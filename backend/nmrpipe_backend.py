@@ -314,7 +314,7 @@ class NMRPipeBackend:
         cmd = ["xyz2pipe", "-in", in_file, "-x"]
         if shift_hz:
             cmd += ["|", "nmrPipe", "-fn", "PS", "-rs", f"{shift_hz}Hz"]
-        cmd += ["|", "pipe2xyz", "-out", pattern, "-z"]
+        cmd += ["|", "pipe2xyz", "-out", pattern, "-x"]
         result = runtime.run(cmd, cwd=str(work), timeout=600)
         logs.append(f"切片 {out_dir.name}: rc={result.returncode}")
         if result.returncode != 0 or not list(out_dir.glob("test*.fid")):

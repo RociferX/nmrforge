@@ -40,7 +40,8 @@ class CshRuntime:
         parts = ["if (-e ~/.cshrc) source ~/.cshrc"]
         if cwd:
             parts.append(f"cd '{cwd}'")
-        parts.append(" ".join(shlex.quote(part) for part in argv))
+        # 管道符 | 保留为 shell 管道，其余参数转义（受控参数，安全）
+        parts.append(" ".join(part if part == "|" else shlex.quote(part) for part in argv))
         command = "; ".join(parts)
         try:
             proc = subprocess.run(
