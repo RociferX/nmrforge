@@ -200,6 +200,12 @@ class NMRPipeBackend:
         smile_scaling = bool(params.get("smile_scaling", True))
         smile_report = int(params.get("smile_report", 1))
         nthread = int(params.get("nthread", 2))
+        # 安全护栏（2026-08-11 sampleM 事故）：大网格 SMILE 满核曾致宿主断电，
+        # 间接网格 >5000 点时线程数上限 2
+        grid_points = int(td[1]) * (int(td[2]) if len(td) > 2 else 1)
+        if grid_points > 5000 and nthread > 2:
+            logs.append(f"大网格 {grid_points}：SMILE 线程数限制为 2（原 {nthread}）")
+            nthread = 2
         ext_lo = str(params.get("ext_lo", 10.5))
         ext_hi = str(params.get("ext_hi", 6.5))
         out_file = f"{experiment.dataset_id}.{ext}"

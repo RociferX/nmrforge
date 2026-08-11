@@ -1,5 +1,11 @@
 # 变更日志
 
+## [0.1.8] - 2026-08-11
+
+- 批量验证 sampleM（CBCANH 3D NUS，675 点 × 9000 网格，nthread=4）时宿主黑屏断电
+  （与旧项目 SMILE 满核卡死同一类；无 OOM/panic 日志，为硬断电）。
+- 安全护栏：间接网格 >5000 点时 SMILE 线程数上限 2 并告警。
+
 ## [0.1.7] - 2026-08-11
 
 - SMILE 参数覆盖：nSigma/thresh/xQ3（SP 幂次）/scaling/report 可经 reconstruct_nus params 传入。
