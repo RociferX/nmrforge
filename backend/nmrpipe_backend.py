@@ -19,6 +19,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from backend.base import BackendCapabilities
 from backend.bruker_workflow import patch_fid_com, patch_nus_expand_count
 from backend.nmrpipe_finder import find_nmrpipe_bin, find_tool
@@ -33,7 +35,12 @@ from backend.script_generator import (
 )
 from core.data.internal_data_model import Experiment, SamplingMode
 from core.data.nus_reader import merge_nuslists, read_nuslist
-from core.optimization.phase_search import direct_ft_traces, search_phase
+from core.optimization.phase_search import (
+    apply_phase_axis,
+    direct_ft_traces,
+    search_phase,
+    search_spectrum_phase,
+)
 from core.planning.processing_plan import ProcessingPlan
 
 
@@ -78,7 +85,8 @@ class NMRPipeBackend:
         experiment: Experiment,
         plan: ProcessingPlan,
         *,
-        direct_phase_search: bool = True,
+        direct_phase_search: bool = False,
+        spectrum_phase: bool = True,
     ) -> dict[str, Any]:
         """均匀采样：转换（含多段合并）+ NMRPipe 处理管道（NUS 请用 reconstruct_nus）。"""
         if experiment.sampling.mode is SamplingMode.NUS:
@@ -131,6 +139,7 @@ class NMRPipeBackend:
         logs += process_logs
         if not processed:
             return {"success": False, "message": "NMRPipe 处理失败", "logs": logs}
+        self._apply_spectrum_phase(work, spectrum, logs, spectrum_phase)
         return {
             "success": True,
             "message": "NMRPipe 处理成功",
@@ -207,7 +216,7 @@ class NMRPipeBackend:
             in_file = fid_file.name
 
         direct_p0, direct_p1 = 0.0, 0.0
-        if bool(params.get("direct_phase_search", True)):
+        if bool(params.get("direct_phase_search", False)):
             fid_for_phase = (
                 work / "seg_001" / f"{experiment.dataset_id}.fid"
                 if experiment.segments
@@ -285,6 +294,9 @@ class NMRPipeBackend:
                 "logs": logs,
             }
         logs.append(f"终谱 → {spectrum}")
+        self._apply_spectrum_phase(
+            work, spectrum, logs, bool(params.get("spectrum_phase", True))
+        )
         return {
             "success": True,
             "message": "SMILE 重构成功",
@@ -356,6 +368,46 @@ class NMRPipeBackend:
             if stale_path.is_file():
                 stale_path.unlink()
         return True
+
+    def _apply_spectrum_phase(
+        self,
+        work: Path,
+        spectrum: Path,
+        logs: list[str],
+        enabled: bool = True,
+    ) -> None:
+        """最终谱上内存内按维相位校正（不重跑重构；NUS/非 NUS 通用）。"""
+        if not enabled or not spectrum.is_file():
+            return
+        phase_file = work / "spectrum_phase.json"
+        try:
+            import nmrglue as ng
+
+            dic, data = ng.pipe.read(str(spectrum))
+            if phase_file.is_file():
+                saved = json.loads(phase_file.read_text(encoding="utf-8"))
+                phased = np.asarray(data)
+                for key in sorted(saved, key=lambda s: int(s[1:])):
+                    value = saved[key]
+                    axis = int(key[1:]) - 1
+                    phased = apply_phase_axis(
+                        phased, axis, float(value["p0"]), float(value["p1"])
+                    )
+                logs.append("最终谱相位（缓存）应用")
+            else:
+                phased, phases = search_spectrum_phase(data)
+                phase_file.write_text(
+                    json.dumps(phases, indent=2), encoding="utf-8"
+                )
+                summary = "; ".join(
+                    f"{key}: p0={value['p0']:g} p1={value['p1']:g} "
+                    f"score={value['score']:.3f}"
+                    for key, value in phases.items()
+                )
+                logs.append(f"最终谱相位校正（内存内，一次重构）: {summary}")
+            ng.pipe.write(str(spectrum), dic, phased.astype(data.dtype), overwrite=True)
+        except Exception as exc:  # noqa: BLE001
+            logs.append(f"最终谱相位校正失败: {exc}")
 
     def _search_direct_phase(
         self,

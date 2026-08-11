@@ -1,18 +1,21 @@
-"""直接维统计相位搜索。
+"""直接维/最终谱相位搜索。
 
-从直接维 FT 后的一维迹线中统计最佳一阶相位 p1（p0 与 t1 演化相位在
-原始迹线上混合，无法分离，固定为 0；最终谱相位由后处理负责）。
+两类搜索：
+1. ``search_phase``：原始 FID 直接维 FT 迹线上的 p1 共识搜索
+   （t1 相位纠缠，p0 不可靠；写进脚本 PS 用）。
+2. ``search_spectrum_phase``：最终谱上按维（F1→F2→F3）内存内相位搜索
+   （旧项目方法域：终谱无 t1 纠缠，p0/p1 都可估；全部 numpy，不重跑重构，
+   满足 NUS/非 NUS「只重构一次」）。
 
-方法：
-- 对每个候选 p1，逐迹在 p0 上取最优峰区吸收度（Σ|Re|/(Σ|Re|+Σ|Im|)），
-  取中位吸收度最高者为公共 p1；
-- ±180° 歧义用实部符号比消歧（正确符号 → 实部以正峰为主）；
-- 输入等价于从 .1FT 中间文件抽出所有一维 FID，但内存内完成、一次到位。
+指标：峰窗口（±5 点）吸收度比例 Σ|Re|/(Σ|Re|+Σ|Im|) 用于细调，
+正负符号 (ΣRe+Σneg)/Σ|Re| 用于 ±180 消歧。
 """
 
 from __future__ import annotations
 
 import numpy as np
+
+# ---------------------------------------------------------------- p1 共识
 
 
 def search_phase(
@@ -97,3 +100,135 @@ def direct_ft_traces(
         work = np.pad(work, pad)
     spectrum = np.fft.fft(work, axis=-1)
     return spectrum.reshape(-1, spectrum.shape[-1])
+
+
+# ------------------------------------------------------ 最终谱按维相位搜索
+
+
+def apply_phase_axis(
+    data: np.ndarray, axis: int, p0: float, p1: float
+) -> np.ndarray:
+    """沿指定轴应用相位（与 NMRPipe PS 等价，频域逐点复乘）。"""
+    n = data.shape[axis]
+    k = np.arange(n, dtype=float)
+    angle = np.deg2rad(p0 + p1 * k / max(n - 1, 1))
+    shape = [1] * data.ndim
+    shape[axis] = n
+    return np.asarray(data) * np.exp(1j * angle).reshape(shape)
+
+
+def _trace_profiles(
+    traces: np.ndarray, positions: np.ndarray, radius: int = 5
+) -> np.ndarray:
+    """在固定峰位切 ±radius 窗口，返回 (m, 2*radius+1) 剖面。"""
+    n = traces.shape[-1]
+    offset = np.arange(-radius, radius + 1)
+    index = np.clip(positions[:, None] + offset[None, :], 0, n - 1)
+    rows = np.arange(len(positions))[:, None]
+    return traces[rows, index]
+
+
+def _window_metrics(profiles: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """逐剖面 (吸收度比例, 正负符号)。"""
+    real = np.real(profiles)
+    re_abs = np.abs(real)
+    im_abs = np.abs(np.imag(profiles))
+    denom = re_abs + im_abs + 1e-12
+    absorption = np.sum(re_abs, axis=-1) / np.sum(denom, axis=-1)
+    positive = np.clip(real, 0.0, None).sum(axis=-1)
+    negative = np.clip(real, None, 0.0).sum(axis=-1)
+    sign = (positive + negative) / (np.sum(re_abs, axis=-1) + 1e-12)
+    return absorption, sign
+
+
+def _search_axis(
+    data: np.ndarray,
+    axis: int,
+    *,
+    max_traces: int = 2000,
+    coarse_step: float = 30.0,
+) -> tuple[float, float, float] | None:
+    """沿单个轴搜索 (p0, p1)，返回 (p0, p1, score)。"""
+    n = data.shape[axis]
+    if n < 8:
+        return None
+    moved = np.moveaxis(data, axis, -1)
+    traces = moved.reshape(-1, n)
+    real = np.real(data)
+    corner = tuple(slice(0, min(16, s)) for s in data.shape)
+    noise = float(np.std(real[corner])) if real.size else 0.0
+    threshold = max(float(np.percentile(real, 99.5)), noise * 5.0)
+    peak_mag = np.max(np.abs(traces), axis=-1)
+    signal = peak_mag > threshold
+    if not np.any(signal):
+        return None
+    sig_traces = traces[signal]
+    if len(sig_traces) > max_traces:
+        index = np.linspace(0, len(sig_traces) - 1, max_traces).astype(int)
+        sig_traces = sig_traces[index]
+    positions = np.argmax(np.abs(sig_traces), axis=-1)
+    k = np.arange(n, dtype=float)
+
+    def _ramp(p0: float, p1: float) -> np.ndarray:
+        return np.exp(1j * np.deg2rad(p0 + p1 * k / max(n - 1, 1)))
+
+    def _evaluate(p0: float, p1: float) -> tuple[float, float]:
+        rotated = sig_traces * _ramp(p0, p1)
+        profiles = _trace_profiles(rotated, positions)
+        absorption, sign = _window_metrics(profiles)
+        return float(np.median(absorption)), float(np.median(sign))
+
+    best_p0 = 0.0
+    best_score = -1.0
+    for p0 in np.arange(0.0, 360.0, coarse_step):
+        a, _ = _evaluate(float(p0), 0.0)
+        if a > best_score:
+            best_score, best_p0 = a, float(p0)
+    for span, step in ((30.0, 10.0), (10.0, 2.5)):
+        for offset in np.arange(-span, span + 1e-9, step):
+            p0 = (best_p0 + offset) % 360.0
+            a, _ = _evaluate(p0, 0.0)
+            if a > best_score:
+                best_score, best_p0 = a, p0
+    # ±180 消歧：负峰被符号指标排除
+    _, sign_here = _evaluate(best_p0, 0.0)
+    _, sign_opposite = _evaluate((best_p0 + 180.0) % 360.0, 0.0)
+    if sign_opposite > sign_here:
+        best_p0 = (best_p0 + 180.0) % 360.0
+    # p1 精修
+    best_p1 = 0.0
+    best_score = _evaluate(best_p0, 0.0)[0]
+    for p1 in np.arange(-90.0, 91.0, 30.0):
+        a, _ = _evaluate(best_p0, float(p1))
+        if a > best_score:
+            best_score, best_p1 = a, float(p1)
+    for span, step in ((30.0, 10.0), (10.0, 5.0)):
+        for offset in np.arange(-span, span + 1e-9, step):
+            p1 = best_p1 + offset
+            a, _ = _evaluate(best_p0, p1)
+            if a > best_score:
+                best_score, best_p1 = a, p1
+    return float(best_p0), float(best_p1), float(best_score)
+
+
+def search_spectrum_phase(
+    data: np.ndarray,
+    *,
+    max_traces: int = 2000,
+) -> tuple[np.ndarray, dict[str, dict[str, float]]]:
+    """最终谱上按维（F1→F2→F3）内存内相位搜索。
+
+    返回 (校正后谱, {"F1": {"p0","p1","score"}, ...})。
+    全程 numpy，不重跑重构——满足 NUS/非 NUS 只重构一次。
+    """
+    data = np.asarray(data, dtype=np.complex128)
+    work = data.copy()
+    phases: dict[str, dict[str, float]] = {}
+    for axis in range(data.ndim):
+        found = _search_axis(work, axis, max_traces=max_traces)
+        if found is None:
+            continue
+        p0, p1, score = found
+        work = apply_phase_axis(work, axis, p0, p1)
+        phases[f"F{axis + 1}"] = {"p0": p0, "p1": p1, "score": score}
+    return work, phases
