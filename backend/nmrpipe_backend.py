@@ -174,8 +174,9 @@ class NMRPipeBackend:
             f"1H {ext_lo}-{ext_hi} ppm，nSigma={nsigma:g} thresh={thresh:g}）"
         )
         timeout = float(params.get("timeout_s", 3600))
+        # 注意：不在 tcsh -c 包装内叠加 nice（实测会让 tcsh 脚本结束后挂起空转）
         run_result = runtime.run(
-            ["nice", "-n", "10", "csh", nus_com.name],
+            ["csh", nus_com.name],
             cwd=str(work),
             timeout=timeout,
         )

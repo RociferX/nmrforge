@@ -1,0 +1,4 @@
+fix: 移除 tcsh 包装内 nice（实测会导致脚本完成后 tcsh 挂起空转）
+
+- 真实 3D NUS SMILE 验证：三步流程 ~4s 完成（SMILE 重构 2.0s），ft3 正常
+- 定位：CshRuntime 的 tcsh -c 内叠加 nice 触发挂起；直接 csh 正常
