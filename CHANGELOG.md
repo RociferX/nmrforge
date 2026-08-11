@@ -1,5 +1,13 @@
 # 变更日志
 
+## [0.1.3] - 2026-08-11
+
+- Bruker 数据接入（参考 NMRFlow）：ser/fid 二进制读取（BYTORDA 字节序、2D/3D 布局、大小校验）。
+- 超复数间接维合并原语（States/States-TPPI；Echo-Antiecho 待 NMRPipe 后端）。
+- fid.com 解析/交叉核对/修补（backend/bruker_workflow，acqus 为权威源）。
+- NUS 检测跨 acqus/acqu2s/acqu3s；AutoProcessor.run 端到端（uniform 2D/3D）。
+- 新增 13 项测试；本地 53 passed。
+
 ## [0.1.2] - 2026-08-11
 
 - Phase 1（处理与 QC）：numpy 原生处理原语（apodization/ZF/FT/phase/baseline/calibration/transpose/sign）。

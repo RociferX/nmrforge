@@ -9,7 +9,16 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from core.processing import apodization, baseline, ft, phase, sign_correction, transpose, zero_fill
+from core.processing import (
+    apodization,
+    baseline,
+    ft,
+    hypercomplex,
+    phase,
+    sign_correction,
+    transpose,
+    zero_fill,
+)
 
 OperationFn = Callable[[Any, dict[str, Any]], Any]
 
@@ -47,6 +56,12 @@ def _run_sign_correction(data: Any, params: dict[str, Any]) -> Any:
     return sign_correction.apply(data, _as_params(sign_correction.SignCorrectionParams, params))
 
 
+def _run_combine_hypercomplex(data: Any, params: dict[str, Any]) -> Any:
+    return hypercomplex.combine(
+        data, _as_params(hypercomplex.HypercomplexParams, params)
+    )
+
+
 DEFAULT_OPERATIONS: dict[str, OperationFn] = {
     "apodization": _run_apodization,
     "zero_fill": _run_zero_fill,
@@ -55,4 +70,5 @@ DEFAULT_OPERATIONS: dict[str, OperationFn] = {
     "baseline": _run_baseline,
     "transpose": _run_transpose,
     "sign_correction": _run_sign_correction,
+    "combine_hypercomplex": _run_combine_hypercomplex,
 }

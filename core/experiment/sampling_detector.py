@@ -29,15 +29,22 @@ def detect(experiment: Experiment) -> Sampling:
     if has_nuslist:
         evidence.append("dataset contains nuslist")
 
-    nus_t2 = _int_param(acqus, "NusT2", 0)
-    nus_td = _int_param(acqus, "NusTD", 0)
-    nus_jsp = _int_param(acqus, "NusJSP", 0)
     nus_amount = _int_param(acqus, "NusAMOUNT", 100)
-    nus_params = (nus_t2 > 0 or nus_td > 0 or nus_jsp > 0) and nus_amount < 100
+    blocks = [acqus] + [
+        params[name] for name in ("acqu2s", "acqu3s") if name in params
+    ]
+    nus_markers = [
+        f"{name}:NusT2={_int_param(block, 'NusT2', 0)}"
+        f":NusTD={_int_param(block, 'NusTD', 0)}"
+        f":NusJSP={_int_param(block, 'NusJSP', 0)}"
+        for block, name in zip(blocks, ["acqus", "acqu2s", "acqu3s"])
+        if _int_param(block, "NusT2", 0) > 0
+        or _int_param(block, "NusTD", 0) > 0
+        or _int_param(block, "NusJSP", 0) > 0
+    ]
+    nus_params = bool(nus_markers) and nus_amount < 100
     if nus_params:
-        evidence.append(
-            f"NusT2={nus_t2}, NusTD={nus_td}, NusJSP={nus_jsp}, NusAMOUNT={nus_amount}"
-        )
+        evidence.append(" ".join(nus_markers) + f" NusAMOUNT={nus_amount}")
 
     if has_nuslist and nus_params and nus_amount >= 100:
         evidence.append("nuslist 与 NusAMOUNT>=100 矛盾，进入安全模式")
