@@ -65,11 +65,7 @@ def search_phase(
         rows = np.arange(len(best_idx))
         best_abs = abs_arr[best_idx, rows]
         best_sign = sign_arr[best_idx, rows]
-        # 峰高加权均值：强迹线主导，避免大量弱迹线把中位数稀释到噪声地板
-        return (
-            float(np.average(best_abs, weights=peak_weights)),
-            float(np.average(best_sign, weights=peak_weights)),
-        )
+        return float(np.median(best_abs)), float(np.median(best_sign))
 
     baseline_abs, _baseline_sign = _evaluate(0.0)
     candidates = []
@@ -181,7 +177,11 @@ def _search_axis(
         rotated = sig_traces * _ramp(p0, p1)
         profiles = _trace_profiles(rotated, positions)
         absorption, sign = _window_metrics(profiles)
-        return float(np.median(absorption)), float(np.median(sign))
+        # 峰高加权均值：强迹线主导，避免弱迹线稀释到噪声地板
+        return (
+            float(np.average(absorption, weights=peak_weights)),
+            float(np.average(sign, weights=peak_weights)),
+        )
 
     best_p0 = 0.0
     best_score = -1.0
