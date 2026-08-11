@@ -160,6 +160,19 @@ def read_data(experiment: Experiment) -> BrukerData:
     )
 
 
+def _param_float(block: dict, *keys: str, default: float = 0.0) -> float:
+    """按顺序取第一个非空数值参数。"""
+    for key in keys:
+        value = block.get(key)
+        if value in (None, "", 0, 0.0):
+            continue
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            continue
+    return default
+
+
 def _detect_ndim(params: dict, acqus: dict) -> int:
     """PARMODE + 存在性启发式：0=1D，1=2D，2=3D。"""
     try:
@@ -195,14 +208,19 @@ def _build_dimensions(params: dict, ndim: int) -> list[Dimension]:
         block = params.get(filename)
         if block is None:
             continue
+        sf = _param_float(block, "SFO1")
+        o1 = _param_float(block, "O1")
+        o1p = _param_float(block, "O1P")
+        if not o1p and sf:
+            o1p = o1 / sf
         dims.append(
             Dimension(
                 logical_axis=logical,
                 nucleus=str(block.get("NUC1", "")),
-                sf=float(block.get("SFO1", 0.0) or 0.0),
-                sw=float(block.get("SW", 0.0) or block.get("SW_h", 0.0) or 0.0),
-                o1=float(block.get("O1", 0.0) or 0.0),
-                o1p=float(block.get("O1P", 0.0) or 0.0),
+                sf=sf,
+                sw=_param_float(block, "SW_h", "SW"),
+                o1=o1,
+                o1p=o1p,
                 td=int(block.get("TD", 0) or 0),
                 acquisition_mode=str(block.get("FnMODE", "")),
                 axis_direction="increasing",

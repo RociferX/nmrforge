@@ -1,0 +1,5 @@
+fix: 真实 Bruker 参数解析（SW_h 优先于 SW(ppm)，O1P 缺失回退 O1/SFO1）
+
+- 真实数据验证发现：acqus 同时含 SW(ppm) 与 SW_h(Hz)，此前误取 ppm 导致 fid.com 被错误修正
+- 载波 ppm 缺失 O1P 时按 O1/SFO1 回退（真实 TopSpin 数据无 O1P）
+- fixtures 统一为 SW_h；新增 2 项回归测试；本地 67 passed

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from core.data.bruker_reader import read_dataset
 from core.data.internal_data_model import SamplingMode
 from core.experiment.acquisition_mode_detector import detect_modes, ft_alt_for
@@ -72,3 +74,31 @@ def test_map_dimensions_3d(bruker_dir: Path) -> None:
     assert by_axis["F1"].display_axis == "X"  # 13C
     assert by_axis["F2"].display_axis == "Y"  # 15N
     assert by_axis["F3"].display_axis == "Z"  # 1H
+
+
+def test_direct_dimension_sw_prefers_sw_h(bruker_dir: Path) -> None:
+    """acqus 同时含 SW(ppm) 与 SW_h(Hz) 时取 SW_h。"""
+    exp = read_dataset(bruker_dir / "hsqc_2d")
+    direct = exp.direct_dimension
+    assert direct is not None
+    assert direct.sw == 10000.0
+
+
+def test_carrier_ppm_fallback_without_o1p(tmp_path: Path, bruker_dir: Path) -> None:
+    """真实数据无 O1P 时载波 ppm = O1 / SFO1。"""
+    import shutil
+
+    dst = tmp_path / "no_o1p"
+    shutil.copytree(bruker_dir / "hsqc_2d", dst)
+    for name in ("acqus", "acqu2s"):
+        path = dst / name
+        lines = [
+            line
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if not line.startswith("##$O1P")
+        ]
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    exp = read_dataset(dst)
+    direct = exp.direct_dimension
+    assert direct is not None
+    assert direct.o1p == pytest.approx(2821.062748 / 599.8937495)
