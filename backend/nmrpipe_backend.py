@@ -279,10 +279,7 @@ class NMRPipeBackend:
             return False
         shutil.move(str(source), dest_work / f"{experiment.dataset_id}.fid")
         logs.append(f"{experiment.dataset_id}.fid 已就位（{raw_dir.name}）")
-        if is_nus:
-            mask = raw_dir / "mask.fid"
-            if mask.is_file():
-                shutil.copy2(mask, dest_work / "mask.fid")
+        # SMILE 只需 nuslist，mask.fid 不复制（省磁盘）
         ser_full = raw_dir / "ser_full"
         if ser_full.is_file():
             ser_full.unlink()
