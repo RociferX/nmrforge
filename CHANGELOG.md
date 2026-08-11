@@ -1,5 +1,10 @@
 # 变更日志
 
+## [0.1.9] - 2026-08-11
+
+- SMILE 参数优化模块（workflow/smile_optimize + scripts/smile_optimize.py）：
+  nSigma×thresh 网格逐组重构并评分，展示参数组合+评分；**不进入自动流程**，用户可后选运行。
+
 ## [0.1.8] - 2026-08-11
 
 - 批量验证 sampleM（CBCANH 3D NUS，675 点 × 9000 网格，nthread=4）时宿主黑屏断电
