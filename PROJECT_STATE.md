@@ -45,6 +45,7 @@
 - 所有 processing / optimization / qc 算法为占位，等待 Phase 1-4 实现。
 - GUI 尚未接入任何信号与后端。
 - config/nmrforge.local.yaml 不应提交（可能含敏感信息）。
+- SMILE 大网格（>5000 间接点）必须限线程（护栏已内置）；data/12 为 2D NUS 但缺 nuslist，需补采样表后才能处理。
 - numpy 限制 <2.5（nmrglue 0.11 的 dtype 别名问题）。
 
 ## 下一步

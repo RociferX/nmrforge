@@ -5,6 +5,8 @@
 - 批量验证 sampleM（CBCANH 3D NUS，675 点 × 9000 网格，nthread=4）时宿主黑屏断电
   （与旧项目 SMILE 满核卡死同一类；无 OOM/panic 日志，为硬断电）。
 - 安全护栏：间接网格 >5000 点时 SMILE 线程数上限 2 并告警。
+- 根因确认：900（CBCANH，675 点×9000 网格）nthread=4 满核触发宿主断电；nthread=2 时 ~13s 完成且负载峰值 1.62，全程稳定。
+- 全目录验证：2D 均匀 3/4/5/8/103/sampleA 全部 ACCEPT（88.7-94.1）；3D NUS 100/101/102/sampleB/sample30/900 全部 ACCEPT（68.7-93.8）；多段 61/63/65/67 ACCEPT 74.1；data/12 为 2D NUS 但缺 nuslist（数据缺口，无法重构）。
 
 ## [0.1.7] - 2026-08-11
 
