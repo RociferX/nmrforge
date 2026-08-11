@@ -1,7 +1,0 @@
-feat: 多段实验支持（每段生成 fid → addNMR 合并，参考实验室脚本）
-
-- 清理 VM 旧软件遗留卡死进程（16h 空转 nmrPipe 管道）
-- Experiment.segments + read_segments（参数一致性校验）+ merge_nuslists
-- NMRPipeBackend：多段 bruker 转换 → 拆 fid 切片 → addNMR 逐对合并 → 统一 SMILE
-- 支持每段可选频移（-rs Hz，防场飘）；转换后清理 ser_full
-- 新增 4 项测试；本地 75 passed，ruff 通过
