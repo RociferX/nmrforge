@@ -1,5 +1,12 @@
 # 变更日志
 
+## [0.1.5] - 2026-08-11
+
+- Phase 3（NUS）：bruker 原生识别确认（acqu3s TD=1 时按 NusTD 取 zN，生成 nusExpand/ser_full/mask.fid + 单文件 test.fid）；移除切片追加 workaround。
+- NMRPipeBackend.reconstruct_nus：2D/3D NUS SMILE 重构（单文件直接维处理 → SMILE → 间接维 FT）。
+- SMILE 经验参数按采样率分档（≥50%: 5/0.95；20-50%: 6/0.90；<20%: 7/0.85）。
+- 新增 NUS 脚本/后端测试；本地 71 passed。
+
 ## [0.1.4] - 2026-08-11
 
 - NMRPipe 后端接入（Linux/csh）：bruker -AUTO → patch_fid_com → 执行 → NMRPipe 处理管道。

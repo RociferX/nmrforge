@@ -1,11 +1,12 @@
-"""确定性 NMRPipe 脚本生成（转换 + 处理管道）。
+"""确定性 NMRPipe 脚本生成（转换 + 处理管道 + NUS SMILE 重构）。
 
 同一输入（实验元数据 + 处理计划）生成字节级一致的 .com 脚本（LF 行尾），
 保证可复现性。关键参数遵循 NMRFlow 审计结论（SOFTWARE_SUMMARY §6.2）：
 - xMODE DQD / yMODE Echo-AntiEcho|Complex / zMODE Complex；
 - DSPFVS=21 → -ws 8 -noi2f；禁用 -DMX；
 - -aq2D 数值（FnMODE 4/6→3，5→2）；
-- NUS 间接维 TD 用 NusTD（避免 acqu3s TD=1 导致 fid.com 输出单文件而非切片）。
+- NUS 间接维 TD 用 NusTD（acqu3s TD=1 时 bruker 原生按 NusTD 识别，
+  输出单文件 test.fid + mask.fid，SMILE 直接消费，无需切片追加）。
 """
 
 from __future__ import annotations
@@ -16,6 +17,18 @@ from core.data.internal_data_model import Experiment, SamplingMode
 from core.planning.processing_plan import ProcessingPlan
 
 _AQ2D_KEYWORDS = {0: "2", 1: "1", 2: "2", 3: "2", 4: "3", 5: "2", 6: "3"}
+
+# FnMODE -> (FT -neg, FT -alt)：States/QF 普通；TPPI/States-TPPI 需 -alt；
+# Echo-Antiecho 由 bruk2pipe 转换完成，无需额外标志。
+_FT_FLAGS = {
+    0: (False, False),
+    1: (True, True),
+    2: (True, True),
+    3: (False, False),
+    4: (False, False),
+    5: (False, True),
+    6: (False, False),
+}
 
 
 def _fnmode(experiment: Experiment, logical_axis: str) -> int:
@@ -51,6 +64,19 @@ def _fmt(value: Any) -> str:
     if isinstance(value, float):
         return f"{value:g}"
     return str(value)
+
+
+def _next_pow2(value: int) -> int:
+    return 1 << max(0, int(value) - 1).bit_length()
+
+
+def select_smile_params(fraction: float) -> tuple[float, float]:
+    """按采样率分档选择 SMILE 经验参数（nSigma, thresh）。"""
+    if fraction >= 0.5:
+        return 5.0, 0.95
+    if fraction >= 0.2:
+        return 6.0, 0.90
+    return 7.0, 0.85
 
 
 def build_context(experiment: Experiment) -> dict[str, Any]:
@@ -191,7 +217,7 @@ def generate_convert_script(
     in_file: str = "./ser",
     out_file: str = "./test.fid",
 ) -> str:
-    """生成 bruk2pipe 转换脚本（LF 行尾，csh 语法）。"""
+    """生成 bruk2pipe 转换脚本（LF 行尾，csh 语法；仅均匀采样回退用）。"""
     ctx = build_context(experiment)
     tokens = _bruk2pipe_tokens(experiment, ctx)
     tokens[tokens.index("-in") + 1] = in_file
@@ -275,4 +301,129 @@ def generate_process_script(
         if index < len(axes) - 1:
             lines.append("| nmrPipe -fn TP \\")
     lines.append(f"| pipe2xyz -out {out_file} -x")
+    return "\n".join(lines) + "\n"
+
+
+def _ft_flag_line(fnmode: int) -> str:
+    neg, alt = _FT_FLAGS.get(int(fnmode), (False, False))
+    flags = []
+    if neg:
+        flags.append("-neg")
+    if alt:
+        flags.append("-alt")
+    suffix = (" " + " ".join(flags)) if flags else ""
+    return f"| nmrPipe -fn FT{suffix} \\"
+
+
+def generate_2d_nus_script(
+    experiment: Experiment,
+    *,
+    in_file: str,
+    nuslist: str,
+    out_file: str,
+    nthread: int = 2,
+    nuslist_count: int = 0,
+    ext_lo: str = "10.5",
+    ext_hi: str = "6.5",
+    nsigma: float = 5.0,
+    thresh: float = 0.95,
+) -> str:
+    """2D NUS SMILE 重构：直接维 FT+EXT → SMILE -nDim 2 → 间接维 FT（终谱 ft2）。"""
+    ctx = build_context(experiment)
+    td = effective_td(experiment)
+    direct_zf = _next_pow2((int(ctx["meta.td.x"]) // 2) * 2)
+    f1_fnmode = _fnmode(experiment, "F1")
+    lines = [
+        "#!/bin/csh",
+        "# NMRForge 2D NUS SMILE reconstruction",
+        f"# experiment: {experiment.dataset_id}",
+        "mkdir -p nus2d",
+        "# step 1: direct dim (F2) FT + EXT",
+        f"xyz2pipe -in {in_file} -x \\",
+        "| nmrPipe -fn SP -off 0.45 -end 0.98 -pow 1 -c 0.5 \\",
+        f"| nmrPipe -fn ZF -zf -size {direct_zf} \\",
+        "| nmrPipe -fn FT \\",
+        "| nmrPipe -fn PS -p0 0 -p1 0 -di \\",
+        f"| nmrPipe -fn EXT -x1 {ext_lo}ppm -xn {ext_hi}ppm -sw -round 2 \\",
+        "| pipe2xyz -out nus2d/test%03d.ft1 -z",
+        "",
+        "# step 2: SMILE reconstruct indirect dim (F1)",
+        "xyz2pipe -in nus2d/test%03d.ft1 -x \\",
+        "| nmrPipe -fn SMILE -nDim 2 \\",
+        f"           -sample {nuslist} -nThread {nthread} \\",
+        f"           -sampleCount {nuslist_count} -nSigma {nsigma:g} -off 0 0 -report 1 \\",
+        "           -xApod SP -xQ1 0.45 -xQ2 0.98 -xQ3 1 \\",
+        f"           -xT {max(1, int(td[1]) // 2)} -xP0 0 -xP1 0 \\",
+        f"           -xCT 0 -thresh {thresh:g} \\",
+        "| pipe2xyz -out nus2d/recon.ft1 -x",
+        "",
+        "# step 3: indirect dim FT",
+        "xyz2pipe -in nus2d/recon.ft1 -x \\",
+        "| nmrPipe -fn ZF -zf 1 -auto \\",
+        _ft_flag_line(f1_fnmode),
+        "| nmrPipe -fn PS -p0 0 -p1 0 -di \\",
+        "| nmrPipe -fn TP \\",
+        "| nmrPipe -fn ZTP \\",
+        f"| pipe2xyz -out {out_file} -x",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def generate_3d_nus_script(
+    experiment: Experiment,
+    *,
+    in_file: str,
+    nuslist: str,
+    out_file: str,
+    nthread: int = 2,
+    nuslist_count: int = 0,
+    ext_lo: str = "10.5",
+    ext_hi: str = "6.5",
+    nsigma: float = 5.0,
+    thresh: float = 0.95,
+) -> str:
+    """3D NUS SMILE 重构：直接维（F3）FT+EXT → SMILE -nDim 3 → 间接维 FT（ft3）。"""
+    ctx = build_context(experiment)
+    direct_zf = _next_pow2((int(ctx["meta.td.x"]) // 2) * 2)
+    f2_fnmode = _fnmode(experiment, "F2")
+    f1_fnmode = _fnmode(experiment, "F1")
+    lines = [
+        "#!/bin/csh",
+        "# NMRForge 3D NUS SMILE reconstruction",
+        f"# experiment: {experiment.dataset_id}",
+        "mkdir -p nus3d_1 nus3d_rc",
+        "# step 1: direct dim (F3) FT + EXT",
+        f"xyz2pipe -in {in_file} -x \\",
+        "| nmrPipe -fn SP -off 0.45 -end 0.98 -pow 2 -c 0.5 \\",
+        f"| nmrPipe -fn ZF -zf -size {direct_zf} \\",
+        "| nmrPipe -fn FT \\",
+        "| nmrPipe -fn PS -p0 0 -p1 0 -di \\",
+        f"| nmrPipe -fn EXT -x1 {ext_lo}ppm -xn {ext_hi}ppm -sw -round 2 \\",
+        "| pipe2xyz -out nus3d_1/test%04d.ft1 -z",
+        "",
+        "# step 2: SMILE reconstruct indirect dims (F2/F1)",
+        "xyz2pipe -in nus3d_1/test%04d.ft1 -x \\",
+        "| nmrPipe -fn SMILE -nDim 3 \\",
+        f"           -sample {nuslist} -nThread {nthread} \\",
+        f"           -sampleCount {nuslist_count} -nSigma {nsigma:g} -off 0 0 -report 1 \\",
+        "           -xApod SP -xQ1 0.45 -xQ2 0.95 -xQ3 1 \\",
+        "           -yApod SP -yQ1 0.45 -yQ2 0.95 -yQ3 1 \\",
+        "           -xP0 0 -xP1 0 -xNeg -xAlt \\",
+        "           -yP0 0 -yP1 0 -yNeg -yAlt \\",
+        f"           -xCT 0 -thresh {thresh:g} \\",
+        "| pipe2xyz -out nus3d_rc/test%04d.ft1 -x",
+        "",
+        "# step 3: indirect dims (F2/F1) FT",
+        "xyz2pipe -in nus3d_rc/test%04d.ft1 -x \\",
+        "| nmrPipe -fn ZF -zf 1 -auto \\",
+        _ft_flag_line(f2_fnmode),
+        "| nmrPipe -fn PS -p0 0 -p1 0 -di \\",
+        "| nmrPipe -fn TP \\",
+        "| nmrPipe -fn ZF -zf 1 -auto \\",
+        _ft_flag_line(f1_fnmode),
+        "| nmrPipe -fn PS -p0 0 -p1 0 -di \\",
+        "| nmrPipe -fn TP \\",
+        "| nmrPipe -fn ZTP \\",
+        f"| pipe2xyz -out {out_file} -x",
+    ]
     return "\n".join(lines) + "\n"

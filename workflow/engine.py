@@ -3,7 +3,7 @@
 流程（框架 §71）：understand（分类/维度映射/采样检测）→ plan（DAG）→
 process（direct）→ optimize（reconstruction/direct/indirect，带预算）→
 qc（before/after + 回滚）→ report。
-Phase 1：NMRPipe 后端可用时走后端，否则走原生读取路径（uniform 2D/3D）。
+Phase 1-3：NMRPipe 后端（均匀 process / NUS reconstruct_nus）或原生路径。
 """
 
 from __future__ import annotations
@@ -47,7 +47,10 @@ class AutoProcessor:
         if provider == "nmrpipe":
             return self.run_backend(experiment)
         if experiment.sampling.mode is SamplingMode.NUS:
-            return RunResult(status="failed", logs=["NUS 数据处理待 Phase 3 接入"])
+            return RunResult(
+                status="failed",
+                logs=["原生路径暂不支持 NUS（Phase 3 走 NMRPipe 后端）"],
+            )
         try:
             data = read_data(experiment)
         except (BrukerDataError, OSError) as exc:
@@ -60,10 +63,13 @@ class AutoProcessor:
         return result
 
     def run_backend(self, experiment: Experiment) -> RunResult:
-        """通过 NMRPipe 后端处理（Linux/csh 环境），成功后读谱做 QC。"""
+        """NMRPipe 后端：均匀采样 process / NUS reconstruct_nus，成功后读谱 QC。"""
         plan = select_method(experiment)
         try:
-            result = self.backend.process(experiment, plan)
+            if experiment.sampling.mode is SamplingMode.NUS:
+                result = self.backend.reconstruct_nus(experiment, {})
+            else:
+                result = self.backend.process(experiment, plan)
         except Exception as exc:  # noqa: BLE001
             return RunResult(status="failed", logs=[f"NMRPipe 后端异常: {exc}"])
         logs = list(result.get("logs", []))

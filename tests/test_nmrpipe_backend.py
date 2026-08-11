@@ -44,3 +44,19 @@ def test_process_bad_explicit_bin_graceful(bruker_dir: Path, tmp_path: Path) -> 
     backend = NMRPipeBackend(nmrpipe_bin=str(tmp_path))
     result = backend.process(exp, plan)
     assert result["success"] is False
+
+
+@pytest.mark.skipif(not _NO_NMRPIPE, reason="本机已安装 NMRPipe，跳过缺失路径测试")
+def test_reconstruct_nus_missing_nmrpipe_graceful(bruker_dir: Path, tmp_path: Path) -> None:
+    exp = read_dataset(bruker_dir / "nus_3d")
+    backend = NMRPipeBackend(nmrpipe_bin="")
+    result = backend.reconstruct_nus(exp, {})
+    assert result["success"] is False
+
+
+def test_reconstruct_nus_rejects_uniform(bruker_dir: Path) -> None:
+    exp = read_dataset(bruker_dir / "hsqc_small")
+    backend = NMRPipeBackend(nmrpipe_bin="")
+    result = backend.reconstruct_nus(exp, {})
+    assert result["success"] is False
+    assert "非 NUS" in result["message"]

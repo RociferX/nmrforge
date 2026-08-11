@@ -1,0 +1,8 @@
+feat: Phase 3 NUS SMILE 重构（信任 bruker 原生识别，移除切片追加）
+
+- 真实数据验证：bruker -AUTO 对 3D NUS（acqu3s TD=1）原生识别正确
+  （zN=NusTD、nusExpand/ser_full/mask.fid、单文件 test.fid）
+- 移除切片追加 workaround；NUS 转换失败不做 bruk2pipe 回退
+- NMRPipeBackend.reconstruct_nus：2D/3D SMILE 重构（单文件直接维处理）
+- SMILE 参数按采样率分档；引擎 NUS 走 reconstruct_nus
+- 新增 4 项 NUS 测试；本地 71 passed，ruff 通过

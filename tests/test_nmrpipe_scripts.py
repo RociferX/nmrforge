@@ -93,3 +93,41 @@ def test_scripts_deterministic(bruker_dir: Path) -> None:
     assert generate_process_script(exp, plan, in_file="a.fid", out_file="a.ft2") == (
         generate_process_script(exp, plan, in_file="a.fid", out_file="a.ft2")
     )
+
+
+def test_2d_nus_script(bruker_dir: Path) -> None:
+    exp = read_dataset(bruker_dir / "nus_2d")
+    from backend.script_generator import generate_2d_nus_script
+
+    script = generate_2d_nus_script(
+        exp, in_file="exp.fid", nuslist="nuslist", out_file="exp.ft2",
+        nuslist_count=5, ext_lo="9.0", ext_hi="7.5", nsigma=7.0, thresh=0.85,
+    )
+    assert script.startswith("#!/bin/csh")
+    assert "xyz2pipe -in exp.fid -x" in script
+    assert "-fn SMILE -nDim 2" in script
+    assert "-sample nuslist" in script
+    assert "-sampleCount 5" in script
+    assert "-x1 9.0ppm -xn 7.5ppm" in script
+    assert "| pipe2xyz -out exp.ft2 -x" in script
+    assert "\r" not in script
+
+
+def test_3d_nus_script(bruker_dir: Path) -> None:
+    exp = read_dataset(bruker_dir / "nus_3d")
+    from backend.script_generator import generate_3d_nus_script
+
+    script = generate_3d_nus_script(
+        exp, in_file="exp.fid", nuslist="nuslist", out_file="exp.ft3",
+        nuslist_count=4, ext_lo="9.0", ext_hi="7.5",
+    )
+    assert "-fn SMILE -nDim 3" in script
+    assert "-sample nuslist" in script
+    assert "| pipe2xyz -out exp.ft3 -x" in script
+    assert script.count("| nmrPipe -fn TP") == 2
+    assert "\r" not in script
+    assert generate_3d_nus_script(
+        exp, in_file="exp.fid", nuslist="nuslist", out_file="exp.ft3"
+    ) == generate_3d_nus_script(
+        exp, in_file="exp.fid", nuslist="nuslist", out_file="exp.ft3"
+    )

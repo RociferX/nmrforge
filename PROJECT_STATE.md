@@ -15,12 +15,12 @@
 | core/data | 实现中（Phase 1） | 内部数据模型、Bruker 元数据 + ser/fid 二进制读取（read_data） |
 | core/experiment | 实现中（Phase 1） | Bruker 参数解析、基础分类、维度映射、NUS/采集模式检测 |
 | core/planning | 实现中（Phase 1） | DAG 拓扑排序/缓存键、默认处理计划、轴计划 |
-| core/processing | 实现中（Phase 1） | 原生处理原语 + 超复数合并（NUS 重建待 Phase 3） |
+| core/processing | 实现中（Phase 1-3） | 原生处理原语 + 超复数合并（NUS 重建走 NMRPipe SMILE） |
 | core/optimization | 骨架（EarlyStopping/评分已实现） | 参数空间、候选生成、搜索算法、预算 |
 | core/qc | 实现中（Phase 1） | 噪声/SNR/峰检测/相位/基线/伪影/综合质量（峰稳定待 Phase 4） |
 | core/experiments | 模板占位 | 实验模板注册表 + HSQC/HNCA 等先验 |
 | core/reporting | 骨架 | 处理报告、QC 报告、参数溯源 |
-| backend | 实现中（Phase 1） | NMRPipe 后端（bruker -AUTO + fid.com 修补 + 管道）、查找器、csh 运行时 |
+| backend | 实现中（Phase 1-3） | NMRPipe 后端（bruker -AUTO + 管道 + SMILE 重构）、查找器、csh 运行时 |
 | workflow | 实现中（Phase 1） | PipelineRunner + AutoProcessor.run（NMRPipe/原生双路径，NUS 待 Phase 3） |
 | gui | 占位 | 主窗口与五大面板（Dataset/Experiment/Plan/Viewer/Quality） |
 | packaging | 规划 | AppImage 打包：desktop/icon/PyInstaller spec/构建脚本（docs/packaging.md） |
