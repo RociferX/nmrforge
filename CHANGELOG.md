@@ -1,96 +1,85 @@
 # 变更日志
 
+## [0.2.4] - 2026-08-11
+
+- B 方案落地：复型重构平面拆包（core/data/pipe_io）+ 按维相位搜索报告
+  （workflow/recon_phase_search + scripts/recon_phase_search.py，不改管线）。
+- 验证结论：搜索机制在复型重构数据上可行（各轴增益为正）；当前数据集
+  重构相位已接近最优（全量平面增益 0.01-0.02；16 平面大增益为小样本假象）。
+- 搜索稳健性：峰高加权均值 + top-K 强迹线抽样。
+
+## [0.2.3] - 2026-08-11
+
+- 实测确认：NMRPipe 谱文件（.ft1/.ft2/.ft3）第一轴实/虚交错存储复型，
+  nmrglue 会读成翻倍实型，需拆包还原（core/data/pipe_io）。
+- 回退「终谱事后调相」集成（实型读取 + 复→实写会损坏输出）；一次重构的
+  直接维相位方案 = 复型 .fid 的 p1 共识写进脚本 PS（默认开启）。
+
+## [0.2.2] - 2026-08-11
+
+- 最终谱按维相位搜索（search_spectrum_phase）与后端集成；
+  后因 NMRPipe 输出实型而回退，保留为复型数据工具。
+
 ## [0.2.1] - 2026-08-11
 
-- 直接维统计相位搜索（core/optimization/phase_search）：FT 后抽全部一维迹线，
-  按能量加权吸收度统计最佳 (p0, p1)，写进处理/NUS 脚本的 PS 步骤（默认开启，可关）。
+- 直接维统计相位搜索（core/optimization/phase_search）：复型 .fid 直接维
+  FT 迹线上 p1 共识搜索（峰区吸收度 + 符号消歧 + 增益门控），写进脚本 PS。
 
 ## [0.2.0] - 2026-08-11
 
 - 后处理参数优化（workflow/param_optimize + scripts/param_optimize.py）：
-  演示结论：sampleF 最优 (0,0,base=1)=93.9、Sampletest/4 最优 (0,0,base=0)=81.9；
-  均匀相位旋转无法超越已校相谱（真实相位需按维/迹搜索，留待后续）。
-  相位 p0/p1 + 基线在终谱上内存内优化，**只重构一次**；NUS 与非 NUS 同一逻辑。
+  相位 p0/p1 + 基线在终谱上内存内优化，只重构一次；NUS 与非 NUS 同一逻辑。
 
 ## [0.1.9] - 2026-08-11
 
 - SMILE 参数优化模块（workflow/smile_optimize + scripts/smile_optimize.py）：
-  逐组反馈（每组跑完立即打印结果）+ 每组超时 300s。
-- 修复 bruker -AUTO sampleCount 误判（Sampletest/4 生成 sampleCount=2 导致卡死）：转换时按 nuslist 行数修正。
-- Sampletest/4（CBCA(CO)NH 3D NUS）9 组 nSigma×thresh 扫描：全部 accept（81.9-84.9）；thresh=0.95 最优、0.99 最差；nSigma 5-7 优于 3。默认 5/0.95（84.8）已在最优区，无需改默认。
-转换时按 nuslist 行数修正。
-  nSigma×thresh 网格逐组重构并评分，展示参数组合+评分；**不进入自动流程**，用户可后选运行。
+  逐组反馈 + 300s 超时；不进入自动流程，用户可后选。
+- 修复 bruker -AUTO sampleCount 误判（Sampletest/4 sampleCount=2 卡死）。
+- Sampletest/4 九组 nSigma×thresh 扫描：全部 accept；thresh=0.95 最优；
+  默认 5/0.95 已在最优区，无需改默认。
 
 ## [0.1.8] - 2026-08-11
 
-- 批量验证 sampleM（CBCANH 3D NUS，675 点 × 9000 网格，nthread=4）时宿主黑屏断电
-  （与旧项目 SMILE 满核卡死同一类；无 OOM/panic 日志，为硬断电）。
-- 安全护栏：间接网格 >5000 点时 SMILE 线程数上限 2 并告警。
-- 根因确认：900（CBCANH，675 点×9000 网格）nthread=4 满核触发宿主断电；nthread=2 时 ~13s 完成且负载峰值 1.62，全程稳定。
-- 全目录验证：2D 均匀 3/4/5/8/103/sampleA 全部 ACCEPT（88.7-94.1）；3D NUS 100/101/102/sampleB/sample30/900 全部 ACCEPT（68.7-93.8）；多段 61/63/65/67 ACCEPT 74.1；data/12 为 2D NUS 但缺 nuslist（数据缺口，无法重构）。
+- 批量验证 sampleM（CBCANH 3D NUS）时宿主断电；根因：SMILE 大网格满核。
+- 安全护栏：间接网格 >5000 点时 SMILE 线程数上限 2；转换后清理 ser_full/mask.fid。
+- 全目录验证：2D 均匀 6 个 ACCEPT、3D NUS 6 个 ACCEPT、多段 61/63/65/67 ACCEPT 74.1。
 
 ## [0.1.7] - 2026-08-11
 
-- SMILE 参数覆盖：nSigma/thresh/xQ3（SP 幂次）/scaling/report 可经 reconstruct_nus params 传入。
-- 默认参数更新（真实验证）：<20% 采样档由 7/0.85 改为 5/0.95；xQ3=2、-scaling 1 对齐实验室模板。
-- data/100 单段 3D NUS（CBCA(CO)NH）验证：默认参数 QC 78.8 ACCEPT。
-- 61/63/65/67 多段 HNCA 参数对比：7/0.85 → warning 57.5；5/0.95+xQ3=2+scaling → accept 74.1。
+- SMILE 参数覆盖（nSigma/thresh/xQ3/scaling/report）。
+- 默认参数更新（真实验证）：<20% 采样档 7/0.85 → 5/0.95；xQ3=2、scaling=1。
 
 ## [0.1.6] - 2026-08-11
 
-- 清理 VM 旧软件遗留卡死进程（16h 空转的 nmrPipe 管道）。
-- 多段实验支持（参考实验室 data/脚本：1stfid.com + 2ndAdd.com）：
-  每段 bruker 转换 → 拆 fid 切片 → addNMR 逐对合并 → 统一 SMILE。
-- Experiment.segments + read_segments（参数一致性校验）+ merge_nuslists。
-- 真实多段验证（61/63/65/67，HNCA 3D NUS）：4 段 × 52 切片 → addNMR 合并 → 合并 nuslist 348 点（63 号 1 个越界点 27 2350 自动丢弃）→ SMILE rc=0 → ft3（QC 58.8 warning，低采样伪影）。
-- 修复：CshRuntime 管道符被引号化、切片轴 -z→-x、多段幂等复用。
-- 新增 4 项测试；本地 75 passed。
+- 清理 VM 旧软件遗留卡死进程；多段实验支持（read_segments + addNMR 合并 + nuslist 校验）。
 
 ## [0.1.5] - 2026-08-11
 
-- Phase 3（NUS）：bruker 原生识别确认（acqu3s TD=1 时按 NusTD 取 zN，生成 nusExpand/ser_full/mask.fid + 单文件 test.fid）；移除切片追加 workaround。
-- NMRPipeBackend.reconstruct_nus：2D/3D NUS SMILE 重构（单文件直接维处理 → SMILE → 间接维 FT）。
-- SMILE 经验参数按采样率分档（≥50%: 5/0.95；20-50%: 6/0.90；<20%: 7/0.85）。
-- 真实 3D NUS 验证（VM verify_flow/exp_001，HNCACB 25%）：SMILE 三步 ~15s、QC 93.7 ACCEPT。
-- 发现并修复 tcsh 包装内叠加 nice 会导致脚本完成后挂起；A/B 验证 yMODE（bruker 原生 Complex vs acqus 推导 Echo-AntiEcho）最终谱一致。
-- 新增 NUS 脚本/后端测试；本地 71 passed。
+- Phase 3：bruker 原生识别确认（NUS acqu3s TD=1 → NusTD），移除切片追加；
+  SMILE 重构端到端（真实 3D NUS 验证）。
 
 ## [0.1.4] - 2026-08-11
 
-- NMRPipe 后端接入（Linux/csh）：bruker -AUTO → patch_fid_com → 执行 → NMRPipe 处理管道。
-- 查找路径按 csh 实际响应（source ~/.cshrc; which nmrPipe），支持显式 bin 目录。
-- 3D NUS 规避 acqu3s TD=1：fid.com 用 NusTD 修补，并强制输出 fid 切片而非单文件。
-- 确定性脚本生成（LF 行尾）；转换参数符合审计结论（-ws 8 -noi2f/无 -DMX/MODE 标志/-aq2D）。
-- AutoProcessor.run 支持 NMRPipe 后端路径（成功后读谱 QC）。
-- 真实数据验证（VM Desktop/sampleF）：SW_h 优先于 SW(ppm)、O1P 缺失回退 O1/SFO1。
-- 新增 13 项测试；本地 64 passed。
+- NMRPipe 后端接入：csh 路径查找、bruker -AUTO 转换 + fid.com 修补、
+  确定性脚本生成（-ws 8 -noi2f / 无 -DMX / MODE 标志 / -aq2D）。
 
 ## [0.1.3] - 2026-08-11
 
-- Bruker 数据接入（参考 NMRFlow）：ser/fid 二进制读取（BYTORDA 字节序、2D/3D 布局、大小校验）。
-- 超复数间接维合并原语（States/States-TPPI；Echo-Antiecho 待 NMRPipe 后端）。
-- fid.com 解析/交叉核对/修补（backend/bruker_workflow，acqus 为权威源）。
-- NUS 检测跨 acqus/acqu2s/acqu3s；AutoProcessor.run 端到端（uniform 2D/3D）。
-- 新增 13 项测试；本地 53 passed。
+- Bruker 数据接入：ser/fid 二进制读取（BYTORDA/布局/大小校验）、
+  超复数合并、fid.com 交叉核对、AutoProcessor.run 端到端。
 
 ## [0.1.2] - 2026-08-11
 
-- Phase 1（处理与 QC）：numpy 原生处理原语（apodization/ZF/FT/phase/baseline/calibration/transpose/sign）。
-- QC 指标实现：robust MAD 噪声、峰检测、SNR、相位/基线质量、孤立峰簇伪影、综合质量评分（ACCEPT/WARNING/ROLLBACK）。
-- DAG 拓扑排序 + 缓存命中 + 失败隔离的 PipelineRunner；默认处理计划（逐维 SP→ZF→FT→PS）。
-- AutoProcessor.process_matrix 最小闭环（uniform 2D/3D 合成矩阵）；新增 21 项测试。
+- Phase 1 处理与 QC：numpy 处理原语、QC 指标全套、DAG 管线（缓存/失败隔离）、
+  AutoProcessor.process_matrix 最小闭环。
 
 ## [0.1.1] - 2026-08-11
 
-- Phase 1（数据理解）：实现 Bruker 参数解析（acqus/acqu2s/acqu3s，跨行数组、引号/尖括号剥离）。
-- 实现 NUS 检测、采集模式检测（FnMODE）、PULPROG 多证据基础分类与采集/处理/显示轴映射。
-- 新增 Bruker fixture（HSQC/NUS-HSQC/HNCA/unknown）与 13 项数据理解测试。
+- Phase 1 数据理解：Bruker 参数解析、内部数据模型、NUS/采集模式检测、
+  基础分类、轴映射；真实数据解析修复（SW_h 优先、O1P 回退）。
 
 ## [0.1.0] - 2026-08-11
 
-- 初始化项目工作树（依据《自动化 NMR 2D/3D 数据处理与优化软件：完整技术框架》重建）。
-- 建立 core/ 八大子模块：experiment / data / planning / processing / optimization / qc / experiments / reporting。
-- 建立 backend/（ProcessingBackend 协议 + NMRPipe/Native 占位）、workflow/（AutoProcessor 编排占位）、gui/（面板占位）。
-- 建立 presets/（实验模板 YAML）、config/、scripts/、docs/、tests/。
-- 开发流程：pyproject（pytest/ruff 配置）、master 分支 git 仓库、README / PROJECT_STATE / CHANGELOG。
-- 正式定名 NMRForge；规划 AppImage 打包（packaging/linux/ + docs/packaging.md）。
+- 初始化项目工作树：core 八大子模块、backend、workflow、gui、presets、
+  config、docs、tests。
+- 定名 NMRForge；AppImage 打包规划；git master + VM 同步链路。
