@@ -1,5 +1,9 @@
 # 变更日志
 
+## [0.1.7] - 2026-08-11
+
+- SMILE 参数覆盖：nSigma/thresh/xQ3（SP 幂次）/scaling/report 可经 reconstruct_nus params 传入。
+
 ## [0.1.6] - 2026-08-11
 
 - 清理 VM 旧软件遗留卡死进程（16h 空转的 nmrPipe 管道）。

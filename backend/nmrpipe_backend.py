@@ -193,7 +193,12 @@ class NMRPipeBackend:
             ext = "ft2"
             script_fn = generate_2d_nus_script
         fraction = nuslist_count / grid if grid else 0.0
-        nsigma, thresh = select_smile_params(fraction)
+        tier_nsigma, tier_thresh = select_smile_params(fraction)
+        nsigma = float(params.get("nsigma", tier_nsigma))
+        thresh = float(params.get("thresh", tier_thresh))
+        smile_xq3 = float(params.get("smile_xq3", 1.0))
+        smile_scaling = bool(params.get("smile_scaling", False))
+        smile_report = int(params.get("smile_report", 1))
         nthread = int(params.get("nthread", 2))
         ext_lo = str(params.get("ext_lo", 10.5))
         ext_hi = str(params.get("ext_hi", 6.5))
@@ -209,6 +214,9 @@ class NMRPipeBackend:
             ext_hi=ext_hi,
             nsigma=nsigma,
             thresh=thresh,
+            smile_xq3=smile_xq3,
+            smile_scaling=smile_scaling,
+            smile_report=smile_report,
         )
         nus_com = work / f"{experiment.dataset_id}_nus.com"
         nus_com.write_text(script, encoding="utf-8", newline="\n")

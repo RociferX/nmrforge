@@ -1,0 +1,1 @@
+feat: SMILE 参数覆盖（nSigma/thresh/xQ3/scaling/report）供实验室参数调优

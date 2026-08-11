@@ -131,3 +131,18 @@ def test_3d_nus_script(bruker_dir: Path) -> None:
     ) == generate_3d_nus_script(
         exp, in_file="exp.fid", nuslist="nuslist", out_file="exp.ft3"
     )
+
+
+def test_3d_nus_script_smile_tuning(bruker_dir: Path) -> None:
+    exp = read_dataset(bruker_dir / "nus_3d")
+    from backend.script_generator import generate_3d_nus_script
+
+    script = generate_3d_nus_script(
+        exp, in_file="exp.fid", nuslist="nuslist", out_file="exp.ft3",
+        nsigma=5.0, thresh=0.99, smile_xq3=2.0, smile_scaling=True, smile_report=2,
+    )
+    assert "-nSigma 5" in script
+    assert "-thresh 0.99" in script
+    assert "-xQ3 2" in script
+    assert "-scaling 1" in script
+    assert "-report 2" in script

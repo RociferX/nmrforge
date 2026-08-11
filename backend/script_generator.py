@@ -7,6 +7,8 @@
 - -aq2D 数值（FnMODE 4/6→3，5→2）；
 - NUS 间接维 TD 用 NusTD（acqu3s TD=1 时 bruker 原生按 NusTD 识别，
   输出单文件 test.fid + mask.fid，SMILE 直接消费，无需切片追加）。
+SMILE 重构参数可经 reconstruct_nus params 覆盖（nSigma/thresh/xQ3/scaling/report），
+用于对照实验室脚本（data/脚本/smile2.com）调优。
 """
 
 from __future__ import annotations
@@ -327,6 +329,11 @@ def generate_2d_nus_script(
     ext_hi: str = "6.5",
     nsigma: float = 5.0,
     thresh: float = 0.95,
+    smile_xq1: float = 0.45,
+    smile_xq2: float = 0.95,
+    smile_xq3: float = 1.0,
+    smile_scaling: bool = False,
+    smile_report: int = 1,
 ) -> str:
     """2D NUS SMILE 重构：直接维 FT+EXT → SMILE -nDim 2 → 间接维 FT（终谱 ft2）。"""
     ctx = build_context(experiment)
@@ -351,8 +358,10 @@ def generate_2d_nus_script(
         "xyz2pipe -in nus2d/test%03d.ft1 -x \\",
         "| nmrPipe -fn SMILE -nDim 2 \\",
         f"           -sample {nuslist} -nThread {nthread} \\",
-        f"           -sampleCount {nuslist_count} -nSigma {nsigma:g} -off 0 0 -report 1 \\",
-        "           -xApod SP -xQ1 0.45 -xQ2 0.98 -xQ3 1 \\",
+        f"           -sampleCount {nuslist_count} -nSigma {nsigma:g} -off 0 0 "
+        f"-report {smile_report} \\",
+        *(["           -scaling 1 \\"] if smile_scaling else []),
+        f"           -xApod SP -xQ1 {smile_xq1:g} -xQ2 {smile_xq2:g} -xQ3 {smile_xq3:g} \\",
         f"           -xT {max(1, int(td[1]) // 2)} -xP0 0 -xP1 0 \\",
         f"           -xCT 0 -thresh {thresh:g} \\",
         "| pipe2xyz -out nus2d/recon.ft1 -x",
@@ -381,6 +390,11 @@ def generate_3d_nus_script(
     ext_hi: str = "6.5",
     nsigma: float = 5.0,
     thresh: float = 0.95,
+    smile_xq1: float = 0.45,
+    smile_xq2: float = 0.95,
+    smile_xq3: float = 1.0,
+    smile_scaling: bool = False,
+    smile_report: int = 1,
 ) -> str:
     """3D NUS SMILE 重构：直接维（F3）FT+EXT → SMILE -nDim 3 → 间接维 FT（ft3）。"""
     ctx = build_context(experiment)
@@ -405,9 +419,11 @@ def generate_3d_nus_script(
         "xyz2pipe -in nus3d_1/test%04d.ft1 -x \\",
         "| nmrPipe -fn SMILE -nDim 3 \\",
         f"           -sample {nuslist} -nThread {nthread} \\",
-        f"           -sampleCount {nuslist_count} -nSigma {nsigma:g} -off 0 0 -report 1 \\",
-        "           -xApod SP -xQ1 0.45 -xQ2 0.95 -xQ3 1 \\",
-        "           -yApod SP -yQ1 0.45 -yQ2 0.95 -yQ3 1 \\",
+        f"           -sampleCount {nuslist_count} -nSigma {nsigma:g} -off 0 0 "
+        f"-report {smile_report} \\",
+        *(["           -scaling 1 \\"] if smile_scaling else []),
+        f"           -xApod SP -xQ1 {smile_xq1:g} -xQ2 {smile_xq2:g} -xQ3 {smile_xq3:g} \\",
+        f"           -yApod SP -yQ1 {smile_xq1:g} -yQ2 {smile_xq2:g} -yQ3 {smile_xq3:g} \\",
         "           -xP0 0 -xP1 0 -xNeg -xAlt \\",
         "           -yP0 0 -yP1 0 -yNeg -yAlt \\",
         f"           -xCT 0 -thresh {thresh:g} \\",
