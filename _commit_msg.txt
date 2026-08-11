@@ -1,8 +1,0 @@
-feat: Bruker 数据接入（ser/fid 二进制读取 + fid.com 交叉核对 + 端到端闭环）
-
-- read_data：int32 DQD 实虚对读取（BYTORDA 字节序）、1D/2D/3D 布局、大小校验
-- 超复数间接维合并（States/States-TPPI；Echo-Antiecho 走 NMRPipe 后端）
-- backend/bruker_workflow：fid.com 解析/交叉核对/修补（acqus 为权威源，参考 NMRFlow）
-- NUS 检测跨 acqus/acqu2s/acqu3s；AutoProcessor.run 读取 Bruker 数据端到端
-- 默认计划改为链式 DAG（各维变换全部合成到最终输出）
-- 新增 13 项测试；本地 51 passed，ruff 全仓通过
