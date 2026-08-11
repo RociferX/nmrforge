@@ -1,9 +1,0 @@
-feat: Phase 1 数据理解核心（Bruker 解析/NUS 检测/轴映射/基础分类）
-
-- 实现 acqus/acqu2s/acqu3s 参数解析（跨行数组、引号/尖括号剥离）
-- read_dataset 生成统一内部数据模型（维度/核/采样/实验类型）
-- NUS 检测（nuslist + Nus* 参数，矛盾进安全模式）
-- FnMODE 采集模式检测（含 ft_alt 标志）
-- PULPROG 多证据基础分类（置信度门控）
-- 采集/处理/显示轴映射（含实验模板 orientation）
-- 新增 Bruker fixture 与测试；本地 19 passed，ruff 全仓通过
