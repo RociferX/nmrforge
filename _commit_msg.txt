@@ -1,7 +1,0 @@
-feat: NMRPipe 后端接入（csh 路径查找 + bruker -AUTO 转换 + 处理管道）
-
-- 查找按 csh 实际响应（source ~/.cshrc; which nmrPipe），支持显式 bin 目录
-- backend/nmrpipe_finder + CshRuntime；AutoProcessor.run 支持后端路径
-- 3D NUS 规避 acqu3s TD=1：fid.com 用 NusTD 修补，并强制输出 fid 切片而非单文件
-- 确定性脚本生成（LF 行尾）：-ws 8 -noi2f/无 -DMX/MODE 标志/-aq2D 数值
-- 新增 nus_3d fixture（TD=1 场景）与 14 项测试；本地 65 passed，ruff 通过
