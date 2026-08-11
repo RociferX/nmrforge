@@ -27,6 +27,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--ext-lo", default="9.0", help="1H 提取窗口低 ppm（默认 9.0）")
     parser.add_argument("--ext-hi", default="7.5", help="1H 提取窗口高 ppm（默认 7.5）")
     parser.add_argument("--nthread", type=int, default=2, help="SMILE 线程数（默认 2）")
+    parser.add_argument("--work-dir", default="", help="工作目录（默认数据集同级 <id>.nmrpipe）")
     parser.add_argument("--out", default="", help="JSON 报告输出路径（默认数据集同级）")
     args = parser.parse_args(argv)
 
@@ -39,7 +40,7 @@ def main(argv: list[str] | None = None) -> int:
 
     from backend.nmrpipe_backend import NMRPipeBackend
 
-    backend = NMRPipeBackend()
+    backend = NMRPipeBackend(work_dir=args.work_dir)
     health = backend.health_check()
     if not health["ok"]:
         print(f"错误: {health['message']}", file=sys.stderr)
