@@ -1,8 +1,0 @@
-feat: Phase 1 后半（处理原语/QC 指标/DAG 管线/最小闭环）
-
-- numpy 原生处理原语：apodization / zero_fill / ft / phase / baseline / calibration / transpose / sign_correction
-- QC 指标：robust MAD 噪声、峰检测、SNR、相位/基线质量、孤立峰簇伪影、综合质量评分（ACCEPT/WARNING/ROLLBACK）
-- ProcessingDag 拓扑排序/缓存键/downstream；PipelineRunner（缓存命中 + 失败隔离）
-- 默认处理计划（逐维 apodization→ZF→FT→phase，alt 按 FnMODE 推断）
-- AutoProcessor.process_matrix 最小闭环（uniform 2D/3D 合成矩阵）
-- 新增 21 项测试；本地 40 passed，ruff 全仓通过
