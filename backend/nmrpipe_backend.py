@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from backend.base import BackendCapabilities
@@ -14,7 +14,9 @@ from core.planning.processing_plan import ProcessingPlan
 class NMRPipeBackend:
     """NMRPipe 实现（占位）。"""
 
-    capabilities: BackendCapabilities = BackendCapabilities(provider="nmrpipe")
+    capabilities: BackendCapabilities = field(
+        default_factory=lambda: BackendCapabilities(provider="nmrpipe")
+    )
 
     def health_check(self) -> dict[str, Any]:
         raise NotImplementedError("Phase 1: 实现 NMRPipe 健康检查")

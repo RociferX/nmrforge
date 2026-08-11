@@ -8,13 +8,32 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+import numpy as np
+
+from core.processing.axes import axis_index
+
 
 @dataclass
 class ZeroFillParams:
-    size: str = "auto"  # auto / 明确点数
+    size: str | int = "auto"  # auto：>= 2*当前点数 的最小 2 的幂
     axis: str = "F3"
 
 
-def apply(data: Any, params: ZeroFillParams) -> Any:
+def apply(data: Any, params: ZeroFillParams) -> np.ndarray:
     """在指定维度补零，返回处理后的数据。"""
-    raise NotImplementedError("Phase 1: 实现 zero fill")
+    arr = np.asarray(data)
+    axis = axis_index(params.axis, arr.ndim)
+    current = arr.shape[axis]
+    if isinstance(params.size, int):
+        target = params.size
+    elif params.size == "auto":
+        target = 1
+        while target < 2 * current:
+            target *= 2
+    else:
+        target = int(params.size)
+    if target <= current:
+        return arr
+    pad = [(0, 0)] * arr.ndim
+    pad[axis] = (0, target - current)
+    return np.pad(arr, pad, mode="constant")

@@ -9,6 +9,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+import numpy as np
+
+from core.processing.axes import axis_index
+
 
 @dataclass
 class PhaseParams:
@@ -19,6 +23,13 @@ class PhaseParams:
     confidence: float = 0.0
 
 
-def apply(data: Any, params: PhaseParams) -> Any:
-    """应用相位校正，返回处理后的数据。"""
-    raise NotImplementedError("Phase 1: 实现相位校正")
+def apply(data: Any, params: PhaseParams) -> np.ndarray:
+    """应用相位校正：angle = p0 + p1 * k / (N-1)（度）。"""
+    arr = np.asarray(data)
+    axis = axis_index(params.axis, arr.ndim)
+    n = arr.shape[axis]
+    k = np.arange(n)
+    angle = np.deg2rad(params.p0 + params.p1 * k / max(n - 1, 1))
+    shape = [1] * arr.ndim
+    shape[axis] = n
+    return arr * np.exp(1j * angle.reshape(shape))

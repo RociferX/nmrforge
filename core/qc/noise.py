@@ -2,12 +2,15 @@
 
 方法：用户指定空白区 / edge regions / robust MAD / histogram / local noise map / peak-masked。
 输出 global_sigma / local_sigma / noise_confidence（框架 §17）。
+Phase 1：robust MAD（对强峰不敏感）。
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any
+
+import numpy as np
 
 
 @dataclass
@@ -19,5 +22,14 @@ class NoiseEstimate:
 
 
 def estimate(data: Any) -> NoiseEstimate:
-    """估计噪声水平。"""
-    raise NotImplementedError("Phase 1: 实现噪声估计")
+    """估计噪声水平（robust MAD，1.4826 因子换算为高斯 sigma）。"""
+    arr = np.asarray(data)
+    flat = np.real(arr).ravel()
+    if flat.size == 0:
+        return NoiseEstimate()
+    median = np.median(flat)
+    mad = np.median(np.abs(flat - median))
+    sigma = float(1.4826 * mad)
+    if sigma < 1e-12:
+        sigma = float(np.std(flat))
+    return NoiseEstimate(global_sigma=sigma, confidence=0.9, method="robust_mad")

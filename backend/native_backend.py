@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from backend.base import BackendCapabilities
@@ -14,8 +14,8 @@ from core.planning.processing_plan import ProcessingPlan
 class NativeBackend:
     """纯 Python 处理实现（占位）。"""
 
-    capabilities: BackendCapabilities = BackendCapabilities(
-        provider="native", supports_nus=False
+    capabilities: BackendCapabilities = field(
+        default_factory=lambda: BackendCapabilities(provider="native", supports_nus=False)
     )
 
     def health_check(self) -> dict[str, Any]:

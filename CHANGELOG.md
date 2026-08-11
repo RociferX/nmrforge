@@ -1,5 +1,12 @@
 # 变更日志
 
+## [0.1.2] - 2026-08-11
+
+- Phase 1（处理与 QC）：numpy 原生处理原语（apodization/ZF/FT/phase/baseline/calibration/transpose/sign）。
+- QC 指标实现：robust MAD 噪声、峰检测、SNR、相位/基线质量、孤立峰簇伪影、综合质量评分（ACCEPT/WARNING/ROLLBACK）。
+- DAG 拓扑排序 + 缓存命中 + 失败隔离的 PipelineRunner；默认处理计划（逐维 SP→ZF→FT→PS）。
+- AutoProcessor.process_matrix 最小闭环（uniform 2D/3D 合成矩阵）；新增 21 项测试。
+
 ## [0.1.1] - 2026-08-11
 
 - Phase 1（数据理解）：实现 Bruker 参数解析（acqus/acqu2s/acqu3s，跨行数组、引号/尖括号剥离）。
