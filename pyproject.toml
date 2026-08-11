@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nmrforge"
+version = "0.1.0"
+description = "面向 Bruker 2D/3D NMR 数据的自动化处理、参数优化与质量控制平台"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "PyQt6>=6.5",
+    "pyqtgraph>=0.13",
+    "numpy>=1.24,<2.5",
+    "scipy>=1.10",
+    "pandas>=2.0",
+    "matplotlib>=3.7",
+    "PyYAML>=6.0",
+    "nmrglue>=0.9",
+    "reportlab>=4.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4",
+    "ruff>=0.4",
+]
+
+[tool.setuptools.packages.find]
+include = ["core*", "backend*", "workflow*", "gui*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+exclude = ["nmrforge", ".venv", ".git", "build", "dist"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP"]

@@ -1,0 +1,10 @@
+# 统一文本行尾（与 NMRFlow 的 LF 约定一致）
+* text=auto
+*.py text eol=lf
+*.toml text eol=lf
+*.yaml text eol=lf
+*.md text eol=lf
+*.sh text eol=lf
+*.desktop text eol=lf
+*.svg text eol=lf
+*.spec text eol=lf

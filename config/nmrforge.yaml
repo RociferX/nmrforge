@@ -1,0 +1,27 @@
+# NMRForge 默认配置（config/nmrforge.local.yaml 可本地覆盖，勿提交敏感信息）
+app:
+  name: NMRForge
+  version: 0.1.0
+
+backend:
+  provider: nmrpipe            # nmrpipe | native
+  nmrpipe:
+    nmrpipe_bin: ""            # 留空自动查找（PATH → csh 环境 → 常见目录）
+
+optimization:
+  budget:
+    max_candidates: 8
+    max_runtime_min: 15
+    early_stop_improvement: 0.01
+    max_no_improvement: 2
+
+qc:
+  contour_levels_sigma: [1.5, 2.0, 3.0, 5.0]
+  peak_min_snr: 3.0
+
+reporting:
+  formats: [json, html]
+  recipe: true
+
+logging:
+  level: INFO

@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# 虚拟环境（开发引导创建于项目根：nmrforge/）
+nmrforge/
+.venv/
+
+# 构建产物
+build/
+dist/
+
+# 本地配置覆盖（可能含敏感信息，勿提交）
+config/nmrforge.local.yaml
