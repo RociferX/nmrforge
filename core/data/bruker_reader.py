@@ -238,11 +238,27 @@ def read_segments(paths: list[Path | str]) -> Experiment:
     base = read_dataset(dirs[0])
     base.segments = dirs
 
+    def _effective_td(exp: Experiment) -> list[int]:
+        """NUS 时间接维取 NusTD（采样网格），否则用声明 TD。"""
+        td = [d.td for d in exp.dimensions]
+        if exp.sampling.mode is SamplingMode.NUS:
+            for index, filename in ((1, "acqu2s"), (2, "acqu3s")):
+                if len(td) <= index:
+                    continue
+                block = exp.acquisition_parameters.get(filename, {})
+                try:
+                    nus_td = int(block.get("NusTD", 0) or 0)
+                except (TypeError, ValueError):
+                    continue
+                if nus_td:
+                    td[index] = nus_td
+        return td
+
     def _key(exp: Experiment) -> tuple:
         return (
             exp.ndim,
             [d.nucleus for d in exp.dimensions],
-            [d.td for d in exp.dimensions],
+            _effective_td(exp),
             [round(d.sw, 6) for d in exp.dimensions],
         )
 
