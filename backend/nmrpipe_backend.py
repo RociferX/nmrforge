@@ -147,7 +147,9 @@ class NMRPipeBackend:
                     "message": "多段 NUS 转换/合并失败",
                     "logs": logs,
                 }
-            nuslist_count = self._write_merged_nuslist(work, experiment.segments, logs)
+            nuslist_count = self._write_merged_nuslist(
+                work, experiment.segments, experiment, logs
+            )
             in_file = "merged/fid/test%03d.fid"
         else:
             fid_file = work / f"{experiment.dataset_id}.fid"
@@ -387,9 +389,29 @@ class NMRPipeBackend:
         return True, logs
 
     def _write_merged_nuslist(
-        self, work: Path, segment_dirs: list[Path], logs: list[str]
+        self,
+        work: Path,
+        segment_dirs: list[Path],
+        experiment: Experiment,
+        logs: list[str],
     ) -> int:
         points = merge_nuslists([Path(d) / "nuslist" for d in segment_dirs])
+        # 3D 校验：nuslist 列为复点索引（上限 NusTD//2），越界点属数据录入错误，丢弃并警告
+        if experiment.ndim >= 3:
+            td = effective_td(experiment)
+            bounds = [int(td[1]) // 2, int(td[2]) // 2] if len(td) > 2 else []
+            valid: list[tuple[int, ...]] = []
+            dropped = 0
+            for point in points:
+                if len(point) >= 2 and (
+                    point[0] >= bounds[0] or point[1] >= bounds[1]
+                ):
+                    dropped += 1
+                else:
+                    valid.append(point)
+            if dropped:
+                logs.append(f"nuslist 越界点 {dropped} 个已丢弃（网格 {bounds}）")
+            points = valid
         text = "".join(" ".join(str(v) for v in point) + "\n" for point in points)
         (work / "nuslist").write_text(text, encoding="utf-8")
         logs.append(f"合并 nuslist：{len(points)} 采样点")
