@@ -301,10 +301,11 @@ class NMRPipeBackend:
             return False
         shutil.move(str(source), dest_work / f"{experiment.dataset_id}.fid")
         logs.append(f"{experiment.dataset_id}.fid 已就位（{raw_dir.name}）")
-        # SMILE 只需 nuslist，mask.fid 不复制（省磁盘）
-        ser_full = raw_dir / "ser_full"
-        if ser_full.is_file():
-            ser_full.unlink()
+        # SMILE 只需 nuslist；ser_full/mask.fid 可再生，转换后清理省磁盘
+        for stale in ("ser_full", "mask.fid"):
+            stale_path = raw_dir / stale
+            if stale_path.is_file():
+                stale_path.unlink()
         return True
 
     def _convert(
