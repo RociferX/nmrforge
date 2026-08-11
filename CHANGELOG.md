@@ -7,6 +7,7 @@
 - 3D NUS 规避 acqu3s TD=1：fid.com 用 NusTD 修补，并强制输出 fid 切片而非单文件。
 - 确定性脚本生成（LF 行尾）；转换参数符合审计结论（-ws 8 -noi2f/无 -DMX/MODE 标志/-aq2D）。
 - AutoProcessor.run 支持 NMRPipe 后端路径（成功后读谱 QC）。
+- 真实数据验证（VM Desktop/sampleF）：SW_h 优先于 SW(ppm)、O1P 缺失回退 O1/SFO1。
 - 新增 13 项测试；本地 64 passed。
 
 ## [0.1.3] - 2026-08-11
