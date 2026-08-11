@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from backend.base import BackendCapabilities
-from backend.bruker_workflow import patch_fid_com
+from backend.bruker_workflow import patch_fid_com, patch_nus_expand_count
 from backend.nmrpipe_finder import find_nmrpipe_bin, find_tool
 from backend.runtime import CshRuntime
 from backend.script_generator import (
@@ -31,7 +31,7 @@ from backend.script_generator import (
     select_smile_params,
 )
 from core.data.internal_data_model import Experiment, SamplingMode
-from core.data.nus_reader import merge_nuslists
+from core.data.nus_reader import merge_nuslists, read_nuslist
 from core.planning.processing_plan import ProcessingPlan
 
 
@@ -282,6 +282,14 @@ class NMRPipeBackend:
             if result.returncode == 0 and fid_com.is_file():
                 text = fid_com.read_text(encoding="utf-8", errors="replace")
                 patched, corrections = patch_fid_com(text, experiment)
+                if is_nus:
+                    nuslist_path = raw_dir / "nuslist"
+                    if nuslist_path.is_file():
+                        nuslist_count = len(read_nuslist(nuslist_path))
+                        patched, nus_corrections = patch_nus_expand_count(
+                            patched, nuslist_count
+                        )
+                        corrections += nus_corrections
                 for correction in corrections:
                     logs.append(f"参数修正: {correction}")
                 # LF 行尾必须：CRLF 会让 csh 的 \ 续行失效

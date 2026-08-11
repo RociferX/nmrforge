@@ -3,6 +3,8 @@
 ## [0.1.9] - 2026-08-11
 
 - SMILE 参数优化模块（workflow/smile_optimize + scripts/smile_optimize.py）：
+  逐组反馈（每组跑完立即打印结果）+ 每组超时 300s。
+- 修复 bruker -AUTO sampleCount 误判（Sampletest/4 生成 sampleCount=2 导致卡死）：转换时按 nuslist 行数修正。
   nSigma×thresh 网格逐组重构并评分，展示参数组合+评分；**不进入自动流程**，用户可后选运行。
 
 ## [0.1.8] - 2026-08-11

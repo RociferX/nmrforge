@@ -77,6 +77,7 @@ def optimize_smile_parameters(
     nthread: int = 2,
     timeout_s: float = 600.0,
     progress: Callable[[int, int, str], None] | None = None,
+    on_result: Callable[[SmileParameterResult], None] | None = None,
     reader: Callable[[str], tuple[dict[str, Any], Any]] | None = None,
 ) -> list[SmileParameterResult]:
     """逐组执行 SMILE 重构并评分，返回按总分降序的候选列表。
@@ -116,6 +117,8 @@ def optimize_smile_parameters(
             result.decision = "error"
             result.message = str(exc)
         results.append(result)
+        if on_result is not None:
+            on_result(result)
     results.sort(key=lambda r: r.overall, reverse=True)
     return results
 

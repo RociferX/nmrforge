@@ -100,3 +100,24 @@ def test_save_report_and_format(tmp_path: Path) -> None:
     table = format_results(results)
     assert "nSigma" in table and "thresh" in table
     assert "5.0" in table and "74.1" in table
+
+
+def test_on_result_callback(bruker_dir: Path) -> None:
+    from core.data.bruker_reader import read_dataset
+
+    exp = read_dataset(bruker_dir / "nus_3d")
+    backend, _seen = _fake_backend()
+    received: list[dict] = []
+
+    def on_result(result) -> None:
+        received.append((result.params["nsigma"], result.overall))
+
+    optimize_smile_parameters(
+        exp,
+        backend,
+        grid=[{"nsigma": 3.0, "thresh": 0.90}, {"nsigma": 5.0, "thresh": 0.99}],
+        reader=_fake_reader,
+        on_result=on_result,
+    )
+    assert len(received) == 2  # 每组评分后都立即回调
+    assert received[0][0] == 3.0 and received[1][0] == 5.0

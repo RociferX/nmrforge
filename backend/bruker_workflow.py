@@ -53,6 +53,32 @@ def _effective_td(experiment: Experiment) -> list[int]:
     return td
 
 
+_NUSEXPAND_RE = re.compile(r"nusExpand\.tcl[^\n]*?-sampleCount\s+(\d+)")
+
+
+def patch_nus_expand_count(text: str, nuslist_count: int) -> tuple[str, list[str]]:
+    """把 nusExpand.tcl 的 -sampleCount 修正为实际 nuslist 行数。
+
+    bruker -AUTO 对部分数据集（如 acqu2s TD 与 NusTD 矛盾）会误判采样点数，
+    导致 ser_full 只展开少量切片、bruk2pipe 读数据失败卡死（2026-08-11 实测）。
+    """
+    warnings: list[str] = []
+
+    def replace(match: re.Match) -> str:
+        current = int(match.group(1))
+        if current == nuslist_count:
+            return match.group(0)
+        warnings.append(
+            f"sampleCount: fid.com={current} → nuslist={nuslist_count}（已修正）"
+        )
+        return match.group(0).replace(
+            f"-sampleCount {current}", f"-sampleCount {nuslist_count}", 1
+        )
+
+    patched = _NUSEXPAND_RE.sub(replace, text)
+    return patched, warnings
+
+
 def parse_fid_com(text: str) -> dict[str, str]:
     """从 bruker 命令生成的 fid.com 提取 bruk2pipe 关键参数。"""
     return {match.group(1): match.group(2) for match in _KEY_RE.finditer(text)}

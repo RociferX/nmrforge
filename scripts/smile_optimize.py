@@ -46,12 +46,23 @@ def main(argv: list[str] | None = None) -> int:
         print(f"错误: {health['message']}", file=sys.stderr)
         return 1
 
+    def _progress(index: int, total: int, label: str) -> None:
+        print(f"[{index}/{total}] 运行 {label}", flush=True)
+
+    def _on_result(result) -> None:
+        print(f"  → {result.decision} {result.overall:.1f} "
+              f"(nSigma={result.params.get('nsigma')}, "
+              f"thresh={result.params.get('thresh')})", flush=True)
+
     results = optimize_smile_parameters(
         experiment,
         backend,
         ext_lo=args.ext_lo,
         ext_hi=args.ext_hi,
         nthread=args.nthread,
+        timeout_s=300.0,
+        progress=_progress,
+        on_result=_on_result,
     )
     print(format_results(results))
 

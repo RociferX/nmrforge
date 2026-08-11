@@ -69,3 +69,19 @@ def test_patch_fid_com(bruker_dir: Path) -> None:
     assert "-xN 2048" in patched
     assert "-yN 256" in patched
     assert "-xT 1024" in patched
+
+
+def test_patch_nus_expand_count() -> None:
+    from backend.bruker_workflow import patch_nus_expand_count
+
+    text = (
+        "nusExpand.tcl -mode bruker -sampleCount 2 -off 0 \\n"
+        " -in ./ser -out ./ser_full -sample ./nuslist\n\n"
+        "nusExpand.tcl -mask -noexpand -sampleCount 2 -in ./test.fid \\n"
+        " -out ./mask.fid -sample ./nuslist\n"
+    )
+    patched, warnings = patch_nus_expand_count(text, 700)
+    assert len(warnings) == 2
+    assert "-sampleCount 700" in patched
+    assert "-sampleCount 2" not in patched
+    assert all("sampleCount" in w for w in warnings)
