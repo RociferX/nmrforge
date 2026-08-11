@@ -136,20 +136,32 @@ class NMRPipeBackend:
         logs: list[str] = []
 
         if experiment.segments:
-            shifts = [float(v) for v in params.get("segment_shift_hz", [])]
-            converted, convert_logs = self._convert_segments(
-                runtime, experiment, work, shifts
+            merged_fid = work / "merged" / "fid"
+            merged_ready = (
+                merged_fid.is_dir()
+                and list(merged_fid.glob("test*.fid"))
+                and (work / "nuslist").is_file()
             )
-            logs += convert_logs
-            if not converted:
-                return {
-                    "success": False,
-                    "message": "多段 NUS 转换/合并失败",
-                    "logs": logs,
-                }
-            nuslist_count = self._write_merged_nuslist(
-                work, experiment.segments, experiment, logs
-            )
+            if not merged_ready:
+                shifts = [float(v) for v in params.get("segment_shift_hz", [])]
+                converted, convert_logs = self._convert_segments(
+                    runtime, experiment, work, shifts
+                )
+                logs += convert_logs
+                if not converted:
+                    return {
+                        "success": False,
+                        "message": "多段 NUS 转换/合并失败",
+                        "logs": logs,
+                    }
+                nuslist_count = self._write_merged_nuslist(
+                    work, experiment.segments, experiment, logs
+                )
+            else:
+                logs.append("复用已合并切片（跳过转换/合并）")
+                nuslist_count = len(
+                    (work / "nuslist").read_text(encoding="utf-8").splitlines()
+                )
             in_file = "merged/fid/test%03d.fid"
         else:
             fid_file = work / f"{experiment.dataset_id}.fid"
