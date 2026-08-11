@@ -164,8 +164,10 @@ def _search_axis(
         return None
     sig_traces = traces[signal]
     if len(sig_traces) > max_traces:
-        index = np.linspace(0, len(sig_traces) - 1, max_traces).astype(int)
-        sig_traces = sig_traces[index]
+        # 只保留峰高最强的 top-K 迹线：相位信息只在强迹线上可靠，
+        # 均匀抽样会把大量弱迹线带进来稀释指标
+        order = np.argsort(peak_mag[signal])[::-1][:max_traces]
+        sig_traces = sig_traces[order]
     positions = np.argmax(np.abs(sig_traces), axis=-1)
     peak_weights = np.max(np.abs(sig_traces), axis=-1) + 1e-12
     k = np.arange(n, dtype=float)
