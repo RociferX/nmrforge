@@ -1,0 +1,499 @@
+"""ProjectManager:项目生命周期与领域操作(GUI 唯一入口)。
+
+- create/open/save(project.json 原子写,tmp + os.replace)
+- 目录模板(raw/processing/spectra/peaks/analysis/figures/report/metadata)
+- 实验 CRUD、状态推断(registered → imported → processed → picked → analyzed)
+- 样本 CRUD(S001 自动编号、删除引用保护)
+- 审计历史(processing_history 只追加)
+- WorkflowRun 生命周期(R-YYYYMMDD-NNN 只追加,脚本快照)
+- 从成功运行提取处理模板(YAML)
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import re
+import tempfile
+from pathlib import Path
+from typing import Any
+
+from core.project.models import (
+    DEFAULT_DIRECTORIES,
+    SCHEMA_VERSION,
+    ExperimentEntry,
+    ExperimentStatus,
+    HistoryEntry,
+    ProjectInfo,
+    ProteinInfo,
+    SampleEntry,
+    WorkflowRun,
+    now_iso,
+)
+
+
+class ProjectError(Exception):
+    """项目管理操作错误(参数校验/引用保护/IO)。"""
+
+
+def sha256_file(path: Path) -> str:
+    """计算文件 SHA-256(输入指纹,供 WorkflowRun.inputs)。"""
+    digest = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(65536), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def atomic_write_json(path: Path, data: dict[str, Any]) -> None:
+    """原子写 JSON:同目录临时文件 + os.replace。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=path.stem + "-", suffix=".json.tmp", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, ensure_ascii=False, indent=2)
+            fh.write("\n")
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+
+
+def _next_sequence_id(existing: list[str], prefix: str, width: int = 3) -> str:
+    """生成连续编号:exp_001 / S001,取现有最大后缀 +1。"""
+    max_n = 0
+    for value in existing:
+        m = re.fullmatch(re.escape(prefix) + r"(\d+)", value)
+        if m:
+            max_n = max(max_n, int(m.group(1)))
+    return f"{prefix}{max_n + 1:0{width}d}"
+
+
+class ProjectManager:
+    """项目根目录上的全部领域操作;所有写操作后需 save() 落盘。"""
+
+    def __init__(self, root: Path | str | None = None) -> None:
+        self.root = Path(root).resolve() if root else None
+        self.project: ProjectInfo | None = None
+
+    # ------------------------------------------------------------------
+    # 生命周期
+    # ------------------------------------------------------------------
+    @classmethod
+    def create_project(
+        cls,
+        root: Path | str,
+        name: str,
+        protein_name: str = "",
+        protein_sequence: str = "",
+        experiment_type: str = "",
+        directories: dict[str, str] | None = None,
+    ) -> ProjectManager:
+        """在 root 下创建项目:目录模板 + project.json + 首条审计历史。"""
+        root_path = Path(root).resolve()
+        project_file = root_path / "project.json"
+        if project_file.exists():
+            raise ProjectError(f"目录已存在项目: {project_file}")
+        manager = cls(root_path)
+        dir_map = {name_: name_ for name_ in DEFAULT_DIRECTORIES}
+        if directories:
+            for key, rel in directories.items():
+                if key in dir_map:
+                    dir_map[key] = rel
+        timestamp = now_iso()
+        manager.project = ProjectInfo(
+            schema_version=SCHEMA_VERSION,
+            name=name,
+            protein=ProteinInfo(name=protein_name, sequence=protein_sequence),
+            experiment_type=experiment_type,
+            created=timestamp,
+            updated=timestamp,
+            directories=dir_map,
+        )
+        for rel in dir_map.values():
+            (root_path / rel).mkdir(parents=True, exist_ok=True)
+        manager.add_history("project_created", {"name": name, "root": str(root_path)})
+        manager.save()
+        return manager
+
+    @classmethod
+    def open_project(cls, root: Path | str) -> ProjectManager:
+        """打开已有项目(读 project.json,schema 1.0/1.1 均兼容)。"""
+        root_path = Path(root).resolve()
+        project_file = root_path / "project.json"
+        if not project_file.is_file():
+            raise ProjectError(f"未找到 project.json: {project_file}")
+        try:
+            data = json.loads(project_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ProjectError(f"project.json 读取失败: {exc}") from exc
+        if (
+            not isinstance(data.get("name"), str)
+            or not data["name"]
+            or not isinstance(data.get("experiments", []), list)
+        ):
+            raise ProjectError(f"project.json 结构无效: {project_file}")
+        manager = cls(root_path)
+        manager.project = ProjectInfo.from_dict(data)
+        return manager
+
+    def save(self) -> None:
+        """原子写 project.json 并刷新 updated 时间戳。"""
+        if self.root is None or self.project is None:
+            raise ProjectError("未加载项目,无法保存")
+        self.project.updated = now_iso()
+        atomic_write_json(self.root / "project.json", self.project.to_dict())
+
+    def close(self) -> None:
+        """关闭当前项目(仅清内存,不自动保存)。"""
+        self.root = None
+        self.project = None
+
+    # ------------------------------------------------------------------
+    # 目录解析
+    # ------------------------------------------------------------------
+    def dir_path(self, key: str) -> Path:
+        if self.root is None or self.project is None:
+            raise ProjectError("未加载项目")
+        rel = self.project.directories.get(key, key)
+        return self.root / rel
+
+    def _experiment_paths(self, exp_id: str) -> list[Path]:
+        """实验全部相关文件/目录(删除实验时按此清理;resolve 后必须仍在项目根内)。"""
+        candidates: list[Path] = []
+        for key in ("raw", "processing", "spectra", "peaks", "analysis", "figures", "report"):
+            base = self.dir_path(key)
+            if key in ("raw", "processing", "analysis", "figures"):
+                candidates.append(base / exp_id)
+            else:
+                candidates.extend(base.glob(f"{exp_id}.*"))
+        candidates.append(self.dir_path("metadata") / f"{exp_id}.json")
+        return candidates
+
+    def _ensure_inside_root(self, path: Path) -> Path:
+        resolved = path.resolve()
+        if self.root is None or not resolved.is_relative_to(self.root):
+            raise ProjectError(f"路径超出项目目录,拒绝操作: {path}")
+        return resolved
+
+    # ------------------------------------------------------------------
+    # 审计历史
+    # ------------------------------------------------------------------
+    def add_history(self, action: str, fields: dict[str, Any] | None = None) -> HistoryEntry:
+        if self.project is None:
+            raise ProjectError("未加载项目")
+        entry = HistoryEntry(
+            id=_next_sequence_id(
+                [h.id for h in self.project.processing_history], "H", width=3
+            ),
+            timestamp=now_iso(),
+            action=action,
+            fields=dict(fields or {}),
+        )
+        self.project.processing_history.append(entry)
+        return entry
+
+    # ------------------------------------------------------------------
+    # 实验
+    # ------------------------------------------------------------------
+    def add_experiment(
+        self,
+        source: Path | str,
+        title: str = "",
+        sample_id: str = "",
+        segments: list[Path | str] | None = None,
+        metadata: dict[str, Any] | None = None,
+        imported_at: str = "",
+    ) -> ExperimentEntry:
+        if self.project is None:
+            raise ProjectError("未加载项目")
+        if sample_id and self.project.sample(sample_id) is None:
+            raise ProjectError(f"样本不存在: {sample_id}")
+        entry = ExperimentEntry(
+            id=_next_sequence_id([e.id for e in self.project.experiments], "exp_"),
+            title=title,
+            source=str(source),
+            status=ExperimentStatus.IMPORTED.value,
+            metadata=dict(metadata or {}),
+            imported_at=imported_at or now_iso(),
+            sample_id=sample_id,
+            segments=[str(s) for s in (segments or [])],
+        )
+        self.project.experiments.append(entry)
+        self.add_history(
+            "experiment_added",
+            {"experiment_id": entry.id, "title": title, "source": str(source)},
+        )
+        return entry
+
+    def rename_experiment(self, exp_id: str, new_title: str) -> None:
+        entry = self._require_experiment(exp_id)
+        old = entry.title
+        entry.title = new_title
+        self.add_history(
+            "experiment_renamed",
+            {"experiment_id": exp_id, "old_title": old, "new_title": new_title},
+        )
+
+    def set_experiment_notes(self, exp_id: str, notes: str) -> None:
+        entry = self._require_experiment(exp_id)
+        entry.notes = notes
+        self.add_history(
+            "experiment_notes", {"experiment_id": exp_id, "notes": notes}
+        )
+
+    def delete_experiment(self, exp_id: str) -> None:
+        """删除实验条目并清理产物文件;WorkflowRun 审计记录保留。"""
+        entry = self._require_experiment(exp_id)
+        removed: list[str] = []
+        for path in self._experiment_paths(exp_id):
+            target = self._ensure_inside_root(path)
+            if target.is_dir():
+                for child in target.rglob("*"):
+                    if child.is_file():
+                        child.unlink()
+                target.rmdir()
+                removed.append(str(target))
+            elif target.is_file():
+                target.unlink()
+                removed.append(str(target))
+        self.project.experiments.remove(entry)
+        self.add_history(
+            "experiment_deleted",
+            {
+                "experiment_id": exp_id,
+                "title": entry.title,
+                "removed_files": removed,
+                "workflow_runs_kept": [
+                    r.run_id for r in self.project.workflow_runs if r.experiment_id == exp_id
+                ],
+            },
+        )
+
+    def infer_status(self, exp_id: str) -> ExperimentStatus:
+        """依据产物文件推断实验状态:metadata/raw → imported,spectra → processed,
+        peaks → picked,report/analysis → analyzed。"""
+        self._require_experiment(exp_id)
+        checks: list[tuple[ExperimentStatus, bool]] = [
+            (
+                ExperimentStatus.IMPORTED,
+                self.dir_path("metadata").joinpath(f"{exp_id}.json").is_file(),
+            ),
+            (
+                ExperimentStatus.PROCESSED,
+                any(
+                    self.dir_path("spectra").joinpath(f"{exp_id}.{ext}").is_file()
+                    for ext in ("ft2", "ft3")
+                ),
+            ),
+            (
+                ExperimentStatus.PICKED,
+                self.dir_path("peaks").joinpath(f"{exp_id}.csv").is_file(),
+            ),
+            (
+                ExperimentStatus.ANALYZED,
+                any(
+                    self.dir_path("report").joinpath(f"{exp_id}.{ext}").is_file()
+                    for ext in ("pdf", "html", "json")
+                )
+                or self.dir_path("analysis").joinpath(exp_id).exists(),
+            ),
+        ]
+        status = ExperimentStatus.REGISTERED
+        order = ExperimentStatus.order()
+        for candidate, present in checks:
+            if present and order.index(candidate) > order.index(status):
+                status = candidate
+        return status
+
+    def update_experiment_status(self, exp_id: str, status: ExperimentStatus) -> None:
+        entry = self._require_experiment(exp_id)
+        old = entry.status
+        entry.status = status.value
+        self.add_history(
+            "experiment_status",
+            {"experiment_id": exp_id, "old_status": old, "new_status": status.value},
+        )
+
+    # ------------------------------------------------------------------
+    # 样本
+    # ------------------------------------------------------------------
+    def add_sample(
+        self,
+        name: str = "",
+        protein_name: str = "",
+        sequence: str = "",
+        notes: str = "",
+        concentration_um: float = 0.0,
+        buffer: str = "",
+    ) -> SampleEntry:
+        if self.project is None:
+            raise ProjectError("未加载项目")
+        sample = SampleEntry(
+            sample_id=_next_sequence_id(
+                [s.sample_id for s in self.project.samples], "S", width=3
+            ),
+            name=name,
+            protein_name=protein_name,
+            sequence=sequence,
+            notes=notes,
+            concentration_um=concentration_um,
+            buffer=buffer,
+            created=now_iso(),
+        )
+        self.project.samples.append(sample)
+        self.add_history(
+            "sample_added", {"sample_id": sample.sample_id, "name": name}
+        )
+        return sample
+
+    def delete_sample(self, sample_id: str) -> None:
+        """删除样本;若有实验引用则拒绝(引用保护)。"""
+        sample = self.project.sample(sample_id) if self.project else None
+        if sample is None:
+            raise ProjectError(f"样本不存在: {sample_id}")
+        referenced = [e.id for e in self.project.experiments if e.sample_id == sample_id]
+        if referenced:
+            raise ProjectError(
+                f"样本 {sample_id} 被实验引用,拒绝删除: {', '.join(referenced)}"
+            )
+        self.project.samples.remove(sample)
+        self.add_history("sample_deleted", {"sample_id": sample_id})
+
+    # ------------------------------------------------------------------
+    # WorkflowRun
+    # ------------------------------------------------------------------
+    def start_run(
+        self,
+        experiment_id: str,
+        workflow_ref: str = "",
+        inputs: dict[str, str] | None = None,
+        scripts: list[str] | None = None,
+        params: dict[str, Any] | None = None,
+    ) -> WorkflowRun:
+        entry = self._require_experiment(experiment_id)
+        if self.project is None:
+            raise ProjectError("未加载项目")
+        started = now_iso()
+        date_part = started[:10].replace("-", "")
+        prefix = f"R-{date_part}-"
+        max_n = 0
+        for run in self.project.workflow_runs:
+            m = re.fullmatch(re.escape(prefix) + r"(\d+)", run.run_id)
+            if m:
+                max_n = max(max_n, int(m.group(1)))
+        run = WorkflowRun(
+            run_id=f"{prefix}{max_n + 1:03d}",
+            experiment_id=experiment_id,
+            workflow_ref=workflow_ref,
+            sample_id=entry.sample_id,
+            inputs=dict(inputs or {}),
+            scripts=list(scripts or []),
+            params=dict(params or {}),
+            started_at=started,
+            status="running",
+        )
+        self.project.workflow_runs.append(run)
+        self.add_history(
+            "run_started",
+            {
+                "run_id": run.run_id,
+                "experiment_id": experiment_id,
+                "workflow_ref": workflow_ref,
+            },
+        )
+        return run
+
+    def finish_run(
+        self,
+        run_id: str,
+        status: str,
+        outputs: dict[str, str] | None = None,
+        message: str = "",
+    ) -> WorkflowRun:
+        run = self._require_run(run_id)
+        run.status = status
+        run.finished_at = now_iso()
+        run.outputs = dict(outputs or {})
+        run.message = message
+        self.add_history(
+            "run_finished",
+            {"run_id": run_id, "status": status, "message": message},
+        )
+        return run
+
+    def snapshot_run(
+        self,
+        run_id: str,
+        scripts: dict[str, str],
+        params: dict[str, Any] | None = None,
+    ) -> Path:
+        """把运行脚本与参数快照写入 processing/<exp>/runs/<run_id>/snapshot/。"""
+        run = self._require_run(run_id)
+        exp = self._require_experiment(run.experiment_id)
+        snapshot = self.dir_path("processing") / exp.id / "runs" / run.run_id / "snapshot"
+        snapshot.mkdir(parents=True, exist_ok=True)
+        for script_name, content in scripts.items():
+            (snapshot / script_name).write_text(content, encoding="utf-8")
+        params_path = snapshot / "params.json"
+        params_path.write_text(
+            json.dumps(params if params is not None else run.params, ensure_ascii=False, indent=2)
+            + "\n",
+            encoding="utf-8",
+        )
+        run.snapshot_dir = snapshot.relative_to(self.root).as_posix()
+        run.scripts = sorted(set(run.scripts) | set(scripts))
+        return snapshot
+
+    def build_template_from_run(
+        self, run_id: str, template_dir: Path | str | None = None
+    ) -> Path:
+        """从成功运行提取 preset/overrides/nus 生成模板 YAML(默认 presets/templates/)。"""
+        run = self._require_run(run_id)
+        if run.status != "success":
+            raise ProjectError(f"仅成功运行可提取模板: {run_id} status={run.status}")
+        params = run.params or {}
+        template = {
+            "name": f"{run.workflow_ref or run.experiment_id}_{run.run_id}",
+            "source_run": run.run_id,
+            "preset": run.workflow_ref,
+            "overrides": params.get("overrides", {}),
+            "nus": params.get("nus", {}),
+            "created": now_iso(),
+        }
+        target_dir = Path(template_dir) if template_dir else self.root / "presets" / "templates"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        target = target_dir / f"{template['name']}.yaml"
+        try:
+            import yaml
+        except ImportError as exc:  # pragma: no cover - PyYAML 是必需依赖
+            raise ProjectError("PyYAML 不可用,无法导出模板") from exc
+        target.write_text(
+            yaml.safe_dump(template, allow_unicode=True, sort_keys=False),
+            encoding="utf-8",
+        )
+        self.add_history(
+            "template_created",
+            {"run_id": run_id, "template": str(target)},
+        )
+        return target
+
+    # ------------------------------------------------------------------
+    # 内部辅助
+    # ------------------------------------------------------------------
+    def _require_experiment(self, exp_id: str) -> ExperimentEntry:
+        if self.project is None:
+            raise ProjectError("未加载项目")
+        entry = self.project.experiment(exp_id)
+        if entry is None:
+            raise ProjectError(f"实验不存在: {exp_id}")
+        return entry
+
+    def _require_run(self, run_id: str) -> WorkflowRun:
+        if self.project is None:
+            raise ProjectError("未加载项目")
+        run = self.project.run(run_id)
+        if run is None:
+            raise ProjectError(f"运行记录不存在: {run_id}")
+        return run

@@ -12,6 +12,7 @@
 
 | 模块 | 状态 | 职责 |
 | --- | --- | --- |
+| core/project | 已实现 | 项目/实验/样本/运行记录/审计历史/最近项目（GUI 地基，见 core/project） |
 | core/data | 实现中（Phase 1） | 内部数据模型、Bruker 元数据 + ser/fid 二进制读取（read_data） |
 | core/experiment | 实现中（Phase 1） | Bruker 参数解析、基础分类、维度映射、NUS/采集模式检测 |
 | core/planning | 实现中（Phase 1） | DAG 拓扑排序/缓存键、默认处理计划、轴计划 |
@@ -22,7 +23,7 @@
 | core/reporting | 骨架 | 处理报告、QC 报告、参数溯源 |
 | backend | 实现中（Phase 1-3） | NMRPipe 后端（bruker -AUTO + 管道 + SMILE + 多段 addNMR 合并）、查找器、csh 运行时 |
 | workflow | 实现中（Phase 1-3） | PipelineRunner + AutoProcessor.run + smile_optimize + param_optimize（后处理参数选优，可选） |
-| gui | 占位 | 主窗口与五大面板（Dataset/Experiment/Plan/Viewer/Quality） |
+| gui | 骨架（已接入） | 主窗口建立在 core.project 之上：新建/打开/保存/最近项目/实验树/样本管理 | 主窗口与五大面板（Dataset/Experiment/Plan/Viewer/Quality） |
 | packaging | 规划 | AppImage 打包：desktop/icon/PyInstaller spec/构建脚本（docs/packaging.md） |
 | presets | YAML 示例 | 实验模板（先验/约束/期望行为） |
 | config | 默认配置 | backend/optimization/qc/reporting 默认值 |
@@ -43,13 +44,14 @@
 ## 已知问题 / 未实现
 
 - 所有 processing / optimization / qc 算法为占位，等待 Phase 1-4 实现。
-- GUI 尚未接入任何信号与后端。
+- GUI 主窗口已接入项目管理；处理/优化/谱图面板待后续接线。
 - config/nmrforge.local.yaml 不应提交（可能含敏感信息）。
 - SMILE 大网格（>5000 间接点）必须限线程（护栏已内置）；data/12 为 2D NUS 但缺 nuslist，需补采样表后才能处理。
 - numpy 限制 <2.5（nmrglue 0.11 的 dtype 别名问题）。
 
 ## 下一步
 
+0. 项目管理模块完成：core/project（实验/样本/运行记录/快照/模板提取），GUI 主窗口骨架已接线。
 1. Phase 1 已起步：Bruker parser + 内部数据模型 + NUS/采集模式检测 + 基础分类 + 轴映射（已测）。
 2. 建立 FakeBackend 测试基座（沿用 NMRFlow 测试经验，不依赖真实 NMRPipe）。
 3. ProcessingPlan DAG 拓扑排序与缓存命中逻辑。

@@ -1,5 +1,11 @@
 # 变更日志
 
+## [0.2.5] - 2026-08-11
+
+- 项目管理模块 core/project：项目/实验/样本/WorkflowRun/审计历史数据模型，目录模板、project.json 原子写、实验 CRUD + 状态推断、样本删除引用保护、运行记录 R-YYYYMMDD-NNN 只追加、脚本快照、模板提取。
+- 最近项目存储（JSON，最多 8 条，置顶去重，可注入 GUI）。
+- GUI 主窗口骨架建立在 ProjectManager 之上：新建/打开/保存/最近项目/实验树（状态推断）/样本管理；main.py 启动 Qt 主窗口。
+- 测试：core/project 22 项 + GUI 7 项（offscreen）。
 ## [0.2.4] - 2026-08-11
 
 - B 方案落地：复型重构平面拆包（core/data/pipe_io）+ 按维相位搜索报告

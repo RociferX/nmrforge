@@ -11,8 +11,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-from core import __version__
-
 PROJECT_ROOT = Path(__file__).resolve().parent
 VENV_DIR = PROJECT_ROOT / "nmrforge"
 VENV_PYTHON = VENV_DIR / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
@@ -34,16 +32,7 @@ def _bootstrap_venv() -> None:
 
 
 def main() -> int:
-    """启动入口：骨架阶段仅提示，后续将拉起 Qt 主窗口。"""
-    print(f"NMRForge {__version__} - 项目工作树已就绪")
-    print("当前阶段：骨架（core/backend/workflow/gui 占位）")
-    print("实现进度见 docs/roadmap.md（Phase 1-4）。")
-    return 0
+    """Launch the Qt main window (GUI is built on core.project)."""
+    from gui.main_window import MainWindow
 
-
-if __name__ == "__main__":
-    if not _is_frozen() and "--inside-venv" not in sys.argv:
-        _bootstrap_venv()
-        if os.path.abspath(sys.executable) != os.path.abspath(str(VENV_PYTHON)):
-            os.execv(str(VENV_PYTHON), [str(VENV_PYTHON), str(__file__), "--inside-venv"])
-    raise SystemExit(main())
+    return MainWindow.run()

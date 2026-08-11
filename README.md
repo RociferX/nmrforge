@@ -25,12 +25,13 @@ ProcessingBackend 协议（backend/base.py）
   ├── NMRPipeBackend（NMRPipe 语义，仅此层接触）
   └── NativeBackend（长期目标）
   │
-core/（数据模型 / 实验理解 / 规划 DAG / 处理原语 / 优化 / QC / 实验模板 / 报告）
+core/（项目管理 project / 数据模型 / 实验理解 / 规划 DAG / 处理原语 / 优化 / QC / 实验模板 / 报告）
 ```
 
 ## 当前状态
 
 - [x] 项目工作树（2026-08-11 初始化）
+- [x] 项目管理模块 core/project（项目/实验/样本/WorkflowRun/审计历史/最近项目）+ GUI 主窗口骨架
 - [ ] Phase 1：Bruker 解析 / 2D-3D 与 uniform-NUS 检测 / 轴映射 / 基础处理 / 自动相位 / 基线 QC / 噪声估计 / 质量评分
 - [ ] Phase 2：实验分类器 + HSQC/HNCA/HNCO/HNCACB/CBCANH 模板
 - [ ] Phase 3：NUS 管线（direct 优化 → reconstruction 优化 → indirect 优化 → 缓存）
