@@ -52,7 +52,8 @@ def search_phase(
         p0_values = np.arange(-90.0, 91.0, 15.0)
     if p1_values is None:
         p1_values = np.arange(-40.0, 41.0, 20.0)
-    energies = np.sum(np.abs(traces), axis=-1) + 1e-12
+    # 峰高加权：信号迹（有峰）权重远大于纯噪声迹，避免被噪声总能量淹没
+    energies = np.max(np.abs(traces), axis=-1) + 1e-12
     best = (0.0, 0.0, -1.0)
     for p0 in p0_values:
         for p1 in p1_values:

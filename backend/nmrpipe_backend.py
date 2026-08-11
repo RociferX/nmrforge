@@ -358,7 +358,11 @@ class NMRPipeBackend:
         return True
 
     def _search_direct_phase(
-        self, work: Path, fid_file: Path, logs: list[str]
+        self,
+        work: Path,
+        fid_file: Path,
+        logs: list[str],
+        min_score: float = 0.55,
     ) -> tuple[float, float]:
         """直接维统计相位搜索（内存内 FT + 全迹统计），结果缓存到 work/phase.json。"""
         phase_file = work / "phase.json"
@@ -382,6 +386,11 @@ class NMRPipeBackend:
                 json.dumps({"p0": p0, "p1": p1, "score": score}, indent=2),
                 encoding="utf-8",
             )
+            if score < min_score:
+                logs.append(
+                    f"直接维相位信息弱（score={score:.3f} < {min_score:g}），保持 p0=p1=0"
+                )
+                return 0.0, 0.0
             logs.append(f"直接维相位搜索: p0={p0:g} p1={p1:g} (score={score:.3f})")
             return p0, p1
         except Exception as exc:  # noqa: BLE001
