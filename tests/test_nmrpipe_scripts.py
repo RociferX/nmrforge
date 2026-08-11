@@ -146,3 +146,22 @@ def test_3d_nus_script_smile_tuning(bruker_dir: Path) -> None:
     assert "-xQ3 2" in script
     assert "-scaling 1" in script
     assert "-report 2" in script
+
+
+def test_select_smile_params_low_sampling() -> None:
+    from backend.script_generator import select_smile_params
+
+    assert select_smile_params(0.04) == (5.0, 0.95)
+    assert select_smile_params(0.3) == (5.0, 0.95)
+    assert select_smile_params(0.8) == (5.0, 0.95)
+
+
+def test_3d_nus_script_default_smile_params(bruker_dir: Path) -> None:
+    exp = read_dataset(bruker_dir / "nus_3d")
+    from backend.script_generator import generate_3d_nus_script
+
+    script = generate_3d_nus_script(
+        exp, in_file="exp.fid", nuslist="nuslist", out_file="exp.ft3"
+    )
+    assert "-xQ3 2" in script
+    assert "-scaling 1" in script

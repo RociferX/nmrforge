@@ -1,0 +1,6 @@
+feat: SMILE 默认参数按真实验证更新（<20% 档 7/0.85 → 5/0.95，xQ3=2、scaling=1）
+
+- data/100 单段 3D NUS（CBCA(CO)NH）验证：QC 78.8 ACCEPT
+- 61/63/65/67 多段 HNCA 参数对比：7/0.85 → warning 57.5（SNR 17）
+  vs 5/0.95+xQ3=2+scaling → accept 74.1（SNR 92）
+- 新增默认参数测试；本地 78 passed，ruff 通过

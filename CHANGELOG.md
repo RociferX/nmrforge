@@ -3,6 +3,9 @@
 ## [0.1.7] - 2026-08-11
 
 - SMILE 参数覆盖：nSigma/thresh/xQ3（SP 幂次）/scaling/report 可经 reconstruct_nus params 传入。
+- 默认参数更新（真实验证）：<20% 采样档由 7/0.85 改为 5/0.95；xQ3=2、-scaling 1 对齐实验室模板。
+- data/100 单段 3D NUS（CBCA(CO)NH）验证：默认参数 QC 78.8 ACCEPT。
+- 61/63/65/67 多段 HNCA 参数对比：7/0.85 → warning 57.5；5/0.95+xQ3=2+scaling → accept 74.1。
 
 ## [0.1.6] - 2026-08-11
 

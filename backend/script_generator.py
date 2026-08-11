@@ -73,12 +73,16 @@ def _next_pow2(value: int) -> int:
 
 
 def select_smile_params(fraction: float) -> tuple[float, float]:
-    """按采样率分档选择 SMILE 经验参数（nSigma, thresh）。"""
+    """按采样率分档选择 SMILE 经验参数（nSigma, thresh）。
+
+    2026-08-11 真实验证（61/63/65/67 合并 3.9%）：低采样用 nSigma=7/thresh=0.85
+    得 QC 57.5（SNR 17）；nSigma=5/thresh=0.95 得 74.1（SNR 92）。
+    """
     if fraction >= 0.5:
         return 5.0, 0.95
     if fraction >= 0.2:
-        return 6.0, 0.90
-    return 7.0, 0.85
+        return 5.0, 0.95
+    return 5.0, 0.95
 
 
 def build_context(experiment: Experiment) -> dict[str, Any]:
@@ -331,8 +335,8 @@ def generate_2d_nus_script(
     thresh: float = 0.95,
     smile_xq1: float = 0.45,
     smile_xq2: float = 0.95,
-    smile_xq3: float = 1.0,
-    smile_scaling: bool = False,
+    smile_xq3: float = 2.0,
+    smile_scaling: bool = True,
     smile_report: int = 1,
 ) -> str:
     """2D NUS SMILE 重构：直接维 FT+EXT → SMILE -nDim 2 → 间接维 FT（终谱 ft2）。"""
@@ -392,8 +396,8 @@ def generate_3d_nus_script(
     thresh: float = 0.95,
     smile_xq1: float = 0.45,
     smile_xq2: float = 0.95,
-    smile_xq3: float = 1.0,
-    smile_scaling: bool = False,
+    smile_xq3: float = 2.0,
+    smile_scaling: bool = True,
     smile_report: int = 1,
 ) -> str:
     """3D NUS SMILE 重构：直接维（F3）FT+EXT → SMILE -nDim 3 → 间接维 FT（ft3）。"""
