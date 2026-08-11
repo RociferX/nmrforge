@@ -1,5 +1,13 @@
 # 变更日志
 
+## [0.1.6] - 2026-08-11
+
+- 清理 VM 旧软件遗留卡死进程（16h 空转的 nmrPipe 管道）。
+- 多段实验支持（参考实验室 data/脚本：1stfid.com + 2ndAdd.com）：
+  每段 bruker 转换 → 拆 fid 切片 → addNMR 逐对合并 → 统一 SMILE。
+- Experiment.segments + read_segments（参数一致性校验）+ merge_nuslists。
+- 新增 4 项测试；本地 75 passed。
+
 ## [0.1.5] - 2026-08-11
 
 - Phase 3（NUS）：bruker 原生识别确认（acqu3s TD=1 时按 NusTD 取 zN，生成 nusExpand/ser_full/mask.fid + 单文件 test.fid）；移除切片追加 workaround。

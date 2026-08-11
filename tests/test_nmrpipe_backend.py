@@ -60,3 +60,19 @@ def test_reconstruct_nus_rejects_uniform(bruker_dir: Path) -> None:
     result = backend.reconstruct_nus(exp, {})
     assert result["success"] is False
     assert "非 NUS" in result["message"]
+
+
+@pytest.mark.skipif(not _NO_NMRPIPE, reason="本机已安装 NMRPipe，跳过缺失路径测试")
+def test_reconstruct_nus_segments_missing_nmrpipe(bruker_dir: Path, tmp_path: Path) -> None:
+    import shutil
+
+    from core.data.bruker_reader import read_segments
+
+    dst_a = tmp_path / "seg_a"
+    dst_b = tmp_path / "seg_b"
+    shutil.copytree(bruker_dir / "nus_3d", dst_a)
+    shutil.copytree(bruker_dir / "nus_3d", dst_b)
+    exp = read_segments([dst_a, dst_b])
+    backend = NMRPipeBackend(nmrpipe_bin="")
+    result = backend.reconstruct_nus(exp, {})
+    assert result["success"] is False

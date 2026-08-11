@@ -230,6 +230,33 @@ def _build_dimensions(params: dict, ndim: int) -> list[Dimension]:
     return dims
 
 
+def read_segments(paths: list[Path | str]) -> Experiment:
+    """把多个同实验数据集读取为一个多段 Experiment（参数必须一致）。"""
+    if len(paths) < 2:
+        raise ValueError("多段实验至少需要 2 个数据集目录")
+    dirs = [Path(p).resolve() for p in paths]
+    base = read_dataset(dirs[0])
+    base.segments = dirs
+
+    def _key(exp: Experiment) -> tuple:
+        return (
+            exp.ndim,
+            [d.nucleus for d in exp.dimensions],
+            [d.td for d in exp.dimensions],
+            [round(d.sw, 6) for d in exp.dimensions],
+        )
+
+    for extra in dirs[1:]:
+        other = read_dataset(extra)
+        if _key(other) != _key(base):
+            raise ValueError(
+                f"数据段参数不一致：{dirs[0]} vs {extra}（维数/核/TD/谱宽必须一致）"
+            )
+    if base.sampling.mode is SamplingMode.NUS:
+        base.sampling.evidence.append(f"多段：{len(dirs)} 个数据集，采样点合并后由后端生成")
+    return base
+
+
 def read_dataset(path: Path) -> Experiment:
     """读取一个 Bruker 数据集目录并生成 Experiment（元数据，不做语义判断）。"""
     dataset_dir = path

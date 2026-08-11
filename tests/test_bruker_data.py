@@ -8,7 +8,13 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from core.data.bruker_reader import BrukerDataError, read_data, read_dataset
+from core.data.bruker_reader import (
+    BrukerDataError,
+    read_data,
+    read_dataset,
+    read_segments,
+)
+from core.data.internal_data_model import SamplingMode
 from core.processing.hypercomplex import HypercomplexParams, combine
 
 
@@ -104,3 +110,41 @@ def test_read_data_1d(tmp_path: Path, bruker_dir: Path) -> None:
     data = read_data(exp)
     assert data.matrix.shape == (8,)
     assert np.allclose(data.matrix, fid)
+
+
+def test_read_segments_ok(tmp_path: Path, bruker_dir: Path) -> None:
+    import shutil
+
+    dst_a = tmp_path / "seg_a"
+    dst_b = tmp_path / "seg_b"
+    shutil.copytree(bruker_dir / "nus_2d", dst_a)
+    shutil.copytree(bruker_dir / "nus_2d", dst_b)
+    exp = read_segments([dst_a, dst_b])
+    assert len(exp.segments) == 2
+    assert exp.ndim == 2
+    assert exp.sampling.mode is SamplingMode.NUS
+
+
+def test_read_segments_mismatch(tmp_path: Path, bruker_dir: Path) -> None:
+    import shutil
+
+    dst_a = tmp_path / "seg_a"
+    dst_b = tmp_path / "seg_b"
+    shutil.copytree(bruker_dir / "nus_2d", dst_a)
+    shutil.copytree(bruker_dir / "nus_2d", dst_b)
+    acqu2s = dst_b / "acqu2s"
+    text = acqu2s.read_text(encoding="utf-8")
+    acqu2s.write_text(text.replace("##$TD= 256", "##$TD= 128"), encoding="utf-8")
+    with pytest.raises(ValueError):
+        read_segments([dst_a, dst_b])
+
+
+def test_merge_nuslists(tmp_path: Path) -> None:
+    from core.data.nus_reader import merge_nuslists
+
+    a = tmp_path / "a.nuslist"
+    b = tmp_path / "b.nuslist"
+    a.write_text("1 1\n2 2\n3 3\n", encoding="utf-8")
+    b.write_text("2 2\n4 4\n", encoding="utf-8")
+    merged = merge_nuslists([a, b])
+    assert merged == [(1, 1), (2, 2), (3, 3), (4, 4)]

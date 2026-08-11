@@ -74,6 +74,7 @@ class Experiment:
     experiment_type: ExperimentType = field(default_factory=ExperimentType)
     acquisition_parameters: dict[str, Any] = field(default_factory=dict)
     processing_state: dict[str, Any] = field(default_factory=dict)
+    segments: list[Path] = field(default_factory=list)  # 多段实验：各数据集目录
 
     @property
     def direct_dimension(self) -> Dimension | None:
