@@ -20,6 +20,9 @@ dependencies = [
     "reportlab>=4.0",
 ]
 
+[project.scripts]
+nmrforge-viewer = "viewer.app:main"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=7.4",
@@ -27,7 +30,7 @@ dev = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["core*", "backend*", "workflow*", "gui*"]
+include = ["core*", "backend*", "workflow*", "gui*", "viewer*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
