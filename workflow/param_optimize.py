@@ -20,7 +20,7 @@ import numpy as np
 
 from core.processing import baseline, phase
 from core.qc import spectrum_quality
-from workflow.smile_optimize import SmileParameterResult, format_results, save_report
+from workflow.smile_optimize import SmileParameterResult, save_report
 
 ParamResult = SmileParameterResult  # 泛化命名：后处理参数组结果
 
@@ -32,6 +32,26 @@ __all__ = [
     "format_results",
     "save_report",
 ]
+
+
+def format_results(results: list[ParamResult]) -> str:
+    """把候选列表渲染为参数组合 + 评分表格（p0/p1/baseline_order）。"""
+    header = (
+        f"{'p0':>7} {'p1':>6} {'base':>5} "
+        f"{'decision':>8} {'overall':>7} {'snr':>5} "
+        f"{'phase':>5} {'baseQ':>5} {'art':>5}"
+    )
+    lines = [header, "-" * len(header)]
+    for result in results:
+        comp = result.components
+        lines.append(
+            f"{result.params.get('p0', 0):>7} {result.params.get('p1', 0):>6} "
+            f"{result.params.get('baseline_order', 0):>5} "
+            f"{result.decision:>8} {result.overall:>7.1f} "
+            f"{comp.get('snr', 0):>5.0f} {comp.get('phase', 0):>5.0f} "
+            f"{comp.get('baseline', 0):>5.0f} {comp.get('artifact', 0):>5.0f}"
+        )
+    return "\n".join(lines)
 
 
 def default_post_grid(
