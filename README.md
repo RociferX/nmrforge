@@ -33,6 +33,7 @@ core/（项目管理 project / 数据模型 / 实验理解 / 规划 DAG / 处理
 - [x] 项目工作树（2026-08-11 初始化）
 - [x] 项目管理模块 core/project（项目/实验/样本/WorkflowRun/审计历史/最近项目）+ GUI 主窗口骨架
 - [x] 独立谱图查看模块 viewer（Poky/nmrDraw 风格:多级数等高线/峰标记/缩放拖拽/长宽比）,可通过 `nmrforge-viewer` 独立启动
+- [x] GUI 重构为流程化布局（借鉴 CryoSPARC）：导入/处理/查看/报告四步；处理分自动化与人工两条路径（人工待实现）
 - [ ] Phase 1：Bruker 解析 / 2D-3D 与 uniform-NUS 检测 / 轴映射 / 基础处理 / 自动相位 / 基线 QC / 噪声估计 / 质量评分
 - [ ] Phase 2：实验分类器 + HSQC/HNCA/HNCO/HNCACB/CBCANH 模板
 - [ ] Phase 3：NUS 管线（direct 优化 → reconstruction 优化 → indirect 优化 → 缓存）

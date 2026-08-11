@@ -24,7 +24,7 @@
 | backend | 实现中（Phase 1-3） | NMRPipe 后端（bruker -AUTO + 管道 + SMILE + 多段 addNMR 合并）、查找器、csh 运行时 |
 | workflow | 实现中（Phase 1-3） | PipelineRunner + AutoProcessor.run + smile_optimize + param_optimize（后处理参数选优，可选） |
 | viewer | 已实现（0.2.6） | 独立谱图查看：Spectrum/SpectrumAxis(ppm 轴)、ContourLayer(Poky 风格多级数/抗锯齿插值)、交互(框选缩放/中键平移/滚轮缩放/长宽比)、独立窗口 |
-| gui | 骨架（已接入） | 主窗口建立在 core.project 之上：新建/打开/保存/最近项目/实验树/样本管理 | 主窗口与五大面板（Dataset/Experiment/Plan/Viewer/Quality） |
+| gui | 已重构（0.2.8） | 简洁流程化布局（CryoSPARC 风格）：导入/处理/查看/报告四步；处理分自动化与人工两条路径（人工占位） | 主窗口与五大面板（Dataset/Experiment/Plan/Viewer/Quality） |
 | packaging | 规划 | AppImage 打包：desktop/icon/PyInstaller spec/构建脚本（docs/packaging.md） |
 | presets | YAML 示例 | 实验模板（先验/约束/期望行为） |
 | config | 默认配置 | backend/optimization/qc/reporting 默认值 |
@@ -45,7 +45,7 @@
 ## 已知问题 / 未实现
 
 - 所有 processing / optimization / qc 算法为占位，等待 Phase 1-4 实现。
-- GUI 主窗口已接入项目管理；谱图查看已由独立 viewer 模块提供（`nmrforge-viewer`）；处理/优化面板待后续接线。
+- GUI 已重构为流程化布局；自动化处理已接 AutoProcessor；人工处理（参数表格/脚本编辑器）为接口占位，待实现。
 - config/nmrforge.local.yaml 不应提交（可能含敏感信息）。
 - SMILE 大网格（>5000 间接点）必须限线程（护栏已内置）；data/12 为 2D NUS 但缺 nuslist，需补采样表后才能处理。
 - numpy 限制 <2.5（nmrglue 0.11 的 dtype 别名问题）。

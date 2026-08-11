@@ -6,10 +6,38 @@ import sys
 from pathlib import Path
 
 from PyQt6.QtGui import QAction, QDragEnterEvent, QDropEvent
-from PyQt6.QtWidgets import QFileDialog, QMainWindow, QMessageBox
+from PyQt6.QtWidgets import (
+    QDialog,
+    QDialogButtonBox,
+    QFileDialog,
+    QLabel,
+    QMainWindow,
+    QVBoxLayout,
+)
 
 from viewer.spectrum import Spectrum
 from viewer.spectrum_viewer import SpectrumViewer
+
+
+class InfoDialog(QDialog):
+    """替代 QMessageBox(避免 Qt6 Windows 下模态弹窗的鼠标 grab 警告)。"""
+
+    def __init__(self, parent, title: str, text: str) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setMinimumWidth(360)
+        layout = QVBoxLayout(self)
+        label = QLabel(text)
+        label.setWordWrap(True)
+        layout.addWidget(label)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)
+        buttons.accepted.connect(self.accept)
+        layout.addWidget(buttons)
+
+
+def show_info(parent, title: str, text: str) -> None:
+    InfoDialog(parent, title, text).exec()
+
 
 _ASPECT_CHOICES = (
     ("自由", None),
@@ -95,7 +123,7 @@ class SpectrumWindow(QMainWindow):
         try:
             spectrum = Spectrum.load_from_ft2(path)
         except Exception as exc:  # noqa: BLE001 - 文件损坏等统一提示
-            QMessageBox.critical(self, "打开失败", f"{path}\n{exc}")
+            show_info(self, "打开失败", f"{path}\n{exc}")
             return False
         self.viewer.add_spectrum(spectrum, name=name or path.stem)
         self._recent = [str(path), *[p for p in self._recent if p != str(path)]][:8]
@@ -131,7 +159,7 @@ class SpectrumWindow(QMainWindow):
             action.setChecked(m == mode)
 
     def _show_help(self) -> None:
-        QMessageBox.information(
+        show_info(
             self,
             "操作说明",
             "左键拖拽:框选放大\n"

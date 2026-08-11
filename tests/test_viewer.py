@@ -227,9 +227,9 @@ def test_spectrum_window_load_and_clear(tmp_path: Path, qapp: QApplication) -> N
 def test_spectrum_window_load_failure(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from PyQt6.QtWidgets import QMessageBox
+    import viewer.app as app_module
 
-    monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda *a, **k: None))
+    monkeypatch.setattr(app_module, "show_info", staticmethod(lambda *a, **k: None))
     window = SpectrumWindow()
     bad = tmp_path / "bad.ft2"
     bad.write_bytes(b"not a pipe file")
