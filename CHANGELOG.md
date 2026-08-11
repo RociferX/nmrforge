@@ -6,6 +6,8 @@
 - 多段实验支持（参考实验室 data/脚本：1stfid.com + 2ndAdd.com）：
   每段 bruker 转换 → 拆 fid 切片 → addNMR 逐对合并 → 统一 SMILE。
 - Experiment.segments + read_segments（参数一致性校验）+ merge_nuslists。
+- 真实多段验证（61/63/65/67，HNCA 3D NUS）：4 段 × 52 切片 → addNMR 合并 → 合并 nuslist 348 点（63 号 1 个越界点 27 2350 自动丢弃）→ SMILE rc=0 → ft3（QC 58.8 warning，低采样伪影）。
+- 修复：CshRuntime 管道符被引号化、切片轴 -z→-x、多段幂等复用。
 - 新增 4 项测试；本地 75 passed。
 
 ## [0.1.5] - 2026-08-11
