@@ -36,3 +36,13 @@ def main() -> int:
     from gui.main_window import MainWindow
 
     return MainWindow.run()
+
+
+if __name__ == "__main__":
+    if not _is_frozen() and "--inside-venv" not in sys.argv:
+        _bootstrap_venv()
+        if os.path.abspath(sys.executable) != os.path.abspath(str(VENV_PYTHON)):
+            os.execv(
+                str(VENV_PYTHON), [str(VENV_PYTHON), str(__file__), "--inside-venv"]
+            )
+    raise SystemExit(main())

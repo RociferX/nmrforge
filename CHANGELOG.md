@@ -1,5 +1,9 @@
 # 变更日志
 
+## [0.2.7] - 2026-08-11
+
+- fix: main.py 恢复 __main__ 入口块(此前重写 main() 时误删,
+  导致 `python main.py` 无输出直接退出);首次运行 bootstrap venv 逻辑复原。
 ## [0.2.6] - 2026-08-11
 
 - 独立谱图查看模块 viewer（与项目管理 GUI 解耦）：Spectrum/SpectrumAxis（nmrglue 读 .ft2 + ppm 轴，ORIG 优先回退 CAR）、ContourLayer（matplotlib 等高线 + 可配插值因子防锯齿/正黑负红）、NMRViewBox（框选缩放/中键平移/滚轮缩放）、SpectrumViewer（多谱叠加/级数滑块/峰标记 Poky 风格半透明圆点/选中放大/长宽比锁定/十字光标）。
