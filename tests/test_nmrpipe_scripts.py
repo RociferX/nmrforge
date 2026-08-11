@@ -165,3 +165,24 @@ def test_3d_nus_script_default_smile_params(bruker_dir: Path) -> None:
     )
     assert "-xQ3 2" in script
     assert "-scaling 1" in script
+
+
+def test_process_script_direct_phase(bruker_dir: Path) -> None:
+    exp = read_dataset(bruker_dir / "hsqc_2d")
+    plan = select_method(exp)
+    script = generate_process_script(
+        exp, plan, in_file="a.fid", out_file="a.ft2",
+        direct_phase={"F2": (12.0, -3.0)},
+    )
+    assert "| nmrPipe -fn PS -p0 12 -p1 -3 -di \\" in script
+
+
+def test_3d_nus_script_direct_phase(bruker_dir: Path) -> None:
+    exp = read_dataset(bruker_dir / "nus_3d")
+    from backend.script_generator import generate_3d_nus_script
+
+    script = generate_3d_nus_script(
+        exp, in_file="e.fid", nuslist="nuslist", out_file="e.ft3",
+        direct_phase=(12.0, -3.0),
+    )
+    assert "| nmrPipe -fn PS -p0 12 -p1 -3 -di \\" in script

@@ -1,5 +1,10 @@
 # 变更日志
 
+## [0.2.1] - 2026-08-11
+
+- 直接维统计相位搜索（core/optimization/phase_search）：FT 后抽全部一维迹线，
+  按能量加权吸收度统计最佳 (p0, p1)，写进处理/NUS 脚本的 PS 步骤（默认开启，可关）。
+
 ## [0.2.0] - 2026-08-11
 
 - 后处理参数优化（workflow/param_optimize + scripts/param_optimize.py）：

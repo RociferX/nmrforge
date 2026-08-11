@@ -249,7 +249,10 @@ def _axis_stages(plan: ProcessingPlan, axis: str) -> list[tuple[str, dict[str, A
     ]
 
 
-def _stage_lines(stages: list[tuple[str, dict[str, Any]]]) -> list[str]:
+def _stage_lines(
+    stages: list[tuple[str, dict[str, Any]]],
+    direct_phase: dict[str, tuple[float, float]] | None = None,
+) -> list[str]:
     lines: list[str] = []
     for op, params in stages:
         if op == "combine_hypercomplex":
@@ -276,9 +279,13 @@ def _stage_lines(stages: list[tuple[str, dict[str, Any]]]) -> list[str]:
             suffix = (" " + " ".join(flags)) if flags else ""
             lines.append(f"| nmrPipe -fn FT{suffix} \\")
         elif op == "phase":
+            p0 = params.get("p0", 0.0)
+            p1 = params.get("p1", 0.0)
+            axis = params.get("axis", "")
+            if direct_phase and axis in direct_phase:
+                p0, p1 = direct_phase[axis]
             lines.append(
-                f"| nmrPipe -fn PS -p0 {_fmt(params.get('p0', 0.0))} "
-                f"-p1 {_fmt(params.get('p1', 0.0))} -di \\"
+                f"| nmrPipe -fn PS -p0 {_fmt(p0)} -p1 {_fmt(p1)} -di \\"
             )
         elif op == "baseline":
             lines.append("| nmrPipe -fn POLY -auto \\")
@@ -293,6 +300,7 @@ def generate_process_script(
     *,
     in_file: str,
     out_file: str,
+    direct_phase: dict[str, tuple[float, float]] | None = None,
 ) -> str:
     """把处理计划（DAG）翻译为 NMRPipe 管道脚本（直接维 → TP → 间接维）。"""
     axes = [dim.logical_axis for dim in experiment.dimensions]
@@ -303,7 +311,7 @@ def generate_process_script(
         f"xyz2pipe -in {in_file} -x \\",
     ]
     for index, axis in enumerate(axes):
-        lines += _stage_lines(_axis_stages(plan, axis))
+        lines += _stage_lines(_axis_stages(plan, axis), direct_phase)
         if index < len(axes) - 1:
             lines.append("| nmrPipe -fn TP \\")
     lines.append(f"| pipe2xyz -out {out_file} -x")
@@ -338,6 +346,7 @@ def generate_2d_nus_script(
     smile_xq3: float = 2.0,
     smile_scaling: bool = True,
     smile_report: int = 1,
+    direct_phase: tuple[float, float] = (0.0, 0.0),
 ) -> str:
     """2D NUS SMILE 重构：直接维 FT+EXT → SMILE -nDim 2 → 间接维 FT（终谱 ft2）。"""
     ctx = build_context(experiment)
@@ -354,7 +363,7 @@ def generate_2d_nus_script(
         "| nmrPipe -fn SP -off 0.45 -end 0.98 -pow 1 -c 0.5 \\",
         f"| nmrPipe -fn ZF -zf -size {direct_zf} \\",
         "| nmrPipe -fn FT \\",
-        "| nmrPipe -fn PS -p0 0 -p1 0 -di \\",
+        f"| nmrPipe -fn PS -p0 {direct_phase[0]:g} -p1 {direct_phase[1]:g} -di \\",
         f"| nmrPipe -fn EXT -x1 {ext_lo}ppm -xn {ext_hi}ppm -sw -round 2 \\",
         "| pipe2xyz -out nus2d/test%03d.ft1 -z",
         "",
@@ -399,6 +408,7 @@ def generate_3d_nus_script(
     smile_xq3: float = 2.0,
     smile_scaling: bool = True,
     smile_report: int = 1,
+    direct_phase: tuple[float, float] = (0.0, 0.0),
 ) -> str:
     """3D NUS SMILE 重构：直接维（F3）FT+EXT → SMILE -nDim 3 → 间接维 FT（ft3）。"""
     ctx = build_context(experiment)
@@ -415,7 +425,7 @@ def generate_3d_nus_script(
         "| nmrPipe -fn SP -off 0.45 -end 0.98 -pow 2 -c 0.5 \\",
         f"| nmrPipe -fn ZF -zf -size {direct_zf} \\",
         "| nmrPipe -fn FT \\",
-        "| nmrPipe -fn PS -p0 0 -p1 0 -di \\",
+        f"| nmrPipe -fn PS -p0 {direct_phase[0]:g} -p1 {direct_phase[1]:g} -di \\",
         f"| nmrPipe -fn EXT -x1 {ext_lo}ppm -xn {ext_hi}ppm -sw -round 2 \\",
         "| pipe2xyz -out nus3d_1/test%04d.ft1 -z",
         "",

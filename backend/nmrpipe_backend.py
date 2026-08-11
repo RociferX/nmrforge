@@ -13,6 +13,7 @@ NMRPipe 语义只存在于本层（backend/）与生成的脚本；上层通过 
 
 from __future__ import annotations
 
+import json
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -32,6 +33,7 @@ from backend.script_generator import (
 )
 from core.data.internal_data_model import Experiment, SamplingMode
 from core.data.nus_reader import merge_nuslists, read_nuslist
+from core.optimization.phase_search import direct_ft_traces, search_phase
 from core.planning.processing_plan import ProcessingPlan
 
 
@@ -71,7 +73,13 @@ class NMRPipeBackend:
             "message": f"找到 nmrPipe: {bin_dir / 'nmrPipe'}",
         }
 
-    def process(self, experiment: Experiment, plan: ProcessingPlan) -> dict[str, Any]:
+    def process(
+        self,
+        experiment: Experiment,
+        plan: ProcessingPlan,
+        *,
+        direct_phase_search: bool = True,
+    ) -> dict[str, Any]:
         """均匀采样：转换（含多段合并）+ NMRPipe 处理管道（NUS 请用 reconstruct_nus）。"""
         if experiment.sampling.mode is SamplingMode.NUS:
             return {
@@ -102,8 +110,23 @@ class NMRPipeBackend:
             in_file = f"{experiment.dataset_id}.fid"
         if not converted:
             return {"success": False, "message": "Bruker→NMRPipe 转换失败", "logs": logs}
+        direct_phase: dict[str, tuple[float, float]] | None = None
+        if direct_phase_search:
+            fid_for_phase = (
+                work / "seg_001" / f"{experiment.dataset_id}.fid"
+                if experiment.segments
+                else work / f"{experiment.dataset_id}.fid"
+            )
+            p0, p1 = self._search_direct_phase(work, fid_for_phase, logs)
+            direct_axis = "F2" if experiment.ndim == 2 else "F3"
+            direct_phase = {direct_axis: (p0, p1)}
         processed, process_logs, spectrum = self._process(
-            runtime, experiment, plan, work, in_file=in_file
+            runtime,
+            experiment,
+            plan,
+            work,
+            in_file=in_file,
+            direct_phase=direct_phase,
         )
         logs += process_logs
         if not processed:
@@ -183,6 +206,17 @@ class NMRPipeBackend:
             )
             in_file = fid_file.name
 
+        direct_p0, direct_p1 = 0.0, 0.0
+        if bool(params.get("direct_phase_search", True)):
+            fid_for_phase = (
+                work / "seg_001" / f"{experiment.dataset_id}.fid"
+                if experiment.segments
+                else work / f"{experiment.dataset_id}.fid"
+            )
+            direct_p0, direct_p1 = self._search_direct_phase(
+                work, fid_for_phase, logs
+            )
+
         td = effective_td(experiment)
         if experiment.ndim >= 3:
             grid = max(int(td[1]) * int(td[2]), 1)
@@ -223,6 +257,7 @@ class NMRPipeBackend:
             smile_xq3=smile_xq3,
             smile_scaling=smile_scaling,
             smile_report=smile_report,
+            direct_phase=(direct_p0, direct_p1),
         )
         nus_com = work / f"{experiment.dataset_id}_nus.com"
         nus_com.write_text(script, encoding="utf-8", newline="\n")
@@ -321,6 +356,37 @@ class NMRPipeBackend:
             if stale_path.is_file():
                 stale_path.unlink()
         return True
+
+    def _search_direct_phase(
+        self, work: Path, fid_file: Path, logs: list[str]
+    ) -> tuple[float, float]:
+        """直接维统计相位搜索（内存内 FT + 全迹统计），结果缓存到 work/phase.json。"""
+        phase_file = work / "phase.json"
+        if phase_file.is_file():
+            data = json.loads(phase_file.read_text(encoding="utf-8"))
+            logs.append(f"直接维相位（缓存）: p0={data['p0']:g} p1={data['p1']:g}")
+            return float(data["p0"]), float(data["p1"])
+        try:
+            import nmrglue as ng
+
+            _dic, fid = ng.pipe.read(str(fid_file))
+            direct_points = fid.shape[-1]
+            zf_size = 1
+            while zf_size < 2 * direct_points:
+                zf_size *= 2
+            traces = direct_ft_traces(
+                fid, zf_size=zf_size, sp_off=0.45, sp_end=0.95, sp_pow=1
+            )
+            p0, p1, score = search_phase(traces)
+            phase_file.write_text(
+                json.dumps({"p0": p0, "p1": p1, "score": score}, indent=2),
+                encoding="utf-8",
+            )
+            logs.append(f"直接维相位搜索: p0={p0:g} p1={p1:g} (score={score:.3f})")
+            return p0, p1
+        except Exception as exc:  # noqa: BLE001
+            logs.append(f"直接维相位搜索失败（回退 p0=p1=0）: {exc}")
+            return 0.0, 0.0
 
     def _convert(
         self,
@@ -462,6 +528,7 @@ class NMRPipeBackend:
         work: Path,
         *,
         in_file: str | None = None,
+        direct_phase: dict[str, tuple[float, float]] | None = None,
     ) -> tuple[bool, list[str], Path]:
         """生成并执行 NMRPipe 处理管道（输出 ft2/ft3）。"""
         logs: list[str] = []
@@ -469,7 +536,11 @@ class NMRPipeBackend:
         in_file = in_file or f"{experiment.dataset_id}.fid"
         out_file = f"{experiment.dataset_id}.{ext}"
         script = generate_process_script(
-            experiment, plan, in_file=in_file, out_file=out_file
+            experiment,
+            plan,
+            in_file=in_file,
+            out_file=out_file,
+            direct_phase=direct_phase,
         )
         process_com = work / f"{experiment.dataset_id}_process.com"
         process_com.write_text(script, encoding="utf-8", newline="\n")
