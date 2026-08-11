@@ -1,5 +1,10 @@
 # 变更日志
 
+## [0.2.0] - 2026-08-11
+
+- 后处理参数优化（workflow/param_optimize + scripts/param_optimize.py）：
+  相位 p0/p1 + 基线在终谱上内存内优化，**只重构一次**；NUS 与非 NUS 同一逻辑。
+
 ## [0.1.9] - 2026-08-11
 
 - SMILE 参数优化模块（workflow/smile_optimize + scripts/smile_optimize.py）：
