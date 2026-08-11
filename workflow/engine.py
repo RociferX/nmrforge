@@ -3,12 +3,13 @@
 流程（框架 §71）：understand（分类/维度映射/采样检测）→ plan（DAG）→
 process（direct）→ optimize（reconstruction/direct/indirect，带预算）→
 qc（before/after + 回滚）→ report。
-Phase 1：uniform 2D/3D Bruker 数据端到端（run）；NUS 待 Phase 3。
+Phase 1：NMRPipe 后端可用时走后端，否则走原生读取路径（uniform 2D/3D）。
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from backend.base import ProcessingBackend
@@ -41,7 +42,10 @@ class AutoProcessor:
         self.budget = budget or OptimizationBudget()
 
     def run(self, experiment: Experiment) -> RunResult:
-        """读取 Bruker 数据并执行自动处理（uniform 2D/3D；NUS 待 Phase 3）。"""
+        """执行自动处理：NMRPipe 后端可用时走后端，否则走原生读取路径。"""
+        provider = getattr(getattr(self.backend, "capabilities", None), "provider", "")
+        if provider == "nmrpipe":
+            return self.run_backend(experiment)
         if experiment.sampling.mode is SamplingMode.NUS:
             return RunResult(status="failed", logs=["NUS 数据处理待 Phase 3 接入"])
         try:
@@ -54,6 +58,38 @@ class AutoProcessor:
             f"layout={data.layout_summary}"
         )
         return result
+
+    def run_backend(self, experiment: Experiment) -> RunResult:
+        """通过 NMRPipe 后端处理（Linux/csh 环境），成功后读谱做 QC。"""
+        plan = select_method(experiment)
+        try:
+            result = self.backend.process(experiment, plan)
+        except Exception as exc:  # noqa: BLE001
+            return RunResult(status="failed", logs=[f"NMRPipe 后端异常: {exc}"])
+        logs = list(result.get("logs", []))
+        if not result.get("success"):
+            return RunResult(
+                status="failed",
+                logs=[result.get("message", "NMRPipe 处理失败")] + logs,
+            )
+        spectrum = (
+            Path(result["spectrum_path"]) if result.get("spectrum_path") else None
+        )
+        if spectrum is not None and spectrum.is_file():
+            try:
+                import nmrglue as ng
+
+                _dic, data = ng.pipe.read(str(spectrum))
+                quality = spectrum_quality.evaluate(data)
+                return RunResult(
+                    status=quality.decision.value,
+                    quality=quality,
+                    report=spectrum,
+                    logs=logs,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logs.append(f"谱图 QC 读取失败（保留后端结果）: {exc}")
+        return RunResult(status="success", report=spectrum, logs=logs)
 
     def process_matrix(self, experiment: Experiment, data: Any) -> RunResult:
         """最小闭环：默认计划 → 管线执行 → QC（uniform 2D/3D 矩阵数据）。"""

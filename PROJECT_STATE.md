@@ -20,8 +20,8 @@
 | core/qc | 实现中（Phase 1） | 噪声/SNR/峰检测/相位/基线/伪影/综合质量（峰稳定待 Phase 4） |
 | core/experiments | 模板占位 | 实验模板注册表 + HSQC/HNCA 等先验 |
 | core/reporting | 骨架 | 处理报告、QC 报告、参数溯源 |
-| backend | 骨架（协议已定义） | ProcessingBackend：NMRPipeBackend / NativeBackend / factory |
-| workflow | 实现中（Phase 1） | PipelineRunner + AutoProcessor.run（Bruker 端到端，NUS 待 Phase 3） |
+| backend | 实现中（Phase 1） | NMRPipe 后端（bruker -AUTO + fid.com 修补 + 管道）、查找器、csh 运行时 |
+| workflow | 实现中（Phase 1） | PipelineRunner + AutoProcessor.run（NMRPipe/原生双路径，NUS 待 Phase 3） |
 | gui | 占位 | 主窗口与五大面板（Dataset/Experiment/Plan/Viewer/Quality） |
 | packaging | 规划 | AppImage 打包：desktop/icon/PyInstaller spec/构建脚本（docs/packaging.md） |
 | presets | YAML 示例 | 实验模板（先验/约束/期望行为） |
