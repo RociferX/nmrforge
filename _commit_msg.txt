@@ -1,0 +1,1 @@
+fix: 缺失 NMRPipe 路径测试按环境跳过（VM 上 csh 可找到 nmrPipe）

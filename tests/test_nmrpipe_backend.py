@@ -4,10 +4,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from backend.factory import create_backend
 from backend.nmrpipe_backend import NMRPipeBackend
+from backend.nmrpipe_finder import find_nmrpipe_bin
 from core.data.bruker_reader import read_dataset
 from core.planning.method_selector import select_method
+
+_NO_NMRPIPE = find_nmrpipe_bin() is None
 
 
 def test_factory_returns_nmrpipe_backend() -> None:
@@ -15,6 +20,7 @@ def test_factory_returns_nmrpipe_backend() -> None:
     assert isinstance(backend, NMRPipeBackend)
 
 
+@pytest.mark.skipif(not _NO_NMRPIPE, reason="本机已安装 NMRPipe，跳过缺失路径测试")
 def test_health_check_missing_nmrpipe() -> None:
     backend = NMRPipeBackend(nmrpipe_bin="")
     health = backend.health_check()
@@ -22,6 +28,7 @@ def test_health_check_missing_nmrpipe() -> None:
     assert "nmrPipe" in health["message"]
 
 
+@pytest.mark.skipif(not _NO_NMRPIPE, reason="本机已安装 NMRPipe，跳过缺失路径测试")
 def test_process_missing_nmrpipe_graceful(bruker_dir: Path, tmp_path: Path) -> None:
     exp = read_dataset(bruker_dir / "hsqc_small")
     plan = select_method(exp)
