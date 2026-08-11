@@ -1,11 +1,13 @@
 """直接维统计相位搜索。
 
-从直接维 FT 后的一维迹线中统计最佳 (p0, p1)：
-对每个候选相位逐迹应用，按迹能量加权平均吸收度
-（Σ|Re| / (Σ|Re| + Σ|Im|)），正确相位时实部为吸收型 → 比例最高。
+从直接维 FT 后的一维迹线中统计最佳一阶相位 p1（p0 与 t1 演化相位在
+原始迹线上混合，无法分离，固定为 0；最终谱相位由后处理负责）。
 
-流程与 NMRPipe step1 一致：SP → ZF → FT 后取全部一维迹线
-（等价于从 .ft1 中间文件中抽出所有一维 FID，但内存内完成、一次到位）。
+方法：
+- 对每个候选 p1，逐迹在 p0 上取最优峰区吸收度（Σ|Re|/(Σ|Re|+Σ|Im|)），
+  取中位吸收度最高者为公共 p1；
+- ±180° 歧义用实部符号比消歧（正确符号 → 实部以正峰为主）；
+- 输入等价于从 .1FT 中间文件抽出所有一维 FID，但内存内完成、一次到位。
 """
 
 from __future__ import annotations
@@ -13,37 +15,13 @@ from __future__ import annotations
 import numpy as np
 
 
-def _apply_phase(traces: np.ndarray, p0: float, p1: float) -> np.ndarray:
-    n = traces.shape[-1]
-    k = np.arange(n, dtype=float)
-    angle = np.deg2rad(p0 + p1 * k / max(n - 1, 1))
-    return traces * np.exp(1j * angle)
-
-
-def trace_absorption_score(
-    traces: np.ndarray, p0: float, p1: float
-) -> np.ndarray:
-    """逐迹峰区吸收度：只统计显著点（|x| >= 0.3*max），避免整条迹被噪声总和稀释。"""
-    rotated = _apply_phase(traces, p0, p1)
-    magnitude = np.abs(rotated)
-    peak_floor = 0.3 * np.max(magnitude, axis=-1, keepdims=True)
-    mask = magnitude >= peak_floor
-    re = np.abs(np.real(rotated)) * mask
-    im = np.abs(np.imag(rotated)) * mask
-    denom = re + im + 1e-12
-    return np.sum(re, axis=-1) / np.sum(denom, axis=-1)
-
-
 def search_phase(
     traces: np.ndarray,
     p0_values: np.ndarray | None = None,
     p1_values: np.ndarray | None = None,
     max_traces: int = 2000,
-) -> tuple[float, float, float]:
-    """统计最佳相位。返回 (p0, p1, score)。
-
-    traces: (n_traces, n_points) 复数频域迹线（直接维 FT 后）。
-    """
+) -> tuple[float, float, float, float]:
+    """p1 共识搜索。返回 (p0=0, p1, score, p1_gain)。"""
     traces = np.asarray(traces, dtype=np.complex128)
     if traces.ndim == 1:
         traces = traces[np.newaxis, :]
@@ -51,20 +29,52 @@ def search_phase(
     if n_traces > max_traces:
         index = np.linspace(0, n_traces - 1, max_traces).astype(int)
         traces = traces[index]
-    if p0_values is None:
-        p0_values = np.arange(-90.0, 91.0, 15.0)
     if p1_values is None:
-        p1_values = np.arange(-40.0, 41.0, 20.0)
-    # 峰高加权：信号迹（有峰）权重远大于纯噪声迹，避免被噪声总能量淹没
-    energies = np.max(np.abs(traces), axis=-1) + 1e-12
-    best = (0.0, 0.0, -1.0)
-    for p0 in p0_values:
-        for p1 in p1_values:
-            per_trace = trace_absorption_score(traces, p0, p1)
-            score = float(np.average(per_trace, weights=energies))
-            if score > best[2]:
-                best = (float(p0), float(p1), score)
-    return best
+        p1_values = np.arange(-180.0, 181.0, 30.0)
+    if p0_values is None:
+        p0_values = np.arange(-180.0, 181.0, 20.0)
+    n = traces.shape[-1]
+    k = np.arange(n, dtype=float)
+    magnitude = np.abs(traces)
+    floor = 0.3 * np.max(magnitude, axis=-1, keepdims=True)
+    mask = magnitude >= floor
+
+    def _evaluate(p1: float) -> tuple[float, float]:
+        ramp = np.exp(1j * np.deg2rad(p1 * k / max(n - 1, 1)))
+        base = traces * ramp
+        abs_scores: list[np.ndarray] = []
+        sign_scores: list[np.ndarray] = []
+        for p0 in p0_values:
+            rot = base * np.exp(1j * np.deg2rad(p0))
+            re = np.real(rot) * mask
+            im = np.imag(rot) * mask
+            re_abs = np.abs(re)
+            abs_scores.append(
+                np.sum(re_abs, axis=-1)
+                / (np.sum(re_abs + np.abs(im), axis=-1) + 1e-12)
+            )
+            sign_scores.append(
+                np.sum(re, axis=-1) / (np.sum(re_abs, axis=-1) + 1e-12)
+            )
+        abs_arr = np.array(abs_scores)
+        sign_arr = np.array(sign_scores)
+        best_idx = np.argmax(abs_arr, axis=0)
+        rows = np.arange(len(best_idx))
+        best_abs = abs_arr[best_idx, rows]
+        best_sign = sign_arr[best_idx, rows]
+        return float(np.median(best_abs)), float(np.median(best_sign))
+
+    baseline_abs, _baseline_sign = _evaluate(0.0)
+    candidates = []
+    for p1 in p1_values:
+        a, s = _evaluate(float(p1))
+        candidates.append((a, s, float(p1)))
+    candidates.sort(key=lambda c: (-c[0], -c[1]))
+    best_abs, best_sign, best_p1 = candidates[0]
+    for a, s, p1 in candidates[1:]:
+        if abs(a - best_abs) < 0.01 and s > best_sign:
+            best_abs, best_sign, best_p1 = a, s, p1
+    return 0.0, best_p1, best_abs, best_abs - baseline_abs
 
 
 def direct_ft_traces(
