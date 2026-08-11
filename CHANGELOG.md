@@ -5,6 +5,8 @@
 - Phase 3（NUS）：bruker 原生识别确认（acqu3s TD=1 时按 NusTD 取 zN，生成 nusExpand/ser_full/mask.fid + 单文件 test.fid）；移除切片追加 workaround。
 - NMRPipeBackend.reconstruct_nus：2D/3D NUS SMILE 重构（单文件直接维处理 → SMILE → 间接维 FT）。
 - SMILE 经验参数按采样率分档（≥50%: 5/0.95；20-50%: 6/0.90；<20%: 7/0.85）。
+- 真实 3D NUS 验证（VM verify_flow/exp_001，HNCACB 25%）：SMILE 三步 ~15s、QC 93.7 ACCEPT。
+- 发现并修复 tcsh 包装内叠加 nice 会导致脚本完成后挂起；A/B 验证 yMODE（bruker 原生 Complex vs acqus 推导 Echo-AntiEcho）最终谱一致。
 - 新增 NUS 脚本/后端测试；本地 71 passed。
 
 ## [0.1.4] - 2026-08-11
