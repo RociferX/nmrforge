@@ -32,7 +32,8 @@ def median_window_absorption(data: np.ndarray, axis: int) -> float:
     positions = np.argmax(np.abs(selected), axis=-1)
     profiles = _trace_profiles(selected, positions)
     absorption, _ = _window_metrics(profiles)
-    return float(np.median(absorption))
+    weights = np.max(np.abs(selected), axis=-1) + 1e-12
+    return float(np.average(absorption, weights=weights))
 
 
 def search_recon_phase(

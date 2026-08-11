@@ -65,7 +65,11 @@ def search_phase(
         rows = np.arange(len(best_idx))
         best_abs = abs_arr[best_idx, rows]
         best_sign = sign_arr[best_idx, rows]
-        return float(np.median(best_abs)), float(np.median(best_sign))
+        # 峰高加权均值：强迹线主导，避免大量弱迹线把中位数稀释到噪声地板
+        return (
+            float(np.average(best_abs, weights=peak_weights)),
+            float(np.average(best_sign, weights=peak_weights)),
+        )
 
     baseline_abs, _baseline_sign = _evaluate(0.0)
     candidates = []
@@ -167,6 +171,7 @@ def _search_axis(
         index = np.linspace(0, len(sig_traces) - 1, max_traces).astype(int)
         sig_traces = sig_traces[index]
     positions = np.argmax(np.abs(sig_traces), axis=-1)
+    peak_weights = np.max(np.abs(sig_traces), axis=-1) + 1e-12
     k = np.arange(n, dtype=float)
 
     def _ramp(p0: float, p1: float) -> np.ndarray:
