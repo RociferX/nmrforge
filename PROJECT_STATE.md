@@ -12,8 +12,8 @@
 
 | 模块 | 状态 | 职责 |
 | --- | --- | --- |
-| core/data | 骨架（数据模型已定义） | 统一内部数据模型、Bruker/NUS 读取、格式转换 |
-| core/experiment | 骨架 | Bruker 参数解析、实验分类、维度映射、NUS/采集模式检测 |
+| core/data | 实现中 | 统一内部数据模型、Bruker 读取（read_dataset）、NUS 读取 |
+| core/experiment | 实现中（Phase 1） | Bruker 参数解析、基础分类、维度映射、NUS/采集模式检测 |
 | core/planning | 骨架（DAG 数据结构已定义） | 处理计划、轴计划、方法选择、依赖图与缓存语义 |
 | core/processing | 骨架 | apodization/ZF/FT/phase/baseline/calibration/transpose/sign/NUS 重建原语 |
 | core/optimization | 骨架（EarlyStopping 已实现） | 参数空间、候选生成、评分、网格/局部/贝叶斯搜索、预算 |
@@ -49,6 +49,6 @@
 
 ## 下一步
 
-1. Phase 1：Bruker parser + 内部数据模型填充 + 2D/3D、uniform/NUS 检测。
+1. Phase 1 已起步：Bruker parser + 内部数据模型 + NUS/采集模式检测 + 基础分类 + 轴映射（已测）。
 2. 建立 FakeBackend 测试基座（沿用 NMRFlow 测试经验，不依赖真实 NMRPipe）。
 3. ProcessingPlan DAG 拓扑排序与缓存命中逻辑。

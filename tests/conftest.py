@@ -28,3 +28,12 @@ def hsqc_experiment() -> Experiment:
         ],
         sampling=Sampling(mode=SamplingMode.UNIFORM),
     )
+
+
+FIXTURES_BRUKER = Path(__file__).parent / "fixtures" / "bruker"
+
+
+@pytest.fixture
+def bruker_dir() -> Path:
+    """Bruker 测试数据集 fixture 目录。"""
+    return FIXTURES_BRUKER
