@@ -16,3 +16,6 @@ dist/
 
 # 本地配置覆盖（可能含敏感信息，勿提交）
 config/nmrforge.local.yaml
+
+# 用户参考文档（重写核对用），保留在磁盘但不入库
+SOFTWARE_SUMMARY.md
