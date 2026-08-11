@@ -23,10 +23,13 @@ def _apply_phase(traces: np.ndarray, p0: float, p1: float) -> np.ndarray:
 def trace_absorption_score(
     traces: np.ndarray, p0: float, p1: float
 ) -> np.ndarray:
-    """逐迹吸收度：Σ|Re| / (Σ|Re| + Σ|Im|)。"""
+    """逐迹峰区吸收度：只统计显著点（|x| >= 0.3*max），避免整条迹被噪声总和稀释。"""
     rotated = _apply_phase(traces, p0, p1)
-    re = np.abs(np.real(rotated))
-    im = np.abs(np.imag(rotated))
+    magnitude = np.abs(rotated)
+    peak_floor = 0.3 * np.max(magnitude, axis=-1, keepdims=True)
+    mask = magnitude >= peak_floor
+    re = np.abs(np.real(rotated)) * mask
+    im = np.abs(np.imag(rotated)) * mask
     denom = re + im + 1e-12
     return np.sum(re, axis=-1) / np.sum(denom, axis=-1)
 
