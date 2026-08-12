@@ -37,6 +37,15 @@ class ProcessingBackend(Protocol):
         """按处理计划执行处理，返回输出与指标。"""
         ...
 
+    def convert_to_fid(
+        self, experiment: Experiment, data_dir: Any
+    ) -> dict[str, Any]:
+        """把 Bruker 数据目录转换为 NMRPipe fid(独立阶段,不生成谱)。
+
+        返回稳定键:{success, fid_path, message, logs}(API_CONTRACT §8.3)。
+        """
+        ...
+
     def reconstruct_nus(self, experiment: Experiment, params: dict[str, Any]) -> dict[str, Any]:
         """执行 NUS 重建。"""
         ...

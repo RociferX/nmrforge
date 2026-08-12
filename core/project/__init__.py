@@ -4,6 +4,7 @@ from core.project.manager import ProjectError, ProjectManager
 from core.project.models import (
     DEFAULT_DIRECTORIES,
     SCHEMA_VERSION,
+    DataEntry,
     ExperimentEntry,
     ExperimentStatus,
     HistoryEntry,
@@ -21,6 +22,7 @@ from core.project.recent import (
 __all__ = [
     "DEFAULT_DIRECTORIES",
     "SCHEMA_VERSION",
+    "DataEntry",
     "ExperimentEntry",
     "ExperimentStatus",
     "HistoryEntry",

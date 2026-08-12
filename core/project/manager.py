@@ -22,6 +22,7 @@ from typing import Any
 from core.project.models import (
     DEFAULT_DIRECTORIES,
     SCHEMA_VERSION,
+    DataEntry,
     ExperimentEntry,
     ExperimentStatus,
     HistoryEntry,
@@ -136,6 +137,14 @@ class ProjectManager:
             raise ProjectError(f"project.json 结构无效: {project_file}")
         manager = cls(root_path)
         manager.project = ProjectInfo.from_dict(data)
+        if manager.project.schema_version != SCHEMA_VERSION:
+            # schema 1.0/1.1 → 1.2:旧 source/segments → data[0]
+            # (ExperimentEntry.from_dict 已完成迁移)
+            old = manager.project.schema_version
+            manager.project.schema_version = SCHEMA_VERSION
+            manager.add_history(
+                "project_migrated", {"from": old, "to": SCHEMA_VERSION}
+            )
         return manager
 
     def save(self) -> None:
@@ -160,7 +169,7 @@ class ProjectManager:
         return self.root / rel
 
     def _experiment_paths(self, exp_id: str) -> list[Path]:
-        """实验全部相关文件/目录(删除实验时按此清理;resolve 后必须仍在项目根内)。"""
+        """实验全部相关文件/目录(删除实验时按此清理;兼容新旧命名)。"""
         candidates: list[Path] = []
         for key in ("raw", "processing", "spectra", "peaks", "analysis", "figures", "report"):
             base = self.dir_path(key)
@@ -168,7 +177,20 @@ class ProjectManager:
                 candidates.append(base / exp_id)
             else:
                 candidates.extend(base.glob(f"{exp_id}.*"))
+                candidates.extend(base.glob(f"{exp_id}-*.*"))
         candidates.append(self.dir_path("metadata") / f"{exp_id}.json")
+        candidates.extend(self.dir_path("metadata").glob(f"{exp_id}-*.json"))
+        return candidates
+
+    def _data_paths(self, exp_id: str, data_id: str) -> list[Path]:
+        """单个数据的全部产物路径(删除数据时清理)。"""
+        candidates = [
+            self.dir_path("raw") / exp_id / data_id,
+            self.dir_path("processing") / exp_id / data_id,
+        ]
+        for key in ("spectra", "peaks", "report"):
+            candidates.extend(self.dir_path(key).glob(f"{exp_id}-{data_id}.*"))
+        candidates.append(self.dir_path("metadata") / f"{exp_id}-{data_id}.json")
         return candidates
 
     def _ensure_inside_root(self, path: Path) -> Path:
@@ -197,6 +219,129 @@ class ProjectManager:
     # ------------------------------------------------------------------
     # 实验
     # ------------------------------------------------------------------
+    def create_experiment(
+        self,
+        title: str = "",
+        sample_id: str = "",
+        metadata: dict[str, Any] | None = None,
+    ) -> ExperimentEntry:
+        """新建空白实验(无数据,status=registered)。"""
+        if self.project is None:
+            raise ProjectError("未加载项目")
+        if sample_id and self.project.sample(sample_id) is None:
+            raise ProjectError(f"样本不存在: {sample_id}")
+        entry = ExperimentEntry(
+            id=_next_sequence_id([e.id for e in self.project.experiments], "exp_"),
+            title=title,
+            status=ExperimentStatus.REGISTERED.value,
+            metadata=dict(metadata or {}),
+            sample_id=sample_id,
+            created_at=now_iso(),
+        )
+        self.project.experiments.append(entry)
+        self.add_history(
+            "experiment_created",
+            {"experiment_id": entry.id, "title": title, "sample_id": sample_id},
+        )
+        return entry
+
+    def data(self, exp_id: str, data_id: str) -> DataEntry:
+        """取实验下的数据条目。"""
+        entry = self._require_experiment(exp_id)
+        data_entry = next((d for d in entry.data if d.id == data_id), None)
+        if data_entry is None:
+            raise ProjectError(f"数据不存在: {exp_id}/{data_id}")
+        return data_entry
+
+    def import_data(
+        self,
+        exp_id: str,
+        source: Path | str,
+        segments: list[Path | str] | None = None,
+        imported_at: str = "",
+    ) -> DataEntry:
+        """登记数据条目(d_001...);文件复制/metadata 落盘由 workflow 完成。"""
+        entry = self._require_experiment(exp_id)
+        data_entry = DataEntry(
+            id=_next_sequence_id([d.id for d in entry.data], "d_"),
+            source=str(source),
+            segments=[str(s) for s in (segments or [])],
+            status="imported",
+            imported_at=imported_at or now_iso(),
+        )
+        entry.data.append(data_entry)
+        if entry.status == ExperimentStatus.REGISTERED.value:
+            entry.status = ExperimentStatus.IMPORTED.value
+        self.add_history(
+            "data_imported",
+            {
+                "experiment_id": exp_id,
+                "data_id": data_entry.id,
+                "source": str(source),
+                "segments": list(data_entry.segments),
+            },
+        )
+        return data_entry
+
+    def set_data_fid(
+        self, exp_id: str, data_id: str, fid_path: Path | str
+    ) -> DataEntry:
+        """登记数据已生成 FID。"""
+        data_entry = self.data(exp_id, data_id)
+        data_entry.fid_path = str(fid_path)
+        data_entry.status = "fid_ready"
+        self.add_history(
+            "data_fid",
+            {"experiment_id": exp_id, "data_id": data_id, "fid_path": str(fid_path)},
+        )
+        return data_entry
+
+    def set_data_spectrum(
+        self, exp_id: str, data_id: str, spectrum_path: Path | str
+    ) -> DataEntry:
+        """登记数据已生成谱图。"""
+        data_entry = self.data(exp_id, data_id)
+        data_entry.spectrum_path = str(spectrum_path)
+        data_entry.status = "processed"
+        self.add_history(
+            "data_spectrum",
+            {
+                "experiment_id": exp_id,
+                "data_id": data_id,
+                "spectrum_path": str(spectrum_path),
+            },
+        )
+        return data_entry
+
+    def delete_data(self, exp_id: str, data_id: str) -> None:
+        """删除数据条目与产物文件;WorkflowRun 审计保留。"""
+        entry = self._require_experiment(exp_id)
+        data_entry = self.data(exp_id, data_id)
+        removed: list[str] = []
+        for path in self._data_paths(exp_id, data_id):
+            target = self._ensure_inside_root(path)
+            if target.is_dir():
+                for child in target.rglob("*"):
+                    if child.is_file():
+                        child.unlink()
+                target.rmdir()
+                removed.append(str(target))
+            elif target.is_file():
+                target.unlink()
+                removed.append(str(target))
+        entry.data.remove(data_entry)
+        if not entry.data:
+            entry.status = ExperimentStatus.REGISTERED.value
+        self.add_history(
+            "data_deleted",
+            {
+                "experiment_id": exp_id,
+                "data_id": data_id,
+                "source": data_entry.source,
+                "removed_files": removed,
+            },
+        )
+
     def add_experiment(
         self,
         source: Path | str,
@@ -206,25 +351,11 @@ class ProjectManager:
         metadata: dict[str, Any] | None = None,
         imported_at: str = "",
     ) -> ExperimentEntry:
-        if self.project is None:
-            raise ProjectError("未加载项目")
-        if sample_id and self.project.sample(sample_id) is None:
-            raise ProjectError(f"样本不存在: {sample_id}")
-        entry = ExperimentEntry(
-            id=_next_sequence_id([e.id for e in self.project.experiments], "exp_"),
-            title=title,
-            source=str(source),
-            status=ExperimentStatus.IMPORTED.value,
-            metadata=dict(metadata or {}),
-            imported_at=imported_at or now_iso(),
-            sample_id=sample_id,
-            segments=[str(s) for s in (segments or [])],
+        """兼容便捷入口:创建实验并导入第一个数据(create_experiment + import_data)。"""
+        entry = self.create_experiment(
+            title=title, sample_id=sample_id, metadata=metadata
         )
-        self.project.experiments.append(entry)
-        self.add_history(
-            "experiment_added",
-            {"experiment_id": entry.id, "title": title, "source": str(source)},
-        )
+        self.import_data(entry.id, source, segments=segments, imported_at=imported_at)
         return entry
 
     def rename_experiment(self, exp_id: str, new_title: str) -> None:
@@ -272,24 +403,46 @@ class ProjectManager:
         )
 
     def infer_status(self, exp_id: str) -> ExperimentStatus:
-        """依据产物文件推断实验状态:metadata/raw → imported,spectra → processed,
-        peaks → picked,report/analysis → analyzed。"""
-        self._require_experiment(exp_id)
+        """按数据条目与产物文件推断实验状态(兼容 schema 1.1 旧命名)。
+
+        registered(无数据)→ imported(metadata 存在)→ processed(谱存在)→
+        picked(峰表)→ analyzed(报告/分析产物)。
+        """
+        entry = self._require_experiment(exp_id)
+        if not entry.data:
+            return ExperimentStatus.REGISTERED
+        metadata_dir = self.dir_path("metadata")
+        spectra_dir = self.dir_path("spectra")
+        # 兼容:旧命名 metadata/<exp_id>.json 与 spectra/<exp_id>.ft2
+        has_imported = (metadata_dir / f"{exp_id}.json").is_file()
+        for d in entry.data:
+            if d.metadata_path and (
+                metadata_dir / Path(d.metadata_path).name
+            ).is_file():
+                has_imported = True
+            if (metadata_dir / f"{exp_id}-{d.id}.json").is_file():
+                has_imported = True
+        # 优先按 DataEntry 记录的产物路径(可能在工作目录),再回退旧命名 glob
+        has_spectrum = False
+        for d in entry.data:
+            if d.spectrum_path:
+                candidate = Path(d.spectrum_path)
+                if not candidate.is_absolute():
+                    candidate = self.root / candidate
+                if candidate.is_file():
+                    has_spectrum = True
+                    break
+        if not has_spectrum:
+            has_spectrum = any(spectra_dir.glob(f"{exp_id}.*")) or any(
+                spectra_dir.glob(f"{exp_id}-*.*")
+            )
         checks: list[tuple[ExperimentStatus, bool]] = [
-            (
-                ExperimentStatus.IMPORTED,
-                self.dir_path("metadata").joinpath(f"{exp_id}.json").is_file(),
-            ),
-            (
-                ExperimentStatus.PROCESSED,
-                any(
-                    self.dir_path("spectra").joinpath(f"{exp_id}.{ext}").is_file()
-                    for ext in ("ft2", "ft3")
-                ),
-            ),
+            (ExperimentStatus.IMPORTED, has_imported),
+            (ExperimentStatus.PROCESSED, has_spectrum),
             (
                 ExperimentStatus.PICKED,
-                self.dir_path("peaks").joinpath(f"{exp_id}.csv").is_file(),
+                self.dir_path("peaks").joinpath(f"{exp_id}.csv").is_file()
+                or bool(list(self.dir_path("peaks").glob(f"{exp_id}-*.csv"))),
             ),
             (
                 ExperimentStatus.ANALYZED,
@@ -297,6 +450,7 @@ class ProjectManager:
                     self.dir_path("report").joinpath(f"{exp_id}.{ext}").is_file()
                     for ext in ("pdf", "html", "json")
                 )
+                or bool(list(self.dir_path("report").glob(f"{exp_id}-*.*")))
                 or self.dir_path("analysis").joinpath(exp_id).exists(),
             ),
         ]

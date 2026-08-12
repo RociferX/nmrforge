@@ -24,5 +24,8 @@ class NativeBackend:
     def process(self, experiment: Experiment, plan: ProcessingPlan) -> dict[str, Any]:
         raise NotImplementedError("Phase 1: 实现 Native 处理")
 
+    def convert_to_fid(self, experiment: Experiment, data_dir: Any) -> dict[str, Any]:
+        raise NotImplementedError("Native 后端暂不支持 Bruker→fid 转换")
+
     def reconstruct_nus(self, experiment: Experiment, params: dict[str, Any]) -> dict[str, Any]:
         raise NotImplementedError("Native 后端暂不支持 NUS 重建")
