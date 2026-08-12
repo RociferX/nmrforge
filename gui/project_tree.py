@@ -345,7 +345,12 @@ class ProjectTreePanel(QWidget):
             else:
                 folder_path = self._folder_path_for_item(item)
                 if folder_path is not None:
-                    self.open_path_requested.emit(str(folder_path.parent if not folder_path.is_dir() else folder_path))
+                    target = (
+                        folder_path.parent
+                        if not folder_path.is_dir()
+                        else folder_path
+                    )
+                    self.open_path_requested.emit(str(target))
             return
         if kind in ("data", "folder"):
             # 双击数据/子文件夹:打开文件管理器对应目录,中间保持 Pipeline

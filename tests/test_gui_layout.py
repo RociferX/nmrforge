@@ -948,7 +948,6 @@ def test_spectrum_file_double_click_opens_in_panel(
 ) -> None:
     """树中谱图文件双击 → 右侧谱图面板直接显示。"""
     import numpy as np
-
     from nmrglue.fileio import pipe
 
     manager = _manager_with_experiment(tmp_path, monkeypatch)
