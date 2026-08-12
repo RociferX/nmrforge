@@ -54,7 +54,8 @@ class SpectrumViewer(QWidget):
         self.plot.setMenuEnabled(False)
         self.plot.getViewBox().setMouseMode(pg.ViewBox.RectMode)
         # nmrDraw/Poky 显示约定:1H 高 ppm 在左、15N 高 ppm 在下
-        # (x 默认索引0=高ppm在左已正确;y 需反转使高 ppm 在底)
+        # 反转 x 与 y:使高 ppm 显示在左(1H)与下(15N)
+        self.plot.getViewBox().invertX(True)
         self.plot.getViewBox().invertY(True)
 
         self.layers: list[ContourLayer] = []
@@ -80,9 +81,9 @@ class SpectrumViewer(QWidget):
 
         self.level_slider = QSlider(Qt.Orientation.Horizontal)
         self.level_slider.setRange(1, 100)
-        self.level_slider.setValue(10)
+        self.level_slider.setValue(8)
         self.level_slider.valueChanged.connect(self._update_levels)
-        self.level_label = QLabel("轮廓起点 10%")
+        self.level_label = QLabel(self._level_label_text())
 
         self.count_slider = QSlider(Qt.Orientation.Horizontal)
         self.count_slider.setRange(5, 60)
@@ -177,6 +178,14 @@ class SpectrumViewer(QWidget):
             self.reset_view()
         return name
 
+    def _level_fraction(self) -> float:
+        """滑块 → 起点百分比(平方映射:前 10% 精细可调)。"""
+        value = max(1, self.level_slider.value())
+        return (value / 100.0) ** 2
+
+    def _level_label_text(self) -> str:
+        return f"轮廓起点 {self._level_fraction() * 100:.2f}%"
+
     def _levels_for(self, spectrum: Spectrum) -> np.ndarray:
         """从起点(base)到最大值之间取 n 级对数间隔,含对称负级。"""
         maximum = spectrum.max_intensity
@@ -184,14 +193,14 @@ class SpectrumViewer(QWidget):
             maximum = abs(float(np.min(spectrum.data))) if spectrum.data.size else 0.0
         if maximum <= 0:
             return np.array([-1.0, 1.0])
-        base = maximum * self.level_slider.value() / 100.0
+        base = maximum * self._level_fraction()
         positive = np.geomspace(max(base, maximum * 1e-6), maximum, self._level_count)
         return np.concatenate([-positive[::-1], positive])
 
     def _update_levels(self) -> None:
         for layer, spectrum in zip(self.layers, self.layer_spectra):
             layer.setData(spectrum.data, self._levels_for(spectrum))
-        self.level_label.setText(f"轮廓起点 {self.level_slider.value()}%")
+        self.level_label.setText(self._level_label_text())
 
     def _on_level_count(self, value: int) -> None:
         self._level_count = value
