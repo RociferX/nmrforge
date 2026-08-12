@@ -1,5 +1,11 @@
 # 变更日志
 
+## [0.2.23] - 2026-08-12
+
+- 诊断(Backend):同一实验多组数据时,步骤执行固定作用于第一个数据
+  (gui/pipeline_panel.run_step 取 nodes[0],树 data_id 未传递);后端
+  接口均按 (exp_id, data_id) 作用域且正确。已建 B2G-002 提案,
+  待 GUI Agent 接线(选中数据传入 run_step)。
 ## [0.2.22] - 2026-08-12
 
 - fix(shared):create_project 不再预建扁平目录模板(raw/processing/spectra/
