@@ -675,6 +675,7 @@ def validate_direct_phase_equivalence(
         correlation, _pvalue = spearmanr(
             [brute_map[k] for k in common], [in_memory[k] for k in common]
         )
+        correlation = float(correlation)  # np.float64 -> float(JSON 可序列化)
         if correlation != correlation:  # nan(常数序列)
             correlation = 0.0
 
