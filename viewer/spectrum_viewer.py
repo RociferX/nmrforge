@@ -110,11 +110,12 @@ class SpectrumViewer(QWidget):
         controls_layout.addWidget(self.peak_label)
         self.controls_layout = controls_layout
 
-        splitter = QSplitter(Qt.Orientation.Horizontal)
+        # 上下布局:上方谱图,下方控制面板(分隔条可上下拖动)
+        splitter = QSplitter(Qt.Orientation.Vertical)
         splitter.addWidget(self.plot)
         splitter.addWidget(controls)
         splitter.setStretchFactor(0, 1)
-        splitter.setSizes([760, 240])
+        splitter.setSizes([560, 180])
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(splitter)

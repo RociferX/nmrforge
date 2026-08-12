@@ -699,3 +699,27 @@ def test_spectrum_panel_vertical_layout(qapp: QApplication) -> None:
     assert splitter.count() == 2
     assert panel.file_list.maximumWidth() > 1000  # 无横向宽度限制
     panel.close()
+
+def test_viewer_internal_vertical_layout(qapp: QApplication) -> None:
+    """SpectrumViewer 内部上下布局:plot 在上、控制面板在下。"""
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtWidgets import QSplitter
+
+    from viewer.spectrum_viewer import SpectrumViewer
+
+    viewer = SpectrumViewer()
+    found: list[QSplitter] = []
+
+    def walk(widget) -> None:
+        for child in widget.children():
+            if isinstance(child, QSplitter):
+                found.append(child)
+            walk(child)
+
+    walk(viewer)
+    assert found, "SpectrumViewer 内应有 QSplitter"
+    splitter = found[0]
+    assert splitter.orientation() == Qt.Orientation.Vertical
+    assert splitter.count() == 2
+    assert splitter.widget(0) is viewer.plot  # 上方谱图
+    viewer.close()
