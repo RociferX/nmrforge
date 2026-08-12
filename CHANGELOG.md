@@ -1,5 +1,16 @@
 # 变更日志
 
+## [0.2.25] - 2026-08-12
+
+- Architect:VM 真实数据回归(sampleA,步骤化 import_data→generate_fid→
+  generate_spectrum)确认 EXT+TP 修复:终谱 FDTRANSPOSED=0,1H 窗
+  6-11 ppm(640 点),主峰 (112.59, 7.47) 与手工 test.ft2
+  (112.73, 7.56) 一致;extract=False 全宽谱水峰 4.7 ppm 为垂直竖线
+  (峰高为相邻 1H 列 60-90 倍)。新增回归脚本 scripts/vm_sample_*.py。
+- 已知问题(Backend 待办):步骤化 generate_spectrum/backend.process
+  未透传 params 的 extract/ext_lo/ext_hi(仅 manual render_scripts
+  生效),自动路径无法关闭/自定义 EXT 窗。
+
 ## [0.2.24] - 2026-08-12
 
 - Backend:处理脚本(generate_process_script)直接维 FT+PS 后增加 EXT 提取
