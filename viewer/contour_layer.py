@@ -44,8 +44,18 @@ class ContourLayer(pg.GraphicsObject):
     def setData(self, data: np.ndarray, levels: np.ndarray) -> None:
         self._data = np.asarray(data, dtype=float)
         self._levels = np.asarray(levels, dtype=float)
+        self._smooth = None
         self._rebuild()
         self.informViewBoundsChanged()
+
+    def set_levels(self, levels: np.ndarray) -> None:
+        """仅更新级别并重建轮廓(复用插值数据,避免重复 zoom)。"""
+        self._levels = np.asarray(levels, dtype=float)
+        if self._smooth is not None:
+            self._rebuild_paths()
+            self.update()
+        else:
+            self._rebuild()
 
     def setPen(self, pen, neg_pen=None) -> None:
         self._pen = pg.mkPen(pen)
@@ -54,46 +64,56 @@ class ContourLayer(pg.GraphicsObject):
         self.update()
 
     def _rebuild(self) -> None:
-        import matplotlib.pyplot as plt
+        """全量重建:插值数据 + 轮廓路径(首次/换谱时)。"""
         from scipy import ndimage
 
-        path_pos = QtGui.QPainterPath()
-        path_neg = QtGui.QPainterPath()
         data = self._data
         levels = self._levels
         if data is not None and data.ndim != 2:
             raise ValueError(f"轮廓仅支持二维数据(当前 {data.ndim} 维)")
+        self._smooth = None
         if data is not None and data.size and levels is not None and len(levels):
             zoom = self._zoom
             smooth = ndimage.zoom(data, zoom, order=1)
-            fig = plt.figure()
-            try:
-                cs = plt.contour(smooth, levels=levels)
-                height = smooth.shape[0]
-                # matplotlib y 向上、pyqtgraph y 向下:翻转 y,使矩阵第 0 行
-                # 位于顶部;配合视图 invertY 后第 0 行(高 ppm)显示在下
-                for level, segs in zip(cs.levels, cs.allsegs):
-                    target = path_neg if level < 0 else path_pos
-                    for seg in segs:
-                        if len(seg) < 2:
-                            continue
-                        target.moveTo(
-                            seg[0, 0] / zoom, (height - seg[0, 1]) / zoom
-                        )
-                        for point in seg[1:]:
-                            target.lineTo(
-                                point[0] / zoom, (height - point[1]) / zoom
-                            )
-            finally:
-                plt.close(fig)
-        self._path = path_pos
-        self._path_neg = path_neg
+            self._smooth = smooth
+            self._rebuild_paths()
+        else:
+            self._path = QtGui.QPainterPath()
+            self._path_neg = QtGui.QPainterPath()
         if data is not None and data.ndim == 2:
             height, width = data.shape
             self._bounds = QtCore.QRectF(0.0, 0.0, float(width), float(height))
         else:
             self._bounds = QtCore.QRectF()
         self.prepareGeometryChange()
+
+    def _rebuild_paths(self) -> None:
+        """用已缓存插值数据重建轮廓路径(滑块/级数变化时快速)。"""
+        import matplotlib.pyplot as plt
+
+        path_pos = QtGui.QPainterPath()
+        path_neg = QtGui.QPainterPath()
+        smooth = self._smooth
+        levels = self._levels
+        if smooth is None or levels is None or not len(levels):
+            return
+        zoom = self._zoom
+        fig = plt.figure()
+        try:
+            cs = plt.contour(smooth, levels=levels)
+            height = smooth.shape[0]
+            for level, segs in zip(cs.levels, cs.allsegs):
+                target = path_neg if level < 0 else path_pos
+                for seg in segs:
+                    if len(seg) < 2:
+                        continue
+                    target.moveTo(seg[0, 0] / zoom, (height - seg[0, 1]) / zoom)
+                    for point in seg[1:]:
+                        target.lineTo(point[0] / zoom, (height - point[1]) / zoom)
+        finally:
+            plt.close(fig)
+        self._path = path_pos
+        self._path_neg = path_neg
 
     def boundingRect(self) -> QtCore.QRectF:
         return self._bounds

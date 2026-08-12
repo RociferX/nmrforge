@@ -82,7 +82,8 @@ class SpectrumViewer(QWidget):
         self.level_slider = QSlider(Qt.Orientation.Horizontal)
         self.level_slider.setRange(1, 100)
         self.level_slider.setValue(8)
-        self.level_slider.valueChanged.connect(self._update_levels)
+        self.level_slider.valueChanged.connect(self._update_levels_debounced)
+        self.level_slider.sliderReleased.connect(self._update_levels)
         self.level_label = QLabel(self._level_label_text())
 
         self.count_slider = QSlider(Qt.Orientation.Horizontal)
@@ -197,10 +198,15 @@ class SpectrumViewer(QWidget):
         positive = np.geomspace(max(base, maximum * 1e-6), maximum, self._level_count)
         return np.concatenate([-positive[::-1], positive])
 
-    def _update_levels(self) -> None:
-        for layer, spectrum in zip(self.layers, self.layer_spectra):
-            layer.setData(spectrum.data, self._levels_for(spectrum))
+    def _update_levels_debounced(self) -> None:
+        """拖动过程中仅刷新标签,避免每格都重建轮廓(性能)。"""
         self.level_label.setText(self._level_label_text())
+
+    def _update_levels(self) -> None:
+        """松开滑块/级数变化时重建轮廓(复用已缓存插值数据)。"""
+        self.level_label.setText(self._level_label_text())
+        for layer, spectrum in zip(self.layers, self.layer_spectra):
+            layer.set_levels(self._levels_for(spectrum))
 
     def _on_level_count(self, value: int) -> None:
         self._level_count = value
@@ -233,12 +239,16 @@ class SpectrumViewer(QWidget):
     # ------------------------------------------------------------- view
 
     def reset_view(self) -> None:
-        """恢复显示完整谱图范围。"""
-        if self._primary is None:
+        """恢复显示完整谱图范围(所有叠加谱的联合范围)。"""
+        if not self.layers:
             return
+        x0 = min(layer.boundingRect().left() for layer in self.layers)
+        y0 = min(layer.boundingRect().top() for layer in self.layers)
+        x1 = max(layer.boundingRect().right() for layer in self.layers)
+        y1 = max(layer.boundingRect().bottom() for layer in self.layers)
         self.plot.getViewBox().setRange(
-            xRange=(0, self._primary.data.shape[1]),
-            yRange=(0, self._primary.data.shape[0]),
+            xRange=(x0, x1),
+            yRange=(y0, y1),
             padding=0,
         )
 

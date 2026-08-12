@@ -723,7 +723,7 @@ class MainWindow(QMainWindow):
             return
         step = "fid" if action == "fid" else "spectrum"
         self.center_panel.set_selection("data", exp_id, data_id)
-        self.center_panel.run_step(step)
+        self.center_panel.run_step(step, data_id=data_id)
 
     def _noop_hint(self) -> None:
         InfoDialog.show_info(self, "提示", "项目管理面板已集成在左侧树中")

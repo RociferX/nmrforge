@@ -259,10 +259,12 @@ class PipelinePanel(QWidget):
     # ------------------------------------------------------------------
     # 上下文
     # ------------------------------------------------------------------
-    def set_context(self, exp_id: str) -> None:
-        """兼容入口:按实验设置上下文(默认视为选中实验)。"""
+    def set_context(self, exp_id: str, data_id: str | None = None) -> None:
+        """兼容入口:按实验设置上下文(data_id 缺省回退首个数据)。"""
         self._selection_kind = "experiment" if exp_id else ""
         self._current_exp_id = exp_id or ""
+        if data_id is not None:
+            self._current_data_id = data_id
         self.refresh()
 
     def set_selection(self, kind: str, exp_id: str, data_id: str = "") -> None:
@@ -320,10 +322,12 @@ class PipelinePanel(QWidget):
     # ------------------------------------------------------------------
     # 运行
     # ------------------------------------------------------------------
-    def run_step(self, step_id: str) -> None:
-        """运行指定步骤(仅 READY 步骤有效);供菜单/下一步按钮调用。"""
+    def run_step(self, step_id: str, data_id: str | None = None) -> None:
+        """运行指定步骤(data_id 指定作用域;缺省用当前选中/首个数据)。"""
         if step_id not in self._rows:
             return
+        if data_id is not None:
+            self._current_data_id = data_id
         row = self._rows[step_id]
         if not row.run_button.isHidden():
             self._on_run_requested(step_id)
@@ -356,7 +360,10 @@ class PipelinePanel(QWidget):
                         f"{STEP_LABEL.get(step_id, step_id)}: 该实验还没有数据,请先导入数据"
                     )
                     return
-                data_node = nodes[0]
+                data_node = next(
+                    (n for n in nodes if getattr(n, "id", "") == self._current_data_id),
+                    nodes[0],
+                )
                 exp_id = self._current_exp_id
                 data_id = getattr(data_node, "id", exp_id)
                 if method_name == "import_data":

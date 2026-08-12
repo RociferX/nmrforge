@@ -97,8 +97,8 @@ class CenterPanel(QWidget):
         self.project_page.refresh()
         self.experiment_page.refresh()
 
-    def run_step(self, step_id: str) -> None:
-        self.pipeline.run_step(step_id)
+    def run_step(self, step_id: str, data_id: str | None = None) -> None:
+        self.pipeline.run_step(step_id, data_id=data_id)
 
     def current_experiment_id(self) -> str:
         return self.pipeline.current_experiment_id()

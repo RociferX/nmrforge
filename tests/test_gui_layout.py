@@ -1006,3 +1006,47 @@ def test_viewer_default_dir_matches_current_data(
     assert Path(viewer.start_dir) == spectra
     viewer.close()
     window.close()
+
+def test_run_step_uses_selected_data_id(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """B2G-002:run_step 传 data_id 时作用于选中数据(非首个)。"""
+    from gui.pipeline_panel import PipelinePanel
+
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    manager.import_data("exp_001", "/sampleE")
+    manager.save()
+    seen: list[str] = []
+
+    class ScopedController(FakeProcessingController):
+        def generate_spectrum(self, data, exp_id=None, data_id=None) -> str:
+            seen.append(data_id or "")
+            return "/tmp/x.ft2"
+
+    controller = ScopedController()
+    panel = PipelinePanel(manager, controller)
+    panel.set_selection("data", "exp_001", "d_002")
+    panel._on_run_requested("spectrum")
+    assert seen == ["d_002"]
+    panel.close()
+
+
+def test_reset_view_union_of_all_layers(qapp: QApplication) -> None:
+    """多谱叠加:reset_view 显示所有谱的联合范围。"""
+    from viewer.spectrum import Spectrum, SpectrumAxis
+    from viewer.spectrum_viewer import SpectrumViewer
+
+    def axis(label: str, size: int) -> SpectrumAxis:
+        return SpectrumAxis(label, size, 6000, 600, 4.7, 4.7 * 600)
+
+    import numpy as np
+
+    s1 = Spectrum(np.random.rand(64, 128), [axis("F1", 64), axis("F2", 128)])
+    s2 = Spectrum(np.random.rand(32, 256), [axis("F1", 32), axis("F2", 256)])
+    viewer = SpectrumViewer()
+    viewer.add_spectrum(s1, name="s1")
+    viewer.add_spectrum(s2, name="s2")
+    viewer.reset_view()
+    x_range, y_range = viewer.plot.getViewBox().viewRange()
+    assert x_range[1] >= 255 and y_range[1] >= 63  # 覆盖两张谱
+    viewer.close()
