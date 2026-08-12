@@ -30,6 +30,15 @@
 - SpectrumViewer 内部改上下布局:谱图在上、控制面板在下(分隔条可拖动);
 - SpectrumPanel 调整为查看器在上、文件列表在下(避免上方空白);
   主界面左/中/右三栏直接拼接。
+- Backend:人工处理路径后端(workflow/manual,用户反馈)——集合命令行人工流程:
+  生成 FID 自动产出 fid.com 后可查看/修改/运行(manual_fid_com /
+  run_manual_fid_com);生成谱图支持表格参数(param_schema/render_scripts)
+  或直接脚本编辑后运行 process.com / nus*.com(run_manual_spectrum,
+  消费已转换 fid,不执行 fid.com——生成 FID 是独立步骤);产物归位
+  process//spectra/,登记 manual_fid/manual_process/manual_nus
+  WorkflowRun,失败登记 failed 并抛 ManualRunError。
+- 测试:新增 tests/test_manual.py 7 项;全量 247 passed,ruff 全绿。
+
 
 ## [0.2.19.5] - 2026-08-12
 
