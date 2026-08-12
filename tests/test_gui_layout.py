@@ -677,3 +677,25 @@ def test_right_click_open_path_emits_signal(
     assert len(opened) == 2 and Path(opened[1]) == spectra_dir
     assert window.center_panel.stack.currentIndex() == 3  # Pipeline 页
     window.close()
+
+def test_spectrum_panel_vertical_layout(qapp: QApplication) -> None:
+    """谱图面板上下布局:文件列表在上、查看器在下。"""
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtWidgets import QSplitter
+
+    panel = SpectrumPanel()
+    found: list[QSplitter] = []
+
+    def walk(widget) -> None:
+        for child in widget.children():
+            if isinstance(child, QSplitter):
+                found.append(child)
+            walk(child)
+
+    walk(panel)
+    assert found, "SpectrumPanel 内应有 QSplitter"
+    splitter = found[0]
+    assert splitter.orientation() == Qt.Orientation.Vertical
+    assert splitter.count() == 2
+    assert panel.file_list.maximumWidth() > 1000  # 无横向宽度限制
+    panel.close()

@@ -44,12 +44,14 @@ class SpectrumPanel(QWidget):
         self.placeholder.setWordWrap(True)
         self.placeholder.setStyleSheet("color: #888;")
 
-        splitter = QSplitter(Qt.Orientation.Horizontal)
+        # 上下布局:上方文件列表,下方查看器(分隔条可上下拖动)
+        splitter = QSplitter(Qt.Orientation.Vertical)
         splitter.addWidget(self.file_list)
         splitter.addWidget(self.viewer)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
-        splitter.setSizes([170, 560])
+        splitter.setSizes([140, 460])
+        self.file_list.setMaximumWidth(16777215)  # 取消横向宽度限制
         layout.addWidget(splitter)
         self.refresh()
 
