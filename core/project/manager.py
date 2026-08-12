@@ -92,7 +92,9 @@ class ProjectManager:
         experiment_type: str = "",
         directories: dict[str, str] | None = None,
     ) -> ProjectManager:
-        """在 root 下创建项目:目录模板 + project.json + 首条审计历史。"""
+        """在 root 下创建项目:project.json + 首条审计历史
+        (schema 1.3 契约 §9.2:文件系统即层级,不预建扁平目录模板)。
+        """
         root_path = Path(root).resolve()
         project_file = root_path / "project.json"
         if project_file.exists():
@@ -113,8 +115,10 @@ class ProjectManager:
             updated=timestamp,
             directories=dir_map,
         )
-        for rel in dir_map.values():
-            (root_path / rel).mkdir(parents=True, exist_ok=True)
+        # schema 1.3(契约 §9.2):文件系统即层级,不预建扁平 raw/processing/
+        # spectra 等模板目录;数据目录在导入/处理时按
+        # <exp>/<data>/{raw,process,spectra,peaks,figures,report} 创建。
+        # dir_map 仅作兼容解析(旧扁平路径),不 mkdir。
         manager.add_history("project_created", {"name": name, "root": str(root_path)})
         manager.save()
         return manager

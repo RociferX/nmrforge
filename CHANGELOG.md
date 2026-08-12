@@ -1,5 +1,13 @@
 # 变更日志
 
+## [0.2.22] - 2026-08-12
+
+- fix(shared):create_project 不再预建扁平目录模板(raw/processing/spectra/
+  peaks/analysis/figures/report/metadata)——契约 §9.2「文件系统即层级」,
+  数据目录在导入/处理时按 <exp>/<data>/{raw,process,spectra,...} 创建;
+  dir_map 仅作旧扁平路径兼容解析,不 mkdir。
+- 测试适配:布局断言改为「不创建扁平目录」,legacy 状态推断/删除用例显式
+  创建旧扁平目录,配置目录用例断言路径解析而非存在;全量 270 passed。
 ## [0.2.21] - 2026-08-12
 
 - Backend(G2B-005):统一峰表模型 core/peaks/peak_table.py(Shared,移植旧项目
