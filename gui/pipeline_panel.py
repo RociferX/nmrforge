@@ -24,6 +24,12 @@ from PyQt6.QtWidgets import (
 )
 
 from core.project import ProjectManager
+from gui.pipeline_state import (
+    input_fingerprint,
+    load_pipeline_state,
+    raw_fingerprint,
+    script_fingerprint,
+)
 from gui.processing import ProcessingController
 
 # 步骤定义:id / 名称 / 描述 / 前置步骤 id 列表
@@ -76,69 +82,227 @@ def _data_nodes(manager: ProjectManager, exp_id: str) -> list:
     return list(getattr(entry, "data", None) or [])
 
 
-def compute_step_statuses(manager: ProjectManager, exp_id: str) -> dict[str, str]:
-    """按产物文件与前置依赖推断各步骤状态。"""
-    nodes = _data_nodes(manager, exp_id)
-    if not nodes:
-        return {step_id: "LOCKED" for step_id, _, _, _ in PIPELINE_STEPS}
-    has_fid = False
-    has_ft = False
-    has_peaks = False
-    has_analysis = False
-    for node in nodes:
-        data_id = getattr(node, "id", exp_id)
-        try:
-            # fid 完成判定:set_data_fid 登记的 fid_path,或 process 目录下 fid 文件
-            fid_path = str(getattr(node, "fid_path", "") or "")
-            fid_ok = bool(fid_path) and Path(fid_path).is_file()
-            if not fid_ok:
-                process_dir = manager.data_dir(exp_id, data_id, "process")
-                fid_ok = any(process_dir.glob("*.fid"))
-            has_fid = has_fid or fid_ok
-            spectra_dir = manager.data_dir(exp_id, data_id, "spectra")
-            peaks_dir = manager.data_dir(exp_id, data_id, "peaks")
-            has_ft = has_ft or any(
-                spectra_dir.joinpath(f"{exp_id}-{data_id}.{ext}").is_file()
-                for ext in ("ft2", "ft3")
-            )
-            has_peaks = has_peaks or peaks_dir.joinpath(
-                f"{exp_id}-{data_id}.csv"
-            ).is_file()
-            report_dir = manager.data_dir(exp_id, data_id, "report")
-            if report_dir.is_dir():
-                has_analysis = has_analysis or any(
-                    p.is_file() and p.suffix.lower() in (".html", ".pdf", ".json")
-                    for p in report_dir.iterdir()
-                )
-        except Exception:  # noqa: BLE001 - 新布局不可用回退旧路径
-            pass
-    # 旧扁平布局回退(项目根 spectra/peaks/analysis)
-    spectra = manager.dir_path("spectra")
-    peaks = manager.dir_path("peaks")
-    analysis = manager.dir_path("analysis")
-    has_ft = has_ft or any(
-        spectra.joinpath(f"{exp_id}.{ext}").is_file()
-        for ext in ("ft2", "ft3")
-    )
-    has_peaks = has_peaks or peaks.joinpath(f"{exp_id}.csv").is_file()
-    has_analysis = has_analysis or analysis.joinpath(exp_id).is_dir()
 
-    artifacts: dict[str, bool] = {
-        "import": True,  # 实验下存在数据节点即导入完成
-        "fid": has_fid,
-        "spectrum": has_ft,
-        "peaks": has_peaks,
-        "analysis": has_analysis,
+def _first_report(directory: Path) -> Path | None:
+    """目录下第一个报告产物(html/pdf/json),无则 None。"""
+    if not directory.is_dir():
+        return None
+    try:
+        files = sorted(
+            p
+            for p in directory.iterdir()
+            if p.is_file() and p.suffix.lower() in ('.html', '.pdf', '.json')
+        )
+    except OSError:
+        return None
+    return files[0] if files else None
+
+
+def _node_artifacts(
+    manager: ProjectManager, exp_id: str, data_id: str
+) -> dict[str, Path | None]:
+    """单个数据节点各步骤产物路径(兼容 schema 1.3 与旧扁平布局)。"""
+    artifacts: dict[str, Path | None] = {
+        'fid': None,
+        'spectrum': None,
+        'peaks': None,
+        'analysis': None,
     }
+    data = manager.data(exp_id, data_id)
+    fid_candidate = getattr(data, 'fid_path', '') or ''
+    if fid_candidate:
+        path = Path(fid_candidate)
+        if not path.is_absolute():
+            path = manager.root / path
+        if path.is_file():
+            artifacts['fid'] = path
+    if artifacts['fid'] is None:
+        proc = manager.data_dir(exp_id, data_id, 'process')
+        try:
+            fids = sorted(proc.glob('*.fid'))
+        except OSError:
+            fids = []
+        if fids:
+            artifacts['fid'] = fids[0]
+    spec_candidate = getattr(data, 'spectrum_path', '') or ''
+    if spec_candidate:
+        path = Path(spec_candidate)
+        if not path.is_absolute():
+            path = manager.root / path
+        if path.is_file():
+            artifacts['spectrum'] = path
+    if artifacts['spectrum'] is None:
+        spectra = manager.data_dir(exp_id, data_id, 'spectra')
+        for ext in ('ft2', 'ft3'):
+            path = spectra / f'{exp_id}-{data_id}.{ext}'
+            if path.is_file():
+                artifacts['spectrum'] = path
+                break
+    if artifacts['spectrum'] is None:  # 旧扁平布局
+        flat = manager.dir_path('spectra')
+        for ext in ('ft2', 'ft3'):
+            path = flat / f'{exp_id}.{ext}'
+            if path.is_file():
+                artifacts['spectrum'] = path
+                break
+    peaks = manager.data_dir(exp_id, data_id, 'peaks') / f'{exp_id}-{data_id}.csv'
+    if peaks.is_file():
+        artifacts['peaks'] = peaks
+    else:
+        flat = manager.dir_path('peaks') / f'{exp_id}.csv'
+        if flat.is_file():
+            artifacts['peaks'] = flat
+    report = _first_report(manager.data_dir(exp_id, data_id, 'report'))
+    if report is None:
+        report = _first_report(manager.dir_path('report'))
+    if report is None:
+        analysis_dir = manager.dir_path('analysis') / exp_id
+        if analysis_dir.is_dir():
+            report = analysis_dir
+    artifacts['analysis'] = report
+    return artifacts
+
+
+def _upstream_artifact(
+    step_id: str, artifacts: dict[str, Path | None]
+) -> Path | None:
+    prev = {'spectrum': 'fid', 'peaks': 'spectrum', 'analysis': 'peaks'}.get(
+        step_id
+    )
+    return artifacts.get(prev) if prev else None
+
+
+def _mtime_ns(path: Path) -> int:
+    try:
+        return path.stat().st_mtime_ns
+    except OSError:
+        return 0
+
+
+def _node_step_statuses(
+    manager: ProjectManager, exp_id: str, node
+) -> dict[str, str]:
+    """单数据节点五步状态:产物 + 指纹校验(OUTDATED)+ 前置依赖。"""
+    data_id = getattr(node, 'id', exp_id)
+    artifacts = _node_artifacts(manager, exp_id, data_id)
+    state = load_pipeline_state(manager, exp_id, data_id)
     statuses: dict[str, str] = {}
     for step_id, _, _, deps in PIPELINE_STEPS:
-        if artifacts.get(step_id, False):
-            statuses[step_id] = "SUCCESS"
-        elif all(statuses.get(dep) == "SUCCESS" for dep in deps):
-            statuses[step_id] = "READY"
+        artifact = None if step_id == 'import' else artifacts.get(step_id)
+        outdated = False
+        if step_id == 'import':
+            done = True  # 实验下存在数据节点即导入完成
+            entry = state['steps'].get('import')
+            if entry and entry.get('input_hash'):
+                current = raw_fingerprint(manager, exp_id, data_id)
+                outdated = current is not None and current != entry['input_hash']
         else:
-            statuses[step_id] = "LOCKED"
+            done = artifact is not None
+            if done:
+                entry = state['steps'].get(step_id)
+                if entry:
+                    current_input = input_fingerprint(
+                        manager, exp_id, data_id, step_id
+                    )
+                    if (
+                        current_input is not None
+                        and entry.get('input_hash')
+                        and current_input != entry['input_hash']
+                    ):
+                        outdated = True
+                    current_script = script_fingerprint(
+                        manager, exp_id, data_id, step_id
+                    )
+                    if (
+                        current_script is not None
+                        and entry.get('script_hash')
+                        and current_script != entry['script_hash']
+                    ):
+                        outdated = True
+                else:
+                    # 旧数据/无指纹状态:用上游产物 mtime 启发式
+                    upstream = _upstream_artifact(step_id, artifacts)
+                    if upstream is not None and _mtime_ns(upstream) > _mtime_ns(
+                        artifact
+                    ):
+                        outdated = True
+        if done and not outdated:
+            statuses[step_id] = 'SUCCESS'
+        elif done:
+            statuses[step_id] = 'OUTDATED'
+        elif all(statuses.get(dep) in ('SUCCESS', 'OUTDATED') for dep in deps):
+            statuses[step_id] = 'READY'
+        else:
+            statuses[step_id] = 'LOCKED'
+    # 上游 OUTDATED 传播:下游即使指纹匹配也视为过期
+    for step_id, _, _, deps in PIPELINE_STEPS:
+        if statuses.get(step_id) == 'SUCCESS' and any(
+            statuses.get(dep) == 'OUTDATED' for dep in deps
+        ):
+            statuses[step_id] = 'OUTDATED'
     return statuses
+
+
+def compute_step_statuses(manager: ProjectManager, exp_id: str) -> dict[str, str]:
+    """按产物文件、指纹校验与前置依赖推断各步骤状态(支持 OUTDATED)。"""
+    nodes = _data_nodes(manager, exp_id)
+    if not nodes:
+        return {step_id: 'LOCKED' for step_id, _, _, _ in PIPELINE_STEPS}
+    per_node = [_node_step_statuses(manager, exp_id, node) for node in nodes]
+    statuses: dict[str, str] = {}
+    for step_id, _, _, deps in PIPELINE_STEPS:
+        verdicts = [node_status[step_id] for node_status in per_node]
+        if 'OUTDATED' in verdicts:
+            statuses[step_id] = 'OUTDATED'
+        elif 'SUCCESS' in verdicts:
+            statuses[step_id] = 'SUCCESS'
+        elif all(statuses.get(dep) in ('SUCCESS', 'OUTDATED') for dep in deps):
+            statuses[step_id] = 'READY'
+        else:
+            statuses[step_id] = 'LOCKED'
+    return statuses
+
+
+def _outdated_reasons(
+    statuses: dict[str, str], manager: ProjectManager, exp_id: str
+) -> dict[str, str]:
+    """为 OUTDATED 步骤生成原因(输入/脚本变化、上游过期、产物落后)。"""
+    reasons: dict[str, str] = {}
+    nodes = _data_nodes(manager, exp_id)
+    for step_id, _, _, deps in PIPELINE_STEPS:
+        if statuses.get(step_id) != 'OUTDATED':
+            continue
+        reason = ''
+        for node in nodes:
+            data_id = getattr(node, 'id', exp_id)
+            entry = load_pipeline_state(manager, exp_id, data_id)['steps'].get(
+                step_id
+            )
+            if entry and entry.get('input_hash'):
+                current = input_fingerprint(manager, exp_id, data_id, step_id)
+                if current is not None and current != entry['input_hash']:
+                    reason = '输入已变化(上游重新运行或外部修改),请重新运行'
+                    break
+                current_script = script_fingerprint(
+                    manager, exp_id, data_id, step_id
+                )
+                if (
+                    current_script is not None
+                    and entry.get('script_hash')
+                    and current_script != entry['script_hash']
+                ):
+                    reason = '处理脚本已变化,请重新运行'
+                    break
+        if not reason:
+            stale_upstream = [
+                STEP_LABEL[dep] for dep in deps if statuses.get(dep) == 'OUTDATED'
+            ]
+            if stale_upstream:
+                reason = '上游步骤已过期: ' + '、'.join(stale_upstream)
+            else:
+                reason = '输入产物比本步骤产物新,请重新运行'
+        reasons[step_id] = reason
+    return reasons
 
 
 def _lock_reasons(statuses: dict[str, str]) -> dict[str, str]:
@@ -210,7 +374,12 @@ class PipelineStepRow(QWidget):
         if reason:
             tooltip += f"\n{reason}"
         self.status_label.setToolTip(tooltip)
-        self.run_button.setVisible(status == "READY")
+        if status == "OUTDATED":
+            self.run_button.setText("重新运行")
+            self.run_button.setVisible(True)
+        else:
+            self.run_button.setText("运行")
+            self.run_button.setVisible(status == "READY")
         # 分析步骤产物就绪后提供「报告」入口
         self.report_button.setVisible(status == "SUCCESS" and self.step_id == "analysis")
 
@@ -322,8 +491,15 @@ class PipelinePanel(QWidget):
             f"{project.name} / {exp_title} ({self._current_exp_id})"
         )
         statuses = compute_step_statuses(self.manager, self._current_exp_id)
+        outdated_next = next(
+            (sid for sid, st in statuses.items() if st == "OUTDATED"), None
+        )
         next_step = next((sid for sid, st in statuses.items() if st == "READY"), None)
-        if next_step:
+        if outdated_next:
+            self.next_label.setText(
+                f"下一步: 重新运行 {STEP_LABEL[outdated_next]}"
+            )
+        elif next_step:
             self.next_label.setText(f"下一步: {STEP_LABEL[next_step]}")
         else:
             self.next_label.setText(
@@ -332,8 +508,12 @@ class PipelinePanel(QWidget):
                 else "等待导入数据"
             )
         reasons = _lock_reasons(statuses)
+        outdated = _outdated_reasons(
+            statuses, self.manager, self._current_exp_id
+        )
         for step_id, status in statuses.items():
-            self._rows[step_id].set_status(status, reasons.get(step_id, ""))
+            reason = reasons.get(step_id, "") or outdated.get(step_id, "")
+            self._rows[step_id].set_status(status, reason)
             # 导入数据为自动化步骤,无人工入口;其余处理步骤保留人工
             self._rows[step_id].manual_button.setVisible(step_id != "import")
 

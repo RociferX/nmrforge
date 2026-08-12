@@ -1,5 +1,16 @@
 # 变更日志
 
+## [0.2.25] - 2026-08-12
+
+- Pipeline 状态机完善(OUTDATED + 指纹校验):新增 gui/pipeline_state.py,
+  每数据维护 .pipeline_state.json(输入/脚本/参数指纹);步骤成功后经
+  ProcessingController / 导入流程登记;compute_step_statuses 重算当前
+  指纹,输入或脚本变化 → 该步骤及下游 OUTDATED(上游重新运行/外部修改/
+  脚本编辑),旧数据无指纹状态用上游产物 mtime 启发式回退;OUTDATED
+  步骤显示「重新运行」按钮与原因 tooltip,「下一步」优先提示过期步骤;
+  人工 fid/谱图/峰表保存同样登记指纹。测试新增 test_gui_pipeline_state
+(7 例),全量 307 passed,ruff 全绿。
+
 ## [0.2.24.1] - 2026-08-12
 
 - 峰表编辑回写(G2B-005 GUI 剩余):右侧谱图面板峰表工具栏新增「添加峰 /

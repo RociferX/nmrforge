@@ -14,6 +14,7 @@ from pathlib import Path
 from core.app_paths import resource_path
 from core.data.bruker_reader import read_dataset
 from core.project import ExperimentEntry, ProjectManager
+from gui.pipeline_state import record_step_success
 from workflow.engine import AutoProcessor
 
 
@@ -96,10 +97,15 @@ class ProcessingController:
         if self._manager is None:
             raise RuntimeError("ProcessingController 未绑定项目(ProjectManager)")
         result = import_data(self._manager, entry.id, source, copy=copy)
+        data_id = getattr(result, "data_id", "") or ""
+        if data_id:
+            record_step_success(
+                self._manager, entry.id, data_id, "import", params={"copy": copy}
+            )
         self._manager.save()
         return {
             "experiment_id": entry.id,
-            "data_id": getattr(result, "data_id", ""),
+            "data_id": data_id,
             "run_id": getattr(result, "run_id", ""),
             "warnings": list(getattr(result, "warnings", []) or []),
         }
@@ -115,6 +121,8 @@ class ProcessingController:
         fid_path = stepwise_fid(
             self._manager, exp_id, data_id, self._backend_instance()
         )
+        if data_id:
+            record_step_success(self._manager, exp_id, data_id, "fid")
         self._manager.save()
         return fid_path
 
@@ -131,6 +139,8 @@ class ProcessingController:
         spectrum_path = stepwise_spectrum(
             self._manager, exp_id, data_id, self._backend_instance()
         )
+        if data_id:
+            record_step_success(self._manager, exp_id, data_id, "spectrum")
         self._manager.save()
         return spectrum_path
 
@@ -148,6 +158,8 @@ class ProcessingController:
         exp_id = exp_id or getattr(data, "exp_id", "")
         data_id = data_id or getattr(data, "id", "")
         result = backend_pick_peaks(self._manager, exp_id, data_id)
+        if data_id and result.get("status") == "success":
+            record_step_success(self._manager, exp_id, data_id, "peaks")
         self._manager.save()
         return result
 
@@ -162,6 +174,8 @@ class ProcessingController:
         exp_id = exp_id or getattr(data, "exp_id", "")
         data_id = data_id or getattr(data, "id", "")
         result = backend_analyze(self._manager, exp_id, data_id)
+        if data_id and result.get("status") == "success":
+            record_step_success(self._manager, exp_id, data_id, "analysis")
         self._manager.save()
         return result
 
@@ -189,6 +203,8 @@ class ProcessingController:
         exp_id = exp_id or getattr(data, "exp_id", "")
         data_id = data_id or getattr(data, "id", "")
         result = backend_run_fid(self._manager, exp_id, data_id, content)
+        if data_id:
+            record_step_success(self._manager, exp_id, data_id, "fid")
         self._manager.save()
         return result
 
@@ -221,6 +237,8 @@ class ProcessingController:
         result = backend_run_spectrum(
             self._manager, exp_id, data_id, scripts
         )
+        if data_id:
+            record_step_success(self._manager, exp_id, data_id, "spectrum")
         self._manager.save()
         return result
 
@@ -236,6 +254,8 @@ class ProcessingController:
         peaks_dir = self._manager.data_dir(exp_id, data_id, "peaks")
         peaks_dir.mkdir(parents=True, exist_ok=True)
         csv_path = save_peaks(peaks_dir / f"{exp_id}-{data_id}.csv", peaks)
+        if data_id:
+            record_step_success(self._manager, exp_id, data_id, "peaks")
         run = self._manager.start_run(
             exp_id,
             workflow_ref="manual_peaks",

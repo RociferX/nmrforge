@@ -312,6 +312,17 @@ class MainWindow(QMainWindow):
                     source,
                     copy=bool(data.get("copy", True)),
                 )
+                data_id = getattr(result, "data_id", "") or ""
+                if data_id:
+                    from gui.pipeline_state import record_step_success
+
+                    record_step_success(
+                        self.manager,
+                        target_exp_id,
+                        data_id,
+                        "import",
+                        params={"copy": bool(data.get("copy", True))},
+                    )
                 self.manager.save()
                 self.import_finished.emit(result)  # 回主线程刷新 UI
             except Exception as exc:  # noqa: BLE001 - 错误统一回主线程提示
@@ -449,7 +460,13 @@ class MainWindow(QMainWindow):
         if self.manager.project is None:
             return
         statuses = compute_step_statuses(self.manager, exp_id)
-        next_step = next((sid for sid, st in statuses.items() if st == "READY"), None)
+        next_step = next(
+            (sid for sid, st in statuses.items() if st == "OUTDATED"), None
+        )
+        if next_step is None:
+            next_step = next(
+                (sid for sid, st in statuses.items() if st == "READY"), None
+            )
         if next_step is None:
             InfoDialog.show_info(self, "提示", "当前没有可运行的步骤")
             return
