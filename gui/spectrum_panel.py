@@ -10,8 +10,11 @@ from pathlib import Path
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
+    QFileDialog,
+    QHBoxLayout,
     QLabel,
     QListWidget,
+    QPushButton,
     QSplitter,
     QTableWidget,
     QTableWidgetItem,
@@ -20,6 +23,7 @@ from PyQt6.QtWidgets import (
 )
 
 from core.project import ProjectManager
+from gui.peaks_io import export_peaks_poky, load_peaks
 from viewer.spectrum_viewer import SpectrumViewer
 
 
@@ -41,6 +45,13 @@ class SpectrumPanel(QWidget):
         self.file_list = QListWidget()
         self.file_list.setMaximumWidth(190)
         self.file_list.itemClicked.connect(self._on_file_clicked)
+        self.peak_toolbar = QHBoxLayout()
+        self.export_poky_button = QPushButton("导出 Poky")
+        self.export_poky_button.setEnabled(False)
+        self.export_poky_button.setToolTip("把当前峰表导出为 Poky/Sparky .list")
+        self.export_poky_button.clicked.connect(self._export_peaks_poky)
+        self.peak_toolbar.addWidget(self.export_poky_button)
+        self.peak_toolbar.addStretch(1)
         self.peak_table = QTableWidget(0, 5)
         self.peak_table.setHorizontalHeaderLabels(
             ["Peak_ID", "H_shift", "N_shift", "Intensity", "SN"]
@@ -58,6 +69,9 @@ class SpectrumPanel(QWidget):
         splitter = QSplitter(Qt.Orientation.Vertical)
         splitter.addWidget(self.viewer)
         splitter.addWidget(self.file_list)
+        toolbar_widget = QWidget()
+        toolbar_widget.setLayout(self.peak_toolbar)
+        splitter.addWidget(toolbar_widget)
         splitter.addWidget(self.peak_table)
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 0)
@@ -85,6 +99,7 @@ class SpectrumPanel(QWidget):
             self.file_list.addItem(path.name)
         self.file_list.setVisible(bool(paths))
         self.peak_table.setVisible(bool(paths))
+        self.export_poky_button.setEnabled(False)
         if paths:
             self._load_peaks(paths[0])
         else:
@@ -154,17 +169,12 @@ class SpectrumPanel(QWidget):
         return legacy if legacy.is_file() else None
 
     def _load_peaks(self, spectrum_path: Path) -> None:
-        import csv
-
         self._clear_peaks()
         csv_path = self._peak_csv_path(spectrum_path)
         if csv_path is None:
             return
-        peaks: list[dict] = []
-        try:
-            with csv_path.open(encoding="utf-8", newline="") as fh:
-                peaks = [dict(row) for row in csv.DictReader(fh)]
-        except (OSError, csv.Error):
+        peaks = load_peaks(csv_path)
+        if not peaks:
             return
         self._peaks = peaks
         self.peak_table.setRowCount(len(peaks))
@@ -173,11 +183,44 @@ class SpectrumPanel(QWidget):
                 self.peak_table.setItem(row, col, QTableWidgetItem(str(peak.get(key, ""))))
             self.peak_table.item(row, 0).setData(0x0100, row)
         self.viewer.set_peaks(peaks)
+        self.export_poky_button.setEnabled(True)
+
+    def _export_peaks_poky(self) -> None:
+        """导出当前峰表为 Poky .list;无峰表/谱图时禁用。"""
+        if not self._peaks or self.manager.project is None:
+            return
+        default = None
+        try:
+            default = (
+                self.manager.data_dir(
+                    self._current_exp_id, self._current_data_id, "peaks"
+                )
+                / f"{self._current_exp_id}-{self._current_data_id}.list"
+            )
+        except Exception:  # noqa: BLE001
+            default = None
+        start = str(default.parent) if default is not None else str(Path.home())
+        path, _ = QFileDialog.getSaveFileName(
+            self, "导出 Poky 峰表", str(default) if default else start,
+            "Poky 峰表 (*.list);;所有文件 (*)",
+        )
+        if not path:
+            return
+        try:
+            export_peaks_poky(path, self._peaks, ndim=2)
+            from gui.dialogs import InfoDialog
+
+            InfoDialog.show_info(self, "导出完成", f"已导出 Poky 峰表: {path}")
+        except Exception as exc:  # noqa: BLE001
+            from gui.dialogs import InfoDialog
+
+            InfoDialog.show_info(self, "导出失败", str(exc))
 
     def _clear_peaks(self) -> None:
         self._peaks = []
         self.peak_table.setRowCount(0)
         self.viewer.set_peaks([])
+        self.export_poky_button.setEnabled(False)
 
     def _on_viewer_peak_clicked(self, row: int) -> None:
         if 0 <= row < self.peak_table.rowCount():

@@ -696,7 +696,7 @@ def test_spectrum_panel_vertical_layout(qapp: QApplication) -> None:
     assert found, "SpectrumPanel 内应有 QSplitter"
     splitter = found[0]
     assert splitter.orientation() == Qt.Orientation.Vertical
-    assert splitter.count() == 3  # viewer / 文件列表 / 峰表
+    assert splitter.count() == 4  # viewer / 文件列表 / 工具栏 / 峰表
     assert panel.file_list.maximumWidth() > 1000  # 无横向宽度限制
     panel.close()
 
@@ -796,4 +796,69 @@ def test_spectrum_peak_linkage(
     assert panel.viewer._selected_peak == 1
     panel._on_viewer_peak_clicked(0)
     assert panel.peak_table.currentRow() == 0
+    panel.close()
+
+def test_export_poky_button_generates_list(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """有峰表时「导出 Poky」可用,生成 .list 且含 header/峰行。"""
+    import csv
+
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    spectra = manager.data_dir("exp_001", "d_001", "spectra")
+    spectra.mkdir(parents=True, exist_ok=True)
+    (spectra / "exp_001-d_001.ft2").write_bytes(b"x")
+    peaks = manager.data_dir("exp_001", "d_001", "peaks")
+    peaks.mkdir(parents=True, exist_ok=True)
+    with (peaks / "exp_001-d_001.csv").open("w", encoding="utf-8", newline="") as fh:
+        writer = csv.writer(fh)
+        writer.writerow(["Peak_ID", "H_shift", "N_shift", "Intensity", "SN", "label"])
+        writer.writerow(["1", "8.0", "115.0", "100", "20", "G1"])
+    panel = SpectrumPanel(manager)
+    panel.set_context("exp_001", "d_001")
+    assert panel.export_poky_button.isEnabled()
+
+    out = tmp_path / "out.list"
+    from gui.peaks_io import export_peaks_poky, load_peaks
+
+    export_peaks_poky(out, load_peaks(peaks / "exp_001-d_001.csv"))
+    content = out.read_text(encoding="utf-8")
+    assert "G1" in content and "115.0" in content and "8.0" in content
+    panel.close()
+
+
+def test_export_poky_button_disabled_without_peaks(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """无峰表时「导出 Poky」禁用。"""
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    panel = SpectrumPanel(manager)
+    panel.set_context("exp_001", "d_001")
+    assert not panel.export_poky_button.isEnabled()
+    panel.close()
+
+
+def test_peak_linkage_via_load_peaks(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """load_peaks 统一加载后行数展示与联动高亮不受影响。"""
+    import csv
+
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    spectra = manager.data_dir("exp_001", "d_001", "spectra")
+    spectra.mkdir(parents=True, exist_ok=True)
+    (spectra / "exp_001-d_001.ft2").write_bytes(b"x")
+    peaks = manager.data_dir("exp_001", "d_001", "peaks")
+    peaks.mkdir(parents=True, exist_ok=True)
+    with (peaks / "exp_001-d_001.csv").open("w", encoding="utf-8", newline="") as fh:
+        writer = csv.writer(fh)
+        writer.writerow(["Peak_ID", "H_shift", "N_shift", "Intensity", "SN", "label"])
+        writer.writerow(["1", "8.0", "115.0", "100", "20", "G1"])
+        writer.writerow(["2", "7.5", "118.0", "80", "15", "A2"])
+    panel = SpectrumPanel(manager)
+    panel.set_context("exp_001", "d_001")
+    assert panel.peak_table.rowCount() == 2
+    assert len(panel.viewer._peaks) == 2
+    panel.peak_table.selectRow(1)
+    assert panel.viewer._selected_peak == 1
     panel.close()

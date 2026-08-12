@@ -1,5 +1,15 @@
 # 变更日志
 
+## [0.2.21] - 2026-08-12
+
+- 峰表工具栏新增「导出 Poky」:当前峰表导出为 Poky/Sparky .list
+  (Assignment w1 w2 Data Height Volume,未命名峰 ?-?),默认路径
+  data_dir(...,"peaks")/<exp>-<data>.list;无峰表/谱图时按钮禁用。
+- 峰表加载统一走 core.peaks.load_peaks(Backend 未落地时 GUI 本地等价实现),
+  行数展示与谱图双向联动不受影响。
+- 新增 gui/peaks_io.py:load_peaks/save_peaks/export_peaks_poky(契约优先,
+  缺失回退本地实现)。
+
 ## [0.2.20] - 2026-08-12
 
 - Dashboard:Project 概览(实验/数据/处理完成度/最近运行 + 新建实验表单);
