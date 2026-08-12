@@ -128,6 +128,12 @@ class MainWindow(QMainWindow):
         self.project_tree.open_requested.connect(self._on_open_experiment)
         self.project_tree.rename_requested.connect(self._rename_experiment_by_id)
         self.project_tree.delete_requested.connect(self._delete_experiment_by_id)
+        self.project_tree.delete_project_requested.connect(self._delete_project)
+        self.project_tree.create_experiment_requested.connect(
+            self._create_experiment
+        )
+        self.project_tree.import_data_requested.connect(self._import_data_for)
+        self.project_tree.data_action_requested.connect(self._on_data_action)
 
         self.pipeline = PipelinePanel(self.manager, self.controller)
         self.pipeline.log_message.connect(self._append_log)
@@ -275,7 +281,9 @@ class MainWindow(QMainWindow):
         for warning in result.warnings:
             self._append_log(f"  提示: {warning}")
         self.refresh()
-        self.project_tree.select_experiment(result.experiment_id)
+        exp_id = getattr(result, "experiment_id", None) or result.get("experiment_id", "")
+        if exp_id:
+            self.project_tree.select_experiment(exp_id)
         if result.warnings:
             InfoDialog.show_info(
                 self, "导入完成(有提示)", "\n".join(result.warnings)
@@ -398,7 +406,7 @@ class MainWindow(QMainWindow):
         if entry is None:
             return
         label = f"{entry.title or entry.id} ({exp_id})"
-        if step_id in ("fid", "process", "reconstruct"):
+        if step_id in ("fid", "spectrum", "import"):
             dialog = ParameterTableDialog(self, label)
         else:
             dialog = ScriptEditorDialog(self, label)
@@ -414,6 +422,72 @@ class MainWindow(QMainWindow):
             InfoDialog.show_info(
                 self, "人工处理待实现", f"{exc}\n已保存参数/脚本骨架,后续版本接入后端。"
             )
+
+    # ------------------------------------------------------------------
+    # 树动作(契约 v1.2 §8.5)
+    # ------------------------------------------------------------------
+    def _delete_project(self) -> None:
+        if self.manager.project is None:
+            return
+        confirmed = ConfirmDialog.confirm(
+            self,
+            "删除项目",
+            f"删除项目 {self.manager.project.name} 及其全部数据/产物?"
+            "(操作不可恢复,审计历史将保留)\n路径: {self.manager.root}",
+        )
+        if not confirmed:
+            return
+        if hasattr(self.recent, "remove") and self.manager.root is not None:
+            self.recent.remove(str(self.manager.root))
+        self.manager.close()
+        self.refresh()
+        self.statusBar().showMessage("项目已关闭")
+
+    def _create_experiment(self) -> None:
+        """新建空白实验(Project/空白处右键)。"""
+        if self.manager.project is None:
+            InfoDialog.show_info(self, "提示", "请先新建或打开项目")
+            return
+        title, ok = QInputDialog.getText(self, "新建实验", "实验标题:")
+        if not ok:
+            return
+        create = getattr(self.manager, "create_experiment", None)
+        try:
+            if create is not None:
+                entry = create(title=title.strip())
+            else:
+                entry = self.manager.add_experiment("", title=title.strip())
+            self.manager.save()
+        except ProjectError as exc:
+            InfoDialog.show_info(self, "新建实验失败", str(exc))
+            return
+        self.refresh()
+        self.project_tree.select_experiment(entry.id)
+
+    def _import_data_for(self, exp_id: str) -> None:
+        """在指定实验下导入数据。"""
+        if self.manager.project is None:
+            InfoDialog.show_info(self, "提示", "请先新建或打开项目")
+            return
+        samples = [(s.sample_id, s.name) for s in self.manager.project.samples]
+        dialog = ImportExperimentDialog(self, samples=samples)
+        if dialog.exec() != ImportExperimentDialog.DialogCode.Accepted:
+            return
+        data = dialog.result_data()
+        data["experiment_id"] = exp_id
+        self._import_experiment_async(data)
+
+    def _on_data_action(self, action: str, data_id: str) -> None:
+        """Data 右键三步操作:生成 FID / 生成谱图 / 删除数据。"""
+        exp_id = self.project_tree.current_experiment_id()
+        if not exp_id:
+            return
+        if action == "delete":
+            self._delete_experiment_by_id(exp_id)
+            return
+        step = "fid" if action == "fid" else "spectrum"
+        self.pipeline.set_context(exp_id)
+        self.pipeline.run_step(step)
 
     def _noop_hint(self) -> None:
         InfoDialog.show_info(self, "提示", "项目管理面板已集成在左侧树中")

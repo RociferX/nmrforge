@@ -1,4 +1,4 @@
-"""三栏布局 GUI 测试:项目树 / Pipeline / 谱图面板 / Task-Log(offscreen)。"""
+"""三栏布局 GUI 测试:项目树(Project→Experiment→Data)/ 五步 Pipeline / 谱图面板(offscreen)。"""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import numpy as np
 import pytest
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QMenu
 
 from core.project import ProjectManager
 from gui.log_panel import LogPanel
@@ -19,7 +19,7 @@ from gui.pipeline_panel import (
     PipelinePanel,
     compute_step_statuses,
 )
-from gui.project_tree import STAGE_LABELS, ProjectTreePanel
+from gui.project_tree import ProjectTreePanel
 from gui.spectrum_panel import SpectrumPanel
 
 
@@ -29,11 +29,21 @@ def qapp() -> QApplication:
     yield app
 
 
+class SyncThread:
+    """把后台线程变为同步执行,测试不依赖线程时序。"""
+
+    def __init__(self, target=None, daemon=None) -> None:
+        self._target = target
+
+    def start(self) -> None:
+        self._target()
+
+
 def _manager_with_experiment(tmp_path: Path) -> ProjectManager:
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     for source, title in (("/sampleD", "HSQC"), ("/sampleE", "HNCACB")):
         entry = manager.add_experiment(source, title=title)
-        entry.status = "registered"  # 仅登记:无 metadata 产物,状态列显示 registered
+        entry.status = "registered"  # schema 1.1 兼容:登记但未落盘 metadata
     manager.save()
     return manager
 
@@ -67,14 +77,14 @@ def _write_ft2(path: Path) -> None:
 
 
 class FakeProcessingController:
-    """记录 auto_run_async 调用的假控制器(同步执行回调)。"""
+    """五步流程假控制器:generate_fid/generate_spectrum 记录调用并同步完成。"""
 
     def __init__(self) -> None:
-        self.calls: list[object] = []
+        self.calls: list[str] = []
         self.last_entry = None
 
     def auto_run_async(self, entry, on_done, on_error) -> None:
-        self.calls.append(entry)
+        self.calls.append("auto_run")
         self.last_entry = entry
         on_done(
             {
@@ -85,9 +95,24 @@ class FakeProcessingController:
             }
         )
 
+    def import_data(self, entry, source) -> dict:
+        self.calls.append("import_data")
+        self.last_entry = entry
+        return {"experiment_id": entry.id, "status": "imported"}
+
+    def generate_fid(self, data) -> str:
+        self.calls.append("generate_fid")
+        self.last_entry = data
+        return "/tmp/x.fid"
+
+    def generate_spectrum(self, data) -> str:
+        self.calls.append("generate_spectrum")
+        self.last_entry = data
+        return "/tmp/x.ft2"
+
 
 # ----------------------------------------------------------------------
-# 项目树
+# 项目树(Project → Experiment → Data)
 # ----------------------------------------------------------------------
 def test_project_tree_structure(tmp_path: Path, qapp: QApplication) -> None:
     manager = _manager_with_experiment(tmp_path)
@@ -98,37 +123,52 @@ def test_project_tree_structure(tmp_path: Path, qapp: QApplication) -> None:
     assert project_item.childCount() == 2
     exp_item = project_item.child(0)
     assert exp_item.text(0) == "HSQC"
-    assert exp_item.text(1) == "已登记"
-    assert exp_item.childCount() == len(STAGE_LABELS)
-    assert exp_item.child(0).text(0) == "Input"
-    assert exp_item.child(1).text(0) == "Processing"
-    assert exp_item.child(2).text(0) == "Output"
-    assert exp_item.child(3).text(0) == "Figures"
+    assert exp_item.childCount() == 1  # schema 1.1 兼容:实验即单数据节点
+    data_item = exp_item.child(0)
+    assert data_item.text(0) == "数据 exp_001"
+    assert data_item.text(1) == "已导入"
     panel.close()
 
 
-def test_project_tree_current_experiment_from_stage(
+def test_project_tree_current_experiment_from_data(
     tmp_path: Path, qapp: QApplication
 ) -> None:
     manager = _manager_with_experiment(tmp_path)
     panel = ProjectTreePanel(manager)
     panel.select_experiment("exp_002")
     assert panel.current_experiment_id() == "exp_002"
-    # 选中阶段节点仍归一化到所属实验
+    # 选中 Data 节点仍归一化到所属实验
     exp_item = panel.tree.topLevelItem(0).child(1)
-    panel.tree.setCurrentItem(exp_item.child(2))
+    panel.tree.setCurrentItem(exp_item.child(0))
     assert panel.current_experiment_id() == "exp_002"
+    assert panel._data_id_of(panel.tree.currentItem()) == "exp_002"
+    panel.close()
+
+
+def test_project_tree_column_widths_readable(qapp: QApplication) -> None:
+    panel = ProjectTreePanel()
+    assert panel.tree.columnWidth(0) >= 180  # 对象列最小可读宽
+    assert panel.tree.columnWidth(1) >= 70  # 状态列
     panel.close()
 
 
 # ----------------------------------------------------------------------
-# Pipeline 状态
+# Pipeline 五步状态
 # ----------------------------------------------------------------------
+def test_pipeline_steps_are_five_step_flow() -> None:
+    ids = [step[0] for step in PIPELINE_STEPS]
+    assert ids == ["import", "fid", "spectrum", "peaks", "analysis"]
+    for _, _, _, deps in PIPELINE_STEPS:
+        for dep in deps:
+            assert dep in ids
+
+
 def test_pipeline_status_registered(tmp_path: Path, qapp: QApplication) -> None:
     manager = _manager_with_experiment(tmp_path)
     statuses = compute_step_statuses(manager, "exp_001")
-    assert statuses["import"] == "READY"
-    for step_id in ("fid", "process", "reconstruct", "peaks", "assign"):
+    assert statuses["import"] == "SUCCESS"  # 存在数据节点即导入完成
+    assert statuses["fid"] == "READY"
+    for step_id in ("spectrum", "peaks", "analysis"):
         assert statuses[step_id] == "LOCKED"
 
 
@@ -139,10 +179,9 @@ def test_pipeline_status_after_spectrum(tmp_path: Path, qapp: QApplication) -> N
     statuses = compute_step_statuses(manager, "exp_001")
     assert statuses["import"] == "SUCCESS"
     assert statuses["fid"] == "SUCCESS"
-    assert statuses["process"] == "SUCCESS"
-    assert statuses["reconstruct"] == "SUCCESS"
+    assert statuses["spectrum"] == "SUCCESS"
     assert statuses["peaks"] == "READY"
-    assert statuses["assign"] == "LOCKED"
+    assert statuses["analysis"] == "LOCKED"
 
 
 def test_pipeline_panel_refresh_shows_next_step(tmp_path: Path, qapp: QApplication) -> None:
@@ -150,27 +189,27 @@ def test_pipeline_panel_refresh_shows_next_step(tmp_path: Path, qapp: QApplicati
     panel = PipelinePanel(manager, FakeProcessingController())
     panel.set_context("exp_001")
     assert "下一步" in panel.next_label.text()
-    assert "导入数据" in panel.next_label.text()
-    assert not panel._rows["import"].run_button.isHidden()
-    assert panel._rows["process"].run_button.isHidden()
+    assert "生成 FID" in panel.next_label.text()
+    assert not panel._rows["fid"].run_button.isHidden()
+    assert panel._rows["spectrum"].run_button.isHidden()
     panel.close()
 
 
-def test_pipeline_panel_run_updates_log_and_status(
-    tmp_path: Path, qapp: QApplication
+def test_pipeline_panel_run_generate_fid(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr("threading.Thread", SyncThread)
     manager = _manager_with_experiment(tmp_path)
     controller = FakeProcessingController()
     panel = PipelinePanel(manager, controller)
     log = LogPanel()
     panel.log_message.connect(log.append)
     panel.set_context("exp_001")
-    panel._on_run_requested("import")
-    assert controller.last_entry is not None
-    assert controller.last_entry.id == "exp_001"
-    assert "QC" in log.text.toPlainText()
-    # 运行完成后按产物文件重新推断(无 ft2 时 import 回到 READY)
-    assert panel._rows["import"].status_label.text().startswith("▶")
+    panel._on_run_requested("fid")
+    assert controller.calls == ["generate_fid"]
+    assert "完成 生成 FID" in log.text.toPlainText()
+    # 运行完成后按产物文件重新推断(无 ft2 时 fid 回到 READY)
+    assert panel._rows["fid"].status_label.text().startswith("▶")
     panel.close()
     log.close()
 
@@ -214,11 +253,9 @@ def test_main_window_three_column_layout(tmp_path: Path, qapp: QApplication) -> 
     assert window.project_tree is not None
     assert window.pipeline is not None
     assert window.spectrum_panel is not None
-    # 打开项目后默认聚焦第一个实验
     assert window.pipeline.current_experiment_id() == "exp_001"
     assert "demo" in window.windowTitle()
-    # 兼容旧测试的扁平实验表仍然同步
-    assert window.experiment_tree.topLevelItemCount() == 2
+    assert window.experiment_tree.topLevelItemCount() == 2  # 兼容表同步
     window.close()
 
 
@@ -234,14 +271,15 @@ def test_main_window_context_updates_on_tree_selection(
 
 
 def test_main_window_log_panel_expands_on_message(
-    tmp_path: Path, qapp: QApplication
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr("threading.Thread", SyncThread)
     manager = _manager_with_experiment(tmp_path)
     window = MainWindow(manager=manager, controller=FakeProcessingController())
     assert window.log_panel.isHidden()
-    window.pipeline._on_run_requested("import")
+    window.pipeline._on_run_requested("fid")
     assert not window.log_panel.isHidden()
-    assert "QC" in window.log_panel.text.toPlainText()
+    assert "生成 FID" in window.log_panel.text.toPlainText()
     window.close()
 
 
@@ -253,12 +291,54 @@ def test_main_window_empty_state(qapp: QApplication) -> None:
     assert window.pipeline.current_experiment_id() == ""
     window.close()
 
+def test_tree_data_node_context_menu_actions(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Data 节点右键三步操作信号(生成 FID / 生成谱图 / 删除)。"""
+    manager = _manager_with_experiment(tmp_path)
+    panel = ProjectTreePanel(manager)
+    data_item = panel.tree.topLevelItem(0).child(0).child(0)
+    actions: list[tuple[str, str]] = []
+    panel.data_action_requested.connect(
+        lambda action, data_id: actions.append((action, data_id))
+    )
+    menu = QMenu()
+    panel._on_context_menu_impl(menu, data_item)
+    for action in menu.actions():
+        action.trigger()
+    assert ("fid", "exp_001") in actions
+    assert ("spectrum", "exp_001") in actions
+    assert ("delete", "exp_001") in actions
+    panel.close()
 
-def test_pipeline_steps_definition_consistent() -> None:
-    ids = [step[0] for step in PIPELINE_STEPS]
-    assert len(ids) == len(set(ids))
-    assert ids[0] == "import"
-    assert ids[-1] == "assign"
-    for _, _, _, deps in PIPELINE_STEPS:
-        for dep in deps:
-            assert dep in ids
+
+def test_create_blank_experiment_action(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """空白处/Project 右键新建空白实验。"""
+    manager = _manager_with_experiment(tmp_path)
+    window = MainWindow(manager=manager)
+    monkeypatch.setattr(
+        "gui.main_window.QInputDialog.getText",
+        staticmethod(lambda *args, **kwargs: ("T4", True)),
+    )
+    window._create_experiment()
+    assert manager.project is not None
+    assert any(e.title == "T4" for e in manager.project.experiments)
+    window.close()
+
+
+def test_delete_project_action(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Project 右键删除项目:确认后关闭项目并清空树。"""
+    from gui.dialogs import ConfirmDialog
+
+    manager = _manager_with_experiment(tmp_path)
+    window = MainWindow(manager=manager)
+    monkeypatch.setattr(ConfirmDialog, "confirm", staticmethod(lambda *a, **k: True))
+    window._delete_project()
+    assert window.manager.project is None
+    assert window.project_tree.tree.topLevelItemCount() == 0
+    assert "未打开项目" in window.windowTitle()
+    window.close()
