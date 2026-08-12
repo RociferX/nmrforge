@@ -1,7 +1,11 @@
-"""项目管理领域模型(project.json schema 1.1,兼容读 1.0)。
+"""项目管理领域模型(project.json schema 1.2,兼容读 1.0/1.1)。
 
-对应 SOFTWARE_SUMMARY.md 4.1 的 project.json 结构:
-实验、样本、审计历史(只追加)、WorkflowRun(只追加,含脚本快照引用)。
+层级:Project → Experiment(可空白)→ Data(可多组)。
+对应 API_CONTRACT §8.1(G2B-002 已批准):
+- ExperimentEntry 持有 data: list[DataEntry],移除顶层 source/segments/imported_at;
+- schema 1.1 项目打开时自动迁移:旧 source/segments/imported_at → data[0]
+  (migrated_from_1_1: true);
+- 兼容只读属性 source/segments/imported_at(指向 data[0]),便于过渡期旧代码读取。
 所有模型提供 to_dict/from_dict,JSON 落盘统一走 ProjectManager 原子写。
 """
 
@@ -12,7 +16,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
-SCHEMA_VERSION = "1.1"
+SCHEMA_VERSION = "1.2"
 
 # 项目目录模板(相对路径,创建项目时逐项建目录)
 DEFAULT_DIRECTORIES = [
@@ -74,50 +78,131 @@ class ProteinInfo:
 
 
 @dataclass
+class DataEntry:
+    """一次导入的数据(实验下的独立条目,d_001...,schema 1.2)。"""
+
+    id: str
+    source: str = ""                 # 外部 Bruker 数据集目录(导入时)
+    raw_dir: str = ""                # 项目内 raw/<exp_id>/<data_id>/ 副本
+    segments: list[str] = field(default_factory=list)
+    status: str = "imported"         # imported / fid_ready / processed
+    imported_at: str = ""
+    metadata_path: str = ""          # metadata/<exp_id>-<data_id>.json(相对路径)
+    fid_path: str = ""               # 生成 FID 后(空串表示未生成)
+    spectrum_path: str = ""          # 生成谱后(空串表示未生成)
+    checksums: dict[str, str] = field(default_factory=dict)
+    migrated_from_1_1: bool = False
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> DataEntry:
+        return cls(
+            id=str(data.get("id", "")),
+            source=str(data.get("source", "")),
+            raw_dir=str(data.get("raw_dir", "")),
+            segments=[str(s) for s in (data.get("segments") or [])],
+            status=str(data.get("status", "imported")),
+            imported_at=str(data.get("imported_at", "")),
+            metadata_path=str(data.get("metadata_path", "")),
+            fid_path=str(data.get("fid_path", "")),
+            spectrum_path=str(data.get("spectrum_path", "")),
+            checksums={str(k): str(v) for k, v in (data.get("checksums") or {}).items()},
+            migrated_from_1_1=bool(data.get("migrated_from_1_1", False)),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "source": self.source,
+            "raw_dir": self.raw_dir,
+            "segments": list(self.segments),
+            "status": self.status,
+            "imported_at": self.imported_at,
+            "metadata_path": self.metadata_path,
+            "fid_path": self.fid_path,
+            "spectrum_path": self.spectrum_path,
+            "checksums": dict(self.checksums),
+            "migrated_from_1_1": self.migrated_from_1_1,
+        }
+
+
+@dataclass
 class ExperimentEntry:
-    """一次 Bruker 采集(数据集)的项目内登记;source 为原始目录路径。"""
+    """实验(可空白创建);数据经 data 列表挂载(schema 1.2)。"""
 
     id: str
     title: str = ""
-    source: str = ""
     status: str = ExperimentStatus.REGISTERED.value
-    metadata: dict[str, Any] = field(default_factory=dict)
-    imported_at: str = ""
-    notes: str = ""
     sample_id: str = ""
-    segments: list[str] = field(default_factory=list)
+    notes: str = ""
+    data: list[DataEntry] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
+    created_at: str = ""
+
+    # ---- schema 1.1 兼容只读属性(指向 data[0]) -------------------------
+    @property
+    def source(self) -> str:
+        """旧字段兼容:首个数据目录(项目内副本优先)。"""
+        if not self.data:
+            return ""
+        first = self.data[0]
+        return first.raw_dir or first.source
+
+    @property
+    def segments(self) -> list[str]:
+        """旧字段兼容:首个数据的段列表。"""
+        return list(self.data[0].segments) if self.data else []
+
+    @property
+    def imported_at(self) -> str:
+        """旧字段兼容:首个数据的导入时间。"""
+        return self.data[0].imported_at if self.data else ""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ExperimentEntry:
+        exp_id = str(data.get("id", ""))
+        entries = [DataEntry.from_dict(d) for d in (data.get("data") or [])]
+        # schema 1.0/1.1 迁移:旧顶层 source/segments/imported_at → data[0]
+        if not entries and (
+            data.get("source") or data.get("segments") or data.get("imported_at")
+        ):
+            entries = [
+                DataEntry(
+                    id="d_001",
+                    source=str(data.get("source", "")),
+                    segments=[str(s) for s in (data.get("segments") or [])],
+                    status="imported",
+                    imported_at=str(data.get("imported_at", "")),
+                    metadata_path=f"{exp_id}.json",  # 旧命名 metadata/<exp_id>.json
+                    migrated_from_1_1=True,
+                )
+            ]
         return cls(
-            id=str(data.get("id", "")),
+            id=exp_id,
             title=str(data.get("title", "")),
-            source=str(data.get("source", "")),
             status=str(data.get("status", ExperimentStatus.REGISTERED.value)),
-            metadata=dict(data.get("metadata") or {}),
-            imported_at=str(data.get("imported_at", "")),
-            notes=str(data.get("notes", "")),
             sample_id=str(data.get("sample_id", "")),
-            segments=[str(s) for s in (data.get("segments") or [])],
+            notes=str(data.get("notes", "")),
+            data=entries,
+            metadata=dict(data.get("metadata") or {}),
+            created_at=str(data.get("created_at", "") or data.get("imported_at", "")),
         )
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "title": self.title,
-            "source": self.source,
             "status": self.status,
-            "metadata": self.metadata,
-            "imported_at": self.imported_at,
-            "notes": self.notes,
             "sample_id": self.sample_id,
-            "segments": list(self.segments),
+            "notes": self.notes,
+            "data": [d.to_dict() for d in self.data],
+            "metadata": self.metadata,
+            "created_at": self.created_at,
         }
 
 
 @dataclass
 class SampleEntry:
-    """样本(schema 1.1):S001 自动编号,可被实验引用。"""
+    """样本(S001 自动编号,可被实验引用)。"""
 
     sample_id: str
     name: str = ""

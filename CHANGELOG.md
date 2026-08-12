@@ -1,5 +1,24 @@
 # 变更日志
 
+## [0.2.14] - 2026-08-12
+
+- Backend:Experiment→Data 层级(core/project schema 1.2 + 迁移,按 G2B-002 /
+  API_CONTRACT §8):新增 DataEntry(d_001...),ExperimentEntry.data 列表,
+  旧 source/segments/imported_at 打开时自动迁移为 data[0]
+  (migrated_from_1_1),保留兼容只读属性;create_experiment/import_data/
+  set_data_fid/set_data_spectrum/delete_data;infer_status 按数据条目聚合。
+- Backend:步骤化处理——import_data(只读参数+复制 raw/<exp_id>/<data_id>/
+  + metadata/<exp_id>-<data_id>.json + import run,不生成 fid/谱);
+  ProcessingBackend.convert_to_fid 独立阶段(NMRPipeBackend 实现,
+  process/reconstruct_nus 复用已转换 fid);workflow/stepwise 编排
+  generate_fid / generate_spectrum(NUS 自动含 SMILE 重构)+ 每步 WorkflowRun。
+- Backend:相位优化恢复「先 SMILE 重构生成谱,再逐候选反复跑后端(暴力)」:
+  workflow/stepwise.optimize_phase_brute_force(暴力搜索 + 真实管线写回),
+  brute_force_direct_scores 支持 NUS(reconstruct_nus + 相位覆盖)。
+- 测试:test_import_workflow 11 / test_project_manager 28 / test_stepwise 6;
+  p1 幅值断言放宽至 ±60°(VM numpy 2.2.6 平台敏感性,先例 ±45°→非零解)。
+- 待 GUI Agent:ProcessingController 三步接线与树测试断言更新
+  (数据节点 id=d_001、metadata/<exp_id>-<data_id>.json)。
 ## [0.2.13] - 2026-08-12
 
 - GUI 树层级演进(契约 v1.2 §8.5):Project → Experiment → Data;

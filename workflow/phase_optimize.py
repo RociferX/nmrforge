@@ -557,15 +557,17 @@ def brute_force_direct_scores(
     direct_axis = "F2" if experiment.ndim == 2 else "F3"
     results: list[CandidateScore] = []
     for params in candidates:
-        override = {
-            direct_axis: (
-                float(params.get("p0", 0.0)),
-                float(params.get("p1", 0.0)),
+        p0 = float(params.get("p0", 0.0))
+        p1 = float(params.get("p1", 0.0))
+        if experiment.sampling.mode is SamplingMode.NUS:
+            resp = backend.reconstruct_nus(
+                experiment, {"direct_phase_override": (p0, p1)}
             )
-        }
-        resp = backend.process(
-            experiment, select_method(experiment), direct_phase_override=override
-        )
+        else:
+            override = {direct_axis: (p0, p1)}
+            resp = backend.process(
+                experiment, select_method(experiment), direct_phase_override=override
+            )
         if not resp.get("success"):
             results.append(
                 CandidateScore(

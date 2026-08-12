@@ -1,12 +1,9 @@
-"""导入工作流:把 Bruker 数据集导入项目。
+"""导入工作流:把 Bruker 数据集导入项目(步骤化流程第 1 步)。
 
-流程(与 docs/PROJECT_STATUS.md「未完成/待办」的导入工作流对应):
-校验 Bruker 数据集 → 登记实验 → raw/<exp_id>/ 复制(可跳过)
-→ SHA-256 指纹 → metadata/<exp_id>.json 落盘 → WorkflowRun(import) 登记。
-
-导入完成后 ExperimentEntry.source 指向项目内 raw 副本,后续自动化处理
-(AutoProcessor)直接读取本地副本;metadata/<id>.json 同时作为状态机
-registered → imported 的落盘依据(core/project.infer_status)。
+流程(API_CONTRACT §8 / G2B-002):只读实验参数 + 复制必要文件到
+raw/<exp_id>/<data_id>/ → SHA-256 指纹 → metadata/<exp_id>-<data_id>.json
+→ WorkflowRun(import) 登记。不生成 FID、不生成谱(第 2/3 步分别由
+convert_to_fid 与 process/reconstruct_nus 完成)。
 """
 
 from __future__ import annotations
@@ -45,6 +42,7 @@ class ImportResult:
     file_count: int
     total_bytes: int
     warnings: list[str] = field(default_factory=list)
+    data_id: str = ""  # schema 1.2:数据条目 d_001
 
 
 def _dataset_summary(experiment: Experiment) -> dict[str, Any]:
@@ -110,22 +108,20 @@ def _validate_dataset_dir(path: Path) -> None:
         raise ImportWorkflowError(f"不是 Bruker 数据集目录(缺少 acqus): {path}")
 
 
-def import_bruker_dataset(
+def import_data(
     manager: ProjectManager,
+    exp_id: str,
     source: Path | str,
     *,
-    title: str = "",
-    sample_id: str = "",
     segments: list[Path | str] | None = None,
     copy: bool = True,
 ) -> ImportResult:
-    """把 Bruker 数据集导入已加载的项目并登记 import WorkflowRun。
+    """导入数据到实验:只读参数 + 复制 raw/<exp_id>/<data_id>/ + metadata + import run。
 
-    返回 ImportResult;调用方需自行 manager.save() 持久化 project.json。
-    source 已在项目内时自动跳过复制(引用原路径,避免自身递归复制)。
+    不生成 FID、不生成谱;调用方需自行 manager.save()。
     """
     if manager.project is None or manager.root is None:
-        raise ImportWorkflowError("未加载项目,无法导入实验")
+        raise ImportWorkflowError("未加载项目,无法导入数据")
     src = Path(source).resolve()
     _validate_dataset_dir(src)
     segment_paths = [Path(seg).resolve() for seg in (segments or [])]
@@ -141,23 +137,18 @@ def import_bruker_dataset(
         warnings.append(f"源目录已在项目内,跳过复制(引用原路径): {src}")
         should_copy = False
 
-    entry = manager.add_experiment(
-        source=str(src),
-        title=title,
-        sample_id=sample_id,
-        segments=[str(seg) for seg in segment_paths] or None,
-    )
-    exp_id = entry.id
+    data_entry = manager.import_data(exp_id, str(src), segments=segment_paths)
+    data_id = data_entry.id
 
     run: WorkflowRun | None = None
     copied_dir: Path | None = None
-    metadata_path = manager.dir_path("metadata") / f"{exp_id}.json"
+    metadata_path = manager.dir_path("metadata") / f"{exp_id}-{data_id}.json"
     try:
         effective_root = src
         if should_copy:
-            copied_dir = manager.dir_path("raw") / exp_id
+            copied_dir = manager.dir_path("raw") / exp_id / data_id
             shutil.copytree(src, copied_dir)
-            entry.source = str(copied_dir)
+            data_entry.raw_dir = str(copied_dir)
             if segment_paths:
                 seg_base = copied_dir / "segments"
                 seg_base.mkdir()
@@ -166,11 +157,12 @@ def import_bruker_dataset(
                     dest = seg_base / f"{index:02d}"
                     shutil.copytree(seg, dest)
                     copied_segments.append(str(dest))
-                entry.segments = copied_segments
+                data_entry.segments = copied_segments
             effective_root = copied_dir
 
         checksums = _key_checksums(effective_root)
         manifest_checksums, file_count, total_bytes = _manifest(effective_root)
+        data_entry.checksums = checksums
 
         inputs = {"source_path": str(src)}
         inputs.update(
@@ -182,7 +174,8 @@ def import_bruker_dataset(
             inputs=inputs,
             params={
                 "copy": should_copy,
-                "segments": [str(seg) for seg in segment_paths],
+                "data_id": data_id,
+                "segments": [str(seg) for seg in data_entry.segments],
                 "file_count": file_count,
                 "total_bytes": total_bytes,
             },
@@ -191,17 +184,16 @@ def import_bruker_dataset(
         metadata = {
             "schema_version": METADATA_SCHEMA_VERSION,
             "experiment_id": exp_id,
-            "title": title,
-            "sample_id": sample_id,
+            "data_id": data_id,
             "source_path": str(src),
             "copied_to": (
                 copied_dir.relative_to(manager.root).as_posix()
                 if copied_dir is not None
                 else None
             ),
-            "imported_at": entry.imported_at,
+            "imported_at": data_entry.imported_at,
             "dataset": _dataset_summary(experiment),
-            "segments": [str(seg) for seg in entry.segments],
+            "segments": [str(seg) for seg in data_entry.segments],
             "manifest": {
                 "file_count": file_count,
                 "total_bytes": total_bytes,
@@ -210,6 +202,7 @@ def import_bruker_dataset(
             "workflow_run_id": run.run_id,
         }
         atomic_write_json(metadata_path, metadata)
+        data_entry.metadata_path = metadata_path.relative_to(manager.root).as_posix()
 
         outputs = {"metadata": metadata_path.relative_to(manager.root).as_posix()}
         if copied_dir is not None:
@@ -227,8 +220,10 @@ def import_bruker_dataset(
             shutil.rmtree(copied_dir)
         if metadata_path.is_file():
             metadata_path.unlink()
-        if manager.project is not None and entry in manager.project.experiments:
-            manager.project.experiments.remove(entry)
+        if manager.project is not None:
+            entry = manager.project.experiment(exp_id)
+            if entry is not None and data_entry in entry.data:
+                entry.data.remove(data_entry)
         raise
 
     return ImportResult(
@@ -241,7 +236,36 @@ def import_bruker_dataset(
         file_count=file_count,
         total_bytes=total_bytes,
         warnings=warnings,
+        data_id=data_id,
     )
+
+
+def import_bruker_dataset(
+    manager: ProjectManager,
+    source: Path | str,
+    *,
+    title: str = "",
+    sample_id: str = "",
+    segments: list[Path | str] | None = None,
+    copy: bool = True,
+) -> ImportResult:
+    """便捷入口(向后兼容):创建实验并导入第一个数据。
+
+    等价 create_experiment + import_data;失败时移除空白实验。
+    """
+    if manager.project is None:
+        raise ImportWorkflowError("未加载项目,无法导入实验")
+    entry = manager.create_experiment(title=title, sample_id=sample_id)
+    try:
+        return import_data(manager, entry.id, source, segments=segments, copy=copy)
+    except Exception:
+        if (
+            manager.project is not None
+            and entry in manager.project.experiments
+            and not entry.data
+        ):
+            manager.project.experiments.remove(entry)
+        raise
 
 
 __all__ = [
@@ -249,4 +273,5 @@ __all__ = [
     "ImportResult",
     "ImportWorkflowError",
     "import_bruker_dataset",
+    "import_data",
 ]

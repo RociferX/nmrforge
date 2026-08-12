@@ -28,7 +28,7 @@ def test_create_project_layout(tmp_path: Path) -> None:
     project_file = root / "project.json"
     assert project_file.is_file()
     data = json.loads(project_file.read_text(encoding="utf-8"))
-    assert data["schema_version"] == "1.1"
+    assert data["schema_version"] == "1.2"
     assert data["name"] == "demo"
     assert data["protein"]["name"] == "GB1"
     assert data["created"] == data["updated"]
@@ -95,8 +95,12 @@ def test_experiment_crud_and_sequencing(tmp_path: Path) -> None:
     assert manager.project.experiment("exp_002").notes == "骨架实验"
     # 审计历史只追加
     actions = [h.action for h in manager.project.processing_history]
-    assert actions == ["project_created", "experiment_added", "experiment_added",
-                       "experiment_renamed", "experiment_notes"]
+    assert actions == [
+        "project_created",
+        "experiment_created", "data_imported",
+        "experiment_created", "data_imported",
+        "experiment_renamed", "experiment_notes",
+    ]
 
 
 def test_add_experiment_unknown_sample_raises(tmp_path: Path) -> None:
@@ -302,3 +306,135 @@ def test_workflow_run_model_roundtrip() -> None:
     )
     restored = WorkflowRun.from_dict(run.to_dict())
     assert restored == run
+
+
+
+def test_data_entry_roundtrip() -> None:
+    from core.project import DataEntry
+
+    data = DataEntry(
+        id="d_001",
+        source="/sampleD",
+        raw_dir="raw/exp_001/d_001",
+        segments=["/sampleE"],
+        status="processed",
+        metadata_path="metadata/exp_001-d_001.json",
+        fid_path="processing/exp_001/d_001/exp_001.fid",
+        spectrum_path="spectra/exp_001-d_001.ft2",
+        checksums={"acqus": "abc"},
+    )
+    restored = DataEntry.from_dict(data.to_dict())
+    assert restored == data
+
+
+def test_create_experiment_blank_and_import_data(tmp_path: Path) -> None:
+    manager = ProjectManager.create_project(tmp_path / "proj", "demo")
+    entry = manager.create_experiment(title="空白")
+    assert entry.status == ExperimentStatus.REGISTERED.value
+    assert entry.data == []
+
+    d1 = manager.import_data(entry.id, "/sampleD")
+    d2 = manager.import_data(entry.id, "/sampleE", segments=["/sampleF"])
+    assert d1.id == "d_001"
+    assert d2.id == "d_002"
+    assert entry.status == ExperimentStatus.IMPORTED.value
+    assert entry.source == "/sampleD"  # 兼容属性 = data[0].source
+    assert entry.imported_at == d1.imported_at
+    with pytest.raises(ProjectError, match="数据不存在"):
+        manager.data(entry.id, "d_999")
+
+
+def test_set_data_fid_and_spectrum(tmp_path: Path) -> None:
+    manager = ProjectManager.create_project(tmp_path / "proj", "demo")
+    entry = manager.create_experiment()
+    data = manager.import_data(entry.id, "/sampleD")
+    manager.set_data_fid(entry.id, data.id, "processing/exp_001/d_001/exp_001.fid")
+    assert data.status == "fid_ready"
+    assert data.fid_path.endswith(".fid")
+    manager.set_data_spectrum(entry.id, data.id, "spectra/exp_001-d_001.ft2")
+    assert data.status == "processed"
+    assert data.spectrum_path.endswith(".ft2")
+    actions = [h.action for h in manager.project.processing_history]
+    assert "data_fid" in actions and "data_spectrum" in actions
+
+
+def test_delete_data_removes_artifacts(tmp_path: Path) -> None:
+    manager = ProjectManager.create_project(tmp_path / "proj", "demo")
+    entry = manager.create_experiment()
+    data = manager.import_data(entry.id, "/sampleD")
+    raw = manager.dir_path("raw") / entry.id / data.id
+    raw.mkdir(parents=True)
+    (raw / "acqus").write_text("x", encoding="utf-8")
+    (manager.dir_path("metadata") / f"{entry.id}-{data.id}.json").write_text(
+        "{}", encoding="utf-8"
+    )
+    (manager.dir_path("spectra") / f"{entry.id}-{data.id}.ft2").write_bytes(b"x")
+
+    manager.delete_data(entry.id, data.id)
+    assert entry.data == []
+    assert entry.status == ExperimentStatus.REGISTERED.value
+    assert not raw.exists()
+    assert not (manager.dir_path("spectra") / f"{entry.id}-{data.id}.ft2").exists()
+    assert any(h.action == "data_deleted" for h in manager.project.processing_history)
+
+
+def test_schema_1_1_migration_to_1_2(tmp_path: Path) -> None:
+    """旧 project.json(source/segments 顶层)→ schema 1.2 的 data[0] 迁移。"""
+    root = tmp_path / "proj"
+    ProjectManager.create_project(root, "demo")
+    manager = ProjectManager.open_project(root)
+    entry = manager.add_experiment("/old/sampleD", title="旧实验")
+    entry.data[0].metadata_path = "exp_001.json"
+    manager.save()
+    # 手工改写为 schema 1.1 旧结构
+    import json
+
+    path = root / "project.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    old_entry = data["experiments"][0]
+    old_entry["source"] = "/old/sampleD"
+    old_entry["segments"] = ["/old/sampleE"]
+    old_entry["imported_at"] = "2026-01-01T00:00:00+00:00"
+    old_entry.pop("data")
+    old_entry.pop("created_at")
+    data["schema_version"] = "1.1"
+    path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+    migrated = ProjectManager.open_project(root)
+    assert migrated.project is not None
+    assert migrated.project.schema_version == "1.2"
+    migrated_entry = migrated.project.experiment("exp_001")
+    assert migrated_entry is not None
+    assert len(migrated_entry.data) == 1
+    migrated_data = migrated_entry.data[0]
+    assert migrated_data.id == "d_001"
+    assert migrated_data.source == "/old/sampleD"
+    assert migrated_data.segments == ["/old/sampleE"]
+    assert migrated_data.imported_at == "2026-01-01T00:00:00+00:00"
+    assert migrated_data.migrated_from_1_1 is True
+    assert migrated_entry.source == "/old/sampleD"  # 兼容属性
+    assert any(h.action == "project_migrated" for h in migrated.project.processing_history)
+    # 保存后仍为 1.2
+    migrated.save()
+    reopened = ProjectManager.open_project(root)
+    assert reopened.project.schema_version == "1.2"
+    assert reopened.project.experiment("exp_001").data[0].id == "d_001"
+
+
+def test_infer_status_aggregates_data(tmp_path: Path) -> None:
+    manager = ProjectManager.create_project(tmp_path / "proj", "demo")
+    entry = manager.create_experiment()
+    assert manager.infer_status(entry.id) is ExperimentStatus.REGISTERED
+    data = manager.import_data(entry.id, "/sampleD")
+    (manager.dir_path("metadata") / f"{entry.id}-{data.id}.json").write_text(
+        "{}", encoding="utf-8"
+    )
+    assert manager.infer_status(entry.id) is ExperimentStatus.IMPORTED
+    (manager.dir_path("spectra") / f"{entry.id}-{data.id}.ft2").write_bytes(b"x")
+    assert manager.infer_status(entry.id) is ExperimentStatus.PROCESSED
+    (manager.dir_path("peaks") / f"{entry.id}-{data.id}.csv").write_text("", encoding="utf-8")
+    assert manager.infer_status(entry.id) is ExperimentStatus.PICKED
+    (manager.dir_path("report") / f"{entry.id}-{data.id}.json").write_text(
+        "{}", encoding="utf-8"
+    )
+    assert manager.infer_status(entry.id) is ExperimentStatus.ANALYZED

@@ -1,4 +1,4 @@
-"""导入工作流测试:raw 复制 + SHA-256 + metadata/<id>.json + WorkflowRun 登记。"""
+"""导入工作流测试:Data 层级(raw 复制 + SHA-256 + metadata + WorkflowRun 登记)。"""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ from workflow.import_workflow import (
     IMPORT_WORKFLOW_REF,
     ImportWorkflowError,
     import_bruker_dataset,
+    import_data,
 )
 
 
@@ -26,28 +27,35 @@ def test_import_copies_and_registers(tmp_path: Path, bruker_dir: Path) -> None:
     result = import_bruker_dataset(manager, _source(bruker_dir), title="HSQC")
 
     assert result.experiment_id == "exp_001"
+    assert result.data_id == "d_001"
     assert result.run_id.startswith("R-")
     assert result.warnings == []
     assert manager.project is not None
 
     entry = manager.project.experiment("exp_001")
     assert entry is not None
-    raw_dir = manager.dir_path("raw") / "exp_001"
-    assert entry.source == str(raw_dir)
+    assert len(entry.data) == 1
+    data = entry.data[0]
+    raw_dir = manager.dir_path("raw") / "exp_001" / "d_001"
+    assert data.raw_dir == str(raw_dir)
+    assert data.source == str(_source(bruker_dir))
     assert (raw_dir / "acqus").is_file()
     assert (raw_dir / "acqu2s").is_file()
+    # 兼容只读属性指向 data[0]
+    assert entry.source == str(raw_dir)
 
-    # metadata 落盘
-    metadata_path = manager.dir_path("metadata") / "exp_001.json"
+    # metadata 落盘(新命名)
+    metadata_path = manager.dir_path("metadata") / "exp_001-d_001.json"
     assert metadata_path.is_file()
-    data = json.loads(metadata_path.read_text(encoding="utf-8"))
-    assert data["schema_version"] == "1.0"
-    assert data["experiment_id"] == "exp_001"
-    assert data["dataset"]["ndim"] == 2
-    assert data["copied_to"] == "raw/exp_001"
-    assert data["workflow_run_id"] == result.run_id
-    assert "acqus" in data["manifest"]["checksums"]
-    assert data["manifest"]["file_count"] == 2
+    meta = json.loads(metadata_path.read_text(encoding="utf-8"))
+    assert meta["schema_version"] == "1.0"
+    assert meta["experiment_id"] == "exp_001"
+    assert meta["data_id"] == "d_001"
+    assert meta["dataset"]["ndim"] == 2
+    assert meta["copied_to"] == "raw/exp_001/d_001"
+    assert meta["workflow_run_id"] == result.run_id
+    assert "acqus" in meta["manifest"]["checksums"]
+    assert meta["manifest"]["file_count"] == 2
 
     # WorkflowRun 登记
     run = manager.project.run(result.run_id)
@@ -56,8 +64,8 @@ def test_import_copies_and_registers(tmp_path: Path, bruker_dir: Path) -> None:
     assert run.status == "success"
     assert run.inputs["sha256:acqus"] == sha256_file(raw_dir / "acqus")
     assert run.inputs["source_path"] == str(_source(bruker_dir))
-    assert run.outputs["raw_dir"] == "raw/exp_001"
-    assert run.outputs["metadata"] == "metadata/exp_001.json"
+    assert run.outputs["raw_dir"] == "raw/exp_001/d_001"
+    assert run.outputs["metadata"] == "metadata/exp_001-d_001.json"
 
     # 状态机推进到 imported
     assert manager.infer_status("exp_001") is ExperimentStatus.IMPORTED
@@ -66,8 +74,29 @@ def test_import_copies_and_registers(tmp_path: Path, bruker_dir: Path) -> None:
     manager.save()
     reopened = ProjectManager.open_project(tmp_path / "proj")
     assert reopened.project is not None
-    assert reopened.project.experiment("exp_001") is not None
+    assert reopened.project.experiment("exp_001").data[0].id == "d_001"
     assert reopened.project.run(result.run_id) is not None
+
+
+def test_import_data_into_existing_experiment(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    manager = ProjectManager.create_project(tmp_path / "proj", "demo")
+    entry = manager.create_experiment(title="骨架")
+    assert entry.status == ExperimentStatus.REGISTERED.value
+    assert entry.data == []
+
+    first = import_data(manager, entry.id, _source(bruker_dir))
+    second = import_data(manager, entry.id, bruker_dir / "nus_2d")
+    assert first.data_id == "d_001"
+    assert second.data_id == "d_002"
+    assert [d.id for d in entry.data] == ["d_001", "d_002"]
+    assert entry.status == ExperimentStatus.IMPORTED.value
+    assert (manager.dir_path("raw") / entry.id / "d_001").is_dir()
+    assert (manager.dir_path("raw") / entry.id / "d_002").is_dir()
+    assert (
+        manager.dir_path("metadata") / f"{entry.id}-d_002.json"
+    ).is_file()
 
 
 def test_import_requires_loaded_project(tmp_path: Path, bruker_dir: Path) -> None:
@@ -93,8 +122,10 @@ def test_import_no_copy_references_source(tmp_path: Path, bruker_dir: Path) -> N
     assert manager.project is not None
     entry = manager.project.experiment("exp_001")
     assert entry is not None
-    assert entry.source == str(_source(bruker_dir))
-    assert not (manager.dir_path("raw") / "exp_001").exists()
+    data = entry.data[0]
+    assert data.raw_dir == ""
+    assert data.source == str(_source(bruker_dir))
+    assert not (manager.dir_path("raw") / "exp_001" / "d_001").exists()
     assert result.raw_dir is None
     metadata = json.loads(result.metadata_path.read_text(encoding="utf-8"))
     assert metadata["copied_to"] is None
@@ -102,7 +133,9 @@ def test_import_no_copy_references_source(tmp_path: Path, bruker_dir: Path) -> N
     assert manager.project.run(result.run_id).status == "success"
 
 
-def test_import_source_inside_project_skips_copy(tmp_path: Path, bruker_dir: Path) -> None:
+def test_import_source_inside_project_skips_copy(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     in_project_src = tmp_path / "proj" / "data_src"
     shutil.copytree(_source(bruker_dir), in_project_src)
@@ -111,8 +144,8 @@ def test_import_source_inside_project_skips_copy(tmp_path: Path, bruker_dir: Pat
     assert manager.project is not None
     entry = manager.project.experiment("exp_001")
     assert entry is not None
-    assert entry.source == str(in_project_src)
-    assert not (manager.dir_path("raw") / "exp_001").exists()
+    assert entry.data[0].raw_dir == ""
+    assert not (manager.dir_path("raw") / "exp_001" / "d_001").exists()
     assert any("跳过复制" in w for w in result.warnings)
     assert manager.project.run(result.run_id).status == "success"
 
@@ -126,10 +159,10 @@ def test_import_segments_are_copied(tmp_path: Path, bruker_dir: Path) -> None:
     assert manager.project is not None
     entry = manager.project.experiment("exp_001")
     assert entry is not None
-    seg_dir = manager.dir_path("raw") / "exp_001" / "segments" / "01"
+    seg_dir = manager.dir_path("raw") / "exp_001" / "d_001" / "segments" / "01"
     assert seg_dir.is_dir()
     assert (seg_dir / "acqus").is_file()
-    assert entry.segments == [str(seg_dir)]
+    assert entry.data[0].segments == [str(seg_dir)]
     metadata = json.loads(result.metadata_path.read_text(encoding="utf-8"))
     assert metadata["segments"] == [str(seg_dir)]
 
@@ -149,12 +182,31 @@ def test_import_failure_rolls_back(
         import_bruker_dataset(manager, _source(bruker_dir))
 
     assert manager.project is not None
-    assert manager.project.experiments == []  # 登记回滚
-    assert not (manager.dir_path("raw") / "exp_001").exists()
-    assert not (manager.dir_path("metadata") / "exp_001.json").exists()
+    assert manager.project.experiments == []  # 便捷入口回滚空白实验
+    assert not (manager.dir_path("raw") / "exp_001" / "d_001").exists()
+    assert not (manager.dir_path("metadata") / "exp_001-d_001.json").exists()
     # 审计保留失败的 run
     assert len(manager.project.workflow_runs) == 1
     assert manager.project.workflow_runs[0].status == "failed"
+
+
+def test_import_data_failure_keeps_experiment(
+    tmp_path: Path, bruker_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """import_data 失败只回滚数据条目,不清除空白实验。"""
+    manager = ProjectManager.create_project(tmp_path / "proj", "demo")
+    entry = manager.create_experiment(title="保留")
+
+    def _boom(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("metadata 写盘失败")
+
+    monkeypatch.setattr(
+        "workflow.import_workflow.atomic_write_json", _boom
+    )
+    with pytest.raises(RuntimeError, match="写盘失败"):
+        import_data(manager, entry.id, _source(bruker_dir))
+    assert manager.project.experiment(entry.id) is entry
+    assert entry.data == []
 
 
 def test_import_twice_creates_separate_entries(
@@ -167,8 +219,8 @@ def test_import_twice_creates_separate_entries(
     assert second.experiment_id == "exp_002"
     assert first.run_id != second.run_id
     assert manager.project is not None
-    assert (manager.dir_path("raw") / "exp_001").is_dir()
-    assert (manager.dir_path("raw") / "exp_002").is_dir()
+    assert (manager.dir_path("raw") / "exp_001" / "d_001").is_dir()
+    assert (manager.dir_path("raw") / "exp_002" / "d_001").is_dir()
 
 
 def test_nus_import_records_nuslist_checksum(

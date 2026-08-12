@@ -105,14 +105,27 @@ class NMRPipeBackend:
         work.mkdir(parents=True, exist_ok=True)
         logs: list[str] = []
 
+        converted = True
         if experiment.segments:
-            converted, convert_logs = self._convert_segments(runtime, experiment, work, [])
-            logs += convert_logs
+            merged_ready = (
+                (work / "merged" / "fid").is_dir()
+                and list((work / "merged" / "fid").glob("test*.fid"))
+            )
             in_file = "merged/fid/test%03d.fid"
+            if merged_ready:
+                logs.append("复用已转换 fid(跳过转换)")
+            else:
+                converted, convert_logs = self._convert_segments(
+                    runtime, experiment, work, []
+                )
+                logs += convert_logs
         else:
-            converted, convert_logs = self._convert(runtime, experiment, raw, work)
-            logs += convert_logs
             in_file = f"{experiment.dataset_id}.fid"
+            if (work / in_file).is_file():
+                logs.append("复用已转换 fid(跳过转换)")
+            else:
+                converted, convert_logs = self._convert(runtime, experiment, raw, work)
+                logs += convert_logs
         if not converted:
             return {"success": False, "message": "Bruker→NMRPipe 转换失败", "logs": logs}
         direct_phase: dict[str, tuple[float, float]] | None = None
@@ -143,6 +156,50 @@ class NMRPipeBackend:
             "success": True,
             "message": "NMRPipe 处理成功",
             "spectrum_path": str(spectrum),
+            "logs": logs,
+        }
+
+    def convert_to_fid(
+        self, experiment: Experiment, data_dir: Path | str
+    ) -> dict[str, Any]:
+        """独立阶段:bruker -AUTO/fid.com 把原始数据转换为 NMRPipe fid(不生成谱)。
+
+        返回稳定键 {success, fid_path, message, logs}(API_CONTRACT §8.3);
+        供步骤化流程「生成 FID」调用,process/reconstruct_nus 会复用其结果。
+        """
+        bin_dir = self._bin_dir()
+        if bin_dir is None:
+            return {
+                "success": False,
+                "message": "未找到 nmrPipe（csh: which nmrPipe）",
+                "logs": [],
+            }
+        runtime = CshRuntime()
+        raw = Path(data_dir)
+        work = self._work_path(experiment)
+        work.mkdir(parents=True, exist_ok=True)
+        logs: list[str] = []
+        if experiment.segments:
+            converted, convert_logs = self._convert_segments(
+                runtime, experiment, work, []
+            )
+            logs += convert_logs
+            fid_path = work / "merged" / "fid"
+        else:
+            converted, convert_logs = self._convert(runtime, experiment, raw, work)
+            logs += convert_logs
+            fid_path = work / f"{experiment.dataset_id}.fid"
+        if not converted:
+            return {
+                "success": False,
+                "message": "Bruker→NMRPipe 转换失败",
+                "logs": logs,
+            }
+        logs.append(f"fid → {fid_path}")
+        return {
+            "success": True,
+            "fid_path": str(fid_path),
+            "message": "转换完成",
             "logs": logs,
         }
 
