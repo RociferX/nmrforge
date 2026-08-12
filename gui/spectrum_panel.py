@@ -70,9 +70,9 @@ class SpectrumPanel(QWidget):
         splitter = QSplitter(Qt.Orientation.Vertical)
         splitter.addWidget(self.viewer)
         splitter.addWidget(self.file_list)
-        toolbar_widget = QWidget()
-        toolbar_widget.setLayout(self.peak_toolbar)
-        splitter.addWidget(toolbar_widget)
+        self.peak_toolbar_widget = QWidget()
+        self.peak_toolbar_widget.setLayout(self.peak_toolbar)
+        splitter.addWidget(self.peak_toolbar_widget)
         splitter.addWidget(self.peak_table)
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 0)
@@ -94,12 +94,14 @@ class SpectrumPanel(QWidget):
         if self.manager.project is None or not self._current_exp_id:
             self.file_list.setVisible(False)
             self.peak_table.setVisible(False)
+            self.peak_toolbar_widget.setVisible(False)
             return
         paths = self._spectrum_paths()
         for path in paths:
             self.file_list.addItem(path.name)
         self.file_list.setVisible(bool(paths))
         self.peak_table.setVisible(bool(paths))
+        self.peak_toolbar_widget.setVisible(bool(paths))
         self.export_poky_button.setEnabled(False)
         if paths:
             first = paths[0]

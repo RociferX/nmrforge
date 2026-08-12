@@ -723,8 +723,8 @@ def test_spectrum_panel_vertical_layout(qapp: QApplication) -> None:
     assert panel.file_list.maximumWidth() > 1000  # 无横向宽度限制
     panel.close()
 
-def test_viewer_internal_vertical_layout(qapp: QApplication) -> None:
-    """SpectrumViewer 内部上下布局:plot 在上、控制面板在下。"""
+def test_viewer_internal_horizontal_layout(qapp: QApplication) -> None:
+    """SpectrumViewer 内部左右布局:plot 在左、控制面板在右。"""
     from PyQt6.QtCore import Qt
     from PyQt6.QtWidgets import QSplitter
 
@@ -742,9 +742,9 @@ def test_viewer_internal_vertical_layout(qapp: QApplication) -> None:
     walk(viewer)
     assert found, "SpectrumViewer 内应有 QSplitter"
     splitter = found[0]
-    assert splitter.orientation() == Qt.Orientation.Vertical
+    assert splitter.orientation() == Qt.Orientation.Horizontal
     assert splitter.count() == 2
-    assert splitter.widget(0) is viewer.plot  # 上方谱图
+    assert splitter.widget(0) is viewer.plot  # 左侧谱图
     viewer.close()
 
 def test_project_dashboard_stats_and_runs(
