@@ -13,8 +13,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, QUrl, pyqtSignal
-from PyQt6.QtGui import QDesktopServices
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QHeaderView,
     QMenu,
@@ -384,13 +383,11 @@ class ProjectTreePanel(QWidget):
                 menu.addSeparator()
                 menu.addAction("删除实验", lambda: self.delete_requested.emit(exp_id))
             elif kind == "data" and exp_id and data_id:
-                source = self._source_of(exp_id)
-                if source:
+                folder_path = self._folder_path_for_item(item)
+                if folder_path is not None:
                     menu.addAction(
                         "打开所在目录",
-                        lambda s=source: QDesktopServices.openUrl(
-                            QUrl.fromLocalFile(str(s))
-                        ),
+                        lambda p=folder_path: self.open_path_requested.emit(str(p)),
                     )
                 menu.addAction(
                     "重命名...",
@@ -405,9 +402,7 @@ class ProjectTreePanel(QWidget):
                 if folder_path is not None:
                     menu.addAction(
                         "打开所在目录",
-                        lambda p=folder_path: QDesktopServices.openUrl(
-                            QUrl.fromLocalFile(str(p))
-                        ),
+                        lambda p=folder_path: self.open_path_requested.emit(str(p)),
                     )
         return menu
 

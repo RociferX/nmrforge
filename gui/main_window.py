@@ -739,7 +739,7 @@ class MainWindow(QMainWindow):
     # 上下文联动
     # ------------------------------------------------------------------
     def _open_path(self, path: str) -> None:
-        """用系统文件管理器打开目录(双击 data/子文件夹)。"""
+        """用系统文件管理器打开目录(双击/右键 data/子文件夹),中间保持 Pipeline。"""
         from PyQt6.QtCore import QUrl
         from PyQt6.QtGui import QDesktopServices
 
@@ -747,6 +747,11 @@ class MainWindow(QMainWindow):
         if not target.is_dir():
             target.mkdir(parents=True, exist_ok=True)
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(target)))
+        # 保持中间 Pipeline 上下文(当前选中实验时切回数据页)
+        exp_id = self.project_tree.current_experiment_id()
+        data_id = self.project_tree._data_id_of(self.project_tree.tree.currentItem())
+        if exp_id:
+            self.center_panel.set_selection("data", exp_id, data_id or "")
         self.statusBar().showMessage(f"已打开: {target}")
 
     def _on_open_experiment(self, exp_id: str) -> None:

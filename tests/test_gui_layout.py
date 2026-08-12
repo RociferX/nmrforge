@@ -645,3 +645,35 @@ def test_double_click_folder_opens_folder_path(
     assert opened and Path(opened[0]) == spectra_dir
     assert window.center_panel.stack.currentIndex() == 3
     window.close()
+
+def test_right_click_open_path_emits_signal(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """右键「打开所在目录」:data/folder 节点发出 open_path_requested(与双击一致)。"""
+    from PyQt6.QtWidgets import QMenu
+
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    raw_dir = manager.data_dir("exp_001", "d_001", "raw")
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    spectra_dir = manager.data_dir("exp_001", "d_001", "spectra")
+    spectra_dir.mkdir(parents=True, exist_ok=True)
+    window = MainWindow(manager=manager)
+    tree = window.project_tree.tree
+    data_item = tree.topLevelItem(0).child(0).child(0).child(0)
+    folder_item = data_item.child(2)  # spectra
+    opened: list[str] = []
+    window.project_tree.open_path_requested.connect(lambda p: opened.append(p))
+
+    data_menu = window.project_tree._on_context_menu_impl(QMenu(), data_item)
+    data_acts = [a for a in data_menu.actions() if a.text() == "打开所在目录"]
+    assert len(data_acts) == 1
+    data_acts[0].trigger()
+    assert opened and Path(opened[0]) == raw_dir
+
+    folder_menu = window.project_tree._on_context_menu_impl(QMenu(), folder_item)
+    folder_acts = [a for a in folder_menu.actions() if a.text() == "打开所在目录"]
+    assert len(folder_acts) == 1
+    folder_acts[0].trigger()
+    assert len(opened) == 2 and Path(opened[1]) == spectra_dir
+    assert window.center_panel.stack.currentIndex() == 3  # Pipeline 页
+    window.close()
