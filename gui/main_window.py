@@ -73,6 +73,7 @@ class MainWindow(QMainWindow):
         self.workspace.ensure()
         self.import_failed.connect(self._on_import_failed)
         self.import_finished.connect(self._on_import_done)
+        self._pending_data_names: dict[str, str] = {}
         self.setWindowTitle("NMRForge")
         self.resize(1280, 780)
         self._build_menus()
@@ -133,9 +134,12 @@ class MainWindow(QMainWindow):
         help_menu.addAction("关于", self.about)
 
     def _build_central(self) -> None:
-        self.project_tree = ProjectTreePanel(self.manager)
+        self.project_tree = ProjectTreePanel(self.manager, workspace=self.workspace)
         self.project_tree.selection_changed.connect(self._update_context)
         self.project_tree.open_requested.connect(self._on_open_experiment)
+        self.project_tree.open_project_requested.connect(
+            lambda path: self._open_root(Path(path))
+        )
         self.project_tree.rename_requested.connect(self._rename_experiment_by_id)
         self.project_tree.delete_requested.connect(self._delete_experiment_by_id)
         self.project_tree.delete_project_requested.connect(self._delete_project)
@@ -144,6 +148,7 @@ class MainWindow(QMainWindow):
         )
         self.project_tree.import_data_requested.connect(self._import_data_for)
         self.project_tree.data_action_requested.connect(self._on_data_action)
+        self.project_tree.data_rename_requested.connect(self._rename_data)
 
         self.center_panel = CenterPanel(self.manager, self.controller)
         self.pipeline = self.center_panel.pipeline  # 兼容旧引用
@@ -317,8 +322,12 @@ class MainWindow(QMainWindow):
         )
         for warning in result.warnings:
             self._append_log(f"  提示: {warning}")
-        self.refresh()
         exp_id = getattr(result, "experiment_id", None) or result.get("experiment_id", "")
+        data_id = getattr(result, "data_id", "") or ""
+        name = self._pending_data_names.pop(exp_id, "") if exp_id else ""
+        if exp_id and data_id and name:
+            self.project_tree._data_titles[(exp_id, data_id)] = name
+        self.refresh()
         if exp_id:
             self.project_tree.select_experiment(exp_id)
         if result.warnings:
@@ -501,8 +510,11 @@ class MainWindow(QMainWindow):
         self.refresh()
         self.project_tree.select_experiment(entry.id)
 
-    def _import_data_with_options(self, exp_id: str, source: str, copy: bool) -> None:
-        """中间面板内嵌导入表单:按指定实验导入数据。"""
+    def _import_data_with_options(
+        self, exp_id: str, name: str, source: str, copy: bool
+    ) -> None:
+        """中间面板内嵌导入表单:按指定实验导入数据(可命名)。"""
+        self._pending_data_names[exp_id] = name
         self._import_experiment_async(
             {
                 "source": source,
@@ -512,6 +524,14 @@ class MainWindow(QMainWindow):
                 "experiment_id": exp_id,
             }
         )
+
+    def _rename_data(self, exp_id: str, data_id: str) -> None:
+        """数据右键重命名(名称保存在 GUI 树层)。"""
+        current = self.project_tree._data_titles.get((exp_id, data_id), "")
+        new_name, ok = QInputDialog.getText(self, "重命名数据", "数据名称:", text=current)
+        if ok:
+            self.project_tree._data_titles[(exp_id, data_id)] = new_name.strip()
+            self.project_tree.refresh()
 
     def _create_experiment_with_title(self, title: str) -> None:
         """中间面板内嵌表单:新建空白实验。"""

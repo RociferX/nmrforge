@@ -21,16 +21,48 @@ def qapp() -> QApplication:
     yield app
 
 
-def _build_manager(tmp_path: Path) -> ProjectManager:
-    manager = ProjectManager.create_project(tmp_path / "proj", "demo")
+def _build_manager(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch | None = None
+) -> ProjectManager:
+    ws = tmp_path / "ws"
+    ws.mkdir(exist_ok=True)
+    manager = ProjectManager.create_project(ws / "proj", "demo")
     manager.add_experiment("/sampleD", title="HSQC")
     manager.add_experiment("/sampleE", title="HNCACB")
     manager.save()
+    if monkeypatch is not None:
+        monkeypatch.setattr(
+            "gui.main_window.WorkspaceManager", lambda: _TempWorkspace(ws)
+        )
+        monkeypatch.setattr(
+            "core.workspace.WorkspaceManager", lambda *a, **k: _TempWorkspace(ws)
+        )
     return manager
 
 
-def test_window_shows_experiments_from_project(tmp_path: Path, qapp: QApplication) -> None:
-    manager = _build_manager(tmp_path)
+class _TempWorkspace:
+    def __init__(self, root) -> None:
+        self.root = Path(root)
+
+    def ensure(self) -> Path:
+        self.root.mkdir(parents=True, exist_ok=True)
+        return self.root
+
+    def list_projects(self) -> list[Path]:
+        return sorted(
+            p
+            for p in self.root.iterdir()
+            if p.is_dir() and (p / "project.json").is_file()
+        )
+
+    def create_project(self, name: str, **kwargs):
+        return ProjectManager.create_project(self.root / name, name, **kwargs)
+
+
+def test_window_shows_experiments_from_project(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manager = _build_manager(tmp_path, monkeypatch)
     window = MainWindow(manager=manager)
     assert window.experiment_tree.topLevelItemCount() == 2
     first = window.experiment_tree.topLevelItem(0)
@@ -112,7 +144,7 @@ def test_add_experiment_action(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """「添加实验」= 新建空白实验(不产生数据,不弹数据文件夹选择)。"""
-    manager = _build_manager(tmp_path)
+    manager = _build_manager(tmp_path, monkeypatch)
     monkeypatch.setattr(
         "gui.main_window.QInputDialog.getText",
         staticmethod(lambda *args, **kwargs: ("3D HNCACB", True)),
@@ -131,7 +163,7 @@ def test_add_experiment_action(
 def test_delete_experiment_action_keeps_audit(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    manager = _build_manager(tmp_path)
+    manager = _build_manager(tmp_path, monkeypatch)
     manager.start_run("exp_001", workflow_ref="hsqc_standard")
     monkeypatch.setattr(
         ConfirmDialog,
@@ -148,7 +180,8 @@ def test_delete_experiment_action_keeps_audit(
 
 
 def test_recent_menu_persists(tmp_path: Path, qapp: QApplication) -> None:
-    root = tmp_path / "proj"
+    root = tmp_path / "ws" / "proj"
+    (tmp_path / "ws").mkdir(exist_ok=True)
     ProjectManager.create_project(root, "demo")
     recent = __import__(
         "core.project.recent", fromlist=["JsonRecentProjectsStore"]
@@ -164,7 +197,15 @@ def test_import_workflow_e2e(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """端到端:真实 Bruker fixture 目录经 workflow.import_workflow.import_data 导入。"""
-    manager = ProjectManager.create_project(tmp_path / "proj", "demo")
+    ws = tmp_path / "ws"
+    ws.mkdir(exist_ok=True)
+    monkeypatch.setattr(
+        "gui.main_window.WorkspaceManager", lambda: _TempWorkspace(ws)
+    )
+    monkeypatch.setattr(
+        "core.workspace.WorkspaceManager", lambda *a, **k: _TempWorkspace(ws)
+    )
+    manager = ProjectManager.create_project(ws / "proj", "demo")
     dataset = tmp_path / "dataset"
     dataset.mkdir()
     (dataset / "acqus").write_text(

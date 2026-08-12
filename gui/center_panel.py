@@ -65,7 +65,7 @@ class _ProjectPage(QWidget):
 class _ExperimentPage(QWidget):
     """实验选中页:内嵌导入数据表单。"""
 
-    import_options_requested = pyqtSignal(str, str, bool)  # (exp_id, source, copy)
+    import_options_requested = pyqtSignal(str, str, str, bool)  # (exp_id, name, source, copy)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -79,6 +79,9 @@ class _ExperimentPage(QWidget):
         layout.addWidget(self.context_label)
         layout.addSpacing(12)
 
+        self.name_edit = QLineEdit()
+        self.name_edit.setPlaceholderText("数据名称(可选)")
+        layout.addWidget(self.name_edit)
         form = QHBoxLayout()
         self.source_edit = QLineEdit()
         self.source_edit.setPlaceholderText("Bruker 数据集目录(含 acqus)")
@@ -119,7 +122,7 @@ class _ExperimentPage(QWidget):
         if not source or not self._exp_id:
             return
         self.import_options_requested.emit(
-            self._exp_id, source, self.copy_check.isChecked()
+            self._exp_id, self.name_edit.text().strip(), source, self.copy_check.isChecked()
         )
 
 
@@ -129,7 +132,7 @@ class CenterPanel(QWidget):
     log_message = pyqtSignal(str)
     manual_open_requested = pyqtSignal(str)
     import_data_requested = pyqtSignal(str)  # exp_id(兼容:打开导入表单)
-    import_options_requested = pyqtSignal(str, str, bool)  # (exp_id, source, copy)
+    import_options_requested = pyqtSignal(str, str, str, bool)  # (exp_id, name, source, copy)
     create_experiment_requested = pyqtSignal(str)  # 实验标题
     new_project_requested = pyqtSignal(str)  # 项目名称
     open_project_requested = pyqtSignal(str)  # 项目路径
