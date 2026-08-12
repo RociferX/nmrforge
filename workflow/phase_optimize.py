@@ -721,3 +721,150 @@ def produce_phased_spectrum(
         return backend.reconstruct_nus(experiment, params)
     plan = select_method(experiment)
     return backend.process(experiment, plan, direct_phase_override=phases)
+
+
+
+def select_direct_phase_refined(
+    experiment: Experiment,
+    backend: Any,
+    center: dict[str, float],
+    *,
+    span: float = 60.0,
+    step: float = 30.0,
+    score_fn: Callable[[str], tuple[float, dict[str, float]]] | None = None,
+) -> CandidateScore:
+    """围绕中心相位做小邻域暴力细化(有界后端运行,选择与暴力搜索一致)。"""
+    p0 = float(center.get("p0", 0.0))
+    p1_center = float(center.get("p1", 0.0))
+    offsets = np.arange(-span, span + 1e-9, step)
+    candidates = direct_phase_candidates(
+        p1_values=tuple(p1_center + float(o) for o in offsets), p0=p0
+    )
+    scores = brute_force_direct_scores(
+        experiment, backend, candidates, score_fn=score_fn
+    )
+    valid = [c for c in scores if c.score > float("-inf")]
+    if not valid:
+        raise ValueError("邻域暴力细化全部失败")
+    return max(valid, key=lambda c: c.score)
+
+
+def decide_refinement(
+    report: EquivalenceReport,
+    refined: CandidateScore | None,
+    *,
+    min_correlation: float = 0.5,
+) -> tuple[dict[str, float], str]:
+    """验证门控决策:通过 -> 内存内最优;未通过 -> 邻域细化最优;无细化 -> 默认。"""
+    if report.top_match and report.correlation >= min_correlation:
+        return dict(report.best_in_memory), "validated"
+    if refined is not None:
+        return dict(refined.params), "refined"
+    return {"p0": 0.0, "p1": 0.0}, "default"
+
+
+@dataclass
+class PhaseSelectionResult:
+    """验证门控的自动相位选择结果。"""
+
+    phase: dict[str, float]
+    spectrum_path: str
+    method: str  # validated / refined / default
+    backend_runs: int
+    report: EquivalenceReport | None = None
+    logs: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "phase": dict(self.phase),
+            "spectrum_path": self.spectrum_path,
+            "method": self.method,
+            "backend_runs": self.backend_runs,
+            "report": self.report.to_dict() if self.report is not None else None,
+            "logs": list(self.logs),
+        }
+
+
+def optimize_direct_phase_guaranteed(
+    experiment: Experiment,
+    backend: Any,
+    candidates: list[dict[str, float]] | None = None,
+    *,
+    work_dir: Path | str | None = None,
+    min_correlation: float = 0.5,
+    refine_span: float = 60.0,
+    refine_step: float = 30.0,
+    score_fn: Callable[[str], tuple[float, dict[str, float]]] | None = None,
+) -> PhaseSelectionResult:
+    """验证门控的自动相位选择(准确性保证是前提)。
+
+    1) validate_direct_phase_equivalence:内存内筛选 vs 小网格暴力参考;
+    2) 通过 -> 采信内存内最优(method=validated);
+    3) 未通过 -> 围绕内存内最优做小邻域暴力细化(method=refined,
+       有界成本,选择与暴力搜索在该邻域一致);
+    4) 最终谱由真实管线产出(produce_phased_spectrum)。
+
+    无论哪条路径,最终谱都来自真实后端(process/reconstruct_nus),
+    能力与「反复跑后端」一致;内存内代理只用于缩小候选范围,
+    准确性由验证门槛与暴力细化兜底。当前仅支持 uniform(process)。
+    """
+    if experiment.sampling.mode is SamplingMode.NUS:
+        raise ValueError(
+            "自动相位门控选择当前仅支持 uniform(process);"
+            "NUS 需 reconstruct_nus 路径,待 VM 验证后支持"
+        )
+    candidates = candidates if candidates is not None else direct_phase_candidates()
+    work = Path(work_dir) if work_dir else default_work_dir(experiment, backend)
+    logs: list[str] = []
+
+    report = validate_direct_phase_equivalence(
+        experiment,
+        backend,
+        candidates,
+        work_dir=work,
+        min_correlation=min_correlation,
+        score_fn=score_fn,
+    )
+    logs.extend(report.logs)
+    backend_runs = report.backend_runs
+
+    refined: CandidateScore | None = None
+    if not (report.top_match and report.correlation >= min_correlation):
+        refined = select_direct_phase_refined(
+            experiment,
+            backend,
+            report.best_in_memory,
+            span=refine_span,
+            step=refine_step,
+            score_fn=score_fn,
+        )
+        n_refine = len(np.arange(-refine_span, refine_span + 1e-9, refine_step))
+        backend_runs += n_refine
+        logs.append(
+            f"等价性验证未通过(top_match={report.top_match}, "
+            f"corr={report.correlation:.2f}),邻域暴力细化 → "
+            f"{_phase_key(refined.params)} (score={refined.score:.1f})"
+        )
+
+    phase, method = decide_refinement(
+        report, refined, min_correlation=min_correlation
+    )
+    direct_axis = "F2" if experiment.ndim == 2 else "F3"
+    final_resp = produce_phased_spectrum(
+        experiment, backend, {direct_axis: (phase["p0"], phase["p1"])}
+    )
+    if not final_resp.get("success"):
+        raise ValueError(f"最终谱生产失败: {final_resp.get('message')}")
+    backend_runs += 1
+    logs.append(
+        f"最终谱(真实管线) → {final_resp.get('spectrum_path')} "
+        f"[method={method}]"
+    )
+    return PhaseSelectionResult(
+        phase=phase,
+        spectrum_path=str(final_resp.get("spectrum_path", "")),
+        method=method,
+        backend_runs=backend_runs,
+        report=report,
+        logs=logs,
+    )

@@ -14,9 +14,11 @@ from workflow.phase_optimize import (
     DIRECT_P0_VALUES,
     DIRECT_P1_VALUES,
     CandidateScore,
+    EquivalenceReport,
     PhaseOptimizeResult,
     _same_phase,
     brute_force_direct_scores,
+    decide_refinement,
     direct_phase_candidates,
     estimate_auto_phase,
     estimate_recon_planes,
@@ -26,6 +28,7 @@ from workflow.phase_optimize import (
     save_report,
     score_in_memory_direct,
     search_direct_phase,
+    select_direct_phase_refined,
 )
 
 
@@ -340,3 +343,68 @@ def test_candidate_score_roundtrip() -> None:
         source="brute_force",
     )
     assert score.to_dict()["params"]["p1"] == 30.0
+
+
+
+def test_decide_refinement_validated() -> None:
+    report = EquivalenceReport(
+        candidates=[],
+        brute_force={},
+        in_memory={},
+        best_brute_force={"p0": 0.0, "p1": -60.0},
+        best_in_memory={"p0": 0.0, "p1": -60.0},
+        top_match=True,
+        correlation=0.8,
+        passed=True,
+        backend_runs=6,
+    )
+    phase, method = decide_refinement(report, None)
+    assert method == "validated"
+    assert phase["p1"] == -60.0
+
+
+def test_decide_refinement_refined_when_not_validated() -> None:
+    report = EquivalenceReport(
+        candidates=[],
+        brute_force={},
+        in_memory={},
+        best_brute_force={"p0": 0.0, "p1": -90.0},
+        best_in_memory={"p0": 0.0, "p1": -60.0},
+        top_match=True,
+        correlation=0.46,
+        passed=False,
+        backend_runs=8,
+    )
+    refined = CandidateScore(params={"p0": 0.0, "p1": -90.0}, score=94.1)
+    phase, method = decide_refinement(report, refined)
+    assert method == "refined"
+    assert phase["p1"] == -90.0
+
+
+def test_select_direct_phase_refined(tmp_path: Path, bruker_dir: Path) -> None:
+    experiment = read_dataset(bruker_dir / "hsqc_2d")
+    backend = _OverrideBackend(tmp_path / "work")
+    best = select_direct_phase_refined(
+        experiment,
+        backend,
+        {"p0": 0.0, "p1": 0.0},
+        span=60.0,
+        step=30.0,
+        score_fn=_score_from_path,
+    )
+    assert best.params["p1"] == 30.0  # 评分函数真值 30°
+    assert len(backend.overrides) == 5  # -60/-30/0/30/60
+
+
+def test_phase_selection_result_roundtrip() -> None:
+    from workflow.phase_optimize import PhaseSelectionResult
+
+    result = PhaseSelectionResult(
+        phase={"p0": 0.0, "p1": 30.0},
+        spectrum_path="out.ft2",
+        method="refined",
+        backend_runs=12,
+    )
+    data = result.to_dict()
+    assert data["method"] == "refined"
+    assert data["phase"]["p1"] == 30.0
