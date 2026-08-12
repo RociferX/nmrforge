@@ -513,9 +513,12 @@ class RunHistoryDialog(QDialog):
         parent: QWidget | None,
         runs: list,
         project_name: str = "",
+        project_root: Path | str | None = None,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle(f"运行历史 - {project_name or 'NMRForge'}")
+        self.project_root = Path(project_root) if project_root else None
+        self._current_snapshot = ""
         self.resize(720, 480)
         layout = QVBoxLayout(self)
 
@@ -540,6 +543,13 @@ class RunHistoryDialog(QDialog):
         self.detail_label.setWordWrap(True)
         self.detail_label.setStyleSheet("color: #444;")
         layout.addWidget(self.detail_label)
+        self.snapshot_button = QPushButton("打开快照目录")
+        self.snapshot_button.setEnabled(False)
+        self.snapshot_button.setToolTip(
+            "打开该运行的脚本/参数快照目录(如有)"
+        )
+        self.snapshot_button.clicked.connect(self._open_snapshot)
+        layout.addWidget(self.snapshot_button)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         buttons.rejected.connect(self.reject)
@@ -553,8 +563,27 @@ class RunHistoryDialog(QDialog):
         if run is None:
             return
         outputs = "\n".join(f"  {k}: {v}" for k, v in run.outputs.items()) or "  (无)"
+        snapshot = run.snapshot_dir or ""
+        scripts = "、".join(run.scripts) if run.scripts else "(无)"
+        self._current_snapshot = ""
+        if snapshot and self.project_root is not None:
+            candidate = self.project_root / snapshot
+            if candidate.is_dir():
+                self._current_snapshot = str(candidate)
+        self.snapshot_button.setEnabled(bool(self._current_snapshot))
         self.detail_label.setText(
             f"运行: {run.run_id}  [{run.status}]\n"
             f"流程: {run.workflow_ref}  实验: {run.experiment_id}\n"
-            f"消息: {run.message or '-'}\n产物:\n{outputs}"
+            f"消息: {run.message or '-'}\n"
+            f"快照: {snapshot or '(无)'}  脚本: {scripts}\n"
+            f"产物:\n{outputs}"
         )
+
+    def _open_snapshot(self) -> None:
+        """打开当前选中运行的脚本/参数快照目录。"""
+        if not self._current_snapshot:
+            return
+        from PyQt6.QtCore import QUrl
+        from PyQt6.QtGui import QDesktopServices
+
+        QDesktopServices.openUrl(QUrl.fromLocalFile(self._current_snapshot))

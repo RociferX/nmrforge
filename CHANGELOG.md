@@ -1,5 +1,15 @@
 # 变更日志
 
+## [0.2.27] - 2026-08-12
+
+- 脚本快照 GUI 接线:ProcessingController 在生成 FID / 生成谱图 / 人工
+  fid.com / 人工谱图运行成功后,把实际执行的脚本(fid.com/process.com/
+  nus*.com)与参数经 snapshot_run 写入对应 WorkflowRun 快照目录
+  (processing/<exp>/runs/<run_id>/snapshot,补写最近一次匹配运行,
+  data_id 作用域过滤,已快照不重复);运行历史对话框展示快照目录与脚本
+  清单,新增「打开快照目录」按钮(QDesktopServices 打开)。
+- 测试:新增 test_gui_snapshot(8 例),全量 327 passed,ruff 全绿。
+
 ## [0.2.26] - 2026-08-12
 
 - 3D 谱切片查看(契约 §10):viewer/spectrum.py 新增 Spectrum3D
