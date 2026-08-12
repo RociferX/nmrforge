@@ -624,3 +624,55 @@ def render_scripts(
             extract=_as_bool(params.get("extract", True)),
         )
     return scripts
+
+
+
+def generate_nus_finalize_script(
+    experiment: Experiment,
+    *,
+    planes: str,
+    out_file: str,
+    phases: dict[str, tuple[float, float]] | None = None,
+) -> str:
+    """NUS 重构平面(复型)的间接维 FT 定稿脚本(逐维 PS 可配)。
+
+    planes:重构平面输入(2D nus2d/recon.ft1;3D nus3d_rc/test%04d.ft1);
+    phases:{轴 -> (p0, p1)},缺省 0——供逐维相位候选运行,不重跑 SMILE。
+    """
+    phases = phases or {}
+    f1_fnmode = _fnmode(experiment, "F1")
+    if experiment.ndim >= 3:
+        f2_fnmode = _fnmode(experiment, "F2")
+        f2_p0, f2_p1 = phases.get("F2", (0.0, 0.0))
+        f1_p0, f1_p1 = phases.get("F1", (0.0, 0.0))
+        lines = [
+            "#!/bin/csh",
+            "# NMRForge NUS finalize script (indirect FT from reconstructed planes)",
+            f"# experiment: {experiment.dataset_id}",
+            f"xyz2pipe -in {planes} -x \\",
+            "| nmrPipe -fn ZF -zf 1 -auto \\",
+            _ft_flag_line(f2_fnmode),
+            f"| nmrPipe -fn PS -p0 {f2_p0:g} -p1 {f2_p1:g} -di \\",
+            "| nmrPipe -fn TP \\",
+            "| nmrPipe -fn ZF -zf 1 -auto \\",
+            _ft_flag_line(f1_fnmode),
+            f"| nmrPipe -fn PS -p0 {f1_p0:g} -p1 {f1_p1:g} -di \\",
+            "| nmrPipe -fn TP \\",
+            "| nmrPipe -fn ZTP \\",
+            f"| pipe2xyz -out {out_file} -x",
+        ]
+    else:
+        f1_p0, f1_p1 = phases.get("F1", (0.0, 0.0))
+        lines = [
+            "#!/bin/csh",
+            "# NMRForge NUS finalize script (indirect FT from reconstructed planes)",
+            f"# experiment: {experiment.dataset_id}",
+            f"xyz2pipe -in {planes} -x \\",
+            "| nmrPipe -fn ZF -zf 1 -auto \\",
+            _ft_flag_line(f1_fnmode),
+            f"| nmrPipe -fn PS -p0 {f1_p0:g} -p1 {f1_p1:g} -di \\",
+            "| nmrPipe -fn TP \\",
+            "| nmrPipe -fn ZTP \\",
+            f"| pipe2xyz -out {out_file} -x",
+        ]
+    return "\n".join(lines) + "\n"

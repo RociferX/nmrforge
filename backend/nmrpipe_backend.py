@@ -29,6 +29,7 @@ from backend.script_generator import (
     generate_2d_nus_script,
     generate_3d_nus_script,
     generate_convert_script,
+    generate_nus_finalize_script,
     generate_process_script,
     select_smile_params,
 )
@@ -369,6 +370,73 @@ class NMRPipeBackend:
             "success": True,
             "message": "SMILE 重构成功",
             "spectrum_path": str(spectrum),
+            "logs": logs,
+        }
+
+    def finalize_nus(
+        self,
+        experiment: Experiment,
+        *,
+        phases: dict[str, tuple[float, float]] | None = None,
+        work_dir: Path | str | None = None,
+        timeout: float = 1800.0,
+    ) -> dict[str, Any]:
+        """从 SMILE 重构平面做间接维 FT 定稿(逐维相位候选,不重跑 SMILE)。
+
+        phases:{轴 -> (p0, p1)},缺省 0;供逐维相位优化(用户方案)。
+        """
+        bin_dir = self._bin_dir()
+        if bin_dir is None:
+            return {
+                "success": False,
+                "message": "未找到 nmrPipe（csh: which nmrPipe）",
+                "logs": [],
+            }
+        work = Path(work_dir) if work_dir else self._work_path(experiment)
+        if experiment.ndim >= 3:
+            planes = "nus3d_rc/test%04d.ft1"
+            if not (work / "nus3d_rc").is_dir():
+                return {
+                    "success": False,
+                    "message": f"缺少重构平面 nus3d_rc: {work}",
+                    "logs": [],
+                }
+        else:
+            planes = "nus2d/recon.ft1"
+            if not (work / "nus2d" / "recon.ft1").is_file():
+                return {
+                    "success": False,
+                    "message": f"缺少重构平面 nus2d/recon.ft1: {work}",
+                    "logs": [],
+                }
+        out_ext = "ft3" if experiment.ndim >= 3 else "ft2"
+        out_file = f"{experiment.dataset_id}.{out_ext}"
+        script = generate_nus_finalize_script(
+            experiment, planes=planes, out_file=out_file, phases=phases
+        )
+        finalize_com = work / f"{experiment.dataset_id}_finalize.com"
+        finalize_com.write_text(script, encoding="utf-8", newline="\n")
+        runtime = CshRuntime()
+        result = runtime.run(
+            ["csh", finalize_com.name], cwd=str(work), timeout=timeout
+        )
+        logs = [f"finalize.com: rc={result.returncode}"]
+        spectrum = work / out_file
+        if (
+            result.returncode != 0
+            or not spectrum.is_file()
+            or spectrum.stat().st_size == 0
+        ):
+            return {
+                "success": False,
+                "message": f"finalize 失败/未生成 {out_file}",
+                "logs": logs,
+            }
+        logs.append(f"谱图 → {spectrum}")
+        return {
+            "success": True,
+            "spectrum_path": str(spectrum),
+            "message": "finalize 完成",
             "logs": logs,
         }
 

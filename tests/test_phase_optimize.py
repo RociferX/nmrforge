@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from core.data.bruker_reader import read_dataset
 from core.optimization.phase_search import apply_phase_axis
@@ -23,6 +24,7 @@ from workflow.phase_optimize import (
     estimate_auto_phase,
     estimate_recon_planes,
     format_phase_report,
+    optimize_phase_sequential,
     produce_phased_spectrum,
     run_with_auto_phase,
     save_report,
@@ -282,7 +284,8 @@ class _OverrideBackend:
 
     def process(self, experiment, plan, direct_phase_override=None) -> dict:
         self.overrides.append(dict(direct_phase_override or {}))
-        p1 = next(iter(direct_phase_override.values()))[1]
+        # 逐维搜索时覆盖含多个轴,取末轴(正在搜索的轴)的 p1
+        p1 = list(direct_phase_override.values())[-1][1]
         return {
             "success": True,
             "spectrum_path": f"{self.work_dir}/out_p1{int(p1)}.ft2",
@@ -413,3 +416,40 @@ def test_phase_selection_result_roundtrip() -> None:
     data = result.to_dict()
     assert data["method"] == "refined"
     assert data["phase"]["p1"] == 30.0
+
+
+
+def test_optimize_phase_sequential_uniform(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """逐维暴力:直接维 F2 → 间接维 F1,依次固定,取整体最优。"""
+    experiment = read_dataset(bruker_dir / "hsqc_2d")
+    backend = _OverrideBackend(tmp_path / "work")
+    result = optimize_phase_sequential(
+        experiment,
+        backend,
+        p0_values=(0.0,),
+        p1_values=(-60.0, 0.0, 30.0, 60.0),
+        score_fn=_score_from_path,
+    )
+    assert result.method == "sequential_brute_force"
+    assert result.phases["F2"][1] == 30.0
+    assert result.phases["F1"][1] == 30.0
+    assert result.backend_runs == 2 * 4
+    assert any("F2" in line and "已固定" in line for line in result.logs)
+    assert any("F1" in line and "已固定" in line for line in result.logs)
+
+
+def test_optimize_phase_sequential_failure(tmp_path: Path, bruker_dir: Path) -> None:
+    """某轴候选全部失败时抛错(不静默)。"""
+    experiment = read_dataset(bruker_dir / "hsqc_2d")
+
+    class _FailBackend(_OverrideBackend):
+        def process(self, experiment, plan, direct_phase_override=None) -> dict:
+            return {"success": False, "message": "boom", "logs": []}
+
+    backend = _FailBackend(tmp_path / "work")
+    with pytest.raises(ValueError, match="全部失败"):
+        optimize_phase_sequential(
+            experiment, backend, p0_values=(0.0,), p1_values=(0.0,)
+        )

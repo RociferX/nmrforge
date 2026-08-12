@@ -1,5 +1,18 @@
 # 变更日志
 
+## [0.2.26] - 2026-08-12
+
+- Backend:相位自动调优改为「逐维暴力」方案(用户反馈):
+  workflow/phase_optimize.optimize_phase_sequential——传统采样按轴
+  (直接维 → 间接维)逐维,每候选相位重跑一次后端管线(process,
+  direct_phase_override 覆盖该轴 PS),对终谱做整体 QC 评分,取最优后
+  固定,依次推进;NUS:先 SMILE 重构一次(reconstruct_nus,直接维随重构
+  固化),再从重构平面逐间接维候选跑 finalize_nus(不重跑 SMILE)。
+- backend:script_generator.generate_nus_finalize_script(重构平面→间接维
+  FT,逐维 PS 可配)+ NMRPipeBackend.finalize_nus;
+  stepwise.optimize_phase_brute_force 改用逐维暴力。
+- 测试:sequential 逐维/失败、finalize 2D/3D 脚本、stepwise 断言;
+  全量通过,ruff 全绿。
 ## [0.2.25] - 2026-08-12
 
 - Backend(G2B-006):EXT 参数在自动/步骤化路径生效——

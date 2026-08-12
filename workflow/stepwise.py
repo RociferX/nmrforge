@@ -173,15 +173,12 @@ def optimize_phase_brute_force(
     work_dir: Path | str | None = None,
     score_fn: Any | None = None,
 ) -> dict[str, Any]:
-    """相位优化:先确保 SMILE 重构谱存在,再逐候选反复跑后端(暴力)优化。
+    """相位优化:逐维暴力(直接维→间接维依次固定;NUS 先 SMILE 一次)。
 
-    返回 {"phase", "spectrum_path", "method", "backend_runs", "logs"}。
+    返回 {"phase": {轴: (p0, p1)}, "spectrum_path", "method",
+    "backend_runs", "logs"}。
     """
-    from workflow.phase_optimize import (
-        brute_force_direct_scores,
-        direct_phase_candidates,
-        produce_phased_spectrum,
-    )
+    from workflow.phase_optimize import optimize_phase_sequential
 
     experiment = _read_experiment(manager, exp_id, data_id)
     data_entry = _require_data(manager, exp_id, data_id)
@@ -189,41 +186,44 @@ def optimize_phase_brute_force(
     _ensure_work_dir(backend, work)
     if not data_entry.spectrum_path or not Path(data_entry.spectrum_path).is_file():
         generate_spectrum(manager, exp_id, data_id, backend, work_dir=work)
-    candidates = candidates if candidates is not None else direct_phase_candidates()
-    scores = brute_force_direct_scores(
-        experiment, backend, candidates, score_fn=score_fn
-    )
-    valid = [c for c in scores if c.score > float("-inf")]
-    if not valid:
-        raise StepwiseError("相位优化暴力搜索全部失败")
-    best = max(valid, key=lambda c: c.score)
-    direct_axis = "F2" if experiment.ndim == 2 else "F3"
-    resp = produce_phased_spectrum(
+
+    p1_values: tuple[float, ...] | None = None
+    if candidates is not None:
+        p1_values = tuple(
+            float(c["p1"])
+            for c in candidates
+            if c.get("p1") is not None
+            and isinstance(c.get("p1"), (int, float))
+        ) or None
+
+    result = optimize_phase_sequential(
         experiment,
         backend,
-        {direct_axis: (best.params["p0"], best.params["p1"])},
+        p1_values=p1_values,
+        score_fn=score_fn,
+        work_dir=work,
     )
-    if not resp.get("success"):
-        raise StepwiseError(str(resp.get("message", "相位优化最终谱生成失败")))
     spectrum_path = _register_spectrum(
-        manager, exp_id, data_id, str(resp.get("spectrum_path", ""))
+        manager, exp_id, data_id, result.spectrum_path
     )
-    backend_runs = 1 + len(candidates) + 1
     _finish_step(
         manager,
         exp_id,
         data_id,
         "phase_optimize",
-        outputs={"spectrum_path": spectrum_path, "phase": str(best.params)},
-        message="相位优化(暴力)",
-        params={"candidates": len(candidates), "phase": dict(best.params)},
+        outputs={"spectrum_path": spectrum_path, "phase": str(result.phases)},
+        message="相位优化(逐维暴力)",
+        params={
+            "backend_runs": result.backend_runs,
+            "phases": {k: list(v) for k, v in result.phases.items()},
+        },
     )
     return {
-        "phase": dict(best.params),
+        "phase": result.phases,
         "spectrum_path": spectrum_path,
-        "method": "brute_force",
-        "backend_runs": backend_runs,
-        "logs": [f"相位优化(暴力): 最优 {best.params} score={best.score:.1f}"],
+        "method": result.method,
+        "backend_runs": result.backend_runs,
+        "logs": result.logs,
     }
 
 

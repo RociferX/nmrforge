@@ -870,3 +870,100 @@ def optimize_direct_phase_guaranteed(
         report=report,
         logs=logs,
     )
+
+
+
+@dataclass
+class SequentialPhaseResult:
+    """逐维暴力相位优化结果(用户方案)。"""
+
+    phases: dict[str, tuple[float, float]]
+    spectrum_path: str
+    backend_runs: int
+    method: str = "sequential_brute_force"
+    logs: list[str] = field(default_factory=list)
+
+
+def optimize_phase_sequential(
+    experiment: Experiment,
+    backend: Any,
+    *,
+    axes: list[str] | None = None,
+    p0_values: tuple[float, ...] = (-45.0, 0.0, 45.0),
+    p1_values: tuple[float, ...] = (-90.0, -60.0, -30.0, 0.0, 30.0, 60.0, 90.0),
+    score_fn: Callable[[str], tuple[float, dict[str, float]]] | None = None,
+    work_dir: Path | str | None = None,
+) -> SequentialPhaseResult:
+    """逐维暴力相位优化:直接维 → 间接维,依次固定(用户方案)。
+
+    传统采样:每候选相位重跑一次后端管线(process,direct_phase_override 覆盖
+    该轴 PS),对终谱做整体 QC 评分(全数据集),取最优后固定,推进下一维;
+    NUS:先 SMILE 重构一次(reconstruct_nus,直接维随重构固化),再从重构平面
+    逐间接维候选跑 finalize_nus(不重跑 SMILE)。
+    """
+    plan = select_method(experiment)
+    if axes is None:
+        axes = [dim.logical_axis for dim in experiment.dimensions]  # 直接维在前
+    if p1_values is None:
+        p1_values = (-90.0, -60.0, -30.0, 0.0, 30.0, 60.0, 90.0)
+    candidates = [
+        {"p0": float(p0), "p1": float(p1)}
+        for p1 in p1_values
+        for p0 in p0_values
+    ]
+    score_fn = score_fn or _default_spectrum_quality
+    is_nus = experiment.sampling.mode is SamplingMode.NUS
+    direct_axis = "F2" if experiment.ndim == 2 else "F3"
+    search_axes = [a for a in axes if a != direct_axis] if is_nus else axes
+    fixed: dict[str, tuple[float, float]] = {}
+    backend_runs = 0
+    logs: list[str] = []
+    spectrum_path = ""
+
+    if is_nus:
+        resp = backend.reconstruct_nus(experiment, {})
+        backend_runs += 1
+        if not resp.get("success"):
+            raise ValueError(f"NUS SMILE 重构失败: {resp.get('message')}")
+        logs.append("NUS:SMILE 重构完成(直接维随重构固化),逐间接维候选跑 finalize")
+
+    for axis in search_axes:
+        best_score = -1.0
+        best_phase: tuple[float, float] | None = None
+        best_path = ""
+        for cand in candidates:
+            phase = (cand["p0"], cand["p1"])
+            override = {**fixed, axis: phase}
+            if is_nus:
+                resp = backend.finalize_nus(
+                    experiment, phases=override, work_dir=work_dir
+                )
+            else:
+                resp = backend.process(
+                    experiment, plan, direct_phase_override=override
+                )
+            backend_runs += 1
+            if not resp.get("success"):
+                logs.append(f"{axis} 候选 {phase}: 运行失败 {resp.get('message')}")
+                continue
+            path = resp.get("spectrum_path", "")
+            try:
+                score, _components = score_fn(str(path))
+            except Exception as exc:  # noqa: BLE001 - 单候选失败不影响其它
+                logs.append(f"{axis} 候选 {phase}: 评分失败 {exc}")
+                continue
+            if score > best_score:
+                best_score, best_phase, best_path = score, phase, str(path)
+        if best_phase is None:
+            raise ValueError(f"轴 {axis} 相位候选全部失败")
+        fixed[axis] = best_phase
+        spectrum_path = best_path
+        logs.append(f"{axis}: 最优 {best_phase} (score={best_score:.1f}),已固定")
+
+    return SequentialPhaseResult(
+        phases=dict(fixed),
+        spectrum_path=spectrum_path,
+        backend_runs=backend_runs,
+        method="sequential_brute_force",
+        logs=logs,
+    )
