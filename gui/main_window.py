@@ -34,6 +34,7 @@ from core.project import (
     ProjectError,
     ProjectManager,
 )
+from gui.center_panel import CenterPanel
 from gui.dialogs import (
     ConfirmDialog,
     ImportExperimentDialog,
@@ -43,11 +44,10 @@ from gui.dialogs import (
     ScriptEditorDialog,
 )
 from gui.log_panel import LogPanel
-from gui.pipeline_panel import PipelinePanel, compute_step_statuses
+from gui.pipeline_panel import compute_step_statuses
 from gui.processing import ProcessingController
 from gui.project_tree import ProjectTreePanel
 from gui.spectrum_panel import SpectrumPanel
-from gui.welcome_page import WelcomePage
 from gui.workspace import WorkspaceManager
 from workflow.import_workflow import ImportResult
 
@@ -140,16 +140,29 @@ class MainWindow(QMainWindow):
         self.project_tree.import_data_requested.connect(self._import_data_for)
         self.project_tree.data_action_requested.connect(self._on_data_action)
 
-        self.pipeline = PipelinePanel(self.manager, self.controller)
-        self.pipeline.log_message.connect(self._append_log)
-        self.pipeline.manual_open_requested.connect(self._open_manual_dialog)
-        self.pipeline.import_data_requested.connect(self._import_data_for)
+        self.center_panel = CenterPanel(self.manager, self.controller)
+        self.pipeline = self.center_panel.pipeline  # 兼容旧引用
+        self.center_panel.log_message.connect(self._append_log)
+        self.center_panel.manual_open_requested.connect(self._open_manual_dialog)
+        self.center_panel.import_data_requested.connect(self._import_data_for)
+        self.center_panel.import_options_requested.connect(
+            self._import_data_with_options
+        )
+        self.center_panel.create_experiment_requested.connect(
+            self._create_experiment_with_title
+        )
+        self.center_panel.new_project_requested.connect(
+            self._new_project_in_workspace
+        )
+        self.center_panel.open_project_requested.connect(
+            lambda path: self._open_root(Path(path))
+        )
 
         self.spectrum_panel = SpectrumPanel(self.manager)
 
         self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
         self.main_splitter.addWidget(self.project_tree)
-        self.main_splitter.addWidget(self.pipeline)
+        self.main_splitter.addWidget(self.center_panel)
         self.main_splitter.addWidget(self.spectrum_panel)
         self.main_splitter.setStretchFactor(0, 22)
         self.main_splitter.setStretchFactor(1, 43)
@@ -159,19 +172,10 @@ class MainWindow(QMainWindow):
         self.log_panel = LogPanel()
         self.log_panel.setVisible(False)
 
-        self.welcome_page = WelcomePage()
-        self.welcome_page.new_project_requested.connect(
-            self._new_project_in_workspace
-        )
-        self.welcome_page.open_project_requested.connect(
-            lambda path: self._open_root(Path(path))
-        )
-
         central = QWidget()
         central_layout = QVBoxLayout(central)
         central_layout.setContentsMargins(0, 0, 0, 0)
         central_layout.setSpacing(0)
-        central_layout.addWidget(self.welcome_page)
         central_layout.addWidget(self.main_splitter, 1)
         central_layout.addWidget(self.log_panel)
         self.setCentralWidget(central)
@@ -204,7 +208,7 @@ class MainWindow(QMainWindow):
             return
         self.recent.push(str(self.manager.root))
         self._rebind_shared_manager()
-        self.welcome_page.refresh()
+        self.center_panel.welcome_page.refresh()
         self.refresh()
 
     def open_project(self) -> None:
@@ -234,6 +238,7 @@ class MainWindow(QMainWindow):
     def _rebind_shared_manager(self) -> None:
         """项目对象更换后,让各面板共享同一个 ProjectManager 实例。"""
         self.project_tree.manager = self.manager
+        self.center_panel._manager = self.manager
         self.pipeline.manager = self.manager
         self.spectrum_panel.manager = self.manager
         self.controller.set_manager(self.manager)
@@ -413,7 +418,7 @@ class MainWindow(QMainWindow):
         if next_step is None:
             InfoDialog.show_info(self, "提示", "当前没有可运行的步骤")
             return
-        self.pipeline.run_step(next_step)
+        self.center_panel.run_step(next_step)
 
     def _manual_param_table_menu(self) -> None:
         self._open_manual_dialog("process")
@@ -489,6 +494,32 @@ class MainWindow(QMainWindow):
         self.refresh()
         self.project_tree.select_experiment(entry.id)
 
+    def _import_data_with_options(self, exp_id: str, source: str, copy: bool) -> None:
+        """中间面板内嵌导入表单:按指定实验导入数据。"""
+        self._import_experiment_async(
+            {
+                "source": source,
+                "title": "",
+                "sample_id": "",
+                "copy": copy,
+                "experiment_id": exp_id,
+            }
+        )
+
+    def _create_experiment_with_title(self, title: str) -> None:
+        """中间面板内嵌表单:新建空白实验。"""
+        if self.manager.project is None:
+            InfoDialog.show_info(self, "提示", "请先新建或打开项目")
+            return
+        try:
+            entry = self.manager.create_experiment(title=title)
+            self.manager.save()
+        except ProjectError as exc:
+            InfoDialog.show_info(self, "新建实验失败", str(exc))
+            return
+        self.refresh()
+        self.project_tree.select_experiment(entry.id)
+
     def _import_data_for(self, exp_id: str) -> None:
         """在指定实验下导入数据。"""
         if self.manager.project is None:
@@ -511,8 +542,8 @@ class MainWindow(QMainWindow):
             self._delete_experiment_by_id(exp_id)
             return
         step = "fid" if action == "fid" else "spectrum"
-        self.pipeline.set_selection("data", exp_id, data_id)
-        self.pipeline.run_step(step)
+        self.center_panel.set_selection("data", exp_id, data_id)
+        self.center_panel.run_step(step)
 
     def _noop_hint(self) -> None:
         InfoDialog.show_info(self, "提示", "项目管理面板已集成在左侧树中")
@@ -542,7 +573,7 @@ class MainWindow(QMainWindow):
     # 上下文联动
     # ------------------------------------------------------------------
     def _on_open_experiment(self, exp_id: str) -> None:
-        self.pipeline.set_selection("experiment", exp_id, "")
+        self.center_panel.set_selection("experiment", exp_id, "")
         self.spectrum_panel.set_context(exp_id, "")
         self.statusBar().showMessage(
             f"实验 {exp_id}: 双击查看谱图文件,中间 Pipeline 显示处理步骤"
@@ -550,7 +581,7 @@ class MainWindow(QMainWindow):
 
     def _update_context(self, kind: str, exp_id: str, data_id: str = "") -> None:
         """左侧选择变化 → 中间按选中类型显示,右侧围绕数据刷新。"""
-        self.pipeline.set_selection(kind, exp_id, data_id)
+        self.center_panel.set_selection(kind, exp_id, data_id)
         self.spectrum_panel.set_context(exp_id, data_id)
 
     def _append_log(self, message: str) -> None:
@@ -574,13 +605,11 @@ class MainWindow(QMainWindow):
         if project is None:
             self.setWindowTitle("NMRForge - 欢迎")
             self.statusBar().showMessage("新建或打开项目开始工作")
-            self.welcome_page.refresh()
-            self.welcome_page.setVisible(True)
+            self.center_panel.welcome_page.refresh()
             self.main_splitter.setVisible(False)
-            self.pipeline.set_selection("", "", "")
+            self.center_panel.set_selection("workspace", "", "")
             self.spectrum_panel.set_context("", "")
             return
-        self.welcome_page.setVisible(False)
         self.main_splitter.setVisible(True)
         for exp in project.experiments:
             status = self.manager.infer_status(exp.id).value
@@ -590,7 +619,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"NMRForge - {project.name}")
         self.statusBar().showMessage(f"项目: {self.manager.root}")
         # 打开/新建项目后默认聚焦第一个实验
-        if project.experiments and not self.pipeline.current_experiment_id():
+        if project.experiments and not self.center_panel.current_experiment_id():
             self.project_tree.select_experiment(project.experiments[0].id)
 
     @staticmethod

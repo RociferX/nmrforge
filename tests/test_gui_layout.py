@@ -262,8 +262,9 @@ def test_main_window_three_column_layout(tmp_path: Path, qapp: QApplication) -> 
     assert window.project_tree is not None
     assert window.pipeline is not None
     assert window.spectrum_panel is not None
-    assert window.pipeline.current_experiment_id() == "exp_001"
-    assert "未选中数据" in window.pipeline.context_label.text()
+    # 默认聚焦第一个实验 → 中间为实验页(内嵌导入数据表单)
+    assert window.center_panel.stack.currentIndex() == 2
+    assert window.center_panel.experiment_page._exp_id == "exp_001"
     assert "demo" in window.windowTitle()
     assert window.experiment_tree.topLevelItemCount() == 2  # 兼容表同步
     window.close()
@@ -275,7 +276,8 @@ def test_main_window_context_updates_on_tree_selection(
     manager = _manager_with_experiment(tmp_path)
     window = MainWindow(manager=manager)
     window.project_tree.select_experiment("exp_002")
-    assert window.pipeline.current_experiment_id() == "exp_002"
+    assert window.center_panel.stack.currentIndex() == 2  # 实验页
+    assert window.center_panel.experiment_page._exp_id == "exp_002"
     assert window.spectrum_panel._current_exp_id == "exp_002"
     window.close()
 
@@ -287,6 +289,7 @@ def test_main_window_log_panel_expands_on_message(
     manager = _manager_with_experiment(tmp_path)
     window = MainWindow(manager=manager, controller=FakeProcessingController())
     assert window.log_panel.isHidden()
+    window.center_panel.set_selection("data", "exp_001", "d_001")
     window.pipeline._on_run_requested("fid")
     assert not window.log_panel.isHidden()
     assert "生成 FID" in window.log_panel.text.toPlainText()
@@ -393,20 +396,20 @@ def test_welcome_page_shows_workspace_and_recent(
 def test_main_window_welcome_page_on_startup(qapp: QApplication) -> None:
     """未打开项目时主窗口显示欢迎页。"""
     window = MainWindow()
-    assert window.welcome_page is not None
+    assert window.center_panel.welcome_page is not None
     assert window.main_splitter.isHidden()  # 欢迎页优先,三栏隐藏
     window.close()
 
-def test_experiment_selected_shows_import_button_no_manual(
+def test_data_selected_shows_pipeline_page(
     tmp_path: Path, qapp: QApplication
 ) -> None:
-    """选中实验:中间显示可点击的「导入数据」,且不显示人工按钮。"""
+    """选中 Data → 中间为 Pipeline 页;导入无人工按钮。"""
     manager = _manager_with_experiment(tmp_path)
     window = MainWindow(manager=manager)
     tree = window.project_tree.tree
-    exp_item = tree.topLevelItem(0).child(0).child(0)
-    tree.setCurrentItem(exp_item)
-    assert "未选中数据" in window.pipeline.context_label.text()
-    assert not window.pipeline.import_button.isHidden()  # 导入数据可点
-    assert window.pipeline._rows["import"].manual_button.isHidden()  # 无人工
+    data_item = tree.topLevelItem(0).child(0).child(0).child(0)
+    tree.setCurrentItem(data_item)
+    assert window.center_panel.stack.currentIndex() == 3  # Pipeline 页
+    assert window.pipeline.current_experiment_id() == "exp_001"
+    assert window.pipeline._rows["import"].manual_button.isHidden()  # 导入无人工
     window.close()

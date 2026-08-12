@@ -44,7 +44,7 @@ def test_window_empty_state(qapp: QApplication) -> None:
     window = MainWindow()
     assert window.experiment_tree.topLevelItemCount() == 0
     assert "欢迎" in window.windowTitle()
-    assert window.welcome_page is not None
+    assert window.center_panel.welcome_page is not None
     window.close()
 
 
