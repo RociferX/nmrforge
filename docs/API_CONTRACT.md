@@ -75,6 +75,7 @@ class Spectrum:
 
 实现位于 GUI 侧(viewer),但结构是契约;Backend 产出 ft2 时必须保证
 头部 FDF1*/FDF2*(SW/OBS/CAR/ORIG) 可被该模型正确解析。
+3D 扩展见 §10 契约 v1.4(Spectrum3D 读取/切片/投影)。
 
 ## 5. ProcessingController(gui/processing.py,实现属 GUI)
 
@@ -94,7 +95,13 @@ GUI 页面不得绕过本控制器直接调 Backend。
 ## 6. 参数/结果约定
 
 - 处理参数统一 dict 键:`zero_fill`、`sampling`(ft_neg/ft_alt/flip_f1/
-  auto_phase)、`stages`(列表,id/tool/macro/params/param_docs);
+  auto_phase)、`baseline`(每维基线校正,见下)、`stages`(列表,
+  id/tool/macro/params/param_docs);
+- 基线校正 `baseline` 键(G2B-007):
+  `{"enabled": true, "mode": "auto"|"order", "order": N,
+   "axes": "all" | ["F1", "F2"(, "F3")]}`;mode=auto →
+  `POLY -auto`,mode=order → `POLY -ord N`,enabled=false 不输出;
+  默认全维 auto(与手工 xy.com 对齐);
 - SMILE 参数:`nSigma/thresh/xQ3/scaling/report`,经验分档
   (≤20%: 5/0.95;20–30%: 6/0.90;30–40%: 7/0.85);
 - 相位:复型 .fid 直接维 p1 共识写脚本 PS;终谱(实型)不做事后调相;
@@ -235,3 +242,35 @@ process/ 内,spectrum_path 在 spectra/ 内。
   data[0]),旧扁平产物(项目根 raw/metadata/spectra)保留可读,
   infer_status 与删除兼容新旧布局;旧 dir_path 保留为兼容层;
 - 不做物理迁移(不搬动旧文件),新导入/处理按 1.3 布局落盘。
+
+## 10. 契约 v1.4(3D 谱查看:读取/切片/投影)
+
+状态:approved(Architect,2026-08-12;实现属 GUI Agent,契约 Shared)。
+
+### 10.1 Spectrum3D(viewer/spectrum.py)
+
+```python
+class Spectrum3D:
+    data: np.ndarray            # 形状 (F1, F2, F3),float
+    axes: list[SpectrumAxis]    # [F1, F2, F3],复用 §4 SpectrumAxis
+    source: Path | None
+    @classmethod
+    def load_from_ft3(cls, path, labels=("F1", "F2", "F3")) -> Spectrum3D
+        # nmrglue 读 ft3;复数取实部;轴用 FDF1/FDF2/FDF3 头部
+        # (SW/OBS/CAR/ORIG,与 §4 同约定)
+    def slice(self, axis_idx: int, index: int) -> Spectrum
+        # 固定 axis_idx 的 index,返回其余两轴的二维 Spectrum(切平面)
+    def project(self, axis_idx: int, mode: str = "max") -> Spectrum
+        # 沿 axis_idx 最大强度投影(MIP,mode="max")或求和
+        # (mode="sum"),返回其余两轴二维 Spectrum
+    def index_at(self, axis_idx: int, ppm: float) -> int
+        # 切片滑块按 ppm 定位(复用 SpectrumAxis.index_at)
+```
+
+### 10.2 查看器行为(viewer/app.py + gui/spectrum_panel.py)
+
+- 打开 .ft3 进入 3D 模式:选择查看平面(如 F1-F2),第三轴为切片轴;
+- 切片轴滑块按 ppm 定位;投影模式切换 MIP/sum(沿第三轴);
+- 切片/投影产物复用现有 SpectrumViewer/ContourLayer 绘制 2D 平面;
+- SpectrumWindow 与 GUI 谱图面板均支持 .ft3(文件过滤器、拖放、双击);
+- 3D 峰表列(F1/F2/F3_shift)显示不受影响。
