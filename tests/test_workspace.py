@@ -73,3 +73,44 @@ def test_open_project_by_name_and_path(tmp_path: Path) -> None:
     assert by_name.project.name == "demo"
     by_path = manager.open_project(manager.root / "demo")
     assert by_path.root == by_name.root
+
+
+
+def test_rename_project_updates_dir_and_name(tmp_path: Path) -> None:
+    manager = WorkspaceManager(tmp_path / "ws")
+    manager.create_project("alpha")
+    new_path = manager.rename_project("alpha", "beta")
+    assert new_path == manager.root / "beta"
+    assert not (manager.root / "alpha").exists()
+    pm = ProjectManager.open_project(new_path)
+    assert pm.project.name == "beta"
+
+
+def test_rename_project_conflicts_and_validation(tmp_path: Path) -> None:
+    manager = WorkspaceManager(tmp_path / "ws")
+    manager.create_project("alpha")
+    manager.create_project("beta")
+    with pytest.raises(WorkspaceError, match="已存在项目"):
+        manager.rename_project("alpha", "beta")
+    with pytest.raises(WorkspaceError, match="非法项目名"):
+        manager.rename_project("alpha", "../x")
+    with pytest.raises(WorkspaceError, match="项目不存在"):
+        manager.rename_project("nope", "gamma")
+
+
+def test_delete_project_trash_moves(tmp_path: Path) -> None:
+    manager = WorkspaceManager(tmp_path / "ws")
+    manager.create_project("alpha")
+    target = manager.delete_project("alpha", trash=True)
+    assert not (manager.root / "alpha").exists()
+    assert target.exists()
+    assert (target / "project.json").is_file()
+
+
+def test_delete_project_direct_and_missing(tmp_path: Path) -> None:
+    manager = WorkspaceManager(tmp_path / "ws")
+    manager.create_project("alpha")
+    manager.delete_project("alpha", trash=False)
+    assert not (manager.root / "alpha").exists()
+    with pytest.raises(WorkspaceError, match="项目不存在"):
+        manager.delete_project("alpha")

@@ -82,6 +82,7 @@ class DataEntry:
     """一次导入的数据(实验下的独立条目,d_001...,schema 1.2)。"""
 
     id: str
+    title: str = ""                   # 数据标题(缺省空,GUI 回退 id)
     source: str = ""                 # 外部 Bruker 数据集目录(导入时)
     raw_dir: str = ""                # 项目内 raw/<exp_id>/<data_id>/ 副本
     segments: list[str] = field(default_factory=list)
@@ -97,6 +98,7 @@ class DataEntry:
     def from_dict(cls, data: dict[str, Any]) -> DataEntry:
         return cls(
             id=str(data.get("id", "")),
+            title=str(data.get("title", "")),
             source=str(data.get("source", "")),
             raw_dir=str(data.get("raw_dir", "")),
             segments=[str(s) for s in (data.get("segments") or [])],
@@ -112,6 +114,7 @@ class DataEntry:
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
+            "title": self.title,
             "source": self.source,
             "raw_dir": self.raw_dir,
             "segments": list(self.segments),

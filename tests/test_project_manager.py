@@ -447,3 +447,29 @@ def test_infer_status_aggregates_data(tmp_path: Path) -> None:
     report.parent.mkdir(parents=True, exist_ok=True)
     report.write_text("{}", encoding="utf-8")
     assert manager.infer_status(entry.id) is ExperimentStatus.ANALYZED
+
+
+
+def test_data_entry_title_roundtrip() -> None:
+    from core.project import DataEntry
+
+    data = DataEntry(id="d_001", title="骨架 A", source="/sampleD")
+    restored = DataEntry.from_dict(data.to_dict())
+    assert restored == data
+    assert restored.title == "骨架 A"
+    # 旧数据缺 title:缺省空
+    legacy = DataEntry.from_dict({"id": "d_001", "source": "/x"})
+    assert legacy.title == ""
+
+
+def test_rename_data_persists_and_audits(tmp_path: Path) -> None:
+    manager = ProjectManager.create_project(tmp_path / "proj", "demo")
+    entry = manager.create_experiment()
+    data = manager.import_data(entry.id, "/sampleD")
+    renamed = manager.rename_data(entry.id, data.id, "骨架 A")
+    assert renamed is data
+    assert data.title == "骨架 A"
+    manager.save()
+    reopened = ProjectManager.open_project(tmp_path / "proj")
+    assert reopened.project.experiment(entry.id).data[0].title == "骨架 A"
+    assert any(h.action == "data_renamed" for h in manager.project.processing_history)
