@@ -1,5 +1,16 @@
 # 变更日志
 
+## [0.2.21] - 2026-08-12
+
+- Backend(G2B-005):统一峰表模型 core/peaks/peak_table.py(Shared,移植旧项目
+  NMRFlow)——PeakTable(add/remove 数字自动编号)、save_peaks/load_peaks
+  (CSV 数字 Peak_ID,缺列补空,2D/3D 自动判别)、export_peaks_poky /
+  import_peaks_poky(Poky/Sparky .list:"Assignment w1 w2 [w3] Data Height
+  Volume",2D w1=15N/w2=1H,未命名 ?-?/?-?-?,Height %.3g,双空格)。
+- Backend(G2B-005):workflow/pick_peaks 改用 PeakTable.save_peaks——
+  输出数字 Peak_ID(1..n,不再 "P001"),列与旧项目一致。
+- 测试:新增 tests/test_peak_table.py 9 项(往返/导出导入/2D/3D/占位/
+  pick_peaks 列);全量 270 passed,ruff 全绿。
 ## [0.2.20] - 2026-08-12
 
 - Dashboard:Project 概览(实验/数据/处理完成度/最近运行 + 新建实验表单);
