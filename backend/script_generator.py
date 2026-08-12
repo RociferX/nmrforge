@@ -253,6 +253,7 @@ def _axis_stages(plan: ProcessingPlan, axis: str) -> list[tuple[str, dict[str, A
 def _stage_lines(
     stages: list[tuple[str, dict[str, Any]]],
     direct_phase: dict[str, tuple[float, float]] | None = None,
+    baseline: dict[str, dict[str, Any]] | None = None,
 ) -> list[str]:
     lines: list[str] = []
     for op, params in stages:
@@ -289,7 +290,17 @@ def _stage_lines(
                 f"| nmrPipe -fn PS -p0 {_fmt(p0)} -p1 {_fmt(p1)} -di \\"
             )
         elif op == "baseline":
-            lines.append("| nmrPipe -fn POLY -auto \\")
+            cfg = dict(params)
+            axis = str(params.get("axis", ""))
+            if baseline and axis in baseline:
+                cfg.update(baseline[axis])
+            if not _as_bool(cfg.get("enabled", True)):
+                continue
+            if str(cfg.get("mode", "auto")) == "order":
+                order = max(1, int(cfg.get("order", 1) or 1))
+                lines.append(f"| nmrPipe -fn POLY -ord {order} \\")
+            else:
+                lines.append("| nmrPipe -fn POLY -auto \\")
         else:
             raise ValueError(f"不支持映射为 nmrPipe 宏的操作: {op}")
     return lines
@@ -302,6 +313,7 @@ def generate_process_script(
     in_file: str,
     out_file: str,
     direct_phase: dict[str, tuple[float, float]] | None = None,
+    baseline: dict[str, dict[str, Any]] | None = None,
     ext_lo: str = "11.0",
     ext_hi: str = "6.0",
     extract: bool = True,
@@ -319,7 +331,9 @@ def generate_process_script(
         f"xyz2pipe -in {in_file} -x \\",
     ]
     for index, axis in enumerate(axes):
-        lines += _stage_lines(_axis_stages(plan, axis), direct_phase)
+        lines += _stage_lines(
+            _axis_stages(plan, axis), direct_phase, baseline
+        )
         if extract and index == 0:
             lines.append(
                 f"| nmrPipe -fn EXT -x1 {ext_lo}ppm -xn {ext_hi}ppm -sw -round 2 \\"
@@ -363,6 +377,7 @@ def generate_2d_nus_script(
     smile_report: int = 1,
     direct_phase: tuple[float, float] = (0.0, 0.0),
     extract: bool = True,
+    baseline: dict[str, Any] | None = None,
 ) -> str:
     """2D NUS SMILE 重构：直接维 FT+EXT → SMILE -nDim 2 → 间接维 FT（终谱 ft2）。"""
     ctx = build_context(experiment)
@@ -406,6 +421,8 @@ def generate_2d_nus_script(
     ]
     if not extract:
         lines = [line for line in lines if "| nmrPipe -fn EXT" not in line]
+    expanded = expand_baseline(experiment, baseline)
+    lines = _insert_nus_baseline(lines, expanded, experiment.ndim)
     return "\n".join(lines) + "\n"
 
 
@@ -428,6 +445,7 @@ def generate_3d_nus_script(
     smile_report: int = 1,
     direct_phase: tuple[float, float] = (0.0, 0.0),
     extract: bool = True,
+    baseline: dict[str, Any] | None = None,
 ) -> str:
     """3D NUS SMILE 重构：直接维（F3）FT+EXT → SMILE -nDim 3 → 间接维 FT（ft3）。"""
     ctx = build_context(experiment)
@@ -477,6 +495,8 @@ def generate_3d_nus_script(
     ]
     if not extract:
         lines = [line for line in lines if "| nmrPipe -fn EXT" not in line]
+    expanded = expand_baseline(experiment, baseline)
+    lines = _insert_nus_baseline(lines, expanded, experiment.ndim)
     return "\n".join(lines) + "\n"
 
 
@@ -530,6 +550,22 @@ def param_schema() -> dict[str, Any]:
                 "default": True,
                 "description": "直接维提取窗口是否开启",
             },
+            "baseline": {
+                "type": "object",
+                "description": "逐维基线校正(POLY,契约 §6)",
+                "properties": {
+                    "enabled": {"type": "boolean", "default": True},
+                    "mode": {"enum": ["auto", "order"], "default": "auto"},
+                    "order": {"type": "integer", "default": 0},
+                    "axes": {
+                        "oneOf": [
+                            {"type": "string", "enum": ["all"]},
+                            {"type": "array", "items": {"type": "string"}},
+                        ],
+                        "default": "all",
+                    },
+                },
+            },
             "stages": {
                 "type": "array",
                 "description": "处理阶段列表(表格编辑器逐行展示)",
@@ -551,6 +587,12 @@ def param_schema() -> dict[str, Any]:
             "ext_lo": "11.0",
             "ext_hi": "6.0",
             "extract": True,
+            "baseline": {
+                "enabled": True,
+                "mode": "auto",
+                "order": 0,
+                "axes": "all",
+            },
             "sampling": {
                 "ft_neg": False,
                 "ft_alt": True,
@@ -591,6 +633,7 @@ def render_scripts(
             direct = tuple(direct_phase.get("F2", (0.0, 0.0)))
         kwargs: dict[str, Any] = {
             "in_file": f"{experiment.dataset_id}.fid",
+            "baseline": expand_baseline(experiment, params.get("baseline")),
             "nuslist": "nuslist",
             "out_file": f"{experiment.dataset_id}.{out_ext}",
             "nthread": int(nus.get("nthread", 2)),
@@ -619,8 +662,147 @@ def render_scripts(
             in_file=f"{experiment.dataset_id}.fid",
             out_file=f"{experiment.dataset_id}.{out_ext}",
             direct_phase=dp,
+            baseline=expand_baseline(experiment, params.get("baseline")),
             ext_lo=str(params.get("ext_lo", "11.0")),
             ext_hi=str(params.get("ext_hi", "6.0")),
             extract=_as_bool(params.get("extract", True)),
         )
     return scripts
+
+
+
+def generate_nus_finalize_script(
+    experiment: Experiment,
+    *,
+    planes: str,
+    out_file: str,
+    phases: dict[str, tuple[float, float]] | None = None,
+) -> str:
+    """NUS 重构平面(复型)的间接维 FT 定稿脚本(逐维 PS 可配)。
+
+    planes:重构平面输入(2D nus2d/recon.ft1;3D nus3d_rc/test%04d.ft1);
+    phases:{轴 -> (p0, p1)},缺省 0——供逐维相位候选运行,不重跑 SMILE。
+    """
+    phases = phases or {}
+    f1_fnmode = _fnmode(experiment, "F1")
+    if experiment.ndim >= 3:
+        f2_fnmode = _fnmode(experiment, "F2")
+        f2_p0, f2_p1 = phases.get("F2", (0.0, 0.0))
+        f1_p0, f1_p1 = phases.get("F1", (0.0, 0.0))
+        lines = [
+            "#!/bin/csh",
+            "# NMRForge NUS finalize script (indirect FT from reconstructed planes)",
+            f"# experiment: {experiment.dataset_id}",
+            f"xyz2pipe -in {planes} -x \\",
+            "| nmrPipe -fn ZF -zf 1 -auto \\",
+            _ft_flag_line(f2_fnmode),
+            f"| nmrPipe -fn PS -p0 {f2_p0:g} -p1 {f2_p1:g} -di \\",
+            "| nmrPipe -fn TP \\",
+            "| nmrPipe -fn ZF -zf 1 -auto \\",
+            _ft_flag_line(f1_fnmode),
+            f"| nmrPipe -fn PS -p0 {f1_p0:g} -p1 {f1_p1:g} -di \\",
+            "| nmrPipe -fn TP \\",
+            "| nmrPipe -fn ZTP \\",
+            f"| pipe2xyz -out {out_file} -x",
+        ]
+    else:
+        f1_p0, f1_p1 = phases.get("F1", (0.0, 0.0))
+        lines = [
+            "#!/bin/csh",
+            "# NMRForge NUS finalize script (indirect FT from reconstructed planes)",
+            f"# experiment: {experiment.dataset_id}",
+            f"xyz2pipe -in {planes} -x \\",
+            "| nmrPipe -fn ZF -zf 1 -auto \\",
+            _ft_flag_line(f1_fnmode),
+            f"| nmrPipe -fn PS -p0 {f1_p0:g} -p1 {f1_p1:g} -di \\",
+            "| nmrPipe -fn TP \\",
+            "| nmrPipe -fn ZTP \\",
+            f"| pipe2xyz -out {out_file} -x",
+        ]
+    return "\n".join(lines) + "\n"
+
+
+
+def expand_baseline(
+    experiment: Experiment,
+    baseline: dict[str, Any] | None,
+) -> dict[str, dict[str, Any]]:
+    """归一 baseline 配置为 {轴: {enabled, mode, order}}。
+
+    支持 None(全维默认 auto)、表单形态 {enabled,mode,order,axes} 与
+    逐轴形态 {轴: {...}}。
+    """
+    axes = [dim.logical_axis for dim in experiment.dimensions]
+    defaults: dict[str, Any] = {"enabled": True, "mode": "auto", "order": 0}
+    if not baseline:
+        return {axis: dict(defaults) for axis in axes}
+    if any(k in baseline for k in ("axes", "enabled", "mode", "order")):
+        enabled = _as_bool(baseline.get("enabled", True))
+        mode = str(baseline.get("mode", "auto"))
+        order = int(baseline.get("order", 0) or 0)
+        sel = baseline.get("axes") or "all"
+        target = axes if sel == "all" else [str(a) for a in sel]
+        return {
+            axis: {"enabled": enabled, "mode": mode, "order": order}
+            for axis in target
+        }
+    out: dict[str, dict[str, Any]] = {}
+    for axis in axes:
+        cfg = dict(defaults)
+        cfg.update(baseline.get(axis, {}))
+        cfg["enabled"] = _as_bool(cfg.get("enabled", True))
+        cfg["mode"] = str(cfg.get("mode", "auto"))
+        cfg["order"] = int(cfg.get("order", 0) or 0)
+        out[axis] = cfg
+    return out
+
+
+def _baseline_line(
+    expanded: dict[str, dict[str, Any]], axis: str
+) -> list[str]:
+    """按轴配置生成 POLY 行(空列表=关闭)。"""
+    cfg = expanded.get(axis) or {}
+    if not cfg.get("enabled", True):
+        return []
+    if str(cfg.get("mode", "auto")) == "order":
+        order = max(1, int(cfg.get("order", 1) or 1))
+        return [f"| nmrPipe -fn POLY -ord {order} \\"]
+    return ["| nmrPipe -fn POLY -auto \\"]
+
+
+def _insert_nus_baseline(
+    lines: list[str],
+    expanded: dict[str, dict[str, Any]],
+    ndim: int,
+) -> list[str]:
+    """在 NUS 脚本指定位置插入 POLY:直接维 EXT 后、间接维各 PS 后。"""
+    direct_anchor = (
+        "| pipe2xyz -out nus3d_1/test%04d.ft1 -z"
+        if ndim >= 3
+        else "| pipe2xyz -out nus2d/test%03d.ft1 -z"
+    )
+    recon_mark = (
+        "xyz2pipe -in nus3d_rc/test%04d.ft1"
+        if ndim >= 3
+        else "xyz2pipe -in nus2d/recon.ft1"
+    )
+    direct_axis = "F3" if ndim >= 3 else "F2"
+    indirect_axes = ["F2", "F1"] if ndim >= 3 else ["F1"]
+    out: list[str] = []
+    direct_done = False
+    indirect_done: set[str] = set()
+    seen_recon = False
+    for line in lines:
+        if not direct_done and line == direct_anchor:
+            out.extend(_baseline_line(expanded, direct_axis))
+            direct_done = True
+        elif recon_mark in line:
+            seen_recon = True
+        elif seen_recon and "| nmrPipe -fn PS" in line:
+            for axis in indirect_axes:
+                if axis not in indirect_done:
+                    out.extend(_baseline_line(expanded, axis))
+                    indirect_done.add(axis)
+                    break
+        out.append(line)
+    return out

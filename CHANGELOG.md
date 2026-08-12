@@ -1,5 +1,39 @@
 # 变更日志
 
+## [0.2.31] - 2026-08-12
+
+- Backend(G2B-007):逐维基线校正(默认全维 POLY -auto):
+  select_method 每维 FT+PS 后插 baseline 节点(逐轴可关/order);
+  script_generator uniform/NUS 脚本按轴插入 POLY(直接维 EXT 后、
+  间接维 PS 后),param_schema 增 baseline 键(enabled/mode/order/axes);
+  workflow/baseline_optimize 逐维网格(mode∈{off,auto}×order∈{1,2,3})
+  用 core.qc.baseline_quality 选每维最优写回配置,score 可注入。
+- 测试:默认两行 POLY -auto、关闭/order 覆盖、NUS 2D/3D 插入位置、
+  schema 默认、逐维优化选校正/平谱选 off;全量通过,ruff 全绿。
+
+## [0.2.30] - 2026-08-12
+
+- Backend:逐维暴力相位优化默认改用相位专用评分
+  (workflow.phase_optimize._default_phase_score,复用 core.qc.phase_quality:
+  吸收度比例 50% + 负峰比例 30% + 对称性 20%),不再用综合 QC
+  (SNR/基线/伪影与相位基本无关,加权会稀释相位排名);score_fn 仍可注入
+  (需要综合评估时传 spectrum_quality)。
+- 测试:错相(负峰)评分低于正相、负峰比例差异断言;全量通过。
+
+## [0.2.29] - 2026-08-12
+
+- Backend:相位自动调优改为「逐维暴力」方案(用户反馈):
+  workflow/phase_optimize.optimize_phase_sequential——传统采样按轴
+  (直接维 → 间接维)逐维,每候选相位重跑一次后端管线(process,
+  direct_phase_override 覆盖该轴 PS),对终谱做整体 QC 评分,取最优后
+  固定,依次推进;NUS:先 SMILE 重构一次(reconstruct_nus,直接维随重构
+  固化),再从重构平面逐间接维候选跑 finalize_nus(不重跑 SMILE)。
+- backend:script_generator.generate_nus_finalize_script(重构平面→间接维
+  FT,逐维 PS 可配)+ NMRPipeBackend.finalize_nus;
+  stepwise.optimize_phase_brute_force 改用逐维暴力。
+- 测试:sequential 逐维/失败、finalize 2D/3D 脚本、stepwise 断言;
+  全量通过,ruff 全绿。
+
 ## [0.2.25] - 2026-08-12
 
 ## [0.2.28] - 2026-08-12

@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from core.data.bruker_reader import read_dataset
 from core.optimization.phase_search import apply_phase_axis
@@ -23,6 +24,7 @@ from workflow.phase_optimize import (
     estimate_auto_phase,
     estimate_recon_planes,
     format_phase_report,
+    optimize_phase_sequential,
     produce_phased_spectrum,
     run_with_auto_phase,
     save_report,
@@ -282,7 +284,8 @@ class _OverrideBackend:
 
     def process(self, experiment, plan, direct_phase_override=None) -> dict:
         self.overrides.append(dict(direct_phase_override or {}))
-        p1 = next(iter(direct_phase_override.values()))[1]
+        # 逐维搜索时覆盖含多个轴,取末轴(正在搜索的轴)的 p1
+        p1 = list(direct_phase_override.values())[-1][1]
         return {
             "success": True,
             "spectrum_path": f"{self.work_dir}/out_p1{int(p1)}.ft2",
@@ -413,3 +416,83 @@ def test_phase_selection_result_roundtrip() -> None:
     data = result.to_dict()
     assert data["method"] == "refined"
     assert data["phase"]["p1"] == 30.0
+
+
+
+def test_optimize_phase_sequential_uniform(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """逐维暴力:直接维 F2 → 间接维 F1,依次固定,取整体最优。"""
+    experiment = read_dataset(bruker_dir / "hsqc_2d")
+    backend = _OverrideBackend(tmp_path / "work")
+    result = optimize_phase_sequential(
+        experiment,
+        backend,
+        p0_values=(0.0,),
+        p1_values=(-60.0, 0.0, 30.0, 60.0),
+        score_fn=_score_from_path,
+    )
+    assert result.method == "sequential_brute_force"
+    assert result.phases["F2"][1] == 30.0
+    assert result.phases["F1"][1] == 30.0
+    assert result.backend_runs == 2 * 4
+    assert any("F2" in line and "已固定" in line for line in result.logs)
+    assert any("F1" in line and "已固定" in line for line in result.logs)
+
+
+def test_optimize_phase_sequential_failure(tmp_path: Path, bruker_dir: Path) -> None:
+    """某轴候选全部失败时抛错(不静默)。"""
+    experiment = read_dataset(bruker_dir / "hsqc_2d")
+
+    class _FailBackend(_OverrideBackend):
+        def process(self, experiment, plan, direct_phase_override=None) -> dict:
+            return {"success": False, "message": "boom", "logs": []}
+
+    backend = _FailBackend(tmp_path / "work")
+    with pytest.raises(ValueError, match="全部失败"):
+        optimize_phase_sequential(
+            experiment, backend, p0_values=(0.0,), p1_values=(0.0,)
+        )
+
+
+
+def test_default_phase_score_ranks_phase_quality(tmp_path: Path) -> None:
+    """相位专用评分:错相(负峰)分数低于正相;不使用综合 QC。"""
+    from scipy.ndimage import gaussian_filter
+
+    from workflow.phase_optimize import _default_phase_score
+
+    in_phase = np.zeros((32, 64))
+    in_phase[8, 20] = 500.0
+    in_phase = gaussian_filter(in_phase, sigma=1.2)
+    inverted = -in_phase  # 180° 错相 → 负峰
+
+    def _write(path: Path, data: np.ndarray) -> None:
+        from nmrglue.fileio import pipe
+
+        dic = {k: "0" for k in pipe.fdata_dic}
+        dic["FDMAGIC"] = 9.2330230000000007e14
+        dic["FDDIMCOUNT"] = 2
+        dic["FDSIZE"] = data.shape[1]
+        dic["FDSPECNUM"] = data.shape[0]
+        dic["FDQUADFLAG"] = 1
+        dic["FDF1QUADFLAG"] = 1
+        dic["FDF2QUADFLAG"] = 1
+        for prefix in ("FDF1", "FDF2"):
+            dic[prefix + "SW"] = "6000.0"
+            dic[prefix + "OBS"] = "600.0"
+            dic[prefix + "CAR"] = "4.7"
+            dic[prefix + "ORIG"] = "1000.0"
+        pipe.write(str(path), dic, data.astype(np.float32), overwrite=True)
+
+    good = tmp_path / "good.ft2"
+    bad = tmp_path / "bad.ft2"
+    _write(good, in_phase)
+    _write(bad, inverted)
+    score_good, comp_good = _default_phase_score(str(good))
+    score_bad, comp_bad = _default_phase_score(str(bad))
+    assert 0.0 <= score_good <= 100.0
+    assert score_good > score_bad  # 负峰比例惩罚
+    assert (
+        comp_bad["negative_peak_fraction"] > comp_good["negative_peak_fraction"]
+    )

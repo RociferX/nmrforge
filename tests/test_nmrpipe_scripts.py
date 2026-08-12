@@ -113,6 +113,38 @@ def test_2d_nus_script(bruker_dir: Path) -> None:
     assert "\r" not in script
 
 
+def test_nus_finalize_script_2d(bruker_dir: Path) -> None:
+    """重构平面定稿脚本:间接维 FT + 逐维 PS 可配。"""
+    exp = read_dataset(bruker_dir / "nus_2d")
+    from backend.script_generator import generate_nus_finalize_script
+
+    script = generate_nus_finalize_script(
+        exp, planes="nus2d/recon.ft1", out_file="e.ft2"
+    )
+    assert "xyz2pipe -in nus2d/recon.ft1 -x" in script
+    assert "| nmrPipe -fn PS -p0 0 -p1 0 -di" in script
+    assert "| nmrPipe -fn SMILE" not in script  # 不重跑 SMILE
+    phased = generate_nus_finalize_script(
+        exp, planes="nus2d/recon.ft1", out_file="e.ft2",
+        phases={"F1": (12.0, -3.0)},
+    )
+    assert "| nmrPipe -fn PS -p0 12 -p1 -3 -di" in phased
+
+
+def test_nus_finalize_script_3d(bruker_dir: Path) -> None:
+    exp = read_dataset(bruker_dir / "nus_3d")
+    from backend.script_generator import generate_nus_finalize_script
+
+    phased = generate_nus_finalize_script(
+        exp, planes="nus3d_rc/test%04d.ft1", out_file="e.ft3",
+        phases={"F2": (12.0, -3.0), "F1": (5.0, 2.0)},
+    )
+    assert "xyz2pipe -in nus3d_rc/test%04d.ft1 -x" in phased
+    assert "| nmrPipe -fn PS -p0 12 -p1 -3 -di" in phased
+    assert "| nmrPipe -fn PS -p0 5 -p1 2 -di" in phased
+    assert phased.count("| nmrPipe -fn TP") == 2
+
+
 def test_2d_nus_script_extract_off(bruker_dir: Path) -> None:
     """extract=False 时不写 EXT 行;True 保持现状(默认 6-11 ppm)。"""
     exp = read_dataset(bruker_dir / "nus_2d")
@@ -252,3 +284,49 @@ def test_process_script_extract_disabled_and_custom(bruker_dir: Path) -> None:
         ext_lo="9.0", ext_hi="7.5",
     )
     assert "| nmrPipe -fn EXT -x1 9.0ppm -xn 7.5ppm" in custom
+
+
+
+def test_process_script_baseline_default_and_overrides(bruker_dir: Path) -> None:
+    """默认每维 POLY -auto;baseline 配置可关闭/改 order。"""
+    exp = read_dataset(bruker_dir / "hsqc_2d")
+    plan = select_method(exp)
+    default = generate_process_script(exp, plan, in_file="a.fid", out_file="a.ft2")
+    assert default.count("| nmrPipe -fn POLY -auto") == 2  # F2 + F1
+    off = generate_process_script(
+        exp, plan, in_file="a.fid", out_file="a.ft2",
+        baseline={"F2": {"enabled": False}},
+    )
+    assert off.count("| nmrPipe -fn POLY") == 1
+    ordered = generate_process_script(
+        exp, plan, in_file="a.fid", out_file="a.ft2",
+        baseline={"F1": {"mode": "order", "order": 2}},
+    )
+    assert "| nmrPipe -fn POLY -ord 2" in ordered
+
+
+def test_2d_nus_script_baseline_insert(bruker_dir: Path) -> None:
+    """NUS 2D:直接维 EXT 后、间接维 PS 后按配置插入 POLY。"""
+    exp = read_dataset(bruker_dir / "nus_2d")
+    from backend.script_generator import generate_2d_nus_script
+
+    script = generate_2d_nus_script(
+        exp, in_file="e.fid", nuslist="nuslist", out_file="e.ft2"
+    )
+    assert script.count("| nmrPipe -fn POLY -auto") == 2
+    off = generate_2d_nus_script(
+        exp, in_file="e.fid", nuslist="nuslist", out_file="e.ft2",
+        baseline={"F1": {"enabled": False}},
+    )
+    assert off.count("| nmrPipe -fn POLY") == 1
+
+
+def test_3d_nus_script_baseline_insert(bruker_dir: Path) -> None:
+    """NUS 3D:直接维 EXT 后 + F2/F1 各 PS 后插入 POLY(共 3 行)。"""
+    exp = read_dataset(bruker_dir / "nus_3d")
+    from backend.script_generator import generate_3d_nus_script
+
+    script = generate_3d_nus_script(
+        exp, in_file="e.fid", nuslist="nuslist", out_file="e.ft3"
+    )
+    assert script.count("| nmrPipe -fn POLY -auto") == 3

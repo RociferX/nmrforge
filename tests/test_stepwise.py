@@ -43,7 +43,8 @@ class _FakeBackend:
         self.last_params = params
         p1 = 0
         if direct_phase_override:
-            p1 = next(iter(direct_phase_override.values()))[1]
+            # 逐维搜索时覆盖含多个轴,取末轴(正在搜索的轴)的 p1
+            p1 = list(direct_phase_override.values())[-1][1]
         spectrum = Path(self.work_dir) / f"out_p1{int(p1)}.ft2"
         self._touch(spectrum)
         return {
@@ -164,11 +165,12 @@ def test_optimize_phase_brute_force(tmp_path: Path, bruker_dir: Path) -> None:
         backend,
         score_fn=_score_from_path,
     )
-    assert result["method"] == "brute_force"
-    assert result["phase"]["p1"] == 30.0
+    assert result["method"] == "sequential_brute_force"
+    # 逐维暴力:直接维 F2 → 间接维 F1,各 21 候选(3 p0 × 7 p1)
+    assert result["phase"]["F2"][1] == 30.0
+    assert result["phase"]["F1"][1] == 30.0
     assert result["spectrum_path"].endswith("out_p130.ft2")
-    # 先 generate_spectrum(1 次 process)+ 候选暴力(5 次 process)+ 最终谱(1 次)
-    assert backend.calls.count("process") >= 7
+    assert backend.calls.count("process") >= 42
     data = manager.data(exp_id, data_id)
     assert data.spectrum_path == result["spectrum_path"]
     assert any(r.workflow_ref == "phase_optimize" for r in manager.project.workflow_runs)
