@@ -50,10 +50,11 @@ _ASPECT_CHOICES = (
 class SpectrumWindow(QMainWindow):
     """独立谱图窗口:打开/叠加谱、长宽比、峰模式、重置视图。"""
 
-    def __init__(self, parent=None) -> None:
+    def __init__(self, parent=None, start_dir: str = "") -> None:
         super().__init__(parent)
         self.setWindowTitle("NMRForge 谱图查看器")
         self.resize(1080, 720)
+        self.start_dir = start_dir
         self.viewer = SpectrumViewer()
         self.setCentralWidget(self.viewer)
         self._recent: list[str] = []
@@ -112,7 +113,7 @@ class SpectrumWindow(QMainWindow):
         path, _ = QFileDialog.getOpenFileName(
             self,
             "打开 NMRPipe 谱图",
-            "",
+            self.start_dir or "",
             "NMRPipe 谱 (*.ft2 *.ft1);;所有文件 (*)",
         )
         if path:

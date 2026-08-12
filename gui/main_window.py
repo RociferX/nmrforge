@@ -143,6 +143,7 @@ class MainWindow(QMainWindow):
             lambda path: self._open_root(Path(path))
         )
         self.project_tree.open_path_requested.connect(self._open_path)
+        self.project_tree.open_spectrum_requested.connect(self._open_spectrum_from_tree)
         self.project_tree.rename_requested.connect(self._rename_experiment_by_id)
         self.project_tree.delete_requested.connect(self._delete_experiment_by_id)
         self.project_tree.delete_project_requested.connect(self._delete_project)
@@ -733,7 +734,15 @@ class MainWindow(QMainWindow):
     def _show_viewer(self) -> None:
         from viewer.app import SpectrumWindow
 
-        self._viewer_window = SpectrumWindow()
+        start_dir = ""
+        exp_id = self.project_tree.current_experiment_id()
+        if exp_id and self.manager.project is not None:
+            try:
+                data_id = self.spectrum_panel._current_data_id or ""
+                start_dir = str(self.manager.data_dir(exp_id, data_id, "spectra"))
+            except Exception:  # noqa: BLE001
+                start_dir = ""
+        self._viewer_window = SpectrumWindow(start_dir=start_dir)
         self._viewer_window.show()
 
     def _show_log(self) -> None:
@@ -751,6 +760,14 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     # 上下文联动
     # ------------------------------------------------------------------
+    def _open_spectrum_from_tree(self, path: str) -> None:
+        """树中双击谱图文件:右侧谱图面板直接显示并加载峰表。"""
+        target = Path(path)
+        if self.spectrum_panel.open_spectrum(target):
+            self.spectrum_panel._current_spectrum = target
+            self.spectrum_panel._load_peaks(target)
+            self.statusBar().showMessage(f"已打开: {target.name}")
+
     def _open_path(self, path: str) -> None:
         """用系统文件管理器打开目录(双击/右键 data/子文件夹),中间保持 Pipeline。"""
         from PyQt6.QtCore import QUrl

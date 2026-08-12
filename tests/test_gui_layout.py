@@ -926,3 +926,84 @@ def test_spectrum_auto_shown_on_data_select(
     panel.refresh()
     assert panel.viewer.layer_list.count() == 1  # 不重复加载
     panel.close()
+
+def test_folder_node_shows_files(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """raw 等子文件夹节点下拉显示目录内文件。"""
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    raw = manager.data_dir("exp_001", "d_001", "raw")
+    raw.mkdir(parents=True, exist_ok=True)
+    (raw / "acqus").write_text("x")
+    (raw / "ser").write_text("y")
+    panel = ProjectTreePanel(manager)
+    data_item = panel.tree.topLevelItem(0).child(0).child(0).child(0)
+    raw_item = data_item.child(0)
+    names = [raw_item.child(i).text(0) for i in range(raw_item.childCount())]
+    assert "acqus" in names and "ser" in names
+    panel.close()
+
+def test_spectrum_file_double_click_opens_in_panel(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """树中谱图文件双击 → 右侧谱图面板直接显示。"""
+    import numpy as np
+
+    from nmrglue.fileio import pipe
+
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    spectra = manager.data_dir("exp_001", "d_001", "spectra")
+    spectra.mkdir(parents=True, exist_ok=True)
+    shape = (16, 32)
+    data = np.zeros(shape, dtype=np.float32)
+    data[8, 16] = 10
+    dic = {key: "0" for key in pipe.fdata_dic}
+    dic["FDMAGIC"] = 9.2330230000000007e14
+    dic["FDDIMCOUNT"] = 2
+    dic["FDSIZE"] = 32
+    dic["FDSPECNUM"] = 16
+    dic["FDQUADFLAG"] = 1
+    dic["FDF1QUADFLAG"] = 1
+    dic["FDF2QUADFLAG"] = 1
+    dic["FDTRANSPOSED"] = 0
+    dic["FDF1T"] = 16
+    dic["FDF1SW"] = 6000
+    dic["FDF1OBS"] = 600
+    dic["FDF1CAR"] = 118
+    dic["FDF1ORIG"] = 118 * 600
+    dic["FDF2T"] = 32
+    dic["FDF2SW"] = 6000
+    dic["FDF2OBS"] = 600
+    dic["FDF2CAR"] = 4.7
+    dic["FDF2ORIG"] = 4.7 * 600
+    pipe.write(str(spectra / "exp_001-d_001.ft2"), dic, data, overwrite=True)
+    window = MainWindow(manager=manager)
+    window.project_tree.select_experiment("exp_001")
+    tree = window.project_tree.tree
+    data_item = tree.topLevelItem(0).child(0).child(0).child(0)
+    file_item = data_item.child(2).child(0)  # spectra/exp_001-d_001.ft2
+    opened: list[str] = []
+    window.project_tree.open_spectrum_requested.connect(lambda p: opened.append(p))
+    window.project_tree._on_double_clicked(file_item, 0)
+    assert opened and Path(opened[0]).name == "exp_001-d_001.ft2"
+    window._open_spectrum_from_tree(opened[0])
+    assert window.spectrum_panel.viewer.layer_list.count() == 1
+    window.close()
+
+
+def test_viewer_default_dir_matches_current_data(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """独立谱图查看器默认打开路径=当前数据 spectra 目录。"""
+    from viewer.app import SpectrumWindow
+
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    spectra = manager.data_dir("exp_001", "d_001", "spectra")
+    spectra.mkdir(parents=True, exist_ok=True)
+    window = MainWindow(manager=manager)
+    window.project_tree.select_experiment("exp_001")
+    window.spectrum_panel.set_context("exp_001", "d_001")
+    viewer = SpectrumWindow(start_dir=str(spectra))
+    assert Path(viewer.start_dir) == spectra
+    viewer.close()
+    window.close()

@@ -47,6 +47,7 @@ class ProjectTreePanel(QWidget):
     data_rename_requested = pyqtSignal(str, str)  # (exp_id, data_id):重命名数据
     rename_project_requested = pyqtSignal()  # 重命名当前项目
     open_path_requested = pyqtSignal(str)  # 打开所在目录(子文件夹右键)
+    open_spectrum_requested = pyqtSignal(str)  # 双击谱图文件:右侧直接显示
     delete_project_requested = pyqtSignal()  # Project 右键:删除项目
     create_experiment_requested = pyqtSignal()  # 空白处右键:新建空白实验
     import_data_requested = pyqtSignal(str)  # Experiment 右键:导入数据(exp_id)
@@ -190,9 +191,34 @@ class ProjectTreePanel(QWidget):
                 Qt.ItemDataRole.UserRole,
                 {"kind": "folder", "exp_id": exp.id, "data_id": data_id, "folder": sub},
             )
+            self._populate_folder_children(sub_item, exp.id, data_id, sub)
             data_item.addChild(sub_item)
         data_item.setExpanded(False)
         return data_item
+
+    def _populate_folder_children(
+        self, folder_item: QTreeWidgetItem, exp_id: str, data_id: str, folder: str
+    ) -> None:
+        """把子文件夹内的文件挂到文件夹节点下(可下拉查看)。"""
+        path = self._folder_path(exp_id, data_id, folder)
+        if path is None or not path.is_dir():
+            return
+        for child in sorted(path.iterdir(), key=lambda p: (p.is_dir(), p.name.lower())):
+            name = child.name
+            file_item = QTreeWidgetItem([name, ""])
+            file_item.setIcon(0, self._icon("folder" if child.is_dir() else "file"))
+            file_item.setData(
+                0,
+                Qt.ItemDataRole.UserRole,
+                {
+                    "kind": "file",
+                    "exp_id": exp_id,
+                    "data_id": data_id,
+                    "folder": folder,
+                    "name": name,
+                },
+            )
+            folder_item.addChild(file_item)
 
     def _data_status(self, exp, data_node) -> str:
         """按产物文件推断数据状态。"""
@@ -220,6 +246,7 @@ class ProjectTreePanel(QWidget):
             "experiment": "E",
             "data": "D",
             "folder": "▸",
+            "file": "•",
         }.get(kind, "•")
         pix = QPixmap(16, 16)
         pix.fill(QColor("transparent"))
@@ -307,6 +334,19 @@ class ProjectTreePanel(QWidget):
             if self.manager.root is None or Path(path) != Path(self.manager.root).resolve():
                 self.open_project_requested.emit(path)
             return
+        if kind == "file":
+            # 双击文件:谱图文件直接右侧显示,其它文件打开所在目录
+            folder = data.get("folder", "")
+            name = data.get("name", "")
+            if folder == "spectra" and name.lower().endswith((".ft2", ".ft3")):
+                path = self._folder_path_for_item(item)
+                if path is not None and path.is_file():
+                    self.open_spectrum_requested.emit(str(path))
+            else:
+                folder_path = self._folder_path_for_item(item)
+                if folder_path is not None:
+                    self.open_path_requested.emit(str(folder_path.parent if not folder_path.is_dir() else folder_path))
+            return
         if kind in ("data", "folder"):
             # 双击数据/子文件夹:打开文件管理器对应目录,中间保持 Pipeline
             folder_path = self._folder_path_for_item(item)
@@ -328,6 +368,11 @@ class ProjectTreePanel(QWidget):
             return None
         if data.get("kind") == "folder":
             return self._folder_path(exp_id, data_id, data.get("folder", ""))
+        if data.get("kind") == "file":
+            folder = self._folder_path(exp_id, data_id, data.get("folder", ""))
+            if folder is not None:
+                candidate = folder / str(data.get("name", ""))
+                return candidate if candidate.exists() else None
         # data 节点:优先 raw 目录,缺失时回退 data 基座
         try:
             raw_dir = self.manager.data_dir(exp_id, data_id, "raw")
