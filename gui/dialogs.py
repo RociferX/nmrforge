@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -214,11 +214,15 @@ class SampleDialog(QDialog):
 
 
 class ParameterTableDialog(QDialog):
-    """人工路径 A:参数表格编辑器。
+    """人工路径 A:参数表格编辑器(以 param_schema 为准)。
 
-    从 backend.script_generator.param_schema() 填充表格;后端缺失时
-    显示占位参数并保持可编辑。
+    标量参数(zero_fill/ext_lo/ext_hi/extract/sampling.*)逐行编辑,
+    stages 阶段表逐行展示;「渲染脚本」发出 render_requested(params),
+    由主窗口经 ProcessingController.manual_scripts 渲染 process.com /
+    nus*.com 并打开脚本编辑器。
     """
+
+    render_requested = pyqtSignal(dict)  # params:点「渲染脚本」时发出
 
     def __init__(
         self,
@@ -228,37 +232,31 @@ class ParameterTableDialog(QDialog):
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle(f"人工参数表格 - {experiment_label}")
-        self.resize(640, 460)
+        self.resize(680, 540)
         layout = QVBoxLayout(self)
-        self.params = dict(params or {})
-        self.params.setdefault("zero_fill", 2)
-        self.params.setdefault("sampling", {"ft_neg": True, "ft_alt": True})
-        stages = self.params.setdefault(
-            "stages",
-            [
-                {"id": "fid", "tool": "nmrPipe", "macro": "fid.com"},
-                {"id": "process", "tool": "nmrPipe", "macro": "process.com"},
-            ],
-        )
+        self.schema = dict(params or {})
+        self.params = self._defaults_from_schema()
 
         hint = QLabel(
-            "人工路径 A:逐阶段修改参数,后端将按参数生成确定性 .com 脚本。"
+            "人工路径 A:逐阶段修改参数,「渲染脚本」后可按需改脚本再运行。"
         )
         hint.setWordWrap(True)
         layout.addWidget(hint)
 
-        self.table = QTableWidget(len(stages), 4)
-        self.table.setHorizontalHeaderLabels(["阶段", "工具", "宏", "参数"])
-        for row, stage in enumerate(stages):
-            self.table.setItem(row, 0, QTableWidgetItem(str(stage.get("id", ""))))
-            self.table.setItem(row, 1, QTableWidgetItem(str(stage.get("tool", ""))))
-            self.table.setItem(row, 2, QTableWidgetItem(str(stage.get("macro", ""))))
-            params_text = " ".join(
-                f"{k}={v}" for k, v in stage.get("params", {}).items()
-            )
-            self.table.setItem(row, 3, QTableWidgetItem(params_text))
-        self.table.horizontalHeader().setStretchLastSection(True)
-        layout.addWidget(self.table, 1)
+        self.param_table = QTableWidget(0, 2)
+        self.param_table.setHorizontalHeaderLabels(["参数", "值"])
+        self._build_scalar_rows()
+        self.param_table.horizontalHeader().setStretchLastSection(True)
+        layout.addWidget(self.param_table, 1)
+
+        stage_title = QLabel("处理阶段(stages)")
+        layout.addWidget(stage_title)
+        self.stages_table = QTableWidget(0, 4)
+        self.stages_table.setHorizontalHeaderLabels(["阶段", "工具", "宏", "参数"])
+        self._build_stages_rows()
+        self.stages_table.horizontalHeader().setStretchLastSection(True)
+        self.stages_table.setMaximumHeight(160)
+        layout.addWidget(self.stages_table, 1)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok
@@ -266,20 +264,164 @@ class ParameterTableDialog(QDialog):
         )
         buttons.button(QDialogButtonBox.StandardButton.Ok).setText("保存")
         buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
+        render_btn = buttons.addButton(
+            "渲染脚本", QDialogButtonBox.ButtonRole.ActionRole
+        )
+        render_btn.setToolTip("按当前参数渲染 process.com / nus*.com 并打开脚本编辑器")
+        render_btn.clicked.connect(
+            lambda: self.render_requested.emit(self.result_data())
+        )
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
+    def _defaults_from_schema(self) -> dict:
+        """从 schema.default 取默认参数(缺失时用可编辑骨架)。"""
+        schema = self.schema
+        default = (
+            dict(schema.get("default") or {})
+            if isinstance(schema, dict) and isinstance(schema.get("default"), dict)
+            else {}
+        )
+        default.setdefault("zero_fill", 2)
+        default.setdefault("ext_lo", "11.0")
+        default.setdefault("ext_hi", "6.0")
+        default.setdefault("extract", True)
+        default.setdefault(
+            "sampling",
+            {"ft_neg": False, "ft_alt": True, "flip_f1": False, "auto_phase": True},
+        )
+        default.setdefault("stages", [])
+        return default
+
+    def _build_scalar_rows(self) -> None:
+        """标量参数行(以 schema properties 顺序为准,含 sampling.* 展开)。"""
+        props = (
+            self.schema.get("properties", {})
+            if isinstance(self.schema, dict)
+            else {}
+        )
+        sampling_props = {}
+        if isinstance(props.get("sampling"), dict):
+            sampling_props = props["sampling"].get("properties", {}) or {}
+        sampling = self.params.get("sampling") or {}
+        def _desc(key: str) -> str:
+            prop = props.get(key, {}) if isinstance(props.get(key), dict) else {}
+            return str(prop.get("description", ""))
+
+        rows = [
+            ("zero_fill", self.params.get("zero_fill", 2), _desc("zero_fill")),
+            ("ext_lo", self.params.get("ext_lo", "11.0"), _desc("ext_lo")),
+            ("ext_hi", self.params.get("ext_hi", "6.0"), _desc("ext_hi")),
+            ("extract", self.params.get("extract", True), _desc("extract")),
+        ]
+        for key in ("ft_neg", "ft_alt", "flip_f1", "auto_phase"):
+            default = key in ("ft_alt", "auto_phase")
+            rows.append(
+                (
+                    f"sampling.{key}",
+                    sampling.get(key, default),
+                    sampling_props.get(key, {}).get("description", ""),
+                )
+            )
+        self.param_table.setRowCount(len(rows))
+        for row, (key, value, desc) in enumerate(rows):
+            key_item = QTableWidgetItem(key)
+            key_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+            self.param_table.setItem(row, 0, key_item)
+            value_item = QTableWidgetItem(self._fmt_value(value))
+            value_item.setToolTip(desc or key)
+            self.param_table.setItem(row, 1, value_item)
+
+    def _build_stages_rows(self) -> None:
+        stages = self.params.get("stages") or []
+        self.stages_table.setRowCount(len(stages))
+        for row, stage in enumerate(stages):
+            self.stages_table.setItem(row, 0, QTableWidgetItem(str(stage.get("id", ""))))
+            self.stages_table.setItem(row, 1, QTableWidgetItem(str(stage.get("tool", ""))))
+            self.stages_table.setItem(row, 2, QTableWidgetItem(str(stage.get("macro", ""))))
+            params_text = " ".join(
+                f"{k}={v}" for k, v in (stage.get("params") or {}).items()
+            )
+            self.stages_table.setItem(row, 3, QTableWidgetItem(params_text))
+
+    @staticmethod
+    def _fmt_value(value) -> str:
+        if value is True:
+            return "true"
+        if value is False:
+            return "false"
+        return str(value)
+
+    _FALLBACK_PARAM_TYPES = {
+        "zero_fill": "integer",
+        "ext_lo": "string",
+        "ext_hi": "string",
+        "extract": "boolean",
+        "sampling.ft_neg": "boolean",
+        "sampling.ft_alt": "boolean",
+        "sampling.flip_f1": "boolean",
+        "sampling.auto_phase": "boolean",
+    }
+
+    def _coerce_value(self, key: str, raw: str):
+        """按 schema 类型转换:boolean/integer/float 转换,string 保持原样。"""
+        low = raw.lower()
+        if low in ("true", "false"):
+            return low == "true"
+        props = (
+            self.schema.get("properties", {})
+            if isinstance(self.schema, dict)
+            else {}
+        )
+        prop_type = ""
+        if key.startswith("sampling."):
+            sub = key.split(".", 1)[1]
+            sampling_props = {}
+            if isinstance(props.get("sampling"), dict):
+                sampling_props = props["sampling"].get("properties", {}) or {}
+            prop_type = str(sampling_props.get(sub, {}).get("type", ""))
+        else:
+            prop_type = str(props.get(key, {}).get("type", ""))
+        if not prop_type:
+            prop_type = self._FALLBACK_PARAM_TYPES.get(key, "")
+        if prop_type == "string":
+            return raw
+        try:
+            if raw.isdigit() or (raw.startswith("-") and raw[1:].isdigit()):
+                return int(raw)
+            return float(raw)
+        except ValueError:
+            return raw
+
     def result_data(self) -> dict:
-        """返回编辑后的 params(UI 骨架:目前只回读表格文本)。"""
+        """回读编辑后的 params(标量 + sampling + stages)。"""
         params = dict(self.params)
+        for row in range(self.param_table.rowCount()):
+            key_item = self.param_table.item(row, 0)
+            value_item = self.param_table.item(row, 1)
+            if key_item is None or value_item is None:
+                continue
+            key = key_item.text()
+            raw = value_item.text().strip()
+            value = self._coerce_value(key, raw)
+            if key.startswith("sampling."):
+                sub = key.split(".", 1)[1]
+                sampling = dict(params.get("sampling") or {})
+                sampling[sub] = value
+                params["sampling"] = sampling
+            else:
+                params[key] = value
         stages = []
-        for row in range(self.table.rowCount()):
+        for row in range(self.stages_table.rowCount()):
+            stage_id = self.stages_table.item(row, 0)
+            stage_tool = self.stages_table.item(row, 1)
+            stage_macro = self.stages_table.item(row, 2)
             stages.append(
                 {
-                    "id": self.table.item(row, 0).text() if self.table.item(row, 0) else "",
-                    "tool": self.table.item(row, 1).text() if self.table.item(row, 1) else "",
-                    "macro": self.table.item(row, 2).text() if self.table.item(row, 2) else "",
+                    "id": stage_id.text() if stage_id else "",
+                    "tool": stage_tool.text() if stage_tool else "",
+                    "macro": stage_macro.text() if stage_macro else "",
                 }
             )
         params["stages"] = stages
@@ -289,9 +431,13 @@ class ParameterTableDialog(QDialog):
 class ScriptEditorDialog(QDialog):
     """人工路径 B:脚本编辑器(模仿 VSCode 的简单文本编辑器)。
 
-    从 render_scripts 加载 .com 内容;支持保存到数据 process 目录,
-    「执行」为占位按钮(后端执行待接入)。
+    从 render_scripts / manual_scripts 加载 .com 内容;保存写入数据
+    process 目录(或 raw 目录的 fid.com);「运行」发出 run_requested(content),
+    由主窗口经 ProcessingController.run_manual_spectrum / run_manual_fid_com
+    执行并登记 WorkflowRun。
     """
+
+    run_requested = pyqtSignal(str)  # 脚本内容:点「运行」时发出
 
     def __init__(
         self,
@@ -303,13 +449,13 @@ class ScriptEditorDialog(QDialog):
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle(f"脚本编辑器 - {experiment_label} ({script_name})")
-        self.resize(720, 520)
+        self.resize(760, 540)
         self.script_name = script_name
         self.save_dir = save_dir
         layout = QVBoxLayout(self)
         hint = QLabel(
-            "人工路径 B:直接编辑处理脚本(.com)。保存写入数据 process 目录,"
-            "「执行」为占位按钮(后端执行待接入)。"
+            "人工路径 B:直接编辑处理脚本。保存写入数据目录;「运行」执行"
+            "谱图脚本(process.com / nus*.com,消费已转换 fid)或 fid.com。"
         )
         hint.setWordWrap(True)
         layout.addWidget(hint)
@@ -326,6 +472,13 @@ class ScriptEditorDialog(QDialog):
         )
         buttons.button(QDialogButtonBox.StandardButton.Ok).setText("保存")
         buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
+        run_btn = buttons.addButton(
+            "运行", QDialogButtonBox.ButtonRole.ActionRole
+        )
+        run_btn.setToolTip("保存当前脚本到数据目录并运行(登记 WorkflowRun)")
+        run_btn.clicked.connect(
+            lambda: self.run_requested.emit(self.editor.toPlainText())
+        )
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
@@ -337,7 +490,7 @@ class ScriptEditorDialog(QDialog):
         return {"content": self.editor.toPlainText()}
 
     def save_script(self) -> Path | None:
-        """把当前内容保存到数据 process 目录(无目录时返回 None)。"""
+        """把当前内容保存到数据目录(无目录时返回 None)。"""
         if self.save_dir is None:
             self.save_message.setText("未指定保存目录(需选中数据)")
             return None

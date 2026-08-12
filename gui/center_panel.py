@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
 
 from gui.dashboards import ExperimentDashboard, ProjectDashboard
 from gui.pipeline_panel import PipelinePanel
+from gui.report_panel import ReportPanel
 from gui.welcome_page import WelcomePage
 
 
@@ -49,6 +50,7 @@ class CenterPanel(QWidget):
         self.pipeline = PipelinePanel(manager, controller)
         self.pipeline.log_message.connect(self.log_message.emit)
         self.pipeline.manual_open_requested.connect(self.manual_open_requested.emit)
+        self.pipeline.report_requested.connect(self.show_report)
         self.pipeline.import_data_requested.connect(self.import_data_requested.emit)
 
         self.project_page = ProjectDashboard()
@@ -66,6 +68,8 @@ class CenterPanel(QWidget):
         self.stack.addWidget(self.project_page)  # index 1: Project
         self.stack.addWidget(self.experiment_page)  # index 2: Experiment
         self.stack.addWidget(self.pipeline)  # index 3: Data / folder
+        self.report_page = ReportPanel(manager)
+        self.stack.addWidget(self.report_page)  # index 4: 报告
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -96,6 +100,16 @@ class CenterPanel(QWidget):
         self.pipeline.refresh()
         self.project_page.refresh()
         self.experiment_page.refresh()
+        self.report_page.manager = self._manager
+        self.report_page.refresh()
+
+    def show_report(self, _step_id: str = "", exp_id: str = "", data_id: str = "") -> None:
+        """打开报告页(分析产物存在时);缺省用当前选中实验/数据。"""
+        exp_id = exp_id or self.pipeline.current_experiment_id()
+        data_id = data_id or getattr(self.pipeline, "_current_data_id", "")
+        self.report_page.manager = self._manager
+        self.report_page.set_context(exp_id, data_id)
+        self.stack.setCurrentIndex(4)
 
     def run_step(self, step_id: str, data_id: str | None = None) -> None:
         self.pipeline.run_step(step_id, data_id=data_id)

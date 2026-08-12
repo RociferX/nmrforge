@@ -104,6 +104,12 @@ def compute_step_statuses(manager: ProjectManager, exp_id: str) -> dict[str, str
             has_peaks = has_peaks or peaks_dir.joinpath(
                 f"{exp_id}-{data_id}.csv"
             ).is_file()
+            report_dir = manager.data_dir(exp_id, data_id, "report")
+            if report_dir.is_dir():
+                has_analysis = has_analysis or any(
+                    p.is_file() and p.suffix.lower() in (".html", ".pdf", ".json")
+                    for p in report_dir.iterdir()
+                )
         except Exception:  # noqa: BLE001 - 新布局不可用回退旧路径
             pass
     # 旧扁平布局回退(项目根 spectra/peaks/analysis)
@@ -154,6 +160,7 @@ class PipelineStepRow(QWidget):
 
     run_requested = pyqtSignal(str)  # step_id
     manual_requested = pyqtSignal(str)  # step_id:打开人工参数表格/脚本编辑器
+    report_requested = pyqtSignal(str)  # step_id:分析完成后打开报告页
 
     def __init__(
         self, step_id: str, label: str, description: str, parent: QWidget | None = None
@@ -180,6 +187,13 @@ class PipelineStepRow(QWidget):
         self.run_button.setVisible(False)
         self.run_button.clicked.connect(lambda: self.run_requested.emit(self.step_id))
         layout.addWidget(self.run_button)
+        self.report_button = QPushButton("报告")
+        self.report_button.setToolTip("查看当前数据的报告产物(report/ 目录)")
+        self.report_button.setVisible(False)
+        self.report_button.clicked.connect(
+            lambda: self.report_requested.emit(self.step_id)
+        )
+        layout.addWidget(self.report_button)
         self.manual_button = QPushButton("人工")
         self.manual_button.setToolTip("人工参数表格 / 脚本编辑器(骨架)")
         self.manual_button.setVisible(False)
@@ -197,6 +211,8 @@ class PipelineStepRow(QWidget):
             tooltip += f"\n{reason}"
         self.status_label.setToolTip(tooltip)
         self.run_button.setVisible(status == "READY")
+        # 分析步骤产物就绪后提供「报告」入口
+        self.report_button.setVisible(status == "SUCCESS" and self.step_id == "analysis")
 
 
 class PipelinePanel(QWidget):
@@ -205,6 +221,7 @@ class PipelinePanel(QWidget):
     log_message = pyqtSignal(str)
     run_finished = pyqtSignal()
     manual_open_requested = pyqtSignal(str)  # step_id:打开人工处理对话框
+    report_requested = pyqtSignal(str)  # step_id:打开报告页
     import_data_requested = pyqtSignal(str)  # exp_id:在当前实验下导入数据
 
     def __init__(
@@ -244,6 +261,7 @@ class PipelinePanel(QWidget):
             row = PipelineStepRow(step_id, label, description)
             row.run_requested.connect(self._on_run_requested)
             row.manual_requested.connect(self.manual_open_requested.emit)
+            row.report_requested.connect(self.report_requested.emit)
             steps_box.addWidget(row)
             self._rows[step_id] = row
         steps_box.addStretch(1)
