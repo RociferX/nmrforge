@@ -57,6 +57,8 @@ class MainWindow(QMainWindow):
 
     import_failed = pyqtSignal(str)  # 导入失败信息(后台线程 → 主线程)
     import_finished = pyqtSignal(object)  # ImportResult(后台线程 → 主线程)
+    manual_run_log = pyqtSignal(str)  # 人工脚本运行日志(后台线程 → 主线程)
+    manual_run_done = pyqtSignal()  # 人工脚本运行完成(主线程刷新 UI)
 
     def __init__(
         self,
@@ -73,6 +75,8 @@ class MainWindow(QMainWindow):
         self.workspace.ensure()
         self.import_failed.connect(self._on_import_failed)
         self.import_finished.connect(self._on_import_done)
+        self.manual_run_log.connect(self._append_log)
+        self.manual_run_done.connect(self._on_manual_run_done)
         self._pending_data_names: dict[str, str] = {}
         self.setWindowTitle("NMRForge")
         self.resize(1280, 780)
@@ -108,6 +112,7 @@ class MainWindow(QMainWindow):
         process_menu.addAction("运行自动化处理", self.run_auto)
         process_menu.addAction("人工参数表格...", self._manual_param_table_menu)
         process_menu.addAction("人工脚本编辑器...", self._manual_script_editor_menu)
+        process_menu.addAction("人工 FID 脚本...", self._manual_fid_menu)
         process_menu.addSeparator()
         process_menu.addAction("运行历史...", self._show_run_history)
 
@@ -118,6 +123,7 @@ class MainWindow(QMainWindow):
         view_menu = bar.addMenu("查看(&V)")
         view_menu.addAction("谱图查看器", self._show_viewer)
         view_menu.addAction("Task / Log", self._show_log)
+        view_menu.addAction("报告...", self._show_report)
         view_menu.addSeparator()
         self.view_left_action = QAction("左侧项目管理", self, checkable=True)
         self.view_left_action.setChecked(True)
@@ -173,7 +179,8 @@ class MainWindow(QMainWindow):
             lambda path: self._open_root(Path(path))
         )
 
-        self.spectrum_panel = SpectrumPanel(self.manager)
+        self.spectrum_panel = SpectrumPanel(self.manager, controller=self.controller)
+        self.spectrum_panel.peaks_saved.connect(self._on_peaks_saved)
 
         self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
         self.main_splitter.addWidget(self.project_tree)
@@ -305,6 +312,17 @@ class MainWindow(QMainWindow):
                     source,
                     copy=bool(data.get("copy", True)),
                 )
+                data_id = getattr(result, "data_id", "") or ""
+                if data_id:
+                    from gui.pipeline_state import record_step_success
+
+                    record_step_success(
+                        self.manager,
+                        target_exp_id,
+                        data_id,
+                        "import",
+                        params={"copy": bool(data.get("copy", True))},
+                    )
                 self.manager.save()
                 self.import_finished.emit(result)  # 回主线程刷新 UI
             except Exception as exc:  # noqa: BLE001 - 错误统一回主线程提示
@@ -442,7 +460,13 @@ class MainWindow(QMainWindow):
         if self.manager.project is None:
             return
         statuses = compute_step_statuses(self.manager, exp_id)
-        next_step = next((sid for sid, st in statuses.items() if st == "READY"), None)
+        next_step = next(
+            (sid for sid, st in statuses.items() if st == "OUTDATED"), None
+        )
+        if next_step is None:
+            next_step = next(
+                (sid for sid, st in statuses.items() if st == "READY"), None
+            )
         if next_step is None:
             InfoDialog.show_info(self, "提示", "当前没有可运行的步骤")
             return
@@ -460,13 +484,16 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def _manual_param_table_menu(self) -> None:
-        self._open_manual_dialog("process")
+        self._open_manual_dialog("spectrum")
 
     def _manual_script_editor_menu(self) -> None:
-        self._open_manual_dialog("process")
+        self._open_manual_dialog("script")
+
+    def _manual_fid_menu(self) -> None:
+        self._open_manual_dialog("fid")
 
     def _open_manual_dialog(self, step_id: str) -> None:
-        """打开人工参数表格/脚本编辑器(UI 骨架;后端接口仍为占位)。"""
+        """人工处理入口:按步骤打开参数表格/脚本编辑器/fid 编辑器。"""
         exp_id = self.project_tree.current_experiment_id()
         if not exp_id:
             InfoDialog.show_info(self, "提示", "请先在左侧选择一个实验")
@@ -475,67 +502,194 @@ class MainWindow(QMainWindow):
         if entry is None:
             return
         label = f"{entry.title or entry.id} ({exp_id})"
-        params, backend_ready = self._load_param_schema()
-        if step_id in ("fid", "spectrum", "import"):
-            dialog = ParameterTableDialog(self, label, params=params)
-            if not backend_ready:
-                dialog.setWindowTitle(dialog.windowTitle() + "(后端待实现)")
-        else:
-            scripts = self._load_rendered_scripts(entry)
-            data_entry = entry.data[0] if entry.data else None
-            save_dir = None
-            if data_entry is not None:
-                try:
-                    save_dir = self.manager.data_dir(exp_id, data_entry.id, "process")
-                except Exception:  # noqa: BLE001
-                    save_dir = None
-            script_name = next(iter(scripts), "process.com")
-            dialog = ScriptEditorDialog(
-                self,
-                label,
-                script_name=script_name,
-                content=scripts.get(script_name, ""),
-                save_dir=save_dir,
-            )
-            if not backend_ready:
-                dialog.setWindowTitle(dialog.windowTitle() + "(后端待实现)")
-        if dialog.exec() != ParameterTableDialog.DialogCode.Accepted:
+        data_node = self._current_data_node(entry)
+        if data_node is None:
+            InfoDialog.show_info(self, "提示", "该实验还没有数据,请先导入数据")
             return
-        if isinstance(dialog, ScriptEditorDialog):
-            dialog.save_script()  # 保存到数据 process 目录
-        elif hasattr(dialog, "result_data"):
-            dialog.result_data()
-        if not backend_ready:
+        data_id = getattr(data_node, "id", exp_id)
+        if step_id == "fid":
+            self._open_fid_editor(data_node, exp_id, data_id, label)
+        elif step_id == "spectrum":
+            self._open_param_table(data_node, exp_id, data_id, label)
+        elif step_id == "script":
+            self._open_script_editor(data_node, exp_id, data_id, label)
+        elif step_id == "peaks":
             InfoDialog.show_info(
                 self,
-                "人工处理",
-                "参数/脚本已加载为可编辑骨架;后端 param_schema/render_scripts 待实现,"
-                "当前仅支持本地保存。",
+                "峰表编辑",
+                "峰表添加/删除/编辑请在右侧谱图面板峰表操作,保存后写回 CSV。",
+            )
+        elif step_id == "analysis":
+            InfoDialog.show_info(
+                self,
+                "分析",
+                "分析步骤后端为占位(workflow.analyze);完成后报告页展示 report/ 产物。",
             )
         else:
+            InfoDialog.show_info(self, "人工处理", f"暂不支持该步骤的人工入口: {step_id}")
+
+    def _current_data_node(self, entry):
+        """当前选中数据节点(未选中时回退首个;空白实验返回 None)。"""
+        nodes = list(getattr(entry, "data", None) or [])
+        if not nodes:
+            return None
+        data_id = self.project_tree._data_id_of(self.project_tree.tree.currentItem())
+        if data_id:
+            return next((n for n in nodes if getattr(n, "id", "") == data_id), nodes[0])
+        return nodes[0]
+
+    def _open_fid_editor(self, data_node, exp_id: str, data_id: str, label: str) -> None:
+        """fid.com 查看/修改/运行(manual_fid_com / run_manual_fid_com)。"""
+        try:
+            content = self.controller.manual_fid_com(
+                data_node, exp_id=exp_id, data_id=data_id
+            )
+        except Exception as exc:  # noqa: BLE001 - 后端缺失统一提示
             InfoDialog.show_info(
-                self, "人工处理", "已保存参数/脚本,后端执行将在后续版本接入。"
+                self, "fid.com", f"无法获取 fid.com: {type(exc).__name__}: {exc}"
+            )
+            return
+        save_dir = None
+        try:
+            save_dir = self.manager.data_dir(exp_id, data_id, "raw")
+        except Exception:  # noqa: BLE001
+            save_dir = None
+        dialog = ScriptEditorDialog(
+            self, label, script_name="fid.com", content=content, save_dir=save_dir
+        )
+        self._wire_script_run(dialog, data_node, exp_id, data_id, "fid.com")
+        if dialog.exec() == ScriptEditorDialog.DialogCode.Accepted:
+            dialog.save_script()
+
+    def _open_param_table(self, data_node, exp_id: str, data_id: str, label: str) -> None:
+        """参数表格:param_schema 填充 → 渲染脚本 → 脚本编辑器运行。"""
+        schema = self.controller.param_schema()
+        dialog = ParameterTableDialog(self, label, params=schema)
+        dialog.render_requested.connect(
+            lambda params: self._render_scripts_and_edit(
+                params, data_node, exp_id, data_id, label
+            )
+        )
+        dialog.exec()
+
+    def _open_script_editor(self, data_node, exp_id: str, data_id: str, label: str) -> None:
+        """脚本编辑器:manual_scripts 渲染当前脚本 → 编辑/保存/运行。"""
+        try:
+            scripts = self.controller.manual_scripts(
+                data_node, params=None, exp_id=exp_id, data_id=data_id
+            )
+        except Exception as exc:  # noqa: BLE001 - 后端缺失统一提示
+            InfoDialog.show_info(
+                self, "加载脚本失败", f"{type(exc).__name__}: {exc}"
+            )
+            return
+        script_key = next(iter(scripts), "process.com")
+        save_dir = None
+        try:
+            save_dir = self.manager.data_dir(exp_id, data_id, "process")
+        except Exception:  # noqa: BLE001
+            save_dir = None
+        dialog = ScriptEditorDialog(
+            self,
+            label,
+            script_name=script_key,
+            content=scripts.get(script_key, ""),
+            save_dir=save_dir,
+        )
+        self._wire_script_run(dialog, data_node, exp_id, data_id, script_key)
+        dialog.exec()
+
+    def _render_scripts_and_edit(
+        self, params: dict, data_node, exp_id: str, data_id: str, label: str
+    ) -> None:
+        """按参数渲染谱图脚本并打开脚本编辑器(保存到 process/ 后可运行)。"""
+        try:
+            scripts = self.controller.manual_scripts(
+                data_node, params=params, exp_id=exp_id, data_id=data_id
+            )
+        except Exception as exc:  # noqa: BLE001
+            InfoDialog.show_info(
+                self, "渲染失败", f"{type(exc).__name__}: {exc}"
+            )
+            return
+        if not scripts:
+            InfoDialog.show_info(self, "渲染失败", "后端未返回脚本")
+            return
+        script_key = next(iter(scripts), "process.com")
+        save_dir = None
+        try:
+            save_dir = self.manager.data_dir(exp_id, data_id, "process")
+        except Exception:  # noqa: BLE001
+            save_dir = None
+        editor = ScriptEditorDialog(
+            self,
+            label,
+            script_name=script_key,
+            content=scripts.get(script_key, ""),
+            save_dir=save_dir,
+        )
+        self._wire_script_run(editor, data_node, exp_id, data_id, script_key)
+        if editor.exec() == ScriptEditorDialog.DialogCode.Accepted:
+            editor.save_script()
+            self._append_log(
+                f"已保存脚本: {save_dir / script_key}" if save_dir else f"已保存脚本: {script_key}"
             )
 
-    def _load_param_schema(self) -> tuple[dict, bool]:
-        """从 backend.script_generator.param_schema() 加载参数;缺失时返回默认骨架。"""
-        try:
-            from backend.script_generator import param_schema
+    def _wire_script_run(
+        self, dialog, data_node, exp_id: str, data_id: str, script_name: str
+    ) -> None:
+        """脚本编辑器「运行」→ 后台执行并登记。"""
+        dialog.run_requested.connect(
+            lambda content: self._run_script_async(
+                content, data_node, exp_id, data_id, script_name
+            )
+        )
 
-            schema = param_schema()
-            return (dict(schema) if isinstance(schema, dict) else {}), True
-        except Exception:  # noqa: BLE001 - 后端未落地
-            return {}, False
+    def _run_script_async(
+        self, content: str, data_node, exp_id: str, data_id: str, script_name: str
+    ) -> None:
+        """后台运行人工脚本;完成后主线程刷新 Pipeline 与运行历史。"""
+        import threading
 
-    def _load_rendered_scripts(self, entry) -> dict:
-        """从 render_scripts(experiment, params) 加载 .com 脚本;缺失时返回空。"""
-        try:
-            from backend.script_generator import render_scripts
+        def worker() -> None:
+            try:
+                if script_name == "fid.com":
+                    result = self.controller.run_manual_fid_com(
+                        data_node, content, exp_id=exp_id, data_id=data_id
+                    )
+                    message = f"fid.com 运行完成: {result}"
+                else:
+                    result = self.controller.run_manual_spectrum(
+                        data_node, {script_name: content}, exp_id=exp_id, data_id=data_id
+                    )
+                    message = f"{script_name} 运行完成: {result}"
+            except Exception as exc:  # noqa: BLE001 - 错误统一回主线程
+                self.manual_run_log.emit(
+                    f"人工运行失败: {type(exc).__name__}: {exc}"
+                )
+                self.manual_run_done.emit()
+                return
+            self.manual_run_log.emit(message)
+            self.manual_run_done.emit()
 
-            result = render_scripts(entry, {})
-            return dict(result) if isinstance(result, dict) else {}
-        except Exception:  # noqa: BLE001 - 后端未落地
-            return {}
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_manual_run_done(self) -> None:
+        """人工脚本运行完成后刷新 Pipeline/报告页(主线程)。"""
+        self.refresh()
+        self.center_panel.refresh()
+
+    def _on_peaks_saved(self) -> None:
+        """峰表写回后刷新 Pipeline(peaks 状态)并记录日志。"""
+        self._append_log("峰表已保存并登记 manual_peaks 运行")
+        self.center_panel.refresh()
+
+    def _show_report(self) -> None:
+        """查看菜单:打开报告页(当前选中实验/数据)。"""
+        if self.manager.project is None:
+            InfoDialog.show_info(self, "提示", "请先打开项目")
+            return
+        self.center_panel.show_report()
 
     # ------------------------------------------------------------------
     # 树动作(契约 v1.2 §8.5)

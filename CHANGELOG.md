@@ -2,6 +2,38 @@
 
 ## [0.2.25] - 2026-08-12
 
+## [0.2.28] - 2026-08-12
+
+- Pipeline 状态机完善(OUTDATED + 指纹校验):新增 gui/pipeline_state.py,
+  每数据维护 .pipeline_state.json(输入/脚本/参数指纹);步骤成功后经
+  ProcessingController / 导入流程登记;compute_step_statuses 重算当前
+  指纹,输入或脚本变化 → 该步骤及下游 OUTDATED(上游重新运行/外部修改/
+  脚本编辑),旧数据无指纹状态用上游产物 mtime 启发式回退;OUTDATED
+  步骤显示「重新运行」按钮与原因 tooltip,「下一步」优先提示过期步骤;
+  人工 fid/谱图/峰表保存同样登记指纹。测试新增 test_gui_pipeline_state
+(7 例),全量 307 passed,ruff 全绿。
+
+## [0.2.27] - 2026-08-12
+
+- 峰表编辑回写(G2B-005 GUI 剩余):右侧谱图面板峰表工具栏新增「添加峰 /
+  删除选中 / 导入 Poky / 保存峰表」;2D/3D 列自动切换,编辑后写回
+  data_dir(...,"peaks")/<exp>-<data>.csv(经 ProcessingController.
+  save_peaks_manual,登记 manual_peaks WorkflowRun success/failed);
+  保存后刷新 viewer 峰标记与 Pipeline peaks 状态。
+- 报告页:新增 gui/report_panel.py,展示 data_dir(...,"report") 下
+  html/pdf/json 产物(内嵌预览/外部打开,缺失提示先完成分析);
+  Pipeline「分析」步骤状态由报告产物驱动(产物存在 → SUCCESS),
+  分析成功时步骤行显示「报告」按钮,查看菜单增加「报告...」。
+- 人工处理接线(经 ProcessingController):ParameterTableDialog 以
+  param_schema 填充(zero_fill/ext_lo/ext_hi/extract/sampling.*/stages),
+  「渲染脚本」→ manual_scripts 生成 process.com / nus*.com;
+  ScriptEditorDialog 增加「运行」→ run_manual_spectrum;fid.com
+  查看/修改/运行接 manual_fid_com / run_manual_fid_com;保存到
+  data_dir(...,"process"|"raw")/ 并刷新运行历史(manual_* 已登记
+  WorkflowRun);步骤运行后刷新 Pipeline。
+- 测试:新增报告页 / 峰表编辑 / Poky 导入 / 人工接线用例,更新
+  test_gui_manual / test_gui_processing;全量 300 passed,ruff 全绿。
+
 ## [0.2.26] - 2026-08-12
 
 - Backend(G2B-006):EXT 参数在自动/步骤化路径生效——

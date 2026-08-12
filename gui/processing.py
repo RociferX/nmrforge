@@ -2,8 +2,8 @@
 
 - 步骤化(契约 v1.2 / G2B-002):``import_data`` → ``generate_fid`` →
   ``generate_spectrum``,每步独立按钮与状态;旧 ``auto_run`` 保留兼容;
-- 人工:``manual_param_table`` / ``manual_script_editor`` 为接口占位
-  (后续实现:表格改参数 / 模仿 VSCode 的脚本编辑器)。
+- 人工:``manual_fid_com`` / ``run_manual_fid_com`` / ``manual_scripts`` /
+  ``run_manual_spectrum`` 对接 workflow/manual(fid.com 与谱图脚本)。
 """
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ from pathlib import Path
 from core.app_paths import resource_path
 from core.data.bruker_reader import read_dataset
 from core.project import ExperimentEntry, ProjectManager
+from gui.pipeline_state import record_step_success
 from workflow.engine import AutoProcessor
 
 
@@ -26,7 +27,7 @@ def _load_config() -> dict:
 
 class ProcessingController:
     """GUI 层处理控制:三步流程(import_data → generate_fid → generate_spectrum)
-    对接 workflow/stepwise(契约 v1.2 §8.3);人工路径接口占位。"""
+    对接 workflow/stepwise(契约 v1.2 §8.3);人工路径对接 workflow/manual。"""
 
     def __init__(self, manager: ProjectManager | None = None) -> None:
         self._backend = None
@@ -96,10 +97,15 @@ class ProcessingController:
         if self._manager is None:
             raise RuntimeError("ProcessingController 未绑定项目(ProjectManager)")
         result = import_data(self._manager, entry.id, source, copy=copy)
+        data_id = getattr(result, "data_id", "") or ""
+        if data_id:
+            record_step_success(
+                self._manager, entry.id, data_id, "import", params={"copy": copy}
+            )
         self._manager.save()
         return {
             "experiment_id": entry.id,
-            "data_id": getattr(result, "data_id", ""),
+            "data_id": data_id,
             "run_id": getattr(result, "run_id", ""),
             "warnings": list(getattr(result, "warnings", []) or []),
         }
@@ -115,6 +121,8 @@ class ProcessingController:
         fid_path = stepwise_fid(
             self._manager, exp_id, data_id, self._backend_instance()
         )
+        if data_id:
+            record_step_success(self._manager, exp_id, data_id, "fid")
         self._manager.save()
         return fid_path
 
@@ -131,6 +139,8 @@ class ProcessingController:
         spectrum_path = stepwise_spectrum(
             self._manager, exp_id, data_id, self._backend_instance()
         )
+        if data_id:
+            record_step_success(self._manager, exp_id, data_id, "spectrum")
         self._manager.save()
         return spectrum_path
 
@@ -148,6 +158,8 @@ class ProcessingController:
         exp_id = exp_id or getattr(data, "exp_id", "")
         data_id = data_id or getattr(data, "id", "")
         result = backend_pick_peaks(self._manager, exp_id, data_id)
+        if data_id and result.get("status") == "success":
+            record_step_success(self._manager, exp_id, data_id, "peaks")
         self._manager.save()
         return result
 
@@ -162,24 +174,186 @@ class ProcessingController:
         exp_id = exp_id or getattr(data, "exp_id", "")
         data_id = data_id or getattr(data, "id", "")
         result = backend_analyze(self._manager, exp_id, data_id)
+        if data_id and result.get("status") == "success":
+            record_step_success(self._manager, exp_id, data_id, "analysis")
         self._manager.save()
         return result
 
     # ------------------------------------------------------------------
-    # 人工路径(接口占位,实现之后再写)
+    # 人工路径(workflow/manual 接线)
     # ------------------------------------------------------------------
-    def manual_param_table(self, entry: ExperimentEntry | None = None) -> str:
-        """人工路径 A:表格改参数。
+    def manual_fid_com(self, data, exp_id: str | None = None, data_id: str | None = None) -> str:
+        """获取/生成 fid.com 内容(供查看修改)。"""
+        from workflow.manual import manual_fid_com as backend_manual_fid_com
 
-        接口占位:后续实现参数表格编辑器(读取处理计划/参数空间,
-        逐阶段改参数并生成确定性 .com 脚本)。
-        """
-        raise NotImplementedError("人工参数表格编辑器待实现")
+        self._require_manager()
+        exp_id = exp_id or getattr(data, "exp_id", "")
+        data_id = data_id or getattr(data, "id", "")
+        return backend_manual_fid_com(
+            self._manager, exp_id, data_id, self._backend_instance()
+        )
 
-    def manual_script_editor(self, entry: ExperimentEntry | None = None) -> str:
-        """人工路径 B:直接改脚本(模仿 VSCode)。
+    def run_manual_fid_com(
+        self, data, content: str, exp_id: str | None = None, data_id: str | None = None
+    ) -> str:
+        """写入并运行修改后的 fid.com。"""
+        from workflow.manual import run_manual_fid_com as backend_run_fid
 
-        接口占位:后续实现带语法高亮的脚本编辑器,
-        编辑 fid.com / process.com / nus*.com 并执行。
-        """
-        raise NotImplementedError("人工脚本编辑器待实现")
+        self._require_manager()
+        exp_id = exp_id or getattr(data, "exp_id", "")
+        data_id = data_id or getattr(data, "id", "")
+        result = backend_run_fid(self._manager, exp_id, data_id, content)
+        if data_id:
+            record_step_success(self._manager, exp_id, data_id, "fid")
+        self._manager.save()
+        return result
+
+    def manual_scripts(
+        self,
+        data,
+        params: dict | None = None,
+        exp_id: str | None = None,
+        data_id: str | None = None,
+    ) -> dict:
+        """渲染谱图步骤脚本(process.com/nus*.com)。"""
+        from workflow.manual import manual_scripts as backend_manual_scripts
+
+        self._require_manager()
+        exp_id = exp_id or getattr(data, "exp_id", "")
+        data_id = data_id or getattr(data, "id", "")
+        return backend_manual_scripts(
+            self._manager, exp_id, data_id, params=params
+        )
+
+    def run_manual_spectrum(
+        self, data, scripts: dict, exp_id: str | None = None, data_id: str | None = None
+    ) -> str:
+        """运行谱图脚本(消费已转换 fid)。"""
+        from workflow.manual import run_manual_spectrum as backend_run_spectrum
+
+        self._require_manager()
+        exp_id = exp_id or getattr(data, "exp_id", "")
+        data_id = data_id or getattr(data, "id", "")
+        result = backend_run_spectrum(
+            self._manager, exp_id, data_id, scripts
+        )
+        if data_id:
+            record_step_success(self._manager, exp_id, data_id, "spectrum")
+        self._manager.save()
+        return result
+
+    def save_peaks_manual(
+        self, data, peaks: list[dict], exp_id: str | None = None, data_id: str | None = None
+    ) -> str:
+        """人工峰表编辑回写(CSV)并登记 WorkflowRun(manual_peaks)。"""
+        from core.peaks.peak_table import save_peaks
+
+        self._require_manager()
+        exp_id = exp_id or getattr(data, "exp_id", "")
+        data_id = data_id or getattr(data, "id", "")
+        peaks_dir = self._manager.data_dir(exp_id, data_id, "peaks")
+        peaks_dir.mkdir(parents=True, exist_ok=True)
+        csv_path = save_peaks(peaks_dir / f"{exp_id}-{data_id}.csv", peaks)
+        if data_id:
+            record_step_success(self._manager, exp_id, data_id, "peaks")
+        run = self._manager.start_run(
+            exp_id,
+            workflow_ref="manual_peaks",
+            inputs={"data_id": data_id},
+            params={"mode": "manual", "peaks": len(peaks)},
+        )
+        try:
+            self._manager.finish_run(
+                run.run_id, "success", outputs={"peaks": str(csv_path)},
+                message=f"人工峰表编辑({len(peaks)} 峰)",
+            )
+        except Exception:  # noqa: BLE001
+            self._manager.finish_run(run.run_id, "failed", message="峰表保存失败")
+        self._manager.save()
+        return str(csv_path)
+
+    def param_schema(self) -> dict:
+        """处理计划参数 schema(param_schema 契约;缺失时返回可编辑默认骨架)。"""
+        try:
+            from backend.script_generator import param_schema as backend_schema
+
+            schema = backend_schema()
+            if isinstance(schema, dict) and schema:
+                return schema
+        except Exception:  # noqa: BLE001 - 后端未落地时用默认骨架
+            pass
+        return {
+            'type': 'object',
+            'title': 'NMRForge 处理参数',
+            'description': '处理计划参数(表格编辑器/脚本渲染共享数据源)',
+            'properties': {
+                'zero_fill': {
+                    'type': 'integer',
+                    'default': 2,
+                    'description': '间接维零填充倍数(auto 按 2 的幂)',
+                },
+                'sampling': {
+                    'type': 'object',
+                    'description': '采样/采集相关标志',
+                    'properties': {
+                        'ft_neg': {
+                            'type': 'boolean',
+                            'default': False,
+                            'description': 'FT 后翻转该轴',
+                        },
+                        'ft_alt': {
+                            'type': 'boolean',
+                            'default': True,
+                            'description': 'TPPI/States-TPPI ± 交替修正',
+                        },
+                        'flip_f1': {
+                            'type': 'boolean',
+                            'default': False,
+                            'description': 'F1 轴翻转',
+                        },
+                        'auto_phase': {
+                            'type': 'boolean',
+                            'default': True,
+                            'description': '直接维 p1 共识自动相位',
+                        },
+                    },
+                },
+                'ext_lo': {
+                    'type': 'string',
+                    'default': '11.0',
+                    'description': '直接维 1H 提取窗口高 ppm(EXT -x1)',
+                },
+                'ext_hi': {
+                    'type': 'string',
+                    'default': '6.0',
+                    'description': '直接维 1H 提取窗口低 ppm(EXT -xn)',
+                },
+                'extract': {
+                    'type': 'boolean',
+                    'default': True,
+                    'description': '直接维提取窗口是否开启',
+                },
+                'stages': {
+                    'type': 'array',
+                    'description': '处理阶段列表(表格编辑器逐行展示)',
+                    'items': {'type': 'object', 'properties': {}},
+                },
+            },
+            'default': {
+                'zero_fill': 2,
+                'ext_lo': '11.0',
+                'ext_hi': '6.0',
+                'extract': True,
+                'sampling': {
+                    'ft_neg': False,
+                    'ft_alt': True,
+                    'flip_f1': False,
+                    'auto_phase': True,
+                },
+                'stages': [],
+            },
+        }
+
+    def _require_manager(self) -> None:
+        if self._manager is None:
+            raise RuntimeError("ProcessingController 未绑定项目(ProjectManager)")

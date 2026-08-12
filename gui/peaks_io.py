@@ -105,3 +105,53 @@ def export_peaks_poky(
             lines.append(f"{assignment}  {w1}  {w2}  {w3}  0  {height}  0")
     target.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return target
+
+
+def import_peaks_poky(path: Path | str) -> list[dict[str, Any]]:
+    """导入 Poky/Sparky .list(优先 core.peaks,缺失时本地解析)。
+
+    格式 "Assignment w1 w2 [w3] Data Height Volume"(双空格);
+    2D w1=15N(N_shift)/w2=1H(H_shift),3D w1/w2/w3=F1/F2/F3_shift;
+    Height 映射为 Intensity。
+    """
+    if _use_core_peaks():
+        try:
+            from core.peaks.peak_table import import_peaks_poky as core_import
+
+            return list(core_import(path))
+        except Exception:  # noqa: BLE001
+            pass
+    rows: list[dict[str, Any]] = []
+    try:
+        lines = Path(path).read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return rows
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith(("Assignment", "#")):
+            continue
+        tokens = line.split()
+        if len(tokens) < 6:
+            continue
+        label = tokens[0]
+        is_3d = len(tokens) >= 7
+        try:
+            if is_3d:
+                row: dict[str, Any] = {
+                    "label": label,
+                    "F1_shift": float(tokens[1]),
+                    "F2_shift": float(tokens[2]),
+                    "F3_shift": float(tokens[3]),
+                    "Intensity": float(tokens[5]),
+                }
+            else:
+                row = {
+                    "label": label,
+                    "N_shift": float(tokens[1]),
+                    "H_shift": float(tokens[2]),
+                    "Intensity": float(tokens[4]),
+                }
+        except ValueError:
+            continue
+        rows.append(row)
+    return rows
