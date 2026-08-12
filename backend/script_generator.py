@@ -16,6 +16,7 @@ from __future__ import annotations
 from typing import Any
 
 from core.data.internal_data_model import Experiment, SamplingMode
+from core.planning.method_selector import select_method
 from core.planning.processing_plan import ProcessingPlan
 
 _AQ2D_KEYWORDS = {0: "2", 1: "1", 2: "2", 3: "2", 4: "3", 5: "2", 6: "3"}
@@ -457,3 +458,128 @@ def generate_3d_nus_script(
         f"| pipe2xyz -out {out_file} -x",
     ]
     return "\n".join(lines) + "\n"
+
+
+
+def param_schema() -> dict[str, Any]:
+    """处理计划参数 JSON schema(API_CONTRACT §6 键 + 默认值/说明)。
+
+    对齐 presets/config:zero_fill、sampling(ft_neg/ft_alt/flip_f1/auto_phase)、
+    stages(id/tool/macro/params/param_docs);供 GUI 参数表格编辑器与渲染使用。
+    """
+    return {
+        "type": "object",
+        "title": "NMRForge 处理参数",
+        "description": "处理计划参数(表格编辑器/脚本渲染共享数据源)",
+        "properties": {
+            "zero_fill": {
+                "type": "integer",
+                "default": 2,
+                "description": "间接维零填充倍数(auto 按 2 的幂)",
+            },
+            "sampling": {
+                "type": "object",
+                "description": "采样/采集相关标志",
+                "properties": {
+                    "ft_neg": {"type": "boolean", "default": False, "description": "FT 后翻转该轴"},
+                    "ft_alt": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": "TPPI/States-TPPI ± 交替修正",
+                    },
+                    "flip_f1": {"type": "boolean", "default": False, "description": "F1 轴翻转"},
+                    "auto_phase": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": "直接维 p1 共识自动相位",
+                    },
+                },
+            },
+            "stages": {
+                "type": "array",
+                "description": "处理阶段列表(表格编辑器逐行展示)",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string", "description": "阶段唯一 id"},
+                        "tool": {"type": "string", "description": "后端工具(nmrpipe/native)"},
+                        "macro": {"type": "string", "description": "NMRPipe 宏(SP/ZF/FT/PS)"},
+                        "params": {"type": "object", "description": "宏参数"},
+                        "param_docs": {"type": "object", "description": "参数说明"},
+                    },
+                    "required": ["id", "tool", "macro"],
+                },
+            },
+        },
+        "default": {
+            "zero_fill": 2,
+            "sampling": {
+                "ft_neg": False,
+                "ft_alt": True,
+                "flip_f1": False,
+                "auto_phase": True,
+            },
+            "stages": [],
+        },
+    }
+
+
+def _as_bool(value: Any, default: bool = True) -> bool:
+    """宽松布尔转换(GUI 可能传字符串 "false"/"0")。"""
+    if isinstance(value, str):
+        return value.strip().lower() not in ("0", "false", "no", "")
+    return bool(value)
+
+
+def render_scripts(
+    experiment: Experiment,
+    params: dict[str, Any] | None = None,
+) -> dict[str, str]:
+    """确定性渲染 fid.com/process.com/nus*.com(供 GUI 展示与保存执行)。
+
+    同一输入(实验元数据 + 参数)生成字节级一致的脚本;NUS 额外渲染 nus.com,
+    uniform 渲染 process.com;fid.com 为 bruk2pipe 确定性转换脚本。
+    """
+    params = dict(params or {})
+    plan = select_method(experiment)
+    out_ext = "ft3" if experiment.ndim >= 3 else "ft2"
+    direct_phase = params.get("direct_phase")
+    scripts: dict[str, str] = {"fid.com": generate_convert_script(experiment)}
+
+    if experiment.sampling.mode is SamplingMode.NUS:
+        nus = dict(params.get("nus", {}) or {})
+        direct = (0.0, 0.0)
+        if direct_phase:
+            direct = tuple(direct_phase.get("F2", (0.0, 0.0)))
+        kwargs: dict[str, Any] = {
+            "in_file": f"{experiment.dataset_id}.fid",
+            "nuslist": "nuslist",
+            "out_file": f"{experiment.dataset_id}.{out_ext}",
+            "nthread": int(nus.get("nthread", 2)),
+            "nuslist_count": int(nus.get("nuslist_count", 0)),
+            "nsigma": float(nus.get("nsigma", 5.0)),
+            "thresh": float(nus.get("thresh", 0.95)),
+            "smile_xq3": float(nus.get("smile_xq3", 2.0)),
+            "smile_scaling": _as_bool(nus.get("smile_scaling", True)),
+            "smile_report": int(nus.get("smile_report", 1)),
+            "direct_phase": direct,
+        }
+        if experiment.ndim >= 3:
+            scripts["nus.com"] = generate_3d_nus_script(experiment, **kwargs)
+        else:
+            scripts["nus.com"] = generate_2d_nus_script(experiment, **kwargs)
+    else:
+        dp = None
+        if direct_phase:
+            direct_axis = "F2" if experiment.ndim == 2 else "F3"
+            dp = {
+                direct_axis: tuple(direct_phase.get(direct_axis, (0.0, 0.0)))
+            }
+        scripts["process.com"] = generate_process_script(
+            experiment,
+            plan,
+            in_file=f"{experiment.dataset_id}.fid",
+            out_file=f"{experiment.dataset_id}.{out_ext}",
+            direct_phase=dp,
+        )
+    return scripts

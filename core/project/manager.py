@@ -330,6 +330,22 @@ class ProjectManager:
         )
         return data_entry
 
+    def rename_data(self, exp_id: str, data_id: str, title: str) -> DataEntry:
+        """重命名数据条目(落盘 title,写审计历史 data_renamed)。"""
+        data_entry = self.data(exp_id, data_id)
+        old_title = data_entry.title
+        data_entry.title = str(title)
+        self.add_history(
+            "data_renamed",
+            {
+                "experiment_id": exp_id,
+                "data_id": data_id,
+                "old_title": old_title,
+                "new_title": str(title),
+            },
+        )
+        return data_entry
+
     def delete_data(self, exp_id: str, data_id: str) -> None:
         """删除数据条目与产物文件;WorkflowRun 审计保留。"""
         entry = self._require_experiment(exp_id)

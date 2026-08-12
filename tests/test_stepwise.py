@@ -78,6 +78,8 @@ def test_generate_fid_registers(tmp_path: Path, bruker_dir: Path) -> None:
     backend = _FakeBackend(work)
     fid_path = generate_fid(manager, exp_id, data_id, backend)
     assert fid_path.endswith(".fid")
+    # 契约 §9.2:fid 落盘 data_dir(..., "process")
+    assert Path(fid_path).parent == manager.data_dir(exp_id, data_id, "process")
     data = manager.data(exp_id, data_id)
     assert data.fid_path == fid_path
     assert data.status == "fid_ready"
@@ -93,6 +95,8 @@ def test_generate_spectrum_uniform(tmp_path: Path, bruker_dir: Path) -> None:
     generate_fid(manager, exp_id, data_id, backend)
     spectrum = generate_spectrum(manager, exp_id, data_id, backend)
     assert spectrum.endswith(".ft2")
+    # 契约 §9.2:终谱落盘 data_dir(..., "spectra")
+    assert Path(spectrum).parent == manager.data_dir(exp_id, data_id, "spectra")
     data = manager.data(exp_id, data_id)
     assert data.spectrum_path == spectrum
     assert data.status == "processed"

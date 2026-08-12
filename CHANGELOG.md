@@ -1,5 +1,28 @@
 # 变更日志
 
+## [0.2.19] - 2026-08-12
+
+- Backend(G2B-004):数据重命名落盘——DataEntry 增加 title 字段
+  (序列化兼容,缺省空),ProjectManager.rename_data 写审计历史 data_renamed;
+- Backend(G2B-004):工作区项目管理——WorkspaceManager.delete_project
+  (默认移入系统回收站,失败回退临时目录,绝不直接删除)与 rename_project
+  (目录 + project.json name,重名/非法名校验);
+- Backend(G2B-004):峰挑选 workflow/pick_peaks——复用
+  core/qc/peak_detection,峰表写 data_dir(...,"peaks")/
+  <exp_id>-<data_id>.csv(2D:Peak_ID,H_shift,N_shift,Intensity,SN,label;
+  3D 加 F1/F2/F3_shift),登记 pick_peaks WorkflowRun,失败
+  finish_run("failed") 并抛 PickPeaksError;
+- Backend(G2B-004):人工处理数据源——backend/script_generator 暴露
+  param_schema()(API_CONTRACT §6 键 + 默认值/说明)与
+  render_scripts(experiment, params)(确定性渲染 fid.com/process.com/
+  nus*.com);
+- Backend(G2B-004):分析步骤占位 workflow/analyze.analyze(返回
+  pending 不抛异常);产物路径契约确认——generate_fid 落盘
+  data_dir(...,"process")、generate_spectrum 落盘
+  data_dir(...,"spectra")(stepwise 测试断言),旧扁平路径在
+  infer_status 保留兼容回退;
+- 测试:新增 test_pick_peaks(2)+ test_script_schema(3),
+  project_manager 30 / workspace 11;全量 240 passed,ruff 全绿。
 ## [0.2.18.1] - 2026-08-12
 
 - 当前项目右键新增「重命名项目...」:更新 project.json 的 name,树与窗口标题
