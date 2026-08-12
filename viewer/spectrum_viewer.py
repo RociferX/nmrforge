@@ -54,8 +54,8 @@ class SpectrumViewer(QWidget):
         self.plot.setMenuEnabled(False)
         self.plot.getViewBox().setMouseMode(pg.ViewBox.RectMode)
         # nmrDraw/Poky 显示约定:1H 高 ppm 在左、15N 高 ppm 在下
-        # 反转 x 与 y:使高 ppm 显示在左(1H)与下(15N)
-        self.plot.getViewBox().invertX(True)
+        # 数据列 0 = 高 ppm(ppm 随索引递减):默认 x 轴列 0 在左即满足;
+        # 因此只反转 y(行 0 = 高 ppm 放到下方),不反转 x(否则高 ppm 会到右)。
         self.plot.getViewBox().invertY(True)
 
         self.layers: list[ContourLayer] = []
