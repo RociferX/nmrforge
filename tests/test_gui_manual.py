@@ -21,11 +21,38 @@ def qapp() -> QApplication:
     yield app
 
 
-def _manager(tmp_path: Path) -> ProjectManager:
-    manager = ProjectManager.create_project(tmp_path / "proj", "demo")
+def _manager(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch | None = None
+) -> ProjectManager:
+    ws = tmp_path / "ws"
+    ws.mkdir(exist_ok=True)
+    manager = ProjectManager.create_project(ws / "proj", "demo")
     manager.add_experiment("/sampleD", title="HSQC")
     manager.save()
+    if monkeypatch is not None:
+        monkeypatch.setattr(
+            "gui.main_window.WorkspaceManager", lambda: _TempWorkspace(ws)
+        )
+        monkeypatch.setattr(
+            "core.workspace.WorkspaceManager", lambda *a, **k: _TempWorkspace(ws)
+        )
     return manager
+
+
+class _TempWorkspace:
+    def __init__(self, root) -> None:
+        self.root = Path(root)
+
+    def list_projects(self):
+        return sorted(
+            p
+            for p in self.root.iterdir()
+            if p.is_dir() and (p / "project.json").is_file()
+        )
+
+    def ensure(self):
+        self.root.mkdir(parents=True, exist_ok=True)
+        return self.root
 
 
 def test_parameter_table_dialog_structure(qapp: QApplication) -> None:
@@ -53,7 +80,7 @@ def test_main_window_open_manual_dialog(
         "gui.main_window.InfoDialog.show_info",
         staticmethod(lambda parent, title, text_: messages.append(text_)),
     )
-    manager = _manager(tmp_path)
+    manager = _manager(tmp_path, monkeypatch)
     window = MainWindow(manager=manager)
     window.project_tree.select_experiment("exp_001")
     called: list[str] = []

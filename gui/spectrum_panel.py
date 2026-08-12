@@ -30,6 +30,7 @@ class SpectrumPanel(QWidget):
         super().__init__(parent)
         self.manager = manager or ProjectManager()
         self._current_exp_id: str = ""
+        self._current_data_id: str = ""
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -52,8 +53,9 @@ class SpectrumPanel(QWidget):
         layout.addWidget(splitter)
         self.refresh()
 
-    def set_context(self, exp_id: str) -> None:
+    def set_context(self, exp_id: str, data_id: str = "") -> None:
         self._current_exp_id = exp_id or ""
+        self._current_data_id = data_id or ""
         self.refresh()
 
     def refresh(self) -> None:

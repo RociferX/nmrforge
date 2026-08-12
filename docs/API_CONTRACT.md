@@ -192,3 +192,44 @@ def process(self, experiment, plan) -> dict        # 保持;内部自动判断 N
 Project(右键:删除项目)→ Experiment(右键:导入数据/重命名/删除)→
 Data(右键:生成 FID/生成谱图/打开目录/删除)。树列宽需可读
 (最小列宽 + 自适应,禁止只显示首字母)。
+
+## 9. 契约 v1.3(工作区层级 + 数据目录层级)
+
+状态:approved(Architect,2026-08-12;Proposal G2B-003)。
+实现:Backend(core/workspace.py + core/project schema 1.3)。
+
+### 9.1 WorkspaceManager(core/workspace.py,Shared)
+
+```python
+class WorkspaceManager:
+    def __init__(self, root: Path | str | None = None)
+        # 默认 ~/NMRForgeWorkspace(Windows/Linux 一致)
+    def ensure(self) -> Path                    # 幂等创建工作区
+    def list_projects(self) -> list[Path]       # 含 project.json 的项目
+    def create_project(self, name, **kwargs) -> ProjectManager
+        # workspace/<name>/,非法名/重名抛 WorkspaceError
+    def open_project(self, name_or_path) -> ProjectManager
+```
+
+### 9.2 数据目录层级(ProjectManager,schema 1.3)
+
+项目 → <exp_id>/ → <data_id>/ → {raw, process, spectra, peaks,
+figures, report, metadata.json}
+
+- raw/        导入的数据副本
+- process/    fid 与处理中间产物
+- spectra/    终谱(ft2/ft3)
+- peaks/      峰表 CSV
+- figures/    图
+- report/     报告
+- metadata.json  数据元数据
+
+DataEntry 路径约定(相对项目根):raw_dir = <exp_id>/<data_id>/raw,
+metadata_path = <exp_id>/<data_id>/metadata.json,fid_path 在
+process/ 内,spectrum_path 在 spectra/ 内。
+
+迁移/兼容:
+- schema 1.1/1.2 项目打开时自动迁移到 1.3(旧 source/segments →
+  data[0]),旧扁平产物(项目根 raw/metadata/spectra)保留可读,
+  infer_status 与删除兼容新旧布局;旧 dir_path 保留为兼容层;
+- 不做物理迁移(不搬动旧文件),新导入/处理按 1.3 布局落盘。

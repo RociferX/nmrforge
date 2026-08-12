@@ -69,10 +69,7 @@ def _data_nodes(manager: ProjectManager, exp_id: str) -> list:
     entry = manager.project.experiment(exp_id) if manager.project is not None else None
     if entry is None:
         return []
-    data = getattr(entry, "data", None)
-    if data:
-        return list(data)
-    return [entry]  # schema 1.1 兼容:实验即数据
+    return list(getattr(entry, "data", None) or [])
 
 
 def compute_step_statuses(manager: ProjectManager, exp_id: str) -> dict[str, str]:
@@ -159,6 +156,7 @@ class PipelineStepRow(QWidget):
         layout.addWidget(self.run_button)
         self.manual_button = QPushButton("人工")
         self.manual_button.setToolTip("人工参数表格 / 脚本编辑器(骨架)")
+        self.manual_button.setVisible(False)
         self.manual_button.clicked.connect(
             lambda: self.manual_requested.emit(self.step_id)
         )
@@ -181,6 +179,7 @@ class PipelinePanel(QWidget):
     log_message = pyqtSignal(str)
     run_finished = pyqtSignal()
     manual_open_requested = pyqtSignal(str)  # step_id:打开人工处理对话框
+    import_data_requested = pyqtSignal(str)  # exp_id:在当前实验下导入数据
 
     def __init__(
         self,
@@ -192,6 +191,8 @@ class PipelinePanel(QWidget):
         self.manager = manager or ProjectManager()
         self.controller = controller or ProcessingController()
         self._current_exp_id: str = ""
+        self._selection_kind: str = ""  # data/folder 时显示步骤;project/experiment 显示提示
+        self._current_data_id: str = ""
         self._rows: dict[str, PipelineStepRow] = {}
 
         layout = QVBoxLayout(self)
@@ -205,6 +206,12 @@ class PipelinePanel(QWidget):
         self.next_label.setWordWrap(True)
         self.next_label.setStyleSheet("color: #16a085;")
         layout.addWidget(self.next_label)
+        self.import_button = QPushButton("导入数据...")
+        self.import_button.setVisible(False)
+        self.import_button.clicked.connect(
+            lambda: self.import_data_requested.emit(self._current_exp_id)
+        )
+        layout.addWidget(self.import_button)
 
         steps_box = QVBoxLayout()
         for step_id, label, description, _deps in PIPELINE_STEPS:
@@ -227,8 +234,16 @@ class PipelinePanel(QWidget):
     # 上下文
     # ------------------------------------------------------------------
     def set_context(self, exp_id: str) -> None:
-        """设置当前实验并刷新步骤状态。"""
+        """兼容入口:按实验设置上下文(默认视为选中实验)。"""
+        self._selection_kind = "experiment" if exp_id else ""
         self._current_exp_id = exp_id or ""
+        self.refresh()
+
+    def set_selection(self, kind: str, exp_id: str, data_id: str = "") -> None:
+        """按树选中类型刷新:project/experiment 显示「未选中数据」;data/folder 显示步骤。"""
+        self._selection_kind = kind or ""
+        self._current_exp_id = exp_id or ""
+        self._current_data_id = data_id
         self.refresh()
 
     def current_experiment_id(self) -> str:
@@ -240,9 +255,21 @@ class PipelinePanel(QWidget):
         if project is None or not self._current_exp_id:
             self.context_label.setText("未打开项目")
             self.next_label.setText("")
+            self.import_button.setVisible(False)
             for row in self._rows.values():
                 row.set_status("LOCKED")
             return
+        if self._selection_kind in ("project", "experiment"):
+            exp = project.experiment(self._current_exp_id)
+            label = exp.title if exp is not None else project.name
+            self.context_label.setText(f"{label} — 未选中数据")
+            self.next_label.setText("请选择左侧的 Data 节点查看/运行处理步骤")
+            for row in self._rows.values():
+                row.set_status("LOCKED")
+                row.manual_button.setVisible(False)  # 未选中数据不显示人工
+            self.import_button.setVisible(True)  # 可直接在当前实验导入数据
+            return
+        self.import_button.setVisible(False)
         exp = project.experiment(self._current_exp_id)
         exp_title = exp.title if exp is not None else self._current_exp_id
         self.context_label.setText(
@@ -261,6 +288,8 @@ class PipelinePanel(QWidget):
         reasons = _lock_reasons(statuses)
         for step_id, status in statuses.items():
             self._rows[step_id].set_status(status, reasons.get(step_id, ""))
+            # 导入数据为自动化步骤,无人工入口;其余处理步骤保留人工
+            self._rows[step_id].manual_button.setVisible(step_id != "import")
 
     # ------------------------------------------------------------------
     # 运行
@@ -295,11 +324,20 @@ class PipelinePanel(QWidget):
 
         def worker() -> None:
             try:
-                data_node = _data_nodes(self.manager, self._current_exp_id)[0]
+                nodes = _data_nodes(self.manager, self._current_exp_id)
+                if not nodes:
+                    self.log_message.emit(
+                        f"{STEP_LABEL.get(step_id, step_id)}: 该实验还没有数据,请先导入数据"
+                    )
+                    return
+                data_node = nodes[0]
+                exp_id = self._current_exp_id
+                data_id = getattr(data_node, "id", exp_id)
                 if method_name == "import_data":
-                    result = method(entry, data_node.source)
+                    source = getattr(data_node, "source", "") or ""
+                    result = method(entry, source)
                 else:
-                    result = method(data_node)
+                    result = method(data_node, exp_id=exp_id, data_id=data_id)
                 message = result if isinstance(result, str) else str(result)
                 self.log_message.emit(
                     f"完成 {STEP_LABEL.get(step_id, step_id)}: {message}"

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (
     QApplication,
@@ -34,6 +34,7 @@ from core.project import (
     ProjectError,
     ProjectManager,
 )
+from gui.center_panel import CenterPanel
 from gui.dialogs import (
     ConfirmDialog,
     ImportExperimentDialog,
@@ -43,15 +44,19 @@ from gui.dialogs import (
     ScriptEditorDialog,
 )
 from gui.log_panel import LogPanel
-from gui.pipeline_panel import PipelinePanel, compute_step_statuses
+from gui.pipeline_panel import compute_step_statuses
 from gui.processing import ProcessingController
 from gui.project_tree import ProjectTreePanel
 from gui.spectrum_panel import SpectrumPanel
-from workflow.import_workflow import ImportResult, import_bruker_dataset
+from gui.workspace import WorkspaceManager
+from workflow.import_workflow import ImportResult
 
 
 class MainWindow(QMainWindow):
-    """NMRForge 主窗口;未打开项目时左侧树与中间面板显示空态。"""
+    """NMRForge 主窗口;未打开项目时显示欢迎页。"""
+
+    import_failed = pyqtSignal(str)  # 导入失败信息(后台线程 → 主线程)
+    import_finished = pyqtSignal(object)  # ImportResult(后台线程 → 主线程)
 
     def __init__(
         self,
@@ -63,6 +68,12 @@ class MainWindow(QMainWindow):
         self.manager = manager or ProjectManager()
         self.recent = recent or JsonRecentProjectsStore()
         self.controller = controller or ProcessingController()
+        self.controller.set_manager(self.manager)
+        self.workspace = WorkspaceManager()
+        self.workspace.ensure()
+        self.import_failed.connect(self._on_import_failed)
+        self.import_finished.connect(self._on_import_done)
+        self._pending_data_names: dict[str, str] = {}
         self.setWindowTitle("NMRForge")
         self.resize(1280, 780)
         self._build_menus()
@@ -89,7 +100,7 @@ class MainWindow(QMainWindow):
 
         project_menu = bar.addMenu("项目(&P)")
         project_menu.addAction("项目管理", self._noop_hint)
-        project_menu.addAction("添加实验...", self.add_experiment)
+        project_menu.addAction("新建实验...", self._create_experiment)
         project_menu.addAction("重命名实验...", self.rename_experiment)
         project_menu.addAction("删除实验", self.delete_experiment)
 
@@ -123,27 +134,46 @@ class MainWindow(QMainWindow):
         help_menu.addAction("关于", self.about)
 
     def _build_central(self) -> None:
-        self.project_tree = ProjectTreePanel(self.manager)
+        self.project_tree = ProjectTreePanel(self.manager, workspace=self.workspace)
         self.project_tree.selection_changed.connect(self._update_context)
         self.project_tree.open_requested.connect(self._on_open_experiment)
+        self.project_tree.open_project_requested.connect(
+            lambda path: self._open_root(Path(path))
+        )
         self.project_tree.rename_requested.connect(self._rename_experiment_by_id)
         self.project_tree.delete_requested.connect(self._delete_experiment_by_id)
         self.project_tree.delete_project_requested.connect(self._delete_project)
+        self.project_tree.rename_project_requested.connect(self._rename_project)
         self.project_tree.create_experiment_requested.connect(
             self._create_experiment
         )
         self.project_tree.import_data_requested.connect(self._import_data_for)
         self.project_tree.data_action_requested.connect(self._on_data_action)
+        self.project_tree.data_rename_requested.connect(self._rename_data)
 
-        self.pipeline = PipelinePanel(self.manager, self.controller)
-        self.pipeline.log_message.connect(self._append_log)
-        self.pipeline.manual_open_requested.connect(self._open_manual_dialog)
+        self.center_panel = CenterPanel(self.manager, self.controller)
+        self.pipeline = self.center_panel.pipeline  # 兼容旧引用
+        self.center_panel.log_message.connect(self._append_log)
+        self.center_panel.manual_open_requested.connect(self._open_manual_dialog)
+        self.center_panel.import_data_requested.connect(self._import_data_for)
+        self.center_panel.import_options_requested.connect(
+            self._import_data_with_options
+        )
+        self.center_panel.create_experiment_requested.connect(
+            self._create_experiment_with_title
+        )
+        self.center_panel.new_project_requested.connect(
+            self._new_project_in_workspace
+        )
+        self.center_panel.open_project_requested.connect(
+            lambda path: self._open_root(Path(path))
+        )
 
         self.spectrum_panel = SpectrumPanel(self.manager)
 
         self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
         self.main_splitter.addWidget(self.project_tree)
-        self.main_splitter.addWidget(self.pipeline)
+        self.main_splitter.addWidget(self.center_panel)
         self.main_splitter.addWidget(self.spectrum_panel)
         self.main_splitter.setStretchFactor(0, 22)
         self.main_splitter.setStretchFactor(1, 43)
@@ -173,20 +203,23 @@ class MainWindow(QMainWindow):
     # 项目动作
     # ------------------------------------------------------------------
     def new_project(self) -> None:
-        start = str(Path.home())
-        root = QFileDialog.getExistingDirectory(self, "选择新项目目录", start)
-        if not root:
-            return
         name, ok = QInputDialog.getText(self, "新建项目", "项目名称:", text="unnamed")
-        if not ok:
-            return
+        if ok and name.strip():
+            self._new_project_in_workspace(name.strip())
+
+    def _new_project_in_workspace(self, name: str) -> None:
+        """在默认工作区下创建项目(契约 v1.3,create_project 返回 ProjectManager)。"""
         try:
-            self.manager = ProjectManager.create_project(root, name.strip() or "unnamed")
+            self.manager = self.workspace.create_project(name)
         except ProjectError as exc:
             InfoDialog.show_info(self, "新建项目失败", str(exc))
             return
+        except Exception as exc:  # noqa: BLE001 - WorkspaceError 等统一提示
+            InfoDialog.show_info(self, "新建项目失败", f"{type(exc).__name__}: {exc}")
+            return
         self.recent.push(str(self.manager.root))
         self._rebind_shared_manager()
+        self.center_panel.welcome_page.refresh()
         self.refresh()
 
     def open_project(self) -> None:
@@ -216,8 +249,10 @@ class MainWindow(QMainWindow):
     def _rebind_shared_manager(self) -> None:
         """项目对象更换后,让各面板共享同一个 ProjectManager 实例。"""
         self.project_tree.manager = self.manager
+        self.center_panel._manager = self.manager
         self.pipeline.manager = self.manager
         self.spectrum_panel.manager = self.manager
+        self.controller.set_manager(self.manager)
 
     def _refresh_recent_menu(self) -> None:
         self.recent_menu.clear()
@@ -231,14 +266,8 @@ class MainWindow(QMainWindow):
     # 实验/样本动作
     # ------------------------------------------------------------------
     def add_experiment(self) -> None:
-        if self.manager.project is None:
-            InfoDialog.show_info(self, "提示", "请先新建或打开项目")
-            return
-        samples = [(s.sample_id, s.name) for s in self.manager.project.samples]
-        dialog = ImportExperimentDialog(self, samples=samples)
-        if dialog.exec() != ImportExperimentDialog.DialogCode.Accepted:
-            return
-        self._import_experiment_async(dialog.result_data())
+        """兼容入口:等同新建空白实验(导入数据走实验右键「导入数据」)。"""
+        self._create_experiment()
 
     def add_experiment_via_import(self, source: str, title: str = "") -> None:
         """直接按路径导入(供测试与自动化场景使用,不弹对话框)。"""
@@ -247,41 +276,59 @@ class MainWindow(QMainWindow):
         )
 
     def _import_experiment_async(self, data: dict) -> None:
-        """后台线程执行导入工作流(B2G-001),避免复制大 ser/fid 阻塞 UI。"""
+        """后台线程执行导入(三步接口 import_data),避免复制大文件阻塞 UI。"""
         import threading
 
         source = data.get("source", "")
-        self._append_log(f"开始导入: {source} (复制到项目={data.get('copy', True)})")
+        exp_id = data.get("experiment_id", "")
+        self._append_log(f"开始导入: {source} (实验 {exp_id or '自动创建'})")
 
         def worker() -> None:
             try:
-                result = import_bruker_dataset(
+                from workflow.import_workflow import import_data
+
+                target_exp_id = exp_id
+                if not target_exp_id:
+                    if self.manager.project is None:
+                        raise ProjectError("未加载项目")
+                    entry = self.manager.create_experiment(
+                        title=data.get("title", "") or "unnamed"
+                    )
+                    target_exp_id = entry.id
+                result = import_data(
                     self.manager,
+                    target_exp_id,
                     source,
-                    title=data.get("title", ""),
-                    sample_id=data.get("sample_id", ""),
                     copy=bool(data.get("copy", True)),
                 )
                 self.manager.save()
-                self._on_import_done(result)
-            except Exception as exc:  # noqa: BLE001 - 错误统一回传 UI
-                self._append_log(f"导入失败: {exc}")
-                InfoDialog.show_info(
-                    self, "导入失败", f"{type(exc).__name__}: {exc}"
-                )
+                self.import_finished.emit(result)  # 回主线程刷新 UI
+            except Exception as exc:  # noqa: BLE001 - 错误统一回主线程提示
+                self.import_failed.emit(f"{type(exc).__name__}: {exc}")
 
         threading.Thread(target=worker, daemon=True).start()
 
+    def _on_import_failed(self, message: str) -> None:
+        """主线程处理导入失败(弹窗 + 日志)。"""
+        self._append_log(f"导入失败: {message}")
+        InfoDialog.show_info(self, "导入失败", message)
+
     def _on_import_done(self, result: ImportResult) -> None:
         """导入成功后刷新并选中新实验;展示 warnings。"""
+        data_id = getattr(result, "data_id", "") or ""
         self._append_log(
-            f"导入完成: {result.experiment_id} ({result.file_count} 文件, "
-            f"{result.total_bytes} 字节, 运行 {result.run_id})"
+            f"导入完成: {result.experiment_id}/{data_id or '-'} "
+            f"({getattr(result, 'file_count', 0)} 文件, "
+            f"{getattr(result, 'total_bytes', 0)} 字节, 运行 {result.run_id})"
         )
         for warning in result.warnings:
             self._append_log(f"  提示: {warning}")
-        self.refresh()
         exp_id = getattr(result, "experiment_id", None) or result.get("experiment_id", "")
+        data_id = getattr(result, "data_id", "") or ""
+        name = self._pending_data_names.pop(exp_id, "") if exp_id else ""
+        if exp_id and data_id and name:
+            self.project_tree._data_titles[(exp_id, data_id)] = name
+        self.refresh()
         if exp_id:
             self.project_tree.select_experiment(exp_id)
         if result.warnings:
@@ -388,7 +435,7 @@ class MainWindow(QMainWindow):
         if next_step is None:
             InfoDialog.show_info(self, "提示", "当前没有可运行的步骤")
             return
-        self.pipeline.run_step(next_step)
+        self.center_panel.run_step(next_step)
 
     def _manual_param_table_menu(self) -> None:
         self._open_manual_dialog("process")
@@ -426,6 +473,24 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     # 树动作(契约 v1.2 §8.5)
     # ------------------------------------------------------------------
+    def _rename_project(self) -> None:
+        """重命名当前项目(更新 project.json 的 name)。"""
+        if self.manager.project is None:
+            return
+        new_name, ok = QInputDialog.getText(
+            self, "重命名项目", "项目名称:", text=self.manager.project.name
+        )
+        if not ok or not new_name.strip():
+            return
+        self.manager.project.name = new_name.strip()
+        try:
+            self.manager.save()
+        except ProjectError as exc:
+            InfoDialog.show_info(self, "重命名项目失败", str(exc))
+            return
+        self.refresh()
+        self.statusBar().showMessage(f"项目已重命名为 {new_name.strip()}")
+
     def _delete_project(self) -> None:
         if self.manager.project is None:
             return
@@ -464,6 +529,43 @@ class MainWindow(QMainWindow):
         self.refresh()
         self.project_tree.select_experiment(entry.id)
 
+    def _import_data_with_options(
+        self, exp_id: str, name: str, source: str, copy: bool
+    ) -> None:
+        """中间面板内嵌导入表单:按指定实验导入数据(可命名)。"""
+        self._pending_data_names[exp_id] = name
+        self._import_experiment_async(
+            {
+                "source": source,
+                "title": "",
+                "sample_id": "",
+                "copy": copy,
+                "experiment_id": exp_id,
+            }
+        )
+
+    def _rename_data(self, exp_id: str, data_id: str) -> None:
+        """数据右键重命名(名称保存在 GUI 树层)。"""
+        current = self.project_tree._data_titles.get((exp_id, data_id), "")
+        new_name, ok = QInputDialog.getText(self, "重命名数据", "数据名称:", text=current)
+        if ok:
+            self.project_tree._data_titles[(exp_id, data_id)] = new_name.strip()
+            self.project_tree.refresh()
+
+    def _create_experiment_with_title(self, title: str) -> None:
+        """中间面板内嵌表单:新建空白实验。"""
+        if self.manager.project is None:
+            InfoDialog.show_info(self, "提示", "请先新建或打开项目")
+            return
+        try:
+            entry = self.manager.create_experiment(title=title)
+            self.manager.save()
+        except ProjectError as exc:
+            InfoDialog.show_info(self, "新建实验失败", str(exc))
+            return
+        self.refresh()
+        self.project_tree.select_experiment(entry.id)
+
     def _import_data_for(self, exp_id: str) -> None:
         """在指定实验下导入数据。"""
         if self.manager.project is None:
@@ -486,8 +588,8 @@ class MainWindow(QMainWindow):
             self._delete_experiment_by_id(exp_id)
             return
         step = "fid" if action == "fid" else "spectrum"
-        self.pipeline.set_context(exp_id)
-        self.pipeline.run_step(step)
+        self.center_panel.set_selection("data", exp_id, data_id)
+        self.center_panel.run_step(step)
 
     def _noop_hint(self) -> None:
         InfoDialog.show_info(self, "提示", "项目管理面板已集成在左侧树中")
@@ -517,16 +619,16 @@ class MainWindow(QMainWindow):
     # 上下文联动
     # ------------------------------------------------------------------
     def _on_open_experiment(self, exp_id: str) -> None:
-        self.pipeline.set_context(exp_id)
-        self.spectrum_panel.set_context(exp_id)
+        self.center_panel.set_selection("experiment", exp_id, "")
+        self.spectrum_panel.set_context(exp_id, "")
         self.statusBar().showMessage(
             f"实验 {exp_id}: 双击查看谱图文件,中间 Pipeline 显示处理步骤"
         )
 
-    def _update_context(self, exp_id: str) -> None:
-        """左侧选择变化 → 中间/右侧围绕所属实验刷新。"""
-        self.pipeline.set_context(exp_id)
-        self.spectrum_panel.set_context(exp_id)
+    def _update_context(self, kind: str, exp_id: str, data_id: str = "") -> None:
+        """左侧选择变化 → 中间按选中类型显示,右侧围绕数据刷新。"""
+        self.center_panel.set_selection(kind, exp_id, data_id)
+        self.spectrum_panel.set_context(exp_id, data_id)
 
     def _append_log(self, message: str) -> None:
         self.log_panel.append(message)
@@ -547,10 +649,12 @@ class MainWindow(QMainWindow):
         tree.clear()
         project = self.manager.project
         if project is None:
-            self.setWindowTitle("NMRForge - 未打开项目")
+            self.setWindowTitle("NMRForge - 欢迎")
             self.statusBar().showMessage("新建或打开项目开始工作")
-            self.pipeline.set_context("")
-            self.spectrum_panel.set_context("")
+            self.center_panel.welcome_page.refresh()
+            self.center_panel.set_selection("workspace", "", "")
+            self.spectrum_panel.set_context("", "")
+            self.main_splitter.setVisible(True)  # 欢迎页在三栏中显示
             return
         for exp in project.experiments:
             status = self.manager.infer_status(exp.id).value
@@ -560,7 +664,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"NMRForge - {project.name}")
         self.statusBar().showMessage(f"项目: {self.manager.root}")
         # 打开/新建项目后默认聚焦第一个实验
-        if project.experiments and not self.pipeline.current_experiment_id():
+        if project.experiments and not self.center_panel.current_experiment_id():
             self.project_tree.select_experiment(project.experiments[0].id)
 
     @staticmethod

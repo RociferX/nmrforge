@@ -39,13 +39,50 @@ class SyncThread:
         self._target()
 
 
-def _manager_with_experiment(tmp_path: Path) -> ProjectManager:
-    manager = ProjectManager.create_project(tmp_path / "proj", "demo")
+def _manager_with_experiment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch | None = None
+) -> ProjectManager:
+    """在临时工作区创建项目,并让树/主窗口使用该工作区(测试隔离)。"""
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    manager = ProjectManager.create_project(workspace / "proj", "demo")
     for source, title in (("/sampleD", "HSQC"), ("/sampleE", "HNCACB")):
         entry = manager.add_experiment(source, title=title)
-        entry.status = "registered"  # schema 1.1 兼容:登记但未落盘 metadata
+        entry.status = "registered"
     manager.save()
+    if monkeypatch is not None:
+        monkeypatch.setattr(
+            "gui.main_window.WorkspaceManager",
+            lambda: _TempWorkspace(workspace),
+        )
+        monkeypatch.setattr(
+            "core.workspace.WorkspaceManager",
+            lambda *a, **k: _TempWorkspace(workspace),
+        )
     return manager
+
+
+class _TempWorkspace:
+    """指向临时目录的工作区桩。"""
+
+    def __init__(self, root) -> None:
+        self.root = Path(root)
+
+    def ensure(self) -> Path:
+        self.root.mkdir(parents=True, exist_ok=True)
+        return self.root
+
+    def list_projects(self) -> list[Path]:
+        return sorted(
+            p
+            for p in self.root.iterdir()
+            if p.is_dir() and (p / "project.json").is_file()
+        )
+
+    def create_project(self, name: str, **kwargs):
+        from core.project import ProjectManager
+
+        return ProjectManager.create_project(self.root / name, name, **kwargs)
 
 
 def _write_ft2(path: Path) -> None:
@@ -79,6 +116,9 @@ def _write_ft2(path: Path) -> None:
 class FakeProcessingController:
     """五步流程假控制器:generate_fid/generate_spectrum 记录调用并同步完成。"""
 
+    def set_manager(self, manager) -> None:
+        self.manager = manager
+
     def __init__(self) -> None:
         self.calls: list[str] = []
         self.last_entry = None
@@ -100,12 +140,12 @@ class FakeProcessingController:
         self.last_entry = entry
         return {"experiment_id": entry.id, "status": "imported"}
 
-    def generate_fid(self, data) -> str:
+    def generate_fid(self, data, exp_id=None, data_id=None) -> str:
         self.calls.append("generate_fid")
         self.last_entry = data
         return "/tmp/x.fid"
 
-    def generate_spectrum(self, data) -> str:
+    def generate_spectrum(self, data, exp_id=None, data_id=None) -> str:
         self.calls.append("generate_spectrum")
         self.last_entry = data
         return "/tmp/x.ft2"
@@ -114,31 +154,37 @@ class FakeProcessingController:
 # ----------------------------------------------------------------------
 # 项目树(Project → Experiment → Data)
 # ----------------------------------------------------------------------
-def test_project_tree_structure(tmp_path: Path, qapp: QApplication) -> None:
-    manager = _manager_with_experiment(tmp_path)
+def test_project_tree_structure(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
     panel = ProjectTreePanel(manager)
     assert panel.tree.topLevelItemCount() == 1
-    project_item = panel.tree.topLevelItem(0)
-    assert project_item.text(0) == "demo"
+    workspace_item = panel.tree.topLevelItem(0)
+    assert workspace_item.text(0) == "NMRForgeWorkspace"  # Workspace 根节点
+    project_item = workspace_item.child(0)
+    assert project_item.text(0) == "demo"  # 当前项目显示 project.name
+    assert project_item.text(1) == "当前"  # 当前项目标记
     assert project_item.childCount() == 2
     exp_item = project_item.child(0)
     assert exp_item.text(0) == "HSQC"
-    assert exp_item.childCount() == 1  # schema 1.1 兼容:实验即单数据节点
+    assert exp_item.childCount() == 1
     data_item = exp_item.child(0)
     assert data_item.text(0) == "数据 d_001"
     assert data_item.text(1) == "已导入"
+    assert data_item.childCount() == 6  # raw/process/spectra/peaks/figures/report
     panel.close()
 
 
 def test_project_tree_current_experiment_from_data(
-    tmp_path: Path, qapp: QApplication
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    manager = _manager_with_experiment(tmp_path)
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
     panel = ProjectTreePanel(manager)
     panel.select_experiment("exp_002")
     assert panel.current_experiment_id() == "exp_002"
     # 选中 Data 节点仍归一化到所属实验
-    exp_item = panel.tree.topLevelItem(0).child(1)
+    exp_item = panel.tree.topLevelItem(0).child(0).child(1)
     panel.tree.setCurrentItem(exp_item.child(0))
     assert panel.current_experiment_id() == "exp_002"
     assert panel._data_id_of(panel.tree.currentItem()) == "d_001"
@@ -187,11 +233,14 @@ def test_pipeline_status_after_spectrum(tmp_path: Path, qapp: QApplication) -> N
 def test_pipeline_panel_refresh_shows_next_step(tmp_path: Path, qapp: QApplication) -> None:
     manager = _manager_with_experiment(tmp_path)
     panel = PipelinePanel(manager, FakeProcessingController())
-    panel.set_context("exp_001")
+    panel.set_selection("data", "exp_001", "d_001")
     assert "下一步" in panel.next_label.text()
     assert "生成 FID" in panel.next_label.text()
     assert not panel._rows["fid"].run_button.isHidden()
     assert panel._rows["spectrum"].run_button.isHidden()
+    # 导入数据为自动化步骤,无人工入口
+    assert panel._rows["import"].manual_button.isHidden()
+    assert not panel._rows["fid"].manual_button.isHidden()
     panel.close()
 
 
@@ -204,7 +253,7 @@ def test_pipeline_panel_run_generate_fid(
     panel = PipelinePanel(manager, controller)
     log = LogPanel()
     panel.log_message.connect(log.append)
-    panel.set_context("exp_001")
+    panel.set_selection("data", "exp_001", "d_001")
     panel._on_run_requested("fid")
     assert controller.calls == ["generate_fid"]
     assert "完成 生成 FID" in log.text.toPlainText()
@@ -246,26 +295,31 @@ def test_spectrum_panel_open_corrupt_returns_false(
 # ----------------------------------------------------------------------
 # 主窗口三栏
 # ----------------------------------------------------------------------
-def test_main_window_three_column_layout(tmp_path: Path, qapp: QApplication) -> None:
-    manager = _manager_with_experiment(tmp_path)
+def test_main_window_three_column_layout(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
     window = MainWindow(manager=manager)
     assert window.main_splitter.count() == 3
     assert window.project_tree is not None
     assert window.pipeline is not None
     assert window.spectrum_panel is not None
-    assert window.pipeline.current_experiment_id() == "exp_001"
+    # 默认聚焦第一个实验 → 中间为实验页(内嵌导入数据表单)
+    assert window.center_panel.stack.currentIndex() == 2
+    assert window.center_panel.experiment_page._exp_id == "exp_001"
     assert "demo" in window.windowTitle()
     assert window.experiment_tree.topLevelItemCount() == 2  # 兼容表同步
     window.close()
 
 
 def test_main_window_context_updates_on_tree_selection(
-    tmp_path: Path, qapp: QApplication
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    manager = _manager_with_experiment(tmp_path)
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
     window = MainWindow(manager=manager)
     window.project_tree.select_experiment("exp_002")
-    assert window.pipeline.current_experiment_id() == "exp_002"
+    assert window.center_panel.stack.currentIndex() == 2  # 实验页
+    assert window.center_panel.experiment_page._exp_id == "exp_002"
     assert window.spectrum_panel._current_exp_id == "exp_002"
     window.close()
 
@@ -274,9 +328,10 @@ def test_main_window_log_panel_expands_on_message(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr("threading.Thread", SyncThread)
-    manager = _manager_with_experiment(tmp_path)
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
     window = MainWindow(manager=manager, controller=FakeProcessingController())
     assert window.log_panel.isHidden()
+    window.center_panel.set_selection("data", "exp_001", "d_001")
     window.pipeline._on_run_requested("fid")
     assert not window.log_panel.isHidden()
     assert "生成 FID" in window.log_panel.text.toPlainText()
@@ -285,30 +340,44 @@ def test_main_window_log_panel_expands_on_message(
 
 def test_main_window_empty_state(qapp: QApplication) -> None:
     window = MainWindow()
-    assert window.project_tree.tree.topLevelItemCount() == 0
+    assert window.project_tree.tree.topLevelItemCount() == 1  # Workspace 根
     assert window.experiment_tree.topLevelItemCount() == 0
-    assert "未打开项目" in window.windowTitle()
+    assert "欢迎" in window.windowTitle()
     assert window.pipeline.current_experiment_id() == ""
     window.close()
 
 def test_tree_data_node_context_menu_actions(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Data 节点右键三步操作信号(生成 FID / 生成谱图 / 删除)。"""
-    manager = _manager_with_experiment(tmp_path)
+    """Data 节点右键不再含功能项,仅删除/打开目录。"""
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
     panel = ProjectTreePanel(manager)
-    data_item = panel.tree.topLevelItem(0).child(0).child(0)
+    data_item = panel.tree.topLevelItem(0).child(0).child(0).child(0)
     actions: list[tuple[str, str]] = []
     panel.data_action_requested.connect(
         lambda action, data_id: actions.append((action, data_id))
     )
     menu = QMenu()
     panel._on_context_menu_impl(menu, data_item)
+    labels = [a.text() for a in menu.actions()]
+    assert "生成 FID" not in labels and "生成谱图" not in labels
     for action in menu.actions():
         action.trigger()
-    assert ("fid", "d_001") in actions
-    assert ("spectrum", "d_001") in actions
-    assert ("delete", "d_001") in actions
+    assert actions == [("delete", "d_001")]
+    panel.close()
+
+
+def test_tree_subfolder_context_menu_has_open_path(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """raw 等子目录右键提供「打开所在目录」。"""
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    panel = ProjectTreePanel(manager)
+    folder_item = panel.tree.topLevelItem(0).child(0).child(0).child(0).child(0)
+    menu = QMenu()
+    panel._on_context_menu_impl(menu, folder_item)
+    labels = [a.text() for a in menu.actions()]
+    assert "打开所在目录" in labels
     panel.close()
 
 
@@ -316,7 +385,7 @@ def test_create_blank_experiment_action(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """空白处/Project 右键新建空白实验。"""
-    manager = _manager_with_experiment(tmp_path)
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
     window = MainWindow(manager=manager)
     monkeypatch.setattr(
         "gui.main_window.QInputDialog.getText",
@@ -334,11 +403,89 @@ def test_delete_project_action(
     """Project 右键删除项目:确认后关闭项目并清空树。"""
     from gui.dialogs import ConfirmDialog
 
-    manager = _manager_with_experiment(tmp_path)
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
     window = MainWindow(manager=manager)
     monkeypatch.setattr(ConfirmDialog, "confirm", staticmethod(lambda *a, **k: True))
     window._delete_project()
     assert window.manager.project is None
-    assert window.project_tree.tree.topLevelItemCount() == 0
-    assert "未打开项目" in window.windowTitle()
+    assert window.project_tree.tree.topLevelItemCount() == 1  # Workspace 根仍在
+    assert "欢迎" in window.windowTitle()
     window.close()
+
+def test_welcome_page_shows_workspace_and_recent(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """欢迎页:工作区路径 + 最近项目列表 + 新建入口(契约 v1.3 §9.4)。"""
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    ProjectManager.create_project(workspace / "projA", "projA")
+    ProjectManager.create_project(workspace / "projB", "projB")
+
+    from gui.welcome_page import WelcomePage, _FallbackWorkspaceManager
+
+    monkeypatch.setattr(
+        "gui.welcome_page.workspace_manager",
+        lambda: _FallbackWorkspaceManager(workspace),
+    )
+    page = WelcomePage()
+    assert str(workspace) in page.workspace_label.text()
+    assert page.recent_list.count() == 2
+    names = {page.recent_list.item(i).text() for i in range(page.recent_list.count())}
+    assert names == {"projA", "projB"}
+    page.close()
+
+
+def test_main_window_welcome_page_on_startup(qapp: QApplication) -> None:
+    """未打开项目时主窗口显示欢迎页(三栏中 Workspace 页)。"""
+    window = MainWindow()
+    assert window.center_panel.welcome_page is not None
+    assert not window.main_splitter.isHidden()  # 三栏可见,欢迎页在中间
+    assert window.center_panel.stack.currentIndex() == 0  # Workspace 页
+    window.close()
+
+def test_data_selected_shows_pipeline_page(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """选中 Data → 中间为 Pipeline 页;导入无人工按钮。"""
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    window = MainWindow(manager=manager)
+    tree = window.project_tree.tree
+    data_item = tree.topLevelItem(0).child(0).child(0).child(0)
+    tree.setCurrentItem(data_item)
+    assert window.center_panel.stack.currentIndex() == 3  # Pipeline 页
+    assert window.pipeline.current_experiment_id() == "exp_001"
+    assert window.pipeline._rows["import"].manual_button.isHidden()  # 导入无人工
+    window.close()
+
+def test_import_failure_handled_on_main_thread(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """导入失败经信号回主线程处理(不在后台线程弹模态框)。"""
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    messages: list[str] = []
+    monkeypatch.setattr(
+        "gui.main_window.InfoDialog.show_info",
+        staticmethod(lambda parent, title, text_: messages.append(text_)),
+    )
+    monkeypatch.setattr(
+        "threading.Thread",
+        lambda *a, **k: _SyncThread(*a, **k),
+    )
+
+    def fail_import(mgr, exp_id, source, *, segments=None, copy=True):
+        raise RuntimeError("模拟导入失败")
+
+    monkeypatch.setattr("workflow.import_workflow.import_data", fail_import)
+    window = MainWindow(manager=manager)
+    window.add_experiment_via_import(str(tmp_path / "nonexistent"), title="T")
+    assert messages and "导入失败" in messages[0]
+    assert "导入失败" in window.log_panel.text.toPlainText()
+    window.close()
+
+
+class _SyncThread:
+    def __init__(self, target=None, daemon=None) -> None:
+        self._target = target
+
+    def start(self) -> None:
+        self._target()

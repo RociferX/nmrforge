@@ -15,6 +15,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -163,14 +164,31 @@ class ProjectManager:
     # 目录解析
     # ------------------------------------------------------------------
     def dir_path(self, key: str) -> Path:
+        """兼容层:旧扁平目录(项目根下 raw/processing/spectra/...)。"""
         if self.root is None or self.project is None:
             raise ProjectError("未加载项目")
         rel = self.project.directories.get(key, key)
         return self.root / rel
 
+    def data_base(self, exp_id: str, data_id: str) -> Path:
+        """schema 1.3 数据目录基座:<project>/<exp_id>/<data_id>/。"""
+        if self.root is None:
+            raise ProjectError("未加载项目")
+        return self.root / exp_id / data_id
+
+    def data_dir(self, exp_id: str, data_id: str, key: str) -> Path:
+        """数据内子目录(契约 §9.2):raw/process/spectra/peaks/figures/report。"""
+        if key not in ("raw", "process", "spectra", "peaks", "figures", "report"):
+            raise ProjectError(f"未知数据子目录: {key}")
+        return self.data_base(exp_id, data_id) / key
+
+    def data_metadata_path(self, exp_id: str, data_id: str) -> Path:
+        """数据 metadata 落盘:<project>/<exp_id>/<data_id>/metadata.json。"""
+        return self.data_base(exp_id, data_id) / "metadata.json"
+
     def _experiment_paths(self, exp_id: str) -> list[Path]:
-        """实验全部相关文件/目录(删除实验时按此清理;兼容新旧命名)。"""
-        candidates: list[Path] = []
+        """实验全部相关文件/目录(删除实验时按此清理;兼容新旧布局)。"""
+        candidates: list[Path] = [self.root / exp_id]  # schema 1.3 数据基座
         for key in ("raw", "processing", "spectra", "peaks", "analysis", "figures", "report"):
             base = self.dir_path(key)
             if key in ("raw", "processing", "analysis", "figures"):
@@ -183,11 +201,10 @@ class ProjectManager:
         return candidates
 
     def _data_paths(self, exp_id: str, data_id: str) -> list[Path]:
-        """单个数据的全部产物路径(删除数据时清理)。"""
-        candidates = [
-            self.dir_path("raw") / exp_id / data_id,
-            self.dir_path("processing") / exp_id / data_id,
-        ]
+        """单个数据的全部产物路径(删除数据时清理;兼容新旧布局)。"""
+        candidates = [self.data_base(exp_id, data_id)]
+        candidates.append(self.dir_path("raw") / exp_id / data_id)
+        candidates.append(self.dir_path("processing") / exp_id / data_id)
         for key in ("spectra", "peaks", "report"):
             candidates.extend(self.dir_path(key).glob(f"{exp_id}-{data_id}.*"))
         candidates.append(self.dir_path("metadata") / f"{exp_id}-{data_id}.json")
@@ -321,10 +338,7 @@ class ProjectManager:
         for path in self._data_paths(exp_id, data_id):
             target = self._ensure_inside_root(path)
             if target.is_dir():
-                for child in target.rglob("*"):
-                    if child.is_file():
-                        child.unlink()
-                target.rmdir()
+                shutil.rmtree(target)
                 removed.append(str(target))
             elif target.is_file():
                 target.unlink()
@@ -381,10 +395,7 @@ class ProjectManager:
         for path in self._experiment_paths(exp_id):
             target = self._ensure_inside_root(path)
             if target.is_dir():
-                for child in target.rglob("*"):
-                    if child.is_file():
-                        child.unlink()
-                target.rmdir()
+                shutil.rmtree(target)
                 removed.append(str(target))
             elif target.is_file():
                 target.unlink()
@@ -416,33 +427,49 @@ class ProjectManager:
         # 兼容:旧命名 metadata/<exp_id>.json 与 spectra/<exp_id>.ft2
         has_imported = (metadata_dir / f"{exp_id}.json").is_file()
         for d in entry.data:
-            if d.metadata_path and (
-                metadata_dir / Path(d.metadata_path).name
-            ).is_file():
+            # schema 1.3 规范布局:<exp>/<data>/metadata.json
+            if self.data_metadata_path(exp_id, d.id).is_file():
                 has_imported = True
+            if d.metadata_path:
+                rel = Path(d.metadata_path)
+                # schema 1.3:<exp>/<data>/metadata.json(项目内相对路径)
+                if not rel.is_absolute() and (self.root / rel).is_file():
+                    has_imported = True
+                elif (metadata_dir / rel.name).is_file():  # 旧扁平命名
+                    has_imported = True
             if (metadata_dir / f"{exp_id}-{d.id}.json").is_file():
                 has_imported = True
-        # 优先按 DataEntry 记录的产物路径(可能在工作目录),再回退旧命名 glob
-        has_spectrum = False
-        for d in entry.data:
-            if d.spectrum_path:
-                candidate = Path(d.spectrum_path)
-                if not candidate.is_absolute():
-                    candidate = self.root / candidate
-                if candidate.is_file():
-                    has_spectrum = True
-                    break
-        if not has_spectrum:
-            has_spectrum = any(spectra_dir.glob(f"{exp_id}.*")) or any(
-                spectra_dir.glob(f"{exp_id}-*.*")
-            )
+            # 优先按 DataEntry 记录的产物路径(可能在工作目录),再回退旧命名 glob
+            has_spectrum = False
+            for d in entry.data:
+                if d.spectrum_path:
+                    candidate = Path(d.spectrum_path)
+                    if not candidate.is_absolute():
+                        candidate = self.root / candidate
+                    if candidate.is_file():
+                        has_spectrum = True
+                        break
+            if not has_spectrum:
+                has_spectrum = any(spectra_dir.glob(f"{exp_id}.*")) or any(
+                    spectra_dir.glob(f"{exp_id}-*.*")
+                )
+            if not has_spectrum:
+                for d in entry.data:
+                    spectra = self.data_dir(exp_id, d.id, "spectra")
+                    if any(spectra.glob("*.ft2")) or any(spectra.glob("*.ft3")):
+                        has_spectrum = True
+                        break
         checks: list[tuple[ExperimentStatus, bool]] = [
             (ExperimentStatus.IMPORTED, has_imported),
             (ExperimentStatus.PROCESSED, has_spectrum),
             (
                 ExperimentStatus.PICKED,
                 self.dir_path("peaks").joinpath(f"{exp_id}.csv").is_file()
-                or bool(list(self.dir_path("peaks").glob(f"{exp_id}-*.csv"))),
+                or bool(list(self.dir_path("peaks").glob(f"{exp_id}-*.csv")))
+                or any(
+                    list(self.data_dir(exp_id, d.id, "peaks").glob("*.csv"))
+                    for d in entry.data
+                ),
             ),
             (
                 ExperimentStatus.ANALYZED,
@@ -451,7 +478,13 @@ class ProjectManager:
                     for ext in ("pdf", "html", "json")
                 )
                 or bool(list(self.dir_path("report").glob(f"{exp_id}-*.*")))
-                or self.dir_path("analysis").joinpath(exp_id).exists(),
+                or self.dir_path("analysis").joinpath(exp_id).exists()
+                or any(
+                    list(self.data_dir(exp_id, d.id, "report").glob("*.pdf"))
+                    or list(self.data_dir(exp_id, d.id, "report").glob("*.html"))
+                    or list(self.data_dir(exp_id, d.id, "report").glob("*.json"))
+                    for d in entry.data
+                ),
             ),
         ]
         status = ExperimentStatus.REGISTERED

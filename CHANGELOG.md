@@ -1,5 +1,88 @@
 # 变更日志
 
+## [0.2.18.1] - 2026-08-12
+
+- 当前项目右键新增「重命名项目...」:更新 project.json 的 name,树与窗口标题
+  同步刷新(树当前项目节点显示 project.name)。
+
+## [0.2.18] - 2026-08-12
+
+- 左侧树 Workspace 节点下列出工作区全部项目:当前项目展开实验/数据并标记
+  「当前」,其余项目双击或右键「打开项目...」切换。
+- 导入数据支持命名:实验页导入表单增加「数据名称(可选)」;数据节点显示
+  自定义名称(默认仍为 数据 d_001)。
+- 数据节点右键新增「重命名...」(重命名后树刷新显示新名称)。
+
+## [0.2.17.1] - 2026-08-12
+
+- 修复欢迎页逻辑冲突:未打开项目时不再隐藏三栏,欢迎页在中间 Workspace
+  页正常显示(新建/打开/最近项目可操作)。
+- 修复导入失败点 OK 卡死:导入在后台线程执行,成功/失败结果改经 Qt 信号
+  回主线程处理(不再在后台线程弹模态对话框/操作 UI)。
+
+## [0.2.17] - 2026-08-12
+
+- 中间面板改为层级上下文面板(CenterPanel),随左侧树选中层级切换:
+  Workspace → 新建项目/打开项目/最近项目(嵌入欢迎页);
+  Project → 新建实验(内嵌表单);
+  Experiment → 导入数据(内嵌表单:目录选择 + 复制选项);
+  Data/子目录 → Pipeline 五步(生成 FID → 分析)。
+- 新建实验/导入数据表单直接内嵌在中间,不再弹独立窗口。
+
+## [0.2.16.3] - 2026-08-12
+
+- 「导入数据」为纯自动化步骤,不再显示「人工」按钮;选中 Data 后仅
+  生成 FID/生成谱图/峰挑选/分析 保留人工入口。
+
+## [0.2.16.2] - 2026-08-12
+
+- 选中实验时,中间面板提供可点击的「导入数据...」按钮(直接在当前实验下
+  导入数据);「未选中数据」状态不再显示各步骤的「人工」按钮,选中 Data
+  后恢复。
+
+## [0.2.16.1] - 2026-08-12
+
+- 中间面板按选中类型显示:选中 Project/Experiment 时显示「未选中数据」
+  提示,选中 Data(或其子目录)才显示 Pipeline 步骤。
+- raw/process/spectra/peaks/figures/report 子目录右键提供「打开所在目录」。
+- Data 节点右键移除功能项(生成 FID/生成谱图),仅保留打开目录/删除;
+  处理动作统一经 Pipeline 步骤运行。
+
+## [0.2.15.1] - 2026-08-12
+
+- 修复:新建空白实验不再产生伪数据节点(移除 schema 1.1「实验即数据」回退;
+  空白实验树/管线均不显示 Data);空白实验运行步骤时提示先导入数据。
+- 修复:「项目 → 添加实验」改为新建空白实验(不再弹数据文件夹选择);
+  导入数据统一走实验右键「导入数据」。
+
+## [0.2.15] - 2026-08-12
+
+- 首次启动工作区欢迎页(G2B-003 §9.4):WorkspaceManager.ensure() 创建默认
+  工作区 ~/NMRForgeWorkspace,显示工作区路径、工作区内项目列表(双击打开)、
+  新建项目入口;未打开项目时主窗口显示欢迎页,三栏自动隐藏。
+- 左侧树加 Workspace 根节点:Workspace → Project → Experiment → Data →
+  raw/process/spectra/peaks/figures/report 各子文件夹;项目右键删除(强确认)。
+- ProcessingController 三步接线(契约 v1.2 §8.3 / workflow.stepwise):
+  import_data / generate_fid / generate_spectrum 对接 Backend 已落地的
+  stepwise(含 WorkflowRun 登记、manager.save、data_id 产物);控制器绑定
+  ProjectManager 后由 Pipeline 步骤调用。
+- 树列宽保持可读(220/90 + 最小段宽),数据节点显示 d_001 并挂真实子文件夹。
+- 测试:欢迎页/Workspace 根/三步接线适配新增;全量 226 passed,ruff 全绿。
+
+## [0.2.16] - 2026-08-12
+
+- Backend:工作区容器 core/workspace.py(契约 v1.3 §9.1 / G2B-003):
+  WorkspaceManager(默认 ~/NMRForgeWorkspace,ensure 幂等/list_projects/
+  create_project/open_project,非法项目名校验)。
+- Backend:数据目录层级(schema 1.3,契约 §9.2):项目 → <exp_id>/ →
+  <data_id>/ → {raw, process, spectra, peaks, figures, report,
+  metadata.json};import_data 复制到 <data>/raw/ 并写
+  <data>/metadata.json;stepwise 工作目录 <data>/process/、终谱归位
+  <data>/spectra/;infer_status/删除兼容新旧布局,旧 dir_path 保留为
+  兼容层;open_project 自动迁移 1.1/1.2 → 1.3(不物理搬文件)。
+- Backend:test_phase_optimize 平台敏感断言改为「非零解 + 增益」
+  (VM numpy 2.2.6 true=-60 → est=-180,±60° 容差仍不足;先例 ±45°→非零解)。
+- 测试:新增 tests/test_workspace.py 7 项;全量 226 passed。
 ## [0.2.14] - 2026-08-12
 
 - Backend:Experiment→Data 层级(core/project schema 1.2 + 迁移,按 G2B-002 /

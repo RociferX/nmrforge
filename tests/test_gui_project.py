@@ -1,4 +1,4 @@
-"""GUI 骨架测试:主窗口建立在 ProjectManager 之上(offscreen)。"""
+"""GUI 骨架测试:主窗口建立在 ProjectManager/WorkspaceManager 之上(offscreen)。"""
 
 from __future__ import annotations
 
@@ -8,12 +8,11 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PyQt6.QtWidgets import QApplication, QFileDialog, QInputDialog
+from PyQt6.QtWidgets import QApplication, QFileDialog
 
 from core.project import ProjectManager
-from gui.dialogs import ConfirmDialog, ImportExperimentDialog
+from gui.dialogs import ConfirmDialog
 from gui.main_window import MainWindow
-from workflow.import_workflow import ImportResult
 
 
 @pytest.fixture(scope="module")
@@ -22,26 +21,53 @@ def qapp() -> QApplication:
     yield app
 
 
-def _build_manager(tmp_path: Path) -> ProjectManager:
-    manager = ProjectManager.create_project(tmp_path / "proj", "demo")
+def _build_manager(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch | None = None
+) -> ProjectManager:
+    ws = tmp_path / "ws"
+    ws.mkdir(exist_ok=True)
+    manager = ProjectManager.create_project(ws / "proj", "demo")
     manager.add_experiment("/sampleD", title="HSQC")
     manager.add_experiment("/sampleE", title="HNCACB")
     manager.save()
+    if monkeypatch is not None:
+        monkeypatch.setattr(
+            "gui.main_window.WorkspaceManager", lambda: _TempWorkspace(ws)
+        )
+        monkeypatch.setattr(
+            "core.workspace.WorkspaceManager", lambda *a, **k: _TempWorkspace(ws)
+        )
     return manager
 
 
-def test_window_shows_experiments_from_project(tmp_path: Path, qapp: QApplication) -> None:
-    manager = _build_manager(tmp_path)
+class _TempWorkspace:
+    def __init__(self, root) -> None:
+        self.root = Path(root)
+
+    def ensure(self) -> Path:
+        self.root.mkdir(parents=True, exist_ok=True)
+        return self.root
+
+    def list_projects(self) -> list[Path]:
+        return sorted(
+            p
+            for p in self.root.iterdir()
+            if p.is_dir() and (p / "project.json").is_file()
+        )
+
+    def create_project(self, name: str, **kwargs):
+        return ProjectManager.create_project(self.root / name, name, **kwargs)
+
+
+def test_window_shows_experiments_from_project(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manager = _build_manager(tmp_path, monkeypatch)
     window = MainWindow(manager=manager)
     assert window.experiment_tree.topLevelItemCount() == 2
     first = window.experiment_tree.topLevelItem(0)
     assert first.text(0) == "exp_001"
     assert first.text(1) == "HSQC"
-    # 状态由产物文件推断:未导入数据时显示 registered
-    assert first.text(2) == "registered"
-    (manager.dir_path("metadata") / "exp_001.json").write_text("{}", encoding="utf-8")
-    window.refresh()
-    assert window.experiment_tree.topLevelItem(0).text(2) == "imported"
     assert "demo" in window.windowTitle()
     window.close()
 
@@ -49,29 +75,52 @@ def test_window_shows_experiments_from_project(tmp_path: Path, qapp: QApplicatio
 def test_window_empty_state(qapp: QApplication) -> None:
     window = MainWindow()
     assert window.experiment_tree.topLevelItemCount() == 0
-    assert "未打开项目" in window.windowTitle()
+    assert "欢迎" in window.windowTitle()
+    assert window.center_panel.welcome_page is not None
     window.close()
 
 
 def test_new_project_action(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    root = tmp_path / "newproj"
     monkeypatch.setattr(
-        QFileDialog,
-        "getExistingDirectory",
-        staticmethod(lambda *args, **kwargs: str(root)),
+        "gui.main_window.QInputDialog.getText",
+        staticmethod(lambda *args, **kwargs: ("demo", True)),
     )
+    # 新建项目落在默认工作区(避免污染真实 ~/NMRForgeWorkspace)
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
     monkeypatch.setattr(
-        QInputDialog, "getText", staticmethod(lambda *args, **kwargs: ("demo", True))
+        "gui.main_window.WorkspaceManager",
+        lambda: _WorkspaceStub(workspace),
     )
     window = MainWindow()
     window.new_project()
     assert window.manager.project is not None
     assert window.manager.project.name == "demo"
     assert window.experiment_tree.topLevelItemCount() == 0
-    assert (root / "project.json").is_file()
     window.close()
+
+
+class _WorkspaceStub:
+    """测试用工作区桩:在工作区目录下创建项目。"""
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+
+    def ensure(self) -> Path:
+        self.root.mkdir(parents=True, exist_ok=True)
+        return self.root
+
+    def create_project(self, name: str, **kwargs):
+        return ProjectManager.create_project(self.root / name, name, **kwargs)
+
+    def list_projects(self) -> list[Path]:
+        return sorted(
+            p
+            for p in self.root.iterdir()
+            if p.is_dir() and (p / "project.json").is_file()
+        )
 
 
 def test_open_project_action(
@@ -94,58 +143,27 @@ def test_open_project_action(
 def test_add_experiment_action(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    manager = _build_manager(tmp_path)
-    ran: list[bool] = []
-
-    class SyncThread:
-        """把后台导入线程变为同步执行,测试不依赖线程时序。"""
-
-        def __init__(self, target=None, daemon=None) -> None:
-            self._target = target
-
-        def start(self) -> None:
-            self._target()
-            ran.append(True)
-
-    monkeypatch.setattr("threading.Thread", SyncThread)
-
-    def fake_import(mgr, source, *, title="", sample_id="", copy=True) -> ImportResult:
-        entry = mgr.add_experiment(source, title=title, sample_id=sample_id)
-        return ImportResult(
-            experiment_id=entry.id,
-            run_id="R-20260812-001",
-            source=Path(source),
-            raw_dir=None,
-            metadata_path=mgr.dir_path("metadata") / f"{entry.id}.json",
-            checksums={},
-            file_count=0,
-            total_bytes=0,
-        )
-
-    monkeypatch.setattr("gui.main_window.import_bruker_dataset", fake_import)
-
-    class FakeImportDialog(ImportExperimentDialog):
-        def exec(self) -> int:
-            self.source_edit.setText("/sampleF")
-            self.title_edit.setText("3D HNCACB")
-            return int(ImportExperimentDialog.DialogCode.Accepted)
-
-    monkeypatch.setattr("gui.main_window.ImportExperimentDialog", FakeImportDialog)
-
+    """「添加实验」= 新建空白实验(不产生数据,不弹数据文件夹选择)。"""
+    manager = _build_manager(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        "gui.main_window.QInputDialog.getText",
+        staticmethod(lambda *args, **kwargs: ("3D HNCACB", True)),
+    )
     window = MainWindow(manager=manager)
     window.add_experiment()
-    assert ran == [True]  # 后台导入已同步执行
     assert window.experiment_tree.topLevelItemCount() == 3
     last = window.experiment_tree.topLevelItem(2)
     assert last.text(0) == "exp_003"
     assert last.text(1) == "3D HNCACB"
+    entry = manager.project.experiment("exp_003")
+    assert entry is not None and len(entry.data) == 0  # 空白实验无数据
     window.close()
 
 
 def test_delete_experiment_action_keeps_audit(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    manager = _build_manager(tmp_path)
+    manager = _build_manager(tmp_path, monkeypatch)
     manager.start_run("exp_001", workflow_ref="hsqc_standard")
     monkeypatch.setattr(
         ConfirmDialog,
@@ -162,7 +180,8 @@ def test_delete_experiment_action_keeps_audit(
 
 
 def test_recent_menu_persists(tmp_path: Path, qapp: QApplication) -> None:
-    root = tmp_path / "proj"
+    root = tmp_path / "ws" / "proj"
+    (tmp_path / "ws").mkdir(exist_ok=True)
     ProjectManager.create_project(root, "demo")
     recent = __import__(
         "core.project.recent", fromlist=["JsonRecentProjectsStore"]
@@ -173,11 +192,20 @@ def test_recent_menu_persists(tmp_path: Path, qapp: QApplication) -> None:
     assert len(window.recent_menu.actions()) == 1
     window.close()
 
+
 def test_import_workflow_e2e(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """B2G-001 端到端:真实 Bruker fixture 目录经 import_bruker_dataset 导入。"""
-    manager = ProjectManager.create_project(tmp_path / "proj", "demo")
+    """端到端:真实 Bruker fixture 目录经 workflow.import_workflow.import_data 导入。"""
+    ws = tmp_path / "ws"
+    ws.mkdir(exist_ok=True)
+    monkeypatch.setattr(
+        "gui.main_window.WorkspaceManager", lambda: _TempWorkspace(ws)
+    )
+    monkeypatch.setattr(
+        "core.workspace.WorkspaceManager", lambda *a, **k: _TempWorkspace(ws)
+    )
+    manager = ProjectManager.create_project(ws / "proj", "demo")
     dataset = tmp_path / "dataset"
     dataset.mkdir()
     (dataset / "acqus").write_text(
@@ -198,8 +226,9 @@ def test_import_workflow_e2e(
     assert manager.project is not None
     entry = manager.project.experiment("exp_001")
     assert entry is not None and entry.title == "HSQC"
-    assert manager.dir_path("metadata").joinpath("exp_001-d_001.json").is_file()
-    assert manager.dir_path("raw").joinpath("exp_001", "d_001").is_dir()
+    assert entry.data and entry.data[0].id == "d_001"
+    assert manager.data_metadata_path("exp_001", "d_001").is_file()
+    assert manager.data_dir("exp_001", "d_001", "raw").is_dir()
     assert any(r.workflow_ref == "import" for r in manager.project.workflow_runs)
     assert window.project_tree.current_experiment_id() == "exp_001"
     window.close()

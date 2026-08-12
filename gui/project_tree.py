@@ -26,6 +26,9 @@ from PyQt6.QtWidgets import (
 
 from core.project import ProjectManager
 
+# 数据节点下真实目录(契约 v1.3 §9:raw/process/spectra/peaks/figures/report)
+DATA_SUBFOLDERS = ("raw", "process", "spectra", "peaks", "figures", "report")
+
 _STATUS_TEXT = {
     "registered": "已登记",
     "imported": "已导入",
@@ -39,8 +42,12 @@ _STATUS_TEXT = {
 class ProjectTreePanel(QWidget):
     """项目管理树;selection_changed 在上下文(实验)变化时发出。"""
 
-    selection_changed = pyqtSignal(str)  # experiment_id(选中实验或空串)
+    selection_changed = pyqtSignal(str, str, str)  # (kind, exp_id, data_id)
     open_requested = pyqtSignal(str)  # 双击实验:请求打开/聚焦该实验
+    open_project_requested = pyqtSignal(str)  # 双击未打开项目:请求打开
+    data_rename_requested = pyqtSignal(str, str)  # (exp_id, data_id):重命名数据
+    rename_project_requested = pyqtSignal()  # 重命名当前项目
+    open_path_requested = pyqtSignal(str)  # 打开所在目录(子文件夹右键)
     delete_project_requested = pyqtSignal()  # Project 右键:删除项目
     create_experiment_requested = pyqtSignal()  # 空白处右键:新建空白实验
     import_data_requested = pyqtSignal(str)  # Experiment 右键:导入数据(exp_id)
@@ -49,10 +56,15 @@ class ProjectTreePanel(QWidget):
     delete_requested = pyqtSignal(str)  # 删除实验(exp_id)
 
     def __init__(
-        self, manager: ProjectManager | None = None, parent: QWidget | None = None
+        self,
+        manager: ProjectManager | None = None,
+        workspace=None,
+        parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.manager = manager or ProjectManager()
+        self.workspace = workspace
+        self._data_titles: dict[tuple[str, str], str] = {}  # (exp_id, data_id) -> 名称
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -80,20 +92,67 @@ class ProjectTreePanel(QWidget):
     # 构建
     # ------------------------------------------------------------------
     def refresh(self) -> None:
-        """按 ProjectManager 重建树。"""
+        """重建树:Workspace 下列出工作区所有项目,当前项目展开实验/数据。"""
         self.tree.clear()
-        project = self.manager.project
-        if project is None:
-            return
-        project_item = QTreeWidgetItem([project.name, ""])
-        project_item.setIcon(0, self._icon("project"))
-        project_item.setToolTip(0, str(self.manager.root))
-        project_item.setData(0, Qt.ItemDataRole.UserRole, {"kind": "project"})
-        self.tree.addTopLevelItem(project_item)
-        for exp in project.experiments:
-            exp_item = self._make_experiment_item(exp)
-            project_item.addChild(exp_item)
-        project_item.setExpanded(True)
+        workspace_item = QTreeWidgetItem([self._workspace_name(), ""])
+        workspace_item.setIcon(0, self._icon("workspace"))
+        workspace_item.setToolTip(0, self._workspace_path())
+        workspace_item.setData(0, Qt.ItemDataRole.UserRole, {"kind": "workspace"})
+        self.tree.addTopLevelItem(workspace_item)
+
+        current_root = self.manager.root
+        for project_dir in self._workspace_projects():
+            is_current = current_root is not None and project_dir == Path(current_root).resolve()
+            display_name = project_dir.name
+            if is_current and self.manager.project is not None:
+                display_name = self.manager.project.name or project_dir.name
+            project_item = QTreeWidgetItem([display_name, "当前" if is_current else ""])
+            project_item.setIcon(0, self._icon("project"))
+            project_item.setToolTip(
+                0,
+                f"{project_dir}\n" + ("双击查看实验/数据" if not is_current else "当前项目"),
+            )
+            project_item.setData(
+                0,
+                Qt.ItemDataRole.UserRole,
+                {"kind": "project", "path": str(project_dir)},
+            )
+            workspace_item.addChild(project_item)
+            if is_current and self.manager.project is not None:
+                for exp in self.manager.project.experiments:
+                    exp_item = self._make_experiment_item(exp)
+                    project_item.addChild(exp_item)
+                project_item.setExpanded(True)
+        workspace_item.setExpanded(True)
+
+    def _workspace_projects(self) -> list[Path]:
+        """工作区内全部项目目录(含 project.json)。"""
+        try:
+            if self.workspace is not None:
+                return list(self.workspace.list_projects())
+            from core.workspace import WorkspaceManager
+
+            return WorkspaceManager().list_projects()
+        except Exception:  # noqa: BLE001 - 工作区不可用时回退当前项目
+            if self.manager.root is not None:
+                return [Path(self.manager.root)]
+            return []
+
+    # ------------------------------------------------------------------
+    # 工作区路径(契约 v1.3;core/workspace 落地后改用 WorkspaceManager)
+    # ------------------------------------------------------------------
+    def _workspace_path(self) -> str:
+        from core.workspace import default_workspace_path
+
+        try:
+            return str(default_workspace_path())
+        except Exception:  # noqa: BLE001
+            if self.manager.root is not None:
+                return str(self.manager.root.parent)
+            return str(Path.home())
+
+    def _workspace_name(self) -> str:
+        return Path(self._workspace_path()).name or "Workspace"
 
     def _make_experiment_item(self, exp) -> QTreeWidgetItem:
         status = exp.status
@@ -108,17 +167,14 @@ class ProjectTreePanel(QWidget):
         return exp_item
 
     def _data_of(self, exp) -> list:
-        """实验下的数据节点;Backend DataEntry 落地后返回 entry.data。"""
-        data = getattr(exp, "data", None)
-        if data:
-            return list(data)
-        return [exp]  # schema 1.1 兼容:实验即数据
+        """实验下的数据节点(空白实验无数据则不显示 Data 子节点)。"""
+        return list(getattr(exp, "data", None) or [])
 
     def _make_data_item(self, exp, data_node) -> QTreeWidgetItem:
         data_id = getattr(data_node, "id", exp.id)
         source = getattr(data_node, "source", "") or getattr(exp, "source", "")
         status = self._data_status(exp, data_node)
-        label = f"数据 {data_id}"
+        label = self._data_titles.get((exp.id, data_id), "") or f"数据 {data_id}"
         data_item = QTreeWidgetItem([label, status])
         data_item.setIcon(0, self._icon("data"))
         data_item.setToolTip(0, f"{data_id}\n来源: {source}\n右键: 生成 FID / 生成谱图 / 删除")
@@ -127,6 +183,16 @@ class ProjectTreePanel(QWidget):
             Qt.ItemDataRole.UserRole,
             {"kind": "data", "exp_id": exp.id, "data_id": data_id},
         )
+        for sub in DATA_SUBFOLDERS:
+            sub_item = QTreeWidgetItem([sub, ""])
+            sub_item.setIcon(0, self._icon("folder"))
+            sub_item.setData(
+                0,
+                Qt.ItemDataRole.UserRole,
+                {"kind": "folder", "exp_id": exp.id, "data_id": data_id, "folder": sub},
+            )
+            data_item.addChild(sub_item)
+        data_item.setExpanded(False)
         return data_item
 
     def _data_status(self, exp, data_node) -> str:
@@ -150,9 +216,11 @@ class ProjectTreePanel(QWidget):
         from PyQt6.QtGui import QColor, QFont, QIcon, QPainter, QPixmap
 
         glyph = {
+            "workspace": "W",
             "project": "P",
             "experiment": "E",
             "data": "D",
+            "folder": "▸",
         }.get(kind, "•")
         pix = QPixmap(16, 16)
         pix.fill(QColor("transparent"))
@@ -191,23 +259,54 @@ class ProjectTreePanel(QWidget):
         return ""
 
     def select_experiment(self, exp_id: str) -> None:
-        """按 id 定位并选中实验节点(用于外部联动)。"""
-        root = self.tree.topLevelItem(0)
-        if root is None:
+        """按 id 递归定位并选中实验节点(Workspace → Project → Experiment)。"""
+        target = self._find_experiment_item(exp_id)
+        if target is None:
             return
-        for i in range(root.childCount()):
-            item = root.child(i)
-            data = item.data(0, Qt.ItemDataRole.UserRole)
-            if isinstance(data, dict) and data.get("exp_id") == exp_id:
-                root.setExpanded(True)
-                item.setExpanded(True)
-                self.tree.setCurrentItem(item)
-                return
+        parent = target.parent()
+        while parent is not None:
+            parent.setExpanded(True)
+            parent = parent.parent()
+        target.setExpanded(True)
+        self.tree.setCurrentItem(target)
+
+    def _find_experiment_item(
+        self, exp_id: str, item: QTreeWidgetItem | None = None
+    ) -> QTreeWidgetItem | None:
+        """深度优先查找实验节点。"""
+        if item is None:
+            for i in range(self.tree.topLevelItemCount()):
+                found = self._find_experiment_item(exp_id, self.tree.topLevelItem(i))
+                if found is not None:
+                    return found
+            return None
+        data = item.data(0, Qt.ItemDataRole.UserRole)
+        if isinstance(data, dict) and data.get("exp_id") == exp_id:
+            return item
+        for i in range(item.childCount()):
+            found = self._find_experiment_item(exp_id, item.child(i))
+            if found is not None:
+                return found
+        return None
 
     def _on_selection_changed(self) -> None:
-        self.selection_changed.emit(self.current_experiment_id())
+        item = self.tree.currentItem()
+        if item is None:
+            self.selection_changed.emit("", "", "")
+            return
+        data = item.data(0, Qt.ItemDataRole.UserRole)
+        kind = data.get("kind") if isinstance(data, dict) else ""
+        self.selection_changed.emit(
+            kind, self._experiment_id_of(item), self._data_id_of(item)
+        )
 
     def _on_double_clicked(self, item: QTreeWidgetItem, _column: int) -> None:
+        data = item.data(0, Qt.ItemDataRole.UserRole)
+        if isinstance(data, dict) and data.get("kind") == "project" and data.get("path"):
+            path = str(data["path"])
+            if self.manager.root is None or Path(path) != Path(self.manager.root).resolve():
+                self.open_project_requested.emit(path)
+            return
         exp_id = self._experiment_id_of(item)
         if exp_id:
             self.open_requested.emit(exp_id)
@@ -233,20 +332,27 @@ class ProjectTreePanel(QWidget):
             exp_id = self._experiment_id_of(item)
             data_id = self._data_id_of(item)
             if kind == "project":
-                menu.addAction("新建空白实验...", self.create_experiment_requested.emit)
-                menu.addSeparator()
-                menu.addAction("删除项目...", self.delete_project_requested.emit)
+                is_current = (
+                    self.manager.root is not None
+                    and data.get("path")
+                    and Path(str(data["path"])) == Path(self.manager.root).resolve()
+                )
+                if not is_current and data.get("path"):
+                    menu.addAction(
+                        "打开项目...",
+                        lambda p=str(data["path"]): self.open_project_requested.emit(p),
+                    )
+                else:
+                    menu.addAction("新建空白实验...", self.create_experiment_requested.emit)
+                    menu.addAction("重命名项目...", self.rename_project_requested.emit)
+                    menu.addSeparator()
+                    menu.addAction("删除项目...", self.delete_project_requested.emit)
             elif kind == "experiment" and exp_id:
                 menu.addAction("导入数据...", lambda: self.import_data_requested.emit(exp_id))
                 menu.addAction("重命名...", lambda: self.rename_requested.emit(exp_id))
                 menu.addSeparator()
                 menu.addAction("删除实验", lambda: self.delete_requested.emit(exp_id))
             elif kind == "data" and exp_id and data_id:
-                menu.addAction("生成 FID", lambda: self.data_action_requested.emit("fid", data_id))
-                menu.addAction(
-                    "生成谱图", lambda: self.data_action_requested.emit("spectrum", data_id)
-                )
-                menu.addSeparator()
                 source = self._source_of(exp_id)
                 if source:
                     menu.addAction(
@@ -256,9 +362,22 @@ class ProjectTreePanel(QWidget):
                         ),
                     )
                 menu.addAction(
+                    "重命名...",
+                    lambda: self.data_rename_requested.emit(exp_id, data_id),
+                )
+                menu.addAction(
                     "删除数据",
                     lambda: self.data_action_requested.emit("delete", data_id),
                 )
+            elif kind == "folder" and exp_id and data_id:
+                folder_path = self._folder_path(exp_id, data_id, data.get("folder", ""))
+                if folder_path is not None:
+                    menu.addAction(
+                        "打开所在目录",
+                        lambda p=folder_path: QDesktopServices.openUrl(
+                            QUrl.fromLocalFile(str(p))
+                        ),
+                    )
         return menu
 
     def _source_of(self, exp_id: str) -> Path | None:
@@ -272,3 +391,10 @@ class ProjectTreePanel(QWidget):
         if path.is_dir():
             return path
         return path.parent if path.exists() else None
+
+    def _folder_path(self, exp_id: str, data_id: str, folder: str) -> Path | None:
+        """数据子文件夹真实路径(契约 v1.3:data_dir(exp_id, data_id, key))。"""
+        try:
+            return self.manager.data_dir(exp_id, data_id, folder)
+        except Exception:  # noqa: BLE001 - 旧布局/未落地时回退 None
+            return None

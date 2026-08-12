@@ -13,7 +13,7 @@ from pathlib import Path
 
 from core.app_paths import resource_path
 from core.data.bruker_reader import read_dataset
-from core.project import ExperimentEntry
+from core.project import ExperimentEntry, ProjectManager
 from workflow.engine import AutoProcessor
 
 
@@ -25,10 +25,24 @@ def _load_config() -> dict:
 
 
 class ProcessingController:
-    """GUI 层处理控制;人工路径接口占位,实现后续补充。"""
+    """GUI 层处理控制:三步流程(import_data → generate_fid → generate_spectrum)
+    对接 workflow/stepwise(契约 v1.2 §8.3);人工路径接口占位。"""
 
-    def __init__(self) -> None:
+    def __init__(self, manager: ProjectManager | None = None) -> None:
         self._backend = None
+        self._manager = manager
+
+    def set_manager(self, manager) -> None:
+        """项目对象更换后绑定当前 ProjectManager(供步骤化调用)。"""
+        self._manager = manager
+
+    def _backend_instance(self):
+        """惰性创建 ProcessingBackend(与旧 auto_run 共用同一后端)。"""
+        if self._backend is None:
+            from backend.factory import create_backend
+
+            self._backend = create_backend(_load_config())
+        return self._backend
 
     # ------------------------------------------------------------------
     # 自动化路径
@@ -75,24 +89,50 @@ class ProcessingController:
     # 实现依赖 Backend 的 DataEntry 层级与 convert_to_fid(待 Backend 落地),
     # 当前提供签名与占位实现;GUI 界面按此接口接线。
     # ------------------------------------------------------------------
-    def import_data(self, entry: ExperimentEntry, source: str) -> dict:
-        """导入数据:读 Bruker 参数 + 复制到 raw,不触发任何处理。
+    def import_data(self, entry: ExperimentEntry, source: str, copy: bool = True) -> dict:
+        """第 1 步:导入数据(只读参数 + 复制 raw),返回 ImportResult dict。"""
+        from workflow.import_workflow import import_data
 
-        待 Backend 落地 DataEntry 层级(契约 v1.2 §8.2)后接线;
-        当前 GUI 导入入口经 workflow.import_workflow.import_bruker_dataset。
-        """
-        raise NotImplementedError("导入数据步骤待 Backend DataEntry 接口落地")
+        if self._manager is None:
+            raise RuntimeError("ProcessingController 未绑定项目(ProjectManager)")
+        result = import_data(self._manager, entry.id, source, copy=copy)
+        self._manager.save()
+        return {
+            "experiment_id": entry.id,
+            "data_id": getattr(result, "data_id", ""),
+            "run_id": getattr(result, "run_id", ""),
+            "warnings": list(getattr(result, "warnings", []) or []),
+        }
 
-    def generate_fid(self, data) -> str:
-        """生成 FID:调后端把原始数据转换为 fid,返回 fid 路径。
+    def generate_fid(self, data, exp_id: str | None = None, data_id: str | None = None) -> str:
+        """第 2 步:生成 FID(backend.convert_to_fid),返回 fid 路径。"""
+        from workflow.stepwise import generate_fid as stepwise_fid
 
-        待 Backend 实现 ProcessingBackend.convert_to_fid 后接线。
-        """
-        raise NotImplementedError("生成 FID 步骤待 Backend convert_to_fid 落地")
+        if self._manager is None:
+            raise RuntimeError("ProcessingController 未绑定项目(ProjectManager)")
+        exp_id = exp_id or getattr(data, "exp_id", "")
+        data_id = data_id or getattr(data, "id", "")
+        fid_path = stepwise_fid(
+            self._manager, exp_id, data_id, self._backend_instance()
+        )
+        self._manager.save()
+        return fid_path
 
-    def generate_spectrum(self, data) -> str:
-        """生成谱图:调后端 process(自动包含 NUS SMILE 重构),返回谱路径。"""
-        raise NotImplementedError("生成谱图步骤待 Backend 步骤化处理落地")
+    def generate_spectrum(
+        self, data, exp_id: str | None = None, data_id: str | None = None
+    ) -> str:
+        """第 3 步:生成谱图(process/reconstruct_nus,含 NUS SMILE 重构)。"""
+        from workflow.stepwise import generate_spectrum as stepwise_spectrum
+
+        if self._manager is None:
+            raise RuntimeError("ProcessingController 未绑定项目(ProjectManager)")
+        exp_id = exp_id or getattr(data, "exp_id", "")
+        data_id = data_id or getattr(data, "id", "")
+        spectrum_path = stepwise_spectrum(
+            self._manager, exp_id, data_id, self._backend_instance()
+        )
+        self._manager.save()
+        return spectrum_path
 
     # ------------------------------------------------------------------
     # 人工路径(接口占位,实现之后再写)

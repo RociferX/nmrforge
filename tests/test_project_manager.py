@@ -28,7 +28,7 @@ def test_create_project_layout(tmp_path: Path) -> None:
     project_file = root / "project.json"
     assert project_file.is_file()
     data = json.loads(project_file.read_text(encoding="utf-8"))
-    assert data["schema_version"] == "1.2"
+    assert data["schema_version"] == "1.3"
     assert data["name"] == "demo"
     assert data["protein"]["name"] == "GB1"
     assert data["created"] == data["updated"]
@@ -362,24 +362,26 @@ def test_delete_data_removes_artifacts(tmp_path: Path) -> None:
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     entry = manager.create_experiment()
     data = manager.import_data(entry.id, "/sampleD")
-    raw = manager.dir_path("raw") / entry.id / data.id
+    raw = manager.data_dir(entry.id, data.id, "raw")
     raw.mkdir(parents=True)
     (raw / "acqus").write_text("x", encoding="utf-8")
-    (manager.dir_path("metadata") / f"{entry.id}-{data.id}.json").write_text(
+    manager.data_metadata_path(entry.id, data.id).write_text(
         "{}", encoding="utf-8"
     )
-    (manager.dir_path("spectra") / f"{entry.id}-{data.id}.ft2").write_bytes(b"x")
+    spec = manager.data_dir(entry.id, data.id, "spectra") / f"{data.id}.ft2"
+    spec.parent.mkdir(parents=True, exist_ok=True)
+    spec.write_bytes(b"x")
 
     manager.delete_data(entry.id, data.id)
     assert entry.data == []
     assert entry.status == ExperimentStatus.REGISTERED.value
     assert not raw.exists()
-    assert not (manager.dir_path("spectra") / f"{entry.id}-{data.id}.ft2").exists()
+    assert not spec.exists()
     assert any(h.action == "data_deleted" for h in manager.project.processing_history)
 
 
-def test_schema_1_1_migration_to_1_2(tmp_path: Path) -> None:
-    """旧 project.json(source/segments 顶层)→ schema 1.2 的 data[0] 迁移。"""
+def test_schema_1_1_migration_to_1_3(tmp_path: Path) -> None:
+    """旧 project.json(source/segments 顶层)→ schema 1.3 的 data[0] 迁移。"""
     root = tmp_path / "proj"
     ProjectManager.create_project(root, "demo")
     manager = ProjectManager.open_project(root)
@@ -402,7 +404,7 @@ def test_schema_1_1_migration_to_1_2(tmp_path: Path) -> None:
 
     migrated = ProjectManager.open_project(root)
     assert migrated.project is not None
-    assert migrated.project.schema_version == "1.2"
+    assert migrated.project.schema_version == "1.3"
     migrated_entry = migrated.project.experiment("exp_001")
     assert migrated_entry is not None
     assert len(migrated_entry.data) == 1
@@ -414,10 +416,10 @@ def test_schema_1_1_migration_to_1_2(tmp_path: Path) -> None:
     assert migrated_data.migrated_from_1_1 is True
     assert migrated_entry.source == "/old/sampleD"  # 兼容属性
     assert any(h.action == "project_migrated" for h in migrated.project.processing_history)
-    # 保存后仍为 1.2
+    # 保存后仍为 1.3
     migrated.save()
     reopened = ProjectManager.open_project(root)
-    assert reopened.project.schema_version == "1.2"
+    assert reopened.project.schema_version == "1.3"
     assert reopened.project.experiment("exp_001").data[0].id == "d_001"
 
 
@@ -426,15 +428,22 @@ def test_infer_status_aggregates_data(tmp_path: Path) -> None:
     entry = manager.create_experiment()
     assert manager.infer_status(entry.id) is ExperimentStatus.REGISTERED
     data = manager.import_data(entry.id, "/sampleD")
-    (manager.dir_path("metadata") / f"{entry.id}-{data.id}.json").write_text(
+    manager.data_metadata_path(entry.id, data.id).parent.mkdir(
+        parents=True, exist_ok=True
+    )
+    manager.data_metadata_path(entry.id, data.id).write_text(
         "{}", encoding="utf-8"
     )
     assert manager.infer_status(entry.id) is ExperimentStatus.IMPORTED
-    (manager.dir_path("spectra") / f"{entry.id}-{data.id}.ft2").write_bytes(b"x")
+    spec = manager.data_dir(entry.id, data.id, "spectra") / f"{data.id}.ft2"
+    spec.parent.mkdir(parents=True, exist_ok=True)
+    spec.write_bytes(b"x")
     assert manager.infer_status(entry.id) is ExperimentStatus.PROCESSED
-    (manager.dir_path("peaks") / f"{entry.id}-{data.id}.csv").write_text("", encoding="utf-8")
+    peaks = manager.data_dir(entry.id, data.id, "peaks") / f"{data.id}.csv"
+    peaks.parent.mkdir(parents=True, exist_ok=True)
+    peaks.write_text("", encoding="utf-8")
     assert manager.infer_status(entry.id) is ExperimentStatus.PICKED
-    (manager.dir_path("report") / f"{entry.id}-{data.id}.json").write_text(
-        "{}", encoding="utf-8"
-    )
+    report = manager.data_dir(entry.id, data.id, "report") / f"{data.id}.json"
+    report.parent.mkdir(parents=True, exist_ok=True)
+    report.write_text("{}", encoding="utf-8")
     assert manager.infer_status(entry.id) is ExperimentStatus.ANALYZED
