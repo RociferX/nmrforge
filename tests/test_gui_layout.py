@@ -233,6 +233,12 @@ def test_pipeline_status_registered(tmp_path: Path, qapp: QApplication) -> None:
 
 def test_pipeline_status_after_spectrum(tmp_path: Path, qapp: QApplication) -> None:
     manager = _manager_with_experiment(tmp_path)
+    # fid 与谱图都需要真实产物:fid 在 process 目录,fid_path 登记
+    process_dir = manager.data_dir("exp_001", "d_001", "process")
+    process_dir.mkdir(parents=True, exist_ok=True)
+    fid_file = process_dir / "exp_001-d_001.fid"
+    fid_file.write_bytes(b"fid")
+    manager.set_data_fid("exp_001", "d_001", fid_file)
     spectra = manager.dir_path("spectra")
     _write_ft2(spectra / "exp_001.ft2")
     statuses = compute_step_statuses(manager, "exp_001")
@@ -241,6 +247,23 @@ def test_pipeline_status_after_spectrum(tmp_path: Path, qapp: QApplication) -> N
     assert statuses["spectrum"] == "SUCCESS"
     assert statuses["peaks"] == "READY"
     assert statuses["analysis"] == "LOCKED"
+
+
+def test_pipeline_fid_unlocks_spectrum(
+    tmp_path: Path, qapp: QApplication
+) -> None:
+    """生成 FID 后,生成谱图步骤应解锁为 READY(回归:曾误用谱图判定 fid)。"""
+    manager = _manager_with_experiment(tmp_path)
+    process_dir = manager.data_dir("exp_001", "d_001", "process")
+    process_dir.mkdir(parents=True, exist_ok=True)
+    fid_file = process_dir / "exp_001-d_001.fid"
+    fid_file.write_bytes(b"fid")
+    manager.set_data_fid("exp_001", "d_001", fid_file)
+    statuses = compute_step_statuses(manager, "exp_001")
+    assert statuses["import"] == "SUCCESS"
+    assert statuses["fid"] == "SUCCESS"
+    assert statuses["spectrum"] == "READY"  # 关键:谱图步骤解锁
+    assert statuses["peaks"] == "LOCKED"
 
 
 def test_pipeline_panel_refresh_shows_next_step(tmp_path: Path, qapp: QApplication) -> None:
