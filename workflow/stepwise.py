@@ -99,6 +99,8 @@ def generate_fid(
     experiment = _read_experiment(manager, exp_id, data_id)
     data_entry = _require_data(manager, exp_id, data_id)
     data_dir = Path(data_entry.raw_dir) if data_entry.raw_dir else Path(data_entry.source)
+    if not data_dir.is_absolute():
+        data_dir = manager.root / data_dir
     work = Path(work_dir) if work_dir else _work_dir(manager, exp_id, data_id)
     _ensure_work_dir(backend, work)
     resp = backend.convert_to_fid(experiment, data_dir)
