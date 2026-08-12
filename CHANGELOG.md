@@ -1,5 +1,15 @@
 # 变更日志
 
+## [0.2.28] - 2026-08-12
+
+- Backend(G2B-007):逐维基线校正(默认全维 POLY -auto):
+  select_method 每维 FT+PS 后插 baseline 节点(逐轴可关/order);
+  script_generator uniform/NUS 脚本按轴插入 POLY(直接维 EXT 后、
+  间接维 PS 后),param_schema 增 baseline 键(enabled/mode/order/axes);
+  workflow/baseline_optimize 逐维网格(mode∈{off,auto}×order∈{1,2,3})
+  用 core.qc.baseline_quality 选每维最优写回配置,score 可注入。
+- 测试:默认两行 POLY -auto、关闭/order 覆盖、NUS 2D/3D 插入位置、
+  schema 默认、逐维优化选校正/平谱选 off;全量通过,ruff 全绿。
 ## [0.2.27] - 2026-08-12
 
 - Backend:逐维暴力相位优化默认改用相位专用评分

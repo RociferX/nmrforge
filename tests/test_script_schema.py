@@ -53,3 +53,13 @@ def test_param_schema_ext_keys() -> None:
     assert schema["default"]["ext_lo"] == "11.0"
     assert schema["default"]["ext_hi"] == "6.0"
     assert schema["default"]["extract"] is True
+
+
+
+def test_param_schema_baseline_key() -> None:
+    schema = param_schema()
+    assert "baseline" in schema["properties"]
+    base = schema["default"]["baseline"]
+    assert base["mode"] == "auto"
+    assert base["axes"] == "all"
+    assert base["enabled"] is True

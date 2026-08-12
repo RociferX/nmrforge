@@ -26,6 +26,7 @@ from backend.runtime import CshRuntime
 from backend.script_generator import (
     _as_bool,
     effective_td,
+    expand_baseline,
     generate_2d_nus_script,
     generate_3d_nus_script,
     generate_convert_script,
@@ -148,6 +149,7 @@ class NMRPipeBackend:
         extract = _as_bool(proc_params.get("extract", True))
         ext_lo = str(proc_params.get("ext_lo", "11.0"))
         ext_hi = str(proc_params.get("ext_hi", "6.0"))
+        baseline = expand_baseline(experiment, proc_params.get("baseline"))
         processed, process_logs, spectrum = self._process(
             runtime,
             experiment,
@@ -155,6 +157,7 @@ class NMRPipeBackend:
             work,
             in_file=in_file,
             direct_phase=direct_phase,
+            baseline=baseline,
             extract=extract,
             ext_lo=ext_lo,
             ext_hi=ext_hi,
@@ -322,6 +325,7 @@ class NMRPipeBackend:
         ext_lo = str(params.get("ext_lo", "11.0"))
         ext_hi = str(params.get("ext_hi", "6.0"))
         extract = _as_bool(params.get("extract", True))
+        baseline = expand_baseline(experiment, params.get("baseline"))
         out_file = f"{experiment.dataset_id}.{ext}"
         script = script_fn(
             experiment,
@@ -339,6 +343,7 @@ class NMRPipeBackend:
             smile_report=smile_report,
             direct_phase=(direct_p0, direct_p1),
             extract=extract,
+            baseline=baseline,
         )
         nus_com = work / f"{experiment.dataset_id}_nus.com"
         nus_com.write_text(script, encoding="utf-8", newline="\n")
@@ -688,6 +693,7 @@ class NMRPipeBackend:
         *,
         in_file: str | None = None,
         direct_phase: dict[str, tuple[float, float]] | None = None,
+        baseline: dict[str, dict[str, Any]] | None = None,
         extract: bool = True,
         ext_lo: str = "11.0",
         ext_hi: str = "6.0",
@@ -703,6 +709,7 @@ class NMRPipeBackend:
             in_file=in_file,
             out_file=out_file,
             direct_phase=direct_phase,
+            baseline=baseline,
             extract=extract,
             ext_lo=ext_lo,
             ext_hi=ext_hi,

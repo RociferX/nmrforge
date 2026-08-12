@@ -36,8 +36,16 @@ def _fnmode_for(experiment: Experiment, axis: str) -> int:
         return 0
 
 
-def select_method(experiment: Experiment) -> ProcessingPlan:
-    """生成默认处理计划：链式逐维 SP→ZF→FT→PS（uniform 2D/3D）。"""
+def select_method(
+    experiment: Experiment, *, baseline: dict | None = None
+) -> ProcessingPlan:
+    """生成默认处理计划:逐维 SP→ZF→FT→PS→POLY(基线校正,默认全维 auto)。
+
+    baseline 为逐轴形态 {轴: {enabled, mode, order}},缺省全维
+    mode="auto"(POLY -auto,与手工 xy.com 对齐);直接维 1H 可配
+    enabled=False 关闭避免水峰区过度校正。
+    """
+    baseline = baseline or {}
     plan = ProcessingPlan(
         experiment_id=experiment.dataset_id,
         confidence=experiment.experiment_type.confidence,
@@ -80,6 +88,9 @@ def select_method(experiment: Experiment) -> ProcessingPlan:
                 },
             ),
         ]
+        baseline_cfg = {"axis": axis, "enabled": True, "mode": "auto", "order": 0}
+        baseline_cfg.update(baseline.get(axis, {}))
+        steps.append(("baseline", baseline_cfg))
         for op, params in steps:
             node_id = f"{op}_{axis}"
             dag.add_node(
