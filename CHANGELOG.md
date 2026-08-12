@@ -1,5 +1,15 @@
 # 变更日志
 
+## [0.2.11] - 2026-08-12
+
+- Backend:自动相位性能重构(workflow/phase_optimize)——自动相位优化改为
+  「单次后端运行 + 内存内候选评分」:直接维复用 phase.json 缓存或对转换后
+  .fid 做内存内 FT + p1 共识;NUS 间接维对复型重构平面按轴搜索(全部 numpy,
+  不触发后端重跑);结果含 backend_runs(=1) 与 candidates_scored 量化性能。
+- Backend:AutoProcessor 后端成功后自动输出相位估计日志(失败/缺失产物优雅
+  跳过);相位搜索候选计数透传(core/optimization/phase_search._search_axis、
+  workflow/recon_phase_search,向后兼容)。
+- 测试:新增 tests/test_phase_optimize.py 11 项,全量 173 passed。
 ## [0.2.9] - 2026-08-12
 
 - Backend:导入工作流(workflow/import_workflow):Bruker 数据集校验 → 登记实验 →

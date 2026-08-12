@@ -147,10 +147,17 @@ def _search_axis(
     *,
     max_traces: int = 2000,
     coarse_step: float = 30.0,
+    candidates: list[int] | None = None,
 ) -> tuple[float, float, float] | None:
-    """沿单个轴搜索 (p0, p1)，返回 (p0, p1, score)。"""
+    """沿单个轴搜索 (p0, p1)，返回 (p0, p1, score)。
+
+    candidates 非 None 时追加本次搜索评估的候选数
+    (无信号/尺寸不足记 0)，供上层统计「内存内候选评分」数量。
+    """
     n = data.shape[axis]
     if n < 8:
+        if candidates is not None:
+            candidates.append(0)
         return None
     moved = np.moveaxis(data, axis, -1)
     traces = moved.reshape(-1, n)
@@ -161,6 +168,8 @@ def _search_axis(
     peak_mag = np.max(np.abs(traces), axis=-1)
     signal = peak_mag > threshold
     if not np.any(signal):
+        if candidates is not None:
+            candidates.append(0)
         return None
     sig_traces = traces[signal]
     if len(sig_traces) > max_traces:
@@ -215,6 +224,16 @@ def _search_axis(
             a, _ = _evaluate(best_p0, p1)
             if a > best_score:
                 best_score, best_p1 = a, p1
+    if candidates is not None:
+        candidates.append(
+            len(np.arange(0.0, 360.0, coarse_step))
+            + len(np.arange(-30.0, 30.0 + 1e-9, 10.0))
+            + len(np.arange(-10.0, 10.0 + 1e-9, 2.5))
+            + 2  # ±180 符号消歧
+            + len(np.arange(-90.0, 91.0, 30.0))
+            + len(np.arange(-30.0, 30.0 + 1e-9, 10.0))
+            + len(np.arange(-10.0, 10.0 + 1e-9, 5.0))
+        )
     return float(best_p0), float(best_p1), float(best_score)
 
 

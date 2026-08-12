@@ -30,6 +30,7 @@ class RunResult:
     quality: QualityResult | None = None
     logs: list[str] = field(default_factory=list)
     cache_hits: int = 0
+    phase_report: Any = None  # workflow.phase_optimize.PhaseOptimizeResult
 
 
 class AutoProcessor:
@@ -81,6 +82,17 @@ class AutoProcessor:
         spectrum = (
             Path(result["spectrum_path"]) if result.get("spectrum_path") else None
         )
+        phase_report = None
+        try:
+            from workflow.phase_optimize import default_work_dir, estimate_auto_phase
+
+            work = default_work_dir(experiment, self.backend)
+            phase_report = estimate_auto_phase(
+                experiment, work, spectrum_path=spectrum
+            )
+            logs.extend(phase_report.logs)
+        except Exception as exc:  # noqa: BLE001
+            logs.append(f"自动相位估计跳过: {exc}")
         if spectrum is not None and spectrum.is_file():
             try:
                 import nmrglue as ng
@@ -92,10 +104,13 @@ class AutoProcessor:
                     quality=quality,
                     report=spectrum,
                     logs=logs,
+                    phase_report=phase_report,
                 )
             except Exception as exc:  # noqa: BLE001
                 logs.append(f"谱图 QC 读取失败（保留后端结果）: {exc}")
-        return RunResult(status="success", report=spectrum, logs=logs)
+        return RunResult(
+            status="success", report=spectrum, logs=logs, phase_report=phase_report
+        )
 
     def process_matrix(self, experiment: Experiment, data: Any) -> RunResult:
         """最小闭环：默认计划 → 管线执行 → QC（uniform 2D/3D 矩阵数据）。"""
