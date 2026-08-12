@@ -296,10 +296,13 @@ class PipelinePanel(QWidget):
         def worker() -> None:
             try:
                 data_node = _data_nodes(self.manager, self._current_exp_id)[0]
+                exp_id = self._current_exp_id
+                data_id = getattr(data_node, "id", exp_id)
                 if method_name == "import_data":
-                    result = method(entry, data_node.source)
+                    source = getattr(data_node, "source", "") or ""
+                    result = method(entry, source)
                 else:
-                    result = method(data_node)
+                    result = method(data_node, exp_id=exp_id, data_id=data_id)
                 message = result if isinstance(result, str) else str(result)
                 self.log_message.emit(
                     f"完成 {STEP_LABEL.get(step_id, step_id)}: {message}"

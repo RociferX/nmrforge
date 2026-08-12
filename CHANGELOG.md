@@ -1,5 +1,19 @@
 # 变更日志
 
+## [0.2.15] - 2026-08-12
+
+- 首次启动工作区欢迎页(G2B-003 §9.4):WorkspaceManager.ensure() 创建默认
+  工作区 ~/NMRForgeWorkspace,显示工作区路径、工作区内项目列表(双击打开)、
+  新建项目入口;未打开项目时主窗口显示欢迎页,三栏自动隐藏。
+- 左侧树加 Workspace 根节点:Workspace → Project → Experiment → Data →
+  raw/process/spectra/peaks/figures/report 各子文件夹;项目右键删除(强确认)。
+- ProcessingController 三步接线(契约 v1.2 §8.3 / workflow.stepwise):
+  import_data / generate_fid / generate_spectrum 对接 Backend 已落地的
+  stepwise(含 WorkflowRun 登记、manager.save、data_id 产物);控制器绑定
+  ProjectManager 后由 Pipeline 步骤调用。
+- 树列宽保持可读(220/90 + 最小段宽),数据节点显示 d_001 并挂真实子文件夹。
+- 测试:欢迎页/Workspace 根/三步接线适配新增;全量 226 passed,ruff 全绿。
+
 ## [0.2.14] - 2026-08-12
 
 - Backend:Experiment→Data 层级(core/project schema 1.2 + 迁移,按 G2B-002 /

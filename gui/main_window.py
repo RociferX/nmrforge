@@ -47,7 +47,9 @@ from gui.pipeline_panel import PipelinePanel, compute_step_statuses
 from gui.processing import ProcessingController
 from gui.project_tree import ProjectTreePanel
 from gui.spectrum_panel import SpectrumPanel
-from workflow.import_workflow import ImportResult, import_bruker_dataset
+from gui.welcome_page import WelcomePage
+from gui.workspace import WorkspaceManager
+from workflow.import_workflow import ImportResult
 
 
 class MainWindow(QMainWindow):
@@ -63,6 +65,9 @@ class MainWindow(QMainWindow):
         self.manager = manager or ProjectManager()
         self.recent = recent or JsonRecentProjectsStore()
         self.controller = controller or ProcessingController()
+        self.controller.set_manager(self.manager)
+        self.workspace = WorkspaceManager()
+        self.workspace.ensure()
         self.setWindowTitle("NMRForge")
         self.resize(1280, 780)
         self._build_menus()
@@ -153,10 +158,19 @@ class MainWindow(QMainWindow):
         self.log_panel = LogPanel()
         self.log_panel.setVisible(False)
 
+        self.welcome_page = WelcomePage()
+        self.welcome_page.new_project_requested.connect(
+            self._new_project_in_workspace
+        )
+        self.welcome_page.open_project_requested.connect(
+            lambda path: self._open_root(Path(path))
+        )
+
         central = QWidget()
         central_layout = QVBoxLayout(central)
         central_layout.setContentsMargins(0, 0, 0, 0)
         central_layout.setSpacing(0)
+        central_layout.addWidget(self.welcome_page)
         central_layout.addWidget(self.main_splitter, 1)
         central_layout.addWidget(self.log_panel)
         self.setCentralWidget(central)
@@ -173,20 +187,23 @@ class MainWindow(QMainWindow):
     # 项目动作
     # ------------------------------------------------------------------
     def new_project(self) -> None:
-        start = str(Path.home())
-        root = QFileDialog.getExistingDirectory(self, "选择新项目目录", start)
-        if not root:
-            return
         name, ok = QInputDialog.getText(self, "新建项目", "项目名称:", text="unnamed")
-        if not ok:
-            return
+        if ok and name.strip():
+            self._new_project_in_workspace(name.strip())
+
+    def _new_project_in_workspace(self, name: str) -> None:
+        """在默认工作区下创建项目(契约 v1.3,create_project 返回 ProjectManager)。"""
         try:
-            self.manager = ProjectManager.create_project(root, name.strip() or "unnamed")
+            self.manager = self.workspace.create_project(name)
         except ProjectError as exc:
             InfoDialog.show_info(self, "新建项目失败", str(exc))
             return
+        except Exception as exc:  # noqa: BLE001 - WorkspaceError 等统一提示
+            InfoDialog.show_info(self, "新建项目失败", f"{type(exc).__name__}: {exc}")
+            return
         self.recent.push(str(self.manager.root))
         self._rebind_shared_manager()
+        self.welcome_page.refresh()
         self.refresh()
 
     def open_project(self) -> None:
@@ -218,6 +235,7 @@ class MainWindow(QMainWindow):
         self.project_tree.manager = self.manager
         self.pipeline.manager = self.manager
         self.spectrum_panel.manager = self.manager
+        self.controller.set_manager(self.manager)
 
     def _refresh_recent_menu(self) -> None:
         self.recent_menu.clear()
@@ -247,19 +265,29 @@ class MainWindow(QMainWindow):
         )
 
     def _import_experiment_async(self, data: dict) -> None:
-        """后台线程执行导入工作流(B2G-001),避免复制大 ser/fid 阻塞 UI。"""
+        """后台线程执行导入(三步接口 import_data),避免复制大文件阻塞 UI。"""
         import threading
 
         source = data.get("source", "")
-        self._append_log(f"开始导入: {source} (复制到项目={data.get('copy', True)})")
+        exp_id = data.get("experiment_id", "")
+        self._append_log(f"开始导入: {source} (实验 {exp_id or '自动创建'})")
 
         def worker() -> None:
             try:
-                result = import_bruker_dataset(
+                from workflow.import_workflow import import_data
+
+                target_exp_id = exp_id
+                if not target_exp_id:
+                    if self.manager.project is None:
+                        raise ProjectError("未加载项目")
+                    entry = self.manager.create_experiment(
+                        title=data.get("title", "") or "unnamed"
+                    )
+                    target_exp_id = entry.id
+                result = import_data(
                     self.manager,
+                    target_exp_id,
                     source,
-                    title=data.get("title", ""),
-                    sample_id=data.get("sample_id", ""),
                     copy=bool(data.get("copy", True)),
                 )
                 self.manager.save()
@@ -274,9 +302,11 @@ class MainWindow(QMainWindow):
 
     def _on_import_done(self, result: ImportResult) -> None:
         """导入成功后刷新并选中新实验;展示 warnings。"""
+        data_id = getattr(result, "data_id", "") or ""
         self._append_log(
-            f"导入完成: {result.experiment_id} ({result.file_count} 文件, "
-            f"{result.total_bytes} 字节, 运行 {result.run_id})"
+            f"导入完成: {result.experiment_id}/{data_id or '-'} "
+            f"({getattr(result, 'file_count', 0)} 文件, "
+            f"{getattr(result, 'total_bytes', 0)} 字节, 运行 {result.run_id})"
         )
         for warning in result.warnings:
             self._append_log(f"  提示: {warning}")
@@ -547,11 +577,16 @@ class MainWindow(QMainWindow):
         tree.clear()
         project = self.manager.project
         if project is None:
-            self.setWindowTitle("NMRForge - 未打开项目")
+            self.setWindowTitle("NMRForge - 欢迎")
             self.statusBar().showMessage("新建或打开项目开始工作")
+            self.welcome_page.refresh()
+            self.welcome_page.setVisible(True)
+            self.main_splitter.setVisible(False)
             self.pipeline.set_context("")
             self.spectrum_panel.set_context("")
             return
+        self.welcome_page.setVisible(False)
+        self.main_splitter.setVisible(True)
         for exp in project.experiments:
             status = self.manager.infer_status(exp.id).value
             item = QTreeWidgetItem([exp.id, exp.title, status, exp.sample_id, exp.source])

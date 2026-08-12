@@ -79,6 +79,9 @@ def _write_ft2(path: Path) -> None:
 class FakeProcessingController:
     """五步流程假控制器:generate_fid/generate_spectrum 记录调用并同步完成。"""
 
+    def set_manager(self, manager) -> None:
+        self.manager = manager
+
     def __init__(self) -> None:
         self.calls: list[str] = []
         self.last_entry = None
@@ -100,12 +103,12 @@ class FakeProcessingController:
         self.last_entry = entry
         return {"experiment_id": entry.id, "status": "imported"}
 
-    def generate_fid(self, data) -> str:
+    def generate_fid(self, data, exp_id=None, data_id=None) -> str:
         self.calls.append("generate_fid")
         self.last_entry = data
         return "/tmp/x.fid"
 
-    def generate_spectrum(self, data) -> str:
+    def generate_spectrum(self, data, exp_id=None, data_id=None) -> str:
         self.calls.append("generate_spectrum")
         self.last_entry = data
         return "/tmp/x.ft2"
@@ -118,15 +121,18 @@ def test_project_tree_structure(tmp_path: Path, qapp: QApplication) -> None:
     manager = _manager_with_experiment(tmp_path)
     panel = ProjectTreePanel(manager)
     assert panel.tree.topLevelItemCount() == 1
-    project_item = panel.tree.topLevelItem(0)
+    workspace_item = panel.tree.topLevelItem(0)
+    assert workspace_item.text(0) == "NMRForgeWorkspace"  # Workspace 根节点
+    project_item = workspace_item.child(0)
     assert project_item.text(0) == "demo"
     assert project_item.childCount() == 2
     exp_item = project_item.child(0)
     assert exp_item.text(0) == "HSQC"
-    assert exp_item.childCount() == 1  # schema 1.1 兼容:实验即单数据节点
+    assert exp_item.childCount() == 1
     data_item = exp_item.child(0)
     assert data_item.text(0) == "数据 d_001"
     assert data_item.text(1) == "已导入"
+    assert data_item.childCount() == 6  # raw/process/spectra/peaks/figures/report
     panel.close()
 
 
@@ -138,7 +144,7 @@ def test_project_tree_current_experiment_from_data(
     panel.select_experiment("exp_002")
     assert panel.current_experiment_id() == "exp_002"
     # 选中 Data 节点仍归一化到所属实验
-    exp_item = panel.tree.topLevelItem(0).child(1)
+    exp_item = panel.tree.topLevelItem(0).child(0).child(1)
     panel.tree.setCurrentItem(exp_item.child(0))
     assert panel.current_experiment_id() == "exp_002"
     assert panel._data_id_of(panel.tree.currentItem()) == "d_001"
@@ -287,7 +293,7 @@ def test_main_window_empty_state(qapp: QApplication) -> None:
     window = MainWindow()
     assert window.project_tree.tree.topLevelItemCount() == 0
     assert window.experiment_tree.topLevelItemCount() == 0
-    assert "未打开项目" in window.windowTitle()
+    assert "欢迎" in window.windowTitle()
     assert window.pipeline.current_experiment_id() == ""
     window.close()
 
@@ -297,7 +303,7 @@ def test_tree_data_node_context_menu_actions(
     """Data 节点右键三步操作信号(生成 FID / 生成谱图 / 删除)。"""
     manager = _manager_with_experiment(tmp_path)
     panel = ProjectTreePanel(manager)
-    data_item = panel.tree.topLevelItem(0).child(0).child(0)
+    data_item = panel.tree.topLevelItem(0).child(0).child(0).child(0)
     actions: list[tuple[str, str]] = []
     panel.data_action_requested.connect(
         lambda action, data_id: actions.append((action, data_id))
@@ -340,5 +346,35 @@ def test_delete_project_action(
     window._delete_project()
     assert window.manager.project is None
     assert window.project_tree.tree.topLevelItemCount() == 0
-    assert "未打开项目" in window.windowTitle()
+    assert "欢迎" in window.windowTitle()
+    window.close()
+
+def test_welcome_page_shows_workspace_and_recent(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """欢迎页:工作区路径 + 最近项目列表 + 新建入口(契约 v1.3 §9.4)。"""
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    ProjectManager.create_project(workspace / "projA", "projA")
+    ProjectManager.create_project(workspace / "projB", "projB")
+
+    from gui.welcome_page import WelcomePage, _FallbackWorkspaceManager
+
+    monkeypatch.setattr(
+        "gui.welcome_page.workspace_manager",
+        lambda: _FallbackWorkspaceManager(workspace),
+    )
+    page = WelcomePage()
+    assert str(workspace) in page.workspace_label.text()
+    assert page.recent_list.count() == 2
+    names = {page.recent_list.item(i).text() for i in range(page.recent_list.count())}
+    assert names == {"projA", "projB"}
+    page.close()
+
+
+def test_main_window_welcome_page_on_startup(qapp: QApplication) -> None:
+    """未打开项目时主窗口显示欢迎页。"""
+    window = MainWindow()
+    assert window.welcome_page is not None
+    assert window.main_splitter.isHidden()  # 欢迎页优先,三栏隐藏
     window.close()

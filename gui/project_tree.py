@@ -26,6 +26,9 @@ from PyQt6.QtWidgets import (
 
 from core.project import ProjectManager
 
+# 数据节点下真实目录(契约 v1.3 §9:raw/process/spectra/peaks/figures/report)
+DATA_SUBFOLDERS = ("raw", "process", "spectra", "peaks", "figures", "report")
+
 _STATUS_TEXT = {
     "registered": "已登记",
     "imported": "已导入",
@@ -80,20 +83,42 @@ class ProjectTreePanel(QWidget):
     # 构建
     # ------------------------------------------------------------------
     def refresh(self) -> None:
-        """按 ProjectManager 重建树。"""
+        """按 ProjectManager 重建树(Workspace → Project → Experiment → Data)。"""
         self.tree.clear()
         project = self.manager.project
         if project is None:
             return
+        workspace_item = QTreeWidgetItem([self._workspace_name(), ""])
+        workspace_item.setIcon(0, self._icon("workspace"))
+        workspace_item.setToolTip(0, self._workspace_path())
+        workspace_item.setData(0, Qt.ItemDataRole.UserRole, {"kind": "workspace"})
+        self.tree.addTopLevelItem(workspace_item)
         project_item = QTreeWidgetItem([project.name, ""])
         project_item.setIcon(0, self._icon("project"))
         project_item.setToolTip(0, str(self.manager.root))
         project_item.setData(0, Qt.ItemDataRole.UserRole, {"kind": "project"})
-        self.tree.addTopLevelItem(project_item)
+        workspace_item.addChild(project_item)
         for exp in project.experiments:
             exp_item = self._make_experiment_item(exp)
             project_item.addChild(exp_item)
+        workspace_item.setExpanded(True)
         project_item.setExpanded(True)
+
+    # ------------------------------------------------------------------
+    # 工作区路径(契约 v1.3;core/workspace 落地后改用 WorkspaceManager)
+    # ------------------------------------------------------------------
+    def _workspace_path(self) -> str:
+        from core.workspace import default_workspace_path
+
+        try:
+            return str(default_workspace_path())
+        except Exception:  # noqa: BLE001
+            if self.manager.root is not None:
+                return str(self.manager.root.parent)
+            return str(Path.home())
+
+    def _workspace_name(self) -> str:
+        return Path(self._workspace_path()).name or "Workspace"
 
     def _make_experiment_item(self, exp) -> QTreeWidgetItem:
         status = exp.status
@@ -127,6 +152,16 @@ class ProjectTreePanel(QWidget):
             Qt.ItemDataRole.UserRole,
             {"kind": "data", "exp_id": exp.id, "data_id": data_id},
         )
+        for sub in DATA_SUBFOLDERS:
+            sub_item = QTreeWidgetItem([sub, ""])
+            sub_item.setIcon(0, self._icon("folder"))
+            sub_item.setData(
+                0,
+                Qt.ItemDataRole.UserRole,
+                {"kind": "folder", "exp_id": exp.id, "data_id": data_id, "folder": sub},
+            )
+            data_item.addChild(sub_item)
+        data_item.setExpanded(False)
         return data_item
 
     def _data_status(self, exp, data_node) -> str:
@@ -150,9 +185,11 @@ class ProjectTreePanel(QWidget):
         from PyQt6.QtGui import QColor, QFont, QIcon, QPainter, QPixmap
 
         glyph = {
+            "workspace": "W",
             "project": "P",
             "experiment": "E",
             "data": "D",
+            "folder": "▸",
         }.get(kind, "•")
         pix = QPixmap(16, 16)
         pix.fill(QColor("transparent"))
@@ -191,18 +228,35 @@ class ProjectTreePanel(QWidget):
         return ""
 
     def select_experiment(self, exp_id: str) -> None:
-        """按 id 定位并选中实验节点(用于外部联动)。"""
-        root = self.tree.topLevelItem(0)
-        if root is None:
+        """按 id 递归定位并选中实验节点(Workspace → Project → Experiment)。"""
+        target = self._find_experiment_item(exp_id)
+        if target is None:
             return
-        for i in range(root.childCount()):
-            item = root.child(i)
-            data = item.data(0, Qt.ItemDataRole.UserRole)
-            if isinstance(data, dict) and data.get("exp_id") == exp_id:
-                root.setExpanded(True)
-                item.setExpanded(True)
-                self.tree.setCurrentItem(item)
-                return
+        parent = target.parent()
+        while parent is not None:
+            parent.setExpanded(True)
+            parent = parent.parent()
+        target.setExpanded(True)
+        self.tree.setCurrentItem(target)
+
+    def _find_experiment_item(
+        self, exp_id: str, item: QTreeWidgetItem | None = None
+    ) -> QTreeWidgetItem | None:
+        """深度优先查找实验节点。"""
+        if item is None:
+            for i in range(self.tree.topLevelItemCount()):
+                found = self._find_experiment_item(exp_id, self.tree.topLevelItem(i))
+                if found is not None:
+                    return found
+            return None
+        data = item.data(0, Qt.ItemDataRole.UserRole)
+        if isinstance(data, dict) and data.get("exp_id") == exp_id:
+            return item
+        for i in range(item.childCount()):
+            found = self._find_experiment_item(exp_id, item.child(i))
+            if found is not None:
+                return found
+        return None
 
     def _on_selection_changed(self) -> None:
         self.selection_changed.emit(self.current_experiment_id())
