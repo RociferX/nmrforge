@@ -143,6 +143,7 @@ class MainWindow(QMainWindow):
         self.pipeline = PipelinePanel(self.manager, self.controller)
         self.pipeline.log_message.connect(self._append_log)
         self.pipeline.manual_open_requested.connect(self._open_manual_dialog)
+        self.pipeline.import_data_requested.connect(self._import_data_for)
 
         self.spectrum_panel = SpectrumPanel(self.manager)
 

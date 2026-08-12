@@ -393,3 +393,17 @@ def test_main_window_welcome_page_on_startup(qapp: QApplication) -> None:
     assert window.welcome_page is not None
     assert window.main_splitter.isHidden()  # 欢迎页优先,三栏隐藏
     window.close()
+
+def test_experiment_selected_shows_import_button_no_manual(
+    tmp_path: Path, qapp: QApplication
+) -> None:
+    """选中实验:中间显示可点击的「导入数据」,且不显示人工按钮。"""
+    manager = _manager_with_experiment(tmp_path)
+    window = MainWindow(manager=manager)
+    tree = window.project_tree.tree
+    exp_item = tree.topLevelItem(0).child(0).child(0)
+    tree.setCurrentItem(exp_item)
+    assert "未选中数据" in window.pipeline.context_label.text()
+    assert not window.pipeline.import_button.isHidden()  # 导入数据可点
+    assert window.pipeline._rows["import"].manual_button.isHidden()  # 无人工
+    window.close()

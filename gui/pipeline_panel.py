@@ -178,6 +178,7 @@ class PipelinePanel(QWidget):
     log_message = pyqtSignal(str)
     run_finished = pyqtSignal()
     manual_open_requested = pyqtSignal(str)  # step_id:打开人工处理对话框
+    import_data_requested = pyqtSignal(str)  # exp_id:在当前实验下导入数据
 
     def __init__(
         self,
@@ -204,6 +205,12 @@ class PipelinePanel(QWidget):
         self.next_label.setWordWrap(True)
         self.next_label.setStyleSheet("color: #16a085;")
         layout.addWidget(self.next_label)
+        self.import_button = QPushButton("导入数据...")
+        self.import_button.setVisible(False)
+        self.import_button.clicked.connect(
+            lambda: self.import_data_requested.emit(self._current_exp_id)
+        )
+        layout.addWidget(self.import_button)
 
         steps_box = QVBoxLayout()
         for step_id, label, description, _deps in PIPELINE_STEPS:
@@ -247,6 +254,7 @@ class PipelinePanel(QWidget):
         if project is None or not self._current_exp_id:
             self.context_label.setText("未打开项目")
             self.next_label.setText("")
+            self.import_button.setVisible(False)
             for row in self._rows.values():
                 row.set_status("LOCKED")
             return
@@ -257,7 +265,10 @@ class PipelinePanel(QWidget):
             self.next_label.setText("请选择左侧的 Data 节点查看/运行处理步骤")
             for row in self._rows.values():
                 row.set_status("LOCKED")
+                row.manual_button.setVisible(False)  # 未选中数据不显示人工
+            self.import_button.setVisible(True)  # 可直接在当前实验导入数据
             return
+        self.import_button.setVisible(False)
         exp = project.experiment(self._current_exp_id)
         exp_title = exp.title if exp is not None else self._current_exp_id
         self.context_label.setText(
@@ -276,6 +287,7 @@ class PipelinePanel(QWidget):
         reasons = _lock_reasons(statuses)
         for step_id, status in statuses.items():
             self._rows[step_id].set_status(status, reasons.get(step_id, ""))
+            self._rows[step_id].manual_button.setVisible(True)  # 选中数据恢复人工
 
     # ------------------------------------------------------------------
     # 运行
