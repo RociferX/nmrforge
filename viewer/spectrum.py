@@ -131,3 +131,125 @@ class Spectrum:
         ]
         logger.info("载入谱图: %s (%s)", path, data.shape)
         return cls(data, axes, source=Path(path))
+
+class Spectrum3D:
+    """三维谱(契约 §10.1):``data`` 形状 (F1, F2, F3);axes=[F1,F2,F3]。"""
+
+    def __init__(
+        self,
+        data: np.ndarray,
+        axes: list[SpectrumAxis],
+        source: Path | str | None = None,
+    ) -> None:
+        self.data = np.asarray(data, dtype=float)
+        self.axes = list(axes)
+        self.source = Path(source) if source else None
+
+    @property
+    def max_intensity(self) -> float:
+        return float(np.max(self.data)) if self.data.size else 0.0
+
+    @staticmethod
+    def _normalize_data(data: np.ndarray, source: str) -> np.ndarray:
+        """复数取实部并强制三维。"""
+        data = np.asarray(data)
+        if np.iscomplexobj(data):
+            data = data.real
+        if data.ndim != 3:
+            raise ValueError(
+                f"仅支持三维谱图(当前 {data.ndim} 维,形状 {data.shape}): {source}"
+            )
+        return data
+
+    @staticmethod
+    def _header_int(dic: dict, key: str) -> int:
+        try:
+            return int(float(dic.get(key, 0) or 0))
+        except (TypeError, ValueError):
+            return 0
+
+    @classmethod
+    def load_from_ft3(
+        cls,
+        path: Path | str,
+        labels: tuple[str, str, str] = ("F1", "F2", "F3"),
+    ) -> Spectrum3D:
+        """用 nmrglue 读取 NMRPipe 三维 .ft3 并构建 ppm 轴(契约 §10.1)。
+
+        单文件 3D 流(xyz2pipe 产物,FDPIPEFLAG=1)读回形状 (F1, F2, F3),
+        其中 F1=FDF3SIZE、F2=FDSPECNUM、F3=FDSIZE;非流文件按同约定重塑。
+        """
+        import nmrglue as ng
+
+        dic, data = ng.pipe.read(str(path))
+        data = np.asarray(data)
+        if cls._header_int(dic, "FDDIMCOUNT") < 3:
+            raise ValueError(f"仅支持三维谱图(FDDIMCOUNT<3): {path}")
+        if data.ndim == 2:
+            f1 = cls._header_int(dic, "FDF3SIZE")
+            f3 = cls._header_int(dic, "FDSIZE")
+            if f1 <= 0 or f3 <= 0 or data.shape[0] % f1 or data.shape[1] != f3:
+                raise ValueError(
+                    f"无法从二维存储还原三维谱(FDF3SIZE={f1}, FDSIZE={f3}): "
+                    f"{path}"
+                )
+            data = data.reshape((f1, data.shape[0] // f1, f3))
+        data = cls._normalize_data(data, str(path))
+
+        def _axis(prefix: str, label: str, size: int) -> SpectrumAxis:
+            return SpectrumAxis(
+                label=label,
+                size=size,
+                sw_hz=float(dic[prefix + "SW"]),
+                obs_mhz=float(dic[prefix + "OBS"]),
+                carrier_ppm=float(dic[prefix + "CAR"]),
+                orig_hz=float(dic.get(prefix + "ORIG", 0.0) or 0.0),
+            )
+
+        axes = [
+            _axis("FDF1", labels[0], int(data.shape[0])),
+            _axis("FDF2", labels[1], int(data.shape[1])),
+            _axis("FDF3", labels[2], int(data.shape[2])),
+        ]
+        logger.info("载入三维谱: %s (%s)", path, data.shape)
+        return cls(data, axes, source=Path(path))
+
+    def index_at(self, axis_idx: int, ppm_value: float) -> int:
+        """第 axis_idx 维按 ppm 定位下标(供滑块按 ppm 定位)。"""
+        return self.axes[axis_idx].index_at(ppm_value)
+
+    def slice(self, axis_idx: int, index: int) -> Spectrum:
+        """固定第 axis_idx 维的 index,返回其余两轴的二维 Spectrum。
+
+        轴顺序与固定维后的剩余轴一致:axis 0 -> (F2,F3);axis 1 -> (F1,F3);
+        axis 2 -> (F1,F2)。
+        """
+        index = int(index)
+        size = self.data.shape[axis_idx]
+        if not (0 <= index < size):
+            raise IndexError(
+                f"切片索引越界: 第 {axis_idx} 维 index={index} (size={size})"
+            )
+        remaining = [i for i in range(3) if i != axis_idx]
+        if axis_idx == 0:
+            data2d = self.data[index, :, :]
+        elif axis_idx == 1:
+            data2d = self.data[:, index, :]
+        else:
+            data2d = self.data[:, :, index]
+        return Spectrum(
+            np.asarray(data2d), [self.axes[i] for i in remaining],
+            source=self.source,
+        )
+
+    def project(self, axis_idx: int, mode: str = "max") -> Spectrum:
+        """沿第 axis_idx 维投影:MIP(max)/ 求和(sum),轴序同 slice。"""
+        if mode == "sum":
+            data2d = np.sum(self.data, axis=axis_idx)
+        else:
+            data2d = np.max(self.data, axis=axis_idx)
+        remaining = [i for i in range(3) if i != axis_idx]
+        return Spectrum(
+            np.asarray(data2d), [self.axes[i] for i in remaining],
+            source=self.source,
+        )

@@ -277,8 +277,23 @@ class SpectrumViewer(QWidget):
         self._click_mode = mode if mode in ("select", "add", "delete") else "select"
 
     def _peak_xy(self, peak: dict) -> tuple[float, float]:
-        x_ppm = float(peak.get("H_shift", peak.get("x_ppm", 0.0)))
-        y_ppm = float(peak.get("N_shift", peak.get("y_ppm", 0.0)))
+        """把峰行映射到当前显示平面的 x/y ppm(按主谱轴标签)。
+
+        2D 峰表用 H_shift/N_shift;3D 峰表用 F1/F2/F3_shift,按当前切片
+        平面(主谱 x/y 轴标签)取对应坐标,其余情况回退 x_ppm/y_ppm。
+        """
+        x_axis = self._primary.x_axis if self._primary is not None else None
+        y_axis = self._primary.y_axis if self._primary is not None else None
+
+        def _pick(axis_label: str | None, fallback: str, alt: str) -> float:
+            if axis_label in ("F1", "F2", "F3"):
+                value = peak.get(f"{axis_label}_shift")
+                if value is not None and str(value) != "":
+                    return float(value)
+            return float(peak.get(fallback, peak.get(alt, 0.0)))
+
+        x_ppm = _pick(x_axis.label if x_axis else None, "H_shift", "x_ppm")
+        y_ppm = _pick(y_axis.label if y_axis else None, "N_shift", "y_ppm")
         return x_ppm, y_ppm
 
     def _apply_peak_items(self, show_labels: bool = True) -> None:
