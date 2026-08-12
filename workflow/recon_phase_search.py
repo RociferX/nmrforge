@@ -38,13 +38,18 @@ def median_window_absorption(data: np.ndarray, axis: int) -> float:
 
 def search_recon_phase(
     planes: np.ndarray,
+    *,
+    candidates: list[int] | None = None,
 ) -> dict[str, dict[str, float]]:
-    """对复型重构平面逐轴做相位搜索，返回 {axisN: {p0,p1,score,gain}}。"""
+    """对复型重构平面逐轴做相位搜索，返回 {axisN: {p0,p1,score,gain}}。
+
+    candidates 非 None 时按轴追加内存内候选评估数(透传给 _search_axis)。
+    """
     data = np.asarray(planes, dtype=np.complex128)
     results: dict[str, dict[str, float]] = {}
     for axis in range(data.ndim):
         baseline = median_window_absorption(data, axis)
-        found = _search_axis(data, axis)
+        found = _search_axis(data, axis, candidates=candidates)
         if found is None:
             results[f"axis{axis}"] = {
                 "p0": 0.0,
