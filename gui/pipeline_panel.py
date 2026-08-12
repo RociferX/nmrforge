@@ -69,10 +69,7 @@ def _data_nodes(manager: ProjectManager, exp_id: str) -> list:
     entry = manager.project.experiment(exp_id) if manager.project is not None else None
     if entry is None:
         return []
-    data = getattr(entry, "data", None)
-    if data:
-        return list(data)
-    return [entry]  # schema 1.1 兼容:实验即数据
+    return list(getattr(entry, "data", None) or [])
 
 
 def compute_step_statuses(manager: ProjectManager, exp_id: str) -> dict[str, str]:
@@ -295,7 +292,13 @@ class PipelinePanel(QWidget):
 
         def worker() -> None:
             try:
-                data_node = _data_nodes(self.manager, self._current_exp_id)[0]
+                nodes = _data_nodes(self.manager, self._current_exp_id)
+                if not nodes:
+                    self.log_message.emit(
+                        f"{STEP_LABEL.get(step_id, step_id)}: 该实验还没有数据,请先导入数据"
+                    )
+                    return
+                data_node = nodes[0]
                 exp_id = self._current_exp_id
                 data_id = getattr(data_node, "id", exp_id)
                 if method_name == "import_data":

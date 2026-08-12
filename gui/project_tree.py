@@ -133,11 +133,8 @@ class ProjectTreePanel(QWidget):
         return exp_item
 
     def _data_of(self, exp) -> list:
-        """实验下的数据节点;Backend DataEntry 落地后返回 entry.data。"""
-        data = getattr(exp, "data", None)
-        if data:
-            return list(data)
-        return [exp]  # schema 1.1 兼容:实验即数据
+        """实验下的数据节点(空白实验无数据则不显示 Data 子节点)。"""
+        return list(getattr(exp, "data", None) or [])
 
     def _make_data_item(self, exp, data_node) -> QTreeWidgetItem:
         data_id = getattr(data_node, "id", exp.id)

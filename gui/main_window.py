@@ -94,7 +94,7 @@ class MainWindow(QMainWindow):
 
         project_menu = bar.addMenu("项目(&P)")
         project_menu.addAction("项目管理", self._noop_hint)
-        project_menu.addAction("添加实验...", self.add_experiment)
+        project_menu.addAction("新建实验...", self._create_experiment)
         project_menu.addAction("重命名实验...", self.rename_experiment)
         project_menu.addAction("删除实验", self.delete_experiment)
 
@@ -249,14 +249,8 @@ class MainWindow(QMainWindow):
     # 实验/样本动作
     # ------------------------------------------------------------------
     def add_experiment(self) -> None:
-        if self.manager.project is None:
-            InfoDialog.show_info(self, "提示", "请先新建或打开项目")
-            return
-        samples = [(s.sample_id, s.name) for s in self.manager.project.samples]
-        dialog = ImportExperimentDialog(self, samples=samples)
-        if dialog.exec() != ImportExperimentDialog.DialogCode.Accepted:
-            return
-        self._import_experiment_async(dialog.result_data())
+        """兼容入口:等同新建空白实验(导入数据走实验右键「导入数据」)。"""
+        self._create_experiment()
 
     def add_experiment_via_import(self, source: str, title: str = "") -> None:
         """直接按路径导入(供测试与自动化场景使用,不弹对话框)。"""

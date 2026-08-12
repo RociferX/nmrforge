@@ -11,9 +11,8 @@ import pytest
 from PyQt6.QtWidgets import QApplication, QFileDialog
 
 from core.project import ProjectManager
-from gui.dialogs import ConfirmDialog, ImportExperimentDialog
+from gui.dialogs import ConfirmDialog
 from gui.main_window import MainWindow
-from workflow.import_workflow import ImportResult
 
 
 @pytest.fixture(scope="module")
@@ -112,50 +111,20 @@ def test_open_project_action(
 def test_add_experiment_action(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """「添加实验」= 新建空白实验(不产生数据,不弹数据文件夹选择)。"""
     manager = _build_manager(tmp_path)
-    ran: list[bool] = []
-
-    class SyncThread:
-        def __init__(self, target=None, daemon=None) -> None:
-            self._target = target
-
-        def start(self) -> None:
-            self._target()
-            ran.append(True)
-
-    monkeypatch.setattr("threading.Thread", SyncThread)
-
-    def fake_import(mgr, exp_id, source, *, segments=None, copy=True) -> ImportResult:
-        data = mgr.import_data(exp_id, source)
-        return ImportResult(
-            experiment_id=exp_id,
-            data_id=data.id,
-            run_id="R-20260812-001",
-            source=Path(source),
-            raw_dir=None,
-            metadata_path=mgr.data_metadata_path(exp_id, data.id),
-            checksums={},
-            file_count=0,
-            total_bytes=0,
-        )
-
-    monkeypatch.setattr("workflow.import_workflow.import_data", fake_import)
-
-    class FakeImportDialog(ImportExperimentDialog):
-        def exec(self) -> int:
-            self.source_edit.setText("/sampleF")
-            self.title_edit.setText("3D HNCACB")
-            return int(ImportExperimentDialog.DialogCode.Accepted)
-
-    monkeypatch.setattr("gui.main_window.ImportExperimentDialog", FakeImportDialog)
-
+    monkeypatch.setattr(
+        "gui.main_window.QInputDialog.getText",
+        staticmethod(lambda *args, **kwargs: ("3D HNCACB", True)),
+    )
     window = MainWindow(manager=manager)
     window.add_experiment()
-    assert ran == [True]  # 后台导入已同步执行
     assert window.experiment_tree.topLevelItemCount() == 3
     last = window.experiment_tree.topLevelItem(2)
     assert last.text(0) == "exp_003"
     assert last.text(1) == "3D HNCACB"
+    entry = manager.project.experiment("exp_003")
+    assert entry is not None and len(entry.data) == 0  # 空白实验无数据
     window.close()
 
 
