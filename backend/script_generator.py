@@ -352,8 +352,8 @@ def generate_2d_nus_script(
     out_file: str,
     nthread: int = 2,
     nuslist_count: int = 0,
-    ext_lo: str = "10.5",
-    ext_hi: str = "6.5",
+    ext_lo: str = "11.0",
+    ext_hi: str = "6.0",
     nsigma: float = 5.0,
     thresh: float = 0.95,
     smile_xq1: float = 0.45,
@@ -362,6 +362,7 @@ def generate_2d_nus_script(
     smile_scaling: bool = True,
     smile_report: int = 1,
     direct_phase: tuple[float, float] = (0.0, 0.0),
+    extract: bool = True,
 ) -> str:
     """2D NUS SMILE 重构：直接维 FT+EXT → SMILE -nDim 2 → 间接维 FT（终谱 ft2）。"""
     ctx = build_context(experiment)
@@ -403,6 +404,8 @@ def generate_2d_nus_script(
         "| nmrPipe -fn ZTP \\",
         f"| pipe2xyz -out {out_file} -x",
     ]
+    if not extract:
+        lines = [line for line in lines if "| nmrPipe -fn EXT" not in line]
     return "\n".join(lines) + "\n"
 
 
@@ -414,8 +417,8 @@ def generate_3d_nus_script(
     out_file: str,
     nthread: int = 2,
     nuslist_count: int = 0,
-    ext_lo: str = "10.5",
-    ext_hi: str = "6.5",
+    ext_lo: str = "11.0",
+    ext_hi: str = "6.0",
     nsigma: float = 5.0,
     thresh: float = 0.95,
     smile_xq1: float = 0.45,
@@ -424,6 +427,7 @@ def generate_3d_nus_script(
     smile_scaling: bool = True,
     smile_report: int = 1,
     direct_phase: tuple[float, float] = (0.0, 0.0),
+    extract: bool = True,
 ) -> str:
     """3D NUS SMILE 重构：直接维（F3）FT+EXT → SMILE -nDim 3 → 间接维 FT（ft3）。"""
     ctx = build_context(experiment)
@@ -471,6 +475,8 @@ def generate_3d_nus_script(
         "| nmrPipe -fn ZTP \\",
         f"| pipe2xyz -out {out_file} -x",
     ]
+    if not extract:
+        lines = [line for line in lines if "| nmrPipe -fn EXT" not in line]
     return "\n".join(lines) + "\n"
 
 

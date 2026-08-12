@@ -1,5 +1,16 @@
 # 变更日志
 
+## [0.2.25] - 2026-08-12
+
+- Backend(G2B-006):EXT 参数在自动/步骤化路径生效——
+  NMRPipeBackend.process 增加 params(extract 默认 True/ext_lo "11.0"/
+  ext_hi "6.0")透传给 generate_process_script;reconstruct_nus 支持
+  extract(False 时不写 EXT 行);2D/3D NUS 脚本默认窗口统一 6-11 ppm;
+  stepwise.generate_spectrum 均匀分支把 params 传给 backend.process;
+  ProcessingBackend Protocol 补充 params 签名(Shared Contract,
+  G2B-006 已批准)。
+- 测试:NUS extract 开关/默认窗口、stepwise 透传断言、后端 params 接受;
+  全量通过,ruff 全绿。
 ## [0.2.24] - 2026-08-12
 
 - Backend:处理脚本(generate_process_script)直接维 FT+PS 后增加 EXT 提取

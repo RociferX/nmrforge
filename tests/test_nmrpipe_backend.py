@@ -54,6 +54,27 @@ def test_reconstruct_nus_missing_nmrpipe_graceful(bruker_dir: Path, tmp_path: Pa
     assert result["success"] is False
 
 
+def test_process_accepts_extract_params(bruker_dir: Path) -> None:
+    """process 接受 params(extract/ext_lo/ext_hi),无 NMRPipe 时优雅降级。"""
+    exp = read_dataset(bruker_dir / "hsqc_small")
+    plan = select_method(exp)
+    backend = NMRPipeBackend(nmrpipe_bin="")
+    result = backend.process(
+        exp,
+        plan,
+        params={"extract": False, "ext_lo": "9.0", "ext_hi": "7.5"},
+    )
+    assert result["success"] is False
+
+
+def test_reconstruct_nus_accepts_extract(bruker_dir: Path) -> None:
+    """reconstruct_nus 接受 extract 参数,无 NMRPipe 时优雅降级。"""
+    exp = read_dataset(bruker_dir / "nus_3d")
+    backend = NMRPipeBackend(nmrpipe_bin="")
+    result = backend.reconstruct_nus(exp, {"extract": False})
+    assert result["success"] is False
+
+
 def test_reconstruct_nus_rejects_uniform(bruker_dir: Path) -> None:
     exp = read_dataset(bruker_dir / "hsqc_small")
     backend = NMRPipeBackend(nmrpipe_bin="")

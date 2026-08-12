@@ -142,7 +142,7 @@ def generate_spectrum(
     else:
         workflow_ref = "process"
         plan = select_method(experiment)
-        resp = backend.process(experiment, plan)
+        resp = backend.process(experiment, plan, params=params)
     logs = list(resp.get("logs", []))
     if not resp.get("success"):
         raise StepwiseError(
