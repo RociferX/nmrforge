@@ -7,12 +7,12 @@
 
 from __future__ import annotations
 
-import csv
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
+from core.peaks.peak_table import save_peaks
 from core.project import ProjectManager
 from core.qc import peak_detection
 
@@ -49,41 +49,33 @@ def _write_peaks_csv(
     dic: dict[str, Any],
     peaks: list[peak_detection.Peak],
 ) -> Path:
-    """把检测峰写为契约 §6 峰表 CSV(2D/3D 列不同)。"""
+    """把检测峰写为契约 §6 峰表 CSV(数字 Peak_ID,经 PeakTable.save_peaks)。"""
     peaks_dir = manager.data_dir(exp_id, data_id, "peaks")
     peaks_dir.mkdir(parents=True, exist_ok=True)
     path = peaks_dir / f"{exp_id}-{data_id}.csv"
     axes = _axes_ppm(dic, data)
-    ndim = data.ndim
-    if ndim == 2:
-        header = ["Peak_ID", "H_shift", "N_shift", "Intensity", "SN", "label"]
-        rows = [
-            [
-                f"P{i + 1:03d}",
-                f"{axes[1][int(p.position[1])]:.3f}" if len(axes) > 1 else "",
-                f"{axes[0][int(p.position[0])]:.3f}",
-                f"{p.height:.4g}",
-                f"{p.snr:.3f}",
-                "",
-            ]
-            for i, p in enumerate(peaks)
-        ]
-    else:
-        header = ["Peak_ID", "F1_shift", "F2_shift", "F3_shift", "Intensity", "SN", "label"]
-        rows = [
-            [f"P{i + 1:03d}"]
-            + [
-                f"{axes[k][int(p.position[k])]:.3f}" if k < len(axes) else ""
-                for k in range(3)
-            ]
-            + [f"{p.height:.4g}", f"{p.snr:.3f}", ""]
-            for i, p in enumerate(peaks)
-        ]
-    with path.open("w", encoding="utf-8", newline="") as fh:
-        writer = csv.writer(fh)
-        writer.writerow(header)
-        writer.writerows(rows)
-    return path
+    rows: list[dict[str, Any]] = []
+    for i, peak in enumerate(peaks, start=1):
+        row: dict[str, Any] = {
+            "Peak_ID": i,
+            "Intensity": float(peak.height),
+            "SN": float(peak.snr),
+            "label": "",
+        }
+        if data.ndim == 2:
+            row["H_shift"] = (
+                float(axes[1][int(peak.position[1])]) if len(axes) > 1 else 0.0
+            )
+            row["N_shift"] = float(axes[0][int(peak.position[0])])
+        else:
+            for k in range(3):
+                row[f"F{k + 1}_shift"] = (
+                    float(axes[k][int(peak.position[k])])
+                    if k < len(axes)
+                    else 0.0
+                )
+        rows.append(row)
+    return save_peaks(path, rows)
 
 
 def pick_peaks(

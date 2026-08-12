@@ -23,8 +23,9 @@ def test_create_project_layout(tmp_path: Path) -> None:
     root = tmp_path / "proj"
     manager = ProjectManager.create_project(root, "demo", protein_name="GB1")
 
+    # schema 1.3(§9.2):不预建扁平目录模板,文件系统即层级
     for rel in DEFAULT_DIRECTORIES:
-        assert (root / rel).is_dir(), rel
+        assert not (root / rel).exists(), rel
     project_file = root / "project.json"
     assert project_file.is_file()
     data = json.loads(project_file.read_text(encoding="utf-8"))
@@ -114,16 +115,21 @@ def test_infer_status_stages(tmp_path: Path) -> None:
     exp = manager.add_experiment("/sampleD")
     assert manager.infer_status(exp.id) is ExperimentStatus.REGISTERED
 
-    (manager.dir_path("metadata") / f"{exp.id}.json").write_text("{}", encoding="utf-8")
+    def _legacy_write(path: Path, content: str = "x") -> None:
+        """模拟旧扁平布局产物(目录需显式创建,新项目不预建)。"""
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+
+    _legacy_write(manager.dir_path("metadata") / f"{exp.id}.json", "{}")
     assert manager.infer_status(exp.id) is ExperimentStatus.IMPORTED
 
-    (manager.dir_path("spectra") / f"{exp.id}.ft2").write_bytes(b"x")
+    _legacy_write(manager.dir_path("spectra") / f"{exp.id}.ft2")
     assert manager.infer_status(exp.id) is ExperimentStatus.PROCESSED
 
-    (manager.dir_path("peaks") / f"{exp.id}.csv").write_text("", encoding="utf-8")
+    _legacy_write(manager.dir_path("peaks") / f"{exp.id}.csv", "")
     assert manager.infer_status(exp.id) is ExperimentStatus.PICKED
 
-    (manager.dir_path("report") / f"{exp.id}.pdf").write_bytes(b"x")
+    _legacy_write(manager.dir_path("report") / f"{exp.id}.pdf")
     assert manager.infer_status(exp.id) is ExperimentStatus.ANALYZED
 
 
@@ -132,7 +138,9 @@ def test_delete_experiment_removes_artifacts_keeps_runs(tmp_path: Path) -> None:
     exp = manager.add_experiment("/sampleD")
     (manager.dir_path("raw") / exp.id).mkdir(parents=True)
     (manager.dir_path("raw") / exp.id / "fid").write_bytes(b"fid")
-    (manager.dir_path("spectra") / f"{exp.id}.ft2").write_bytes(b"ft2")
+    spectra_path = manager.dir_path("spectra") / f"{exp.id}.ft2"
+    spectra_path.parent.mkdir(parents=True, exist_ok=True)
+    spectra_path.write_bytes(b"ft2")
     (manager.dir_path("processing") / exp.id / "log.txt").parent.mkdir(parents=True)
     (manager.dir_path("processing") / exp.id / "log.txt").write_text("log", encoding="utf-8")
 
@@ -293,8 +301,9 @@ def test_default_directories_configurable(tmp_path: Path) -> None:
     manager = ProjectManager.create_project(
         tmp_path / "proj", "demo", directories={"raw": "data/raw"}
     )
-    assert (tmp_path / "proj" / "data" / "raw").is_dir()
+    # schema 1.3:目录映射仅作兼容解析,不预建目录
     assert manager.dir_path("raw") == (tmp_path / "proj" / "data" / "raw").resolve()
+    assert not (tmp_path / "proj" / "data" / "raw").exists()
 
 
 def test_workflow_run_model_roundtrip() -> None:

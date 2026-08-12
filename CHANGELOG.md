@@ -1,5 +1,14 @@
 # 变更日志
 
+## [0.2.22] - 2026-08-12
+
+- fix(shared):create_project 不再预建扁平目录模板(raw/processing/spectra/
+  peaks/analysis/figures/report/metadata)——契约 §9.2「文件系统即层级」,
+  数据目录在导入/处理时按 <exp>/<data>/{raw,process,spectra,...} 创建;
+  dir_map 仅作旧扁平路径兼容解析,不 mkdir。
+- 测试适配:布局断言改为「不创建扁平目录」,legacy 状态推断/删除用例显式
+  创建旧扁平目录,配置目录用例断言路径解析而非存在;全量 270 passed。
+
 ## [0.2.21.6] - 2026-08-12
 
 - 修复谱图内容位置(SpectrumViewer 反转 y 轴使 15N 高 ppm 在下、
@@ -33,6 +42,7 @@
 
 ## [0.2.21] - 2026-08-12
 
+
 - 峰表工具栏新增「导出 Poky」:当前峰表导出为 Poky/Sparky .list
   (Assignment w1 w2 Data Height Volume,未命名峰 ?-?),默认路径
   data_dir(...,"peaks")/<exp>-<data>.list;无峰表/谱图时按钮禁用。
@@ -40,6 +50,17 @@
   行数展示与谱图双向联动不受影响。
 - 新增 gui/peaks_io.py:load_peaks/save_peaks/export_peaks_poky(契约优先,
   缺失回退本地实现)。
+
+- Backend(G2B-005):统一峰表模型 core/peaks/peak_table.py(Shared,移植旧项目
+  NMRFlow)——PeakTable(add/remove 数字自动编号)、save_peaks/load_peaks
+  (CSV 数字 Peak_ID,缺列补空,2D/3D 自动判别)、export_peaks_poky /
+  import_peaks_poky(Poky/Sparky .list:"Assignment w1 w2 [w3] Data Height
+  Volume",2D w1=15N/w2=1H,未命名 ?-?/?-?-?,Height %.3g,双空格)。
+- Backend(G2B-005):workflow/pick_peaks 改用 PeakTable.save_peaks——
+  输出数字 Peak_ID(1..n,不再 "P001"),列与旧项目一致。
+- 测试:新增 tests/test_peak_table.py 9 项(往返/导出导入/2D/3D/占位/
+  pick_peaks 列);全量 270 passed,ruff 全绿。
+
 
 ## [0.2.20] - 2026-08-12
 

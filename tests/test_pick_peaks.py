@@ -62,7 +62,7 @@ def test_pick_peaks_detects_and_writes(tmp_path: Path) -> None:
     assert peak_path.parent == manager.data_dir(exp_id, data_id, "peaks")
 
     rows = list(csv.DictReader(peak_path.open(encoding="utf-8")))
-    assert rows[0]["Peak_ID"] == "P001"
+    assert rows[0]["Peak_ID"] == "1"  # 数字 Peak_ID(G2B-005)
     assert "H_shift" in rows[0] and "N_shift" in rows[0]
     assert float(rows[0]["SN"]) >= 3.0
 
