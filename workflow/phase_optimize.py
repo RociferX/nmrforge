@@ -541,6 +541,22 @@ def _default_spectrum_quality(path: str) -> tuple[float, dict[str, float]]:
     return quality.score.overall, asdict(quality.score.components)
 
 
+def _default_phase_score(path: str) -> tuple[float, dict[str, float]]:
+    """相位专用评分(逐维相位优化的默认评估)。
+
+    复用 core.qc.phase_quality:吸收度比例 50% + 负峰比例 30% + 对称性 20%——
+    这是成熟的调相指标(错误相位→负峰/失对称/实虚失衡);不用综合 QC
+    (SNR/基线/伪影与相位基本无关,加权后会把相位排名信号稀释)。
+    """
+    import nmrglue as ng
+
+    from core.qc import phase_quality
+
+    _dic, data = ng.pipe.read(path)
+    quality = phase_quality.evaluate(np.asarray(data))
+    return quality.score, asdict(quality)
+
+
 def brute_force_direct_scores(
     experiment: Experiment,
     backend: Any,
@@ -911,7 +927,7 @@ def optimize_phase_sequential(
         for p1 in p1_values
         for p0 in p0_values
     ]
-    score_fn = score_fn or _default_spectrum_quality
+    score_fn = score_fn or _default_phase_score
     is_nus = experiment.sampling.mode is SamplingMode.NUS
     direct_axis = "F2" if experiment.ndim == 2 else "F3"
     search_axes = [a for a in axes if a != direct_axis] if is_nus else axes

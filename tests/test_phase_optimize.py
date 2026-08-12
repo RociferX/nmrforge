@@ -453,3 +453,46 @@ def test_optimize_phase_sequential_failure(tmp_path: Path, bruker_dir: Path) -> 
         optimize_phase_sequential(
             experiment, backend, p0_values=(0.0,), p1_values=(0.0,)
         )
+
+
+
+def test_default_phase_score_ranks_phase_quality(tmp_path: Path) -> None:
+    """相位专用评分:错相(负峰)分数低于正相;不使用综合 QC。"""
+    from scipy.ndimage import gaussian_filter
+
+    from workflow.phase_optimize import _default_phase_score
+
+    in_phase = np.zeros((32, 64))
+    in_phase[8, 20] = 500.0
+    in_phase = gaussian_filter(in_phase, sigma=1.2)
+    inverted = -in_phase  # 180° 错相 → 负峰
+
+    def _write(path: Path, data: np.ndarray) -> None:
+        from nmrglue.fileio import pipe
+
+        dic = {k: "0" for k in pipe.fdata_dic}
+        dic["FDMAGIC"] = 9.2330230000000007e14
+        dic["FDDIMCOUNT"] = 2
+        dic["FDSIZE"] = data.shape[1]
+        dic["FDSPECNUM"] = data.shape[0]
+        dic["FDQUADFLAG"] = 1
+        dic["FDF1QUADFLAG"] = 1
+        dic["FDF2QUADFLAG"] = 1
+        for prefix in ("FDF1", "FDF2"):
+            dic[prefix + "SW"] = "6000.0"
+            dic[prefix + "OBS"] = "600.0"
+            dic[prefix + "CAR"] = "4.7"
+            dic[prefix + "ORIG"] = "1000.0"
+        pipe.write(str(path), dic, data.astype(np.float32), overwrite=True)
+
+    good = tmp_path / "good.ft2"
+    bad = tmp_path / "bad.ft2"
+    _write(good, in_phase)
+    _write(bad, inverted)
+    score_good, comp_good = _default_phase_score(str(good))
+    score_bad, comp_bad = _default_phase_score(str(bad))
+    assert 0.0 <= score_good <= 100.0
+    assert score_good > score_bad  # 负峰比例惩罚
+    assert (
+        comp_bad["negative_peak_fraction"] > comp_good["negative_peak_fraction"]
+    )
