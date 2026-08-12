@@ -52,8 +52,14 @@ SHARED_PREFIXES = (
 
 
 def owner_of(path: str) -> str:
-    """返回路径所属:gui / backend / shared。"""
+    """返回路径所属:gui / backend / shared / docs(协作文档)。"""
     path = path.replace("\\", "/")
+    if path.startswith("docs/proposals/gui-to-backend/"):
+        return "gui"  # GUI 创建的需求
+    if path.startswith("docs/proposals/backend-to-gui/"):
+        return "backend"  # Backend 创建的需求
+    if path in ("CHANGELOG.md", "docs/PROJECT_STATUS.md"):
+        return "docs"  # 协作文档,两方都可追加
     if path.startswith("tests/"):
         if path.startswith(("tests/test_gui", "tests/test_viewer")):
             return "gui"
@@ -96,9 +102,12 @@ def changed_files(base: str) -> list[str]:
 def violations(owner: str, base: str) -> list[tuple[str, str]]:
     """返回 (文件, 实际 owner) 中不属于 owner 的条目。"""
     result: list[tuple[str, str]] = []
+    allowed = {owner}
+    if owner in ("gui", "backend"):
+        allowed.add("docs")  # 协作文档(CHANGELOG/PROJECT_STATUS)双方可写
     for path in changed_files(base):
         actual = owner_of(path)
-        if owner != "all" and actual != owner:
+        if owner != "all" and actual not in allowed:
             result.append((path, actual))
     return result
 

@@ -45,6 +45,10 @@ def test_shared_paths() -> None:
     assert module.owner_of("viewer/spectrum.py") == "shared"
     assert module.owner_of("gui/processing.py") == "shared"
     assert module.owner_of("docs/ARCHITECTURE.md") == "shared"
+    assert module.owner_of("CHANGELOG.md") == "docs"
+    assert module.owner_of("docs/PROJECT_STATUS.md") == "docs"
+    assert module.owner_of("docs/proposals/gui-to-backend/001-x.md") == "gui"
+    assert module.owner_of("docs/proposals/backend-to-gui/001-x.md") == "backend"
     assert module.owner_of("pyproject.toml") == "shared"
     assert module.owner_of("tests/test_ownership.py") == "shared"
 
@@ -60,5 +64,6 @@ def test_violations_logic() -> None:
         "backend/base.py": "shared",
         "core/processing/phase.py": "backend",
     }
-    bad = [(p, o) for p, o in files.items() if o != "gui"]
+    allowed = {"gui", "docs"}
+    bad = [(p, o) for p, o in files.items() if o not in allowed]
     assert bad == [("backend/base.py", "shared"), ("core/processing/phase.py", "backend")]
