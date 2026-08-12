@@ -1,5 +1,18 @@
 # 变更日志
 
+## [0.2.12] - 2026-08-12
+
+- Backend:相位准确性保证(workflow/phase_optimize)——VM 真实数据等价性验证
+  (dataset 3,2D 均匀)证实「内存内代理筛选 ≠ 暴力逐候选后端评分」:
+  内存内最优 p1=-60,暴力最优 p1=-120,Spearman 相关 0.46,验证未通过;
+  据此新增验证门控 optimize_direct_phase_guaranteed:验证通过才采信内存内
+  筛选,否则围绕内存内最优 ±60° 邻域暴力细化(本例细化得 p1=-120,QC 94.2),
+  最终谱由真实管线 produce_phased_spectrum 产出——能力与反复跑后端一致,
+  成本有界(验证网格 + 细化邻域 + 生产)。
+- Backend:NMRPipeBackend.process/reconstruct_nus 支持 direct_phase_override;
+  等价性验证 validate_direct_phase_equivalence(最优候选一致 + Spearman,
+  可序列化 EquivalenceReport)。
+- 测试:test_phase_optimize 增至 21 项,全量 183 passed。
 ## [0.2.11] - 2026-08-12
 
 - Backend:自动相位性能重构(workflow/phase_optimize)——自动相位优化改为
