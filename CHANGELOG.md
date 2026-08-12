@@ -1,5 +1,14 @@
 # 变更日志
 
+## [0.2.9] - 2026-08-12
+
+- 导入工作流(workflow/import_workflow):Bruker 数据集校验 → 登记实验 →
+  raw/<exp_id>/ 复制(可跳过,源在项目内自动引用)→ SHA-256 指纹 →
+  metadata/<id>.json 落盘 → WorkflowRun(import) 登记(成功/失败 + 失败回滚)。
+- 导入后 ExperimentEntry.source 指向项目内 raw 副本,状态机推进到 imported;
+  GUI 导入入口待按 B2G-001 接驳(对话框调 import_bruker_dataset、warnings
+  展示、「复制到项目」选项)。
+- 测试:新增 tests/test_import_workflow.py 9 项,全量 153 passed。
 ## [0.2.8] - 2026-08-11
 
 - GUI 重构为简洁流程化布局（借鉴 CryoSPARC）：顶部流程栏（导入数据 / 处理 / 查看谱图 / 报告）+ 中央页面切换；导入页实验/样本双栏表格、处理页自动化与人工两条路径卡片、查看页连接独立 viewer。
