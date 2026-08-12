@@ -8,9 +8,10 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PyQt6.QtWidgets import QApplication, QFileDialog, QInputDialog, QMessageBox
+from PyQt6.QtWidgets import QApplication, QFileDialog, QInputDialog
 
 from core.project import ProjectManager
+from gui.dialogs import ConfirmDialog, ImportExperimentDialog
 from gui.main_window import MainWindow
 
 
@@ -93,12 +94,14 @@ def test_add_experiment_action(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     manager = _build_manager(tmp_path)
-    answers = iter([("/sampleF", True), ("3D HNCACB", True)])
-    monkeypatch.setattr(
-        QInputDialog,
-        "getText",
-        staticmethod(lambda *args, **kwargs: next(answers)),
-    )
+
+    class FakeImportDialog(ImportExperimentDialog):
+        def exec(self) -> int:
+            self.source_edit.setText("/sampleF")
+            self.title_edit.setText("3D HNCACB")
+            return int(ImportExperimentDialog.DialogCode.Accepted)
+
+    monkeypatch.setattr("gui.main_window.ImportExperimentDialog", FakeImportDialog)
     window = MainWindow(manager=manager)
     window.add_experiment()
     assert window.experiment_tree.topLevelItemCount() == 3
@@ -114,12 +117,12 @@ def test_delete_experiment_action_keeps_audit(
     manager = _build_manager(tmp_path)
     manager.start_run("exp_001", workflow_ref="hsqc_standard")
     monkeypatch.setattr(
-        QMessageBox,
-        "question",
-        staticmethod(lambda *args, **kwargs: QMessageBox.StandardButton.Yes),
+        ConfirmDialog,
+        "confirm",
+        staticmethod(lambda *args, **kwargs: True),
     )
     window = MainWindow(manager=manager)
-    window.experiment_tree.topLevelItem(0).setSelected(True)
+    window.project_tree.select_experiment("exp_001")
     window.delete_experiment()
     assert window.experiment_tree.topLevelItemCount() == 1
     assert manager.project is not None
