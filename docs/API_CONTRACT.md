@@ -107,3 +107,88 @@ GUI 页面不得绕过本控制器直接调 Backend。
 2. Architect 评审接口与兼容性;
 3. 批准后在契约文件落地并更新本文件版本号(顶部);
 4. 双方测试同步更新;全量回归(本地 + VM)。
+
+## 8. 契约 v1.2 草案(Experiment→Data 层级 + 步骤化处理,待实现)
+
+状态:draft(Architect 设计,2026-08-12)。实现需经两个 Agent 按 Proposal
+`gui-to-backend/002-stepwise-processing.md` 与本次层级改造协作。
+
+### 8.1 数据模型变更(core/project/,schema 1.1 → 1.2)
+
+层级:Project → Experiment(可空白)→ Data(可多组,导入数据是实验下的动作)。
+
+```python
+@dataclass ExperimentEntry:  # 变更
+    id: str                       # exp_001(保持)
+    title: str
+    status: str                   # registered(空白)/imported(有数据)/...
+    sample_id: str
+    notes: str
+    data: list[DataEntry]         # 新增:0..n 组数据
+    metadata: dict
+    created_at: str
+    # 移除顶层 source/segments/imported_at(迁移到 DataEntry)
+
+@dataclass DataEntry:             # 新增
+    id: str                       # d_001
+    source: str                   # 外部 Bruker 数据集目录(导入时)
+    raw_dir: str                  # 项目内 raw/<exp_id>/<data_id>/ 副本
+    segments: list[str]
+    status: str                   # imported / fid_ready / processed
+    imported_at: str
+    metadata_path: str            # metadata/<exp_id>-<data_id>.json
+    fid_path: str                 # 生成 FID 后(空串表示未生成)
+    spectrum_path: str            # 生成谱后(空串表示未生成)
+    checksums: dict[str, str]
+```
+
+迁移规则:读取 schema 1.1 的 project.json 时,将旧 ExperimentEntry 的
+source/segments/imported_at 迁移为 data[0],并标记 `migrated_from_1_1: true`。
+
+### 8.2 ProjectManager 变更(core/project/)
+
+```python
+create_experiment(title="", sample_id="") -> ExperimentEntry   # 新建空白实验
+import_data(exp_id, source, segments=None, title="") -> DataEntry
+    # 读参数 + 复制 raw/<exp_id>/<data_id>/ + 写 metadata + import WorkflowRun
+    # 不生成 FID、不生成谱
+set_data_fid(data_id, fid_path)                               # 生成 FID 后登记
+set_data_spectrum(data_id, spectrum_path)                     # 生成谱后登记
+infer_status(exp_id)                                          # 按 data 聚合
+```
+
+兼容:`add_experiment(source=...)` 保留为「导入第一个数据」的便捷入口,
+内部等价于 create_experiment + import_data。
+
+### 8.3 处理流程步骤化(Backend + ProcessingController)
+
+```python
+# gui/processing.py ProcessingController(实现属 GUI,契约共享)
+import_data(entry, source) -> DataEntry            # 读参数+复制,返回数据条目
+generate_fid(data) -> str                          # 调后端转换,返回 fid 路径
+generate_spectrum(data) -> str                     # 调后端处理(含 NUS 重构),返回谱路径
+
+# backend/base.py ProcessingBackend(契约)
+def convert_to_fid(self, experiment, data_dir) -> dict
+    # 返回 {"success", "fid_path", "message", "logs"}
+def process(self, experiment, plan) -> dict        # 保持;内部自动判断 NUS→重构
+```
+
+流程语义:
+- 导入数据 = 只读实验参数 + 复制必要文件到 raw,不触发任何处理;
+- 生成 FID = bruker -AUTO/fid.com 转换(现有 backend/bruker_workflow 逻辑);
+- 生成谱图(原"数据处理")= process,自动包含 SMILE 重构,不需要单独步骤;
+- GUI 不暴露单独 SMILE 重构按钮;SMILE 参数优化保留为可选后处理。
+
+### 8.4 产物命名
+
+- raw 副本:raw/<exp_id>/<data_id>/
+- metadata:metadata/<exp_id>-<data_id>.json
+- fid:processing/<exp_id>/<data_id>.fid(或 data 内)
+- 谱:spectra/<exp_id>-<data_id>.ft2|ft3
+
+### 8.5 GUI 树层级
+
+Project(右键:删除项目)→ Experiment(右键:导入数据/重命名/删除)→
+Data(右键:生成 FID/生成谱图/打开目录/删除)。树列宽需可读
+(最小列宽 + 自适应,禁止只显示首字母)。
