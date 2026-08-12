@@ -61,12 +61,15 @@ class SpectrumPanel(QWidget):
         self.refresh()
 
     def refresh(self) -> None:
-        """刷新谱图文件列表(schema 1.3 data_dir 新布局,旧扁平路径回退)。"""
+        """刷新谱图文件列表;无文件时隐藏列表(避免右下角空白)。"""
         self.file_list.clear()
         if self.manager.project is None or not self._current_exp_id:
+            self.file_list.setVisible(False)
             return
-        for path in self._spectrum_paths():
+        paths = self._spectrum_paths()
+        for path in paths:
             self.file_list.addItem(path.name)
+        self.file_list.setVisible(bool(paths))
 
     def _spectrum_paths(self) -> list[Path]:
         """当前实验/数据下的谱图文件(新布局优先,旧扁平路径回退)。"""
