@@ -159,5 +159,6 @@ def test_read_experiment_prefers_raw_copy(
     entry = manager.create_experiment()
     result = import_data(manager, entry.id, bruker_dir / "hsqc_2d")
     exp = _read_experiment(manager, entry.id, result.data_id)
-    assert exp.source_path == Path(manager.data(entry.id, result.data_id).raw_dir)
+    raw_dir = manager.data(entry.id, result.data_id).raw_dir
+    assert exp.source_path == manager.root / raw_dir
     assert read_dataset(Path(result.raw_dir)).ndim == 2

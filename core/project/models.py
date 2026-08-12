@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
-SCHEMA_VERSION = "1.2"
+SCHEMA_VERSION = "1.3"
 
 # 项目目录模板(相对路径,创建项目时逐项建目录)
 DEFAULT_DIRECTORIES = [
