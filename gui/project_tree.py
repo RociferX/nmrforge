@@ -302,14 +302,45 @@ class ProjectTreePanel(QWidget):
 
     def _on_double_clicked(self, item: QTreeWidgetItem, _column: int) -> None:
         data = item.data(0, Qt.ItemDataRole.UserRole)
-        if isinstance(data, dict) and data.get("kind") == "project" and data.get("path"):
+        kind = data.get("kind") if isinstance(data, dict) else ""
+        if kind == "project" and data.get("path"):
             path = str(data["path"])
             if self.manager.root is None or Path(path) != Path(self.manager.root).resolve():
                 self.open_project_requested.emit(path)
             return
+        if kind in ("data", "folder"):
+            # 双击数据/子文件夹:打开文件管理器对应目录,中间保持 Pipeline
+            folder_path = self._folder_path_for_item(item)
+            if folder_path is not None:
+                self.open_path_requested.emit(str(folder_path))
+            return
         exp_id = self._experiment_id_of(item)
         if exp_id:
             self.open_requested.emit(exp_id)
+
+    def _folder_path_for_item(self, item: QTreeWidgetItem) -> Path | None:
+        """解析 data 或 folder 节点的真实目录(双击打开用)。"""
+        data = item.data(0, Qt.ItemDataRole.UserRole)
+        if not isinstance(data, dict):
+            return None
+        exp_id = self._experiment_id_of(item)
+        data_id = self._data_id_of(item)
+        if not exp_id or not data_id:
+            return None
+        if data.get("kind") == "folder":
+            return self._folder_path(exp_id, data_id, data.get("folder", ""))
+        # data 节点:优先 raw 目录,缺失时回退 data 基座
+        try:
+            raw_dir = self.manager.data_dir(exp_id, data_id, "raw")
+            if raw_dir.is_dir():
+                return raw_dir
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            base = self.manager.data_base(exp_id, data_id)
+            return base if base.is_dir() else None
+        except Exception:  # noqa: BLE001
+            return None
 
     # ------------------------------------------------------------------
     # 右键菜单

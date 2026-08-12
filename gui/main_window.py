@@ -140,6 +140,7 @@ class MainWindow(QMainWindow):
         self.project_tree.open_project_requested.connect(
             lambda path: self._open_root(Path(path))
         )
+        self.project_tree.open_path_requested.connect(self._open_path)
         self.project_tree.rename_requested.connect(self._rename_experiment_by_id)
         self.project_tree.delete_requested.connect(self._delete_experiment_by_id)
         self.project_tree.delete_project_requested.connect(self._delete_project)
@@ -737,6 +738,17 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     # 上下文联动
     # ------------------------------------------------------------------
+    def _open_path(self, path: str) -> None:
+        """用系统文件管理器打开目录(双击 data/子文件夹)。"""
+        from PyQt6.QtCore import QUrl
+        from PyQt6.QtGui import QDesktopServices
+
+        target = Path(path)
+        if not target.is_dir():
+            target.mkdir(parents=True, exist_ok=True)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(target)))
+        self.statusBar().showMessage(f"已打开: {target}")
+
     def _on_open_experiment(self, exp_id: str) -> None:
         self.center_panel.set_selection("experiment", exp_id, "")
         self.spectrum_panel.set_context(exp_id, "")

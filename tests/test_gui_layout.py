@@ -607,3 +607,41 @@ def test_data_rename_persists_title(
     data_item = tree.topLevelItem(0).child(0).child(0).child(0)
     assert data_item.text(0) == "重命名后"
     window.close()
+
+def test_double_click_data_keeps_pipeline_and_opens_path(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """双击数据节点:发出 open_path_requested(不跳导入页),中间保持 Pipeline。"""
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    raw_dir = manager.data_dir("exp_001", "d_001", "raw")
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    window = MainWindow(manager=manager)
+    tree = window.project_tree.tree
+    data_item = tree.topLevelItem(0).child(0).child(0).child(0)
+    opened: list[str] = []
+    window.project_tree.open_path_requested.connect(lambda p: opened.append(p))
+    tree.setCurrentItem(data_item)
+    window.project_tree._on_double_clicked(data_item, 0)
+    assert opened and Path(opened[0]) == raw_dir  # 打开 raw 目录
+    assert window.center_panel.stack.currentIndex() == 3  # Pipeline 页
+    window.close()
+
+
+def test_double_click_folder_opens_folder_path(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """双击子文件夹:打开该文件夹目录,中间保持 Pipeline。"""
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    spectra_dir = manager.data_dir("exp_001", "d_001", "spectra")
+    spectra_dir.mkdir(parents=True, exist_ok=True)
+    window = MainWindow(manager=manager)
+    tree = window.project_tree.tree
+    data_item = tree.topLevelItem(0).child(0).child(0).child(0)
+    folder_item = data_item.child(2)  # spectra
+    opened: list[str] = []
+    window.project_tree.open_path_requested.connect(lambda p: opened.append(p))
+    tree.setCurrentItem(folder_item)
+    window.project_tree._on_double_clicked(folder_item, 0)
+    assert opened and Path(opened[0]) == spectra_dir
+    assert window.center_panel.stack.currentIndex() == 3
+    window.close()
