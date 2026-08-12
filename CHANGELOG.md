@@ -6,9 +6,10 @@
   生成 FID 自动产出 fid.com 后可查看/修改/运行(manual_fid_com /
   run_manual_fid_com);生成谱图支持表格参数(param_schema/render_scripts)
   或直接脚本编辑后运行 process.com / nus*.com(run_manual_spectrum,
-  含 fid.com);产物归位 process//spectra/,登记 manual_fid/manual_process/
-  manual_nus WorkflowRun,失败登记 failed 并抛 ManualRunError。
-- 测试:新增 tests/test_manual.py 6 项;全量 246 passed,ruff 全绿。
+  消费已转换 fid,不执行 fid.com——生成 FID 是独立步骤);产物归位
+  process//spectra/,登记 manual_fid/manual_process/manual_nus
+  WorkflowRun,失败登记 failed 并抛 ManualRunError。
+- 测试:新增 tests/test_manual.py 7 项;全量 247 passed,ruff 全绿。
 ## [0.2.19.5] - 2026-08-12
 
 - 谱图面板上下布局(重新实现):文件列表在上、查看器在下,分隔条可上下

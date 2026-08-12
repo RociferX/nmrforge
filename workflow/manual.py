@@ -130,11 +130,21 @@ def manual_scripts(
     data_id: str,
     params: dict[str, Any] | None = None,
 ) -> dict[str, str]:
-    """按参数渲染 fid.com/process.com/nus*.com(供表格或脚本编辑器展示)。"""
+    """渲染谱图步骤脚本(process.com / nus*.com,供表格或脚本编辑器展示)。
+
+    只返回谱图脚本——fid 由「生成 FID」步骤(manual_fid_com / generate_fid)
+    产出,谱图步骤只消费已转换 fid,不执行 fid.com。
+    """
     data_entry = manager.data(exp_id, data_id)
     raw_dir = _resolve_raw_dir(manager, data_entry)
     experiment = read_dataset(raw_dir)
-    return render_scripts(experiment, params)
+    rendered = render_scripts(experiment, params)
+    script_key = (
+        "nus.com"
+        if experiment.sampling.mode is SamplingMode.NUS
+        else "process.com"
+    )
+    return {script_key: rendered[script_key]}
 
 
 def run_manual_spectrum(
@@ -146,8 +156,8 @@ def run_manual_spectrum(
     work_dir: Path | str | None = None,
     timeout: float = 7200.0,
 ) -> str:
-    """运行人工脚本(fid.com 在 raw 目录;process.com/nus*.com 在 process/),
-    终谱归位 spectra/ 并登记。
+    """运行谱图脚本(process.com/nus*.com 在 process/,消费已转换 fid),
+    终谱归位 spectra/ 并登记;不执行 fid.com(生成 FID 是独立步骤)。
     """
     data_entry = manager.data(exp_id, data_id)
     raw_dir = _resolve_raw_dir(manager, data_entry)
@@ -166,6 +176,7 @@ def run_manual_spectrum(
             manager,
             exp_id,
             data_id,
+            data_entry,
             scripts,
             raw_dir,
             work,
@@ -190,6 +201,7 @@ def _run_manual_spectrum_impl(
     manager: ProjectManager,
     exp_id: str,
     data_id: str,
+    data_entry: Any,
     scripts: dict[str, str],
     raw_dir: Path,
     work: Path,
@@ -199,17 +211,19 @@ def _run_manual_spectrum_impl(
     workflow_ref: str,
     timeout: float,
 ) -> str:
-    """run_manual_spectrum 的实际执行(成功路径;失败抛 ManualRunError)。"""
-    fid_com = scripts.get("fid.com")
-    if fid_com is not None:
-        (raw_dir / "fid.com").write_text(fid_com, encoding="utf-8", newline="\n")
-        result = runtime.run(["csh", "fid.com"], cwd=str(raw_dir), timeout=timeout)
-        src = raw_dir / "test.fid"
-        if result.returncode != 0 or not src.is_file():
-            raise ManualRunError(f"fid.com 运行失败: {result.stderr}")
-        fid_path = work / f"{experiment.dataset_id}.fid"
-        shutil.move(str(src), str(fid_path))
-        manager.set_data_fid(exp_id, data_id, fid_path)
+    """run_manual_spectrum 的实际执行(成功路径;失败抛 ManualRunError)。
+
+    谱图步骤只消费已转换 fid(「生成 FID」独立步骤产出),不执行 fid.com。
+    """
+    fid_candidate = (
+        Path(data_entry.fid_path)
+        if data_entry.fid_path
+        else work / f"{experiment.dataset_id}.fid"
+    )
+    if not fid_candidate.is_file():
+        raise ManualRunError(
+            f"缺少已转换 fid,请先生成 FID: {exp_id}/{data_id}"
+        )
 
     if experiment.sampling.mode is SamplingMode.NUS:
         nuslist_src = raw_dir / "nuslist"

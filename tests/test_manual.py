@@ -92,7 +92,8 @@ def test_manual_scripts_renders(
 ) -> None:
     manager, exp_id, data_id, _raw = _manager_with_raw(tmp_path, bruker_dir)
     scripts = manual_scripts(manager, exp_id, data_id)
-    assert sorted(scripts) == ["fid.com", "process.com"]
+    # 谱图步骤只渲染谱图脚本(process.com),不包含 fid.com
+    assert sorted(scripts) == ["process.com"]
     assert scripts["process.com"].startswith("#!/bin/csh")
 
 
@@ -102,18 +103,19 @@ def test_run_manual_spectrum_uniform(
     manager, exp_id, data_id, raw = _manager_with_raw(tmp_path, bruker_dir)
     runtime = _FakeRuntime(spectrum_name=f"{raw.name}.ft2")
     monkeypatch.setattr("workflow.manual.CshRuntime", lambda: runtime)
-    scripts = {
-        "fid.com": "#!/bin/csh\n# fid\n",
-        "process.com": "#!/bin/csh\n# process\n",
-    }
-    spectrum = run_manual_spectrum(manager, exp_id, data_id, scripts)
+    # 先生成 FID(独立步骤),谱图步骤只消费已转换 fid
+    run_manual_fid_com(manager, exp_id, data_id, "#!/bin/csh\n# fid\n")
+    runtime.calls.clear()
+    spectrum = run_manual_spectrum(
+        manager, exp_id, data_id, {"process.com": "#!/bin/csh\n# process\n"}
+    )
     assert Path(spectrum).parent == manager.data_dir(exp_id, data_id, "spectra")
     data = manager.data(exp_id, data_id)
     assert data.spectrum_path == spectrum
     assert data.status == "processed"
     assert any(r.workflow_ref == "manual_process" for r in manager.project.workflow_runs)
-    # fid.com 也执行过并登记 fid
-    assert any(name == "fid.com" for name, _cwd in runtime.calls)
+    # 谱图步骤不执行 fid.com(生成 FID 是独立步骤)
+    assert all(name != "fid.com" for name, _cwd in runtime.calls)
     assert data.fid_path.endswith(".fid")
 
 
@@ -121,8 +123,11 @@ def test_run_manual_spectrum_failure(
     tmp_path: Path, bruker_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     manager, exp_id, data_id, raw = _manager_with_raw(tmp_path, bruker_dir)
-    runtime = _FakeRuntime(spectrum_name=f"{raw.name}.ft2", fail=True)
-    monkeypatch.setattr("workflow.manual.CshRuntime", lambda: runtime)
+    ok_runtime = _FakeRuntime(spectrum_name=f"{raw.name}.ft2")
+    monkeypatch.setattr("workflow.manual.CshRuntime", lambda: ok_runtime)
+    run_manual_fid_com(manager, exp_id, data_id, "#!/bin/csh\n# fid\n")
+    fail_runtime = _FakeRuntime(spectrum_name=f"{raw.name}.ft2", fail=True)
+    monkeypatch.setattr("workflow.manual.CshRuntime", lambda: fail_runtime)
     with pytest.raises(ManualRunError, match="运行失败"):
         run_manual_spectrum(
             manager,
@@ -142,5 +147,25 @@ def test_run_manual_spectrum_missing_script(
     manager, exp_id, data_id, raw = _manager_with_raw(tmp_path, bruker_dir)
     runtime = _FakeRuntime(spectrum_name=f"{raw.name}.ft2")
     monkeypatch.setattr("workflow.manual.CshRuntime", lambda: runtime)
+    run_manual_fid_com(manager, exp_id, data_id, "#!/bin/csh\n# fid\n")
     with pytest.raises(ManualRunError, match="缺少脚本"):
         run_manual_spectrum(manager, exp_id, data_id, {})
+
+
+def test_run_manual_spectrum_missing_fid(
+    tmp_path: Path, bruker_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """谱图步骤缺 fid 时报错并登记 failed run(不自动执行 fid.com)。"""
+    manager, exp_id, data_id, raw = _manager_with_raw(tmp_path, bruker_dir)
+    runtime = _FakeRuntime(spectrum_name=f"{raw.name}.ft2")
+    monkeypatch.setattr("workflow.manual.CshRuntime", lambda: runtime)
+    with pytest.raises(ManualRunError, match="请先生成 FID"):
+        run_manual_spectrum(
+            manager, exp_id, data_id, {"process.com": "#!/bin/csh\n"}
+        )
+    run = next(
+        r
+        for r in manager.project.workflow_runs
+        if r.workflow_ref == "manual_process"
+    )
+    assert run.status == "failed"
