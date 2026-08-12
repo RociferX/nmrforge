@@ -33,8 +33,18 @@ class ProcessingBackend(Protocol):
         """返回后端健康状态（工具可用性/版本）。"""
         ...
 
-    def process(self, experiment: Experiment, plan: ProcessingPlan) -> dict[str, Any]:
-        """按处理计划执行处理，返回输出与指标。"""
+    def process(
+        self,
+        experiment: Experiment,
+        plan: ProcessingPlan,
+        *,
+        params: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """按处理计划执行处理，返回输出与指标。
+
+        params 键:extract(bool,默认 True)/ext_lo(str,默认 "11.0")/
+        ext_hi(str,默认 "6.0")(G2B-006,均匀路径生效)。
+        """
         ...
 
     def convert_to_fid(
@@ -46,6 +56,10 @@ class ProcessingBackend(Protocol):
         """
         ...
 
-    def reconstruct_nus(self, experiment: Experiment, params: dict[str, Any]) -> dict[str, Any]:
-        """执行 NUS 重建。"""
+    def reconstruct_nus(
+        self,
+        experiment: Experiment,
+        params: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """执行 NUS 重建(params 支持 extract,默认 True)。"""
         ...

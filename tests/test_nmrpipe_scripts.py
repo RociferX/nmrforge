@@ -113,6 +113,38 @@ def test_2d_nus_script(bruker_dir: Path) -> None:
     assert "\r" not in script
 
 
+def test_2d_nus_script_extract_off(bruker_dir: Path) -> None:
+    """extract=False 时不写 EXT 行;True 保持现状(默认 6-11 ppm)。"""
+    exp = read_dataset(bruker_dir / "nus_2d")
+    from backend.script_generator import generate_2d_nus_script
+
+    on = generate_2d_nus_script(
+        exp, in_file="e.fid", nuslist="nuslist", out_file="e.ft2"
+    )
+    assert "| nmrPipe -fn EXT" in on
+    assert "-x1 11.0ppm -xn 6.0ppm" in on
+    off = generate_2d_nus_script(
+        exp, in_file="e.fid", nuslist="nuslist", out_file="e.ft2",
+        extract=False,
+    )
+    assert "| nmrPipe -fn EXT" not in off
+
+
+def test_3d_nus_script_extract_off(bruker_dir: Path) -> None:
+    exp = read_dataset(bruker_dir / "nus_3d")
+    from backend.script_generator import generate_3d_nus_script
+
+    off = generate_3d_nus_script(
+        exp, in_file="e.fid", nuslist="nuslist", out_file="e.ft3",
+        extract=False,
+    )
+    assert "| nmrPipe -fn EXT" not in off
+    on = generate_3d_nus_script(
+        exp, in_file="e.fid", nuslist="nuslist", out_file="e.ft3"
+    )
+    assert "| nmrPipe -fn EXT" in on
+
+
 def test_3d_nus_script(bruker_dir: Path) -> None:
     exp = read_dataset(bruker_dir / "nus_3d")
     from backend.script_generator import generate_3d_nus_script

@@ -24,6 +24,7 @@ from backend.bruker_workflow import patch_fid_com, patch_nus_expand_count
 from backend.nmrpipe_finder import find_nmrpipe_bin, find_tool
 from backend.runtime import CshRuntime
 from backend.script_generator import (
+    _as_bool,
     effective_td,
     generate_2d_nus_script,
     generate_3d_nus_script,
@@ -78,6 +79,7 @@ class NMRPipeBackend:
         experiment: Experiment,
         plan: ProcessingPlan,
         *,
+        params: dict[str, Any] | None = None,
         direct_phase_search: bool = True,
         direct_phase_override: dict[str, tuple[float, float]] | None = None,
     ) -> dict[str, Any]:
@@ -141,6 +143,10 @@ class NMRPipeBackend:
             p0, p1 = self._search_direct_phase(work, fid_for_phase, logs)
             direct_axis = "F2" if experiment.ndim == 2 else "F3"
             direct_phase = {direct_axis: (p0, p1)}
+        proc_params = dict(params or {})
+        extract = _as_bool(proc_params.get("extract", True))
+        ext_lo = str(proc_params.get("ext_lo", "11.0"))
+        ext_hi = str(proc_params.get("ext_hi", "6.0"))
         processed, process_logs, spectrum = self._process(
             runtime,
             experiment,
@@ -148,6 +154,9 @@ class NMRPipeBackend:
             work,
             in_file=in_file,
             direct_phase=direct_phase,
+            extract=extract,
+            ext_lo=ext_lo,
+            ext_hi=ext_hi,
         )
         logs += process_logs
         if not processed:
@@ -309,8 +318,9 @@ class NMRPipeBackend:
         if grid_points > 5000 and nthread > 2:
             logs.append(f"大网格 {grid_points}：SMILE 线程数限制为 2（原 {nthread}）")
             nthread = 2
-        ext_lo = str(params.get("ext_lo", 10.5))
-        ext_hi = str(params.get("ext_hi", 6.5))
+        ext_lo = str(params.get("ext_lo", "11.0"))
+        ext_hi = str(params.get("ext_hi", "6.0"))
+        extract = _as_bool(params.get("extract", True))
         out_file = f"{experiment.dataset_id}.{ext}"
         script = script_fn(
             experiment,
@@ -327,6 +337,7 @@ class NMRPipeBackend:
             smile_scaling=smile_scaling,
             smile_report=smile_report,
             direct_phase=(direct_p0, direct_p1),
+            extract=extract,
         )
         nus_com = work / f"{experiment.dataset_id}_nus.com"
         nus_com.write_text(script, encoding="utf-8", newline="\n")
@@ -609,6 +620,9 @@ class NMRPipeBackend:
         *,
         in_file: str | None = None,
         direct_phase: dict[str, tuple[float, float]] | None = None,
+        extract: bool = True,
+        ext_lo: str = "11.0",
+        ext_hi: str = "6.0",
     ) -> tuple[bool, list[str], Path]:
         """生成并执行 NMRPipe 处理管道（输出 ft2/ft3）。"""
         logs: list[str] = []
@@ -621,6 +635,9 @@ class NMRPipeBackend:
             in_file=in_file,
             out_file=out_file,
             direct_phase=direct_phase,
+            extract=extract,
+            ext_lo=ext_lo,
+            ext_hi=ext_hi,
         )
         process_com = work / f"{experiment.dataset_id}_process.com"
         process_com.write_text(script, encoding="utf-8", newline="\n")

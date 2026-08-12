@@ -36,8 +36,11 @@ class _FakeBackend:
         self._touch(fid_path)
         return {"success": True, "fid_path": str(fid_path), "message": "ok", "logs": []}
 
-    def process(self, experiment, plan, direct_phase_override=None) -> dict:
+    def process(
+        self, experiment, plan, direct_phase_override=None, params=None
+    ) -> dict:
         self.calls.append("process")
+        self.last_params = params
         p1 = 0
         if direct_phase_override:
             p1 = next(iter(direct_phase_override.values()))[1]
@@ -102,6 +105,25 @@ def test_generate_spectrum_uniform(tmp_path: Path, bruker_dir: Path) -> None:
     assert data.status == "processed"
     assert "process" in backend.calls
     assert manager.infer_status(exp_id) is ExperimentStatus.PROCESSED
+
+
+def test_generate_spectrum_passes_params(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """均匀分支把 params 透传给 backend.process(G2B-006)。"""
+    manager, exp_id, data_id, work = _manager_with_data(
+        tmp_path, bruker_dir / "hsqc_2d"
+    )
+    backend = _FakeBackend(work)
+    generate_fid(manager, exp_id, data_id, backend)
+    generate_spectrum(
+        manager,
+        exp_id,
+        data_id,
+        backend,
+        params={"extract": False, "ext_lo": "9.0"},
+    )
+    assert backend.last_params == {"extract": False, "ext_lo": "9.0"}
 
 
 def test_generate_spectrum_nus_uses_reconstruct(tmp_path: Path, bruker_dir: Path) -> None:
