@@ -163,7 +163,7 @@ def test_project_tree_structure(
     workspace_item = panel.tree.topLevelItem(0)
     assert workspace_item.text(0) == "NMRForgeWorkspace"  # Workspace 根节点
     project_item = workspace_item.child(0)
-    assert project_item.text(0) == "proj"  # 工作区项目目录名
+    assert project_item.text(0) == "demo"  # 当前项目显示 project.name
     assert project_item.text(1) == "当前"  # 当前项目标记
     assert project_item.childCount() == 2
     exp_item = project_item.child(0)

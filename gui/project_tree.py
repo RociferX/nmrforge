@@ -46,6 +46,7 @@ class ProjectTreePanel(QWidget):
     open_requested = pyqtSignal(str)  # 双击实验:请求打开/聚焦该实验
     open_project_requested = pyqtSignal(str)  # 双击未打开项目:请求打开
     data_rename_requested = pyqtSignal(str, str)  # (exp_id, data_id):重命名数据
+    rename_project_requested = pyqtSignal()  # 重命名当前项目
     open_path_requested = pyqtSignal(str)  # 打开所在目录(子文件夹右键)
     delete_project_requested = pyqtSignal()  # Project 右键:删除项目
     create_experiment_requested = pyqtSignal()  # 空白处右键:新建空白实验
@@ -102,7 +103,10 @@ class ProjectTreePanel(QWidget):
         current_root = self.manager.root
         for project_dir in self._workspace_projects():
             is_current = current_root is not None and project_dir == Path(current_root).resolve()
-            project_item = QTreeWidgetItem([project_dir.name, "当前" if is_current else ""])
+            display_name = project_dir.name
+            if is_current and self.manager.project is not None:
+                display_name = self.manager.project.name or project_dir.name
+            project_item = QTreeWidgetItem([display_name, "当前" if is_current else ""])
             project_item.setIcon(0, self._icon("project"))
             project_item.setToolTip(
                 0,
@@ -340,6 +344,7 @@ class ProjectTreePanel(QWidget):
                     )
                 else:
                     menu.addAction("新建空白实验...", self.create_experiment_requested.emit)
+                    menu.addAction("重命名项目...", self.rename_project_requested.emit)
                     menu.addSeparator()
                     menu.addAction("删除项目...", self.delete_project_requested.emit)
             elif kind == "experiment" and exp_id:

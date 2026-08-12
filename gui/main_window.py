@@ -143,6 +143,7 @@ class MainWindow(QMainWindow):
         self.project_tree.rename_requested.connect(self._rename_experiment_by_id)
         self.project_tree.delete_requested.connect(self._delete_experiment_by_id)
         self.project_tree.delete_project_requested.connect(self._delete_project)
+        self.project_tree.rename_project_requested.connect(self._rename_project)
         self.project_tree.create_experiment_requested.connect(
             self._create_experiment
         )
@@ -472,6 +473,24 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     # 树动作(契约 v1.2 §8.5)
     # ------------------------------------------------------------------
+    def _rename_project(self) -> None:
+        """重命名当前项目(更新 project.json 的 name)。"""
+        if self.manager.project is None:
+            return
+        new_name, ok = QInputDialog.getText(
+            self, "重命名项目", "项目名称:", text=self.manager.project.name
+        )
+        if not ok or not new_name.strip():
+            return
+        self.manager.project.name = new_name.strip()
+        try:
+            self.manager.save()
+        except ProjectError as exc:
+            InfoDialog.show_info(self, "重命名项目失败", str(exc))
+            return
+        self.refresh()
+        self.statusBar().showMessage(f"项目已重命名为 {new_name.strip()}")
+
     def _delete_project(self) -> None:
         if self.manager.project is None:
             return
