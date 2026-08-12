@@ -696,7 +696,7 @@ def test_spectrum_panel_vertical_layout(qapp: QApplication) -> None:
     assert found, "SpectrumPanel 内应有 QSplitter"
     splitter = found[0]
     assert splitter.orientation() == Qt.Orientation.Vertical
-    assert splitter.count() == 2
+    assert splitter.count() == 3  # viewer / 文件列表 / 峰表
     assert panel.file_list.maximumWidth() > 1000  # 无横向宽度限制
     panel.close()
 
@@ -723,3 +723,77 @@ def test_viewer_internal_vertical_layout(qapp: QApplication) -> None:
     assert splitter.count() == 2
     assert splitter.widget(0) is viewer.plot  # 上方谱图
     viewer.close()
+
+def test_project_dashboard_stats_and_runs(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Project Dashboard:统计 + 最近运行。"""
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    run = manager.start_run("exp_001", workflow_ref="import")
+    manager.finish_run(run.run_id, "success", message="ok")
+    manager.save()
+    window = MainWindow(manager=manager)
+    tree = window.project_tree.tree
+    proj_item = tree.topLevelItem(0).child(0)
+    tree.setCurrentItem(proj_item)
+    assert window.center_panel.stack.currentIndex() == 1  # Project Dashboard
+    assert "实验:" in window.center_panel.project_page.stats_label.text()
+    assert window.center_panel.project_page.runs_table.rowCount() >= 1
+    window.close()
+
+
+def test_experiment_dashboard_data_rows(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Experiment Dashboard:数据列表。"""
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    window = MainWindow(manager=manager)
+    tree = window.project_tree.tree
+    exp_item = tree.topLevelItem(0).child(0).child(0)
+    tree.setCurrentItem(exp_item)
+    assert window.center_panel.stack.currentIndex() == 2
+    assert window.center_panel.experiment_page.data_table.rowCount() >= 1
+    window.close()
+
+
+def test_run_history_dialog(tmp_path: Path, qapp: QApplication) -> None:
+    """运行历史对话框:列表 + 详情。"""
+    from gui.dialogs import RunHistoryDialog
+
+    manager = ProjectManager.create_project(tmp_path / "ws" / "proj", "demo")
+    manager.create_experiment("HSQC")
+    run = manager.start_run("exp_001", workflow_ref="import")
+    manager.finish_run(run.run_id, "success", outputs={"spectrum": "x.ft2"}, message="ok")
+    dialog = RunHistoryDialog(None, manager.project.workflow_runs, "demo")
+    assert dialog.table.rowCount() == 1
+    dialog.table.selectRow(0)
+    assert "x.ft2" in dialog.detail_label.text()
+    dialog.close()
+
+
+def test_spectrum_peak_linkage(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """谱图-峰表联动:峰表加载 + 双向高亮/选中。"""
+    import csv
+
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    spectra = manager.data_dir("exp_001", "d_001", "spectra")
+    spectra.mkdir(parents=True, exist_ok=True)
+    (spectra / "exp_001-d_001.ft2").write_bytes(b"x")
+    peaks = manager.data_dir("exp_001", "d_001", "peaks")
+    peaks.mkdir(parents=True, exist_ok=True)
+    with (peaks / "exp_001-d_001.csv").open("w", encoding="utf-8", newline="") as fh:
+        writer = csv.writer(fh)
+        writer.writerow(["Peak_ID", "H_shift", "N_shift", "Intensity", "SN", "label"])
+        writer.writerow(["1", "8.0", "115.0", "100", "20", "G1"])
+        writer.writerow(["2", "7.5", "118.0", "80", "15", "A2"])
+    panel = SpectrumPanel(manager)
+    panel.set_context("exp_001", "d_001")
+    assert panel.peak_table.rowCount() == 2
+    assert len(panel.viewer._peaks) == 2
+    panel.peak_table.selectRow(1)
+    assert panel.viewer._selected_peak == 1
+    panel._on_viewer_peak_clicked(0)
+    assert panel.peak_table.currentRow() == 0
+    panel.close()

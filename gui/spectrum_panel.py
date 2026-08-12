@@ -13,6 +13,8 @@ from PyQt6.QtWidgets import (
     QLabel,
     QListWidget,
     QSplitter,
+    QTableWidget,
+    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -39,18 +41,29 @@ class SpectrumPanel(QWidget):
         self.file_list = QListWidget()
         self.file_list.setMaximumWidth(190)
         self.file_list.itemClicked.connect(self._on_file_clicked)
+        self.peak_table = QTableWidget(0, 5)
+        self.peak_table.setHorizontalHeaderLabels(
+            ["Peak_ID", "H_shift", "N_shift", "Intensity", "SN"]
+        )
+        self.peak_table.horizontalHeader().setStretchLastSection(True)
+        self.peak_table.setMaximumHeight(150)
+        self.peak_table.itemSelectionChanged.connect(self._on_peak_row_selected)
+        self._peaks: list[dict] = []
         self.placeholder = QLabel("未打开项目\n\n从左侧选择实验,或点击下方谱图文件查看结果。")
         self.placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.placeholder.setWordWrap(True)
         self.placeholder.setStyleSheet("color: #888;")
 
-        # 上下布局:上方查看器,下方文件列表(分隔条可上下拖动,避免上方空白)
+        # 上下布局:上方查看器,中部文件列表,下方峰表
         splitter = QSplitter(Qt.Orientation.Vertical)
         splitter.addWidget(self.viewer)
         splitter.addWidget(self.file_list)
+        splitter.addWidget(self.peak_table)
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 0)
-        splitter.setSizes([520, 110])
+        splitter.setStretchFactor(2, 0)
+        splitter.setSizes([500, 80, 120])
+        self.viewer.peak_clicked.connect(self._on_viewer_peak_clicked)
         self.file_list.setMaximumWidth(16777215)  # 取消横向宽度限制
         layout.addWidget(splitter)
         self.refresh()
@@ -65,11 +78,17 @@ class SpectrumPanel(QWidget):
         self.file_list.clear()
         if self.manager.project is None or not self._current_exp_id:
             self.file_list.setVisible(False)
+            self.peak_table.setVisible(False)
             return
         paths = self._spectrum_paths()
         for path in paths:
             self.file_list.addItem(path.name)
         self.file_list.setVisible(bool(paths))
+        self.peak_table.setVisible(bool(paths))
+        if paths:
+            self._load_peaks(paths[0])
+        else:
+            self._clear_peaks()
 
     def _spectrum_paths(self) -> list[Path]:
         """当前实验/数据下的谱图文件(新布局优先,旧扁平路径回退)。"""
@@ -113,4 +132,62 @@ class SpectrumPanel(QWidget):
             return
         if not self.open_spectrum(paths[0]):
             self.viewer.clear()
+        self._load_peaks(paths[0])
+
+    # ------------------------------------------------------------------
+    # 峰表(Peak CSV)与谱图双向联动
+    # ------------------------------------------------------------------
+    def _peak_csv_path(self, spectrum_path: Path) -> Path | None:
+        if self.manager.project is None:
+            return None
+        try:
+            if self._current_data_id:
+                peaks_dir = self.manager.data_dir(
+                    self._current_exp_id, self._current_data_id, "peaks"
+                )
+                candidate = peaks_dir / f"{self._current_exp_id}-{self._current_data_id}.csv"
+                if candidate.is_file():
+                    return candidate
+        except Exception:  # noqa: BLE001
+            pass
+        legacy = self.manager.dir_path("peaks") / f"{self._current_exp_id}.csv"
+        return legacy if legacy.is_file() else None
+
+    def _load_peaks(self, spectrum_path: Path) -> None:
+        import csv
+
+        self._clear_peaks()
+        csv_path = self._peak_csv_path(spectrum_path)
+        if csv_path is None:
+            return
+        peaks: list[dict] = []
+        try:
+            with csv_path.open(encoding="utf-8", newline="") as fh:
+                peaks = [dict(row) for row in csv.DictReader(fh)]
+        except (OSError, csv.Error):
+            return
+        self._peaks = peaks
+        self.peak_table.setRowCount(len(peaks))
+        for row, peak in enumerate(peaks):
+            for col, key in enumerate(("Peak_ID", "H_shift", "N_shift", "Intensity", "SN")):
+                self.peak_table.setItem(row, col, QTableWidgetItem(str(peak.get(key, ""))))
+            self.peak_table.item(row, 0).setData(0x0100, row)
+        self.viewer.set_peaks(peaks)
+
+    def _clear_peaks(self) -> None:
+        self._peaks = []
+        self.peak_table.setRowCount(0)
+        self.viewer.set_peaks([])
+
+    def _on_viewer_peak_clicked(self, row: int) -> None:
+        if 0 <= row < self.peak_table.rowCount():
+            self.peak_table.selectRow(row)
+
+    def _on_peak_row_selected(self) -> None:
+        rows = self.peak_table.selectionModel().selectedRows()
+        if not rows:
+            return
+        row = rows[0].row()
+        if 0 <= row < len(self._peaks):
+            self.viewer.highlight_peak(row)
 

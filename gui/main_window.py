@@ -108,6 +108,8 @@ class MainWindow(QMainWindow):
         process_menu.addAction("运行自动化处理", self.run_auto)
         process_menu.addAction("人工参数表格...", self._manual_param_table_menu)
         process_menu.addAction("人工脚本编辑器...", self._manual_script_editor_menu)
+        process_menu.addSeparator()
+        process_menu.addAction("运行历史...", self._show_run_history)
 
         sample_menu = bar.addMenu("样本(&S)")
         sample_menu.addAction("添加样本...", self.add_sample)
@@ -444,6 +446,17 @@ class MainWindow(QMainWindow):
             InfoDialog.show_info(self, "提示", "当前没有可运行的步骤")
             return
         self.center_panel.run_step(next_step)
+
+    def _show_run_history(self) -> None:
+        """打开运行历史对话框(全部 workflow_runs)。"""
+        from gui.dialogs import RunHistoryDialog
+
+        if self.manager.project is None:
+            InfoDialog.show_info(self, "提示", "请先打开项目")
+            return
+        runs = list(self.manager.project.workflow_runs)
+        dialog = RunHistoryDialog(self, runs, self.manager.project.name)
+        dialog.exec()
 
     def _manual_param_table_menu(self) -> None:
         self._open_manual_dialog("process")

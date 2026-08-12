@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -349,3 +350,58 @@ class ScriptEditorDialog(QDialog):
         except OSError as exc:
             self.save_message.setText(f"保存失败: {exc}")
             return None
+
+
+class RunHistoryDialog(QDialog):
+    """运行历史对话框:workflow_runs 列表 + 详情(状态/时间/消息/产物)。"""
+
+    def __init__(
+        self,
+        parent: QWidget | None,
+        runs: list,
+        project_name: str = "",
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(f"运行历史 - {project_name or 'NMRForge'}")
+        self.resize(720, 480)
+        layout = QVBoxLayout(self)
+
+        self.table = QTableWidget(len(runs), 6)
+        self.table.setHorizontalHeaderLabels(
+            ["运行", "实验", "流程", "状态", "开始", "结束"]
+        )
+        self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        for row, run in enumerate(runs):
+            self.table.setItem(row, 0, QTableWidgetItem(run.run_id))
+            self.table.setItem(row, 1, QTableWidgetItem(run.experiment_id))
+            self.table.setItem(row, 2, QTableWidgetItem(run.workflow_ref))
+            self.table.setItem(row, 3, QTableWidgetItem(run.status))
+            self.table.setItem(row, 4, QTableWidgetItem(run.started_at[:19]))
+            self.table.setItem(row, 5, QTableWidgetItem((run.finished_at or "")[:19]))
+            self.table.item(row, 0).setData(Qt.ItemDataRole.UserRole, run)
+        self.table.itemSelectionChanged.connect(self._show_detail)
+        layout.addWidget(self.table, 1)
+
+        self.detail_label = QLabel("选择一行查看详情")
+        self.detail_label.setWordWrap(True)
+        self.detail_label.setStyleSheet("color: #444;")
+        layout.addWidget(self.detail_label)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _show_detail(self) -> None:
+        items = self.table.selectedItems()
+        if not items:
+            return
+        run = items[0].data(Qt.ItemDataRole.UserRole)
+        if run is None:
+            return
+        outputs = "\n".join(f"  {k}: {v}" for k, v in run.outputs.items()) or "  (无)"
+        self.detail_label.setText(
+            f"运行: {run.run_id}  [{run.status}]\n"
+            f"流程: {run.workflow_ref}  实验: {run.experiment_id}\n"
+            f"消息: {run.message or '-'}\n产物:\n{outputs}"
+        )
