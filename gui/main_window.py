@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (
     QApplication,
@@ -53,7 +53,10 @@ from workflow.import_workflow import ImportResult
 
 
 class MainWindow(QMainWindow):
-    """NMRForge 主窗口;未打开项目时左侧树与中间面板显示空态。"""
+    """NMRForge 主窗口;未打开项目时显示欢迎页。"""
+
+    import_failed = pyqtSignal(str)  # 导入失败信息(后台线程 → 主线程)
+    import_finished = pyqtSignal(object)  # ImportResult(后台线程 → 主线程)
 
     def __init__(
         self,
@@ -68,6 +71,8 @@ class MainWindow(QMainWindow):
         self.controller.set_manager(self.manager)
         self.workspace = WorkspaceManager()
         self.workspace.ensure()
+        self.import_failed.connect(self._on_import_failed)
+        self.import_finished.connect(self._on_import_done)
         self.setWindowTitle("NMRForge")
         self.resize(1280, 780)
         self._build_menus()
@@ -291,14 +296,16 @@ class MainWindow(QMainWindow):
                     copy=bool(data.get("copy", True)),
                 )
                 self.manager.save()
-                self._on_import_done(result)
-            except Exception as exc:  # noqa: BLE001 - 错误统一回传 UI
-                self._append_log(f"导入失败: {exc}")
-                InfoDialog.show_info(
-                    self, "导入失败", f"{type(exc).__name__}: {exc}"
-                )
+                self.import_finished.emit(result)  # 回主线程刷新 UI
+            except Exception as exc:  # noqa: BLE001 - 错误统一回主线程提示
+                self.import_failed.emit(f"{type(exc).__name__}: {exc}")
 
         threading.Thread(target=worker, daemon=True).start()
+
+    def _on_import_failed(self, message: str) -> None:
+        """主线程处理导入失败(弹窗 + 日志)。"""
+        self._append_log(f"导入失败: {message}")
+        InfoDialog.show_info(self, "导入失败", message)
 
     def _on_import_done(self, result: ImportResult) -> None:
         """导入成功后刷新并选中新实验;展示 warnings。"""
@@ -606,11 +613,10 @@ class MainWindow(QMainWindow):
             self.setWindowTitle("NMRForge - 欢迎")
             self.statusBar().showMessage("新建或打开项目开始工作")
             self.center_panel.welcome_page.refresh()
-            self.main_splitter.setVisible(False)
             self.center_panel.set_selection("workspace", "", "")
             self.spectrum_panel.set_context("", "")
+            self.main_splitter.setVisible(True)  # 欢迎页在三栏中显示
             return
-        self.main_splitter.setVisible(True)
         for exp in project.experiments:
             status = self.manager.infer_status(exp.id).value
             item = QTreeWidgetItem([exp.id, exp.title, status, exp.sample_id, exp.source])

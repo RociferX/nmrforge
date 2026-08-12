@@ -394,10 +394,11 @@ def test_welcome_page_shows_workspace_and_recent(
 
 
 def test_main_window_welcome_page_on_startup(qapp: QApplication) -> None:
-    """未打开项目时主窗口显示欢迎页。"""
+    """未打开项目时主窗口显示欢迎页(三栏中 Workspace 页)。"""
     window = MainWindow()
     assert window.center_panel.welcome_page is not None
-    assert window.main_splitter.isHidden()  # 欢迎页优先,三栏隐藏
+    assert not window.main_splitter.isHidden()  # 三栏可见,欢迎页在中间
+    assert window.center_panel.stack.currentIndex() == 0  # Workspace 页
     window.close()
 
 def test_data_selected_shows_pipeline_page(
@@ -413,3 +414,36 @@ def test_data_selected_shows_pipeline_page(
     assert window.pipeline.current_experiment_id() == "exp_001"
     assert window.pipeline._rows["import"].manual_button.isHidden()  # 导入无人工
     window.close()
+
+def test_import_failure_handled_on_main_thread(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """导入失败经信号回主线程处理(不在后台线程弹模态框)。"""
+    manager = _manager_with_experiment(tmp_path)
+    messages: list[str] = []
+    monkeypatch.setattr(
+        "gui.main_window.InfoDialog.show_info",
+        staticmethod(lambda parent, title, text_: messages.append(text_)),
+    )
+    monkeypatch.setattr(
+        "threading.Thread",
+        lambda *a, **k: _SyncThread(*a, **k),
+    )
+
+    def fail_import(mgr, exp_id, source, *, segments=None, copy=True):
+        raise RuntimeError("模拟导入失败")
+
+    monkeypatch.setattr("workflow.import_workflow.import_data", fail_import)
+    window = MainWindow(manager=manager)
+    window.add_experiment_via_import(str(tmp_path / "nonexistent"), title="T")
+    assert messages and "导入失败" in messages[0]
+    assert "导入失败" in window.log_panel.text.toPlainText()
+    window.close()
+
+
+class _SyncThread:
+    def __init__(self, target=None, daemon=None) -> None:
+        self._target = target
+
+    def start(self) -> None:
+        self._target()
