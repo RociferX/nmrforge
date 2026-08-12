@@ -38,6 +38,7 @@ Backend 不依赖 Qt。
 | `core/qc/`、`core/reporting/` | Backend | QC/报告 |
 | `scripts/{smile_optimize,param_optimize,recon_phase_search}.py` | Backend | 命令行工具 |
 | `core/project/` | Shared | 项目管理模型(GUI 地基 + Backend 运行登记) |
+| `core/workspace.py` | Shared | 工作区容器(默认 ~/NMRForgeWorkspace,首次启动创建) |
 | `core/data/internal_data_model.py` | Shared | Experiment/Dimension/Sampling |
 | `backend/base.py` | Shared | ProcessingBackend Protocol |
 | `viewer/spectrum.py` | Shared | Spectrum/SpectrumAxis(读谱契约) |
@@ -52,8 +53,10 @@ Bruker 目录 → core/data/bruker_reader.read_dataset → Experiment(Shared)
   → backend.process / reconstruct_nus → 谱图文件(ft2/ft3)
   → viewer/spectrum.Spectrum(Shared) → SpectrumViewer 展示
 
-项目管理:core/project.ProjectManager(Shared)贯穿:
-  实验登记 → WorkflowRun(参数/脚本快照/产物) → 状态推断
+项目管理:core/workspace.WorkspaceManager(Shared,首次启动创建默认工作区)
+  → core/project.ProjectManager(Shared):
+  实验登记 → 数据导入(raw 副本 + metadata)→ WorkflowRun(参数/快照/产物)
+  → 状态推断;目录层级即层级(见 API_CONTRACT §9)
 ```
 
 ## 4. 当前跨边界触点(唯一)
