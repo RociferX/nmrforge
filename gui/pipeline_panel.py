@@ -189,6 +189,8 @@ class PipelinePanel(QWidget):
         self.manager = manager or ProjectManager()
         self.controller = controller or ProcessingController()
         self._current_exp_id: str = ""
+        self._selection_kind: str = ""  # data/folder 时显示步骤;project/experiment 显示提示
+        self._current_data_id: str = ""
         self._rows: dict[str, PipelineStepRow] = {}
 
         layout = QVBoxLayout(self)
@@ -224,8 +226,16 @@ class PipelinePanel(QWidget):
     # 上下文
     # ------------------------------------------------------------------
     def set_context(self, exp_id: str) -> None:
-        """设置当前实验并刷新步骤状态。"""
+        """兼容入口:按实验设置上下文(默认视为选中实验)。"""
+        self._selection_kind = "experiment" if exp_id else ""
         self._current_exp_id = exp_id or ""
+        self.refresh()
+
+    def set_selection(self, kind: str, exp_id: str, data_id: str = "") -> None:
+        """按树选中类型刷新:project/experiment 显示「未选中数据」;data/folder 显示步骤。"""
+        self._selection_kind = kind or ""
+        self._current_exp_id = exp_id or ""
+        self._current_data_id = data_id
         self.refresh()
 
     def current_experiment_id(self) -> str:
@@ -237,6 +247,14 @@ class PipelinePanel(QWidget):
         if project is None or not self._current_exp_id:
             self.context_label.setText("未打开项目")
             self.next_label.setText("")
+            for row in self._rows.values():
+                row.set_status("LOCKED")
+            return
+        if self._selection_kind in ("project", "experiment"):
+            exp = project.experiment(self._current_exp_id)
+            label = exp.title if exp is not None else project.name
+            self.context_label.setText(f"{label} — 未选中数据")
+            self.next_label.setText("请选择左侧的 Data 节点查看/运行处理步骤")
             for row in self._rows.values():
                 row.set_status("LOCKED")
             return

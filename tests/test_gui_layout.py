@@ -193,7 +193,7 @@ def test_pipeline_status_after_spectrum(tmp_path: Path, qapp: QApplication) -> N
 def test_pipeline_panel_refresh_shows_next_step(tmp_path: Path, qapp: QApplication) -> None:
     manager = _manager_with_experiment(tmp_path)
     panel = PipelinePanel(manager, FakeProcessingController())
-    panel.set_context("exp_001")
+    panel.set_selection("data", "exp_001", "d_001")
     assert "下一步" in panel.next_label.text()
     assert "生成 FID" in panel.next_label.text()
     assert not panel._rows["fid"].run_button.isHidden()
@@ -210,7 +210,7 @@ def test_pipeline_panel_run_generate_fid(
     panel = PipelinePanel(manager, controller)
     log = LogPanel()
     panel.log_message.connect(log.append)
-    panel.set_context("exp_001")
+    panel.set_selection("data", "exp_001", "d_001")
     panel._on_run_requested("fid")
     assert controller.calls == ["generate_fid"]
     assert "完成 生成 FID" in log.text.toPlainText()
@@ -260,6 +260,7 @@ def test_main_window_three_column_layout(tmp_path: Path, qapp: QApplication) -> 
     assert window.pipeline is not None
     assert window.spectrum_panel is not None
     assert window.pipeline.current_experiment_id() == "exp_001"
+    assert "未选中数据" in window.pipeline.context_label.text()
     assert "demo" in window.windowTitle()
     assert window.experiment_tree.topLevelItemCount() == 2  # 兼容表同步
     window.close()
@@ -300,7 +301,7 @@ def test_main_window_empty_state(qapp: QApplication) -> None:
 def test_tree_data_node_context_menu_actions(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Data 节点右键三步操作信号(生成 FID / 生成谱图 / 删除)。"""
+    """Data 节点右键不再含功能项,仅删除/打开目录。"""
     manager = _manager_with_experiment(tmp_path)
     panel = ProjectTreePanel(manager)
     data_item = panel.tree.topLevelItem(0).child(0).child(0).child(0)
@@ -310,11 +311,25 @@ def test_tree_data_node_context_menu_actions(
     )
     menu = QMenu()
     panel._on_context_menu_impl(menu, data_item)
+    labels = [a.text() for a in menu.actions()]
+    assert "生成 FID" not in labels and "生成谱图" not in labels
     for action in menu.actions():
         action.trigger()
-    assert ("fid", "d_001") in actions
-    assert ("spectrum", "d_001") in actions
-    assert ("delete", "d_001") in actions
+    assert actions == [("delete", "d_001")]
+    panel.close()
+
+
+def test_tree_subfolder_context_menu_has_open_path(
+    tmp_path: Path, qapp: QApplication
+) -> None:
+    """raw 等子目录右键提供「打开所在目录」。"""
+    manager = _manager_with_experiment(tmp_path)
+    panel = ProjectTreePanel(manager)
+    folder_item = panel.tree.topLevelItem(0).child(0).child(0).child(0).child(0)
+    menu = QMenu()
+    panel._on_context_menu_impl(menu, folder_item)
+    labels = [a.text() for a in menu.actions()]
+    assert "打开所在目录" in labels
     panel.close()
 
 

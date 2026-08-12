@@ -510,7 +510,7 @@ class MainWindow(QMainWindow):
             self._delete_experiment_by_id(exp_id)
             return
         step = "fid" if action == "fid" else "spectrum"
-        self.pipeline.set_context(exp_id)
+        self.pipeline.set_selection("data", exp_id, data_id)
         self.pipeline.run_step(step)
 
     def _noop_hint(self) -> None:
@@ -541,16 +541,16 @@ class MainWindow(QMainWindow):
     # 上下文联动
     # ------------------------------------------------------------------
     def _on_open_experiment(self, exp_id: str) -> None:
-        self.pipeline.set_context(exp_id)
-        self.spectrum_panel.set_context(exp_id)
+        self.pipeline.set_selection("experiment", exp_id, "")
+        self.spectrum_panel.set_context(exp_id, "")
         self.statusBar().showMessage(
             f"实验 {exp_id}: 双击查看谱图文件,中间 Pipeline 显示处理步骤"
         )
 
-    def _update_context(self, exp_id: str) -> None:
-        """左侧选择变化 → 中间/右侧围绕所属实验刷新。"""
-        self.pipeline.set_context(exp_id)
-        self.spectrum_panel.set_context(exp_id)
+    def _update_context(self, kind: str, exp_id: str, data_id: str = "") -> None:
+        """左侧选择变化 → 中间按选中类型显示,右侧围绕数据刷新。"""
+        self.pipeline.set_selection(kind, exp_id, data_id)
+        self.spectrum_panel.set_context(exp_id, data_id)
 
     def _append_log(self, message: str) -> None:
         self.log_panel.append(message)
@@ -576,8 +576,8 @@ class MainWindow(QMainWindow):
             self.welcome_page.refresh()
             self.welcome_page.setVisible(True)
             self.main_splitter.setVisible(False)
-            self.pipeline.set_context("")
-            self.spectrum_panel.set_context("")
+            self.pipeline.set_selection("", "", "")
+            self.spectrum_panel.set_context("", "")
             return
         self.welcome_page.setVisible(False)
         self.main_splitter.setVisible(True)

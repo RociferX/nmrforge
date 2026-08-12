@@ -42,8 +42,9 @@ _STATUS_TEXT = {
 class ProjectTreePanel(QWidget):
     """项目管理树;selection_changed 在上下文(实验)变化时发出。"""
 
-    selection_changed = pyqtSignal(str)  # experiment_id(选中实验或空串)
+    selection_changed = pyqtSignal(str, str, str)  # (kind, exp_id, data_id)
     open_requested = pyqtSignal(str)  # 双击实验:请求打开/聚焦该实验
+    open_path_requested = pyqtSignal(str)  # 打开所在目录(子文件夹右键)
     delete_project_requested = pyqtSignal()  # Project 右键:删除项目
     create_experiment_requested = pyqtSignal()  # 空白处右键:新建空白实验
     import_data_requested = pyqtSignal(str)  # Experiment 右键:导入数据(exp_id)
@@ -256,7 +257,15 @@ class ProjectTreePanel(QWidget):
         return None
 
     def _on_selection_changed(self) -> None:
-        self.selection_changed.emit(self.current_experiment_id())
+        item = self.tree.currentItem()
+        if item is None:
+            self.selection_changed.emit("", "", "")
+            return
+        data = item.data(0, Qt.ItemDataRole.UserRole)
+        kind = data.get("kind") if isinstance(data, dict) else ""
+        self.selection_changed.emit(
+            kind, self._experiment_id_of(item), self._data_id_of(item)
+        )
 
     def _on_double_clicked(self, item: QTreeWidgetItem, _column: int) -> None:
         exp_id = self._experiment_id_of(item)
@@ -293,11 +302,6 @@ class ProjectTreePanel(QWidget):
                 menu.addSeparator()
                 menu.addAction("删除实验", lambda: self.delete_requested.emit(exp_id))
             elif kind == "data" and exp_id and data_id:
-                menu.addAction("生成 FID", lambda: self.data_action_requested.emit("fid", data_id))
-                menu.addAction(
-                    "生成谱图", lambda: self.data_action_requested.emit("spectrum", data_id)
-                )
-                menu.addSeparator()
                 source = self._source_of(exp_id)
                 if source:
                     menu.addAction(
@@ -310,6 +314,15 @@ class ProjectTreePanel(QWidget):
                     "删除数据",
                     lambda: self.data_action_requested.emit("delete", data_id),
                 )
+            elif kind == "folder" and exp_id and data_id:
+                folder_path = self._folder_path(exp_id, data_id, data.get("folder", ""))
+                if folder_path is not None:
+                    menu.addAction(
+                        "打开所在目录",
+                        lambda p=folder_path: QDesktopServices.openUrl(
+                            QUrl.fromLocalFile(str(p))
+                        ),
+                    )
         return menu
 
     def _source_of(self, exp_id: str) -> Path | None:
@@ -323,3 +336,10 @@ class ProjectTreePanel(QWidget):
         if path.is_dir():
             return path
         return path.parent if path.exists() else None
+
+    def _folder_path(self, exp_id: str, data_id: str, folder: str) -> Path | None:
+        """数据子文件夹真实路径(契约 v1.3:data_dir(exp_id, data_id, key))。"""
+        try:
+            return self.manager.data_dir(exp_id, data_id, folder)
+        except Exception:  # noqa: BLE001 - 旧布局/未落地时回退 None
+            return None
