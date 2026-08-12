@@ -60,6 +60,7 @@ class SpectrumPanel(QWidget):
         self.peak_table.setMaximumHeight(150)
         self.peak_table.itemSelectionChanged.connect(self._on_peak_row_selected)
         self._peaks: list[dict] = []
+        self._current_spectrum: Path | None = None
         self.placeholder = QLabel("未打开项目\n\n从左侧选择实验,或点击下方谱图文件查看结果。")
         self.placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.placeholder.setWordWrap(True)
@@ -101,8 +102,15 @@ class SpectrumPanel(QWidget):
         self.peak_table.setVisible(bool(paths))
         self.export_poky_button.setEnabled(False)
         if paths:
-            self._load_peaks(paths[0])
+            first = paths[0]
+            if self._current_spectrum != first:
+                if self.open_spectrum(first):
+                    self._current_spectrum = first
+                else:
+                    self._current_spectrum = None
+            self._load_peaks(first)
         else:
+            self._current_spectrum = None
             self._clear_peaks()
 
     def _spectrum_paths(self) -> list[Path]:
@@ -147,6 +155,8 @@ class SpectrumPanel(QWidget):
             return
         if not self.open_spectrum(paths[0]):
             self.viewer.clear()
+        else:
+            self._current_spectrum = paths[0]
         self._load_peaks(paths[0])
 
     # ------------------------------------------------------------------

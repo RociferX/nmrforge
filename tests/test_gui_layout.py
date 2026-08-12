@@ -885,3 +885,44 @@ def test_peak_linkage_via_load_peaks(
     panel.peak_table.selectRow(1)
     assert panel.viewer._selected_peak == 1
     panel.close()
+
+def test_spectrum_auto_shown_on_data_select(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """选中数据后自动显示第一张谱图(有谱图时);重复刷新不重复加载。"""
+    import numpy as np
+    from nmrglue.fileio import pipe
+
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    spectra = manager.data_dir("exp_001", "d_001", "spectra")
+    spectra.mkdir(parents=True, exist_ok=True)
+    shape = (32, 64)
+    data = np.zeros(shape, dtype=np.float32)
+    data[16, 32] = 50
+    dic = {key: "0" for key in pipe.fdata_dic}
+    dic["FDMAGIC"] = 9.2330230000000007e14
+    dic["FDDIMCOUNT"] = 2
+    dic["FDSIZE"] = 64
+    dic["FDSPECNUM"] = 32
+    dic["FDQUADFLAG"] = 1
+    dic["FDF1QUADFLAG"] = 1
+    dic["FDF2QUADFLAG"] = 1
+    dic["FDTRANSPOSED"] = 0
+    dic["FDF1T"] = 32
+    dic["FDF1SW"] = 6000
+    dic["FDF1OBS"] = 600
+    dic["FDF1CAR"] = 118
+    dic["FDF1ORIG"] = 118 * 600
+    dic["FDF2T"] = 64
+    dic["FDF2SW"] = 6000
+    dic["FDF2OBS"] = 600
+    dic["FDF2CAR"] = 4.7
+    dic["FDF2ORIG"] = 4.7 * 600
+    pipe.write(str(spectra / "exp_001-d_001.ft2"), dic, data, overwrite=True)
+    panel = SpectrumPanel(manager)
+    panel.set_context("exp_001", "d_001")
+    assert panel.viewer.layer_list.count() == 1  # 自动加载
+    assert panel._current_spectrum is not None
+    panel.refresh()
+    assert panel.viewer.layer_list.count() == 1  # 不重复加载
+    panel.close()
