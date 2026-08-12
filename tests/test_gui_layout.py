@@ -198,6 +198,9 @@ def test_pipeline_panel_refresh_shows_next_step(tmp_path: Path, qapp: QApplicati
     assert "生成 FID" in panel.next_label.text()
     assert not panel._rows["fid"].run_button.isHidden()
     assert panel._rows["spectrum"].run_button.isHidden()
+    # 导入数据为自动化步骤,无人工入口
+    assert panel._rows["import"].manual_button.isHidden()
+    assert not panel._rows["fid"].manual_button.isHidden()
     panel.close()
 
 

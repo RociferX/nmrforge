@@ -156,6 +156,7 @@ class PipelineStepRow(QWidget):
         layout.addWidget(self.run_button)
         self.manual_button = QPushButton("人工")
         self.manual_button.setToolTip("人工参数表格 / 脚本编辑器(骨架)")
+        self.manual_button.setVisible(False)
         self.manual_button.clicked.connect(
             lambda: self.manual_requested.emit(self.step_id)
         )
@@ -287,7 +288,8 @@ class PipelinePanel(QWidget):
         reasons = _lock_reasons(statuses)
         for step_id, status in statuses.items():
             self._rows[step_id].set_status(status, reasons.get(step_id, ""))
-            self._rows[step_id].manual_button.setVisible(True)  # 选中数据恢复人工
+            # 导入数据为自动化步骤,无人工入口;其余处理步骤保留人工
+            self._rows[step_id].manual_button.setVisible(step_id != "import")
 
     # ------------------------------------------------------------------
     # 运行
