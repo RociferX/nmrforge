@@ -377,9 +377,17 @@ class PipelineStepRow(QWidget):
         if status == "OUTDATED":
             self.run_button.setText("重新运行")
             self.run_button.setVisible(True)
+            self.run_button.setToolTip("输入/参数已变化,重新运行以更新结果")
+        elif status == "SUCCESS" and self.step_id != "import":
+            self.run_button.setText("重新处理")
+            self.run_button.setVisible(True)
+            self.run_button.setToolTip(
+                "已处理完成;点击可强制重新处理(下游步骤将标记为过期)"
+            )
         else:
             self.run_button.setText("运行")
             self.run_button.setVisible(status == "READY")
+            self.run_button.setToolTip("运行当前步骤")
         # 分析步骤产物就绪后提供「报告」入口
         self.report_button.setVisible(status == "SUCCESS" and self.step_id == "analysis")
 

@@ -1,5 +1,13 @@
 # 变更日志
 
+## [0.2.28] - 2026-08-12
+
+- 重新处理入口:Pipeline 已成功(SUCCESS)的处理步骤(生成 FID / 生成谱图 /
+  峰挑选 / 分析)新增「重新处理」按钮(导入步骤除外——重跑会新建数据而
+  非覆盖);点击强制重跑对应 ProcessingController 方法,重跑后下游步骤
+  经指纹校验标记为过期(OUTDATED);按钮 tooltip 说明后果。
+- 测试:新增 test_gui_rerun(4 例),全量 331 passed,ruff 全绿。
+
 ## [0.2.27] - 2026-08-12
 
 - 脚本快照 GUI 接线:ProcessingController 在生成 FID / 生成谱图 / 人工
