@@ -125,7 +125,7 @@ def test_project_tree_structure(tmp_path: Path, qapp: QApplication) -> None:
     assert exp_item.text(0) == "HSQC"
     assert exp_item.childCount() == 1  # schema 1.1 兼容:实验即单数据节点
     data_item = exp_item.child(0)
-    assert data_item.text(0) == "数据 exp_001"
+    assert data_item.text(0) == "数据 d_001"
     assert data_item.text(1) == "已导入"
     panel.close()
 
@@ -141,7 +141,7 @@ def test_project_tree_current_experiment_from_data(
     exp_item = panel.tree.topLevelItem(0).child(1)
     panel.tree.setCurrentItem(exp_item.child(0))
     assert panel.current_experiment_id() == "exp_002"
-    assert panel._data_id_of(panel.tree.currentItem()) == "exp_002"
+    assert panel._data_id_of(panel.tree.currentItem()) == "d_001"
     panel.close()
 
 
@@ -306,9 +306,9 @@ def test_tree_data_node_context_menu_actions(
     panel._on_context_menu_impl(menu, data_item)
     for action in menu.actions():
         action.trigger()
-    assert ("fid", "exp_001") in actions
-    assert ("spectrum", "exp_001") in actions
-    assert ("delete", "exp_001") in actions
+    assert ("fid", "d_001") in actions
+    assert ("spectrum", "d_001") in actions
+    assert ("delete", "d_001") in actions
     panel.close()
 
 

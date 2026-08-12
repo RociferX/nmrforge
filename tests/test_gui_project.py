@@ -198,8 +198,8 @@ def test_import_workflow_e2e(
     assert manager.project is not None
     entry = manager.project.experiment("exp_001")
     assert entry is not None and entry.title == "HSQC"
-    assert manager.dir_path("metadata").joinpath("exp_001.json").is_file()
-    assert manager.dir_path("raw").joinpath("exp_001").is_dir()
+    assert manager.dir_path("metadata").joinpath("exp_001-d_001.json").is_file()
+    assert manager.dir_path("raw").joinpath("exp_001", "d_001").is_dir()
     assert any(r.workflow_ref == "import" for r in manager.project.workflow_runs)
     assert window.project_tree.current_experiment_id() == "exp_001"
     window.close()
