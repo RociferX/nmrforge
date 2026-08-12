@@ -1,6 +1,7 @@
 """处理流程控制:自动化与人工两条路径。
 
-- 自动化:``auto_run`` 从 Bruker 目录构建 Experiment,经 backend + AutoProcessor 执行;
+- 步骤化(契约 v1.2 / G2B-002):``import_data`` → ``generate_fid`` →
+  ``generate_spectrum``,每步独立按钮与状态;旧 ``auto_run`` 保留兼容;
 - 人工:``manual_param_table`` / ``manual_script_editor`` 为接口占位
   (后续实现:表格改参数 / 模仿 VSCode 的脚本编辑器)。
 """
@@ -68,6 +69,30 @@ class ProcessingController:
                 on_error(f"{type(exc).__name__}: {exc}")
 
         threading.Thread(target=worker, daemon=True).start()
+
+    # ------------------------------------------------------------------
+    # 步骤化处理(G2B-002 / 契约 v1.2):导入数据 → 生成 FID → 生成谱图
+    # 实现依赖 Backend 的 DataEntry 层级与 convert_to_fid(待 Backend 落地),
+    # 当前提供签名与占位实现;GUI 界面按此接口接线。
+    # ------------------------------------------------------------------
+    def import_data(self, entry: ExperimentEntry, source: str) -> dict:
+        """导入数据:读 Bruker 参数 + 复制到 raw,不触发任何处理。
+
+        待 Backend 落地 DataEntry 层级(契约 v1.2 §8.2)后接线;
+        当前 GUI 导入入口经 workflow.import_workflow.import_bruker_dataset。
+        """
+        raise NotImplementedError("导入数据步骤待 Backend DataEntry 接口落地")
+
+    def generate_fid(self, data) -> str:
+        """生成 FID:调后端把原始数据转换为 fid,返回 fid 路径。
+
+        待 Backend 实现 ProcessingBackend.convert_to_fid 后接线。
+        """
+        raise NotImplementedError("生成 FID 步骤待 Backend convert_to_fid 落地")
+
+    def generate_spectrum(self, data) -> str:
+        """生成谱图:调后端 process(自动包含 NUS SMILE 重构),返回谱路径。"""
+        raise NotImplementedError("生成谱图步骤待 Backend 步骤化处理落地")
 
     # ------------------------------------------------------------------
     # 人工路径(接口占位,实现之后再写)
