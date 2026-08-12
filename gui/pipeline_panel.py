@@ -85,10 +85,25 @@ def compute_step_statuses(manager: ProjectManager, exp_id: str) -> dict[str, str
     return statuses
 
 
+def _lock_reasons(statuses: dict[str, str]) -> dict[str, str]:
+    """为 LOCKED 步骤生成依赖提示(告诉用户缺哪个前置产物)。"""
+    reasons: dict[str, str] = {}
+    for step_id, _, _, deps in PIPELINE_STEPS:
+        if statuses.get(step_id) != "LOCKED":
+            continue
+        missing = [STEP_LABEL[dep] for dep in deps if statuses.get(dep) != "SUCCESS"]
+        if missing:
+            reasons[step_id] = "前置步骤未完成: " + "、".join(missing)
+        else:
+            reasons[step_id] = "等待前置产物就绪"
+    return reasons
+
+
 class PipelineStepRow(QWidget):
-    """单个步骤行:状态图标 + 名称 + 描述 + (READY 时)运行按钮。"""
+    """单个步骤行:状态图标 + 名称 + 描述 + 运行/人工入口按钮。"""
 
     run_requested = pyqtSignal(str)  # step_id
+    manual_requested = pyqtSignal(str)  # step_id:打开人工参数表格/脚本编辑器
 
     def __init__(
         self, step_id: str, label: str, description: str, parent: QWidget | None = None
@@ -115,12 +130,21 @@ class PipelineStepRow(QWidget):
         self.run_button.setVisible(False)
         self.run_button.clicked.connect(lambda: self.run_requested.emit(self.step_id))
         layout.addWidget(self.run_button)
+        self.manual_button = QPushButton("人工")
+        self.manual_button.setToolTip("人工参数表格 / 脚本编辑器(骨架)")
+        self.manual_button.clicked.connect(
+            lambda: self.manual_requested.emit(self.step_id)
+        )
+        layout.addWidget(self.manual_button)
 
-    def set_status(self, status: str) -> None:
+    def set_status(self, status: str, reason: str = "") -> None:
         icon = STATUS_ICON.get(status, "·")
         label = STATUS_TEXT.get(status, status)
         self.status_label.setText(f"{icon} {label}")
-        self.status_label.setToolTip(f"状态: {STATUS_TEXT.get(status, status)}")
+        tooltip = f"状态: {STATUS_TEXT.get(status, status)}"
+        if reason:
+            tooltip += f"\n{reason}"
+        self.status_label.setToolTip(tooltip)
         self.run_button.setVisible(status == "READY")
 
 
@@ -129,6 +153,7 @@ class PipelinePanel(QWidget):
 
     log_message = pyqtSignal(str)
     run_finished = pyqtSignal()
+    manual_open_requested = pyqtSignal(str)  # step_id:打开人工处理对话框
 
     def __init__(
         self,
@@ -158,6 +183,7 @@ class PipelinePanel(QWidget):
         for step_id, label, description, _deps in PIPELINE_STEPS:
             row = PipelineStepRow(step_id, label, description)
             row.run_requested.connect(self._on_run_requested)
+            row.manual_requested.connect(self.manual_open_requested.emit)
             steps_box.addWidget(row)
             self._rows[step_id] = row
         steps_box.addStretch(1)
@@ -203,8 +229,9 @@ class PipelinePanel(QWidget):
             self.next_label.setText("全部步骤已完成" if any(
                 st == "SUCCESS" for st in statuses.values()
             ) else "等待导入数据")
+        reasons = _lock_reasons(statuses)
         for step_id, status in statuses.items():
-            self._rows[step_id].set_status(status)
+            self._rows[step_id].set_status(status, reasons.get(step_id, ""))
 
     # ------------------------------------------------------------------
     # 运行

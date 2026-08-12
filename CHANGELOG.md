@@ -1,5 +1,23 @@
 # 变更日志
 
+## [0.2.10] - 2026-08-12
+
+- GUI 三栏布局第二版:导入工作流接驳(B2G-001)+ 人工处理入口 UI 骨架。
+- 导入数据:ImportExperimentDialog 增加「复制数据到项目」选项(默认勾选,
+  raw/<exp_id> + SHA-256 指纹)与 acqus 校验;导入改走
+  workflow.import_bruker_dataset(后台线程避免复制大文件阻塞 UI),完成后
+  自动登记 WorkflowRun(import)、刷新项目树并选中新实验,warnings 与错误
+  经 InfoDialog 展示。
+- 人工处理入口 UI 骨架:ParameterTableDialog(参数表格,展示 zero_fill/
+  sampling/stages 契约结构)与 ScriptEditorDialog(等宽字体 .com 脚本
+  编辑器);Pipeline 每步增加「人工」按钮 + 处理菜单两条入口;后端接口
+  仍为占位(manual_param_table/manual_script_editor 抛 NotImplementedError
+  时给出友好提示)。
+- Pipeline 步骤 LOCKED 状态增加依赖 tooltip(说明缺哪个前置步骤);
+  自动化处理仍只经 ProcessingController.auto_run_async 调用后端。
+- 测试:新增 tests/test_gui_manual.py 5 项 + 导入工作流端到端 1 项 +
+  对话框复制选项/acqus 校验 2 项;全量 178 passed,ruff 全绿。
+
 ## [0.2.9] - 2026-08-12
 
 - Backend:导入工作流(workflow/import_workflow):Bruker 数据集校验 → 登记实验 →

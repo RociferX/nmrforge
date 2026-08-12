@@ -46,6 +46,36 @@ def test_import_dialog_validation_empty(
     dialog.close()
 
 
+def test_import_dialog_copy_defaults_checked(qapp: QApplication) -> None:
+    dialog = ImportExperimentDialog(None)
+    assert dialog.copy_check.isChecked() is True
+    dialog.copy_check.setChecked(False)
+    dialog.source_edit.setText(str(Path.home()))
+    assert dialog.result_data()["copy"] is False
+    dialog.close()
+
+
+def test_import_dialog_validation_requires_acqus(
+    qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    messages: list[str] = []
+    monkeypatch.setattr(
+        "gui.dialogs.InfoDialog.show_info",
+        staticmethod(lambda parent, title, text: messages.append(text)),
+    )
+    dialog = ImportExperimentDialog(None)
+    dataset = tmp_path / "dataset"
+    dataset.mkdir()
+    dialog.source_edit.setText(str(dataset))
+    dialog._validate_and_accept()
+    assert messages and "acqus" in messages[0]
+    assert dialog.result() != 1
+    (dataset / "acqus").write_text("##SIMPLE 1\n", encoding="utf-8")
+    dialog._validate_and_accept()
+    assert dialog.result() == 1
+    dialog.close()
+
+
 def test_sample_dialog_result_data(qapp: QApplication) -> None:
     dialog = SampleDialog(None, sample_id="S001")
     dialog.name_edit.setText("sample B")

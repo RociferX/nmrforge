@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import QApplication, QFileDialog, QInputDialog
 from core.project import ProjectManager
 from gui.dialogs import ConfirmDialog, ImportExperimentDialog
 from gui.main_window import MainWindow
+from workflow.import_workflow import ImportResult
 
 
 @pytest.fixture(scope="module")
@@ -94,6 +95,34 @@ def test_add_experiment_action(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     manager = _build_manager(tmp_path)
+    ran: list[bool] = []
+
+    class SyncThread:
+        """把后台导入线程变为同步执行,测试不依赖线程时序。"""
+
+        def __init__(self, target=None, daemon=None) -> None:
+            self._target = target
+
+        def start(self) -> None:
+            self._target()
+            ran.append(True)
+
+    monkeypatch.setattr("threading.Thread", SyncThread)
+
+    def fake_import(mgr, source, *, title="", sample_id="", copy=True) -> ImportResult:
+        entry = mgr.add_experiment(source, title=title, sample_id=sample_id)
+        return ImportResult(
+            experiment_id=entry.id,
+            run_id="R-20260812-001",
+            source=Path(source),
+            raw_dir=None,
+            metadata_path=mgr.dir_path("metadata") / f"{entry.id}.json",
+            checksums={},
+            file_count=0,
+            total_bytes=0,
+        )
+
+    monkeypatch.setattr("gui.main_window.import_bruker_dataset", fake_import)
 
     class FakeImportDialog(ImportExperimentDialog):
         def exec(self) -> int:
@@ -102,8 +131,10 @@ def test_add_experiment_action(
             return int(ImportExperimentDialog.DialogCode.Accepted)
 
     monkeypatch.setattr("gui.main_window.ImportExperimentDialog", FakeImportDialog)
+
     window = MainWindow(manager=manager)
     window.add_experiment()
+    assert ran == [True]  # 后台导入已同步执行
     assert window.experiment_tree.topLevelItemCount() == 3
     last = window.experiment_tree.topLevelItem(2)
     assert last.text(0) == "exp_003"
@@ -140,4 +171,35 @@ def test_recent_menu_persists(tmp_path: Path, qapp: QApplication) -> None:
     window._open_root(root)
     assert recent.list() == [str(root.resolve())]
     assert len(window.recent_menu.actions()) == 1
+    window.close()
+
+def test_import_workflow_e2e(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """B2G-001 端到端:真实 Bruker fixture 目录经 import_bruker_dataset 导入。"""
+    manager = ProjectManager.create_project(tmp_path / "proj", "demo")
+    dataset = tmp_path / "dataset"
+    dataset.mkdir()
+    (dataset / "acqus").write_text(
+        "##SIMPLE 1\n##NUC1 1H\n##NUC2 15N\n##TD 1024\n",
+        encoding="utf-8",
+    )
+
+    class SyncThread:
+        def __init__(self, target=None, daemon=None) -> None:
+            self._target = target
+
+        def start(self) -> None:
+            self._target()
+
+    monkeypatch.setattr("threading.Thread", SyncThread)
+    window = MainWindow(manager=manager)
+    window.add_experiment_via_import(str(dataset), title="HSQC")
+    assert manager.project is not None
+    entry = manager.project.experiment("exp_001")
+    assert entry is not None and entry.title == "HSQC"
+    assert manager.dir_path("metadata").joinpath("exp_001.json").is_file()
+    assert manager.dir_path("raw").joinpath("exp_001").is_dir()
+    assert any(r.workflow_ref == "import" for r in manager.project.workflow_runs)
+    assert window.project_tree.current_experiment_id() == "exp_001"
     window.close()

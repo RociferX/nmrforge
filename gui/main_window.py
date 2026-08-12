@@ -38,13 +38,16 @@ from gui.dialogs import (
     ConfirmDialog,
     ImportExperimentDialog,
     InfoDialog,
+    ParameterTableDialog,
     SampleDialog,
+    ScriptEditorDialog,
 )
 from gui.log_panel import LogPanel
 from gui.pipeline_panel import PipelinePanel, compute_step_statuses
 from gui.processing import ProcessingController
 from gui.project_tree import ProjectTreePanel
 from gui.spectrum_panel import SpectrumPanel
+from workflow.import_workflow import ImportResult, import_bruker_dataset
 
 
 class MainWindow(QMainWindow):
@@ -92,8 +95,8 @@ class MainWindow(QMainWindow):
 
         process_menu = bar.addMenu("处理(&R)")
         process_menu.addAction("运行自动化处理", self.run_auto)
-        process_menu.addAction("人工参数表格(待实现)", self._manual_param_hint)
-        process_menu.addAction("人工脚本编辑器(待实现)", self._manual_script_hint)
+        process_menu.addAction("人工参数表格...", self._manual_param_table_menu)
+        process_menu.addAction("人工脚本编辑器...", self._manual_script_editor_menu)
 
         sample_menu = bar.addMenu("样本(&S)")
         sample_menu.addAction("添加样本...", self.add_sample)
@@ -128,6 +131,7 @@ class MainWindow(QMainWindow):
 
         self.pipeline = PipelinePanel(self.manager, self.controller)
         self.pipeline.log_message.connect(self._append_log)
+        self.pipeline.manual_open_requested.connect(self._open_manual_dialog)
 
         self.spectrum_panel = SpectrumPanel(self.manager)
 
@@ -228,16 +232,54 @@ class MainWindow(QMainWindow):
         dialog = ImportExperimentDialog(self, samples=samples)
         if dialog.exec() != ImportExperimentDialog.DialogCode.Accepted:
             return
-        data = dialog.result_data()
-        try:
-            self.manager.add_experiment(
-                data["source"], title=data["title"], sample_id=data["sample_id"]
-            )
-            self.manager.save()
-        except ProjectError as exc:
-            InfoDialog.show_info(self, "添加实验失败", str(exc))
-            return
+        self._import_experiment_async(dialog.result_data())
+
+    def add_experiment_via_import(self, source: str, title: str = "") -> None:
+        """直接按路径导入(供测试与自动化场景使用,不弹对话框)。"""
+        self._import_experiment_async(
+            {"source": source, "title": title, "sample_id": "", "copy": True}
+        )
+
+    def _import_experiment_async(self, data: dict) -> None:
+        """后台线程执行导入工作流(B2G-001),避免复制大 ser/fid 阻塞 UI。"""
+        import threading
+
+        source = data.get("source", "")
+        self._append_log(f"开始导入: {source} (复制到项目={data.get('copy', True)})")
+
+        def worker() -> None:
+            try:
+                result = import_bruker_dataset(
+                    self.manager,
+                    source,
+                    title=data.get("title", ""),
+                    sample_id=data.get("sample_id", ""),
+                    copy=bool(data.get("copy", True)),
+                )
+                self.manager.save()
+                self._on_import_done(result)
+            except Exception as exc:  # noqa: BLE001 - 错误统一回传 UI
+                self._append_log(f"导入失败: {exc}")
+                InfoDialog.show_info(
+                    self, "导入失败", f"{type(exc).__name__}: {exc}"
+                )
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_import_done(self, result: ImportResult) -> None:
+        """导入成功后刷新并选中新实验;展示 warnings。"""
+        self._append_log(
+            f"导入完成: {result.experiment_id} ({result.file_count} 文件, "
+            f"{result.total_bytes} 字节, 运行 {result.run_id})"
+        )
+        for warning in result.warnings:
+            self._append_log(f"  提示: {warning}")
         self.refresh()
+        self.project_tree.select_experiment(result.experiment_id)
+        if result.warnings:
+            InfoDialog.show_info(
+                self, "导入完成(有提示)", "\n".join(result.warnings)
+            )
 
     def rename_experiment(self) -> None:
         exp_id = self.project_tree.current_experiment_id()
@@ -340,11 +382,38 @@ class MainWindow(QMainWindow):
             return
         self.pipeline.run_step(next_step)
 
-    def _manual_param_hint(self) -> None:
-        InfoDialog.show_info(self, "提示", "人工参数表格编辑器待实现(接口已占位)")
+    def _manual_param_table_menu(self) -> None:
+        self._open_manual_dialog("process")
 
-    def _manual_script_hint(self) -> None:
-        InfoDialog.show_info(self, "提示", "人工脚本编辑器待实现(接口已占位)")
+    def _manual_script_editor_menu(self) -> None:
+        self._open_manual_dialog("process")
+
+    def _open_manual_dialog(self, step_id: str) -> None:
+        """打开人工参数表格/脚本编辑器(UI 骨架;后端接口仍为占位)。"""
+        exp_id = self.project_tree.current_experiment_id()
+        if not exp_id:
+            InfoDialog.show_info(self, "提示", "请先在左侧选择一个实验")
+            return
+        entry = self.manager.project.experiment(exp_id) if self.manager.project else None
+        if entry is None:
+            return
+        label = f"{entry.title or entry.id} ({exp_id})"
+        if step_id in ("fid", "process", "reconstruct"):
+            dialog = ParameterTableDialog(self, label)
+        else:
+            dialog = ScriptEditorDialog(self, label)
+        if dialog.exec() != ParameterTableDialog.DialogCode.Accepted:
+            return
+        dialog.result_data()  # UI 骨架:回读编辑内容,后续版本传给后端
+        try:
+            if isinstance(dialog, ParameterTableDialog):
+                self.controller.manual_param_table(entry)
+            else:
+                self.controller.manual_script_editor(entry)
+        except NotImplementedError as exc:
+            InfoDialog.show_info(
+                self, "人工处理待实现", f"{exc}\n已保存参数/脚本骨架,后续版本接入后端。"
+            )
 
     def _noop_hint(self) -> None:
         InfoDialog.show_info(self, "提示", "项目管理面板已集成在左侧树中")
