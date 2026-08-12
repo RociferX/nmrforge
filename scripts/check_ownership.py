@@ -99,7 +99,9 @@ def changed_files(base: str) -> list[str]:
     return sorted(set(files))
 
 
-def violations(owner: str, base: str) -> list[tuple[str, str]]:
+def violations(
+    owner: str, base: str, allow_shared: bool = False
+) -> list[tuple[str, str]]:
     """返回 (文件, 实际 owner) 中不属于 owner 的条目。"""
     result: list[tuple[str, str]] = []
     allowed = {owner}
@@ -108,6 +110,8 @@ def violations(owner: str, base: str) -> list[tuple[str, str]]:
     for path in changed_files(base):
         actual = owner_of(path)
         if owner != "all" and actual not in allowed:
+            if allow_shared and actual == "shared":
+                continue  # Architect 批准提案的实现性修改
             result.append((path, actual))
     return result
 
@@ -116,6 +120,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Ownership 检查")
     parser.add_argument("--owner", choices=("gui", "backend", "all"), default="all")
     parser.add_argument("--base", default="master", help="git 基线(默认 master)")
+    parser.add_argument(
+        "--allow-shared",
+        action="store_true",
+        help="允许 Shared Contract 文件(仅当 Architect 批准提案的实现性修改)"
+    )
     args = parser.parse_args(argv)
 
     files = changed_files(args.base)
@@ -125,7 +134,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  [{owner_of(path):>7}] {path}")
         return 0
 
-    bad = violations(args.owner, args.base)
+    bad = violations(args.owner, args.base, args.allow_shared)
     if bad:
         print(f"Ownership 违规({args.owner} 越界 {len(bad)} 个文件):")
         for path, actual in bad:
