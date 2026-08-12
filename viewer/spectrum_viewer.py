@@ -115,10 +115,9 @@ class SpectrumViewer(QWidget):
         splitter.addWidget(self.plot)
         splitter.addWidget(controls)
         splitter.setStretchFactor(0, 1)
-        splitter.setSizes([760, 200])
-        # 默认显示宽扁谱图区(避免打开时接近正方形)
-        self.plot.setMinimumHeight(320)
-        controls.setMaximumHeight(260)
+        splitter.setSizes([460, 220])
+        # 默认显示接近正方形的谱图区
+        self.plot.setMinimumHeight(300)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(splitter)
