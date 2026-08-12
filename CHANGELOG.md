@@ -9,6 +9,15 @@
 - viewer 性能:轮廓重建缓存插值数据(级数/起点变化复用),滑块拖动防抖
   (仅松开时重建),操作卡顿明显缓解。
 
+## [0.2.24] - 2026-08-12
+
+- fix: 2D process 脚本缺末尾 TP 导致 F1/F2 交换(软件谱在 viewer 显示为
+  转置/交换;水峰被标成 15N 116.5ppm 横线)。generate_process_script 对 2D
+  在间接维 FT 后补 TP(与手工 xy.com 两个 TP 对齐),产物 FDTRANSPOSED=0,
+  主峰与手工一致(112.6/8.2 vs 112.7/8.3)。VM 实测验证。
+- 已知待办:软件 2D 谱仍缺 EXT(1H 全宽 12.7--3.3ppm,手工裁剪 6.5-9.5),
+  需 Backend 在 script_generator 补 EXT/POLY(见 PROJECT_STATUS)。
+
 ## [0.2.23] - 2026-08-12
 
 - 诊断(Backend):同一实验多组数据时,步骤执行固定作用于第一个数据
