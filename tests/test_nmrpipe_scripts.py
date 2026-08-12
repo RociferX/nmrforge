@@ -73,7 +73,7 @@ def test_process_script_2d(bruker_dir: Path) -> None:
     assert "| nmrPipe -fn ZF" in script
     assert "| nmrPipe -fn FT" in script
     assert "| nmrPipe -fn PS" in script
-    assert script.count("| nmrPipe -fn TP") == 1
+    assert script.count("| nmrPipe -fn TP") == 2  # 直接维后 + 间接维后(转置回来)
     assert "| pipe2xyz -out out.ft2 -x" in script
     assert "\r" not in script
 

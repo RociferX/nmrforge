@@ -315,6 +315,9 @@ def generate_process_script(
         lines += _stage_lines(_axis_stages(plan, axis), direct_phase)
         if index < len(axes) - 1:
             lines.append("| nmrPipe -fn TP \\")
+    if len(axes) == 2:
+        # NMRPipe 2D:间接维 FT 后需再 TP 转置回来,否则输出 F1/F2 交换
+        lines.append("| nmrPipe -fn TP \\")
     lines.append(f"| pipe2xyz -out {out_file} -x")
     return "\n".join(lines) + "\n"
 
