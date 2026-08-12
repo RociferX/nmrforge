@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -29,6 +30,7 @@ from core.data.internal_data_model import Experiment, SamplingMode
 from core.data.pipe_io import read_pipe_planes
 from core.optimization.phase_search import direct_ft_traces, search_phase
 from core.planning.method_selector import select_method
+from core.qc import spectrum_quality
 from workflow.recon_phase_search import search_recon_phase
 
 # 直接维 p1 共识搜索的默认候选网格(search_phase 默认值,显式传入保证计数一致)
@@ -380,3 +382,341 @@ __all__ = [
     "save_report",
     "search_direct_phase",
 ]
+
+
+# ------------------------------------------------------------- 等价性验证
+
+
+@dataclass
+class CandidateScore:
+    """一个相位候选的评分(暴力参考或内存内代理)。"""
+
+    params: dict[str, float]
+    score: float
+    components: dict[str, float] = field(default_factory=dict)
+    spectrum_path: str = ""
+    source: str = ""  # brute_force / in_memory
+    message: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class EquivalenceReport:
+    """内存内筛选 vs 暴力逐候选后端评分的等价性对比。"""
+
+    candidates: list[dict[str, float]]
+    brute_force: dict[str, float]
+    in_memory: dict[str, float]
+    best_brute_force: dict[str, float]
+    best_in_memory: dict[str, float]
+    top_match: bool
+    correlation: float
+    passed: bool
+    backend_runs: int
+    logs: list[str] = field(default_factory=list)
+
+    @property
+    def summary(self) -> str:
+        return (
+            "等价性验证: 最优候选一致="
+            + str(self.top_match)
+            + " 排序相关="
+            + f"{self.correlation:.2f}"
+            + " 通过="
+            + str(self.passed)
+            + f" 后端运行={self.backend_runs} 次"
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "candidates": list(self.candidates),
+            "brute_force": dict(self.brute_force),
+            "in_memory": dict(self.in_memory),
+            "best_brute_force": dict(self.best_brute_force),
+            "best_in_memory": dict(self.best_in_memory),
+            "top_match": self.top_match,
+            "correlation": self.correlation,
+            "passed": self.passed,
+            "backend_runs": self.backend_runs,
+            "logs": list(self.logs),
+        }
+
+
+def direct_phase_candidates(
+    p1_values: tuple[float, ...] = (-90.0, -60.0, -30.0, 0.0, 30.0, 60.0, 90.0),
+    p0: float = 0.0,
+) -> list[dict[str, float]]:
+    """直接维候选网格(默认 p0=0, p1 每 30° 一档)。"""
+    return [{"p0": p0, "p1": p1} for p1 in p1_values]
+
+
+def _phase_key(params: dict[str, float]) -> str:
+    return f"p0={params.get('p0', 0.0):g}/p1={params.get('p1', 0.0):g}"
+
+
+def _traces_metric(traces: np.ndarray, p0: float, p1: float) -> tuple[float, float]:
+    """固定 (p0, p1) 在 FT 迹线上的吸收度/符号。"""
+    n = traces.shape[-1]
+    k = np.arange(n, dtype=float)
+    magnitude = np.abs(traces)
+    mask = magnitude >= 0.3 * np.max(magnitude, axis=-1, keepdims=True)
+    base = traces * np.exp(1j * np.deg2rad(p1 * k / max(n - 1, 1)))
+    rot = base * np.exp(1j * np.deg2rad(p0))
+    re = np.real(rot) * mask
+    im = np.imag(rot) * mask
+    re_abs = np.abs(re)
+    absorption = np.sum(re_abs, axis=-1) / (
+        np.sum(re_abs + np.abs(im), axis=-1) + 1e-12
+    )
+    sign = np.sum(re, axis=-1) / (np.sum(re_abs, axis=-1) + 1e-12)
+    return float(np.median(absorption)), float(np.median(sign))
+
+
+def _p1_score(traces: np.ndarray, p1: float) -> tuple[float, float]:
+    """给定 p1 的迹线评分:每迹线吸收最优 p0 后取吸收度中位数。
+
+    与 search_phase._evaluate 同族(直接维 p0 不可靠,先被吸收),
+    保证内存内代理与真实搜索使用的指标一致。
+    """
+    n = traces.shape[-1]
+    k = np.arange(n, dtype=float)
+    magnitude = np.abs(traces)
+    mask = magnitude >= 0.3 * np.max(magnitude, axis=-1, keepdims=True)
+    base = traces * np.exp(1j * np.deg2rad(p1 * k / max(n - 1, 1)))
+    absorptions: list[np.ndarray] = []
+    signs: list[np.ndarray] = []
+    for p0 in DIRECT_P0_VALUES:
+        rot = base * np.exp(1j * np.deg2rad(p0))
+        re = np.real(rot) * mask
+        im = np.imag(rot) * mask
+        re_abs = np.abs(re)
+        absorptions.append(
+            np.sum(re_abs, axis=-1)
+            / (np.sum(re_abs + np.abs(im), axis=-1) + 1e-12)
+        )
+        signs.append(np.sum(re, axis=-1) / (np.sum(re_abs, axis=-1) + 1e-12))
+    abs_arr = np.array(absorptions)
+    sign_arr = np.array(signs)
+    best_idx = np.argmax(abs_arr, axis=0)
+    rows = np.arange(abs_arr.shape[1])
+    return (
+        float(np.median(abs_arr[best_idx, rows])),
+        float(np.median(sign_arr[best_idx, rows])),
+    )
+
+
+def score_in_memory_direct(
+    fid: np.ndarray,
+    candidates: list[dict[str, float]],
+    *,
+    zf_size: int | None = None,
+) -> dict[str, float]:
+    """单次 FT 后对每个候选相位做内存内吸收度评分(不重跑后端)。"""
+    arr = np.asarray(fid)
+    n_points = arr.shape[-1] if arr.ndim >= 1 else 0
+    if n_points < 8:
+        return {}
+    if zf_size is None:
+        zf_size = 1
+        while zf_size < 2 * n_points:
+            zf_size *= 2
+    traces = direct_ft_traces(arr, zf_size=zf_size, sp_off=0.45, sp_end=0.95, sp_pow=1)
+    scores: dict[str, float] = {}
+    for params in candidates:
+        absorption, _sign = _p1_score(
+            traces, float(params.get("p1", 0.0))
+        )
+        scores[_phase_key(params)] = absorption
+    return scores
+
+
+def _default_spectrum_quality(path: str) -> tuple[float, dict[str, float]]:
+    """默认终谱评分:nmrglue 读 ft2/ft3 + spectrum_quality.evaluate。"""
+    import nmrglue as ng
+
+    _dic, data = ng.pipe.read(path)
+    quality = spectrum_quality.evaluate(data)
+    return quality.score.overall, asdict(quality.score.components)
+
+
+def brute_force_direct_scores(
+    experiment: Experiment,
+    backend: Any,
+    candidates: list[dict[str, float]] | None = None,
+    *,
+    score_fn: Callable[[str], tuple[float, dict[str, float]]] | None = None,
+) -> list[CandidateScore]:
+    """暴力参考:逐候选把相位写进脚本重跑后端,用终谱 QC 评分。
+
+    后端运行次数 = 候选数;仅供准确性验证,不进入默认自动路径。
+    """
+    candidates = candidates if candidates is not None else direct_phase_candidates()
+    score_fn = score_fn or _default_spectrum_quality
+    direct_axis = "F2" if experiment.ndim == 2 else "F3"
+    results: list[CandidateScore] = []
+    for params in candidates:
+        override = {
+            direct_axis: (
+                float(params.get("p0", 0.0)),
+                float(params.get("p1", 0.0)),
+            )
+        }
+        resp = backend.process(
+            experiment, select_method(experiment), direct_phase_override=override
+        )
+        if not resp.get("success"):
+            results.append(
+                CandidateScore(
+                    params=dict(params),
+                    score=float("-inf"),
+                    source="brute_force",
+                    message=str(resp.get("message", "后端运行失败")),
+                )
+            )
+            continue
+        path = resp.get("spectrum_path", "")
+        try:
+            overall, components = score_fn(str(path))
+        except Exception as exc:  # noqa: BLE001
+            results.append(
+                CandidateScore(
+                    params=dict(params),
+                    score=float("-inf"),
+                    source="brute_force",
+                    message=f"终谱评分失败: {exc}",
+                )
+            )
+            continue
+        results.append(
+            CandidateScore(
+                params=dict(params),
+                score=overall,
+                components=components,
+                spectrum_path=str(path),
+                source="brute_force",
+            )
+        )
+    return results
+
+
+def _same_phase(a: dict[str, float], b: dict[str, float], tol: float) -> bool:
+    """相位一致(±180 符号歧义视为等价:p0 可翻转,p1 幅值一致)。"""
+    p0_close = abs((a.get("p0", 0.0) - b.get("p0", 0.0) + 180.0) % 360.0 - 180.0) <= tol
+    p1_close = abs(a.get("p1", 0.0) - b.get("p1", 0.0)) <= tol
+    p1_abs_close = abs(abs(a.get("p1", 0.0)) - abs(b.get("p1", 0.0))) <= tol
+    return p0_close and (p1_close or p1_abs_close)
+
+
+def validate_direct_phase_equivalence(
+    experiment: Experiment,
+    backend: Any,
+    candidates: list[dict[str, float]] | None = None,
+    *,
+    work_dir: Path | str | None = None,
+    min_correlation: float = 0.5,
+    top_tolerance: float = 30.0,
+    score_fn: Callable[[str], tuple[float, dict[str, float]]] | None = None,
+) -> EquivalenceReport:
+    """对比内存内筛选与暴力逐候选后端评分的等价性。
+
+    流程:
+    1) 中性运行一次后端(相位覆盖 0/0)取转换 .fid;
+    2) 内存内对每个候选计算吸收度代理分(score_in_memory_direct);
+    3) 暴力参考:逐候选重跑后端 + 终谱 QC(backend_runs = 候选数);
+    4) 比较:最优候选一致(±top_tolerance,允许 ±180 符号歧义)+ 排序相关。
+
+    passed = 最优候选一致 且 Spearman 相关 >= min_correlation;
+    未通过时上层应回退暴力搜索或保持默认相位(D005),不得直接采信内存内筛选。
+    """
+    candidates = candidates if candidates is not None else direct_phase_candidates()
+    work = Path(work_dir) if work_dir else default_work_dir(experiment, backend)
+    logs: list[str] = []
+
+    direct_axis = "F2" if experiment.ndim == 2 else "F3"
+    neutral = {direct_axis: (0.0, 0.0)}
+    resp = backend.process(
+        experiment, select_method(experiment), direct_phase_override=neutral
+    )
+    if not resp.get("success"):
+        raise ValueError(f"中性后端运行失败: {resp.get('message')}")
+    logs.append("中性运行完成(相位 0/0,取转换 .fid)")
+
+    fid_path = _direct_fid_path(work, experiment)
+    if fid_path is None:
+        raise ValueError(f"未找到转换后 .fid: {work}")
+    import nmrglue as ng
+
+    _dic, fid = ng.pipe.read(str(fid_path))
+
+    in_memory = score_in_memory_direct(fid, candidates)
+    brute = brute_force_direct_scores(experiment, backend, candidates, score_fn=score_fn)
+    brute_map = {_phase_key(c.params): c.score for c in brute if c.score > float("-inf")}
+
+    if not brute_map:
+        raise ValueError("暴力参考全部失败,无法验证等价性")
+    best_bf = max(brute, key=lambda c: c.score)
+    best_bf_params = best_bf.params
+    if in_memory:
+        best_mem_key = max(in_memory, key=in_memory.get)
+        best_mem_params = next(
+            c for c in candidates if _phase_key(c) == best_mem_key
+        )
+    else:
+        best_mem_params = {"p0": 0.0, "p1": 0.0}
+    top_match = _same_phase(best_bf_params, best_mem_params, top_tolerance)
+
+    common = [k for k in brute_map if k in in_memory]
+    correlation = 0.0
+    if len(common) >= 3:
+        from scipy.stats import spearmanr
+
+        correlation, _pvalue = spearmanr(
+            [brute_map[k] for k in common], [in_memory[k] for k in common]
+        )
+        if correlation != correlation:  # nan(常数序列)
+            correlation = 0.0
+
+    passed = top_match and correlation >= min_correlation
+    logs.append(f"暴力最优: {_phase_key(best_bf_params)} (score={best_bf.score:.1f})")
+    logs.append(f"内存内最优: {_phase_key(best_mem_params)}")
+    logs.append(
+        f"最优候选一致={top_match}, Spearman 相关={correlation:.2f}, "
+        f"通过={passed}"
+    )
+    return EquivalenceReport(
+        candidates=[dict(c) for c in candidates],
+        brute_force=dict(brute_map),
+        in_memory=dict(in_memory),
+        best_brute_force=dict(best_bf_params),
+        best_in_memory=dict(best_mem_params),
+        top_match=top_match,
+        correlation=float(correlation),
+        passed=passed,
+        backend_runs=1 + len(candidates),
+        logs=logs,
+    )
+
+
+def produce_phased_spectrum(
+    experiment: Experiment,
+    backend: Any,
+    phases: dict[str, tuple[float, float]] | None = None,
+    *,
+    params: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """把选中相位写回后端重跑一次产出最终谱(生产路径)。
+
+    总后端运行 = 估计 1 次 + 生产 1 次(而非逐候选 N 次);
+    最终谱由真实管线(process / reconstruct_nus)产出,与暴力搜索产出一致。
+    """
+    params = dict(params or {})
+    direct_axis = "F2" if experiment.ndim == 2 else "F3"
+    direct = phases.get(direct_axis) if phases else None
+    if experiment.sampling.mode is SamplingMode.NUS:
+        if direct is not None:
+            params["direct_phase_override"] = direct
+        return backend.reconstruct_nus(experiment, params)
+    plan = select_method(experiment)
+    return backend.process(experiment, plan, direct_phase_override=phases)

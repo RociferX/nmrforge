@@ -79,8 +79,13 @@ class NMRPipeBackend:
         plan: ProcessingPlan,
         *,
         direct_phase_search: bool = True,
+        direct_phase_override: dict[str, tuple[float, float]] | None = None,
     ) -> dict[str, Any]:
-        """均匀采样：转换（含多段合并）+ NMRPipe 处理管道（NUS 请用 reconstruct_nus）。"""
+        """均匀采样：转换（含多段合并）+ NMRPipe 处理管道（NUS 请用 reconstruct_nus）。
+
+        direct_phase_override 非空时跳过相位搜索,直接以给定相位写 PS
+        (暴力参考/选中相位写回生产用,准确性验证见 workflow.phase_optimize)。
+        """
         if experiment.sampling.mode is SamplingMode.NUS:
             return {
                 "success": False,
@@ -111,7 +116,10 @@ class NMRPipeBackend:
         if not converted:
             return {"success": False, "message": "Bruker→NMRPipe 转换失败", "logs": logs}
         direct_phase: dict[str, tuple[float, float]] | None = None
-        if direct_phase_search:
+        if direct_phase_override:
+            direct_phase = dict(direct_phase_override)
+            logs.append(f"直接维相位覆盖: {direct_phase}")
+        elif direct_phase_search:
             fid_for_phase = (
                 work / "seg_001" / f"{experiment.dataset_id}.fid"
                 if experiment.segments
@@ -207,7 +215,11 @@ class NMRPipeBackend:
             in_file = fid_file.name
 
         direct_p0, direct_p1 = 0.0, 0.0
-        if bool(params.get("direct_phase_search", True)):
+        override = params.get("direct_phase_override")
+        if override is not None:
+            direct_p0, direct_p1 = float(override[0]), float(override[1])
+            logs.append(f"直接维相位覆盖: p0={direct_p0:g} p1={direct_p1:g}")
+        elif bool(params.get("direct_phase_search", True)):
             fid_for_phase = (
                 work / "seg_001" / f"{experiment.dataset_id}.fid"
                 if experiment.segments

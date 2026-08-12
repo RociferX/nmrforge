@@ -13,12 +13,18 @@ from workflow.engine import AutoProcessor
 from workflow.phase_optimize import (
     DIRECT_P0_VALUES,
     DIRECT_P1_VALUES,
+    CandidateScore,
     PhaseOptimizeResult,
+    _same_phase,
+    brute_force_direct_scores,
+    direct_phase_candidates,
     estimate_auto_phase,
     estimate_recon_planes,
     format_phase_report,
+    produce_phased_spectrum,
     run_with_auto_phase,
     save_report,
+    score_in_memory_direct,
     search_direct_phase,
 )
 
@@ -237,3 +243,100 @@ def test_format_and_save_report(tmp_path: Path) -> None:
     data = json.loads(out.read_text(encoding="utf-8"))
     assert data["candidates_scored"] == 247
     assert data["backend_runs"] == 1
+
+
+
+def test_score_in_memory_direct_ranks_true_p1_magnitude() -> None:
+    """p0 吸收后的 p1 代理分:恢复真值幅值(±180 歧义内)。"""
+    for true_p1 in (90.0, -60.0, 0.0):
+        scores = score_in_memory_direct(
+            _p1_fid(true_p1), direct_phase_candidates()
+        )
+        assert scores
+        best_key = max(scores, key=scores.get)
+        best_p1 = float(best_key.split("/")[1].split("=")[1])
+        assert abs(abs(best_p1) - abs(true_p1)) <= 30.0
+
+
+def test_same_phase_tolerance() -> None:
+    assert _same_phase({"p0": 0.0, "p1": 90.0}, {"p0": 0.0, "p1": 90.0}, 30.0)
+    assert _same_phase({"p0": 0.0, "p1": 90.0}, {"p0": 0.0, "p1": -90.0}, 30.0)
+    assert not _same_phase({"p0": 0.0, "p1": 90.0}, {"p0": 0.0, "p1": 0.0}, 30.0)
+    assert not _same_phase({"p0": 0.0, "p1": 90.0}, {"p0": 180.0, "p1": 0.0}, 30.0)
+
+
+class _OverrideBackend:
+    """记录 direct_phase_override 的假后端(按 p1 返回不同谱路径供评分)。"""
+
+    def __init__(self, work_dir: Path) -> None:
+        self.work_dir = str(work_dir)
+        self.overrides: list[dict] = []
+
+    def process(self, experiment, plan, direct_phase_override=None) -> dict:
+        self.overrides.append(dict(direct_phase_override or {}))
+        p1 = next(iter(direct_phase_override.values()))[1]
+        return {
+            "success": True,
+            "spectrum_path": f"{self.work_dir}/out_p1{int(p1)}.ft2",
+            "logs": [],
+        }
+
+    def reconstruct_nus(self, experiment, params) -> dict:
+        self.overrides.append(params.get("direct_phase_override"))
+        return {
+            "success": True,
+            "spectrum_path": f"{self.work_dir}/out_nus.ft3",
+            "logs": [],
+        }
+
+
+def _score_from_path(path: str) -> tuple[float, dict[str, float]]:
+    """评分函数:从路径解析 p1,真值 30° 处得分最高。"""
+    p1 = float(path.split("p1")[1].split(".")[0])
+    return 100.0 - abs(p1 - 30.0), {"snr": 0.0}
+
+
+def test_brute_force_direct_scores_passes_override(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    experiment = read_dataset(bruker_dir / "hsqc_2d")
+    backend = _OverrideBackend(tmp_path / "work")
+    candidates = direct_phase_candidates(
+        p1_values=(-90.0, -30.0, 30.0, 90.0)
+    )
+    results = brute_force_direct_scores(
+        experiment, backend, candidates, score_fn=_score_from_path
+    )
+    assert len(results) == 4
+    assert len(backend.overrides) == 4
+    assert all("F2" in o for o in backend.overrides)
+    best = max(results, key=lambda c: c.score)
+    assert best.params["p1"] == 30.0
+    assert best.source == "brute_force"
+
+
+def test_produce_phased_spectrum_uniform(tmp_path: Path, bruker_dir: Path) -> None:
+    experiment = read_dataset(bruker_dir / "hsqc_2d")
+    backend = _OverrideBackend(tmp_path / "work")
+    resp = produce_phased_spectrum(experiment, backend, {"F2": (0.0, 30.0)})
+    assert resp["success"]
+    assert backend.overrides == [{"F2": (0.0, 30.0)}]
+
+
+def test_produce_phased_spectrum_nus(tmp_path: Path, bruker_dir: Path) -> None:
+    experiment = read_dataset(bruker_dir / "nus_2d")
+    backend = _OverrideBackend(tmp_path / "work")
+    resp = produce_phased_spectrum(
+        experiment, backend, {"F2": (0.0, 30.0)}, params={"nthread": 2}
+    )
+    assert resp["success"]
+    assert backend.overrides == [(0.0, 30.0)]
+
+
+def test_candidate_score_roundtrip() -> None:
+    score = CandidateScore(
+        params={"p0": 0.0, "p1": 30.0},
+        score=88.0,
+        source="brute_force",
+    )
+    assert score.to_dict()["params"]["p1"] == 30.0
