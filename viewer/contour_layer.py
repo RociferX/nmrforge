@@ -69,14 +69,21 @@ class ContourLayer(pg.GraphicsObject):
             fig = plt.figure()
             try:
                 cs = plt.contour(smooth, levels=levels)
+                height = smooth.shape[0]
+                # matplotlib y 向上、pyqtgraph y 向下:翻转 y,使矩阵第 0 行
+                # 位于顶部;配合视图 invertY 后第 0 行(高 ppm)显示在下
                 for level, segs in zip(cs.levels, cs.allsegs):
                     target = path_neg if level < 0 else path_pos
                     for seg in segs:
                         if len(seg) < 2:
                             continue
-                        target.moveTo(seg[0, 0] / zoom, seg[0, 1] / zoom)
+                        target.moveTo(
+                            seg[0, 0] / zoom, (height - seg[0, 1]) / zoom
+                        )
                         for point in seg[1:]:
-                            target.lineTo(point[0] / zoom, point[1] / zoom)
+                            target.lineTo(
+                                point[0] / zoom, (height - point[1]) / zoom
+                            )
             finally:
                 plt.close(fig)
         self._path = path_pos

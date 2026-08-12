@@ -53,6 +53,9 @@ class SpectrumViewer(QWidget):
         self.plot.setBackground("w")
         self.plot.setMenuEnabled(False)
         self.plot.getViewBox().setMouseMode(pg.ViewBox.RectMode)
+        # nmrDraw/Poky 显示约定:1H 高 ppm 在左、15N 高 ppm 在下
+        # (x 默认索引0=高ppm在左已正确;y 需反转使高 ppm 在底)
+        self.plot.getViewBox().invertY(True)
 
         self.layers: list[ContourLayer] = []
         self.layer_names: list[str] = []
