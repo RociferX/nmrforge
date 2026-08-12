@@ -59,14 +59,36 @@ class SpectrumPanel(QWidget):
         self.refresh()
 
     def refresh(self) -> None:
-        """刷新谱图文件列表(不自动加载,避免频繁 IO)。"""
+        """刷新谱图文件列表(schema 1.3 data_dir 新布局,旧扁平路径回退)。"""
         self.file_list.clear()
         if self.manager.project is None or not self._current_exp_id:
             return
+        for path in self._spectrum_paths():
+            self.file_list.addItem(path.name)
+
+    def _spectrum_paths(self) -> list[Path]:
+        """当前实验/数据下的谱图文件(新布局优先,旧扁平路径回退)。"""
+        paths: list[Path] = []
+        exp_id = self._current_exp_id
+        data_id = self._current_data_id
+        if self.manager.project is None:
+            return paths
+        try:
+            if data_id:
+                spectra_dir = self.manager.data_dir(exp_id, data_id, "spectra")
+                for ext in (".ft2", ".ft3"):
+                    paths.extend(
+                        sorted(spectra_dir.glob(f"{exp_id}-{data_id}*{ext}"))
+                    )
+                if paths:
+                    return paths
+        except Exception:  # noqa: BLE001 - 新布局不可用回退旧路径
+            pass
+        # 旧扁平布局回退(项目根 spectra/,{exp_id}* 通配)
         spectra_dir = self.manager.dir_path("spectra")
         for ext in (".ft2", ".ft3"):
-            for path in sorted(spectra_dir.glob(f"{self._current_exp_id}*{ext}")):
-                self.file_list.addItem(path.name)
+            paths.extend(sorted(spectra_dir.glob(f"{exp_id}*{ext}")))
+        return paths
 
     def open_spectrum(self, path: Path, name: str | None = None) -> bool:
         """加载谱图到查看器;失败返回 False(不弹窗,由调用方决定提示)。"""
@@ -81,9 +103,9 @@ class SpectrumPanel(QWidget):
         return True
 
     def _on_file_clicked(self, item) -> None:
-        if self.manager.project is None:
+        paths = [p for p in self._spectrum_paths() if p.name == item.text()]
+        if not paths:
             return
-        path = self.manager.dir_path("spectra") / item.text()
-        if not self.open_spectrum(path):
+        if not self.open_spectrum(paths[0]):
             self.viewer.clear()
 

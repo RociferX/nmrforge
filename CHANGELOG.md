@@ -1,5 +1,23 @@
 # 变更日志
 
+## [0.2.19] - 2026-08-12
+
+- 谱图/峰表路径适配 schema 1.3 新布局:spectrum_panel 与 Pipeline 状态推断
+  改用 data_dir(exp_id, data_id, "spectra"/"peaks") 扫描,旧扁平路径保留回退。
+- 数据删除接线:数据右键「删除」调 manager.delete_data(不再误删实验),
+  确认对话框 + save + refresh。
+- 数据重命名落盘:改写 DataEntry.title(优先 manager.rename_data,缺失时直接
+  写 title),移除树内存 _data_titles;树显示 title 优先、缺省回退 data_id。
+- 项目删除/重命名接 WorkspaceManager:delete_project(回收站)/
+  rename_project(目录+name);后端接口缺失时友好提示并保留原行为。
+- 峰挑选/分析步骤接线:ProcessingController 增加 pick_peaks/analyze
+  (调 workflow.pick_peaks/analyze,缺失时提示待实现);peaks 运行后峰表
+  出现即 SUCCESS,analysis 占位提示。
+- 人工处理对话框加载真实数据:ParameterTableDialog 从
+  script_generator.param_schema() 填充;ScriptEditorDialog 从
+  render_scripts() 加载 .com 并支持保存到 data_dir(...,"process")/;
+  后端缺失时显示「后端待实现」并保持可编辑骨架。
+
 ## [0.2.18.1] - 2026-08-12
 
 - 当前项目右键新增「重命名项目...」:更新 project.json 的 name,树与窗口标题

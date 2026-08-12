@@ -135,6 +135,37 @@ class ProcessingController:
         return spectrum_path
 
     # ------------------------------------------------------------------
+    # 峰挑选 / 分析(G2B-004)
+    # ------------------------------------------------------------------
+    def pick_peaks(self, data, exp_id: str | None = None, data_id: str | None = None) -> dict:
+        """峰挑选:调 workflow.pick_peaks,返回 {status, peak_path, peak_count, logs}。"""
+        try:
+            from workflow.pick_peaks import pick_peaks as backend_pick_peaks
+        except ImportError as exc:  # pragma: no cover - Backend 未落地
+            raise NotImplementedError("峰挑选(workflow.pick_peaks)待 Backend 实现") from exc
+        if self._manager is None:
+            raise RuntimeError("ProcessingController 未绑定项目(ProjectManager)")
+        exp_id = exp_id or getattr(data, "exp_id", "")
+        data_id = data_id or getattr(data, "id", "")
+        result = backend_pick_peaks(self._manager, exp_id, data_id)
+        self._manager.save()
+        return result
+
+    def analyze(self, data, exp_id: str | None = None, data_id: str | None = None) -> dict:
+        """分析(峰归属/统计):调 workflow.analyze;接口占位。"""
+        try:
+            from workflow.analyze import analyze as backend_analyze
+        except ImportError as exc:  # pragma: no cover - Backend 未落地
+            raise NotImplementedError("分析(workflow.analyze)待 Backend 实现") from exc
+        if self._manager is None:
+            raise RuntimeError("ProcessingController 未绑定项目(ProjectManager)")
+        exp_id = exp_id or getattr(data, "exp_id", "")
+        data_id = data_id or getattr(data, "id", "")
+        result = backend_analyze(self._manager, exp_id, data_id)
+        self._manager.save()
+        return result
+
+    # ------------------------------------------------------------------
     # 人工路径(接口占位,实现之后再写)
     # ------------------------------------------------------------------
     def manual_param_table(self, entry: ExperimentEntry | None = None) -> str:

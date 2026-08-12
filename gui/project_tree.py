@@ -64,7 +64,6 @@ class ProjectTreePanel(QWidget):
         super().__init__(parent)
         self.manager = manager or ProjectManager()
         self.workspace = workspace
-        self._data_titles: dict[tuple[str, str], str] = {}  # (exp_id, data_id) -> 名称
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -174,7 +173,8 @@ class ProjectTreePanel(QWidget):
         data_id = getattr(data_node, "id", exp.id)
         source = getattr(data_node, "source", "") or getattr(exp, "source", "")
         status = self._data_status(exp, data_node)
-        label = self._data_titles.get((exp.id, data_id), "") or f"数据 {data_id}"
+        title = getattr(data_node, "title", "") or ""
+        label = title or f"数据 {data_id}"
         data_item = QTreeWidgetItem([label, status])
         data_item.setIcon(0, self._icon("data"))
         data_item.setToolTip(0, f"{data_id}\n来源: {source}\n右键: 生成 FID / 生成谱图 / 删除")

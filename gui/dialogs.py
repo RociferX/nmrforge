@@ -213,11 +213,10 @@ class SampleDialog(QDialog):
 
 
 class ParameterTableDialog(QDialog):
-    """人工路径 A:参数表格编辑器 UI 骨架。
+    """人工路径 A:参数表格编辑器。
 
-    展示契约约定的处理参数结构(zero_fill/sampling/stages);后端实现
-    尚未落地,「运行」按钮调用 ProcessingController.manual_param_table 占位
-    接口并提示待实现。
+    从 backend.script_generator.param_schema() 填充表格;后端缺失时
+    显示占位参数并保持可编辑。
     """
 
     def __init__(
@@ -242,8 +241,7 @@ class ParameterTableDialog(QDialog):
         )
 
         hint = QLabel(
-            "人工路径 A(骨架):逐阶段修改参数,后端将按参数生成确定性 .com 脚本。"
-            "当前为占位接口,保存后可继续开发。"
+            "人工路径 A:逐阶段修改参数,后端将按参数生成确定性 .com 脚本。"
         )
         hint.setWordWrap(True)
         layout.addWidget(hint)
@@ -288,10 +286,10 @@ class ParameterTableDialog(QDialog):
 
 
 class ScriptEditorDialog(QDialog):
-    """人工路径 B:脚本编辑器 UI 骨架(模仿 VSCode 的简单文本编辑器)。
+    """人工路径 B:脚本编辑器(模仿 VSCode 的简单文本编辑器)。
 
-    编辑 .com 处理脚本;后端实现尚未落地,「运行」调用
-    ProcessingController.manual_script_editor 占位接口并提示待实现。
+    从 render_scripts 加载 .com 内容;支持保存到数据 process 目录,
+    「执行」为占位按钮(后端执行待接入)。
     """
 
     def __init__(
@@ -300,14 +298,17 @@ class ScriptEditorDialog(QDialog):
         experiment_label: str,
         script_name: str = "process.com",
         content: str = "",
+        save_dir: Path | None = None,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle(f"脚本编辑器 - {experiment_label} ({script_name})")
         self.resize(720, 520)
+        self.script_name = script_name
+        self.save_dir = save_dir
         layout = QVBoxLayout(self)
         hint = QLabel(
-            "人工路径 B(骨架):直接编辑处理脚本(.com)。当前为占位接口,"
-            "语法高亮与后端执行将在后续版本接入。"
+            "人工路径 B:直接编辑处理脚本(.com)。保存写入数据 process 目录,"
+            "「执行」为占位按钮(后端执行待接入)。"
         )
         hint.setWordWrap(True)
         layout.addWidget(hint)
@@ -327,6 +328,24 @@ class ScriptEditorDialog(QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+        self.save_message = QLabel("")
+        self.save_message.setWordWrap(True)
+        layout.addWidget(self.save_message)
 
     def result_data(self) -> dict:
         return {"content": self.editor.toPlainText()}
+
+    def save_script(self) -> Path | None:
+        """把当前内容保存到数据 process 目录(无目录时返回 None)。"""
+        if self.save_dir is None:
+            self.save_message.setText("未指定保存目录(需选中数据)")
+            return None
+        try:
+            self.save_dir.mkdir(parents=True, exist_ok=True)
+            target = self.save_dir / self.script_name
+            target.write_text(self.editor.toPlainText(), encoding="utf-8")
+            self.save_message.setText(f"已保存: {target}")
+            return target
+        except OSError as exc:
+            self.save_message.setText(f"保存失败: {exc}")
+            return None

@@ -27,5 +27,19 @@ class WorkspaceManager:
         """在工作区下创建项目,返回 ProjectManager。"""
         return self._impl.create_project(name, **kwargs)
 
+    def delete_project(self, name: str, trash: bool = True):
+        """删除项目(默认移入回收站);后端未实现时抛 NotImplementedError。"""
+        method = getattr(self._impl, "delete_project", None)
+        if method is None:
+            raise NotImplementedError("WorkspaceManager.delete_project 待 Backend 实现")
+        return method(name, trash=trash)
+
+    def rename_project(self, old_name: str, new_name: str) -> Path:
+        """重命名项目目录;后端未实现时抛 NotImplementedError。"""
+        method = getattr(self._impl, "rename_project", None)
+        if method is None:
+            raise NotImplementedError("WorkspaceManager.rename_project 待 Backend 实现")
+        return Path(method(old_name, new_name))
+
     def default_root(self) -> Path:
         return self.ensure()

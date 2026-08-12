@@ -71,6 +71,19 @@ class _TempWorkspace:
     def ensure(self) -> Path:
         self.root.mkdir(parents=True, exist_ok=True)
         return self.root
+    def delete_project(self, name: str, trash: bool = True) -> None:
+        target = self.root / name
+        if target.exists():
+            import shutil
+
+            shutil.rmtree(target)
+
+    def rename_project(self, old_name: str, new_name: str) -> Path:
+        target = self.root / old_name
+        new_target = self.root / new_name
+        if target.exists():
+            target.rename(new_target)
+        return new_target
 
     def list_projects(self) -> list[Path]:
         return sorted(
@@ -489,3 +502,108 @@ class _SyncThread:
 
     def start(self) -> None:
         self._target()
+
+def test_spectrum_panel_scans_data_dir_layout(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """schema 1.3 布局:谱图位于 data_dir(...,"spectra")/ 下,面板可列出并打开。"""
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    spectra_dir = manager.data_dir("exp_001", "d_001", "spectra")
+    spectra_dir.mkdir(parents=True, exist_ok=True)
+    _write_ft2(spectra_dir / "exp_001-d_001.ft2")
+    panel = SpectrumPanel(manager)
+    panel.set_context("exp_001", "d_001")
+    assert panel.file_list.count() == 1
+    assert panel.file_list.item(0).text() == "exp_001-d_001.ft2"
+    assert panel.open_spectrum(spectra_dir / "exp_001-d_001.ft2") is True
+    panel.close()
+
+
+def test_pipeline_status_peaks_from_data_dir(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """peaks 状态检查 data_dir(...,"peaks")/<exp>-<data>.csv。"""
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    spectra_dir = manager.data_dir("exp_001", "d_001", "spectra")
+    spectra_dir.mkdir(parents=True, exist_ok=True)
+    _write_ft2(spectra_dir / "exp_001-d_001.ft2")
+    peaks_dir = manager.data_dir("exp_001", "d_001", "peaks")
+    peaks_dir.mkdir(parents=True, exist_ok=True)
+    (peaks_dir / "exp_001-d_001.csv").write_text(
+        "Peak_ID,H_shift,N_shift,Intensity,SN,label\n1,8.0,115.0,100,20,G1\n",
+        encoding="utf-8",
+    )
+    statuses = compute_step_statuses(manager, "exp_001")
+    assert statuses["spectrum"] == "SUCCESS"
+    assert statuses["peaks"] == "SUCCESS"
+    assert statuses["analysis"] == "READY"
+
+
+def test_pipeline_peaks_step_runs_pick_peaks(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """peaks 步骤运行按钮走 pick_peaks 并刷新状态。"""
+    monkeypatch.setattr("threading.Thread", SyncThread)
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    spectra_dir = manager.data_dir("exp_001", "d_001", "spectra")
+    spectra_dir.mkdir(parents=True, exist_ok=True)
+    _write_ft2(spectra_dir / "exp_001-d_001.ft2")
+
+    class PeaksController(FakeProcessingController):
+        def pick_peaks(self, data, exp_id=None, data_id=None) -> dict:
+            self.calls.append("pick_peaks")
+            peaks_dir = manager.data_dir(exp_id, data_id, "peaks")
+            peaks_dir.mkdir(parents=True, exist_ok=True)
+            (peaks_dir / f"{exp_id}-{data_id}.csv").write_text(
+                "Peak_ID,H_shift,N_shift,Intensity,SN,label\n1,8.0,115.0,100,20,G1\n",
+                encoding="utf-8",
+            )
+            return {"status": "success", "peak_count": 1}
+
+    controller = PeaksController()
+    panel = PipelinePanel(manager, controller)
+    log = LogPanel()
+    panel.log_message.connect(log.append)
+    panel.set_selection("data", "exp_001", "d_001")
+    assert not panel._rows["peaks"].run_button.isHidden()  # peaks READY
+    panel._on_run_requested("peaks")
+    assert "pick_peaks" in controller.calls
+    assert panel._rows["peaks"].status_label.text().startswith("✓")  # 峰表出现 → SUCCESS
+    panel.close()
+    log.close()
+
+
+def test_data_delete_wires_manager_delete_data(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """数据删除接线:manager.delete_data(不删实验)。"""
+    from gui.dialogs import ConfirmDialog
+
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    window = MainWindow(manager=manager)
+    monkeypatch.setattr(ConfirmDialog, "confirm", staticmethod(lambda *a, **k: True))
+    window.project_tree.select_experiment("exp_001")
+    window._delete_data("exp_001", "d_001")
+    entry = manager.project.experiment("exp_001")
+    assert entry is not None and entry.data == []  # 数据被删,实验保留
+    window.close()
+
+
+def test_data_rename_persists_title(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """数据重命名:写 DataEntry.title 并落盘(重启可读)。"""
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    window = MainWindow(manager=manager)
+    monkeypatch.setattr(
+        "gui.main_window.QInputDialog.getText",
+        staticmethod(lambda *a, **k: ("重命名后", True)),
+    )
+    window._rename_data("exp_001", "d_001")
+    data_entry = manager.project.experiment("exp_001").data[0]
+    assert data_entry.title == "重命名后"
+    # 树显示 title
+    tree = window.project_tree.tree
+    data_item = tree.topLevelItem(0).child(0).child(0).child(0)
+    assert data_item.text(0) == "重命名后"
+    window.close()

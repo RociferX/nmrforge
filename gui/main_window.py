@@ -326,8 +326,15 @@ class MainWindow(QMainWindow):
         exp_id = getattr(result, "experiment_id", None) or result.get("experiment_id", "")
         data_id = getattr(result, "data_id", "") or ""
         name = self._pending_data_names.pop(exp_id, "") if exp_id else ""
-        if exp_id and data_id and name:
-            self.project_tree._data_titles[(exp_id, data_id)] = name
+        if exp_id and data_id and name and self.manager.project is not None:
+            entry = self.manager.project.experiment(exp_id)
+            data_entry = next((d for d in entry.data if d.id == data_id), None) if entry else None
+            if data_entry is not None:
+                data_entry.title = name
+                try:
+                    self.manager.save()
+                except ProjectError:
+                    pass
         self.refresh()
         if exp_id:
             self.project_tree.select_experiment(exp_id)
@@ -453,43 +460,101 @@ class MainWindow(QMainWindow):
         if entry is None:
             return
         label = f"{entry.title or entry.id} ({exp_id})"
+        params, backend_ready = self._load_param_schema()
         if step_id in ("fid", "spectrum", "import"):
-            dialog = ParameterTableDialog(self, label)
+            dialog = ParameterTableDialog(self, label, params=params)
+            if not backend_ready:
+                dialog.setWindowTitle(dialog.windowTitle() + "(后端待实现)")
         else:
-            dialog = ScriptEditorDialog(self, label)
+            scripts = self._load_rendered_scripts(entry)
+            data_entry = entry.data[0] if entry.data else None
+            save_dir = None
+            if data_entry is not None:
+                try:
+                    save_dir = self.manager.data_dir(exp_id, data_entry.id, "process")
+                except Exception:  # noqa: BLE001
+                    save_dir = None
+            script_name = next(iter(scripts), "process.com")
+            dialog = ScriptEditorDialog(
+                self,
+                label,
+                script_name=script_name,
+                content=scripts.get(script_name, ""),
+                save_dir=save_dir,
+            )
+            if not backend_ready:
+                dialog.setWindowTitle(dialog.windowTitle() + "(后端待实现)")
         if dialog.exec() != ParameterTableDialog.DialogCode.Accepted:
             return
-        dialog.result_data()  # UI 骨架:回读编辑内容,后续版本传给后端
-        try:
-            if isinstance(dialog, ParameterTableDialog):
-                self.controller.manual_param_table(entry)
-            else:
-                self.controller.manual_script_editor(entry)
-        except NotImplementedError as exc:
+        if isinstance(dialog, ScriptEditorDialog):
+            dialog.save_script()  # 保存到数据 process 目录
+        elif hasattr(dialog, "result_data"):
+            dialog.result_data()
+        if not backend_ready:
             InfoDialog.show_info(
-                self, "人工处理待实现", f"{exc}\n已保存参数/脚本骨架,后续版本接入后端。"
+                self,
+                "人工处理",
+                "参数/脚本已加载为可编辑骨架;后端 param_schema/render_scripts 待实现,"
+                "当前仅支持本地保存。",
             )
+        else:
+            InfoDialog.show_info(
+                self, "人工处理", "已保存参数/脚本,后端执行将在后续版本接入。"
+            )
+
+    def _load_param_schema(self) -> tuple[dict, bool]:
+        """从 backend.script_generator.param_schema() 加载参数;缺失时返回默认骨架。"""
+        try:
+            from backend.script_generator import param_schema
+
+            schema = param_schema()
+            return (dict(schema) if isinstance(schema, dict) else {}), True
+        except Exception:  # noqa: BLE001 - 后端未落地
+            return {}, False
+
+    def _load_rendered_scripts(self, entry) -> dict:
+        """从 render_scripts(experiment, params) 加载 .com 脚本;缺失时返回空。"""
+        try:
+            from backend.script_generator import render_scripts
+
+            result = render_scripts(entry, {})
+            return dict(result) if isinstance(result, dict) else {}
+        except Exception:  # noqa: BLE001 - 后端未落地
+            return {}
 
     # ------------------------------------------------------------------
     # 树动作(契约 v1.2 §8.5)
     # ------------------------------------------------------------------
     def _rename_project(self) -> None:
-        """重命名当前项目(更新 project.json 的 name)。"""
-        if self.manager.project is None:
+        """重命名当前项目:优先 WorkspaceManager.rename_project(目录+name)。"""
+        if self.manager.project is None or self.manager.root is None:
             return
+        old_name = self.manager.root.name
         new_name, ok = QInputDialog.getText(
             self, "重命名项目", "项目名称:", text=self.manager.project.name
         )
         if not ok or not new_name.strip():
             return
-        self.manager.project.name = new_name.strip()
+        new_name = new_name.strip()
         try:
-            self.manager.save()
-        except ProjectError as exc:
-            InfoDialog.show_info(self, "重命名项目失败", str(exc))
+            new_root = self.workspace.rename_project(old_name, new_name)
+            self.manager = ProjectManager.open_project(new_root)
+        except NotImplementedError as exc:
+            InfoDialog.show_info(
+                self, "重命名项目", f"{exc}\n当前仅更新 project.json 的 name。"
+            )
+            self.manager.project.name = new_name
+            try:
+                self.manager.save()
+            except ProjectError as exc2:
+                InfoDialog.show_info(self, "重命名项目失败", str(exc2))
+                return
+        except Exception as exc:  # noqa: BLE001 - WorkspaceError 等统一提示
+            InfoDialog.show_info(self, "重命名项目失败", f"{type(exc).__name__}: {exc}")
             return
+        self._rebind_shared_manager()
         self.refresh()
-        self.statusBar().showMessage(f"项目已重命名为 {new_name.strip()}")
+        self.statusBar().showMessage(f"项目已重命名为 {new_name}")
 
     def _delete_project(self) -> None:
         if self.manager.project is None:
@@ -502,10 +567,22 @@ class MainWindow(QMainWindow):
         )
         if not confirmed:
             return
+        try:
+            project_name = self.manager.root.name if self.manager.root is not None else ""
+            if project_name:
+                self.workspace.delete_project(project_name)
+        except NotImplementedError as exc:
+            InfoDialog.show_info(
+                self, "删除项目", f"{exc}\n当前仅关闭项目,目录保留。"
+            )
+        except Exception as exc:  # noqa: BLE001 - WorkspaceError 等统一提示
+            InfoDialog.show_info(self, "删除项目失败", f"{type(exc).__name__}: {exc}")
+            return
         if hasattr(self.recent, "remove") and self.manager.root is not None:
             self.recent.remove(str(self.manager.root))
         self.manager.close()
         self.refresh()
+        self.center_panel.welcome_page.refresh()
         self.statusBar().showMessage("项目已关闭")
 
     def _create_experiment(self) -> None:
@@ -545,12 +622,54 @@ class MainWindow(QMainWindow):
         )
 
     def _rename_data(self, exp_id: str, data_id: str) -> None:
-        """数据右键重命名(名称保存在 GUI 树层)。"""
-        current = self.project_tree._data_titles.get((exp_id, data_id), "")
+        """数据右键重命名:优先 manager.rename_data 落盘;缺失时直接写 title 并提示。"""
+        entry = self.manager.project.experiment(exp_id) if self.manager.project else None
+        if entry is None:
+            return
+        data_entry = next((d for d in entry.data if d.id == data_id), None)
+        current = getattr(data_entry, "title", "") or "" if data_entry else ""
         new_name, ok = QInputDialog.getText(self, "重命名数据", "数据名称:", text=current)
-        if ok:
-            self.project_tree._data_titles[(exp_id, data_id)] = new_name.strip()
-            self.project_tree.refresh()
+        if not ok:
+            return
+        new_name = new_name.strip()
+        rename_data = getattr(self.manager, "rename_data", None)
+        if rename_data is not None:
+            try:
+                rename_data(exp_id, data_id, new_name)
+            except Exception as exc:  # noqa: BLE001 - 后端异常统一提示
+                InfoDialog.show_info(self, "重命名数据失败", str(exc))
+                return
+        elif data_entry is not None:
+            # Backend rename_data 未落地:直接写 DataEntry.title 落盘
+            data_entry.title = new_name
+        try:
+            self.manager.save()
+        except ProjectError as exc:
+            InfoDialog.show_info(self, "重命名数据失败", str(exc))
+            return
+        self.project_tree.refresh()
+
+    def _delete_data(self, exp_id: str, data_id: str) -> None:
+        """删除数据(不删实验);确认 + manager.delete_data + save + refresh。"""
+        if self.manager.project is None:
+            return
+        confirmed = ConfirmDialog.confirm(
+            self,
+            "删除数据",
+            f"删除数据 {data_id} 及其产物文件?\n(WorkflowRun 审计记录将保留)",
+        )
+        if not confirmed:
+            return
+        try:
+            delete_data = getattr(self.manager, "delete_data", None)
+            if delete_data is None:
+                raise ProjectError("后端 delete_data 接口待实现")
+            delete_data(exp_id, data_id)
+            self.manager.save()
+        except ProjectError as exc:
+            InfoDialog.show_info(self, "删除数据失败", str(exc))
+            return
+        self.refresh()
 
     def _create_experiment_with_title(self, title: str) -> None:
         """中间面板内嵌表单:新建空白实验。"""
@@ -585,7 +704,7 @@ class MainWindow(QMainWindow):
         if not exp_id:
             return
         if action == "delete":
-            self._delete_experiment_by_id(exp_id)
+            self._delete_data(exp_id, data_id)
             return
         step = "fid" if action == "fid" else "spectrum"
         self.center_panel.set_selection("data", exp_id, data_id)

@@ -57,6 +57,8 @@ STEP_METHOD: dict[str, str] = {
     "import": "import_data",
     "fid": "generate_fid",
     "spectrum": "generate_spectrum",
+    "peaks": "pick_peaks",
+    "analysis": "analyze",
 }
 
 
@@ -77,19 +79,33 @@ def compute_step_statuses(manager: ProjectManager, exp_id: str) -> dict[str, str
     nodes = _data_nodes(manager, exp_id)
     if not nodes:
         return {step_id: "LOCKED" for step_id, _, _, _ in PIPELINE_STEPS}
+    has_ft = False
+    has_peaks = False
+    has_analysis = False
+    for node in nodes:
+        data_id = getattr(node, "id", exp_id)
+        try:
+            spectra_dir = manager.data_dir(exp_id, data_id, "spectra")
+            peaks_dir = manager.data_dir(exp_id, data_id, "peaks")
+            has_ft = has_ft or any(
+                spectra_dir.joinpath(f"{exp_id}-{data_id}.{ext}").is_file()
+                for ext in ("ft2", "ft3")
+            )
+            has_peaks = has_peaks or peaks_dir.joinpath(
+                f"{exp_id}-{data_id}.csv"
+            ).is_file()
+        except Exception:  # noqa: BLE001 - 新布局不可用回退旧路径
+            pass
+    # 旧扁平布局回退(项目根 spectra/peaks/analysis)
     spectra = manager.dir_path("spectra")
     peaks = manager.dir_path("peaks")
     analysis = manager.dir_path("analysis")
-    has_ft = any(
-        spectra.joinpath(f"{exp_id}-{node.id}.{ext}").is_file()
-        for node in nodes
-        for ext in ("ft2", "ft3")
-    ) or any(
+    has_ft = has_ft or any(
         spectra.joinpath(f"{exp_id}.{ext}").is_file()
         for ext in ("ft2", "ft3")
     )
-    has_peaks = peaks.joinpath(f"{exp_id}.csv").is_file()
-    has_analysis = analysis.joinpath(exp_id).is_dir()
+    has_peaks = has_peaks or peaks.joinpath(f"{exp_id}.csv").is_file()
+    has_analysis = has_analysis or analysis.joinpath(exp_id).is_dir()
 
     artifacts: dict[str, bool] = {
         "import": True,  # 实验下存在数据节点即导入完成

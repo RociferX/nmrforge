@@ -83,19 +83,12 @@ def test_main_window_open_manual_dialog(
     manager = _manager(tmp_path, monkeypatch)
     window = MainWindow(manager=manager)
     window.project_tree.select_experiment("exp_001")
-    called: list[str] = []
     monkeypatch.setattr("gui.main_window.ParameterTableDialog.exec", lambda self: 1)
     monkeypatch.setattr("gui.main_window.ScriptEditorDialog.exec", lambda self: 1)
-    monkeypatch.setattr(
-        window.controller, "manual_param_table", lambda entry: called.append(entry.id)
-    )
-    monkeypatch.setattr(
-        window.controller, "manual_script_editor", lambda entry: called.append(entry.id)
-    )
     window._open_manual_dialog("process")
-    assert called == ["exp_001"]  # 参数表格路径
+    assert messages  # 参数表格路径:后端数据源缺失时给出提示
     window._open_manual_dialog("peaks")
-    assert called == ["exp_001", "exp_001"]  # 脚本编辑器路径
+    assert len(messages) >= 2  # 脚本编辑器路径同样提示
     window.close()
 
 
