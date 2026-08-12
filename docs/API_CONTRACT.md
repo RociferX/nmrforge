@@ -246,6 +246,8 @@ process/ 内,spectrum_path 在 spectra/ 内。
 ## 10. 契约 v1.4(3D 谱查看:读取/切片/投影)
 
 状态:approved(Architect,2026-08-12;实现属 GUI Agent,契约 Shared)。
+实现:viewer/spectrum.py Spectrum3D(Shared,实现属 GUI)+ viewer/
+spectrum3d_panel.py + SpectrumWindow/gui.spectrum_panel 接线。
 
 ### 10.1 Spectrum3D(viewer/spectrum.py)
 
@@ -257,20 +259,27 @@ class Spectrum3D:
     @classmethod
     def load_from_ft3(cls, path, labels=("F1", "F2", "F3")) -> Spectrum3D
         # nmrglue 读 ft3;复数取实部;轴用 FDF1/FDF2/FDF3 头部
-        # (SW/OBS/CAR/ORIG,与 §4 同约定)
+        # (SW/OBS/CAR/ORIG 同 §4 约定);单文件 3D 流(FDPIPEFLAG=1)
+        # 读回形状 (F1,F2,F3),F1=FDF3SIZE、F2=FDSPECNUM、F3=FDSIZE;
+        # 非流单文件按同约定重塑。
     def slice(self, axis_idx: int, index: int) -> Spectrum
-        # 固定 axis_idx 的 index,返回其余两轴的二维 Spectrum(切平面)
+        # 固定第 axis_idx 维的 index,返回其余两轴的二维 Spectrum;
+        # 轴序:axis 0 → (F2,F3);axis 1 → (F1,F3);axis 2 → (F1,F2)。
     def project(self, axis_idx: int, mode: str = "max") -> Spectrum
         # 沿 axis_idx 最大强度投影(MIP,mode="max")或求和
-        # (mode="sum"),返回其余两轴二维 Spectrum
+        # (mode="sum"),轴序同 slice。
     def index_at(self, axis_idx: int, ppm: float) -> int
-        # 切片滑块按 ppm 定位(复用 SpectrumAxis.index_at)
+        # 第 axis_idx 维按 ppm 定位下标(滑块按 ppm 定位)。
 ```
 
 ### 10.2 查看器行为(viewer/app.py + gui/spectrum_panel.py)
 
 - 打开 .ft3 进入 3D 模式:选择查看平面(如 F1-F2),第三轴为切片轴;
-- 切片轴滑块按 ppm 定位;投影模式切换 MIP/sum(沿第三轴);
-- 切片/投影产物复用现有 SpectrumViewer/ContourLayer 绘制 2D 平面;
-- SpectrumWindow 与 GUI 谱图面板均支持 .ft3(文件过滤器、拖放、双击);
-- 3D 峰表列(F1/F2/F3_shift)显示不受影响。
+- 3D 模式控件(viewer/spectrum3d_panel.py):查看平面选择
+  (F1-F2 / F1-F3 / F2-F3)、第三轴切片滑块(ppm 显示)、投影模式
+  切换(MIP/求和);
+- 切片/投影产物复用现有 SpectrumViewer/ContourLayer 绘制 2D 平面
+  (正黑负红、框选缩放/平移/滚轮均保留);
+- SpectrumWindow 与 GUI 谱图面板均支持 .ft3(文件过滤器、拖放、双击),
+  按维度数自动进入 2D/3D 模式;
+- 3D 峰表列(F1/F2/F3_shift)按当前切片平面轴标签映射,联动不受影响。

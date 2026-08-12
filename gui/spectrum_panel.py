@@ -28,6 +28,7 @@ from core.project import ProjectManager
 from gui.dialogs import InfoDialog
 from gui.peaks_io import export_peaks_poky, import_peaks_poky, load_peaks
 from gui.processing import ProcessingController
+from viewer.spectrum3d_panel import Spectrum3DPanel
 from viewer.spectrum_viewer import SpectrumViewer
 
 
@@ -60,6 +61,10 @@ class SpectrumPanel(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self.viewer = SpectrumViewer()
+        self._spectrum3d_panel = Spectrum3DPanel()
+        self._spectrum3d_panel.setVisible(False)
+        self._spectrum3d_panel.slice_changed.connect(self._render_3d_view)
+        self.viewer.add_control_panel(self._spectrum3d_panel)
 
         self.file_list = QListWidget()
         self.file_list.setMaximumWidth(190)
@@ -152,6 +157,7 @@ class SpectrumPanel(QWidget):
             self.file_list.setVisible(False)
             self.peak_table.setVisible(False)
             self.peak_toolbar_widget.setVisible(False)
+            self._spectrum3d_panel.setVisible(False)
             return
         paths = self._spectrum_paths()
         for path in paths:
@@ -171,6 +177,7 @@ class SpectrumPanel(QWidget):
             self._load_peaks(first)
         else:
             self._current_spectrum = None
+            self._spectrum3d_panel.clear()
             self._clear_peaks()
 
     def _spectrum_paths(self) -> list[Path]:
@@ -198,16 +205,45 @@ class SpectrumPanel(QWidget):
         return paths
 
     def open_spectrum(self, path: Path, name: str | None = None) -> bool:
-        """加载谱图到查看器;失败返回 False(不弹窗,由调用方决定提示)。"""
+        """加载谱图到查看器;失败返回 False(不弹窗,由调用方决定提示)。
+
+        .ft3 走 3D 查看路径(契约 §10):绑定 Spectrum3D 并显示默认切片,
+        3D 面板提供平面/切片/投影切换;.ft2 走二维叠加。
+        """
         try:
+            if path.suffix.lower() == ".ft3":
+                from viewer.spectrum import Spectrum3D
+
+                self._current_spectrum = path
+                self._spectrum3d_panel.set_spectrum3d(
+                    Spectrum3D.load_from_ft3(path)
+                )
+                self._spectrum3d_panel.setVisible(True)
+                self._render_3d_view()
+                return True
             from viewer.spectrum import Spectrum
 
             spectrum = Spectrum.load_from_ft2(path)
         except Exception:  # noqa: BLE001 - 损坏文件统一由调用方提示
             return False
+        self._spectrum3d_panel.clear()
         self.viewer.clear()
         self.viewer.add_spectrum(spectrum, name=name or path.stem)
         return True
+
+    def _render_3d_view(self) -> None:
+        """按 3D 面板当前平面/切片/投影渲染二维视图并重挂峰标记。"""
+        spectrum = self._spectrum3d_panel.current_spectrum()
+        if spectrum is None:
+            return
+        base = self._current_spectrum.stem if self._current_spectrum else "3D"
+        self.viewer.clear()
+        self.viewer.add_spectrum(
+            spectrum,
+            name=self._spectrum3d_panel.current_name(base),
+        )
+        if self._peaks:
+            self.viewer.set_peaks(self._peaks)
 
     def _on_file_clicked(self, item) -> None:
         paths = [p for p in self._spectrum_paths() if p.name == item.text()]

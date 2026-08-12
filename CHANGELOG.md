@@ -1,5 +1,17 @@
 # 变更日志
 
+## [0.2.32] - 2026-08-12
+
+- 3D 谱切片查看(契约 §10):viewer/spectrum.py 新增 Spectrum3D
+  (load_from_ft3 / slice / project / index_at,兼容单文件流与非流存储);
+  新增 viewer/spectrum3d_panel.py(查看平面 F1-F2/F1-F3/F2-F3、第三轴
+  切片滑块 ppm 显示、MIP/求和投影);SpectrumWindow 文件过滤器/拖放/
+  命令行支持 .ft3,按维度数自动进入 2D/3D 模式,切片/投影复用现有
+  SpectrumViewer/ContourLayer 绘制;gui/spectrum_panel 双击/选择 .ft3
+  走 3D 查看路径(不再报「仅支持二维谱图」),峰表 3D 列按切片平面轴
+  标签映射联动;状态栏/帮助补充 3D 操作说明。
+- 测试:新增 test_viewer3d(12 例),全量通过,ruff 全绿。
+
 ## [0.2.31] - 2026-08-12
 
 - Backend(G2B-007):逐维基线校正(默认全维 POLY -auto):
