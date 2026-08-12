@@ -1,4 +1,4 @@
-"""pyqtgraph 等高线图层:matplotlib contour 生成 QPainterPath,正负峰分色。
+"""pyqtgraph 轮廓图层(contour):matplotlib contour 生成 QPainterPath,正负峰分色。
 
 Poky/nmrDraw 风格:
 - 插值后绘制使轮廓圆润(``zoom`` 因子,默认 2;级别越多越细腻);
@@ -14,7 +14,7 @@ from pyqtgraph.Qt import QtCore, QtGui
 
 
 class ContourLayer(pg.GraphicsObject):
-    """把二维数据画成等高线;坐标即数据点下标(与 ppm 轴对应)。"""
+    """把二维数据画成轮廓(contour);坐标即数据点下标(与 ppm 轴对应)。"""
 
     def __init__(
         self,
@@ -62,7 +62,7 @@ class ContourLayer(pg.GraphicsObject):
         data = self._data
         levels = self._levels
         if data is not None and data.ndim != 2:
-            raise ValueError(f"等高线仅支持二维数据(当前 {data.ndim} 维)")
+            raise ValueError(f"轮廓仅支持二维数据(当前 {data.ndim} 维)")
         if data is not None and data.size and levels is not None and len(levels):
             zoom = self._zoom
             smooth = ndimage.zoom(data, zoom, order=1)

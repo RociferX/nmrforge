@@ -1,8 +1,8 @@
-"""二维谱查看器控件(独立于项目管理 GUI):等高线、峰标记、缩放/平移、长宽比。
+"""二维谱查看器控件(独立于项目管理 GUI):轮廓(contour)、峰标记、缩放/平移、长宽比。
 
 交互习惯(nmrDraw/Poky):
 - 左键拖拽框选放大;中键拖拽平移;滚轮缩放;
-- 强度滑块控制等高线起始水平;级数滑块控制轮廓密度(默认 36 级);
+- 强度滑块控制轮廓起始水平;级数滑块控制轮廓密度(默认 36 级);
 - 正峰黑/负峰红;峰为半透明圆点,点击选中放大并显示标签;
 - 支持锁定显示长宽比(1:1 / 2:1 / 4:1 / 自由)。
 """
@@ -79,7 +79,7 @@ class SpectrumViewer(QWidget):
         self.level_slider.setRange(1, 100)
         self.level_slider.setValue(10)
         self.level_slider.valueChanged.connect(self._update_levels)
-        self.level_label = QLabel("等高线起点 10%")
+        self.level_label = QLabel("轮廓起点 10%")
 
         self.count_slider = QSlider(Qt.Orientation.Horizontal)
         self.count_slider.setRange(5, 60)
@@ -99,10 +99,10 @@ class SpectrumViewer(QWidget):
         controls_layout = QVBoxLayout(controls)
         controls_layout.addWidget(QLabel("谱图层"))
         controls_layout.addWidget(self.layer_list, 1)
-        controls_layout.addWidget(QLabel("等高线起点(%)"))
+        controls_layout.addWidget(QLabel("轮廓起点(%)"))
         controls_layout.addWidget(self.level_slider)
         controls_layout.addWidget(self.level_label)
-        controls_layout.addWidget(QLabel("等高线级数"))
+        controls_layout.addWidget(QLabel("轮廓级数"))
         controls_layout.addWidget(self.count_slider)
         controls_layout.addWidget(self.count_label)
         controls_layout.addWidget(self.reset_button)
@@ -115,7 +115,10 @@ class SpectrumViewer(QWidget):
         splitter.addWidget(self.plot)
         splitter.addWidget(controls)
         splitter.setStretchFactor(0, 1)
-        splitter.setSizes([560, 180])
+        splitter.setSizes([760, 200])
+        # 默认显示宽扁谱图区(避免打开时接近正方形)
+        self.plot.setMinimumHeight(320)
+        controls.setMaximumHeight(260)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(splitter)
@@ -186,7 +189,7 @@ class SpectrumViewer(QWidget):
     def _update_levels(self) -> None:
         for layer, spectrum in zip(self.layers, self.layer_spectra):
             layer.setData(spectrum.data, self._levels_for(spectrum))
-        self.level_label.setText(f"等高线起点 {self.level_slider.value()}%")
+        self.level_label.setText(f"轮廓起点 {self.level_slider.value()}%")
 
     def _on_level_count(self, value: int) -> None:
         self._level_count = value
