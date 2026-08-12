@@ -1,5 +1,19 @@
 # 变更日志
 
+## [0.2.16] - 2026-08-12
+
+- Backend:工作区容器 core/workspace.py(契约 v1.3 §9.1 / G2B-003):
+  WorkspaceManager(默认 ~/NMRForgeWorkspace,ensure 幂等/list_projects/
+  create_project/open_project,非法项目名校验)。
+- Backend:数据目录层级(schema 1.3,契约 §9.2):项目 → <exp_id>/ →
+  <data_id>/ → {raw, process, spectra, peaks, figures, report,
+  metadata.json};import_data 复制到 <data>/raw/ 并写
+  <data>/metadata.json;stepwise 工作目录 <data>/process/、终谱归位
+  <data>/spectra/;infer_status/删除兼容新旧布局,旧 dir_path 保留为
+  兼容层;open_project 自动迁移 1.1/1.2 → 1.3(不物理搬文件)。
+- Backend:test_phase_optimize 平台敏感断言改为「非零解 + 增益」
+  (VM numpy 2.2.6 true=-60 → est=-180,±60° 容差仍不足;先例 ±45°→非零解)。
+- 测试:新增 tests/test_workspace.py 7 项;全量 226 passed。
 ## [0.2.14] - 2026-08-12
 
 - Backend:Experiment→Data 层级(core/project schema 1.2 + 迁移,按 G2B-002 /

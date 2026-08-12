@@ -142,13 +142,13 @@ def import_data(
 
     run: WorkflowRun | None = None
     copied_dir: Path | None = None
-    metadata_path = manager.dir_path("metadata") / f"{exp_id}-{data_id}.json"
+    metadata_path = manager.data_metadata_path(exp_id, data_id)
     try:
         effective_root = src
         if should_copy:
-            copied_dir = manager.dir_path("raw") / exp_id / data_id
+            copied_dir = manager.data_dir(exp_id, data_id, "raw")
             shutil.copytree(src, copied_dir)
-            data_entry.raw_dir = str(copied_dir)
+            data_entry.raw_dir = copied_dir.relative_to(manager.root).as_posix()
             if segment_paths:
                 seg_base = copied_dir / "segments"
                 seg_base.mkdir()
