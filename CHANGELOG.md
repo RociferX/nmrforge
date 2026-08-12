@@ -1,5 +1,13 @@
 # 变更日志
 
+## [0.2.24] - 2026-08-12
+
+- Backend:处理脚本(generate_process_script)直接维 FT+PS 后增加 EXT 提取
+  窗口,默认选区 6-11 ppm(-x1 11.0ppm -xn 6.0ppm -sw -round 2),
+  与 NUS 脚本一致;ext_lo/ext_hi/extract 可配(extract=False 关闭);
+  param_schema 与 render_scripts 透传。
+- 测试:新增 EXT 默认行/顺序、关闭、自定义窗口、schema 键断言;
+  全量通过,ruff 全绿。
 ## [0.2.22.1] - 2026-08-12
 
 - B2G-002:处理步骤按 data_id 作用域执行——run_step/set_context 支持

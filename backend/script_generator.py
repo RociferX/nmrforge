@@ -302,8 +302,15 @@ def generate_process_script(
     in_file: str,
     out_file: str,
     direct_phase: dict[str, tuple[float, float]] | None = None,
+    ext_lo: str = "11.0",
+    ext_hi: str = "6.0",
+    extract: bool = True,
 ) -> str:
-    """把处理计划（DAG）翻译为 NMRPipe 管道脚本（直接维 → TP → 间接维）。"""
+    """把处理计划（DAG）翻译为 NMRPipe 管道脚本（直接维 → EXT → TP → 间接维）。
+
+    EXT 沿直接维(1H)提取窗口,默认 6-11 ppm(ext_lo=11, ext_hi=6),
+    与 NUS 脚本一致;extract=False 可关闭。
+    """
     axes = [dim.logical_axis for dim in experiment.dimensions]
     lines = [
         "#!/bin/csh",
@@ -313,6 +320,10 @@ def generate_process_script(
     ]
     for index, axis in enumerate(axes):
         lines += _stage_lines(_axis_stages(plan, axis), direct_phase)
+        if extract and index == 0:
+            lines.append(
+                f"| nmrPipe -fn EXT -x1 {ext_lo}ppm -xn {ext_hi}ppm -sw -round 2 \\"
+            )
         if index < len(axes) - 1:
             lines.append("| nmrPipe -fn TP \\")
     if len(axes) == 2:
@@ -498,6 +509,21 @@ def param_schema() -> dict[str, Any]:
                     },
                 },
             },
+            "ext_lo": {
+                "type": "string",
+                "default": "11.0",
+                "description": "直接维 1H 提取窗口高 ppm(EXT -x1)",
+            },
+            "ext_hi": {
+                "type": "string",
+                "default": "6.0",
+                "description": "直接维 1H 提取窗口低 ppm(EXT -xn)",
+            },
+            "extract": {
+                "type": "boolean",
+                "default": True,
+                "description": "直接维提取窗口是否开启",
+            },
             "stages": {
                 "type": "array",
                 "description": "处理阶段列表(表格编辑器逐行展示)",
@@ -516,6 +542,9 @@ def param_schema() -> dict[str, Any]:
         },
         "default": {
             "zero_fill": 2,
+            "ext_lo": "11.0",
+            "ext_hi": "6.0",
+            "extract": True,
             "sampling": {
                 "ft_neg": False,
                 "ft_alt": True,
@@ -584,5 +613,8 @@ def render_scripts(
             in_file=f"{experiment.dataset_id}.fid",
             out_file=f"{experiment.dataset_id}.{out_ext}",
             direct_phase=dp,
+            ext_lo=str(params.get("ext_lo", "11.0")),
+            ext_hi=str(params.get("ext_hi", "6.0")),
+            extract=_as_bool(params.get("extract", True)),
         )
     return scripts

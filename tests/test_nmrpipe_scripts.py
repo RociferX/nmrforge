@@ -186,3 +186,37 @@ def test_3d_nus_script_direct_phase(bruker_dir: Path) -> None:
         direct_phase=(12.0, -3.0),
     )
     assert "| nmrPipe -fn PS -p0 12 -p1 -3 -di \\" in script
+
+
+
+def test_process_script_ext_default_6_11(bruker_dir: Path) -> None:
+    """处理脚本直接维 FT 后加 EXT,默认选区 6-11 ppm(PS 之后、TP 之前)。"""
+    exp = read_dataset(bruker_dir / "hsqc_2d")
+    plan = select_method(exp)
+    script = generate_process_script(exp, plan, in_file="a.fid", out_file="a.ft2")
+    lines = script.splitlines()
+    ps_index = next(
+        i for i, line in enumerate(lines) if "| nmrPipe -fn PS" in line
+    )
+    ext_index = next(
+        i for i, line in enumerate(lines) if "| nmrPipe -fn EXT" in line
+    )
+    tp_index = next(
+        i for i, line in enumerate(lines) if "| nmrPipe -fn TP" in line
+    )
+    assert ps_index < ext_index < tp_index
+    assert "| nmrPipe -fn EXT -x1 11.0ppm -xn 6.0ppm -sw -round 2" in script
+
+
+def test_process_script_extract_disabled_and_custom(bruker_dir: Path) -> None:
+    exp = read_dataset(bruker_dir / "hsqc_2d")
+    plan = select_method(exp)
+    off = generate_process_script(
+        exp, plan, in_file="a.fid", out_file="a.ft2", extract=False
+    )
+    assert "| nmrPipe -fn EXT" not in off
+    custom = generate_process_script(
+        exp, plan, in_file="a.fid", out_file="a.ft2",
+        ext_lo="9.0", ext_hi="7.5",
+    )
+    assert "| nmrPipe -fn EXT -x1 9.0ppm -xn 7.5ppm" in custom
