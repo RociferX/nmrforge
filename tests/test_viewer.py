@@ -201,6 +201,25 @@ def test_viewer_nearest_peak(qapp: QApplication) -> None:
     viewer.close()
 
 
+def test_viewer_axis_direction_nmrdraw(qapp: QApplication) -> None:
+    """nmrDraw 约定:1H 高 ppm 在左(x 列 0 靠左),15N 高 ppm 在下(y 行 0 靠下)。"""
+    import pyqtgraph as pg
+
+    viewer = SpectrumViewer()
+    spectrum = _synthetic_spectrum()
+    viewer.add_spectrum(spectrum)
+    vb = viewer.plot.getViewBox()
+    nx, ny = spectrum.data.shape[1], spectrum.data.shape[0]
+    p0 = vb.mapViewToScene(pg.QtCore.QPointF(0, 0))
+    p1 = vb.mapViewToScene(pg.QtCore.QPointF(nx - 1, 0))
+    assert p0.x() < p1.x()  # 列 0(高 ppm)在左
+    # contour 把行 0(高 ppm)画在数据 y 最大处;invertY 后数据 y 最大在底部
+    q0 = vb.mapViewToScene(pg.QtCore.QPointF(0, 0))
+    q1 = vb.mapViewToScene(pg.QtCore.QPointF(0, ny - 1))
+    assert q1.y() > q0.y()  # 行 0(高 ppm)对应数据 y 最大,显示在底部
+    viewer.close()
+
+
 def test_viewer_aspect_ratio(qapp: QApplication) -> None:
     viewer = SpectrumViewer()
     viewer.add_spectrum(_synthetic_spectrum())
