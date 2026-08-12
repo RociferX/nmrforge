@@ -11,6 +11,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import (
     QHBoxLayout,
@@ -79,12 +81,20 @@ def compute_step_statuses(manager: ProjectManager, exp_id: str) -> dict[str, str
     nodes = _data_nodes(manager, exp_id)
     if not nodes:
         return {step_id: "LOCKED" for step_id, _, _, _ in PIPELINE_STEPS}
+    has_fid = False
     has_ft = False
     has_peaks = False
     has_analysis = False
     for node in nodes:
         data_id = getattr(node, "id", exp_id)
         try:
+            # fid 完成判定:set_data_fid 登记的 fid_path,或 process 目录下 fid 文件
+            fid_path = str(getattr(node, "fid_path", "") or "")
+            fid_ok = bool(fid_path) and Path(fid_path).is_file()
+            if not fid_ok:
+                process_dir = manager.data_dir(exp_id, data_id, "process")
+                fid_ok = any(process_dir.glob("*.fid"))
+            has_fid = has_fid or fid_ok
             spectra_dir = manager.data_dir(exp_id, data_id, "spectra")
             peaks_dir = manager.data_dir(exp_id, data_id, "peaks")
             has_ft = has_ft or any(
@@ -109,7 +119,7 @@ def compute_step_statuses(manager: ProjectManager, exp_id: str) -> dict[str, str
 
     artifacts: dict[str, bool] = {
         "import": True,  # 实验下存在数据节点即导入完成
-        "fid": has_ft,
+        "fid": has_fid,
         "spectrum": has_ft,
         "peaks": has_peaks,
         "analysis": has_analysis,
