@@ -1,5 +1,18 @@
 # 变更日志
 
+## [0.2.13] - 2026-08-12
+
+- GUI 树层级演进(契约 v1.2 §8.5):Project → Experiment → Data;
+  Project 右键删除项目(强确认)、空白处/Project 右键新建空白实验、
+  Experiment 右键导入数据/重命名/删除、Data 右键生成 FID/生成谱图/
+  打开目录/删除;树列宽改为显式宽度 + 最小段宽(220/90,可读)。
+- ProcessingController 新增步骤化方法(契约 v1.2 §8.3):import_data /
+  generate_fid / generate_spectrum;旧 auto_run_sync/async 保留兼容;
+  后端 DataEntry 层级与 convert_to_fid 落地前为占位(友好提示)。
+- Pipeline 面板改为五步流程:导入数据 → 生成 FID → 生成谱图(含 SMILE
+  重构)→ 峰挑选 → 分析;步骤运行映射到 ProcessingController 对应方法。
+- 测试:树层级/右键动作/列宽/五步状态新增 9 项;全量 203 passed,ruff 全绿。
+
 ## [0.2.12] - 2026-08-12
 
 - Backend:相位准确性保证(workflow/phase_optimize)——VM 真实数据等价性验证

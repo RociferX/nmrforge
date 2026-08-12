@@ -1,11 +1,12 @@
-"""中间 Pipeline 面板:围绕当前实验显示处理步骤与状态。
+"""中间 Pipeline 面板:围绕当前数据/实验显示处理步骤与状态。
 
-第一版实现"状态驱动的步骤列表 + 下一步提示"(GUI_ARCHITECTURE_VISION §13-16):
+五步流程(契约 v1.2 / G2B-002):
+导入数据 → 生成 FID → 生成谱图(含 SMILE 重构)→ 峰挑选 → 分析。
+
 - 步骤状态依据前置依赖与产物文件推断(LOCKED/READY/RUNNING/SUCCESS/FAILED);
-- READY 步骤提供"运行"按钮,经 ProcessingController.auto_run_async 执行;
-- OUTDATED(参数/上游变化)与指纹校验留给后续阶段(见 PROJECT_STATUS 待办)。
-
-GUI 层不直接触碰 Backend:唯一出口是 ProcessingController。
+- READY 步骤提供「运行」按钮,经 ProcessingController 对应方法执行;
+- LOCKED 步骤 tooltip 说明缺哪个前置步骤;
+- GUI 层不直接触碰 Backend:唯一出口是 ProcessingController。
 """
 
 from __future__ import annotations
@@ -25,12 +26,11 @@ from gui.processing import ProcessingController
 
 # 步骤定义:id / 名称 / 描述 / 前置步骤 id 列表
 PIPELINE_STEPS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
-    ("import", "导入数据", "登记 Bruker 数据集并识别实验类型", ()),
-    ("fid", "生成 FID", "由原始数据生成 ser/fid 复型数据", ("import",)),
-    ("process", "数据处理", "NMRPipe 傅里叶变换与相位处理", ("fid",)),
-    ("reconstruct", "SMILE 重构", "非均匀采样重构(NUS)", ("process",)),
-    ("peaks", "峰挑选", "自动峰检测与强度/SNR 评估", ("process",)),
-    ("assign", "归属分析", "峰归属与结果分析", ("peaks",)),
+    ("import", "导入数据", "读 Bruker 参数并复制到项目(raw),不触发处理", ()),
+    ("fid", "生成 FID", "由原始数据转换为 fid(后端 bruker -AUTO/fid.com)", ("import",)),
+    ("spectrum", "生成谱图", "后端处理生成谱(自动包含 NUS SMILE 重构)", ("fid",)),
+    ("peaks", "峰挑选", "自动峰检测与强度/SNR 评估", ("spectrum",)),
+    ("analysis", "分析", "峰归属与结果分析", ("peaks",)),
 )
 
 STEP_LABEL: dict[str, str] = {step_id: label for step_id, label, _, _ in PIPELINE_STEPS}
@@ -52,27 +52,54 @@ STATUS_ICON = {
     "OUTDATED": "!",
 }
 
+# 步骤 → ProcessingController 方法映射(契约 v1.2 §8.3)
+STEP_METHOD: dict[str, str] = {
+    "import": "import_data",
+    "fid": "generate_fid",
+    "spectrum": "generate_spectrum",
+}
 
-def compute_step_statuses(manager: ProjectManager, exp_id: str) -> dict[str, str]:
-    """按产物文件与前置依赖推断各步骤状态(第一版启发式,后续换指纹校验)。"""
+
+def _data_nodes(manager: ProjectManager, exp_id: str) -> list:
+    """返回实验下的 Data 节点。
+
+    Backend 落地 DataEntry 层级(契约 v1.2 §8.1)后直接返回 entry.data;
+    当前兼容阶段:单数据模型下以实验自身作为数据节点。
+    """
     entry = manager.project.experiment(exp_id) if manager.project is not None else None
     if entry is None:
+        return []
+    data = getattr(entry, "data", None)
+    if data:
+        return list(data)
+    return [entry]  # schema 1.1 兼容:实验即数据
+
+
+def compute_step_statuses(manager: ProjectManager, exp_id: str) -> dict[str, str]:
+    """按产物文件与前置依赖推断各步骤状态。"""
+    nodes = _data_nodes(manager, exp_id)
+    if not nodes:
         return {step_id: "LOCKED" for step_id, _, _, _ in PIPELINE_STEPS}
     spectra = manager.dir_path("spectra")
     peaks = manager.dir_path("peaks")
     analysis = manager.dir_path("analysis")
-    has_ft = any(spectra.joinpath(f"{exp_id}.{ext}").is_file() for ext in ("ft2", "ft3"))
+    has_ft = any(
+        spectra.joinpath(f"{exp_id}-{node.id}.{ext}").is_file()
+        for node in nodes
+        for ext in ("ft2", "ft3")
+    ) or any(
+        spectra.joinpath(f"{exp_id}.{ext}").is_file()
+        for ext in ("ft2", "ft3")
+    )
     has_peaks = peaks.joinpath(f"{exp_id}.csv").is_file()
     has_analysis = analysis.joinpath(exp_id).is_dir()
-    imported = manager.infer_status(exp_id).value not in ("", "registered")
 
     artifacts: dict[str, bool] = {
-        "import": imported,
+        "import": True,  # 实验下存在数据节点即导入完成
         "fid": has_ft,
-        "process": has_ft,
-        "reconstruct": has_ft,
+        "spectrum": has_ft,
         "peaks": has_peaks,
-        "assign": has_analysis,
+        "analysis": has_analysis,
     }
     statuses: dict[str, str] = {}
     for step_id, _, _, deps in PIPELINE_STEPS:
@@ -226,9 +253,11 @@ class PipelinePanel(QWidget):
         if next_step:
             self.next_label.setText(f"下一步: {STEP_LABEL[next_step]}")
         else:
-            self.next_label.setText("全部步骤已完成" if any(
-                st == "SUCCESS" for st in statuses.values()
-            ) else "等待导入数据")
+            self.next_label.setText(
+                "全部步骤已完成"
+                if any(st == "SUCCESS" for st in statuses.values())
+                else "等待导入数据"
+            )
         reasons = _lock_reasons(statuses)
         for step_id, status in statuses.items():
             self._rows[step_id].set_status(status, reasons.get(step_id, ""))
@@ -254,24 +283,35 @@ class PipelinePanel(QWidget):
         )
         if entry is None:
             return
+        method_name = STEP_METHOD.get(step_id)
+        method = getattr(self.controller, method_name, None) if method_name else None
+        if method is None:
+            self.log_message.emit(
+                f"{STEP_LABEL.get(step_id, step_id)}: 后端接口待实现,暂不可运行"
+            )
+            return
         self._rows[step_id].set_status("RUNNING")
         self.log_message.emit(f"开始 {STEP_LABEL.get(step_id, step_id)}: {entry.id}")
 
-        def on_done(result: dict) -> None:
-            status = result.get("status", "?")
-            message = result.get("message") or ""
-            logs = result.get("logs") or []
-            self.log_message.emit(f"完成 {STEP_LABEL.get(step_id, step_id)}: {status} {message}")
-            for line in list(logs)[-5:]:
-                self.log_message.emit(f"  {line}")
-            self.refresh()
-            self.run_finished.emit()
+        def worker() -> None:
+            try:
+                data_node = _data_nodes(self.manager, self._current_exp_id)[0]
+                if method_name == "import_data":
+                    result = method(entry, data_node.source)
+                else:
+                    result = method(data_node)
+                message = result if isinstance(result, str) else str(result)
+                self.log_message.emit(
+                    f"完成 {STEP_LABEL.get(step_id, step_id)}: {message}"
+                )
+            except Exception as exc:  # noqa: BLE001 - 错误统一回传 UI
+                self.log_message.emit(
+                    f"失败 {STEP_LABEL.get(step_id, step_id)}: {exc}"
+                )
+            finally:
+                self.refresh()
+                self.run_finished.emit()
 
-        def on_error(error: str) -> None:
-            self._rows[step_id].set_status("FAILED")
-            self.log_message.emit(f"失败 {STEP_LABEL.get(step_id, step_id)}: {error}")
-            self.refresh()
-            self.run_finished.emit()
+        import threading
 
-        self.controller.auto_run_async(entry, on_done, on_error)
-
+        threading.Thread(target=worker, daemon=True).start()
