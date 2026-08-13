@@ -1,8 +1,8 @@
 """导入工作流:把 Bruker 数据集导入项目(步骤化流程第 1 步)。
 
 流程(API_CONTRACT §8 / G2B-002/G2B-009):只读实验参数 + 链接必要文件到
-raw/<exp_id>/<data_id>/(硬链接→符号链接→复制回退) → SHA-256 指纹
-→ metadata/<exp_id>-<data_id>.json
+raw/<exp_id>/<data_id>/(硬链接→符号链接→复制回退;fid.com 等后端可写
+文件实体复制)→ SHA-256 指纹 → metadata/<exp_id>-<data_id>.json
 → WorkflowRun(import) 登记。不生成 FID、不生成谱(第 2/3 步分别由
 convert_to_fid 与 process/reconstruct_nus 完成)。
 """
@@ -25,6 +25,11 @@ IMPORT_WORKFLOW_REF = "import"
 
 # 指纹计算的权威 Bruker 参数/数据文件(存在即计入 WorkflowRun.inputs)
 KEY_FILES = ("acqus", "acqu2s", "acqu3s", "ser", "fid", "nuslist")
+
+# 后端会在 raw 目录改写的文件(如 bruker -AUTO / patch_fid_com 生成的
+# fid.com):必须实体复制,不能链接——硬链接/符号链接会把改写写回源数据
+# (G2B-009 兼容性条款「fid.com 等后端生成文件始终实体写入,不受影响」)。
+WRITABLE_RAW_NAMES = {"fid.com"}
 
 
 class ImportWorkflowError(Exception):
@@ -127,13 +132,19 @@ def _link_one(src: Path, dst: Path) -> str:
 
 
 def _link_tree(src: Path, dst: Path, stats: dict[str, int]) -> None:
-    """按源相对结构建立链接树:目录 mkdir,文件链接(G2B-009)。"""
+    """按源相对结构建立链接树:目录 mkdir,文件链接(G2B-009)。
+
+    后端可写文件(WRITABLE_RAW_NAMES,如 fid.com)实体复制,不链接。
+    """
     dst.mkdir(parents=True, exist_ok=True)
     for item in sorted(src.iterdir()):
         source_item = src / item.name
         dest_item = dst / item.name
         if source_item.is_dir():
             _link_tree(source_item, dest_item, stats)
+        elif item.name in WRITABLE_RAW_NAMES:
+            shutil.copy2(source_item, dest_item)
+            stats["writable"] += 1
         else:
             stats[_link_one(source_item, dest_item)] += 1
 
@@ -164,7 +175,7 @@ def import_data(
     experiment = read_dataset(src)
 
     warnings: list[str] = []
-    link_stats = {"hardlink": 0, "symlink": 0, "copy": 0}
+    link_stats = {"hardlink": 0, "symlink": 0, "copy": 0, "writable": 0}
     should_copy = copy
     if should_copy and src.is_relative_to(manager.root):
         warnings.append(f"源目录已在项目内,跳过复制(引用原路径): {src}")

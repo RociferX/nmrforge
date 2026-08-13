@@ -1,5 +1,19 @@
 # 变更日志
 
+## [0.2.57] - 2026-08-13
+
+- Backend:G2B-009 归属与收尾(核对 0.2.56 直接实现,补齐边界缺口):
+  - 核对:raw 链接式导入(硬链接→符号链接→复制回退,逐项失败回退 +
+    warnings)、copy=False 语义不变、SHA-256/manifest 不变、WorkflowRun
+    params 含 link_stats、_register_spectrum/manual 终谱 move 归位且
+    process/ 不留副本——均符合提案,无需改动;
+  - 缺口修复:fid.com 等后端可写文件(raw 内会被 bruker -AUTO /
+    patch_fid_com 改写)此前被链接,硬链接会把改写写回源数据——新增
+    WRITABLE_RAW_NAMES,可写文件实体复制(link_stats 增 writable 计数,
+    不计入「回退复制」warning);
+  - 测试:新增 fid.com 实体复制不污染源、link_stats 记录断言;全量
+    435 passed,ruff 全绿。
+
 ## [0.2.56] - 2026-08-13
 
 - Backend:存储去重实装(G2B-009,用户确认「raw 非必要不复制只链接、
