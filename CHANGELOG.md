@@ -1,5 +1,11 @@
 # 变更日志
 
+## [0.2.62] - 2026-08-13
+
+- Backend:G2B-009 可查证性增强——导入 metadata.json 记录 link_stats
+  (hardlink/symlink/copy/writable 计数),与 WorkflowRun params 双落盘,
+  用户/流程可直接查证导入方式(是否真正链接、回退复制了几项)。
+
 ## [0.2.58] - 2026-08-13
 
 - 修正(用户反馈):右侧纵向 1D 条带的坐标轴/谱方向与二维谱不一致——

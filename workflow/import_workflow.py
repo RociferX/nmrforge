@@ -243,6 +243,7 @@ def import_data(
             "imported_at": data_entry.imported_at,
             "dataset": _dataset_summary(experiment),
             "segments": [str(seg) for seg in data_entry.segments],
+            "link_stats": dict(link_stats),  # G2B-009:hardlink/symlink/copy/writable
             "manifest": {
                 "file_count": file_count,
                 "total_bytes": total_bytes,
