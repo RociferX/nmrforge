@@ -172,7 +172,6 @@ def optimize_phase_brute_force(
     candidates: list[dict[str, float]] | None = None,
     work_dir: Path | str | None = None,
     score_fn: Any | None = None,
-    good_enough: float | None = 80.0,
 ) -> dict[str, Any]:
     """相位优化:逐维暴力(直接维→间接维依次固定;NUS 先 SMILE 一次)。
 
@@ -203,7 +202,6 @@ def optimize_phase_brute_force(
         p1_values=p1_values,
         score_fn=score_fn,
         work_dir=work,
-        good_enough=good_enough,
     )
     spectrum_path = _register_spectrum(
         manager, exp_id, data_id, result.spectrum_path

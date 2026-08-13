@@ -61,33 +61,9 @@ def test_optimize_baseline_grid_contains_off_and_orders(
     spec = np.zeros((32, 64))
     ft2 = tmp_path / "flat.ft2"
     _write_ft2(ft2, spec)
-    # 平谱已够好会被前置判断跳过,这里关掉以验证网格机制本身
-    result = optimize_baseline(experiment, ft2, good_enough=None)
+    # 平谱:直接全网格,off 应最优(校正无增益)
+    result = optimize_baseline(experiment, ft2)
     # 平谱:off 应最优(校正无增益)
     assert result.scores["F2"]["off:0"] >= max(result.scores["F2"].values()) - 1e-9
     assert "auto:1" in result.scores["F2"]
     assert "order:3" in result.scores["F2"]
-
-def test_optimize_baseline_skips_good_axis_keeps_current(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
-    """前置判断:轴基线已够好时跳过网格,保持当前配置并记录日志。"""
-    experiment = read_dataset(bruker_dir / "hsqc_2d")
-    spec = np.zeros((32, 64))
-    ft2 = tmp_path / "flat.ft2"
-    _write_ft2(ft2, spec)
-    result = optimize_baseline(
-        experiment,
-        ft2,
-        current_baseline={"F1": {"enabled": False, "mode": "auto", "order": 0}},
-    )
-    assert result.optimized == []
-    assert set(result.skipped) == {"F1", "F2"}
-    # 平谱两轴均够好 → 未优化,保持当前配置
-    assert result.baseline["F2"] == {"enabled": True, "mode": "auto", "order": 0}
-    assert result.baseline["F1"] == {"enabled": False, "mode": "auto", "order": 0}
-    joined = "\n".join(result.logs)
-    assert "未优化" in joined
-    assert "保持当前配置" in joined
-    assert "基线优化总结" in joined
-

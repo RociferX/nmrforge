@@ -166,7 +166,7 @@ def test_optimize_phase_brute_force(tmp_path: Path, bruker_dir: Path) -> None:
         score_fn=_score_from_path,
     )
     assert result["method"] == "sequential_brute_force"
-    # 逐维暴力:直接维 F2 → 间接维 F1,各 21 候选(3 p0 × 7 p1)
+    # 逐维暴力:直接维 F2 → 间接维 F1,各粗 21 候选 + 多尺度细化(默认 5°)
     assert result["phase"]["F2"][1] == 30.0
     assert result["phase"]["F1"][1] == 30.0
     assert result["spectrum_path"].endswith("out_p130.ft2")

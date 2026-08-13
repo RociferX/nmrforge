@@ -431,6 +431,7 @@ def test_optimize_phase_sequential_uniform(
         p0_values=(0.0,),
         p1_values=(-60.0, 0.0, 30.0, 60.0),
         score_fn=_score_from_path,
+        refine=False,
     )
     assert result.method == "sequential_brute_force"
     assert result.phases["F2"][1] == 30.0
@@ -438,6 +439,7 @@ def test_optimize_phase_sequential_uniform(
     assert result.backend_runs == 2 * 4
     assert any("F2" in line and "已固定" in line for line in result.logs)
     assert any("F1" in line and "已固定" in line for line in result.logs)
+    assert any("70.0 → 100.0" in line for line in result.logs)
 
 
 def test_optimize_phase_sequential_failure(tmp_path: Path, bruker_dir: Path) -> None:
@@ -497,50 +499,39 @@ def test_default_phase_score_ranks_phase_quality(tmp_path: Path) -> None:
         comp_bad["negative_peak_fraction"] > comp_good["negative_peak_fraction"]
     )
 
-def test_optimize_phase_sequential_skips_good_axis(
+
+
+def test_optimize_phase_sequential_default_multiscale() -> None:
+    """默认:粗网格 p1 30° 步长 + 多尺度细化到 5°(而非固定步长全搜索)。"""
+    import inspect
+
+    sig = inspect.signature(optimize_phase_sequential)
+    p1 = sig.parameters["p1_values"].default
+    assert len(p1) == 7 and p1[1] - p1[0] == 30.0
+    assert sig.parameters["refine"].default is True
+    assert sig.parameters["final_step"].default == 5.0
+
+
+def test_optimize_phase_sequential_multiscale_refine(
     tmp_path: Path, bruker_dir: Path
 ) -> None:
-    """前置判断:当前相位已够好(≥阈值)时跳过候选搜索,日志说明未优化。"""
+    """粗到细:粗网格最优偏离真值(12°)时,细化收敛到 5° 以内。"""
     experiment = read_dataset(bruker_dir / "hsqc_2d")
     backend = _OverrideBackend(tmp_path / "work")
 
-    def _good(path: str) -> tuple[float, dict[str, float]]:
-        return 90.0, {}
+    def _peak12(path: str) -> tuple[float, dict[str, float]]:
+        p1 = float(path.split("p1")[1].split(".")[0])
+        return 100.0 - abs(p1 - 12.0), {}
 
     result = optimize_phase_sequential(
         experiment,
         backend,
         p0_values=(0.0,),
         p1_values=(-60.0, 0.0, 30.0, 60.0),
-        score_fn=_good,
+        score_fn=_peak12,
     )
-    assert result.phases == {"F2": (0.0, 0.0), "F1": (0.0, 0.0)}
-    assert result.backend_runs == 2  # 每轴仅前置评分 1 次,候选 0 次
-    assert result.optimized == []
-    assert set(result.skipped) == {"F1", "F2"}
-    joined = "\n".join(result.logs)
-    assert joined.count("未优化") >= 2
-    assert "保持" in joined
-    assert "相位优化总结" in joined
-
-
-def test_optimize_phase_sequential_disable_precheck(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
-    """good_enough=None 关闭前置判断,总是暴力搜索全部候选。"""
-    experiment = read_dataset(bruker_dir / "hsqc_2d")
-    backend = _OverrideBackend(tmp_path / "work")
-
-    result = optimize_phase_sequential(
-        experiment,
-        backend,
-        p0_values=(0.0,),
-        p1_values=(-60.0, 0.0, 30.0, 60.0),
-        score_fn=_score_from_path,
-        good_enough=None,
-    )
-    assert result.phases["F2"][1] == 30.0  # 评分函数在 30° 处最高
-    assert result.phases["F1"][1] == 30.0
-    assert result.backend_runs == 2 * 4
-    assert result.skipped == []
-
+    # 粗网格最优 p1=0(偏离真值 12°);细化窗口 ±20@10 → 10,±5@5 → 10(偏差 2°)
+    assert result.phases["F2"][1] == 10.0
+    assert result.phases["F1"][1] == 10.0
+    assert result.backend_runs > 2 * 4  # 细化产生额外后端运行
+    assert result.optimized == ["F2", "F1"]

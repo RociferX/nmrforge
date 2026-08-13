@@ -54,18 +54,13 @@ def optimize_baseline(
     *,
     grid: list[tuple[str, int]] | None = None,
     score_fn: Callable[[np.ndarray, int], float] | None = None,
-    good_enough: float | None = 80.0,
-    current_baseline: dict[str, dict[str, Any]] | None = None,
 ) -> BaselineOptimizeResult:
     """逐维基线优化:每维网格 mode∈{off,auto}×order∈{1,2,3},内存内评分,
-    选每维最优写回 baseline 配置;最终谱由真实管线渲染(baseline 写回)。
-
-    good_enough:前置判断阈值(0-100,默认 80)——每轴先对当前谱评分,已够好
-    则跳过网格搜索并保持当前配置(current_baseline,缺省全维 auto);
-    传 None 关闭前置判断(总是网格搜索)。日志逐轴说明「未优化 / 已优化 +
-    配置变化 + 分数增益」。score_fn(data, axis_idx) 返回该轴基线质量分
-    (默认 baseline_quality);off=不校正。返回 {"baseline", "scores",
-    "logs", "optimized", "skipped"}。
+    选每维最优写回 baseline 配置。直接全网格优化(内存内毫秒级,无需前置
+    过滤);无实质增益(≤1e-6)时保持默认 auto 配置。日志逐轴说明配置变化
+    与分数增益。score_fn(data, axis_idx) 返回该轴基线质量分(默认
+    baseline_quality);off=不校正。返回 {"baseline", "scores", "logs",
+    "optimized", "skipped"}。
     """
     import nmrglue as ng
 
@@ -82,26 +77,14 @@ def optimize_baseline(
         ("order", 3),
     ]
     score_fn = score_fn or _default_score
-    current = current_baseline or {}
     default_cfg: dict[str, Any] = {"enabled": True, "mode": "auto", "order": 0}
     baseline_cfg: dict[str, dict[str, Any]] = {}
     scores: dict[str, dict[str, float]] = {}
     logs: list[str] = []
     optimized: list[str] = []
-    skipped: list[str] = []
+    unchanged: list[str] = []
     for axis_idx, axis in enumerate(axes):
-        old_cfg = dict(default_cfg)
-        old_cfg.update(current.get(axis, {}))
         current_score = float(score_fn(arr, axis_idx))
-        if good_enough is not None and current_score >= good_enough:
-            baseline_cfg[axis] = old_cfg
-            scores[axis] = {"current": current_score}
-            skipped.append(axis)
-            logs.append(
-                f"{axis}: 基线已够好(score={current_score:.1f} >= {good_enough:g}),"
-                f"保持当前配置 {_fmt_cfg(old_cfg)},未优化"
-            )
-            continue
         axis_scores: dict[str, float] = {}
         best: tuple[float, str, int] | None = None
         for mode, order in grid:
@@ -124,25 +107,27 @@ def optimize_baseline(
             new_cfg = {"enabled": True, "mode": "auto", "order": 0}
         else:
             new_cfg = {"enabled": True, "mode": "order", "order": order}
-        baseline_cfg[axis] = new_cfg
-        scores[axis] = axis_scores
         gain = score - current_score
-        if new_cfg == old_cfg and gain <= 1e-9:
+        if gain <= 1e-6:
+            baseline_cfg[axis] = dict(default_cfg)
             logs.append(
-                f"{axis}: 候选未优于当前配置,保持 {_fmt_cfg(new_cfg)} "
+                f"{axis}: 候选未优于当前配置,保持 {_fmt_cfg(default_cfg)} "
                 f"(score={score:.1f})"
             )
+            unchanged.append(axis)
         else:
+            baseline_cfg[axis] = new_cfg
             logs.append(
-                f"{axis}: 基线已优化 {_fmt_cfg(old_cfg)} → {_fmt_cfg(new_cfg)} "
+                f"{axis}: 基线已优化 {_fmt_cfg(default_cfg)} → {_fmt_cfg(new_cfg)} "
                 f"(score={current_score:.1f} → {score:.1f}, +{gain:.1f})"
             )
             optimized.append(axis)
+        scores[axis] = axis_scores
     logs.append(
         "基线优化总结: "
-        + ("未优化 " + ",".join(skipped) if skipped else "未优化 无")
-        + "; "
         + ("已优化 " + ",".join(optimized) if optimized else "已优化 无")
+        + "; "
+        + ("未优化 " + ",".join(unchanged) if unchanged else "未优化 无")
     )
     return BaselineOptimizeResult(
         baseline=baseline_cfg,
@@ -150,7 +135,7 @@ def optimize_baseline(
         spectrum_path=str(spectrum_path),
         logs=logs,
         optimized=optimized,
-        skipped=skipped,
+        skipped=[],
     )
 
 
