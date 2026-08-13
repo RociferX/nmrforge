@@ -60,10 +60,10 @@ class SpectrumViewer(QWidget):
         self.plot.setBackground("w")
         self.plot.setMenuEnabled(False)
         self.plot.getViewBox().setMouseMode(pg.ViewBox.RectMode)
-        # 显示约定(用户 0.2.53 反馈修正):1H 高 ppm 在左、15N 高 ppm 在上;
+        # 显示约定(用户 0.2.59 反馈修正):1H 高 ppm 在左、15N 高 ppm 在下;
         # 数据列 0 = 高 ppm(x 列 0 在左);contour 不翻转(view y = 数据行),
-        # invertY(True) 使 view y 增大=屏幕向下 → 行 0(高 ppm)显示在顶部。
-        self.plot.getViewBox().invertY(True)
+        # invertY(False) 下 view y 增大=屏幕向上 → 行 0(高 ppm)显示在底部。
+        self.plot.getViewBox().invertY(False)
 
         self.layers: list[ContourLayer] = []
         self.layer_names: list[str] = []
@@ -156,7 +156,7 @@ class SpectrumViewer(QWidget):
         self.strip_right.setFixedWidth(90)
         self.strip_right.setMenuEnabled(False)
         self.strip_right.getViewBox().setYLink(self.plot.getViewBox())
-        self.strip_right.getViewBox().invertY(True)
+        self.strip_right.getViewBox().invertY(False)
         self.strip_right_curve = pg.PlotDataItem(pen=pg.mkPen("#d62728", width=1))
         self.strip_right.addItem(self.strip_right_curve)
         self.strip_right.hide()
@@ -212,8 +212,8 @@ class SpectrumViewer(QWidget):
             self.plot.removeItem(self._plot_1d)
             self._plot_1d = None
         self.set_1d_mode(False)
-        # 恢复 2D 显示方向:1D 视图(invertY=False)后不泄漏到后续 2D/3D
-        self.plot.getViewBox().invertY(True)
+        # 统一 2D 显示方向:行 0(高 ppm)在底部,1D 视图后不泄漏到后续 2D/3D
+        self.plot.getViewBox().invertY(False)
         for layer in self.layers:
             self.plot.removeItem(layer)
         self.layers.clear()
@@ -372,7 +372,7 @@ class SpectrumViewer(QWidget):
             self._plot_1d = None
         for layer in self.layers:
             layer.setVisible(True)
-        self.plot.getViewBox().invertY(True)
+        self.plot.getViewBox().invertY(False)
         if self._primary is not None:
             self._setup_axes(self._primary)
             self.reset_view()

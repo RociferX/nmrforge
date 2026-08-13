@@ -9,7 +9,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import numpy as np
 import pytest
-from PyQt6.QtWidgets import QApplication, QMenu
+from PyQt6.QtWidgets import QApplication, QDialog, QMenu
 
 from core.project import ProjectManager
 from gui.log_panel import LogPanel
@@ -434,6 +434,20 @@ def test_create_blank_experiment_action(
         "gui.main_window.QInputDialog.getText",
         staticmethod(lambda *args, **kwargs: ("T4", True)),
     )
+
+    class _FakeNotesDialog:
+        DialogCode = QDialog.DialogCode
+
+        def __init__(self, parent, title, text):
+            pass
+
+        def exec(self):
+            return QDialog.DialogCode.Accepted
+
+        def result_text(self):
+            return ""
+
+    monkeypatch.setattr("gui.main_window.NotesDialog", _FakeNotesDialog)
     window._create_experiment()
     assert manager.project is not None
     assert any(e.title == "T4" for e in manager.project.experiments)
@@ -1081,18 +1095,18 @@ def test_rename_project_to_sample_wording(
     # 未打开样本:上下文条与欢迎页入口文案
     assert window.context_bar.text() == "未打开样本"
     assert window.center_panel.welcome_page.new_button.text() == "新建样本..."
-    # 菜单栏:单一「样本(&S)」菜单,不含「项目」标题
+    # 菜单栏:「实验(&E)」菜单,不含「项目/样本管理/添加/删除样本」
     menus = [action.text() for action in window.menuBar().actions()]
-    assert "样本(&S)" in menus
+    assert "实验(&E)" in menus
     assert not any("项目" in text for text in menus if text)
-    sample_menu = next(
+    experiment_menu = next(
         action.menu()
         for action in window.menuBar().actions()
-        if action.text() == "样本(&S)"
+        if action.text() == "实验(&E)"
     )
-    labels = [action.text() for action in sample_menu.actions()]
-    assert "样本管理" in labels
+    labels = [action.text() for action in experiment_menu.actions()]
     assert "新建实验..." in labels
-    assert "添加样本..." in labels
-    assert "删除样本..." in labels
+    assert "样本管理" not in labels
+    assert "添加样本..." not in labels
+    assert "删除样本..." not in labels
     window.close()

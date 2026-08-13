@@ -71,7 +71,7 @@ def test_step_detail_expands_with_params(tmp_path: Path, qapp: QApplication) -> 
     text = row.detail_label.text()
     assert "产物" in text and "参数" in text
     assert "ext_lo=11.0" in text and "zero_fill=2" in text
-    assert not row.manual_with_params_button.isHidden()
+    assert not hasattr(row, "manual_with_params_button")
     panel._toggle_step_detail("spectrum")
     assert row.detail_frame.isHidden()
     panel.close()
@@ -115,19 +115,6 @@ def test_view_log_signal(tmp_path: Path, qapp: QApplication) -> None:
     assert seen == ["spectrum"]
     panel.close()
 
-
-def test_manual_with_params_signal(tmp_path: Path, qapp: QApplication) -> None:
-    manager, exp_id, data_id = _manager_with_spectrum(tmp_path)
-    panel = PipelinePanel(manager, _FakeController())
-    panel.set_selection("data", exp_id, data_id)
-    seen: list[tuple[str, dict]] = []
-    panel.manual_with_params_requested.connect(
-        lambda sid, p: seen.append((sid, p))
-    )
-    panel._rows["spectrum"].manual_with_params_button.click()
-    assert seen and seen[0][0] == "spectrum"
-    assert seen[0][1].get("zero_fill") == 2
-    panel.close()
 
 def test_step_detail_light_background(qapp: QApplication) -> None:
     """步骤详情面板显式浅色背景 + 深色文字(深色系统主题下仍可读)。"""

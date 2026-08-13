@@ -102,8 +102,8 @@ class ContourLayer(pg.GraphicsObject):
         try:
             cs = plt.contour(smooth, levels=levels)
             # view y 直接取 matplotlib 行号(数据行 0 → view y=0);
-            # 配合视图 invertY(True)(view y 增大=屏幕向下),
-            # 数据行 0(高 ppm)显示在屏幕顶部。
+            # 配合视图 invertY(False)(view y 增大=屏幕向上),
+            # 数据行 0(高 ppm)显示在屏幕底部。
             for level, segs in zip(cs.levels, cs.allsegs):
                 target = path_neg if level < 0 else path_pos
                 for seg in segs:

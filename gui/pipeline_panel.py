@@ -419,7 +419,6 @@ class PipelineStepRow(QWidget):
     report_requested = pyqtSignal(str)  # step_id:分析完成后打开报告页
     detail_toggled = pyqtSignal(str)  # step_id:点击行切换详情
     view_log_requested = pyqtSignal(str)  # step_id:定位日志面板
-    manual_with_params_requested = pyqtSignal(str)  # step_id:以此参数打开人工编辑器
 
     def __init__(
         self, step_id: str, label: str, description: str, parent: QWidget | None = None
@@ -485,15 +484,6 @@ class PipelineStepRow(QWidget):
         self.detail_label.setStyleSheet("color: #222;")
         detail_layout.addWidget(self.detail_label)
         detail_buttons = QHBoxLayout()
-        self.manual_with_params_button = QPushButton("以此参数打开人工编辑器")
-        self.manual_with_params_button.setVisible(False)
-        self.manual_with_params_button.setToolTip(
-            "用本次运行的参数打开人工参数表格(可修改后重新渲染/运行)"
-        )
-        self.manual_with_params_button.clicked.connect(
-            lambda: self.manual_with_params_requested.emit(self.step_id)
-        )
-        detail_buttons.addWidget(self.manual_with_params_button)
         self.view_log_button = QPushButton("查看日志")
         self.view_log_button.setVisible(False)
         self.view_log_button.clicked.connect(
@@ -517,14 +507,9 @@ class PipelineStepRow(QWidget):
             self.detail_toggled.emit(self.step_id)
         super().mousePressEvent(event)
 
-    def set_detail(
-        self, text: str, params: dict | None = None, failed: bool = False
-    ) -> None:
-        """填充详情文本;params 非空时提供「以此参数打开人工编辑器」。"""
+    def set_detail(self, text: str, failed: bool = False) -> None:
+        """填充详情文本。"""
         self.detail_label.setText(text)
-        self.manual_with_params_button.setVisible(
-            params is not None and self.step_id != "import"
-        )
         self.view_log_button.setVisible(failed)
         self.retry_button.setVisible(failed)
 
@@ -568,7 +553,6 @@ class PipelinePanel(QWidget):
     manual_open_requested = pyqtSignal(str)  # step_id:打开人工处理对话框
     report_requested = pyqtSignal(str)  # step_id:打开报告页
     import_data_requested = pyqtSignal(str)  # exp_id:在当前实验下导入数据
-    manual_with_params_requested = pyqtSignal(str, dict)  # (step_id, params)
     view_log_requested = pyqtSignal(str)  # step_id:定位日志面板
     progress_updated = pyqtSignal(str)  # 批量进度文本(主线程更新标签)
     batch_summary_requested = pyqtSignal(object)  # 批量汇总 dict
@@ -629,9 +613,6 @@ class PipelinePanel(QWidget):
             row.report_requested.connect(self.report_requested.emit)
             row.detail_toggled.connect(self._toggle_step_detail)
             row.view_log_requested.connect(self.view_log_requested.emit)
-            row.manual_with_params_requested.connect(
-                self._on_manual_with_params
-            )
             steps_box.addWidget(row)
             self._rows[step_id] = row
         steps_box.addStretch(1)
@@ -800,8 +781,8 @@ class PipelinePanel(QWidget):
         row = self._rows.get(step_id)
         if row is None:
             return
-        text, params, failed = self._step_detail(step_id)
-        row.set_detail(text, params=params, failed=failed)
+        text, _params, failed = self._step_detail(step_id)
+        row.set_detail(text, failed=failed)
         row.detail_frame.setVisible(row.detail_frame.isHidden())
 
     def _step_detail(self, step_id: str) -> tuple[str, dict | None, bool]:
@@ -840,11 +821,6 @@ class PipelinePanel(QWidget):
                 params = dict(run.params)
                 lines.append(f"参数: {_format_params(run.params)}")
         return "\n".join(lines) if lines else "无详情", params, failed
-
-    def _on_manual_with_params(self, step_id: str) -> None:
-        """以最近运行参数打开人工编辑器(参数预填)。"""
-        _text, params, _failed = self._step_detail(step_id)
-        self.manual_with_params_requested.emit(step_id, params or {})
 
     def _on_run_requested(self, step_id: str) -> None:
         if not self._current_exp_id:
