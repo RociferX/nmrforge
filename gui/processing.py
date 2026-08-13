@@ -123,6 +123,12 @@ class ProcessingController:
         )
         if data_id:
             record_step_success(self._manager, exp_id, data_id, "fid")
+            self._snapshot_step(
+                exp_id,
+                data_id,
+                ("convert_to_fid",),
+                self._fid_com_script(exp_id, data_id),
+            )
         self._manager.save()
         return fid_path
 
@@ -141,6 +147,12 @@ class ProcessingController:
         )
         if data_id:
             record_step_success(self._manager, exp_id, data_id, "spectrum")
+            self._snapshot_step(
+                exp_id,
+                data_id,
+                ("process", "reconstruct_nus"),
+                self._spectrum_scripts(exp_id, data_id),
+            )
         self._manager.save()
         return spectrum_path
 
@@ -205,6 +217,9 @@ class ProcessingController:
         result = backend_run_fid(self._manager, exp_id, data_id, content)
         if data_id:
             record_step_success(self._manager, exp_id, data_id, "fid")
+            self._snapshot_step(
+                exp_id, data_id, ("manual_fid",), {"fid.com": content}
+            )
         self._manager.save()
         return result
 
@@ -239,6 +254,9 @@ class ProcessingController:
         )
         if data_id:
             record_step_success(self._manager, exp_id, data_id, "spectrum")
+            self._snapshot_step(
+                exp_id, data_id, ("manual_process", "manual_nus"), scripts
+            )
         self._manager.save()
         return result
 
@@ -353,6 +371,90 @@ class ProcessingController:
                 'stages': [],
             },
         }
+
+    # ------------------------------------------------------------------
+    # 脚本快照(GUI 接线):步骤成功后把执行的脚本/参数写入 WorkflowRun
+    # ------------------------------------------------------------------
+    def _snapshot_step(
+        self,
+        exp_id: str,
+        data_id: str,
+        workflow_refs: tuple[str, ...],
+        scripts: dict[str, str],
+    ) -> str:
+        """把最近一次匹配步骤的 WorkflowRun 补写脚本快照(snapshot_run)。
+
+        返回快照目录(空串表示无匹配运行或已快照)。后端步骤只登记运行,
+        不落脚本;GUI 在此把实际执行的 fid.com/process.com/nus*.com 与
+        参数写入 run.snapshot_dir,保证可复现(契约 §2)。
+        """
+        if self._manager is None or self._manager.project is None:
+            return ""
+        run = None
+        for candidate in reversed(self._manager.project.workflow_runs):
+            if candidate.experiment_id != exp_id:
+                continue
+            if candidate.workflow_ref not in workflow_refs:
+                continue
+            recorded_data = (candidate.inputs or {}).get("data_id", "")
+            if recorded_data and recorded_data != data_id:
+                continue
+            run = candidate
+            break
+        if run is None or run.snapshot_dir:
+            return ""
+        try:
+            snapshot = self._manager.snapshot_run(
+                run.run_id, dict(scripts or {}), params=dict(run.params or {})
+            )
+            return str(snapshot)
+        except Exception:  # noqa: BLE001 - 快照失败不阻断处理
+            return ""
+
+    def _fid_com_script(self, exp_id: str, data_id: str) -> dict[str, str]:
+        """读取 raw 目录下的 fid.com(自动/人工 FID 步骤脚本)。"""
+        if self._manager is None:
+            return {}
+        try:
+            entry = self._manager.data(exp_id, data_id)
+        except Exception:  # noqa: BLE001
+            return {}
+        raw = (
+            Path(entry.raw_dir)
+            if getattr(entry, "raw_dir", "")
+            else Path(entry.source)
+        )
+        if not raw.is_absolute():
+            raw = self._manager.root / raw
+        if not raw.is_dir():
+            # schema 1.3 数据级 raw 目录回退(登记缺失时)
+            raw = self._manager.data_dir(exp_id, data_id, "raw")
+        fid_com = raw / "fid.com"
+        if fid_com.is_file():
+            return {
+                "fid.com": fid_com.read_text(
+                    encoding="utf-8", errors="replace"
+                )
+            }
+        return {}
+
+    def _spectrum_scripts(self, exp_id: str, data_id: str) -> dict[str, str]:
+        """读取 process 目录下谱图脚本(process.com/nus*.com,不含 fid.com)。"""
+        scripts: dict[str, str] = {}
+        if self._manager is None:
+            return scripts
+        proc = self._manager.data_dir(exp_id, data_id, "process")
+        try:
+            paths = sorted(proc.glob("*.com"))
+        except OSError:
+            return scripts
+        for path in paths:
+            if path.name != "fid.com":
+                scripts[path.name] = path.read_text(
+                    encoding="utf-8", errors="replace"
+                )
+        return scripts
+
 
     def _require_manager(self) -> None:
         if self._manager is None:

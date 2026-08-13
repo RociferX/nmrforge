@@ -480,7 +480,10 @@ class MainWindow(QMainWindow):
             InfoDialog.show_info(self, "提示", "请先打开项目")
             return
         runs = list(self.manager.project.workflow_runs)
-        dialog = RunHistoryDialog(self, runs, self.manager.project.name)
+        dialog = RunHistoryDialog(
+            self, runs, self.manager.project.name,
+            project_root=self.manager.root,
+        )
         dialog.exec()
 
     def _manual_param_table_menu(self) -> None:
