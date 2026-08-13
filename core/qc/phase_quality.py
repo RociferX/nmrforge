@@ -29,18 +29,102 @@ class PhaseQuality:
     score: float = 0.0
 
 
-def negative_area_fraction(real: Any) -> float:
-    """连续负面积比例：稳健基线扣除后，负值面积 / 总绝对值面积。
+def negative_area_fraction(real: Any, radius: int = 8) -> float:
+    """峰窗负面积比例：检测峰后在峰窗口内统计负值面积占比（峰高加权）。
 
-    de Brouwer 2009 的黄金标准指标。基线用中位数估计（峰只占少数点，
-    中位数稳健）；相位误差 → 色散负边瓣 → 比例一阶上升。
-    返回 [0, 1]，0 = 无负值区域，1 = 全部为负。
+    0.2.63 起从全谱统计改为峰窗统计（VM 真实数据校准）：全谱负面积被
+    噪声/基线稀释，对相位几乎不敏感（sampleF 实测全谱评分在 ±5° 内仅
+    0.02 分）；相位误差的色散负边瓣集中在峰窗内，峰窗负面积占比对相位
+    敏感且尖锐（sampleF 粗网格判别力 ~2 分/100 分制）。
+    返回 [0, 1]，0 = 峰窗无负值区域，1 = 全部为负。
     """
     arr = np.asarray(np.real(real), dtype=float)
-    corrected = arr - float(np.median(arr))
-    total = float(np.sum(np.abs(corrected))) + 1e-12
-    neg = float(np.sum(np.minimum(corrected, 0.0)))
-    return float(-neg / total)
+    # 正峰 + 负峰(180° 反相谱 detect 找不到正峰,必须分别检测)
+    peaks = list(peak_detection.detect(arr)) + list(
+        peak_detection.detect(-arr)
+    )
+    if not peaks:
+        return 0.0  # 无峰：无负面积信息，不惩罚
+    # 只统计强峰：噪声峰无数目性负瓣，会稀释相位敏感信号（实测 501 个
+    # 峰里真实信号峰占少数，全峰平均后负面积恒≈0，相位判别失效）
+    heights = np.asarray([float(p.height) for p in peaks])
+    threshold = max(float(np.percentile(np.abs(arr), 99.5)), 0.0)
+    strong = [p for p, h in zip(peaks, heights) if h >= threshold]
+    # 跳过边缘峰(窗口不完整,统计无意义;FFT 边界伪影峰常落在数组两端)
+    strong = [
+        p
+        for p in strong
+        if all(
+            radius <= int(round(float(v))) < s - radius
+            for v, s in zip(np.atleast_1d(p.position), arr.shape)
+        )
+    ]
+    if not strong:
+        return 0.0  # 强峰全在边缘/窗口不完整:无有效信号峰,不惩罚
+    # 只取峰高 top-5 强峰(0.2.63,VM sampleF 校准):全强峰加权聚合会把
+    # 大量弱峰/伪影纳入,与主峰观感不一致(顺序搜索收敛到局部最优);
+    # 主峰(最强峰)是相位最可靠指示,top-N 与用户看到的一维谱峰形一致
+    strong.sort(key=lambda p: p.height, reverse=True)
+    strong = strong[:5]
+    total_abs = 0.0
+    total_neg = 0.0
+    for peak in strong:
+        pos = np.round(np.asarray(peak.position)).astype(int)
+        slices = tuple(
+            slice(max(0, i - radius), min(s, i + radius + 1))
+            for i, s in zip(pos, arr.shape)
+        )
+        win = arr[slices]
+        total_abs += float(np.sum(np.abs(win)))
+        total_neg += float(-np.sum(np.minimum(win, 0.0)))
+    return float(total_neg / (total_abs + 1e-12))
+
+
+def negative_area_axis(real: Any, axis: int, radius: int = 8) -> float:
+    """沿指定轴的一维剖面峰窗负面积(旧项目 NMRFlow 逐轴调相方式)。
+
+    相位误差的色散负瓣沿被调轴方向展开;沿该轴取峰位置的一维剖面,
+    统计负值占比(正/负峰分别检测,强峰过滤,峰高加权)。二维窗口会
+    把已调好方向的峰形(如 F2 已吸收)纳入,稀释目标轴相位信号——
+    VM sampleF 实测二维聚合与一维主峰剖面排序不一致,一维剖面与
+    用户看到的一维谱峰形一致。
+    """
+    arr = np.asarray(np.real(real), dtype=float)
+    peaks = list(peak_detection.detect(arr)) + list(
+        peak_detection.detect(-arr)
+    )
+    if not peaks:
+        return 0.0
+    heights = np.asarray([float(p.height) for p in peaks])
+    threshold = max(float(np.percentile(np.abs(arr), 99.5)), 0.0)
+    strong = [p for p, h in zip(peaks, heights) if h >= threshold]
+    strong = [
+        p
+        for p in strong
+        if 0 <= axis < arr.ndim
+        and radius
+        <= int(round(float(np.atleast_1d(p.position)[axis])))
+        < arr.shape[axis] - radius
+    ]
+    if not strong:
+        return 0.0
+    # 只取峰高 top-5 强峰(与 negative_area_fraction 一致,主峰优先)
+    strong.sort(key=lambda p: p.height, reverse=True)
+    strong = strong[:5]
+    total_abs = 0.0
+    total_neg = 0.0
+    for peak in strong:
+        pos = np.round(np.asarray(peak.position)).astype(int)
+        lo = max(0, int(pos[axis]) - radius)
+        hi = min(arr.shape[axis], int(pos[axis]) + radius + 1)
+        sl = tuple(
+            slice(lo, hi) if i == axis else slice(int(pos[i]), int(pos[i]) + 1)
+            for i in range(arr.ndim)
+        )
+        win = arr[sl]
+        total_abs += float(np.sum(np.abs(win)))
+        total_neg += float(-np.sum(np.minimum(win, 0.0)))
+    return float(total_neg / (total_abs + 1e-12))
 
 
 def spectral_entropy(real: Any) -> float:
