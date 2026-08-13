@@ -367,7 +367,7 @@ def test_process_script_window_and_zero_fill_overrides(
     )
     assert "| nmrPipe -fn GM -lb 4 -gb 0.2 \\" in script
     assert script.count("| nmrPipe -fn SP") == 1  # F1 仍是默认 SP
-    # F1 不填零:FT 后无 ZF 行(F2 仍保留默认 ZF -auto)
+    # F1 不填零:FT 后无 ZF 行(F2 仍保留默认 2×TD 填零)
     assert script.count("| nmrPipe -fn ZF") == 1
     off = generate_process_script(
         exp,
@@ -378,3 +378,83 @@ def test_process_script_window_and_zero_fill_overrides(
     )
     assert "| nmrPipe -fn ZF" not in off
 
+
+def _pow2_ge(value: int) -> int:
+    return 1 << max(0, int(value) - 1).bit_length()
+
+
+def test_zero_fill_plan_direct_and_indirect(bruker_dir: Path) -> None:
+    """直接维 SI=2×TD;间接维按目标数字分辨率动态且受 1/AQ 约束(0.2.39)。"""
+    exp = read_dataset(bruker_dir / "hsqc_2d")
+    from backend.script_generator import effective_td, zero_fill_plan
+
+    td = effective_td(exp)
+    plan = zero_fill_plan(exp)
+    # 直接维:2×TD 的 2 的幂
+    assert plan["F2"]["size"] == _pow2_ge(2 * td[0])
+    # 间接维:不小于 TD,不超过 next_pow2(2×TD)(points_per_line 默认 2)
+    assert td[1] <= plan["F1"]["size"] <= _pow2_ge(2 * td[1])
+    # 线宽越窄填零越多(宽线 60 Hz 目标点距放宽,SI 减小)
+    narrow = zero_fill_plan(exp, linewidth_hz={"F1": 5.0})
+    wide = zero_fill_plan(exp, linewidth_hz={"F1": 60.0})
+    assert narrow["F1"]["size"] >= wide["F1"]["size"]
+    # 覆盖语义:0=auto;int k=间接维 k×TD;逐轴 none 关闭
+    assert zero_fill_plan(exp, 0) == zero_fill_plan(exp)
+    fixed = zero_fill_plan(exp, 2)
+    assert fixed["F2"]["size"] == _pow2_ge(2 * td[0])
+    assert fixed["F1"]["size"] == _pow2_ge(2 * td[1])
+    off = zero_fill_plan(exp, {"F1": {"mode": "none"}})
+    assert off["F1"]["mode"] == "none" and off["F1"]["size"] is None
+    assert off["F2"]["size"] == plan["F2"]["size"]
+
+
+def test_2d_nus_script_zero_fill_plan(bruker_dir: Path) -> None:
+    """NUS 两阶段 ZF 使用填零计划:直接维 2×TD,间接维按重构网格动态。"""
+    exp = read_dataset(bruker_dir / "nus_2d")
+    from backend.script_generator import (
+        effective_td,
+        generate_2d_nus_script,
+        zero_fill_plan,
+    )
+
+    plan = zero_fill_plan(exp)
+    script = generate_2d_nus_script(
+        exp, in_file="e.fid", nuslist="nuslist", out_file="e.ft2"
+    )
+    assert f"| nmrPipe -fn ZF -zf -size {plan['F2']['size']} \\" in script
+    assert f"| nmrPipe -fn ZF -size {plan['F1']['size']} \\" in script
+    # NUS 间接维以重构后的复点网格为 TD(与 SMILE 重构相互独立)
+    td = effective_td(exp)
+    assert plan["F1"]["size"] >= td[1]
+    # 间接维关闭:stage2 不再输出 ZF 行
+    off = generate_2d_nus_script(
+        exp,
+        in_file="e.fid",
+        nuslist="nuslist",
+        out_file="e.ft2",
+        zero_fill={"F1": {"mode": "none"}},
+    )
+    assert "| nmrPipe -fn ZF -size" not in off
+    assert "| nmrPipe -fn ZF -zf -size" in off  # 直接维保留
+
+
+def test_finalize_script_zero_fill_plan(bruker_dir: Path) -> None:
+    """finalize(相位优化复用)的间接维 ZF 使用计划 SI,可关闭。"""
+    exp = read_dataset(bruker_dir / "nus_2d")
+    from backend.script_generator import (
+        generate_nus_finalize_script,
+        zero_fill_plan,
+    )
+
+    plan = zero_fill_plan(exp)
+    script = generate_nus_finalize_script(
+        exp, planes="nus2d/recon.ft1", out_file="e.ft2"
+    )
+    assert f"| nmrPipe -fn ZF -size {plan['F1']['size']} \\" in script
+    off = generate_nus_finalize_script(
+        exp,
+        planes="nus2d/recon.ft1",
+        out_file="e.ft2",
+        zero_fill={"F1": {"mode": "none"}},
+    )
+    assert "| nmrPipe -fn ZF" not in off

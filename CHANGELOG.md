@@ -1,5 +1,25 @@
 # 变更日志
 
+## [0.2.44] - 2026-08-13
+
+- Backend:填零逻辑改造(用户方案)——不再机械「所有维度 2×」:新增
+  zero_fill_plan(experiment, zero_fill, linewidth_hz, points_per_line):
+  直接维 F2/F3 默认 SI=2×TD(稳妥起点,1024→2048);间接维按目标数字
+  分辨率动态决定——目标点距 = max(线宽, 1/AQ)/points_per_line
+  (默认 1/2,每线宽 ≥2 个数字点;精确峰位/线宽/拟合/CSP 可调 1/4 或
+  更细),SI 取 2 的幂并夹在 [TD, next_pow2(ppl×TD)];线宽来源
+  params.linewidth_hz[轴] → 核素默认表(1H 8/15N 15/13C 20 Hz)→
+  15 Hz;1/AQ 下限保证「线宽不可能窄于真实分辨率」,SI 天然不过度。
+  NUS 间接维以重构后的完整复点网格(effective_td)为 TD——重构与填零
+  是两个独立过程,填零只作用于重构后的时间域。uniform/NUS 两阶段/
+  3D/finalize 脚本全部改显式 ZF -size;process/reconstruct_nus/
+  finalize_nus 透传 linewidth_hz/points_per_line 并输出逐维 SI 选择
+  日志;param_schema 增 linewidth_hz/points_per_line,zero_fill 语义
+  0=自动/k=间接维固定倍数(直接维保持 2×);stepwise 窗/填零嵌入的
+  体积估计改用填零计划。
+- 测试:直接维 2×TD、间接维动态+1/AQ 约束、线宽影响、覆盖语义
+  (0/int/none)、NUS/finalize ZF 行与关闭;全量 350 通过,ruff 全绿。
+
 ## [0.2.43] - 2026-08-13
 
 - 批量处理(实验中间页):「导入数据」表单下方加分割线 + 「批量处理」区块,
