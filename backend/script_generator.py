@@ -129,6 +129,21 @@ def _default_linewidth(experiment: Experiment, axis: str) -> float:
             return _DEFAULT_LINEWIDTH_HZ.get(nucleus, _DEFAULT_LINEWIDTH_HZ[""])
     return _DEFAULT_LINEWIDTH_HZ[""]
 
+def _config_linewidth_by_axis(experiment: Experiment) -> dict[str, float]:
+    """从 config 读核素→线宽并映射为轴→线宽(缺省回退核素默认表)。"""
+    from backend.config import DEFAULT_LINEWIDTH_HZ, load_processing_defaults
+
+    cfg = load_processing_defaults()["linewidth_hz"]
+    mapping: dict[str, float] = {}
+    for dim in experiment.dimensions:
+        nucleus = str(dim.nucleus or "").strip()
+        mapping[dim.logical_axis] = float(
+            cfg.get(
+                nucleus, DEFAULT_LINEWIDTH_HZ.get(nucleus, DEFAULT_LINEWIDTH_HZ[""])
+            )
+        )
+    return mapping
+
 
 def _linewidth_for(
     axis: str, linewidth_hz: dict[str, float] | None
@@ -178,7 +193,7 @@ def zero_fill_plan(
     zero_fill: dict[str, Any] | int | None = None,
     *,
     linewidth_hz: dict[str, float] | None = None,
-    points_per_line: float = DEFAULT_POINTS_PER_LINE,
+    points_per_line: float | None = None,
 ) -> dict[str, dict[str, Any]]:
     """逐维填零计划:{轴: {"mode", "size", "note"}}。
 
@@ -187,7 +202,15 @@ def zero_fill_plan(
     - int k≥1 → 直接维保持 2×TD,间接维固定 k×TD(旧 schema 语义);
     - {轴: {"mode": "none"|"auto", "size": N}} → 逐轴覆盖。
     auto 模式返回选定的 SI;mode=none 时 size=None。
+    linewidth_hz/points_per_line 未显式传参时读取 config/nmrforge.yaml
+    (processing.linewidth_hz/points_per_line,显式 params 优先)。
     """
+    from backend.config import load_processing_defaults
+
+    if linewidth_hz is None:
+        linewidth_hz = _config_linewidth_by_axis(experiment)
+    if points_per_line is None:
+        points_per_line = float(load_processing_defaults()["points_per_line"])
     axes = [dim.logical_axis for dim in experiment.dimensions]
     td = effective_td(experiment)
     direct_axis = axes[0] if axes else ''

@@ -21,6 +21,7 @@ from typing import Any
 
 from backend.base import BackendCapabilities
 from backend.bruker_workflow import patch_fid_com, patch_nus_expand_count
+from backend.config import resolve_nthread, resolve_points_per_line
 from backend.nmrpipe_finder import find_nmrpipe_bin, find_tool
 from backend.runtime import CshRuntime
 from backend.script_generator import (
@@ -52,6 +53,14 @@ def enforce_smile_thread_guardrail(nthread: int, grid_points: int) -> tuple[int,
     if grid_points > 5000 and nthread > 2:
         return 2, f"大网格 {grid_points}：SMILE 线程数限制为 2（原 {nthread}）"
     return nthread, ""
+
+
+def zf_summary(plan: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """填零计划摘要(WorkflowRun params 用):{轴: {"mode", "size"}}。"""
+    return {
+        axis: {"mode": str(cfg.get("mode", "auto")), "size": cfg.get("size")}
+        for axis, cfg in plan.items()
+    }
 
 
 @dataclass
@@ -167,8 +176,8 @@ class NMRPipeBackend:
         window = proc_params.get("window")
         zero_fill = proc_params.get("zero_fill")
         linewidth_hz = proc_params.get("linewidth_hz")
-        points_per_line = float(
-            proc_params.get("points_per_line", DEFAULT_POINTS_PER_LINE)
+        points_per_line = resolve_points_per_line(
+            proc_params.get("points_per_line")
         )
         zf_plan = zero_fill_plan(
             experiment,
@@ -201,6 +210,17 @@ class NMRPipeBackend:
             "message": "NMRPipe 处理成功",
             "spectrum_path": str(spectrum),
             "logs": logs,
+            "effective_params": {
+                "extract": extract,
+                "ext_lo": ext_lo,
+                "ext_hi": ext_hi,
+                "zero_fill": zf_summary(zf_plan),
+                "baseline": baseline,
+                "window": window,
+                "direct_phase": direct_phase,
+                "linewidth_hz": linewidth_hz,
+                "points_per_line": points_per_line,
+            },
         }
 
     def convert_to_fid(
@@ -245,6 +265,13 @@ class NMRPipeBackend:
             "fid_path": str(fid_path),
             "message": "转换完成",
             "logs": logs,
+            "effective_params": {
+                "dataset_id": experiment.dataset_id,
+                "ndim": experiment.ndim,
+                "segments": len(experiment.segments),
+                "work_dir": str(work),
+                "fid_path": str(fid_path),
+            },
         }
 
     def reconstruct_nus(
@@ -346,7 +373,7 @@ class NMRPipeBackend:
         smile_xq3 = float(params.get("smile_xq3", 2.0))
         smile_scaling = bool(params.get("smile_scaling", True))
         smile_report = int(params.get("smile_report", 1))
-        nthread = int(params.get("nthread", 2))
+        nthread = resolve_nthread(params.get("nthread"))
         # 安全护栏（2026-08-11 sampleM 事故）：大网格 SMILE 满核曾致宿主断电，
         # 间接网格 >5000 点时线程数上限 2
         grid_points = int(td[1]) * (int(td[2]) if len(td) > 2 else 1)
@@ -359,7 +386,7 @@ class NMRPipeBackend:
         baseline = expand_baseline(experiment, params.get("baseline"))
         zero_fill = params.get("zero_fill")
         linewidth_hz = params.get("linewidth_hz")
-        points_per_line = float(params.get("points_per_line", DEFAULT_POINTS_PER_LINE))
+        points_per_line = resolve_points_per_line(params.get("points_per_line"))
         zf_plan = zero_fill_plan(
             experiment,
             zero_fill,
@@ -420,6 +447,22 @@ class NMRPipeBackend:
             "message": "SMILE 重构成功",
             "spectrum_path": str(spectrum),
             "logs": logs,
+            "effective_params": {
+                "extract": extract,
+                "ext_lo": ext_lo,
+                "ext_hi": ext_hi,
+                "zero_fill": zf_summary(zf_plan),
+                "baseline": baseline,
+                "nSigma": nsigma,
+                "thresh": thresh,
+                "smile_xq3": smile_xq3,
+                "smile_scaling": smile_scaling,
+                "smile_report": smile_report,
+                "nthread": nthread,
+                "direct_phase": [direct_p0, direct_p1],
+                "linewidth_hz": linewidth_hz,
+                "points_per_line": points_per_line,
+            },
         }
 
     def finalize_nus(
@@ -467,8 +510,8 @@ class NMRPipeBackend:
             experiment,
             zf_params.get("zero_fill"),
             linewidth_hz=zf_params.get("linewidth_hz"),
-            points_per_line=float(
-                zf_params.get("points_per_line", DEFAULT_POINTS_PER_LINE)
+            points_per_line=resolve_points_per_line(
+                zf_params.get("points_per_line")
             ),
         )
         script = generate_nus_finalize_script(

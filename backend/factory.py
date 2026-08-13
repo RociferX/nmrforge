@@ -16,5 +16,7 @@ def create_backend(config: dict[str, Any]) -> ProcessingBackend:
     if provider == "native":
         return NativeBackend()
     if provider == "nmrpipe":
-        return NMRPipeBackend()
+        from backend.config import nmrpipe_path
+
+        return NMRPipeBackend(nmrpipe_bin=nmrpipe_path(config))
     raise ValueError(f"未知后端 provider: {provider}")
