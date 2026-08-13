@@ -137,6 +137,10 @@ def test_mtime_fallback_without_state(
     assert statuses["spectrum"] == "SUCCESS"
     assert statuses["peaks"] == "SUCCESS"
     artifacts["ft2"].write_bytes(b"ft2-new")
+    # 显式把 ft2 mtime 设为 peaks 之后(避免同秒 mtime 相同导致
+    # 全量运行时启发式判定不稳定)
+    _peaks_mtime = artifacts["csv"].stat().st_mtime
+    os.utime(artifacts["ft2"], (_peaks_mtime + 5, _peaks_mtime + 5))
     statuses = compute_step_statuses(manager, exp_id)
     assert statuses["spectrum"] == "SUCCESS"
     assert statuses["peaks"] == "OUTDATED"
