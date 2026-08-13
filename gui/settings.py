@@ -18,6 +18,7 @@ DEFAULTS: dict = {
     "linewidth_hz": {"1H": 8, "15N": 15, "13C": 20},
     "points_per_line": 2,
     "smile_thread_cap": 2,
+    "guide": {"first_import_hint_shown": False},
 }
 
 
@@ -52,6 +53,13 @@ def load_settings() -> dict:
         merged["linewidth_hz"] = {
             nucleus: linewidth.get(nucleus, default)
             for nucleus, default in DEFAULTS["linewidth_hz"].items()
+        }
+    guide = raw.get("guide")
+    if isinstance(guide, dict):
+        merged["guide"] = {
+            "first_import_hint_shown": bool(
+                guide.get("first_import_hint_shown", False)
+            )
         }
     return merged
 

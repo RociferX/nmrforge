@@ -187,6 +187,7 @@ class MainWindow(QMainWindow):
         )
         self.pipeline.view_log_requested.connect(self._on_view_step_log)
         self.pipeline.batch_summary_requested.connect(self._on_batch_summary)
+        # 首次导入提示:导入完成信号里触发(见 _on_import_done/_on_batch_import_done)
         self.center_panel.create_experiment_requested.connect(
             self._create_experiment_with_title
         )
@@ -367,6 +368,7 @@ class MainWindow(QMainWindow):
         self.refresh()
         self.project_tree.select_experiment(exp_id)
         self.center_panel.set_selection("experiment", exp_id)
+        self._maybe_show_first_import_hint()
 
     def _assign_batch(self, exp_id: str, data_id: str, batch: str) -> None:
         """把数据加入(已有或新建的)批量组。"""
@@ -465,6 +467,7 @@ class MainWindow(QMainWindow):
         self.refresh()
         if exp_id:
             self.project_tree.select_experiment(exp_id)
+        self._maybe_show_first_import_hint()
         if result.warnings:
             InfoDialog.show_info(
                 self, "导入完成(有提示)", "\n".join(result.warnings)
@@ -637,6 +640,19 @@ class MainWindow(QMainWindow):
         self._append_log(
             f"── {STEP_LABEL.get(step_id, step_id)} 运行日志(最近一次)──"
         )
+
+    def _maybe_show_first_import_hint(self) -> None:
+        """首次导入后的「下一步」高亮提示,只出现一次(状态存设置)。"""
+        from gui.settings import load_settings, save_settings
+
+        settings = load_settings()
+        guide = settings.get("guide") or {}
+        if guide.get("first_import_hint_shown"):
+            return
+        guide["first_import_hint_shown"] = True
+        settings["guide"] = guide
+        save_settings(settings)
+        self.pipeline.show_first_import_hint()
 
     def _open_settings(self) -> None:
         """打开软件设置对话框(阶段 C3)。"""

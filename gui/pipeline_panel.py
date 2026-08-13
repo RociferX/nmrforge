@@ -607,6 +607,14 @@ class PipelinePanel(QWidget):
         self.batch_progress_label.setWordWrap(True)
         layout.addWidget(self.batch_progress_label)
         self.progress_updated.connect(self._on_progress_updated)
+        self.hint_bubble = QLabel("")
+        self.hint_bubble.setVisible(False)
+        self.hint_bubble.setWordWrap(True)
+        self.hint_bubble.setStyleSheet(
+            "background: #fef9e7; border: 1px solid #f5b041; "
+            "color: #935116; padding: 4px 8px;"
+        )
+        layout.addWidget(self.hint_bubble)
 
         steps_box = QVBoxLayout()
         for step_id, label, description, _deps in PIPELINE_STEPS:
@@ -750,6 +758,32 @@ class PipelinePanel(QWidget):
         row = self._rows[step_id]
         if not row.run_button.isHidden():
             self._on_run_requested(step_id)
+
+    def show_first_import_hint(self) -> None:
+        """首次导入后的下一步提示:高亮下一个可运行步骤 + 气泡,8 秒后消失。"""
+        statuses = self._current_statuses()
+        next_step = next(
+            (sid for sid, st in statuses.items() if st in ("READY", "OUTDATED")),
+            None,
+        )
+        if next_step is None:
+            return
+        row = self._rows.get(next_step)
+        if row is None:
+            return
+        row.name_label.setStyleSheet("font-weight: bold; color: #16a085;")
+        self.hint_bubble.setText(
+            f"已导入数据:下一步可运行「{STEP_LABEL.get(next_step, next_step)}」"
+        )
+        self.hint_bubble.setVisible(True)
+        from PyQt6.QtCore import QTimer
+
+        QTimer.singleShot(8000, self._clear_first_import_hint)
+
+    def _clear_first_import_hint(self) -> None:
+        self.hint_bubble.setVisible(False)
+        for row in self._rows.values():
+            row.name_label.setStyleSheet("font-weight: bold;")
 
     def _on_progress_updated(self, text: str) -> None:
         """批量进度标签(主线程):空文本隐藏。"""

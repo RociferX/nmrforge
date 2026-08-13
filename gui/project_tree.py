@@ -95,38 +95,190 @@ class ProjectTreePanel(QWidget):
     # 构建
     # ------------------------------------------------------------------
     def refresh(self) -> None:
-        """重建树:Workspace 下列出工作区所有项目,当前项目展开实验/数据。"""
-        self.tree.clear()
-        workspace_item = QTreeWidgetItem([self._workspace_name(), ""])
-        workspace_item.setIcon(0, self._icon("workspace"))
-        workspace_item.setToolTip(0, self._workspace_path())
-        workspace_item.setData(0, Qt.ItemDataRole.UserRole, {"kind": "workspace"})
-        self.tree.addTopLevelItem(workspace_item)
+        """增量刷新树:只更新变化节点/子目录,未变化节点保留实例。"""
+        workspace_item = self.tree.topLevelItem(0)
+        if workspace_item is None:
+            workspace_item = QTreeWidgetItem([self._workspace_name(), ""])
+            workspace_item.setIcon(0, self._icon("workspace"))
+            workspace_item.setToolTip(0, self._workspace_path())
+            workspace_item.setData(0, Qt.ItemDataRole.UserRole, {"kind": "workspace"})
+            self.tree.addTopLevelItem(workspace_item)
 
         current_root = self.manager.root
-        for project_dir in self._workspace_projects():
-            is_current = current_root is not None and project_dir == Path(current_root).resolve()
+        project_dirs = self._workspace_projects()
+        existing: dict[str, QTreeWidgetItem] = {}
+        for index in range(workspace_item.childCount()):
+            item = workspace_item.child(index)
+            data = item.data(0, Qt.ItemDataRole.UserRole)
+            if isinstance(data, dict) and data.get("kind") == "project":
+                existing[str(data.get("path"))] = item
+        new_paths = {str(path) for path in project_dirs}
+        for path in list(existing):
+            if path not in new_paths:
+                workspace_item.removeChild(existing[path])
+
+        for project_dir in project_dirs:
+            key = str(project_dir)
+            is_current = (
+                current_root is not None
+                and project_dir == Path(current_root).resolve()
+            )
             display_name = project_dir.name
             if is_current and self.manager.project is not None:
                 display_name = self.manager.project.name or project_dir.name
-            project_item = QTreeWidgetItem([display_name, "当前" if is_current else ""])
-            project_item.setIcon(0, self._icon("project"))
+            project_item = existing.get(key)
+            if project_item is None:
+                project_item = QTreeWidgetItem([display_name, ""])
+                project_item.setIcon(0, self._icon("project"))
+                project_item.setData(
+                    0,
+                    Qt.ItemDataRole.UserRole,
+                    {"kind": "project", "path": key},
+                )
+                workspace_item.addChild(project_item)
+            project_item.setText(0, display_name)
+            project_item.setText(1, "当前" if is_current else "")
             project_item.setToolTip(
                 0,
-                f"{project_dir}\n" + ("双击查看实验/数据" if not is_current else "当前项目"),
+                f"{project_dir}\n"
+                + ("单击打开项目" if not is_current else "当前项目"),
             )
-            project_item.setData(
-                0,
-                Qt.ItemDataRole.UserRole,
-                {"kind": "project", "path": str(project_dir)},
-            )
-            workspace_item.addChild(project_item)
             if is_current and self.manager.project is not None:
-                for exp in self.manager.project.experiments:
-                    exp_item = self._make_experiment_item(exp)
-                    project_item.addChild(exp_item)
+                self._refresh_experiments(project_item)
                 project_item.setExpanded(True)
+            else:
+                for index in range(project_item.childCount() - 1, -1, -1):
+                    project_item.removeChild(project_item.child(index))
         workspace_item.setExpanded(True)
+
+    def _refresh_experiments(self, project_item: QTreeWidgetItem) -> None:
+        """增量刷新实验节点(按 exp_id 复用未变化实例)。"""
+        existing: dict[str, QTreeWidgetItem] = {}
+        for index in range(project_item.childCount()):
+            item = project_item.child(index)
+            data = item.data(0, Qt.ItemDataRole.UserRole)
+            if isinstance(data, dict) and data.get("kind") == "experiment":
+                existing[str(data.get("exp_id"))] = item
+        experiments = (
+            self.manager.project.experiments if self.manager.project else []
+        )
+        ids = {exp.id for exp in experiments}
+        for exp_id in list(existing):
+            if exp_id not in ids:
+                project_item.removeChild(existing[exp_id])
+        for exp in experiments:
+            exp_item = existing.get(exp.id)
+            if exp_item is None:
+                exp_item = self._make_experiment_item(exp)
+                project_item.addChild(exp_item)
+            else:
+                self._update_experiment_item(exp_item, exp)
+
+    def _update_experiment_item(
+        self, exp_item: QTreeWidgetItem, exp
+    ) -> None:
+        """更新实验节点文本并增量刷新数据节点。"""
+        exp_item.setText(0, exp.title or exp.id)
+        exp_item.setText(1, _STATUS_TEXT.get(exp.status, exp.status))
+        exp_item.setToolTip(0, f"{exp.id}\n右键: 导入数据 / 重命名 / 删除")
+        existing: dict[str, QTreeWidgetItem] = {}
+        for index in range(exp_item.childCount()):
+            item = exp_item.child(index)
+            data = item.data(0, Qt.ItemDataRole.UserRole)
+            if isinstance(data, dict) and data.get("kind") == "data":
+                existing[str(data.get("data_id"))] = item
+        data_nodes = self._data_of(exp)
+        ids = {getattr(n, "id", exp.id) for n in data_nodes}
+        for data_id in list(existing):
+            if data_id not in ids:
+                exp_item.removeChild(existing[data_id])
+        for data_node in data_nodes:
+            data_id = getattr(data_node, "id", exp.id)
+            data_item = existing.get(data_id)
+            if data_item is None:
+                data_item = self._make_data_item(exp, data_node)
+                exp_item.addChild(data_item)
+            else:
+                self._update_data_item(data_item, exp, data_node)
+
+    def _update_data_item(
+        self, data_item: QTreeWidgetItem, exp, data_node
+    ) -> None:
+        """更新数据节点文本/状态,并按目录指纹增量刷新子文件夹文件。"""
+        data_id = getattr(data_node, "id", exp.id)
+        status = self._data_status(exp, data_node)
+        title = getattr(data_node, "title", "") or ""
+        from gui.pipeline_state import batch_id
+
+        batch = (
+            batch_id(self.manager, exp.id, data_id)
+            if self.manager is not None
+            else ""
+        )
+        label = title or f"数据 {data_id}"
+        if batch:
+            label = f"{label} [{batch}]"
+        data_item.setText(0, label)
+        data_item.setText(1, status)
+
+        existing: dict[str, QTreeWidgetItem] = {}
+        for index in range(data_item.childCount()):
+            item = data_item.child(index)
+            data = item.data(0, Qt.ItemDataRole.UserRole)
+            if isinstance(data, dict) and data.get("kind") == "folder":
+                existing[str(data.get("folder"))] = item
+        for sub in DATA_SUBFOLDERS:
+            folder_item = existing.get(sub)
+            fingerprint = self._folder_fingerprint(exp.id, data_id, sub)
+            if folder_item is None:
+                folder_item = QTreeWidgetItem([sub, ""])
+                folder_item.setIcon(0, self._icon("folder"))
+                folder_item.setData(
+                    0,
+                    Qt.ItemDataRole.UserRole,
+                    {
+                        "kind": "folder",
+                        "exp_id": exp.id,
+                        "data_id": data_id,
+                        "folder": sub,
+                        "fingerprint": fingerprint,
+                    },
+                )
+                data_item.addChild(folder_item)
+                self._populate_folder_children(folder_item, exp.id, data_id, sub)
+            else:
+                role = folder_item.data(0, Qt.ItemDataRole.UserRole)
+                if role.get("fingerprint") != fingerprint:
+                    role["fingerprint"] = fingerprint
+                    for index in range(folder_item.childCount() - 1, -1, -1):
+                        folder_item.removeChild(folder_item.child(index))
+                    self._populate_folder_children(
+                        folder_item, exp.id, data_id, sub
+                    )
+        for sub in list(existing):
+            if sub not in DATA_SUBFOLDERS:
+                data_item.removeChild(existing[sub])
+
+    def _folder_fingerprint(
+        self, exp_id: str, data_id: str, folder: str
+    ) -> str:
+        """目录指纹:dir mtime + (名称, 大小, mtime) 列表,判断子目录是否变化。"""
+        path = self._folder_path(exp_id, data_id, folder)
+        if path is None or not path.is_dir():
+            return ""
+        try:
+            parts = [str(path.stat().st_mtime_ns)]
+            for child in sorted(path.iterdir(), key=lambda p: p.name.lower()):
+                try:
+                    cst = child.stat()
+                    parts.append(
+                        f"{child.name}:{cst.st_size}:{cst.st_mtime_ns}"
+                    )
+                except OSError:
+                    continue
+            return "|".join(parts)
+        except OSError:
+            return ""
 
     def _workspace_projects(self) -> list[Path]:
         """工作区内全部项目目录(含 project.json)。"""
@@ -206,7 +358,15 @@ class ProjectTreePanel(QWidget):
             sub_item.setData(
                 0,
                 Qt.ItemDataRole.UserRole,
-                {"kind": "folder", "exp_id": exp.id, "data_id": data_id, "folder": sub},
+                {
+                    "kind": "folder",
+                    "exp_id": exp.id,
+                    "data_id": data_id,
+                    "folder": sub,
+                    "fingerprint": self._folder_fingerprint(
+                        exp.id, data_id, sub
+                    ),
+                },
             )
             self._populate_folder_children(sub_item, exp.id, data_id, sub)
             data_item.addChild(sub_item)
