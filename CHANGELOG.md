@@ -1,5 +1,34 @@
 # 变更日志
 
+## [0.2.54] - 2026-08-13
+
+- Backend:相位优化方案 B(审查结论「3D 评分面平坦,必须门控回退」):
+  - per-axis 平坦门控:margin < PHASE_SCORE_FLAT_MARGIN(0.05)不再只记日志,
+    回退 (0,0)(SMILE 内建相位),不应用低置信相位;
+  - 联合 ±final_step 邻域复核:全部轴固定后按 p1 网格(3^N + 全零)重评,
+    联合最优显著更优(差 ≥0.05)才更新,否则保持顺序结果——堵住「顺序
+    搜索选的不是联合最优」;
+  - 可复现性检查:top-K 强迹线奇偶子采样各取邻域最优 p1,两次差 >10° 判
+    低置信回退 (0,0);
+  - margin 只按 p1 邻域计算(p1 为相位判别主导维度;p0 弱维度纳入会把
+    margin 拉平误判平坦)。
+- Backend:方案 C 窗函数/填零嵌入修复:
+  - zf_modes 移除 none(填零关闭会减半数字分辨率且综合 QC 此前不惩罚);
+  - _est_bytes 对 none 按有效 TD 估算(消除恒 4 字节退化,防御);
+  - 同分容忍内改「高分辨率优先」(替代最小文件);
+  - spectrum_quality.evaluate 增 min_shape 分辨率惩罚(写回 score.overall);
+  - artifact 孤立峰惩罚连续化(平滑 100/80 离散跳变,按超出距离阈值程度
+    扣 10..20 分)。
+- Backend:SMILE 平面复用(方案 D 收尾)——reconstruct_nus 成功后写
+  .nus_params.json;optimize_phase_sequential 在平面存在且参数一致时跳过
+  重构(backend_runs 不重复计),完整入口 SMILE 从 2 次降到 1 次。
+- VM 方案 A 等价性验证(scripts/vm_validate_recon_phase_equiv.py,sampleB
+  3D NUS):复型平面内存内评分(M1 直接 apply_phase / M2 FFT 后 apply)vs
+  finalize 暴力评分的 Spearman -0.47 / -0.62,top-match 不一致 → **不通过**;
+  3D 不切换内存内评分,由门控回退兜底(结论见 PROJECT_STATUS)。
+- 测试:新增 test_phase_gating(5 例)/test_qc_enhance(2 例),既有 fake
+  后端编码 p0 适配门控;合并后全量 434 passed,ruff 全绿。
+
 ## [0.2.53] - 2026-08-13
 
 - 修复(用户反馈):viewer 一维谱条带与二维谱错位——contour 把数据行 r

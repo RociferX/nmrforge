@@ -39,5 +39,23 @@ def detect(data: Any) -> ArtifactReport:
             dists = np.linalg.norm(positions[comparable] - pos, axis=1)
             if float(np.min(dists)) > threshold:
                 isolated += 1
-    score = float(max(0.0, 100.0 - 20.0 * isolated))
+    # 0.2.47:孤立峰惩罚连续化(原 100-20×N 只在 100/80/60... 离散跳变,
+    # 让优化嵌入的 QC 增益由连续距离驱动)。每个孤立峰按「超出距离阈值的
+    # 程度」扣 10..20 分。
+    penalty = 0.0
+    if len(peaks) > 1:
+        positions = np.array([p.position for p in peaks])
+        heights = np.array([p.height for p in peaks])
+        threshold = 0.15 * max(arr.shape)
+        for i, pos in enumerate(positions):
+            comparable = heights >= 0.5 * heights[i]
+            comparable[i] = False
+            if not comparable.any():
+                continue
+            dists = np.linalg.norm(positions[comparable] - pos, axis=1)
+            dmin = float(np.min(dists))
+            if dmin > threshold:
+                excess = min(1.0, (dmin - threshold) / max(threshold, 1e-9))
+                penalty += 20.0 * (0.5 + 0.5 * excess)
+    score = float(max(0.0, 100.0 - penalty))
     return ArtifactReport(isolated_peak_clusters=isolated, score=score)

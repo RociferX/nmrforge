@@ -40,8 +40,13 @@ DIRECT_P1_VALUES = np.arange(-180.0, 181.0, 30.0)  # 13 个
 
 # 相位评分「平坦」阈值(0.2.45 VM 真实数据标定):±5° 余量 2D sampleA ≈0.11、
 # 3D NUS sampleB ≈0.04(评分面近乎平坦);原 <1 分过严(真实数据必然触发),
-# 下调为 0.05 以区分「最优较明确」与「评分面平坦」。
+# 下调为 0.05 以区分「最优较明确」与「评分面平坦」。0.2.47 起 margin 低于
+# 该阈值不再只记日志,而是回退 (0,0)(方案 B)。
 PHASE_SCORE_FLAT_MARGIN = 0.05
+
+# 可复现性检查(0.2.47,方案 B):top-K 强迹线奇偶子采样两次最优 p1 差超过
+# 该值判低置信并回退 (0,0)。
+PHASE_REPRODUCIBILITY_TOL = 10.0
 
 
 @dataclass
@@ -941,6 +946,119 @@ def _refine_window(center: float, prev_step: float, new_step: float) -> list[flo
     return [center + k * new_step for k in range(-n, n + 1)]
 
 
+def _axis_index(axis: str) -> int:
+    """轴名 → 谱数组下标(F1=0, F2=1, F3=2)。"""
+    return {"F1": 0, "F2": 1, "F3": 2}.get(axis, 0)
+
+
+def _subsampled_score(
+    path: str, axis: str, k: int = 500, group: str = "even"
+) -> float:
+    """沿 axis 取峰高 top-K 强迹线的半组子采样,内存内评估 phase_quality。"""
+    import nmrglue as ng
+
+    from core.qc import phase_quality
+
+    _dic, data = ng.pipe.read(path)
+    arr = np.asarray(data)
+    if np.iscomplexobj(arr):
+        arr = arr.real
+    moved = np.moveaxis(arr, _axis_index(axis), -1)
+    traces = moved.reshape(-1, moved.shape[-1])
+    peak_mag = np.max(np.abs(traces), axis=-1)
+    order = np.argsort(peak_mag)[::-1][:k]
+    selected = order[0::2] if group == "even" else order[1::2]
+    if len(selected) == 0:
+        return 0.0
+    return float(phase_quality.evaluate(traces[selected]).score)
+
+
+def _reproducibility_check(
+    neighbor_paths: list[tuple[tuple[float, float], str]],
+    axis: str,
+    *,
+    k: int = 500,
+) -> tuple[bool, float, float]:
+    """可复现性:top-K 强迹线奇偶两组子采样,各自取邻域最优 p1。
+
+    两次最优 p1 差 > PHASE_REPRODUCIBILITY_TOL(10°)判低置信。
+    返回 (是否一致, p1_even, p1_odd)。"""
+    p1s: list[float] = []
+    for group in ("even", "odd"):
+        best_phase: tuple[float, float] | None = None
+        best_score = -1.0
+        for phase, path in neighbor_paths:
+            try:
+                s = _subsampled_score(path, axis, k=k, group=group)
+            except Exception:  # noqa: BLE001 - 子采样失败按 0 处理
+                s = -1.0
+            if s > best_score:
+                best_score, best_phase = s, phase
+        p1s.append(float(best_phase[1]) if best_phase is not None else 0.0)
+    consistent = abs(p1s[0] - p1s[1]) <= PHASE_REPRODUCIBILITY_TOL
+    return consistent, p1s[0], p1s[1]
+
+
+def _joint_recheck(
+    experiment: Experiment,
+    backend: Any,
+    plan: Any,
+    is_nus: bool,
+    fixed: dict[str, tuple[float, float]],
+    search_axes: list[str],
+    final_step: float,
+    work_dir: Path | str | None,
+    score_fn: Callable[[str], tuple[float, dict[str, float]]],
+    backend_runs: list[int],
+) -> tuple[dict[str, tuple[float, float]], float, str, int, float, float, str]:
+    """全部轴固定的联合 ±final_step 邻域复核(p1 每轴 3 值,含全零组合)。
+
+    返回 (最优 phases, 最优 score, 谱路径, 新增后端运行数,
+    顺序固定组合 score, 全零组合 score, 全零谱路径)。
+    """
+    import itertools
+
+    offsets = (-final_step, 0.0, final_step)
+    combos: list[dict[str, tuple[float, float]]] = []
+    for combo in itertools.product(offsets, repeat=len(search_axes)):
+        phases = dict(fixed)
+        for axis, offset in zip(search_axes, combo):
+            p0, p1 = fixed[axis]
+            phases[axis] = (p0, p1 + offset)
+        combos.append(phases)
+    all_zero = {axis: (0.0, 0.0) for axis in search_axes}
+    combos.append(all_zero)
+    best_phases = dict(fixed)
+    best_score = -1.0
+    best_path = ""
+    fixed_score = -1.0
+    zero_score = -1.0
+    zero_path = ""
+    runs = 0
+    for phases in combos:
+        if is_nus:
+            resp = backend.finalize_nus(experiment, phases=phases, work_dir=work_dir)
+        else:
+            resp = backend.process(experiment, plan, direct_phase_override=phases)
+        runs += 1
+        if not resp.get("success"):
+            continue
+        path = str(resp.get("spectrum_path", ""))
+        try:
+            score, _components = score_fn(path)
+        except Exception:  # noqa: BLE001 - 单候选失败不影响其它
+            continue
+        if phases == fixed:
+            fixed_score = float(score)
+        if phases == all_zero:
+            zero_score = float(score)
+            zero_path = path
+        if score > best_score:
+            best_phases, best_score, best_path = dict(phases), float(score), path
+    backend_runs[0] += runs
+    return best_phases, best_score, best_path, runs, fixed_score, zero_score, zero_path
+
+
 def optimize_phase_sequential(
     experiment: Experiment,
     backend: Any,
@@ -989,11 +1107,28 @@ def optimize_phase_sequential(
     unchanged: list[str] = []
 
     if is_nus:
-        resp = backend.reconstruct_nus(experiment, {})
-        backend_runs += 1
-        if not resp.get("success"):
-            raise ValueError(f"NUS SMILE 重构失败: {resp.get('message')}")
-        logs.append("NUS:SMILE 重构完成(直接维随重构固化),逐间接维候选跑 finalize")
+        work = Path(work_dir) if work_dir else default_work_dir(experiment, backend)
+        planes_dir = work / ("nus3d_rc" if experiment.ndim >= 3 else "nus2d")
+        params_file = work / ".nus_params.json"
+        if experiment.ndim >= 3:
+            planes_ready = planes_dir.is_dir() and list(planes_dir.glob("test*.ft1"))
+        else:
+            planes_ready = (planes_dir / "recon.ft1").is_file()
+        reuse = False
+        if planes_ready:
+            try:
+                prev_params = json.loads(params_file.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                prev_params = None
+            reuse = prev_params == {}
+        if reuse:
+            logs.append("复用已存在的 SMILE 重构平面(参数一致),跳过重构")
+        else:
+            resp = backend.reconstruct_nus(experiment, {})
+            backend_runs += 1
+            if not resp.get("success"):
+                raise ValueError(f"NUS SMILE 重构失败: {resp.get('message')}")
+            logs.append("NUS:SMILE 重构完成(直接维随重构固化),逐间接维候选跑 finalize")
 
     p0_step = _grid_step(tuple(p0_values))
     p1_step = _grid_step(tuple(p1_values))
@@ -1053,17 +1188,19 @@ def optimize_phase_sequential(
             raise ValueError(f"轴 {axis} 相位候选全部失败")
         best_phase = max(scored, key=lambda p: scored[p][0])
         best_score, best_path = scored[best_phase]
-        # 相位置信度:与 ±final_step 内已评分邻域的最优分差(评分面陡峭度)。
+        # 相位置信度:与 ±final_step 内已评分 p1 邻域的最优分差(评分面陡峭度)。
+        # p1 是频率相关相位,判别主导;p0 为弱维度(实型谱上对负面积/熵影响小),
+        # 纳入邻居会把 margin 拉平导致误判平坦。
         neighbor_scores = [
             s
             for p, (s, _path) in scored.items()
-            if p != best_phase
-            and abs(p[0] - best_phase[0]) <= final_step
-            and abs(p[1] - best_phase[1]) <= final_step
+            if p != best_phase and abs(p[1] - best_phase[1]) <= final_step
         ]
+        flat = False
         if neighbor_scores:
             margin = best_score - max(neighbor_scores)
             if margin < PHASE_SCORE_FLAT_MARGIN:
+                flat = True
                 logs.append(
                     f"{axis}: 相位评分余量 {margin:.2f} 分"
                     f"(<{PHASE_SCORE_FLAT_MARGIN:g}),评分面"
@@ -1071,6 +1208,35 @@ def optimize_phase_sequential(
                 )
             else:
                 logs.append(f"{axis}: 相位评分余量 {margin:.2f} 分,最优较明确")
+        if not flat:
+            # 可复现性:top-K 强迹线奇偶子采样各取邻域最优 p1,差 >10° 判低置信
+            neighbor_paths = [
+                (p, path)
+                for p, (s, path) in scored.items()
+                if abs(p[1] - best_phase[1]) <= final_step
+            ]
+            if len(neighbor_paths) >= 2:
+                consistent, p1a, p1b = _reproducibility_check(
+                    neighbor_paths, axis
+                )
+                if not consistent:
+                    flat = True
+                    logs.append(
+                        f"{axis}: 可复现性检查未通过(top-K 子采样最优 p1 "
+                        f"{p1a:g}/{p1b:g},差>{PHASE_REPRODUCIBILITY_TOL:g}°),"
+                        f"回退 (0,0)"
+                    )
+        if flat and best_phase != (0.0, 0.0):
+            # 方案 B(0.2.47):评分面平坦/低置信 → 回退 (0,0)(SMILE 内建相位)
+            if (0.0, 0.0) in scored:
+                best_phase = (0.0, 0.0)
+                best_score, best_path = scored[(0.0, 0.0)]
+            else:
+                _run_phase((0.0, 0.0))
+                if (0.0, 0.0) in scored:
+                    best_phase = (0.0, 0.0)
+                    best_score, best_path = scored[(0.0, 0.0)]
+            logs.append(f"{axis}: 已回退 (0,0)(评分面平坦/低置信)")
         fixed[axis] = best_phase
         spectrum_path = best_path
         baseline_score = scored.get((0.0, 0.0))
@@ -1090,6 +1256,50 @@ def optimize_phase_sequential(
         else:
             logs.append(f"{axis}: 最优 {best_phase} (score={best_score:.1f}),已固定")
             optimized.append(axis)
+
+    if len(search_axes) >= 2 and refine and fixed:
+        (
+            joint_phases,
+            joint_score,
+            joint_path,
+            joint_runs,
+            fixed_score,
+            zero_score,
+            zero_path,
+        ) = _joint_recheck(
+            experiment,
+            backend,
+            plan,
+            is_nus,
+            fixed,
+            search_axes,
+            final_step,
+            work_dir,
+            score_fn,
+            [backend_runs],
+        )
+        if joint_phases == fixed:
+            logs.append(
+                f"联合复核: 顺序固定 {fixed} 即联合最优 "
+                f"(score={joint_score:.2f}, 新增 {joint_runs} 次后端)"
+            )
+        elif joint_score - fixed_score >= PHASE_SCORE_FLAT_MARGIN:
+            logs.append(
+                f"联合复核: 联合最优 {joint_phases} (score={joint_score:.2f}) "
+                f"优于顺序固定 {fixed} (score={fixed_score:.2f}, "
+                f"+{joint_score - fixed_score:.2f}),已更新"
+            )
+            fixed = joint_phases
+            spectrum_path = joint_path
+        else:
+            # 联合面平坦:顺序固定与联合最优差异不显著。per-axis 平坦门控
+            # 已回退低置信轴(方案 B),此处保持顺序结果,不再整体回退——
+            # 避免在评分面明确(per-axis margin 通过)时误伤。
+            logs.append(
+                f"联合复核: 联合面平坦(顺序 {fixed} score={fixed_score:.2f} "
+                f"vs 联合最优 {joint_phases} score={joint_score:.2f}, "
+                f"差 <{PHASE_SCORE_FLAT_MARGIN:g}),保持顺序固定"
+            )
 
     logs.append(
         "相位优化总结: "

@@ -31,8 +31,31 @@ def _clip100(value: float) -> float:
     return float(max(0.0, min(100.0, value)))
 
 
-def evaluate(data: Any) -> QualityResult:
-    """评估综合谱质量（SNR/相位/基线/伪影加权）。"""
+def _resolution_penalty(shape: tuple[int, ...], min_shape: tuple[int, ...]) -> float:
+    """数字分辨率惩罚(0.2.47):任一维实际点数低于最低要求按比例扣分。
+
+    填零不改变真实频率分辨率(由 AQ 决定),但过低的数字点距会损失峰位/
+    线宽可测性;用于阻止优化嵌入选择会减半分辨率的填零模式。返回 0..20。
+    """
+    penalty = 0.0
+    for actual, required in zip(shape, min_shape):
+        if required <= 0:
+            continue
+        ratio = actual / required
+        if ratio < 1.0:
+            penalty = max(penalty, 20.0 * (1.0 - ratio))
+    return penalty
+
+
+def evaluate(
+    data: Any,
+    *,
+    min_shape: tuple[int, ...] | None = None,
+) -> QualityResult:
+    """评估综合谱质量（SNR/相位/基线/伪影加权）。
+
+    min_shape 非 None 时按各维最低点数施加分辨率惩罚(如填零后 SI 下限)。
+    """
     arr = np.asarray(data)
     sigma = noise.estimate(arr).global_sigma
     peaks = peak_detection.detect(arr)
@@ -52,8 +75,20 @@ def evaluate(data: Any) -> QualityResult:
         weights={"snr": 1.0, "phase": 1.0, "baseline": 1.0, "artifact": 1.0},
     )
     overall = score.compute()
+    resolution_penalty = (
+        _resolution_penalty(arr.shape, min_shape) if min_shape is not None else 0.0
+    )
+    if resolution_penalty > 0:
+        # 惩罚写回 score.overall,保证调用方读到的是含分辨率惩罚的综合分
+        overall = float(max(0.0, overall - resolution_penalty))
+        score.overall = overall
 
     reasons: list[str] = []
+    if resolution_penalty > 0:
+        reasons.append(
+            f"数字分辨率不足(shape={tuple(arr.shape)}, 低于最低要求 "
+            f"{tuple(min_shape)}, 扣 {resolution_penalty:.1f} 分)"
+        )
     if snr_metrics.global_snr < 10:
         reasons.append(f"全局 SNR 偏低（{snr_metrics.global_snr:.1f}）")
     if phase_metrics.negative_peak_fraction > 0.15:

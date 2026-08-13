@@ -441,6 +441,13 @@ class NMRPipeBackend:
                 "message": f"SMILE 重构失败/未生成 {out_file}",
                 "logs": logs,
             }
+        try:
+            (work / ".nus_params.json").write_text(
+                json.dumps(params, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except OSError:
+            pass  # 参数指纹写盘失败不影响重构结果
         logs.append(f"终谱 → {spectrum}")
         return {
             "success": True,
