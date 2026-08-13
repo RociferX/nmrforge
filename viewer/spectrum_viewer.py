@@ -394,7 +394,7 @@ class SpectrumViewer(QWidget):
             self._setup_strip_axes()
             rows, cols = self._primary.data.shape
             self._update_strips(rows // 2, cols // 2)
-            self._move_crosshair(cols // 2, rows // 2)
+            self._move_crosshair(cols // 2, rows - rows // 2)
         else:
             self._restore_strips()
 
@@ -432,7 +432,7 @@ class SpectrumViewer(QWidget):
         )
 
     def _move_crosshair(self, x: float, y: float) -> None:
-        """移动十字线到数据坐标 (x=列, y=行)。"""
+        """移动十字线到视图坐标 (x=列, y=view y;数据行 r 位于 view y=rows-r)。"""
         if not self._strips_active:
             return
         self._crosshair_v.setPos(x)
@@ -575,7 +575,8 @@ class SpectrumViewer(QWidget):
         for row, peak in enumerate(self._peaks):
             x_ppm, y_ppm = self._peak_xy(peak)
             xs.append(float(x_axis.index_at(x_ppm)))
-            ys.append(float(y_axis.index_at(y_ppm)))
+            # contour 把数据行 r 画在 view y = rows-r:峰标记也要翻转
+            ys.append(float(self._primary.data.shape[0] - y_axis.index_at(y_ppm)))
             sizes.append(16.0 if row == self._selected_peak else 10.0)
         self.peak_item.setData(x=xs, y=ys, size=sizes)
 
@@ -613,6 +614,21 @@ class SpectrumViewer(QWidget):
             )
             self.peak_clicked.emit(row)
 
+    def _view_to_data(self, point) -> tuple[int, int]:
+        """视图坐标 → 数据下标 (col, row);contour 把数据行 r 画在
+        view y = rows - r,因此鼠标的 view y 需翻转回数据行。
+        超出范围返回 (-1, -1)。"""
+        if self._primary is None:
+            return -1, -1
+        x_axis = self._primary.x_axis
+        y_axis = self._primary.y_axis
+        rows = self._primary.data.shape[0]
+        xi = int(round(point.x()))
+        yi = rows - int(round(point.y()))
+        if not (0 <= xi < x_axis.size and 0 <= yi < y_axis.size):
+            return -1, -1
+        return xi, yi
+
     def _on_plot_clicked(self, event) -> None:
         if event.button() != Qt.MouseButton.LeftButton:
             return
@@ -626,17 +642,16 @@ class SpectrumViewer(QWidget):
             point = self.plot.getViewBox().mapSceneToView(event.scenePos())
         except Exception:  # noqa: BLE001
             return
-        x_axis = self._primary.x_axis
-        y_axis = self._primary.y_axis
-        xi = round(point.x())
-        yi = round(point.y())
-        if not (0 <= xi < x_axis.size and 0 <= yi < y_axis.size):
+        xi, yi = self._view_to_data(point)
+        if xi < 0:
             return
         if self._strips_active:
-            # 一维谱模式:点击定位十字线并显示该处两个一维谱
-            self._move_crosshair(xi, yi)
+            # 一维谱模式:点击定位十字线(视图坐标)并显示该处两个一维谱
+            self._move_crosshair(float(point.x()), float(point.y()))
             self._update_strips(yi, xi)
             return
+        x_axis = self._primary.x_axis
+        y_axis = self._primary.y_axis
         x_ppm = float(x_axis.ppm_at(xi))
         y_ppm = float(y_axis.ppm_at(yi))
         if self._click_mode == "delete":
@@ -672,18 +687,18 @@ class SpectrumViewer(QWidget):
             point = self.plot.getViewBox().mapSceneToView(pos)
         except Exception:  # noqa: BLE001
             return
+        xi, yi = self._view_to_data(point)
+        if xi < 0:
+            return
+        if self._strips_active:
+            self._move_crosshair(float(point.x()), float(point.y()))
+            self._update_strips(yi, xi)
         x_axis = self._primary.x_axis
         y_axis = self._primary.y_axis
-        xi = round(point.x())
-        yi = round(point.y())
-        if 0 <= xi < x_axis.size and 0 <= yi < y_axis.size:
-            if self._strips_active:
-                self._move_crosshair(float(point.x()), float(point.y()))
-                self._update_strips(yi, xi)
-            self.crosshair_label.setText(
-                f"{x_axis.label} {x_axis.ppm_at(xi):.3f} ppm | "
-                f"{y_axis.label} {y_axis.ppm_at(yi):.3f} ppm"
-            )
+        self.crosshair_label.setText(
+            f"{x_axis.label} {x_axis.ppm_at(xi):.3f} ppm | "
+            f"{y_axis.label} {y_axis.ppm_at(yi):.3f} ppm"
+        )
 
     # ------------------------------------------------------------- misc
 
