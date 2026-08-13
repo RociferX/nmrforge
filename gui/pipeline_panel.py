@@ -473,11 +473,16 @@ class PipelineStepRow(QWidget):
 
         self.detail_frame = QFrame()
         self.detail_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        # 显式浅色背景:深色系统主题下 QFrame 会变黑,灰字看不清
+        self.detail_frame.setStyleSheet(
+            "QFrame { background: #ffffff; border: 1px solid #d5d8dc; "
+            "border-radius: 4px; }"
+        )
         self.detail_frame.setVisible(False)
         detail_layout = QVBoxLayout(self.detail_frame)
         self.detail_label = QLabel("")
         self.detail_label.setWordWrap(True)
-        self.detail_label.setStyleSheet("color: #333;")
+        self.detail_label.setStyleSheet("color: #222;")
         detail_layout.addWidget(self.detail_label)
         detail_buttons = QHBoxLayout()
         self.manual_with_params_button = QPushButton("以此参数打开人工编辑器")
