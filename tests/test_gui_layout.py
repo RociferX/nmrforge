@@ -750,7 +750,7 @@ def test_viewer_internal_vertical_layout(qapp: QApplication) -> None:
     splitter = found[0]
     assert splitter.orientation() == Qt.Orientation.Vertical
     assert splitter.count() == 2
-    assert splitter.widget(0) is viewer.plot  # 上方谱图
+    assert splitter.widget(0) is viewer.plot_area  # 上方谱图区
     viewer.close()
 
 def test_project_dashboard_stats_and_runs(

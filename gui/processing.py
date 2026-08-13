@@ -263,32 +263,35 @@ class ProcessingController:
     def save_peaks_manual(
         self, data, peaks: list[dict], exp_id: str | None = None, data_id: str | None = None
     ) -> str:
-        """人工峰表编辑回写(CSV)并登记 WorkflowRun(manual_peaks)。"""
-        from core.peaks.peak_table import save_peaks
+        """人工峰表保存:写 Poky .list(峰表文件即 list)并登记运行。"""
+        from gui.peaks_io import export_peaks_poky
 
         self._require_manager()
         exp_id = exp_id or getattr(data, "exp_id", "")
         data_id = data_id or getattr(data, "id", "")
+        ndim = 3 if peaks and "F1_shift" in peaks[0] else 2
         peaks_dir = self._manager.data_dir(exp_id, data_id, "peaks")
         peaks_dir.mkdir(parents=True, exist_ok=True)
-        csv_path = save_peaks(peaks_dir / f"{exp_id}-{data_id}.csv", peaks)
+        list_path = export_peaks_poky(
+            peaks_dir / f"{exp_id}-{data_id}.list", peaks, ndim=ndim
+        )
         if data_id:
             record_step_success(self._manager, exp_id, data_id, "peaks")
         run = self._manager.start_run(
             exp_id,
             workflow_ref="manual_peaks",
             inputs={"data_id": data_id},
-            params={"mode": "manual", "peaks": len(peaks)},
+            params={"mode": "manual", "peaks": len(peaks), "format": "list"},
         )
         try:
             self._manager.finish_run(
-                run.run_id, "success", outputs={"peaks": str(csv_path)},
+                run.run_id, "success", outputs={"peaks": str(list_path)},
                 message=f"人工峰表编辑({len(peaks)} 峰)",
             )
         except Exception:  # noqa: BLE001
             self._manager.finish_run(run.run_id, "failed", message="峰表保存失败")
         self._manager.save()
-        return str(csv_path)
+        return str(list_path)
 
     def param_schema(self) -> dict:
         """处理计划参数 schema(param_schema 契约;缺失时返回可编辑默认骨架)。"""

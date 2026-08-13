@@ -70,10 +70,10 @@ def test_manual_interfaces_require_manager() -> None:
         controller.save_peaks_manual(None, [])
 
 
-def test_save_peaks_manual_writes_csv_and_registers_run(
+def test_save_peaks_manual_writes_list_and_registers_run(
     tmp_path: Path,
 ) -> None:
-    """人工峰表保存:写 data/peaks CSV + 登记 manual_peaks WorkflowRun。"""
+    """人工峰表保存:写 data/peaks Poky .list + 登记 manual_peaks 运行。"""
     manager = _manager_with_experiment(tmp_path)
     controller = ProcessingController(manager)
     peaks = [
@@ -94,12 +94,14 @@ def test_save_peaks_manual_writes_csv_and_registers_run(
             "label": "A2",
         },
     ]
-    csv_path = controller.save_peaks_manual(
+    list_path = controller.save_peaks_manual(
         None, peaks, exp_id="exp_001", data_id="d_001"
     )
-    assert Path(csv_path).is_file()
-    content = Path(csv_path).read_text(encoding="utf-8")
-    assert "Peak_ID" in content and "8.0" in content and "118.0" in content
+    assert Path(list_path).suffix == ".list"
+    assert Path(list_path).is_file()
+    content = Path(list_path).read_text(encoding="utf-8")
+    assert "Assignment w1 w2" in content
+    assert "G1" in content and "8.0" in content and "118.0" in content
     runs = [
         run
         for run in manager.project.workflow_runs
@@ -107,7 +109,7 @@ def test_save_peaks_manual_writes_csv_and_registers_run(
     ]
     assert len(runs) == 1
     assert runs[0].status == "success"
-    assert runs[0].outputs.get("peaks") == str(csv_path)
+    assert runs[0].outputs.get("peaks") == str(list_path)
 
 
 def test_param_schema_returns_editable_defaults() -> None:

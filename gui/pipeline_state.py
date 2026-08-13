@@ -183,11 +183,18 @@ def _spectrum_file(manager: Any, exp_id: str, data_id: str) -> Path | None:
 
 
 def _peaks_file(manager: Any, exp_id: str, data_id: str) -> Path | None:
-    path = manager.data_dir(exp_id, data_id, "peaks") / f"{exp_id}-{data_id}.csv"
-    if path.is_file():
-        return path
-    flat = manager.dir_path("peaks") / f"{exp_id}.csv"
-    return flat if flat.is_file() else None
+    """峰表文件:.list 优先(峰表即 list),旧 CSV 兼容回退。"""
+    for suffix in (".list", ".csv"):
+        path = manager.data_dir(exp_id, data_id, "peaks") / (
+            f"{exp_id}-{data_id}{suffix}"
+        )
+        if path.is_file():
+            return path
+    for suffix in (".list", ".csv"):
+        flat = manager.dir_path("peaks") / f"{exp_id}{suffix}"
+        if flat.is_file():
+            return flat
+    return None
 
 
 def input_fingerprint(

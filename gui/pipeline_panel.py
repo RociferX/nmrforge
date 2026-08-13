@@ -148,13 +148,20 @@ def _node_artifacts(
             if path.is_file():
                 artifacts['spectrum'] = path
                 break
-    peaks = manager.data_dir(exp_id, data_id, 'peaks') / f'{exp_id}-{data_id}.csv'
-    if peaks.is_file():
-        artifacts['peaks'] = peaks
-    else:
-        flat = manager.dir_path('peaks') / f'{exp_id}.csv'
-        if flat.is_file():
-            artifacts['peaks'] = flat
+    for suffix in ('.list', '.csv'):
+        candidate = (
+            manager.data_dir(exp_id, data_id, 'peaks')
+            / f'{exp_id}-{data_id}{suffix}'
+        )
+        if candidate.is_file():
+            artifacts['peaks'] = candidate
+            break
+    if artifacts['peaks'] is None:
+        for suffix in ('.list', '.csv'):
+            flat = manager.dir_path('peaks') / f'{exp_id}{suffix}'
+            if flat.is_file():
+                artifacts['peaks'] = flat
+                break
     report = _first_report(manager.data_dir(exp_id, data_id, 'report'))
     if report is None:
         report = _first_report(manager.dir_path('report'))

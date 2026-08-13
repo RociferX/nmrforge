@@ -14,6 +14,7 @@ import pyqtgraph as pg
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QCheckBox,
+    QGridLayout,
     QLabel,
     QListWidget,
     QListWidgetItem,
@@ -123,11 +124,13 @@ class SpectrumViewer(QWidget):
         controls_layout.addWidget(self.count_slider)
         controls_layout.addWidget(self.count_label)
         controls_layout.addWidget(self.reset_button)
-        self.back_2d_button = QPushButton("返回二维视图")
-        self.back_2d_button.setVisible(False)
-        self.back_2d_button.setToolTip("退出 1D 切片/迹线视图,返回二维谱")
-        self.back_2d_button.clicked.connect(self._restore_2d)
-        controls_layout.addWidget(self.back_2d_button)
+        self.show_1d_button = QPushButton("一维谱")
+        self.show_1d_button.setCheckable(True)
+        self.show_1d_button.setToolTip(
+            "开启后出现随鼠标十字线,点击显示该处两个一维谱(TopSpin 式)"
+        )
+        self.show_1d_button.toggled.connect(self.set_1d_mode)
+        controls_layout.addWidget(self.show_1d_button)
         controls_layout.addWidget(self.crosshair_label)
         controls_layout.addWidget(self.peak_label)
         self.show_peaks_checkbox = QCheckBox("显示峰")
@@ -136,12 +139,56 @@ class SpectrumViewer(QWidget):
         controls_layout.addWidget(self.show_peaks_checkbox)
         self.controls_layout = controls_layout
 
-        # 上下布局:上方谱图,下方控制面板(用户偏好);谱图默认 1:1 正方形
+        # TopSpin 式 1D 条带:上方行迹线(F2)、右侧列迹线(F1),与主谱联动
+        self.strip_top = pg.PlotWidget()
+        self.strip_top.setFixedHeight(96)
+        self.strip_top.setMenuEnabled(False)
+        self.strip_top.getViewBox().setXLink(self.plot.getViewBox())
+        self.strip_top_curve = pg.PlotDataItem(pen=pg.mkPen("#1f77b4", width=1))
+        self.strip_top.addItem(self.strip_top_curve)
+        self.strip_top.hide()
+        self.strip_right = pg.PlotWidget()
+        self.strip_right.setFixedWidth(96)
+        self.strip_right.setMenuEnabled(False)
+        self.strip_right.getViewBox().setYLink(self.plot.getViewBox())
+        self.strip_right.getViewBox().invertY(True)
+        self.strip_right_curve = pg.PlotDataItem(pen=pg.mkPen("#d62728", width=1))
+        self.strip_right.addItem(self.strip_right_curve)
+        self.strip_right.hide()
+        self._strips_active = False
+
+        self._crosshair_v = pg.InfiniteLine(
+            angle=90,
+            movable=False,
+            pen=pg.mkPen("#888888", width=1, style=Qt.PenStyle.DashLine),
+        )
+        self._crosshair_h = pg.InfiniteLine(
+            angle=0,
+            movable=False,
+            pen=pg.mkPen("#888888", width=1, style=Qt.PenStyle.DashLine),
+        )
+        self._crosshair_v.setZValue(30)
+        self._crosshair_h.setZValue(30)
+        self.plot.addItem(self._crosshair_v)
+        self.plot.addItem(self._crosshair_h)
+        self._crosshair_v.hide()
+        self._crosshair_h.hide()
+
+        plot_area = QWidget()
+        plot_grid = QGridLayout(plot_area)
+        plot_grid.setContentsMargins(0, 0, 0, 0)
+        plot_grid.setSpacing(0)
+        plot_grid.addWidget(self.strip_top, 0, 1)
+        plot_grid.addWidget(self.strip_right, 1, 0)
+        plot_grid.addWidget(self.plot, 1, 1)
+        self.plot_area = plot_area
+
+        # 上下布局:上方谱图区,下方控制面板;谱图默认 1:1 正方形
         splitter = QSplitter(Qt.Orientation.Vertical)
-        splitter.addWidget(self.plot)
+        splitter.addWidget(plot_area)
         splitter.addWidget(controls)
         splitter.setStretchFactor(0, 1)
-        splitter.setSizes([600, 260])
+        splitter.setSizes([640, 260])
         self.plot.setMinimumHeight(320)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -159,7 +206,7 @@ class SpectrumViewer(QWidget):
         if self._plot_1d is not None:
             self.plot.removeItem(self._plot_1d)
             self._plot_1d = None
-        self.back_2d_button.setVisible(False)
+        self.set_1d_mode(False)
         for layer in self.layers:
             self.plot.removeItem(layer)
         self.layers.clear()
@@ -181,6 +228,8 @@ class SpectrumViewer(QWidget):
         """
         if spectrum.data.ndim == 1:
             return self._show_1d(spectrum, name or "")
+        if self._mode_1d:
+            self._restore_2d()
         color = color or _COLORS[len(self.layers) % len(_COLORS)]
         if name is None:
             name = (
@@ -299,8 +348,8 @@ class SpectrumViewer(QWidget):
             self.plot.getAxis("bottom").setTicks([ticks])
             self.plot.setLabels(bottom=axis.label, left="强度")
         self.plot.getViewBox().invertY(False)
+        self.set_1d_mode(False)
         self.reset_view()
-        self.back_2d_button.setVisible(bool(self.layers))
         return name or (
             spectrum1d.source.stem if spectrum1d.source is not None else "1D"
         )
@@ -316,67 +365,80 @@ class SpectrumViewer(QWidget):
             self._plot_1d = None
         for layer in self.layers:
             layer.setVisible(True)
-        self.back_2d_button.setVisible(False)
         self.plot.getViewBox().invertY(True)
         if self._primary is not None:
             self._setup_axes(self._primary)
             self.reset_view()
             self._apply_peak_items()
 
-    def show_1d_row(self, row: int) -> None:
-        """固定 F1 行,沿 F2 显示 1D 迹线(类似 nmrDraw 行切片)。"""
+    def set_1d_mode(self, active: bool) -> None:
+        """开关一维谱显示(TopSpin 式):十字线 + 上/右 1D 条带。"""
+        active = bool(active)
+        if self._primary is None or self._mode_1d:
+            active = False
+        if active == self._strips_active:
+            return
+        self._strips_active = active
+        if self.show_1d_button.isChecked() != active:
+            self.show_1d_button.setChecked(active)
+        self.strip_top.setVisible(active)
+        self.strip_right.setVisible(active)
+        self._crosshair_v.setVisible(active)
+        self._crosshair_h.setVisible(active)
+        if active:
+            self._setup_strip_axes()
+            rows, cols = self._primary.data.shape
+            self._update_strips(rows // 2, cols // 2)
+            self._move_crosshair(cols // 2, rows // 2)
+        else:
+            self._restore_strips()
+
+    def _setup_strip_axes(self) -> None:
+        """给 1D 条带设置 ppm 刻度(与主谱联动)。"""
         if self._primary is None:
             return
-        if not (0 <= row < self._primary.data.shape[0]):
-            return
-        self._show_1d(
-            Spectrum1D(
-                np.asarray(self._primary.data[row, :]),
-                self._primary.x_axis,
-                source=self._primary.source,
-            ),
-            name=f"行 {row} ({self._primary.x_axis.label})",
-        )
-
-    def show_1d_column(self, col: int) -> None:
-        """固定 F2 列,沿 F1 显示 1D 迹线(类似 nmrDraw 列切片)。"""
-        if self._primary is None:
-            return
-        if not (0 <= col < self._primary.data.shape[1]):
-            return
-        self._show_1d(
-            Spectrum1D(
-                np.asarray(self._primary.data[:, col]),
-                self._primary.y_axis,
-                source=self._primary.source,
-            ),
-            name=f"列 {col} ({self._primary.y_axis.label})",
-        )
-
-    def _show_1d_context_menu(self, event) -> None:
-        """右键谱图:按点击位置提取 1D 行/列切片。"""
-        if self._primary is None or self._mode_1d or not self.layers:
-            return
-        try:
-            point = self.plot.getViewBox().mapSceneToView(event.scenePos())
-        except Exception:  # noqa: BLE001
-            return
-        xi, yi = round(point.x()), round(point.y())
         x_axis = self._primary.x_axis
         y_axis = self._primary.y_axis
-        menu = QMenu(self)
-        if 0 <= yi < y_axis.size:
-            menu.addAction(
-                f"查看 1D 行切片 ({x_axis.label})",
-                lambda row=yi: self.show_1d_row(row),
-            )
-        if 0 <= xi < x_axis.size:
-            menu.addAction(
-                f"查看 1D 列切片 ({y_axis.label})",
-                lambda col=xi: self.show_1d_column(col),
-            )
-        if menu.actions():
-            menu.exec(event.screenPos())
+        x_ticks = [
+            (int(i), f"{x_axis.ppm_at(int(i)):.2f}")
+            for i in np.linspace(0, x_axis.size - 1, 6)
+        ]
+        y_ticks = [
+            (int(i), f"{y_axis.ppm_at(int(i)):.2f}")
+            for i in np.linspace(0, y_axis.size - 1, 6)
+        ]
+        self.strip_top.getAxis("bottom").setTicks([x_ticks])
+        self.strip_top.setLabels(bottom=f"{x_axis.label} (ppm)", left="强度")
+        self.strip_right.getAxis("left").setTicks([y_ticks])
+        self.strip_right.setLabels(left=f"{y_axis.label} (ppm)", bottom="强度")
+
+    def _update_strips(self, row: int, col: int) -> None:
+        """更新十字线处两个一维迹线(行=F2 迹线,列=F1 迹线)。"""
+        if self._primary is None or not self._strips_active:
+            return
+        rows, cols = self._primary.data.shape
+        row = max(0, min(rows - 1, int(row)))
+        col = max(0, min(cols - 1, int(col)))
+        self.strip_top_curve.setData(
+            np.arange(cols), np.asarray(self._primary.data[row, :])
+        )
+        self.strip_right_curve.setData(
+            np.asarray(self._primary.data[:, col]), np.arange(rows)
+        )
+
+    def _move_crosshair(self, x: float, y: float) -> None:
+        """移动十字线到数据坐标 (x=列, y=行)。"""
+        if not self._strips_active:
+            return
+        self._crosshair_v.setPos(x)
+        self._crosshair_h.setPos(y)
+
+    def _restore_strips(self) -> None:
+        """隐藏条带与十字线。"""
+        self.strip_top.hide()
+        self.strip_right.hide()
+        self._crosshair_v.hide()
+        self._crosshair_h.hide()
 
     # ------------------------------------------------------------ layers
 
@@ -547,9 +609,6 @@ class SpectrumViewer(QWidget):
             self.peak_clicked.emit(row)
 
     def _on_plot_clicked(self, event) -> None:
-        if event.button() == Qt.MouseButton.RightButton:
-            self._show_1d_context_menu(event)
-            return
         if event.button() != Qt.MouseButton.LeftButton:
             return
         press = event.buttonDownScenePos(Qt.MouseButton.LeftButton)
@@ -567,6 +626,11 @@ class SpectrumViewer(QWidget):
         xi = round(point.x())
         yi = round(point.y())
         if not (0 <= xi < x_axis.size and 0 <= yi < y_axis.size):
+            return
+        if self._strips_active:
+            # 一维谱模式:点击定位十字线并显示该处两个一维谱
+            self._move_crosshair(xi, yi)
+            self._update_strips(yi, xi)
             return
         x_ppm = float(x_axis.ppm_at(xi))
         y_ppm = float(y_axis.ppm_at(yi))
@@ -608,6 +672,9 @@ class SpectrumViewer(QWidget):
         xi = round(point.x())
         yi = round(point.y())
         if 0 <= xi < x_axis.size and 0 <= yi < y_axis.size:
+            if self._strips_active:
+                self._move_crosshair(float(point.x()), float(point.y()))
+                self._update_strips(yi, xi)
             self.crosshair_label.setText(
                 f"{x_axis.label} {x_axis.ppm_at(xi):.3f} ppm | "
                 f"{y_axis.label} {y_axis.ppm_at(yi):.3f} ppm"

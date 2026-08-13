@@ -234,7 +234,7 @@ def test_manual_menu_actions_require_experiment(
 def test_spectrum_panel_peak_add_edit_delete_save(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """峰表加/改/删/存:写回 CSV + 登记 manual_peaks + viewer 刷新。"""
+    """峰表加/改/删/存:写回 Poky .list + 登记 manual_peaks + viewer 刷新。"""
     messages: list[str] = []
     monkeypatch.setattr(
         "gui.spectrum_panel.InfoDialog.show_info",
@@ -262,8 +262,8 @@ def test_spectrum_panel_peak_add_edit_delete_save(
     panel.peak_table.item(1, 2).setText("118.0")
     panel._on_save_peaks()
 
-    csv_path = peaks / "exp_001-d_001.csv"
-    saved = csv_path.read_text(encoding="utf-8")
+    list_path = peaks / "exp_001-d_001.list"
+    saved = list_path.read_text(encoding="utf-8")
     assert "7.5" in saved and "118.0" in saved
     runs = [
         run
@@ -277,7 +277,7 @@ def test_spectrum_panel_peak_add_edit_delete_save(
     panel._on_delete_peak()
     assert panel.peak_table.rowCount() == 1
     panel._on_save_peaks()
-    saved = csv_path.read_text(encoding="utf-8")
+    saved = list_path.read_text(encoding="utf-8")
     assert "7.5" not in saved and "G1" in saved
     panel.close()
 

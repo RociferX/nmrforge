@@ -1,4 +1,4 @@
-"""一维谱/FID 查看测试:Spectrum1D、1D 行/列切片、图层删除、峰显示开关。"""
+"""一维谱/FID 查看测试:Spectrum1D、TopSpin 式 1D 条带、图层删除、峰开关。"""
 
 from __future__ import annotations
 
@@ -104,22 +104,28 @@ def test_spectrum1d_load_from_fid_roundtrip(tmp_path: Path) -> None:
     assert loaded.source == path
 
 
-def test_viewer_1d_row_and_column_slice(qapp: QApplication) -> None:
+def test_viewer_1d_strips_toggle_and_update(qapp: QApplication) -> None:
+    """一维谱开关:十字线 + 上/右条带,点击位置显示两个一维谱。"""
     spectrum = _synthetic_spectrum()
     viewer = SpectrumViewer()
     viewer.add_spectrum(spectrum)
-    viewer.show_1d_row(40)
-    assert viewer._mode_1d
-    assert not viewer.back_2d_button.isHidden()
-    _x, y = viewer._plot_1d.getData()
-    np.testing.assert_allclose(np.asarray(y), spectrum.data[40, :])
-    viewer.show_1d_column(120)
-    _x, y = viewer._plot_1d.getData()
-    np.testing.assert_allclose(np.asarray(y), spectrum.data[:, 120])
-    # 返回二维
-    viewer._restore_2d()
-    assert not viewer._mode_1d
-    assert all(layer.isVisible() for layer in viewer.layers)
+    assert viewer.show_1d_button.text() == "一维谱"
+    assert not viewer.show_1d_button.isChecked()
+    viewer.set_1d_mode(True)
+    assert viewer._strips_active
+    assert viewer.show_1d_button.isChecked()
+    assert not viewer.strip_top.isHidden()
+    assert not viewer.strip_right.isHidden()
+    # 更新十字线位置 → 两个一维迹线
+    viewer._update_strips(40, 120)
+    _xt, yt = viewer.strip_top_curve.getData()
+    np.testing.assert_allclose(np.asarray(yt), spectrum.data[40, :])
+    xr, _yr = viewer.strip_right_curve.getData()
+    np.testing.assert_allclose(np.asarray(xr), spectrum.data[:, 120])
+    # 关闭:条带与十字线隐藏
+    viewer.set_1d_mode(False)
+    assert not viewer._strips_active
+    assert viewer.strip_top.isHidden()
     viewer.close()
 
 
