@@ -212,6 +212,8 @@ class SpectrumViewer(QWidget):
             self.plot.removeItem(self._plot_1d)
             self._plot_1d = None
         self.set_1d_mode(False)
+        # 恢复 2D 显示方向:1D 视图(invertY=False)后不泄漏到后续 2D/3D
+        self.plot.getViewBox().invertY(True)
         for layer in self.layers:
             self.plot.removeItem(layer)
         self.layers.clear()
@@ -392,6 +394,10 @@ class SpectrumViewer(QWidget):
         self._crosshair_h.setVisible(active)
         if active:
             self._setup_strip_axes()
+            # 右侧 1D 条带方向与二维谱 Y 轴保持一致(谱+坐标轴一起翻正)
+            self.strip_right.getViewBox().invertY(
+                bool(self.plot.getViewBox().state.get("yInverted", True))
+            )
             rows, cols = self._primary.data.shape
             self._update_strips(rows // 2, cols // 2)
             self._move_crosshair(cols // 2, rows // 2)
