@@ -190,6 +190,7 @@ def test_joint_recheck_finds_better_combination(tmp_path: Path) -> None:
         tmp_path / "work",
         _joint_score,
         runs,
+        {},
     )
     assert best_phases == {"F2": (0.0, 5.0), "F1": (0.0, 5.0)}
     assert best_score == 100.0
@@ -209,6 +210,27 @@ def test_reproducibility_check_consistent(tmp_path: Path) -> None:
     )
     assert consistent
     assert p1a == 10.0 and p1b == 10.0
+
+
+def test_profile_symmetry_axis_absorption_vs_dispersion() -> None:
+    """一维剖面镜像相关:吸收(偶函数)≈+1,色散(奇函数)≈-1。"""
+    import numpy as np
+
+    from core.qc import phase_quality
+
+    n = 64
+    x = np.arange(n) - n / 2.0
+    absorption = 1.0 / (1.0 + (x / 4.0) ** 2)
+    dispersion = x / (1.0 + (x / 4.0) ** 2) / 4.0
+    spec_abs = np.zeros((16, n))
+    spec_abs[8, :] = absorption
+    spec_dis = np.zeros((16, n))
+    spec_dis[8, :] = dispersion
+    s_abs = phase_quality.profile_symmetry_axis(spec_abs, 1)
+    s_dis = phase_quality.profile_symmetry_axis(spec_dis, 1)
+    assert s_abs > 0.5, s_abs
+    # 色散剖面以正峰顶为中心,窗口不对称使相关≈0(非正);吸收显著正相关
+    assert s_dis < 0.0, s_dis
 
 
 def test_smile_planes_reuse_when_params_match(

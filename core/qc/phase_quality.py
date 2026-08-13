@@ -127,6 +127,53 @@ def negative_area_axis(real: Any, axis: int, radius: int = 8) -> float:
     return float(total_neg / (total_abs + 1e-12))
 
 
+def profile_symmetry_axis(real: Any, axis: int, radius: int = 6) -> float:
+    """峰窗一维剖面镜像对称性(吸收≈+1,色散≈-1),top-5 强峰中位数。
+
+    旧项目(NMRFlow)用一维剖面与镜像的相关系数做 ±90° 相位歧义消解:
+    吸收峰为偶函数(镜像相关≈+1),色散峰为奇函数(镜像相关≈-1)。
+    注意:全谱翻转相关(旧 0.2.38 方案)会把 90° 色散 2D 谱误判为对称,
+    一维峰窗剖面才是正确的奇偶性判别。
+    """
+    arr = np.asarray(np.real(real), dtype=float)
+    peaks = list(peak_detection.detect(arr)) + list(
+        peak_detection.detect(-arr)
+    )
+    if not peaks:
+        return 0.0
+    heights = np.asarray([float(p.height) for p in peaks])
+    threshold = max(float(np.percentile(np.abs(arr), 99.5)), 0.0)
+    strong = [p for p, h in zip(peaks, heights) if h >= threshold]
+    strong = [
+        p
+        for p in strong
+        if 0 <= axis < arr.ndim
+        and radius
+        <= int(round(float(np.atleast_1d(p.position)[axis])))
+        < arr.shape[axis] - radius
+    ]
+    strong.sort(key=lambda p: p.height, reverse=True)
+    strong = strong[:5]
+    if not strong:
+        return 0.0
+    corrs: list[float] = []
+    for peak in strong:
+        pos = np.round(np.asarray(peak.position)).astype(int)
+        lo = max(0, int(pos[axis]) - radius)
+        hi = min(arr.shape[axis], int(pos[axis]) + radius + 1)
+        sl = tuple(
+            slice(lo, hi) if i == axis else slice(int(pos[i]), int(pos[i]) + 1)
+            for i in range(arr.ndim)
+        )
+        profile = arr[sl].astype(float).ravel()
+        if profile.size < 5 or float(np.std(profile)) == 0.0:
+            continue
+        corr = float(np.corrcoef(profile, profile[::-1])[0, 1])
+        if corr == corr:
+            corrs.append(corr)
+    return float(np.median(corrs)) if corrs else 0.0
+
+
 def spectral_entropy(real: Any) -> float:
     """正部谱熵（Ernst 最小熵，归一化到 [0, 1]）。
 
