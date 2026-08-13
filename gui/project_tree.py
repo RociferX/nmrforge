@@ -301,6 +301,18 @@ class ProjectTreePanel(QWidget):
             item = item.parent()
         return ""
 
+    def select_data(self, exp_id: str, data_id: str) -> None:
+        """选中实验下的数据节点(展开实验;找不到时静默)。"""
+        exp_item = self._find_experiment_item(exp_id)
+        if exp_item is None:
+            return
+        for index in range(exp_item.childCount()):
+            child = exp_item.child(index)
+            if self._data_id_of(child) == data_id:
+                self.tree.expandItem(exp_item)
+                self.tree.setCurrentItem(child)
+                return
+
     def select_experiment(self, exp_id: str) -> None:
         """按 id 递归定位并选中实验节点(Workspace → Project → Experiment)。"""
         target = self._find_experiment_item(exp_id)

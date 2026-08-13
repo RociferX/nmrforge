@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
     QApplication,
     QFileDialog,
     QInputDialog,
+    QLabel,
     QMainWindow,
     QMenu,
     QSplitter,
@@ -189,6 +190,9 @@ class MainWindow(QMainWindow):
 
         self.spectrum_panel = SpectrumPanel(self.manager, controller=self.controller)
         self.spectrum_panel.peaks_saved.connect(self._on_peaks_saved)
+        self.spectrum_panel.locate_pipeline_requested.connect(
+            self._locate_pipeline
+        )
 
         self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
         self.main_splitter.addWidget(self.project_tree)
@@ -207,6 +211,13 @@ class MainWindow(QMainWindow):
         central_layout = QVBoxLayout(central)
         central_layout.setContentsMargins(0, 0, 0, 0)
         central_layout.setSpacing(0)
+        self.context_bar = QLabel("未打开项目")
+        self.context_bar.setWordWrap(True)
+        self.context_bar.setStyleSheet(
+            "background: #ecf0f1; padding: 4px 10px; "
+            "font-weight: bold; color: #2c3e50;"
+        )
+        central_layout.addWidget(self.context_bar)
         central_layout.addWidget(self.main_splitter, 1)
         central_layout.addWidget(self.log_panel)
         self.setCentralWidget(central)
@@ -1038,10 +1049,52 @@ class MainWindow(QMainWindow):
             f"实验 {exp_id}: 双击查看谱图文件,中间 Pipeline 显示处理步骤"
         )
 
+    _DATA_STATUS_TEXT = {
+        "imported": "已导入",
+        "fid_ready": "FID 就绪",
+        "processed": "已处理",
+        "picked": "已选峰",
+        "analyzed": "已分析",
+        "registered": "已登记",
+    }
+
+    def _update_context_bar(self) -> None:
+        """顶部上下文条:Project / Experiment / Data + 状态摘要。"""
+        if self.manager.project is None:
+            self.context_bar.setText("未打开项目")
+            return
+        exp_id = self.project_tree.current_experiment_id()
+        data_id = self.project_tree._data_id_of(self.project_tree.tree.currentItem())
+        parts = [self.manager.project.name]
+        if exp_id:
+            exp = self.manager.project.experiment(exp_id)
+            parts.append(exp.title if exp is not None else exp_id)
+        if data_id and exp_id:
+            label = data_id
+            status_text = ""
+            try:
+                exp = self.manager.project.experiment(exp_id)
+                data = next((d for d in exp.data if d.id == data_id), None)
+                if data is not None:
+                    label = getattr(data, "title", "") or data_id
+                    status_text = self._DATA_STATUS_TEXT.get(
+                        getattr(data, "status", ""), getattr(data, "status", "")
+                    )
+            except Exception:  # noqa: BLE001 - 上下文解析失败保底
+                label = data_id
+            parts.append(f"{label} · {status_text}" if status_text else label)
+        self.context_bar.setText(" / ".join(parts))
+
+    def _locate_pipeline(self, exp_id: str, data_id: str) -> None:
+        """谱图面板「在 Pipeline 中定位」:选中树节点并切到处理页。"""
+        self.project_tree.select_data(exp_id, data_id)
+        self.center_panel.set_selection("data", exp_id, data_id)
+
     def _update_context(self, kind: str, exp_id: str, data_id: str = "") -> None:
         """左侧选择变化 → 中间按选中类型显示,右侧围绕数据刷新。"""
         self.center_panel.set_selection(kind, exp_id, data_id)
         self.spectrum_panel.set_context(exp_id, data_id)
+        self._update_context_bar()
 
     def _append_log(self, message: str) -> None:
         self.log_panel.append(message)
@@ -1068,6 +1121,7 @@ class MainWindow(QMainWindow):
             self.center_panel.set_selection("workspace", "", "")
             self.spectrum_panel.set_context("", "")
             self.main_splitter.setVisible(True)  # 欢迎页在三栏中显示
+            self._update_context_bar()
             return
         for exp in project.experiments:
             status = self.manager.infer_status(exp.id).value
@@ -1079,6 +1133,7 @@ class MainWindow(QMainWindow):
         # 打开/新建项目后默认聚焦第一个实验
         if project.experiments and not self.center_panel.current_experiment_id():
             self.project_tree.select_experiment(project.experiments[0].id)
+        self._update_context_bar()
 
     @staticmethod
     def run() -> int:

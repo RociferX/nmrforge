@@ -36,6 +36,7 @@ class SpectrumPanel(QWidget):
     """谱图面板:查看器 + 文件列表 + 峰表(加/删/改/存)。"""
 
     peaks_saved = pyqtSignal()  # 峰表写回后发出(主窗口刷新 Pipeline/日志)
+    locate_pipeline_requested = pyqtSignal(str, str)  # (exp_id, data_id)
 
     def __init__(
         self,
@@ -50,6 +51,7 @@ class SpectrumPanel(QWidget):
         self._current_exp_id: str = ""
         self._current_data_id: str = ""
         self._loading_peaks = False
+        self._viewer3d_state: dict[str, tuple[int, int]] = {}
         self._peak_keys: tuple[str, ...] = (
             "Peak_ID",
             "H_shift",
@@ -64,6 +66,12 @@ class SpectrumPanel(QWidget):
         self._spectrum3d_panel = Spectrum3DPanel()
         self._spectrum3d_panel.setVisible(False)
         self._spectrum3d_panel.slice_changed.connect(self._render_3d_view)
+        self._spectrum3d_panel.plane_combo.currentIndexChanged.connect(
+            self._save_3d_state
+        )
+        self._spectrum3d_panel.mode_combo.currentIndexChanged.connect(
+            self._save_3d_state
+        )
         self.viewer.add_control_panel(self._spectrum3d_panel)
 
         self.file_list = QListWidget()
@@ -110,6 +118,24 @@ class SpectrumPanel(QWidget):
         self.placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.placeholder.setWordWrap(True)
         self.placeholder.setStyleSheet("color: #888;")
+
+        header = QHBoxLayout()
+        self.context_summary = QLabel("")
+        self.context_summary.setWordWrap(True)
+        self.context_summary.setStyleSheet(
+            "color: #555; background: #f8f9fa; padding: 3px 6px;"
+        )
+        header.addWidget(self.context_summary, 1)
+        self.locate_button = QPushButton("在 Pipeline 中定位")
+        self.locate_button.setVisible(False)
+        self.locate_button.setToolTip("在左侧树选中该数据并切到 Pipeline")
+        self.locate_button.clicked.connect(
+            lambda: self.locate_pipeline_requested.emit(
+                self._current_exp_id, self._current_data_id
+            )
+        )
+        header.addWidget(self.locate_button)
+        layout.addLayout(header)
 
         # 上下布局:上方查看器,中部文件列表,下方峰表
         splitter = QSplitter(Qt.Orientation.Vertical)
@@ -179,6 +205,7 @@ class SpectrumPanel(QWidget):
             self._current_spectrum = None
             self._spectrum3d_panel.clear()
             self._clear_peaks()
+        self._update_context_summary(self._current_spectrum)
 
     def _spectrum_paths(self) -> list[Path]:
         """当前实验/数据下的谱图文件(新布局优先,旧扁平路径回退)。"""
@@ -223,10 +250,15 @@ class SpectrumPanel(QWidget):
                 from viewer.spectrum import Spectrum3D
 
                 self._current_spectrum = path
+                # 在 set_spectrum3d(会重置平面/投影并触发保存)之前捕获记忆状态
+                state = self._viewer3d_state.get(self._current_data_id)
                 self._spectrum3d_panel.set_spectrum3d(
                     Spectrum3D.load_from_ft3(path)
                 )
                 self._spectrum3d_panel.setVisible(True)
+                if state:
+                    self._spectrum3d_panel.plane_combo.setCurrentIndex(state[0])
+                    self._spectrum3d_panel.mode_combo.setCurrentIndex(state[1])
                 self._render_3d_view()
                 return True
             if path.suffix.lower() == ".fid":
@@ -248,6 +280,67 @@ class SpectrumPanel(QWidget):
         self.viewer.add_spectrum(spectrum, name=name or path.stem)
         return True
 
+    def _update_context_summary(self, spectrum_path: Path | None) -> None:
+        """谱图联动:显示来源数据、步骤与关键参数摘要(缺失=历史数据)。"""
+        if spectrum_path is None or not (
+            self._current_exp_id and self._current_data_id
+        ):
+            self.context_summary.setText("")
+            self.locate_button.setVisible(False)
+            return
+        label = self._current_data_id
+        try:
+            entry = self.manager.project.experiment(self._current_exp_id)
+            data = next(
+                (d for d in entry.data if d.id == self._current_data_id), None
+            )
+            if data is not None:
+                label = getattr(data, "title", "") or self._current_data_id
+        except Exception:  # noqa: BLE001 - 上下文解析失败保底
+            label = self._current_data_id
+        self.context_summary.setText(
+            f"数据 {label} · 步骤: 生成谱图 · {self._spectrum_params_summary()}"
+        )
+        self.locate_button.setVisible(True)
+
+    def _spectrum_params_summary(self) -> str:
+        """从最近成功谱图运行读取参数摘要;无运行记录返回「历史数据」。"""
+        if self.manager.project is None:
+            return "历史数据"
+        refs = ("process", "reconstruct_nus", "manual_process", "manual_nus")
+        run = None
+        for candidate in reversed(self.manager.project.workflow_runs):
+            if candidate.experiment_id != self._current_exp_id:
+                continue
+            if candidate.workflow_ref not in refs:
+                continue
+            if (candidate.inputs or {}).get("data_id", "") not in (
+                "",
+                self._current_data_id,
+            ):
+                continue
+            if candidate.status != "success":
+                continue
+            run = candidate
+            break
+        if run is None:
+            return "历史数据"
+        params = run.params or {}
+        bits: list[str] = []
+        if params.get("extract") is False:
+            bits.append("全谱(无 EXT)")
+        elif params.get("ext_lo") and params.get("ext_hi"):
+            bits.append(f"EXT {params['ext_hi']}–{params['ext_lo']} ppm")
+        if params.get("zero_fill") is not None:
+            bits.append(f"ZF {params['zero_fill']}")
+        baseline = params.get("baseline")
+        if isinstance(baseline, dict) and baseline.get("enabled") is not False:
+            bits.append("基线 auto")
+        sampling = params.get("sampling") or {}
+        if sampling.get("auto_phase") is True:
+            bits.append("自动相位")
+        return " · ".join(bits) if bits else "默认参数"
+
     def _render_3d_view(self) -> None:
         """按 3D 面板当前平面/切片/投影渲染二维视图并重挂峰标记。"""
         spectrum = self._spectrum3d_panel.current_spectrum()
@@ -261,6 +354,13 @@ class SpectrumPanel(QWidget):
         )
         if self._peaks:
             self.viewer.set_peaks(self._peaks)
+    def _save_3d_state(self, *_args) -> None:
+        """记忆当前数据的 3D 查看平面/投影模式。"""
+        if self._current_data_id:
+            self._viewer3d_state[self._current_data_id] = (
+                self._spectrum3d_panel.plane_combo.currentIndex(),
+                self._spectrum3d_panel.mode_combo.currentIndex(),
+            )
 
     def _on_file_clicked(self, item) -> None:
         paths = [p for p in self._spectrum_paths() if p.name == item.text()]
@@ -271,6 +371,7 @@ class SpectrumPanel(QWidget):
         else:
             self._current_spectrum = paths[0]
         self._load_peaks(paths[0])
+        self._update_context_summary(paths[0])
 
     # ------------------------------------------------------------------
     # 峰表(Peak CSV)与谱图双向联动 + 编辑回写
