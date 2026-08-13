@@ -44,7 +44,10 @@ from gui.dialogs import (
     ScriptEditorDialog,
 )
 from gui.log_panel import LogPanel
-from gui.pipeline_panel import compute_step_statuses
+from gui.pipeline_panel import (
+    compute_data_step_statuses,
+    compute_step_statuses,
+)
 from gui.processing import ProcessingController
 from gui.project_tree import ProjectTreePanel
 from gui.spectrum_panel import SpectrumPanel
@@ -81,7 +84,7 @@ class MainWindow(QMainWindow):
         self.manual_run_done.connect(self._on_manual_run_done)
         self._pending_data_names: dict[str, str] = {}
         self.setWindowTitle("NMRForge")
-        self.resize(1280, 780)
+        self.resize(1280, 720)
         self._build_menus()
         self._build_central()
         self.refresh()
@@ -191,12 +194,13 @@ class MainWindow(QMainWindow):
         self.main_splitter.addWidget(self.project_tree)
         self.main_splitter.addWidget(self.center_panel)
         self.main_splitter.addWidget(self.spectrum_panel)
-        self.main_splitter.setStretchFactor(0, 22)
-        self.main_splitter.setStretchFactor(1, 43)
-        self.main_splitter.setStretchFactor(2, 35)
-        self.main_splitter.setSizes([280, 540, 420])
+        self.main_splitter.setStretchFactor(0, 20)
+        self.main_splitter.setStretchFactor(1, 40)
+        self.main_splitter.setStretchFactor(2, 40)
+        self.main_splitter.setSizes([260, 460, 560])
 
         self.log_panel = LogPanel()
+        self.log_panel.setMaximumHeight(160)
         self.log_panel.setVisible(False)
 
         central = QWidget()
@@ -540,7 +544,12 @@ class MainWindow(QMainWindow):
             return
         if self.manager.project is None:
             return
-        statuses = compute_step_statuses(self.manager, exp_id)
+        data_id = getattr(self.pipeline, "_current_data_id", "")
+        statuses = (
+            compute_data_step_statuses(self.manager, exp_id, data_id)
+            if data_id
+            else compute_step_statuses(self.manager, exp_id)
+        )
         next_step = next(
             (sid for sid, st in statuses.items() if st == "OUTDATED"), None
         )

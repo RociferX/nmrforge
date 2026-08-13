@@ -14,7 +14,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QCheckBox,
     QFileDialog,
-    QFrame,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -27,6 +27,7 @@ from PyQt6.QtWidgets import (
 )
 
 from core.project import ProjectManager
+from gui.dialogs import InfoDialog
 
 
 def _data_count(project) -> int:
@@ -155,9 +156,11 @@ class ExperimentDashboard(QWidget):
         layout.addWidget(self.data_table)
         layout.addSpacing(10)
 
+        self.single_group = QGroupBox("单个导入")
+        single_layout = QVBoxLayout(self.single_group)
         self.name_edit = QLineEdit()
         self.name_edit.setPlaceholderText("数据名称(可选)")
-        layout.addWidget(self.name_edit)
+        single_layout.addWidget(self.name_edit)
         form = QHBoxLayout()
         self.source_edit = QLineEdit()
         self.source_edit.setPlaceholderText("Bruker 数据集目录(含 acqus)")
@@ -165,40 +168,33 @@ class ExperimentDashboard(QWidget):
         browse = QPushButton("浏览...")
         browse.clicked.connect(self._browse)
         form.addWidget(browse)
-        layout.addLayout(form)
-
+        single_layout.addLayout(form)
         self.copy_check = QCheckBox("复制数据到项目(raw, SHA-256 指纹)")
         self.copy_check.setChecked(True)
-        layout.addWidget(self.copy_check)
-
+        single_layout.addWidget(self.copy_check)
         self.import_button = QPushButton("导入数据")
         self.import_button.setEnabled(False)
         self.import_button.clicked.connect(self._on_import)
-        layout.addWidget(self.import_button)
+        single_layout.addWidget(self.import_button)
         self.source_edit.textChanged.connect(
             lambda _t: self.import_button.setEnabled(
                 bool(self.source_edit.text().strip())
             )
         )
-        layout.addSpacing(10)
-        separator = QFrame()
-        separator.setFrameShape(QFrame.Shape.HLine)
-        separator.setFrameShadow(QFrame.Shadow.Sunken)
-        layout.addWidget(separator)
+        layout.addWidget(self.single_group)
 
-        batch_title = QLabel("批量处理")
-        batch_title.setStyleSheet("font-weight: bold;")
-        layout.addWidget(batch_title)
+        self.batch_group = QGroupBox("批量处理")
+        batch_layout = QVBoxLayout(self.batch_group)
         batch_hint = QLabel(
-            "添加多个 Bruker 数据目录后批量导入;同批数据绑定同一批量组标记,"
-            "中间处理页操作对整组数据执行"
+            "可添加总文件夹(自动检查子文件夹中的 Bruker 数据集)或多个数据目录;"
+            "同批数据绑定同一批量组标记,中间处理页操作对整组数据执行"
         )
         batch_hint.setWordWrap(True)
         batch_hint.setStyleSheet("color: #666;")
-        layout.addWidget(batch_hint)
+        batch_layout.addWidget(batch_hint)
         self.batch_list = QListWidget()
         self.batch_list.setMaximumHeight(110)
-        layout.addWidget(self.batch_list)
+        batch_layout.addWidget(self.batch_list)
         batch_buttons = QHBoxLayout()
         self.batch_add_button = QPushButton("添加数据文件夹...")
         self.batch_add_button.clicked.connect(self._on_batch_add_folder)
@@ -210,7 +206,8 @@ class ExperimentDashboard(QWidget):
         self.batch_import_button.setEnabled(False)
         self.batch_import_button.clicked.connect(self._on_batch_import)
         batch_buttons.addWidget(self.batch_import_button)
-        layout.addLayout(batch_buttons)
+        batch_layout.addLayout(batch_buttons)
+        layout.addWidget(self.batch_group)
         layout.addStretch(1)
 
     def set_context(self, manager: ProjectManager, exp_id: str, label: str) -> None:
@@ -245,15 +242,42 @@ class ExperimentDashboard(QWidget):
             self.source_edit.setText(path)
 
     def _on_batch_add_folder(self) -> None:
-        """批量列表添加一个数据文件夹(去重)。"""
+        """批量列表添加数据文件夹(自动检查子文件夹中的 Bruker 数据集)。"""
         path = QFileDialog.getExistingDirectory(
-            self, "选择 Bruker 数据集目录(批量)"
+            self, "选择 Bruker 数据文件夹(批量)"
         )
-        if path and not self.batch_list.findItems(
-            path, Qt.MatchFlag.MatchExactly
-        ):
-            self.batch_list.addItem(path)
+        if not path:
+            return
+        found = self._bruker_datasets_under(Path(path))
+        if not found:
+            InfoDialog.show_info(
+                self,
+                "未找到数据",
+                "所选目录及其子文件夹中没有含 acqus 的 Bruker 数据集",
+            )
+            return
+        for dataset_dir in found:
+            if not self.batch_list.findItems(
+                str(dataset_dir), Qt.MatchFlag.MatchExactly
+            ):
+                self.batch_list.addItem(str(dataset_dir))
         self.batch_import_button.setEnabled(self.batch_list.count() > 0)
+
+    @staticmethod
+    def _bruker_datasets_under(root: Path) -> list[Path]:
+        """root 及子文件夹中所有含 acqus 的数据集目录(排序去重)。"""
+        datasets: set[Path] = set()
+        try:
+            candidates = [
+                Path(p).parent for p in root.rglob("acqus") if p.is_file()
+            ]
+            candidates.append(root)
+        except OSError:
+            candidates = [root]
+        for cand in candidates:
+            if (cand / "acqus").is_file():
+                datasets.add(cand.resolve())
+        return sorted(datasets)
 
     def _on_batch_clear(self) -> None:
         self.batch_list.clear()

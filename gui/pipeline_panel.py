@@ -272,7 +272,10 @@ def _node_step_statuses(
 
 
 def compute_step_statuses(manager: ProjectManager, exp_id: str) -> dict[str, str]:
-    """按产物文件、指纹校验与前置依赖推断各步骤状态(支持 OUTDATED)。"""
+    """按产物文件、指纹校验与前置依赖推断各步骤状态(支持 OUTDATED)。
+
+    实验级聚合:多数据时任一节点成功即 SUCCESS(兼容旧行为/测试)。
+    """
     nodes = _data_nodes(manager, exp_id)
     if not nodes:
         return {step_id: 'LOCKED' for step_id, _, _, _ in PIPELINE_STEPS}
@@ -291,12 +294,30 @@ def compute_step_statuses(manager: ProjectManager, exp_id: str) -> dict[str, str
     return statuses
 
 
+def compute_data_step_statuses(
+    manager: ProjectManager, exp_id: str, data_id: str
+) -> dict[str, str]:
+    """按单个数据节点计算步骤状态(中间处理页按选中数据显示)。"""
+    nodes = _data_nodes(manager, exp_id)
+    node = next(
+        (n for n in nodes if getattr(n, "id", "") == data_id), None
+    )
+    if node is None:
+        return compute_step_statuses(manager, exp_id)
+    return _node_step_statuses(manager, exp_id, node)
+
+
 def _outdated_reasons(
-    statuses: dict[str, str], manager: ProjectManager, exp_id: str
+    statuses: dict[str, str],
+    manager: ProjectManager,
+    exp_id: str,
+    data_id: str = "",
 ) -> dict[str, str]:
     """为 OUTDATED 步骤生成原因(输入/脚本变化、上游过期、产物落后)。"""
     reasons: dict[str, str] = {}
     nodes = _data_nodes(manager, exp_id)
+    if data_id:
+        nodes = [n for n in nodes if getattr(n, "id", "") == data_id]
     for step_id, _, _, deps in PIPELINE_STEPS:
         if statuses.get(step_id) != 'OUTDATED':
             continue
@@ -500,6 +521,14 @@ class PipelinePanel(QWidget):
     def current_experiment_id(self) -> str:
         return self._current_exp_id
 
+    def _current_statuses(self) -> dict[str, str]:
+        """当前选中数据的步骤状态;未选中数据/旧单数据回退实验聚合。"""
+        if self._current_data_id:
+            return compute_data_step_statuses(
+                self.manager, self._current_exp_id, self._current_data_id
+            )
+        return compute_step_statuses(self.manager, self._current_exp_id)
+
     def refresh(self) -> None:
         """刷新上下文标签与步骤状态。"""
         project = self.manager.project
@@ -537,7 +566,7 @@ class PipelinePanel(QWidget):
             )
             context_text += f" [批量 {current_batch}: {group_count} 数据]"
         self.context_label.setText(context_text)
-        statuses = compute_step_statuses(self.manager, self._current_exp_id)
+        statuses = self._current_statuses()
         outdated_next = next(
             (sid for sid, st in statuses.items() if st == "OUTDATED"), None
         )
@@ -556,7 +585,10 @@ class PipelinePanel(QWidget):
             )
         reasons = _lock_reasons(statuses)
         outdated = _outdated_reasons(
-            statuses, self.manager, self._current_exp_id
+            statuses,
+            self.manager,
+            self._current_exp_id,
+            self._current_data_id,
         )
         for step_id, status in statuses.items():
             reason = reasons.get(step_id, "") or outdated.get(step_id, "")
@@ -636,7 +668,16 @@ class PipelinePanel(QWidget):
                         source = getattr(node, "source", "") or ""
                         result = method(entry, source)
                     else:
-                        result = method(node, exp_id=exp_id, data_id=data_id)
+                        import inspect
+
+                        kwargs: dict = {"exp_id": exp_id, "data_id": data_id}
+                        if "progress" in inspect.signature(method).parameters:
+                            kwargs["progress"] = (
+                                lambda msg, d=data_id: self.log_message.emit(
+                                    f"{STEP_LABEL.get(step_id, step_id)} {d}: {msg}"
+                                )
+                            )
+                        result = method(node, **kwargs)
                     message = result if isinstance(result, str) else str(result)
                     self.log_message.emit(
                         f"完成 {STEP_LABEL.get(step_id, step_id)} {data_id}:"

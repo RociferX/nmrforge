@@ -146,17 +146,42 @@ class ProcessingController:
         self._manager.save()
         return {"batch_id": batch, "results": results}
 
-    def generate_fid(self, data, exp_id: str | None = None, data_id: str | None = None) -> str:
-        """第 2 步:生成 FID(backend.convert_to_fid),返回 fid 路径。"""
+    def generate_fid(
+        self,
+        data,
+        exp_id: str | None = None,
+        data_id: str | None = None,
+        progress: Callable[[str], None] | None = None,
+    ) -> str:
+        """第 2 步:生成 FID(backend.convert_to_fid),返回 fid 路径。
+
+        progress 可选回调:阶段进展(G2B-006;后端落地后转发真实阶段日志)。
+        """
+        import inspect
+
         from workflow.stepwise import generate_fid as stepwise_fid
 
         if self._manager is None:
             raise RuntimeError("ProcessingController 未绑定项目(ProjectManager)")
         exp_id = exp_id or getattr(data, "exp_id", "")
         data_id = data_id or getattr(data, "id", "")
+
+        def emit(message: str) -> None:
+            if progress is not None:
+                progress(message)
+
+        emit("bruker 转换中(fid.com)")
+        kwargs: dict = {}
+        if "progress" in inspect.signature(stepwise_fid).parameters:
+            kwargs["progress"] = emit
         fid_path = stepwise_fid(
-            self._manager, exp_id, data_id, self._backend_instance()
+            self._manager,
+            exp_id,
+            data_id,
+            self._backend_instance(),
+            **kwargs,
         )
+        emit("完成 FID 转换")
         if data_id:
             record_step_success(self._manager, exp_id, data_id, "fid")
             self._snapshot_step(
@@ -169,18 +194,51 @@ class ProcessingController:
         return fid_path
 
     def generate_spectrum(
-        self, data, exp_id: str | None = None, data_id: str | None = None
+        self,
+        data,
+        exp_id: str | None = None,
+        data_id: str | None = None,
+        progress: Callable[[str], None] | None = None,
     ) -> str:
-        """第 3 步:生成谱图(process/reconstruct_nus,含 NUS SMILE 重构)。"""
+        """第 3 步:生成谱图(process/reconstruct_nus,含 NUS SMILE 重构)。
+
+        progress 可选回调:阶段进展(G2B-006;后端落地后转发真实阶段日志)。
+        """
+        import inspect
+
         from workflow.stepwise import generate_spectrum as stepwise_spectrum
 
         if self._manager is None:
             raise RuntimeError("ProcessingController 未绑定项目(ProjectManager)")
         exp_id = exp_id or getattr(data, "exp_id", "")
         data_id = data_id or getattr(data, "id", "")
+
+        def emit(message: str) -> None:
+            if progress is not None:
+                progress(message)
+
+        emit("读取数据,准备处理")
+        try:
+            experiment = self._read_experiment(exp_id, data_id)
+            from core.data.internal_data_model import SamplingMode
+
+            if experiment.sampling.mode is SamplingMode.NUS:
+                emit("NUS 数据: 开始 SMILE 重构(含直接维相位)")
+            else:
+                emit("均匀采样: 开始 NMRPipe 处理(含直接维相位)")
+        except Exception:  # noqa: BLE001 - 采样信息不可用给通用提示
+            emit("后端执行中(转换/重构/相位优化)")
+        kwargs: dict = {}
+        if "progress" in inspect.signature(stepwise_spectrum).parameters:
+            kwargs["progress"] = emit
         spectrum_path = stepwise_spectrum(
-            self._manager, exp_id, data_id, self._backend_instance()
+            self._manager,
+            exp_id,
+            data_id,
+            self._backend_instance(),
+            **kwargs,
         )
+        emit("完成重构/处理,终谱已就位")
         if data_id:
             record_step_success(self._manager, exp_id, data_id, "spectrum")
             self._snapshot_step(

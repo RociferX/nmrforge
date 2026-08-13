@@ -97,6 +97,18 @@ class _FakeController:
         return "/tmp/x.ft2"
 
 
+class _ProgressController(_FakeController):
+    """带 progress 回调的假控制器(验证阶段日志进面板)。"""
+
+    def generate_spectrum(
+        self, data, exp_id=None, data_id=None, progress=None
+    ) -> str:
+        self.calls.append(data_id or "")
+        if progress:
+            progress("NUS 数据: 开始 SMILE 重构(含直接维相位)")
+        return "/tmp/x.ft2"
+
+
 class _SyncThread:
     def __init__(self, target=None, daemon=None) -> None:
         self._target = target
@@ -163,3 +175,152 @@ def test_tree_data_label_shows_batch_marker(
     data_item = panel.tree.topLevelItem(0).child(0).child(0).child(0)
     assert "[B1]" in data_item.text(0)
     panel.close()
+
+
+def test_pipeline_status_shows_selected_data(
+    tmp_path: Path, qapp: QApplication
+) -> None:
+    """导入新数据后,中间状态按当前选中数据而非首条数据。"""
+    from gui.pipeline_panel import compute_data_step_statuses
+
+    manager = ProjectManager.create_project(tmp_path / "proj", "demo")
+    entry = manager.create_experiment("multi")
+    data1 = manager.import_data(entry.id, "/fake/1")
+    data2 = manager.import_data(entry.id, "/fake/2")
+    # data1 已处理(fid+ft2),data2 空白
+    process = manager.data_dir(entry.id, data1.id, "process")
+    process.mkdir(parents=True, exist_ok=True)
+    fid = process / f"{entry.id}-{data1.id}.fid"
+    fid.write_bytes(b"fid")
+    manager.set_data_fid(entry.id, data1.id, fid)
+    spectra = manager.data_dir(entry.id, data1.id, "spectra")
+    spectra.mkdir(parents=True, exist_ok=True)
+    ft2 = spectra / f"{entry.id}-{data1.id}.ft2"
+    ft2.write_bytes(b"ft2")
+    manager.set_data_spectrum(entry.id, data1.id, ft2)
+    manager.save()
+
+    st1 = compute_data_step_statuses(manager, entry.id, data1.id)
+    assert st1["fid"] == "SUCCESS" and st1["spectrum"] == "SUCCESS"
+    st2 = compute_data_step_statuses(manager, entry.id, data2.id)
+    assert st2["fid"] == "READY" and st2["spectrum"] == "LOCKED"
+    # 面板选中 data2 时显示其状态(不是 data1 的已完成状态)
+    panel = PipelinePanel(manager, _FakeController())
+    panel.set_selection("data", entry.id, data2.id)
+    assert panel._rows["fid"].status_label.text().startswith("▶")
+    assert panel._rows["spectrum"].status_label.text().startswith("🔒")
+    panel.close()
+
+
+def test_batch_subfolder_scan(tmp_path: Path) -> None:
+    """批量添加总文件夹时自动检查子文件夹中的 Bruker 数据集。"""
+    from gui.dashboards import ExperimentDashboard
+
+    root = tmp_path / "batch_root"
+    (root / "hsqc").mkdir(parents=True)
+    (root / "hsqc" / "acqus").write_text("x")
+    (root / "nested" / "hnca").mkdir(parents=True)
+    (root / "nested" / "hnca" / "acqus").write_text("x")
+    (root / "notes.txt").write_text("not a dataset")
+    found = ExperimentDashboard._bruker_datasets_under(root)
+    names = {p.name for p in found}
+    assert names == {"hsqc", "hnca"}
+    # 直接选择数据集目录 → 返回自身
+    direct = ExperimentDashboard._bruker_datasets_under(root / "hsqc")
+    assert [p.name for p in direct] == ["hsqc"]
+
+
+def test_experiment_dashboard_single_batch_groups(
+    qapp: QApplication,
+) -> None:
+    """实验页:单个导入与批量处理分组展示(视觉区分)。"""
+    from PyQt6.QtWidgets import QGroupBox
+
+    from gui.dashboards import ExperimentDashboard
+
+    page = ExperimentDashboard()
+    assert isinstance(page.single_group, QGroupBox)
+    assert isinstance(page.batch_group, QGroupBox)
+    assert page.single_group.title() == "单个导入"
+    assert page.batch_group.title() == "批量处理"
+    page.close()
+
+
+def test_project_single_click_opens(
+    tmp_path: Path, qapp: QApplication
+) -> None:
+    """单击项目节点即打开(无需双击);当前项目不重复打开。"""
+    from gui.project_tree import ProjectTreePanel
+
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    ProjectManager.create_project(ws / "projA", "projA")
+    manager = ProjectManager.create_project(ws / "projB", "projB")
+    manager.create_experiment()
+    manager.save()
+    panel = ProjectTreePanel(manager, workspace=_TempWorkspace(ws))
+    opened: list[str] = []
+    panel.open_project_requested.connect(lambda p: opened.append(p))
+    workspace_item = panel.tree.topLevelItem(0)
+
+    def project_item(name: str):
+        for index in range(workspace_item.childCount()):
+            child = workspace_item.child(index)
+            if child.text(0) == name:
+                return child
+        return None
+
+    proj_a = project_item("projA")
+    proj_b = project_item("projB")
+    assert proj_a is not None and proj_b is not None
+    panel._on_item_clicked(proj_a, 0)  # 非当前项目 → 打开
+    assert opened and Path(opened[0]).name == "projA"
+    panel._on_item_clicked(proj_b, 0)  # 当前项目 → 不重复打开
+    assert len(opened) == 1
+    panel.close()
+
+
+def test_pipeline_progress_logs_to_panel(
+    tmp_path: Path,
+    qapp: QApplication,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """运行生成谱图时阶段进展经 progress 进入日志面板。"""
+    from gui.log_panel import LogPanel
+
+    monkeypatch.setattr("threading.Thread", _SyncThread)
+    manager = ProjectManager.create_project(tmp_path / "proj", "demo")
+    entry = manager.create_experiment("prog")
+    data = manager.import_data(entry.id, "/fake/1")
+    manager.save()
+    controller = _ProgressController()
+    panel = PipelinePanel(manager, controller)
+    log = LogPanel()
+    panel.log_message.connect(log.append)
+    panel.set_selection("data", entry.id, data.id)
+    panel._on_run_requested("spectrum")
+    assert "SMILE 重构" in log.text.toPlainText()
+    panel.close()
+    log.close()
+
+
+def test_welcome_single_click_opens(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """欢迎页最近项目单击打开。"""
+    from gui.welcome_page import WelcomePage, _FallbackWorkspaceManager
+
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    ProjectManager.create_project(ws / "projA", "projA")
+    monkeypatch.setattr(
+        "gui.welcome_page.workspace_manager",
+        lambda: _FallbackWorkspaceManager(ws),
+    )
+    page = WelcomePage()
+    opened: list[str] = []
+    page.open_project_requested.connect(lambda p: opened.append(p))
+    item = page.recent_list.item(0)
+    page._on_recent_clicked(item)
+    assert opened and Path(opened[0]).name == "projA"
+    page.close()

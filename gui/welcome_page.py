@@ -97,7 +97,7 @@ class WelcomePage(QWidget):
 
         self.recent_list = QListWidget()
         self.recent_list.setMinimumHeight(140)
-        self.recent_list.itemDoubleClicked.connect(self._on_recent_double_clicked)
+        self.recent_list.itemClicked.connect(self._on_recent_clicked)
         layout.addWidget(self.recent_list, 1)
 
         actions = QHBoxLayout()
@@ -130,7 +130,7 @@ class WelcomePage(QWidget):
         return str(self.ws.ensure())
 
     # ------------------------------------------------------------------
-    def _on_recent_double_clicked(self, item: QListWidgetItem) -> None:
+    def _on_recent_clicked(self, item: QListWidgetItem) -> None:
         path = item.data(0x0100)
         if path:
             self.open_project_requested.emit(str(path))

@@ -99,8 +99,8 @@ def test_spectrum1d_load_from_fid_roundtrip(tmp_path: Path) -> None:
     assert loaded.data.shape == (64,)
     np.testing.assert_allclose(loaded.data, data)
     assert loaded.axis.size == 64
-    assert loaded.ppm_valid
-    np.testing.assert_allclose(loaded.x_values(), loaded.axis.ppm)
+    assert not loaded.ppm_valid  # 时间域 FID 不用 ppm 轴
+    np.testing.assert_allclose(loaded.x_values(), np.arange(64))
     assert loaded.source == path
 
 

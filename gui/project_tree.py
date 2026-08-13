@@ -85,6 +85,7 @@ class ProjectTreePanel(QWidget):
         self.tree.setMinimumWidth(180)
         self.tree.itemSelectionChanged.connect(self._on_selection_changed)
         self.tree.itemDoubleClicked.connect(self._on_double_clicked)
+        self.tree.itemClicked.connect(self._on_item_clicked)
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._on_context_menu)
         layout.addWidget(self.tree)
@@ -341,6 +342,21 @@ class ProjectTreePanel(QWidget):
         self.selection_changed.emit(
             kind, self._experiment_id_of(item), self._data_id_of(item)
         )
+
+    def _on_item_clicked(self, item: QTreeWidgetItem, _column: int) -> None:
+        """单击项目节点即打开(无需双击)。"""
+        data = item.data(0, Qt.ItemDataRole.UserRole)
+        if not isinstance(data, dict) or data.get("kind") != "project":
+            return
+        path = data.get("path")
+        if not path:
+            return
+        is_current = (
+            self.manager.root is not None
+            and Path(str(path)) == Path(self.manager.root).resolve()
+        )
+        if not is_current:
+            self.open_project_requested.emit(str(path))
 
     def _on_double_clicked(self, item: QTreeWidgetItem, _column: int) -> None:
         data = item.data(0, Qt.ItemDataRole.UserRole)
