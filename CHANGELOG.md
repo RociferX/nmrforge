@@ -15,7 +15,8 @@
     (hsqc_small_convert.com,HANDOVER §5 经典 pull 阻挡副本),VM git status 恢复干净;
   - 备注:本地全量首轮 1 例 Windows 瞬时文件锁(os.replace PermissionError,
     test_project_dashboard_stats_and_runs)偶发,单测复跑通过;新鲜 basetemp 全量复跑全绿。
-- 测试:全量 424 passed(本地 Windows + offscreen),ruff 全绿。
+- 测试:全量 424 passed(本地 Windows + offscreen),ruff 全绿;
+- VM 全量回归:420 passed + 4 skipped(2026-08-13,推送后同步复测)。
 
 
 ## [0.2.51] - 2026-08-13
