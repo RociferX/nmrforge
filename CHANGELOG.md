@@ -10,7 +10,7 @@
     SOFTWARE_SUMMARY.md(用户参考文档)、config/nmrforge.local.yaml(本地配置);
   - .gitignore 增补覆盖率/编辑器/系统临时文件规则(.coverage、htmlcov/、
     .hypothesis/、.tox/、.idea/、.vscode/、.DS_Store、Thumbs.db、*.tmp、
-    *.bak、*.orig、*.rej、*~),防再入库;
+    *.bak、*.orig、*.rej、*~)与 NMRPipe 工作目录 *.nmrpipe/,防再入库;
   - VM 工作副本清理未跟踪生成产物 tests/fixtures/bruker/hsqc_small.nmrpipe/
     (hsqc_small_convert.com,HANDOVER §5 经典 pull 阻挡副本),VM git status 恢复干净;
   - 备注:本地全量首轮 1 例 Windows 瞬时文件锁(os.replace PermissionError,

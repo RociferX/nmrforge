@@ -14,6 +14,9 @@ nmrforge/
 build/
 dist/
 
+# NMRPipe 工作产物(<dataset>.nmrpipe 目录:转换/重构中间产物)
+*.nmrpipe/
+
 # 本地配置覆盖（可能含敏感信息，勿提交）
 config/nmrforge.local.yaml
 
