@@ -1,5 +1,12 @@
 # 变更日志
 
+## [0.2.33] - 2026-08-13
+
+- 存储去重(G2B-007 Proposal):导入勾选文案改为「链接原始数据到项目(只读
+  文件链接,必要时复制)」;实际链接式导入(硬链接→符号链接→复制回退)与
+  终谱 move 到 spectra/(process/ 不再保留副本)由 Backend 按
+  docs/proposals/gui-to-backend/007-storage-dedup-link-raw.md 实现。
+
 ## [0.2.32] - 2026-08-13
 
 - UI 调整(用户反馈):

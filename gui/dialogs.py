@@ -106,7 +106,7 @@ class ImportExperimentDialog(QDialog):
         for sample_id, name in samples or []:
             self.sample_combo.addItem(f"{sample_id} {name}".strip(), sample_id)
         form.addRow("关联样本:", self.sample_combo)
-        self.copy_check = QCheckBox("复制数据到项目(raw/<exp_id>,SHA-256 指纹)")
+        self.copy_check = QCheckBox("链接原始数据到项目(只读文件链接,必要时复制)")
         self.copy_check.setChecked(True)
         self.copy_check.setToolTip(
             "勾选后把 Bruker 数据集复制进项目 raw/ 目录并计算输入指纹;"

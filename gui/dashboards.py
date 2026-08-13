@@ -169,7 +169,7 @@ class ExperimentDashboard(QWidget):
         browse.clicked.connect(self._browse)
         form.addWidget(browse)
         single_layout.addLayout(form)
-        self.copy_check = QCheckBox("复制数据到项目(raw, SHA-256 指纹)")
+        self.copy_check = QCheckBox("链接原始数据到项目(只读文件链接,必要时复制)")
         self.copy_check.setChecked(True)
         single_layout.addWidget(self.copy_check)
         self.import_button = QPushButton("导入数据")
