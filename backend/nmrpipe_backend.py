@@ -150,6 +150,8 @@ class NMRPipeBackend:
         ext_lo = str(proc_params.get("ext_lo", "11.0"))
         ext_hi = str(proc_params.get("ext_hi", "6.0"))
         baseline = expand_baseline(experiment, proc_params.get("baseline"))
+        window = proc_params.get("window")
+        zero_fill = proc_params.get("zero_fill")
         processed, process_logs, spectrum = self._process(
             runtime,
             experiment,
@@ -158,6 +160,8 @@ class NMRPipeBackend:
             in_file=in_file,
             direct_phase=direct_phase,
             baseline=baseline,
+            window=window,
+            zero_fill=zero_fill,
             extract=extract,
             ext_lo=ext_lo,
             ext_hi=ext_hi,
@@ -699,6 +703,8 @@ class NMRPipeBackend:
         in_file: str | None = None,
         direct_phase: dict[str, tuple[float, float]] | None = None,
         baseline: dict[str, dict[str, Any]] | None = None,
+        window: dict[str, dict[str, Any]] | None = None,
+        zero_fill: dict[str, dict[str, Any]] | None = None,
         extract: bool = True,
         ext_lo: str = "11.0",
         ext_hi: str = "6.0",
@@ -715,6 +721,8 @@ class NMRPipeBackend:
             out_file=out_file,
             direct_phase=direct_phase,
             baseline=baseline,
+            window=window,
+            zero_fill=zero_fill,
             extract=extract,
             ext_lo=ext_lo,
             ext_hi=ext_hi,

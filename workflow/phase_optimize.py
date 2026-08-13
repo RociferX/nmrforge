@@ -1046,6 +1046,23 @@ def optimize_phase_sequential(
             raise ValueError(f"轴 {axis} 相位候选全部失败")
         best_phase = max(scored, key=lambda p: scored[p][0])
         best_score, best_path = scored[best_phase]
+        # 相位置信度:与 ±final_step 内已评分邻域的最优分差(评分面陡峭度)。
+        neighbor_scores = [
+            s
+            for p, (s, _path) in scored.items()
+            if p != best_phase
+            and abs(p[0] - best_phase[0]) <= final_step
+            and abs(p[1] - best_phase[1]) <= final_step
+        ]
+        if neighbor_scores:
+            margin = best_score - max(neighbor_scores)
+            if margin < 1.0:
+                logs.append(
+                    f"{axis}: 相位评分余量 {margin:.2f} 分(<1),评分面"
+                    f"平坦,最佳相位置信度低(±{final_step:g}° 内差异不显著)"
+                )
+            else:
+                logs.append(f"{axis}: 相位评分余量 {margin:.2f} 分,最优较明确")
         fixed[axis] = best_phase
         spectrum_path = best_path
         baseline_score = scored.get((0.0, 0.0))

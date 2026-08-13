@@ -1,5 +1,21 @@
 # 变更日志
 
+## [0.2.37] - 2026-08-13
+
+- Backend:窗函数与填零嵌入相位优化(用户方案,uniform):stepwise 在相位+
+  基线后跑小网格(sine_bell/sine_bell²/gaussian × 填零 auto/none),每次
+  候选重渲评分;填零受文件大小上限约束(默认 256MB),同分容忍 0.5 分内
+  选最小文件;NUS 窗函数在 SMILE 重构内,调整需重跑 SMILE,仅报告。
+  script_generator.generate_process_script 支持 window/zero_fill 覆盖
+  (SP/GM/EM 窗,ZF auto/none/size),backend.process 透传。
+- 相位搜索加「评分余量/置信度」日志:用已评分的 ±5° 邻域计算分差,
+  <1 分提示评分面平坦、最佳相位置信度低(phase_quality 对 5° 误差区分度
+  实测 <0.3 分);VM sampleA 实测余量 0.02-0.27,证实评分无法在 ±5° 内
+  唯一定位最佳相位(搜索仍收敛到合理相位,负峰最小)。
+- 验证:3D uniform(F3/F2/F1)与 3D NUS(F2/F1,直接维 F3 随重构固化)维度
+  覆盖测试;VM sampleA uniform 实测网格选出 sine_bell+不填零(score 92.9,
+  0.5MB,比 auto 小 4× 且分数相当)。
+- 测试:3D 覆盖、窗函数/填零脚本、置信度日志;全量 343 通过,ruff 全绿。
 ## [0.2.36] - 2026-08-13
 
 - Backend:其它优化嵌入相位优化(用户方案,除 SMILE)——stepwise

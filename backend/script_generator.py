@@ -271,24 +271,43 @@ def _stage_lines(
     stages: list[tuple[str, dict[str, Any]]],
     direct_phase: dict[str, tuple[float, float]] | None = None,
     baseline: dict[str, dict[str, Any]] | None = None,
+    window: dict[str, dict[str, Any]] | None = None,
+    zero_fill: dict[str, dict[str, Any]] | None = None,
 ) -> list[str]:
     lines: list[str] = []
     for op, params in stages:
         if op == "combine_hypercomplex":
             continue  # bruk2pipe 已按 MODE 完成超复数重建
         if op == "apodization":
-            window = params.get("params", {})
-            lines.append(
-                f"| nmrPipe -fn SP -off {_fmt(window.get('off', 0.45))} "
-                f"-end {_fmt(window.get('end', 0.95))} "
-                f"-pow {_fmt(window.get('pow', 1))} -c {_fmt(window.get('c', 0.5))} \\"
-            )
+            axis = str(params.get("axis", ""))
+            cfg = dict(params.get("params", {}) or {})
+            if window and axis in window:
+                cfg.update(window[axis] or {})
+            wtype = str(cfg.get("type", "sine_bell"))
+            if wtype == "gaussian":
+                lines.append(
+                    f"| nmrPipe -fn GM -lb {_fmt(cfg.get('lb', 5.0))} "
+                    f"-gb {_fmt(cfg.get('gb', 0.1))} \\"
+                )
+            elif wtype == "exp":
+                lines.append(f"| nmrPipe -fn EM -lb {_fmt(cfg.get('lb', 5.0))} \\")
+            else:
+                powv = 2 if wtype == "sine_bell_squared" else cfg.get("pow", 1)
+                lines.append(
+                    f"| nmrPipe -fn SP -off {_fmt(cfg.get('off', 0.45))} "
+                    f"-end {_fmt(cfg.get('end', 0.95))} "
+                    f"-pow {_fmt(powv)} -c {_fmt(cfg.get('c', 0.5))} \\"
+                )
         elif op == "zero_fill":
-            size = params.get("size", "auto")
-            if size == "auto":
+            axis = str(params.get("axis", ""))
+            zf = (zero_fill or {}).get(axis, {}) or {}
+            mode = zf.get("mode", params.get("size", "auto"))
+            if mode == "none":
+                continue
+            if mode == "auto":
                 lines.append("| nmrPipe -fn ZF -auto \\")
             else:
-                lines.append(f"| nmrPipe -fn ZF -size {int(size)} \\")
+                lines.append(f"| nmrPipe -fn ZF -size {int(mode)} \\")
         elif op == "ft":
             flags = []
             if params.get("alt"):
@@ -331,6 +350,8 @@ def generate_process_script(
     out_file: str,
     direct_phase: dict[str, tuple[float, float]] | None = None,
     baseline: dict[str, dict[str, Any]] | None = None,
+    window: dict[str, dict[str, Any]] | None = None,
+    zero_fill: dict[str, dict[str, Any]] | None = None,
     ext_lo: str = "11.0",
     ext_hi: str = "6.0",
     extract: bool = True,
@@ -349,7 +370,7 @@ def generate_process_script(
     ]
     for index, axis in enumerate(axes):
         lines += _stage_lines(
-            _axis_stages(plan, axis), direct_phase, baseline
+            _axis_stages(plan, axis), direct_phase, baseline, window, zero_fill
         )
         if extract and index == 0:
             lines.append(

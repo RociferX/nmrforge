@@ -349,3 +349,32 @@ def test_effective_td_2d_nus_complex_grid(bruker_dir: Path) -> None:
     td3 = effective_td(exp3)
     assert td3[1] == 48 and td3[2] == 128  # 3D 保持 NusTD(已是复点数)
 
+def test_process_script_window_and_zero_fill_overrides(
+    bruker_dir: Path,
+) -> None:
+    """窗函数/填零覆盖:GM 窗替换 SP;F1 不填零时省略 ZF 行。"""
+    exp = read_dataset(bruker_dir / "hsqc_2d")
+    plan = select_method(exp)
+    from backend.script_generator import generate_process_script
+
+    script = generate_process_script(
+        exp,
+        plan,
+        in_file="a.fid",
+        out_file="a.ft2",
+        window={"F2": {"type": "gaussian", "lb": 4.0, "gb": 0.2}},
+        zero_fill={"F1": {"mode": "none"}},
+    )
+    assert "| nmrPipe -fn GM -lb 4 -gb 0.2 \\" in script
+    assert script.count("| nmrPipe -fn SP") == 1  # F1 仍是默认 SP
+    # F1 不填零:FT 后无 ZF 行(F2 仍保留默认 ZF -auto)
+    assert script.count("| nmrPipe -fn ZF") == 1
+    off = generate_process_script(
+        exp,
+        plan,
+        in_file="a.fid",
+        out_file="a.ft2",
+        zero_fill={"F2": {"mode": "none"}, "F1": {"mode": "none"}},
+    )
+    assert "| nmrPipe -fn ZF" not in off
+
