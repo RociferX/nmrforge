@@ -28,7 +28,7 @@ class WorkspaceManager:
         return self._impl.create_project(name, **kwargs)
 
     def delete_project(self, name: str, trash: bool = True):
-        """删除项目(默认移入回收站);后端未实现时抛 NotImplementedError。"""
+        """删除样本(默认移入回收站);后端未实现时抛 NotImplementedError。"""
         method = getattr(self._impl, "delete_project", None)
         if method is None:
             raise NotImplementedError("WorkspaceManager.delete_project 待 Backend 实现")

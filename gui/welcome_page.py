@@ -1,6 +1,6 @@
 """首次启动工作区欢迎页(G2B-003 / 契约 v1.3 §9.4)。
 
-显示工作区路径、最近项目列表与新建项目入口。
+显示工作区路径、最近样本列表与新建项目入口。
 ``WorkspaceManager``(core/workspace.py)由 Backend 按 G2B-003 落地;在落地前
 提供兼容层:优先使用 core.workspace.WorkspaceManager,缺失时回退到
 ``~/NMRForgeWorkspace``(幂等创建),保证 GUI 先行可用。
@@ -91,7 +91,7 @@ class WelcomePage(QWidget):
         layout.addWidget(self.workspace_label)
         layout.addSpacing(10)
 
-        recent_title = QLabel("最近项目")
+        recent_title = QLabel("最近样本")
         recent_title.setStyleSheet("font-weight: bold;")
         layout.addWidget(recent_title)
 
@@ -101,7 +101,7 @@ class WelcomePage(QWidget):
         layout.addWidget(self.recent_list, 1)
 
         actions = QHBoxLayout()
-        self.new_button = QPushButton("新建项目...")
+        self.new_button = QPushButton("新建样本...")
         self.new_button.clicked.connect(self._on_new_clicked)
         actions.addWidget(self.new_button)
         actions.addStretch(1)
@@ -121,7 +121,7 @@ class WelcomePage(QWidget):
             item.setToolTip(str(project_dir))
             self.recent_list.addItem(item)
         if self.recent_list.count() == 0:
-            self.recent_list.addItem("(工作区中还没有项目,点击「新建项目」开始)")
+            self.recent_list.addItem("(工作区中还没有样本,点击「新建样本」开始)")
 
     def refresh(self) -> None:
         self._refresh()
@@ -139,7 +139,7 @@ class WelcomePage(QWidget):
         from PyQt6.QtWidgets import QInputDialog
 
         name, ok = QInputDialog.getText(
-            self, "新建项目", "项目名称:", text="unnamed"
+            self, "新建样本", "样本名称:", text="unnamed"
         )
         if ok and name.strip():
             self.new_project_requested.emit(name.strip())

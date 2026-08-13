@@ -1,6 +1,6 @@
-"""Dashboard 面板:项目/实验概览(GUI_ARCHITECTURE_VISION §11-12)。
+"""Dashboard 面板:样本/实验概览(GUI_ARCHITECTURE_VISION §11-12)。
 
-- ProjectDashboard:项目统计(实验/数据/处理完成度)+ 最近运行 + 新建实验表单;
+- ProjectDashboard:样本统计(实验/数据/处理完成度)+ 最近运行 + 新建实验表单;
 - ExperimentDashboard:数据列表(每数据状态)+ 导入数据表单。
 
 数据来源:core.project(ProjectManager);运行历史来自 workflow_runs。
@@ -45,7 +45,7 @@ def _data_processed(project) -> int:
 
 
 class ProjectDashboard(QWidget):
-    """项目概览:统计 + 处理完成度 + 最近运行 + 新建实验。"""
+    """样本概览:统计 + 处理完成度 + 最近运行 + 新建实验。"""
 
     create_experiment_requested = pyqtSignal(str)  # 实验标题
 
@@ -55,7 +55,7 @@ class ProjectDashboard(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
 
-        title = QLabel("项目")
+        title = QLabel("样本")
         title.setStyleSheet("font-size: 15px; font-weight: bold; color: #2c3e50;")
         layout.addWidget(title)
         self.context_label = QLabel("")
@@ -169,7 +169,7 @@ class ExperimentDashboard(QWidget):
         browse.clicked.connect(self._browse)
         form.addWidget(browse)
         single_layout.addLayout(form)
-        self.copy_check = QCheckBox("链接原始数据到项目(只读文件链接,必要时复制)")
+        self.copy_check = QCheckBox("链接原始数据到样本(只读文件链接,必要时复制)")
         self.copy_check.setChecked(True)
         single_layout.addWidget(self.copy_check)
         self.import_button = QPushButton("导入数据")

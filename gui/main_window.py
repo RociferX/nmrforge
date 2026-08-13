@@ -1,9 +1,9 @@
-"""主窗口:三栏布局(项目管理树 / Pipeline / 谱图查看器)+ 底部 Task/Log。
+"""主窗口:三栏布局(样本管理树 / Pipeline / 谱图查看器)+ 底部 Task/Log。
 
 布局遵循 docs/GUI_ARCHITECTURE_VISION.md:
 - 左侧:ProjectTreePanel(Project → Experiment → Input/Processing/Output/Figures);
 - 中间:PipelinePanel(上下文面包屑 + 状态驱动的步骤列表 + 下一步提示);
-- 右侧:SpectrumPanel(内嵌 viewer.SpectrumViewer + 项目谱图文件列表);
+- 右侧:SpectrumPanel(内嵌 viewer.SpectrumViewer + 样本谱图文件列表);
 - 底部:LogPanel(任务日志,运行/失败时自动展开)。
 
 所有项目数据一律经 core.project 访问(GUI 不直接读写 project.json);
@@ -58,7 +58,7 @@ from workflow.import_workflow import ImportResult
 
 
 class MainWindow(QMainWindow):
-    """NMRForge 主窗口;未打开项目时显示欢迎页。"""
+    """NMRForge 主窗口;未打开样本时显示欢迎页。"""
 
     import_failed = pyqtSignal(str)  # 导入失败信息(后台线程 → 主线程)
     import_finished = pyqtSignal(object)  # ImportResult(后台线程 → 主线程)
@@ -99,22 +99,22 @@ class MainWindow(QMainWindow):
         bar = self.menuBar()
 
         file_menu = bar.addMenu("文件(&F)")
-        file_menu.addAction("新建项目...", self.new_project)
-        file_menu.addAction("打开项目...", self.open_project)
-        save_action = QAction("保存项目", self)
+        file_menu.addAction("新建样本...", self.new_project)
+        file_menu.addAction("打开样本...", self.open_project)
+        save_action = QAction("保存样本", self)
         save_action.setShortcut("Ctrl+S")
         save_action.triggered.connect(self.save_project)
         file_menu.addAction(save_action)
-        self.recent_menu = QMenu("最近项目", self)
+        self.recent_menu = QMenu("最近样本", self)
         file_menu.addMenu(self.recent_menu)
         file_menu.addSeparator()
         file_menu.addAction("退出", self.close)
 
-        project_menu = bar.addMenu("项目(&P)")
-        project_menu.addAction("项目管理", self._noop_hint)
-        project_menu.addAction("新建实验...", self._create_experiment)
-        project_menu.addAction("重命名实验...", self.rename_experiment)
-        project_menu.addAction("删除实验", self.delete_experiment)
+        sample_menu = bar.addMenu("样本(&S)")
+        sample_menu.addAction("样本管理", self._noop_hint)
+        sample_menu.addAction("新建实验...", self._create_experiment)
+        sample_menu.addAction("重命名实验...", self.rename_experiment)
+        sample_menu.addAction("删除实验", self.delete_experiment)
 
         process_menu = bar.addMenu("处理(&R)")
         process_menu.addAction("运行自动化处理", self.run_auto)
@@ -124,7 +124,7 @@ class MainWindow(QMainWindow):
         process_menu.addSeparator()
         process_menu.addAction("运行历史...", self._show_run_history)
 
-        sample_menu = bar.addMenu("样本(&S)")
+        sample_menu.addSeparator()
         sample_menu.addAction("添加样本...", self.add_sample)
         sample_menu.addAction("删除样本...", self.delete_sample)
 
@@ -133,7 +133,7 @@ class MainWindow(QMainWindow):
         view_menu.addAction("Task / Log", self._show_log)
         view_menu.addAction("报告...", self._show_report)
         view_menu.addSeparator()
-        self.view_left_action = QAction("左侧项目管理", self, checkable=True)
+        self.view_left_action = QAction("左侧样本管理", self, checkable=True)
         self.view_left_action.setChecked(True)
         self.view_left_action.toggled.connect(self._toggle_left)
         view_menu.addAction(self.view_left_action)
@@ -221,7 +221,7 @@ class MainWindow(QMainWindow):
         central_layout = QVBoxLayout(central)
         central_layout.setContentsMargins(0, 0, 0, 0)
         central_layout.setSpacing(0)
-        self.context_bar = QLabel("未打开项目")
+        self.context_bar = QLabel("未打开样本")
         self.context_bar.setWordWrap(True)
         self.context_bar.setStyleSheet(
             "background: #ecf0f1; padding: 4px 10px; "
@@ -244,7 +244,7 @@ class MainWindow(QMainWindow):
     # 项目动作
     # ------------------------------------------------------------------
     def new_project(self) -> None:
-        name, ok = QInputDialog.getText(self, "新建项目", "项目名称:", text="unnamed")
+        name, ok = QInputDialog.getText(self, "新建样本", "样本名称:", text="unnamed")
         if ok and name.strip():
             self._new_project_in_workspace(name.strip())
 
@@ -253,10 +253,10 @@ class MainWindow(QMainWindow):
         try:
             self.manager = self.workspace.create_project(name)
         except ProjectError as exc:
-            InfoDialog.show_info(self, "新建项目失败", str(exc))
+            InfoDialog.show_info(self, "新建样本失败", str(exc))
             return
         except Exception as exc:  # noqa: BLE001 - WorkspaceError 等统一提示
-            InfoDialog.show_info(self, "新建项目失败", f"{type(exc).__name__}: {exc}")
+            InfoDialog.show_info(self, "新建样本失败", f"{type(exc).__name__}: {exc}")
             return
         self.recent.push(str(self.manager.root))
         self._rebind_shared_manager()
@@ -275,20 +275,20 @@ class MainWindow(QMainWindow):
         except ProjectError as exc:
             InfoDialog.show_info(self, "保存失败", str(exc))
             return
-        self.statusBar().showMessage("项目已保存")
+        self.statusBar().showMessage("样本已保存")
 
     def _open_root(self, root: Path) -> None:
         try:
             self.manager = ProjectManager.open_project(root)
         except ProjectError as exc:
-            InfoDialog.show_info(self, "打开项目失败", str(exc))
+            InfoDialog.show_info(self, "打开样本失败", str(exc))
             return
         self.recent.push(str(self.manager.root))
         self._rebind_shared_manager()
         self.refresh()
 
     def _rebind_shared_manager(self) -> None:
-        """项目对象更换后,让各面板共享同一个 ProjectManager 实例。"""
+        """样本对象更换后,让各面板共享同一个 ProjectManager 实例。"""
         self.project_tree.manager = self.manager
         self.center_panel._manager = self.manager
         self.pipeline.manager = self.manager
@@ -408,7 +408,7 @@ class MainWindow(QMainWindow):
                 target_exp_id = exp_id
                 if not target_exp_id:
                     if self.manager.project is None:
-                        raise ProjectError("未加载项目")
+                        raise ProjectError("未加载样本")
                     entry = self.manager.create_experiment(
                         title=data.get("title", "") or "unnamed"
                     )
@@ -516,7 +516,7 @@ class MainWindow(QMainWindow):
 
     def add_sample(self) -> None:
         if self.manager.project is None:
-            InfoDialog.show_info(self, "提示", "请先新建或打开项目")
+            InfoDialog.show_info(self, "提示", "请先新建或打开样本")
             return
         dialog = SampleDialog(self)
         if dialog.exec() != SampleDialog.DialogCode.Accepted:
@@ -534,7 +534,7 @@ class MainWindow(QMainWindow):
             return
         sample_ids = [s.sample_id for s in self.manager.project.samples]
         if not sample_ids:
-            InfoDialog.show_info(self, "提示", "项目中没有样本")
+            InfoDialog.show_info(self, "提示", "当前样本中没有样本条目")
             return
         sample_id, ok = QInputDialog.getItem(
             self, "删除样本", "选择样本:", sample_ids, editable=False
@@ -554,7 +554,7 @@ class MainWindow(QMainWindow):
             self,
             "关于 NMRForge",
             "NMRForge:面向 Bruker 2D/3D NMR 的自动化处理、参数优化与质量控制平台。\n"
-            "三栏布局:项目管理树 / Pipeline / 谱图查看器。",
+            "三栏布局:样本管理树 / Pipeline / 谱图查看器。",
         )
 
     # ------------------------------------------------------------------
@@ -590,7 +590,7 @@ class MainWindow(QMainWindow):
         from gui.dialogs import RunHistoryDialog
 
         if self.manager.project is None:
-            InfoDialog.show_info(self, "提示", "请先打开项目")
+            InfoDialog.show_info(self, "提示", "请先打开样本")
             return
         runs = list(self.manager.project.workflow_runs)
         dialog = RunHistoryDialog(
@@ -910,7 +910,7 @@ class MainWindow(QMainWindow):
     def _show_report(self) -> None:
         """查看菜单:打开报告页(当前选中实验/数据)。"""
         if self.manager.project is None:
-            InfoDialog.show_info(self, "提示", "请先打开项目")
+            InfoDialog.show_info(self, "提示", "请先打开样本")
             return
         self.center_panel.show_report()
 
@@ -923,7 +923,7 @@ class MainWindow(QMainWindow):
             return
         old_name = self.manager.root.name
         new_name, ok = QInputDialog.getText(
-            self, "重命名项目", "项目名称:", text=self.manager.project.name
+            self, "重命名样本", "样本名称:", text=self.manager.project.name
         )
         if not ok or not new_name.strip():
             return
@@ -933,28 +933,28 @@ class MainWindow(QMainWindow):
             self.manager = ProjectManager.open_project(new_root)
         except NotImplementedError as exc:
             InfoDialog.show_info(
-                self, "重命名项目", f"{exc}\n当前仅更新 project.json 的 name。"
+                self, "重命名样本", f"{exc}\n当前仅更新 project.json 的 name。"
             )
             self.manager.project.name = new_name
             try:
                 self.manager.save()
             except ProjectError as exc2:
-                InfoDialog.show_info(self, "重命名项目失败", str(exc2))
+                InfoDialog.show_info(self, "重命名样本失败", str(exc2))
                 return
         except Exception as exc:  # noqa: BLE001 - WorkspaceError 等统一提示
-            InfoDialog.show_info(self, "重命名项目失败", f"{type(exc).__name__}: {exc}")
+            InfoDialog.show_info(self, "重命名样本失败", f"{type(exc).__name__}: {exc}")
             return
         self._rebind_shared_manager()
         self.refresh()
-        self.statusBar().showMessage(f"项目已重命名为 {new_name}")
+        self.statusBar().showMessage(f"样本已重命名为 {new_name}")
 
     def _delete_project(self) -> None:
         if self.manager.project is None:
             return
         confirmed = ConfirmDialog.confirm(
             self,
-            "删除项目",
-            f"删除项目 {self.manager.project.name} 及其全部数据/产物?"
+            "删除样本",
+            f"删除样本 {self.manager.project.name} 及其全部数据/产物?"
             "(操作不可恢复,审计历史将保留)\n路径: {self.manager.root}",
         )
         if not confirmed:
@@ -965,22 +965,22 @@ class MainWindow(QMainWindow):
                 self.workspace.delete_project(project_name)
         except NotImplementedError as exc:
             InfoDialog.show_info(
-                self, "删除项目", f"{exc}\n当前仅关闭项目,目录保留。"
+                self, "删除样本", f"{exc}\n当前仅关闭样本,目录保留。"
             )
         except Exception as exc:  # noqa: BLE001 - WorkspaceError 等统一提示
-            InfoDialog.show_info(self, "删除项目失败", f"{type(exc).__name__}: {exc}")
+            InfoDialog.show_info(self, "删除样本失败", f"{type(exc).__name__}: {exc}")
             return
         if hasattr(self.recent, "remove") and self.manager.root is not None:
             self.recent.remove(str(self.manager.root))
         self.manager.close()
         self.refresh()
         self.center_panel.welcome_page.refresh()
-        self.statusBar().showMessage("项目已关闭")
+        self.statusBar().showMessage("样本已关闭")
 
     def _create_experiment(self) -> None:
         """新建空白实验(Project/空白处右键)。"""
         if self.manager.project is None:
-            InfoDialog.show_info(self, "提示", "请先新建或打开项目")
+            InfoDialog.show_info(self, "提示", "请先新建或打开样本")
             return
         title, ok = QInputDialog.getText(self, "新建实验", "实验标题:")
         if not ok:
@@ -1066,7 +1066,7 @@ class MainWindow(QMainWindow):
     def _create_experiment_with_title(self, title: str) -> None:
         """中间面板内嵌表单:新建空白实验。"""
         if self.manager.project is None:
-            InfoDialog.show_info(self, "提示", "请先新建或打开项目")
+            InfoDialog.show_info(self, "提示", "请先新建或打开样本")
             return
         try:
             entry = self.manager.create_experiment(title=title)
@@ -1080,7 +1080,7 @@ class MainWindow(QMainWindow):
     def _import_data_for(self, exp_id: str) -> None:
         """在指定实验下导入数据。"""
         if self.manager.project is None:
-            InfoDialog.show_info(self, "提示", "请先新建或打开项目")
+            InfoDialog.show_info(self, "提示", "请先新建或打开样本")
             return
         samples = [(s.sample_id, s.name) for s in self.manager.project.samples]
         dialog = ImportExperimentDialog(self, samples=samples)
@@ -1103,7 +1103,7 @@ class MainWindow(QMainWindow):
         self.center_panel.run_step(step, data_id=data_id)
 
     def _noop_hint(self) -> None:
-        InfoDialog.show_info(self, "提示", "项目管理面板已集成在左侧树中")
+        InfoDialog.show_info(self, "提示", "样本管理面板已集成在左侧树中")
 
     # ------------------------------------------------------------------
     # 查看动作
@@ -1180,7 +1180,7 @@ class MainWindow(QMainWindow):
     def _update_context_bar(self) -> None:
         """顶部上下文条:Project / Experiment / Data + 状态摘要。"""
         if self.manager.project is None:
-            self.context_bar.setText("未打开项目")
+            self.context_bar.setText("未打开样本")
             return
         exp_id = self.project_tree.current_experiment_id()
         data_id = self.project_tree._data_id_of(self.project_tree.tree.currentItem())
@@ -1227,7 +1227,7 @@ class MainWindow(QMainWindow):
         return exp_id or None
 
     def refresh(self) -> None:
-        """刷新窗口标题、最近项目菜单、左侧树与兼容实验表。"""
+        """刷新窗口标题、最近样本菜单、左侧树与兼容实验表。"""
         self._refresh_recent_menu()
         self.project_tree.refresh()
         tree = self.experiment_tree
@@ -1235,7 +1235,7 @@ class MainWindow(QMainWindow):
         project = self.manager.project
         if project is None:
             self.setWindowTitle("NMRForge - 欢迎")
-            self.statusBar().showMessage("新建或打开项目开始工作")
+            self.statusBar().showMessage("新建或打开样本开始工作")
             self.center_panel.welcome_page.refresh()
             self.center_panel.set_selection("workspace", "", "")
             self.spectrum_panel.set_context("", "")
@@ -1248,8 +1248,8 @@ class MainWindow(QMainWindow):
             item.setData(0, Qt.ItemDataRole.UserRole, exp.id)
             tree.addTopLevelItem(item)
         self.setWindowTitle(f"NMRForge - {project.name}")
-        self.statusBar().showMessage(f"项目: {self.manager.root}")
-        # 打开/新建项目后默认聚焦第一个实验
+        self.statusBar().showMessage(f"样本: {self.manager.root}")
+        # 打开/新建样本后默认聚焦第一个实验
         if project.experiments and not self.center_panel.current_experiment_id():
             self.project_tree.select_experiment(project.experiments[0].id)
         self._update_context_bar()

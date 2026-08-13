@@ -1,6 +1,6 @@
-"""右侧谱图面板:嵌入独立查看器 + 项目谱图文件列表 + 峰表编辑回写。
+"""右侧谱图面板:嵌入独立查看器 + 样本谱图文件列表 + 峰表编辑回写。
 
-复用 viewer.SpectrumViewer(不重复实现谱图功能);列表扫描项目 spectra 目录,
+复用 viewer.SpectrumViewer(不重复实现谱图功能);列表扫描样本 spectra 目录,
 点击 .ft2/.ft3 即在右侧打开。峰表支持添加/删除/编辑行并写回
 data_dir(..., "peaks")/<exp>-<data>.csv(经 ProcessingController,登记
 manual_peaks WorkflowRun);Poky .list 可导入/导出。GUI 不直接接触处理逻辑。
@@ -114,7 +114,9 @@ class SpectrumPanel(QWidget):
         self.peak_table.itemChanged.connect(self._on_peak_cell_edited)
         self._peaks: list[dict] = []
         self._current_spectrum: Path | None = None
-        self.placeholder = QLabel("未打开项目\n\n从左侧选择实验,或点击下方谱图文件查看结果。")
+        self.placeholder = QLabel(
+            "未打开样本\n\n从左侧选择样本下的实验,或点击谱图文件查看结果。"
+        )
         self.placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.placeholder.setWordWrap(True)
         self.placeholder.setStyleSheet("color: #888;")
