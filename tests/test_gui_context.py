@@ -123,37 +123,8 @@ def test_context_bar_follows_selection(
     window.close()
 
 
-def test_spectrum_panel_params_summary(tmp_path: Path, qapp: QApplication) -> None:
-    manager = ProjectManager.create_project(tmp_path / "proj", "demo")
-    entry = manager.create_experiment("HSQC")
-    data = manager.import_data(entry.id, "/fake/1")
-    exp_id, data_id = entry.id, data.id
-    spectra = manager.data_dir(exp_id, data_id, "spectra")
-    spectra.mkdir(parents=True, exist_ok=True)
-    ft2 = spectra / f"{exp_id}-{data_id}.ft2"
-    _write_ft2(ft2)
-    run = manager.start_run(
-        exp_id,
-        workflow_ref="process",
-        inputs={"data_id": data_id},
-        params={"extract": True, "ext_lo": "11.0", "ext_hi": "6.0", "zero_fill": 2},
-    )
-    manager.finish_run(
-        run.run_id, "success", outputs={"spectrum_path": str(ft2)}
-    )
-    manager.save()
-    panel = SpectrumPanel(manager)
-    panel.set_context(exp_id, data_id)
-    assert "生成谱图" in panel.context_summary.text()
-    assert "EXT" in panel.context_summary.text()
-    assert "ZF 2" in panel.context_summary.text()
-    assert not panel.locate_button.isHidden()
-    panel.close()
-
-
-def test_spectrum_panel_summary_historical(
-    tmp_path: Path, qapp: QApplication
-) -> None:
+def test_spectrum_panel_no_locator_bar(tmp_path: Path, qapp: QApplication) -> None:
+    """谱图面板不再显示「在 Pipeline 中定位 / 数据摘要」条(用户反馈无用)。"""
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     entry = manager.create_experiment("HSQC")
     data = manager.import_data(entry.id, "/fake/1")
@@ -163,31 +134,9 @@ def test_spectrum_panel_summary_historical(
     manager.save()
     panel = SpectrumPanel(manager)
     panel.set_context(entry.id, data.id)
-    assert "历史数据" in panel.context_summary.text()
+    assert not hasattr(panel, "context_summary")
+    assert not hasattr(panel, "locate_button")
     panel.close()
-
-
-def test_locate_button_selects_data_in_pipeline(
-    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    manager, ws, exp_id, data_id = _manager_with_ws(tmp_path)
-    monkeypatch.setattr(
-        "gui.main_window.WorkspaceManager", lambda: _TempWorkspace(ws)
-    )
-    monkeypatch.setattr(
-        "core.workspace.WorkspaceManager",
-        lambda *a, **k: _TempWorkspace(ws),
-    )
-    window = MainWindow(manager=manager)
-    window.spectrum_panel._current_exp_id = exp_id
-    window.spectrum_panel._current_data_id = data_id
-    window.spectrum_panel.locate_button.click()
-    assert (
-        window.project_tree._data_id_of(window.project_tree.tree.currentItem())
-        == data_id
-    )
-    assert window.center_panel.stack.currentIndex() == 3  # Pipeline 页
-    window.close()
 
 
 def test_3d_viewer_state_memory(tmp_path: Path, qapp: QApplication) -> None:

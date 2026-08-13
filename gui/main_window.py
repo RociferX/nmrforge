@@ -200,9 +200,6 @@ class MainWindow(QMainWindow):
 
         self.spectrum_panel = SpectrumPanel(self.manager, controller=self.controller)
         self.spectrum_panel.peaks_saved.connect(self._on_peaks_saved)
-        self.spectrum_panel.locate_pipeline_requested.connect(
-            self._locate_pipeline
-        )
 
         self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
         self.main_splitter.addWidget(self.project_tree)
