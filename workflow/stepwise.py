@@ -172,11 +172,17 @@ def optimize_phase_brute_force(
     candidates: list[dict[str, float]] | None = None,
     work_dir: Path | str | None = None,
     score_fn: Any | None = None,
+    embed_baseline: bool = True,
 ) -> dict[str, Any]:
-    """相位优化:逐维暴力(直接维→间接维依次固定;NUS 先 SMILE 一次)。
+    """相位优化:逐维暴力/多尺度(直接维→间接维依次固定;NUS 先 SMILE 一次)。
 
-    返回 {"phase": {轴: (p0, p1)}, "spectrum_path", "method",
-    "backend_runs", "logs"}。
+    嵌入其它优化(除 SMILE):相位搜索结束后对最优谱内存内跑基线优化
+    (optimize_baseline,0 次后端运行),配置变化时以「最优相位+最优基线」
+    重渲终谱 1 次(uniform 全轴;NUS 2D 仅间接维 F1——直接维 F2 基线在
+    SMILE 重构时固化,调整需重跑 SMILE,仅报告)。
+
+    返回 {"phase", "spectrum_path", "method", "backend_runs",
+    "logs", "optimized", "skipped", "baseline"}。
     """
     from workflow.phase_optimize import optimize_phase_sequential
 
@@ -203,19 +209,107 @@ def optimize_phase_brute_force(
         score_fn=score_fn,
         work_dir=work,
     )
+    logs = list(result.logs)
     spectrum_path = _register_spectrum(
         manager, exp_id, data_id, result.spectrum_path
     )
+
+    baseline_result: dict[str, Any] | None = None
+    if embed_baseline:
+        from workflow.baseline_optimize import optimize_baseline
+
+        try:
+            baseline_opt = optimize_baseline(experiment, spectrum_path)
+        except Exception as exc:  # noqa: BLE001 - 基线评估失败不影响相位结果
+            logs.append(f"基线优化(嵌入)失败: {exc}")
+            baseline_opt = None
+        if baseline_opt is not None:
+            baseline_result = {
+                "config": baseline_opt.baseline,
+                "scores": baseline_opt.scores,
+                "optimized": baseline_opt.optimized,
+                "skipped": baseline_opt.skipped,
+                "logs": baseline_opt.logs,
+            }
+            default_cfg: dict[str, Any] = {
+                "enabled": True, "mode": "auto", "order": 0
+            }
+            changed = [
+                axis
+                for axis, cfg in baseline_opt.baseline.items()
+                if cfg != default_cfg
+            ]
+            is_nus = experiment.sampling.mode is SamplingMode.NUS
+            re_render = False
+            apply_cfg: dict[str, Any] = {}
+            if not is_nus and changed:
+                re_render = True
+                apply_cfg = dict(baseline_opt.baseline)
+            elif is_nus and experiment.ndim == 2 and changed:
+                f1_changed = [a for a in changed if a == "F1"]
+                skipped_axes = [a for a in changed if a != "F1"]
+                if f1_changed:
+                    re_render = True
+                    apply_cfg = {"F1": dict(baseline_opt.baseline["F1"])}
+                if skipped_axes:
+                    logs.append(
+                        "基线(嵌入): 轴 " + ",".join(skipped_axes)
+                        + " 基线调整需重跑 SMILE 重构,已跳过(仅报告)"
+                    )
+            elif is_nus and changed:
+                logs.append(
+                    "基线(嵌入): 3D NUS 基线调整需重跑 SMILE 重构,"
+                    "已跳过(仅报告)"
+                )
+            if re_render:
+                if is_nus:
+                    resp = backend.finalize_nus(
+                        experiment,
+                        phases=result.phases,
+                        work_dir=work,
+                        baseline=apply_cfg,
+                    )
+                else:
+                    plan = select_method(experiment)
+                    resp = backend.process(
+                        experiment,
+                        plan,
+                        direct_phase_override=result.phases,
+                        params={"baseline": apply_cfg},
+                    )
+                if resp.get("success"):
+                    spectrum_path = _register_spectrum(
+                        manager,
+                        exp_id,
+                        data_id,
+                        str(resp.get("spectrum_path", spectrum_path)),
+                    )
+                    logs.append(
+                        "基线(嵌入): 终谱已用「最优相位+最优基线」重渲"
+                    )
+                else:
+                    logs.append(f"基线(嵌入)重渲失败: {resp.get('message')}")
+            logs.extend(baseline_opt.logs)
+
     _finish_step(
         manager,
         exp_id,
         data_id,
         "phase_optimize",
-        outputs={"spectrum_path": spectrum_path, "phase": str(result.phases)},
-        message="相位优化(逐维暴力)",
+        outputs={
+            "spectrum_path": spectrum_path,
+            "phase": str(result.phases),
+            "baseline": (
+                str(baseline_result["config"]) if baseline_result else ""
+            ),
+        },
+        message="相位优化(逐维暴力,嵌入基线)",
         params={
             "backend_runs": result.backend_runs,
             "phases": {k: list(v) for k, v in result.phases.items()},
+            "baseline": (
+                baseline_result["config"] if baseline_result else None
+            ),
         },
     )
     return {
@@ -223,9 +317,10 @@ def optimize_phase_brute_force(
         "spectrum_path": spectrum_path,
         "method": result.method,
         "backend_runs": result.backend_runs,
-        "logs": result.logs,
+        "logs": logs,
         "optimized": result.optimized,
         "skipped": result.skipped,
+        "baseline": baseline_result,
     }
 
 

@@ -385,6 +385,7 @@ class NMRPipeBackend:
         phases: dict[str, tuple[float, float]] | None = None,
         work_dir: Path | str | None = None,
         timeout: float = 1800.0,
+        baseline: dict[str, dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """从 SMILE 重构平面做间接维 FT 定稿(逐维相位候选,不重跑 SMILE)。
 
@@ -417,7 +418,11 @@ class NMRPipeBackend:
         out_ext = "ft3" if experiment.ndim >= 3 else "ft2"
         out_file = f"{experiment.dataset_id}.{out_ext}"
         script = generate_nus_finalize_script(
-            experiment, planes=planes, out_file=out_file, phases=phases
+            experiment,
+            planes=planes,
+            out_file=out_file,
+            phases=phases,
+            baseline=baseline,
         )
         finalize_com = work / f"{experiment.dataset_id}_finalize.com"
         finalize_com.write_text(script, encoding="utf-8", newline="\n")

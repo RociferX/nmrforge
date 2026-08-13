@@ -1,5 +1,17 @@
 # 变更日志
 
+## [0.2.36] - 2026-08-13
+
+- Backend:其它优化嵌入相位优化(用户方案,除 SMILE)——stepwise
+  optimize_phase_brute_force 在相位搜索后对最优谱内存内跑基线优化
+  (optimize_baseline,0 次后端运行),配置变化时以「最优相位+最优基线」
+  重渲终谱 1 次(uniform 全轴;NUS 2D 仅间接维 F1,直接维 F2 基线在
+  SMILE 重构时固化,调整需重跑 SMILE 时仅报告);finalize_nus 支持
+  baseline 透传;结果返回 baseline(config/scores/optimized/skipped),
+  日志逐轴说明基线变化与分数增益。VM sampleA NUS 实测:相位+嵌入基线
+  端到端通过(F1 order 3 重渲 +1.0 分;F2 需重跑 SMILE 已报告)。
+- 测试:嵌入基线(曲率 → order 2 重渲,多 1 次 process);全量 341 通过,
+  ruff 全绿。
 ## [0.2.35] - 2026-08-13
 
 - Backend:相位优化改「粗网格 + 多尺度细化」(用户方案,替代固定步长全搜索):
