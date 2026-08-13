@@ -1,5 +1,17 @@
 # 变更日志
 
+## [0.2.64] - 2026-08-13
+
+- presets 实验模板扩充(用户反馈):常用 2D/3D 谱预设从 4 个增加到 28 个——
+  新增 HSQC-13C、HMQC(15N/13C)、HMBC(13C/15N)、COSY、TOCSY、NOESY、
+  ROESY(2D),以及 HNCACB、CBCA(CO)NH、CBCANH、HNCO、HN(CO)CA、HN(CA)CO、
+  HNHA、H(CA)NH、H(CCO)NH、C(CCO)NH、HBHA(CO)NH、HCCH-TOCSY、CCH-TOCSY、
+  3D NOESY-HSQC(15N/13C 编辑)(3D);每个模板含各核化学位移先验
+  (priors,如 HNCO 13C 165–185 ppm、HNCACB 13C 10–80 ppm),供实验类型
+  判断时按化学位移进一步确认核;README 更新模板清单。
+- 测试:新增 test_gui_presets(3 例:全量解析/字段/priors 范围/常用类型齐全),
+  全量 449 passed,ruff 全绿。
+
 ## [0.2.63] - 2026-08-13
 
 - viewer 轴名按核显示(用户反馈):根据导入 metadata 的维度核信息,把谱图
