@@ -172,11 +172,21 @@ def optimize_phase_brute_force(
     candidates: list[dict[str, float]] | None = None,
     work_dir: Path | str | None = None,
     score_fn: Any | None = None,
+    embed_baseline: bool = True,
+    embed_processing: bool = True,
 ) -> dict[str, Any]:
-    """相位优化:逐维暴力(直接维→间接维依次固定;NUS 先 SMILE 一次)。
+    """相位优化:逐维暴力/多尺度(直接维→间接维依次固定;NUS 先 SMILE 一次)。
 
-    返回 {"phase": {轴: (p0, p1)}, "spectrum_path", "method",
-    "backend_runs", "logs"}。
+    嵌入其它优化(除 SMILE):相位搜索结束后对最优谱内存内跑基线优化
+    (optimize_baseline,0 次后端运行),配置变化时以「最优相位+最优基线」
+    重渲终谱 1 次(uniform 全轴;NUS 2D 仅间接维 F1——直接维 F2 基线在
+    SMILE 重构时固化,调整需重跑 SMILE,仅报告)。
+    嵌入窗函数/填零(uniform;NUS 窗函数在 SMILE 内仅报告):小网格
+    (sine_bell/sine_bell²/gaussian × 填零 auto/none)重渲评分,填零受
+    文件大小上限约束(默认 256MB,同分选最小文件),取最优重渲终谱。
+
+    返回 {"phase", "spectrum_path", "method", "backend_runs",
+    "logs", "optimized", "skipped", "baseline", "processing"}。
     """
     from workflow.phase_optimize import optimize_phase_sequential
 
@@ -203,19 +213,252 @@ def optimize_phase_brute_force(
         score_fn=score_fn,
         work_dir=work,
     )
+    logs = list(result.logs)
     spectrum_path = _register_spectrum(
         manager, exp_id, data_id, result.spectrum_path
     )
+
+    baseline_result: dict[str, Any] | None = None
+    applied_baseline: dict[str, Any] | None = None
+    if embed_baseline:
+        from workflow.baseline_optimize import optimize_baseline
+
+        try:
+            baseline_opt = optimize_baseline(experiment, spectrum_path)
+        except Exception as exc:  # noqa: BLE001 - 基线评估失败不影响相位结果
+            logs.append(f"基线优化(嵌入)失败: {exc}")
+            baseline_opt = None
+        if baseline_opt is not None:
+            baseline_result = {
+                "config": baseline_opt.baseline,
+                "scores": baseline_opt.scores,
+                "optimized": baseline_opt.optimized,
+                "skipped": baseline_opt.skipped,
+                "logs": baseline_opt.logs,
+            }
+            default_cfg: dict[str, Any] = {
+                "enabled": True, "mode": "auto", "order": 0
+            }
+            changed = [
+                axis
+                for axis, cfg in baseline_opt.baseline.items()
+                if cfg != default_cfg
+            ]
+            is_nus = experiment.sampling.mode is SamplingMode.NUS
+            re_render = False
+            apply_cfg: dict[str, Any] = {}
+            if not is_nus and changed:
+                re_render = True
+                apply_cfg = dict(baseline_opt.baseline)
+            elif is_nus and experiment.ndim == 2 and changed:
+                f1_changed = [a for a in changed if a == "F1"]
+                skipped_axes = [a for a in changed if a != "F1"]
+                if f1_changed:
+                    re_render = True
+                    apply_cfg = {"F1": dict(baseline_opt.baseline["F1"])}
+                if skipped_axes:
+                    logs.append(
+                        "基线(嵌入): 轴 " + ",".join(skipped_axes)
+                        + " 基线调整需重跑 SMILE 重构,已跳过(仅报告)"
+                    )
+            elif is_nus and changed:
+                logs.append(
+                    "基线(嵌入): 3D NUS 基线调整需重跑 SMILE 重构,"
+                    "已跳过(仅报告)"
+                )
+            if re_render:
+                if is_nus:
+                    resp = backend.finalize_nus(
+                        experiment,
+                        phases=result.phases,
+                        work_dir=work,
+                        baseline=apply_cfg,
+                    )
+                else:
+                    plan = select_method(experiment)
+                    resp = backend.process(
+                        experiment,
+                        plan,
+                        direct_phase_override=result.phases,
+                        params={"baseline": apply_cfg},
+                    )
+                if resp.get("success"):
+                    spectrum_path = _register_spectrum(
+                        manager,
+                        exp_id,
+                        data_id,
+                        str(resp.get("spectrum_path", spectrum_path)),
+                    )
+                    applied_baseline = dict(apply_cfg)
+                    logs.append(
+                        "基线(嵌入): 终谱已用「最优相位+最优基线」重渲"
+                    )
+                else:
+                    logs.append(f"基线(嵌入)重渲失败: {resp.get('message')}")
+            logs.extend(baseline_opt.logs)
+
+    processing_result: dict[str, Any] | None = None
+    if embed_processing:
+        is_nus = experiment.sampling.mode is SamplingMode.NUS
+        if is_nus:
+            logs.append(
+                "窗函数/填零(嵌入): NUS 窗函数在 SMILE 重构内,调整需"
+                "重跑 SMILE,已跳过(仅报告)"
+            )
+        else:
+            import numpy as np
+
+            from core.qc import spectrum_quality
+
+            windows = [
+                {"type": "sine_bell"},
+                {"type": "sine_bell_squared"},
+                {"type": "gaussian", "lb": 5.0, "gb": 0.1},
+            ]
+            zf_modes = ["auto", "none"]
+            max_bytes = 256 * 1024 * 1024
+            axes = [dim.logical_axis for dim in experiment.dimensions]
+
+            def _next_pow2(value: int) -> int:
+                return 1 << max(0, int(value) - 1).bit_length()
+
+            def _est_bytes(zf_mode: str) -> int:
+                total = 1
+                for dim in experiment.dimensions:
+                    td = max(int(dim.td), 1)
+                    size = _next_pow2(td) if zf_mode == "auto" else max(
+                        td // 2, 1
+                    )
+                    total *= size
+                return total * 4
+
+            def _score_path(path: str) -> float:
+                import nmrglue as ng
+
+                _dic, data = ng.pipe.read(str(path))
+                q = spectrum_quality.evaluate(np.asarray(data))
+                return float(q.score.overall)
+
+            try:
+                base_score = _score_path(spectrum_path)
+            except Exception as exc:  # noqa: BLE001
+                logs.append(f"窗函数/填零(嵌入)基准评分失败: {exc}")
+                base_score = -1.0
+            candidates: list[tuple[dict[str, Any], str, float, int]] = []
+            for w in windows:
+                for zf_mode in zf_modes:
+                    est = _est_bytes(zf_mode)
+                    if zf_mode == "auto" and est > max_bytes:
+                        logs.append(
+                            f"窗函数/填零(嵌入): auto 填零估计"
+                            f" {est // 1048576}MB > 上限,跳过"
+                        )
+                        continue
+                    wname = str(w.get("type", "sine_bell"))
+                    plan = select_method(experiment)
+                    resp = backend.process(
+                        experiment,
+                        plan,
+                        direct_phase_override=result.phases,
+                        params={
+                            "window": {a: dict(w) for a in axes},
+                            "zero_fill": {a: {"mode": zf_mode} for a in axes},
+                            "baseline": applied_baseline,
+                        },
+                    )
+                    if not resp.get("success"):
+                        logs.append(
+                            f"窗函数/填零(嵌入): {wname}+{zf_mode} "
+                            f"运行失败 {resp.get('message')}"
+                        )
+                        continue
+                    path = str(resp.get("spectrum_path", ""))
+                    try:
+                        score = _score_path(path)
+                    except Exception as exc:  # noqa: BLE001
+                        logs.append(
+                            f"窗函数/填零(嵌入): {wname}+{zf_mode} 评分失败 {exc}"
+                        )
+                        continue
+                    candidates.append((dict(w), zf_mode, score, est))
+                    logs.append(
+                        f"窗函数/填零(嵌入): {wname}+填零={zf_mode} "
+                        f"score={score:.1f} 大小≈{est // 1048576}MB"
+                    )
+            if candidates:
+                best_score = max(c[2] for c in candidates)
+                # 同分容忍 0.5 分内选最小文件(填零注意文件大小)
+                best = min(
+                    (c for c in candidates if c[2] >= best_score - 0.5),
+                    key=lambda c: c[3],
+                )
+                processing_result = {
+                    "window": best[0],
+                    "zero_fill": best[1],
+                    "score": best[2],
+                    "estimated_bytes": best[3],
+                }
+                base_bytes = _est_bytes("auto")
+                better = best[2] > base_score + 0.5 or (
+                    best[2] >= base_score - 0.5 and best[3] < base_bytes
+                )
+                if better:
+                    plan = select_method(experiment)
+                    resp = backend.process(
+                        experiment,
+                        plan,
+                        direct_phase_override=result.phases,
+                        params={
+                            "window": {a: dict(best[0]) for a in axes},
+                            "zero_fill": {a: {"mode": best[1]} for a in axes},
+                            "baseline": applied_baseline,
+                        },
+                    )
+                    if resp.get("success"):
+                        spectrum_path = _register_spectrum(
+                            manager,
+                            exp_id,
+                            data_id,
+                            str(resp.get("spectrum_path", spectrum_path)),
+                        )
+                        logs.append(
+                            f"窗函数/填零(嵌入): 终谱已用 "
+                            f"{best[0].get('type')}+填零={best[1]} "
+                            f"(score={best[2]:.1f}) 重渲"
+                        )
+                    else:
+                        logs.append(
+                            f"窗函数/填零(嵌入)重渲失败: {resp.get('message')}"
+                        )
+                else:
+                    logs.append("窗函数/填零(嵌入): 候选未优于当前,保持默认")
+
     _finish_step(
         manager,
         exp_id,
         data_id,
         "phase_optimize",
-        outputs={"spectrum_path": spectrum_path, "phase": str(result.phases)},
-        message="相位优化(逐维暴力)",
+        outputs={
+            "spectrum_path": spectrum_path,
+            "phase": str(result.phases),
+            "baseline": (
+                str(baseline_result["config"]) if baseline_result else ""
+            ),
+            "processing": (
+                str(processing_result) if processing_result else ""
+            ),
+        },
+        message="相位优化(逐维暴力,嵌入基线/窗函数/填零)",
         params={
             "backend_runs": result.backend_runs,
             "phases": {k: list(v) for k, v in result.phases.items()},
+            "baseline": (
+                baseline_result["config"] if baseline_result else None
+            ),
+            "window": processing_result["window"] if processing_result else None,
+            "zero_fill": (
+                processing_result["zero_fill"] if processing_result else None
+            ),
         },
     )
     return {
@@ -223,7 +466,11 @@ def optimize_phase_brute_force(
         "spectrum_path": spectrum_path,
         "method": result.method,
         "backend_runs": result.backend_runs,
-        "logs": result.logs,
+        "logs": logs,
+        "optimized": result.optimized,
+        "skipped": result.skipped,
+        "baseline": baseline_result,
+        "processing": processing_result,
     }
 
 

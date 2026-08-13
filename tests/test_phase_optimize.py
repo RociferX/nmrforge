@@ -300,6 +300,15 @@ class _OverrideBackend:
             "logs": [],
         }
 
+    def finalize_nus(self, experiment, phases=None, work_dir=None, baseline=None) -> dict:
+        self.overrides.append(dict(phases or {}))
+        p1 = list((phases or {}).values())[-1][1]
+        return {
+            "success": True,
+            "spectrum_path": f"{self.work_dir}/out_p1{int(p1)}.ft2",
+            "logs": [],
+        }
+
 
 def _score_from_path(path: str) -> tuple[float, dict[str, float]]:
     """评分函数:从路径解析 p1,真值 30° 处得分最高。"""
@@ -431,6 +440,7 @@ def test_optimize_phase_sequential_uniform(
         p0_values=(0.0,),
         p1_values=(-60.0, 0.0, 30.0, 60.0),
         score_fn=_score_from_path,
+        refine=False,
     )
     assert result.method == "sequential_brute_force"
     assert result.phases["F2"][1] == 30.0
@@ -438,6 +448,7 @@ def test_optimize_phase_sequential_uniform(
     assert result.backend_runs == 2 * 4
     assert any("F2" in line and "已固定" in line for line in result.logs)
     assert any("F1" in line and "已固定" in line for line in result.logs)
+    assert any("70.0 → 100.0" in line for line in result.logs)
 
 
 def test_optimize_phase_sequential_failure(tmp_path: Path, bruker_dir: Path) -> None:
@@ -496,3 +507,83 @@ def test_default_phase_score_ranks_phase_quality(tmp_path: Path) -> None:
     assert (
         comp_bad["negative_peak_fraction"] > comp_good["negative_peak_fraction"]
     )
+    # 0.2.38 新指标:连续负面积与谱熵方向一致(错相惩罚更强)
+    assert (
+        comp_bad["negative_area_fraction"] > comp_good["negative_area_fraction"]
+    )
+    assert comp_bad["entropy"] > comp_good["entropy"]
+
+
+
+def test_optimize_phase_sequential_default_multiscale() -> None:
+    """默认:粗网格 p1 30° 步长 + 多尺度细化到 5°(而非固定步长全搜索)。"""
+    import inspect
+
+    sig = inspect.signature(optimize_phase_sequential)
+    p1 = sig.parameters["p1_values"].default
+    assert len(p1) == 7 and p1[1] - p1[0] == 30.0
+    assert sig.parameters["refine"].default is True
+    assert sig.parameters["final_step"].default == 5.0
+
+
+def test_optimize_phase_sequential_multiscale_refine(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """粗到细:粗网格最优偏离真值(12°)时,细化收敛到 5° 以内。"""
+    experiment = read_dataset(bruker_dir / "hsqc_2d")
+    backend = _OverrideBackend(tmp_path / "work")
+
+    def _peak12(path: str) -> tuple[float, dict[str, float]]:
+        p1 = float(path.split("p1")[1].split(".")[0])
+        return 100.0 - abs(p1 - 12.0), {}
+
+    result = optimize_phase_sequential(
+        experiment,
+        backend,
+        p0_values=(0.0,),
+        p1_values=(-60.0, 0.0, 30.0, 60.0),
+        score_fn=_peak12,
+    )
+    # 粗网格最优 p1=0(偏离真值 12°);细化窗口 ±20@10 → 10,±5@5 → 10(偏差 2°)
+    assert result.phases["F2"][1] == 10.0
+    assert result.phases["F1"][1] == 10.0
+    assert result.backend_runs > 2 * 4  # 细化产生额外后端运行
+    assert result.optimized == ["F2", "F1"]
+
+def test_optimize_phase_sequential_3d_uniform(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """3D 均匀:每一维(F3→F2→F1)都搜索并固定。"""
+    experiment = read_dataset(bruker_dir / "hnca_3d")
+    backend = _OverrideBackend(tmp_path / "work")
+    result = optimize_phase_sequential(
+        experiment,
+        backend,
+        p0_values=(0.0,),
+        p1_values=(-60.0, 0.0, 30.0, 60.0),
+        score_fn=_score_from_path,
+        refine=False,
+    )
+    assert set(result.phases) == {"F3", "F2", "F1"}
+    assert all(result.phases[axis][1] == 30.0 for axis in ("F3", "F2", "F1"))
+    assert result.backend_runs == 3 * 4
+
+
+def test_optimize_phase_sequential_3d_nus_skips_direct(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """3D NUS:直接维 F3 随 SMILE 重构固化,间接维 F2/F1 逐维搜索。"""
+    experiment = read_dataset(bruker_dir / "nus_3d")
+    backend = _OverrideBackend(tmp_path / "work")
+    result = optimize_phase_sequential(
+        experiment,
+        backend,
+        p0_values=(0.0,),
+        p1_values=(-60.0, 0.0, 30.0, 60.0),
+        score_fn=_score_from_path,
+        refine=False,
+    )
+    assert set(result.phases) == {"F2", "F1"}
+    assert all(result.phases[axis][1] == 30.0 for axis in ("F2", "F1"))
+    assert result.backend_runs == 1 + 2 * 4  # 1 次 SMILE 重构 + 2 轴 × 4 候选
+

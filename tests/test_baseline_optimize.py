@@ -49,6 +49,9 @@ def test_optimize_baseline_direct_axis_slope(
     # 直接维存在校正,且 off 不是最优
     assert result.baseline["F2"]["enabled"] is True
     assert result.scores["F2"]["off:0"] < max(result.scores["F2"].values())
+    joined = "\n".join(result.logs)
+    assert "F2" in joined and "基线已优化" in joined
+    assert "F1" in joined and "未优化" in joined
 
 
 def test_optimize_baseline_grid_contains_off_and_orders(
@@ -58,6 +61,7 @@ def test_optimize_baseline_grid_contains_off_and_orders(
     spec = np.zeros((32, 64))
     ft2 = tmp_path / "flat.ft2"
     _write_ft2(ft2, spec)
+    # 平谱:直接全网格,off 应最优(校正无增益)
     result = optimize_baseline(experiment, ft2)
     # 平谱:off 应最优(校正无增益)
     assert result.scores["F2"]["off:0"] >= max(result.scores["F2"].values()) - 1e-9
