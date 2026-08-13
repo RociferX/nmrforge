@@ -214,11 +214,17 @@ def test_project_tree_column_widths_readable(qapp: QApplication) -> None:
 # ----------------------------------------------------------------------
 # Pipeline 五步状态
 # ----------------------------------------------------------------------
-def test_pipeline_steps_are_five_step_flow() -> None:
+def test_pipeline_steps_include_optional_smile() -> None:
     ids = [step[0] for step in PIPELINE_STEPS]
-    assert ids == ["import", "fid", "spectrum", "peaks", "analysis"]
-    for _, _, _, deps in PIPELINE_STEPS:
-        for dep in deps:
+    assert ids == [
+        "import", "fid", "spectrum", "smile", "peaks", "analysis"
+    ]
+    deps = {step[0]: step[3] for step in PIPELINE_STEPS}
+    # SMILE 优化为可选:峰挑选不依赖它
+    assert "smile" not in deps["peaks"]
+    assert deps["smile"] == ("spectrum",)
+    for _, _, _, step_deps in PIPELINE_STEPS:
+        for dep in step_deps:
             assert dep in ids
 
 
@@ -385,7 +391,7 @@ def test_main_window_empty_state(qapp: QApplication) -> None:
 def test_tree_data_node_context_menu_actions(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Data 节点右键不再含功能项,仅删除/打开目录。"""
+    """Data 节点右键:删除/打开目录 + 批量组加入(不含生成步骤)。"""
     manager = _manager_with_experiment(tmp_path, monkeypatch)
     panel = ProjectTreePanel(manager)
     data_item = panel.tree.topLevelItem(0).child(0).child(0).child(0)
@@ -397,8 +403,9 @@ def test_tree_data_node_context_menu_actions(
     panel._on_context_menu_impl(menu, data_item)
     labels = [a.text() for a in menu.actions()]
     assert "生成 FID" not in labels and "生成谱图" not in labels
-    for action in menu.actions():
-        action.trigger()
+    assert "加入批量组..." in labels
+    delete_action = next(a for a in menu.actions() if a.text() == "删除数据")
+    delete_action.trigger()
     assert actions == [("delete", "d_001")]
     panel.close()
 
@@ -717,14 +724,14 @@ def test_spectrum_panel_vertical_layout(qapp: QApplication) -> None:
 
     walk(panel)
     assert found, "SpectrumPanel 内应有 QSplitter"
-    splitter = found[0]
+    splitter = next(s for s in found if s.count() == 4)
     assert splitter.orientation() == Qt.Orientation.Vertical
     assert splitter.count() == 4  # viewer / 文件列表 / 工具栏 / 峰表
     assert panel.file_list.maximumWidth() > 1000  # 无横向宽度限制
     panel.close()
 
-def test_viewer_internal_horizontal_layout(qapp: QApplication) -> None:
-    """SpectrumViewer 内部左右布局:plot 在左、控制面板在右。"""
+def test_viewer_internal_vertical_layout(qapp: QApplication) -> None:
+    """SpectrumViewer 内部上下布局:plot 在上、控制面板在下。"""
     from PyQt6.QtCore import Qt
     from PyQt6.QtWidgets import QSplitter
 
@@ -742,9 +749,9 @@ def test_viewer_internal_horizontal_layout(qapp: QApplication) -> None:
     walk(viewer)
     assert found, "SpectrumViewer 内应有 QSplitter"
     splitter = found[0]
-    assert splitter.orientation() == Qt.Orientation.Horizontal
+    assert splitter.orientation() == Qt.Orientation.Vertical
     assert splitter.count() == 2
-    assert splitter.widget(0) is viewer.plot  # 左侧谱图
+    assert splitter.widget(0) is viewer.plot_area  # 上方谱图区
     viewer.close()
 
 def test_project_dashboard_stats_and_runs(
@@ -1011,6 +1018,7 @@ def test_run_step_uses_selected_data_id(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """B2G-002:run_step 传 data_id 时作用于选中数据(非首个)。"""
+    monkeypatch.setattr("threading.Thread", SyncThread)
     from gui.pipeline_panel import PipelinePanel
 
     manager = _manager_with_experiment(tmp_path, monkeypatch)

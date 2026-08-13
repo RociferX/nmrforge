@@ -16,6 +16,7 @@ from pathlib import Path
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QHeaderView,
+    QInputDialog,
     QMenu,
     QTreeWidget,
     QTreeWidgetItem,
@@ -52,6 +53,8 @@ class ProjectTreePanel(QWidget):
     create_experiment_requested = pyqtSignal()  # 空白处右键:新建空白实验
     import_data_requested = pyqtSignal(str)  # Experiment 右键:导入数据(exp_id)
     data_action_requested = pyqtSignal(str, str)  # (action, data_id):生成FID/谱/删除
+    batch_assign_requested = pyqtSignal(str, str, str)  # (exp_id, data_id, batch_id)
+    batch_remove_requested = pyqtSignal(str, str)  # (exp_id, data_id)
     rename_requested = pyqtSignal(str)  # 重命名实验(exp_id)
     delete_requested = pyqtSignal(str)  # 删除实验(exp_id)
 
@@ -174,10 +177,23 @@ class ProjectTreePanel(QWidget):
         source = getattr(data_node, "source", "") or getattr(exp, "source", "")
         status = self._data_status(exp, data_node)
         title = getattr(data_node, "title", "") or ""
+        from gui.pipeline_state import batch_id
+
+        batch = (
+            batch_id(self.manager, exp.id, data_id)
+            if self.manager is not None
+            else ""
+        )
         label = title or f"数据 {data_id}"
+        if batch:
+            label = f"{label} [{batch}]"
         data_item = QTreeWidgetItem([label, status])
         data_item.setIcon(0, self._icon("data"))
-        data_item.setToolTip(0, f"{data_id}\n来源: {source}\n右键: 生成 FID / 生成谱图 / 删除")
+        tooltip = f"{data_id}\n来源: {source}"
+        if batch:
+            tooltip += f"\n批量组: {batch}"
+        tooltip += "\n右键: 生成 FID / 生成谱图 / 删除"
+        data_item.setToolTip(0, tooltip)
         data_item.setData(
             0,
             Qt.ItemDataRole.UserRole,
@@ -362,6 +378,27 @@ class ProjectTreePanel(QWidget):
         if exp_id:
             self.open_requested.emit(exp_id)
 
+    def _request_batch_assign(self, exp_id: str, data_id: str) -> None:
+        """弹出批量组选择(可输入新编号,留空自动编号)。"""
+        from gui.pipeline_state import batch_id, batch_ids_in_experiment
+
+        groups = batch_ids_in_experiment(self.manager, exp_id)
+        current = batch_id(self.manager, exp_id, data_id)
+        items = list(groups)
+        if current and current not in items:
+            items.insert(0, current)
+        if not items:
+            items = [""]
+        value, ok = QInputDialog.getItem(
+            self,
+            "加入批量组",
+            "选择或输入批量组编号(留空自动编号):",
+            items,
+            editable=True,
+        )
+        if ok:
+            self.batch_assign_requested.emit(exp_id, data_id, value)
+
     def _folder_path_for_item(self, item: QTreeWidgetItem) -> Path | None:
         """解析 data 或 folder 节点的真实目录(双击打开用)。"""
         data = item.data(0, Qt.ItemDataRole.UserRole)
@@ -443,6 +480,19 @@ class ProjectTreePanel(QWidget):
                     "重命名...",
                     lambda: self.data_rename_requested.emit(exp_id, data_id),
                 )
+                menu.addSeparator()
+                from gui.pipeline_state import batch_id
+
+                current_batch = batch_id(self.manager, exp_id, data_id)
+                menu.addAction(
+                    "加入批量组...",
+                    lambda: self._request_batch_assign(exp_id, data_id),
+                )
+                if current_batch:
+                    menu.addAction(
+                        "移出批量组",
+                        lambda: self.batch_remove_requested.emit(exp_id, data_id),
+                    )
                 menu.addAction(
                     "删除数据",
                     lambda: self.data_action_requested.emit("delete", data_id),

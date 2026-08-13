@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 
-from viewer.spectrum import Spectrum, Spectrum3D
+from viewer.spectrum import Spectrum, Spectrum1D, Spectrum3D
 from viewer.spectrum3d_panel import Spectrum3DPanel
 from viewer.spectrum_viewer import SpectrumViewer
 
@@ -98,7 +98,7 @@ class SpectrumWindow(QMainWindow):
             )
             aspect_menu.addAction(action)
             self._aspect_actions.append(action)
-        self._aspect_actions[0].setChecked(True)
+        self._aspect_actions[1].setChecked(True)  # 默认 1:1 正方形
 
         peak_menu = self.menuBar().addMenu("峰(&P)")
         self._peak_actions: list[QAction] = []
@@ -121,7 +121,7 @@ class SpectrumWindow(QMainWindow):
             self,
             "打开 NMRPipe 谱图",
             self.start_dir or "",
-            "NMRPipe 谱 (*.ft2 *.ft3 *.ft1);;所有文件 (*)",
+            "NMRPipe 谱 (*.ft2 *.ft3 *.ft1 *.fid);;所有文件 (*)",
         )
         if path:
             self.load_spectrum(Path(path))
@@ -132,9 +132,15 @@ class SpectrumWindow(QMainWindow):
             if path.suffix.lower() == ".ft3":
                 spectrum3d = Spectrum3D.load_from_ft3(path)
                 spectrum = None
+                spectrum1d = None
+            elif path.suffix.lower() == ".fid":
+                spectrum1d = Spectrum1D.load_from_fid(path)
+                spectrum3d = None
+                spectrum = None
             else:
                 spectrum3d = None
                 spectrum = Spectrum.load_from_ft2(path)
+                spectrum1d = None
         except Exception as exc:  # noqa: BLE001 - 文件损坏等统一提示
             show_info(self, "打开失败", f"{path}\n{exc}")
             return False
@@ -145,14 +151,19 @@ class SpectrumWindow(QMainWindow):
                 self._spectrum3d_active = False
                 self._spectrum3d_panel.clear()
                 self.viewer.clear()
-            self.viewer.add_spectrum(spectrum, name=name or path.stem)
+            self.viewer.add_spectrum(
+                spectrum1d if spectrum1d is not None else spectrum,
+                name=name or path.stem,
+            )
         self._recent = [str(path), *[p for p in self._recent if p != str(path)]][:8]
         self._refresh_recent()
-        self.statusBar().showMessage(
-            f"已加载 3D 谱: {path}"
-            if spectrum3d is not None
-            else f"已加载: {path}"
-        )
+        if spectrum3d is not None:
+            status_text = f"已加载 3D 谱: {path}"
+        elif spectrum1d is not None:
+            status_text = f"已加载 FID: {path}"
+        else:
+            status_text = f"已加载: {path}"
+        self.statusBar().showMessage(status_text)
         self.setWindowTitle(f"NMRForge 谱图查看器 - {path.name}")
         return True
 
@@ -213,7 +224,9 @@ class SpectrumWindow(QMainWindow):
             "视图菜单:锁定显示长宽比\n"
             "峰菜单:切换单击行为(选中/添加/删除峰)\n"
             "3D 谱(.ft3):右侧面板选择查看平面(F1-F2/F1-F3/F2-F3),\n"
-            "  拖动切片滑块逐平面查看,或切换 MIP/求和投影",
+            "  拖动切片滑块逐平面查看,或切换 MIP/求和投影\n"
+            ".fid:以 1D 迹线显示(多维取第一条 FID)\n"
+            "二维谱:右键谱图提取 1D 行/列切片;图层列表右键删除图层",
         )
 
     # ------------------------------------------------------------- drops
@@ -225,7 +238,7 @@ class SpectrumWindow(QMainWindow):
     def dropEvent(self, event: QDropEvent) -> None:
         for url in event.mimeData().urls():
             path = Path(url.toLocalFile())
-            if path.suffix in (".ft2", ".ft3", ".ft1"):
+            if path.suffix in (".ft2", ".ft3", ".ft1", ".fid"):
                 self.load_spectrum(path)
 
 
@@ -234,7 +247,7 @@ def main(argv: list[str] | None = None) -> int:
     from PyQt6.QtWidgets import QApplication
 
     args = argv if argv is not None else sys.argv[1:]
-    paths = [Path(a) for a in args if Path(a).suffix in (".ft2", ".ft3", ".ft1")]
+    paths = [Path(a) for a in args if Path(a).suffix in (".ft2", ".ft3", ".ft1", ".fid")]
     app = QApplication(sys.argv[:1] + args)
     window = SpectrumWindow()
     window.show()

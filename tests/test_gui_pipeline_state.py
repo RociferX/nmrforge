@@ -57,7 +57,7 @@ def _manager_with_artifacts(tmp_path: Path):
 
 
 def _record_all(manager: ProjectManager, exp_id: str, data_id: str) -> None:
-    for step in ("import", "fid", "spectrum", "peaks", "analysis"):
+    for step in ("import", "fid", "spectrum", "smile", "peaks", "analysis"):
         record_step_success(manager, exp_id, data_id, step)
 
 

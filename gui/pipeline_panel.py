@@ -1,7 +1,8 @@
 """中间 Pipeline 面板:围绕当前数据/实验显示处理步骤与状态。
 
-五步流程(契约 v1.2 / G2B-002):
-导入数据 → 生成 FID → 生成谱图(含 SMILE 重构)→ 峰挑选 → 分析。
+六步流程(契约 v1.2 / G2B-002,含可选 SMILE 优化):
+导入数据 → 生成 FID → 生成谱图(含 SMILE 重构)→ [SMILE 优化,可选] →
+峰挑选 → 分析。
 
 - 步骤状态依据前置依赖与产物文件推断(LOCKED/READY/RUNNING/SUCCESS/FAILED);
 - READY 步骤提供「运行」按钮,经 ProcessingController 对应方法执行;
@@ -25,6 +26,8 @@ from PyQt6.QtWidgets import (
 
 from core.project import ProjectManager
 from gui.pipeline_state import (
+    batch_data_ids,
+    batch_id,
     input_fingerprint,
     load_pipeline_state,
     raw_fingerprint,
@@ -37,6 +40,7 @@ PIPELINE_STEPS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ("import", "导入数据", "读 Bruker 参数并复制到项目(raw),不触发处理", ()),
     ("fid", "生成 FID", "由原始数据转换为 fid(后端 bruker -AUTO/fid.com)", ("import",)),
     ("spectrum", "生成谱图", "后端处理生成谱(自动包含 NUS SMILE 重构)", ("fid",)),
+    ("smile", "SMILE 优化", "可选:重构参数网格优化并采用最优谱(仅 NUS)", ("spectrum",)),
     ("peaks", "峰挑选", "自动峰检测与强度/SNR 评估", ("spectrum",)),
     ("analysis", "分析", "峰归属与结果分析", ("peaks",)),
 )
@@ -65,6 +69,7 @@ STEP_METHOD: dict[str, str] = {
     "import": "import_data",
     "fid": "generate_fid",
     "spectrum": "generate_spectrum",
+    "smile": "optimize_smile",
     "peaks": "pick_peaks",
     "analysis": "analyze",
 }
@@ -145,13 +150,20 @@ def _node_artifacts(
             if path.is_file():
                 artifacts['spectrum'] = path
                 break
-    peaks = manager.data_dir(exp_id, data_id, 'peaks') / f'{exp_id}-{data_id}.csv'
-    if peaks.is_file():
-        artifacts['peaks'] = peaks
-    else:
-        flat = manager.dir_path('peaks') / f'{exp_id}.csv'
-        if flat.is_file():
-            artifacts['peaks'] = flat
+    for suffix in ('.list', '.csv'):
+        candidate = (
+            manager.data_dir(exp_id, data_id, 'peaks')
+            / f'{exp_id}-{data_id}{suffix}'
+        )
+        if candidate.is_file():
+            artifacts['peaks'] = candidate
+            break
+    if artifacts['peaks'] is None:
+        for suffix in ('.list', '.csv'):
+            flat = manager.dir_path('peaks') / f'{exp_id}{suffix}'
+            if flat.is_file():
+                artifacts['peaks'] = flat
+                break
     report = _first_report(manager.data_dir(exp_id, data_id, 'report'))
     if report is None:
         report = _first_report(manager.dir_path('report'))
@@ -188,7 +200,11 @@ def _node_step_statuses(
     state = load_pipeline_state(manager, exp_id, data_id)
     statuses: dict[str, str] = {}
     for step_id, _, _, deps in PIPELINE_STEPS:
-        artifact = None if step_id == 'import' else artifacts.get(step_id)
+        artifact = (
+            None
+            if step_id in ('import', 'smile')
+            else artifacts.get(step_id)
+        )
         outdated = False
         if step_id == 'import':
             done = True  # 实验下存在数据节点即导入完成
@@ -196,6 +212,18 @@ def _node_step_statuses(
             if entry and entry.get('input_hash'):
                 current = raw_fingerprint(manager, exp_id, data_id)
                 outdated = current is not None and current != entry['input_hash']
+        elif step_id == 'smile':
+            # 可选步骤:运行过即完成(产物复用谱图,指纹校验输入变化)
+            entry = state['steps'].get('smile')
+            done = entry is not None
+            if done:
+                current = input_fingerprint(manager, exp_id, data_id, 'smile')
+                if (
+                    current is not None
+                    and entry.get('input_hash')
+                    and current != entry['input_hash']
+                ):
+                    outdated = True
         else:
             done = artifact is not None
             if done:
@@ -495,9 +523,20 @@ class PipelinePanel(QWidget):
         self.import_button.setVisible(False)
         exp = project.experiment(self._current_exp_id)
         exp_title = exp.title if exp is not None else self._current_exp_id
-        self.context_label.setText(
+        current_batch = (
+            batch_id(self.manager, self._current_exp_id, self._current_data_id)
+            if self._current_data_id
+            else ""
+        )
+        context_text = (
             f"{project.name} / {exp_title} ({self._current_exp_id})"
         )
+        if current_batch:
+            group_count = len(
+                batch_data_ids(self.manager, self._current_exp_id, current_batch)
+            )
+            context_text += f" [批量 {current_batch}: {group_count} 数据]"
+        self.context_label.setText(context_text)
         statuses = compute_step_statuses(self.manager, self._current_exp_id)
         outdated_next = next(
             (sid for sid, st in statuses.items() if st == "OUTDATED"), None
@@ -523,7 +562,9 @@ class PipelinePanel(QWidget):
             reason = reasons.get(step_id, "") or outdated.get(step_id, "")
             self._rows[step_id].set_status(status, reason)
             # 导入数据为自动化步骤,无人工入口;其余处理步骤保留人工
-            self._rows[step_id].manual_button.setVisible(step_id != "import")
+            self._rows[step_id].manual_button.setVisible(
+                step_id not in ("import", "smile")
+            )
 
     # ------------------------------------------------------------------
     # 运行
@@ -571,16 +612,36 @@ class PipelinePanel(QWidget):
                     nodes[0],
                 )
                 exp_id = self._current_exp_id
-                data_id = getattr(data_node, "id", exp_id)
-                if method_name == "import_data":
-                    source = getattr(data_node, "source", "") or ""
-                    result = method(entry, source)
-                else:
-                    result = method(data_node, exp_id=exp_id, data_id=data_id)
-                message = result if isinstance(result, str) else str(result)
-                self.log_message.emit(
-                    f"完成 {STEP_LABEL.get(step_id, step_id)}: {message}"
+                target_data_id = getattr(data_node, "id", exp_id)
+                # 批量组:同一标记的数据绑定,整组依次执行
+                current_batch = batch_id(self.manager, exp_id, target_data_id)
+                data_ids = (
+                    batch_data_ids(self.manager, exp_id, current_batch)
+                    if current_batch
+                    else [target_data_id]
                 )
+                if len(data_ids) > 1:
+                    self.log_message.emit(
+                        f"批量组 {current_batch}: 对 {len(data_ids)} 个数据依次"
+                        f" {STEP_LABEL.get(step_id, step_id)}"
+                    )
+                for data_id in data_ids:
+                    node = next(
+                        (n for n in nodes if getattr(n, "id", "") == data_id),
+                        None,
+                    )
+                    if node is None:
+                        continue
+                    if method_name == "import_data":
+                        source = getattr(node, "source", "") or ""
+                        result = method(entry, source)
+                    else:
+                        result = method(node, exp_id=exp_id, data_id=data_id)
+                    message = result if isinstance(result, str) else str(result)
+                    self.log_message.emit(
+                        f"完成 {STEP_LABEL.get(step_id, step_id)} {data_id}:"
+                        f" {message}"
+                    )
             except Exception as exc:  # noqa: BLE001 - 错误统一回传 UI
                 self.log_message.emit(
                     f"失败 {STEP_LABEL.get(step_id, step_id)}: {exc}"

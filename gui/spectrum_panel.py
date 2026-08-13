@@ -194,6 +194,14 @@ class SpectrumPanel(QWidget):
                     paths.extend(
                         sorted(spectra_dir.glob(f"{exp_id}-{data_id}*{ext}"))
                     )
+                # 追加 process 目录 FID(供 1D 迹线查看)
+                try:
+                    process_dir = self.manager.data_dir(
+                        exp_id, data_id, "process"
+                    )
+                    paths.extend(sorted(process_dir.glob("*.fid")))
+                except OSError:
+                    pass
                 if paths:
                     return paths
         except Exception:  # noqa: BLE001 - 新布局不可用回退旧路径
@@ -220,6 +228,15 @@ class SpectrumPanel(QWidget):
                 )
                 self._spectrum3d_panel.setVisible(True)
                 self._render_3d_view()
+                return True
+            if path.suffix.lower() == ".fid":
+                from viewer.spectrum import Spectrum1D
+
+                self._current_spectrum = path
+                self._spectrum3d_panel.clear()
+                self.viewer.add_spectrum(
+                    Spectrum1D.load_from_fid(path), name=path.stem
+                )
                 return True
             from viewer.spectrum import Spectrum
 
@@ -258,7 +275,8 @@ class SpectrumPanel(QWidget):
     # ------------------------------------------------------------------
     # 峰表(Peak CSV)与谱图双向联动 + 编辑回写
     # ------------------------------------------------------------------
-    def _peak_csv_path(self, spectrum_path: Path) -> Path | None:
+    def _peak_file_path(self, spectrum_path: Path) -> Path | None:
+        """峰表文件:.list 优先(峰表即 list),旧 CSV 兼容回退。"""
         if self.manager.project is None:
             return None
         try:
@@ -266,20 +284,29 @@ class SpectrumPanel(QWidget):
                 peaks_dir = self.manager.data_dir(
                     self._current_exp_id, self._current_data_id, "peaks"
                 )
-                candidate = peaks_dir / f"{self._current_exp_id}-{self._current_data_id}.csv"
-                if candidate.is_file():
-                    return candidate
+                for suffix in (".list", ".csv"):
+                    candidate = peaks_dir / (
+                        f"{self._current_exp_id}-{self._current_data_id}{suffix}"
+                    )
+                    if candidate.is_file():
+                        return candidate
         except Exception:  # noqa: BLE001
             pass
-        legacy = self.manager.dir_path("peaks") / f"{self._current_exp_id}.csv"
-        return legacy if legacy.is_file() else None
+        for suffix in (".list", ".csv"):
+            legacy = self.manager.dir_path("peaks") / f"{self._current_exp_id}{suffix}"
+            if legacy.is_file():
+                return legacy
+        return None
 
     def _load_peaks(self, spectrum_path: Path) -> None:
         self._clear_peaks()
-        csv_path = self._peak_csv_path(spectrum_path)
-        if csv_path is None:
+        peak_path = self._peak_file_path(spectrum_path)
+        if peak_path is None:
             return
-        peaks = load_peaks(csv_path)
+        if peak_path.suffix.lower() == ".list":
+            peaks = import_peaks_poky(peak_path)
+        else:
+            peaks = load_peaks(peak_path)
         if not peaks:
             return
         self._peaks = peaks
@@ -410,8 +437,13 @@ class SpectrumPanel(QWidget):
         self.viewer.set_peaks(peaks)
         self.export_poky_button.setEnabled(True)
         self.save_peaks_button.setEnabled(True)
+        # 替换峰表关联关系(不覆盖文件):导入仅更新内存峰表,
+        # 点「保存峰表」时以 Poky .list 写盘
         InfoDialog.show_info(
-            self, "导入完成", f"已从 Poky 峰表导入 {len(peaks)} 个峰\n(点「保存峰表」写回 CSV)"
+            self,
+            "导入完成",
+            f"已用 Poky 峰表替换当前峰表关联({len(peaks)} 个峰)\n"
+            "(点「保存峰表」写回 .list 文件)",
         )
 
     def _on_save_peaks(self) -> None:

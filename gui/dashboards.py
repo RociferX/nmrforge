@@ -10,13 +10,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QCheckBox,
     QFileDialog,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -127,6 +129,7 @@ class ExperimentDashboard(QWidget):
     """实验概览:数据列表(状态)+ 导入数据表单。"""
 
     import_options_requested = pyqtSignal(str, str, str, bool)  # (exp_id, name, source, copy)
+    batch_import_requested = pyqtSignal(str, list)  # (exp_id, folders)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -177,6 +180,37 @@ class ExperimentDashboard(QWidget):
                 bool(self.source_edit.text().strip())
             )
         )
+        layout.addSpacing(10)
+        separator = QFrame()
+        separator.setFrameShape(QFrame.Shape.HLine)
+        separator.setFrameShadow(QFrame.Shadow.Sunken)
+        layout.addWidget(separator)
+
+        batch_title = QLabel("批量处理")
+        batch_title.setStyleSheet("font-weight: bold;")
+        layout.addWidget(batch_title)
+        batch_hint = QLabel(
+            "添加多个 Bruker 数据目录后批量导入;同批数据绑定同一批量组标记,"
+            "中间处理页操作对整组数据执行"
+        )
+        batch_hint.setWordWrap(True)
+        batch_hint.setStyleSheet("color: #666;")
+        layout.addWidget(batch_hint)
+        self.batch_list = QListWidget()
+        self.batch_list.setMaximumHeight(110)
+        layout.addWidget(self.batch_list)
+        batch_buttons = QHBoxLayout()
+        self.batch_add_button = QPushButton("添加数据文件夹...")
+        self.batch_add_button.clicked.connect(self._on_batch_add_folder)
+        batch_buttons.addWidget(self.batch_add_button)
+        self.batch_clear_button = QPushButton("清空列表")
+        self.batch_clear_button.clicked.connect(self._on_batch_clear)
+        batch_buttons.addWidget(self.batch_clear_button)
+        self.batch_import_button = QPushButton("批量导入")
+        self.batch_import_button.setEnabled(False)
+        self.batch_import_button.clicked.connect(self._on_batch_import)
+        batch_buttons.addWidget(self.batch_import_button)
+        layout.addLayout(batch_buttons)
         layout.addStretch(1)
 
     def set_context(self, manager: ProjectManager, exp_id: str, label: str) -> None:
@@ -209,6 +243,31 @@ class ExperimentDashboard(QWidget):
         )
         if path:
             self.source_edit.setText(path)
+
+    def _on_batch_add_folder(self) -> None:
+        """批量列表添加一个数据文件夹(去重)。"""
+        path = QFileDialog.getExistingDirectory(
+            self, "选择 Bruker 数据集目录(批量)"
+        )
+        if path and not self.batch_list.findItems(
+            path, Qt.MatchFlag.MatchExactly
+        ):
+            self.batch_list.addItem(path)
+        self.batch_import_button.setEnabled(self.batch_list.count() > 0)
+
+    def _on_batch_clear(self) -> None:
+        self.batch_list.clear()
+        self.batch_import_button.setEnabled(False)
+
+    def _on_batch_import(self) -> None:
+        """把列表中的多个数据目录以同一批量组导入当前实验。"""
+        if not self._exp_id or self.batch_list.count() == 0:
+            return
+        folders = [
+            self.batch_list.item(index).text()
+            for index in range(self.batch_list.count())
+        ]
+        self.batch_import_requested.emit(self._exp_id, folders)
 
     def _on_import(self) -> None:
         source = self.source_edit.text().strip()

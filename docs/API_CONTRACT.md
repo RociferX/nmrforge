@@ -87,6 +87,9 @@ class ProcessingController:
                        on_error: Callable[[str], None]) -> None
     def manual_param_table(self, entry=None) -> NotImplementedError(占位)
     def manual_script_editor(self, entry=None) -> NotImplementedError(占位)
+    def optimize_smile(self, data, exp_id=None, data_id=None) -> dict
+        # 可选 SMILE 优化(仅 NUS):网格搜索重构参数并采用最优谱,
+        # 归位 spectra/ 并登记 smile_optimize 运行
 ```
 
 自动化内部固定走 `read_dataset → create_backend(config) → AutoProcessor.run`,
@@ -105,10 +108,12 @@ GUI 页面不得绕过本控制器直接调 Backend。
 - SMILE 参数:`nSigma/thresh/xQ3/scaling/report`,经验分档
   (≤20%: 5/0.95;20–30%: 6/0.90;30–40%: 7/0.85);
 - 相位:复型 .fid 直接维 p1 共识写脚本 PS;终谱(实型)不做事后调相;
-- 峰表:内部 CSV(数字 Peak_ID,2D `Peak_ID,H_shift,N_shift,Intensity,SN,label`;
-  3D 加 F1/F2/F3_shift);导出 Poky/Sparky `.list`
-  (`Assignment w1 w2 [w3] Data Height Volume`,2D w1=15N/w2=1H,
-  未命名 `?-?`/`?-?-?`);导入反向解析。实现见 core/peaks/peak_table.py(G2B-005)。
+- 峰表:峰文件为 Poky/Sparky `.list`(保存经 export_peaks_poky 写
+  peaks/<exp>-<data>.list;旧 CSV 兼容读取)。内部字段数字 Peak_ID,
+  2D `Peak_ID,H_shift,N_shift,Intensity,SN,label`;3D 加
+  F1/F2/F3_shift;`.list` 格式 `Assignment w1 w2 [w3] Data Height
+  Volume`(2D w1=15N/w2=1H,未命名 `?-?`/`?-?-?`);导入反向解析并
+  替换峰表关联(不覆盖文件)。实现见 core/peaks/peak_table.py(G2B-005)。
 
 ## 7. 变更流程
 

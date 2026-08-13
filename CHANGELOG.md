@@ -1,5 +1,52 @@
 # 变更日志
 
+## [0.2.43] - 2026-08-13
+
+- 批量处理(实验中间页):「导入数据」表单下方加分割线 + 「批量处理」区块,
+  可添加多个 Bruker 数据文件夹并批量导入;同批导入的数据带批量组标记
+  (B1/B2...,多次批量导入序号递增),树中显示 [B{n}];同标记数据绑定,中间
+  处理页(Pipeline)操作对整组数据依次执行;数据右键可「加入批量组...」
+  (选择/新建组号)或「移出批量组」恢复单一数据。
+- 实现:gui/pipeline_state.py 批量组助手(batch_id/set/clear/next/
+  batch_data_ids,存于 .pipeline_state.json);ProcessingController.
+  batch_import;ExperimentDashboard 批量区块;Pipeline 组内整组运行 + 上下文
+  批量标记;ProjectTree 标记显示与右键加入/移出。
+- 测试:新增 test_gui_batch(5 例),全量 354 passed,ruff 全绿。
+
+
+## [0.2.42] - 2026-08-13
+
+- 修订(用户反馈):
+  - 1D 显示改为控制面板「一维谱」开关(TopSpin 式):开启后谱图出现随鼠标
+    的十字线,点击(或移动)显示该处两个一维谱——上方 F2 行迹线 + 右侧
+    F1 列迹线条带,与主谱联动;移除右键菜单方案;
+  - 峰表文件直接改为 Poky .list(保存写 peaks/<exp>-<data>.list,旧 CSV
+    兼容读取);「导入 Poky」只替换峰表关联关系(不覆盖文件),点「保存
+    峰表」才写盘。
+- 测试:更新 test_viewer_1d(条带)、test_gui_poky / test_gui_manual /
+  test_gui_processing(.list),全量 349 passed,ruff 全绿。
+
+
+## [0.2.41] - 2026-08-13
+
+- Viewer 增强(6 项):
+  - .fid 查看:Spectrum1D(load_from_fid,多维取第一条 FID 实部);独立查看器
+    与谱图面板的过滤器/拖放/文件列表支持 .fid,以 1D 迹线显示;
+  - 二维谱 1D 切片:右键谱图按点击位置提取 1D 行/列切片(类似 nmrDraw),
+    「返回二维视图」按钮恢复轮廓;
+  - 布局:查看器内部改为上下布局(上方谱图、下方控制面板),谱图默认 1:1
+    正方形显示;
+  - 图层管理:图层列表右键「删除该图层 / 删除全部图层」;
+  - 峰显示开关:控制面板「显示峰」勾选隐藏/显示全部峰标记;Poky .list
+    导入直接替换峰 CSV 文件(登记 manual_peaks 运行);
+  - SMILE 优化(可选):Pipeline 新增「SMILE 优化」步骤(生成谱图后、仅
+    NUS,可跳过——峰挑选不依赖它),ProcessingController.optimize_smile
+    网格搜索并采用最优谱(归位 spectra/、登记 smile_optimize 运行、脚本
+    快照、指纹刷新使下游过期)。
+- 测试:新增 test_viewer_1d / test_gui_smile / test_gui_poky,更新
+  test_gui_layout(六步流程/上下布局),全量 349 passed,ruff 全绿。
+
+
 ## [0.2.40] - 2026-08-13
 
 - Backend:相位评分改「连续负面积 + 谱熵」(文献方案:de Brouwer 2009

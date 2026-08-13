@@ -110,6 +110,42 @@ class ProcessingController:
             "warnings": list(getattr(result, "warnings", []) or []),
         }
 
+    def batch_import(self, exp_id: str, folders: list) -> dict:
+        """批量导入多个数据目录到实验,同一批数据标记同一 batch_id。
+
+        返回 {"batch_id", "results": [{folder, data_id, ok, error}]};
+        单个目录失败不阻断整批(结果中带 error 信息)。
+        """
+        from gui.pipeline_state import next_batch_id, set_batch_id
+
+        self._require_manager()
+        if self._manager.project is None:
+            raise RuntimeError("ProcessingController 未绑定项目(ProjectManager)")
+        entry = self._manager.project.experiment(exp_id)
+        if entry is None:
+            raise RuntimeError(f"实验不存在: {exp_id}")
+        batch = next_batch_id(self._manager, exp_id)
+        results: list[dict] = []
+        for folder in folders:
+            item: dict = {
+                "folder": str(folder),
+                "data_id": "",
+                "ok": False,
+                "error": "",
+            }
+            try:
+                result = self.import_data(entry, str(folder))
+                data_id = str(result.get("data_id", "") or "")
+                item["data_id"] = data_id
+                if data_id:
+                    set_batch_id(self._manager, exp_id, data_id, batch)
+                item["ok"] = True
+            except Exception as exc:  # noqa: BLE001 - 单个失败不阻断整批
+                item["error"] = f"{type(exc).__name__}: {exc}"
+            results.append(item)
+        self._manager.save()
+        return {"batch_id": batch, "results": results}
+
     def generate_fid(self, data, exp_id: str | None = None, data_id: str | None = None) -> str:
         """第 2 步:生成 FID(backend.convert_to_fid),返回 fid 路径。"""
         from workflow.stepwise import generate_fid as stepwise_fid
@@ -263,32 +299,35 @@ class ProcessingController:
     def save_peaks_manual(
         self, data, peaks: list[dict], exp_id: str | None = None, data_id: str | None = None
     ) -> str:
-        """人工峰表编辑回写(CSV)并登记 WorkflowRun(manual_peaks)。"""
-        from core.peaks.peak_table import save_peaks
+        """人工峰表保存:写 Poky .list(峰表文件即 list)并登记运行。"""
+        from gui.peaks_io import export_peaks_poky
 
         self._require_manager()
         exp_id = exp_id or getattr(data, "exp_id", "")
         data_id = data_id or getattr(data, "id", "")
+        ndim = 3 if peaks and "F1_shift" in peaks[0] else 2
         peaks_dir = self._manager.data_dir(exp_id, data_id, "peaks")
         peaks_dir.mkdir(parents=True, exist_ok=True)
-        csv_path = save_peaks(peaks_dir / f"{exp_id}-{data_id}.csv", peaks)
+        list_path = export_peaks_poky(
+            peaks_dir / f"{exp_id}-{data_id}.list", peaks, ndim=ndim
+        )
         if data_id:
             record_step_success(self._manager, exp_id, data_id, "peaks")
         run = self._manager.start_run(
             exp_id,
             workflow_ref="manual_peaks",
             inputs={"data_id": data_id},
-            params={"mode": "manual", "peaks": len(peaks)},
+            params={"mode": "manual", "peaks": len(peaks), "format": "list"},
         )
         try:
             self._manager.finish_run(
-                run.run_id, "success", outputs={"peaks": str(csv_path)},
+                run.run_id, "success", outputs={"peaks": str(list_path)},
                 message=f"人工峰表编辑({len(peaks)} 峰)",
             )
         except Exception:  # noqa: BLE001
             self._manager.finish_run(run.run_id, "failed", message="峰表保存失败")
         self._manager.save()
-        return str(csv_path)
+        return str(list_path)
 
     def param_schema(self) -> dict:
         """处理计划参数 schema(param_schema 契约;缺失时返回可编辑默认骨架)。"""
@@ -371,6 +410,89 @@ class ProcessingController:
                 'stages': [],
             },
         }
+
+
+    # ------------------------------------------------------------------
+    # SMILE 优化(可选步骤,仅 NUS):网格搜索重构参数并采用最优谱
+    # ------------------------------------------------------------------
+    def _read_experiment(self, exp_id: str, data_id: str):
+        """读取数据对应 Experiment(优先项目内 raw 副本)。"""
+        from core.data.bruker_reader import read_dataset
+
+        entry = self._manager.data(exp_id, data_id)
+        raw = (
+            Path(entry.raw_dir)
+            if getattr(entry, "raw_dir", "")
+            else Path(entry.source)
+        )
+        if not raw.is_absolute():
+            raw = self._manager.root / raw
+        return read_dataset(raw)
+
+    def optimize_smile(self, data, exp_id=None, data_id=None) -> dict:
+        """SMILE 优化(可选):参数网格搜索,把最优谱归位并登记运行。"""
+        from core.data.internal_data_model import SamplingMode
+        from workflow.smile_optimize import optimize_smile_parameters
+
+        self._require_manager()
+        exp_id = exp_id or getattr(data, "exp_id", "")
+        data_id = data_id or getattr(data, "id", "")
+        experiment = self._read_experiment(exp_id, data_id)
+        if experiment.sampling.mode is not SamplingMode.NUS:
+            raise RuntimeError("SMILE 优化仅适用于 NUS 数据(当前为均匀采样)")
+        results = optimize_smile_parameters(
+            experiment, self._backend_instance()
+        )
+        valid = [
+            result
+            for result in results
+            if getattr(result, "spectrum_path", "")
+            and getattr(result, "decision", "") not in ("failed", "error")
+        ]
+        if not valid:
+            raise RuntimeError("SMILE 优化未获得可用候选")
+        best = valid[0]
+        spectrum_path = self._apply_smile_result(exp_id, data_id, best)
+        return {
+            "status": "success",
+            "best_params": dict(getattr(best, "params", {}) or {}),
+            "spectrum_path": spectrum_path,
+            "candidates": len(results),
+            "message": f"SMILE 优化: {len(results)} 组,最优 {best.params}",
+        }
+
+    def _apply_smile_result(self, exp_id: str, data_id: str, result) -> str:
+        """把最优 SMILE 谱归位 spectra/ 并登记运行与指纹(下游过期)。"""
+        import shutil
+
+        source = Path(getattr(result, "spectrum_path", ""))
+        spectra_dir = self._manager.data_dir(exp_id, data_id, "spectra")
+        spectra_dir.mkdir(parents=True, exist_ok=True)
+        target = spectra_dir / source.name
+        if source.is_file() and source.resolve() != target.resolve():
+            shutil.copy2(source, target)
+        self._manager.set_data_spectrum(exp_id, data_id, target)
+        run = self._manager.start_run(
+            exp_id,
+            workflow_ref="smile_optimize",
+            inputs={"data_id": data_id},
+            params=dict(getattr(result, "params", {}) or {}),
+        )
+        self._manager.finish_run(
+            run.run_id,
+            "success",
+            outputs={"spectrum_path": str(target)},
+            message=str(getattr(result, "message", "") or "SMILE 优化完成"),
+        )
+        record_step_success(self._manager, exp_id, data_id, "smile")
+        record_step_success(self._manager, exp_id, data_id, "spectrum")
+        self._snapshot_step(
+            exp_id,
+            data_id,
+            ("smile_optimize",),
+            self._spectrum_scripts(exp_id, data_id),
+        )
+        return str(target)
 
     # ------------------------------------------------------------------
     # 脚本快照(GUI 接线):步骤成功后把执行的脚本/参数写入 WorkflowRun

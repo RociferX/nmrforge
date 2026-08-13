@@ -253,3 +253,72 @@ class Spectrum3D:
             np.asarray(data2d), [self.axes[i] for i in remaining],
             source=self.source,
         )
+
+class Spectrum1D:
+    """一维谱(时间域 FID 或二维切片):``data`` 形状 (N,),一个 SpectrumAxis。"""
+
+    def __init__(
+        self,
+        data: np.ndarray,
+        axis: SpectrumAxis,
+        source: Path | str | None = None,
+    ) -> None:
+        self.data = np.asarray(data, dtype=float)
+        self.axis = axis
+        self.source = Path(source) if source else None
+
+    @property
+    def max_intensity(self) -> float:
+        return float(np.max(self.data)) if self.data.size else 0.0
+
+    @property
+    def ppm_valid(self) -> bool:
+        """是否有可用 ppm 轴(sw/obs 头部齐全)。"""
+        return self.axis.sw_hz > 0 and self.axis.obs_mhz > 0
+
+    def x_values(self) -> np.ndarray:
+        """绘图 x 坐标:有效 ppm 轴用 ppm,否则用点序号。"""
+        if self.ppm_valid:
+            return self.axis.ppm
+        return np.arange(self.axis.size, dtype=float)
+
+    @staticmethod
+    def _axis_from_dic(dic: dict, label: str, size: int) -> SpectrumAxis:
+        """从 NMRPipe 头部取直接维频率参数(FDF2*/FS*),缺失时退化为点轴。"""
+
+        def _first(*keys: str) -> float:
+            for key in keys:
+                value = dic.get(key)
+                if value in (None, "", 0, 0.0):
+                    continue
+                try:
+                    return float(value)
+                except (TypeError, ValueError):
+                    continue
+            return 0.0
+
+        return SpectrumAxis(
+            label=label,
+            size=size,
+            sw_hz=_first("FDF2SW", "FSSW", "FSW"),
+            obs_mhz=_first("FDF2OBS", "FSOBS"),
+            carrier_ppm=_first("FDF2CAR", "FSCAR"),
+            orig_hz=_first("FDF2ORIG"),
+        )
+
+    @classmethod
+    def load_from_fid(
+        cls, path: Path | str, label: str = "FID"
+    ) -> Spectrum1D:
+        """用 nmrglue 读取 NMRPipe .fid(时间域);多维取第一条 FID 实部。"""
+        import nmrglue as ng
+
+        dic, data = ng.pipe.read(str(path))
+        data = np.asarray(data)
+        if np.iscomplexobj(data):
+            data = data.real
+        while data.ndim > 1:
+            data = data[0]  # 查看用:取第一条 FID 作为一维迹线
+        axis = cls._axis_from_dic(dic, label, int(data.shape[0]))
+        logger.info("载入 FID: %s (%s)", path, data.shape)
+        return cls(data, axis, source=Path(path))
