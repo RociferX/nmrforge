@@ -110,10 +110,10 @@ class ImportExperimentDialog(QDialog):
         for sample_id, name in samples or []:
             self.sample_combo.addItem(f"{sample_id} {name}".strip(), sample_id)
         form.addRow("关联样本:", self.sample_combo)
-        self.copy_check = QCheckBox("链接原始数据到项目(只读文件链接,必要时复制)")
+        self.copy_check = QCheckBox("链接原始数据到样本(只读文件链接,必要时复制)")
         self.copy_check.setChecked(True)
         self.copy_check.setToolTip(
-            "勾选后把 Bruker 数据集复制进项目 raw/ 目录并计算输入指纹;"
+            "勾选后把 Bruker 数据集复制进样本 raw/ 目录并计算输入指纹;"
             "不勾选仅登记引用(源目录需保持可访问)。"
         )
         form.addRow("", self.copy_check)

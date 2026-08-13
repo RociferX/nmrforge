@@ -38,7 +38,7 @@ from gui.processing import ProcessingController
 
 # 步骤定义:id / 名称 / 描述 / 前置步骤 id 列表
 PIPELINE_STEPS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
-    ("import", "导入数据", "读 Bruker 参数并复制到项目(raw),不触发处理", ()),
+    ("import", "导入数据", "读 Bruker 参数并复制到样本(raw),不触发处理", ()),
     ("fid", "生成 FID", "由原始数据转换为 fid(后端 bruker -AUTO/fid.com)", ("import",)),
     ("spectrum", "生成谱图", "后端处理生成谱(自动包含 NUS SMILE 重构)", ("fid",)),
     ("smile", "SMILE 优化", "可选:重构参数网格优化并采用最优谱(仅 NUS)", ("spectrum",)),
@@ -473,11 +473,16 @@ class PipelineStepRow(QWidget):
 
         self.detail_frame = QFrame()
         self.detail_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        # 显式浅色背景:深色系统主题下 QFrame 会变黑,灰字看不清
+        self.detail_frame.setStyleSheet(
+            "QFrame { background: #ffffff; border: 1px solid #d5d8dc; "
+            "border-radius: 4px; }"
+        )
         self.detail_frame.setVisible(False)
         detail_layout = QVBoxLayout(self.detail_frame)
         self.detail_label = QLabel("")
         self.detail_label.setWordWrap(True)
-        self.detail_label.setStyleSheet("color: #333;")
+        self.detail_label.setStyleSheet("color: #222;")
         detail_layout.addWidget(self.detail_label)
         detail_buttons = QHBoxLayout()
         self.manual_with_params_button = QPushButton("以此参数打开人工编辑器")
@@ -585,7 +590,7 @@ class PipelinePanel(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
 
-        self.context_label = QLabel("未打开项目")
+        self.context_label = QLabel("未打开样本")
         self.context_label.setStyleSheet("font-size: 13px; font-weight: bold; color: #2c3e50;")
         layout.addWidget(self.context_label)
 
@@ -672,7 +677,7 @@ class PipelinePanel(QWidget):
         """刷新上下文标签与步骤状态。"""
         project = self.manager.project
         if project is None or not self._current_exp_id:
-            self.context_label.setText("未打开项目")
+            self.context_label.setText("未打开样本")
             self.next_label.setText("")
             self.import_button.setVisible(False)
             for row in self._rows.values():

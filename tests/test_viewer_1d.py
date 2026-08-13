@@ -237,6 +237,47 @@ def test_viewer_plot_click_strips_and_select(qapp: QApplication) -> None:
     viewer.close()
 
 
+def test_viewer_strip_right_y_direction_and_link(qapp: QApplication) -> None:
+    """右侧 1D 条带方向与二维谱 Y 轴一致,且主图缩放时 y 范围联动。"""
+    spectrum = _synthetic_spectrum()
+    viewer = SpectrumViewer()
+    viewer.add_spectrum(spectrum)
+    viewer.set_1d_mode(True)
+    main_inv = viewer.plot.getViewBox().state["yInverted"]
+    right_inv = viewer.strip_right.getViewBox().state["yInverted"]
+    assert right_inv == main_inv
+    # 主图 Y 缩放 → 右条带 yRange 跟随(与二维谱坐标轴移动/缩放同步)
+    viewer.plot.getViewBox().setRange(yRange=(10.0, 40.0), padding=0)
+    np.testing.assert_allclose(
+        viewer.strip_right.getViewBox().viewRange()[1],
+        viewer.plot.getViewBox().viewRange()[1],
+    )
+    # 谱+坐标轴一起翻正:右条带数据行 0 与主图同为顶部方向
+    right_s0 = viewer.strip_right.getViewBox().mapViewToScene(
+        QPointF(0.0, 0.0)
+    )
+    right_s1 = viewer.strip_right.getViewBox().mapViewToScene(
+        QPointF(0.0, spectrum.data.shape[0] - 1)
+    )
+    main_s0 = viewer.plot.getViewBox().mapViewToScene(QPointF(0.0, 0.0))
+    main_s1 = viewer.plot.getViewBox().mapViewToScene(
+        QPointF(0.0, spectrum.data.shape[0] - 1)
+    )
+    assert (right_s0.y() < right_s1.y()) == (main_s0.y() < main_s1.y())
+    viewer.close()
+
+
+def test_viewer_clear_restores_2d_direction(qapp: QApplication) -> None:
+    """clear() 恢复主图 2D 显示方向(1D 视图的 invertY 不泄漏)。"""
+    spectrum = _synthetic_spectrum()
+    viewer = SpectrumViewer()
+    viewer.add_spectrum(spectrum)
+    viewer.plot.getViewBox().invertY(False)  # 模拟 1D 视图后状态
+    viewer.clear()
+    assert viewer.plot.getViewBox().state["yInverted"] is True
+    viewer.close()
+
+
 def test_viewer_peaks_toggle(qapp: QApplication) -> None:
     spectrum = _synthetic_spectrum()
     viewer = SpectrumViewer()

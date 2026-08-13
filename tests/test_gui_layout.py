@@ -1058,3 +1058,41 @@ def test_reset_view_union_of_all_layers(qapp: QApplication) -> None:
     x_range, y_range = viewer.plot.getViewBox().viewRange()
     assert x_range[1] >= 255 and y_range[1] >= 63  # 覆盖两张谱
     viewer.close()
+
+def test_rename_project_to_sample_wording(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """「项目」用户可见措辞统一为「样本」:菜单 / 欢迎页 / 上下文条。"""
+    from gui.welcome_page import _FallbackWorkspaceManager
+
+    workspace = tmp_path / "ws2"
+    monkeypatch.setattr(
+        "gui.main_window.WorkspaceManager", lambda: _TempWorkspace(workspace)
+    )
+    monkeypatch.setattr(
+        "core.workspace.WorkspaceManager",
+        lambda *a, **k: _TempWorkspace(workspace),
+    )
+    monkeypatch.setattr(
+        "gui.welcome_page.workspace_manager",
+        lambda: _FallbackWorkspaceManager(workspace),
+    )
+    window = MainWindow()
+    # 未打开样本:上下文条与欢迎页入口文案
+    assert window.context_bar.text() == "未打开样本"
+    assert window.center_panel.welcome_page.new_button.text() == "新建样本..."
+    # 菜单栏:单一「样本(&S)」菜单,不含「项目」标题
+    menus = [action.text() for action in window.menuBar().actions()]
+    assert "样本(&S)" in menus
+    assert not any("项目" in text for text in menus if text)
+    sample_menu = next(
+        action.menu()
+        for action in window.menuBar().actions()
+        if action.text() == "样本(&S)"
+    )
+    labels = [action.text() for action in sample_menu.actions()]
+    assert "样本管理" in labels
+    assert "新建实验..." in labels
+    assert "添加样本..." in labels
+    assert "删除样本..." in labels
+    window.close()

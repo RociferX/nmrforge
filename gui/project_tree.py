@@ -1,4 +1,4 @@
-"""左侧项目管理树:Project → Experiment → Data。
+"""左侧样本管理树:Project → Experiment → Data。
 
 层级(契约 v1.2 §8.5):
 - Project 节点:右键删除项目(强确认);
@@ -40,13 +40,13 @@ _STATUS_TEXT = {
 
 
 class ProjectTreePanel(QWidget):
-    """项目管理树;selection_changed 在上下文(实验)变化时发出。"""
+    """样本管理树;selection_changed 在上下文(实验)变化时发出。"""
 
     selection_changed = pyqtSignal(str, str, str)  # (kind, exp_id, data_id)
     open_requested = pyqtSignal(str)  # 双击实验:请求打开/聚焦该实验
     open_project_requested = pyqtSignal(str)  # 双击未打开项目:请求打开
     data_rename_requested = pyqtSignal(str, str)  # (exp_id, data_id):重命名数据
-    rename_project_requested = pyqtSignal()  # 重命名当前项目
+    rename_project_requested = pyqtSignal()  # 重命名当前样本
     open_path_requested = pyqtSignal(str)  # 打开所在目录(子文件夹右键)
     open_spectrum_requested = pyqtSignal(str)  # 双击谱图文件:右侧直接显示
     delete_project_requested = pyqtSignal()  # Project 右键:删除项目
@@ -141,7 +141,7 @@ class ProjectTreePanel(QWidget):
             project_item.setToolTip(
                 0,
                 f"{project_dir}\n"
-                + ("单击打开项目" if not is_current else "当前项目"),
+                + ("单击打开样本" if not is_current else "当前样本"),
             )
             if is_current and self.manager.project is not None:
                 self._refresh_experiments(project_item)
@@ -288,7 +288,7 @@ class ProjectTreePanel(QWidget):
             from core.workspace import WorkspaceManager
 
             return WorkspaceManager().list_projects()
-        except Exception:  # noqa: BLE001 - 工作区不可用时回退当前项目
+        except Exception:  # noqa: BLE001 - 工作区不可用时回退当前样本
             if self.manager.root is not None:
                 return [Path(self.manager.root)]
             return []
@@ -644,14 +644,14 @@ class ProjectTreePanel(QWidget):
                 )
                 if not is_current and data.get("path"):
                     menu.addAction(
-                        "打开项目...",
+                        "打开样本...",
                         lambda p=str(data["path"]): self.open_project_requested.emit(p),
                     )
                 else:
                     menu.addAction("新建空白实验...", self.create_experiment_requested.emit)
-                    menu.addAction("重命名项目...", self.rename_project_requested.emit)
+                    menu.addAction("重命名样本...", self.rename_project_requested.emit)
                     menu.addSeparator()
-                    menu.addAction("删除项目...", self.delete_project_requested.emit)
+                    menu.addAction("删除样本...", self.delete_project_requested.emit)
             elif kind == "experiment" and exp_id:
                 menu.addAction("导入数据...", lambda: self.import_data_requested.emit(exp_id))
                 menu.addAction("重命名...", lambda: self.rename_requested.emit(exp_id))

@@ -1,7 +1,7 @@
 """中间上下文面板:随左侧树选中层级切换。
 
-- Workspace 选中 → 新建项目/打开项目/最近项目(嵌入欢迎页);
-- Project 选中 → 新建实验(内嵌表单);
+- Workspace 选中 → 新建样本/打开样本/最近样本(嵌入欢迎页);
+- Sample(项目) 选中 → 新建实验(内嵌表单);
 - Experiment 选中 → 导入数据(内嵌表单);
 - Data / 子目录选中 → Pipeline 五步(生成 FID → 分析)。
 
@@ -32,8 +32,8 @@ class CenterPanel(QWidget):
     import_options_requested = pyqtSignal(str, str, str, bool)  # (exp_id, name, source, copy)
     batch_import_requested = pyqtSignal(str, list)  # (exp_id, folders)
     create_experiment_requested = pyqtSignal(str)  # 实验标题
-    new_project_requested = pyqtSignal(str)  # 项目名称
-    open_project_requested = pyqtSignal(str)  # 项目路径
+    new_project_requested = pyqtSignal(str)  # 样本名称
+    open_project_requested = pyqtSignal(str)  # 样本路径
 
     def __init__(
         self,

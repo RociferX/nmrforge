@@ -128,3 +128,13 @@ def test_manual_with_params_signal(tmp_path: Path, qapp: QApplication) -> None:
     assert seen and seen[0][0] == "spectrum"
     assert seen[0][1].get("zero_fill") == 2
     panel.close()
+
+def test_step_detail_light_background(qapp: QApplication) -> None:
+    """步骤详情面板显式浅色背景 + 深色文字(深色系统主题下仍可读)。"""
+    from gui.pipeline_panel import PipelineStepRow
+
+    row = PipelineStepRow("spectrum", "生成谱图", "desc")
+    style = row.detail_frame.styleSheet()
+    assert "background: #ffffff" in style
+    assert "color: #222" in row.detail_label.styleSheet()
+    row.close()
