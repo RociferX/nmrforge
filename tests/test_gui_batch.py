@@ -1,0 +1,165 @@
+"""批量处理测试:批量组标记、批量导入、组内整组运行、树标记显示。"""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+import pytest
+from PyQt6.QtWidgets import QApplication
+
+from core.project import ProjectManager
+from gui.pipeline_panel import PipelinePanel
+from gui.pipeline_state import (
+    batch_data_ids,
+    batch_id,
+    batch_ids_in_experiment,
+    clear_batch_id,
+    next_batch_id,
+    set_batch_id,
+)
+from gui.processing import ProcessingController
+
+
+@pytest.fixture(scope="module")
+def qapp() -> QApplication:
+    app = QApplication.instance() or QApplication([])
+    yield app
+
+
+def _manager_with_experiment(tmp_path: Path) -> tuple[ProjectManager, str]:
+    manager = ProjectManager.create_project(tmp_path / "proj", "demo")
+    entry = manager.create_experiment("HSQC")
+    manager.import_data(entry.id, "/fake/1")
+    manager.save()
+    return manager, entry.id
+
+
+def test_batch_helpers(tmp_path: Path) -> None:
+    manager, exp_id = _manager_with_experiment(tmp_path)
+    manager.import_data(exp_id, "/fake/2")
+    manager.save()
+    data_ids = [d.id for d in manager.project.experiment(exp_id).data]
+    for data_id in data_ids:
+        assert batch_id(manager, exp_id, data_id) == ""
+    # 第一次批量导入 → B1,绑定两组数据
+    assert next_batch_id(manager, exp_id) == "B1"
+    set_batch_id(manager, exp_id, data_ids[0], "B1")
+    set_batch_id(manager, exp_id, data_ids[1], "B1")
+    assert batch_id(manager, exp_id, data_ids[0]) == "B1"
+    assert batch_data_ids(manager, exp_id, "B1") == data_ids
+    # 第二次批量导入 → B2
+    assert next_batch_id(manager, exp_id) == "B2"
+    assert batch_ids_in_experiment(manager, exp_id) == ["B1"]
+    # 移出组:恢复单一数据
+    clear_batch_id(manager, exp_id, data_ids[1])
+    assert batch_data_ids(manager, exp_id, "B1") == [data_ids[0]]
+    assert batch_id(manager, exp_id, data_ids[1]) == ""
+
+
+def test_batch_import_marks_group(tmp_path: Path, bruker_dir: Path) -> None:
+    """批量导入:多个目录导入同一实验,标记同一 batch_id,多次导入序号递增。"""
+    manager = ProjectManager.create_project(tmp_path / "proj", "demo")
+    entry = manager.create_experiment("batch")
+    manager.save()
+    folders = [
+        str(bruker_dir / "hsqc_2d"),
+        str(bruker_dir / "nus_2d"),
+    ]
+    controller = ProcessingController(manager)
+    result = controller.batch_import(entry.id, folders)
+    assert result["batch_id"] == "B1"
+    assert all(item["ok"] for item in result["results"])
+    data_ids = [item["data_id"] for item in result["results"]]
+    assert len(data_ids) == 2
+    assert batch_data_ids(manager, entry.id, "B1") == data_ids
+    # 再批量导入一次 → B2
+    result2 = controller.batch_import(
+        entry.id, [str(bruker_dir / "hsqc_small")]
+    )
+    assert result2["batch_id"] == "B2"
+    assert batch_ids_in_experiment(manager, entry.id) == ["B1", "B2"]
+
+
+class _FakeController:
+    """记录每个 data_id 的步骤调用。"""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def set_manager(self, manager) -> None:
+        pass
+
+    def generate_spectrum(self, data, exp_id=None, data_id=None) -> str:
+        self.calls.append(data_id or "")
+        return "/tmp/x.ft2"
+
+
+class _SyncThread:
+    def __init__(self, target=None, daemon=None) -> None:
+        self._target = target
+
+    def start(self) -> None:
+        self._target()
+
+
+def test_pipeline_group_run_applies_to_all(
+    tmp_path: Path,
+    qapp: QApplication,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """中间处理页操作:批量组内所有数据依次执行,上下文显示批量标记。"""
+    monkeypatch.setattr("threading.Thread", _SyncThread)
+    manager = ProjectManager.create_project(tmp_path / "proj", "demo")
+    entry = manager.create_experiment("batch")
+    data1 = manager.import_data(entry.id, "/fake/1")
+    data2 = manager.import_data(entry.id, "/fake/2")
+    manager.save()
+    set_batch_id(manager, entry.id, data1.id, "B1")
+    set_batch_id(manager, entry.id, data2.id, "B1")
+    controller = _FakeController()
+    panel = PipelinePanel(manager, controller)
+    panel.set_selection("data", entry.id, data1.id)
+    assert "批量 B1" in panel.context_label.text()
+    panel._on_run_requested("spectrum")
+    assert controller.calls == [data1.id, data2.id]
+    panel.close()
+
+
+class _TempWorkspace:
+    """指向临时目录的工作区桩(树面板列出项目用)。"""
+
+    def __init__(self, root: Path) -> None:
+        self.root = Path(root)
+
+    def list_projects(self):
+        return sorted(
+            p
+            for p in self.root.iterdir()
+            if p.is_dir() and (p / "project.json").is_file()
+        )
+
+    def ensure(self) -> Path:
+        self.root.mkdir(parents=True, exist_ok=True)
+        return self.root
+
+
+def test_tree_data_label_shows_batch_marker(
+    tmp_path: Path, qapp: QApplication
+) -> None:
+    """批量导入的数据在树中带批量标记显示。"""
+    from gui.project_tree import ProjectTreePanel
+
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    manager = ProjectManager.create_project(ws / "proj", "demo")
+    entry = manager.create_experiment("HSQC")
+    data = manager.import_data(entry.id, "/fake/1")
+    manager.save()
+    set_batch_id(manager, entry.id, data.id, "B1")
+    panel = ProjectTreePanel(manager, workspace=_TempWorkspace(ws))
+    data_item = panel.tree.topLevelItem(0).child(0).child(0).child(0)
+    assert "[B1]" in data_item.text(0)
+    panel.close()

@@ -57,6 +57,7 @@ class MainWindow(QMainWindow):
 
     import_failed = pyqtSignal(str)  # 导入失败信息(后台线程 → 主线程)
     import_finished = pyqtSignal(object)  # ImportResult(后台线程 → 主线程)
+    batch_import_finished = pyqtSignal(str, str, int, object)  # (exp_id, batch_id, count, results)
     manual_run_log = pyqtSignal(str)  # 人工脚本运行日志(后台线程 → 主线程)
     manual_run_done = pyqtSignal()  # 人工脚本运行完成(主线程刷新 UI)
 
@@ -75,6 +76,7 @@ class MainWindow(QMainWindow):
         self.workspace.ensure()
         self.import_failed.connect(self._on_import_failed)
         self.import_finished.connect(self._on_import_done)
+        self.batch_import_finished.connect(self._on_batch_import_done)
         self.manual_run_log.connect(self._append_log)
         self.manual_run_done.connect(self._on_manual_run_done)
         self._pending_data_names: dict[str, str] = {}
@@ -160,6 +162,8 @@ class MainWindow(QMainWindow):
         self.project_tree.import_data_requested.connect(self._import_data_for)
         self.project_tree.data_action_requested.connect(self._on_data_action)
         self.project_tree.data_rename_requested.connect(self._rename_data)
+        self.project_tree.batch_assign_requested.connect(self._assign_batch)
+        self.project_tree.batch_remove_requested.connect(self._remove_batch)
 
         self.center_panel = CenterPanel(self.manager, self.controller)
         self.pipeline = self.center_panel.pipeline  # 兼容旧引用
@@ -169,6 +173,7 @@ class MainWindow(QMainWindow):
         self.center_panel.import_options_requested.connect(
             self._import_data_with_options
         )
+        self.center_panel.batch_import_requested.connect(self._batch_import)
         self.center_panel.create_experiment_requested.connect(
             self._create_experiment_with_title
         )
@@ -285,6 +290,82 @@ class MainWindow(QMainWindow):
         self._import_experiment_async(
             {"source": source, "title": title, "sample_id": "", "copy": True}
         )
+
+    def _batch_import(self, exp_id: str, folders: list) -> None:
+        """批量导入多个数据目录(后台线程,同批标记同一 batch_id)。"""
+        import threading
+
+        if self.manager.project is None or not exp_id or not folders:
+            return
+        self._append_log(
+            f"开始批量导入: {len(folders)} 个目录 → 实验 {exp_id}"
+        )
+
+        def worker() -> None:
+            try:
+                self.controller.set_manager(self.manager)
+                result = self.controller.batch_import(exp_id, folders)
+                results = list(result.get("results", []))
+                ok = [item for item in results if item.get("ok")]
+                failed = [item for item in results if not item.get("ok")]
+                self.batch_import_finished.emit(
+                    exp_id, result["batch_id"], len(ok), results
+                )
+                if failed:
+                    self.import_failed.emit(
+                        "批量导入部分失败:\n"
+                        + "\n".join(
+                            f"{item['folder']}: {item.get('error')}"
+                            for item in failed
+                        )
+                    )
+            except Exception as exc:  # noqa: BLE001 - 错误统一回主线程
+                self.import_failed.emit(f"{type(exc).__name__}: {exc}")
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_batch_import_done(
+        self, exp_id: str, batch_id_value: str, count: int, results
+    ) -> None:
+        """批量导入完成(主线程):逐项日志 + 刷新并选中实验。"""
+        for item in results or []:
+            if item.get("ok"):
+                self._append_log(
+                    f"  导入完成: {item['folder']} → {item['data_id']}"
+                )
+            else:
+                self._append_log(
+                    f"  导入失败: {item['folder']} ({item.get('error')})"
+                )
+        self._append_log(
+            f"批量导入完成: 实验 {exp_id} 组 {batch_id_value},共 {count} 个数据"
+        )
+        self.refresh()
+        self.project_tree.select_experiment(exp_id)
+        self.center_panel.set_selection("experiment", exp_id)
+
+    def _assign_batch(self, exp_id: str, data_id: str, batch: str) -> None:
+        """把数据加入(已有或新建的)批量组。"""
+        from gui.pipeline_state import next_batch_id, set_batch_id
+
+        if self.manager.project is None:
+            return
+        batch = (batch or "").strip()
+        if not batch:
+            batch = next_batch_id(self.manager, exp_id)
+        set_batch_id(self.manager, exp_id, data_id, batch)
+        self._append_log(f"数据 {data_id} 已加入批量组 {batch}")
+        self.refresh()
+
+    def _remove_batch(self, exp_id: str, data_id: str) -> None:
+        """把数据移出批量组(恢复单一数据)。"""
+        from gui.pipeline_state import clear_batch_id
+
+        if self.manager.project is None:
+            return
+        clear_batch_id(self.manager, exp_id, data_id)
+        self._append_log(f"数据 {data_id} 已移出批量组(恢复单一数据)")
+        self.refresh()
 
     def _import_experiment_async(self, data: dict) -> None:
         """后台线程执行导入(三步接口 import_data),避免复制大文件阻塞 UI。"""

@@ -1,5 +1,18 @@
 # 变更日志
 
+## [0.2.31] - 2026-08-13
+
+- 批量处理(实验中间页):「导入数据」表单下方加分割线 + 「批量处理」区块,
+  可添加多个 Bruker 数据文件夹并批量导入;同批导入的数据带批量组标记
+  (B1/B2...,多次批量导入序号递增),树中显示 [B{n}];同标记数据绑定,中间
+  处理页(Pipeline)操作对整组数据依次执行;数据右键可「加入批量组...」
+  (选择/新建组号)或「移出批量组」恢复单一数据。
+- 实现:gui/pipeline_state.py 批量组助手(batch_id/set/clear/next/
+  batch_data_ids,存于 .pipeline_state.json);ProcessingController.
+  batch_import;ExperimentDashboard 批量区块;Pipeline 组内整组运行 + 上下文
+  批量标记;ProjectTree 标记显示与右键加入/移出。
+- 测试:新增 test_gui_batch(5 例),全量 354 passed,ruff 全绿。
+
 ## [0.2.30] - 2026-08-13
 
 - 修订(用户反馈):

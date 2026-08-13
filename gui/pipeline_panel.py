@@ -26,6 +26,8 @@ from PyQt6.QtWidgets import (
 
 from core.project import ProjectManager
 from gui.pipeline_state import (
+    batch_data_ids,
+    batch_id,
     input_fingerprint,
     load_pipeline_state,
     raw_fingerprint,
@@ -521,9 +523,20 @@ class PipelinePanel(QWidget):
         self.import_button.setVisible(False)
         exp = project.experiment(self._current_exp_id)
         exp_title = exp.title if exp is not None else self._current_exp_id
-        self.context_label.setText(
+        current_batch = (
+            batch_id(self.manager, self._current_exp_id, self._current_data_id)
+            if self._current_data_id
+            else ""
+        )
+        context_text = (
             f"{project.name} / {exp_title} ({self._current_exp_id})"
         )
+        if current_batch:
+            group_count = len(
+                batch_data_ids(self.manager, self._current_exp_id, current_batch)
+            )
+            context_text += f" [批量 {current_batch}: {group_count} 数据]"
+        self.context_label.setText(context_text)
         statuses = compute_step_statuses(self.manager, self._current_exp_id)
         outdated_next = next(
             (sid for sid, st in statuses.items() if st == "OUTDATED"), None
@@ -599,16 +612,36 @@ class PipelinePanel(QWidget):
                     nodes[0],
                 )
                 exp_id = self._current_exp_id
-                data_id = getattr(data_node, "id", exp_id)
-                if method_name == "import_data":
-                    source = getattr(data_node, "source", "") or ""
-                    result = method(entry, source)
-                else:
-                    result = method(data_node, exp_id=exp_id, data_id=data_id)
-                message = result if isinstance(result, str) else str(result)
-                self.log_message.emit(
-                    f"完成 {STEP_LABEL.get(step_id, step_id)}: {message}"
+                target_data_id = getattr(data_node, "id", exp_id)
+                # 批量组:同一标记的数据绑定,整组依次执行
+                current_batch = batch_id(self.manager, exp_id, target_data_id)
+                data_ids = (
+                    batch_data_ids(self.manager, exp_id, current_batch)
+                    if current_batch
+                    else [target_data_id]
                 )
+                if len(data_ids) > 1:
+                    self.log_message.emit(
+                        f"批量组 {current_batch}: 对 {len(data_ids)} 个数据依次"
+                        f" {STEP_LABEL.get(step_id, step_id)}"
+                    )
+                for data_id in data_ids:
+                    node = next(
+                        (n for n in nodes if getattr(n, "id", "") == data_id),
+                        None,
+                    )
+                    if node is None:
+                        continue
+                    if method_name == "import_data":
+                        source = getattr(node, "source", "") or ""
+                        result = method(entry, source)
+                    else:
+                        result = method(node, exp_id=exp_id, data_id=data_id)
+                    message = result if isinstance(result, str) else str(result)
+                    self.log_message.emit(
+                        f"完成 {STEP_LABEL.get(step_id, step_id)} {data_id}:"
+                        f" {message}"
+                    )
             except Exception as exc:  # noqa: BLE001 - 错误统一回传 UI
                 self.log_message.emit(
                     f"失败 {STEP_LABEL.get(step_id, step_id)}: {exc}"

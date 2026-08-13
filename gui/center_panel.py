@@ -30,6 +30,7 @@ class CenterPanel(QWidget):
     manual_open_requested = pyqtSignal(str)
     import_data_requested = pyqtSignal(str)  # exp_id(兼容:打开导入表单)
     import_options_requested = pyqtSignal(str, str, str, bool)  # (exp_id, name, source, copy)
+    batch_import_requested = pyqtSignal(str, list)  # (exp_id, folders)
     create_experiment_requested = pyqtSignal(str)  # 实验标题
     new_project_requested = pyqtSignal(str)  # 项目名称
     open_project_requested = pyqtSignal(str)  # 项目路径
@@ -61,6 +62,9 @@ class CenterPanel(QWidget):
         self.experiment_page = ExperimentDashboard()
         self.experiment_page.import_options_requested.connect(
             self.import_options_requested.emit
+        )
+        self.experiment_page.batch_import_requested.connect(
+            self.batch_import_requested.emit
         )
 
         self.stack = QStackedWidget()

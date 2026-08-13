@@ -391,7 +391,7 @@ def test_main_window_empty_state(qapp: QApplication) -> None:
 def test_tree_data_node_context_menu_actions(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Data 节点右键不再含功能项,仅删除/打开目录。"""
+    """Data 节点右键:删除/打开目录 + 批量组加入(不含生成步骤)。"""
     manager = _manager_with_experiment(tmp_path, monkeypatch)
     panel = ProjectTreePanel(manager)
     data_item = panel.tree.topLevelItem(0).child(0).child(0).child(0)
@@ -403,8 +403,9 @@ def test_tree_data_node_context_menu_actions(
     panel._on_context_menu_impl(menu, data_item)
     labels = [a.text() for a in menu.actions()]
     assert "生成 FID" not in labels and "生成谱图" not in labels
-    for action in menu.actions():
-        action.trigger()
+    assert "加入批量组..." in labels
+    delete_action = next(a for a in menu.actions() if a.text() == "删除数据")
+    delete_action.trigger()
     assert actions == [("delete", "d_001")]
     panel.close()
 
@@ -1017,6 +1018,7 @@ def test_run_step_uses_selected_data_id(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """B2G-002:run_step 传 data_id 时作用于选中数据(非首个)。"""
+    monkeypatch.setattr("threading.Thread", SyncThread)
     from gui.pipeline_panel import PipelinePanel
 
     manager = _manager_with_experiment(tmp_path, monkeypatch)

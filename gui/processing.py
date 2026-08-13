@@ -110,6 +110,42 @@ class ProcessingController:
             "warnings": list(getattr(result, "warnings", []) or []),
         }
 
+    def batch_import(self, exp_id: str, folders: list) -> dict:
+        """批量导入多个数据目录到实验,同一批数据标记同一 batch_id。
+
+        返回 {"batch_id", "results": [{folder, data_id, ok, error}]};
+        单个目录失败不阻断整批(结果中带 error 信息)。
+        """
+        from gui.pipeline_state import next_batch_id, set_batch_id
+
+        self._require_manager()
+        if self._manager.project is None:
+            raise RuntimeError("ProcessingController 未绑定项目(ProjectManager)")
+        entry = self._manager.project.experiment(exp_id)
+        if entry is None:
+            raise RuntimeError(f"实验不存在: {exp_id}")
+        batch = next_batch_id(self._manager, exp_id)
+        results: list[dict] = []
+        for folder in folders:
+            item: dict = {
+                "folder": str(folder),
+                "data_id": "",
+                "ok": False,
+                "error": "",
+            }
+            try:
+                result = self.import_data(entry, str(folder))
+                data_id = str(result.get("data_id", "") or "")
+                item["data_id"] = data_id
+                if data_id:
+                    set_batch_id(self._manager, exp_id, data_id, batch)
+                item["ok"] = True
+            except Exception as exc:  # noqa: BLE001 - 单个失败不阻断整批
+                item["error"] = f"{type(exc).__name__}: {exc}"
+            results.append(item)
+        self._manager.save()
+        return {"batch_id": batch, "results": results}
+
     def generate_fid(self, data, exp_id: str | None = None, data_id: str | None = None) -> str:
         """第 2 步:生成 FID(backend.convert_to_fid),返回 fid 路径。"""
         from workflow.stepwise import generate_fid as stepwise_fid

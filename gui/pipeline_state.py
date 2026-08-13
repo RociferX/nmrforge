@@ -20,6 +20,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -62,16 +63,27 @@ def pipeline_state_path(manager: Any, exp_id: str, data_id: str) -> Path:
 
 
 def load_pipeline_state(manager: Any, exp_id: str, data_id: str) -> dict:
-    """读取指纹状态(缺失/损坏返回空状态,不抛异常)。"""
+    """读取指纹状态(缺失/损坏返回空状态,不抛异常)。
+
+    除 steps 外保留 batch 等额外顶层键(批量组标记等 GUI 侧元数据)。
+    """
     path = pipeline_state_path(manager, exp_id, data_id)
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {"version": STATE_VERSION, "steps": {}}
-    steps = raw.get("steps") if isinstance(raw, dict) else None
+    if not isinstance(raw, dict):
+        return {"version": STATE_VERSION, "steps": {}}
+    steps = raw.get("steps")
+    extra = {
+        key: value
+        for key, value in raw.items()
+        if key not in ("version", "steps")
+    }
     return {
         "version": STATE_VERSION,
         "steps": steps if isinstance(steps, dict) else {},
+        **extra,
     }
 
 
@@ -275,12 +287,83 @@ def record_step_success(
 
 __all__ = [
     "STATE_FILENAME",
+    "batch_data_ids",
+    "batch_id",
+    "batch_ids_in_experiment",
+    "clear_batch_id",
     "file_fingerprint",
     "input_fingerprint",
     "load_pipeline_state",
+    "next_batch_id",
     "pipeline_state_path",
     "raw_fingerprint",
     "record_step_success",
     "save_pipeline_state",
     "script_fingerprint",
+    "set_batch_id",
 ]
+# ----------------------------------------------------------------------
+# 批量组标记(GUI 侧):同一次批量导入的数据绑定同一 batch_id
+# ----------------------------------------------------------------------
+def batch_id(manager: Any, exp_id: str, data_id: str) -> str:
+    """数据所属批量组编号(空串 = 单一数据未入组)。"""
+    state = load_pipeline_state(manager, exp_id, data_id)
+    value = state.get("batch", "")
+    return str(value) if value else ""
+
+
+def set_batch_id(
+    manager: Any, exp_id: str, data_id: str, batch_id_value: str
+) -> None:
+    """把数据加入批量组(空值 = 移出组)。"""
+    state = load_pipeline_state(manager, exp_id, data_id)
+    state["batch"] = str(batch_id_value or "")
+    save_pipeline_state(manager, exp_id, data_id, state)
+
+
+def clear_batch_id(manager: Any, exp_id: str, data_id: str) -> None:
+    """把数据移出批量组(恢复单一数据)。"""
+    set_batch_id(manager, exp_id, data_id, "")
+
+
+def batch_ids_in_experiment(manager: Any, exp_id: str) -> list[str]:
+    """实验内已存在的批量组编号(B1, B2, ...)。"""
+    ids: list[str] = []
+    if manager.project is None:
+        return ids
+    entry = manager.project.experiment(exp_id)
+    if entry is None:
+        return ids
+    for data in entry.data:
+        bid = batch_id(manager, exp_id, getattr(data, "id", ""))
+        if bid and bid not in ids:
+            ids.append(bid)
+    return sorted(ids)
+
+
+def next_batch_id(manager: Any, exp_id: str) -> str:
+    """实验内下一个批量组编号(多次批量导入序号递增 B1, B2, ...)。"""
+    max_n = 0
+    for bid in batch_ids_in_experiment(manager, exp_id):
+        match = re.fullmatch(r"B(\d+)", bid)
+        if match:
+            max_n = max(max_n, int(match.group(1)))
+    return f"B{max_n + 1}"
+
+
+def batch_data_ids(
+    manager: Any, exp_id: str, batch_id_value: str
+) -> list[str]:
+    """实验内同一批量组绑定的数据 id 列表(空组返回空)。"""
+    ids: list[str] = []
+    if manager.project is None:
+        return ids
+    entry = manager.project.experiment(exp_id)
+    if entry is None:
+        return ids
+    for data in entry.data:
+        data_id = getattr(data, "id", "")
+        if batch_id(manager, exp_id, data_id) == batch_id_value:
+            ids.append(data_id)
+    return ids
+
