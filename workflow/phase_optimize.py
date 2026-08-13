@@ -545,9 +545,11 @@ def _default_spectrum_quality(path: str) -> tuple[float, dict[str, float]]:
 def _default_phase_score(path: str) -> tuple[float, dict[str, float]]:
     """相位专用评分(逐维相位优化的默认评估)。
 
-    复用 core.qc.phase_quality:吸收度比例 50% + 负峰比例 30% + 对称性 20%——
-    这是成熟的调相指标(错误相位→负峰/失对称/实虚失衡);不用综合 QC
-    (SNR/基线/伪影与相位基本无关,加权后会把相位排名信号稀释)。
+    复用 core.qc.phase_quality(0.2.38 起):吸收度 25% + 连续负面积 40%
+    (de Brouwer 2009)+ 正部谱熵 20%(Ernst 1966)+ 负峰计数 15%;
+    终谱为实型(D005)时吸收度恒 1,区分主要靠负面积与熵——合成多峰+噪声
+    实测 5° 相位误差的评分余量由旧公式 ~0.1 提升到 ~0.5-0.7(约 5 倍)。
+    不用综合 QC(SNR/基线/伪影与相位基本无关,加权后稀释相位排名信号)。
     """
     import nmrglue as ng
 

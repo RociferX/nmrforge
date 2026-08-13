@@ -507,6 +507,11 @@ def test_default_phase_score_ranks_phase_quality(tmp_path: Path) -> None:
     assert (
         comp_bad["negative_peak_fraction"] > comp_good["negative_peak_fraction"]
     )
+    # 0.2.38 新指标:连续负面积与谱熵方向一致(错相惩罚更强)
+    assert (
+        comp_bad["negative_area_fraction"] > comp_good["negative_area_fraction"]
+    )
+    assert comp_bad["entropy"] > comp_good["entropy"]
 
 
 
