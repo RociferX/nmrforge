@@ -41,11 +41,11 @@ class _FakeBackend:
     ) -> dict:
         self.calls.append("process")
         self.last_params = params
-        p1 = 0
+        p0, p1 = 0, 0
         if direct_phase_override:
-            # 逐维搜索时覆盖含多个轴,取末轴(正在搜索的轴)的 p1
-            p1 = list(direct_phase_override.values())[-1][1]
-        spectrum = Path(self.work_dir) / f"out_p1{int(p1)}.ft2"
+            # 逐维搜索时覆盖含多个轴,取末轴(正在搜索的轴)的 p0/p1
+            p0, p1 = list(direct_phase_override.values())[-1]
+        spectrum = Path(self.work_dir) / f"out_p0{int(p0)}_p1{int(p1)}.ft2"
         self._touch(spectrum)
         return {
             "success": True,
@@ -148,8 +148,10 @@ def test_generate_fid_failure_raises(tmp_path: Path, bruker_dir: Path) -> None:
 
 
 def _score_from_path(path: str) -> tuple[float, dict[str, float]]:
-    p1 = float(path.split("p1")[1].split(".")[0])
-    return 100.0 - abs(p1 - 30.0), {"snr": 0.0}
+    p0 = float(path.split("_p0")[1].split("_")[0])
+    p1 = float(path.split("_p1")[1].split(".")[0])
+    # p0 为弱维度(真实相位评分中 p0 影响小但非零)
+    return 100.0 - abs(p1 - 30.0) - 0.02 * abs(p0), {"snr": 0.0}
 
 
 def test_optimize_phase_brute_force(tmp_path: Path, bruker_dir: Path) -> None:
@@ -169,7 +171,7 @@ def test_optimize_phase_brute_force(tmp_path: Path, bruker_dir: Path) -> None:
     # 逐维暴力:直接维 F2 → 间接维 F1,各粗 21 候选 + 多尺度细化(默认 5°)
     assert result["phase"]["F2"][1] == 30.0
     assert result["phase"]["F1"][1] == 30.0
-    assert result["spectrum_path"].endswith("out_p130.ft2")
+    assert result["spectrum_path"].endswith("out_p00_p130.ft2")
     assert backend.calls.count("process") >= 42
     assert result["optimized"] == ["F2", "F1"]
     assert result["skipped"] == []

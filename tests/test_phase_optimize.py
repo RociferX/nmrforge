@@ -284,11 +284,11 @@ class _OverrideBackend:
 
     def process(self, experiment, plan, direct_phase_override=None) -> dict:
         self.overrides.append(dict(direct_phase_override or {}))
-        # 逐维搜索时覆盖含多个轴,取末轴(正在搜索的轴)的 p1
-        p1 = list(direct_phase_override.values())[-1][1]
+        # 逐维搜索时覆盖含多个轴,取末轴(正在搜索的轴)的 p0/p1
+        p0, p1 = list(direct_phase_override.values())[-1]
         return {
             "success": True,
-            "spectrum_path": f"{self.work_dir}/out_p1{int(p1)}.ft2",
+            "spectrum_path": f"{self.work_dir}/out_p0{int(p0)}_p1{int(p1)}.ft2",
             "logs": [],
         }
 
@@ -302,18 +302,19 @@ class _OverrideBackend:
 
     def finalize_nus(self, experiment, phases=None, work_dir=None, baseline=None) -> dict:
         self.overrides.append(dict(phases or {}))
-        p1 = list((phases or {}).values())[-1][1]
+        p0, p1 = list((phases or {}).values())[-1]
         return {
             "success": True,
-            "spectrum_path": f"{self.work_dir}/out_p1{int(p1)}.ft2",
+            "spectrum_path": f"{self.work_dir}/out_p0{int(p0)}_p1{int(p1)}.ft2",
             "logs": [],
         }
 
 
 def _score_from_path(path: str) -> tuple[float, dict[str, float]]:
-    """评分函数:从路径解析 p1,真值 30° 处得分最高。"""
-    p1 = float(path.split("p1")[1].split(".")[0])
-    return 100.0 - abs(p1 - 30.0), {"snr": 0.0}
+    """评分函数:从路径解析 p0/p1,真值 30° 处得分最高(p0 弱依赖)。"""
+    p0 = float(path.split("_p0")[1].split("_")[0])
+    p1 = float(path.split("_p1")[1].split(".")[0])
+    return 100.0 - abs(p1 - 30.0) - 0.02 * abs(p0), {"snr": 0.0}
 
 
 def test_brute_force_direct_scores_passes_override(
@@ -534,7 +535,7 @@ def test_optimize_phase_sequential_multiscale_refine(
     backend = _OverrideBackend(tmp_path / "work")
 
     def _peak12(path: str) -> tuple[float, dict[str, float]]:
-        p1 = float(path.split("p1")[1].split(".")[0])
+        p1 = float(path.split("_p1")[1].split(".")[0])
         return 100.0 - abs(p1 - 12.0), {}
 
     result = optimize_phase_sequential(

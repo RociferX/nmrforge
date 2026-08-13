@@ -320,12 +320,14 @@ def optimize_phase_brute_force(
                 {"type": "sine_bell_squared"},
                 {"type": "gaussian", "lb": 5.0, "gb": 0.1},
             ]
-            zf_modes = ["auto", "none"]
+            zf_modes = ["auto"]  # 0.2.47:移除 none——填零关闭会减半数字
+            # 分辨率且综合 QC 此前不惩罚(审查结论);候选另经 min_shape
+            # 分辨率下限过滤,防未来回归。
             max_bytes = 256 * 1024 * 1024
             axes = [dim.logical_axis for dim in experiment.dimensions]
 
             def _est_bytes(zf_mode: str) -> int:
-                from backend.script_generator import zero_fill_plan
+                from backend.script_generator import effective_td, zero_fill_plan
 
                 zf_param = (
                     {a: {"mode": "none"} for a in axes}
@@ -333,17 +335,34 @@ def optimize_phase_brute_force(
                     else {a: {"mode": "auto"} for a in axes}
                 )
                 plan = zero_fill_plan(experiment, zf_param)
+                td = effective_td(experiment)
                 total = 1
-                for axis in axes:
+                for index, axis in enumerate(axes):
                     cfg = plan.get(axis, {})
-                    total *= int(cfg.get("size") or 1)
+                    size = int(cfg.get("size") or 0)
+                    if size <= 0:
+                        # mode=none:按有效 TD 估算(消除恒 4 字节退化)
+                        size = int(td[index]) if index < len(td) else 1
+                    total *= max(size, 1)
                 return total * 4
+
+            # 分辨率下限 = auto 填零计划的目标 SI(直接维 2×TD、间接维动态)
+            from backend.script_generator import zero_fill_plan
+
+            auto_plan = zero_fill_plan(
+                experiment, {a: {"mode": "auto"} for a in axes}
+            )
+            min_shape = tuple(
+                int(auto_plan.get(a, {}).get("size") or 1) for a in axes
+            )
 
             def _score_path(path: str) -> float:
                 import nmrglue as ng
 
                 _dic, data = ng.pipe.read(str(path))
-                q = spectrum_quality.evaluate(np.asarray(data))
+                q = spectrum_quality.evaluate(
+                    np.asarray(data), min_shape=min_shape
+                )
                 return float(q.score.overall)
 
             try:
@@ -394,10 +413,12 @@ def optimize_phase_brute_force(
                     )
             if candidates:
                 best_score = max(c[2] for c in candidates)
-                # 同分容忍 0.5 分内选最小文件(填零注意文件大小)
-                best = min(
+                # 同分容忍 0.5 分内选高分辨率优先(0.2.47,审查结论:填零不改变
+                # 真实频率分辨率,文件大小不再是优化目标;低分辨率已由 min_shape
+                # 惩罚项排除)
+                best = max(
                     (c for c in candidates if c[2] >= best_score - 0.5),
-                    key=lambda c: c[3],
+                    key=lambda c: (c[3], -c[2]),
                 )
                 processing_result = {
                     "window": best[0],
@@ -407,7 +428,7 @@ def optimize_phase_brute_force(
                 }
                 base_bytes = _est_bytes("auto")
                 better = best[2] > base_score + 0.5 or (
-                    best[2] >= base_score - 0.5 and best[3] < base_bytes
+                    best[2] >= base_score - 0.5 and best[3] >= base_bytes - 1
                 )
                 if better:
                     plan = select_method(experiment)
