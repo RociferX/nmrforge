@@ -547,23 +547,38 @@ class SpectrumViewer(QWidget):
         self._click_mode = mode if mode in ("select", "add", "delete") else "select"
 
     def _peak_xy(self, peak: dict) -> tuple[float, float]:
-        """把峰行映射到当前显示平面的 x/y ppm(按主谱轴标签)。
+        """把峰行映射到当前显示平面的 x/y ppm(按轴维序 F1/F2/F3)。
 
-        2D 峰表用 H_shift/N_shift;3D 峰表用 F1/F2/F3_shift,按当前切片
-        平面(主谱 x/y 轴标签)取对应坐标,其余情况回退 x_ppm/y_ppm。
+        轴标签可能为核名(H/N/C...),因此用轴在谱中的维序(F1=0/F2=1/F3=2)
+        选峰表列;2D 峰表回退 H_shift/N_shift,其余情况回退 x_ppm/y_ppm。
         """
         x_axis = self._primary.x_axis if self._primary is not None else None
         y_axis = self._primary.y_axis if self._primary is not None else None
 
-        def _pick(axis_label: str | None, fallback: str, alt: str) -> float:
-            if axis_label in ("F1", "F2", "F3"):
-                value = peak.get(f"{axis_label}_shift")
+        def _dim_of(axis) -> int:
+            if self._primary is None or axis is None:
+                return -1
+            dims = getattr(self._primary, "dim_indices", None)
+            try:
+                local = self._primary.axes.index(axis)
+            except ValueError:
+                return -1
+            if dims is not None:
+                try:
+                    return int(dims[local])
+                except (TypeError, IndexError):
+                    return -1
+            return local
+
+        def _pick(dim: int, fallback: str, alt: str) -> float:
+            if 0 <= dim <= 2:
+                value = peak.get(f"F{dim + 1}_shift")
                 if value is not None and str(value) != "":
                     return float(value)
             return float(peak.get(fallback, peak.get(alt, 0.0)))
 
-        x_ppm = _pick(x_axis.label if x_axis else None, "H_shift", "x_ppm")
-        y_ppm = _pick(y_axis.label if y_axis else None, "N_shift", "y_ppm")
+        x_ppm = _pick(_dim_of(x_axis), "H_shift", "x_ppm")
+        y_ppm = _pick(_dim_of(y_axis), "N_shift", "y_ppm")
         return x_ppm, y_ppm
 
     def _apply_peak_items(self, show_labels: bool = True) -> None:
