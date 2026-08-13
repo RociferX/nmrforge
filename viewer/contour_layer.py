@@ -101,15 +101,17 @@ class ContourLayer(pg.GraphicsObject):
         fig = plt.figure()
         try:
             cs = plt.contour(smooth, levels=levels)
-            height = smooth.shape[0]
+            # view y 直接取 matplotlib 行号(数据行 0 → view y=0);
+            # 配合视图 invertY(True)(view y 增大=屏幕向下),
+            # 数据行 0(高 ppm)显示在屏幕顶部。
             for level, segs in zip(cs.levels, cs.allsegs):
                 target = path_neg if level < 0 else path_pos
                 for seg in segs:
                     if len(seg) < 2:
                         continue
-                    target.moveTo(seg[0, 0] / zoom, (height - seg[0, 1]) / zoom)
+                    target.moveTo(seg[0, 0] / zoom, seg[0, 1] / zoom)
                     for point in seg[1:]:
-                        target.lineTo(point[0] / zoom, (height - point[1]) / zoom)
+                        target.lineTo(point[0] / zoom, point[1] / zoom)
         finally:
             plt.close(fig)
         self._path = path_pos

@@ -60,9 +60,9 @@ class SpectrumViewer(QWidget):
         self.plot.setBackground("w")
         self.plot.setMenuEnabled(False)
         self.plot.getViewBox().setMouseMode(pg.ViewBox.RectMode)
-        # nmrDraw/Poky 显示约定:1H 高 ppm 在左、15N 高 ppm 在下
-        # 数据列 0 = 高 ppm(ppm 随索引递减):默认 x 轴列 0 在左即满足;
-        # 因此只反转 y(行 0 = 高 ppm 放到下方),不反转 x(否则高 ppm 会到右)。
+        # 显示约定(用户 0.2.53 反馈修正):1H 高 ppm 在左、15N 高 ppm 在上;
+        # 数据列 0 = 高 ppm(x 列 0 在左);contour 不翻转(view y = 数据行),
+        # invertY(True) 使 view y 增大=屏幕向下 → 行 0(高 ppm)显示在顶部。
         self.plot.getViewBox().invertY(True)
 
         self.layers: list[ContourLayer] = []
@@ -394,7 +394,7 @@ class SpectrumViewer(QWidget):
             self._setup_strip_axes()
             rows, cols = self._primary.data.shape
             self._update_strips(rows // 2, cols // 2)
-            self._move_crosshair(cols // 2, rows - rows // 2)
+            self._move_crosshair(cols // 2, rows // 2)
         else:
             self._restore_strips()
 
@@ -432,7 +432,7 @@ class SpectrumViewer(QWidget):
         )
 
     def _move_crosshair(self, x: float, y: float) -> None:
-        """移动十字线到视图坐标 (x=列, y=view y;数据行 r 位于 view y=rows-r)。"""
+        """移动十字线到视图坐标 (x=列, y=view y;view y 即数据行)。"""
         if not self._strips_active:
             return
         self._crosshair_v.setPos(x)
@@ -575,8 +575,8 @@ class SpectrumViewer(QWidget):
         for row, peak in enumerate(self._peaks):
             x_ppm, y_ppm = self._peak_xy(peak)
             xs.append(float(x_axis.index_at(x_ppm)))
-            # contour 把数据行 r 画在 view y = rows-r:峰标记也要翻转
-            ys.append(float(self._primary.data.shape[0] - y_axis.index_at(y_ppm)))
+            # view y 即数据行:峰标记按 y 轴数据行放置,与 contour 对齐
+            ys.append(float(y_axis.index_at(y_ppm)))
             sizes.append(16.0 if row == self._selected_peak else 10.0)
         self.peak_item.setData(x=xs, y=ys, size=sizes)
 
@@ -615,16 +615,14 @@ class SpectrumViewer(QWidget):
             self.peak_clicked.emit(row)
 
     def _view_to_data(self, point) -> tuple[int, int]:
-        """视图坐标 → 数据下标 (col, row);contour 把数据行 r 画在
-        view y = rows - r,因此鼠标的 view y 需翻转回数据行。
+        """视图坐标 → 数据下标 (col, row);contour 不翻转,view y 即数据行。
         超出范围返回 (-1, -1)。"""
         if self._primary is None:
             return -1, -1
         x_axis = self._primary.x_axis
         y_axis = self._primary.y_axis
-        rows = self._primary.data.shape[0]
         xi = int(round(point.x()))
-        yi = rows - int(round(point.y()))
+        yi = int(round(point.y()))
         if not (0 <= xi < x_axis.size and 0 <= yi < y_axis.size):
             return -1, -1
         return xi, yi

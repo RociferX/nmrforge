@@ -123,19 +123,15 @@ def test_viewer_1d_strips_toggle_and_update(qapp: QApplication) -> None:
     np.testing.assert_allclose(np.asarray(yt), spectrum.data[40, :])
     xr, _yr = viewer.strip_right_curve.getData()
     np.testing.assert_allclose(np.asarray(xr), spectrum.data[:, 120])
-    # 鼠标在数据 (120, 40) 处(view y = rows-40):条带应显示 data[40,:] 与 data[:,120]
-    scene_pt = viewer.plot.getViewBox().mapViewToScene(
-        QPointF(120.0, spectrum.data.shape[0] - 40)
-    )
+    # 鼠标在数据 (120, 40) 处(view y 即数据行):条带应显示 data[40,:] 与 data[:,120]
+    scene_pt = viewer.plot.getViewBox().mapViewToScene(QPointF(120.0, 40))
     viewer._on_mouse_moved(scene_pt)
     _xt, yt = viewer.strip_top_curve.getData()
     np.testing.assert_allclose(np.asarray(yt), spectrum.data[40, :])
     xr, _yr = viewer.strip_right_curve.getData()
     np.testing.assert_allclose(np.asarray(xr), spectrum.data[:, 120])
     assert viewer._crosshair_v.pos().x() == pytest.approx(120.0)
-    assert viewer._crosshair_h.pos().y() == pytest.approx(
-        spectrum.data.shape[0] - 40
-    )
+    assert viewer._crosshair_h.pos().y() == pytest.approx(40)
     # 关闭:条带与十字线隐藏
     viewer.set_1d_mode(False)
     assert not viewer._strips_active
@@ -168,25 +164,24 @@ def test_viewer_layer_delete(qapp: QApplication) -> None:
     viewer.close()
 
 
-def test_viewer_view_to_data_y_flip(qapp: QApplication) -> None:
-    """视图坐标 → 数据下标:view y=rows-r 对应数据行 r,越界返回 (-1,-1)。"""
+def test_viewer_view_to_data_maps_view_y_to_row(qapp: QApplication) -> None:
+    """视图坐标即数据下标:view y=行号,越界返回 (-1,-1)。"""
     spectrum = _synthetic_spectrum()
     viewer = SpectrumViewer()
     viewer.add_spectrum(spectrum)
     rows, cols = spectrum.data.shape
-    assert viewer._view_to_data(QPointF(120.0, rows - 40)) == (120, 40)
-    assert viewer._view_to_data(QPointF(0.0, rows)) == (0, 0)
-    assert viewer._view_to_data(QPointF(0.0, 0)) == (-1, -1)
-    assert viewer._view_to_data(QPointF(cols + 5, rows - 40)) == (-1, -1)
+    assert viewer._view_to_data(QPointF(120.0, 40)) == (120, 40)
+    assert viewer._view_to_data(QPointF(0.0, 0)) == (0, 0)
+    assert viewer._view_to_data(QPointF(0.0, rows)) == (-1, -1)
+    assert viewer._view_to_data(QPointF(cols + 5, 40)) == (-1, -1)
     viewer.close()
 
 
-def test_viewer_peaks_y_flip_alignment(qapp: QApplication) -> None:
-    """峰标记 view y 应与 contour 一致:数据行 r → view y = rows - r。"""
+def test_viewer_peaks_aligned_with_contour(qapp: QApplication) -> None:
+    """峰标记 view y 即数据行(与 contour 一致)。"""
     spectrum = _synthetic_spectrum()
     viewer = SpectrumViewer()
     viewer.add_spectrum(spectrum)
-    rows = spectrum.data.shape[0]
     viewer.set_peaks(
         [
             {
@@ -196,7 +191,7 @@ def test_viewer_peaks_y_flip_alignment(qapp: QApplication) -> None:
         ]
     )
     assert float(viewer.peak_item.data["x"][0]) == 120.0
-    assert float(viewer.peak_item.data["y"][0]) == rows - 40
+    assert float(viewer.peak_item.data["y"][0]) == 40
     viewer.close()
 
 
@@ -216,15 +211,12 @@ class _FakeClickEvent:
         return self._pos
 
 
-def test_viewer_plot_click_y_flip(qapp: QApplication) -> None:
+def test_viewer_plot_click_strips_and_select(qapp: QApplication) -> None:
     """点击数据 (120, 40) 的屏幕位置:条带显示正确行/列,且能选中该峰。"""
     spectrum = _synthetic_spectrum()
     viewer = SpectrumViewer()
     viewer.add_spectrum(spectrum)
-    rows = spectrum.data.shape[0]
-    scene_pt = viewer.plot.getViewBox().mapViewToScene(
-        QPointF(120.0, rows - 40)
-    )
+    scene_pt = viewer.plot.getViewBox().mapViewToScene(QPointF(120.0, 40))
     viewer.set_peaks(
         [
             {

@@ -202,7 +202,8 @@ def test_viewer_nearest_peak(qapp: QApplication) -> None:
 
 
 def test_viewer_axis_direction_nmrdraw(qapp: QApplication) -> None:
-    """nmrDraw 约定:1H 高 ppm 在左(x 列 0 靠左),15N 高 ppm 在下(y 行 0 靠下)。"""
+    """显示约定(用户 0.2.53 反馈):1H 高 ppm 在左(x 列 0 靠左),
+15N 高 ppm 在上(y 行 0 靠上)。"""
     import pyqtgraph as pg
 
     viewer = SpectrumViewer()
@@ -213,10 +214,10 @@ def test_viewer_axis_direction_nmrdraw(qapp: QApplication) -> None:
     p0 = vb.mapViewToScene(pg.QtCore.QPointF(0, 0))
     p1 = vb.mapViewToScene(pg.QtCore.QPointF(nx - 1, 0))
     assert p0.x() < p1.x()  # 列 0(高 ppm)在左
-    # contour 把行 0(高 ppm)画在数据 y 最大处;invertY 后数据 y 最大在底部
+    # view y 即数据行:行 0(高 ppm)= view y=0 在顶部,行 ny-1(低 ppm)在底部
     q0 = vb.mapViewToScene(pg.QtCore.QPointF(0, 0))
     q1 = vb.mapViewToScene(pg.QtCore.QPointF(0, ny - 1))
-    assert q1.y() > q0.y()  # 行 0(高 ppm)对应数据 y 最大,显示在底部
+    assert q0.y() < q1.y()  # 行 0(高 ppm)显示在顶部,行 ny-1(低 ppm)在底部
     viewer.close()
 
 
