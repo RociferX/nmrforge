@@ -46,6 +46,7 @@ from gui.dialogs import (
 )
 from gui.log_panel import LogPanel
 from gui.pipeline_panel import (
+    STEP_LABEL,
     compute_data_step_statuses,
     compute_step_statuses,
 )
@@ -178,6 +179,10 @@ class MainWindow(QMainWindow):
             self._import_data_with_options
         )
         self.center_panel.batch_import_requested.connect(self._batch_import)
+        self.pipeline.manual_with_params_requested.connect(
+            self._open_manual_with_params
+        )
+        self.pipeline.view_log_requested.connect(self._on_view_step_log)
         self.center_panel.create_experiment_requested.connect(
             self._create_experiment_with_title
         )
@@ -595,6 +600,39 @@ class MainWindow(QMainWindow):
 
     def _manual_fid_menu(self) -> None:
         self._open_manual_dialog("fid")
+
+    def _open_manual_with_params(self, step_id: str, params: dict) -> None:
+        """用最近运行参数打开人工参数表格(参数预填)。"""
+        exp_id = self.project_tree.current_experiment_id()
+        if not exp_id or self.manager.project is None:
+            return
+        entry = self.manager.project.experiment(exp_id)
+        if entry is None:
+            return
+        data_node = self._current_data_node(entry)
+        if data_node is None:
+            return
+        data_id = getattr(data_node, "id", exp_id)
+        label = f"{entry.title or entry.id} ({exp_id})"
+        schema = self.controller.param_schema()
+        defaults = schema.setdefault("default", {})
+        if isinstance(defaults, dict):
+            for key, value in (params or {}).items():
+                if key in defaults:
+                    defaults[key] = value
+        dialog = ParameterTableDialog(self, label, params=schema)
+        dialog.render_requested.connect(
+            lambda p: self._render_scripts_and_edit(
+                p, data_node, exp_id, data_id, label
+            )
+        )
+        dialog.exec()
+
+    def _on_view_step_log(self, step_id: str) -> None:
+        """定位日志面板:追加标记行并展开(append 自动滚底)。"""
+        self._append_log(
+            f"── {STEP_LABEL.get(step_id, step_id)} 运行日志(最近一次)──"
+        )
 
     def _open_manual_dialog(self, step_id: str) -> None:
         """人工处理入口:按步骤打开参数表格/脚本编辑器/fid 编辑器。"""

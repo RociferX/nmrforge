@@ -14,8 +14,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
+    QFrame,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -254,7 +255,12 @@ def _node_step_statuses(
                         artifact
                     ):
                         outdated = True
-        if done and not outdated:
+        failed_run = _last_run_for(
+            manager, exp_id, data_id, _step_refs(step_id)
+        )
+        if failed_run is not None and failed_run.status == 'failed':
+            statuses[step_id] = 'FAILED'
+        elif done and not outdated:
             statuses[step_id] = 'SUCCESS'
         elif done:
             statuses[step_id] = 'OUTDATED'
@@ -368,23 +374,66 @@ def _lock_reasons(statuses: dict[str, str]) -> dict[str, str]:
     return reasons
 
 
+def _step_refs(step_id: str) -> tuple[str, ...]:
+    """步骤 → 可能的工作流 refs(查最近运行用)。"""
+    return {
+        "import": ("import",),
+        "fid": ("convert_to_fid", "manual_fid"),
+        "spectrum": ("process", "reconstruct_nus", "manual_process", "manual_nus"),
+        "smile": ("smile_optimize",),
+        "peaks": ("pick_peaks", "manual_peaks"),
+        "analysis": ("analyze",),
+    }.get(step_id, ())
+
+
+def _last_run_for(
+    manager: ProjectManager, exp_id: str, data_id: str, refs: tuple[str, ...]
+):
+    """数据在指定步骤 refs 下的最近一次 WorkflowRun(无则 None)。"""
+    if manager.project is None:
+        return None
+    for candidate in reversed(manager.project.workflow_runs):
+        if candidate.experiment_id != exp_id:
+            continue
+        if candidate.workflow_ref not in refs:
+            continue
+        if (candidate.inputs or {}).get("data_id", "") not in ("", data_id):
+            continue
+        return candidate
+    return None
+
+
+def _format_params(params: dict) -> str:
+    return ", ".join(f"{key}={value}" for key, value in sorted(params.items()))
+
+
 class PipelineStepRow(QWidget):
-    """单个步骤行:状态图标 + 名称 + 描述 + 运行/人工入口按钮。"""
+    """单个步骤行:状态图标 + 名称 + 描述 + 运行/人工入口 + 内嵌详情。
+
+    点击行展开/收起详情(输入产物、运行记录、参数、脚本快照);LOCKED /
+    OUTDATED / FAILED 原因灰字直显;FAILED 提供「查看日志」「重试」。
+    """
 
     run_requested = pyqtSignal(str)  # step_id
     manual_requested = pyqtSignal(str)  # step_id:打开人工参数表格/脚本编辑器
     report_requested = pyqtSignal(str)  # step_id:分析完成后打开报告页
+    detail_toggled = pyqtSignal(str)  # step_id:点击行切换详情
+    view_log_requested = pyqtSignal(str)  # step_id:定位日志面板
+    manual_with_params_requested = pyqtSignal(str)  # step_id:以此参数打开人工编辑器
 
     def __init__(
         self, step_id: str, label: str, description: str, parent: QWidget | None = None
     ) -> None:
         super().__init__(parent)
         self.step_id = step_id
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(4, 2, 4, 2)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(4, 2, 4, 2)
+        outer.setSpacing(0)
+
+        header = QHBoxLayout()
         self.icon_label = QLabel()
         self.icon_label.setFixedWidth(24)
-        layout.addWidget(self.icon_label)
+        header.addWidget(self.icon_label)
         text_box = QVBoxLayout()
         self.name_label = QLabel(label)
         self.name_label.setStyleSheet("font-weight: bold;")
@@ -393,27 +442,86 @@ class PipelineStepRow(QWidget):
         self.desc_label.setWordWrap(True)
         text_box.addWidget(self.name_label)
         text_box.addWidget(self.desc_label)
-        layout.addLayout(text_box, 1)
+        header.addLayout(text_box, 1)
         self.status_label = QLabel("")
-        layout.addWidget(self.status_label)
+        header.addWidget(self.status_label)
         self.run_button = QPushButton("运行")
         self.run_button.setVisible(False)
         self.run_button.clicked.connect(lambda: self.run_requested.emit(self.step_id))
-        layout.addWidget(self.run_button)
+        header.addWidget(self.run_button)
         self.report_button = QPushButton("报告")
         self.report_button.setToolTip("查看当前数据的报告产物(report/ 目录)")
         self.report_button.setVisible(False)
         self.report_button.clicked.connect(
             lambda: self.report_requested.emit(self.step_id)
         )
-        layout.addWidget(self.report_button)
+        header.addWidget(self.report_button)
         self.manual_button = QPushButton("人工")
-        self.manual_button.setToolTip("人工参数表格 / 脚本编辑器(骨架)")
+        self.manual_button.setToolTip("人工参数表格 / 脚本编辑器")
         self.manual_button.setVisible(False)
         self.manual_button.clicked.connect(
             lambda: self.manual_requested.emit(self.step_id)
         )
-        layout.addWidget(self.manual_button)
+        header.addWidget(self.manual_button)
+        outer.addLayout(header)
+
+        self.reason_label = QLabel("")
+        self.reason_label.setStyleSheet("color: #888;")
+        self.reason_label.setWordWrap(True)
+        self.reason_label.setVisible(False)
+        outer.addWidget(self.reason_label)
+
+        self.detail_frame = QFrame()
+        self.detail_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        self.detail_frame.setVisible(False)
+        detail_layout = QVBoxLayout(self.detail_frame)
+        self.detail_label = QLabel("")
+        self.detail_label.setWordWrap(True)
+        self.detail_label.setStyleSheet("color: #333;")
+        detail_layout.addWidget(self.detail_label)
+        detail_buttons = QHBoxLayout()
+        self.manual_with_params_button = QPushButton("以此参数打开人工编辑器")
+        self.manual_with_params_button.setVisible(False)
+        self.manual_with_params_button.setToolTip(
+            "用本次运行的参数打开人工参数表格(可修改后重新渲染/运行)"
+        )
+        self.manual_with_params_button.clicked.connect(
+            lambda: self.manual_with_params_requested.emit(self.step_id)
+        )
+        detail_buttons.addWidget(self.manual_with_params_button)
+        self.view_log_button = QPushButton("查看日志")
+        self.view_log_button.setVisible(False)
+        self.view_log_button.clicked.connect(
+            lambda: self.view_log_requested.emit(self.step_id)
+        )
+        detail_buttons.addWidget(self.view_log_button)
+        self.retry_button = QPushButton("重试")
+        self.retry_button.setVisible(False)
+        self.retry_button.clicked.connect(
+            lambda: self.run_requested.emit(self.step_id)
+        )
+        detail_buttons.addWidget(self.retry_button)
+        detail_layout.addLayout(detail_buttons)
+        outer.addWidget(self.detail_frame)
+
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def mousePressEvent(self, event) -> None:
+        """点击行(非按钮区域)切换详情展开/收起。"""
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.detail_toggled.emit(self.step_id)
+        super().mousePressEvent(event)
+
+    def set_detail(
+        self, text: str, params: dict | None = None, failed: bool = False
+    ) -> None:
+        """填充详情文本;params 非空时提供「以此参数打开人工编辑器」。"""
+        self.detail_label.setText(text)
+        self.manual_with_params_button.setVisible(
+            params is not None and self.step_id != "import"
+        )
+        self.view_log_button.setVisible(failed)
+        self.retry_button.setVisible(failed)
 
     def set_status(self, status: str, reason: str = "") -> None:
         icon = STATUS_ICON.get(status, "·")
@@ -423,6 +531,12 @@ class PipelineStepRow(QWidget):
         if reason:
             tooltip += f"\n{reason}"
         self.status_label.setToolTip(tooltip)
+        # 原因直显:LOCKED/OUTDATED/FAILED 灰字(不只 tooltip)
+        if status in ("LOCKED", "OUTDATED", "FAILED"):
+            self.reason_label.setText(reason or STATUS_TEXT.get(status, status))
+            self.reason_label.setVisible(True)
+        else:
+            self.reason_label.setVisible(False)
         if status == "OUTDATED":
             self.run_button.setText("重新运行")
             self.run_button.setVisible(True)
@@ -449,6 +563,8 @@ class PipelinePanel(QWidget):
     manual_open_requested = pyqtSignal(str)  # step_id:打开人工处理对话框
     report_requested = pyqtSignal(str)  # step_id:打开报告页
     import_data_requested = pyqtSignal(str)  # exp_id:在当前实验下导入数据
+    manual_with_params_requested = pyqtSignal(str, dict)  # (step_id, params)
+    view_log_requested = pyqtSignal(str)  # step_id:定位日志面板
 
     def __init__(
         self,
@@ -488,6 +604,11 @@ class PipelinePanel(QWidget):
             row.run_requested.connect(self._on_run_requested)
             row.manual_requested.connect(self.manual_open_requested.emit)
             row.report_requested.connect(self.report_requested.emit)
+            row.detail_toggled.connect(self._toggle_step_detail)
+            row.view_log_requested.connect(self.view_log_requested.emit)
+            row.manual_with_params_requested.connect(
+                self._on_manual_with_params
+            )
             steps_box.addWidget(row)
             self._rows[step_id] = row
         steps_box.addStretch(1)
@@ -592,6 +713,15 @@ class PipelinePanel(QWidget):
         )
         for step_id, status in statuses.items():
             reason = reasons.get(step_id, "") or outdated.get(step_id, "")
+            if status == "FAILED":
+                run = _last_run_for(
+                    self.manager,
+                    self._current_exp_id,
+                    self._current_data_id,
+                    _step_refs(step_id),
+                )
+                if run is not None and run.message:
+                    reason = run.message
             self._rows[step_id].set_status(status, reason)
             # 导入数据为自动化步骤,无人工入口;其余处理步骤保留人工
             self._rows[step_id].manual_button.setVisible(
@@ -610,6 +740,57 @@ class PipelinePanel(QWidget):
         row = self._rows[step_id]
         if not row.run_button.isHidden():
             self._on_run_requested(step_id)
+
+    def _toggle_step_detail(self, step_id: str) -> None:
+        """点击步骤行展开/收起内嵌详情面板。"""
+        row = self._rows.get(step_id)
+        if row is None:
+            return
+        text, params, failed = self._step_detail(step_id)
+        row.set_detail(text, params=params, failed=failed)
+        row.detail_frame.setVisible(row.detail_frame.isHidden())
+
+    def _step_detail(self, step_id: str) -> tuple[str, dict | None, bool]:
+        """构建步骤详情(输入/产物/最近运行/参数/脚本快照);返回(文本, params, failed)。"""
+        exp_id = self._current_exp_id
+        data_id = self._current_data_id
+        if not (exp_id and data_id):
+            return "未选中数据", None, False
+        lines: list[str] = []
+        params: dict | None = None
+        failed = False
+        if step_id != "import":
+            try:
+                artifacts = _node_artifacts(self.manager, exp_id, data_id)
+                artifact = artifacts.get(step_id)
+                if artifact is not None:
+                    lines.append(f"产物: {artifact}")
+            except Exception:  # noqa: BLE001 - 产物解析失败忽略
+                pass
+        run = _last_run_for(self.manager, exp_id, data_id, _step_refs(step_id))
+        if run is None:
+            lines.append("运行记录: 无")
+        else:
+            failed = run.status == "failed"
+            lines.append(f"运行: {run.run_id} [{run.status}] {run.workflow_ref}")
+            if run.message:
+                lines.append(f"消息: {run.message}")
+            if run.outputs:
+                outs = " | ".join(f"{k}={v}" for k, v in run.outputs.items())
+                lines.append(f"输出: {outs}")
+            if run.snapshot_dir:
+                lines.append(f"快照目录: {run.snapshot_dir}")
+            if run.scripts:
+                lines.append(f"脚本快照: {'、'.join(run.scripts)}")
+            if run.params:
+                params = dict(run.params)
+                lines.append(f"参数: {_format_params(run.params)}")
+        return "\n".join(lines) if lines else "无详情", params, failed
+
+    def _on_manual_with_params(self, step_id: str) -> None:
+        """以最近运行参数打开人工编辑器(参数预填)。"""
+        _text, params, _failed = self._step_detail(step_id)
+        self.manual_with_params_requested.emit(step_id, params or {})
 
     def _on_run_requested(self, step_id: str) -> None:
         if not self._current_exp_id:
