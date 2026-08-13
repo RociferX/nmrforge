@@ -565,6 +565,8 @@ class PipelinePanel(QWidget):
     import_data_requested = pyqtSignal(str)  # exp_id:在当前实验下导入数据
     manual_with_params_requested = pyqtSignal(str, dict)  # (step_id, params)
     view_log_requested = pyqtSignal(str)  # step_id:定位日志面板
+    progress_updated = pyqtSignal(str)  # 批量进度文本(主线程更新标签)
+    batch_summary_requested = pyqtSignal(object)  # 批量汇总 dict
 
     def __init__(
         self,
@@ -597,6 +599,14 @@ class PipelinePanel(QWidget):
             lambda: self.import_data_requested.emit(self._current_exp_id)
         )
         layout.addWidget(self.import_button)
+        self.batch_progress_label = QLabel("")
+        self.batch_progress_label.setVisible(False)
+        self.batch_progress_label.setStyleSheet(
+            "color: #16a085; font-weight: bold; padding: 2px 0;"
+        )
+        self.batch_progress_label.setWordWrap(True)
+        layout.addWidget(self.batch_progress_label)
+        self.progress_updated.connect(self._on_progress_updated)
 
         steps_box = QVBoxLayout()
         for step_id, label, description, _deps in PIPELINE_STEPS:
@@ -741,6 +751,11 @@ class PipelinePanel(QWidget):
         if not row.run_button.isHidden():
             self._on_run_requested(step_id)
 
+    def _on_progress_updated(self, text: str) -> None:
+        """批量进度标签(主线程):空文本隐藏。"""
+        self.batch_progress_label.setText(text)
+        self.batch_progress_label.setVisible(bool(text))
+
     def _toggle_step_detail(self, step_id: str) -> None:
         """点击步骤行展开/收起内嵌详情面板。"""
         row = self._rows.get(step_id)
@@ -833,36 +848,70 @@ class PipelinePanel(QWidget):
                     if current_batch
                     else [target_data_id]
                 )
-                if len(data_ids) > 1:
+                total = len(data_ids)
+                results: list[dict] = []
+                if total > 1:
                     self.log_message.emit(
-                        f"批量组 {current_batch}: 对 {len(data_ids)} 个数据依次"
+                        f"批量组 {current_batch}: 对 {total} 个数据依次"
                         f" {STEP_LABEL.get(step_id, step_id)}"
                     )
-                for data_id in data_ids:
+                for index, data_id in enumerate(data_ids, start=1):
                     node = next(
                         (n for n in nodes if getattr(n, "id", "") == data_id),
                         None,
                     )
                     if node is None:
                         continue
-                    if method_name == "import_data":
-                        source = getattr(node, "source", "") or ""
-                        result = method(entry, source)
-                    else:
-                        import inspect
+                    step_label = STEP_LABEL.get(step_id, step_id)
+                    if total > 1:
+                        self.progress_updated.emit(
+                            f"批量 {current_batch}: {index - 1}/{total} 完成 · "
+                            f"当前: {data_id} {step_label}"
+                        )
+                    item: dict = {
+                        "data_id": data_id,
+                        "step": step_label,
+                        "ok": False,
+                        "error": "",
+                    }
+                    try:
+                        if method_name == "import_data":
+                            source = getattr(node, "source", "") or ""
+                            result = method(entry, source)
+                        else:
+                            import inspect
 
-                        kwargs: dict = {"exp_id": exp_id, "data_id": data_id}
-                        if "progress" in inspect.signature(method).parameters:
-                            kwargs["progress"] = (
-                                lambda msg, d=data_id: self.log_message.emit(
-                                    f"{STEP_LABEL.get(step_id, step_id)} {d}: {msg}"
+                            kwargs: dict = {"exp_id": exp_id, "data_id": data_id}
+                            if "progress" in inspect.signature(method).parameters:
+                                kwargs["progress"] = (
+                                    lambda msg, d=data_id: self.log_message.emit(
+                                        f"{step_label} {d}: {msg}"
+                                    )
                                 )
-                            )
-                        result = method(node, **kwargs)
-                    message = result if isinstance(result, str) else str(result)
-                    self.log_message.emit(
-                        f"完成 {STEP_LABEL.get(step_id, step_id)} {data_id}:"
-                        f" {message}"
+                            result = method(node, **kwargs)
+                        item["ok"] = True
+                        message = (
+                            result if isinstance(result, str) else str(result)
+                        )
+                        self.log_message.emit(
+                            f"完成 {step_label} {data_id}: {message}"
+                        )
+                    except Exception as exc:  # noqa: BLE001 - 单数据失败不中断整组
+                        item["error"] = f"{type(exc).__name__}: {exc}"
+                        self.log_message.emit(
+                            f"失败 {step_label} {data_id}: {item['error']}"
+                        )
+                    results.append(item)
+                self.progress_updated.emit("")
+                if total > 1:
+                    ok_count = sum(1 for r in results if r.get("ok"))
+                    self.batch_summary_requested.emit(
+                        {
+                            "info": (
+                                f"批量组 {current_batch}: {ok_count}/{total} 成功"
+                            ),
+                            "items": results,
+                        }
                     )
             except Exception as exc:  # noqa: BLE001 - 错误统一回传 UI
                 self.log_message.emit(

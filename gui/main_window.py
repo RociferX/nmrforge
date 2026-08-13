@@ -87,6 +87,7 @@ class MainWindow(QMainWindow):
         self._pending_data_names: dict[str, str] = {}
         self.setWindowTitle("NMRForge")
         self.resize(1280, 720)
+        self.setAcceptDrops(True)  # 拖拽 Bruker 数据目录导入
         self._build_menus()
         self._build_central()
         self.refresh()
@@ -145,6 +146,8 @@ class MainWindow(QMainWindow):
         self.view_spectrum_action.toggled.connect(self._toggle_spectrum)
         view_menu.addAction(self.view_spectrum_action)
 
+        settings_menu = bar.addMenu("设置(&T)")
+        settings_menu.addAction("软件设置...", self._open_settings)
         help_menu = bar.addMenu("帮助(&H)")
         help_menu.addAction("关于", self.about)
 
@@ -183,6 +186,7 @@ class MainWindow(QMainWindow):
             self._open_manual_with_params
         )
         self.pipeline.view_log_requested.connect(self._on_view_step_log)
+        self.pipeline.batch_summary_requested.connect(self._on_batch_summary)
         self.center_panel.create_experiment_requested.connect(
             self._create_experiment_with_title
         )
@@ -633,6 +637,67 @@ class MainWindow(QMainWindow):
         self._append_log(
             f"── {STEP_LABEL.get(step_id, step_id)} 运行日志(最近一次)──"
         )
+
+    def _open_settings(self) -> None:
+        """打开软件设置对话框(阶段 C3)。"""
+        from gui.dialogs import SettingsDialog
+
+        SettingsDialog(self).exec()
+
+    def _on_batch_summary(self, summary: dict) -> None:
+        """批量处理汇总弹窗:失败项双击定位到数据(阶段 C1)。"""
+        from gui.dialogs import BatchSummaryDialog
+
+        name = self.manager.project.name if self.manager.project else ""
+        dialog = BatchSummaryDialog(self, summary, name)
+        dialog.locate_requested.connect(self._locate_pipeline_from_batch)
+        dialog.exec()
+
+    def _locate_pipeline_from_batch(self, data_id: str) -> None:
+        exp_id = self.project_tree.current_experiment_id()
+        if exp_id and data_id:
+            self._locate_pipeline(exp_id, data_id)
+
+    def dragEnterEvent(self, event) -> None:
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event) -> None:
+        paths = [
+            Path(url.toLocalFile())
+            for url in event.mimeData().urls()
+            if url.isLocalFile()
+        ]
+        self._handle_dropped_import_paths(paths)
+
+    def _handle_dropped_import_paths(self, paths: list) -> None:
+        """拖拽导入:目录含 acqus 视为 Bruker 数据集,导入当前实验或新建实验。"""
+        imported = 0
+        for path in paths:
+            if not path.is_dir():
+                continue
+            if not (path / "acqus").is_file():
+                InfoDialog.show_info(
+                    self,
+                    "导入失败",
+                    f"不是 Bruker 数据集目录(缺少 acqus):\n{path}",
+                )
+                continue
+            exp_id = self.project_tree.current_experiment_id()
+            if exp_id:
+                self._pending_data_names[exp_id] = path.name
+            self._import_experiment_async(
+                {
+                    "source": str(path),
+                    "title": path.name,
+                    "sample_id": "",
+                    "copy": True,
+                    "experiment_id": exp_id or "",
+                }
+            )
+            imported += 1
+        if imported:
+            self._append_log(f"拖拽导入: {imported} 个数据目录")
 
     def _open_manual_dialog(self, step_id: str) -> None:
         """人工处理入口:按步骤打开参数表格/脚本编辑器/fid 编辑器。"""
