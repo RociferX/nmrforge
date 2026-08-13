@@ -36,11 +36,15 @@ class _FakeBackend:
         self._touch(fid_path)
         return {"success": True, "fid_path": str(fid_path), "message": "ok", "logs": []}
 
-    def process(self, experiment, plan, direct_phase_override=None) -> dict:
+    def process(
+        self, experiment, plan, direct_phase_override=None, params=None
+    ) -> dict:
         self.calls.append("process")
+        self.last_params = params
         p1 = 0
         if direct_phase_override:
-            p1 = next(iter(direct_phase_override.values()))[1]
+            # 逐维搜索时覆盖含多个轴,取末轴(正在搜索的轴)的 p1
+            p1 = list(direct_phase_override.values())[-1][1]
         spectrum = Path(self.work_dir) / f"out_p1{int(p1)}.ft2"
         self._touch(spectrum)
         return {
@@ -104,6 +108,25 @@ def test_generate_spectrum_uniform(tmp_path: Path, bruker_dir: Path) -> None:
     assert manager.infer_status(exp_id) is ExperimentStatus.PROCESSED
 
 
+def test_generate_spectrum_passes_params(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """均匀分支把 params 透传给 backend.process(G2B-006)。"""
+    manager, exp_id, data_id, work = _manager_with_data(
+        tmp_path, bruker_dir / "hsqc_2d"
+    )
+    backend = _FakeBackend(work)
+    generate_fid(manager, exp_id, data_id, backend)
+    generate_spectrum(
+        manager,
+        exp_id,
+        data_id,
+        backend,
+        params={"extract": False, "ext_lo": "9.0"},
+    )
+    assert backend.last_params == {"extract": False, "ext_lo": "9.0"}
+
+
 def test_generate_spectrum_nus_uses_reconstruct(tmp_path: Path, bruker_dir: Path) -> None:
     manager, exp_id, data_id, work = _manager_with_data(
         tmp_path, bruker_dir / "nus_2d"
@@ -142,11 +165,14 @@ def test_optimize_phase_brute_force(tmp_path: Path, bruker_dir: Path) -> None:
         backend,
         score_fn=_score_from_path,
     )
-    assert result["method"] == "brute_force"
-    assert result["phase"]["p1"] == 30.0
+    assert result["method"] == "sequential_brute_force"
+    # 逐维暴力:直接维 F2 → 间接维 F1,各粗 21 候选 + 多尺度细化(默认 5°)
+    assert result["phase"]["F2"][1] == 30.0
+    assert result["phase"]["F1"][1] == 30.0
     assert result["spectrum_path"].endswith("out_p130.ft2")
-    # 先 generate_spectrum(1 次 process)+ 候选暴力(5 次 process)+ 最终谱(1 次)
-    assert backend.calls.count("process") >= 7
+    assert backend.calls.count("process") >= 42
+    assert result["optimized"] == ["F2", "F1"]
+    assert result["skipped"] == []
     data = manager.data(exp_id, data_id)
     assert data.spectrum_path == result["spectrum_path"]
     assert any(r.workflow_ref == "phase_optimize" for r in manager.project.workflow_runs)
@@ -166,3 +192,50 @@ def test_read_experiment_prefers_raw_copy(
     raw_dir = manager.data(entry.id, result.data_id).raw_dir
     assert exp.source_path == manager.root / raw_dir
     assert read_dataset(Path(result.raw_dir)).ndim == 2
+
+def test_optimize_phase_brute_force_embeds_baseline(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """嵌入基线优化:最优谱内存内优化基线(0 次后端),配置变化时重渲 1 次。"""
+    import numpy as np
+
+    manager, exp_id, data_id, work = _manager_with_data(
+        tmp_path, bruker_dir / "hsqc_2d"
+    )
+
+    class _Ft2Backend(_FakeBackend):
+        def _touch(self, path: Path) -> None:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            # 曲率基线:auto(order 1)修不掉,order 2 能修 → 触发基线重渲
+            x = np.linspace(-1.0, 1.0, 64)
+            data = np.zeros((32, 64))
+            data += (x**2) * 120.0
+            data[16, 30] = 500.0
+            from nmrglue.fileio import pipe
+
+            dic = {k: "0" for k in pipe.fdata_dic}
+            dic["FDMAGIC"] = 9.2330230000000007e14
+            dic["FDDIMCOUNT"] = 2
+            dic["FDSIZE"] = 64
+            dic["FDSPECNUM"] = 32
+            dic["FDQUADFLAG"] = 1
+            dic["FDF1QUADFLAG"] = 1
+            dic["FDF2QUADFLAG"] = 1
+            for prefix in ("FDF1", "FDF2"):
+                dic[prefix + "SW"] = "6000.0"
+                dic[prefix + "OBS"] = "600.0"
+                dic[prefix + "CAR"] = "4.7"
+                dic[prefix + "ORIG"] = "1000.0"
+            pipe.write(str(path), dic, data.astype(np.float32), overwrite=True)
+
+    backend = _Ft2Backend(work)
+    result = optimize_phase_brute_force(
+        manager, exp_id, data_id, backend, score_fn=_score_from_path
+    )
+    assert result["baseline"] is not None
+    assert "F2" in result["baseline"]["optimized"]  # 曲率 → order 2 校正
+    assert result["baseline"]["config"]["F2"]["mode"] == "order"
+    # 基线配置变化 → 以「最优相位+最优基线」重渲 1 次
+    assert backend.calls.count("process") >= 42 + 1
+    assert any("基线(嵌入)" in line for line in result["logs"])
+

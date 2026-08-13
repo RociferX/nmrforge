@@ -58,6 +58,55 @@ def test_phase_quality_good_vs_bad() -> None:
     assert phase_quality.evaluate(good).absorption_fraction > 0.9
     assert phase_quality.evaluate(bad).absorption_fraction < 0.2
 
+def _phase_sweep_spectrum(
+    n: int = 2048, seed: int = 3, noise: float = 0.1
+) -> np.ndarray:
+    """复型 Lorentzian 多峰谱(相位=0 时实部为吸收),加实部噪声。
+
+    用 Lorentzian(指数衰减 FID)而非高斯峰:真实 NMR 谱形长尾,
+    相位误差的色散负边瓣才能被负面积指标一阶捕捉。
+    """
+    rng = np.random.default_rng(seed)
+    t = np.arange(n, dtype=float) / n
+    fid = np.zeros(n, dtype=complex)
+    for _ in range(20):
+        f0 = rng.uniform(0.04, 0.9)
+        amp = rng.uniform(0.8, 6.0)
+        width = rng.uniform(0.0015, 0.004)
+        fid += amp * np.exp(1j * 2 * np.pi * f0 * t) * np.exp(-t / width)
+    spec = np.fft.fft(fid)
+    return spec + np.random.default_rng(7).normal(0, noise, size=n)
+
+
+def test_phase_quality_continuous_metrics() -> None:
+    """连续负面积 + 谱熵:相位误差越大评分越低,且 5° 内有可测余量。"""
+    spec = _phase_sweep_spectrum()
+    metrics = [
+        phase_quality.evaluate(np.real(spec * np.exp(-1j * np.deg2rad(d))))
+        for d in (0.0, 5.0, 10.0, 30.0, 90.0)
+    ]
+    scores = [m.score for m in metrics]
+    assert scores[0] > scores[1] > scores[2] > scores[3] > scores[4]
+    # 连续负面积与谱熵方向一致(0.2.38 新指标)
+    assert metrics[1].negative_area_fraction > metrics[0].negative_area_fraction
+    assert metrics[1].entropy > metrics[0].entropy
+    # 5° 处评分余量显著(旧公式以负峰计数+对称性,实测 <0.15 无法区分 5°)
+    assert scores[0] - scores[1] > 0.2
+
+
+def test_phase_quality_180_inversion_penalty() -> None:
+    """180° 反相(整谱取负)被负面积/负峰同时惩罚,评分远低于正相。"""
+    from scipy.ndimage import gaussian_filter
+
+    base = np.zeros((48, 96))
+    base[16, 40] = 200.0
+    base = gaussian_filter(base, sigma=1.5)
+    good = phase_quality.evaluate(base)
+    bad = phase_quality.evaluate(-base)
+    assert good.score > bad.score + 20
+    assert bad.negative_area_fraction > good.negative_area_fraction
+    assert bad.entropy > good.entropy
+
 
 def test_baseline_quality_flags_ramp() -> None:
     ramp = np.linspace(0.0, 10.0, 128)[np.newaxis, :] + 0j

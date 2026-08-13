@@ -24,17 +24,34 @@ from backend.bruker_workflow import patch_fid_com, patch_nus_expand_count
 from backend.nmrpipe_finder import find_nmrpipe_bin, find_tool
 from backend.runtime import CshRuntime
 from backend.script_generator import (
+    DEFAULT_POINTS_PER_LINE,
+    _as_bool,
     effective_td,
+    expand_baseline,
     generate_2d_nus_script,
     generate_3d_nus_script,
     generate_convert_script,
+    generate_nus_finalize_script,
     generate_process_script,
     select_smile_params,
+    zero_fill_plan,
+    zero_fill_report,
 )
 from core.data.internal_data_model import Experiment, SamplingMode
 from core.data.nus_reader import merge_nuslists, read_nuslist
 from core.optimization.phase_search import direct_ft_traces, search_phase
 from core.planning.processing_plan import ProcessingPlan
+
+
+def enforce_smile_thread_guardrail(nthread: int, grid_points: int) -> tuple[int, str]:
+    """SMILE 线程护栏（D006）：间接网格 >5000 点时线程数上限 2。
+
+    2026-08-11 sampleM 事故：宽窗口 SMILE 满核曾致宿主断电；大网格强制
+    2 线程。返回 (线程数, 日志)；未超限时日志为空串。
+    """
+    if grid_points > 5000 and nthread > 2:
+        return 2, f"大网格 {grid_points}：SMILE 线程数限制为 2（原 {nthread}）"
+    return nthread, ""
 
 
 @dataclass
@@ -78,6 +95,7 @@ class NMRPipeBackend:
         experiment: Experiment,
         plan: ProcessingPlan,
         *,
+        params: dict[str, Any] | None = None,
         direct_phase_search: bool = True,
         direct_phase_override: dict[str, tuple[float, float]] | None = None,
     ) -> dict[str, Any]:
@@ -141,6 +159,24 @@ class NMRPipeBackend:
             p0, p1 = self._search_direct_phase(work, fid_for_phase, logs)
             direct_axis = "F2" if experiment.ndim == 2 else "F3"
             direct_phase = {direct_axis: (p0, p1)}
+        proc_params = dict(params or {})
+        extract = _as_bool(proc_params.get("extract", True))
+        ext_lo = str(proc_params.get("ext_lo", "11.0"))
+        ext_hi = str(proc_params.get("ext_hi", "6.0"))
+        baseline = expand_baseline(experiment, proc_params.get("baseline"))
+        window = proc_params.get("window")
+        zero_fill = proc_params.get("zero_fill")
+        linewidth_hz = proc_params.get("linewidth_hz")
+        points_per_line = float(
+            proc_params.get("points_per_line", DEFAULT_POINTS_PER_LINE)
+        )
+        zf_plan = zero_fill_plan(
+            experiment,
+            zero_fill,
+            linewidth_hz=linewidth_hz,
+            points_per_line=points_per_line,
+        )
+        logs += zero_fill_report(zf_plan)
         processed, process_logs, spectrum = self._process(
             runtime,
             experiment,
@@ -148,6 +184,14 @@ class NMRPipeBackend:
             work,
             in_file=in_file,
             direct_phase=direct_phase,
+            baseline=baseline,
+            window=window,
+            zero_fill=zf_plan,
+            linewidth_hz=linewidth_hz,
+            points_per_line=points_per_line,
+            extract=extract,
+            ext_lo=ext_lo,
+            ext_hi=ext_hi,
         )
         logs += process_logs
         if not processed:
@@ -306,11 +350,23 @@ class NMRPipeBackend:
         # 安全护栏（2026-08-11 sampleM 事故）：大网格 SMILE 满核曾致宿主断电，
         # 间接网格 >5000 点时线程数上限 2
         grid_points = int(td[1]) * (int(td[2]) if len(td) > 2 else 1)
-        if grid_points > 5000 and nthread > 2:
-            logs.append(f"大网格 {grid_points}：SMILE 线程数限制为 2（原 {nthread}）")
-            nthread = 2
-        ext_lo = str(params.get("ext_lo", 10.5))
-        ext_hi = str(params.get("ext_hi", 6.5))
+        nthread, guard_log = enforce_smile_thread_guardrail(nthread, grid_points)
+        if guard_log:
+            logs.append(guard_log)
+        ext_lo = str(params.get("ext_lo", "11.0"))
+        ext_hi = str(params.get("ext_hi", "6.0"))
+        extract = _as_bool(params.get("extract", True))
+        baseline = expand_baseline(experiment, params.get("baseline"))
+        zero_fill = params.get("zero_fill")
+        linewidth_hz = params.get("linewidth_hz")
+        points_per_line = float(params.get("points_per_line", DEFAULT_POINTS_PER_LINE))
+        zf_plan = zero_fill_plan(
+            experiment,
+            zero_fill,
+            linewidth_hz=linewidth_hz,
+            points_per_line=points_per_line,
+        )
+        logs += zero_fill_report(zf_plan)
         out_file = f"{experiment.dataset_id}.{ext}"
         script = script_fn(
             experiment,
@@ -327,6 +383,11 @@ class NMRPipeBackend:
             smile_scaling=smile_scaling,
             smile_report=smile_report,
             direct_phase=(direct_p0, direct_p1),
+            extract=extract,
+            baseline=baseline,
+            zero_fill=zf_plan,
+            linewidth_hz=linewidth_hz,
+            points_per_line=points_per_line,
         )
         nus_com = work / f"{experiment.dataset_id}_nus.com"
         nus_com.write_text(script, encoding="utf-8", newline="\n")
@@ -358,6 +419,89 @@ class NMRPipeBackend:
             "success": True,
             "message": "SMILE 重构成功",
             "spectrum_path": str(spectrum),
+            "logs": logs,
+        }
+
+    def finalize_nus(
+        self,
+        experiment: Experiment,
+        *,
+        phases: dict[str, tuple[float, float]] | None = None,
+        work_dir: Path | str | None = None,
+        timeout: float = 1800.0,
+        baseline: dict[str, dict[str, Any]] | None = None,
+        params: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """从 SMILE 重构平面做间接维 FT 定稿(逐维相位候选,不重跑 SMILE)。
+
+        phases:{轴 -> (p0, p1)},缺省 0;供逐维相位优化(用户方案)。
+        """
+        bin_dir = self._bin_dir()
+        if bin_dir is None:
+            return {
+                "success": False,
+                "message": "未找到 nmrPipe（csh: which nmrPipe）",
+                "logs": [],
+            }
+        work = Path(work_dir) if work_dir else self._work_path(experiment)
+        if experiment.ndim >= 3:
+            planes = "nus3d_rc/test%04d.ft1"
+            if not (work / "nus3d_rc").is_dir():
+                return {
+                    "success": False,
+                    "message": f"缺少重构平面 nus3d_rc: {work}",
+                    "logs": [],
+                }
+        else:
+            planes = "nus2d/recon.ft1"
+            if not (work / "nus2d" / "recon.ft1").is_file():
+                return {
+                    "success": False,
+                    "message": f"缺少重构平面 nus2d/recon.ft1: {work}",
+                    "logs": [],
+                }
+        out_ext = "ft3" if experiment.ndim >= 3 else "ft2"
+        out_file = f"{experiment.dataset_id}.{out_ext}"
+        zf_params = dict(params or {})
+        zf_plan = zero_fill_plan(
+            experiment,
+            zf_params.get("zero_fill"),
+            linewidth_hz=zf_params.get("linewidth_hz"),
+            points_per_line=float(
+                zf_params.get("points_per_line", DEFAULT_POINTS_PER_LINE)
+            ),
+        )
+        script = generate_nus_finalize_script(
+            experiment,
+            planes=planes,
+            out_file=out_file,
+            phases=phases,
+            baseline=baseline,
+            zero_fill=zf_plan,
+        )
+        finalize_com = work / f"{experiment.dataset_id}_finalize.com"
+        finalize_com.write_text(script, encoding="utf-8", newline="\n")
+        runtime = CshRuntime()
+        result = runtime.run(
+            ["csh", finalize_com.name], cwd=str(work), timeout=timeout
+        )
+        logs = zero_fill_report(zf_plan) + [f"finalize.com: rc={result.returncode}"]
+        spectrum = work / out_file
+        if (
+            result.returncode != 0
+            or not spectrum.is_file()
+            or spectrum.stat().st_size == 0
+        ):
+            return {
+                "success": False,
+                "message": f"finalize 失败/未生成 {out_file}",
+                "logs": logs,
+            }
+        logs.append(f"谱图 → {spectrum}")
+        return {
+            "success": True,
+            "spectrum_path": str(spectrum),
+            "message": "finalize 完成",
             "logs": logs,
         }
 
@@ -609,6 +753,14 @@ class NMRPipeBackend:
         *,
         in_file: str | None = None,
         direct_phase: dict[str, tuple[float, float]] | None = None,
+        baseline: dict[str, dict[str, Any]] | None = None,
+        window: dict[str, dict[str, Any]] | None = None,
+        zero_fill: dict[str, dict[str, Any]] | None = None,
+        linewidth_hz: dict[str, float] | None = None,
+        points_per_line: float = DEFAULT_POINTS_PER_LINE,
+        extract: bool = True,
+        ext_lo: str = "11.0",
+        ext_hi: str = "6.0",
     ) -> tuple[bool, list[str], Path]:
         """生成并执行 NMRPipe 处理管道（输出 ft2/ft3）。"""
         logs: list[str] = []
@@ -621,6 +773,14 @@ class NMRPipeBackend:
             in_file=in_file,
             out_file=out_file,
             direct_phase=direct_phase,
+            baseline=baseline,
+            window=window,
+            zero_fill=zero_fill,
+            linewidth_hz=linewidth_hz,
+            points_per_line=points_per_line,
+            extract=extract,
+            ext_lo=ext_lo,
+            ext_hi=ext_hi,
         )
         process_com = work / f"{experiment.dataset_id}_process.com"
         process_com.write_text(script, encoding="utf-8", newline="\n")

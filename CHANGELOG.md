@@ -1,13 +1,13 @@
 # 变更日志
 
-## [0.2.33] - 2026-08-13
+## [0.2.47] - 2026-08-13
 
-- 存储去重(G2B-007 Proposal):导入勾选文案改为「链接原始数据到项目(只读
+- 存储去重(G2B-009 Proposal):导入勾选文案改为「链接原始数据到项目(只读
   文件链接,必要时复制)」;实际链接式导入(硬链接→符号链接→复制回退)与
   终谱 move 到 spectra/(process/ 不再保留副本)由 Backend 按
-  docs/proposals/gui-to-backend/007-storage-dedup-link-raw.md 实现。
+  docs/proposals/gui-to-backend/009-storage-dedup-link-raw.md 实现。
 
-## [0.2.32] - 2026-08-13
+## [0.2.46] - 2026-08-13
 
 - UI 调整(用户反馈):
   - .fid 显示修正:时间域 FID 以数据点(序号)为 x 轴显示,不再用 ppm 轴;
@@ -24,13 +24,57 @@
   generate_spectrum 新增 progress 回调,运行前/后叙述阶段(读取数据、
   NUS→SMILE 重构 / 均匀→NMRPipe 处理、完成重构/处理、终谱就位),
   PipelinePanel 将进度接入日志面板;真实中途阶段日志(正在重构 / 完成
-  重构 / 开始 / 完成相位优化)已建 Proposal G2B-006 待 Backend 实现
-  (docs/proposals/gui-to-backend/006-stream-step-progress.md),后端落地
+  重构 / 开始 / 完成相位优化)已建 Proposal G2B-008 待 Backend 实现
+  (docs/proposals/gui-to-backend/008-stream-step-progress.md),后端落地
   后自动转发。
 - 测试:新增数据感知状态/批量子文件夹扫描/分组/单击打开/进度日志用例,
   全量 362 passed,ruff 全绿。
 
-## [0.2.31] - 2026-08-13
+## [0.2.45] - 2026-08-13
+
+- Backend:批量处理引擎实装(workflow/batch.run_batch,替代占位):
+  run_batch(manager, exp_id, targets, steps, backend) 按序对组内每个数据执行
+  指定步骤(import 幂等确认→fid→spectrum→peaks→analysis),fid/spectrum 复用
+  workflow.stepwise,peaks/analysis 复用 workflow.pick_peaks/analyze;targets
+  支持 batch_id(B1/B2...,读 .pipeline_state.json,与 GUI 批量组语义一致,
+  Engine 不依赖 Qt)或显式 data_ids;单数据失败不中断整组(记录
+  failed_step/error),逐数据登记 WorkflowRun,返回逐数据结果 dict + summary
+  (total/success/failed),可选 progress 回调。
+- Backend:3D NUS 相位门控路径复核——SMILE 线程护栏(D006)提取为可测函数
+  enforce_smile_thread_guardrail(默认 2、大网格>5000 强制 2);3D NUS 相位
+  优化 = 1 次 reconstruct_nus(默认护栏参数)+ 逐间接维 F2/F1 候选
+  finalize_nus(不重跑 SMILE),backend_runs=1+2×候选;VM sampleB 真实数据
+  产物 FDTRANSPOSED=0。
+- Backend:相位评分置信度阈值 VM 标定(0.2.45):真实数据 ±5° 相位误差余量
+  2D sampleA ≈0.11 分、3D NUS sampleB ≈0.04 分(评分面近乎平坦),原「评分面
+  平坦」阈值 <1 分过严(真实数据必然触发);下调为 <0.05
+  (PHASE_SCORE_FLAT_MARGIN),2D 判「最优较明确」、3D 判「平坦」。
+- 测试:新增 test_batch(8 例:多数据批量/单数据失败继续/WorkflowRun 登记/
+  stepwise 复用/batch_id 解析/import 幂等/全流程五步/参数校验)、
+  test_phase_nus_3d(3D NUS 护栏与 backend_runs、线程护栏上限);全量 386
+  passed,ruff 全绿。
+
+## [0.2.44] - 2026-08-13
+
+- Backend:填零逻辑改造(用户方案)——不再机械「所有维度 2×」:新增
+  zero_fill_plan(experiment, zero_fill, linewidth_hz, points_per_line):
+  直接维 F2/F3 默认 SI=2×TD(稳妥起点,1024→2048);间接维按目标数字
+  分辨率动态决定——目标点距 = max(线宽, 1/AQ)/points_per_line
+  (默认 1/2,每线宽 ≥2 个数字点;精确峰位/线宽/拟合/CSP 可调 1/4 或
+  更细),SI 取 2 的幂并夹在 [TD, next_pow2(ppl×TD)];线宽来源
+  params.linewidth_hz[轴] → 核素默认表(1H 8/15N 15/13C 20 Hz)→
+  15 Hz;1/AQ 下限保证「线宽不可能窄于真实分辨率」,SI 天然不过度。
+  NUS 间接维以重构后的完整复点网格(effective_td)为 TD——重构与填零
+  是两个独立过程,填零只作用于重构后的时间域。uniform/NUS 两阶段/
+  3D/finalize 脚本全部改显式 ZF -size;process/reconstruct_nus/
+  finalize_nus 透传 linewidth_hz/points_per_line 并输出逐维 SI 选择
+  日志;param_schema 增 linewidth_hz/points_per_line,zero_fill 语义
+  0=自动/k=间接维固定倍数(直接维保持 2×);stepwise 窗/填零嵌入的
+  体积估计改用填零计划。
+- 测试:直接维 2×TD、间接维动态+1/AQ 约束、线宽影响、覆盖语义
+  (0/int/none)、NUS/finalize ZF 行与关闭;全量 350 通过,ruff 全绿。
+
+## [0.2.43] - 2026-08-13
 
 - 批量处理(实验中间页):「导入数据」表单下方加分割线 + 「批量处理」区块,
   可添加多个 Bruker 数据文件夹并批量导入;同批导入的数据带批量组标记
@@ -43,7 +87,8 @@
   批量标记;ProjectTree 标记显示与右键加入/移出。
 - 测试:新增 test_gui_batch(5 例),全量 354 passed,ruff 全绿。
 
-## [0.2.30] - 2026-08-13
+
+## [0.2.42] - 2026-08-13
 
 - 修订(用户反馈):
   - 1D 显示改为控制面板「一维谱」开关(TopSpin 式):开启后谱图出现随鼠标
@@ -55,7 +100,8 @@
 - 测试:更新 test_viewer_1d(条带)、test_gui_poky / test_gui_manual /
   test_gui_processing(.list),全量 349 passed,ruff 全绿。
 
-## [0.2.29] - 2026-08-13
+
+## [0.2.41] - 2026-08-13
 
 - Viewer 增强(6 项):
   - .fid 查看:Spectrum1D(load_from_fid,多维取第一条 FID 实部);独立查看器
@@ -74,25 +120,109 @@
 - 测试:新增 test_viewer_1d / test_gui_smile / test_gui_poky,更新
   test_gui_layout(六步流程/上下布局),全量 349 passed,ruff 全绿。
 
-## [0.2.28] - 2026-08-12
+
+## [0.2.40] - 2026-08-13
+
+- Backend:相位评分改「连续负面积 + 谱熵」(文献方案:de Brouwer 2009
+  负面积最小化 + Ernst 1966 谱熵最小化)。core/qc/phase_quality.evaluate
+  评分权重:吸收度 25% + 连续负面积 40%(先稳健基线扣除再统计负值面积,
+  相位误差经色散负边瓣一阶放大)+ 正部谱熵 20% + 负峰计数 15%;
+  移除镜像对称性计分(90° 色散谱高度对称,旧公式误判为高相位质量,
+  字段保留);PhaseQuality 新增 negative_area_fraction/entropy,
+  导出 negative_area_fraction/spectral_entropy 辅助函数;
+  _default_phase_score 复用新评分(score_fn 仍可注入)。合成
+  Lorentzian 多峰+噪声实测:5° 相位误差评分余量由旧公式 ~0.1 提升到
+  ~0.5-0.7(约 5 倍),0°→90° 单调递减,180° 反相惩罚更强。
+- 测试:相位误差扫描单调性(0/5/10/30/90°)、5° 余量 >0.2、180° 反相
+  惩罚、连续负面积/谱熵方向断言;全量 346 通过,ruff 全绿。
+
+## [0.2.39] - 2026-08-13
+
+- Backend:窗函数与填零嵌入相位优化(用户方案,uniform):stepwise 在相位+
+  基线后跑小网格(sine_bell/sine_bell²/gaussian × 填零 auto/none),每次
+  候选重渲评分;填零受文件大小上限约束(默认 256MB),同分容忍 0.5 分内
+  选最小文件;NUS 窗函数在 SMILE 重构内,调整需重跑 SMILE,仅报告。
+  script_generator.generate_process_script 支持 window/zero_fill 覆盖
+  (SP/GM/EM 窗,ZF auto/none/size),backend.process 透传。
+- 相位搜索加「评分余量/置信度」日志:用已评分的 ±5° 邻域计算分差,
+  <1 分提示评分面平坦、最佳相位置信度低(phase_quality 对 5° 误差区分度
+  实测 <0.3 分);VM sampleA 实测余量 0.02-0.27,证实评分无法在 ±5° 内
+  唯一定位最佳相位(搜索仍收敛到合理相位,负峰最小)。
+- 验证:3D uniform(F3/F2/F1)与 3D NUS(F2/F1,直接维 F3 随重构固化)维度
+  覆盖测试;VM sampleA uniform 实测网格选出 sine_bell+不填零(score 92.9,
+  0.5MB,比 auto 小 4× 且分数相当)。
+- 测试:3D 覆盖、窗函数/填零脚本、置信度日志;全量 343 通过,ruff 全绿。
+
+## [0.2.38] - 2026-08-13
+
+- Backend:其它优化嵌入相位优化(用户方案,除 SMILE)——stepwise
+  optimize_phase_brute_force 在相位搜索后对最优谱内存内跑基线优化
+  (optimize_baseline,0 次后端运行),配置变化时以「最优相位+最优基线」
+  重渲终谱 1 次(uniform 全轴;NUS 2D 仅间接维 F1,直接维 F2 基线在
+  SMILE 重构时固化,调整需重跑 SMILE 时仅报告);finalize_nus 支持
+  baseline 透传;结果返回 baseline(config/scores/optimized/skipped),
+  日志逐轴说明基线变化与分数增益。VM sampleA NUS 实测:相位+嵌入基线
+  端到端通过(F1 order 3 重渲 +1.0 分;F2 需重跑 SMILE 已报告)。
+- 测试:嵌入基线(曲率 → order 2 重渲,多 1 次 process);全量 341 通过,
+  ruff 全绿。
+
+## [0.2.37] - 2026-08-13
+
+- Backend:相位优化改「粗网格 + 多尺度细化」(用户方案,替代固定步长全搜索):
+  粗网格 p1 30°/p0 45° → 逐级约 1/3 细化到 5°(每级在上一级最优
+  ±上一步长/2 窗口内联合扫描 p0×p1),单峰假设下与最优相位偏差 ≤2.5°;
+  VM sampleA 实测 uniform 2D 13.6s(118 次)/ NUS 2D 5.7s(60 次),约为
+  5° 全网格的一半(25.8s/10.6s),结果一致(F2 p1=10°)。
+- 移除「够好即停」前置过滤(相位 + 基线):直接全网格优化实测足够快
+  (粗网格 uniform 5s / NUS 2.6s),避免复杂度与评分阈值不可靠问题
+  (phase_quality 对 5° 误差区分度 <0.3 分,固定阈值无法严格保证 5°);
+  保留逐轴「相位/配置变化 + 分数增益」日志与 optimized 字段。
+- 测试:多尺度收敛(真值 12° → 细化到 10°)、默认参数(粗 30° + refine)、
+  无前置过滤;全量 340 通过,ruff 全绿。
+
+## [0.2.36] - 2026-08-13
+
+- Backend:相位/基线优化加「够好即停」前置判断(用户反馈):
+  optimize_phase_sequential 与 optimize_baseline 每轴先评分当前状态
+  (good_enough=80,0-100;None 关闭前置判断),已够好则跳过候选搜索并
+  保持当前配置;日志逐轴说明「未优化 / 已优化 + 参数变化 + 分数增益」,
+  末尾附总结行;结果新增 optimized/skipped 字段;stepwise
+  optimize_phase_brute_force 透传 good_enough 并返回 optimized/skipped。
+- 测试:跳过(保持配置)、关闭前置判断(全候选)、日志断言;全量 341 通过,
+  ruff 全绿。
+
+## [0.2.35] - 2026-08-12
 
 - 重新处理入口:Pipeline 已成功(SUCCESS)的处理步骤(生成 FID / 生成谱图 /
   峰挑选 / 分析)新增「重新处理」按钮(导入步骤除外——重跑会新建数据而
   非覆盖);点击强制重跑对应 ProcessingController 方法,重跑后下游步骤
   经指纹校验标记为过期(OUTDATED);按钮 tooltip 说明后果。
-- 测试:新增 test_gui_rerun(4 例),全量 331 passed,ruff 全绿。
+- 测试:新增 test_gui_rerun(4 例),全量通过,ruff 全绿。
 
-## [0.2.27] - 2026-08-12
+## [0.2.34] - 2026-08-12
 
 - 脚本快照 GUI 接线:ProcessingController 在生成 FID / 生成谱图 / 人工
-  fid.com / 人工谱图运行成功后,把实际执行的脚本(fid.com/process.com/
-  nus*.com)与参数经 snapshot_run 写入对应 WorkflowRun 快照目录
-  (processing/<exp>/runs/<run_id>/snapshot,补写最近一次匹配运行,
-  data_id 作用域过滤,已快照不重复);运行历史对话框展示快照目录与脚本
-  清单,新增「打开快照目录」按钮(QDesktopServices 打开)。
-- 测试:新增 test_gui_snapshot(8 例),全量 327 passed,ruff 全绿。
+  fid.com / 人工谱图运行成功后,把实际执行的脚本与参数经 snapshot_run
+  写入 WorkflowRun 快照目录(processing/<exp>/runs/<run_id>/snapshot,
+  data_id 作用域过滤,已快照不重复);RunHistoryDialog 展示快照目录与
+  脚本清单,新增「打开快照目录」按钮。
+- 测试:新增 test_gui_snapshot(8 例),全量通过,ruff 全绿。
 
-## [0.2.26] - 2026-08-12
+## [0.2.33] - 2026-08-13
+
+- Backend:2D NUS 重构改两阶段(Architect VM 验证 sampleA 25% NUS 主峰
+  112.59/7.47 与全采样一致,QC=93.6):generate_2d_nus_script → stage 1
+  直接维 FT+EXT+POLY → TP → SMILE(-sample None -sampleCount N
+  -xT 复点网格)→ nus2d/recon.ft1;stage 2 nmrPipe -in recon.ft1 →
+  ZF/FT -alt/PS/POLY/TP → 终谱 ft2(-out -ov);effective_td 2D NUS
+  间接维改复点网格 TD//mult(不采信 acqu2s NusTD,部分数据 NusTD=TD);
+  3D NUS 保持 NusTD(已是复点数);generate_nus_finalize_script 2D 改
+  nmrPipe -in + POLY + -out -ov,finalize_nus 支持 2D 逐维 PS 候选
+  (相位优化不重跑 SMILE);构造工具 scripts/vm_sample_make_nus.py 入库
+  并回归(网格=TD//mult、nuslist 首点 0)。
+- 测试:两阶段结构(TP/SMILE/-alt/-xT 网格)、finalize 2D、effective_td
+  复点网格、make_nus 构造回归;全量 338 通过,ruff 全绿。
+## [0.2.32] - 2026-08-12
 
 - 3D 谱切片查看(契约 §10):viewer/spectrum.py 新增 Spectrum3D
   (load_from_ft3 / slice / project / index_at,兼容单文件流与非流存储);
@@ -102,9 +232,47 @@
   SpectrumViewer/ContourLayer 绘制;gui/spectrum_panel 双击/选择 .ft3
   走 3D 查看路径(不再报「仅支持二维谱图」),峰表 3D 列按切片平面轴
   标签映射联动;状态栏/帮助补充 3D 操作说明。
-- 测试:新增 test_viewer3d(12 例),全量 319 passed,ruff 全绿。
+- 测试:新增 test_viewer3d(12 例),全量通过,ruff 全绿。
 
-## [0.2.25] - 2026-08-12
+
+## [0.2.31] - 2026-08-12
+
+- Backend(G2B-007):逐维基线校正(默认全维 POLY -auto):
+  select_method 每维 FT+PS 后插 baseline 节点(逐轴可关/order);
+  script_generator uniform/NUS 脚本按轴插入 POLY(直接维 EXT 后、
+  间接维 PS 后),param_schema 增 baseline 键(enabled/mode/order/axes);
+  workflow/baseline_optimize 逐维网格(mode∈{off,auto}×order∈{1,2,3})
+  用 core.qc.baseline_quality 选每维最优写回配置,score 可注入。
+- 测试:默认两行 POLY -auto、关闭/order 覆盖、NUS 2D/3D 插入位置、
+  schema 默认、逐维优化选校正/平谱选 off;全量通过,ruff 全绿。
+
+
+## [0.2.30] - 2026-08-12
+
+- Backend:逐维暴力相位优化默认改用相位专用评分
+  (workflow.phase_optimize._default_phase_score,复用 core.qc.phase_quality:
+  吸收度比例 50% + 负峰比例 30% + 对称性 20%),不再用综合 QC
+  (SNR/基线/伪影与相位基本无关,加权会稀释相位排名);score_fn 仍可注入
+  (需要综合评估时传 spectrum_quality)。
+- 测试:错相(负峰)评分低于正相、负峰比例差异断言;全量通过。
+
+
+## [0.2.29] - 2026-08-12
+
+- Backend:相位自动调优改为「逐维暴力」方案(用户反馈):
+  workflow/phase_optimize.optimize_phase_sequential——传统采样按轴
+  (直接维 → 间接维)逐维,每候选相位重跑一次后端管线(process,
+  direct_phase_override 覆盖该轴 PS),对终谱做整体 QC 评分,取最优后
+  固定,依次推进;NUS:先 SMILE 重构一次(reconstruct_nus,直接维随重构
+  固化),再从重构平面逐间接维候选跑 finalize_nus(不重跑 SMILE)。
+- backend:script_generator.generate_nus_finalize_script(重构平面→间接维
+  FT,逐维 PS 可配)+ NMRPipeBackend.finalize_nus;
+  stepwise.optimize_phase_brute_force 改用逐维暴力。
+- 测试:sequential 逐维/失败、finalize 2D/3D 脚本、stepwise 断言;
+  全量通过,ruff 全绿。
+
+
+## [0.2.28] - 2026-08-12
 
 - Pipeline 状态机完善(OUTDATED + 指纹校验):新增 gui/pipeline_state.py,
   每数据维护 .pipeline_state.json(输入/脚本/参数指纹);步骤成功后经
@@ -115,7 +283,7 @@
   人工 fid/谱图/峰表保存同样登记指纹。测试新增 test_gui_pipeline_state
 (7 例),全量 307 passed,ruff 全绿。
 
-## [0.2.24.1] - 2026-08-12
+## [0.2.27] - 2026-08-12
 
 - 峰表编辑回写(G2B-005 GUI 剩余):右侧谱图面板峰表工具栏新增「添加峰 /
   删除选中 / 导入 Poky / 保存峰表」;2D/3D 列自动切换,编辑后写回
@@ -135,6 +303,27 @@
   WorkflowRun);步骤运行后刷新 Pipeline。
 - 测试:新增报告页 / 峰表编辑 / Poky 导入 / 人工接线用例,更新
   test_gui_manual / test_gui_processing;全量 300 passed,ruff 全绿。
+
+## [0.2.26] - 2026-08-12
+
+- Backend(G2B-006):EXT 参数在自动/步骤化路径生效——
+  NMRPipeBackend.process 增加 params(extract 默认 True/ext_lo "11.0"/
+  ext_hi "6.0")透传给 generate_process_script;reconstruct_nus 支持
+  extract(False 时不写 EXT 行);2D/3D NUS 脚本默认窗口统一 6-11 ppm;
+  stepwise.generate_spectrum 均匀分支把 params 传给 backend.process;
+  ProcessingBackend Protocol 补充 params 签名(Shared Contract,
+  G2B-006 已批准)。
+- 测试:NUS extract 开关/默认窗口、stepwise 透传断言、后端 params 接受;
+  全量通过,ruff 全绿。
+
+## [0.2.25] - 2026-08-12
+
+- Architect:VM 真实数据回归(sampleA,步骤化 import_data→generate_fid→
+  generate_spectrum)确认 EXT+TP 修复:终谱 FDTRANSPOSED=0,1H 窗
+  6-11 ppm(640 点),主峰 (112.59, 7.47) 与手工 test.ft2
+  (112.73, 7.56) 一致;extract=False 全宽谱水峰 4.7 ppm 为垂直竖线
+  (峰高为相邻 1H 列 60-90 倍)。新增回归脚本 scripts/vm_sample_*.py。
+- EXT 参数透传缺口已由 G2B-006 关闭(见 0.2.26)。
 ## [0.2.24] - 2026-08-12
 
 - Backend:处理脚本(generate_process_script)直接维 FT+PS 后增加 EXT 提取
