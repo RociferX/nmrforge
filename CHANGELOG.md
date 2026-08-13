@@ -1,5 +1,23 @@
 # 变更日志
 
+## [0.2.52] - 2026-08-13
+
+- 项目垃圾清理(Architect 专项):
+  - 三个 worktree(master/gui-dev/backend-dev)核对:git ls-files 无缓存/二进制
+    大文件(>1MB)入库,无未忽略的未跟踪文件;
+  - 清理全部可再生的忽略缓存:__pycache__/×55、.pytest_cache/、.ruff_cache/、
+    nmrforge.egg-info(共 57 个目录);保留虚拟环境 nmrforge/、
+    SOFTWARE_SUMMARY.md(用户参考文档)、config/nmrforge.local.yaml(本地配置);
+  - .gitignore 增补覆盖率/编辑器/系统临时文件规则(.coverage、htmlcov/、
+    .hypothesis/、.tox/、.idea/、.vscode/、.DS_Store、Thumbs.db、*.tmp、
+    *.bak、*.orig、*.rej、*~),防再入库;
+  - VM 工作副本清理未跟踪生成产物 tests/fixtures/bruker/hsqc_small.nmrpipe/
+    (hsqc_small_convert.com,HANDOVER §5 经典 pull 阻挡副本),VM git status 恢复干净;
+  - 备注:本地全量首轮 1 例 Windows 瞬时文件锁(os.replace PermissionError,
+    test_project_dashboard_stats_and_runs)偶发,单测复跑通过;新鲜 basetemp 全量复跑全绿。
+- 测试:全量 424 passed(本地 Windows + offscreen),ruff 全绿。
+
+
 ## [0.2.51] - 2026-08-13
 
 - 阶段 D:引导与性能(愿景 §33/§31):

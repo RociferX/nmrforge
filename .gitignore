@@ -19,3 +19,20 @@ config/nmrforge.local.yaml
 
 # 用户参考文档（重写核对用），保留在磁盘但不入库
 SOFTWARE_SUMMARY.md
+
+# 覆盖率/测试缓存
+.coverage
+htmlcov/
+.hypothesis/
+.tox/
+
+# 编辑器/系统临时文件
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.tmp
+*.bak
+*.orig
+*.rej
+*~
