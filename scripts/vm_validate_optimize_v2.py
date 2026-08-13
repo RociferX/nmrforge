@@ -64,7 +64,6 @@ def run_2d(dataset: Path, root: Path) -> None:
 
 def run_3d(dataset: Path, root: Path) -> None:
     from backend.nmrpipe_backend import NMRPipeBackend
-    from core.data.bruker_reader import read_dataset
     from core.project import ProjectManager
     from workflow.import_workflow import import_data
     from workflow.stepwise import optimize_phase_brute_force
