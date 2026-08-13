@@ -126,7 +126,7 @@ def test_load_from_ft2_rejects_1d(tmp_path: Path) -> None:
         Spectrum.load_from_ft2(path)
 
 
-def test_contour_layer_builds_paths() -> None:
+def test_contour_layer_renders_image() -> None:
     from scipy.ndimage import gaussian_filter
 
     spectrum = _synthetic_spectrum((64, 128))
@@ -141,12 +141,11 @@ def test_contour_layer_builds_paths() -> None:
         neg_pen="#e74c3c",
         zoom=2.0,
     )
-    assert layer._path.isEmpty() is False
-    assert layer._path_neg.isEmpty() is False
+    assert layer._image is not None and not layer._image.isNull()
     assert layer.boundingRect().width() == 128
     assert layer.boundingRect().height() == 64
     layer.setData(spectrum.data, np.array([-20.0, 20.0]))
-    assert layer._path.isEmpty() is False
+    assert layer._image is not None
 
 
 def test_viewer_add_spectrum_and_levels(qapp: QApplication) -> None:
@@ -155,7 +154,7 @@ def test_viewer_add_spectrum_and_levels(qapp: QApplication) -> None:
     name = viewer.add_spectrum(spectrum, name="HSQC")
     assert name == "HSQC"
     assert viewer.layer_list.count() == 1
-    assert viewer.layers[0]._path.isEmpty() is False
+    assert viewer.layers[0]._image is not None
     # 级数滑块改变后路径重建且级数更新
     old_count = viewer._level_count
     viewer.count_slider.setValue(old_count + 8)
