@@ -214,11 +214,17 @@ def test_project_tree_column_widths_readable(qapp: QApplication) -> None:
 # ----------------------------------------------------------------------
 # Pipeline 五步状态
 # ----------------------------------------------------------------------
-def test_pipeline_steps_are_five_step_flow() -> None:
+def test_pipeline_steps_include_optional_smile() -> None:
     ids = [step[0] for step in PIPELINE_STEPS]
-    assert ids == ["import", "fid", "spectrum", "peaks", "analysis"]
-    for _, _, _, deps in PIPELINE_STEPS:
-        for dep in deps:
+    assert ids == [
+        "import", "fid", "spectrum", "smile", "peaks", "analysis"
+    ]
+    deps = {step[0]: step[3] for step in PIPELINE_STEPS}
+    # SMILE 优化为可选:峰挑选不依赖它
+    assert "smile" not in deps["peaks"]
+    assert deps["smile"] == ("spectrum",)
+    for _, _, _, step_deps in PIPELINE_STEPS:
+        for dep in step_deps:
             assert dep in ids
 
 
@@ -717,14 +723,14 @@ def test_spectrum_panel_vertical_layout(qapp: QApplication) -> None:
 
     walk(panel)
     assert found, "SpectrumPanel 内应有 QSplitter"
-    splitter = found[0]
+    splitter = next(s for s in found if s.count() == 4)
     assert splitter.orientation() == Qt.Orientation.Vertical
     assert splitter.count() == 4  # viewer / 文件列表 / 工具栏 / 峰表
     assert panel.file_list.maximumWidth() > 1000  # 无横向宽度限制
     panel.close()
 
-def test_viewer_internal_horizontal_layout(qapp: QApplication) -> None:
-    """SpectrumViewer 内部左右布局:plot 在左、控制面板在右。"""
+def test_viewer_internal_vertical_layout(qapp: QApplication) -> None:
+    """SpectrumViewer 内部上下布局:plot 在上、控制面板在下。"""
     from PyQt6.QtCore import Qt
     from PyQt6.QtWidgets import QSplitter
 
@@ -742,9 +748,9 @@ def test_viewer_internal_horizontal_layout(qapp: QApplication) -> None:
     walk(viewer)
     assert found, "SpectrumViewer 内应有 QSplitter"
     splitter = found[0]
-    assert splitter.orientation() == Qt.Orientation.Horizontal
+    assert splitter.orientation() == Qt.Orientation.Vertical
     assert splitter.count() == 2
-    assert splitter.widget(0) is viewer.plot  # 左侧谱图
+    assert splitter.widget(0) is viewer.plot  # 上方谱图
     viewer.close()
 
 def test_project_dashboard_stats_and_runs(

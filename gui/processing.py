@@ -372,6 +372,89 @@ class ProcessingController:
             },
         }
 
+
+    # ------------------------------------------------------------------
+    # SMILE 优化(可选步骤,仅 NUS):网格搜索重构参数并采用最优谱
+    # ------------------------------------------------------------------
+    def _read_experiment(self, exp_id: str, data_id: str):
+        """读取数据对应 Experiment(优先项目内 raw 副本)。"""
+        from core.data.bruker_reader import read_dataset
+
+        entry = self._manager.data(exp_id, data_id)
+        raw = (
+            Path(entry.raw_dir)
+            if getattr(entry, "raw_dir", "")
+            else Path(entry.source)
+        )
+        if not raw.is_absolute():
+            raw = self._manager.root / raw
+        return read_dataset(raw)
+
+    def optimize_smile(self, data, exp_id=None, data_id=None) -> dict:
+        """SMILE 优化(可选):参数网格搜索,把最优谱归位并登记运行。"""
+        from core.data.internal_data_model import SamplingMode
+        from workflow.smile_optimize import optimize_smile_parameters
+
+        self._require_manager()
+        exp_id = exp_id or getattr(data, "exp_id", "")
+        data_id = data_id or getattr(data, "id", "")
+        experiment = self._read_experiment(exp_id, data_id)
+        if experiment.sampling.mode is not SamplingMode.NUS:
+            raise RuntimeError("SMILE 优化仅适用于 NUS 数据(当前为均匀采样)")
+        results = optimize_smile_parameters(
+            experiment, self._backend_instance()
+        )
+        valid = [
+            result
+            for result in results
+            if getattr(result, "spectrum_path", "")
+            and getattr(result, "decision", "") not in ("failed", "error")
+        ]
+        if not valid:
+            raise RuntimeError("SMILE 优化未获得可用候选")
+        best = valid[0]
+        spectrum_path = self._apply_smile_result(exp_id, data_id, best)
+        return {
+            "status": "success",
+            "best_params": dict(getattr(best, "params", {}) or {}),
+            "spectrum_path": spectrum_path,
+            "candidates": len(results),
+            "message": f"SMILE 优化: {len(results)} 组,最优 {best.params}",
+        }
+
+    def _apply_smile_result(self, exp_id: str, data_id: str, result) -> str:
+        """把最优 SMILE 谱归位 spectra/ 并登记运行与指纹(下游过期)。"""
+        import shutil
+
+        source = Path(getattr(result, "spectrum_path", ""))
+        spectra_dir = self._manager.data_dir(exp_id, data_id, "spectra")
+        spectra_dir.mkdir(parents=True, exist_ok=True)
+        target = spectra_dir / source.name
+        if source.is_file() and source.resolve() != target.resolve():
+            shutil.copy2(source, target)
+        self._manager.set_data_spectrum(exp_id, data_id, target)
+        run = self._manager.start_run(
+            exp_id,
+            workflow_ref="smile_optimize",
+            inputs={"data_id": data_id},
+            params=dict(getattr(result, "params", {}) or {}),
+        )
+        self._manager.finish_run(
+            run.run_id,
+            "success",
+            outputs={"spectrum_path": str(target)},
+            message=str(getattr(result, "message", "") or "SMILE 优化完成"),
+        )
+        record_step_success(self._manager, exp_id, data_id, "smile")
+        record_step_success(self._manager, exp_id, data_id, "spectrum")
+        self._snapshot_step(
+            exp_id,
+            data_id,
+            ("smile_optimize",),
+            self._spectrum_scripts(exp_id, data_id),
+        )
+        return str(target)
+
     # ------------------------------------------------------------------
     # 脚本快照(GUI 接线):步骤成功后把执行的脚本/参数写入 WorkflowRun
     # ------------------------------------------------------------------

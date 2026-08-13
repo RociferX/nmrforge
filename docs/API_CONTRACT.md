@@ -86,6 +86,9 @@ class ProcessingController:
                        on_error: Callable[[str], None]) -> None
     def manual_param_table(self, entry=None) -> NotImplementedError(占位)
     def manual_script_editor(self, entry=None) -> NotImplementedError(占位)
+    def optimize_smile(self, data, exp_id=None, data_id=None) -> dict
+        # 可选 SMILE 优化(仅 NUS):网格搜索重构参数并采用最优谱,
+        # 归位 spectra/ 并登记 smile_optimize 运行
 ```
 
 自动化内部固定走 `read_dataset → create_backend(config) → AutoProcessor.run`,

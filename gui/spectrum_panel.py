@@ -194,6 +194,14 @@ class SpectrumPanel(QWidget):
                     paths.extend(
                         sorted(spectra_dir.glob(f"{exp_id}-{data_id}*{ext}"))
                     )
+                # 追加 process 目录 FID(供 1D 迹线查看)
+                try:
+                    process_dir = self.manager.data_dir(
+                        exp_id, data_id, "process"
+                    )
+                    paths.extend(sorted(process_dir.glob("*.fid")))
+                except OSError:
+                    pass
                 if paths:
                     return paths
         except Exception:  # noqa: BLE001 - 新布局不可用回退旧路径
@@ -220,6 +228,15 @@ class SpectrumPanel(QWidget):
                 )
                 self._spectrum3d_panel.setVisible(True)
                 self._render_3d_view()
+                return True
+            if path.suffix.lower() == ".fid":
+                from viewer.spectrum import Spectrum1D
+
+                self._current_spectrum = path
+                self._spectrum3d_panel.clear()
+                self.viewer.add_spectrum(
+                    Spectrum1D.load_from_fid(path), name=path.stem
+                )
                 return True
             from viewer.spectrum import Spectrum
 
@@ -410,9 +427,33 @@ class SpectrumPanel(QWidget):
         self.viewer.set_peaks(peaks)
         self.export_poky_button.setEnabled(True)
         self.save_peaks_button.setEnabled(True)
-        InfoDialog.show_info(
-            self, "导入完成", f"已从 Poky 峰表导入 {len(peaks)} 个峰\n(点「保存峰表」写回 CSV)"
-        )
+        # 用导入的 Poky 峰表直接替换峰文件(写回 CSV + 登记 manual_peaks)
+        if self._current_data_id:
+            try:
+                self.controller.set_manager(self.manager)
+                csv_path = self.controller.save_peaks_manual(
+                    None,
+                    peaks,
+                    exp_id=self._current_exp_id,
+                    data_id=self._current_data_id,
+                )
+            except Exception as exc:  # noqa: BLE001 - 错误统一提示
+                InfoDialog.show_info(
+                    self,
+                    "替换失败",
+                    f"峰表替换未完成(仍保留在内存): {exc}",
+                )
+                return
+            self.peaks_saved.emit()
+            InfoDialog.show_info(
+                self, "导入完成", f"已用 Poky 峰表替换峰文件:\n{csv_path}"
+            )
+        else:
+            InfoDialog.show_info(
+                self,
+                "导入完成",
+                f"已从 Poky 峰表导入 {len(peaks)} 个峰\n(点「保存峰表」写回 CSV)",
+            )
 
     def _on_save_peaks(self) -> None:
         """峰表写回 data/peaks/<exp>-<data>.csv 并登记 manual_peaks 运行。"""

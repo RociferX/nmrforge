@@ -199,7 +199,7 @@ def input_fingerprint(
     if step_id == "spectrum":
         fid = _fid_file(manager, exp_id, data_id)
         return file_fingerprint(fid) if fid is not None else None
-    if step_id == "peaks":
+    if step_id in ("smile", "peaks"):
         spectrum = _spectrum_file(manager, exp_id, data_id)
         return file_fingerprint(spectrum) if spectrum is not None else None
     if step_id == "analysis":

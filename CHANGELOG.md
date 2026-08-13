@@ -1,5 +1,24 @@
 # 变更日志
 
+## [0.2.29] - 2026-08-13
+
+- Viewer 增强(6 项):
+  - .fid 查看:Spectrum1D(load_from_fid,多维取第一条 FID 实部);独立查看器
+    与谱图面板的过滤器/拖放/文件列表支持 .fid,以 1D 迹线显示;
+  - 二维谱 1D 切片:右键谱图按点击位置提取 1D 行/列切片(类似 nmrDraw),
+    「返回二维视图」按钮恢复轮廓;
+  - 布局:查看器内部改为上下布局(上方谱图、下方控制面板),谱图默认 1:1
+    正方形显示;
+  - 图层管理:图层列表右键「删除该图层 / 删除全部图层」;
+  - 峰显示开关:控制面板「显示峰」勾选隐藏/显示全部峰标记;Poky .list
+    导入直接替换峰 CSV 文件(登记 manual_peaks 运行);
+  - SMILE 优化(可选):Pipeline 新增「SMILE 优化」步骤(生成谱图后、仅
+    NUS,可跳过——峰挑选不依赖它),ProcessingController.optimize_smile
+    网格搜索并采用最优谱(归位 spectra/、登记 smile_optimize 运行、脚本
+    快照、指纹刷新使下游过期)。
+- 测试:新增 test_viewer_1d / test_gui_smile / test_gui_poky,更新
+  test_gui_layout(六步流程/上下布局),全量 349 passed,ruff 全绿。
+
 ## [0.2.28] - 2026-08-12
 
 - 重新处理入口:Pipeline 已成功(SUCCESS)的处理步骤(生成 FID / 生成谱图 /
