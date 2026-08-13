@@ -310,15 +310,26 @@ class Spectrum1D:
     def load_from_fid(
         cls, path: Path | str, label: str = "FID"
     ) -> Spectrum1D:
-        """用 nmrglue 读取 NMRPipe .fid(时间域);多维取第一条 FID 实部。"""
+        """用 nmrglue 读取 NMRPipe .fid(时间域);多维取第一条 FID 实部。
+
+        时间域 FID 以数据点(序号)为 x 轴显示,不使用 ppm 轴
+        (ppm 只对频域谱有意义)。
+        """
         import nmrglue as ng
 
-        dic, data = ng.pipe.read(str(path))
+        _dic, data = ng.pipe.read(str(path))
         data = np.asarray(data)
         if np.iscomplexobj(data):
             data = data.real
         while data.ndim > 1:
             data = data[0]  # 查看用:取第一条 FID 作为一维迹线
-        axis = cls._axis_from_dic(dic, label, int(data.shape[0]))
+        axis = SpectrumAxis(
+            label=label or "FID 数据点",
+            size=int(data.shape[0]),
+            sw_hz=0.0,
+            obs_mhz=0.0,
+            carrier_ppm=0.0,
+            orig_hz=0.0,
+        )
         logger.info("载入 FID: %s (%s)", path, data.shape)
         return cls(data, axis, source=Path(path))

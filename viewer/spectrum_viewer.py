@@ -84,6 +84,7 @@ class SpectrumViewer(QWidget):
         self.peak_label_items: list[pg.TextItem] = []
 
         self.layer_list = QListWidget()
+        self.layer_list.setMaximumHeight(90)
         self.layer_list.itemChanged.connect(self._on_layer_toggle)
         self.layer_list.setContextMenuPolicy(
             Qt.ContextMenuPolicy.CustomContextMenu
@@ -93,6 +94,7 @@ class SpectrumViewer(QWidget):
         )
 
         self.level_slider = QSlider(Qt.Orientation.Horizontal)
+        self.level_slider.setFixedHeight(18)
         self.level_slider.setRange(1, 100)
         self.level_slider.setValue(8)
         self.level_slider.valueChanged.connect(self._update_levels_debounced)
@@ -100,6 +102,7 @@ class SpectrumViewer(QWidget):
         self.level_label = QLabel(self._level_label_text())
 
         self.count_slider = QSlider(Qt.Orientation.Horizontal)
+        self.count_slider.setFixedHeight(18)
         self.count_slider.setRange(5, 60)
         self.count_slider.setValue(self._level_count)
         self.count_slider.valueChanged.connect(self._on_level_count)
@@ -115,6 +118,8 @@ class SpectrumViewer(QWidget):
 
         controls = QWidget()
         controls_layout = QVBoxLayout(controls)
+        controls_layout.setContentsMargins(4, 2, 4, 2)
+        controls_layout.setSpacing(2)
         controls_layout.addWidget(QLabel("谱图层"))
         controls_layout.addWidget(self.layer_list, 1)
         controls_layout.addWidget(QLabel("轮廓起点(%)"))
@@ -141,14 +146,14 @@ class SpectrumViewer(QWidget):
 
         # TopSpin 式 1D 条带:上方行迹线(F2)、右侧列迹线(F1),与主谱联动
         self.strip_top = pg.PlotWidget()
-        self.strip_top.setFixedHeight(96)
+        self.strip_top.setFixedHeight(110)
         self.strip_top.setMenuEnabled(False)
         self.strip_top.getViewBox().setXLink(self.plot.getViewBox())
         self.strip_top_curve = pg.PlotDataItem(pen=pg.mkPen("#1f77b4", width=1))
         self.strip_top.addItem(self.strip_top_curve)
         self.strip_top.hide()
         self.strip_right = pg.PlotWidget()
-        self.strip_right.setFixedWidth(96)
+        self.strip_right.setFixedWidth(90)
         self.strip_right.setMenuEnabled(False)
         self.strip_right.getViewBox().setYLink(self.plot.getViewBox())
         self.strip_right.getViewBox().invertY(True)
@@ -188,8 +193,8 @@ class SpectrumViewer(QWidget):
         splitter.addWidget(plot_area)
         splitter.addWidget(controls)
         splitter.setStretchFactor(0, 1)
-        splitter.setSizes([640, 260])
-        self.plot.setMinimumHeight(320)
+        splitter.setSizes([620, 210])
+        self.plot.setMinimumHeight(300)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(splitter)

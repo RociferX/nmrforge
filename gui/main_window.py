@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
     QApplication,
     QFileDialog,
     QInputDialog,
+    QLabel,
     QMainWindow,
     QMenu,
     QSplitter,
@@ -44,7 +45,11 @@ from gui.dialogs import (
     ScriptEditorDialog,
 )
 from gui.log_panel import LogPanel
-from gui.pipeline_panel import compute_step_statuses
+from gui.pipeline_panel import (
+    STEP_LABEL,
+    compute_data_step_statuses,
+    compute_step_statuses,
+)
 from gui.processing import ProcessingController
 from gui.project_tree import ProjectTreePanel
 from gui.spectrum_panel import SpectrumPanel
@@ -81,7 +86,8 @@ class MainWindow(QMainWindow):
         self.manual_run_done.connect(self._on_manual_run_done)
         self._pending_data_names: dict[str, str] = {}
         self.setWindowTitle("NMRForge")
-        self.resize(1280, 780)
+        self.resize(1280, 720)
+        self.setAcceptDrops(True)  # 拖拽 Bruker 数据目录导入
         self._build_menus()
         self._build_central()
         self.refresh()
@@ -140,6 +146,8 @@ class MainWindow(QMainWindow):
         self.view_spectrum_action.toggled.connect(self._toggle_spectrum)
         view_menu.addAction(self.view_spectrum_action)
 
+        settings_menu = bar.addMenu("设置(&T)")
+        settings_menu.addAction("软件设置...", self._open_settings)
         help_menu = bar.addMenu("帮助(&H)")
         help_menu.addAction("关于", self.about)
 
@@ -174,6 +182,12 @@ class MainWindow(QMainWindow):
             self._import_data_with_options
         )
         self.center_panel.batch_import_requested.connect(self._batch_import)
+        self.pipeline.manual_with_params_requested.connect(
+            self._open_manual_with_params
+        )
+        self.pipeline.view_log_requested.connect(self._on_view_step_log)
+        self.pipeline.batch_summary_requested.connect(self._on_batch_summary)
+        # 首次导入提示:导入完成信号里触发(见 _on_import_done/_on_batch_import_done)
         self.center_panel.create_experiment_requested.connect(
             self._create_experiment_with_title
         )
@@ -186,23 +200,34 @@ class MainWindow(QMainWindow):
 
         self.spectrum_panel = SpectrumPanel(self.manager, controller=self.controller)
         self.spectrum_panel.peaks_saved.connect(self._on_peaks_saved)
+        self.spectrum_panel.locate_pipeline_requested.connect(
+            self._locate_pipeline
+        )
 
         self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
         self.main_splitter.addWidget(self.project_tree)
         self.main_splitter.addWidget(self.center_panel)
         self.main_splitter.addWidget(self.spectrum_panel)
-        self.main_splitter.setStretchFactor(0, 22)
-        self.main_splitter.setStretchFactor(1, 43)
-        self.main_splitter.setStretchFactor(2, 35)
-        self.main_splitter.setSizes([280, 540, 420])
+        self.main_splitter.setStretchFactor(0, 20)
+        self.main_splitter.setStretchFactor(1, 40)
+        self.main_splitter.setStretchFactor(2, 40)
+        self.main_splitter.setSizes([260, 460, 560])
 
         self.log_panel = LogPanel()
+        self.log_panel.setMaximumHeight(160)
         self.log_panel.setVisible(False)
 
         central = QWidget()
         central_layout = QVBoxLayout(central)
         central_layout.setContentsMargins(0, 0, 0, 0)
         central_layout.setSpacing(0)
+        self.context_bar = QLabel("未打开项目")
+        self.context_bar.setWordWrap(True)
+        self.context_bar.setStyleSheet(
+            "background: #ecf0f1; padding: 4px 10px; "
+            "font-weight: bold; color: #2c3e50;"
+        )
+        central_layout.addWidget(self.context_bar)
         central_layout.addWidget(self.main_splitter, 1)
         central_layout.addWidget(self.log_panel)
         self.setCentralWidget(central)
@@ -343,6 +368,7 @@ class MainWindow(QMainWindow):
         self.refresh()
         self.project_tree.select_experiment(exp_id)
         self.center_panel.set_selection("experiment", exp_id)
+        self._maybe_show_first_import_hint()
 
     def _assign_batch(self, exp_id: str, data_id: str, batch: str) -> None:
         """把数据加入(已有或新建的)批量组。"""
@@ -441,6 +467,7 @@ class MainWindow(QMainWindow):
         self.refresh()
         if exp_id:
             self.project_tree.select_experiment(exp_id)
+        self._maybe_show_first_import_hint()
         if result.warnings:
             InfoDialog.show_info(
                 self, "导入完成(有提示)", "\n".join(result.warnings)
@@ -540,7 +567,12 @@ class MainWindow(QMainWindow):
             return
         if self.manager.project is None:
             return
-        statuses = compute_step_statuses(self.manager, exp_id)
+        data_id = getattr(self.pipeline, "_current_data_id", "")
+        statuses = (
+            compute_data_step_statuses(self.manager, exp_id, data_id)
+            if data_id
+            else compute_step_statuses(self.manager, exp_id)
+        )
         next_step = next(
             (sid for sid, st in statuses.items() if st == "OUTDATED"), None
         )
@@ -575,6 +607,113 @@ class MainWindow(QMainWindow):
 
     def _manual_fid_menu(self) -> None:
         self._open_manual_dialog("fid")
+
+    def _open_manual_with_params(self, step_id: str, params: dict) -> None:
+        """用最近运行参数打开人工参数表格(参数预填)。"""
+        exp_id = self.project_tree.current_experiment_id()
+        if not exp_id or self.manager.project is None:
+            return
+        entry = self.manager.project.experiment(exp_id)
+        if entry is None:
+            return
+        data_node = self._current_data_node(entry)
+        if data_node is None:
+            return
+        data_id = getattr(data_node, "id", exp_id)
+        label = f"{entry.title or entry.id} ({exp_id})"
+        schema = self.controller.param_schema()
+        defaults = schema.setdefault("default", {})
+        if isinstance(defaults, dict):
+            for key, value in (params or {}).items():
+                if key in defaults:
+                    defaults[key] = value
+        dialog = ParameterTableDialog(self, label, params=schema)
+        dialog.render_requested.connect(
+            lambda p: self._render_scripts_and_edit(
+                p, data_node, exp_id, data_id, label
+            )
+        )
+        dialog.exec()
+
+    def _on_view_step_log(self, step_id: str) -> None:
+        """定位日志面板:追加标记行并展开(append 自动滚底)。"""
+        self._append_log(
+            f"── {STEP_LABEL.get(step_id, step_id)} 运行日志(最近一次)──"
+        )
+
+    def _maybe_show_first_import_hint(self) -> None:
+        """首次导入后的「下一步」高亮提示,只出现一次(状态存设置)。"""
+        from gui.settings import load_settings, save_settings
+
+        settings = load_settings()
+        guide = settings.get("guide") or {}
+        if guide.get("first_import_hint_shown"):
+            return
+        guide["first_import_hint_shown"] = True
+        settings["guide"] = guide
+        save_settings(settings)
+        self.pipeline.show_first_import_hint()
+
+    def _open_settings(self) -> None:
+        """打开软件设置对话框(阶段 C3)。"""
+        from gui.dialogs import SettingsDialog
+
+        SettingsDialog(self).exec()
+
+    def _on_batch_summary(self, summary: dict) -> None:
+        """批量处理汇总弹窗:失败项双击定位到数据(阶段 C1)。"""
+        from gui.dialogs import BatchSummaryDialog
+
+        name = self.manager.project.name if self.manager.project else ""
+        dialog = BatchSummaryDialog(self, summary, name)
+        dialog.locate_requested.connect(self._locate_pipeline_from_batch)
+        dialog.exec()
+
+    def _locate_pipeline_from_batch(self, data_id: str) -> None:
+        exp_id = self.project_tree.current_experiment_id()
+        if exp_id and data_id:
+            self._locate_pipeline(exp_id, data_id)
+
+    def dragEnterEvent(self, event) -> None:
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event) -> None:
+        paths = [
+            Path(url.toLocalFile())
+            for url in event.mimeData().urls()
+            if url.isLocalFile()
+        ]
+        self._handle_dropped_import_paths(paths)
+
+    def _handle_dropped_import_paths(self, paths: list) -> None:
+        """拖拽导入:目录含 acqus 视为 Bruker 数据集,导入当前实验或新建实验。"""
+        imported = 0
+        for path in paths:
+            if not path.is_dir():
+                continue
+            if not (path / "acqus").is_file():
+                InfoDialog.show_info(
+                    self,
+                    "导入失败",
+                    f"不是 Bruker 数据集目录(缺少 acqus):\n{path}",
+                )
+                continue
+            exp_id = self.project_tree.current_experiment_id()
+            if exp_id:
+                self._pending_data_names[exp_id] = path.name
+            self._import_experiment_async(
+                {
+                    "source": str(path),
+                    "title": path.name,
+                    "sample_id": "",
+                    "copy": True,
+                    "experiment_id": exp_id or "",
+                }
+            )
+            imported += 1
+        if imported:
+            self._append_log(f"拖拽导入: {imported} 个数据目录")
 
     def _open_manual_dialog(self, step_id: str) -> None:
         """人工处理入口:按步骤打开参数表格/脚本编辑器/fid 编辑器。"""
@@ -1029,10 +1168,52 @@ class MainWindow(QMainWindow):
             f"实验 {exp_id}: 双击查看谱图文件,中间 Pipeline 显示处理步骤"
         )
 
+    _DATA_STATUS_TEXT = {
+        "imported": "已导入",
+        "fid_ready": "FID 就绪",
+        "processed": "已处理",
+        "picked": "已选峰",
+        "analyzed": "已分析",
+        "registered": "已登记",
+    }
+
+    def _update_context_bar(self) -> None:
+        """顶部上下文条:Project / Experiment / Data + 状态摘要。"""
+        if self.manager.project is None:
+            self.context_bar.setText("未打开项目")
+            return
+        exp_id = self.project_tree.current_experiment_id()
+        data_id = self.project_tree._data_id_of(self.project_tree.tree.currentItem())
+        parts = [self.manager.project.name]
+        if exp_id:
+            exp = self.manager.project.experiment(exp_id)
+            parts.append(exp.title if exp is not None else exp_id)
+        if data_id and exp_id:
+            label = data_id
+            status_text = ""
+            try:
+                exp = self.manager.project.experiment(exp_id)
+                data = next((d for d in exp.data if d.id == data_id), None)
+                if data is not None:
+                    label = getattr(data, "title", "") or data_id
+                    status_text = self._DATA_STATUS_TEXT.get(
+                        getattr(data, "status", ""), getattr(data, "status", "")
+                    )
+            except Exception:  # noqa: BLE001 - 上下文解析失败保底
+                label = data_id
+            parts.append(f"{label} · {status_text}" if status_text else label)
+        self.context_bar.setText(" / ".join(parts))
+
+    def _locate_pipeline(self, exp_id: str, data_id: str) -> None:
+        """谱图面板「在 Pipeline 中定位」:选中树节点并切到处理页。"""
+        self.project_tree.select_data(exp_id, data_id)
+        self.center_panel.set_selection("data", exp_id, data_id)
+
     def _update_context(self, kind: str, exp_id: str, data_id: str = "") -> None:
         """左侧选择变化 → 中间按选中类型显示,右侧围绕数据刷新。"""
         self.center_panel.set_selection(kind, exp_id, data_id)
         self.spectrum_panel.set_context(exp_id, data_id)
+        self._update_context_bar()
 
     def _append_log(self, message: str) -> None:
         self.log_panel.append(message)
@@ -1059,6 +1240,7 @@ class MainWindow(QMainWindow):
             self.center_panel.set_selection("workspace", "", "")
             self.spectrum_panel.set_context("", "")
             self.main_splitter.setVisible(True)  # 欢迎页在三栏中显示
+            self._update_context_bar()
             return
         for exp in project.experiments:
             status = self.manager.infer_status(exp.id).value
@@ -1070,6 +1252,7 @@ class MainWindow(QMainWindow):
         # 打开/新建项目后默认聚焦第一个实验
         if project.experiments and not self.center_panel.current_experiment_id():
             self.project_tree.select_experiment(project.experiments[0].id)
+        self._update_context_bar()
 
     @staticmethod
     def run() -> int:

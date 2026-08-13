@@ -112,6 +112,30 @@ def test_save_peaks_manual_writes_list_and_registers_run(
     assert runs[0].outputs.get("peaks") == str(list_path)
 
 
+def test_generate_spectrum_reports_progress(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """生成谱图阶段进展经 progress 回调上报(开始/完成叙述)。"""
+    manager = _manager_with_experiment(tmp_path)
+    data = manager.project.experiment("exp_001").data[0]
+    messages: list[str] = []
+    monkeypatch.setattr(
+        "workflow.stepwise.generate_spectrum",
+        lambda *args, **kwargs: "/tmp/x.ft2",
+    )
+    controller = ProcessingController(manager)
+    path = controller.generate_spectrum(
+        data,
+        exp_id="exp_001",
+        data_id="d_001",
+        progress=messages.append,
+    )
+    assert path == "/tmp/x.ft2"
+    assert messages
+    assert any("读取数据" in msg for msg in messages)
+    assert any("完成重构/处理" in msg for msg in messages)
+
+
 def test_param_schema_returns_editable_defaults() -> None:
     """param_schema:返回可编辑参数结构(zero_fill/ext/sampling 等键)。"""
     schema = ProcessingController().param_schema()

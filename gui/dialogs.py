@@ -14,13 +14,17 @@ from PyQt6.QtWidgets import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
+    QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QPlainTextEdit,
     QPushButton,
+    QSpinBox,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -106,7 +110,7 @@ class ImportExperimentDialog(QDialog):
         for sample_id, name in samples or []:
             self.sample_combo.addItem(f"{sample_id} {name}".strip(), sample_id)
         form.addRow("关联样本:", self.sample_combo)
-        self.copy_check = QCheckBox("复制数据到项目(raw/<exp_id>,SHA-256 指纹)")
+        self.copy_check = QCheckBox("链接原始数据到项目(只读文件链接,必要时复制)")
         self.copy_check.setChecked(True)
         self.copy_check.setToolTip(
             "勾选后把 Bruker 数据集复制进项目 raw/ 目录并计算输入指纹;"
@@ -587,3 +591,112 @@ class RunHistoryDialog(QDialog):
         from PyQt6.QtGui import QDesktopServices
 
         QDesktopServices.openUrl(QUrl.fromLocalFile(self._current_snapshot))
+
+class BatchSummaryDialog(QDialog):
+    """批量处理汇总:成功/失败清单;失败项双击定位到数据(阶段 C1)。"""
+
+    locate_requested = pyqtSignal(str)  # data_id
+
+    def __init__(
+        self,
+        parent: QWidget | None,
+        summary: dict,
+        project_name: str = "",
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(f"批量处理汇总 - {project_name or 'NMRForge'}")
+        self.resize(520, 380)
+        layout = QVBoxLayout(self)
+        info = QLabel(str(summary.get("info", "")))
+        info.setWordWrap(True)
+        layout.addWidget(info)
+        self.list_widget = QListWidget()
+        layout.addWidget(self.list_widget, 1)
+        for item in summary.get("items", []):
+            status = (
+                "成功"
+                if item.get("ok")
+                else "失败: " + str(item.get("error", ""))
+            )
+            list_item = QListWidgetItem(
+                f"{item.get('data_id', '')} {item.get('step', '')} · {status}"
+            )
+            list_item.setData(Qt.ItemDataRole.UserRole, item.get("data_id", ""))
+            self.list_widget.addItem(list_item)
+        self.list_widget.itemDoubleClicked.connect(self._on_item_activated)
+        hint = QLabel("双击条目可在左侧定位到对应数据(失败项)或查看状态。")
+        hint.setStyleSheet("color: #666;")
+        layout.addWidget(hint)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _on_item_activated(self, item: QListWidgetItem) -> None:
+        data_id = item.data(Qt.ItemDataRole.UserRole)
+        if data_id:
+            self.locate_requested.emit(str(data_id))
+
+
+class SettingsDialog(QDialog):
+    """软件设置(精简,阶段 C3):NMRPipe 路径、默认线宽、points_per_line、
+    SMILE 线程上限;保存到 config/nmrforge.local.yaml,重启生效。
+    """
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("软件设置")
+        self.resize(420, 300)
+        from gui.settings import DEFAULTS, load_settings
+
+        settings = load_settings()
+        layout = QVBoxLayout(self)
+        form = QFormLayout()
+        self.nmrpipe_edit = QLineEdit(str(settings.get("nmrpipe_path", "")))
+        self.nmrpipe_edit.setPlaceholderText("未配置(自动查找)")
+        form.addRow("NMRPipe 路径", self.nmrpipe_edit)
+        self.linewidth_spins: dict[str, QDoubleSpinBox] = {}
+        for nucleus, default in DEFAULTS["linewidth_hz"].items():
+            spin = QDoubleSpinBox()
+            spin.setRange(0, 200)
+            spin.setDecimals(1)
+            spin.setValue(float(settings["linewidth_hz"].get(nucleus, default)))
+            form.addRow(f"{nucleus} 默认线宽 (Hz)", spin)
+            self.linewidth_spins[nucleus] = spin
+        self.ppl_spin = QSpinBox()
+        self.ppl_spin.setRange(1, 8)
+        self.ppl_spin.setValue(int(settings.get("points_per_line", 2)))
+        form.addRow("填零 points_per_line", self.ppl_spin)
+        self.smile_spin = QSpinBox()
+        self.smile_spin.setRange(1, 16)
+        self.smile_spin.setValue(int(settings.get("smile_thread_cap", 2)))
+        form.addRow("SMILE 线程上限", self.smile_spin)
+        layout.addLayout(form)
+        hint = QLabel(
+            "保存到 config/nmrforge.local.yaml,重启后生效;未配置时显示默认值。"
+        )
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: #666;")
+        layout.addWidget(hint)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok
+            | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self._on_accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _on_accept(self) -> None:
+        from gui.settings import save_settings
+
+        settings = {
+            "nmrpipe_path": self.nmrpipe_edit.text().strip(),
+            "linewidth_hz": {
+                nucleus: spin.value()
+                for nucleus, spin in self.linewidth_spins.items()
+            },
+            "points_per_line": self.ppl_spin.value(),
+            "smile_thread_cap": self.smile_spin.value(),
+        }
+        save_settings(settings)
+        self.accept()
+
