@@ -164,7 +164,8 @@ source/segments/imported_at 迁移为 data[0],并标记 `migrated_from_1_1: true
 ```python
 create_experiment(title="", sample_id="") -> ExperimentEntry   # 新建空白实验
 import_data(exp_id, source, segments=None, title="") -> DataEntry
-    # 读参数 + 复制 raw/<exp_id>/<data_id>/ + 写 metadata + import WorkflowRun
+    # 读参数 + 链接/复制 raw/<exp_id>/<data_id>/(G2B-009:硬链接→符号链接→
+    # 复制回退)+ 写 metadata + import WorkflowRun
     # 不生成 FID、不生成谱
 set_data_fid(data_id, fid_path)                               # 生成 FID 后登记
 set_data_spectrum(data_id, spectrum_path)                     # 生成谱后登记
@@ -196,7 +197,7 @@ def process(self, experiment, plan) -> dict        # 保持;内部自动判断 N
 
 ### 8.4 产物命名
 
-- raw 副本:raw/<exp_id>/<data_id>/
+- raw 链接/副本:raw/<exp_id>/<data_id>/(G2B-009:默认硬链接→符号链接→复制回退)
 - metadata:metadata/<exp_id>-<data_id>.json
 - fid:processing/<exp_id>/<data_id>.fid(或 data 内)
 - 谱:spectra/<exp_id>-<data_id>.ft2|ft3
@@ -230,7 +231,7 @@ class WorkspaceManager:
 项目 → <exp_id>/ → <data_id>/ → {raw, process, spectra, peaks,
 figures, report, metadata.json}
 
-- raw/        导入的数据副本
+- raw/        导入的数据(G2B-009:链接式,默认硬链接→符号链接→复制回退)
 - process/    fid 与处理中间产物
 - spectra/    终谱(ft2/ft3)
 - peaks/      峰表 CSV

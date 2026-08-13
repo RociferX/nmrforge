@@ -101,6 +101,8 @@ def test_generate_spectrum_uniform(tmp_path: Path, bruker_dir: Path) -> None:
     assert spectrum.endswith(".ft2")
     # 契约 §9.2:终谱落盘 data_dir(..., "spectra")
     assert Path(spectrum).parent == manager.data_dir(exp_id, data_id, "spectra")
+    # G2B-009:终谱只存 spectra/,process/ 不留副本
+    assert not (manager.data_dir(exp_id, data_id, "process") / Path(spectrum).name).exists()
     data = manager.data(exp_id, data_id)
     assert data.spectrum_path == spectrum
     assert data.status == "processed"

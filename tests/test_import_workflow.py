@@ -1,8 +1,9 @@
-"""导入工作流测试:Data 层级(raw 复制 + SHA-256 + metadata + WorkflowRun 登记)。"""
+"""导入工作流测试:Data 层级(raw 链接 + SHA-256 + metadata + WorkflowRun 登记)。"""
 
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from pathlib import Path
 
@@ -22,7 +23,7 @@ def _source(bruker_dir: Path) -> Path:
     return bruker_dir / "hsqc_2d"
 
 
-def test_import_copies_and_registers(tmp_path: Path, bruker_dir: Path) -> None:
+def test_import_links_and_registers(tmp_path: Path, bruker_dir: Path) -> None:
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     result = import_bruker_dataset(manager, _source(bruker_dir), title="HSQC")
 
@@ -41,6 +42,10 @@ def test_import_copies_and_registers(tmp_path: Path, bruker_dir: Path) -> None:
     assert data.source == str(_source(bruker_dir))
     assert (raw_dir / "acqus").is_file()
     assert (raw_dir / "acqu2s").is_file()
+    # G2B-009:raw 只读文件为硬链接(同卷),不是复制
+    assert not (raw_dir / "acqus").is_symlink()
+    assert os.path.samefile(_source(bruker_dir) / "acqus", raw_dir / "acqus")
+    assert os.path.samefile(_source(bruker_dir) / "acqu2s", raw_dir / "acqu2s")
     # 兼容只读属性指向 data[0]
     assert entry.source == data.raw_dir
 
@@ -148,7 +153,7 @@ def test_import_source_inside_project_skips_copy(
     assert manager.project.run(result.run_id).status == "success"
 
 
-def test_import_segments_are_copied(tmp_path: Path, bruker_dir: Path) -> None:
+def test_import_segments_are_linked(tmp_path: Path, bruker_dir: Path) -> None:
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     segment = bruker_dir / "nus_2d"
     result = import_bruker_dataset(
@@ -160,9 +165,31 @@ def test_import_segments_are_copied(tmp_path: Path, bruker_dir: Path) -> None:
     seg_dir = manager.data_dir("exp_001", "d_001", "raw") / "segments" / "01"
     assert seg_dir.is_dir()
     assert (seg_dir / "acqus").is_file()
+    assert os.path.samefile(segment / "acqus", seg_dir / "acqus")
     assert entry.data[0].segments == [str(seg_dir)]
     metadata = json.loads(result.metadata_path.read_text(encoding="utf-8"))
     assert metadata["segments"] == [str(seg_dir)]
+
+
+def test_import_link_failure_falls_back_to_copy(
+    tmp_path: Path, bruker_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """硬链接/符号链接均失败时逐项回退复制,仍成功并记录 warnings。"""
+
+    def _no_link(*_args: object, **_kwargs: object) -> None:
+        raise OSError("link disabled for test")
+
+    monkeypatch.setattr("workflow.import_workflow.os.link", _no_link)
+    monkeypatch.setattr("workflow.import_workflow.os.symlink", _no_link)
+    manager = ProjectManager.create_project(tmp_path / "proj", "demo")
+    result = import_bruker_dataset(manager, _source(bruker_dir))
+    assert manager.project is not None
+    raw_dir = manager.data_dir("exp_001", "d_001", "raw")
+    assert (raw_dir / "acqus").is_file()
+    # 回退复制:文件为独立副本,不再与源 samefile
+    assert not os.path.samefile(_source(bruker_dir) / "acqus", raw_dir / "acqus")
+    assert any("回退复制" in w for w in result.warnings)
+    assert manager.project.run(result.run_id).status == "success"
 
 
 def test_import_failure_rolls_back(

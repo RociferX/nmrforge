@@ -1,5 +1,20 @@
 # 变更日志
 
+## [0.2.56] - 2026-08-13
+
+- Backend:存储去重实装(G2B-009,用户确认「raw 非必要不复制只链接、
+  process 不放终谱」):
+  - 导入 raw 改「链接式」:只读源文件按原相对结构建立链接,优先级
+    硬链接 → 符号链接 → 复制回退(跨卷/权限失败逐项回退并记录 warnings);
+    copy=False 语义不变;SHA-256 指纹/manifest 与 metadata 不变;
+  - 终谱归位改 move:_register_spectrum 从 process/ 移入
+    spectra/<exp>-<data>.ft2|ft3,process/ 不再保留终谱副本
+    (fid/脚本/中间候选谱仍在 process/);manual 路径复用同一归位;
+  - 旧数据不迁移、旧路径兼容;WorkflowRun params 增 link_stats 审计。
+- 测试:test_import_workflow 新增链接断言(硬链接 samefile)与回退复制
+  用例,test_stepwise/test_manual 补「process/ 无终谱」断言;
+  全量 435 passed,ruff 全绿。
+
 ## [0.2.55] - 2026-08-13
 
 - 修正(用户反馈):0.2.52 方向判断相反——二维谱应「行 0(高 ppm)显示在

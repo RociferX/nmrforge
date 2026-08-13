@@ -1,7 +1,7 @@
 """步骤化处理编排(API_CONTRACT §8.3 / G2B-002)。
 
 三步:
-1. import_data —— workflow.import_workflow.import_data(只读参数 + 复制);
+1. import_data —— workflow.import_workflow.import_data(只读参数 + 链接(G2B-009));
 2. generate_fid —— backend.convert_to_fid(生成 NMRPipe fid);
 3. generate_spectrum —— backend.process / reconstruct_nus(含 NUS SMILE 重构)。
 
@@ -50,13 +50,13 @@ def _register_spectrum(
     data_id: str,
     spectrum_path: str,
 ) -> str:
-    """把后端产出的终谱归位到 <exp_id>/<data_id>/spectra/ 并登记。"""
+    """把后端产出的终谱归位到 <exp_id>/<data_id>/spectra/(move,process 不留副本)并登记。"""
     source = Path(spectrum_path)
     spectra_dir = manager.data_dir(exp_id, data_id, "spectra")
     spectra_dir.mkdir(parents=True, exist_ok=True)
     target = spectra_dir / source.name
     if source.is_file() and source.resolve() != target.resolve():
-        shutil.copy2(source, target)
+        shutil.move(str(source), str(target))
     manager.set_data_spectrum(exp_id, data_id, target)
     return str(target)
 

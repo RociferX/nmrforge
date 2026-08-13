@@ -1,13 +1,15 @@
 """导入工作流:把 Bruker 数据集导入项目(步骤化流程第 1 步)。
 
-流程(API_CONTRACT §8 / G2B-002):只读实验参数 + 复制必要文件到
-raw/<exp_id>/<data_id>/ → SHA-256 指纹 → metadata/<exp_id>-<data_id>.json
+流程(API_CONTRACT §8 / G2B-002/G2B-009):只读实验参数 + 链接必要文件到
+raw/<exp_id>/<data_id>/(硬链接→符号链接→复制回退) → SHA-256 指纹
+→ metadata/<exp_id>-<data_id>.json
 → WorkflowRun(import) 登记。不生成 FID、不生成谱(第 2/3 步分别由
 convert_to_fid 与 process/reconstruct_nus 完成)。
 """
 
 from __future__ import annotations
 
+import os
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -108,6 +110,34 @@ def _validate_dataset_dir(path: Path) -> None:
         raise ImportWorkflowError(f"不是 Bruker 数据集目录(缺少 acqus): {path}")
 
 
+def _link_one(src: Path, dst: Path) -> str:
+    """链接单个文件:硬链接 → 符号链接 → 复制回退(G2B-009)。"""
+    try:
+        os.link(src, dst)
+        return "hardlink"
+    except OSError:
+        pass
+    try:
+        os.symlink(src, dst)
+        return "symlink"
+    except OSError:
+        pass
+    shutil.copy2(src, dst)
+    return "copy"
+
+
+def _link_tree(src: Path, dst: Path, stats: dict[str, int]) -> None:
+    """按源相对结构建立链接树:目录 mkdir,文件链接(G2B-009)。"""
+    dst.mkdir(parents=True, exist_ok=True)
+    for item in sorted(src.iterdir()):
+        source_item = src / item.name
+        dest_item = dst / item.name
+        if source_item.is_dir():
+            _link_tree(source_item, dest_item, stats)
+        else:
+            stats[_link_one(source_item, dest_item)] += 1
+
+
 def import_data(
     manager: ProjectManager,
     exp_id: str,
@@ -116,7 +146,9 @@ def import_data(
     segments: list[Path | str] | None = None,
     copy: bool = True,
 ) -> ImportResult:
-    """导入数据到实验:只读参数 + 复制 raw/<exp_id>/<data_id>/ + metadata + import run。
+    """导入数据到实验:只读参数 + 链接 raw/<exp_id>/<data_id>/ + metadata + import run。
+
+    G2B-009:raw 只读文件默认硬链接,失败回退符号链接/复制。
 
     不生成 FID、不生成谱;调用方需自行 manager.save()。
     """
@@ -132,6 +164,7 @@ def import_data(
     experiment = read_dataset(src)
 
     warnings: list[str] = []
+    link_stats = {"hardlink": 0, "symlink": 0, "copy": 0}
     should_copy = copy
     if should_copy and src.is_relative_to(manager.root):
         warnings.append(f"源目录已在项目内,跳过复制(引用原路径): {src}")
@@ -147,7 +180,7 @@ def import_data(
         effective_root = src
         if should_copy:
             copied_dir = manager.data_dir(exp_id, data_id, "raw")
-            shutil.copytree(src, copied_dir)
+            _link_tree(src, copied_dir, link_stats)
             data_entry.raw_dir = copied_dir.relative_to(manager.root).as_posix()
             if segment_paths:
                 seg_base = copied_dir / "segments"
@@ -155,10 +188,14 @@ def import_data(
                 copied_segments: list[str] = []
                 for index, seg in enumerate(segment_paths, start=1):
                     dest = seg_base / f"{index:02d}"
-                    shutil.copytree(seg, dest)
+                    _link_tree(seg, dest, link_stats)
                     copied_segments.append(str(dest))
                 data_entry.segments = copied_segments
             effective_root = copied_dir
+            if link_stats["copy"]:
+                warnings.append(
+                    f"{link_stats['copy']} 个文件无法建立链接,已回退复制"
+                )
 
         checksums = _key_checksums(effective_root)
         manifest_checksums, file_count, total_bytes = _manifest(effective_root)
@@ -174,6 +211,7 @@ def import_data(
             inputs=inputs,
             params={
                 "copy": should_copy,
+                "link_stats": dict(link_stats),
                 "data_id": data_id,
                 "segments": [str(seg) for seg in data_entry.segments],
                 "file_count": file_count,
