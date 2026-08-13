@@ -38,6 +38,11 @@ from workflow.recon_phase_search import search_recon_phase
 DIRECT_P0_VALUES = np.arange(-180.0, 181.0, 20.0)  # 19 个
 DIRECT_P1_VALUES = np.arange(-180.0, 181.0, 30.0)  # 13 个
 
+# 相位评分「平坦」阈值(0.2.45 VM 真实数据标定):±5° 余量 2D sampleA ≈0.11、
+# 3D NUS sampleB ≈0.04(评分面近乎平坦);原 <1 分过严(真实数据必然触发),
+# 下调为 0.05 以区分「最优较明确」与「评分面平坦」。
+PHASE_SCORE_FLAT_MARGIN = 0.05
+
 
 @dataclass
 class AxisPhaseEstimate:
@@ -1058,9 +1063,10 @@ def optimize_phase_sequential(
         ]
         if neighbor_scores:
             margin = best_score - max(neighbor_scores)
-            if margin < 1.0:
+            if margin < PHASE_SCORE_FLAT_MARGIN:
                 logs.append(
-                    f"{axis}: 相位评分余量 {margin:.2f} 分(<1),评分面"
+                    f"{axis}: 相位评分余量 {margin:.2f} 分"
+                    f"(<{PHASE_SCORE_FLAT_MARGIN:g}),评分面"
                     f"平坦,最佳相位置信度低(±{final_step:g}° 内差异不显著)"
                 )
             else:

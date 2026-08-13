@@ -43,6 +43,17 @@ from core.optimization.phase_search import direct_ft_traces, search_phase
 from core.planning.processing_plan import ProcessingPlan
 
 
+def enforce_smile_thread_guardrail(nthread: int, grid_points: int) -> tuple[int, str]:
+    """SMILE 线程护栏（D006）：间接网格 >5000 点时线程数上限 2。
+
+    2026-08-11 sampleM 事故：宽窗口 SMILE 满核曾致宿主断电；大网格强制
+    2 线程。返回 (线程数, 日志)；未超限时日志为空串。
+    """
+    if grid_points > 5000 and nthread > 2:
+        return 2, f"大网格 {grid_points}：SMILE 线程数限制为 2（原 {nthread}）"
+    return nthread, ""
+
+
 @dataclass
 class NMRPipeBackend:
     """NMRPipe 实现（Linux：bruker -AUTO + fid.com + NMRPipe 管道 + SMILE + 多段合并）。"""
@@ -339,9 +350,9 @@ class NMRPipeBackend:
         # 安全护栏（2026-08-11 sampleM 事故）：大网格 SMILE 满核曾致宿主断电，
         # 间接网格 >5000 点时线程数上限 2
         grid_points = int(td[1]) * (int(td[2]) if len(td) > 2 else 1)
-        if grid_points > 5000 and nthread > 2:
-            logs.append(f"大网格 {grid_points}：SMILE 线程数限制为 2（原 {nthread}）")
-            nthread = 2
+        nthread, guard_log = enforce_smile_thread_guardrail(nthread, grid_points)
+        if guard_log:
+            logs.append(guard_log)
         ext_lo = str(params.get("ext_lo", "11.0"))
         ext_hi = str(params.get("ext_hi", "6.0"))
         extract = _as_bool(params.get("extract", True))

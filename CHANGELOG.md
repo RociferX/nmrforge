@@ -1,5 +1,29 @@
 # 变更日志
 
+## [0.2.45] - 2026-08-13
+
+- Backend:批量处理引擎实装(workflow/batch.run_batch,替代占位):
+  run_batch(manager, exp_id, targets, steps, backend) 按序对组内每个数据执行
+  指定步骤(import 幂等确认→fid→spectrum→peaks→analysis),fid/spectrum 复用
+  workflow.stepwise,peaks/analysis 复用 workflow.pick_peaks/analyze;targets
+  支持 batch_id(B1/B2...,读 .pipeline_state.json,与 GUI 批量组语义一致,
+  Engine 不依赖 Qt)或显式 data_ids;单数据失败不中断整组(记录
+  failed_step/error),逐数据登记 WorkflowRun,返回逐数据结果 dict + summary
+  (total/success/failed),可选 progress 回调。
+- Backend:3D NUS 相位门控路径复核——SMILE 线程护栏(D006)提取为可测函数
+  enforce_smile_thread_guardrail(默认 2、大网格>5000 强制 2);3D NUS 相位
+  优化 = 1 次 reconstruct_nus(默认护栏参数)+ 逐间接维 F2/F1 候选
+  finalize_nus(不重跑 SMILE),backend_runs=1+2×候选;VM sampleB 真实数据
+  产物 FDTRANSPOSED=0。
+- Backend:相位评分置信度阈值 VM 标定(0.2.45):真实数据 ±5° 相位误差余量
+  2D sampleA ≈0.11 分、3D NUS sampleB ≈0.04 分(评分面近乎平坦),原「评分面
+  平坦」阈值 <1 分过严(真实数据必然触发);下调为 <0.05
+  (PHASE_SCORE_FLAT_MARGIN),2D 判「最优较明确」、3D 判「平坦」。
+- 测试:新增 test_batch(8 例:多数据批量/单数据失败继续/WorkflowRun 登记/
+  stepwise 复用/batch_id 解析/import 幂等/全流程五步/参数校验)、
+  test_phase_nus_3d(3D NUS 护栏与 backend_runs、线程护栏上限);全量 386
+  passed,ruff 全绿。
+
 ## [0.2.44] - 2026-08-13
 
 - Backend:填零逻辑改造(用户方案)——不再机械「所有维度 2×」:新增
