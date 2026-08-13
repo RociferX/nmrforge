@@ -56,6 +56,17 @@ def test_param_schema_ext_keys() -> None:
 
 
 
+def test_param_schema_zero_fill_keys() -> None:
+    schema = param_schema()
+    zf = schema["properties"]["zero_fill"]
+    assert zf["type"] == "integer" and zf["default"] == 2
+    assert "linewidth_hz" in schema["properties"]
+    assert schema["properties"]["linewidth_hz"]["type"] == "object"
+    ppl = schema["properties"]["points_per_line"]
+    assert ppl["type"] == "number" and ppl["default"] == 2.0
+    assert schema["default"]["points_per_line"] == 2.0
+
+
 def test_param_schema_baseline_key() -> None:
     schema = param_schema()
     assert "baseline" in schema["properties"]

@@ -24,6 +24,7 @@ from backend.bruker_workflow import patch_fid_com, patch_nus_expand_count
 from backend.nmrpipe_finder import find_nmrpipe_bin, find_tool
 from backend.runtime import CshRuntime
 from backend.script_generator import (
+    DEFAULT_POINTS_PER_LINE,
     _as_bool,
     effective_td,
     expand_baseline,
@@ -33,6 +34,8 @@ from backend.script_generator import (
     generate_nus_finalize_script,
     generate_process_script,
     select_smile_params,
+    zero_fill_plan,
+    zero_fill_report,
 )
 from core.data.internal_data_model import Experiment, SamplingMode
 from core.data.nus_reader import merge_nuslists, read_nuslist
@@ -152,6 +155,17 @@ class NMRPipeBackend:
         baseline = expand_baseline(experiment, proc_params.get("baseline"))
         window = proc_params.get("window")
         zero_fill = proc_params.get("zero_fill")
+        linewidth_hz = proc_params.get("linewidth_hz")
+        points_per_line = float(
+            proc_params.get("points_per_line", DEFAULT_POINTS_PER_LINE)
+        )
+        zf_plan = zero_fill_plan(
+            experiment,
+            zero_fill,
+            linewidth_hz=linewidth_hz,
+            points_per_line=points_per_line,
+        )
+        logs += zero_fill_report(zf_plan)
         processed, process_logs, spectrum = self._process(
             runtime,
             experiment,
@@ -161,7 +175,9 @@ class NMRPipeBackend:
             direct_phase=direct_phase,
             baseline=baseline,
             window=window,
-            zero_fill=zero_fill,
+            zero_fill=zf_plan,
+            linewidth_hz=linewidth_hz,
+            points_per_line=points_per_line,
             extract=extract,
             ext_lo=ext_lo,
             ext_hi=ext_hi,
@@ -330,6 +346,16 @@ class NMRPipeBackend:
         ext_hi = str(params.get("ext_hi", "6.0"))
         extract = _as_bool(params.get("extract", True))
         baseline = expand_baseline(experiment, params.get("baseline"))
+        zero_fill = params.get("zero_fill")
+        linewidth_hz = params.get("linewidth_hz")
+        points_per_line = float(params.get("points_per_line", DEFAULT_POINTS_PER_LINE))
+        zf_plan = zero_fill_plan(
+            experiment,
+            zero_fill,
+            linewidth_hz=linewidth_hz,
+            points_per_line=points_per_line,
+        )
+        logs += zero_fill_report(zf_plan)
         out_file = f"{experiment.dataset_id}.{ext}"
         script = script_fn(
             experiment,
@@ -348,6 +374,9 @@ class NMRPipeBackend:
             direct_phase=(direct_p0, direct_p1),
             extract=extract,
             baseline=baseline,
+            zero_fill=zf_plan,
+            linewidth_hz=linewidth_hz,
+            points_per_line=points_per_line,
         )
         nus_com = work / f"{experiment.dataset_id}_nus.com"
         nus_com.write_text(script, encoding="utf-8", newline="\n")
@@ -390,6 +419,7 @@ class NMRPipeBackend:
         work_dir: Path | str | None = None,
         timeout: float = 1800.0,
         baseline: dict[str, dict[str, Any]] | None = None,
+        params: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """从 SMILE 重构平面做间接维 FT 定稿(逐维相位候选,不重跑 SMILE)。
 
@@ -421,12 +451,22 @@ class NMRPipeBackend:
                 }
         out_ext = "ft3" if experiment.ndim >= 3 else "ft2"
         out_file = f"{experiment.dataset_id}.{out_ext}"
+        zf_params = dict(params or {})
+        zf_plan = zero_fill_plan(
+            experiment,
+            zf_params.get("zero_fill"),
+            linewidth_hz=zf_params.get("linewidth_hz"),
+            points_per_line=float(
+                zf_params.get("points_per_line", DEFAULT_POINTS_PER_LINE)
+            ),
+        )
         script = generate_nus_finalize_script(
             experiment,
             planes=planes,
             out_file=out_file,
             phases=phases,
             baseline=baseline,
+            zero_fill=zf_plan,
         )
         finalize_com = work / f"{experiment.dataset_id}_finalize.com"
         finalize_com.write_text(script, encoding="utf-8", newline="\n")
@@ -434,7 +474,7 @@ class NMRPipeBackend:
         result = runtime.run(
             ["csh", finalize_com.name], cwd=str(work), timeout=timeout
         )
-        logs = [f"finalize.com: rc={result.returncode}"]
+        logs = zero_fill_report(zf_plan) + [f"finalize.com: rc={result.returncode}"]
         spectrum = work / out_file
         if (
             result.returncode != 0
@@ -705,6 +745,8 @@ class NMRPipeBackend:
         baseline: dict[str, dict[str, Any]] | None = None,
         window: dict[str, dict[str, Any]] | None = None,
         zero_fill: dict[str, dict[str, Any]] | None = None,
+        linewidth_hz: dict[str, float] | None = None,
+        points_per_line: float = DEFAULT_POINTS_PER_LINE,
         extract: bool = True,
         ext_lo: str = "11.0",
         ext_hi: str = "6.0",
@@ -723,6 +765,8 @@ class NMRPipeBackend:
             baseline=baseline,
             window=window,
             zero_fill=zero_fill,
+            linewidth_hz=linewidth_hz,
+            points_per_line=points_per_line,
             extract=extract,
             ext_lo=ext_lo,
             ext_hi=ext_hi,

@@ -319,17 +319,19 @@ def optimize_phase_brute_force(
             max_bytes = 256 * 1024 * 1024
             axes = [dim.logical_axis for dim in experiment.dimensions]
 
-            def _next_pow2(value: int) -> int:
-                return 1 << max(0, int(value) - 1).bit_length()
-
             def _est_bytes(zf_mode: str) -> int:
+                from backend.script_generator import zero_fill_plan
+
+                zf_param = (
+                    {a: {"mode": "none"} for a in axes}
+                    if zf_mode == "none"
+                    else {a: {"mode": "auto"} for a in axes}
+                )
+                plan = zero_fill_plan(experiment, zf_param)
                 total = 1
-                for dim in experiment.dimensions:
-                    td = max(int(dim.td), 1)
-                    size = _next_pow2(td) if zf_mode == "auto" else max(
-                        td // 2, 1
-                    )
-                    total *= size
+                for axis in axes:
+                    cfg = plan.get(axis, {})
+                    total *= int(cfg.get("size") or 1)
                 return total * 4
 
             def _score_path(path: str) -> float:

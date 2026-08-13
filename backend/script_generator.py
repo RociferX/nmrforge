@@ -13,6 +13,7 @@ SMILE 重构参数可经 reconstruct_nus params 覆盖（nSigma/thresh/xQ3/scali
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from core.data.internal_data_model import Experiment, SamplingMode
@@ -88,6 +89,169 @@ def _fmt(value: Any) -> str:
 
 def _next_pow2(value: int) -> int:
     return 1 << max(0, int(value) - 1).bit_length()
+
+
+# ----------------------------------------------------------------- 填零规划
+# 原则(2026-08-13,用户方案):填零不改变真实频率分辨率(取决于有效采集
+# 时间 AQ=TD/SW),只减小频域数字点距(SW/SI)。直接维 F2/F3 默认
+# SI=2×TD(稳妥经验起点,1024→2048);间接维按目标数字分辨率动态决定:
+# 目标点距 = max(线宽, 1/AQ)/points_per_line(默认 1/2,即每个线宽至少 2 个
+# 数字点;精确峰位/线宽/拟合/CSP 可调 1/4 或更细),所需 SI 向上取 2 的幂
+# 并夹在 [TD, next_pow2(points_per_line×TD)]——SI 天然不超过
+# points_per_line×TD 的 2 的幂上界。线宽来源:params.linewidth_hz[axis]
+# → 核素默认表 → 15 Hz。NUS 间接维 TD 用重构后的完整复点网格
+# (effective_td),填零只作用于重构后的时间域数据(与 SMILE 重构是两个
+# 独立过程)。
+DIRECT_ZF_FACTOR = 2
+DEFAULT_POINTS_PER_LINE = 2.0
+_DEFAULT_LINEWIDTH_HZ = {
+    "1H": 8.0,
+    "15N": 15.0,
+    "13C": 20.0,
+    "31P": 15.0,
+    "19F": 20.0,
+    "": 15.0,
+}
+
+
+def _axis_sw(experiment: Experiment, axis: str) -> float:
+    for dim in experiment.dimensions:
+        if dim.logical_axis == axis:
+            return float(dim.sw or 0.0)
+    return 0.0
+
+
+def _default_linewidth(experiment: Experiment, axis: str) -> float:
+    """核素默认估计线宽(Hz);实际线宽可用 params.linewidth_hz 覆盖。"""
+    for dim in experiment.dimensions:
+        if dim.logical_axis == axis:
+            nucleus = str(dim.nucleus or "").strip()
+            return _DEFAULT_LINEWIDTH_HZ.get(nucleus, _DEFAULT_LINEWIDTH_HZ[""])
+    return _DEFAULT_LINEWIDTH_HZ[""]
+
+
+def _linewidth_for(
+    axis: str, linewidth_hz: dict[str, float] | None
+) -> float:
+    if not linewidth_hz:
+        return 0.0
+    try:
+        value = float(linewidth_hz.get(axis, 0.0))
+    except (TypeError, ValueError):
+        return 0.0
+    return value if value > 0.0 else 0.0
+
+
+def _indirect_si(
+    n: int, sw: float, linewidth: float, points_per_line: float
+) -> tuple[int, str]:
+    """间接维目标 SI:点距 ≤ max(线宽, 1/AQ)/points_per_line。
+
+    物理约束:线宽不可能窄于真实分辨率下限 1/AQ,因此以
+    max(linewidth, SW/TD) 为目标线宽;SI 夹在 [TD, next_pow2(ppl×TD)],
+    即默认不超过 2×TD 的 2 的幂上界。
+    """
+    if n <= 0:
+        return 1, "点数无效,SI=1"
+    if sw <= 0 or linewidth <= 0:
+        si = _next_pow2(2 * n)
+        return si, f"SW/线宽缺失,回退 2×({n}→{si})"
+    natural = sw / n  # 1/AQ:真实频率分辨率下限(Hz/pt)
+    lw_eff = max(linewidth, natural)
+    si_req = int(math.ceil(points_per_line * sw / lw_eff))
+    si = _next_pow2(max(si_req, n))
+    cap = _next_pow2(max(int(math.ceil(points_per_line * n)), n))
+    if si > cap:
+        si = cap
+    current = sw / n
+    after = sw / si
+    return (
+        si,
+        f"目标点距 {lw_eff / points_per_line:.2f} Hz/pt"
+        f"(线宽 {linewidth:g} Hz,≥1/AQ {natural:.2f}),"
+        f"Δν {current:.2f}→{after:.2f} Hz/pt,SI={si}",
+    )
+
+
+def zero_fill_plan(
+    experiment: Experiment,
+    zero_fill: dict[str, Any] | int | None = None,
+    *,
+    linewidth_hz: dict[str, float] | None = None,
+    points_per_line: float = DEFAULT_POINTS_PER_LINE,
+) -> dict[str, dict[str, Any]]:
+    """逐维填零计划:{轴: {"mode", "size", "note"}}。
+
+    zero_fill 覆盖(可空):
+    - None 或 0 → 全部 auto(直接维 2×TD、间接维按数字分辨率动态);
+    - int k≥1 → 直接维保持 2×TD,间接维固定 k×TD(旧 schema 语义);
+    - {轴: {"mode": "none"|"auto", "size": N}} → 逐轴覆盖。
+    auto 模式返回选定的 SI;mode=none 时 size=None。
+    """
+    axes = [dim.logical_axis for dim in experiment.dimensions]
+    td = effective_td(experiment)
+    direct_axis = axes[0] if axes else ''
+    plan: dict[str, dict[str, Any]] = {}
+
+    override: dict[str, dict[str, Any]] = {}
+    if isinstance(zero_fill, int) and zero_fill > 0:
+        for index, axis in enumerate(axes):
+            n = max(int(td[index]) if index < len(td) else 0, 1)
+            if axis == direct_axis:
+                override[axis] = {
+                    "mode": "size",
+                    "size": _next_pow2(DIRECT_ZF_FACTOR * n),
+                }
+            else:
+                override[axis] = {
+                    "mode": "size",
+                    "size": _next_pow2(max(int(zero_fill) * n, n)),
+                }
+    elif isinstance(zero_fill, dict):
+        for axis, cfg in zero_fill.items():
+            if isinstance(cfg, dict):
+                override[axis] = dict(cfg)
+            else:
+                override[axis] = {"mode": "size", "size": int(cfg)}
+
+    for index, axis in enumerate(axes):
+        n = max(int(td[index]) if index < len(td) else 0, 1)
+        sw = _axis_sw(experiment, axis)
+        cfg = override.get(axis) or {}
+        mode = cfg.get("mode", "auto")
+        if mode == "none":
+            plan[axis] = {"mode": "none", "size": None, "note": "填零关闭"}
+            continue
+        if mode in ("auto", ""):
+            if cfg.get("size") is not None:
+                size = int(cfg["size"])
+                plan[axis] = {"mode": "size", "size": size, "note": f"显式 SI={size}"}
+                continue
+            if axis == direct_axis:
+                size = _next_pow2(DIRECT_ZF_FACTOR * n)
+                note = f"直接维 2×TD({n}→{size})"
+            else:
+                lw = _linewidth_for(axis, linewidth_hz) or _default_linewidth(
+                    experiment, axis
+                )
+                size, note = _indirect_si(n, sw, lw, points_per_line)
+            plan[axis] = {"mode": "auto", "size": size, "note": note}
+        else:
+            size = int(cfg.get("size", mode))
+            plan[axis] = {"mode": "size", "size": size, "note": f"显式 SI={size}"}
+    return plan
+
+
+def zero_fill_report(plan: dict[str, dict[str, Any]]) -> list[str]:
+    """把逐维填零计划渲染为日志行(SI 选择依据对用户可见)。"""
+    out: list[str] = []
+    for axis in plan:
+        cfg = plan[axis]
+        if cfg.get("mode") == "none":
+            out.append(f"填零 {axis}: 关闭")
+        else:
+            out.append(f"填零 {axis}: {cfg.get('note', '')}")
+    return out
 
 
 def select_smile_params(fraction: float) -> tuple[float, float]:
@@ -301,13 +465,16 @@ def _stage_lines(
         elif op == "zero_fill":
             axis = str(params.get("axis", ""))
             zf = (zero_fill or {}).get(axis, {}) or {}
-            mode = zf.get("mode", params.get("size", "auto"))
+            mode = zf.get("mode", "auto")
             if mode == "none":
                 continue
-            if mode == "auto":
+            size = zf.get("size")
+            if size is None and mode not in ("auto", ""):
+                size = mode
+            if size is None:
                 lines.append("| nmrPipe -fn ZF -auto \\")
             else:
-                lines.append(f"| nmrPipe -fn ZF -size {int(mode)} \\")
+                lines.append(f"| nmrPipe -fn ZF -size {int(size)} \\")
         elif op == "ft":
             flags = []
             if params.get("alt"):
@@ -351,7 +518,9 @@ def generate_process_script(
     direct_phase: dict[str, tuple[float, float]] | None = None,
     baseline: dict[str, dict[str, Any]] | None = None,
     window: dict[str, dict[str, Any]] | None = None,
-    zero_fill: dict[str, dict[str, Any]] | None = None,
+    zero_fill: dict[str, Any] | int | None = None,
+    linewidth_hz: dict[str, float] | None = None,
+    points_per_line: float = DEFAULT_POINTS_PER_LINE,
     ext_lo: str = "11.0",
     ext_hi: str = "6.0",
     extract: bool = True,
@@ -362,6 +531,12 @@ def generate_process_script(
     与 NUS 脚本一致;extract=False 可关闭。
     """
     axes = [dim.logical_axis for dim in experiment.dimensions]
+    zf_plan = zero_fill_plan(
+        experiment,
+        zero_fill,
+        linewidth_hz=linewidth_hz,
+        points_per_line=points_per_line,
+    )
     lines = [
         "#!/bin/csh",
         "# NMRForge processing script",
@@ -370,7 +545,7 @@ def generate_process_script(
     ]
     for index, axis in enumerate(axes):
         lines += _stage_lines(
-            _axis_stages(plan, axis), direct_phase, baseline, window, zero_fill
+            _axis_stages(plan, axis), direct_phase, baseline, window, zf_plan
         )
         if extract and index == 0:
             lines.append(
@@ -416,6 +591,9 @@ def generate_2d_nus_script(
     direct_phase: tuple[float, float] = (0.0, 0.0),
     extract: bool = True,
     baseline: dict[str, Any] | None = None,
+    zero_fill: dict[str, Any] | int | None = None,
+    linewidth_hz: dict[str, float] | None = None,
+    points_per_line: float = DEFAULT_POINTS_PER_LINE,
 ) -> str:
     """2D NUS SMILE 重构(两阶段,Architect VM 验证 sampleA 25% NUS)。
 
@@ -425,9 +603,16 @@ def generate_2d_nus_script(
     单文件用 nmrPipe -in(2D 单文件只有 1 平面,不能用 xyz2pipe);
     分段多文件(test%03d.fid)回退 xyz2pipe + -sample nuslist。
     """
-    ctx = build_context(experiment)
     td = effective_td(experiment)
-    direct_zf = _next_pow2((int(ctx["meta.td.x"]) // 2) * 2)
+    zf_plan = zero_fill_plan(
+        experiment,
+        zero_fill,
+        linewidth_hz=linewidth_hz,
+        points_per_line=points_per_line,
+    )
+    f2_zf = zf_plan.get("F2", {})
+    f1_zf = zf_plan.get("F1", {})
+    direct_zf = int(f2_zf.get("size") or _next_pow2(2 * max(int(td[0]), 1)))
     f1_fnmode = _fnmode(experiment, "F1")
     x_t = max(1, int(td[1])) if len(td) > 1 else 1  # 间接维复点网格
     multi = "%" in in_file
@@ -436,7 +621,10 @@ def generate_2d_nus_script(
     indirect_poly = _baseline_line(expanded, "F1")
     direct_stages = [
         "| nmrPipe -fn SP -off 0.45 -end 0.98 -pow 1 -c 0.5 \\",
-        f"| nmrPipe -fn ZF -zf -size {direct_zf} \\",
+    ]
+    if f2_zf.get("mode") != "none":
+        direct_stages.append(f"| nmrPipe -fn ZF -zf -size {direct_zf} \\")
+    direct_stages += [
         "| nmrPipe -fn FT \\",
         f"| nmrPipe -fn PS -p0 {direct_phase[0]:g} -p1 {direct_phase[1]:g} -di \\",
     ]
@@ -489,11 +677,16 @@ def generate_2d_nus_script(
             *(["           -scaling 1 \\"] if smile_scaling else []),
             *smile_tail,
         ]
+    f1_zf_line: list[str] = []
+    if f1_zf.get("mode") != "none":
+        f1_zf_line = [
+            f"| nmrPipe -fn ZF -size {f1_zf.get('size') or _next_pow2(2 * max(int(td[1]), 1))} \\"
+        ]
     lines += [
         "",
         "# stage 2: indirect dim (F1) FT -alt + PS + POLY",
         "nmrPipe -in nus2d/recon.ft1 \\",
-        "| nmrPipe -fn ZF -zf 1 -auto \\",
+        *f1_zf_line,
         _ft_flag_line(f1_fnmode),
         "| nmrPipe -fn PS -p0 0 -p1 0 -di \\",
         *indirect_poly,
@@ -523,10 +716,30 @@ def generate_3d_nus_script(
     direct_phase: tuple[float, float] = (0.0, 0.0),
     extract: bool = True,
     baseline: dict[str, Any] | None = None,
+    zero_fill: dict[str, Any] | int | None = None,
+    linewidth_hz: dict[str, float] | None = None,
+    points_per_line: float = DEFAULT_POINTS_PER_LINE,
 ) -> str:
     """3D NUS SMILE 重构：直接维（F3）FT+EXT → SMILE -nDim 3 → 间接维 FT（ft3）。"""
     ctx = build_context(experiment)
-    direct_zf = _next_pow2((int(ctx["meta.td.x"]) // 2) * 2)
+    zf_plan = zero_fill_plan(
+        experiment,
+        zero_fill,
+        linewidth_hz=linewidth_hz,
+        points_per_line=points_per_line,
+    )
+    f3_zf = zf_plan.get("F3", {})
+    f2_zf = zf_plan.get("F2", {})
+    f1_zf = zf_plan.get("F1", {})
+    direct_zf = int(
+        f3_zf.get("size") or _next_pow2(2 * max(int(ctx["meta.td.x"]), 1))
+    )
+    f2_zf_size = int(
+        f2_zf.get("size") or _next_pow2(2 * max(int(ctx["meta.td.y"]), 1))
+    )
+    f1_zf_size = int(
+        f1_zf.get("size") or _next_pow2(2 * max(int(ctx["meta.td.z"]), 1))
+    )
     f2_fnmode = _fnmode(experiment, "F2")
     f1_fnmode = _fnmode(experiment, "F1")
     lines = [
@@ -537,7 +750,11 @@ def generate_3d_nus_script(
         "# step 1: direct dim (F3) FT + EXT",
         f"xyz2pipe -in {in_file} -x \\",
         "| nmrPipe -fn SP -off 0.45 -end 0.98 -pow 2 -c 0.5 \\",
-        f"| nmrPipe -fn ZF -zf -size {direct_zf} \\",
+        *(
+            [f"| nmrPipe -fn ZF -zf -size {direct_zf} \\"]
+            if f3_zf.get("mode") != "none"
+            else []
+        ),
         "| nmrPipe -fn FT \\",
         f"| nmrPipe -fn PS -p0 {direct_phase[0]:g} -p1 {direct_phase[1]:g} -di \\",
         f"| nmrPipe -fn EXT -x1 {ext_lo}ppm -xn {ext_hi}ppm -sw -round 2 \\",
@@ -559,11 +776,23 @@ def generate_3d_nus_script(
         "",
         "# step 3: indirect dims (F2/F1) FT",
         "xyz2pipe -in nus3d_rc/test%04d.ft1 -x \\",
-        "| nmrPipe -fn ZF -zf 1 -auto \\",
+        *(
+            [
+                f"| nmrPipe -fn ZF -size {f2_zf_size} \\"
+            ]
+            if f2_zf.get("mode") != "none"
+            else []
+        ),
         _ft_flag_line(f2_fnmode),
         "| nmrPipe -fn PS -p0 0 -p1 0 -di \\",
         "| nmrPipe -fn TP \\",
-        "| nmrPipe -fn ZF -zf 1 -auto \\",
+        *(
+            [
+                f"| nmrPipe -fn ZF -size {f1_zf_size} \\"
+            ]
+            if f1_zf.get("mode") != "none"
+            else []
+        ),
         _ft_flag_line(f1_fnmode),
         "| nmrPipe -fn PS -p0 0 -p1 0 -di \\",
         "| nmrPipe -fn TP \\",
@@ -592,7 +821,30 @@ def param_schema() -> dict[str, Any]:
             "zero_fill": {
                 "type": "integer",
                 "default": 2,
-                "description": "间接维零填充倍数(auto 按 2 的幂)",
+                "description": (
+                    "填零:0=自动(直接维 2×TD、间接维按目标数字分辨率动态,"
+                    "受 1/AQ 约束且不超过 points_per_line×TD);k≥1=间接维"
+                    "固定 k×TD(直接维保持 2×TD)。填零不改变真实频率分辨率"
+                    "(由 AQ 决定),只减小数字点距。"
+                ),
+            },
+            "linewidth_hz": {
+                "type": "object",
+                "description": (
+                    "逐轴估计线宽(Hz),间接维自动填零的目标线宽;缺省按核素"
+                    "默认(1H 8/15N 15/13C 20 Hz 等),并受 1/AQ 下限约束。"
+                    "例:{\"F1\": 15.0}"
+                ),
+                "additionalProperties": {"type": "number"},
+            },
+            "points_per_line": {
+                "type": "number",
+                "default": 2.0,
+                "description": (
+                    "间接维目标数字点距 = max(线宽,1/AQ)/points_per_line"
+                    "(默认 1/2,即每个线宽至少 2 个数字点;精确峰位/线宽/拟合/"
+                    "CSP 可加大,2D 省内存可减小)"
+                ),
             },
             "sampling": {
                 "type": "object",
@@ -661,6 +913,8 @@ def param_schema() -> dict[str, Any]:
         },
         "default": {
             "zero_fill": 2,
+            "linewidth_hz": {},
+            "points_per_line": 2.0,
             "ext_lo": "11.0",
             "ext_hi": "6.0",
             "extract": True,
@@ -721,6 +975,9 @@ def render_scripts(
             "smile_scaling": _as_bool(nus.get("smile_scaling", True)),
             "smile_report": int(nus.get("smile_report", 1)),
             "direct_phase": direct,
+            "zero_fill": params.get("zero_fill"),
+            "linewidth_hz": params.get("linewidth_hz"),
+            "points_per_line": float(params.get("points_per_line", 4.0)),
         }
         if experiment.ndim >= 3:
             scripts["nus.com"] = generate_3d_nus_script(experiment, **kwargs)
@@ -740,6 +997,9 @@ def render_scripts(
             out_file=f"{experiment.dataset_id}.{out_ext}",
             direct_phase=dp,
             baseline=expand_baseline(experiment, params.get("baseline")),
+            zero_fill=params.get("zero_fill"),
+            linewidth_hz=params.get("linewidth_hz"),
+            points_per_line=float(params.get("points_per_line", 4.0)),
             ext_lo=str(params.get("ext_lo", "11.0")),
             ext_hi=str(params.get("ext_hi", "6.0")),
             extract=_as_bool(params.get("extract", True)),
@@ -755,6 +1015,9 @@ def generate_nus_finalize_script(
     out_file: str,
     phases: dict[str, tuple[float, float]] | None = None,
     baseline: dict[str, Any] | None = None,
+    zero_fill: dict[str, Any] | int | None = None,
+    linewidth_hz: dict[str, float] | None = None,
+    points_per_line: float = DEFAULT_POINTS_PER_LINE,
 ) -> str:
     """NUS 重构平面(复型)的间接维 FT 定稿脚本(逐维 PS 可配)。
 
@@ -763,21 +1026,48 @@ def generate_nus_finalize_script(
     2D 单文件用 nmrPipe -in + -out -ov(与验证 s2.com 一致),F1 POLY 可配。
     """
     phases = phases or {}
+    td = effective_td(experiment)
+    zf_plan = zero_fill_plan(
+        experiment,
+        zero_fill,
+        linewidth_hz=linewidth_hz,
+        points_per_line=points_per_line,
+    )
     f1_fnmode = _fnmode(experiment, "F1")
     if experiment.ndim >= 3:
         f2_fnmode = _fnmode(experiment, "F2")
         f2_p0, f2_p1 = phases.get("F2", (0.0, 0.0))
         f1_p0, f1_p1 = phases.get("F1", (0.0, 0.0))
+        f2_size = int(
+            zf_plan.get("F2", {}).get("size")
+            or _next_pow2(2 * max(int(td[1]), 1))
+        )
+        f1_size = int(
+            zf_plan.get("F1", {}).get("size")
+            or _next_pow2(2 * max(int(td[2]), 1))
+        )
         lines = [
             "#!/bin/csh",
             "# NMRForge NUS finalize script (indirect FT from reconstructed planes)",
             f"# experiment: {experiment.dataset_id}",
             f"xyz2pipe -in {planes} -x \\",
-            "| nmrPipe -fn ZF -zf 1 -auto \\",
+            *(
+                [
+                    f"| nmrPipe -fn ZF -size {f2_size} \\"
+                ]
+                if zf_plan.get("F2", {}).get("mode") != "none"
+                else []
+            ),
             _ft_flag_line(f2_fnmode),
             f"| nmrPipe -fn PS -p0 {f2_p0:g} -p1 {f2_p1:g} -di \\",
             "| nmrPipe -fn TP \\",
-            "| nmrPipe -fn ZF -zf 1 -auto \\",
+            *(
+                [
+                    f"| nmrPipe -fn ZF -size {f1_size} \\"
+                ]
+                if zf_plan.get("F1", {}).get("mode") != "none"
+                else []
+            ),
             _ft_flag_line(f1_fnmode),
             f"| nmrPipe -fn PS -p0 {f1_p0:g} -p1 {f1_p1:g} -di \\",
             "| nmrPipe -fn TP \\",
@@ -786,13 +1076,23 @@ def generate_nus_finalize_script(
         ]
     else:
         f1_p0, f1_p1 = phases.get("F1", (0.0, 0.0))
+        f1_size = int(
+            zf_plan.get("F1", {}).get("size")
+            or _next_pow2(2 * max(int(td[1]), 1))
+        )
         expanded = expand_baseline(experiment, baseline)
         lines = [
             "#!/bin/csh",
             "# NMRForge NUS finalize script (indirect FT from reconstructed planes)",
             f"# experiment: {experiment.dataset_id}",
             f"nmrPipe -in {planes} \\",
-            "| nmrPipe -fn ZF -zf 1 -auto \\",
+            *(
+                [
+                    f"| nmrPipe -fn ZF -size {f1_size} \\"
+                ]
+                if zf_plan.get("F1", {}).get("mode") != "none"
+                else []
+            ),
             _ft_flag_line(f1_fnmode),
             f"| nmrPipe -fn PS -p0 {f1_p0:g} -p1 {f1_p1:g} -di \\",
             *_baseline_line(expanded, "F1"),
