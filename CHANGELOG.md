@@ -1,5 +1,19 @@
 # 变更日志
 
+## [0.2.33] - 2026-08-13
+
+- Backend:2D NUS 重构改两阶段(Architect VM 验证 sampleA 25% NUS 主峰
+  112.59/7.47 与全采样一致,QC=93.6):generate_2d_nus_script → stage 1
+  直接维 FT+EXT+POLY → TP → SMILE(-sample None -sampleCount N
+  -xT 复点网格)→ nus2d/recon.ft1;stage 2 nmrPipe -in recon.ft1 →
+  ZF/FT -alt/PS/POLY/TP → 终谱 ft2(-out -ov);effective_td 2D NUS
+  间接维改复点网格 TD//mult(不采信 acqu2s NusTD,部分数据 NusTD=TD);
+  3D NUS 保持 NusTD(已是复点数);generate_nus_finalize_script 2D 改
+  nmrPipe -in + POLY + -out -ov,finalize_nus 支持 2D 逐维 PS 候选
+  (相位优化不重跑 SMILE);构造工具 scripts/vm_sample_make_nus.py 入库
+  并回归(网格=TD//mult、nuslist 首点 0)。
+- 测试:两阶段结构(TP/SMILE/-alt/-xT 网格)、finalize 2D、effective_td
+  复点网格、make_nus 构造回归;全量 338 通过,ruff 全绿。
 ## [0.2.32] - 2026-08-12
 
 - 3D 谱切片查看(契约 §10):viewer/spectrum.py 新增 Spectrum3D

@@ -96,6 +96,8 @@ def test_scripts_deterministic(bruker_dir: Path) -> None:
 
 
 def test_2d_nus_script(bruker_dir: Path) -> None:
+    """两阶段:stage1 nmrPipe -in + SMILE(-sample None,-xT 复点网格);
+    stage2 nmrPipe -in recon.ft1 + FT -alt + -out -ov。"""
     exp = read_dataset(bruker_dir / "nus_2d")
     from backend.script_generator import generate_2d_nus_script
 
@@ -104,33 +106,36 @@ def test_2d_nus_script(bruker_dir: Path) -> None:
         nuslist_count=5, ext_lo="9.0", ext_hi="7.5", nsigma=7.0, thresh=0.85,
     )
     assert script.startswith("#!/bin/csh")
-    assert "xyz2pipe -in exp.fid -x" in script
-    assert "-fn SMILE -nDim 2" in script
-    assert "-sample nuslist" in script
+    assert "nmrPipe -in exp.fid \\" in script
+    assert "| nusPipe -fn SMILE -nDim 2" in script
+    assert "-sample None" in script
     assert "-sampleCount 5" in script
     assert "-x1 9.0ppm -xn 7.5ppm" in script
-    assert "| pipe2xyz -out exp.ft2 -x" in script
+    assert "-xT 128" in script  # F1 复点网格 256//2
+    assert "| nmrPipe -fn FT -alt \\" in script  # States 间接维
+    assert "nmrPipe -in nus2d/recon.ft1 \\" in script
+    assert "  -out exp.ft2 -ov" in script
+    assert "| pipe2xyz -out exp.ft2" not in script
     assert "\r" not in script
-
-
 def test_nus_finalize_script_2d(bruker_dir: Path) -> None:
-    """重构平面定稿脚本:间接维 FT + 逐维 PS 可配。"""
+    """重构平面定稿(2D):nmrPipe -in + FT -alt + POLY + -out -ov,逐维 PS 可配。"""
     exp = read_dataset(bruker_dir / "nus_2d")
     from backend.script_generator import generate_nus_finalize_script
 
     script = generate_nus_finalize_script(
         exp, planes="nus2d/recon.ft1", out_file="e.ft2"
     )
-    assert "xyz2pipe -in nus2d/recon.ft1 -x" in script
+    assert "nmrPipe -in nus2d/recon.ft1 \\" in script
+    assert "| nmrPipe -fn FT -alt \\" in script
     assert "| nmrPipe -fn PS -p0 0 -p1 0 -di" in script
+    assert "| nmrPipe -fn POLY -auto" in script  # 与验证 s2.com 一致
+    assert "  -out e.ft2 -ov" in script
     assert "| nmrPipe -fn SMILE" not in script  # 不重跑 SMILE
     phased = generate_nus_finalize_script(
         exp, planes="nus2d/recon.ft1", out_file="e.ft2",
         phases={"F1": (12.0, -3.0)},
     )
     assert "| nmrPipe -fn PS -p0 12 -p1 -3 -di" in phased
-
-
 def test_nus_finalize_script_3d(bruker_dir: Path) -> None:
     exp = read_dataset(bruker_dir / "nus_3d")
     from backend.script_generator import generate_nus_finalize_script
@@ -306,7 +311,7 @@ def test_process_script_baseline_default_and_overrides(bruker_dir: Path) -> None
 
 
 def test_2d_nus_script_baseline_insert(bruker_dir: Path) -> None:
-    """NUS 2D:直接维 EXT 后、间接维 PS 后按配置插入 POLY。"""
+    """两阶段基线:stage1 F2 POLY 在 EXT 后,stage2 F1 POLY 在 PS 后。"""
     exp = read_dataset(bruker_dir / "nus_2d")
     from backend.script_generator import generate_2d_nus_script
 
@@ -314,13 +319,14 @@ def test_2d_nus_script_baseline_insert(bruker_dir: Path) -> None:
         exp, in_file="e.fid", nuslist="nuslist", out_file="e.ft2"
     )
     assert script.count("| nmrPipe -fn POLY -auto") == 2
+    stage2 = script.split("# stage 2:")[1].splitlines()
+    ps_i = next(i for i, line in enumerate(stage2) if "| nmrPipe -fn PS" in line)
+    assert "| nmrPipe -fn POLY" in stage2[ps_i + 1]
     off = generate_2d_nus_script(
         exp, in_file="e.fid", nuslist="nuslist", out_file="e.ft2",
         baseline={"F1": {"enabled": False}},
     )
     assert off.count("| nmrPipe -fn POLY") == 1
-
-
 def test_3d_nus_script_baseline_insert(bruker_dir: Path) -> None:
     """NUS 3D:直接维 EXT 后 + F2/F1 各 PS 后插入 POLY(共 3 行)。"""
     exp = read_dataset(bruker_dir / "nus_3d")
@@ -330,3 +336,16 @@ def test_3d_nus_script_baseline_insert(bruker_dir: Path) -> None:
         exp, in_file="e.fid", nuslist="nuslist", out_file="e.ft3"
     )
     assert script.count("| nmrPipe -fn POLY -auto") == 3
+
+def test_effective_td_2d_nus_complex_grid(bruker_dir: Path) -> None:
+    """2D NUS:F1 用复点网格 TD//mult;acqu2s NusTD=TD 时不被采信。"""
+    exp = read_dataset(bruker_dir / "nus_2d")
+    exp.acquisition_parameters["acqu2s"]["NusTD"] = 256  # 部分数据 NusTD=TD
+    from backend.script_generator import effective_td
+
+    td = effective_td(exp)
+    assert td[1] == 128  # 256 // 2 (States)
+    exp3 = read_dataset(bruker_dir / "nus_3d")
+    td3 = effective_td(exp3)
+    assert td3[1] == 48 and td3[2] == 128  # 3D 保持 NusTD(已是复点数)
+

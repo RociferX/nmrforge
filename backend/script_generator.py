@@ -46,14 +46,31 @@ def _fnmode(experiment: Experiment, logical_axis: str) -> int:
         return 0
 
 
+def _mult_for(fnmode: int) -> int:
+    """超复数分量数:States/TPPI/States-TPPI/Echo-Antiecho 为 2,QF 为 1。"""
+    return 2 if int(fnmode) in (0, 1, 2, 4, 5, 6) else 1
+
+
+
 def effective_td(experiment: Experiment) -> list[int]:
-    """每维有效点数：NUS 时间接维取 NusTD（采样网格），否则取 TD。"""
+    """每维有效点数:NUS 时间接维取复点网格,否则取 TD。
+
+    2D NUS:间接维复点网格 = acqu2s TD // 超复数分量(如 TD=256/States→128),
+    不直接采信 acqu2s NusTD(部分数据 NusTD 等于 TD,含超复数分量);
+    3D NUS:acqu2s/acqu3s NusTD 已是复点数,直接采用。
+    """
     td = [dim.td for dim in experiment.dimensions]
     if experiment.sampling.mode is SamplingMode.NUS:
         for index, filename in ((1, "acqu2s"), (2, "acqu3s")):
             if len(td) <= index:
                 continue
             block = experiment.acquisition_parameters.get(filename, {})
+            if index == 1 and experiment.ndim == 2:
+                raw_td = int(td[index] or 0)
+                mult = _mult_for(_fnmode(experiment, "F1"))
+                if raw_td and mult:
+                    td[index] = raw_td // mult
+                continue
             try:
                 nus_td = int(block.get("NusTD", 0) or 0)
             except (TypeError, ValueError):
@@ -379,50 +396,89 @@ def generate_2d_nus_script(
     extract: bool = True,
     baseline: dict[str, Any] | None = None,
 ) -> str:
-    """2D NUS SMILE 重构：直接维 FT+EXT → SMILE -nDim 2 → 间接维 FT（终谱 ft2）。"""
+    """2D NUS SMILE 重构(两阶段,Architect VM 验证 sampleA 25% NUS)。
+
+    stage 1:直接维(F2)FT+EXT+POLY → TP → SMILE(-sample None,
+    -xT 复点网格)→ nus2d/recon.ft1;stage 2:间接维(F1)
+    ZF/FT -alt/PS/POLY/TP → 终谱 ft2(-out -ov)。
+    单文件用 nmrPipe -in(2D 单文件只有 1 平面,不能用 xyz2pipe);
+    分段多文件(test%03d.fid)回退 xyz2pipe + -sample nuslist。
+    """
     ctx = build_context(experiment)
     td = effective_td(experiment)
     direct_zf = _next_pow2((int(ctx["meta.td.x"]) // 2) * 2)
     f1_fnmode = _fnmode(experiment, "F1")
-    lines = [
-        "#!/bin/csh",
-        "# NMRForge 2D NUS SMILE reconstruction",
-        f"# experiment: {experiment.dataset_id}",
-        "mkdir -p nus2d",
-        "# step 1: direct dim (F2) FT + EXT",
-        f"xyz2pipe -in {in_file} -x \\",
+    x_t = max(1, int(td[1])) if len(td) > 1 else 1  # 间接维复点网格
+    multi = "%" in in_file
+    expanded = expand_baseline(experiment, baseline)
+    direct_poly = _baseline_line(expanded, "F2")
+    indirect_poly = _baseline_line(expanded, "F1")
+    direct_stages = [
         "| nmrPipe -fn SP -off 0.45 -end 0.98 -pow 1 -c 0.5 \\",
         f"| nmrPipe -fn ZF -zf -size {direct_zf} \\",
         "| nmrPipe -fn FT \\",
         f"| nmrPipe -fn PS -p0 {direct_phase[0]:g} -p1 {direct_phase[1]:g} -di \\",
-        f"| nmrPipe -fn EXT -x1 {ext_lo}ppm -xn {ext_hi}ppm -sw -round 2 \\",
-        "| pipe2xyz -out nus2d/test%03d.ft1 -z",
-        "",
-        "# step 2: SMILE reconstruct indirect dim (F1)",
-        "xyz2pipe -in nus2d/test%03d.ft1 -x \\",
-        "| nmrPipe -fn SMILE -nDim 2 \\",
-        f"           -sample {nuslist} -nThread {nthread} \\",
-        f"           -sampleCount {nuslist_count} -nSigma {nsigma:g} -off 0 0 "
-        f"-report {smile_report} \\",
-        *(["           -scaling 1 \\"] if smile_scaling else []),
-        f"           -xApod SP -xQ1 {smile_xq1:g} -xQ2 {smile_xq2:g} -xQ3 {smile_xq3:g} \\",
-        f"           -xT {max(1, int(td[1]) // 2)} -xP0 0 -xP1 0 \\",
+    ]
+    if extract:
+        direct_stages.append(
+            f"| nmrPipe -fn EXT -x1 {ext_lo}ppm -xn {ext_hi}ppm -sw -round 2 \\"
+        )
+    direct_stages += direct_poly
+    smile_tail = [
+        f"           -xApod SP -xQ1 {smile_xq1:g} -xQ2 {smile_xq2:g} "
+        f"-xQ3 {smile_xq3:g} \\",
+        f"           -xT {x_t} -xP0 0 -xP1 0 \\",
         f"           -xCT 0 -thresh {thresh:g} \\",
-        "| pipe2xyz -out nus2d/recon.ft1 -x",
+        "| pipe2xyz -out nus2d/recon.ft1 -x -ov",
+    ]
+    if multi:
+        lines = [
+            "#!/bin/csh",
+            "# NMRForge 2D NUS SMILE reconstruction (two-stage, multi-file)",
+            f"# experiment: {experiment.dataset_id}",
+            "mkdir -p nus2d",
+            "# stage 1: direct dim (F2) FT + EXT + POLY",
+            f"xyz2pipe -in {in_file} -x \\",
+            *direct_stages,
+            "| pipe2xyz -out nus2d/test%03d.ft1 -z",
+            "",
+            "# SMILE reconstruct indirect dim (F1)",
+            "xyz2pipe -in nus2d/test%03d.ft1 -x \\",
+            "| nusPipe -fn SMILE -nDim 2 \\",
+            f"           -sample {nuslist} -nThread {nthread} \\",
+            f"           -sampleCount {nuslist_count} -nSigma {nsigma:g} "
+            f"-off 0 0 -report {smile_report} \\",
+            *(["           -scaling 1 \\"] if smile_scaling else []),
+            *smile_tail,
+        ]
+    else:
+        lines = [
+            "#!/bin/csh",
+            "# NMRForge 2D NUS SMILE reconstruction (two-stage)",
+            f"# experiment: {experiment.dataset_id}",
+            "mkdir -p nus2d",
+            "# stage 1: direct dim (F2) FT + EXT + POLY, SMILE reconstruct F1",
+            f"nmrPipe -in {in_file} \\",
+            *direct_stages,
+            "| nmrPipe -fn TP \\",
+            "| nusPipe -fn SMILE -nDim 2 \\",
+            f"           -sample None -nThread {nthread} \\",
+            f"           -sampleCount {nuslist_count} -nSigma {nsigma:g} "
+            f"-off 0 0 -report {smile_report} \\",
+            *(["           -scaling 1 \\"] if smile_scaling else []),
+            *smile_tail,
+        ]
+    lines += [
         "",
-        "# step 3: indirect dim FT",
-        "xyz2pipe -in nus2d/recon.ft1 -x \\",
+        "# stage 2: indirect dim (F1) FT -alt + PS + POLY",
+        "nmrPipe -in nus2d/recon.ft1 \\",
         "| nmrPipe -fn ZF -zf 1 -auto \\",
         _ft_flag_line(f1_fnmode),
         "| nmrPipe -fn PS -p0 0 -p1 0 -di \\",
+        *indirect_poly,
         "| nmrPipe -fn TP \\",
-        "| nmrPipe -fn ZTP \\",
-        f"| pipe2xyz -out {out_file} -x",
+        f"  -out {out_file} -ov",
     ]
-    if not extract:
-        lines = [line for line in lines if "| nmrPipe -fn EXT" not in line]
-    expanded = expand_baseline(experiment, baseline)
-    lines = _insert_nus_baseline(lines, expanded, experiment.ndim)
     return "\n".join(lines) + "\n"
 
 
@@ -677,11 +733,13 @@ def generate_nus_finalize_script(
     planes: str,
     out_file: str,
     phases: dict[str, tuple[float, float]] | None = None,
+    baseline: dict[str, Any] | None = None,
 ) -> str:
     """NUS 重构平面(复型)的间接维 FT 定稿脚本(逐维 PS 可配)。
 
     planes:重构平面输入(2D nus2d/recon.ft1;3D nus3d_rc/test%04d.ft1);
-    phases:{轴 -> (p0, p1)},缺省 0——供逐维相位候选运行,不重跑 SMILE。
+    phases:{轴 -> (p0, p1)},缺省 0——供逐维相位候选运行,不重跑 SMILE;
+    2D 单文件用 nmrPipe -in + -out -ov(与验证 s2.com 一致),F1 POLY 可配。
     """
     phases = phases or {}
     f1_fnmode = _fnmode(experiment, "F1")
@@ -707,20 +765,20 @@ def generate_nus_finalize_script(
         ]
     else:
         f1_p0, f1_p1 = phases.get("F1", (0.0, 0.0))
+        expanded = expand_baseline(experiment, baseline)
         lines = [
             "#!/bin/csh",
             "# NMRForge NUS finalize script (indirect FT from reconstructed planes)",
             f"# experiment: {experiment.dataset_id}",
-            f"xyz2pipe -in {planes} -x \\",
+            f"nmrPipe -in {planes} \\",
             "| nmrPipe -fn ZF -zf 1 -auto \\",
             _ft_flag_line(f1_fnmode),
             f"| nmrPipe -fn PS -p0 {f1_p0:g} -p1 {f1_p1:g} -di \\",
+            *_baseline_line(expanded, "F1"),
             "| nmrPipe -fn TP \\",
-            "| nmrPipe -fn ZTP \\",
-            f"| pipe2xyz -out {out_file} -x",
+            f"  -out {out_file} -ov",
         ]
     return "\n".join(lines) + "\n"
-
 
 
 def expand_baseline(
