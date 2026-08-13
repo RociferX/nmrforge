@@ -111,6 +111,7 @@ def generate_fid(
         )
     fid_path = str(resp.get("fid_path", ""))
     manager.set_data_fid(exp_id, data_id, fid_path)
+    merged_params = dict(resp.get("effective_params") or {})
     _finish_step(
         manager,
         exp_id,
@@ -118,6 +119,7 @@ def generate_fid(
         "convert_to_fid",
         outputs={"fid_path": fid_path},
         message="生成 FID",
+        params=merged_params,
     )
     return fid_path
 
@@ -151,6 +153,9 @@ def generate_spectrum(
     spectrum_path = _register_spectrum(
         manager, exp_id, data_id, str(resp.get("spectrum_path", ""))
     )
+    # 实际生效参数(effective_params)与调用方 params 合并,调用方显式参数优先
+    merged_params = dict(resp.get("effective_params") or {})
+    merged_params.update(params)
     _finish_step(
         manager,
         exp_id,
@@ -158,7 +163,7 @@ def generate_spectrum(
         workflow_ref,
         outputs={"spectrum_path": spectrum_path},
         message="生成谱图",
-        params=params,
+        params=merged_params,
     )
     return spectrum_path
 

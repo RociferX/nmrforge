@@ -7,6 +7,17 @@ backend:
   provider: nmrpipe            # nmrpipe | native
   nmrpipe:
     nmrpipe_bin: ""            # 留空自动查找（PATH → csh 环境 → 常见目录）
+    path: ""                   # 显式 NMRPipe bin 目录/可执行文件(优先于 nmrpipe_bin;可空)
+
+processing:
+  linewidth_hz:                # 间接维自动填零目标线宽(核素 → Hz),显式 params 可覆盖
+    1H: 8
+    15N: 15
+    13C: 20
+  points_per_line: 2.0         # 目标数字点距 = max(线宽, 1/AQ)/points_per_line
+
+smile:
+  nthread: 2                   # SMILE 线程数(大网格仍受护栏强制 ≤2)
 
 optimization:
   budget:

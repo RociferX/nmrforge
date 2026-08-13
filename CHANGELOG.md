@@ -1,5 +1,26 @@
 # 变更日志
 
+## [0.2.46] - 2026-08-13
+
+- Backend:实际生效参数回写(B2G-003)——backend.process/reconstruct_nus/
+  convert_to_fid 返回 dict 增加 effective_params(均匀 process:extract/
+  ext_lo/ext_hi、zero_fill_plan 逐维 SI、baseline、window、direct_phase;
+  NUS:ext/zero_fill SI/nSigma/thresh/xQ3/scaling/baseline/direct_phase/
+  nthread;convert:dataset_id/ndim/segments/work_dir);workflow.stepwise
+  generate_spectrum/generate_fid 把 effective_params 与调用方 params 合并
+  (调用方优先)写入 WorkflowRun params;旧后端(无 effective_params)params
+  保持现状(兼容)。
+- Backend:配置默认参数注入(B2G-003)——config/nmrforge.yaml 新增
+  processing.linewidth_hz(1H/15N/13C 默认 8/15/20)、points_per_line(2.0)、
+  smile.nthread(2)、backend.nmrpipe.path(可空);新增 backend/config.py
+  load_processing_defaults()(供 GUI 设置对话框);zero_fill_plan/
+  reconstruct_nus/finalize_nus 未显式传参时读取配置(显式 params 优先,
+  无效值回退内置默认);factory 把 config 的 nmrpipe 路径透传给
+  NMRPipeBackend(nmrpipe_finder 路径优先 config)。
+- 测试:新增 test_config_defaults(配置读取/覆盖优先级/无效值回退/factory
+  透传)、test_effective_params(effective_params 合并/调用方优先/旧后端
+  兼容/zf_summary);全量 396 passed,ruff 全绿。
+
 ## [0.2.45] - 2026-08-13
 
 - Backend:批量处理引擎实装(workflow/batch.run_batch,替代占位):
