@@ -898,6 +898,8 @@ class SequentialPhaseResult:
     backend_runs: int
     method: str = "sequential_brute_force"
     logs: list[str] = field(default_factory=list)
+    optimized: list[str] = field(default_factory=list)
+    skipped: list[str] = field(default_factory=list)
 
 
 def optimize_phase_sequential(
@@ -909,6 +911,7 @@ def optimize_phase_sequential(
     p1_values: tuple[float, ...] = (-90.0, -60.0, -30.0, 0.0, 30.0, 60.0, 90.0),
     score_fn: Callable[[str], tuple[float, dict[str, float]]] | None = None,
     work_dir: Path | str | None = None,
+    good_enough: float | None = 80.0,
 ) -> SequentialPhaseResult:
     """逐维暴力相位优化:直接维 → 间接维,依次固定(用户方案)。
 
@@ -916,6 +919,10 @@ def optimize_phase_sequential(
     该轴 PS),对终谱做整体 QC 评分(全数据集),取最优后固定,推进下一维;
     NUS:先 SMILE 重构一次(reconstruct_nus,直接维随重构固化),再从重构平面
     逐间接维候选跑 finalize_nus(不重跑 SMILE)。
+
+    good_enough:前置判断阈值(0-100,默认 80)——每轴先用当前相位(缺省
+    0/0)评分,已够好则跳过候选搜索并保持当前配置;传 None 关闭前置判断
+    (总是暴力搜索)。日志逐轴说明「未优化 / 已优化 + 相位变化 + 分数增益」。
     """
     plan = select_method(experiment)
     if axes is None:
@@ -935,6 +942,8 @@ def optimize_phase_sequential(
     backend_runs = 0
     logs: list[str] = []
     spectrum_path = ""
+    optimized: list[str] = []
+    skipped: list[str] = []
 
     if is_nus:
         resp = backend.reconstruct_nus(experiment, {})
@@ -944,11 +953,48 @@ def optimize_phase_sequential(
         logs.append("NUS:SMILE 重构完成(直接维随重构固化),逐间接维候选跑 finalize")
 
     for axis in search_axes:
-        best_score = -1.0
-        best_phase: tuple[float, float] | None = None
-        best_path = ""
+        current_phase = fixed.get(axis, (0.0, 0.0))
+        current_score: float | None = None
+        current_path = ""
+        # 前置判断:当前(缺省 0/0)相位质量已够好则跳过候选搜索
+        if good_enough is not None:
+            override = {**fixed, axis: current_phase}
+            if is_nus:
+                resp = backend.finalize_nus(
+                    experiment, phases=override, work_dir=work_dir
+                )
+            else:
+                resp = backend.process(
+                    experiment, plan, direct_phase_override=override
+                )
+            backend_runs += 1
+            if resp.get("success"):
+                path = resp.get("spectrum_path", "")
+                try:
+                    current_score, _components = score_fn(str(path))
+                    current_path = str(path)
+                except Exception as exc:  # noqa: BLE001 - 前置评分失败进入候选搜索
+                    logs.append(f"{axis} 前置评分失败: {exc}")
+        if (
+            current_score is not None
+            and good_enough is not None
+            and current_score >= good_enough
+        ):
+            fixed[axis] = current_phase
+            spectrum_path = current_path
+            skipped.append(axis)
+            logs.append(
+                f"{axis}: 相位已够好(score={current_score:.1f} >= {good_enough:g}),"
+                f"保持 {current_phase},未优化"
+            )
+            continue
+        best_score = current_score if current_score is not None else -1.0
+        best_phase = current_phase if current_score is not None else None
+        best_path = current_path
         for cand in candidates:
             phase = (cand["p0"], cand["p1"])
+            if current_score is not None and phase == current_phase:
+                continue  # 已在前置判断中评分,避免重复跑后端
             override = {**fixed, axis: phase}
             if is_nus:
                 resp = backend.finalize_nus(
@@ -974,12 +1020,34 @@ def optimize_phase_sequential(
             raise ValueError(f"轴 {axis} 相位候选全部失败")
         fixed[axis] = best_phase
         spectrum_path = best_path
-        logs.append(f"{axis}: 最优 {best_phase} (score={best_score:.1f}),已固定")
+        if current_score is not None and best_phase == current_phase:
+            logs.append(
+                f"{axis}: 候选未优于当前相位,保持 {best_phase} "
+                f"(score={best_score:.1f}),已固定"
+            )
+        elif current_score is not None:
+            gain = best_score - current_score
+            logs.append(
+                f"{axis}: 相位已优化 {current_phase} → {best_phase} "
+                f"(score={current_score:.1f} → {best_score:.1f}, +{gain:.1f}),已固定"
+            )
+            optimized.append(axis)
+        else:
+            logs.append(f"{axis}: 最优 {best_phase} (score={best_score:.1f}),已固定")
+            optimized.append(axis)
 
+    logs.append(
+        "相位优化总结: "
+        + ("未优化 " + ",".join(skipped) if skipped else "未优化 无")
+        + "; "
+        + ("已优化 " + ",".join(optimized) if optimized else "已优化 无")
+    )
     return SequentialPhaseResult(
         phases=dict(fixed),
         spectrum_path=spectrum_path,
         backend_runs=backend_runs,
         method="sequential_brute_force",
         logs=logs,
+        optimized=optimized,
+        skipped=skipped,
     )

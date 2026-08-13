@@ -1,5 +1,15 @@
 # 变更日志
 
+## [0.2.34] - 2026-08-13
+
+- Backend:相位/基线优化加「够好即停」前置判断(用户反馈):
+  optimize_phase_sequential 与 optimize_baseline 每轴先评分当前状态
+  (good_enough=80,0-100;None 关闭前置判断),已够好则跳过候选搜索并
+  保持当前配置;日志逐轴说明「未优化 / 已优化 + 参数变化 + 分数增益」,
+  末尾附总结行;结果新增 optimized/skipped 字段;stepwise
+  optimize_phase_brute_force 透传 good_enough 并返回 optimized/skipped。
+- 测试:跳过(保持配置)、关闭前置判断(全候选)、日志断言;全量 341 通过,
+  ruff 全绿。
 ## [0.2.33] - 2026-08-13
 
 - Backend:2D NUS 重构改两阶段(Architect VM 验证 sampleA 25% NUS 主峰

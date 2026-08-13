@@ -496,3 +496,51 @@ def test_default_phase_score_ranks_phase_quality(tmp_path: Path) -> None:
     assert (
         comp_bad["negative_peak_fraction"] > comp_good["negative_peak_fraction"]
     )
+
+def test_optimize_phase_sequential_skips_good_axis(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """前置判断:当前相位已够好(≥阈值)时跳过候选搜索,日志说明未优化。"""
+    experiment = read_dataset(bruker_dir / "hsqc_2d")
+    backend = _OverrideBackend(tmp_path / "work")
+
+    def _good(path: str) -> tuple[float, dict[str, float]]:
+        return 90.0, {}
+
+    result = optimize_phase_sequential(
+        experiment,
+        backend,
+        p0_values=(0.0,),
+        p1_values=(-60.0, 0.0, 30.0, 60.0),
+        score_fn=_good,
+    )
+    assert result.phases == {"F2": (0.0, 0.0), "F1": (0.0, 0.0)}
+    assert result.backend_runs == 2  # 每轴仅前置评分 1 次,候选 0 次
+    assert result.optimized == []
+    assert set(result.skipped) == {"F1", "F2"}
+    joined = "\n".join(result.logs)
+    assert joined.count("未优化") >= 2
+    assert "保持" in joined
+    assert "相位优化总结" in joined
+
+
+def test_optimize_phase_sequential_disable_precheck(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """good_enough=None 关闭前置判断,总是暴力搜索全部候选。"""
+    experiment = read_dataset(bruker_dir / "hsqc_2d")
+    backend = _OverrideBackend(tmp_path / "work")
+
+    result = optimize_phase_sequential(
+        experiment,
+        backend,
+        p0_values=(0.0,),
+        p1_values=(-60.0, 0.0, 30.0, 60.0),
+        score_fn=_score_from_path,
+        good_enough=None,
+    )
+    assert result.phases["F2"][1] == 30.0  # 评分函数在 30° 处最高
+    assert result.phases["F1"][1] == 30.0
+    assert result.backend_runs == 2 * 4
+    assert result.skipped == []
+
