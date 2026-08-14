@@ -13,6 +13,9 @@
 - 修复:viewer/contour_layer.py 尺寸分流——像素数小于 256x512 的小谱走
   matplotlib 等高线(稳定路径),真实数据规模走光栅化(性能路径,512x1024
   谱仍约 30ms);同时修正 0.2.65 遗留的 `_pen_neg` 元组笔误。
+- 阈值上调(Architect 基准,0.2.67 补充):_RASTER_MIN_PIXELS 256x512 →
+  512x1024;阈值处 matplotlib 中位 ≈167ms,安全边际 4×,光栅化仅用于
+  ≥512x1024 真实大谱。
 - 测试:VM 全量 449 tests(MALLOC_PERTURB_=1 连跑 3 轮全绿)+ 本地全量
   passed(offscreen)+ ruff 全绿;test_viewer 拆分小谱路径(等高线)与大谱
   路径(光栅化)断言。

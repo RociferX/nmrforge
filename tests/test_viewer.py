@@ -154,10 +154,10 @@ def test_contour_layer_small_data_uses_paths() -> None:
 def test_contour_layer_large_data_renders_image() -> None:
     from scipy.ndimage import gaussian_filter
 
-    spectrum = _synthetic_spectrum((256, 512))
+    spectrum = _synthetic_spectrum((512, 1024))
     data = spectrum.data.copy()
     negative = np.zeros_like(data)
-    negative[80, 360] = -300.0
+    negative[160, 720] = -300.0
     data = data + gaussian_filter(negative, sigma=(1.5, 1.5))
     layer = ContourLayer(
         data,
@@ -169,8 +169,8 @@ def test_contour_layer_large_data_renders_image() -> None:
     # 大谱走光栅化(真实数据规模,性能路径)
     assert layer._raster is True
     assert layer._image is not None and not layer._image.isNull()
-    assert layer.boundingRect().width() == 512
-    assert layer.boundingRect().height() == 256
+    assert layer.boundingRect().width() == 1024
+    assert layer.boundingRect().height() == 512
     layer.setData(spectrum.data, np.array([-20.0, 20.0]))
     assert layer._image is not None
 

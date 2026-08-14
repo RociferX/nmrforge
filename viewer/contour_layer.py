@@ -8,7 +8,7 @@ numpy 向量化重渲染,避免 matplotlib 等高线几何计算的卡顿(真实
 尺寸分流(0.2.67):像素数小于 ``_RASTER_MIN_PIXELS`` 的小谱继续走
 matplotlib 等高线。VM Linux 全量 pytest 下,小谱光栅化的内存分配模式
 会触发 PyQt6/sip 对 C++ 已析构子控件的 wrapper 缓存错配,导致 Qt 控件
-构造时随机段错误(与渲染逻辑本身无关);真实数据规模(256x512 及以上)
+构造时随机段错误(与渲染逻辑本身无关);真实数据规模(512x1024 及以上)
 的大缓冲走 mmap,光栅化路径稳定且保持毫秒级性能。
 """
 
@@ -18,8 +18,9 @@ import numpy as np
 import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore, QtGui
 
-# 光栅化阈值:像素数达到该值(256x512)才走光栅化,更小谱走 matplotlib
-_RASTER_MIN_PIXELS = 256 * 512
+# 光栅化阈值:像素数达到该值(512x1024)才走光栅化,更小谱走 matplotlib
+# (Architect 基准:阈值处 matplotlib 中位 ≈167ms;上调后安全边际 4×)
+_RASTER_MIN_PIXELS = 512 * 1024
 
 
 class ContourLayer(pg.GraphicsObject):
