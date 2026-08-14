@@ -61,6 +61,10 @@ def test_import_links_and_registers(tmp_path: Path, bruker_dir: Path) -> None:
     assert meta["workflow_run_id"] == result.run_id
     assert "acqus" in meta["manifest"]["checksums"]
     assert meta["manifest"]["file_count"] == 2
+    # G2B-009:metadata 记录链接统计(可查证导入方式)
+    assert meta["link_stats"]["hardlink"] == 2
+    assert meta["link_stats"]["copy"] == 0
+    assert meta["link_stats"]["writable"] == 0
 
     # WorkflowRun 登记
     run = manager.project.run(result.run_id)

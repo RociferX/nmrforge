@@ -552,6 +552,27 @@ def _default_spectrum_quality(path: str) -> tuple[float, dict[str, float]]:
     return quality.score.overall, asdict(quality.score.components)
 
 
+def _default_phase_score_axis(path: str, axis: str) -> tuple[float, dict[str, float]]:
+    """相位专用评分(逐轴):沿被优化轴的一维剖面峰窗负面积。
+
+    0.2.63 起默认评分改用旧项目(NMRFlow)的逐轴方式:相位误差的色散
+    负瓣沿被调轴方向展开,取峰位置沿该轴的一维剖面统计负值占比(1-na);
+    二维峰窗会把已调好方向的峰形纳入,稀释目标轴信号(VM sampleF 实测)。
+    """
+    import nmrglue as ng
+
+    from core.qc import phase_quality
+
+    _dic, data = ng.pipe.read(path)
+    arr = np.asarray(data)
+    if np.iscomplexobj(arr):
+        arr = arr.real
+    axis_idx = _axis_index(axis)
+    na = phase_quality.negative_area_axis(arr, axis_idx)
+    score = 100.0 * (1.0 - na)
+    return score, {"negative_area_fraction": na}
+
+
 def _default_phase_score(path: str) -> tuple[float, dict[str, float]]:
     """相位专用评分(逐维相位优化的默认评估)。
 
@@ -946,6 +967,14 @@ def _refine_window(center: float, prev_step: float, new_step: float) -> list[flo
     return [center + k * new_step for k in range(-n, n + 1)]
 
 
+def _spectrum_real(path: str) -> np.ndarray:
+    import nmrglue as ng
+
+    _dic, data = ng.pipe.read(path)
+    arr = np.asarray(data)
+    return arr.real if np.iscomplexobj(arr) else arr
+
+
 def _axis_index(axis: str) -> int:
     """轴名 → 谱数组下标(F1=0, F2=1, F3=2)。"""
     return {"F1": 0, "F2": 1, "F3": 2}.get(axis, 0)
@@ -1010,6 +1039,9 @@ def _joint_recheck(
     work_dir: Path | str | None,
     score_fn: Callable[[str], tuple[float, dict[str, float]]],
     backend_runs: list[int],
+    phase_cache: dict[
+        tuple[tuple[str, tuple[float, float]], ...], tuple[float, str]
+    ],
 ) -> tuple[dict[str, tuple[float, float]], float, str, int, float, float, str]:
     """全部轴固定的联合 ±final_step 邻域复核(p1 每轴 3 值,含全零组合)。
 
@@ -1036,14 +1068,24 @@ def _joint_recheck(
     zero_path = ""
     runs = 0
     for phases in combos:
-        if is_nus:
-            resp = backend.finalize_nus(experiment, phases=phases, work_dir=work_dir)
+        cache_key = tuple(sorted(phases.items()))
+        cached = phase_cache.get(cache_key)
+        if cached is not None:
+            # 复用顺序搜索已产出的后端产物,重新评分(score_fn 基准一致)
+            path = cached[1]
         else:
-            resp = backend.process(experiment, plan, direct_phase_override=phases)
-        runs += 1
-        if not resp.get("success"):
-            continue
-        path = str(resp.get("spectrum_path", ""))
+            if is_nus:
+                resp = backend.finalize_nus(
+                    experiment, phases=phases, work_dir=work_dir
+                )
+            else:
+                resp = backend.process(
+                    experiment, plan, direct_phase_override=phases
+                )
+            runs += 1
+            if not resp.get("success"):
+                continue
+            path = str(resp.get("spectrum_path", ""))
         try:
             score, _components = score_fn(path)
         except Exception:  # noqa: BLE001 - 单候选失败不影响其它
@@ -1089,12 +1131,14 @@ def optimize_phase_sequential(
     if axes is None:
         axes = [dim.logical_axis for dim in experiment.dimensions]  # 直接维在前
     if p1_values is None:
-        p1_values = (-90.0, -60.0, -30.0, 0.0, 30.0, 60.0, 90.0)
+        # 0.2.63:默认范围 ±180°(真实数据最优相位可超出 ±90°,sampleF F1=150°)
+        p1_values = tuple(float(v) for v in range(-180, 181, 30))
     coarse = [
         (float(p0), float(p1))
         for p1 in p1_values
         for p0 in p0_values
     ]
+    custom_score = score_fn is not None
     score_fn = score_fn or _default_phase_score
     is_nus = experiment.sampling.mode is SamplingMode.NUS
     direct_axis = "F2" if experiment.ndim == 2 else "F3"
@@ -1105,6 +1149,11 @@ def optimize_phase_sequential(
     spectrum_path = ""
     optimized: list[str] = []
     unchanged: list[str] = []
+
+    # 候选缓存(联合复核复用顺序搜索已评分组合,性能优化)
+    phase_cache: dict[
+        tuple[tuple[str, tuple[float, float]], ...], tuple[float, str]
+    ] = {}
 
     if is_nus:
         work = Path(work_dir) if work_dir else default_work_dir(experiment, backend)
@@ -1144,6 +1193,11 @@ def optimize_phase_sequential(
             if phase in scored:
                 return
             override = {**fixed, axis: phase}
+            cache_key = tuple(sorted(override.items()))
+            cached = phase_cache.get(cache_key)
+            if cached is not None:
+                scored[phase] = cached
+                return
             if is_nus:
                 resp = backend.finalize_nus(
                     experiment, phases=override, work_dir=work_dir
@@ -1158,14 +1212,32 @@ def optimize_phase_sequential(
                 return
             path = resp.get("spectrum_path", "")
             try:
-                score, _components = score_fn(str(path))
+                if custom_score:
+                    score, _components = score_fn(str(path))
+                else:
+                    # 默认评分沿被优化轴取一维剖面(旧项目逐轴方式)
+                    score, _components = _default_phase_score_axis(
+                        str(path), axis
+                    )
             except Exception as exc:  # noqa: BLE001 - 单候选失败不影响其它
                 logs.append(f"{axis} 候选 {phase}: 评分失败 {exc}")
                 return
             scored[phase] = (float(score), str(path))
+            phase_cache[cache_key] = (float(score), str(path))
 
         for phase in coarse:
             _run_phase(phase)
+        if not scored:
+            raise ValueError(f"轴 {axis} 相位候选全部失败")
+        # 粗网格最优与判别力(供门控回退:细网格平坦时保留粗定位)
+        coarse_done = [p for p in coarse if p in scored]
+        coarse_sorted = sorted(coarse_done, key=lambda p: -scored[p][0])
+        coarse_best = coarse_sorted[0]
+        coarse_margin = (
+            scored[coarse_sorted[0]][0] - scored[coarse_sorted[1]][0]
+            if len(coarse_sorted) > 1
+            else 0.0
+        )
         if levels:
             prev0, prev1 = p0_step, p1_step
             for level in range(levels):
@@ -1184,8 +1256,6 @@ def optimize_phase_sequential(
                     for p1 in w1:
                         _run_phase((p0, p1))
                 prev0, prev1 = s0, s1
-        if not scored:
-            raise ValueError(f"轴 {axis} 相位候选全部失败")
         best_phase = max(scored, key=lambda p: scored[p][0])
         best_score, best_path = scored[best_phase]
         # 相位置信度:与 ±final_step 内已评分 p1 邻域的最优分差(评分面陡峭度)。
@@ -1226,17 +1296,102 @@ def optimize_phase_sequential(
                         f"{p1a:g}/{p1b:g},差>{PHASE_REPRODUCIBILITY_TOL:g}°),"
                         f"回退 (0,0)"
                     )
-        if flat and best_phase != (0.0, 0.0):
-            # 方案 B(0.2.47):评分面平坦/低置信 → 回退 (0,0)(SMILE 内建相位)
-            if (0.0, 0.0) in scored:
-                best_phase = (0.0, 0.0)
-                best_score, best_path = scored[(0.0, 0.0)]
+        if flat:
+            if coarse_best != (0.0, 0.0) and coarse_margin >= PHASE_SCORE_FLAT_MARGIN:
+                # 0.2.63:细网格平坦只说明 ±5° 内评分不敏感,粗网格最优仍是
+                # 可靠相位定位(否则会把正确相位如 sampleF F1=150° 丢弃)
+                if best_phase != coarse_best:
+                    logs.append(
+                        f"{axis}: 细网格评分平坦,采用粗网格最优 {coarse_best} "
+                        f"(粗 margin={coarse_margin:.2f} 分)"
+                    )
+                    best_phase = coarse_best
+                    best_score, best_path = scored[coarse_best]
+                else:
+                    logs.append(
+                        f"{axis}: 细网格评分平坦,保持粗网格最优 {coarse_best} "
+                        f"(粗 margin={coarse_margin:.2f} 分)"
+                    )
             else:
-                _run_phase((0.0, 0.0))
+                # 粗网格也平坦/最优即零相位 → 回退 (0,0)(SMILE 内建相位)
                 if (0.0, 0.0) in scored:
                     best_phase = (0.0, 0.0)
                     best_score, best_path = scored[(0.0, 0.0)]
-            logs.append(f"{axis}: 已回退 (0,0)(评分面平坦/低置信)")
+                else:
+                    _run_phase((0.0, 0.0))
+                    if (0.0, 0.0) in scored:
+                        best_phase = (0.0, 0.0)
+                        best_score, best_path = scored[(0.0, 0.0)]
+                logs.append(f"{axis}: 已回退 (0,0)(评分面平坦且粗网格最优为零)")
+        if refine:
+            # 平台圆中位数(旧项目 NMRFlow):评分 ≥ best-0.02 的 p1 平台取
+            # 圆中位数,把相位从 5° 网格精修到亚度精度(如 -52°),避免停在
+            # 平台边缘噪声点
+            plateau_p1 = [
+                p[1]
+                for p, (s, _path) in scored.items()
+                if s >= best_score - 0.02
+            ]
+            if len(plateau_p1) >= 2:
+                angles = np.deg2rad(plateau_p1)
+                center = float(
+                    np.rad2deg(
+                        np.arctan2(
+                            np.mean(np.sin(angles)), np.mean(np.cos(angles))
+                        )
+                    )
+                )
+                center = ((center + 180.0) % 360.0) - 180.0
+                refined = (best_phase[0], center)
+                if abs(center - best_phase[1]) > 0.5 and refined not in scored:
+                    _run_phase(refined)
+                if refined in scored:
+                    r_score, r_path = scored[refined]
+                    if r_score >= best_score - 0.02:
+                        best_phase, best_score, best_path = (
+                            refined,
+                            r_score,
+                            r_path,
+                        )
+                        logs.append(
+                            f"{axis}: 平台圆中位数 p1 → {center:.2f}° "
+                            f"(score={r_score:.2f})"
+                        )
+            # ±90° 对称性消歧(旧项目 NMRFlow):p0 为弱维度,吸收度相近时
+            # 选峰形更对称者(吸收≈+1,色散≈-1),避免落偏 90°
+            from core.qc import phase_quality
+
+            axis_idx = _axis_index(axis)
+
+            def _sym_of(path: str) -> float:
+                # 读谱失败(如测试 fake 产物无效)时按 0 处理,消歧跳过
+                try:
+                    return phase_quality.profile_symmetry_axis(
+                        _spectrum_real(path), axis_idx
+                    )
+                except Exception:  # noqa: BLE001
+                    return 0.0
+
+            best_sym = _sym_of(best_path)
+            for offset in (90.0, -90.0):
+                cand = (best_phase[0] + offset, best_phase[1])
+                if cand not in scored:
+                    _run_phase(cand)
+                if cand in scored:
+                    c_score, c_path = scored[cand]
+                    if c_score >= best_score - 0.05:
+                        c_sym = _sym_of(c_path)
+                        if c_sym > best_sym + 0.05:
+                            logs.append(
+                                f"{axis}: ±90° 对称性消歧 {best_phase} → "
+                                f"{cand} (sym {best_sym:.2f}→{c_sym:.2f})"
+                            )
+                            best_phase, best_score, best_path = (
+                                cand,
+                                c_score,
+                                c_path,
+                            )
+                            best_sym = c_sym
         fixed[axis] = best_phase
         spectrum_path = best_path
         baseline_score = scored.get((0.0, 0.0))
@@ -1277,6 +1432,7 @@ def optimize_phase_sequential(
             work_dir,
             score_fn,
             [backend_runs],
+            phase_cache,
         )
         if joint_phases == fixed:
             logs.append(
@@ -1307,8 +1463,11 @@ def optimize_phase_sequential(
         + "; "
         + ("未优化 " + ",".join(unchanged) if unchanged else "未优化 无")
     )
+    # 注意:不做 p1 归一化!NMRPipe PS 的 p1 是频率相关线性相位
+    # (相位 = p0 + p1·k/max),p1+360 在中间点 k 处不等价(-200° 与 160° 谱
+    # 不同);0.2.64 曾归一化导致基线重渲用错误相位、峰形劣化,已移除。
     return SequentialPhaseResult(
-        phases=dict(fixed),
+        phases={axis: (float(p0), float(p1)) for axis, (p0, p1) in fixed.items()},
         spectrum_path=spectrum_path,
         backend_runs=backend_runs,
         method="sequential_brute_force",
