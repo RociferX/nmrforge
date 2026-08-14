@@ -1,5 +1,23 @@
 # 变更日志
 
+## [0.2.75] - 2026-08-14
+
+- 修复(GUI Agent,用户反馈):0.2.71 光栅化谱图观感与 nmrDraw/POKY 根本
+  不同——光栅化是连续 alpha 强度填色,POKY/SPARKY/nmrDraw 画的是离散等
+  值线(细线框,级别 lowest × factor^n 几何级数,逐级 Marching Squares
+  追踪,按级着色 1px 折线);经 POKY 官方手册与 SPARKY 3.115 开源源码
+  (contourplane.cc/contourstream.cc/uiview.cc)确认同源机制。
+- 实现:viewer/contour_layer.py 彻底弃用光栅化(RGBA/QImage/尺寸分流全部
+  移除),改用 contourpy(matplotlib 底层 C++ Marching Squares 引擎)在数据
+  原始分辨率逐级追踪真实等高线,正=层色、负=红 1px 折线;zoom 插值参数
+  保留但不再放大,坐标即数据下标。
+- 性能:512x1024 谱 contourpy 提取 10 级约 16-50ms、36 级约 52-116ms,
+  QPainterPath 构建最坏约 170ms,与光栅化同量级;原 matplotlib 慢路径
+  (约 21s)的瓶颈是 ndimage.zoom + plt.contour 建图,已一并消除。
+- 附带:等高线回到历史上 VM 全量全绿的 matplotlib 路径族,不再需要
+  0.2.73 的尺寸分流;测试断言同步从 _image/_raster 改为等值线路径。
+- 测试:本地全量 passed(offscreen)+ ruff 全绿;VM 全量复测通过。
+
 ## [0.2.73] - 2026-08-14
 
 - 修复(GUI Agent):VM Linux 全量 pytest 段错误真正根因落地。0.2.72 的
