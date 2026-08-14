@@ -199,10 +199,13 @@ class ProcessingController:
         exp_id: str | None = None,
         data_id: str | None = None,
         progress: Callable[[str], None] | None = None,
+        phase_optimize: bool = True,
     ) -> str:
         """第 3 步:生成谱图(process/reconstruct_nus,含 NUS SMILE 重构)。
 
-        progress 可选回调:阶段进展(G2B-006;后端落地后转发真实阶段日志)。
+        默认在基础谱后跑逐维相位优化(optimize_phase_brute_force,
+        0.2.62-0.2.64 相位处理),最终谱相位正确;phase_optimize=False
+        仅生成基础谱(调试/测试用)。progress 可选回调:阶段进展。
         """
         import inspect
 
@@ -238,7 +241,22 @@ class ProcessingController:
             self._backend_instance(),
             **kwargs,
         )
-        emit("完成重构/处理,终谱已就位")
+        emit("基础谱图完成,开始逐维相位优化")
+        if phase_optimize:
+            from workflow.stepwise import optimize_phase_brute_force
+
+            opt = optimize_phase_brute_force(
+                self._manager,
+                exp_id,
+                data_id,
+                self._backend_instance(),
+            )
+            spectrum_path = str(opt.get("spectrum_path") or spectrum_path)
+            phases = opt.get("phase") or {}
+            state = "已优化" if opt.get("optimized") else "保持/门控回退"
+            emit(f"相位优化完成: {state} 相位 {phases}")
+        else:
+            emit("完成重构/处理,终谱已就位")
         if data_id:
             record_step_success(self._manager, exp_id, data_id, "spectrum")
             self._snapshot_step(

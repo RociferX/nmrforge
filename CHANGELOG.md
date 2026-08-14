@@ -1,5 +1,22 @@
 # 变更日志
 
+## [0.2.66] - 2026-08-14
+
+- GUI:生成谱图自动接相位优化(用户反馈「最终谱相位不对」):
+  - ProcessingController.generate_spectrum 在基础谱后默认跑
+    optimize_phase_brute_force(0.2.62-0.2.64 相位处理),最终谱相位
+    正确;新增 phase_optimize=False 调试开关;
+  - 实测(sampleL):基础谱相位评分 49.89(峰窗负面积 60.1%)→ 优化后
+    71.87(5.6%),最优相位 F2(0,-127.5)/F1(60,35);
+- 审计 GUI↔Backend 不同步:
+  - ⚠ param_schema 的 sampling 块(ft_neg/ft_alt/flip_f1/auto_phase)
+    仅文档化,后端脚本生成未消费(死参数,待 Backend 实现或移除);
+  - ⚠ G2B-008 生成谱图真实阶段日志仍待 Backend(progress 未转发);
+  - ⚠ 后端 run_batch 引擎未接入 GUI 批量执行(GUI 逐数据走 stepwise);
+  - ✅ 导入 link_stats warnings 已在 GUI 展示(无缺口)。
+- 测试:新增 test_generate_spectrum_phase_optimize_disabled,更新 progress
+  用例;全量 439 passed(本地 3.13),ruff 全绿。
+
 ## [0.2.65] - 2026-08-14
 
 - 工程:项目要求 Python ≥3.12(用户决策):
