@@ -28,7 +28,7 @@ class _FakeBackend:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"x")
 
-    def convert_to_fid(self, experiment, data_dir) -> dict:
+    def convert_to_fid(self, experiment, data_dir, progress=None) -> dict:
         self.calls.append("convert_to_fid")
         if not self.success:
             return {"success": False, "message": "转换失败", "logs": []}
@@ -37,7 +37,12 @@ class _FakeBackend:
         return {"success": True, "fid_path": str(fid_path), "message": "ok", "logs": []}
 
     def process(
-        self, experiment, plan, direct_phase_override=None, params=None
+        self,
+        experiment,
+        plan,
+        direct_phase_override=None,
+        params=None,
+        progress=None,
     ) -> dict:
         self.calls.append("process")
         self.last_params = params
@@ -54,7 +59,7 @@ class _FakeBackend:
             "logs": [],
         }
 
-    def reconstruct_nus(self, experiment, params) -> dict:
+    def reconstruct_nus(self, experiment, params, progress=None) -> dict:
         self.calls.append("reconstruct_nus")
         spectrum = Path(self.work_dir) / "out_nus.ft2"
         self._touch(spectrum)

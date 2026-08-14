@@ -98,7 +98,10 @@ GUI 页面不得绕过本控制器直接调 Backend。
 ## 6. 参数/结果约定
 
 - 处理参数统一 dict 键:`zero_fill`、`sampling`(ft_neg/ft_alt/flip_f1/
-  auto_phase)、`baseline`(每维基线校正,见下)、`stages`(列表,
+  auto_phase,0.2.67 起脚本生成消费:ft_neg None=按采集方式自动/True=强制
+  FT -neg/False=关闭;ft_alt True=按采集方式自动/False=强制关闭;flip_f1
+  True 时 F1 轴 FT -neg 翻转;auto_phase False 关闭直接维自动相位)、
+  `baseline`(每维基线校正,见下)、`stages`(列表,
   id/tool/macro/params/param_docs);
 - 基线校正 `baseline` 键(G2B-007):
   `{"enabled": true, "mode": "auto"|"order", "order": N,

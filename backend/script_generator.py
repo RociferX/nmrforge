@@ -460,6 +460,7 @@ def _stage_lines(
     baseline: dict[str, dict[str, Any]] | None = None,
     window: dict[str, dict[str, Any]] | None = None,
     zero_fill: dict[str, dict[str, Any]] | None = None,
+    sampling: dict[str, Any] | None = None,
 ) -> list[str]:
     lines: list[str] = []
     for op, params in stages:
@@ -500,9 +501,21 @@ def _stage_lines(
                 lines.append(f"| nmrPipe -fn ZF -size {int(size)} \\")
         elif op == "ft":
             flags = []
-            if params.get("alt"):
+            neg = bool(params.get("neg"))
+            alt = bool(params.get("alt"))
+            axis = str(params.get("axis", ""))
+            # sampling 覆盖(0.2.67):ft_neg/ft_alt 非 None 时覆盖 plan 推导,
+            # flip_f1=True 时 F1 轴强制 -neg(翻转)
+            if sampling:
+                if sampling.get("ft_neg") is not None:
+                    neg = bool(sampling.get("ft_neg"))
+                if sampling.get("ft_alt") is False:
+                    alt = False  # True=按采集方式自动;False=强制关闭
+                if axis == "F1" and bool(sampling.get("flip_f1")):
+                    neg = True
+            if alt:
                 flags.append("-alt")
-            if params.get("neg"):
+            if neg:
                 flags.append("-neg")
             suffix = (" " + " ".join(flags)) if flags else ""
             lines.append(f"| nmrPipe -fn FT{suffix} \\")
@@ -547,6 +560,7 @@ def generate_process_script(
     ext_lo: str = "11.0",
     ext_hi: str = "6.0",
     extract: bool = True,
+    sampling: dict[str, Any] | None = None,
 ) -> str:
     """把处理计划（DAG）翻译为 NMRPipe 管道脚本（直接维 → EXT → TP → 间接维）。
 
@@ -568,7 +582,12 @@ def generate_process_script(
     ]
     for index, axis in enumerate(axes):
         lines += _stage_lines(
-            _axis_stages(plan, axis), direct_phase, baseline, window, zf_plan
+            _axis_stages(plan, axis),
+            direct_phase,
+            baseline,
+            window,
+            zf_plan,
+            sampling,
         )
         if extract and index == 0:
             lines.append(
@@ -583,8 +602,22 @@ def generate_process_script(
     return "\n".join(lines) + "\n"
 
 
-def _ft_flag_line(fnmode: int) -> str:
+def _ft_flag_line(
+    fnmode: int,
+    *,
+    sampling: dict[str, Any] | None = None,
+    axis: str = "",
+) -> str:
+    """FT 行标志:sampling.ft_neg/ft_alt 非 None 时覆盖 FnMODE 推导,
+    flip_f1=True 时 F1 轴强制 -neg(翻转);默认保持推导输出不变。"""
     neg, alt = _FT_FLAGS.get(int(fnmode), (False, False))
+    if sampling:
+        if sampling.get("ft_neg") is not None:
+            neg = bool(sampling.get("ft_neg"))
+        if sampling.get("ft_alt") is False:
+            alt = False  # True=按采集方式自动;False=强制关闭
+        if axis == "F1" and bool(sampling.get("flip_f1")):
+            neg = True
     flags = []
     if neg:
         flags.append("-neg")
@@ -617,6 +650,7 @@ def generate_2d_nus_script(
     zero_fill: dict[str, Any] | int | None = None,
     linewidth_hz: dict[str, float] | None = None,
     points_per_line: float = DEFAULT_POINTS_PER_LINE,
+    sampling: dict[str, Any] | None = None,
 ) -> str:
     """2D NUS SMILE 重构(两阶段,Architect VM 验证 sampleA 25% NUS)。
 
@@ -710,7 +744,7 @@ def generate_2d_nus_script(
         "# stage 2: indirect dim (F1) FT -alt + PS + POLY",
         "nmrPipe -in nus2d/recon.ft1 \\",
         *f1_zf_line,
-        _ft_flag_line(f1_fnmode),
+        _ft_flag_line(f1_fnmode, sampling=sampling, axis="F1"),
         "| nmrPipe -fn PS -p0 0 -p1 0 -di \\",
         *indirect_poly,
         "| nmrPipe -fn TP \\",
@@ -742,6 +776,7 @@ def generate_3d_nus_script(
     zero_fill: dict[str, Any] | int | None = None,
     linewidth_hz: dict[str, float] | None = None,
     points_per_line: float = DEFAULT_POINTS_PER_LINE,
+    sampling: dict[str, Any] | None = None,
 ) -> str:
     """3D NUS SMILE 重构：直接维（F3）FT+EXT → SMILE -nDim 3 → 间接维 FT（ft3）。"""
     ctx = build_context(experiment)
@@ -806,7 +841,7 @@ def generate_3d_nus_script(
             if f2_zf.get("mode") != "none"
             else []
         ),
-        _ft_flag_line(f2_fnmode),
+        _ft_flag_line(f2_fnmode, sampling=sampling, axis="F2"),
         "| nmrPipe -fn PS -p0 0 -p1 0 -di \\",
         "| nmrPipe -fn TP \\",
         *(
@@ -816,7 +851,7 @@ def generate_3d_nus_script(
             if f1_zf.get("mode") != "none"
             else []
         ),
-        _ft_flag_line(f1_fnmode),
+        _ft_flag_line(f1_fnmode, sampling=sampling, axis="F1"),
         "| nmrPipe -fn PS -p0 0 -p1 0 -di \\",
         "| nmrPipe -fn TP \\",
         "| nmrPipe -fn ZTP \\",
@@ -873,13 +908,24 @@ def param_schema() -> dict[str, Any]:
                 "type": "object",
                 "description": "采样/采集相关标志",
                 "properties": {
-                    "ft_neg": {"type": "boolean", "default": False, "description": "FT 后翻转该轴"},
+                    "ft_neg": {
+                        "type": ["boolean", "null"],
+                        "default": None,
+                        "description": "FT 后翻转该轴(null=按采集方式自动,True/False=强制)",
+                    },
                     "ft_alt": {
                         "type": "boolean",
                         "default": True,
-                        "description": "TPPI/States-TPPI ± 交替修正",
+                        "description": (
+                            "TPPI/States-TPPI ± 交替修正(True=按采集方式自动,"
+                            "False=强制关闭)"
+                        ),
                     },
-                    "flip_f1": {"type": "boolean", "default": False, "description": "F1 轴翻转"},
+                    "flip_f1": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "F1 轴翻转(FT -neg)",
+                    },
                     "auto_phase": {
                         "type": "boolean",
                         "default": True,
@@ -948,7 +994,7 @@ def param_schema() -> dict[str, Any]:
                 "axes": "all",
             },
             "sampling": {
-                "ft_neg": False,
+                "ft_neg": None,
                 "ft_alt": True,
                 "flip_f1": False,
                 "auto_phase": True,
@@ -1041,6 +1087,7 @@ def generate_nus_finalize_script(
     zero_fill: dict[str, Any] | int | None = None,
     linewidth_hz: dict[str, float] | None = None,
     points_per_line: float = DEFAULT_POINTS_PER_LINE,
+    sampling: dict[str, Any] | None = None,
 ) -> str:
     """NUS 重构平面(复型)的间接维 FT 定稿脚本(逐维 PS 可配)。
 
@@ -1081,7 +1128,7 @@ def generate_nus_finalize_script(
                 if zf_plan.get("F2", {}).get("mode") != "none"
                 else []
             ),
-            _ft_flag_line(f2_fnmode),
+            _ft_flag_line(f2_fnmode, sampling=sampling, axis="F2"),
             f"| nmrPipe -fn PS -p0 {f2_p0:g} -p1 {f2_p1:g} -di \\",
             "| nmrPipe -fn TP \\",
             *(
@@ -1091,7 +1138,7 @@ def generate_nus_finalize_script(
                 if zf_plan.get("F1", {}).get("mode") != "none"
                 else []
             ),
-            _ft_flag_line(f1_fnmode),
+            _ft_flag_line(f1_fnmode, sampling=sampling, axis="F1"),
             f"| nmrPipe -fn PS -p0 {f1_p0:g} -p1 {f1_p1:g} -di \\",
             "| nmrPipe -fn TP \\",
             "| nmrPipe -fn ZTP \\",
@@ -1116,7 +1163,7 @@ def generate_nus_finalize_script(
                 if zf_plan.get("F1", {}).get("mode") != "none"
                 else []
             ),
-            _ft_flag_line(f1_fnmode),
+            _ft_flag_line(f1_fnmode, sampling=sampling, axis="F1"),
             f"| nmrPipe -fn PS -p0 {f1_p0:g} -p1 {f1_p1:g} -di \\",
             *_baseline_line(expanded, "F1"),
             "| nmrPipe -fn TP \\",

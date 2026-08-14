@@ -15,8 +15,13 @@ def test_param_schema_structure() -> None:
         assert key in schema["properties"]
     sampling = schema["properties"]["sampling"]["properties"]
     for flag in ("ft_neg", "ft_alt", "flip_f1", "auto_phase"):
-        assert sampling[flag]["type"] == "boolean"
+        # 0.2.67:ft_neg/ft_alt 允许 null(=按采集方式自动,保持默认输出不变)
+        assert sampling[flag]["type"] in ("boolean", ["boolean", "null"])
         assert "default" in sampling[flag] and "description" in sampling[flag]
+    assert sampling["ft_neg"]["default"] is None
+    assert sampling["ft_alt"]["default"] is True  # True=按采集方式自动
+    assert sampling["flip_f1"]["default"] is False
+    assert sampling["auto_phase"]["default"] is True
     stages = schema["properties"]["stages"]["items"]["properties"]
     for key in ("id", "tool", "macro", "params", "param_docs"):
         assert key in stages
