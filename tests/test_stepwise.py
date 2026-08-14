@@ -180,7 +180,7 @@ def test_optimize_phase_brute_force(tmp_path: Path, bruker_dir: Path) -> None:
     assert result["phase"]["F1"][1] == 30.0
     assert result["spectrum_path"].endswith("out_p00_p130.ft2")
     assert backend.calls.count("process") >= 42
-    assert result["optimized"] == ["F2", "F1"]
+    assert result["optimized"] == ["F1", "F2"]  # 0.2.75:均匀路径间接维先
     assert result["skipped"] == []
     data = manager.data(exp_id, data_id)
     assert data.spectrum_path == result["spectrum_path"]
