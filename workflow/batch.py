@@ -133,13 +133,14 @@ def run_batch(
     backend: Any,
     *,
     params: dict[str, Any] | None = None,
-    progress: Callable[[int, int, str], None] | None = None,
+    progress: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     """按序对组内每个数据执行指定步骤,单数据失败不中断整组。
 
     steps 中每个可执行步骤(import 幂等确认)都会经底层实现登记 WorkflowRun
     (convert_to_fid / process / reconstruct_nus / pick_peaks);失败数据
     记录 failed_step/error,整组继续。返回逐数据结果与汇总(见模块 docstring)。
+    progress:每数据每步骤消息回调(如 "d_001: 开始 spectrum")。
     """
     if manager.project is None:
         raise BatchError("未加载项目,无法批量处理")
@@ -160,9 +161,9 @@ def run_batch(
             "error": "",
             "logs": [],
         }
-        if progress is not None:
-            progress(index - 1, total, f"开始 {data_id} ({batch or '单数据'})")
         for step in steps:
+            if progress is not None:
+                progress(f"{data_id}: 开始 {step}")
             try:
                 value = _run_step(manager, exp_id, data_id, step, backend, step_params)
             except Exception as exc:  # noqa: BLE001 - 单数据失败不中断整组
@@ -175,14 +176,12 @@ def run_batch(
         results[data_id] = per_data
         if progress is not None:
             progress(
-                index,
-                total,
                 f"{data_id}: "
                 + (
                     "成功"
                     if per_data["status"] == "success"
                     else "失败 " + per_data["error"]
-                ),
+                )
             )
     manager.save()
     failed = [d for d, r in results.items() if r["status"] == "failed"]
