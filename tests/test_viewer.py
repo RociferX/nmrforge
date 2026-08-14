@@ -126,7 +126,7 @@ def test_load_from_ft2_rejects_1d(tmp_path: Path) -> None:
         Spectrum.load_from_ft2(path)
 
 
-def test_contour_layer_renders_image() -> None:
+def test_contour_layer_small_data_uses_paths() -> None:
     from scipy.ndimage import gaussian_filter
 
     spectrum = _synthetic_spectrum((64, 128))
@@ -141,9 +141,36 @@ def test_contour_layer_renders_image() -> None:
         neg_pen="#e74c3c",
         zoom=2.0,
     )
-    assert layer._image is not None and not layer._image.isNull()
+    # 小谱走 matplotlib 等高线(尺寸分流,见 CHANGELOG 0.2.67)
+    assert layer._raster is False
+    assert layer._path.isEmpty() is False
+    assert layer._path_neg.isEmpty() is False
     assert layer.boundingRect().width() == 128
     assert layer.boundingRect().height() == 64
+    layer.setData(spectrum.data, np.array([-20.0, 20.0]))
+    assert layer._path.isEmpty() is False
+
+
+def test_contour_layer_large_data_renders_image() -> None:
+    from scipy.ndimage import gaussian_filter
+
+    spectrum = _synthetic_spectrum((256, 512))
+    data = spectrum.data.copy()
+    negative = np.zeros_like(data)
+    negative[80, 360] = -300.0
+    data = data + gaussian_filter(negative, sigma=(1.5, 1.5))
+    layer = ContourLayer(
+        data,
+        np.array([-50.0, -10.0, 10.0, 50.0]),
+        pen="#000000",
+        neg_pen="#e74c3c",
+        zoom=2.0,
+    )
+    # 大谱走光栅化(真实数据规模,性能路径)
+    assert layer._raster is True
+    assert layer._image is not None and not layer._image.isNull()
+    assert layer.boundingRect().width() == 512
+    assert layer.boundingRect().height() == 256
     layer.setData(spectrum.data, np.array([-20.0, 20.0]))
     assert layer._image is not None
 
@@ -154,7 +181,7 @@ def test_viewer_add_spectrum_and_levels(qapp: QApplication) -> None:
     name = viewer.add_spectrum(spectrum, name="HSQC")
     assert name == "HSQC"
     assert viewer.layer_list.count() == 1
-    assert viewer.layers[0]._image is not None
+    assert viewer.layers[0]._path.isEmpty() is False
     # 级数滑块改变后路径重建且级数更新
     old_count = viewer._level_count
     viewer.count_slider.setValue(old_count + 8)

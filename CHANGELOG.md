@@ -1,5 +1,22 @@
 # 变更日志
 
+## [0.2.67] - 2026-08-14
+
+- 修复(GUI Agent):VM Linux 全量 pytest 段错误真正根因落地。0.2.66 的
+  「QImage bytes 悬挂」假设经复测证伪——PyQt6 6.10.2/6.11.0、Python
+  3.10/3.12、pyqtgraph 0.13.7/0.14.0 全组合在 VM 全量下仍段错误,valgrind/
+  ASan 均无内存错误,MALLOC_PERTURB_=1 可稳定复现;gdb/探针确认崩溃为
+  PyQt6/sip 对「C++ 已析构子控件」(pyqtgraph 菜单/ctrl 控件树)的 wrapper
+  缓存未失效,Linux 堆布局下地址复用返回类型错配的旧 wrapper,Qt 控件构造
+  (PlotItem/ViewBoxMenu/WidgetGroup)时随机段错误;小谱光栅化的内存分配
+  模式使其高频触发,真实数据规模(>=256x512)的大缓冲走 mmap 不触发。
+- 修复:viewer/contour_layer.py 尺寸分流——像素数小于 256x512 的小谱走
+  matplotlib 等高线(稳定路径),真实数据规模走光栅化(性能路径,512x1024
+  谱仍约 30ms);同时修正 0.2.65 遗留的 `_pen_neg` 元组笔误。
+- 测试:VM 全量 449 tests(MALLOC_PERTURB_=1 连跑 3 轮全绿)+ 本地全量
+  passed(offscreen)+ ruff 全绿;test_viewer 拆分小谱路径(等高线)与大谱
+  路径(光栅化)断言。
+
 ## [0.2.66] - 2026-08-14
 
 - 修复(Architect 审查):VM 全量 pytest 段错误(test_window_empty_state → _build_menus)。根因:光栅化 ContourLayer 用 `QImage(img.tobytes(), ...)`
