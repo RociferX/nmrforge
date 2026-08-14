@@ -6,6 +6,7 @@ NMRPipe 语义只存在于 backend 实现与运行时（框架 §49-50）。
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
@@ -39,6 +40,7 @@ class ProcessingBackend(Protocol):
         plan: ProcessingPlan,
         *,
         params: dict[str, Any] | None = None,
+        progress: Callable[[str], None] | None = None,
     ) -> dict[str, Any]:
         """按处理计划执行处理，返回输出与指标。
 
@@ -48,7 +50,10 @@ class ProcessingBackend(Protocol):
         ...
 
     def convert_to_fid(
-        self, experiment: Experiment, data_dir: Any
+        self,
+        experiment: Experiment,
+        data_dir: Any,
+        progress: Callable[[str], None] | None = None,
     ) -> dict[str, Any]:
         """把 Bruker 数据目录转换为 NMRPipe fid(独立阶段,不生成谱)。
 
@@ -60,6 +65,7 @@ class ProcessingBackend(Protocol):
         self,
         experiment: Experiment,
         params: dict[str, Any] | None = None,
+        progress: Callable[[str], None] | None = None,
     ) -> dict[str, Any]:
         """执行 NUS 重建(params 支持 extract,默认 True)。"""
         ...

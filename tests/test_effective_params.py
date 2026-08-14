@@ -18,7 +18,7 @@ class _EffectiveBackend:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"x")
 
-    def convert_to_fid(self, experiment, data_dir) -> dict:
+    def convert_to_fid(self, experiment, data_dir, progress=None) -> dict:
         fid_path = Path(self.work_dir) / f"{experiment.dataset_id}.fid"
         self._touch(fid_path)
         return {
@@ -33,7 +33,14 @@ class _EffectiveBackend:
             },
         }
 
-    def process(self, experiment, plan, direct_phase_override=None, params=None) -> dict:
+    def process(
+        self,
+        experiment,
+        plan,
+        direct_phase_override=None,
+        params=None,
+        progress=None,
+    ) -> dict:
         spectrum = Path(self.work_dir) / f"{experiment.dataset_id}.ft2"
         self._touch(spectrum)
         return {
@@ -120,7 +127,14 @@ def test_legacy_backend_params_unchanged(tmp_path: Path, bruker_dir: Path) -> No
     """旧后端(无 effective_params)params 保持调用方 params(兼容)。"""
 
     class _LegacyBackend(_EffectiveBackend):
-        def process(self, experiment, plan, direct_phase_override=None, params=None) -> dict:
+        def process(
+        self,
+        experiment,
+        plan,
+        direct_phase_override=None,
+        params=None,
+        progress=None,
+    ) -> dict:
             spectrum = Path(self.work_dir) / f"{experiment.dataset_id}.ft2"
             self._touch(spectrum)
             return {

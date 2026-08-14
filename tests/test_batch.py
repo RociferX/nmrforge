@@ -24,7 +24,7 @@ class _FakeBackend:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"x")
 
-    def convert_to_fid(self, experiment, data_dir) -> dict:
+    def convert_to_fid(self, experiment, data_dir, progress=None) -> dict:
         self.fid_calls += 1
         self.calls.append(("convert_to_fid", experiment.dataset_id))
         if self.fid_calls == self.fail_fid_on:
@@ -38,7 +38,14 @@ class _FakeBackend:
             "logs": [],
         }
 
-    def process(self, experiment, plan, direct_phase_override=None, params=None) -> dict:
+    def process(
+        self,
+        experiment,
+        plan,
+        direct_phase_override=None,
+        params=None,
+        progress=None,
+    ) -> dict:
         self.calls.append(("process", experiment.dataset_id))
         spectrum = Path(self.work_dir) / f"{experiment.dataset_id}.ft2"
         self._touch(spectrum)
@@ -49,7 +56,7 @@ class _FakeBackend:
             "logs": [],
         }
 
-    def reconstruct_nus(self, experiment, params) -> dict:
+    def reconstruct_nus(self, experiment, params, progress=None) -> dict:
         self.calls.append(("reconstruct_nus", experiment.dataset_id))
         spectrum = Path(self.work_dir) / f"{experiment.dataset_id}.ft2"
         self._touch(spectrum)
@@ -96,18 +103,21 @@ def test_run_batch_multiple_data(tmp_path: Path, bruker_dir: Path) -> None:
         tmp_path, bruker_dir / "hsqc_2d", n=2
     )
     backend = _FakeBackend(tmp_path / "work")
-    events: list[tuple[int, int]] = []
+    events: list[str] = []
     result = run_batch(
         manager,
         exp_id,
         data_ids,
         ["fid", "spectrum"],
         backend,
-        progress=lambda done, total, msg: events.append((done, total)),
+        progress=events.append,
     )
     assert result["summary"] == {"total": 2, "success": 2, "failed": 0}
     assert result["failed"] == []
-    assert events[-1] == (2, 2)
+    # 进度回调顺序:逐数据逐步骤消息
+    assert events[0].startswith(f"{data_ids[0]}: 开始 fid")
+    assert events[1].startswith(f"{data_ids[0]}: 开始 spectrum")
+    assert events[-1] == f"{data_ids[1]}: 成功"
     # 逐数据执行:convert → process → convert → process
     assert [m for m, _ in backend.calls] == [
         "convert_to_fid",
@@ -263,7 +273,14 @@ def _write_ft2(path: Path) -> None:
 class _Ft2Backend(_FakeBackend):
     """process 产出可读 ft2(供 peaks 步骤真实检测)。"""
 
-    def process(self, experiment, plan, direct_phase_override=None, params=None) -> dict:
+    def process(
+        self,
+        experiment,
+        plan,
+        direct_phase_override=None,
+        params=None,
+        progress=None,
+    ) -> dict:
         self.calls.append(("process", experiment.dataset_id))
         spectrum = Path(self.work_dir) / f"{experiment.dataset_id}.ft2"
         _write_ft2(spectrum)

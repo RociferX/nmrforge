@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import shutil
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -94,6 +95,7 @@ def generate_fid(
     backend: Any,
     *,
     work_dir: Path | str | None = None,
+    progress: Callable[[str], None] | None = None,
 ) -> str:
     """第 2 步:转换 Bruker 原始数据为 NMRPipe fid(独立阶段)。"""
     experiment = _read_experiment(manager, exp_id, data_id)
@@ -103,7 +105,7 @@ def generate_fid(
         data_dir = manager.root / data_dir
     work = Path(work_dir) if work_dir else _work_dir(manager, exp_id, data_id)
     _ensure_work_dir(backend, work)
-    resp = backend.convert_to_fid(experiment, data_dir)
+    resp = backend.convert_to_fid(experiment, data_dir, progress=progress)
     logs = list(resp.get("logs", []))
     if not resp.get("success"):
         raise StepwiseError(
@@ -132,6 +134,7 @@ def generate_spectrum(
     *,
     params: dict[str, Any] | None = None,
     work_dir: Path | str | None = None,
+    progress: Callable[[str], None] | None = None,
 ) -> str:
     """第 3 步:生成谱图(NUS 自动走 SMILE 重构;复用已转换 fid)。"""
     experiment = _read_experiment(manager, exp_id, data_id)
@@ -140,11 +143,13 @@ def generate_spectrum(
     params = dict(params or {})
     if experiment.sampling.mode is SamplingMode.NUS:
         workflow_ref = "reconstruct_nus"
-        resp = backend.reconstruct_nus(experiment, params)
+        resp = backend.reconstruct_nus(experiment, params, progress=progress)
     else:
         workflow_ref = "process"
         plan = select_method(experiment)
-        resp = backend.process(experiment, plan, params=params)
+        resp = backend.process(
+            experiment, plan, params=params, progress=progress
+        )
     logs = list(resp.get("logs", []))
     if not resp.get("success"):
         raise StepwiseError(

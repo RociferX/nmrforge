@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import shutil
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -107,6 +108,7 @@ class NMRPipeBackend:
         params: dict[str, Any] | None = None,
         direct_phase_search: bool = True,
         direct_phase_override: dict[str, tuple[float, float]] | None = None,
+        progress: Callable[[str], None] | None = None,
     ) -> dict[str, Any]:
         """均匀采样：转换（含多段合并）+ NMRPipe 处理管道（NUS 请用 reconstruct_nus）。
 
@@ -132,7 +134,12 @@ class NMRPipeBackend:
         work.mkdir(parents=True, exist_ok=True)
         logs: list[str] = []
 
+        def _progress(msg: str) -> None:
+            if progress is not None:
+                progress(msg)
+
         converted = True
+        _progress("开始转换 fid")
         if experiment.segments:
             merged_ready = (
                 (work / "merged" / "fid").is_dir()
@@ -160,6 +167,7 @@ class NMRPipeBackend:
             direct_phase = dict(direct_phase_override)
             logs.append(f"直接维相位覆盖: {direct_phase}")
         elif direct_phase_search:
+            _progress("开始相位优化(直接维 p1 共识)")
             fid_for_phase = (
                 work / "seg_001" / f"{experiment.dataset_id}.fid"
                 if experiment.segments
@@ -168,6 +176,7 @@ class NMRPipeBackend:
             p0, p1 = self._search_direct_phase(work, fid_for_phase, logs)
             direct_axis = "F2" if experiment.ndim == 2 else "F3"
             direct_phase = {direct_axis: (p0, p1)}
+            _progress(f"完成相位优化(直接维 {direct_axis} p1={p1:g}°)")
         proc_params = dict(params or {})
         sampling = proc_params.get("sampling") or {}
         # sampling.auto_phase=False → 关闭直接维自动相位(PS 保持 plan 默认 0/0)
@@ -206,10 +215,12 @@ class NMRPipeBackend:
             ext_lo=ext_lo,
             ext_hi=ext_hi,
             sampling=sampling,
+            progress=progress,
         )
         logs += process_logs
         if not processed:
             return {"success": False, "message": "NMRPipe 处理失败", "logs": logs}
+        _progress("终谱已就位")
         return {
             "success": True,
             "message": "NMRPipe 处理成功",
@@ -230,7 +241,10 @@ class NMRPipeBackend:
         }
 
     def convert_to_fid(
-        self, experiment: Experiment, data_dir: Path | str
+        self,
+        experiment: Experiment,
+        data_dir: Path | str,
+        progress: Callable[[str], None] | None = None,
     ) -> dict[str, Any]:
         """独立阶段:bruker -AUTO/fid.com 把原始数据转换为 NMRPipe fid(不生成谱)。
 
@@ -249,6 +263,8 @@ class NMRPipeBackend:
         work = self._work_path(experiment)
         work.mkdir(parents=True, exist_ok=True)
         logs: list[str] = []
+        if progress is not None:
+            progress("开始转换 fid")
         if experiment.segments:
             converted, convert_logs = self._convert_segments(
                 runtime, experiment, work, []
@@ -281,7 +297,10 @@ class NMRPipeBackend:
         }
 
     def reconstruct_nus(
-        self, experiment: Experiment, params: dict[str, Any] | None = None
+        self,
+        experiment: Experiment,
+        params: dict[str, Any] | None = None,
+        progress: Callable[[str], None] | None = None,
     ) -> dict[str, Any]:
         """NUS 数据：bruker 原生转换（单段/多段合并）+ SMILE 重构输出终谱。"""
         params = dict(params or {})
@@ -435,10 +454,13 @@ class NMRPipeBackend:
         )
         timeout = float(params.get("timeout_s", 3600))
         # 注意：不在 tcsh -c 包装内叠加 nice（实测会让 tcsh 脚本结束后挂起空转）
+        if progress is not None:
+            progress("开始 SMILE 重构")
         run_result = runtime.run(
             ["csh", nus_com.name],
             cwd=str(work),
             timeout=timeout,
+            on_line=(lambda line: progress(line) if progress else None),
         )
         logs.append(f"nus.com: rc={run_result.returncode}")
         spectrum = work / out_file
@@ -460,6 +482,8 @@ class NMRPipeBackend:
         except OSError:
             pass  # 参数指纹写盘失败不影响重构结果
         logs.append(f"终谱 → {spectrum}")
+        if progress is not None:
+            progress("完成 SMILE 重构;终谱已就位")
         return {
             "success": True,
             "message": "SMILE 重构成功",
@@ -826,6 +850,7 @@ class NMRPipeBackend:
         ext_lo: str = "11.0",
         ext_hi: str = "6.0",
         sampling: dict[str, Any] | None = None,
+        progress: Callable[[str], None] | None = None,
     ) -> tuple[bool, list[str], Path]:
         """生成并执行 NMRPipe 处理管道（输出 ft2/ft3）。"""
         logs: list[str] = []
@@ -851,7 +876,10 @@ class NMRPipeBackend:
         process_com = work / f"{experiment.dataset_id}_process.com"
         process_com.write_text(script, encoding="utf-8", newline="\n")
         run_result = runtime.run(
-            ["csh", process_com.name], cwd=str(work), timeout=7200
+            ["csh", process_com.name],
+            cwd=str(work),
+            timeout=7200,
+            on_line=(lambda line: progress(line) if progress else None),
         )
         logs.append(f"process.com: rc={run_result.returncode}")
         spectrum = work / out_file
