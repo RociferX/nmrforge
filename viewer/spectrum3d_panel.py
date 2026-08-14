@@ -65,6 +65,11 @@ class Spectrum3DPanel(QWidget):
         self._spectrum3d = spectrum3d
         self._slice_axis = 2
         self._mode = "slice"
+        # 平面下拉项用核名(如 N-H / N-C / H-C);下标由轴标签决定
+        for index, (_, axis) in enumerate(_PLANES):
+            remaining = [i for i in range(3) if i != axis]
+            name = "-".join(self._spectrum3d.axes[i].label for i in remaining)
+            self.plane_combo.setItemText(index, name)
         self.plane_combo.setCurrentIndex(0)
         self.mode_combo.setCurrentIndex(0)
         self._update_slider_range()
@@ -83,16 +88,20 @@ class Spectrum3DPanel(QWidget):
         if self._spectrum3d is None:
             return None
         if self._mode == "slice":
-            return self._spectrum3d.slice(
+            spectrum = self._spectrum3d.slice(
                 self._slice_axis, self.slice_slider.value()
             )
-        return self._spectrum3d.project(self._slice_axis, self._mode)
+        else:
+            spectrum = self._spectrum3d.project(self._slice_axis, self._mode)
+        # 记录剩余两轴的原始维序(F1=0/F2=1/F3=2),供峰表 F*_shift 映射
+        spectrum.dim_indices = tuple(
+            i for i in range(3) if i != self._slice_axis
+        )
+        return spectrum
 
     def current_name(self, base: str = "") -> str:
-        """产物显示名:例如 'hsqc3d F1-F2 切片' / 'hsqc3d F2-F3 MIP 投影'。"""
-        plane = next(
-            (name for name, axis in _PLANES if axis == self._slice_axis), "?"
-        )
+        """产物显示名:例如 'hsqc3d N-H 切片' / 'hsqc3d H-C MIP 投影'。"""
+        plane = self._plane_name()
         mode_label = next(
             (label for label, mode in _MODES if mode == self._mode), self._mode
         )
@@ -105,6 +114,13 @@ class Spectrum3DPanel(QWidget):
         if self._spectrum3d is None:
             return ""
         return self._spectrum3d.axes[self._slice_axis].label
+
+    def _plane_name(self) -> str:
+        """当前查看平面名(剩余两轴的核名,如 N-H)。"""
+        if self._spectrum3d is None:
+            return "F1-F2"
+        remaining = [i for i in range(3) if i != self._slice_axis]
+        return "-".join(self._spectrum3d.axes[i].label for i in remaining)
 
     def refresh(self) -> None:
         """重新计算产物并发出重绘(滑块拖动后/外部触发)。"""

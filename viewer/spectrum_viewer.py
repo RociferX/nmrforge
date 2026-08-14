@@ -60,10 +60,10 @@ class SpectrumViewer(QWidget):
         self.plot.setBackground("w")
         self.plot.setMenuEnabled(False)
         self.plot.getViewBox().setMouseMode(pg.ViewBox.RectMode)
-        # 显示约定(用户 0.2.53 反馈修正):1H 高 ppm 在左、15N 高 ppm 在上;
+        # 显示约定(用户 0.2.59 反馈修正):1H 高 ppm 在左、15N 高 ppm 在下;
         # 数据列 0 = 高 ppm(x 列 0 在左);contour 不翻转(view y = 数据行),
-        # invertY(True) 使 view y 增大=屏幕向下 → 行 0(高 ppm)显示在顶部。
-        self.plot.getViewBox().invertY(True)
+        # invertY(False) 下 view y 增大=屏幕向上 → 行 0(高 ppm)显示在底部。
+        self.plot.getViewBox().invertY(False)
 
         self.layers: list[ContourLayer] = []
         self.layer_names: list[str] = []
@@ -156,7 +156,7 @@ class SpectrumViewer(QWidget):
         self.strip_right.setFixedWidth(90)
         self.strip_right.setMenuEnabled(False)
         self.strip_right.getViewBox().setYLink(self.plot.getViewBox())
-        self.strip_right.getViewBox().invertY(True)
+        self.strip_right.getViewBox().invertY(False)
         self.strip_right_curve = pg.PlotDataItem(pen=pg.mkPen("#d62728", width=1))
         self.strip_right.addItem(self.strip_right_curve)
         self.strip_right.hide()
@@ -212,8 +212,8 @@ class SpectrumViewer(QWidget):
             self.plot.removeItem(self._plot_1d)
             self._plot_1d = None
         self.set_1d_mode(False)
-        # 恢复 2D 显示方向:1D 视图(invertY=False)后不泄漏到后续 2D/3D
-        self.plot.getViewBox().invertY(True)
+        # 统一 2D 显示方向:行 0(高 ppm)在底部,1D 视图后不泄漏到后续 2D/3D
+        self.plot.getViewBox().invertY(False)
         for layer in self.layers:
             self.plot.removeItem(layer)
         self.layers.clear()
@@ -372,7 +372,7 @@ class SpectrumViewer(QWidget):
             self._plot_1d = None
         for layer in self.layers:
             layer.setVisible(True)
-        self.plot.getViewBox().invertY(True)
+        self.plot.getViewBox().invertY(False)
         if self._primary is not None:
             self._setup_axes(self._primary)
             self.reset_view()
@@ -547,23 +547,38 @@ class SpectrumViewer(QWidget):
         self._click_mode = mode if mode in ("select", "add", "delete") else "select"
 
     def _peak_xy(self, peak: dict) -> tuple[float, float]:
-        """把峰行映射到当前显示平面的 x/y ppm(按主谱轴标签)。
+        """把峰行映射到当前显示平面的 x/y ppm(按轴维序 F1/F2/F3)。
 
-        2D 峰表用 H_shift/N_shift;3D 峰表用 F1/F2/F3_shift,按当前切片
-        平面(主谱 x/y 轴标签)取对应坐标,其余情况回退 x_ppm/y_ppm。
+        轴标签可能为核名(H/N/C...),因此用轴在谱中的维序(F1=0/F2=1/F3=2)
+        选峰表列;2D 峰表回退 H_shift/N_shift,其余情况回退 x_ppm/y_ppm。
         """
         x_axis = self._primary.x_axis if self._primary is not None else None
         y_axis = self._primary.y_axis if self._primary is not None else None
 
-        def _pick(axis_label: str | None, fallback: str, alt: str) -> float:
-            if axis_label in ("F1", "F2", "F3"):
-                value = peak.get(f"{axis_label}_shift")
+        def _dim_of(axis) -> int:
+            if self._primary is None or axis is None:
+                return -1
+            dims = getattr(self._primary, "dim_indices", None)
+            try:
+                local = self._primary.axes.index(axis)
+            except ValueError:
+                return -1
+            if dims is not None:
+                try:
+                    return int(dims[local])
+                except (TypeError, IndexError):
+                    return -1
+            return local
+
+        def _pick(dim: int, fallback: str, alt: str) -> float:
+            if 0 <= dim <= 2:
+                value = peak.get(f"F{dim + 1}_shift")
                 if value is not None and str(value) != "":
                     return float(value)
             return float(peak.get(fallback, peak.get(alt, 0.0)))
 
-        x_ppm = _pick(x_axis.label if x_axis else None, "H_shift", "x_ppm")
-        y_ppm = _pick(y_axis.label if y_axis else None, "N_shift", "y_ppm")
+        x_ppm = _pick(_dim_of(x_axis), "H_shift", "x_ppm")
+        y_ppm = _pick(_dim_of(y_axis), "N_shift", "y_ppm")
         return x_ppm, y_ppm
 
     def _apply_peak_items(self, show_labels: bool = True) -> None:
