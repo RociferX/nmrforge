@@ -1,5 +1,14 @@
 # 变更日志
 
+## [0.2.66] - 2026-08-14
+
+- 修复(Architect 审查):VM 全量 pytest 段错误(test_window_empty_state → _build_menus)。根因:光栅化 ContourLayer 用 `QImage(img.tobytes(), ...)`
+  构造图像,PyQt6 的 QImage 引用 bytes 内存而不拷贝,临时 bytes 在构造
+  返回后即被释放,图像数据悬空——Windows 内存未覆盖碰巧正常,Linux
+  全量顺序下 Qt 访问已释放内存段错误。修复:bytes 保存到 self 持有引用
+  (viewer/contour_layer.py),本地验证 GC 后像素稳定。
+- 测试:本地全量 449 passed(offscreen)+ ruff 全绿,待 VM 全量复测。
+
 ## [0.2.65] - 2026-08-13
 
 - viewer 性能优化(用户反馈):等高线渲染从 matplotlib 几何计算改为

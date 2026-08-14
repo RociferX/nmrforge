@@ -36,6 +36,7 @@ class ContourLayer(pg.GraphicsObject):
         self._data: np.ndarray | None = None
         self._levels: np.ndarray | None = None
         self._image: QtGui.QImage | None = None
+        self._image_data = b""  # QImage 引用该内存,必须持有引用
         self._bounds = QtCore.QRectF()
         self.setZValue(5)
         self.setData(data, levels)
@@ -93,8 +94,10 @@ class ContourLayer(pg.GraphicsObject):
         img[pos, 3] = a8[pos]  # 正峰黑
         img[neg, 0] = 255  # 负峰红
         img[neg, 3] = a8[neg]
+        # 保存字节引用:QImage 不拷贝数据,bytes 被释放会导致悬空段错误
+        self._image_data = img.tobytes()
         self._image = QtGui.QImage(
-            img.tobytes(),
+            self._image_data,
             width,
             height,
             width * 4,
