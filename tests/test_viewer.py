@@ -126,7 +126,7 @@ def test_load_from_ft2_rejects_1d(tmp_path: Path) -> None:
         Spectrum.load_from_ft2(path)
 
 
-def test_contour_layer_small_data_builds_paths() -> None:
+def test_contour_layer_small_data_uses_paths() -> None:
     from scipy.ndimage import gaussian_filter
 
     spectrum = _synthetic_spectrum((64, 128))
@@ -141,7 +141,8 @@ def test_contour_layer_small_data_builds_paths() -> None:
         neg_pen="#e74c3c",
         zoom=2.0,
     )
-    # 统一走 contourpy 真实等值线(POKY/nmrDraw 式细线框,见 CHANGELOG 0.2.75)
+    # 小谱走 matplotlib 等高线(尺寸分流,VM 全量稳定路径,见 CHANGELOG 0.2.73)
+    assert layer._use_contourpy is False
     assert layer._path.isEmpty() is False
     assert layer._path_neg.isEmpty() is False
     assert layer.boundingRect().width() == 128
@@ -150,7 +151,7 @@ def test_contour_layer_small_data_builds_paths() -> None:
     assert layer._path.isEmpty() is False
 
 
-def test_contour_layer_large_data_builds_paths() -> None:
+def test_contour_layer_large_data_uses_contourpy() -> None:
     from scipy.ndimage import gaussian_filter
 
     spectrum = _synthetic_spectrum((512, 1024))
@@ -165,7 +166,8 @@ def test_contour_layer_large_data_builds_paths() -> None:
         neg_pen="#e74c3c",
         zoom=2.0,
     )
-    # 大谱同样走 contourpy 等值线路径,不再有光栅化 QImage
+    # 大谱走 contourpy 真实等值线(POKY/nmrDraw 式细线框,见 CHANGELOG 0.2.75)
+    assert layer._use_contourpy is True
     assert layer._path.isEmpty() is False
     assert layer._path_neg.isEmpty() is False
     assert layer.boundingRect().width() == 1024

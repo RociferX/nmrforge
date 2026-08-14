@@ -7,16 +7,19 @@
   值线(细线框,级别 lowest × factor^n 几何级数,逐级 Marching Squares
   追踪,按级着色 1px 折线);经 POKY 官方手册与 SPARKY 3.115 开源源码
   (contourplane.cc/contourstream.cc/uiview.cc)确认同源机制。
-- 实现:viewer/contour_layer.py 彻底弃用光栅化(RGBA/QImage/尺寸分流全部
-  移除),改用 contourpy(matplotlib 底层 C++ Marching Squares 引擎)在数据
-  原始分辨率逐级追踪真实等高线,正=层色、负=红 1px 折线;zoom 插值参数
-  保留但不再放大,坐标即数据下标。
+- 实现:viewer/contour_layer.py 大谱渲染从光栅化 RGBA 强度图改为
+  contourpy(matplotlib 底层 C++ Marching Squares 引擎)真实等值线——
+  数据原始分辨率逐级追踪,正=层色、负=红 1px 折线;小谱保留 matplotlib
+  插值路径(0.2.73 尺寸分流,VM 全量稳定);光栅化 RGBA/QImage 彻底移除。
 - 性能:512x1024 谱 contourpy 提取 10 级约 16-50ms、36 级约 52-116ms,
   QPainterPath 构建最坏约 170ms,与光栅化同量级;原 matplotlib 慢路径
-  (约 21s)的瓶颈是 ndimage.zoom + plt.contour 建图,已一并消除。
-- 附带:等高线回到历史上 VM 全量全绿的 matplotlib 路径族,不再需要
-  0.2.73 的尺寸分流;测试断言同步从 _image/_raster 改为等值线路径。
-- 测试:本地全量 passed(offscreen)+ ruff 全绿;VM 全量复测通过。
+  (约 21s)的瓶颈是 ndimage.zoom + plt.contour 建图,大谱已绕开。
+- VM 段错误复核:统一走 contourpy(含小谱)会重新触发 PyQt6/sip 对已析构
+  子控件 wrapper 缓存错配段错误(崩溃点漂移,3/3 复现;39737a5 同套件
+  全绿),故保留尺寸分流:小谱 matplotlib、真实数据规模 contourpy;
+  contourpy 改为惰性导入,顶层导入集合与 39737a5 一致。
+- 测试:test_viewer 断言从 _image/_raster 改为 _use_contourpy/等值线路径;
+  本地全量 passed(offscreen)+ ruff 全绿;VM 全量复测通过。
 
 ## [0.2.73] - 2026-08-14
 
