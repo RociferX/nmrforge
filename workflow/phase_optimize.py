@@ -1106,7 +1106,11 @@ def optimize_phase_sequential(
     backend: Any,
     *,
     axes: list[str] | None = None,
-    p0_values: tuple[float, ...] = (-45.0, 0.0, 45.0),
+    # 0.2.74:p0 粗网格扩到 ±135(45° 步)——sampleI 真实 F2 p0=-120°,
+    # 旧 ±45° 范围永远够不到,返回明显非最优相位
+    p0_values: tuple[float, ...] = (
+        -135.0, -90.0, -45.0, 0.0, 45.0, 90.0, 135.0
+    ),
     p1_values: tuple[float, ...] = (-90.0, -60.0, -30.0, 0.0, 30.0, 60.0, 90.0),
     score_fn: Callable[[str], tuple[float, dict[str, float]]] | None = None,
     work_dir: Path | str | None = None,

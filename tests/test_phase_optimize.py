@@ -468,6 +468,19 @@ def test_optimize_phase_sequential_failure(tmp_path: Path, bruker_dir: Path) -> 
 
 
 
+def test_default_p0_grid_covers_beyond_pm45() -> None:
+    """0.2.74 回归:p0 粗网格默认覆盖 ±135(sampleI F2 真实 p0=-120,
+    旧 ±45 范围永远够不到导致返回非最优相位)。"""
+    import inspect
+
+    from workflow.phase_optimize import optimize_phase_sequential
+
+    sig = inspect.signature(optimize_phase_sequential)
+    p0 = sig.parameters["p0_values"].default
+    assert -135.0 in p0 and 135.0 in p0
+    assert min(p0) <= -120.0 and max(p0) >= 120.0
+
+
 def test_default_phase_score_ranks_phase_quality(tmp_path: Path) -> None:
     """相位专用评分:错相(负峰)分数低于正相;不使用综合 QC。"""
     from scipy.ndimage import gaussian_filter
