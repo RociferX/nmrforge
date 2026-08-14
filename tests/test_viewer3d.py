@@ -293,6 +293,7 @@ def test_viewer_peak_xy_3d_mapping(qapp: QApplication) -> None:
     spectrum3d = _synthetic3d()
     viewer = SpectrumViewer()
     sl = spectrum3d.slice(2, 3)  # 平面 F1-F2
+    sl.dim_indices = (0, 1)  # 与 spectrum3d_panel.current_spectrum 一致
     viewer.add_spectrum(sl)
     x_ppm, y_ppm = viewer._peak_xy(
         {
@@ -314,6 +315,7 @@ def test_viewer_peak_xy_3d_mapping(qapp: QApplication) -> None:
     # F2-F3 平面
     viewer2 = SpectrumViewer()
     sl2 = spectrum3d.slice(0, 1)
+    sl2.dim_indices = (1, 2)  # 与 spectrum3d_panel.current_spectrum 一致
     viewer2.add_spectrum(sl2)
     x2, y2 = viewer2._peak_xy(
         {

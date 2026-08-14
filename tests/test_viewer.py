@@ -126,7 +126,7 @@ def test_load_from_ft2_rejects_1d(tmp_path: Path) -> None:
         Spectrum.load_from_ft2(path)
 
 
-def test_contour_layer_builds_paths() -> None:
+def test_contour_layer_small_data_uses_paths() -> None:
     from scipy.ndimage import gaussian_filter
 
     spectrum = _synthetic_spectrum((64, 128))
@@ -141,12 +141,38 @@ def test_contour_layer_builds_paths() -> None:
         neg_pen="#e74c3c",
         zoom=2.0,
     )
+    # 小谱走 matplotlib 等高线(尺寸分流,见 CHANGELOG 0.2.67)
+    assert layer._raster is False
     assert layer._path.isEmpty() is False
     assert layer._path_neg.isEmpty() is False
     assert layer.boundingRect().width() == 128
     assert layer.boundingRect().height() == 64
     layer.setData(spectrum.data, np.array([-20.0, 20.0]))
     assert layer._path.isEmpty() is False
+
+
+def test_contour_layer_large_data_renders_image() -> None:
+    from scipy.ndimage import gaussian_filter
+
+    spectrum = _synthetic_spectrum((512, 1024))
+    data = spectrum.data.copy()
+    negative = np.zeros_like(data)
+    negative[160, 720] = -300.0
+    data = data + gaussian_filter(negative, sigma=(1.5, 1.5))
+    layer = ContourLayer(
+        data,
+        np.array([-50.0, -10.0, 10.0, 50.0]),
+        pen="#000000",
+        neg_pen="#e74c3c",
+        zoom=2.0,
+    )
+    # 大谱走光栅化(真实数据规模,性能路径)
+    assert layer._raster is True
+    assert layer._image is not None and not layer._image.isNull()
+    assert layer.boundingRect().width() == 1024
+    assert layer.boundingRect().height() == 512
+    layer.setData(spectrum.data, np.array([-20.0, 20.0]))
+    assert layer._image is not None
 
 
 def test_viewer_add_spectrum_and_levels(qapp: QApplication) -> None:
@@ -202,8 +228,8 @@ def test_viewer_nearest_peak(qapp: QApplication) -> None:
 
 
 def test_viewer_axis_direction_nmrdraw(qapp: QApplication) -> None:
-    """显示约定(用户 0.2.53 反馈):1H 高 ppm 在左(x 列 0 靠左),
-15N 高 ppm 在上(y 行 0 靠上)。"""
+    """显示约定(用户 0.2.59 反馈):1H 高 ppm 在左(x 列 0 靠左),
+15N 高 ppm 在下(y 行 0 靠下)。"""
     import pyqtgraph as pg
 
     viewer = SpectrumViewer()
@@ -214,10 +240,10 @@ def test_viewer_axis_direction_nmrdraw(qapp: QApplication) -> None:
     p0 = vb.mapViewToScene(pg.QtCore.QPointF(0, 0))
     p1 = vb.mapViewToScene(pg.QtCore.QPointF(nx - 1, 0))
     assert p0.x() < p1.x()  # 列 0(高 ppm)在左
-    # view y 即数据行:行 0(高 ppm)= view y=0 在顶部,行 ny-1(低 ppm)在底部
+    # view y 即数据行:行 0(高 ppm)= view y=0 在底部,行 ny-1(低 ppm)在顶部
     q0 = vb.mapViewToScene(pg.QtCore.QPointF(0, 0))
     q1 = vb.mapViewToScene(pg.QtCore.QPointF(0, ny - 1))
-    assert q0.y() < q1.y()  # 行 0(高 ppm)显示在顶部,行 ny-1(低 ppm)在底部
+    assert q0.y() > q1.y()  # 行 0(高 ppm)显示在底部,行 ny-1(低 ppm)在顶部
     viewer.close()
 
 

@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 
+from viewer.axis_labels import axis_labels_from_nuclei, nuclei_from_metadata
 from viewer.spectrum import Spectrum, Spectrum1D, Spectrum3D
 from viewer.spectrum3d_panel import Spectrum3DPanel
 from viewer.spectrum_viewer import SpectrumViewer
@@ -38,6 +39,24 @@ class InfoDialog(QDialog):
 
 def show_info(parent, title: str, text: str) -> None:
     InfoDialog(parent, title, text).exec()
+
+
+def _axis_labels_from_path(path: Path, required: int) -> tuple[str, ...] | None:
+    """独立查看器:从谱图同数据基座的 metadata.json 推断核名(F1/F2/F3→H/N/C)。
+    谱图在 <数据基座>/spectra/,metadata.json 在数据基座下。"""
+    candidate = path.parent.parent / "metadata.json"
+    if not candidate.is_file():
+        return None
+    try:
+        import json
+
+        metadata = json.loads(candidate.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return None
+    nuclei = nuclei_from_metadata(metadata)
+    if not nuclei or len(nuclei) != required:
+        return None
+    return axis_labels_from_nuclei(nuclei)
 
 
 _ASPECT_CHOICES = (
@@ -128,9 +147,11 @@ class SpectrumWindow(QMainWindow):
 
     def load_spectrum(self, path: Path, name: str | None = None) -> bool:
         """加载谱图(.ft2/.ft3)并显示;失败时弹窗并返回 False。"""
+        labels3d = _axis_labels_from_path(path, 3) or ("F1", "F2", "F3")
+        labels2d = _axis_labels_from_path(path, 2) or ("F1", "F2")
         try:
             if path.suffix.lower() == ".ft3":
-                spectrum3d = Spectrum3D.load_from_ft3(path)
+                spectrum3d = Spectrum3D.load_from_ft3(path, labels=labels3d)
                 spectrum = None
                 spectrum1d = None
             elif path.suffix.lower() == ".fid":
@@ -139,7 +160,7 @@ class SpectrumWindow(QMainWindow):
                 spectrum = None
             else:
                 spectrum3d = None
-                spectrum = Spectrum.load_from_ft2(path)
+                spectrum = Spectrum.load_from_ft2(path, labels=labels2d)
                 spectrum1d = None
         except Exception as exc:  # noqa: BLE001 - 文件损坏等统一提示
             show_info(self, "打开失败", f"{path}\n{exc}")

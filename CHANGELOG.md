@@ -1,5 +1,84 @@
 # 变更日志
 
+## [0.2.73] - 2026-08-14
+
+- 修复(GUI Agent):VM Linux 全量 pytest 段错误真正根因落地。0.2.72 的
+  「QImage bytes 悬挂」假设经复测证伪——PyQt6 6.10.2/6.11.0、Python
+  3.10/3.12、pyqtgraph 0.13.7/0.14.0 全组合在 VM 全量下仍段错误,valgrind/
+  ASan 均无内存错误,MALLOC_PERTURB_=1 可稳定复现;gdb/探针确认崩溃为
+  PyQt6/sip 对「C++ 已析构子控件」(pyqtgraph 菜单/ctrl 控件树)的 wrapper
+  缓存未失效,Linux 堆布局下地址复用返回类型错配的旧 wrapper,Qt 控件构造
+  (PlotItem/ViewBoxMenu/WidgetGroup)时随机段错误;小谱光栅化的内存分配
+  模式使其高频触发,真实数据规模(>=512x1024)的大缓冲走 mmap 不触发。
+- 修复:viewer/contour_layer.py 尺寸分流——像素数小于 512x1024 的小谱走
+  matplotlib 等高线(稳定路径),真实数据规模走光栅化(性能路径,512x1024
+  谱仍约 30ms);同时修正 0.2.71 遗留的 `_pen_neg` 元组笔误。
+- 阈值上调(Architect 基准):_RASTER_MIN_PIXELS 256x512 → 512x1024;
+  阈值处 matplotlib 中位 ≈167ms,安全边际 4×,光栅化仅用于 ≥512x1024
+  真实大谱。
+- 测试:VM 全量 449 tests(MALLOC_PERTURB_=1 连跑 3 轮全绿)+ 本地全量
+  passed(offscreen)+ ruff 全绿;test_viewer 拆分小谱路径(等高线)与大谱
+  路径(光栅化)断言;合并入 master 后本地全量 460 passed。
+
+## [0.2.72] - 2026-08-14
+
+- 修复(Architect 审查):VM 全量 pytest 段错误(test_window_empty_state →
+  _build_menus)。根因:光栅化 ContourLayer 用 `QImage(img.tobytes(), ...)`
+  构造图像,PyQt6 的 QImage 引用 bytes 内存而不拷贝,临时 bytes 在构造
+  返回后即被释放,图像数据悬空——Windows 内存未覆盖碰巧正常,Linux
+  全量顺序下 Qt 访问已释放内存段错误。修复:bytes 保存到 self 持有引用
+  (viewer/contour_layer.py),本地验证 GC 后像素稳定。
+- 测试:本地全量 449 passed(offscreen)+ ruff 全绿,待 VM 全量复测;
+  ⚠ 0.2.73 已证实该假设不成立(真正根因与修复见 0.2.73)。
+
+## [0.2.71] - 2026-08-13
+
+- viewer 性能优化(用户反馈):等高线渲染从 matplotlib 几何计算改为
+  nmrDraw 式光栅化(RGBA 图像,正黑负红)——512x1024 谱加载从约 10.7 秒
+  降到约 32 毫秒(约 335 倍),级别/级数滑块更新从约 2.7 秒降到约 33 毫秒;
+  保留正黑负红、轮廓起点/级数滑块语义,缩放/平移由 Qt 原生重采样,
+  框选缩放/峰标记/1D 条带交互不变。
+- 测试:viewer 断言从 _path 更新为光栅化 _image,全量 449 passed,ruff 全绿。
+
+## [0.2.70] - 2026-08-13
+
+- presets 实验模板扩充(用户反馈):常用 2D/3D 谱预设从 4 个增加到 28 个——
+  新增 HSQC-13C、HMQC(15N/13C)、HMBC(13C/15N)、COSY、TOCSY、NOESY、
+  ROESY(2D),以及 HNCACB、CBCA(CO)NH、CBCANH、HNCO、HN(CO)CA、HN(CA)CO、
+  HNHA、H(CA)NH、H(CCO)NH、C(CCO)NH、HBHA(CO)NH、HCCH-TOCSY、CCH-TOCSY、
+  3D NOESY-HSQC(15N/13C 编辑)(3D);每个模板含各核化学位移先验
+  (priors,如 HNCO 13C 165–185 ppm、HNCACB 13C 10–80 ppm),供实验类型
+  判断时按化学位移进一步确认核;README 更新模板清单。
+- 测试:新增 test_gui_presets(3 例:全量解析/字段/priors 范围/常用类型齐全),
+  全量 449 passed,ruff 全绿。
+
+## [0.2.69] - 2026-08-13
+
+- viewer 轴名按核显示(用户反馈):根据导入 metadata 的维度核信息,把谱图
+  轴名从 F1/F2/F3 改为真实核符号(H/N/C...);同一核出现多个轴时加 x/y/z
+  下标(如 1H-1H 同核 2D 显示 Hx-Hy,3D C-N-H)。主窗口谱图面板与独立查看器
+  均支持,无 metadata 时回退 F1/F2/F3;3D 平面名同步用核名(N-H 等);
+  峰表 F1/F2/F3_shift 映射改用轴维序(viewer/axis_labels.py,不改 Shared
+  Contract;切片/投影产物经 dim_indices 携带原始维序)。
+- 测试:新增 test_axis_labels(6 例:核符号/同核下标/metadata 解析/面板与
+  独立查看器轴名/回退),全量 446 passed,ruff 全绿。
+
+## [0.2.68] - 2026-08-13
+
+- 菜单调整(用户反馈):顶部「样本(&S)」菜单改为「实验(&E)」,去掉
+  「样本管理 / 添加样本 / 删除样本」项;
+- 三级注释功能:样本(项目)/实验/数据均可添加注释——新建样本/新建实验/
+  导入数据时可选填写,也可通过中间区域最上方的注释条「编辑注释」后补;
+  注释展示在中间区域最上方(gui/notes.py:样本=protein.notes、实验=
+  notes、数据=metadata["data_notes"][data_id],不改 Shared Contract);
+- 移除(用户反馈):Pipeline 步骤详情里的「以此参数打开人工编辑器」按钮;
+- 修正(用户反馈):viewer 一维/二维谱 Y 轴整体翻回习惯方向——行 0
+  (高 ppm)在底部,条带/峰/鼠标对应关系保持(invertY True→False);
+- 修复(用户反馈):处理步骤生成新文件后左侧树不自动出现展开箭头——
+  Pipeline run_finished 接线到主窗口刷新(树/中间/谱图面板),无需重启;
+- 测试:新增 test_gui_notes(4 例),删除按钮/菜单/方向/刷新断言更新,
+  全量 440 passed,ruff 全绿。
+
 ## [0.2.67] - 2026-08-14
 
 - Backend:sampling 参数块落地(死参数修复,审计待办)——param_schema 声明
