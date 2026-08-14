@@ -169,6 +169,10 @@ class NMRPipeBackend:
             direct_axis = "F2" if experiment.ndim == 2 else "F3"
             direct_phase = {direct_axis: (p0, p1)}
         proc_params = dict(params or {})
+        sampling = proc_params.get("sampling") or {}
+        # sampling.auto_phase=False → 关闭直接维自动相位(PS 保持 plan 默认 0/0)
+        if sampling.get("auto_phase") is False:
+            direct_phase_search = False
         extract = _as_bool(proc_params.get("extract", True))
         ext_lo = str(proc_params.get("ext_lo", "11.0"))
         ext_hi = str(proc_params.get("ext_hi", "6.0"))
@@ -201,6 +205,7 @@ class NMRPipeBackend:
             extract=extract,
             ext_lo=ext_lo,
             ext_hi=ext_hi,
+            sampling=sampling,
         )
         logs += process_logs
         if not processed:
@@ -220,6 +225,7 @@ class NMRPipeBackend:
                 "direct_phase": direct_phase,
                 "linewidth_hz": linewidth_hz,
                 "points_per_line": points_per_line,
+                "sampling": dict(sampling),
             },
         }
 
@@ -347,7 +353,11 @@ class NMRPipeBackend:
         if override is not None:
             direct_p0, direct_p1 = float(override[0]), float(override[1])
             logs.append(f"直接维相位覆盖: p0={direct_p0:g} p1={direct_p1:g}")
-        elif bool(params.get("direct_phase_search", True)):
+        sampling = params.get("sampling") or {}
+        direct_phase_search = bool(params.get("direct_phase_search", True))
+        if sampling.get("auto_phase") is False:
+            direct_phase_search = False
+        elif direct_phase_search:
             fid_for_phase = (
                 work / "seg_001" / f"{experiment.dataset_id}.fid"
                 if experiment.segments
@@ -415,6 +425,7 @@ class NMRPipeBackend:
             zero_fill=zf_plan,
             linewidth_hz=linewidth_hz,
             points_per_line=points_per_line,
+            sampling=sampling,
         )
         nus_com = work / f"{experiment.dataset_id}_nus.com"
         nus_com.write_text(script, encoding="utf-8", newline="\n")
@@ -469,6 +480,7 @@ class NMRPipeBackend:
                 "direct_phase": [direct_p0, direct_p1],
                 "linewidth_hz": linewidth_hz,
                 "points_per_line": points_per_line,
+                "sampling": dict(sampling),
             },
         }
 
@@ -481,6 +493,7 @@ class NMRPipeBackend:
         timeout: float = 1800.0,
         baseline: dict[str, dict[str, Any]] | None = None,
         params: dict[str, Any] | None = None,
+        sampling: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """从 SMILE 重构平面做间接维 FT 定稿(逐维相位候选,不重跑 SMILE)。
 
@@ -528,6 +541,7 @@ class NMRPipeBackend:
             phases=phases,
             baseline=baseline,
             zero_fill=zf_plan,
+            sampling=sampling,
         )
         finalize_com = work / f"{experiment.dataset_id}_finalize.com"
         finalize_com.write_text(script, encoding="utf-8", newline="\n")
@@ -811,6 +825,7 @@ class NMRPipeBackend:
         extract: bool = True,
         ext_lo: str = "11.0",
         ext_hi: str = "6.0",
+        sampling: dict[str, Any] | None = None,
     ) -> tuple[bool, list[str], Path]:
         """生成并执行 NMRPipe 处理管道（输出 ft2/ft3）。"""
         logs: list[str] = []
@@ -831,6 +846,7 @@ class NMRPipeBackend:
             extract=extract,
             ext_lo=ext_lo,
             ext_hi=ext_hi,
+            sampling=sampling,
         )
         process_com = work / f"{experiment.dataset_id}_process.com"
         process_com.write_text(script, encoding="utf-8", newline="\n")

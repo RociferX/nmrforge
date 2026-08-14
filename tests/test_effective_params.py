@@ -53,6 +53,7 @@ class _EffectiveBackend:
                 "window": None,
                 "direct_phase": {"F2": (0.0, 0.0)},
                 "points_per_line": 2.0,
+                "sampling": {"ft_neg": False, "ft_alt": None, "auto_phase": True},
             },
         }
 
@@ -96,6 +97,8 @@ def test_generate_spectrum_records_effective_params(
     assert params["zero_fill"]["F2"]["size"] == 2048
     assert params["direct_phase"] == {"F2": (0.0, 0.0)}
     assert params["points_per_line"] == 2.0
+    assert params["sampling"]["auto_phase"] is True
+    assert params["sampling"]["ft_alt"] is None
     assert "baseline" in params and "window" in params
 
 
