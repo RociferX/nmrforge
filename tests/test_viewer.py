@@ -126,7 +126,7 @@ def test_load_from_ft2_rejects_1d(tmp_path: Path) -> None:
         Spectrum.load_from_ft2(path)
 
 
-def test_contour_layer_builds_paths() -> None:
+def test_contour_layer_renders_image() -> None:
     from scipy.ndimage import gaussian_filter
 
     spectrum = _synthetic_spectrum((64, 128))
@@ -141,12 +141,11 @@ def test_contour_layer_builds_paths() -> None:
         neg_pen="#e74c3c",
         zoom=2.0,
     )
-    assert layer._path.isEmpty() is False
-    assert layer._path_neg.isEmpty() is False
+    assert layer._image is not None and not layer._image.isNull()
     assert layer.boundingRect().width() == 128
     assert layer.boundingRect().height() == 64
     layer.setData(spectrum.data, np.array([-20.0, 20.0]))
-    assert layer._path.isEmpty() is False
+    assert layer._image is not None
 
 
 def test_viewer_add_spectrum_and_levels(qapp: QApplication) -> None:
@@ -155,7 +154,7 @@ def test_viewer_add_spectrum_and_levels(qapp: QApplication) -> None:
     name = viewer.add_spectrum(spectrum, name="HSQC")
     assert name == "HSQC"
     assert viewer.layer_list.count() == 1
-    assert viewer.layers[0]._path.isEmpty() is False
+    assert viewer.layers[0]._image is not None
     # 级数滑块改变后路径重建且级数更新
     old_count = viewer._level_count
     viewer.count_slider.setValue(old_count + 8)
@@ -202,8 +201,8 @@ def test_viewer_nearest_peak(qapp: QApplication) -> None:
 
 
 def test_viewer_axis_direction_nmrdraw(qapp: QApplication) -> None:
-    """显示约定(用户 0.2.53 反馈):1H 高 ppm 在左(x 列 0 靠左),
-15N 高 ppm 在上(y 行 0 靠上)。"""
+    """显示约定(用户 0.2.59 反馈):1H 高 ppm 在左(x 列 0 靠左),
+15N 高 ppm 在下(y 行 0 靠下)。"""
     import pyqtgraph as pg
 
     viewer = SpectrumViewer()
@@ -214,10 +213,10 @@ def test_viewer_axis_direction_nmrdraw(qapp: QApplication) -> None:
     p0 = vb.mapViewToScene(pg.QtCore.QPointF(0, 0))
     p1 = vb.mapViewToScene(pg.QtCore.QPointF(nx - 1, 0))
     assert p0.x() < p1.x()  # 列 0(高 ppm)在左
-    # view y 即数据行:行 0(高 ppm)= view y=0 在顶部,行 ny-1(低 ppm)在底部
+    # view y 即数据行:行 0(高 ppm)= view y=0 在底部,行 ny-1(低 ppm)在顶部
     q0 = vb.mapViewToScene(pg.QtCore.QPointF(0, 0))
     q1 = vb.mapViewToScene(pg.QtCore.QPointF(0, ny - 1))
-    assert q0.y() < q1.y()  # 行 0(高 ppm)显示在顶部,行 ny-1(低 ppm)在底部
+    assert q0.y() > q1.y()  # 行 0(高 ppm)显示在底部,行 ny-1(低 ppm)在顶部
     viewer.close()
 
 
