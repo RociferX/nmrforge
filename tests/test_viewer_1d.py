@@ -252,7 +252,7 @@ def test_viewer_strip_right_y_direction_and_link(qapp: QApplication) -> None:
         viewer.strip_right.getViewBox().viewRange()[1],
         viewer.plot.getViewBox().viewRange()[1],
     )
-    # 右条带数据行 0 与主图同为底部方向(与二维谱 Y 轴一致)
+    # 谱+坐标轴一起翻正:右条带数据行 0 与主图同为顶部方向
     right_s0 = viewer.strip_right.getViewBox().mapViewToScene(
         QPointF(0.0, 0.0)
     )
@@ -268,13 +268,13 @@ def test_viewer_strip_right_y_direction_and_link(qapp: QApplication) -> None:
 
 
 def test_viewer_clear_restores_2d_direction(qapp: QApplication) -> None:
-    """clear() 统一主图 2D 显示方向(行 0=高 ppm 在底部)。"""
+    """clear() 恢复主图 2D 显示方向(1D 视图的 invertY 不泄漏)。"""
     spectrum = _synthetic_spectrum()
     viewer = SpectrumViewer()
     viewer.add_spectrum(spectrum)
-    viewer.plot.getViewBox().invertY(True)  # 模拟 1D 视图后状态
+    viewer.plot.getViewBox().invertY(False)  # 模拟 1D 视图后状态
     viewer.clear()
-    assert viewer.plot.getViewBox().state["yInverted"] is False
+    assert viewer.plot.getViewBox().state["yInverted"] is True
     viewer.close()
 
 

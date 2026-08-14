@@ -228,8 +228,6 @@ class SpectrumPanel(QWidget):
         .ft3 走 3D 查看路径(契约 §10):绑定 Spectrum3D 并显示默认切片,
         3D 面板提供平面/切片/投影切换;.ft2 走二维叠加。
         """
-        labels3d = self._axis_labels(3) or ("F1", "F2", "F3")
-        labels2d = self._axis_labels(2) or ("F1", "F2")
         try:
             if path.suffix.lower() == ".ft3":
                 from viewer.spectrum import Spectrum3D
@@ -238,7 +236,7 @@ class SpectrumPanel(QWidget):
                 # 在 set_spectrum3d(会重置平面/投影并触发保存)之前捕获记忆状态
                 state = self._viewer3d_state.get(self._current_data_id)
                 self._spectrum3d_panel.set_spectrum3d(
-                    Spectrum3D.load_from_ft3(path, labels=labels3d)
+                    Spectrum3D.load_from_ft3(path)
                 )
                 self._spectrum3d_panel.setVisible(True)
                 if state:
@@ -257,7 +255,7 @@ class SpectrumPanel(QWidget):
                 return True
             from viewer.spectrum import Spectrum
 
-            spectrum = Spectrum.load_from_ft2(path, labels=labels2d)
+            spectrum = Spectrum.load_from_ft2(path)
         except Exception:  # noqa: BLE001 - 损坏文件统一由调用方提示
             return False
         self._spectrum3d_panel.clear()
@@ -265,37 +263,6 @@ class SpectrumPanel(QWidget):
         self.viewer.add_spectrum(spectrum, name=name or path.stem)
         return True
 
-
-    def _axis_labels(self, required: int) -> tuple[str, ...] | None:
-        """按当前数据 metadata 的核信息生成轴名(F1/F2/F3→H/N/C)。
-        维度数不符/无 metadata 时返回 None(调用方回退 F1/F2/F3)。"""
-        from viewer.axis_labels import (
-            axis_labels_from_nuclei,
-            nuclei_from_metadata,
-        )
-
-        if self._manager is None or not (
-            self._current_exp_id and self._current_data_id
-        ):
-            return None
-        try:
-            meta_path = self._manager.data_metadata_path(
-                self._current_exp_id, self._current_data_id
-            )
-        except Exception:  # noqa: BLE001
-            return None
-        if meta_path is None or not meta_path.is_file():
-            return None
-        try:
-            import json
-
-            metadata = json.loads(meta_path.read_text(encoding="utf-8"))
-        except Exception:  # noqa: BLE001
-            return None
-        nuclei = nuclei_from_metadata(metadata)
-        if not nuclei or len(nuclei) != required:
-            return None
-        return axis_labels_from_nuclei(nuclei)
 
     def _render_3d_view(self) -> None:
         """按 3D 面板当前平面/切片/投影渲染二维视图并重挂峰标记。"""

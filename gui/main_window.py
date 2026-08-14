@@ -40,8 +40,8 @@ from gui.dialogs import (
     ConfirmDialog,
     ImportExperimentDialog,
     InfoDialog,
-    NotesDialog,
     ParameterTableDialog,
+    SampleDialog,
     ScriptEditorDialog,
 )
 from gui.log_panel import LogPanel
@@ -110,10 +110,11 @@ class MainWindow(QMainWindow):
         file_menu.addSeparator()
         file_menu.addAction("退出", self.close)
 
-        experiment_menu = bar.addMenu("实验(&E)")
-        experiment_menu.addAction("新建实验...", self._create_experiment)
-        experiment_menu.addAction("重命名实验...", self.rename_experiment)
-        experiment_menu.addAction("删除实验", self.delete_experiment)
+        sample_menu = bar.addMenu("样本(&S)")
+        sample_menu.addAction("样本管理", self._noop_hint)
+        sample_menu.addAction("新建实验...", self._create_experiment)
+        sample_menu.addAction("重命名实验...", self.rename_experiment)
+        sample_menu.addAction("删除实验", self.delete_experiment)
 
         process_menu = bar.addMenu("处理(&R)")
         process_menu.addAction("运行自动化处理", self.run_auto)
@@ -123,6 +124,9 @@ class MainWindow(QMainWindow):
         process_menu.addSeparator()
         process_menu.addAction("运行历史...", self._show_run_history)
 
+        sample_menu.addSeparator()
+        sample_menu.addAction("添加样本...", self.add_sample)
+        sample_menu.addAction("删除样本...", self.delete_sample)
 
         view_menu = bar.addMenu("查看(&V)")
         view_menu.addAction("谱图查看器", self._show_viewer)
@@ -178,6 +182,9 @@ class MainWindow(QMainWindow):
             self._import_data_with_options
         )
         self.center_panel.batch_import_requested.connect(self._batch_import)
+        self.pipeline.manual_with_params_requested.connect(
+            self._open_manual_with_params
+        )
         self.pipeline.view_log_requested.connect(self._on_view_step_log)
         self.pipeline.batch_summary_requested.connect(self._on_batch_summary)
         # 首次导入提示:导入完成信号里触发(见 _on_import_done/_on_batch_import_done)
@@ -190,8 +197,6 @@ class MainWindow(QMainWindow):
         self.center_panel.open_project_requested.connect(
             lambda path: self._open_root(Path(path))
         )
-        self.center_panel.edit_notes_requested.connect(self._edit_notes)
-        self.pipeline.run_finished.connect(self._on_pipeline_run_finished)
 
         self.spectrum_panel = SpectrumPanel(self.manager, controller=self.controller)
         self.spectrum_panel.peaks_saved.connect(self._on_peaks_saved)
@@ -238,10 +243,9 @@ class MainWindow(QMainWindow):
     def new_project(self) -> None:
         name, ok = QInputDialog.getText(self, "新建样本", "样本名称:", text="unnamed")
         if ok and name.strip():
-            notes = self._ask_notes("新建样本 - 注释(可选)")
-            self._new_project_in_workspace(name.strip(), notes=notes)
+            self._new_project_in_workspace(name.strip())
 
-    def _new_project_in_workspace(self, name: str, notes: str = "") -> None:
+    def _new_project_in_workspace(self, name: str) -> None:
         """在默认工作区下创建项目(契约 v1.3,create_project 返回 ProjectManager)。"""
         try:
             self.manager = self.workspace.create_project(name)
@@ -251,12 +255,6 @@ class MainWindow(QMainWindow):
         except Exception as exc:  # noqa: BLE001 - WorkspaceError 等统一提示
             InfoDialog.show_info(self, "新建样本失败", f"{type(exc).__name__}: {exc}")
             return
-        if notes and self.manager.project is not None:
-            self.manager.project.protein.notes = notes
-            try:
-                self.manager.save()
-            except ProjectError:
-                pass
         self.recent.push(str(self.manager.root))
         self._rebind_shared_manager()
         self.center_panel.welcome_page.refresh()
@@ -429,13 +427,6 @@ class MainWindow(QMainWindow):
                         "import",
                         params={"copy": bool(data.get("copy", True))},
                     )
-                    notes = (data or {}).get("notes", "") or ""
-                    if notes:
-                        from gui.notes import set_data_note
-
-                        set_data_note(
-                            self.manager.project, target_exp_id, data_id, notes
-                        )
                 self.manager.save()
                 self.import_finished.emit(result)  # 回主线程刷新 UI
             except Exception as exc:  # noqa: BLE001 - 错误统一回主线程提示
@@ -520,12 +511,40 @@ class MainWindow(QMainWindow):
             return
         self.refresh()
 
-    def _ask_notes(self, title: str) -> str:
-        """可选注释对话框:确定返回文本,取消返回空串。"""
-        dialog = NotesDialog(self, title, "")
-        if dialog.exec() == NotesDialog.DialogCode.Accepted:
-            return dialog.result_text()
-        return ""
+    def add_sample(self) -> None:
+        if self.manager.project is None:
+            InfoDialog.show_info(self, "提示", "请先新建或打开样本")
+            return
+        dialog = SampleDialog(self)
+        if dialog.exec() != SampleDialog.DialogCode.Accepted:
+            return
+        try:
+            sample = self.manager.add_sample(**dialog.result_data())
+            self.manager.save()
+        except ProjectError as exc:
+            InfoDialog.show_info(self, "添加样本失败", str(exc))
+            return
+        self.statusBar().showMessage(f"已添加样本 {sample.sample_id}")
+
+    def delete_sample(self) -> None:
+        if self.manager.project is None:
+            return
+        sample_ids = [s.sample_id for s in self.manager.project.samples]
+        if not sample_ids:
+            InfoDialog.show_info(self, "提示", "当前样本中没有样本条目")
+            return
+        sample_id, ok = QInputDialog.getItem(
+            self, "删除样本", "选择样本:", sample_ids, editable=False
+        )
+        if not ok:
+            return
+        try:
+            self.manager.delete_sample(sample_id)
+            self.manager.save()
+        except ProjectError as exc:
+            InfoDialog.show_info(self, "删除样本失败", str(exc))
+            return
+        self.refresh()
 
     def about(self) -> None:
         InfoDialog.show_info(
@@ -585,6 +604,33 @@ class MainWindow(QMainWindow):
 
     def _manual_fid_menu(self) -> None:
         self._open_manual_dialog("fid")
+
+    def _open_manual_with_params(self, step_id: str, params: dict) -> None:
+        """用最近运行参数打开人工参数表格(参数预填)。"""
+        exp_id = self.project_tree.current_experiment_id()
+        if not exp_id or self.manager.project is None:
+            return
+        entry = self.manager.project.experiment(exp_id)
+        if entry is None:
+            return
+        data_node = self._current_data_node(entry)
+        if data_node is None:
+            return
+        data_id = getattr(data_node, "id", exp_id)
+        label = f"{entry.title or entry.id} ({exp_id})"
+        schema = self.controller.param_schema()
+        defaults = schema.setdefault("default", {})
+        if isinstance(defaults, dict):
+            for key, value in (params or {}).items():
+                if key in defaults:
+                    defaults[key] = value
+        dialog = ParameterTableDialog(self, label, params=schema)
+        dialog.render_requested.connect(
+            lambda p: self._render_scripts_and_edit(
+                p, data_node, exp_id, data_id, label
+            )
+        )
+        dialog.exec()
 
     def _on_view_step_log(self, step_id: str) -> None:
         """定位日志面板:追加标记行并展开(append 自动滚底)。"""
@@ -848,12 +894,6 @@ class MainWindow(QMainWindow):
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _on_pipeline_run_finished(self) -> None:
-        """Pipeline 处理步骤完成后刷新左侧树/中间/谱图面板(主线程)。"""
-        self.refresh()
-        self.center_panel.refresh()
-        self.spectrum_panel.refresh()
-
     def _on_manual_run_done(self) -> None:
         """人工脚本运行完成后刷新 Pipeline/报告页(主线程)。"""
         self.refresh()
@@ -935,22 +975,19 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("样本已关闭")
 
     def _create_experiment(self) -> None:
-        """新建空白实验(Project/空白处右键),可同时填写注释。"""
+        """新建空白实验(Project/空白处右键)。"""
         if self.manager.project is None:
             InfoDialog.show_info(self, "提示", "请先新建或打开样本")
             return
         title, ok = QInputDialog.getText(self, "新建实验", "实验标题:")
         if not ok:
             return
-        notes = self._ask_notes("新建实验 - 注释(可选)")
         create = getattr(self.manager, "create_experiment", None)
         try:
             if create is not None:
                 entry = create(title=title.strip())
             else:
                 entry = self.manager.add_experiment("", title=title.strip())
-            if notes:
-                entry.notes = notes
             self.manager.save()
         except ProjectError as exc:
             InfoDialog.show_info(self, "新建实验失败", str(exc))
@@ -1062,48 +1099,8 @@ class MainWindow(QMainWindow):
         self.center_panel.set_selection("data", exp_id, data_id)
         self.center_panel.run_step(step, data_id=data_id)
 
-    def _edit_notes(self, kind: str, exp_id: str, data_id: str) -> None:
-        """编辑样本/实验/数据注释(中间顶部注释条「编辑注释」)。"""
-        if self.manager.project is None or not kind:
-            return
-        from gui.notes import (
-            data_note,
-            experiment_note,
-            sample_note,
-            set_data_note,
-            set_experiment_note,
-            set_sample_note,
-        )
-
-        title = {
-            "project": "样本注释",
-            "experiment": "实验注释",
-            "data": "数据注释",
-        }.get(kind, "注释")
-        if kind == "project":
-            current = sample_note(self.manager.project)
-        elif kind == "experiment":
-            current = experiment_note(self.manager.project, exp_id)
-        else:
-            kind = "data"
-            current = data_note(self.manager.project, exp_id, data_id)
-        dialog = NotesDialog(self, f"编辑{title}", current)
-        if dialog.exec() != NotesDialog.DialogCode.Accepted:
-            return
-        text = dialog.result_text()
-        if kind == "project":
-            set_sample_note(self.manager.project, text)
-        elif kind == "experiment":
-            set_experiment_note(self.manager.project, exp_id, text)
-        else:
-            set_data_note(self.manager.project, exp_id, data_id, text)
-        try:
-            self.manager.save()
-        except ProjectError as exc:
-            InfoDialog.show_info(self, "保存失败", str(exc))
-            return
-        self.center_panel._update_notes(kind, exp_id, data_id)
-        self._append_log(f"已保存{title}")
+    def _noop_hint(self) -> None:
+        InfoDialog.show_info(self, "提示", "样本管理面板已集成在左侧树中")
 
     # ------------------------------------------------------------------
     # 查看动作

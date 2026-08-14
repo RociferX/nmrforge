@@ -105,13 +105,6 @@ class ImportExperimentDialog(QDialog):
         self.title_edit = QLineEdit()
         form.addRow("标题(可留空):", self.title_edit)
 
-        self.notes_edit = QPlainTextEdit()
-        self.notes_edit.setMaximumHeight(70)
-        self.notes_edit.setPlaceholderText(
-            "数据注释(可选,导入后也可在中间上方编辑)"
-        )
-        form.addRow("注释(可选):", self.notes_edit)
-
         self.sample_combo = QComboBox()
         self.sample_combo.addItem("(无)", "")
         for sample_id, name in samples or []:
@@ -161,7 +154,6 @@ class ImportExperimentDialog(QDialog):
         return {
             "source": self.source_edit.text().strip(),
             "title": self.title_edit.text().strip(),
-            "notes": self.notes_edit.toPlainText().strip(),
             "sample_id": self.sample_combo.currentData() or "",
             "copy": self.copy_check.isChecked(),
         }
@@ -223,41 +215,6 @@ class SampleDialog(QDialog):
             "buffer": self.buffer_edit.text().strip(),
             "notes": self.notes_edit.text().strip(),
         }
-
-
-class NotesDialog(QDialog):
-    """注释编辑对话框(样本/实验/数据通用):多行文本 + 确定/取消。"""
-
-    def __init__(
-        self,
-        parent: QWidget | None,
-        title: str,
-        text: str = "",
-    ) -> None:
-        super().__init__(parent)
-        self.setWindowTitle(title)
-        self.setMinimumWidth(460)
-        layout = QVBoxLayout(self)
-        hint = QLabel("输入注释信息(可留空):")
-        layout.addWidget(hint)
-        self.editor = QPlainTextEdit()
-        self.editor.setPlainText(text)
-        self.editor.setPlaceholderText(
-            "注释信息,例如样本:蛋白名称/buffer/浓度;实验:实验类型;数据:采集日期等"
-        )
-        layout.addWidget(self.editor, 1)
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok
-            | QDialogButtonBox.StandardButton.Cancel
-        )
-        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("确定")
-        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
-
-    def result_text(self) -> str:
-        return self.editor.toPlainText().strip()
 
 
 class ParameterTableDialog(QDialog):

@@ -8,7 +8,7 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PyQt6.QtWidgets import QApplication, QDialog, QFileDialog
+from PyQt6.QtWidgets import QApplication, QFileDialog
 
 from core.project import ProjectManager
 from gui.dialogs import ConfirmDialog
@@ -95,19 +95,6 @@ def test_new_project_action(
         lambda: _WorkspaceStub(workspace),
     )
     window = MainWindow()
-    class _FakeNotesDialog:
-        DialogCode = QDialog.DialogCode
-
-        def __init__(self, parent, title, text):
-            pass
-
-        def exec(self):
-            return QDialog.DialogCode.Accepted
-
-        def result_text(self):
-            return ""
-
-    monkeypatch.setattr("gui.main_window.NotesDialog", _FakeNotesDialog)
     window.new_project()
     assert window.manager.project is not None
     assert window.manager.project.name == "demo"
@@ -162,20 +149,6 @@ def test_add_experiment_action(
         "gui.main_window.QInputDialog.getText",
         staticmethod(lambda *args, **kwargs: ("3D HNCACB", True)),
     )
-
-    class _FakeNotesDialog:
-        DialogCode = QDialog.DialogCode
-
-        def __init__(self, parent, title, text):
-            pass
-
-        def exec(self):
-            return QDialog.DialogCode.Accepted
-
-        def result_text(self):
-            return ""
-
-    monkeypatch.setattr("gui.main_window.NotesDialog", _FakeNotesDialog)
     window = MainWindow(manager=manager)
     window.add_experiment()
     assert window.experiment_tree.topLevelItemCount() == 3
