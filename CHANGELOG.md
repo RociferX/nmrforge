@@ -1,5 +1,28 @@
 # 变更日志
 
+## [0.2.67] - 2026-08-14
+
+- Backend:sampling 参数块落地(死参数修复,审计待办)——param_schema 声明
+  的 ft_neg/ft_alt/flip_f1/auto_phase 此前脚本生成从不消费,改 GUI 参数
+  无效。现消费:ft_neg(None=按 FnMODE 推导/True=强制 -neg/False=关闭)、
+  ft_alt(True=按采集方式自动/False=强制关闭)、flip_f1(True 时 F1 轴
+  FT -neg 翻转)、auto_phase(False 关闭直接维自动相位);process/
+  reconstruct_nus/_process/finalize_nus → script_generator 各生成函数
+  传递,effective_params 回写 sampling;默认保持现有脚本输出不变(回归
+  断言 base==with_sampling);param_schema 默认 ft_neg None/ft_alt True
+  (语义=按采集方式自动);API_CONTRACT §6 措辞更新;
+- Backend:G2B-008 生成谱图真实阶段日志——CshRuntime.run 增加 on_line
+  逐行回调;process/reconstruct_nus/convert_to_fid 增加 progress 阶段
+  消息(开始转换 fid/开始·完成相位优化/开始·完成 SMILE 重构/终谱已
+  就位);stepwise.generate_fid/generate_spectrum 转发 progress(缺省
+  None 兼容);ProcessingBackend Protocol 增 progress(Shared Contract,
+  G2B-006/008);
+- Backend:run_batch 进度回调——progress 改为 Callable[[str], None]
+  (每数据每步骤消息,如 d_001: 开始 spectrum/d_001: 成功),供 GUI 批量
+  执行展示;batch_id 解析/失败继续/汇总语义不变;
+- 测试:新增 test_sampling_params(5 例)/test_progress(3 例),既有 fake
+  后端适配 progress;全量 447 passed,ruff 全绿。
+
 ## [0.2.66] - 2026-08-14
 
 - GUI:生成谱图自动接相位优化(用户反馈「最终谱相位不对」):
