@@ -12,8 +12,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from enum import Enum
+from datetime import UTC, datetime
+from enum import StrEnum
 from typing import Any
 
 SCHEMA_VERSION = "1.3"
@@ -33,10 +33,10 @@ DEFAULT_DIRECTORIES = [
 
 def now_iso() -> str:
     """当前 UTC 时间的 ISO-8601 字符串(秒级)。"""
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
-class ExperimentStatus(str, Enum):
+class ExperimentStatus(StrEnum):
     """实验状态机:registered(仅登记) → imported → processed → picked → analyzed。"""
 
     REGISTERED = "registered"

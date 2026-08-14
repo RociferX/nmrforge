@@ -7,18 +7,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
 
-class SamplingMode(str, Enum):
+class SamplingMode(StrEnum):
     UNIFORM = "uniform"
     NUS = "nus"
     UNCERTAIN = "uncertain"
 
 
-class AxisRole(str, Enum):
+class AxisRole(StrEnum):
     DIRECT = "direct"
     INDIRECT = "indirect"
 

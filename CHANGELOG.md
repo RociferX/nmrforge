@@ -1,5 +1,22 @@
 # 变更日志
 
+## [0.2.65] - 2026-08-14
+
+- 工程:项目要求 Python ≥3.12(用户决策):
+  - pyproject requires-python ">=3.10" → ">=3.12";ruff target-version
+    py310 → py312;
+  - 枚举迁移:7 处 str+Enum → enum.StrEnum;datetime.timezone.utc →
+    datetime.UTC;
+  - 打包脚本/AGENTS.md/SOFTWARE_SUMMARY 版本说明同步;代码扫描无 3.12
+    移除 API(distutils/imp 等)。
+- 测试(3.12 实测):本地 3.13 全量 438 passed + ruff 全绿;VM 3.12
+  (~/nmr312_venv,uv 托管 CPython 3.12.13 + PyQt6 6.11.0)master 全量
+  434 passed + 4 skipped;
+  ⚠ gui-dev 7f4e080 在 3.12 下仍段错误(PyQt6 6.11.0/6.10.2 均崩,
+  崩溃点 pyqtgraph ViewBoxMenu ← PlotWidget ← spectrum_viewer)——
+  段错误非 Python 或 PyQt6 版本问题,属 Linux 下 GUI 代码内存损坏,
+  待 GUI Agent 定位;gui 合并维持回退。
+
 ## [0.2.64] - 2026-08-13
 
 - Backend:相位优化增强(参考旧项目 NMRFlow)+ 性能优化:

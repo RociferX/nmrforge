@@ -7,7 +7,7 @@ name = "nmrforge"
 version = "0.1.0"
 description = "面向 Bruker 2D/3D NMR 数据的自动化处理、参数优化与质量控制平台"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 dependencies = [
     "PyQt6>=6.5",
     "pyqtgraph>=0.13",
@@ -39,7 +39,7 @@ addopts = "-q"
 
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py312"
 exclude = ["nmrforge", ".venv", ".git", "build", "dist"]
 
 [tool.ruff.lint]

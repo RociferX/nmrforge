@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 import numpy as np
@@ -14,7 +14,7 @@ from core.optimization.scoring import QualityScore, ScoreComponents
 from core.qc import artifact_detection, baseline_quality, noise, peak_detection, phase_quality, snr
 
 
-class QcDecision(str, Enum):
+class QcDecision(StrEnum):
     ACCEPT = "accept"
     WARNING = "warning"
     ROLLBACK = "rollback"

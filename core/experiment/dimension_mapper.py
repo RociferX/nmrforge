@@ -8,18 +8,18 @@ Phase 1：采集轴→处理轴按 Bruker 标准顺序；显示轴按实验模�
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 
 from core.data.internal_data_model import Experiment
 
 
-class AxisKind(str, Enum):
+class AxisKind(StrEnum):
     ACQUISITION = "acquisition"
     PROCESSING = "processing"
     DISPLAY = "display"
 
 
-class TransformOp(str, Enum):
+class TransformOp(StrEnum):
     TRANSPOSE = "transpose"
     REVERSE = "reverse"
     SIGN = "sign"

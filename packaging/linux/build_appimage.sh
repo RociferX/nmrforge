@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 构建 NMRForge AppImage（在 Linux 构建机/VM 上运行，见 docs/packaging.md）
-# 依赖：python3.10+、pip、appimagetool（https://github.com/AppImage/appimagetool/releases）
+# 依赖：python3.12+、pip、appimagetool（https://github.com/AppImage/appimagetool/releases）
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
