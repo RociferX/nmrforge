@@ -15,7 +15,6 @@ PyQt6/sip wrapper 缓存错配段错误(0.2.73 以尺寸分流规避)。contourp
 
 from __future__ import annotations
 
-import contourpy
 import numpy as np
 import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore, QtGui
@@ -56,6 +55,7 @@ class ContourLayer(pg.GraphicsObject):
         if self._data.ndim != 2:
             raise ValueError(f"轮廓仅支持二维数据,当前 {self._data.ndim} 维")
         self._levels = np.asarray(levels, dtype=float)
+        import contourpy
         self._gen = (
             contourpy.contour_generator(z=self._data)
             if self._data.size
