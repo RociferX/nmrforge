@@ -2,7 +2,7 @@
 
 交互习惯(nmrDraw/Poky):
 - 左键拖拽框选放大;中键拖拽平移;滚轮缩放;
-- 强度滑块控制轮廓起始水平;级数滑块控制轮廓密度(默认 36 级);
+- 强度滑块控制轮廓起始水平;级数滑块控制轮廓密度(默认 8 级);
 - 正峰黑/负峰红;峰为半透明圆点,点击选中放大并显示标签;
 - 支持锁定显示长宽比(1:1 / 2:1 / 4:1 / 自由)。
 """
@@ -31,7 +31,7 @@ from viewer.nmr_viewbox import NMRViewBox
 from viewer.spectrum import Spectrum, Spectrum1D
 
 _COLORS = ("#1f77b4", "#d62728", "#2ca02c", "#9467bd", "#ff7f0e", "#17becf")
-_DEFAULT_LEVELS = 36
+_DEFAULT_LEVELS = 8
 
 
 class SpectrumViewer(QWidget):
@@ -96,7 +96,7 @@ class SpectrumViewer(QWidget):
         self.level_slider = QSlider(Qt.Orientation.Horizontal)
         self.level_slider.setFixedHeight(18)
         self.level_slider.setRange(1, 100)
-        self.level_slider.setValue(8)
+        self.level_slider.setValue(3)
         self.level_slider.valueChanged.connect(self._update_levels_debounced)
         self.level_slider.sliderReleased.connect(self._update_levels)
         self.level_label = QLabel(self._level_label_text())
@@ -106,12 +106,12 @@ class SpectrumViewer(QWidget):
         self.count_slider.setRange(5, 60)
         self.count_slider.setValue(self._level_count)
         self.count_slider.valueChanged.connect(self._on_level_count)
-        self.count_label = QLabel(f"级数 {self._level_count}")
+        self.count_label = QLabel(f"Levels {self._level_count}")
 
-        self.reset_button = QPushButton("全谱视图")
+        self.reset_button = QPushButton("Full view")
         self.reset_button.clicked.connect(self.reset_view)
 
-        self.crosshair_label = QLabel("移动鼠标读取 ppm 坐标")
+        self.crosshair_label = QLabel("Move mouse to read ppm")
         self.crosshair_label.setWordWrap(True)
         self.peak_label = QLabel("")
         self.peak_label.setWordWrap(True)
@@ -120,16 +120,16 @@ class SpectrumViewer(QWidget):
         controls_layout = QVBoxLayout(controls)
         controls_layout.setContentsMargins(4, 2, 4, 2)
         controls_layout.setSpacing(2)
-        controls_layout.addWidget(QLabel("谱图层"))
+        controls_layout.addWidget(QLabel("Layers"))
         controls_layout.addWidget(self.layer_list, 1)
-        controls_layout.addWidget(QLabel("轮廓起点(%)"))
+        controls_layout.addWidget(QLabel("Contour start (%)"))
         controls_layout.addWidget(self.level_slider)
         controls_layout.addWidget(self.level_label)
-        controls_layout.addWidget(QLabel("轮廓级数"))
+        controls_layout.addWidget(QLabel("Levels"))
         controls_layout.addWidget(self.count_slider)
         controls_layout.addWidget(self.count_label)
         controls_layout.addWidget(self.reset_button)
-        self.show_1d_button = QPushButton("一维谱")
+        self.show_1d_button = QPushButton("1D")
         self.show_1d_button.setCheckable(True)
         self.show_1d_button.setToolTip(
             "开启后出现随鼠标十字线,点击显示该处两个一维谱(TopSpin 式)"
@@ -138,7 +138,7 @@ class SpectrumViewer(QWidget):
         controls_layout.addWidget(self.show_1d_button)
         controls_layout.addWidget(self.crosshair_label)
         controls_layout.addWidget(self.peak_label)
-        self.show_peaks_checkbox = QCheckBox("显示峰")
+        self.show_peaks_checkbox = QCheckBox("Show peaks")
         self.show_peaks_checkbox.setChecked(True)
         self.show_peaks_checkbox.toggled.connect(self.set_peaks_visible)
         controls_layout.addWidget(self.show_peaks_checkbox)
@@ -242,7 +242,7 @@ class SpectrumViewer(QWidget):
             name = (
                 spectrum.source.stem
                 if spectrum.source is not None
-                else f"谱图 {len(self.layers) + 1}"
+                else f"Spectrum {len(self.layers) + 1}"
             )
         layer = ContourLayer(
             spectrum.data,
@@ -268,12 +268,11 @@ class SpectrumViewer(QWidget):
         return name
 
     def _level_fraction(self) -> float:
-        """滑块 → 起点百分比(平方映射:前 10% 精细可调)。"""
-        value = max(1, self.level_slider.value())
-        return (value / 100.0) ** 2
+        """滑块值 → 起点百分比(线性,1-100%)。"""
+        return max(1, self.level_slider.value()) / 100.0
 
     def _level_label_text(self) -> str:
-        return f"轮廓起点 {self._level_fraction() * 100:.2f}%"
+        return f"Contour start {self._level_fraction() * 100:.2f}%"
 
     def _levels_for(self, spectrum: Spectrum) -> np.ndarray:
         """从起点(base)到最大值之间取 n 级对数间隔,含对称负级。"""
@@ -298,7 +297,7 @@ class SpectrumViewer(QWidget):
 
     def _on_level_count(self, value: int) -> None:
         self._level_count = value
-        self.count_label.setText(f"级数 {value}")
+        self.count_label.setText(f"Levels {value}")
         self._update_levels()
 
     def _setup_axes(self, spectrum: Spectrum) -> None:
@@ -346,14 +345,14 @@ class SpectrumViewer(QWidget):
                 for i in np.linspace(0, axis.size - 1, 8)
             ]
             self.plot.getAxis("bottom").setTicks([ticks])
-            self.plot.setLabels(bottom=f"{axis.label} (ppm)", left="强度")
+            self.plot.setLabels(bottom=f"{axis.label} (ppm)", left="Intensity")
         else:
             ticks = [
                 (int(i), str(int(i)))
                 for i in np.linspace(0, axis.size - 1, 6)
             ]
             self.plot.getAxis("bottom").setTicks([ticks])
-            self.plot.setLabels(bottom=axis.label, left="强度")
+            self.plot.setLabels(bottom=axis.label, left="Intensity")
         self.plot.getViewBox().invertY(False)
         self.set_1d_mode(False)
         self.reset_view()
@@ -419,9 +418,9 @@ class SpectrumViewer(QWidget):
             for i in np.linspace(0, y_axis.size - 1, 6)
         ]
         self.strip_top.getAxis("bottom").setTicks([x_ticks])
-        self.strip_top.setLabels(bottom=f"{x_axis.label} (ppm)", left="强度")
+        self.strip_top.setLabels(bottom=f"{x_axis.label} (ppm)", left="Intensity")
         self.strip_right.getAxis("left").setTicks([y_ticks])
-        self.strip_right.setLabels(left=f"{y_axis.label} (ppm)", bottom="强度")
+        self.strip_right.setLabels(left=f"{y_axis.label} (ppm)", bottom="Intensity")
 
     def _update_strips(self, row: int, col: int) -> None:
         """更新十字线处两个一维迹线(行=F2 迹线,列=F1 迹线)。"""
@@ -460,8 +459,8 @@ class SpectrumViewer(QWidget):
             return
         index = self.layer_list.row(item)
         menu = QMenu(self)
-        delete_action = menu.addAction("删除该图层")
-        clear_action = menu.addAction("删除全部图层")
+        delete_action = menu.addAction("Delete layer")
+        clear_action = menu.addAction("Delete all layers")
         chosen = menu.exec(self.layer_list.mapToGlobal(pos))
         if chosen is delete_action:
             self.remove_layer(index)

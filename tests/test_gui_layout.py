@@ -563,6 +563,24 @@ def test_spectrum_panel_scans_data_dir_layout(
     panel.close()
 
 
+def test_spectrum_panel_excludes_fid_from_list(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.2.77:谱图文件列表只列 .ft2/.ft3,process 目录 raw.fid 不再混入。"""
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    spectra_dir = manager.data_dir("exp_001", "d_001", "spectra")
+    spectra_dir.mkdir(parents=True, exist_ok=True)
+    _write_ft2(spectra_dir / "exp_001-d_001.ft2")
+    process_dir = manager.data_dir("exp_001", "d_001", "process")
+    process_dir.mkdir(parents=True, exist_ok=True)
+    (process_dir / "raw.fid").write_bytes(b"fid")
+    panel = SpectrumPanel(manager)
+    panel.set_context("exp_001", "d_001")
+    assert panel.file_list.count() == 1
+    assert panel.file_list.item(0).text() == "exp_001-d_001.ft2"
+    panel.close()
+
+
 def test_pipeline_status_peaks_from_data_dir(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:

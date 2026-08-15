@@ -192,6 +192,21 @@ def test_viewer_add_spectrum_and_levels(qapp: QApplication) -> None:
     viewer.close()
 
 
+def test_viewer_contour_defaults_and_english_labels(
+    qapp: QApplication,
+) -> None:
+    """0.2.77:轮廓起点默认 3%、级数默认 8,常用术语英文显示。"""
+    viewer = SpectrumViewer()
+    assert viewer.level_slider.value() == 3
+    assert viewer._level_count == 8
+    assert viewer.count_slider.value() == 8
+    assert viewer.level_label.text().startswith("Contour start 3.00%")
+    assert viewer.count_label.text() == "Levels 8"
+    assert viewer.show_peaks_checkbox.text() == "Show peaks"
+    assert viewer.show_1d_button.text() == "1D"
+    viewer.close()
+
+
 def test_viewer_peaks_poky_style(qapp: QApplication) -> None:
     viewer = SpectrumViewer()
     spectrum = _synthetic_spectrum()

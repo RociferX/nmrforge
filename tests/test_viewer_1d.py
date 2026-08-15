@@ -110,7 +110,7 @@ def test_viewer_1d_strips_toggle_and_update(qapp: QApplication) -> None:
     spectrum = _synthetic_spectrum()
     viewer = SpectrumViewer()
     viewer.add_spectrum(spectrum)
-    assert viewer.show_1d_button.text() == "一维谱"
+    assert viewer.show_1d_button.text() == "1D"
     assert not viewer.show_1d_button.isChecked()
     viewer.set_1d_mode(True)
     assert viewer._strips_active

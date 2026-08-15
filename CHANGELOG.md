@@ -1,5 +1,19 @@
 # 变更日志
 
+## [0.2.77] - 2026-08-15
+
+- 修复(GUI Agent,用户反馈):谱图查看器常用术语直接英文显示——轮廓起点
+  Contour start (%)、级数 Levels、图层 Layers、显示峰 Show peaks、一维谱
+  1D、全谱视图 Full view、强度 Intensity;3D 面板同步(3D view / Slice /
+  MIP / Sum);峰表工具栏 Add peak / Delete selected / Import-Export Poky /
+  Save peaks。
+- 调整:轮廓起点默认 3%(滑块线性映射,默认值 3)、级数默认 8(原 36)。
+- 修复(GUI Agent,用户反馈):主页面右侧谱图文件列表不再混入 process 目录
+  的 raw.fid(原 0.2.29 为 1D 查看追加),列表只列 .ft2/.ft3;FID 仍可
+  拖放/直接打开查看 1D。
+- 测试:新增查看器默认值/英文文案断言与 FID 排除断言;本地全量 passed
+  (offscreen)+ ruff 全绿;VM 全量复测通过。
+
 ## [0.2.76] - 2026-08-14
 
 - 修复(GUI Agent,用户反馈):0.2.71 光栅化谱图观感与 nmrDraw/POKY 根本

@@ -78,27 +78,27 @@ class SpectrumPanel(QWidget):
         self.file_list.itemClicked.connect(self._on_file_clicked)
 
         self.peak_toolbar = QHBoxLayout()
-        self.add_peak_button = QPushButton("添加峰")
+        self.add_peak_button = QPushButton("Add peak")
         self.add_peak_button.setEnabled(False)
         self.add_peak_button.setToolTip("在峰表追加一行(保存后写回 CSV)")
         self.add_peak_button.clicked.connect(self._on_add_peak)
         self.peak_toolbar.addWidget(self.add_peak_button)
-        self.delete_peak_button = QPushButton("删除选中")
+        self.delete_peak_button = QPushButton("Delete selected")
         self.delete_peak_button.setEnabled(False)
         self.delete_peak_button.setToolTip("删除峰表中选中的行")
         self.delete_peak_button.clicked.connect(self._on_delete_peak)
         self.peak_toolbar.addWidget(self.delete_peak_button)
-        self.import_poky_button = QPushButton("导入 Poky")
+        self.import_poky_button = QPushButton("Import Poky")
         self.import_poky_button.setEnabled(False)
         self.import_poky_button.setToolTip("从 Poky/Sparky .list 导入峰表")
         self.import_poky_button.clicked.connect(self._on_import_poky)
         self.peak_toolbar.addWidget(self.import_poky_button)
-        self.export_poky_button = QPushButton("导出 Poky")
+        self.export_poky_button = QPushButton("Export Poky")
         self.export_poky_button.setEnabled(False)
         self.export_poky_button.setToolTip("把当前峰表导出为 Poky/Sparky .list")
         self.export_poky_button.clicked.connect(self._export_peaks_poky)
         self.peak_toolbar.addWidget(self.export_poky_button)
-        self.save_peaks_button = QPushButton("保存峰表")
+        self.save_peaks_button = QPushButton("Save peaks")
         self.save_peaks_button.setEnabled(False)
         self.save_peaks_button.setToolTip("把峰表写回 data/peaks/<exp>-<data>.csv 并登记")
         self.save_peaks_button.clicked.connect(self._on_save_peaks)
@@ -204,14 +204,6 @@ class SpectrumPanel(QWidget):
                     paths.extend(
                         sorted(spectra_dir.glob(f"{exp_id}-{data_id}*{ext}"))
                     )
-                # 追加 process 目录 FID(供 1D 迹线查看)
-                try:
-                    process_dir = self.manager.data_dir(
-                        exp_id, data_id, "process"
-                    )
-                    paths.extend(sorted(process_dir.glob("*.fid")))
-                except OSError:
-                    pass
                 if paths:
                     return paths
         except Exception:  # noqa: BLE001 - 新布局不可用回退旧路径
