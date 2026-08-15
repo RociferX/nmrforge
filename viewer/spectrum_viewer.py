@@ -96,7 +96,7 @@ class SpectrumViewer(QWidget):
         self.level_slider = QSlider(Qt.Orientation.Horizontal)
         self.level_slider.setFixedHeight(18)
         self.level_slider.setRange(1, 100)
-        self.level_slider.setValue(3)
+        self.level_slider.setValue(31)
         self.level_slider.valueChanged.connect(self._update_levels_debounced)
         self.level_slider.sliderReleased.connect(self._update_levels)
         self.level_label = QLabel(self._level_label_text())
@@ -268,8 +268,9 @@ class SpectrumViewer(QWidget):
         return name
 
     def _level_fraction(self) -> float:
-        """滑块值 → 起点百分比(线性,1-100%)。"""
-        return max(1, self.level_slider.value()) / 100.0
+        """滑块值 → 起点百分比(立方映射:前 10% 阈值占拖动条大部分,低阈值精细可调)。"""
+        value = max(1, self.level_slider.value())
+        return (value / 100.0) ** 3
 
     def _level_label_text(self) -> str:
         return f"Contour start {self._level_fraction() * 100:.2f}%"

@@ -7,7 +7,8 @@
   1D、全谱视图 Full view、强度 Intensity;3D 面板同步(3D view / Slice /
   MIP / Sum);峰表工具栏 Add peak / Delete selected / Import-Export Poky /
   Save peaks。
-- 调整:轮廓起点默认 3%(滑块线性映射,默认值 3)、级数默认 8(原 36)。
+- 调整:轮廓起点默认 3%(滑块立方映射,默认值 31,显示 2.98%)、级数默认
+  8(原 36);前 10% 阈值占拖动条大部分,低阈值比原平方映射更精细可调。
 - 修复(GUI Agent,用户反馈):主页面右侧谱图文件列表不再混入 process 目录
   的 raw.fid(原 0.2.29 为 1D 查看追加),列表只列 .ft2/.ft3;FID 仍可
   拖放/直接打开查看 1D。
