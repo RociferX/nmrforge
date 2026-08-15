@@ -1,5 +1,19 @@
 # 变更日志
 
+## [0.2.90] - 2026-08-16
+
+- 修复/调整(G2B-009 修订,Architect,用户要求):raw 导入只读文件改为
+  符号链接优先(软连接)——VM/Linux 下 raw 呈现为软链接,不再因硬链接
+  显示成普通文件;链接顺序:符号链接 → 硬链接 → 复制(Windows 无符号
+  链接权限时自动回退);
+- 只复制需要修改的文件:WRITABLE_RAW_NAMES 增 profYZ.dat(转换会 touch
+  该文件,实体复制防止改写写回源数据;fid.com 原本就在名单);
+- 测试:link_stats 断言平台感知(符号链接可用断言 symlink,否则 hardlink);
+  可写名单测试覆盖 fid.com + profYZ.dat;本地全量 488 passed、VM 全量
+  484 passed + 4 skipped(1eb8a4c),ruff 全绿;
+- VM 实测(sampleB,3D HNCACB):raw 1682 文件全部软链接、0 复制,
+  fid.com/profYZ.dat 实体复制,无 warnings。
+
 ## [0.2.89] - 2026-08-16
 
 - merge(Architect):并入 GUI 0.2.86(查看器交互调相 P0/P1 + 生成谱图参数
