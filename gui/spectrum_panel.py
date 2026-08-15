@@ -36,6 +36,12 @@ class SpectrumPanel(QWidget):
     """谱图面板:查看器 + 文件列表 + 峰表(加/删/改/存)。"""
 
     peaks_saved = pyqtSignal()  # 峰表写回后发出(主窗口刷新 Pipeline/日志)
+    status_message = pyqtSignal(str)  # 状态栏提示(主窗口接收)
+    _ft3_ready = pyqtSignal(object, object)  # (path, Spectrum3D) 后台加载完成
+    _ft3_failed = pyqtSignal(object, str)  # (path, message)
+
+    # 0.2.89:超过该大小的 .ft3 后台线程加载,避免大文件读取卡死 UI
+    _ASYNC_FT3_MIN_BYTES = 32 * 1024 * 1024
 
     def __init__(
         self,
@@ -64,6 +70,8 @@ class SpectrumPanel(QWidget):
         self.viewer = SpectrumViewer()
         self._spectrum3d_panel = Spectrum3DPanel()
         self._spectrum3d_panel.setVisible(False)
+        self._ft3_ready.connect(self._on_ft3_ready)
+        self._ft3_failed.connect(self._on_ft3_failed)
         self._spectrum3d_panel.slice_changed.connect(self._render_3d_view)
         self._spectrum3d_panel.plane_combo.currentIndexChanged.connect(
             self._save_3d_state
@@ -242,6 +250,16 @@ class SpectrumPanel(QWidget):
             if path.suffix.lower() == ".ft3":
                 from viewer.spectrum import Spectrum3D
 
+                size = path.stat().st_size if path.is_file() else 0
+                if size >= self._ASYNC_FT3_MIN_BYTES:
+                    # 0.2.89:大 3D 谱后台加载,避免 UI 长时间无响应
+                    self._current_spectrum = path
+                    self.status_message.emit(
+                        f"正在后台加载 3D 谱: {path.name} "
+                        f"({size // (1024 * 1024)} MB)"
+                    )
+                    self._load_ft3_async(path, labels3d)
+                    return True
                 self._current_spectrum = path
                 # 在 set_spectrum3d(会重置平面/投影并触发保存)之前捕获记忆状态
                 state = self._viewer3d_state.get(self._current_data_id)
@@ -273,6 +291,42 @@ class SpectrumPanel(QWidget):
         self.viewer.add_spectrum(spectrum, name=name or path.stem)
         return True
 
+
+    def _load_ft3_async(self, path: Path, labels3d) -> None:
+        """后台线程读取大 .ft3,完成后经信号回主线程绑定渲染。"""
+        import threading
+
+        def worker() -> None:
+            try:
+                from viewer.spectrum import Spectrum3D
+
+                spectrum3d = Spectrum3D.load_from_ft3(path, labels=labels3d)
+                self._ft3_ready.emit(path, spectrum3d)
+            except Exception as exc:  # noqa: BLE001 - 错误统一回主线程提示
+                self._ft3_failed.emit(path, f"{type(exc).__name__}: {exc}")
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_ft3_ready(self, path, spectrum3d) -> None:
+        """大 .ft3 加载完成(主线程):绑定 3D 面板并渲染;已切换则忽略。"""
+        if path != self._current_spectrum:
+            return
+        state = self._viewer3d_state.get(self._current_data_id)
+        self._spectrum3d_panel.set_spectrum3d(spectrum3d)
+        self._spectrum3d_panel.setVisible(True)
+        if state:
+            self._spectrum3d_panel.plane_combo.setCurrentIndex(state[0])
+            self._spectrum3d_panel.mode_combo.setCurrentIndex(state[1])
+        self._render_3d_view()
+        self._load_peaks(path)
+        self.status_message.emit(f"已加载 3D 谱: {path.name}")
+
+    def _on_ft3_failed(self, path, message: str) -> None:
+        """大 .ft3 加载失败(主线程)。"""
+        if path != self._current_spectrum:
+            return
+        self._current_spectrum = None
+        self.status_message.emit(f"3D 谱加载失败: {message}")
 
     def _axis_labels(self, required: int) -> tuple[str, ...] | None:
         """按当前样品数据 metadata 的核信息生成轴名(F1/F2/F3→H/N/C)。

@@ -1,5 +1,26 @@
 # 变更日志
 
+## [0.2.89] - 2026-08-16
+
+- 修复(GUI Agent,用户反馈):核种类按化学位移(观测频率 sf)推断——
+  sf/旋磁比对应 1H 频率并与常见磁场匹配(600→1H、60.8→15N、
+  150.9→13C),推断失败才回退 acqus 的 NUC1 标签;注释自动填充的
+  核与查看器轴标签(N-H/C-N-H)同步使用该推断。
+- 修复(GUI Agent,用户反馈):3D 谱导入后打开卡顿——大 .ft3
+  (>32MB)改为后台线程读取,状态栏提示加载进度,完成后再绑定
+  渲染,UI 不再长时间无响应。
+- 调整(GUI Agent,用户反馈):3D 投影方式对齐 nmrPipe projZ.M——
+  新增 Proj 模式(每张平面低于阈值的点置零后沿轴求和,峰保留、
+  噪声不累积),并设为默认;如 HNCACB 沿 13C 投影得到类似 HSQC
+  的 HN 平面(选 F2-F3 平面 + Proj)。阈值取 3×噪声估计。
+- 修复(GUI Agent,用户反馈):3D 谱生成后整链莫名 OUTDATED + 左侧点击
+  卡顿——raw 输入指纹只统计权威 Bruker 输入文件(acqus/acqu2s/acqu3s/
+  ser/fid/nuslist,与导入登记一致)+ metadata.json;3D NUS 处理写入
+  raw/fid、raw/mask、raw/ft 等数百个中间产物不再使导入/FID 误判过期,
+  状态计算从 ~1s/次(1537 文件全量哈希)降到毫秒级。
+- 测试:infer_nucleus、project_nmrpipe 阈值求和、3D 默认 Proj、
+  大 .ft3 异步加载、raw 处理产物忽略;本地全量 pytest + ruff 全绿。
+
 ## [0.2.88] - 2026-08-16
 
 - 调整(GUI Agent,用户反馈):取消选中样品数据时自动显示谱图——右侧

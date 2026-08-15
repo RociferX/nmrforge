@@ -254,6 +254,33 @@ class Spectrum3D:
             source=self.source,
         )
 
+    def estimate_noise(self, fraction: float = 0.1) -> float:
+        """用角落小块(三维)的标准差估计噪声水平。"""
+        if self.data.size == 0:
+            return 0.0
+        s0 = max(1, int(self.data.shape[0] * fraction))
+        s1 = max(1, int(self.data.shape[1] * fraction))
+        s2 = max(1, int(self.data.shape[2] * fraction))
+        region = self.data[-s0:, -s1:, -s2:]
+        return float(np.std(region)) if region.size else 0.0
+
+    def project_nmrpipe(self, axis_idx: int, thresh: float) -> Spectrum:
+        """nmrPipe projZ 式投影:低于阈值的点置零后沿轴求和。
+
+        projZ.M 的做法:每张平面先做 ±阈值截断(噪声置零),再把平面
+        累加——峰强度保留、噪声不累积,投影谱观感接近常规二维谱
+        (如 HNCA 沿 13C 投影得到类似 HSQC 的 HN 平面)。
+        """
+        data = np.asarray(self.data, dtype=float)
+        if thresh > 0:
+            data = np.where(np.abs(data) < thresh, 0.0, data)
+        data2d = np.sum(data, axis=axis_idx)
+        remaining = [i for i in range(3) if i != axis_idx]
+        return Spectrum(
+            np.asarray(data2d), [self.axes[i] for i in remaining],
+            source=self.source,
+        )
+
 class Spectrum1D:
     """一维谱(时间域 FID 或二维切片):``data`` 形状 (N,),一个 SpectrumAxis。"""
 

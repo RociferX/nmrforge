@@ -20,7 +20,12 @@ from viewer.spectrum import Spectrum, Spectrum3D
 
 # (显示名, 被固定/切片的轴下标);查看平面为该轴之外的另两轴
 _PLANES = (("F1-F2", 2), ("F1-F3", 1), ("F2-F3", 0))
-_MODES = (("Slice", "slice"), ("MIP", "max"), ("Sum", "sum"))
+_MODES = (
+    ("Slice", "slice"),
+    ("Proj", "proj"),  # nmrPipe projZ 式:阈值截断后沿轴求和
+    ("MIP", "max"),
+    ("Sum", "sum"),
+)
 
 
 class Spectrum3DPanel(QWidget):
@@ -32,7 +37,7 @@ class Spectrum3DPanel(QWidget):
         super().__init__(parent)
         self._spectrum3d: Spectrum3D | None = None
         self._slice_axis = 2  # 默认 F1-F2 平面(固定 F3)
-        self._mode = "max"  # 默认 MIP 投影(右侧直接显示一个投影)
+        self._mode = "proj"  # 默认 nmrPipe 式阈值求和投影
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
@@ -45,7 +50,7 @@ class Spectrum3DPanel(QWidget):
         self.mode_combo = QComboBox()
         self.mode_combo.addItems([name for name, _ in _MODES])
         self.mode_combo.setToolTip(
-            "切片(固定第三轴一个平面)/ MIP 最大强度投影 / 求和投影"
+            "切片 / Proj(nmrPipe 式:低于阈值置零后沿轴求和)/ MIP 最大强度 / 求和投影"
         )
         self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
         layout.addWidget(self.mode_combo)
@@ -58,21 +63,27 @@ class Spectrum3DPanel(QWidget):
         self.position_label = QLabel("Slice: -")
         self.position_label.setWordWrap(True)
         layout.addWidget(self.position_label)
-        self.mode_combo.setCurrentIndex(1)  # 默认 MIP 投影(控件就绪后)
+        self.mode_combo.setCurrentIndex(1)  # 默认 Proj 投影(控件就绪后)
 
     # ------------------------------------------------------------- API
     def set_spectrum3d(self, spectrum3d: Spectrum3D) -> None:
-        """绑定 3D 谱并重置到默认平面(F1-F2, MIP 投影);自动发出重绘。"""
+        """绑定 3D 谱并重置到默认平面(F1-F2, Proj 投影);自动发出重绘。"""
         self._spectrum3d = spectrum3d
         self._slice_axis = 2
-        self._mode = "max"  # 默认显示一个投影(MIP)
+        self._mode = "proj"  # 默认 nmrPipe projZ 式阈值求和投影
+        noise = spectrum3d.estimate_noise()
+        self._proj_thresh = (
+            3.0 * noise
+            if noise > 0
+            else 0.01 * max(spectrum3d.max_intensity, 1.0)
+        )
         # 平面下拉项用核名(如 N-H / N-C / H-C);下标由轴标签决定
         for index, (_, axis) in enumerate(_PLANES):
             remaining = [i for i in range(3) if i != axis]
             name = "-".join(self._spectrum3d.axes[i].label for i in remaining)
             self.plane_combo.setItemText(index, name)
         self.plane_combo.setCurrentIndex(0)
-        self.mode_combo.setCurrentIndex(1)  # 默认 MIP 投影
+        self.mode_combo.setCurrentIndex(1)  # 默认 Proj 投影
         self._update_slider_range()
         self._update_position_label()
         self._emit()
@@ -91,6 +102,10 @@ class Spectrum3DPanel(QWidget):
         if self._mode == "slice":
             spectrum = self._spectrum3d.slice(
                 self._slice_axis, self.slice_slider.value()
+            )
+        elif self._mode == "proj":
+            spectrum = self._spectrum3d.project_nmrpipe(
+                self._slice_axis, getattr(self, "_proj_thresh", 0.0)
             )
         else:
             spectrum = self._spectrum3d.project(self._slice_axis, self._mode)

@@ -13,6 +13,8 @@ import json
 import re
 from pathlib import Path
 
+from viewer.axis_labels import infer_nucleus
+
 # 各级注释字段(键 / 显示名),0.2.79 起按层级区分:
 # 项目=蛋白样品基本信息;实验类型=类型/维度/核;样品数据=重复/条件/pH/温度。
 SAMPLE_FIELDS: tuple[tuple[str, str], ...] = (
@@ -320,11 +322,16 @@ def auto_fill_notes_from_metadata(
         and exptype.lower() not in ("unknown", "generic", "generic2d", "generic3d")
     ):
         exp_fields["experiment_type"] = exptype
-    nuclei = [
-        str(dim.get("nucleus", "")).strip()
-        for dim in (dataset.get("dimensions") or [])
-        if str(dim.get("nucleus", "")).strip()
-    ]
+    nuclei: list[str] = []
+    for dim in dataset.get("dimensions") or []:
+        try:
+            sf = float(dim.get("sf", 0) or 0)
+        except (TypeError, ValueError):
+            sf = 0.0
+        # 0.2.89:优先按化学位移(观测频率 sf)推断核,失败回退存储字段
+        nucleus = infer_nucleus(sf) or str(dim.get("nucleus", "") or "").strip()
+        if nucleus:
+            nuclei.append(nucleus)
     if nuclei and not exp_fields.get("nuclei"):
         exp_fields["nuclei"] = "-".join(nuclei)
     set_experiment_note_fields(project, exp_id, exp_fields)

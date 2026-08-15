@@ -200,6 +200,9 @@ class MainWindow(QMainWindow):
 
         self.spectrum_panel = SpectrumPanel(self.manager, controller=self.controller)
         self.spectrum_panel.peaks_saved.connect(self._on_peaks_saved)
+        self.spectrum_panel.status_message.connect(
+            self.statusBar().showMessage
+        )
 
         self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
         self.main_splitter.addWidget(self.project_tree)

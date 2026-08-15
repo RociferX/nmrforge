@@ -25,6 +25,18 @@ def qapp() -> QApplication:
     yield app
 
 
+def test_infer_nucleus_from_sf() -> None:
+    """0.2.89:按观测频率 sf 推断核:600→1H、60.8→15N、150.9→13C。"""
+    from viewer.axis_labels import infer_nucleus
+
+    assert infer_nucleus(600.13) == "1H"
+    assert infer_nucleus(60.82) == "15N"
+    assert infer_nucleus(150.9) == "13C"
+    assert infer_nucleus(10) == ""
+    assert infer_nucleus(2000) == ""
+    assert infer_nucleus(0) == ""
+
+
 def test_nucleus_symbol() -> None:
     assert nucleus_symbol("1H") == "H"
     assert nucleus_symbol("15N") == "N"

@@ -116,11 +116,19 @@ def _raw_dir(manager: Any, exp_id: str, data_id: str) -> Path | None:
     return raw if raw.is_dir() else None
 
 
-def raw_fingerprint(manager: Any, exp_id: str, data_id: str) -> str | None:
-    """原始数据指纹:metadata.json 内容 + raw 文件 (路径, size, mtime) 清单。
+# 原始数据权威输入文件(与导入 WorkflowRun.inputs 的 sha256:<name> 一致);
+# 处理过程在 raw/ 下写入/移动的中间产物(fid/、mask/、ft/ 等)不计入输入指纹。
+_RAW_KEY_FILES = ("acqus", "acqu2s", "acqu3s", "ser", "fid", "nuslist")
 
-    fid.com 属处理脚本(fid 步骤单独以 script_hash 校验),不计入输入指纹,
-    避免 bruker 重新生成脚本头导致误判。
+
+def raw_fingerprint(manager: Any, exp_id: str, data_id: str) -> str | None:
+    """原始数据输入指纹:metadata.json 内容 + 权威 Bruker 输入文件指纹。
+
+    0.2.89:只统计 acqus/acqu2s/acqu3s/ser/fid/nuslist——3D NUS 处理会在
+    raw/ 下生成 fid/、mask/、ft/ 等数百个中间文件并移动个别文件,若全目录
+    扫描会使导入/FID 步骤在「生成谱图」后误判 OUTDATED,且每次选中数据
+    全量哈希大目录导致 UI 卡顿(实测 1537 文件 ~1s/次)。小文件仍用内容
+    哈希(≤8MiB),避免后端 touch 辅助文件 mtime 误判。
     """
     digest = hashlib.sha256()
     meta = manager.data_metadata_path(exp_id, data_id)
@@ -130,25 +138,13 @@ def raw_fingerprint(manager: Any, exp_id: str, data_id: str) -> str | None:
     except OSError:
         pass
     raw = _raw_dir(manager, exp_id, data_id)
-    files: list[Path] = []
-    if raw is not None:
-        try:
-            files = sorted(p for p in raw.rglob("*") if p.is_file())
-        except OSError:
-            files = []
-    digest.update(f"|files={len(files)}".encode())
-    for path in files:
-        if path.name == "fid.com":
-            continue
-        # 0.2.84:小文件用内容哈希(≤8MiB),大文件保留 size+mtime——
-        # 后端转换会 touch raw 里 Bruker 辅助文件(如 profYZ.dat)的
-        # mtime 但内容不变,纯 mtime 指纹导致 3D 生成 FID 后「导入/
-        # 生成FID」双双误判 OUTDATED(实测 sampleB)
-        fp = file_fingerprint(path)
+    if raw is None:
+        return digest.hexdigest()
+    for name in _RAW_KEY_FILES:
+        fp = file_fingerprint(raw / name)
         if fp is None:
             continue
-        rel = path.relative_to(raw).as_posix()
-        digest.update(f"|{rel}:{fp}".encode())
+        digest.update(f"|{name}:{fp}".encode())
     return digest.hexdigest()
 
 
