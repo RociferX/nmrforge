@@ -72,6 +72,37 @@ def test_file_fingerprint_changes_with_content(tmp_path: Path) -> None:
     assert file_fingerprint(tmp_path / "missing") is None
 
 
+def test_raw_fingerprint_ignores_mtime_touch() -> None:
+    """0.2.84 回归:小文件仅 mtime 被 touch(内容不变)不改变 raw
+    指纹——后端转换会 touch profYZ.dat 等辅助文件,纯 mtime 指纹
+    曾导致 3D 生成 FID 后导入/生成FID 双双误判 OUTDATED。"""
+    import os
+    import tempfile
+    from pathlib import Path as _Path
+
+    from core.project import ProjectManager
+    from gui import pipeline_state as ps
+
+    with tempfile.TemporaryDirectory() as td:
+        root = _Path(td)
+        manager = ProjectManager.create_project(root / "proj", "demo")
+        entry = manager.create_experiment(title="e")
+        data = manager.import_data(entry.id, str(root / "src"))
+        raw = manager.data_dir(entry.id, data.id, "raw")
+        raw.mkdir(parents=True, exist_ok=True)
+        data.raw_dir = str(raw)  # 指向项目内 raw 副本(模拟真实导入)
+        manager.save()
+        (raw / "profYZ.dat").write_text("payload-v1", encoding="utf-8")
+        f1 = ps.raw_fingerprint(manager, entry.id, data.id)
+        st = (raw / "profYZ.dat").stat()
+        os.utime(raw / "profYZ.dat", (st.st_atime + 1, st.st_mtime + 1))
+        f2 = ps.raw_fingerprint(manager, entry.id, data.id)
+        assert f1 == f2, "mtime touch 不应改变 raw 指纹"
+        (raw / "profYZ.dat").write_text("payload-v2", encoding="utf-8")
+        f3 = ps.raw_fingerprint(manager, entry.id, data.id)
+        assert f1 != f3, "内容变化应改变 raw 指纹"
+
+
 def test_statuses_success_without_state(
     tmp_path: Path, qapp: QApplication
 ) -> None:

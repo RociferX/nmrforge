@@ -1,5 +1,18 @@
 # 变更日志
 
+## [0.2.84] - 2026-08-15
+
+- GUI(Architect):修复 3D 数据生成 FID 后「导入数据 / 生成FID」双双
+  变 OUTDATED——根因:raw_fingerprint 用文件 mtime 计算,后端转换会
+  touch raw 里 Bruker 辅助文件(实测 sampleB 的 profYZ.dat)的 mtime
+  但内容不变,纯 mtime 指纹误判 raw 被修改(导入与生成FID 的输入指纹
+  都依赖 raw_fingerprint);
+- 修复:raw_fingerprint 小文件(≤8MiB)改用内容 SHA-256(复用
+  file_fingerprint),大文件保留 size+mtime——touch 不再误判,真实
+  内容修改仍能检出;
+- 测试:新增 test_raw_fingerprint_ignores_mtime_touch;全量 475 passed,
+  ruff 全绿。
+
 ## [0.2.83] - 2026-08-15
 
 - Backend(Architect):修复 0.2.77 并行引入的两个问题:

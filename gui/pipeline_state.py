@@ -140,12 +140,15 @@ def raw_fingerprint(manager: Any, exp_id: str, data_id: str) -> str | None:
     for path in files:
         if path.name == "fid.com":
             continue
-        try:
-            st = path.stat()
-            rel = path.relative_to(raw).as_posix()
-            digest.update(f"|{rel}:{st.st_size}:{st.st_mtime_ns}".encode())
-        except (OSError, ValueError):
+        # 0.2.84:小文件用内容哈希(≤8MiB),大文件保留 size+mtime——
+        # 后端转换会 touch raw 里 Bruker 辅助文件(如 profYZ.dat)的
+        # mtime 但内容不变,纯 mtime 指纹导致 3D 生成 FID 后「导入/
+        # 生成FID」双双误判 OUTDATED(实测 sampleB)
+        fp = file_fingerprint(path)
+        if fp is None:
             continue
+        rel = path.relative_to(raw).as_posix()
+        digest.update(f"|{rel}:{fp}".encode())
     return digest.hexdigest()
 
 
