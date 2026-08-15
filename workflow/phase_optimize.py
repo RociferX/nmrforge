@@ -983,6 +983,54 @@ def _candidate_tag(override: dict[str, tuple[float, float]]) -> str:
     ).hexdigest()[:10]
 
 
+def _resolve_workers(max_workers: int | None) -> int:
+    """并行 worker 数:显式指定优先,否则机器线程数 - 2(给系统留 2),最小 1。"""
+    return (
+        max_workers
+        if max_workers is not None
+        else max(1, (os.cpu_count() or 4) - 2)
+    )
+
+
+def _candidate_backend_run(
+    backend: Any,
+    experiment: Experiment,
+    plan: Any,
+    is_nus: bool,
+    override: dict[str, tuple[float, float]],
+    work_dir: Path | str | None,
+    prefix: str,
+) -> tuple[dict[str, Any] | None, str]:
+    """候选后端运行(每候选唯一脚本/输出名,线程安全)。
+
+    返回 (resp, path);resp=None 表示调用异常(与运行失败区分)。
+    prefix 区分来源(""=顺序搜索,"j"=联合复核),避免文件名冲突。
+    """
+    tag = _candidate_tag(override)
+    ext = "ft3" if experiment.ndim >= 3 else "ft2"
+    name = f"{experiment.dataset_id}_{prefix}{tag}.{ext}"
+    try:
+        if is_nus:
+            resp = backend.finalize_nus(
+                experiment,
+                phases=override,
+                work_dir=work_dir,
+                out_file=name,
+                script_name=f"{experiment.dataset_id}_{prefix}{tag}_finalize.com",
+            )
+        else:
+            resp = backend.process(
+                experiment,
+                plan,
+                direct_phase_override=override,
+                out_file=name,
+                script_name=f"{experiment.dataset_id}_{prefix}{tag}_process.com",
+            )
+    except Exception:  # noqa: BLE001 - 单候选失败不影响其它
+        return None, ""
+    return resp, str(resp.get("spectrum_path", ""))
+
+
 def _spectrum_real(path: str) -> np.ndarray:
     import nmrglue as ng
 
@@ -1189,12 +1237,8 @@ def _joint_recheck(
     zero_score = -1.0
     zero_path = ""
     runs = 0
-    n_workers = (
-        max_workers
-        if max_workers is not None
-        else max(1, (os.cpu_count() or 4) - 2)
-    )
-    use_unique = True  # 0.2.77:唯一输出名(修复缓存路径别名)
+    n_workers = _resolve_workers(max_workers)
+    # 0.2.77:唯一输出名(修复缓存路径别名)
 
     def _joint_eval(
         phases: dict[str, tuple[float, float]],
@@ -1208,42 +1252,11 @@ def _joint_recheck(
             is_new = False
         else:
             is_new = True
-            try:
-                if is_nus:
-                    if use_unique:
-                        tag = _candidate_tag(phases)
-                        ext = "ft3" if experiment.ndim >= 3 else "ft2"
-                        resp = backend.finalize_nus(
-                            experiment,
-                            phases=phases,
-                            work_dir=work_dir,
-                            out_file=f"{experiment.dataset_id}_j{tag}.{ext}",
-                            script_name=f"{experiment.dataset_id}_j{tag}_finalize.com",
-                        )
-                    else:
-                        resp = backend.finalize_nus(
-                            experiment, phases=phases, work_dir=work_dir
-                        )
-                else:
-                    if use_unique:
-                        tag = _candidate_tag(phases)
-                        ext = "ft3" if experiment.ndim >= 3 else "ft2"
-                        resp = backend.process(
-                            experiment,
-                            plan,
-                            direct_phase_override=phases,
-                            out_file=f"{experiment.dataset_id}_j{tag}.{ext}",
-                            script_name=f"{experiment.dataset_id}_j{tag}_process.com",
-                        )
-                    else:
-                        resp = backend.process(
-                            experiment, plan, direct_phase_override=phases
-                        )
-            except Exception:  # noqa: BLE001 - 单候选失败不影响其它
+            resp, path = _candidate_backend_run(
+                backend, experiment, plan, is_nus, phases, work_dir, "j"
+            )
+            if resp is None or not resp.get("success"):
                 return phases, None, "", True
-            if not resp.get("success"):
-                return phases, None, "", True
-            path = str(resp.get("spectrum_path", ""))
         try:
             score = _joint_score_path(path)
         except Exception:  # noqa: BLE001 - 单候选失败不影响其它
@@ -1270,7 +1283,7 @@ def _joint_recheck(
         if score > best_score:
             best_phases, best_score, best_path = dict(phases), score, path
 
-    if use_unique:
+    if n_workers > 1:
         with ThreadPoolExecutor(max_workers=n_workers) as pool:
             futures = [pool.submit(_joint_eval, phases) for phases in combos]
             for fut in as_completed(futures):
@@ -1390,11 +1403,7 @@ def optimize_phase_sequential(
     steps0 = _refine_steps(p0_step, final_step) if refine and p0_step > 0 else []
     steps1 = _refine_steps(p1_step, final_step) if refine and p1_step > 0 else []
     levels = max(len(steps0), len(steps1))
-    n_workers = (
-        max_workers
-        if max_workers is not None
-        else max(1, (os.cpu_count() or 4) - 2)
-    )
+    n_workers = _resolve_workers(max_workers)
     # 0.2.77:每候选使用唯一脚本/输出名——不只是并发安全,还修复联合复核
     # 缓存路径别名 bug:旧共享 raw.ft3 会被后写候选覆盖,缓存命中的联合组合
     # 会读到错误谱(d8 顺序模式 F2 曾因此误判 joint 更优)
@@ -1405,46 +1414,16 @@ def optimize_phase_sequential(
         def _evaluate_one(
             phase: tuple[float, float],
             override: dict[str, tuple[float, float]],
-            unique: bool,
         ) -> tuple[tuple[float, float], float, str, str, bool] | None:
             """后端运行 + 评分(线程安全,无状态突变)。
 
             返回 (phase, score, path, err, ran);ran=是否调用了后端(含失败)。
             """
-            path = ""
-            try:
-                if is_nus:
-                    if unique:
-                        tag = _candidate_tag(override)
-                        ext = "ft3" if experiment.ndim >= 3 else "ft2"
-                        resp = backend.finalize_nus(
-                            experiment,
-                            phases=override,
-                            work_dir=work_dir,
-                            out_file=f"{experiment.dataset_id}_{tag}.{ext}",
-                            script_name=f"{experiment.dataset_id}_{tag}_finalize.com",
-                        )
-                    else:
-                        resp = backend.finalize_nus(
-                            experiment, phases=override, work_dir=work_dir
-                        )
-                else:
-                    if unique:
-                        tag = _candidate_tag(override)
-                        ext = "ft3" if experiment.ndim >= 3 else "ft2"
-                        resp = backend.process(
-                            experiment,
-                            plan,
-                            direct_phase_override=override,
-                            out_file=f"{experiment.dataset_id}_{tag}.{ext}",
-                            script_name=f"{experiment.dataset_id}_{tag}_process.com",
-                        )
-                    else:
-                        resp = backend.process(
-                            experiment, plan, direct_phase_override=override
-                        )
-            except Exception as exc:  # noqa: BLE001 - 单候选失败不影响其它
-                return None, None, None, f"{axis} 候选 {phase}: 后端异常 {exc}", True
+            resp, path = _candidate_backend_run(
+                backend, experiment, plan, is_nus, override, work_dir, ""
+            )
+            if resp is None:
+                return None, None, None, f"{axis} 候选 {phase}: 后端异常", True
             if not resp.get("success"):
                 return (
                     None,
@@ -1453,7 +1432,6 @@ def optimize_phase_sequential(
                     f"{axis} 候选 {phase}: 运行失败 {resp.get('message')}",
                     True,
                 )
-            path = str(resp.get("spectrum_path", ""))
             try:
                 if custom_score:
                     score, _components = score_fn(path)
@@ -1502,11 +1480,11 @@ def optimize_phase_sequential(
                 return
             if n_workers <= 1:
                 for phase, override in pending:
-                    _merge_one(_evaluate_one(phase, override, True))
+                    _merge_one(_evaluate_one(phase, override))
                 return
             with ThreadPoolExecutor(max_workers=n_workers) as pool:
                 futures = {
-                    pool.submit(_evaluate_one, phase, override, True): phase
+                    pool.submit(_evaluate_one, phase, override): phase
                     for phase, override in pending
                 }
                 for fut in as_completed(futures):

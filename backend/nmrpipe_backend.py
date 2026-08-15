@@ -64,6 +64,29 @@ def zf_summary(plan: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
     }
 
 
+def _effective_params_base(
+    extract: bool,
+    ext_lo: str,
+    ext_hi: str,
+    zf_plan: dict[str, Any],
+    baseline: dict[str, Any] | None,
+    linewidth_hz: dict[str, float] | None,
+    points_per_line: float,
+    sampling: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """process/reconstruct_nus 共用的 effective_params 基础键(0.2.46)。"""
+    return {
+        "extract": extract,
+        "ext_lo": ext_lo,
+        "ext_hi": ext_hi,
+        "zero_fill": zf_summary(zf_plan),
+        "baseline": baseline,
+        "linewidth_hz": linewidth_hz,
+        "points_per_line": points_per_line,
+        "sampling": dict(sampling),
+    }
+
+
 @dataclass
 class NMRPipeBackend:
     """NMRPipe 实现（Linux：bruker -AUTO + fid.com + NMRPipe 管道 + SMILE + 多段合并）。"""
@@ -231,16 +254,18 @@ class NMRPipeBackend:
             "spectrum_path": str(spectrum),
             "logs": logs,
             "effective_params": {
-                "extract": extract,
-                "ext_lo": ext_lo,
-                "ext_hi": ext_hi,
-                "zero_fill": zf_summary(zf_plan),
-                "baseline": baseline,
+                **_effective_params_base(
+                    extract,
+                    ext_lo,
+                    ext_hi,
+                    zf_plan,
+                    baseline,
+                    linewidth_hz,
+                    points_per_line,
+                    sampling,
+                ),
                 "window": window,
                 "direct_phase": direct_phase,
-                "linewidth_hz": linewidth_hz,
-                "points_per_line": points_per_line,
-                "sampling": dict(sampling),
             },
         }
 
@@ -494,11 +519,16 @@ class NMRPipeBackend:
             "spectrum_path": str(spectrum),
             "logs": logs,
             "effective_params": {
-                "extract": extract,
-                "ext_lo": ext_lo,
-                "ext_hi": ext_hi,
-                "zero_fill": zf_summary(zf_plan),
-                "baseline": baseline,
+                **_effective_params_base(
+                    extract,
+                    ext_lo,
+                    ext_hi,
+                    zf_plan,
+                    baseline,
+                    linewidth_hz,
+                    points_per_line,
+                    sampling,
+                ),
                 "nSigma": nsigma,
                 "thresh": thresh,
                 "smile_xq3": smile_xq3,
