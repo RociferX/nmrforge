@@ -1,5 +1,21 @@
 # 变更日志
 
+## [0.2.91] - 2026-08-16
+
+- 调整(Architect,用户要求):fid.com 等生成脚本归位 process/ 工作目录——
+  backend._convert_dir 把 bruker -AUTO 在 raw 生成的 fid.com 立即移入
+  dest_work(process/),以绝对路径 csh 执行(内部相对路径仍以 raw 为 cwd
+  解析 ./ser);转换后 raw 不再残留 fid.com;回退 convert.com 同步绝对路径;
+- workflow/manual:manual_fid_com 优先读 process/fid.com(旧数据回退 raw),
+  自动生成前确保 process 目录存在;run_manual_fid_com 把修改后的 fid.com
+  写入 process/ 再运行;
+- GUI:pipeline_state.script_fingerprint 与 processing._fid_com_script
+  改读 process/fid.com(旧数据回退 raw/);
+- 测试:test_manual/test_gui_snapshot 更新到 process/;本地全量 488 passed、
+  VM 全量 484 passed + 4 skipped(b455c02),ruff 全绿;
+- VM 实测(sampleB 真实转换):fid.com 与 raw.fid 均在 process/,raw 无
+  fid.com(1682 软链接 + 仅 profYZ.dat 实体),转换正常。
+
 ## [0.2.90] - 2026-08-16
 
 - 修复/调整(G2B-009 修订,Architect,用户要求):raw 导入只读文件改为
