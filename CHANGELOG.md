@@ -30,13 +30,26 @@
 
 ## [0.2.86] - 2026-08-16
 
-- 直接维提取窗口默认 6-11 ppm → **6.5-10.5 ppm**(用户指定)并配置化:
+- 直接维提取窗口默认 6-11 ppm → **6.5-10.5 ppm**(Backend,用户指定)并配置化:
   - config/nmrforge.yaml processing.ext_lo/ext_hi(10.5/6.5);
     backend.config.load_processing_defaults 返回(供 GUI 设置对话框改默认值);
     resolve_ext_lo/resolve_ext_hi:显式 params > 配置 > 内置默认;
   - process/reconstruct_nus/_process 与 param_schema/脚本默认值全部同步;
   - 测试:更新 4 处旧默认断言(11/6 → 10.5/6.5);全量 479 passed,ruff 全绿;
   - GUI 侧需在设置对话框暴露 ext_lo/ext_hi(待 GUI Agent 接线,后端数据源已就绪)。
+- 新增(GUI Agent,用户反馈):查看器交互式相位校正面板 P0/P1 滑块——
+  对复型数据(1D FID / 二维时域 FID)频率域调相实时重渲(1D 实时、
+  2D 松手重建),支持 Reset/复制 P0/P1 回写脚本 PS 行;实型终谱
+  (ft2/ft3)无法事后调相,面板提示禁用。
+- 调整(GUI Agent,用户反馈):点击「生成谱图」步骤展开详情,新增
+  「参数报告」——按实际生效参数列出提取窗口/窗函数/填零/相位/基线/
+  SMILE 等(readable 逐行,来自 WorkflowRun effective_params)。
+- 新增(GUI Agent,用户反馈):导入数据后自动按 Bruker 文件填充注释——
+  实验类型注释:维度/实验类型(presets 名)/核;样品数据注释:温度
+  (acqus TE);只填空字段不覆盖已有值。
+- 新增(GUI Agent,用户反馈):导入后自动检查并报告原始数据质量——
+  acqus 参数/维度/核/温度、ser/fid 存在性与大小、小文件信噪估算,
+  日志输出 + 问题并入导入完成提示;批量导入逐项检查。
 
 ## [0.2.85] - 2026-08-16
 

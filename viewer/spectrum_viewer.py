@@ -142,6 +142,11 @@ class SpectrumViewer(QWidget):
         self.show_peaks_checkbox.setChecked(True)
         self.show_peaks_checkbox.toggled.connect(self.set_peaks_visible)
         controls_layout.addWidget(self.show_peaks_checkbox)
+        from viewer.phase_panel import PhasePanel
+
+        self.phase_panel = PhasePanel()
+        self.phase_panel.phase_changed.connect(self._on_phase_changed)
+        controls_layout.addWidget(self.phase_panel)
         self.controls_layout = controls_layout
 
         # TopSpin 式 1D 条带:上方行迹线(F2)、右侧列迹线(F1),与主谱联动
@@ -221,6 +226,7 @@ class SpectrumViewer(QWidget):
         self.layer_spectra.clear()
         self.layer_list.clear()
         self._primary = None
+        self.phase_panel.set_available(False)
         self.set_peaks([])
 
     def add_spectrum(
@@ -265,6 +271,7 @@ class SpectrumViewer(QWidget):
             self._primary = spectrum
             self._setup_axes(spectrum)
             self.reset_view()
+        self._refresh_phase_availability()
         return name
 
     def _level_fraction(self) -> float:
@@ -371,6 +378,7 @@ class SpectrumViewer(QWidget):
         self.plot.getViewBox().invertY(False)
         self.set_1d_mode(False)
         self.reset_view()
+        self._refresh_phase_availability()
         return name or (
             spectrum1d.source.stem if spectrum1d.source is not None else "1D"
         )
@@ -391,6 +399,71 @@ class SpectrumViewer(QWidget):
             self._setup_axes(self._primary)
             self.reset_view()
             self._apply_peak_items()
+        self._refresh_phase_availability()
+
+    # ------------------------------------------------------------ phase
+    def _refresh_phase_availability(self) -> None:
+        """按当前谱图是否有复型数据启用/禁用相位面板。"""
+        complex_data, _kind = self._complex_for_phase()
+        self.phase_panel.set_available(complex_data is not None)
+
+    def _complex_for_phase(self) -> tuple[np.ndarray | None, str]:
+        """当前可用于交互调相的复型数据(1D FID 或二维时域 FID)。"""
+        if self._mode_1d and self._primary_1d is not None:
+            return getattr(self._primary_1d, "complex_data", None), "1d"
+        if self._primary is not None:
+            return getattr(self._primary, "complex_data", None), "2d"
+        return None, ""
+
+    def _on_phase_changed(self, final: bool) -> None:
+        """相位滑块变化:1D 实时更新,2D 松手后重建轮廓。"""
+        complex_data, kind = self._complex_for_phase()
+        if complex_data is None:
+            return
+        if kind == "1d":
+            self._update_phased_1d(complex_data)
+        elif kind == "2d" and final:
+            self._update_phased_2d(complex_data)
+
+    @staticmethod
+    def _phase_rotate(
+        complex_data: np.ndarray, p0: float, p1: float, axis: int
+    ) -> np.ndarray:
+        """沿指定轴 FT 后按 P0/P1 旋转相位,返回实部显示数据。"""
+        spec = np.fft.fft(complex_data, axis=axis)
+        n = spec.shape[axis]
+        k = np.arange(n, dtype=float)
+        angle = np.deg2rad(p0 + p1 * k / max(1, n - 1))
+        shape = [1] * spec.ndim
+        shape[axis] = n
+        return (spec * np.exp(1j * angle.reshape(shape))).real
+
+    def _update_phased_1d(self, complex_data: np.ndarray) -> None:
+        if self._plot_1d is None or self._primary_1d is None:
+            return
+        p0, p1 = self.phase_panel.values()
+        phased = self._phase_rotate(np.asarray(complex_data), p0, p1, axis=0)
+        self._plot_1d.setData(self._primary_1d.x_values(), phased)
+
+    def _update_phased_2d(self, complex_data: np.ndarray) -> None:
+        if self._primary is None or not self.layers:
+            return
+        p0, p1 = self.phase_panel.values()
+        phased = self._phase_rotate(np.asarray(complex_data), p0, p1, axis=1)
+        display = Spectrum(phased, self._primary.axes, source=self._primary.source)
+        layer = ContourLayer(
+            display.data,
+            self._levels_for(display),
+            pg.mkPen("#1f77b4", width=1),
+            neg_pen=pg.mkPen("#e74c3c", width=1),
+            zoom=self._contour_zoom,
+        )
+        self.plot.addItem(layer)
+        old = self.layers[0]
+        self.plot.removeItem(old)
+        self.layers[0] = layer
+        self.layer_spectra[0] = display
+        self._apply_peak_items()
 
     def set_1d_mode(self, active: bool) -> None:
         """开关一维谱显示(TopSpin 式):十字线 + 上/右 1D 条带。"""

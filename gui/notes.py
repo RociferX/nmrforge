@@ -10,6 +10,8 @@ manager.save() 前调用。
 from __future__ import annotations
 
 import json
+import re
+from pathlib import Path
 
 # 各级注释字段(键 / 显示名),0.2.79 起按层级区分:
 # 项目=蛋白样品基本信息;实验类型=类型/维度/核;样品数据=重复/条件/pH/温度。
@@ -245,3 +247,87 @@ def data_note(project, exp_id: str, data_id: str) -> str:
 def set_data_note(project, exp_id: str, data_id: str, text: str) -> None:
     """兼容旧调用:写入 备注 字段。"""
     set_data_note_fields(project, exp_id, data_id, {"notes": text})
+
+
+# ---------------------------------------------------------------- 导入自动填充
+def _acqus_value(raw_dir, key: str) -> str:
+    """从 Bruker acqus 读单个参数值(如 TE)。"""
+    acqus = Path(raw_dir) / "acqus"
+    try:
+        text = acqus.read_text(encoding="latin-1", errors="replace")
+    except OSError:
+        return ""
+    match = re.search(rf"##\${key}=([^\n]+)", text)
+    return match.group(1).strip() if match else ""
+
+
+def temperature_from_acqus(raw_dir) -> str:
+    """Bruker TE(0.1 K 单位)→ 摄氏温度字符串;无法解析返回空串。"""
+    value = _acqus_value(raw_dir, "TE")
+    if not value:
+        return ""
+    try:
+        tenths = float(value.split()[0])
+    except (TypeError, ValueError):
+        return ""
+    return f"{tenths / 10.0 - 273.15:.1f}"
+
+
+def _raw_dir_for(project, exp_id: str, data_id: str) -> Path | None:
+    try:
+        raw = project.data_dir(exp_id, data_id, "raw")
+        if raw.is_dir():
+            return raw
+    except Exception:  # noqa: BLE001 - 布局不可用按无原始目录处理
+        pass
+    return None
+
+
+def auto_fill_notes_from_metadata(
+    manager, exp_id: str, data_id: str, metadata: dict
+) -> dict:
+    """导入后按 Bruker 文件/元数据自动填充注释里能填的字段(不覆盖已有值)。
+
+    实验类型注释:维度 / 实验类型(presets 名)/ 核;
+    样品数据注释:温度(acqus TE)。返回本次实际填充的 {字段: 值} 摘要。
+    """
+    filled: dict[str, str] = {}
+    project = manager.project if manager is not None else None
+    if project is None:
+        return filled
+    dataset = (metadata or {}).get("dataset") or {}
+
+    exp_fields = dict(experiment_note_fields(project, exp_id))
+    ndim = dataset.get("ndim")
+    if ndim and not exp_fields.get("dimension"):
+        exp_fields["dimension"] = f"{int(ndim)}D"
+    exptype = str((dataset.get("experiment_type") or {}).get("name", "") or "")
+    if (
+        exptype
+        and not exp_fields.get("experiment_type")
+        and exptype.lower() not in ("unknown", "generic", "generic2d", "generic3d")
+    ):
+        exp_fields["experiment_type"] = exptype
+    nuclei = [
+        str(dim.get("nucleus", "")).strip()
+        for dim in (dataset.get("dimensions") or [])
+        if str(dim.get("nucleus", "")).strip()
+    ]
+    if nuclei and not exp_fields.get("nuclei"):
+        exp_fields["nuclei"] = "-".join(nuclei)
+    set_experiment_note_fields(project, exp_id, exp_fields)
+    for key in ("dimension", "experiment_type", "nuclei"):
+        value = exp_fields.get(key, "")
+        if value:
+            filled[f"experiment.{key}"] = value
+
+    data_fields = dict(data_note_fields(project, exp_id, data_id))
+    if not data_fields.get("temperature"):
+        raw_dir = _raw_dir_for(manager, exp_id, data_id)
+        temp = temperature_from_acqus(raw_dir) if raw_dir is not None else ""
+        if temp:
+            data_fields["temperature"] = temp
+    set_data_note_fields(project, exp_id, data_id, data_fields)
+    if data_fields.get("temperature"):
+        filled["data.temperature"] = data_fields["temperature"]
+    return filled

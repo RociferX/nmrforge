@@ -322,10 +322,13 @@ class Spectrum1D:
 
         _dic, data = ng.pipe.read(str(path))
         data = np.asarray(data)
+        complex_data = data if np.iscomplexobj(data) else None
         if np.iscomplexobj(data):
             data = data.real
         while data.ndim > 2:
             data = data[0]  # 3D+ FID:显示首个间接增量的二维时域平面
+            if complex_data is not None and complex_data.ndim > 2:
+                complex_data = complex_data[0]
         if data.ndim == 1:
             axis = SpectrumAxis(
                 label=label or "FID 数据点",
@@ -335,8 +338,11 @@ class Spectrum1D:
                 carrier_ppm=0.0,
                 orig_hz=0.0,
             )
+            spectrum1d = cls(data, axis, source=Path(path))
+            if complex_data is not None:
+                spectrum1d.complex_data = complex_data
             logger.info("载入 FID: %s (%s)", path, data.shape)
-            return cls(data, axis, source=Path(path))
+            return spectrum1d
         fid_axis = SpectrumAxis(
             label=label or "FID",
             size=int(data.shape[0]),
@@ -354,6 +360,8 @@ class Spectrum1D:
             orig_hz=0.0,
         )
         spectrum = Spectrum(data, [fid_axis, point_axis], source=Path(path))
+        if complex_data is not None:
+            spectrum.complex_data = complex_data
         # FID 动态范围大(ADC 累积值),等高线默认基准取高分位数,
         # 避免被个别尖峰淹没,看不到大部分 FID 的时域包络。
         robust_max = float(np.percentile(np.abs(data), 99.0))
