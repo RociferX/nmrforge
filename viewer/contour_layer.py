@@ -1,15 +1,19 @@
-"""pyqtgraph 轮廓图层:小谱 matplotlib 等高线,大谱光栅化渲染(正黑负红)。
+"""pyqtgraph 轮廓图层:POKY/nmrDraw 风格真实等值线(细线框)。
 
-Poky/nmrDraw 风格:按强度把谱渲染为 RGBA 图像(正峰黑、负峰红,alpha
-随强度与级别起点),缩放/平移由 Qt 原生重采样;级别/级数滑块只触发
-numpy 向量化重渲染,避免 matplotlib 等高线几何计算的卡顿(真实 512x1024
-谱加载从约 10 秒降到约 30 毫秒)。
+小谱走 matplotlib 等高线(0.2.73 起 VM 全量验证稳定);真实数据规模
+(像素数 >= ``_CONTOURPY_MIN_PIXELS``)走 contourpy(C++ Marching Squares,
+matplotlib 底层引擎)在数据原始分辨率逐级追踪真实等值线,正=层色、负=红
+1px 折线。与 POKY/SPARKY/nmrDraw 的「lowest × factor^n 离散等值线」观感
+一致(级别由调用方给定;spectrum_viewer 默认 geomspace 等价于把最高级
+钉到谱峰 max 的几何级数)。
 
-尺寸分流(0.2.67):像素数小于 ``_RASTER_MIN_PIXELS`` 的小谱继续走
-matplotlib 等高线。VM Linux 全量 pytest 下,小谱光栅化的内存分配模式
-会触发 PyQt6/sip 对 C++ 已析构子控件的 wrapper 缓存错配,导致 Qt 控件
-构造时随机段错误(与渲染逻辑本身无关);真实数据规模(512x1024 及以上)
-的大缓冲走 mmap,光栅化路径稳定且保持毫秒级性能。
+0.2.75:大谱渲染从光栅化 RGBA 强度图(0.2.71-0.2.74)改为 contourpy 真实
+等值线——光栅化是连续 alpha 填色,与 nmrDraw/POKY 的细线框完全不同;
+性能与光栅化同量级(512x1024 谱 10 级约 16-50ms、36 级约 52-116ms,
+QPainterPath 构建最坏约 170ms)。VM Linux 全量 pytest 下曾证实:小谱
+光栅化的内存分配模式会触发 PyQt6/sip 对 C++ 已析构子控件的 wrapper
+缓存错配段错误,故小谱保留 matplotlib 路径;统一走 contourpy(含小谱)
+会重新触发该段错误(崩溃点漂移,39737a5 同套件全绿),因此保留尺寸分流。
 """
 
 from __future__ import annotations
@@ -18,13 +22,13 @@ import numpy as np
 import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore, QtGui
 
-# 光栅化阈值:像素数达到该值(512x1024)才走光栅化,更小谱走 matplotlib
-# (Architect 基准:阈值处 matplotlib 中位 ≈167ms;上调后安全边际 4×)
-_RASTER_MIN_PIXELS = 512 * 1024
+# 大谱走 contourpy 的阈值:像素数达到该值(512x1024)才走 contourpy,
+# 更小谱走 matplotlib(0.2.73 Architect 基准;VM 段错误规避边界)
+_CONTOURPY_MIN_PIXELS = 512 * 1024
 
 
 class ContourLayer(pg.GraphicsObject):
-    """把二维数据渲染为等高线/强度图;坐标即数据点下标(与 ppm 轴对应)。"""
+    """把二维数据渲染为等高线;坐标即数据点下标(与 ppm 轴对应)。"""
 
     def __init__(
         self,
@@ -45,32 +49,41 @@ class ContourLayer(pg.GraphicsObject):
         )
         self._data: np.ndarray | None = None
         self._levels: np.ndarray | None = None
-        self._image: QtGui.QImage | None = None
-        self._image_data = b""  # QImage 引用该内存,必须持有引用
+        self._gen = None
         self._path = QtGui.QPainterPath()
         self._path_neg = QtGui.QPainterPath()
         self._smooth: np.ndarray | None = None
-        self._raster = False
+        self._use_contourpy = False
         self._bounds = QtCore.QRectF()
         self.setZValue(5)
         self.setData(data, levels)
 
     def setData(self, data: np.ndarray, levels: np.ndarray) -> None:
         self._data = np.asarray(data, dtype=float)
+        if self._data.ndim != 2:
+            raise ValueError(f"轮廓仅支持二维数据(当前 {self._data.ndim} 维)")
         self._levels = np.asarray(levels, dtype=float)
-        self._raster = self._data.size >= _RASTER_MIN_PIXELS
         self._smooth = None
-        if self._raster:
-            self._render()
+        self._use_contourpy = self._data.size >= _CONTOURPY_MIN_PIXELS
+        if self._use_contourpy:
+            import contourpy  # 惰性:避免收集阶段加载扩展改变堆布局
+
+            self._gen = (
+                contourpy.contour_generator(z=self._data)
+                if self._data.size
+                else None
+            )
+            self._build_paths()
         else:
+            self._gen = None
             self._rebuild()
         self.informViewBoundsChanged()
 
     def set_levels(self, levels: np.ndarray) -> None:
-        """仅更新级别并重建(小谱路径/大谱光栅化均快速)。"""
+        """仅更新级别并重建(小谱 matplotlib 路径/大谱 contourpy 均快速)。"""
         self._levels = np.asarray(levels, dtype=float)
-        if self._raster:
-            self._render()
+        if self._use_contourpy:
+            self._build_paths()
             self.update()
         elif self._smooth is not None:
             self._rebuild_paths()
@@ -84,7 +97,7 @@ class ContourLayer(pg.GraphicsObject):
             self._pen_neg = pg.mkPen(neg_pen)
         self.update()
 
-    # ---- matplotlib 等高线路径(小谱,稳定) ----
+    # ---- matplotlib 等高线路径(小谱,0.2.73 起 VM 全量验证稳定) ----
 
     def _rebuild(self) -> None:
         """全量重建:插值数据 + 轮廓路径(小谱首次/换谱时)。"""
@@ -92,8 +105,6 @@ class ContourLayer(pg.GraphicsObject):
 
         data = self._data
         levels = self._levels
-        if data is not None and data.ndim != 2:
-            raise ValueError(f"轮廓仅支持二维数据(当前 {data.ndim} 维)")
         self._smooth = None
         if data is not None and data.size and levels is not None and len(levels):
             zoom = self._zoom
@@ -140,64 +151,39 @@ class ContourLayer(pg.GraphicsObject):
         self._path = path_pos
         self._path_neg = path_neg
 
-    # ---- 光栅化路径(大谱,性能) ----
+    # ---- contourpy 真实等值线(大谱,0.2.75,原生分辨率) ----
 
-    def _render(self) -> None:
-        """把谱强度映射为 RGBA 图像:正峰黑、负峰红,alpha 按级别起点/级数。"""
-        data = self._data
+    def _build_paths(self) -> None:
+        """用 contourpy 逐级追踪等值线,正负级分别写入 QPainterPath。"""
+        path_pos = QtGui.QPainterPath()
+        path_neg = QtGui.QPainterPath()
+        gen = self._gen
         levels = self._levels
-        if (
-            data is None
-            or data.ndim != 2
-            or data.size == 0
-            or levels is None
-            or not len(levels)
-        ):
-            self._image = None
-            self._bounds = QtCore.QRectF()
-            return
-        height, width = data.shape
-        maximum = float(np.max(np.abs(data))) or 1.0
-        positive = levels[levels > 0]
-        if positive.size:
-            base_frac = float(positive.min() / (positive.max() or 1.0))
+        data = self._data
+        if gen is not None and levels is not None and len(levels):
+            for level in levels:
+                if level == 0:
+                    continue
+                target = path_neg if level < 0 else path_pos
+                for line in gen.create_contour(float(level)):
+                    if len(line) < 2:
+                        continue
+                    target.moveTo(line[0, 0], line[0, 1])
+                    for point in line[1:]:
+                        target.lineTo(point[0], point[1])
+        if data is not None and data.ndim == 2:
+            height, width = data.shape
+            self._bounds = QtCore.QRectF(0.0, 0.0, float(width), float(height))
         else:
-            base_frac = 0.0
-        count = max(5, int(len(levels) // 2))
-        norm = np.abs(data) / maximum
-        alpha = np.clip(
-            (norm - base_frac) / max(1e-6, 1.0 - base_frac), 0.0, 1.0
-        )
-        alpha = alpha ** 0.6  # 视觉增强(低强度快速可见)
-        alpha = np.ceil(alpha * count) / count  # 按级数量化
-        a8 = (alpha * 255).astype(np.uint8)
-        img = np.zeros((height, width, 4), dtype=np.uint8)
-        pos = data > 0
-        neg = data < 0
-        img[pos, 3] = a8[pos]  # 正峰黑
-        img[neg, 0] = 255  # 负峰红
-        img[neg, 3] = a8[neg]
-        # 保存字节引用:QImage 不拷贝数据,bytes 被释放会导致悬空段错误
-        self._image_data = img.tobytes()
-        self._image = QtGui.QImage(
-            self._image_data,
-            width,
-            height,
-            width * 4,
-            QtGui.QImage.Format.Format_RGBA8888,
-        )
-        self._bounds = QtCore.QRectF(0.0, 0.0, float(width), float(height))
+            self._bounds = QtCore.QRectF()
+        self._path = path_pos
+        self._path_neg = path_neg
+        self.prepareGeometryChange()
 
     def boundingRect(self) -> QtCore.QRectF:
         return self._bounds
 
     def paint(self, painter, *args) -> None:
-        if self._image is not None and not self._image.isNull():
-            painter.setRenderHint(
-                QtGui.QPainter.RenderHint.SmoothPixmapTransform, True
-            )
-            painter.drawImage(self._bounds, self._image)
-            return
         painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing, True)
         if not self._path.isEmpty():
             painter.setPen(self._pen)
