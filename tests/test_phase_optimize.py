@@ -923,11 +923,11 @@ def test_preview_direct_phase_no_smile(tmp_path: Path, bruker_dir: Path) -> None
 def test_preview_direct_phase_nus_pseudo_uniform(
     tmp_path: Path, bruker_dir: Path
 ) -> None:
-    """0.2.90:伪均匀传统 FT 路径(NUS,无 SMILE)恢复直接维 (p0, p1)。
+    """0.2.91:NU-DFT 路径(NUS,无 SMILE)恢复直接维 (p0, p1),离网格 F1。
 
     构造 16 个切片:每个直接维 3 峰,信号相位 +33°(p0)/斜坡 -42°(p1),
-    另叠 t1 调制 θ(i)=2π·16·i/128(网格上 F1=16);nuslist 摆网格 + 传统
-    F1 FT 后直接维相位不再与 t1 纠缠,校正值应 ≈ (-33, +42)。
+    另叠 t1 调制 θ(i)=2π·17.3·i/128(离网格 F1=17.3);沿增量对最强直接
+    峰做非均匀 DFT,在真实 F1 频率处 t1 调制精确抵消,校正值 ≈ (-33, +42)。
     """
     import nmrglue as ng
 
@@ -942,6 +942,7 @@ def test_preview_direct_phase_nus_pseudo_uniform(
     k = np.arange(n)
     rng = np.random.default_rng(1)
     n_f1 = 128  # fixture nus_2d 的 F1 复点网格
+    f_true = 17.3  # 离网格真实 F1 频率
     points = []
     for index in range(16):
         i_f1 = 4 * index  # 采样点:0,4,8,...,60
@@ -949,7 +950,7 @@ def test_preview_direct_phase_nus_pseudo_uniform(
         spec = np.zeros(n, dtype=complex)
         for peak in (140, 260, 380):
             spec += np.exp(-((k - peak) ** 2) / (2 * 6.0**2))
-        theta = 2.0 * np.pi * 16.0 * i_f1 / n_f1  # 网格上 F1=16 的 t1 调制
+        theta = 2.0 * np.pi * f_true * i_f1 / n_f1
         spec *= np.exp(
             1j * np.deg2rad(33.0 + (-42.0) * k / max(n - 1, 1)) + 1j * theta
         )
@@ -980,15 +981,77 @@ def test_preview_direct_phase_nus_pseudo_uniform(
     assert result.backend_runs == 0
     assert len(result.phases) == 1
     direct = result.phases[0]
-    assert direct.source == "direct_pseudo"
+    assert direct.source == "direct_nudft"
     # 校正值 ≈ (-33, +42)(信号相位相反数)
-    assert abs(((direct.p0 + 33.0 + 180.0) % 360.0) - 180.0) <= 15.0, direct.p0
+    assert abs(((direct.p0 + 33.0 + 180.0) % 360.0) - 180.0) <= 12.0, direct.p0
     assert abs(direct.p1 - 42.0) <= 12.0, direct.p1
     cached = json.loads((work / "phase.json").read_text(encoding="utf-8"))
     assert cached["version"] == 2
-    assert cached["source"] == "direct_pseudo"
+    assert cached["source"] == "direct_nudft"
     assert cached["p0"] == direct.p0
     preview = work / "direct_pseudo.ft2"
     assert preview.is_file()
     _d2, data = ng.pipe.read(str(preview))
     assert data.shape == (n_f1, n)
+
+
+def test_backend_search_direct_phase_nus_automatic(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """0.2.91:reconstruct_nus 的 _search_direct_phase 自动走 NU-DFT(无需人工确认)。"""
+    import nmrglue as ng
+
+    from backend.nmrpipe_backend import NMRPipeBackend
+
+    work = tmp_path / "work"
+    fid_dir = work / "fid"
+    fid_dir.mkdir(parents=True)
+    n = 512
+    k = np.arange(n)
+    rng = np.random.default_rng(2)
+    n_f1 = 128
+    f_true = 20.7  # 离网格
+    points = []
+    for index in range(16):
+        i_f1 = 4 * index
+        points.append((i_f1,))
+        spec = np.zeros(n, dtype=complex)
+        for peak in (140, 260, 380):
+            spec += np.exp(-((k - peak) ** 2) / (2 * 6.0**2))
+        theta = 2.0 * np.pi * f_true * i_f1 / n_f1
+        spec *= np.exp(
+            1j * np.deg2rad(33.0 + (-42.0) * k / max(n - 1, 1)) + 1j * theta
+        )
+        spec += rng.normal(0.0, 0.02, size=n)
+        spec += 1j * rng.normal(0.0, 0.02, size=n)
+        dic = {kk: "0" for kk in ng.pipe.fdata_dic}
+        dic["FDMAGIC"] = 9.2330230000000007e14
+        dic["FDDIMCOUNT"] = 1
+        dic["FDSIZE"] = n
+        dic["FDSPECNUM"] = 1
+        dic["FDQUADFLAG"] = 1
+        dic["FDOBS"] = "600.0"
+        dic["FDCAR"] = "4.7"
+        dic["FDSW"] = "6000.0"
+        dic["FDORIG"] = "1000.0"
+        ng.pipe.write(
+            str(fid_dir / f"test{index:03d}.fid"),
+            dic,
+            np.fft.ifft(spec).astype(np.complex64),
+            overwrite=True,
+        )
+    (work / "nuslist").write_text(
+        "".join(f"{p[0]}\n" for p in points), encoding="utf-8"
+    )
+    backend = NMRPipeBackend()
+    slices = sorted(fid_dir.glob("test*.fid"))
+    logs: list[str] = []
+    p0, p1 = backend._search_direct_phase(
+        work, slices, logs, is_nus=True, n_f1=n_f1, n_f2=1
+    )
+    assert abs(((p0 + 33.0 + 180.0) % 360.0) - 180.0) <= 12.0, p0
+    assert abs(p1 - 42.0) <= 12.0, p1
+    assert any("NU-DFT" in line for line in logs)
+    cached = json.loads((work / "phase.json").read_text(encoding="utf-8"))
+    assert cached["version"] == 2
+    assert cached["source"] == "direct_nudft"

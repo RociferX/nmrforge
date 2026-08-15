@@ -36,6 +36,7 @@ from core.data.nus_reader import read_nuslist
 from core.data.pipe_io import read_pipe_planes
 from core.optimization.phase_search import (
     direct_ft_traces,
+    nus_direct_phase,
     search_direct_spectrum_phase,
 )
 from core.planning.method_selector import select_method
@@ -183,56 +184,6 @@ def search_direct_phase(
     )
 
 
-def _write_direct_preview(
-    spectra: np.ndarray,
-    p0: float,
-    p1: float,
-    out_path: Path,
-    logs: list[str],
-    direct_dic: dict[str, Any] | None = None,
-    *,
-    max_slices: int = 8,
-) -> str:
-    """把直接维 FT 谱前 K 条强迹线按 (p0, p1) 调相,写 2D 实型 ft2 预览谱。
-
-    沿直接维(F2)按 NMRPipe PS 语义旋转取实部;F2 轴头尽量从原 fid 头
-    继承(FDOBS/FDCAR/FDSW → FDF2*),缺失时用占位值,谱图软件按点序
-    显示即可。返回写入路径。
-    """
-    from nmrglue.fileio import pipe
-
-    arr = np.asarray(spectra, dtype=np.complex128)
-    n = arr.shape[-1]
-    k = np.arange(n, dtype=float)
-    rot = arr * np.exp(1j * np.deg2rad(p0 + p1 * k / max(n - 1, 1)))
-    heights = np.max(np.abs(arr), axis=-1)
-    top = min(max_slices, arr.shape[0])
-    order = np.argsort(heights)[::-1][:top]
-    preview = np.real(rot[order])
-    dic = {kk: "0" for kk in pipe.fdata_dic}
-    dic["FDMAGIC"] = 9.2330230000000007e14
-    dic["FDDIMCOUNT"] = 2
-    dic["FDSIZE"] = n
-    dic["FDSPECNUM"] = top
-    dic["FDQUADFLAG"] = 1
-    dic["FDF1QUADFLAG"] = 1
-    dic["FDF2QUADFLAG"] = 1
-    src = direct_dic or {}
-    dic["FDF2OBS"] = str(src.get("FDOBS", "600.0"))
-    dic["FDF2CAR"] = str(src.get("FDCAR", "4.7"))
-    dic["FDF2SW"] = str(src.get("FDSW", "6000.0"))
-    dic["FDF2ORIG"] = str(src.get("FDORIG", "1000.0"))
-    # F1 轴仅为切片堆叠序号,占位即可
-    dic["FDF1SW"] = "1.0"
-    dic["FDF1OBS"] = "1.0"
-    dic["FDF1CAR"] = "1.0"
-    dic["FDF1ORIG"] = "1.0"
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    pipe.write(str(out_path), dic, preview.astype(np.float32), overwrite=True)
-    logs.append(f"直接维预览谱 → {out_path}")
-    return str(out_path)
-
-
 def _write_spectrum_preview(
     data: np.ndarray,
     out_path: Path,
@@ -250,19 +201,14 @@ def _write_spectrum_preview(
     d["FDSPECNUM"] = arr.shape[-2] if ndim >= 2 else 1
     d["FDQUADFLAG"] = 1
     src = dic or {}
-    direct_axis = (
-        ("FDOBS", "FDCAR", "FDSW", "FDORIG")
-        if ndim == 1
-        else ("FDOBS", "FDCAR", "FDSW", "FDORIG")
-    )
     for i in range(1, ndim + 1):
         prefix = f"FDF{i}"
         d[prefix + "QUADFLAG"] = 1
         if i == ndim:  # 直接维:继承 fid 头
-            obs = src.get(direct_axis[0], "600.0")
-            car = src.get(direct_axis[1], "4.7")
-            sw = src.get(direct_axis[2], "6000.0")
-            orig = src.get(direct_axis[3], "1000.0")
+            obs = src.get("FDOBS", "600.0")
+            car = src.get("FDCAR", "4.7")
+            sw = src.get("FDSW", "6000.0")
+            orig = src.get("FDORIG", "1000.0")
         else:
             obs = car = sw = orig = "1.0"
         d[prefix + "OBS"] = str(obs)
@@ -313,23 +259,22 @@ def _nus_pseudo_uniform_spectrum(
     *,
     max_cells: int = 4096,
 ) -> tuple[np.ndarray, dict[str, Any]] | None:
-    """NUS 切片按 nuslist 摆到完整网格(缺位补零)+ 传统逐维 FT。
+    """NUS 切片按 nuslist 摆到完整网格(缺位补零)+ 传统逐维 FT(预览产物)。
 
-    返回伪均匀谱(直接维在最后一维)与元信息。摆放顺序/索引单位差异不
+    返回伪均匀谱(直接维在最后一维)与元信息;摆放顺序/索引单位差异不
     影响直接维相位(间接 FT 把 t1 调制变成间接频率);间接网格过大时均匀
-    子采样(缺位更多但直接维相位不变)。
+    子采样。
     """
     import nmrglue as ng
 
-    td = effective_td(experiment)  # [direct, F2(3D), F1] / [direct F2, F1](2D)
+    td = effective_td(experiment)
     if len(td) < 2:
         return None
-    direct_td = int(td[0])
     if experiment.ndim >= 3 and len(td) >= 3:
         n_f1, n_f2 = int(td[2]), int(td[1])
     else:
         n_f1, n_f2 = int(td[1]), 1
-    if direct_td <= 0 or n_f1 <= 0:
+    if n_f1 <= 0:
         return None
     fids: list[np.ndarray] = []
     first_dic: dict[str, Any] | None = None
@@ -352,7 +297,6 @@ def _nus_pseudo_uniform_spectrum(
     for fid in fids:
         tr = direct_ft_traces(fid, sp_off=0.45, sp_end=0.95, sp_pow=1)
         direct_ft.append(tr[:, lo_idx:hi_idx])
-    # 间接网格子采样(防 3D 内存爆炸)
     f1_grid = np.arange(n_f1)
     f2_grid = np.arange(n_f2) if n_f2 > 1 else np.array([0])
     if f1_grid.size * f2_grid.size > max_cells:
@@ -384,13 +328,12 @@ def _nus_pseudo_uniform_spectrum(
         placed += 1
     if placed == 0:
         return None
-    # 传统间接维 FT(伪均匀,不跑 SMILE)
     spectrum = grid
     if n_f2 > 1:
         spectrum = np.fft.fft(spectrum, axis=1)
     spectrum = np.fft.fft(spectrum, axis=0)
     if n_f2 == 1:
-        spectrum = spectrum[:, 0, :]  # 2D:去掉 F2 单例轴
+        spectrum = spectrum[:, 0, :]
     meta: dict[str, Any] = {
         "placed": placed,
         "grid": (f1_grid.size, f2_grid.size),
@@ -410,18 +353,20 @@ def _finish_direct_preview(
     experiment: Experiment,
     work: Path,
     est: tuple[float, float, float, float],
-    spectra: np.ndarray,
+    preview_spectra: np.ndarray | None,
     meta: dict[str, Any],
     out_preview: Path | str | None,
     min_gain: float,
     logs: list[str],
     source: str,
+    *,
+    gate_score: float = 0.55,
 ) -> PhaseOptimizeResult:
-    """门控 + 写 phase.json(v2)+ 可选预览谱,组装 PhaseOptimizeResult。"""
+    """门控 + 写 phase.json(v2)+ 可选预览谱(直接维按校正相位旋转后写实部)。"""
     direct_axis = "F2" if experiment.ndim == 2 else "F3"
     p0, p1, score, gain = est
     note = ""
-    if gain < min_gain or score < 0.55:
+    if gain < min_gain or score < gate_score:
         note = (
             f"相位信息弱(gain={gain:.3f}, score={score:.3f}),保持 p0=p1=0"
         )
@@ -436,25 +381,22 @@ def _finish_direct_preview(
                 "p1": p1,
                 "score": score,
                 "gain": gain,
-                "n": int(meta.get("n", spectra.shape[0])),
+                "n": int(meta.get("n", 0)),
             },
             indent=2,
         ),
         encoding="utf-8",
     )
     preview_path = ""
-    if out_preview is not None:
+    if out_preview is not None and preview_spectra is not None:
         target = Path(out_preview)
         if not target.is_absolute():
             target = work / target
-        if source == "direct_pseudo":
-            preview_path = _write_spectrum_preview(
-                spectra, target, meta.get("dic")
-            )
-        else:
-            preview_path = _write_direct_preview(
-                spectra, p0, p1, target, logs, meta.get("dic")
-            )
+        arr = np.asarray(preview_spectra, dtype=np.complex128)
+        nd = arr.shape[-1]
+        kk = np.arange(nd, dtype=float)
+        rot = arr * np.exp(1j * np.deg2rad(p0 + p1 * kk / max(nd - 1, 1)))
+        preview_path = _write_spectrum_preview(rot, target, meta.get("dic"))
     logs.append(
         f"直接维相位预览: p0={p0:g} p1={p1:g} "
         f"(score={score:.3f}, gain={gain:.3f}, {source},已写 phase.json v2)"
@@ -490,13 +432,11 @@ def preview_direct_phase(
 ) -> PhaseOptimizeResult:
     """直接维相位预览:无 SMILE、零后端运行。
 
-    NUS(有 nuslist + 切片)走「伪均匀传统 FT」路径(用户方案):按 nuslist
-    把稀疏切片摆到完整网格、缺位补零,内存内做传统逐维 FT(直接维
-    SP+FT+EXT 窗口 + 间接维 FFT),得到伪均匀谱——直接维相位不再与 t1
-    纠缠,像传统采样一样可估 (p0, p1);结果写 phase.json(version=2),
-    后续 reconstruct_nus 直接复用,不再重搜。可选 out_preview 输出已调相
-    伪均匀谱(2D/3D ft2/ft3)供肉眼核对。
-    无 nuslist/切片不匹配时回退「首条迹线锚定」路径。
+    NUS(有 nuslist + 切片)走「非均匀 DFT 最强峰相位」路径:沿增量对最强
+    直接峰复值做 NU-DFT,在真实 F1/F2 频率处 t1 调制精确抵消,峰相位 =
+    φ(k*),直接维 (p0, p1) 校正可靠;结果写 phase.json(version=2),后续
+    reconstruct_nus 直接复用。可选 out_preview 输出已调相伪均匀谱/切片
+    预览。无 nuslist/切片不匹配时回退「首条迹线锚定」路径。
 
     返回 PhaseOptimizeResult(backend_runs=0);未找到 fid/切片或搜索无信号
     时 phases 为空并记录原因。
@@ -520,45 +460,74 @@ def preview_direct_phase(
             work_dir=str(work),
             logs=["直接维相位预览:未找到转换后的 fid/切片(请先生成 FID)"],
         )
-    # NUS 伪均匀路径(用户方案:先不做 SMILE,把间接维变换出来像传统采样优化)
+    # NUS 自动路径:非均匀 DFT(正确性优先,无需人工确认)
     if experiment.sampling.mode is SamplingMode.NUS:
         nuslist_file = work / "nuslist"
         if not nuslist_file.is_file():
             nuslist_file = Path(experiment.source_path) / "nuslist"
         if nuslist_file.is_file():
             points = read_nuslist(nuslist_file)
-            if points and len(points) == len(paths):
-                from backend.config import resolve_ext_hi, resolve_ext_lo
+            try:
+                import nmrglue as ng
 
-                pseudo = _nus_pseudo_uniform_spectrum(
-                    experiment,
-                    paths,
-                    points,
-                    resolve_ext_lo(ext_lo),
-                    resolve_ext_hi(ext_hi),
-                    logs,
-                )
-                if pseudo is not None:
-                    spectrum, meta = pseudo
-                    est = search_direct_spectrum_phase(
-                        spectrum, p0_source="strongest"
+                fids: list[np.ndarray] = []
+                first_dic: dict[str, Any] | None = None
+                for path in paths:
+                    dic, fid = ng.pipe.read(str(path))
+                    arr = np.asarray(fid)
+                    if arr.ndim < 1 or arr.shape[-1] < 8:
+                        continue
+                    if first_dic is None:
+                        first_dic = dic
+                    fids.append(arr.reshape(-1, arr.shape[-1]))
+                if fids and len(fids) == len(points):
+                    td = effective_td(experiment)
+                    n_f1 = int(td[1]) if len(td) > 1 else 0
+                    n_f2 = int(td[2]) if len(td) > 2 else 1
+                    est = nus_direct_phase(
+                        np.concatenate(fids, axis=0), points, n_f1, n_f2
                     )
                     if est is not None:
+                        preview_spectra: np.ndarray | None = None
+                        meta: dict[str, Any] = {
+                            "n": len(fids),
+                            "dic": first_dic,
+                        }
+                        if out_preview is not None:
+                            from backend.config import (
+                                resolve_ext_hi,
+                                resolve_ext_lo,
+                            )
+
+                            pseudo = _nus_pseudo_uniform_spectrum(
+                                experiment,
+                                paths,
+                                points,
+                                resolve_ext_lo(ext_lo),
+                                resolve_ext_hi(ext_hi),
+                                logs,
+                            )
+                            if pseudo is not None:
+                                preview_spectra = pseudo[0]
+                                meta["dic"] = pseudo[1].get("dic") or first_dic
                         return _finish_direct_preview(
                             experiment,
                             work,
-                            est,
-                            spectrum,
+                            est[:4],
+                            preview_spectra,
                             meta,
                             out_preview,
                             min_gain,
                             logs,
-                            "direct_pseudo",
+                            "direct_nudft",
+                            gate_score=2.0,
                         )
-                logs.append(
-                    "直接维相位预览:伪均匀路径不可用"
-                    "(nuslist/切片不匹配或无信号),回退逐切片路径"
-                )
+            except Exception as exc:  # noqa: BLE001
+                logs.append(f"直接维相位预览(NU-DFT)失败: {exc}")
+            logs.append(
+                "直接维相位预览:NU-DFT 路径不可用"
+                "(nuslist/切片不匹配或无信号),回退逐切片路径"
+            )
     # 回退:逐切片/FID 路径(首条迹线 t1=0 锚定)
     if len(paths) > 16:
         index = np.linspace(0, len(paths) - 1, 16).astype(int)

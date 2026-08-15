@@ -441,3 +441,125 @@ def search_direct_spectrum_phase(
     baseline, _sign = _row_absorption(_arr, pos, heights, 0.0, 0.0)
     gain = score - baseline
     return p0, p1, score, gain
+
+
+def nus_direct_phase(
+    fids: np.ndarray,
+    points: list[tuple[int, ...]],
+    n_f1: int,
+    n_f2: int = 1,
+    *,
+    oversample: int = 8,
+    refine_step: float = 0.02,
+) -> tuple[float, float, float, float, int] | None:
+    """NUS 直接维 (p0, p1) 校正:最强直接峰在各增量真实 F1/F2 频率处的相位。
+
+    原理:切片 i 直接维峰 k* 的相位 = φ(k*) + ω1·Δt1·p1_i + ω2·Δt2·p2_i;
+    沿增量对峰复值做非均匀 DFT,在真实 F1/F2 频率处 t1 调制精确抵消
+    (δ=0),峰相位 = φ(k*) = φ0 + p1·k*/(n-1)。p1 由各切片多峰相位集中度
+    拟合取中位数(0.2.88 机制)。全程 numpy,不跑 SMILE/后端。
+
+    返回 (p0_corr, p1_corr, score, gain, kstar);无信号/点数不足返回 None。
+    score/gain 用最强切片在 (p0_corr, p1_corr) 下的峰窗吸收度(半径 1)与
+    零相位基线之差(门控用)。p0/p1 均为 PS 校正值(信号相位相反数)。
+    """
+    arr = np.asarray(fids, dtype=np.complex128)
+    if arr.ndim != 2 or arr.shape[0] != len(points) or arr.shape[-1] < 8:
+        return None
+    if n_f1 <= 0:
+        return None
+    spectra = direct_ft_traces(arr, sp_off=0.45, sp_end=0.95, sp_pow=1)
+    # 最强直接峰:各切片中位峰高最大处
+    med = np.median(np.abs(spectra), axis=0)
+    kstar = int(np.argmax(med))
+    v = spectra[:, kstar]
+    # 增量索引(模运算容错:1-based/复点单位差异)
+    if n_f2 > 1:
+        p1 = np.array(
+            [int(pt[1]) % n_f1 if len(pt) >= 2 else 0 for pt in points],
+            dtype=float,
+        )
+        p2 = np.array(
+            [int(pt[0]) % n_f2 if len(pt) >= 1 else 0 for pt in points],
+            dtype=float,
+        )
+    else:
+        p1 = np.array([int(pt[0]) % n_f1 for pt in points], dtype=float)
+        p2 = np.zeros(len(points), dtype=float)
+    # 非均匀 DFT 粗网格(内存上限:粗格点 × 切片数)
+    max_cells = 1_000_000
+    os = oversample
+    while (n_f1 * os) * (max(n_f2, 1) * os) > max_cells and os > 2:
+        os //= 2
+    f1_coarse = np.arange(n_f1 * os) / os
+    if n_f2 > 1:
+        f2_coarse = np.arange(n_f2 * os) / os
+        F1, F2 = np.meshgrid(f1_coarse, f2_coarse, indexing="ij")
+        arg = (
+            2.0 * np.pi
+            * (
+                F1[..., None] * p1[None, None, :] / n_f1
+                + F2[..., None] * p2[None, None, :] / n_f2
+            )
+        )
+        V = np.sum(v[None, None, :] * np.exp(-1j * arg), axis=-1)
+        idx = np.unravel_index(int(np.argmax(np.abs(V))), V.shape)
+        f1pk, f2pk = float(f1_coarse[idx[0]]), float(f2_coarse[idx[1]])
+    else:
+        arg = 2.0 * np.pi * f1_coarse[:, None] * p1[None, :] / n_f1
+        V = np.sum(v[None, :] * np.exp(-1j * arg), axis=-1)
+        idx = int(np.argmax(np.abs(V)))
+        f1pk, f2pk = float(f1_coarse[idx]), 0.0
+    # 局部细化(峰附近细网格)
+    span = 1.0
+    if n_f2 > 1:
+        f1s = np.arange(max(0.0, f1pk - span), min(n_f1, f1pk + span) + 1e-9, refine_step)
+        f2s = np.arange(max(0.0, f2pk - span), min(n_f2, f2pk + span) + 1e-9, refine_step)
+        F1f, F2f = np.meshgrid(f1s, f2s, indexing="ij")
+        argf = (
+            2.0 * np.pi
+            * (
+                F1f[..., None] * p1[None, None, :] / n_f1
+                + F2f[..., None] * p2[None, None, :] / n_f2
+            )
+        )
+        Vf = np.sum(v[None, None, :] * np.exp(-1j * argf), axis=-1)
+        idf = np.unravel_index(int(np.argmax(np.abs(Vf))), Vf.shape)
+        f1pk, f2pk = float(f1s[idf[0]]), float(f2s[idf[1]])
+        phase = float(np.rad2deg(np.angle(Vf[idf])))
+    else:
+        f1s = np.arange(max(0.0, f1pk - span), min(n_f1, f1pk + span) + 1e-9, refine_step)
+        argf = 2.0 * np.pi * f1s[:, None] * p1[None, :] / n_f1
+        Vf = np.sum(v[None, :] * np.exp(-1j * argf), axis=-1)
+        idf = int(np.argmax(np.abs(Vf)))
+        f1pk = float(f1s[idf])
+        phase = float(np.rad2deg(np.angle(Vf[idf])))
+    # p1:各切片多峰相位集中度拟合取中位数(信号斜坡)
+    p1_rows: list[float] = []
+    for index in range(spectra.shape[0]):
+        peaks = _row_peak_positions(spectra[index])
+        if peaks is not None and peaks[0].size >= 2:
+            fit = _row_p1_fit(spectra[index], peaks[0], peaks[1])
+            if fit is not None:
+                p1_rows.append(fit[0])
+    p1_sig = float(np.median(p1_rows)) if p1_rows else 0.0
+    # p0_corr = -(φ(k*) - p1_sig·k*/(n-1));p1_corr = -p1_sig
+    p0_corr = (-(phase - p1_sig * kstar / max(spectra.shape[-1] - 1, 1))) % 360.0
+    p1_corr = -p1_sig
+    # ±180 消歧(最强切片正峰解;吸收度仅用于消歧,不用作门控——
+    # SP 窗非线性相位使吸收度在正确相位下可能反而不高,0.2.91 实证)
+    best_slice = int(np.argmax(np.max(np.abs(spectra), axis=-1)))
+    peaks = _row_peak_positions(spectra[best_slice])
+    if peaks is None:
+        return None
+    pos, heights = peaks
+    _a0, s0 = _row_absorption(spectra[best_slice], pos, heights, p0_corr, p1_corr)
+    _a1, s1 = _row_absorption(
+        spectra[best_slice], pos, heights, (p0_corr + 180.0) % 360.0, p1_corr
+    )
+    if s1 > s0:
+        p0_corr = (p0_corr + 180.0) % 360.0
+    # 门控用相干 SNR:|V_peak|/(√N·mean|v|)——信号≈√N,噪声≈1
+    v_mean = float(np.mean(np.abs(v))) + 1e-12
+    score = float(np.abs(Vf[idf])) / (np.sqrt(len(points)) * v_mean)
+    return p0_corr, p1_corr, score, score - 1.0, kstar

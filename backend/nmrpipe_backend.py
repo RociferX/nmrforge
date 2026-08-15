@@ -470,8 +470,14 @@ class NMRPipeBackend:
             if isinstance(phase_inputs, Path) and not phase_inputs.is_file():
                 logs.append("直接维相位搜索:未找到 fid/切片,保持 p0=p1=0")
             else:
+                _td = effective_td(experiment)
                 direct_p0, direct_p1 = self._search_direct_phase(
-                    work, phase_inputs, logs, is_nus=True
+                    work,
+                    phase_inputs,
+                    logs,
+                    is_nus=True,
+                    n_f1=int(_td[1]) if len(_td) > 1 else 0,
+                    n_f2=int(_td[2]) if len(_td) > 2 else 1,
                 )
 
         td = effective_td(experiment)
@@ -789,6 +795,8 @@ class NMRPipeBackend:
         logs: list[str],
         min_gain: float = 0.02,
         is_nus: bool = False,
+        n_f1: int = 0,
+        n_f2: int = 1,
     ) -> tuple[float, float]:
         """直接维相位搜索:直接维 FT 谱上 (p0, p1) 频域搜索,结果缓存 phase.json。
 
@@ -798,8 +806,13 @@ class NMRPipeBackend:
         偏置,不影响斜坡),p0 锚定首条有峰的迹线(增量 0)的峰相位圆均值
         取反(PS 校正约定),±180 消歧取正峰解——直接维公共 p0 不再丢失。
         估计在 PS 应用尺寸上做(NUS 直接维 1×TD、均匀 2×TD),p1 语义与
-        脚本 PS 一致,无需缩放。fid_files 支持单个文件或切片列表
-        (均匀子采样 ≤16 个,3D 海量切片不拖慢)。
+        脚本 PS 一致,无需缩放。fid_files 支持单个文件或切片列表。
+
+        0.2.91(NUS 自动路径):有 nuslist + 切片时优先走「非均匀 DFT 最强
+        峰相位」(core.optimization.phase_search.nus_direct_phase)——沿增量
+        对最强直接峰复值做 NU-DFT,在真实 F1/F2 频率处 t1 调制精确抵消,
+        峰相位 = φ(k*),直接维 (p0, p1) 校正可靠,无需人工确认;失败回退
+        逐切片锚定。n_f1/n_f2 为间接维网格尺寸(effective_td)。
         """
         phase_file = work / "phase.json"
         if phase_file.is_file():
@@ -816,6 +829,65 @@ class NMRPipeBackend:
         paths = [fid_files] if isinstance(fid_files, Path) else list(fid_files)
         if not paths:
             return 0.0, 0.0
+        # 0.2.91:NUS 自动路径——非均匀 DFT 最强峰相位(用全部切片,无需人工确认)
+        if is_nus and n_f1 > 0:
+            nuslist_file = work / "nuslist"
+            if nuslist_file.is_file():
+                try:
+                    import nmrglue as ng
+
+                    from core.optimization.phase_search import nus_direct_phase
+
+                    points = read_nuslist(nuslist_file)
+                    fids: list[np.ndarray] = []
+                    for path in paths:
+                        _dic, fid = ng.pipe.read(str(path))
+                        arr = np.asarray(fid)
+                        if arr.ndim < 1 or arr.shape[-1] < 8:
+                            continue
+                        fids.append(arr.reshape(-1, arr.shape[-1]))
+                    if fids and len(fids) == len(points):
+                        est = nus_direct_phase(
+                            np.concatenate(fids, axis=0),
+                            points,
+                            n_f1,
+                            n_f2,
+                        )
+                        if est is not None:
+                            p0, p1, score, gain, kstar = est
+                            phase_file.write_text(
+                                json.dumps(
+                                    {
+                                        "version": 2,
+                                        "source": "direct_nudft",
+                                        "p0": p0,
+                                        "p1": p1,
+                                        "score": score,
+                                        "gain": gain,
+                                        "n": int(len(fids)),
+                                        "kstar": kstar,
+                                    },
+                                    indent=2,
+                                ),
+                                encoding="utf-8",
+                            )
+                            if score < 2.0:
+                                logs.append(
+                                    f"直接维相位信息弱(相干 SNR="
+                                    f"{score:.2f} < 2),保持 p0=p1=0"
+                                )
+                                return 0.0, 0.0
+                            logs.append(
+                                f"直接维相位搜索(NU-DFT): p0={p0:g} "
+                                f"p1={p1:g} (相干 SNR={score:.2f}, "
+                                f"峰 k*={kstar}, {len(fids)} 切片)"
+                            )
+                            return p0, p1
+                except Exception as exc:  # noqa: BLE001
+                    logs.append(
+                        f"直接维相位搜索(NU-DFT)失败,回退逐切片: {exc}"
+                    )
+        # 逐切片回退:均匀子采样 ≤16
         if len(paths) > 16:
             index = np.linspace(0, len(paths) - 1, 16).astype(int)
             paths = [paths[i] for i in index]
