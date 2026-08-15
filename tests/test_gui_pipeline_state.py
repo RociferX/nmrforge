@@ -186,33 +186,16 @@ def test_raw_change_marks_import_fid_outdated_and_propagates(
     assert statuses["analysis"] == "OUTDATED"
 
 
-def test_outdated_disabled_by_settings(
+def test_simple_mode_disables_outdated(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """0.2.90:关闭指纹检测 / 已过期显示后,不再出现 OUTDATED。"""
+    """0.2.91:简单模式——只按产物文件判断,不出现 OUTDATED。"""
     manager, exp_id, data_id, artifacts = _manager_with_artifacts(tmp_path)
     _record_all(manager, exp_id, data_id)
     # spectrum 步骤的输入是 FID 文件:改写 FID → 默认 OUTDATED
     artifacts["fid"].write_bytes(b"fid-v2")
     assert compute_step_statuses(manager, exp_id)["spectrum"] == "OUTDATED"
 
-    monkeypatch.setattr(
-        "gui.settings.load_settings",
-        lambda: {"pipeline": {"fingerprint_check": False, "outdated_enabled": True}},
-    )
-    statuses = compute_step_statuses(manager, exp_id)
-    assert "OUTDATED" not in statuses.values()
-    assert statuses["spectrum"] == "SUCCESS"
-
-    monkeypatch.setattr(
-        "gui.settings.load_settings",
-        lambda: {"pipeline": {"fingerprint_check": True, "outdated_enabled": False}},
-    )
-    statuses = compute_step_statuses(manager, exp_id)
-    assert "OUTDATED" not in statuses.values()
-    assert statuses["spectrum"] == "SUCCESS"
-
-    # 0.2.91:简单模式(只按产物文件判断)同样不出现 OUTDATED
     monkeypatch.setattr(
         "gui.settings.load_settings",
         lambda: {"pipeline": {"simple_mode": True}},

@@ -1,5 +1,14 @@
 # 变更日志
 
+## [0.2.92] - 2026-08-16
+
+- 调整(GUI Agent,用户反馈):移除「文件指纹检测」「显示已过期状态」
+  两个细分开关,设置对话框只保留「简单模式」一个 Pipeline 开关
+  (config/nmrforge.local.yaml pipeline.simple_mode,重启生效);
+  简单模式=只按上一步产物文件判断状态,不做指纹/新旧比较、不显示
+  「已过期」,旧配置里的 fingerprint_check/outdated_enabled 键忽略。
+- 测试:开关测试收敛为简单模式断言;本地全量 pytest + ruff 全绿。
+
 ## [0.2.91] - 2026-08-16
 
 - 新增(GUI Agent,用户反馈):「简单模式」开关(设置对话框 →

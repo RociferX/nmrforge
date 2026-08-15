@@ -19,11 +19,7 @@ DEFAULTS: dict = {
     "points_per_line": 2,
     "smile_thread_cap": 2,
     "guide": {"first_import_hint_shown": False},
-    "pipeline": {
-        "simple_mode": False,
-        "fingerprint_check": True,
-        "outdated_enabled": True,
-    },
+    "pipeline": {"simple_mode": False},
 }
 
 
@@ -70,12 +66,6 @@ def load_settings() -> dict:
     if isinstance(pipeline, dict):
         merged["pipeline"] = {
             "simple_mode": bool(pipeline.get("simple_mode", False)),
-            "fingerprint_check": bool(
-                pipeline.get("fingerprint_check", True)
-            ),
-            "outdated_enabled": bool(
-                pipeline.get("outdated_enabled", True)
-            ),
         }
     return merged
 
