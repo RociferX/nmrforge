@@ -267,10 +267,13 @@ def _row_peak_positions(
     spectrum: np.ndarray,
     *,
     max_peaks: int = 8,
+    margin: int = 0,
 ) -> tuple[np.ndarray, np.ndarray] | None:
     """锁定 1D 直接维谱 top-K 局部峰,返回 (下标, 峰高)。
 
-    峰高须高于 5×拐角噪声(纯噪声迹线返回 None)。
+    峰高须高于 5×拐角噪声(纯噪声迹线返回 None)。margin>0 时排除首尾
+    margin 个点(真实数据直接维 FT 首尾常为 DC/Nyquist 伪影,可比真实
+    峰强数倍)。
     """
     arr = np.asarray(spectrum, dtype=np.complex128)
     n = arr.shape[-1]
@@ -284,6 +287,9 @@ def _row_peak_positions(
     threshold = max(float(np.percentile(mag, 99.0)), noise * 5.0)
     interior = np.zeros(n, dtype=bool)
     interior[1:-1] = (mag[1:-1] >= mag[:-2]) & (mag[1:-1] >= mag[2:])
+    if margin > 0:
+        interior[:margin] = False
+        interior[-margin:] = False
     candidates = np.where(interior & (mag > threshold))[0]
     if not candidates.size:
         return None
@@ -469,9 +475,19 @@ def nus_direct_phase(
     if n_f1 <= 0:
         return None
     spectra = direct_ft_traces(arr, sp_off=0.45, sp_end=0.95, sp_pow=1)
-    # 最强直接峰:各切片中位峰高最大处
+    # 最强直接峰:各切片中位峰高最大的内部局部极大(排除首尾 DC/Nyquist
+    # 伪影——真实数据可比真实峰强数倍,0.2.92 VM sampleI 实测 k=0 伪影
+    # 4.9e8 vs 真实峰 8e7)
+    margin = max(2, arr.shape[-1] // 64)
     med = np.median(np.abs(spectra), axis=0)
-    kstar = int(np.argmax(med))
+    interior = np.zeros(med.size, dtype=bool)
+    interior[margin:-margin] = True
+    local_max = np.zeros(med.size, dtype=bool)
+    local_max[1:-1] = (med[1:-1] >= med[:-2]) & (med[1:-1] >= med[2:])
+    cand = np.where(interior & local_max)[0]
+    if not cand.size:
+        cand = np.where(interior)[0]
+    kstar = int(cand[int(np.argmax(med[cand]))])
     v = spectra[:, kstar]
     # 增量索引(模运算容错:1-based/复点单位差异)
     if n_f2 > 1:
@@ -537,7 +553,7 @@ def nus_direct_phase(
     # p1:各切片多峰相位集中度拟合取中位数(信号斜坡)
     p1_rows: list[float] = []
     for index in range(spectra.shape[0]):
-        peaks = _row_peak_positions(spectra[index])
+        peaks = _row_peak_positions(spectra[index], margin=margin)
         if peaks is not None and peaks[0].size >= 2:
             fit = _row_p1_fit(spectra[index], peaks[0], peaks[1])
             if fit is not None:
