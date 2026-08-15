@@ -20,7 +20,7 @@ from viewer.spectrum import Spectrum, Spectrum3D
 
 # (显示名, 被固定/切片的轴下标);查看平面为该轴之外的另两轴
 _PLANES = (("F1-F2", 2), ("F1-F3", 1), ("F2-F3", 0))
-_MODES = (("切片", "slice"), ("MIP 投影", "max"), ("求和投影", "sum"))
+_MODES = (("Slice", "slice"), ("MIP", "max"), ("Sum", "sum"))
 
 
 class Spectrum3DPanel(QWidget):
@@ -36,7 +36,7 @@ class Spectrum3DPanel(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
-        layout.addWidget(QLabel("3D 谱查看"))
+        layout.addWidget(QLabel("3D view"))
         self.plane_combo = QComboBox()
         self.plane_combo.addItems([name for name, _ in _PLANES])
         self.plane_combo.setToolTip("选择查看平面(第三轴用于切片/投影)")
@@ -55,7 +55,7 @@ class Spectrum3DPanel(QWidget):
         self.slice_slider.sliderReleased.connect(self._emit)
         self.slice_slider.setEnabled(False)
         layout.addWidget(self.slice_slider)
-        self.position_label = QLabel("切片: -")
+        self.position_label = QLabel("Slice: -")
         self.position_label.setWordWrap(True)
         layout.addWidget(self.position_label)
 
@@ -80,7 +80,7 @@ class Spectrum3DPanel(QWidget):
         """解除 3D 谱绑定并隐藏面板。"""
         self._spectrum3d = None
         self.slice_slider.setEnabled(False)
-        self.position_label.setText("切片: -")
+        self.position_label.setText("Slice: -")
         self.setVisible(False)
 
     def current_spectrum(self) -> Spectrum | None:
@@ -158,7 +158,7 @@ class Spectrum3DPanel(QWidget):
 
     def _update_position_label(self) -> None:
         if self._spectrum3d is None:
-            self.position_label.setText("切片: -")
+            self.position_label.setText("Slice: -")
             return
         axis = self._spectrum3d.axes[self._slice_axis]
         value = self.slice_slider.value()
@@ -168,11 +168,11 @@ class Spectrum3DPanel(QWidget):
         )
         if self._mode == "slice":
             self.position_label.setText(
-                f"{axis.label} 切片: {ppm:.3f} ppm (点 {value}/{axis.size - 1})"
+                f"{axis.label} slice: {ppm:.3f} ppm (point {value}/{axis.size - 1})"
             )
         else:
             self.position_label.setText(
-                f"{mode_text}(沿 {axis.label}), 忽略切片位置"
+                f"{mode_text} (along {axis.label}), slice position ignored"
             )
 
     def _emit(self) -> None:

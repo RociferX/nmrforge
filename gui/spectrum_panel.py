@@ -1,6 +1,6 @@
-"""右侧谱图面板:嵌入独立查看器 + 样本谱图文件列表 + 峰表编辑回写。
+"""右侧谱图面板:嵌入独立查看器 + 项目谱图文件列表 + 峰表编辑回写。
 
-复用 viewer.SpectrumViewer(不重复实现谱图功能);列表扫描样本 spectra 目录,
+复用 viewer.SpectrumViewer(不重复实现谱图功能);列表扫描项目 spectra 目录,
 点击 .ft2/.ft3 即在右侧打开。峰表支持添加/删除/编辑行并写回
 data_dir(..., "peaks")/<exp>-<data>.csv(经 ProcessingController,登记
 manual_peaks WorkflowRun);Poky .list 可导入/导出。GUI 不直接接触处理逻辑。
@@ -78,27 +78,27 @@ class SpectrumPanel(QWidget):
         self.file_list.itemClicked.connect(self._on_file_clicked)
 
         self.peak_toolbar = QHBoxLayout()
-        self.add_peak_button = QPushButton("添加峰")
+        self.add_peak_button = QPushButton("Add peak")
         self.add_peak_button.setEnabled(False)
         self.add_peak_button.setToolTip("在峰表追加一行(保存后写回 CSV)")
         self.add_peak_button.clicked.connect(self._on_add_peak)
         self.peak_toolbar.addWidget(self.add_peak_button)
-        self.delete_peak_button = QPushButton("删除选中")
+        self.delete_peak_button = QPushButton("Delete selected")
         self.delete_peak_button.setEnabled(False)
         self.delete_peak_button.setToolTip("删除峰表中选中的行")
         self.delete_peak_button.clicked.connect(self._on_delete_peak)
         self.peak_toolbar.addWidget(self.delete_peak_button)
-        self.import_poky_button = QPushButton("导入 Poky")
+        self.import_poky_button = QPushButton("Import Poky")
         self.import_poky_button.setEnabled(False)
         self.import_poky_button.setToolTip("从 Poky/Sparky .list 导入峰表")
         self.import_poky_button.clicked.connect(self._on_import_poky)
         self.peak_toolbar.addWidget(self.import_poky_button)
-        self.export_poky_button = QPushButton("导出 Poky")
+        self.export_poky_button = QPushButton("Export Poky")
         self.export_poky_button.setEnabled(False)
         self.export_poky_button.setToolTip("把当前峰表导出为 Poky/Sparky .list")
         self.export_poky_button.clicked.connect(self._export_peaks_poky)
         self.peak_toolbar.addWidget(self.export_poky_button)
-        self.save_peaks_button = QPushButton("保存峰表")
+        self.save_peaks_button = QPushButton("Save peaks")
         self.save_peaks_button.setEnabled(False)
         self.save_peaks_button.setToolTip("把峰表写回 data/peaks/<exp>-<data>.csv 并登记")
         self.save_peaks_button.clicked.connect(self._on_save_peaks)
@@ -114,7 +114,7 @@ class SpectrumPanel(QWidget):
         self._peaks: list[dict] = []
         self._current_spectrum: Path | None = None
         self.placeholder = QLabel(
-            "未打开样本\n\n从左侧选择样本下的实验,或点击谱图文件查看结果。"
+            "未打开项目\n\n从左侧选择项目下的实验类型,或点击谱图文件查看结果。"
         )
         self.placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.placeholder.setWordWrap(True)
@@ -191,7 +191,7 @@ class SpectrumPanel(QWidget):
             self._clear_peaks()
 
     def _spectrum_paths(self) -> list[Path]:
-        """当前实验/数据下的谱图文件(新布局优先,旧扁平路径回退)。"""
+        """当前实验类型/样品数据下的谱图文件(新布局优先,旧扁平路径回退)。"""
         paths: list[Path] = []
         exp_id = self._current_exp_id
         data_id = self._current_data_id
@@ -204,14 +204,6 @@ class SpectrumPanel(QWidget):
                     paths.extend(
                         sorted(spectra_dir.glob(f"{exp_id}-{data_id}*{ext}"))
                     )
-                # 追加 process 目录 FID(供 1D 迹线查看)
-                try:
-                    process_dir = self.manager.data_dir(
-                        exp_id, data_id, "process"
-                    )
-                    paths.extend(sorted(process_dir.glob("*.fid")))
-                except OSError:
-                    pass
                 if paths:
                     return paths
         except Exception:  # noqa: BLE001 - 新布局不可用回退旧路径
@@ -267,7 +259,7 @@ class SpectrumPanel(QWidget):
 
 
     def _axis_labels(self, required: int) -> tuple[str, ...] | None:
-        """按当前数据 metadata 的核信息生成轴名(F1/F2/F3→H/N/C)。
+        """按当前样品数据 metadata 的核信息生成轴名(F1/F2/F3→H/N/C)。
         维度数不符/无 metadata 时返回 None(调用方回退 F1/F2/F3)。"""
         from viewer.axis_labels import (
             axis_labels_from_nuclei,
@@ -311,7 +303,7 @@ class SpectrumPanel(QWidget):
         if self._peaks:
             self.viewer.set_peaks(self._peaks)
     def _save_3d_state(self, *_args) -> None:
-        """记忆当前数据的 3D 查看平面/投影模式。"""
+        """记忆当前样品数据的 3D 查看平面/投影模式。"""
         if self._current_data_id:
             self._viewer3d_state[self._current_data_id] = (
                 self._spectrum3d_panel.plane_combo.currentIndex(),
@@ -505,10 +497,10 @@ class SpectrumPanel(QWidget):
     def _on_save_peaks(self) -> None:
         """峰表写回 data/peaks/<exp>-<data>.csv 并登记 manual_peaks 运行。"""
         if self.manager.project is None or not self._current_exp_id:
-            InfoDialog.show_info(self, "提示", "请先选中数据")
+            InfoDialog.show_info(self, "提示", "请先选中样品数据")
             return
         if not self._current_data_id:
-            InfoDialog.show_info(self, "提示", "请先选中数据节点")
+            InfoDialog.show_info(self, "提示", "请先选中样品数据节点")
             return
         peaks = self._table_peaks()
         try:

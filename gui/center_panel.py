@@ -1,8 +1,8 @@
 """中间上下文面板:随左侧树选中层级切换。
 
-- Workspace 选中 → 新建样本/打开样本/最近样本(嵌入欢迎页);
-- Sample(项目) 选中 → 新建实验(内嵌表单);
-- Experiment 选中 → 导入数据(内嵌表单);
+- Workspace 选中 → 新建项目/打开项目/最近项目(嵌入欢迎页);
+- 项目 选中 → 新建实验类型(内嵌表单);
+- 实验类型 选中 → 导入样品数据(内嵌表单);
 - Data / 子目录选中 → Pipeline 五步(生成 FID → 分析)。
 
 新建/导入表单直接内嵌在中间,不弹独立窗口。
@@ -34,10 +34,10 @@ class CenterPanel(QWidget):
     import_data_requested = pyqtSignal(str)  # exp_id(兼容:打开导入表单)
     import_options_requested = pyqtSignal(str, str, str, bool)  # (exp_id, name, source, copy)
     batch_import_requested = pyqtSignal(str, list)  # (exp_id, folders)
-    create_experiment_requested = pyqtSignal(str)  # 实验标题
+    create_experiment_requested = pyqtSignal(str)  # 实验类型标题
     edit_notes_requested = pyqtSignal(str, str, str)  # (kind, exp_id, data_id)
-    new_project_requested = pyqtSignal(str)  # 样本名称
-    open_project_requested = pyqtSignal(str)  # 样本路径
+    new_project_requested = pyqtSignal(str)  # 项目名称
+    open_project_requested = pyqtSignal(str)  # 项目路径
 
     def __init__(
         self,
@@ -79,7 +79,7 @@ class CenterPanel(QWidget):
         self.report_page = ReportPanel(manager)
         self.stack.addWidget(self.report_page)  # index 4: 报告
 
-        # 顶部注释条:样本/实验/数据三级注释展示 + 后补编辑入口
+        # 顶部注释条:项目/实验类型/样品数据三级注释展示 + 后补编辑入口
         self.notes_header = QHBoxLayout()
         self.notes_label = QLabel("")
         self.notes_label.setWordWrap(True)
@@ -89,7 +89,7 @@ class CenterPanel(QWidget):
         )
         self.notes_header.addWidget(self.notes_label, 1)
         self.edit_notes_button = QPushButton("编辑注释")
-        self.edit_notes_button.setToolTip("添加/修改当前样本、实验或数据的注释信息")
+        self.edit_notes_button.setToolTip("添加/修改当前项目、实验类型或样品数据的注释信息")
         self.edit_notes_button.clicked.connect(self._on_edit_notes)
         self.notes_header.addWidget(self.edit_notes_button)
 
@@ -121,7 +121,7 @@ class CenterPanel(QWidget):
 
     # ------------------------------------------------------------------
     def _update_notes(self, kind: str, exp_id: str, data_id: str = "") -> None:
-        """按选中层级显示样本/实验/数据注释(中间区域最上方)。"""
+        """按选中层级显示项目/实验类型/样品数据注释(中间区域最上方)。"""
         from gui.notes import data_note, experiment_note, sample_note
 
         self._notes_kind = kind if kind in ("project", "experiment", "data", "folder") else ""
@@ -141,7 +141,7 @@ class CenterPanel(QWidget):
                 text = experiment_note(project, exp_id)
             elif kind in ("data", "folder"):
                 text = data_note(project, exp_id, data_id)
-        self.notes_label.setText(f"注释: {text}" if text else "注释: (未填写)")
+        self.notes_label.setText(f"注释:\n{text}" if text else "注释: (未填写)")
 
     def _on_edit_notes(self) -> None:
         """点击「编辑注释」:发出编辑请求(主窗口打开注释对话框)。"""

@@ -98,14 +98,14 @@ def test_new_project_action(
     class _FakeNotesDialog:
         DialogCode = QDialog.DialogCode
 
-        def __init__(self, parent, title, text):
+        def __init__(self, parent, title, kind="", values=None):
             pass
 
         def exec(self):
             return QDialog.DialogCode.Accepted
 
-        def result_text(self):
-            return ""
+        def result_fields(self):
+            return {}
 
     monkeypatch.setattr("gui.main_window.NotesDialog", _FakeNotesDialog)
     window.new_project()
@@ -156,7 +156,7 @@ def test_open_project_action(
 def test_add_experiment_action(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """「添加实验」= 新建空白实验(不产生数据,不弹数据文件夹选择)。"""
+    """「添加实验类型」= 新建空白实验类型(不产生样品数据,不弹数据文件夹选择)。"""
     manager = _build_manager(tmp_path, monkeypatch)
     monkeypatch.setattr(
         "gui.main_window.QInputDialog.getText",
@@ -166,14 +166,14 @@ def test_add_experiment_action(
     class _FakeNotesDialog:
         DialogCode = QDialog.DialogCode
 
-        def __init__(self, parent, title, text):
+        def __init__(self, parent, title, kind="", values=None):
             pass
 
         def exec(self):
             return QDialog.DialogCode.Accepted
 
-        def result_text(self):
-            return ""
+        def result_fields(self):
+            return {}
 
     monkeypatch.setattr("gui.main_window.NotesDialog", _FakeNotesDialog)
     window = MainWindow(manager=manager)
@@ -183,7 +183,7 @@ def test_add_experiment_action(
     assert last.text(0) == "exp_003"
     assert last.text(1) == "3D HNCACB"
     entry = manager.project.experiment("exp_003")
-    assert entry is not None and len(entry.data) == 0  # 空白实验无数据
+    assert entry is not None and len(entry.data) == 0  # 空白实验类型无样品数据
     window.close()
 
 

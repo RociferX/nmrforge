@@ -1237,7 +1237,16 @@ def _joint_recheck(
     zero_score = -1.0
     zero_path = ""
     runs = 0
-    n_workers = _resolve_workers(max_workers)
+    # 0.2.81:parallel 参数真正接线(此前为死参数,默认 cpu-2 并发)
+    n_workers = 1 if not parallel else _resolve_workers(max_workers)
+    # 0.2.81:预建工作目录,避免并发候选首次写入时目录创建竞态
+    # (nmrglue open_towrite 的 exists→makedirs 非线程安全,假后端并发
+    # 写新目录会 FileExistsError 导致候选丢失、门控回退误判)
+    _work = Path(work_dir) if work_dir else default_work_dir(experiment, backend)
+    try:
+        _work.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
     # 0.2.77:唯一输出名(修复缓存路径别名)
 
     def _joint_eval(
@@ -1403,7 +1412,14 @@ def optimize_phase_sequential(
     steps0 = _refine_steps(p0_step, final_step) if refine and p0_step > 0 else []
     steps1 = _refine_steps(p1_step, final_step) if refine and p1_step > 0 else []
     levels = max(len(steps0), len(steps1))
-    n_workers = _resolve_workers(max_workers)
+    # 0.2.81:parallel 参数真正接线(此前为死参数,默认 cpu-2 并发)
+    n_workers = 1 if not parallel else _resolve_workers(max_workers)
+    # 0.2.81:预建工作目录,避免并发候选首次写入时目录创建竞态
+    _work = Path(work_dir) if work_dir else default_work_dir(experiment, backend)
+    try:
+        _work.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
     # 0.2.77:每候选使用唯一脚本/输出名——不只是并发安全,还修复联合复核
     # 缓存路径别名 bug:旧共享 raw.ft3 会被后写候选覆盖,缓存命中的联合组合
     # 会读到错误谱(d8 顺序模式 F2 曾因此误判 joint 更优)

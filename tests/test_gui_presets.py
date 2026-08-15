@@ -1,4 +1,4 @@
-"""presets 实验模板数据完整性测试:全部 YAML 可解析、字段与化学位移先验合法。"""
+"""presets 实验类型模板数据完整性测试:全部 YAML 可解析、字段与化学位移先验合法。"""
 
 from __future__ import annotations
 

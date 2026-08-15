@@ -27,7 +27,7 @@ REPORT_EXTS = (".html", ".pdf", ".json")
 
 
 def report_products(manager: ProjectManager, exp_id: str, data_id: str) -> list[Path]:
-    """扫描当前数据的 report 目录,返回 html/pdf/json 产物(排序)。"""
+    """扫描当前样品数据的 report 目录,返回 html/pdf/json 产物(排序)。"""
     if manager.project is None or not exp_id or not data_id:
         return []
     try:
@@ -109,7 +109,7 @@ class ReportPanel(QWidget):
         self._current = None
         self.open_button.setEnabled(False)
         if self._manager.project is None or not self._exp_id or not self._data_id:
-            self.hint_label.setText("未选中数据——从左侧选择数据节点后查看报告")
+            self.hint_label.setText("未选中样品数据——从左侧选择样品数据节点后查看报告")
             self.file_list.setVisible(False)
             self.preview.setVisible(False)
             return

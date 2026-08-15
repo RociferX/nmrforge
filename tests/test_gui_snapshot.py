@@ -82,7 +82,7 @@ def test_snapshot_step_no_matching_run(tmp_path: Path) -> None:
 
 
 def test_snapshot_step_filters_by_data_id(tmp_path: Path) -> None:
-    """多数据实验:只快照匹配 data_id 的最近运行。"""
+    """多样品数据实验类型:只快照匹配 data_id 的最近运行。"""
     manager, exp_id, _data_id = _manager_with_data(tmp_path)
     manager.import_data(exp_id, "/fake/2")  # d_002
     run2 = manager.start_run(

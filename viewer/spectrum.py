@@ -309,11 +309,14 @@ class Spectrum1D:
     @classmethod
     def load_from_fid(
         cls, path: Path | str, label: str = "FID"
-    ) -> Spectrum1D:
-        """用 nmrglue 读取 NMRPipe .fid(时间域);多维取第一条 FID 实部。
+    ) -> Spectrum1D | Spectrum:
+        """用 nmrglue 读取 NMRPipe .fid(时间域)。
 
-        时间域 FID 以数据点(序号)为 x 轴显示,不使用 ppm 轴
-        (ppm 只对频域谱有意义)。
+        - 一维 FID:返回 Spectrum1D(实部迹线);
+        - 二维及以上 FID:按 nmrDraw 方式显示整块二维时域平面
+          (行=各 FID/间接维增量,列=直接维时点),返回 Spectrum;
+          3D+ FID 显示首个间接增量的二维平面(与 nmrDraw 一致)。
+        时间域以数据点(序号)为轴,不使用 ppm(ppm 只对频域谱有意义)。
         """
         import nmrglue as ng
 
@@ -321,15 +324,40 @@ class Spectrum1D:
         data = np.asarray(data)
         if np.iscomplexobj(data):
             data = data.real
-        while data.ndim > 1:
-            data = data[0]  # 查看用:取第一条 FID 作为一维迹线
-        axis = SpectrumAxis(
-            label=label or "FID 数据点",
+        while data.ndim > 2:
+            data = data[0]  # 3D+ FID:显示首个间接增量的二维时域平面
+        if data.ndim == 1:
+            axis = SpectrumAxis(
+                label=label or "FID 数据点",
+                size=int(data.shape[0]),
+                sw_hz=0.0,
+                obs_mhz=0.0,
+                carrier_ppm=0.0,
+                orig_hz=0.0,
+            )
+            logger.info("载入 FID: %s (%s)", path, data.shape)
+            return cls(data, axis, source=Path(path))
+        fid_axis = SpectrumAxis(
+            label=label or "FID",
             size=int(data.shape[0]),
             sw_hz=0.0,
             obs_mhz=0.0,
             carrier_ppm=0.0,
             orig_hz=0.0,
         )
-        logger.info("载入 FID: %s (%s)", path, data.shape)
-        return cls(data, axis, source=Path(path))
+        point_axis = SpectrumAxis(
+            label="Points",
+            size=int(data.shape[1]),
+            sw_hz=0.0,
+            obs_mhz=0.0,
+            carrier_ppm=0.0,
+            orig_hz=0.0,
+        )
+        spectrum = Spectrum(data, [fid_axis, point_axis], source=Path(path))
+        # FID 动态范围大(ADC 累积值),等高线默认基准取高分位数,
+        # 避免被个别尖峰淹没,看不到大部分 FID 的时域包络。
+        robust_max = float(np.percentile(np.abs(data), 99.0))
+        if robust_max > 0:
+            spectrum.robust_max = robust_max
+        logger.info("载入 FID(二维时域): %s (%s)", path, data.shape)
+        return spectrum

@@ -1,4 +1,4 @@
-"""GUI 对话框组件:信息/确认/导入实验/样本表单。
+"""GUI 对话框组件:信息/确认/导入实验类型/项目表单。
 
 不使用 QMessageBox(在 Windows + Qt6 下从菜单触发模态 QMessageBox 会打印
 "This plugin supports grabbing the mouse only for popup windows"),统一用普通 QDialog。
@@ -30,6 +30,8 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+from gui.notes import note_fields
 
 
 class InfoDialog(QDialog):
@@ -79,7 +81,7 @@ class ConfirmDialog(QDialog):
 
 
 class ImportExperimentDialog(QDialog):
-    """导入实验:选择 Bruker 数据集目录 + 标题 + 关联样本。"""
+    """导入实验类型:选择 Bruker 数据集目录 + 标题 + 关联项目。"""
 
     def __init__(
         self,
@@ -87,7 +89,7 @@ class ImportExperimentDialog(QDialog):
         samples: list[tuple[str, str]] | None = None,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("导入数据")
+        self.setWindowTitle("导入样品数据")
         self.setMinimumWidth(520)
         layout = QVBoxLayout(self)
         form = QFormLayout()
@@ -108,7 +110,7 @@ class ImportExperimentDialog(QDialog):
         self.notes_edit = QPlainTextEdit()
         self.notes_edit.setMaximumHeight(70)
         self.notes_edit.setPlaceholderText(
-            "数据注释(可选,导入后也可在中间上方编辑)"
+            "样品数据注释(可选,导入后也可在中间上方编辑)"
         )
         form.addRow("注释(可选):", self.notes_edit)
 
@@ -116,11 +118,11 @@ class ImportExperimentDialog(QDialog):
         self.sample_combo.addItem("(无)", "")
         for sample_id, name in samples or []:
             self.sample_combo.addItem(f"{sample_id} {name}".strip(), sample_id)
-        form.addRow("关联样本:", self.sample_combo)
-        self.copy_check = QCheckBox("链接原始数据到样本(只读文件链接,必要时复制)")
+        form.addRow("关联项目:", self.sample_combo)
+        self.copy_check = QCheckBox("链接原始数据到项目(只读文件链接,必要时复制)")
         self.copy_check.setChecked(True)
         self.copy_check.setToolTip(
-            "勾选后把 Bruker 数据集复制进样本 raw/ 目录并计算输入指纹;"
+            "勾选后把 Bruker 数据集复制进项目 raw/ 目录并计算输入指纹;"
             "不勾选仅登记引用(源目录需保持可访问)。"
         )
         form.addRow("", self.copy_check)
@@ -168,11 +170,11 @@ class ImportExperimentDialog(QDialog):
 
 
 class SampleDialog(QDialog):
-    """样本表单:名称/蛋白/序列/浓度/缓冲液/备注。"""
+    """项目表单:名称/蛋白/序列/浓度/缓冲液/备注。"""
 
     def __init__(self, parent: QWidget | None, sample_id: str = "") -> None:
         super().__init__(parent)
-        self.setWindowTitle(f"样本 {sample_id}".strip() if sample_id else "添加样本")
+        self.setWindowTitle(f"项目 {sample_id}".strip() if sample_id else "添加项目")
         self.setMinimumWidth(420)
         layout = QVBoxLayout(self)
         form = QFormLayout()
@@ -203,7 +205,7 @@ class SampleDialog(QDialog):
 
     def _validate_and_accept(self) -> None:
         if not self.name_edit.text().strip():
-            InfoDialog.show_info(self, "提示", "请填写样本名称")
+            InfoDialog.show_info(self, "提示", "请填写项目名称")
             return
         self.accept()
 
@@ -226,26 +228,30 @@ class SampleDialog(QDialog):
 
 
 class NotesDialog(QDialog):
-    """注释编辑对话框(样本/实验/数据通用):多行文本 + 确定/取消。"""
+    """三级注释表单:按层级字段列表逐行填写(项目/实验类型/样品数据字段不同)。"""
 
     def __init__(
         self,
         parent: QWidget | None,
         title: str,
-        text: str = "",
+        kind: str = "",
+        values: dict | None = None,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle(title)
         self.setMinimumWidth(460)
         layout = QVBoxLayout(self)
-        hint = QLabel("输入注释信息(可留空):")
+        hint = QLabel("常规信息(可留空):")
         layout.addWidget(hint)
-        self.editor = QPlainTextEdit()
-        self.editor.setPlainText(text)
-        self.editor.setPlaceholderText(
-            "注释信息,例如样本:蛋白名称/buffer/浓度;实验:实验类型;数据:采集日期等"
-        )
-        layout.addWidget(self.editor, 1)
+        self._edits: dict[str, QLineEdit] = {}
+        form = QFormLayout()
+        for key, label in note_fields(kind):
+            edit = QLineEdit()
+            edit.setText(str((values or {}).get(key, "") or ""))
+            edit.setPlaceholderText("可留空")
+            self._edits[key] = edit
+            form.addRow(f"{label}:", edit)
+        layout.addLayout(form)
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok
             | QDialogButtonBox.StandardButton.Cancel
@@ -256,8 +262,13 @@ class NotesDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
-    def result_text(self) -> str:
-        return self.editor.toPlainText().strip()
+    def result_fields(self) -> dict[str, str]:
+        """返回填写后的字段 dict(空值剔除)。"""
+        return {
+            key: edit.text().strip()
+            for key, edit in self._edits.items()
+            if edit.text().strip()
+        }
 
 
 class ParameterTableDialog(QDialog):
@@ -571,7 +582,7 @@ class RunHistoryDialog(QDialog):
 
         self.table = QTableWidget(len(runs), 6)
         self.table.setHorizontalHeaderLabels(
-            ["运行", "实验", "流程", "状态", "开始", "结束"]
+            ["运行", "实验类型", "流程", "状态", "开始", "结束"]
         )
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -620,7 +631,7 @@ class RunHistoryDialog(QDialog):
         self.snapshot_button.setEnabled(bool(self._current_snapshot))
         self.detail_label.setText(
             f"运行: {run.run_id}  [{run.status}]\n"
-            f"流程: {run.workflow_ref}  实验: {run.experiment_id}\n"
+            f"流程: {run.workflow_ref}  实验类型: {run.experiment_id}\n"
             f"消息: {run.message or '-'}\n"
             f"快照: {snapshot or '(无)'}  脚本: {scripts}\n"
             f"产物:\n{outputs}"

@@ -86,12 +86,12 @@ class ProcessingController:
         threading.Thread(target=worker, daemon=True).start()
 
     # ------------------------------------------------------------------
-    # 步骤化处理(G2B-002 / 契约 v1.2):导入数据 → 生成 FID → 生成谱图
+    # 步骤化处理(G2B-002 / 契约 v1.2):导入样品数据 → 生成 FID → 生成谱图
     # 实现依赖 Backend 的 DataEntry 层级与 convert_to_fid(待 Backend 落地),
     # 当前提供签名与占位实现;GUI 界面按此接口接线。
     # ------------------------------------------------------------------
     def import_data(self, entry: ExperimentEntry, source: str, copy: bool = True) -> dict:
-        """第 1 步:导入数据(只读参数 + 复制 raw),返回 ImportResult dict。"""
+        """第 1 步:导入样品数据(只读参数 + 复制 raw),返回 ImportResult dict。"""
         from workflow.import_workflow import import_data
 
         if self._manager is None:
@@ -111,7 +111,7 @@ class ProcessingController:
         }
 
     def batch_import(self, exp_id: str, folders: list) -> dict:
-        """批量导入多个数据目录到实验,同一批数据标记同一 batch_id。
+        """批量导入多个数据目录到实验类型,同一批样品数据标记同一 batch_id。
 
         返回 {"batch_id", "results": [{folder, data_id, ok, error}]};
         单个目录失败不阻断整批(结果中带 error 信息)。
@@ -123,7 +123,7 @@ class ProcessingController:
             raise RuntimeError("ProcessingController 未绑定项目(ProjectManager)")
         entry = self._manager.project.experiment(exp_id)
         if entry is None:
-            raise RuntimeError(f"实验不存在: {exp_id}")
+            raise RuntimeError(f"实验类型不存在: {exp_id}")
         batch = next_batch_id(self._manager, exp_id)
         results: list[dict] = []
         for folder in folders:
