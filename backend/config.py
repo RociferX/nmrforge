@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from core.app_paths import resource_path
@@ -21,7 +22,11 @@ DEFAULT_LINEWIDTH_HZ: dict[str, float] = {
     "": 15.0,
 }
 DEFAULT_POINTS_PER_LINE = 2.0
-DEFAULT_SMILE_NTHREAD = 2
+
+
+def _auto_nthread() -> int:
+    """SMILE 默认线程 = 机器线程数 - 2(给系统留 2),最小 1。"""
+    return max(1, (os.cpu_count() or 4) - 2)
 
 
 def load_config(config: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -66,7 +71,7 @@ def load_processing_defaults(config: dict[str, Any] | None = None) -> dict[str, 
     {
         "linewidth_hz": {核素: Hz},   # 无效值回退核素默认
         "points_per_line": float,     # 无效/非正回退 2.0
-        "nthread": int,               # SMILE 线程,无效/非正回退 2
+        "nthread": int,               # SMILE 线程,缺省/0=自动(机器线程数-2)
         "nmrpipe_path": str,          # 显式 NMRPipe bin 目录/可执行文件,可空
     }
     """
@@ -87,7 +92,7 @@ def load_processing_defaults(config: dict[str, Any] | None = None) -> dict[str, 
         "points_per_line": _as_float(
             processing.get("points_per_line"), DEFAULT_POINTS_PER_LINE
         ),
-        "nthread": _as_int(smile.get("nthread"), DEFAULT_SMILE_NTHREAD),
+        "nthread": _as_int(smile.get("nthread"), 0) or _auto_nthread(),
         "nmrpipe_path": _as_str(nmrpipe.get("path") or nmrpipe.get("nmrpipe_bin")),
     }
 
@@ -114,7 +119,7 @@ def resolve_points_per_line(value: Any, config: dict[str, Any] | None = None) ->
 
 
 def resolve_nthread(value: Any, config: dict[str, Any] | None = None) -> int:
-    """显式值优先,否则配置默认(smile.nthread);无效/非正回退 2。"""
+    """显式值优先,否则配置默认(smile.nthread);无效/非正回退自动(机器线程数-2)。"""
     if value is not None:
         try:
             v = int(value)
@@ -133,7 +138,6 @@ def nmrpipe_path(config: dict[str, Any] | None = None) -> str:
 __all__ = [
     "DEFAULT_LINEWIDTH_HZ",
     "DEFAULT_POINTS_PER_LINE",
-    "DEFAULT_SMILE_NTHREAD",
     "linewidth_hz_for",
     "load_config",
     "load_processing_defaults",
