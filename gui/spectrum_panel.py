@@ -153,7 +153,11 @@ class SpectrumPanel(QWidget):
         self.refresh()
 
     def refresh(self) -> None:
-        """刷新谱图文件列表;无文件时隐藏列表(避免右下角空白)。"""
+        """刷新谱图文件列表;无文件时隐藏列表(避免右下角空白)。
+
+        0.2.88:不自动显示谱图——文件列表点击或 Pipeline「展示谱图」按钮打开;
+        切换样品数据时清空旧谱,避免残留上一张谱。
+        """
         self.file_list.clear()
         has_context = (
             self.manager.project is not None
@@ -177,19 +181,30 @@ class SpectrumPanel(QWidget):
         self.peak_toolbar_widget.setVisible(bool(paths))
         self.export_poky_button.setEnabled(False)
         self.save_peaks_button.setEnabled(False)
-        if paths:
-            first = paths[0]
-            if self._current_spectrum != first:
-                if self.open_spectrum(first):
-                    self._current_spectrum = first
-                else:
-                    self._current_spectrum = None
-            self._load_peaks(first)
-        else:
+        if not paths:
             self._current_spectrum = None
             self._spectrum3d_panel.clear()
             self.viewer.clear()  # 谱图文件夹无谱时右侧留空
             self._clear_peaks()
+            return
+        if self._current_spectrum is not None and self._current_spectrum not in paths:
+            # 上下文已切换:不自动显示,清空旧谱(等用户点文件/「展示谱图」)
+            self._current_spectrum = None
+            self._spectrum3d_panel.clear()
+            self.viewer.clear()
+            self._clear_peaks()
+
+    def load_current_spectrum(self) -> bool:
+        """加载当前样品数据 spectra 文件夹的首个谱(「展示谱图」按钮)。"""
+        paths = self._spectrum_paths()
+        if not paths:
+            return False
+        first = paths[0]
+        if not self.open_spectrum(first):
+            return False
+        self._current_spectrum = first
+        self._load_peaks(first)
+        return True
 
     def _spectrum_paths(self) -> list[Path]:
         """当前实验类型/样品数据下的谱图文件(新布局优先,旧扁平路径回退)。"""

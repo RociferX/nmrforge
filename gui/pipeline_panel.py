@@ -440,6 +440,7 @@ class PipelineStepRow(QWidget):
     run_requested = pyqtSignal(str)  # step_id
     manual_requested = pyqtSignal(str)  # step_id:打开人工参数表格/脚本编辑器
     report_requested = pyqtSignal(str)  # step_id:分析完成后打开报告页
+    show_spectrum_requested = pyqtSignal(str)  # step_id:生成谱图完成后展示谱图
     detail_toggled = pyqtSignal(str)  # step_id:点击行切换详情
     view_log_requested = pyqtSignal(str)  # step_id:定位日志面板
 
@@ -478,6 +479,15 @@ class PipelineStepRow(QWidget):
             lambda: self.report_requested.emit(self.step_id)
         )
         header.addWidget(self.report_button)
+        self.show_spectrum_button = QPushButton("展示谱图")
+        self.show_spectrum_button.setToolTip(
+            "在右侧谱图面板显示当前数据 spectra 文件夹的最终谱"
+        )
+        self.show_spectrum_button.setVisible(False)
+        self.show_spectrum_button.clicked.connect(
+            lambda: self.show_spectrum_requested.emit(self.step_id)
+        )
+        header.addWidget(self.show_spectrum_button)
         self.manual_button = QPushButton("人工")
         self.manual_button.setToolTip("人工参数表格 / 脚本编辑器")
         self.manual_button.setVisible(False)
@@ -575,6 +585,7 @@ class PipelinePanel(QWidget):
     run_finished = pyqtSignal()
     manual_open_requested = pyqtSignal(str)  # step_id:打开人工处理对话框
     report_requested = pyqtSignal(str)  # step_id:打开报告页
+    show_spectrum_requested = pyqtSignal(str)  # step_id:展示谱图
     import_data_requested = pyqtSignal(str)  # exp_id:在当前实验类型下导入样品数据
     view_log_requested = pyqtSignal(str)  # step_id:定位日志面板
     progress_updated = pyqtSignal(str)  # 批量进度文本(主线程更新标签)
@@ -634,6 +645,7 @@ class PipelinePanel(QWidget):
             row.run_requested.connect(self._on_run_requested)
             row.manual_requested.connect(self.manual_open_requested.emit)
             row.report_requested.connect(self.report_requested.emit)
+            row.show_spectrum_requested.connect(self.show_spectrum_requested.emit)
             row.detail_toggled.connect(self._toggle_step_detail)
             row.view_log_requested.connect(self.view_log_requested.emit)
             steps_box.addWidget(row)
@@ -769,6 +781,10 @@ class PipelinePanel(QWidget):
             # 导入样品数据为自动化步骤,无人工入口;其余处理步骤保留人工
             self._rows[step_id].manual_button.setVisible(
                 step_id not in ("import", "smile")
+            )
+            # 0.2.88:生成谱图完成后出现「展示谱图」按钮(不再自动显示谱)
+            self._rows[step_id].show_spectrum_button.setVisible(
+                step_id == "spectrum" and status == "SUCCESS"
             )
 
     # ------------------------------------------------------------------

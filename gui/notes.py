@@ -30,7 +30,7 @@ EXPERIMENT_FIELDS: tuple[tuple[str, str], ...] = (
 )
 DATA_FIELDS: tuple[tuple[str, str], ...] = (
     ("repeat", "重复号"),
-    ("condition", "条件变化"),
+    ("condition", "Buffer 组分"),
     ("buffer_ph", "Buffer pH"),
     ("temperature", "温度(°C)"),
     ("notes", "备注"),
@@ -262,15 +262,27 @@ def _acqus_value(raw_dir, key: str) -> str:
 
 
 def temperature_from_acqus(raw_dir) -> str:
-    """Bruker TE(0.1 K 单位)→ 摄氏温度字符串;无法解析返回空串。"""
+    """Bruker TE → 摄氏温度字符串;自动识别 0.1 K / K / °C,无法解析返回空串。
+
+    - TE 惯例为 0.1 K(如 2980 → 298.0 K → 24.9 °C);
+    - 部分数据直接存 K(如 298.0)或 °C(如 25),按数值范围判定。
+    """
     value = _acqus_value(raw_dir, "TE")
     if not value:
         return ""
     try:
-        tenths = float(value.split()[0])
+        number = float(value.split()[0])
     except (TypeError, ValueError):
         return ""
-    return f"{tenths / 10.0 - 273.15:.1f}"
+    kelvin_tenths = number / 10.0
+    celsius: float | None = None
+    if 240.0 <= kelvin_tenths <= 340.0:
+        celsius = kelvin_tenths - 273.15
+    elif 240.0 <= number <= 340.0:
+        celsius = number - 273.15
+    elif -40.0 <= number <= 100.0:
+        celsius = number
+    return f"{celsius:.1f}" if celsius is not None else ""
 
 
 def _raw_dir_for(project, exp_id: str, data_id: str) -> Path | None:

@@ -254,6 +254,7 @@ def test_spectrum_panel_peak_add_edit_delete_save(
     controller = ProcessingController(manager)
     panel = SpectrumPanel(manager, controller=controller)
     panel.set_context("exp_001", "d_001")
+    panel._load_peaks(spectra / "exp_001-d_001.ft2")  # 0.2.88:显式加载峰表
     assert panel.peak_table.rowCount() == 1
 
     panel._on_add_peak()
@@ -323,6 +324,7 @@ def test_spectrum_panel_3d_columns_auto(
     )
     panel = SpectrumPanel(manager)
     panel.set_context("exp_001", "d_001")
+    panel._load_peaks(spectra / "exp_001-d_001.ft3")  # 0.2.88:显式加载峰表
     assert panel.peak_table.rowCount() == 1
     assert "F1_shift" in panel._peak_keys
     assert panel.peak_table.horizontalHeaderItem(1).text() == "F1_shift"

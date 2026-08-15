@@ -167,40 +167,40 @@ def test_viewer_fid_2d_window_load(tmp_path: Path, qapp: QApplication) -> None:
     window.close()
 
 
-def test_phase_rotate_math() -> None:
-    """0.2.86:P0=0 等价纯 FT 实部,P0=180 反号;2D 沿列轴同样成立。"""
+def test_display_phase_math() -> None:
+    """0.2.87:显示用相位(仅显示不改数据):0°还原,180°反号,90°变化。"""
     from viewer.spectrum_viewer import SpectrumViewer
 
     rng = np.random.default_rng(3)
-    complex_data = rng.normal(size=32) + 1j * rng.normal(size=32)
-    real0 = SpectrumViewer._phase_rotate(complex_data, 0.0, 0.0, 0)
-    real180 = SpectrumViewer._phase_rotate(complex_data, 180.0, 0.0, 0)
-    np.testing.assert_allclose(real0, np.fft.fft(complex_data).real)
-    np.testing.assert_allclose(real180, -real0, atol=1e-9)
-    c2 = rng.normal(size=(4, 8)) + 1j * rng.normal(size=(4, 8))
-    r0_2d = SpectrumViewer._phase_rotate(c2, 0.0, 0.0, 1)
-    np.testing.assert_allclose(r0_2d, np.fft.fft(c2, axis=1).real)
+    real = rng.normal(size=32)
+    p0_0 = SpectrumViewer._display_phase(real, 0.0, 0.0)
+    np.testing.assert_allclose(p0_0, real)
+    p0_180 = SpectrumViewer._display_phase(real, 180.0, 0.0)
+    np.testing.assert_allclose(p0_180, -real, atol=1e-9)
+    p0_90 = SpectrumViewer._display_phase(real, 90.0, 0.0)
+    assert not np.allclose(p0_90, real)
 
 
-def test_viewer_phase_panel_applies_phase_to_complex_fid(
+def test_viewer_phase_panel_display_only_real_data(
     qapp: QApplication,
 ) -> None:
-    """0.2.86:交互调相面板:复型 FID 启用,P0 旋转改变显示实部,归零恢复。"""
+    """0.2.87:相位面板对实数 1D 谱即可用,仅显示调相,不改数据。"""
     from viewer.spectrum import SpectrumAxis
 
     n = 64
     time = np.arange(n)
-    complex_fid = np.exp(-time / 20.0) * np.exp(1j * 0.3)
-    spectrum1d = Spectrum1D(complex_fid.real, SpectrumAxis("FID", n, 0.0, 0.0, 0.0))
-    spectrum1d.complex_data = complex_fid
+    real = np.exp(-time / 20.0) * np.cos(2 * np.pi * time / 8.0)
+    spectrum1d = Spectrum1D(real, SpectrumAxis("1H", n, 6000.0, 600.0, 4.7))
     viewer = SpectrumViewer()
-    viewer.add_spectrum(spectrum1d, name="fid")
+    viewer.add_spectrum(spectrum1d, name="1d")
     assert viewer.phase_panel.p0_slider.isEnabled()
-    viewer._on_phase_changed(True)  # 建立 FT 实部基线(P0=P1=0)
+    viewer._on_phase_changed(True)  # 建立显示基线(P0=P1=0)
     _x0, y0 = viewer._plot_1d.getData()
     viewer.phase_panel.set_values(90, 0)
     _x1, y1 = viewer._plot_1d.getData()
     assert not np.allclose(np.asarray(y0), np.asarray(y1))
+    # 仅显示调相:原始数据不变
+    np.testing.assert_allclose(viewer._primary_1d.data, real)
     viewer.phase_panel.set_values(0, 0)
     _x2, y2 = viewer._plot_1d.getData()
     np.testing.assert_allclose(np.asarray(y2), np.asarray(y0))

@@ -608,11 +608,33 @@ def test_spectrum_panel_empty_spectra_clears_viewer(
     _write_ft2(spectra1 / f"{entry.id}-{data1.id}.ft2")
     panel = SpectrumPanel(manager)
     panel.set_context(entry.id, data1.id)
+    assert panel.load_current_spectrum() is True
     assert panel.viewer.layer_list.count() == 1
     # data2 谱图文件夹为空 → 查看器清空
     panel.set_context(entry.id, data2.id)
     assert panel.viewer.layer_list.count() == 0
     assert panel._current_spectrum is None
+    panel.close()
+
+
+def test_pipeline_show_spectrum_button_on_spectrum_success(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.2.88:生成谱图完成后出现「展示谱图」按钮,点击发出请求。"""
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    spectra = manager.data_dir("exp_001", "d_001", "spectra")
+    spectra.mkdir(parents=True, exist_ok=True)
+    _write_ft2(spectra / "exp_001-d_001.ft2")
+    from gui.pipeline_panel import PipelinePanel
+
+    panel = PipelinePanel(manager, FakeProcessingController())
+    panel.set_selection("data", "exp_001", "d_001")
+    button = panel._rows["spectrum"].show_spectrum_button
+    assert not button.isHidden()
+    seen: list[str] = []
+    panel.show_spectrum_requested.connect(seen.append)
+    button.click()
+    assert seen == ["spectrum"]
     panel.close()
 
 
@@ -887,6 +909,7 @@ def test_spectrum_peak_linkage(
         writer.writerow(["2", "7.5", "118.0", "80", "15", "A2"])
     panel = SpectrumPanel(manager)
     panel.set_context("exp_001", "d_001")
+    panel._load_peaks(spectra / "exp_001-d_001.ft2")  # 0.2.88:显式加载峰表
     assert panel.peak_table.rowCount() == 2
     assert len(panel.viewer._peaks) == 2
     panel.peak_table.selectRow(1)
@@ -913,6 +936,7 @@ def test_export_poky_button_generates_list(
         writer.writerow(["1", "8.0", "115.0", "100", "20", "G1"])
     panel = SpectrumPanel(manager)
     panel.set_context("exp_001", "d_001")
+    panel._load_peaks(spectra / "exp_001-d_001.ft2")  # 0.2.88:显式加载峰表
     assert panel.export_poky_button.isEnabled()
 
     out = tmp_path / "out.list"
@@ -954,6 +978,7 @@ def test_peak_linkage_via_load_peaks(
         writer.writerow(["2", "7.5", "118.0", "80", "15", "A2"])
     panel = SpectrumPanel(manager)
     panel.set_context("exp_001", "d_001")
+    panel._load_peaks(spectra / "exp_001-d_001.ft2")  # 0.2.88:显式加载峰表
     assert panel.peak_table.rowCount() == 2
     assert len(panel.viewer._peaks) == 2
     panel.peak_table.selectRow(1)
@@ -995,10 +1020,12 @@ def test_spectrum_auto_shown_on_data_select(
     pipe.write(str(spectra / "exp_001-d_001.ft2"), dic, data, overwrite=True)
     panel = SpectrumPanel(manager)
     panel.set_context("exp_001", "d_001")
-    assert panel.viewer.layer_list.count() == 1  # 自动加载
+    assert panel.viewer.layer_list.count() == 0  # 0.2.88:不自动显示
+    assert panel.load_current_spectrum() is True
+    assert panel.viewer.layer_list.count() == 1
     assert panel._current_spectrum is not None
     panel.refresh()
-    assert panel.viewer.layer_list.count() == 1  # 不重复加载
+    assert panel.viewer.layer_list.count() == 1  # 刷新不重开
     panel.close()
 
 def test_folder_node_shows_files(
