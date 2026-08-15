@@ -1,49 +1,159 @@
 """样本/实验/数据三级注释读写 helper(GUI 侧约定)。
 
-- 样本注释:ProjectInfo.protein.notes(项目即样本,0.2.55 术语统一);
-- 实验注释:ExperimentEntry.notes;
-- 数据注释:ExperimentEntry.metadata["data_notes"][data_id](约定键,
-  metadata 为模型自由 dict,不改 Shared Contract 结构)。
-写操作由调用方在 manager.save() 前调用。
+- 样本注释:ProjectInfo.protein.notes(JSON 字段串,兼容旧纯文本);
+- 实验注释:ExperimentEntry.metadata["note_fields"](dict,约定键);
+- 数据注释:ExperimentEntry.metadata["data_notes"][data_id](dict,约定键)。
+各级字段为「常规信息列表」,由用户按表单逐行填写;写操作由调用方在
+manager.save() 前调用。
 """
 
 from __future__ import annotations
 
+import json
+
+# 各级注释字段(键 / 显示名),0.2.79 起按层级区分:
+# 样本=蛋白样品基本信息;实验=实验类型/维度/核;数据=重复/条件/pH/温度。
+SAMPLE_FIELDS: tuple[tuple[str, str], ...] = (
+    ("protein_name", "蛋白名称"),
+    ("expression_system", "表达系统"),
+    ("concentration", "浓度"),
+    ("buffer", "Buffer"),
+    ("notes", "备注"),
+)
+EXPERIMENT_FIELDS: tuple[tuple[str, str], ...] = (
+    ("experiment_type", "实验类型"),
+    ("dimension", "维度"),
+    ("nuclei", "核"),
+    ("notes", "备注"),
+)
+DATA_FIELDS: tuple[tuple[str, str], ...] = (
+    ("repeat", "重复号"),
+    ("condition", "条件变化"),
+    ("buffer_ph", "Buffer pH"),
+    ("temperature", "温度(°C)"),
+    ("notes", "备注"),
+)
+
+_FIELD_BY_KIND: dict[str, tuple[tuple[str, str], ...]] = {
+    "project": SAMPLE_FIELDS,
+    "experiment": EXPERIMENT_FIELDS,
+    "data": DATA_FIELDS,
+}
+
+_FIELD_LABELS: dict[str, str] = {
+    key: label
+    for schema in (SAMPLE_FIELDS, EXPERIMENT_FIELDS, DATA_FIELDS)
+    for key, label in schema
+}
+
+
+def note_fields(kind: str) -> tuple[tuple[str, str], ...]:
+    """某层级的注释字段列表(键, 显示名)。"""
+    return _FIELD_BY_KIND.get(kind, ())
+
+
+def format_fields(fields: dict) -> str:
+    """字段 dict → 多行「显示名: 值」(跳过空值)。"""
+    lines: list[str] = []
+    for key, value in (fields or {}).items():
+        text = str(value or "").strip()
+        if not text:
+            continue
+        lines.append(f"{_FIELD_LABELS.get(key, key)}: {text}")
+    return "\n".join(lines)
+
+
+def _clean(fields: dict) -> dict[str, str]:
+    return {str(key): str(value or "").strip() for key, value in (fields or {}).items()}
+
+
+def _loads(value: str) -> dict:
+    try:
+        data = json.loads(value or "")
+    except (TypeError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+# ---------------------------------------------------------------- 样本
+def sample_note_fields(project) -> dict:
+    """样本(项目)结构化注释:protein.notes 中 JSON 字段。"""
+    protein = getattr(project, "protein", None)
+    return _loads(str(getattr(protein, "notes", "") or ""))
+
+
+def set_sample_note_fields(project, fields: dict) -> None:
+    protein = getattr(project, "protein", None)
+    if protein is not None:
+        protein.notes = json.dumps(_clean(fields), ensure_ascii=False)
+
 
 def sample_note(project) -> str:
-    """样本(项目)注释:protein.notes。"""
+    """样本注释展示文本(结构化字段多行;旧纯文本直接返回)。"""
+    fields = sample_note_fields(project)
+    if fields:
+        return format_fields(fields)
     protein = getattr(project, "protein", None)
     return str(getattr(protein, "notes", "") or "")
 
 
 def set_sample_note(project, text: str) -> None:
+    """兼容旧调用:覆盖为纯文本(清除结构化字段)。"""
     protein = getattr(project, "protein", None)
     if protein is not None:
         protein.notes = str(text or "")
 
 
+# ---------------------------------------------------------------- 实验
+def experiment_note_fields(project, exp_id: str) -> dict:
+    entry = project.experiment(exp_id) if project is not None else None
+    if entry is None:
+        return {}
+    fields = (entry.metadata or {}).get("note_fields")
+    return dict(fields) if isinstance(fields, dict) else {}
+
+
+def set_experiment_note_fields(project, exp_id: str, fields: dict) -> None:
+    entry = project.experiment(exp_id) if project is not None else None
+    if entry is None:
+        return
+    meta = dict(entry.metadata or {})
+    meta["note_fields"] = _clean(fields)
+    entry.metadata = meta
+
+
 def experiment_note(project, exp_id: str) -> str:
+    """实验注释展示文本(结构化字段优先,兼容 entry.notes 纯文本)。"""
+    fields = experiment_note_fields(project, exp_id)
+    if fields:
+        return format_fields(fields)
     entry = project.experiment(exp_id) if project is not None else None
     return str(getattr(entry, "notes", "") or "") if entry is not None else ""
 
 
 def set_experiment_note(project, exp_id: str, text: str) -> None:
+    """兼容旧调用:覆盖为纯文本并清除结构化字段。"""
     entry = project.experiment(exp_id) if project is not None else None
-    if entry is not None:
-        entry.notes = str(text or "")
+    if entry is None:
+        return
+    entry.notes = str(text or "")
+    meta = dict(entry.metadata or {})
+    meta.pop("note_fields", None)
+    entry.metadata = meta
 
 
-def data_note(project, exp_id: str, data_id: str) -> str:
+# ---------------------------------------------------------------- 数据
+def data_note_fields(project, exp_id: str, data_id: str) -> dict:
     if project is None:
-        return ""
+        return {}
     entry = project.experiment(exp_id)
     if entry is None:
-        return ""
-    data_notes = (entry.metadata or {}).get("data_notes") or {}
-    return str(data_notes.get(data_id, "") or "")
+        return {}
+    value = ((entry.metadata or {}).get("data_notes") or {}).get(data_id)
+    return dict(value) if isinstance(value, dict) else {}
 
 
-def set_data_note(project, exp_id: str, data_id: str, text: str) -> None:
+def set_data_note_fields(project, exp_id: str, data_id: str, fields: dict) -> None:
     if project is None:
         return
     entry = project.experiment(exp_id)
@@ -51,6 +161,25 @@ def set_data_note(project, exp_id: str, data_id: str, text: str) -> None:
         return
     meta = dict(entry.metadata or {})
     data_notes = dict(meta.get("data_notes") or {})
-    data_notes[data_id] = str(text or "")
+    data_notes[data_id] = _clean(fields)
     meta["data_notes"] = data_notes
     entry.metadata = meta
+
+
+def data_note(project, exp_id: str, data_id: str) -> str:
+    """数据注释展示文本(结构化字段优先;兼容旧纯文本字符串)。"""
+    fields = data_note_fields(project, exp_id, data_id)
+    if fields:
+        return format_fields(fields)
+    if project is None:
+        return ""
+    entry = project.experiment(exp_id)
+    if entry is None:
+        return ""
+    raw = ((entry.metadata or {}).get("data_notes") or {}).get(data_id)
+    return str(raw or "") if isinstance(raw, str) else ""
+
+
+def set_data_note(project, exp_id: str, data_id: str, text: str) -> None:
+    """兼容旧调用:写入 备注 字段。"""
+    set_data_note_fields(project, exp_id, data_id, {"notes": text})

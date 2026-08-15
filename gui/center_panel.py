@@ -141,7 +141,7 @@ class CenterPanel(QWidget):
                 text = experiment_note(project, exp_id)
             elif kind in ("data", "folder"):
                 text = data_note(project, exp_id, data_id)
-        self.notes_label.setText(f"注释: {text}" if text else "注释: (未填写)")
+        self.notes_label.setText(f"注释:\n{text}" if text else "注释: (未填写)")
 
     def _on_edit_notes(self) -> None:
         """点击「编辑注释」:发出编辑请求(主窗口打开注释对话框)。"""

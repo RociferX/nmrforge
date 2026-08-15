@@ -238,10 +238,12 @@ class MainWindow(QMainWindow):
     def new_project(self) -> None:
         name, ok = QInputDialog.getText(self, "新建样本", "样本名称:", text="unnamed")
         if ok and name.strip():
-            notes = self._ask_notes("新建样本 - 注释(可选)")
-            self._new_project_in_workspace(name.strip(), notes=notes)
+            fields = self._ask_note_fields("新建样本 - 常规信息(可选)", "project")
+            self._new_project_in_workspace(name.strip(), fields=fields)
 
-    def _new_project_in_workspace(self, name: str, notes: str = "") -> None:
+    def _new_project_in_workspace(
+        self, name: str, fields: dict | None = None
+    ) -> None:
         """在默认工作区下创建项目(契约 v1.3,create_project 返回 ProjectManager)。"""
         try:
             self.manager = self.workspace.create_project(name)
@@ -251,8 +253,10 @@ class MainWindow(QMainWindow):
         except Exception as exc:  # noqa: BLE001 - WorkspaceError 等统一提示
             InfoDialog.show_info(self, "新建样本失败", f"{type(exc).__name__}: {exc}")
             return
-        if notes and self.manager.project is not None:
-            self.manager.project.protein.notes = notes
+        if self.manager.project is not None:
+            from gui.notes import set_sample_note_fields
+
+            set_sample_note_fields(self.manager.project, fields or {})
             try:
                 self.manager.save()
             except ProjectError:
@@ -431,10 +435,13 @@ class MainWindow(QMainWindow):
                     )
                     notes = (data or {}).get("notes", "") or ""
                     if notes:
-                        from gui.notes import set_data_note
+                        from gui.notes import set_data_note_fields
 
-                        set_data_note(
-                            self.manager.project, target_exp_id, data_id, notes
+                        set_data_note_fields(
+                            self.manager.project,
+                            target_exp_id,
+                            data_id,
+                            {"notes": notes},
                         )
                 self.manager.save()
                 self.import_finished.emit(result)  # 回主线程刷新 UI
@@ -520,12 +527,12 @@ class MainWindow(QMainWindow):
             return
         self.refresh()
 
-    def _ask_notes(self, title: str) -> str:
-        """可选注释对话框:确定返回文本,取消返回空串。"""
-        dialog = NotesDialog(self, title, "")
+    def _ask_note_fields(self, title: str, kind: str) -> dict:
+        """常规信息表单对话框:确定返回字段 dict,取消返回空 dict。"""
+        dialog = NotesDialog(self, title, kind)
         if dialog.exec() == NotesDialog.DialogCode.Accepted:
-            return dialog.result_text()
-        return ""
+            return dialog.result_fields()
+        return {}
 
     def about(self) -> None:
         InfoDialog.show_info(
@@ -942,15 +949,19 @@ class MainWindow(QMainWindow):
         title, ok = QInputDialog.getText(self, "新建实验", "实验标题:")
         if not ok:
             return
-        notes = self._ask_notes("新建实验 - 注释(可选)")
+        fields = self._ask_note_fields("新建实验 - 常规信息(可选)", "experiment")
         create = getattr(self.manager, "create_experiment", None)
         try:
             if create is not None:
                 entry = create(title=title.strip())
             else:
                 entry = self.manager.add_experiment("", title=title.strip())
-            if notes:
-                entry.notes = notes
+            if fields:
+                from gui.notes import set_experiment_note_fields
+
+                set_experiment_note_fields(
+                    self.manager.project, entry.id, fields
+                )
             self.manager.save()
         except ProjectError as exc:
             InfoDialog.show_info(self, "新建实验失败", str(exc))
@@ -1067,12 +1078,12 @@ class MainWindow(QMainWindow):
         if self.manager.project is None or not kind:
             return
         from gui.notes import (
-            data_note,
-            experiment_note,
-            sample_note,
-            set_data_note,
-            set_experiment_note,
-            set_sample_note,
+            data_note_fields,
+            experiment_note_fields,
+            sample_note_fields,
+            set_data_note_fields,
+            set_experiment_note_fields,
+            set_sample_note_fields,
         )
 
         title = {
@@ -1081,22 +1092,22 @@ class MainWindow(QMainWindow):
             "data": "数据注释",
         }.get(kind, "注释")
         if kind == "project":
-            current = sample_note(self.manager.project)
+            current = sample_note_fields(self.manager.project)
         elif kind == "experiment":
-            current = experiment_note(self.manager.project, exp_id)
+            current = experiment_note_fields(self.manager.project, exp_id)
         else:
             kind = "data"
-            current = data_note(self.manager.project, exp_id, data_id)
-        dialog = NotesDialog(self, f"编辑{title}", current)
+            current = data_note_fields(self.manager.project, exp_id, data_id)
+        dialog = NotesDialog(self, f"编辑{title}", kind, current)
         if dialog.exec() != NotesDialog.DialogCode.Accepted:
             return
-        text = dialog.result_text()
+        fields = dialog.result_fields()
         if kind == "project":
-            set_sample_note(self.manager.project, text)
+            set_sample_note_fields(self.manager.project, fields)
         elif kind == "experiment":
-            set_experiment_note(self.manager.project, exp_id, text)
+            set_experiment_note_fields(self.manager.project, exp_id, fields)
         else:
-            set_data_note(self.manager.project, exp_id, data_id, text)
+            set_data_note_fields(self.manager.project, exp_id, data_id, fields)
         try:
             self.manager.save()
         except ProjectError as exc:

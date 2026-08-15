@@ -98,14 +98,14 @@ def test_new_project_action(
     class _FakeNotesDialog:
         DialogCode = QDialog.DialogCode
 
-        def __init__(self, parent, title, text):
+        def __init__(self, parent, title, kind="", values=None):
             pass
 
         def exec(self):
             return QDialog.DialogCode.Accepted
 
-        def result_text(self):
-            return ""
+        def result_fields(self):
+            return {}
 
     monkeypatch.setattr("gui.main_window.NotesDialog", _FakeNotesDialog)
     window.new_project()
@@ -166,14 +166,14 @@ def test_add_experiment_action(
     class _FakeNotesDialog:
         DialogCode = QDialog.DialogCode
 
-        def __init__(self, parent, title, text):
+        def __init__(self, parent, title, kind="", values=None):
             pass
 
         def exec(self):
             return QDialog.DialogCode.Accepted
 
-        def result_text(self):
-            return ""
+        def result_fields(self):
+            return {}
 
     monkeypatch.setattr("gui.main_window.NotesDialog", _FakeNotesDialog)
     window = MainWindow(manager=manager)

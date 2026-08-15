@@ -1,5 +1,18 @@
 # 变更日志
 
+## [0.2.79] - 2026-08-15
+
+- 调整(GUI Agent,用户反馈):点中 Data 节点时中间不再显示「导入数据」
+  步骤(导入数据属于实验层,点中实验时显示);数据层下一步提示同步
+  跳过导入步骤。
+- 调整(GUI Agent,用户反馈):样本/实验/数据三级注释改为结构化字段
+  表单(常规信息按列表逐行填写),各层级字段不同——样本:蛋白名称/
+  表达系统/浓度/Buffer;实验:实验类型/维度/核;数据:重复号/条件
+  变化/Buffer pH/温度;均含备注。旧纯文本注释兼容读取。
+- 存储:样本注释存 protein.notes(JSON 字段串),实验注释存
+  ExperimentEntry.metadata["note_fields"],数据注释存
+  metadata["data_notes"][data_id](均 GUI 侧约定,不改 Shared Contract)。
+
 ## [0.2.78] - 2026-08-15
 
 - 修复(GUI Agent,用户反馈):FID 显示按 nmrDraw 方式修正——二维 FID

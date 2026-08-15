@@ -366,6 +366,20 @@ def test_main_window_context_updates_on_tree_selection(
     window.close()
 
 
+def test_pipeline_hides_import_step_for_data_selection(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.2.79:点中 Data 时中间不再显示「导入数据」步骤(导入属于实验层)。"""
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    panel = PipelinePanel(manager, FakeProcessingController())
+    panel.set_selection("data", "exp_001", "d_001")
+    assert panel._rows["import"].isHidden()
+    assert not panel._rows["fid"].isHidden()
+    panel.set_selection("experiment", "exp_001")
+    assert not panel._rows["import"].isHidden()
+    panel.close()
+
+
 def test_main_window_log_panel_expands_on_message(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -438,14 +452,14 @@ def test_create_blank_experiment_action(
     class _FakeNotesDialog:
         DialogCode = QDialog.DialogCode
 
-        def __init__(self, parent, title, text):
+        def __init__(self, parent, title, kind="", values=None):
             pass
 
         def exec(self):
             return QDialog.DialogCode.Accepted
 
-        def result_text(self):
-            return ""
+        def result_fields(self):
+            return {}
 
     monkeypatch.setattr("gui.main_window.NotesDialog", _FakeNotesDialog)
     window._create_experiment()

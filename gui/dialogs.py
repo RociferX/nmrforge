@@ -31,6 +31,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from gui.notes import note_fields
+
 
 class InfoDialog(QDialog):
     """带确定按钮的信息对话框(替代 QMessageBox.information/critical/about)。"""
@@ -226,26 +228,30 @@ class SampleDialog(QDialog):
 
 
 class NotesDialog(QDialog):
-    """注释编辑对话框(样本/实验/数据通用):多行文本 + 确定/取消。"""
+    """三级注释表单:按层级字段列表逐行填写(样本/实验/数据字段不同)。"""
 
     def __init__(
         self,
         parent: QWidget | None,
         title: str,
-        text: str = "",
+        kind: str = "",
+        values: dict | None = None,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle(title)
         self.setMinimumWidth(460)
         layout = QVBoxLayout(self)
-        hint = QLabel("输入注释信息(可留空):")
+        hint = QLabel("常规信息(可留空):")
         layout.addWidget(hint)
-        self.editor = QPlainTextEdit()
-        self.editor.setPlainText(text)
-        self.editor.setPlaceholderText(
-            "注释信息,例如样本:蛋白名称/buffer/浓度;实验:实验类型;数据:采集日期等"
-        )
-        layout.addWidget(self.editor, 1)
+        self._edits: dict[str, QLineEdit] = {}
+        form = QFormLayout()
+        for key, label in note_fields(kind):
+            edit = QLineEdit()
+            edit.setText(str((values or {}).get(key, "") or ""))
+            edit.setPlaceholderText("可留空")
+            self._edits[key] = edit
+            form.addRow(f"{label}:", edit)
+        layout.addLayout(form)
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok
             | QDialogButtonBox.StandardButton.Cancel
@@ -256,8 +262,13 @@ class NotesDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
-    def result_text(self) -> str:
-        return self.editor.toPlainText().strip()
+    def result_fields(self) -> dict[str, str]:
+        """返回填写后的字段 dict(空值剔除)。"""
+        return {
+            key: edit.text().strip()
+            for key, edit in self._edits.items()
+            if edit.text().strip()
+        }
 
 
 class ParameterTableDialog(QDialog):

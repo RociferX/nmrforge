@@ -673,8 +673,11 @@ class PipelinePanel(QWidget):
                 row.set_status("LOCKED")
                 row.manual_button.setVisible(False)  # 未选中数据不显示人工
             self.import_button.setVisible(True)  # 可直接在当前实验导入数据
+            self._rows["import"].setVisible(True)
             return
         self.import_button.setVisible(False)
+        # 导入数据属于实验层(点中实验时显示),数据层不再展示该步骤
+        self._rows["import"].setVisible(False)
         exp = project.experiment(self._current_exp_id)
         exp_title = exp.title if exp is not None else self._current_exp_id
         current_batch = (
@@ -692,10 +695,23 @@ class PipelinePanel(QWidget):
             context_text += f" [批量 {current_batch}: {group_count} 数据]"
         self.context_label.setText(context_text)
         statuses = self._current_statuses()
+        # 数据层不提示/展示导入步骤(导入属于实验层动作)
         outdated_next = next(
-            (sid for sid, st in statuses.items() if st == "OUTDATED"), None
+            (
+                sid
+                for sid, st in statuses.items()
+                if st == "OUTDATED" and sid != "import"
+            ),
+            None,
         )
-        next_step = next((sid for sid, st in statuses.items() if st == "READY"), None)
+        next_step = next(
+            (
+                sid
+                for sid, st in statuses.items()
+                if st == "READY" and sid != "import"
+            ),
+            None,
+        )
         if outdated_next:
             self.next_label.setText(
                 f"下一步: 重新运行 {STEP_LABEL[outdated_next]}"
