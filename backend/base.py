@@ -44,8 +44,8 @@ class ProcessingBackend(Protocol):
     ) -> dict[str, Any]:
         """按处理计划执行处理，返回输出与指标。
 
-        params 键:extract(bool,默认 True)/ext_lo(str,默认 "11.0")/
-        ext_hi(str,默认 "6.0")(G2B-006,均匀路径生效)。
+        params 键:extract(bool,默认 True)/ext_lo(str,默认 "10.5")/
+        ext_hi(str,默认 "6.5")(G2B-006,均匀路径生效)。
         """
         ...
 

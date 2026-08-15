@@ -948,12 +948,12 @@ def param_schema() -> dict[str, Any]:
             },
             "ext_lo": {
                 "type": "string",
-                "default": "11.0",
+                "default": "10.5",
                 "description": "直接维 1H 提取窗口高 ppm(EXT -x1)",
             },
             "ext_hi": {
                 "type": "string",
-                "default": "6.0",
+                "default": "6.5",
                 "description": "直接维 1H 提取窗口低 ppm(EXT -xn)",
             },
             "extract": {
@@ -1082,8 +1082,8 @@ def render_scripts(
             zero_fill=params.get("zero_fill"),
             linewidth_hz=params.get("linewidth_hz"),
             points_per_line=float(params.get("points_per_line", 4.0)),
-            ext_lo=str(params.get("ext_lo", "11.0")),
-            ext_hi=str(params.get("ext_hi", "6.0")),
+            ext_lo=str(params.get("ext_lo", "10.5")),
+            ext_hi=str(params.get("ext_hi", "6.5")),
             extract=_as_bool(params.get("extract", True)),
         )
     return scripts

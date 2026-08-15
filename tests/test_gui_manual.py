@@ -116,7 +116,7 @@ def test_parameter_table_dialog_structure(qapp: QApplication) -> None:
     assert "sampling.ft_neg" in keys and "sampling.ft_alt" in keys
     data = dialog.result_data()
     assert data["zero_fill"] == 2
-    assert data["ext_lo"] == "11.0"
+    assert data["ext_lo"] == "10.5"
     assert data["sampling"]["ft_alt"] is True
     dialog.close()
 

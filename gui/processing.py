@@ -453,12 +453,12 @@ class ProcessingController:
                 },
                 'ext_lo': {
                     'type': 'string',
-                    'default': '11.0',
+                    'default': '10.5',
                     'description': '直接维 1H 提取窗口高 ppm(EXT -x1)',
                 },
                 'ext_hi': {
                     'type': 'string',
-                    'default': '6.0',
+                    'default': '6.5',
                     'description': '直接维 1H 提取窗口低 ppm(EXT -xn)',
                 },
                 'extract': {
@@ -474,8 +474,8 @@ class ProcessingController:
             },
             'default': {
                 'zero_fill': 2,
-                'ext_lo': '11.0',
-                'ext_hi': '6.0',
+                'ext_lo': '10.5',
+                'ext_hi': '6.5',
                 'extract': True,
                 'sampling': {
                     'ft_neg': False,

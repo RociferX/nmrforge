@@ -179,5 +179,5 @@ def test_param_schema_returns_editable_defaults() -> None:
     assert "sampling" in props
     default = schema["default"]
     assert default["zero_fill"] == 2
-    assert default["ext_lo"] == "11.0"
+    assert default["ext_lo"] == "10.5"
     assert default["sampling"]["ft_alt"] is True

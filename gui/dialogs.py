@@ -416,8 +416,8 @@ class ParameterTableDialog(QDialog):
             else {}
         )
         default.setdefault("zero_fill", 2)
-        default.setdefault("ext_lo", "11.0")
-        default.setdefault("ext_hi", "6.0")
+        default.setdefault("ext_lo", "10.5")
+        default.setdefault("ext_hi", "6.5")
         default.setdefault("extract", True)
         default.setdefault(
             "sampling",
@@ -443,8 +443,8 @@ class ParameterTableDialog(QDialog):
 
         rows = [
             ("zero_fill", self.params.get("zero_fill", 2), _desc("zero_fill")),
-            ("ext_lo", self.params.get("ext_lo", "11.0"), _desc("ext_lo")),
-            ("ext_hi", self.params.get("ext_hi", "6.0"), _desc("ext_hi")),
+            ("ext_lo", self.params.get("ext_lo", "10.5"), _desc("ext_lo")),
+            ("ext_hi", self.params.get("ext_hi", "6.5"), _desc("ext_hi")),
             ("extract", self.params.get("extract", True), _desc("extract")),
         ]
         for key in ("ft_neg", "ft_alt", "flip_f1", "auto_phase"):
