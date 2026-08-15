@@ -10,8 +10,8 @@
 - 修复:raw_fingerprint 小文件(≤8MiB)改用内容 SHA-256(复用
   file_fingerprint),大文件保留 size+mtime——touch 不再误判,真实
   内容修改仍能检出;
-- 测试:新增 test_raw_fingerprint_ignores_mtime_touch;全量 475 passed,
-  ruff 全绿。
+- 测试:新增 test_raw_fingerprint_ignores_mtime_touch;本地全量 476 passed、
+  VM 干净副本(5458038)全量 472 passed + 4 skipped,ruff 全绿。
 
 ## [0.2.83] - 2026-08-15
 
