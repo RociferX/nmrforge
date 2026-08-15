@@ -102,11 +102,11 @@ def test_snapshot_step_filters_by_data_id(tmp_path: Path) -> None:
 
 def test_fid_com_script_helper(tmp_path: Path) -> None:
     manager, exp_id, data_id = _manager_with_data(tmp_path)
-    raw = manager.data_dir(exp_id, data_id, "raw")
-    raw.mkdir(parents=True, exist_ok=True)
+    process = manager.data_dir(exp_id, data_id, "process")
+    process.mkdir(parents=True, exist_ok=True)
     controller = ProcessingController(manager)
     assert controller._fid_com_script(exp_id, data_id) == {}
-    (raw / "fid.com").write_text("bruk2pipe -in ser", encoding="utf-8")
+    (process / "fid.com").write_text("bruk2pipe -in ser", encoding="utf-8")
     scripts = controller._fid_com_script(exp_id, data_id)
     assert scripts == {"fid.com": "bruk2pipe -in ser"}
 

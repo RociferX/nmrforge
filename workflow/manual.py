@@ -67,14 +67,22 @@ def manual_fid_com(
     """获取当前 fid.com 内容(供人工查看/修改);未生成时先自动生成。"""
     data_entry = manager.data(exp_id, data_id)
     raw_dir = _resolve_raw_dir(manager, data_entry)
-    fid_com = raw_dir / "fid.com"
+    work = _work_dir(manager, exp_id, data_id)
+    work.mkdir(parents=True, exist_ok=True)
+    fid_com = work / "fid.com"
     if not fid_com.is_file():
+        legacy = raw_dir / "fid.com"
+        if legacy.is_file():
+            return legacy.read_text(encoding="utf-8", errors="replace")
         experiment = read_dataset(raw_dir)
+        if hasattr(backend, "work_dir"):
+            backend.work_dir = str(work)
         resp = backend.convert_to_fid(experiment, raw_dir)
         if not resp.get("success"):
             raise ManualRunError(
                 f"自动生成 fid.com 失败: {resp.get('message')}"
             )
+        fid_com = work / "fid.com"
     return fid_com.read_text(encoding="utf-8", errors="replace")
 
 
@@ -92,10 +100,11 @@ def run_manual_fid_com(
     raw_dir = _resolve_raw_dir(manager, data_entry)
     work = Path(work_dir) if work_dir else _work_dir(manager, exp_id, data_id)
     work.mkdir(parents=True, exist_ok=True)
-    (raw_dir / "fid.com").write_text(content, encoding="utf-8", newline="\n")
+    fid_com = work / "fid.com"
+    fid_com.write_text(content, encoding="utf-8", newline="\n")
 
     runtime = CshRuntime()
-    result = runtime.run(["csh", "fid.com"], cwd=str(raw_dir), timeout=timeout)
+    result = runtime.run(["csh", str(fid_com)], cwd=str(raw_dir), timeout=timeout)
     src = raw_dir / "test.fid"
     if result.returncode != 0 or not src.is_file():
         run = manager.start_run(

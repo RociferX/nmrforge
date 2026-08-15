@@ -26,7 +26,7 @@ class _FakeRuntime:
         self.calls: list[tuple[str, str]] = []
 
     def run(self, argv, *, cwd=None, timeout=3600):
-        name = argv[-1]
+        name = Path(argv[-1]).name
         self.calls.append((name, str(cwd)))
         if self.fail:
             return SimpleNamespace(returncode=1, stderr="boom", stdout="")
@@ -41,10 +41,12 @@ class _FakeRuntime:
 class _FakeBackend:
     """自动生成 fid.com 的假后端(manual_fid_com 未生成时调用)。"""
 
+    work_dir: str | None = None
+
     def convert_to_fid(self, experiment, data_dir):
-        raw = Path(data_dir)
-        (raw / "fid.com").write_text("#!/bin/csh\n# auto fid.com\n", encoding="utf-8")
-        (raw / "test.fid").write_bytes(b"fid")
+        work = Path(self.work_dir) if self.work_dir else Path(data_dir)
+        (work / "fid.com").write_text("#!/bin/csh\n# auto fid.com\n", encoding="utf-8")
+        (work / "test.fid").write_bytes(b"fid")
         return {"success": True, "fid_path": "x.fid", "message": "ok", "logs": []}
 
 
@@ -66,7 +68,9 @@ def test_manual_fid_com_generates_and_reads(
     manager, exp_id, data_id, raw = _manager_with_raw(tmp_path, bruker_dir)
     content = manual_fid_com(manager, exp_id, data_id, _FakeBackend())
     assert "fid.com" in content
-    assert (raw / "fid.com").is_file()
+    assert (
+        manager.data_dir(exp_id, data_id, "process") / "fid.com"
+    ).is_file()
 
 
 def test_run_manual_fid_com_registers(

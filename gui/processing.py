@@ -610,7 +610,7 @@ class ProcessingController:
             return ""
 
     def _fid_com_script(self, exp_id: str, data_id: str) -> dict[str, str]:
-        """读取 raw 目录下的 fid.com(自动/人工 FID 步骤脚本)。"""
+        """读取 process/ 下的 fid.com(0.2.91 起;旧数据回退 raw/)。"""
         if self._manager is None:
             return {}
         try:
@@ -627,7 +627,9 @@ class ProcessingController:
         if not raw.is_dir():
             # schema 1.3 数据级 raw 目录回退(登记缺失时)
             raw = self._manager.data_dir(exp_id, data_id, "raw")
-        fid_com = raw / "fid.com"
+        fid_com = self._manager.data_dir(exp_id, data_id, "process") / "fid.com"
+        if not fid_com.is_file():
+            fid_com = raw / "fid.com"
         if fid_com.is_file():
             return {
                 "fid.com": fid_com.read_text(

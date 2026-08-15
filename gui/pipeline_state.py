@@ -233,13 +233,17 @@ def input_fingerprint(
 def script_fingerprint(
     manager: Any, exp_id: str, data_id: str, step_id: str
 ) -> str | None:
-    """步骤脚本指纹(fid.com 在 raw/,谱图脚本在 process/)。"""
+    """步骤脚本指纹(fid.com 在 process/,旧数据回退 raw/;谱图脚本在 process/)。"""
     if step_id == "fid":
-        raw = _raw_dir(manager, exp_id, data_id)
-        if raw is None:
-            return None
-        fid_com = raw / "fid.com"
-        return file_fingerprint(fid_com) if fid_com.is_file() else None
+        fid_com = manager.data_dir(exp_id, data_id, "process") / "fid.com"
+        if not fid_com.is_file():
+            raw = _raw_dir(manager, exp_id, data_id)
+            fid_com = raw / "fid.com" if raw is not None else None
+        return (
+            file_fingerprint(fid_com)
+            if fid_com is not None and fid_com.is_file()
+            else None
+        )
     if step_id == "spectrum":
         proc = manager.data_dir(exp_id, data_id, "process")
         try:

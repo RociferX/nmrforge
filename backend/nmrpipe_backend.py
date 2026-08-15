@@ -705,18 +705,24 @@ class NMRPipeBackend:
         is_nus: bool,
         logs: list[str],
     ) -> bool:
-        """在 raw_dir 中 bruker -AUTO → patch fid.com → 执行 → 移动 test.fid 到 dest_work。
+        """在 raw_dir 中 bruker -AUTO → fid.com 归位 dest_work → patch → 执行
+        (脚本在 work 目录,相对路径以 raw_dir 为 cwd 解析)→ 移动 test.fid 到 dest_work。
 
         NUS 时信任 bruker 原生识别（nusExpand/mask/单文件 test.fid）；bruker 失败时
         仅均匀采样走 bruk2pipe 回退。转换后清理 ser_full（可再生，避免占空间）。
         """
-        fid_com = raw_dir / "fid.com"
+        raw_fid = raw_dir / "fid.com"
+        fid_com = dest_work / "fid.com"
         bruker_ok = False
         bruker = find_tool("bruker", self._bin_dir())
         if bruker is not None:
             result = runtime.run(["bruker", "-AUTO"], cwd=str(raw_dir), timeout=120)
             logs.append(f"bruker -AUTO ({raw_dir.name}): rc={result.returncode}")
-            if result.returncode == 0 and fid_com.is_file():
+            if result.returncode == 0 and raw_fid.is_file():
+                # 0.2.91:fid.com 归位 process/(dest_work),raw 不再保留生成脚本
+                if raw_fid != fid_com:
+                    fid_com.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.move(str(raw_fid), str(fid_com))
                 text = fid_com.read_text(encoding="utf-8", errors="replace")
                 patched, corrections = patch_fid_com(text, experiment)
                 if is_nus:
@@ -729,9 +735,12 @@ class NMRPipeBackend:
                         corrections += nus_corrections
                 for correction in corrections:
                     logs.append(f"参数修正: {correction}")
-                # LF 行尾必须：CRLF 会让 csh 的 \ 续行失效
+                # LF 行尾必须：CRLF 会让 csh 的 \ 续行失效;脚本在 work 目录,
+                # 内部相对路径(./ser)以 raw_dir 为 cwd 解析
                 fid_com.write_text(patched, encoding="utf-8", newline="\n")
-                run_result = runtime.run(["csh", "fid.com"], cwd=str(raw_dir), timeout=900)
+                run_result = runtime.run(
+                    ["csh", str(fid_com)], cwd=str(raw_dir), timeout=900
+                )
                 logs.append(f"fid.com: rc={run_result.returncode}")
                 bruker_ok = run_result.returncode == 0
         if not bruker_ok:
@@ -742,7 +751,7 @@ class NMRPipeBackend:
             convert_script = dest_work / f"{experiment.dataset_id}_convert.com"
             convert_script.write_text(script, encoding="utf-8", newline="\n")
             run_result = runtime.run(
-                ["csh", convert_script.name], cwd=str(raw_dir), timeout=600
+                ["csh", str(convert_script)], cwd=str(raw_dir), timeout=600
             )
             logs.append(f"convert.com: rc={run_result.returncode}")
             if run_result.returncode != 0:
