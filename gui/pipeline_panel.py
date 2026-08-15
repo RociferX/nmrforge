@@ -192,6 +192,25 @@ def _mtime_ns(path: Path) -> int:
         return 0
 
 
+def _pipeline_flags() -> dict[str, bool]:
+    """Pipeline 行为开关(config/nmrforge.local.yaml → gui.settings):
+
+    - fingerprint_check: 关闭后不做文件指纹/产物新旧比较(输入、脚本
+      变化不再触发「已过期」,同时省去每次刷新的大目录哈希);
+    - outdated_enabled: 关闭后完全不显示「已过期」状态。
+    """
+    try:
+        from gui.settings import load_settings
+
+        pipeline = load_settings().get("pipeline") or {}
+    except Exception:  # noqa: BLE001 - 设置不可读时按默认开启
+        pipeline = {}
+    return {
+        "fingerprint_check": bool(pipeline.get("fingerprint_check", True)),
+        "outdated_enabled": bool(pipeline.get("outdated_enabled", True)),
+    }
+
+
 def _node_step_statuses(
     manager: ProjectManager, exp_id: str, node
 ) -> dict[str, str]:
@@ -199,6 +218,7 @@ def _node_step_statuses(
     data_id = getattr(node, 'id', exp_id)
     artifacts = _node_artifacts(manager, exp_id, data_id)
     state = load_pipeline_state(manager, exp_id, data_id)
+    flags = _pipeline_flags()
     statuses: dict[str, str] = {}
     for step_id, _, _, deps in PIPELINE_STEPS:
         artifact = (
@@ -210,14 +230,23 @@ def _node_step_statuses(
         if step_id == 'import':
             done = True  # 实验下存在数据节点即导入完成
             entry = state['steps'].get('import')
-            if entry and entry.get('input_hash'):
+            if (
+                entry
+                and entry.get('input_hash')
+                and flags['fingerprint_check']
+                and flags['outdated_enabled']
+            ):
                 current = raw_fingerprint(manager, exp_id, data_id)
                 outdated = current is not None and current != entry['input_hash']
         elif step_id == 'smile':
             # 可选步骤:运行过即完成(产物复用谱图,指纹校验输入变化)
             entry = state['steps'].get('smile')
             done = entry is not None
-            if done:
+            if (
+                done
+                and flags['fingerprint_check']
+                and flags['outdated_enabled']
+            ):
                 current = input_fingerprint(manager, exp_id, data_id, 'smile')
                 if (
                     current is not None
@@ -227,7 +256,11 @@ def _node_step_statuses(
                     outdated = True
         else:
             done = artifact is not None
-            if done:
+            if (
+                done
+                and flags['outdated_enabled']
+                and flags['fingerprint_check']
+            ):
                 entry = state['steps'].get(step_id)
                 if entry:
                     current_input = input_fingerprint(
@@ -268,12 +301,13 @@ def _node_step_statuses(
             statuses[step_id] = 'READY'
         else:
             statuses[step_id] = 'LOCKED'
-    # 上游 OUTDATED 传播:下游即使指纹匹配也视为过期
-    for step_id, _, _, deps in PIPELINE_STEPS:
-        if statuses.get(step_id) == 'SUCCESS' and any(
-            statuses.get(dep) == 'OUTDATED' for dep in deps
-        ):
-            statuses[step_id] = 'OUTDATED'
+    # 上游 OUTDATED 传播:下游即使指纹匹配也视为过期(开关关闭时不传播)
+    if flags['outdated_enabled']:
+        for step_id, _, _, deps in PIPELINE_STEPS:
+            if statuses.get(step_id) == 'SUCCESS' and any(
+                statuses.get(dep) == 'OUTDATED' for dep in deps
+            ):
+                statuses[step_id] = 'OUTDATED'
     return statuses
 
 

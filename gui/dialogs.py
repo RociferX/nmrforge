@@ -799,6 +799,19 @@ class SettingsDialog(QDialog):
         self.smile_spin.setValue(int(settings.get("smile_thread_cap", 2)))
         form.addRow("SMILE 线程上限", self.smile_spin)
         layout.addLayout(form)
+        pipeline = settings.get("pipeline") or {}
+        self.fingerprint_check = QCheckBox(
+            "文件指纹检测(输入/脚本变化 → 已过期)"
+        )
+        self.fingerprint_check.setChecked(
+            bool(pipeline.get("fingerprint_check", True))
+        )
+        layout.addWidget(self.fingerprint_check)
+        self.outdated_check = QCheckBox("显示「已过期」状态")
+        self.outdated_check.setChecked(
+            bool(pipeline.get("outdated_enabled", True))
+        )
+        layout.addWidget(self.outdated_check)
         hint = QLabel(
             "保存到 config/nmrforge.local.yaml,重启后生效;未配置时显示默认值。"
         )
@@ -824,6 +837,10 @@ class SettingsDialog(QDialog):
             },
             "points_per_line": self.ppl_spin.value(),
             "smile_thread_cap": self.smile_spin.value(),
+            "pipeline": {
+                "fingerprint_check": self.fingerprint_check.isChecked(),
+                "outdated_enabled": self.outdated_check.isChecked(),
+            },
         }
         save_settings(settings)
         self.accept()
