@@ -23,6 +23,21 @@ def _source(bruker_dir: Path) -> Path:
     return bruker_dir / "hsqc_2d"
 
 
+def _symlink_supported() -> bool:
+    """平台探测:os.symlink 可用(VM/Linux 是;Windows 默认无权限)。"""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        src = Path(tmp) / "probe_src"
+        dst = Path(tmp) / "probe_dst"
+        src.write_text("x", encoding="utf-8")
+        try:
+            os.symlink(src, dst)
+            return dst.is_symlink()
+        except OSError:
+            return False
+
+
 def test_import_links_and_registers(tmp_path: Path, bruker_dir: Path) -> None:
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     result = import_bruker_dataset(manager, _source(bruker_dir), title="HSQC")
@@ -42,8 +57,9 @@ def test_import_links_and_registers(tmp_path: Path, bruker_dir: Path) -> None:
     assert data.source == str(_source(bruker_dir))
     assert (raw_dir / "acqus").is_file()
     assert (raw_dir / "acqu2s").is_file()
-    # G2B-009:raw 只读文件为硬链接(同卷),不是复制
-    assert not (raw_dir / "acqus").is_symlink()
+    # G2B-009:raw 只读文件为链接(符号链接优先,Windows 回退硬链接),不是复制
+    if _symlink_supported():
+        assert (raw_dir / "acqus").is_symlink()
     assert os.path.samefile(_source(bruker_dir) / "acqus", raw_dir / "acqus")
     assert os.path.samefile(_source(bruker_dir) / "acqu2s", raw_dir / "acqu2s")
     # 兼容只读属性指向 data[0]
@@ -62,7 +78,10 @@ def test_import_links_and_registers(tmp_path: Path, bruker_dir: Path) -> None:
     assert "acqus" in meta["manifest"]["checksums"]
     assert meta["manifest"]["file_count"] == 2
     # G2B-009:metadata 记录链接统计(可查证导入方式)
-    assert meta["link_stats"]["hardlink"] == 2
+    if _symlink_supported():
+        assert meta["link_stats"]["symlink"] == 2
+    else:
+        assert meta["link_stats"]["hardlink"] == 2
     assert meta["link_stats"]["copy"] == 0
     assert meta["link_stats"]["writable"] == 0
 
@@ -264,30 +283,40 @@ def test_nus_import_records_nuslist_checksum(
     assert run.inputs.get("sha256:nuslist") == result.checksums["nuslist"]
 
 
-def test_import_fid_com_is_copied_not_linked(
+def test_import_writable_raw_names_copied_not_linked(
     tmp_path: Path, bruker_dir: Path
 ) -> None:
-    """fid.com 是后端可写文件:实体复制不链接(改动不污染源)。"""
+    """fid.com/profYZ.dat 是后端可写/触及文件:实体复制不链接(改动不污染源)。"""
     src = tmp_path / "src_with_fid"
     shutil.copytree(_source(bruker_dir), src)
     fid_com = src / "fid.com"
     fid_com.write_text("#!/bin/csh\n# user fid.com\n", encoding="utf-8")
+    prof_yz = src / "profYZ.dat"
+    prof_yz.write_text("profile", encoding="utf-8")
 
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     result = import_bruker_dataset(manager, src)
     assert manager.project is not None
     raw_dir = manager.data_dir("exp_001", "d_001", "raw")
-    assert (raw_dir / "fid.com").is_file()
     # 可写文件不是链接:与源不同文件,改写不污染源
-    assert not os.path.samefile(src / "fid.com", raw_dir / "fid.com")
+    for name in ("fid.com", "profYZ.dat"):
+        assert (raw_dir / name).is_file()
+        assert not os.path.samefile(src / name, raw_dir / name)
     (raw_dir / "fid.com").write_text("#!/bin/csh\n# patched\n", encoding="utf-8")
     assert fid_com.read_text(encoding="utf-8") == "#!/bin/csh\n# user fid.com\n"
-    # 其余只读文件仍是硬链接
+    (raw_dir / "profYZ.dat").write_text("patched", encoding="utf-8")
+    assert prof_yz.read_text(encoding="utf-8") == "profile"
+    # 其余只读文件仍是链接(符号链接优先,Windows 回退硬链接)
     assert os.path.samefile(src / "acqus", raw_dir / "acqus")
+    if _symlink_supported():
+        assert (raw_dir / "acqus").is_symlink()
     run = manager.project.run(result.run_id)
     assert run is not None
-    assert run.params["link_stats"]["writable"] == 1
-    assert run.params["link_stats"]["hardlink"] > 0
+    assert run.params["link_stats"]["writable"] == 2
+    assert (
+        run.params["link_stats"]["symlink"] > 0
+        or run.params["link_stats"]["hardlink"] > 0
+    )
 
 
 def test_import_records_link_stats(
@@ -301,7 +330,7 @@ def test_import_records_link_stats(
     assert run is not None
     stats = run.params["link_stats"]
     assert set(stats) == {"hardlink", "symlink", "copy", "writable"}
-    assert stats["hardlink"] > 0
+    assert stats["symlink"] > 0 or stats["hardlink"] > 0
     assert stats["copy"] == 0
     assert stats["writable"] == 0
     assert result.warnings == []

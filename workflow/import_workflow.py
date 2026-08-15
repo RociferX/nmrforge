@@ -29,7 +29,7 @@ KEY_FILES = ("acqus", "acqu2s", "acqu3s", "ser", "fid", "nuslist")
 # 后端会在 raw 目录改写的文件(如 bruker -AUTO / patch_fid_com 生成的
 # fid.com):必须实体复制,不能链接——硬链接/符号链接会把改写写回源数据
 # (G2B-009 兼容性条款「fid.com 等后端生成文件始终实体写入,不受影响」)。
-WRITABLE_RAW_NAMES = {"fid.com"}
+WRITABLE_RAW_NAMES = {"fid.com", "profYZ.dat"}  # 转换会 touch/改写 profYZ.dat,实体复制以保护源
 
 
 class ImportWorkflowError(Exception):
@@ -116,15 +116,15 @@ def _validate_dataset_dir(path: Path) -> None:
 
 
 def _link_one(src: Path, dst: Path) -> str:
-    """链接单个文件:硬链接 → 符号链接 → 复制回退(G2B-009)。"""
-    try:
-        os.link(src, dst)
-        return "hardlink"
-    except OSError:
-        pass
+    """链接单个文件:符号链接 → 硬链接 → 复制回退(G2B-009,用户指定软链接优先)。"""
     try:
         os.symlink(src, dst)
         return "symlink"
+    except OSError:
+        pass
+    try:
+        os.link(src, dst)
+        return "hardlink"
     except OSError:
         pass
     shutil.copy2(src, dst)
@@ -159,7 +159,7 @@ def import_data(
 ) -> ImportResult:
     """导入数据到实验:只读参数 + 链接 raw/<exp_id>/<data_id>/ + metadata + import run。
 
-    G2B-009:raw 只读文件默认硬链接,失败回退符号链接/复制。
+    G2B-009:raw 只读文件默认符号链接(用户要求),失败回退硬链接/复制。
 
     不生成 FID、不生成谱;调用方需自行 manager.save()。
     """
