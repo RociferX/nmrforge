@@ -212,6 +212,15 @@ def test_outdated_disabled_by_settings(
     assert "OUTDATED" not in statuses.values()
     assert statuses["spectrum"] == "SUCCESS"
 
+    # 0.2.91:简单模式(只按产物文件判断)同样不出现 OUTDATED
+    monkeypatch.setattr(
+        "gui.settings.load_settings",
+        lambda: {"pipeline": {"simple_mode": True}},
+    )
+    statuses = compute_step_statuses(manager, exp_id)
+    assert "OUTDATED" not in statuses.values()
+    assert statuses["spectrum"] == "SUCCESS"
+
 
 def test_mtime_fallback_without_state(
     tmp_path: Path, qapp: QApplication

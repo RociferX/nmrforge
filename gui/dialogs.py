@@ -800,6 +800,17 @@ class SettingsDialog(QDialog):
         form.addRow("SMILE 线程上限", self.smile_spin)
         layout.addLayout(form)
         pipeline = settings.get("pipeline") or {}
+        self.simple_mode_check = QCheckBox(
+            "简单模式(只按上一步产物文件判断状态)"
+        )
+        self.simple_mode_check.setToolTip(
+            "开启后 Pipeline 只认产物文件是否存在(.fid/.ft2/.ft3/.list/"
+            "报告),不再比较输入/脚本指纹,也不显示「已过期」"
+        )
+        self.simple_mode_check.setChecked(
+            bool(pipeline.get("simple_mode", False))
+        )
+        layout.addWidget(self.simple_mode_check)
         self.fingerprint_check = QCheckBox(
             "文件指纹检测(输入/脚本变化 → 已过期)"
         )
@@ -838,6 +849,7 @@ class SettingsDialog(QDialog):
             "points_per_line": self.ppl_spin.value(),
             "smile_thread_cap": self.smile_spin.value(),
             "pipeline": {
+                "simple_mode": self.simple_mode_check.isChecked(),
                 "fingerprint_check": self.fingerprint_check.isChecked(),
                 "outdated_enabled": self.outdated_check.isChecked(),
             },

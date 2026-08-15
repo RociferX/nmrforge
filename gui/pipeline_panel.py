@@ -195,6 +195,8 @@ def _mtime_ns(path: Path) -> int:
 def _pipeline_flags() -> dict[str, bool]:
     """Pipeline 行为开关(config/nmrforge.local.yaml → gui.settings):
 
+    - simple_mode: 简单模式——只按上一步产物文件是否存在判断状态,
+      不做指纹/产物新旧比较,也不显示「已过期」;
     - fingerprint_check: 关闭后不做文件指纹/产物新旧比较(输入、脚本
       变化不再触发「已过期」,同时省去每次刷新的大目录哈希);
     - outdated_enabled: 关闭后完全不显示「已过期」状态。
@@ -206,6 +208,7 @@ def _pipeline_flags() -> dict[str, bool]:
     except Exception:  # noqa: BLE001 - 设置不可读时按默认开启
         pipeline = {}
     return {
+        "simple_mode": bool(pipeline.get("simple_mode", False)),
         "fingerprint_check": bool(pipeline.get("fingerprint_check", True)),
         "outdated_enabled": bool(pipeline.get("outdated_enabled", True)),
     }
@@ -219,6 +222,10 @@ def _node_step_statuses(
     artifacts = _node_artifacts(manager, exp_id, data_id)
     state = load_pipeline_state(manager, exp_id, data_id)
     flags = _pipeline_flags()
+    if flags["simple_mode"]:
+        # 简单模式:只按产物文件判断状态,关闭指纹比较与「已过期」
+        flags["fingerprint_check"] = False
+        flags["outdated_enabled"] = False
     statuses: dict[str, str] = {}
     for step_id, _, _, deps in PIPELINE_STEPS:
         artifact = (
