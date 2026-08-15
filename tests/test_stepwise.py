@@ -23,6 +23,7 @@ class _FakeBackend:
         self.work_dir = str(work_dir)
         self.success = success
         self.calls: list[str] = []
+        self.process_params: list[dict | None] = []
 
     def _touch(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -48,6 +49,7 @@ class _FakeBackend:
     ) -> dict:
         self.calls.append("process")
         self.last_params = params
+        self.process_params.append(params)
         p0, p1 = 0, 0
         if direct_phase_override:
             # 逐维搜索时覆盖含多个轴,取末轴(正在搜索的轴)的 p0/p1
@@ -250,3 +252,30 @@ def test_optimize_phase_brute_force_embeds_baseline(
     assert backend.calls.count("process") >= 42 + 1
     assert any("基线(嵌入)" in line for line in result["logs"])
 
+
+
+def test_optimize_phase_brute_force_candidates_none_final_auto(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """0.2.87:相位候选零填零(none),最终生产渲染按完整填零计划(auto)。"""
+    manager, exp_id, data_id, work = _manager_with_data(
+        tmp_path, bruker_dir / "hsqc_2d"
+    )
+    backend = _FakeBackend(work)
+    optimize_phase_brute_force(
+        manager, exp_id, data_id, backend, score_fn=_score_from_path
+    )
+    zf_calls = [
+        p for p in backend.process_params if p and p.get("zero_fill")
+    ]
+    assert zf_calls, "应有候选/生产渲染调用"
+    # 候选阶段:至少一次调用全部轴 zero_fill=none(数据最小化)
+    assert any(
+        all(cfg.get("mode") == "none" for cfg in p["zero_fill"].values())
+        for p in zf_calls
+    )
+    # 生产终谱:最后一次带填零的渲染按完整计划(auto)执行(填零在优化最后)
+    assert all(
+        cfg.get("mode") == "auto"
+        for cfg in zf_calls[-1]["zero_fill"].values()
+    )

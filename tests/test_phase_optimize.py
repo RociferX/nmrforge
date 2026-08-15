@@ -394,7 +394,7 @@ class _PhaseEmbedBackend:
 
     def process(
         self, experiment, plan, direct_phase_override=None,
-        out_file=None, script_name=None,
+        params=None, out_file=None, script_name=None,
     ) -> dict:
         self.calls.append(dict(direct_phase_override or {}))
         path = self._path_for(direct_phase_override or {})
@@ -495,12 +495,15 @@ class _OverrideBackend:
     def __init__(self, work_dir: Path) -> None:
         self.work_dir = str(work_dir)
         self.overrides: list[dict] = []
+        self.process_params: list[dict] = []
+        self.finalize_params: list[dict] = []
 
     def process(
         self, experiment, plan, direct_phase_override=None,
-        out_file=None, script_name=None,
+        params=None, out_file=None, script_name=None,
     ) -> dict:
         self.overrides.append(dict(direct_phase_override or {}))
+        self.process_params.append(dict(params or {}))
         # 逐维搜索时覆盖含多个轴,取末轴(正在搜索的轴)的 p0/p1
         p0, p1 = list(direct_phase_override.values())[-1]
         return {
@@ -519,9 +522,10 @@ class _OverrideBackend:
 
     def finalize_nus(
         self, experiment, phases=None, work_dir=None, baseline=None,
-        out_file=None, script_name=None,
+        params=None, out_file=None, script_name=None,
     ) -> dict:
         self.overrides.append(dict(phases or {}))
+        self.finalize_params.append(dict(params or {}))
         p0, p1 = list((phases or {}).values())[-1]
         return {
             "success": True,
@@ -679,7 +683,7 @@ def test_optimize_phase_sequential_failure(tmp_path: Path, bruker_dir: Path) -> 
     class _FailBackend(_OverrideBackend):
         def process(
         self, experiment, plan, direct_phase_override=None,
-        out_file=None, script_name=None,
+        params=None, out_file=None, script_name=None,
     ) -> dict:
             return {"success": False, "message": "boom", "logs": []}
 
@@ -826,3 +830,25 @@ def test_optimize_phase_sequential_3d_nus_skips_direct(
     assert all(result.phases[axis][1] == 30.0 for axis in ("F2", "F1"))
     assert result.backend_runs == 1 + 2 * 4  # 1 次 SMILE 重构 + 2 轴 × 4 候选
 
+
+
+def test_candidates_run_with_zero_fill_none(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """0.2.87:相位候选谱零填零(mode:none),优化期间数据最小化。"""
+    from core.data.bruker_reader import read_dataset
+
+    experiment = read_dataset(bruker_dir / "hsqc_2d")
+    axes = [dim.logical_axis for dim in experiment.dimensions]
+    expected = {"zero_fill": {a: {"mode": "none"} for a in axes}}
+    backend = _OverrideBackend(tmp_path / "work")
+    optimize_phase_sequential(
+        experiment,
+        backend,
+        p0_values=(0.0,),
+        p1_values=(0.0,),
+        refine=False,
+        score_fn=_score_from_path,
+    )
+    assert backend.process_params, "应至少跑一次候选 process"
+    assert all(p == expected for p in backend.process_params)

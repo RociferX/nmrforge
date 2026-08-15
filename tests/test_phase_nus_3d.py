@@ -15,7 +15,7 @@ class _Nus3DBackend:
     def __init__(self, work_dir: Path) -> None:
         self.work_dir = str(work_dir)
         self.reconstruct_params: list[dict] = []
-        self.finalize_calls: list[tuple[dict, str | None]] = []
+        self.finalize_calls: list[tuple[dict, str | None, dict]] = []
 
     def reconstruct_nus(self, experiment, params) -> dict:
         self.reconstruct_params.append(dict(params or {}))
@@ -27,9 +27,11 @@ class _Nus3DBackend:
 
     def finalize_nus(
         self, experiment, phases=None, work_dir=None, baseline=None,
-        out_file=None, script_name=None,
+        params=None, out_file=None, script_name=None,
     ) -> dict:
-        self.finalize_calls.append((dict(phases or {}), work_dir))
+        self.finalize_calls.append(
+            (dict(phases or {}), work_dir, dict(params or {}))
+        )
         p1 = list((phases or {}).values())[-1][1]
         return {
             "success": True,
@@ -67,8 +69,16 @@ def test_3d_nus_phase_optimize_guardrails_and_runs(
     assert len(backend.finalize_calls) == 2 * 4
     # work_dir 以 Path/str 均可透传(finalize_nus 签名接受两者)
     assert all(str(call[1]) == str(work) for call in backend.finalize_calls)
+    # 0.2.87:候选 finalize 一律零填零(mode:none,数据最小化)
+    zf_none = {
+        "zero_fill": {
+            dim.logical_axis: {"mode": "none"}
+            for dim in experiment.dimensions
+        }
+    }
+    assert all(call[2] == zf_none for call in backend.finalize_calls)
     # 直接维 F3 不在 finalize 相位中(SMILE 重构时固化)
-    assert all("F3" not in phases for phases, _ in backend.finalize_calls)
+    assert all("F3" not in phases for phases, _, _ in backend.finalize_calls)
     assert set(result.phases) == {"F2", "F1"}
     assert all(result.phases[axis][1] == 30.0 for axis in ("F2", "F1"))
     assert result.backend_runs == 1 + 2 * 4

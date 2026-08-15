@@ -1,5 +1,19 @@
 # 变更日志
 
+## [0.2.87] - 2026-08-16
+
+- 相位优化候选谱零填零 + 填零放在优化最后(用户要求):
+  - optimize_phase_sequential 每候选(process / finalize_nus)统一传
+    params={"zero_fill": {轴: {"mode": "none"}}}(直接/间接维一律不填零,
+    数据最小化——尤其 3D NUS 逐候选 finalize 的 ft3 体积不再随填零放大);
+  - optimize_phase_brute_force 在搜索结束后立即以最终相位 + 完整填零计划
+    (mode=auto:直接维 2×TD、间接维动态)重渲生产终谱并归位;填零只出现在
+    优化最后,不在候选阶段/SMILE 前;基线/窗函数嵌入的重渲路径不变;
+  - 回归:uniform 2D 终谱路径/相位选择不变(test_stepwise 既有断言保持),
+    候选体积与 I/O 显著下降(3D NUS 候选由全尺寸 ft3 降为 SI=TD);
+  - 测试:新增候选 zero_fill=none 与最终 auto 断言;fake backend 补 params;
+  - 待 VM 用户手动参数复核:终谱尺寸/峰位/线宽与全采样对照。
+
 ## [0.2.86] - 2026-08-16
 
 - 直接维提取窗口默认 6-11 ppm → **6.5-10.5 ppm**(用户指定)并配置化:

@@ -197,6 +197,10 @@ def optimize_phase_brute_force(
 
     返回 {"phase", "spectrum_path", "method", "backend_runs",
     "logs", "optimized", "skipped", "baseline", "processing"}。
+
+    0.2.87:相位候选谱零填零(数据最小化),搜索结束后立即以最终相位+完整
+    填零计划(auto)重渲生产终谱并归位——填零只出现在优化最后,不在候选
+    阶段/SMILE 前。
     """
     from workflow.phase_optimize import optimize_phase_sequential
 
@@ -224,9 +228,47 @@ def optimize_phase_brute_force(
         work_dir=work,
     )
     logs = list(result.logs)
-    spectrum_path = _register_spectrum(
-        manager, exp_id, data_id, result.spectrum_path
-    )
+    # 0.2.87:候选谱零填零(数据最小化);搜索结束后立即以最终相位+完整填零
+    # 计划渲染生产终谱(填零只在优化最后执行,不在候选阶段/SMILE 前)。
+    axes = [dim.logical_axis for dim in experiment.dimensions]
+    is_nus = experiment.sampling.mode is SamplingMode.NUS
+    full_zf_params = {
+        "zero_fill": {a: {"mode": "auto"} for a in axes},
+    }
+    if is_nus:
+        resp = backend.finalize_nus(
+            experiment,
+            phases=result.phases,
+            work_dir=work,
+            params=full_zf_params,
+        )
+    else:
+        plan = select_method(experiment)
+        resp = backend.process(
+            experiment,
+            plan,
+            direct_phase_override=result.phases,
+            params=full_zf_params,
+        )
+    if resp.get("success"):
+        spectrum_path = _register_spectrum(
+            manager,
+            exp_id,
+            data_id,
+            str(resp.get("spectrum_path", result.spectrum_path)),
+        )
+        logs.append(
+            "终谱: 候选谱零填零最小化,搜索结束以完整填零计划重渲"
+        )
+    else:
+        logs.append(
+            "终谱完整填零重渲失败: "
+            + str(resp.get("message"))
+            + "; 暂用零填零候选谱"
+        )
+        spectrum_path = _register_spectrum(
+            manager, exp_id, data_id, result.spectrum_path
+        )
 
     baseline_result: dict[str, Any] | None = None
     applied_baseline: dict[str, Any] | None = None
