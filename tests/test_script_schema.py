@@ -55,8 +55,8 @@ def test_param_schema_ext_keys() -> None:
     for key in ("ext_lo", "ext_hi", "extract"):
         assert key in schema["properties"]
         assert "default" in schema["properties"][key]
-    assert schema["default"]["ext_lo"] == "11.0"
-    assert schema["default"]["ext_hi"] == "6.0"
+    assert schema["default"]["ext_lo"] == "10.5"
+    assert schema["default"]["ext_hi"] == "6.5"
     assert schema["default"]["extract"] is True
 
 

@@ -15,9 +15,11 @@ processing:
     15N: 15
     13C: 20
   points_per_line: 2.0         # 目标数字点距 = max(线宽, 1/AQ)/points_per_line
+  ext_lo: "10.5"                 # 直接维提取窗口高端(EXT -x1),默认 10.5 ppm
+  ext_hi: "6.5"                  # 直接维提取窗口低端(EXT -xn),默认 6.5 ppm
 
 smile:
-  nthread: 2                   # SMILE 线程数(大网格仍受护栏强制 ≤2)
+  nthread: 0                   # 0=自动(机器线程数-2);正整数=固定;大网格仍护栏强制 ≤2
 
 optimization:
   budget:

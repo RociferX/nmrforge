@@ -80,7 +80,7 @@ class _GatingBackend:
 
     def finalize_nus(
         self, experiment, phases=None, work_dir=None, baseline=None,
-        out_file=None, script_name=None,
+        params=None, out_file=None, script_name=None,
     ) -> dict:
         self.calls.append(dict(phases or {}))
         path = self._path_for(phases or {})

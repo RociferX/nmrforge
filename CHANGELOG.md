@@ -1,6 +1,30 @@
 # 变更日志
 
-## [0.2.85] - 2026-08-15
+## [0.2.87] - 2026-08-16
+
+- 相位优化候选谱零填零 + 填零放在优化最后(用户要求):
+  - optimize_phase_sequential 每候选(process / finalize_nus)统一传
+    params={"zero_fill": {轴: {"mode": "none"}}}(直接/间接维一律不填零,
+    数据最小化——尤其 3D NUS 逐候选 finalize 的 ft3 体积不再随填零放大);
+  - optimize_phase_brute_force 在搜索结束后立即以最终相位 + 完整填零计划
+    (mode=auto:直接维 2×TD、间接维动态)重渲生产终谱并归位;填零只出现在
+    优化最后,不在候选阶段/SMILE 前;基线/窗函数嵌入的重渲路径不变;
+  - 回归:uniform 2D 终谱路径/相位选择不变(test_stepwise 既有断言保持),
+    候选体积与 I/O 显著下降(3D NUS 候选由全尺寸 ft3 降为 SI=TD);
+  - 测试:新增候选 zero_fill=none 与最终 auto 断言;fake backend 补 params;
+  - 待 VM 用户手动参数复核:终谱尺寸/峰位/线宽与全采样对照。
+
+## [0.2.86] - 2026-08-16
+
+- 直接维提取窗口默认 6-11 ppm → **6.5-10.5 ppm**(用户指定)并配置化:
+  - config/nmrforge.yaml processing.ext_lo/ext_hi(10.5/6.5);
+    backend.config.load_processing_defaults 返回(供 GUI 设置对话框改默认值);
+    resolve_ext_lo/resolve_ext_hi:显式 params > 配置 > 内置默认;
+  - process/reconstruct_nus/_process 与 param_schema/脚本默认值全部同步;
+  - 测试:更新 4 处旧默认断言(11/6 → 10.5/6.5);全量 479 passed,ruff 全绿;
+  - GUI 侧需在设置对话框暴露 ext_lo/ext_hi(待 GUI Agent 接线,后端数据源已就绪)。
+
+## [0.2.85] - 2026-08-16
 
 - 调整(GUI Agent,用户反馈):注释表单仅有几种取值的字段直接给下拉——
   实验类型注释先选维度(2D/3D),维度确定后再按 presets 过滤给出实验
@@ -12,6 +36,19 @@
   谱图文件夹无谱时右侧清空不再残留上一张谱。
 - 测试:新增 presets 类型选项、注释下拉维度→类型联动、无谱清空查看器、
   3D 默认 MIP 断言。
+- 三维处理全切片流 + NUS 直接维填零 1×TD(Backend Agent,用户实测根因修复):
+  - bruker 在 acqu3s TD 正确时输出切片式 fid/test%03d.fid(每 F1 一个切片);
+    convert 接受切片输出(保留 work/fid/),reconstruct_nus 与 process(均匀 3D)
+    均优先使用切片 in_file 流式处理——与用户手动传递顺序一致
+    (fid/test%03d.fid → 直接维 FT/EXT → planes → SMILE/间接 FT → 终谱);
+  - NUS 直接维填零 1×TD:2×TD 使直接维平面翻倍 → SMILE 工作量翻倍导致
+    重载关机(用户实测;手动 1×TD 34s 安全完成);均匀路径保持 2×TD;
+  - 直接维相位搜索对切片形式回退用首切片;
+  - 测试:新增切片归位/单文件兼容/缺失失败用例;更新 NUS 直接维 1×TD 与
+    均匀 2×TD 断言;全量 479 passed,ruff 全绿;
+  - 注:VM 验证按用户手动参数(直接维 ZF 2048、窗口 9.0-7.4、sampleCount 700)
+    进行;0.2.86 起默认窗口已配置化为 10.5-6.5 ppm,超大 NUS(如 sampleJ)
+    请用 ext_lo/ext_hi 传参收紧窗口,避免 SMILE 重载。
 
 ## [0.2.84] - 2026-08-15
 
@@ -80,6 +117,19 @@
 - 修复(GUI Agent,用户反馈):主页面右侧谱图文件列表不再混入 process 目录
   的 raw.fid,列表只列 .ft2/.ft3;FID 仍可拖放/直接打开查看。
 - 测试:新增查看器默认值/英文文案/FID 排除断言;VM 全量复测通过。
+
+## [0.2.79] - 2026-08-15
+
+- SMILE 线程默认改自动(用户要求):未显式指定(参数/配置缺省或 0)时
+  nthread = 机器线程数 - 2(最小 1),与相位优化候选并行一致;
+  大网格护栏不变:间接网格 >5000 点仍强制 ≤2(sampleM 事故防护)。
+  - backend/config.py 新增 `_auto_nthread()`;`load_processing_defaults`/
+    `resolve_nthread` 缺省回退自动;config/nmrforge.yaml `smile.nthread` 默认 0
+    (=自动);显式正整数仍优先;
+  - 测试:更新 test_config_defaults(空配置/无效值 → 自动);全量 476 passed,
+    ruff 全绿;
+  - VM 8 核实测:auto=6,小网格保持 6,sampleA 渲染 nThread=6;大网格 6396
+    强制 2。
 
 ## [0.2.78] - 2026-08-15
 

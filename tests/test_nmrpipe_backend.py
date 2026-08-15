@@ -84,6 +84,46 @@ def test_reconstruct_nus_rejects_uniform(bruker_dir: Path) -> None:
 
 
 @pytest.mark.skipif(not _NO_NMRPIPE, reason="本机已安装 NMRPipe，跳过缺失路径测试")
+def test_finalize_converted_fid_slice_form(tmp_path: Path) -> None:
+    """0.2.80:bruker 切片式输出(fid/test%03d.fid)被接受并归位到 work/fid/。"""
+    backend = NMRPipeBackend(nmrpipe_bin="")
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    (raw / "fid").mkdir()
+    for i in (1, 2, 3):
+        (raw / "fid" / f"test{i:03d}.fid").write_bytes(b"x")
+    dest = tmp_path / "work"
+    dest.mkdir()
+    logs: list[str] = []
+    assert backend._finalize_converted_fid(raw, dest, "exp", logs)
+    assert len(list((dest / "fid").glob("test*.fid"))) == 3
+    assert not (dest / "exp.fid").exists()
+    assert any("切片式 fid" in line for line in logs)
+
+
+def test_finalize_converted_fid_single_file(tmp_path: Path) -> None:
+    """单文件 test.fid 路径保持兼容(非切片式 bruker 输出)。"""
+    backend = NMRPipeBackend(nmrpipe_bin="")
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    (raw / "test.fid").write_bytes(b"x")
+    dest = tmp_path / "work"
+    dest.mkdir()
+    logs: list[str] = []
+    assert backend._finalize_converted_fid(raw, dest, "exp", logs)
+    assert (dest / "exp.fid").is_file()
+
+
+def test_finalize_converted_fid_missing(tmp_path: Path) -> None:
+    """既无 test.fid 也无切片时失败(不静默)。"""
+    backend = NMRPipeBackend(nmrpipe_bin="")
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    dest = tmp_path / "work"
+    dest.mkdir()
+    assert not backend._finalize_converted_fid(raw, dest, "exp", [])
+
+
 def test_reconstruct_nus_segments_missing_nmrpipe(bruker_dir: Path, tmp_path: Path) -> None:
     import shutil
 

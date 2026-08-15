@@ -1005,10 +1005,18 @@ def _candidate_backend_run(
 
     返回 (resp, path);resp=None 表示调用异常(与运行失败区分)。
     prefix 区分来源(""=顺序搜索,"j"=联合复核),避免文件名冲突。
+    0.2.87:候选谱一律零填零(mode:none,数据最小化),完整填零由生产终谱
+    渲染在优化结束后按默认计划执行(填零放在优化最后)。
     """
     tag = _candidate_tag(override)
     ext = "ft3" if experiment.ndim >= 3 else "ft2"
     name = f"{experiment.dataset_id}_{prefix}{tag}.{ext}"
+    zf_none = {
+        "zero_fill": {
+            dim.logical_axis: {"mode": "none"}
+            for dim in experiment.dimensions
+        }
+    }
     try:
         if is_nus:
             resp = backend.finalize_nus(
@@ -1017,6 +1025,7 @@ def _candidate_backend_run(
                 work_dir=work_dir,
                 out_file=name,
                 script_name=f"{experiment.dataset_id}_{prefix}{tag}_finalize.com",
+                params=zf_none,
             )
         else:
             resp = backend.process(
@@ -1025,6 +1034,7 @@ def _candidate_backend_run(
                 direct_phase_override=override,
                 out_file=name,
                 script_name=f"{experiment.dataset_id}_{prefix}{tag}_process.com",
+                params=zf_none,
             )
     except Exception:  # noqa: BLE001 - 单候选失败不影响其它
         return None, ""

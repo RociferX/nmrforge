@@ -15,10 +15,16 @@ from backend.script_generator import effective_td, zero_fill_plan
 from core.data.bruker_reader import read_dataset
 
 
+def _auto_nthread_expected() -> int:
+    import os
+
+    return max(1, (os.cpu_count() or 4) - 2)
+
+
 def test_load_processing_defaults_empty_config() -> None:
     defaults = load_processing_defaults({})
     assert defaults["points_per_line"] == 2.0
-    assert defaults["nthread"] == 2
+    assert defaults["nthread"] == _auto_nthread_expected()
     assert defaults["nmrpipe_path"] == ""
     assert isinstance(defaults["linewidth_hz"], dict)
 
@@ -53,7 +59,7 @@ def test_load_processing_defaults_invalid_fallback() -> None:
     assert defaults["linewidth_hz"]["1H"] == 8.0  # 无效 → 核素默认
     assert defaults["linewidth_hz"]["13C"] == 20.0
     assert defaults["points_per_line"] == 2.0
-    assert defaults["nthread"] == 2
+    assert defaults["nthread"] == _auto_nthread_expected()
     assert defaults["nmrpipe_path"] == "123"
 
 
@@ -61,9 +67,9 @@ def test_resolve_helpers() -> None:
     assert resolve_points_per_line(None) == 2.0
     assert resolve_points_per_line(4.0) == 4.0
     assert resolve_points_per_line("abc") == 2.0
-    assert resolve_nthread(None) == 2
+    assert resolve_nthread(None) == _auto_nthread_expected()
     assert resolve_nthread(4) == 4
-    assert resolve_nthread(0) == 2
+    assert resolve_nthread(0) == _auto_nthread_expected()
 
 
 def test_zero_fill_plan_uses_config_defaults(
@@ -84,7 +90,13 @@ def test_zero_fill_plan_uses_config_defaults(
     )
     plan = zero_fill_plan(exp)
     td = effective_td(exp)
-    assert plan["F2"]["size"] == 1 << max(0, int(2 * td[0]) - 1).bit_length()
+    # 0.2.81:NUS 直接维填零 1×TD(2×TD 使 SMILE 平面翻倍→重载关机)
+    assert plan["F2"]["size"] == 1 << max(0, int(td[0]) - 1).bit_length()
+    # 均匀路径保持 2×TD
+    uniform = read_dataset(bruker_dir / "hsqc_2d")
+    plan_uniform = zero_fill_plan(uniform)
+    td_u = effective_td(uniform)
+    assert plan_uniform["F2"]["size"] == 1 << max(0, int(2 * td_u[0]) - 1).bit_length()
     # 点距更细(ppl 4.0)→ 目标 SI 更大或相等(单调)
     cfg_defaults["points_per_line"] = 4.0
     plan_fine = zero_fill_plan(exp)

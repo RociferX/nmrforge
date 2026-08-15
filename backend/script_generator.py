@@ -214,6 +214,11 @@ def zero_fill_plan(
     axes = [dim.logical_axis for dim in experiment.dimensions]
     td = effective_td(experiment)
     direct_axis = axes[0] if axes else ''
+    # 0.2.81:NUS 直接维填零 1×TD(2×TD 使直接维平面翻倍→SMILE 重载关机;
+    # 手动验证 1×TD 安全且 34s 完成);均匀路径保持 2×TD
+    direct_factor = (
+        1 if experiment.sampling.mode is SamplingMode.NUS else DIRECT_ZF_FACTOR
+    )
     plan: dict[str, dict[str, Any]] = {}
 
     override: dict[str, dict[str, Any]] = {}
@@ -223,7 +228,7 @@ def zero_fill_plan(
             if axis == direct_axis:
                 override[axis] = {
                     "mode": "size",
-                    "size": _next_pow2(DIRECT_ZF_FACTOR * n),
+                    "size": _next_pow2(direct_factor * n),
                 }
             else:
                 override[axis] = {
@@ -251,8 +256,8 @@ def zero_fill_plan(
                 plan[axis] = {"mode": "size", "size": size, "note": f"显式 SI={size}"}
                 continue
             if axis == direct_axis:
-                size = _next_pow2(DIRECT_ZF_FACTOR * n)
-                note = f"直接维 2×TD({n}→{size})"
+                size = _next_pow2(direct_factor * n)
+                note = f"直接维 {direct_factor}×TD({n}→{size})"
             else:
                 lw = _linewidth_for(axis, linewidth_hz) or _default_linewidth(
                     experiment, axis
@@ -548,14 +553,14 @@ def generate_process_script(
     zero_fill: dict[str, Any] | int | None = None,
     linewidth_hz: dict[str, float] | None = None,
     points_per_line: float = DEFAULT_POINTS_PER_LINE,
-    ext_lo: str = "11.0",
-    ext_hi: str = "6.0",
+    ext_lo: str = "10.5",
+    ext_hi: str = "6.5",
     extract: bool = True,
     sampling: dict[str, Any] | None = None,
 ) -> str:
     """把处理计划（DAG）翻译为 NMRPipe 管道脚本（直接维 → EXT → TP → 间接维）。
 
-    EXT 沿直接维(1H)提取窗口,默认 6-11 ppm(ext_lo=11, ext_hi=6),
+    EXT 沿直接维(1H)提取窗口,默认 6.5-10.5 ppm(ext_lo=10.5, ext_hi=6.5),
     与 NUS 脚本一致;extract=False 可关闭。
     """
     axes = [dim.logical_axis for dim in experiment.dimensions]
@@ -649,8 +654,8 @@ def generate_2d_nus_script(
     out_file: str,
     nthread: int = 2,
     nuslist_count: int = 0,
-    ext_lo: str = "11.0",
-    ext_hi: str = "6.0",
+    ext_lo: str = "10.5",
+    ext_hi: str = "6.5",
     nsigma: float = 5.0,
     thresh: float = 0.95,
     smile_xq1: float = 0.45,
@@ -775,8 +780,8 @@ def generate_3d_nus_script(
     out_file: str,
     nthread: int = 2,
     nuslist_count: int = 0,
-    ext_lo: str = "11.0",
-    ext_hi: str = "6.0",
+    ext_lo: str = "10.5",
+    ext_hi: str = "6.5",
     nsigma: float = 5.0,
     thresh: float = 0.95,
     smile_xq1: float = 0.45,
@@ -992,8 +997,8 @@ def param_schema() -> dict[str, Any]:
             "zero_fill": 2,
             "linewidth_hz": {},
             "points_per_line": 2.0,
-            "ext_lo": "11.0",
-            "ext_hi": "6.0",
+            "ext_lo": "10.5",
+            "ext_hi": "6.5",
             "extract": True,
             "baseline": {
                 "enabled": True,
