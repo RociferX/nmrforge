@@ -25,7 +25,10 @@ class _Nus3DBackend:
             "logs": [],
         }
 
-    def finalize_nus(self, experiment, phases=None, work_dir=None, baseline=None) -> dict:
+    def finalize_nus(
+        self, experiment, phases=None, work_dir=None, baseline=None,
+        out_file=None, script_name=None,
+    ) -> dict:
         self.finalize_calls.append((dict(phases or {}), work_dir))
         p1 = list((phases or {}).values())[-1][1]
         return {

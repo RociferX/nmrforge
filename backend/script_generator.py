@@ -500,23 +500,14 @@ def _stage_lines(
             else:
                 lines.append(f"| nmrPipe -fn ZF -size {int(size)} \\")
         elif op == "ft":
-            flags = []
-            neg = bool(params.get("neg"))
-            alt = bool(params.get("alt"))
             axis = str(params.get("axis", ""))
-            # sampling 覆盖(0.2.67):ft_neg/ft_alt 非 None 时覆盖 plan 推导,
-            # flip_f1=True 时 F1 轴强制 -neg(翻转)
-            if sampling:
-                if sampling.get("ft_neg") is not None:
-                    neg = bool(sampling.get("ft_neg"))
-                if sampling.get("ft_alt") is False:
-                    alt = False  # True=按采集方式自动;False=强制关闭
-                if axis == "F1" and bool(sampling.get("flip_f1")):
-                    neg = True
-            if alt:
-                flags.append("-alt")
-            if neg:
-                flags.append("-neg")
+            # 采样覆盖与标志装配统一走 _ft_flags(与 NUS/finalize 同源)
+            flags = _ft_flags(
+                bool(params.get("neg")),
+                bool(params.get("alt")),
+                sampling=sampling,
+                axis=axis,
+            )
             suffix = (" " + " ".join(flags)) if flags else ""
             lines.append(f"| nmrPipe -fn FT{suffix} \\")
         elif op == "phase":
@@ -602,15 +593,25 @@ def generate_process_script(
     return "\n".join(lines) + "\n"
 
 
-def _ft_flag_line(
-    fnmode: int,
+def _nus_zf_size(cfg: dict[str, Any], td_points: int) -> int:
+    """NUS 维度填零尺寸:显式 size 优先,否则 next_pow2(2×TD)。"""
+    return int(cfg.get("size") or _next_pow2(2 * max(int(td_points), 1)))
+
+
+def _ft_flags(
+    base_neg: bool,
+    base_alt: bool,
     *,
     sampling: dict[str, Any] | None = None,
     axis: str = "",
-) -> str:
-    """FT 行标志:sampling.ft_neg/ft_alt 非 None 时覆盖 FnMODE 推导,
-    flip_f1=True 时 F1 轴强制 -neg(翻转);默认保持推导输出不变。"""
-    neg, alt = _FT_FLAGS.get(int(fnmode), (False, False))
+) -> list[str]:
+    """FT 标志列表(sampling 覆盖逻辑唯一实现)。
+
+    base_neg/base_alt 由调用方给定(均匀路径来自 plan 节点;NUS/finalize
+    来自 FnMODE 推导);sampling.ft_neg/ft_alt 非 None 时覆盖,
+    flip_f1=True 时 F1 轴强制 -neg(翻转);默认保持推导输出不变。
+    """
+    neg, alt = bool(base_neg), bool(base_alt)
     if sampling:
         if sampling.get("ft_neg") is not None:
             neg = bool(sampling.get("ft_neg"))
@@ -623,6 +624,19 @@ def _ft_flag_line(
         flags.append("-neg")
     if alt:
         flags.append("-alt")
+    return flags
+
+
+def _ft_flag_line(
+    fnmode: int,
+    *,
+    sampling: dict[str, Any] | None = None,
+    axis: str = "",
+) -> str:
+    """FT 行标志:sampling.ft_neg/ft_alt 非 None 时覆盖 FnMODE 推导,
+    flip_f1=True 时 F1 轴强制 -neg(翻转);默认保持推导输出不变。"""
+    neg, alt = _FT_FLAGS.get(int(fnmode), (False, False))
+    flags = _ft_flags(neg, alt, sampling=sampling, axis=axis)
     suffix = (" " + " ".join(flags)) if flags else ""
     return f"| nmrPipe -fn FT{suffix} \\"
 
@@ -669,7 +683,7 @@ def generate_2d_nus_script(
     )
     f2_zf = zf_plan.get("F2", {})
     f1_zf = zf_plan.get("F1", {})
-    direct_zf = int(f2_zf.get("size") or _next_pow2(2 * max(int(td[0]), 1)))
+    direct_zf = _nus_zf_size(f2_zf, td[0])
     f1_fnmode = _fnmode(experiment, "F1")
     x_t = max(1, int(td[1])) if len(td) > 1 else 1  # 间接维复点网格
     multi = "%" in in_file
@@ -789,15 +803,9 @@ def generate_3d_nus_script(
     f3_zf = zf_plan.get("F3", {})
     f2_zf = zf_plan.get("F2", {})
     f1_zf = zf_plan.get("F1", {})
-    direct_zf = int(
-        f3_zf.get("size") or _next_pow2(2 * max(int(ctx["meta.td.x"]), 1))
-    )
-    f2_zf_size = int(
-        f2_zf.get("size") or _next_pow2(2 * max(int(ctx["meta.td.y"]), 1))
-    )
-    f1_zf_size = int(
-        f1_zf.get("size") or _next_pow2(2 * max(int(ctx["meta.td.z"]), 1))
-    )
+    direct_zf = _nus_zf_size(f3_zf, ctx["meta.td.x"])
+    f2_zf_size = _nus_zf_size(f2_zf, ctx["meta.td.y"])
+    f1_zf_size = _nus_zf_size(f1_zf, ctx["meta.td.z"])
     f2_fnmode = _fnmode(experiment, "F2")
     f1_fnmode = _fnmode(experiment, "F1")
     lines = [
@@ -1108,14 +1116,8 @@ def generate_nus_finalize_script(
         f2_fnmode = _fnmode(experiment, "F2")
         f2_p0, f2_p1 = phases.get("F2", (0.0, 0.0))
         f1_p0, f1_p1 = phases.get("F1", (0.0, 0.0))
-        f2_size = int(
-            zf_plan.get("F2", {}).get("size")
-            or _next_pow2(2 * max(int(td[1]), 1))
-        )
-        f1_size = int(
-            zf_plan.get("F1", {}).get("size")
-            or _next_pow2(2 * max(int(td[2]), 1))
-        )
+        f2_size = _nus_zf_size(zf_plan.get("F2", {}), td[1])
+        f1_size = _nus_zf_size(zf_plan.get("F1", {}), td[2])
         lines = [
             "#!/bin/csh",
             "# NMRForge NUS finalize script (indirect FT from reconstructed planes)",
@@ -1146,10 +1148,7 @@ def generate_nus_finalize_script(
         ]
     else:
         f1_p0, f1_p1 = phases.get("F1", (0.0, 0.0))
-        f1_size = int(
-            zf_plan.get("F1", {}).get("size")
-            or _next_pow2(2 * max(int(td[1]), 1))
-        )
+        f1_size = _nus_zf_size(zf_plan.get("F1", {}), td[1])
         expanded = expand_baseline(experiment, baseline)
         lines = [
             "#!/bin/csh",

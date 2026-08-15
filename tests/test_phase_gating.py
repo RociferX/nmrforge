@@ -53,7 +53,10 @@ class _GatingBackend:
                 parts.append(f"{axis}{int(override[axis][1])}")
         return Path(self.work_dir) / ("out_" + "_".join(parts) + ".ft2")
 
-    def process(self, experiment, plan, direct_phase_override=None, params=None) -> dict:
+    def process(
+        self, experiment, plan, direct_phase_override=None, params=None,
+        out_file=None, script_name=None,
+    ) -> dict:
         self.calls.append(dict(direct_phase_override or {}))
         path = self._path_for(direct_phase_override or {})
         _write_ft2(path)
@@ -75,7 +78,10 @@ class _GatingBackend:
             "logs": [],
         }
 
-    def finalize_nus(self, experiment, phases=None, work_dir=None, baseline=None) -> dict:
+    def finalize_nus(
+        self, experiment, phases=None, work_dir=None, baseline=None,
+        out_file=None, script_name=None,
+    ) -> dict:
         self.calls.append(dict(phases or {}))
         path = self._path_for(phases or {})
         _write_ft2(path)

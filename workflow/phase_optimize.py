@@ -18,9 +18,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
+import os
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -973,6 +976,61 @@ def _refine_window(center: float, prev_step: float, new_step: float) -> list[flo
     return [center + k * new_step for k in range(-n, n + 1)]
 
 
+def _candidate_tag(override: dict[str, tuple[float, float]]) -> str:
+    """候选唯一标签(并行时脚本/输出名用,避免并发互相覆盖)。"""
+    return hashlib.md5(
+        repr(sorted(override.items())).encode("utf-8")
+    ).hexdigest()[:10]
+
+
+def _resolve_workers(max_workers: int | None) -> int:
+    """并行 worker 数:显式指定优先,否则机器线程数 - 2(给系统留 2),最小 1。"""
+    return (
+        max_workers
+        if max_workers is not None
+        else max(1, (os.cpu_count() or 4) - 2)
+    )
+
+
+def _candidate_backend_run(
+    backend: Any,
+    experiment: Experiment,
+    plan: Any,
+    is_nus: bool,
+    override: dict[str, tuple[float, float]],
+    work_dir: Path | str | None,
+    prefix: str,
+) -> tuple[dict[str, Any] | None, str]:
+    """候选后端运行(每候选唯一脚本/输出名,线程安全)。
+
+    返回 (resp, path);resp=None 表示调用异常(与运行失败区分)。
+    prefix 区分来源(""=顺序搜索,"j"=联合复核),避免文件名冲突。
+    """
+    tag = _candidate_tag(override)
+    ext = "ft3" if experiment.ndim >= 3 else "ft2"
+    name = f"{experiment.dataset_id}_{prefix}{tag}.{ext}"
+    try:
+        if is_nus:
+            resp = backend.finalize_nus(
+                experiment,
+                phases=override,
+                work_dir=work_dir,
+                out_file=name,
+                script_name=f"{experiment.dataset_id}_{prefix}{tag}_finalize.com",
+            )
+        else:
+            resp = backend.process(
+                experiment,
+                plan,
+                direct_phase_override=override,
+                out_file=name,
+                script_name=f"{experiment.dataset_id}_{prefix}{tag}_process.com",
+            )
+    except Exception:  # noqa: BLE001 - 单候选失败不影响其它
+        return None, ""
+    return resp, str(resp.get("spectrum_path", ""))
+
+
 def _spectrum_real(path: str) -> np.ndarray:
     import nmrglue as ng
 
@@ -1131,6 +1189,8 @@ def _joint_recheck(
     ] | None = None,
     *,
     trace_map: dict[str, tuple[list[int], list[int]]] | None = None,
+    parallel: bool = True,
+    max_workers: int | None = None,
 ) -> tuple[dict[str, tuple[float, float]], float, str, int, float, float, str]:
     """全部轴固定的联合 ±final_step 邻域复核(p1 每轴 3 值,含全零组合)。
 
@@ -1177,36 +1237,60 @@ def _joint_recheck(
     zero_score = -1.0
     zero_path = ""
     runs = 0
-    for phases in combos:
+    n_workers = _resolve_workers(max_workers)
+    # 0.2.77:唯一输出名(修复缓存路径别名)
+
+    def _joint_eval(
+        phases: dict[str, tuple[float, float]],
+    ) -> tuple[dict[str, tuple[float, float]], float, str, bool] | None:
+        """单组合后端运行 + 评分(线程安全)。返回 (phases, score, path, is_new)。"""
         cache_key = tuple(sorted(phases.items()))
         cached = phase_cache.get(cache_key)
         if cached is not None:
             # 复用顺序搜索已产出的后端产物,重新评分(评分基准一致)
             path = cached[1]
+            is_new = False
         else:
-            if is_nus:
-                resp = backend.finalize_nus(
-                    experiment, phases=phases, work_dir=work_dir
-                )
-            else:
-                resp = backend.process(
-                    experiment, plan, direct_phase_override=phases
-                )
-            runs += 1
-            if not resp.get("success"):
-                continue
-            path = str(resp.get("spectrum_path", ""))
+            is_new = True
+            resp, path = _candidate_backend_run(
+                backend, experiment, plan, is_nus, phases, work_dir, "j"
+            )
+            if resp is None or not resp.get("success"):
+                return phases, None, "", True
         try:
             score = _joint_score_path(path)
         except Exception:  # noqa: BLE001 - 单候选失败不影响其它
-            continue
+            return phases, None, "", is_new
+        return phases, float(score), path, is_new
+
+    def _joint_merge(
+        result: tuple[dict[str, tuple[float, float]], float, str, bool] | None,
+    ) -> None:
+        nonlocal runs, fixed_score, zero_score, zero_path, best_score
+        nonlocal best_phases, best_path
+        if result is None:
+            return
+        phases, score, path, is_new = result
+        if is_new:
+            runs += 1
+        if score is None:
+            return
         if phases == fixed:
-            fixed_score = float(score)
+            fixed_score = score
         if phases == all_zero:
-            zero_score = float(score)
+            zero_score = score
             zero_path = path
         if score > best_score:
-            best_phases, best_score, best_path = dict(phases), float(score), path
+            best_phases, best_score, best_path = dict(phases), score, path
+
+    if n_workers > 1:
+        with ThreadPoolExecutor(max_workers=n_workers) as pool:
+            futures = [pool.submit(_joint_eval, phases) for phases in combos]
+            for fut in as_completed(futures):
+                _joint_merge(fut.result())
+    else:
+        for phases in combos:
+            _joint_merge(_joint_eval(phases))
     backend_runs[0] += runs
     return best_phases, best_score, best_path, runs, fixed_score, zero_score, zero_path
 
@@ -1226,6 +1310,10 @@ def optimize_phase_sequential(
     work_dir: Path | str | None = None,
     refine: bool = True,
     final_step: float = 5.0,
+    # 0.2.77:候选并行(墙钟 ÷N-2;同一候选集合/评分/选择逻辑,结果与串行
+    # 逐位一致);max_workers 默认自动 = 机器线程数 - 2(给系统留 2 线程),最小 1
+    parallel: bool = True,
+    max_workers: int | None = None,
 ) -> SequentialPhaseResult:
     """逐维相位优化:粗网格 + 多尺度细化(均匀:间接维 → 直接维,依次固定;NUS:逐间接维)。
 
@@ -1315,49 +1403,95 @@ def optimize_phase_sequential(
     steps0 = _refine_steps(p0_step, final_step) if refine and p0_step > 0 else []
     steps1 = _refine_steps(p1_step, final_step) if refine and p1_step > 0 else []
     levels = max(len(steps0), len(steps1))
+    n_workers = _resolve_workers(max_workers)
+    # 0.2.77:每候选使用唯一脚本/输出名——不只是并发安全,还修复联合复核
+    # 缓存路径别名 bug:旧共享 raw.ft3 会被后写候选覆盖,缓存命中的联合组合
+    # 会读到错误谱(d8 顺序模式 F2 曾因此误判 joint 更优)
 
     for axis in search_axes:
         scored: dict[tuple[float, float], tuple[float, str]] = {}
 
-        def _run_phase(phase: tuple[float, float]) -> None:
-            nonlocal backend_runs
-            # p0 全圆:p0 取模 360(常数相位 360° 周期,谱不变,仅 key/记录归一)
-            phase = (float(phase[0]) % 360.0, float(phase[1]))
-            if phase in scored:
-                return
-            override = {**fixed, axis: phase}
-            cache_key = tuple(sorted(override.items()))
-            cached = phase_cache.get(cache_key)
-            if cached is not None:
-                scored[phase] = cached
-                return
-            if is_nus:
-                resp = backend.finalize_nus(
-                    experiment, phases=override, work_dir=work_dir
-                )
-            else:
-                resp = backend.process(
-                    experiment, plan, direct_phase_override=override
-                )
-            backend_runs += 1
+        def _evaluate_one(
+            phase: tuple[float, float],
+            override: dict[str, tuple[float, float]],
+        ) -> tuple[tuple[float, float], float, str, str, bool] | None:
+            """后端运行 + 评分(线程安全,无状态突变)。
+
+            返回 (phase, score, path, err, ran);ran=是否调用了后端(含失败)。
+            """
+            resp, path = _candidate_backend_run(
+                backend, experiment, plan, is_nus, override, work_dir, ""
+            )
+            if resp is None:
+                return None, None, None, f"{axis} 候选 {phase}: 后端异常", True
             if not resp.get("success"):
-                logs.append(f"{axis} 候选 {phase}: 运行失败 {resp.get('message')}")
-                return
-            path = resp.get("spectrum_path", "")
+                return (
+                    None,
+                    None,
+                    None,
+                    f"{axis} 候选 {phase}: 运行失败 {resp.get('message')}",
+                    True,
+                )
             try:
                 if custom_score:
-                    score, _components = score_fn(str(path))
+                    score, _components = score_fn(path)
                 else:
                     # 0.2.75:默认评分 = 基线固定迹线中位数净吸收(旧 NMRFlow),
                     # 强负峰(折叠)只影响单条迹线,中位数聚合不受其主导
                     score, _components = _score_fixed_traces(
-                        str(path), axis, trace_indices, trace_positions
+                        path, axis, trace_indices, trace_positions
                     )
             except Exception as exc:  # noqa: BLE001 - 单候选失败不影响其它
-                logs.append(f"{axis} 候选 {phase}: 评分失败 {exc}")
+                return None, None, None, f"{axis} 候选 {phase}: 评分失败 {exc}", True
+            return phase, float(score), path, "", True
+
+        def _merge_one(
+            result: tuple[tuple[float, float], float, str, str, bool] | None,
+        ) -> None:
+            nonlocal backend_runs
+            if result is None or result[4] is False:
                 return
-            scored[phase] = (float(score), str(path))
-            phase_cache[cache_key] = (float(score), str(path))
+            phase, score, path, err, _ran = result
+            backend_runs += 1  # 与旧 _run_phase 一致:后端被调用即计数(含失败)
+            if err:
+                logs.append(err)
+                return
+            scored[phase] = (score, path)
+            cache_key = tuple(sorted({**fixed, axis: phase}.items()))
+            phase_cache[cache_key] = (score, path)
+
+        def _run_batch(phases: list[tuple[float, float]]) -> None:
+            pending: list[
+                tuple[tuple[float, float], dict[str, tuple[float, float]]]
+            ] = []
+            for raw in phases:
+                # p0 全圆:p0 取模 360(常数相位 360° 周期,谱不变,仅 key/记录归一)
+                phase = (float(raw[0]) % 360.0, float(raw[1]))
+                if phase in scored:
+                    continue
+                override = {**fixed, axis: phase}
+                cache_key = tuple(sorted(override.items()))
+                cached = phase_cache.get(cache_key)
+                if cached is not None:
+                    scored[phase] = cached
+                    continue
+                pending.append((phase, override))
+            if not pending:
+                return
+            if n_workers <= 1:
+                for phase, override in pending:
+                    _merge_one(_evaluate_one(phase, override))
+                return
+            with ThreadPoolExecutor(max_workers=n_workers) as pool:
+                futures = {
+                    pool.submit(_evaluate_one, phase, override): phase
+                    for phase, override in pending
+                }
+                for fut in as_completed(futures):
+                    _merge_one(fut.result())
+
+        def _run_phase(phase: tuple[float, float]) -> None:
+            _run_batch([phase])
 
         axis_idx = _axis_index(axis)
         trace_indices: list[int] = []
@@ -1405,8 +1539,7 @@ def optimize_phase_sequential(
             if trace_indices:
                 axis_traces[axis] = (list(trace_indices), list(trace_positions))
 
-        for phase in coarse:
-            _run_phase(phase)
+        _run_batch(coarse)
         if not scored:
             raise ValueError(f"轴 {axis} 相位候选全部失败")
         # 粗网格最优与判别力(供门控回退:细网格平坦时保留粗定位)
@@ -1444,9 +1577,7 @@ def optimize_phase_sequential(
                     w1 = _refine_window(best[1], prev1, s1) if steps1 else [best[1]]
                 else:
                     w1 = [best[1]]  # 默认:p1 固定 0,仅细化 p0(旧方案)
-                for p0 in w0:
-                    for p1 in w1:
-                        _run_phase((p0, p1))
+                _run_batch([(p0, p1) for p0 in w0 for p1 in w1])
                 prev0, prev1 = s0, s1
         best_phase = max(scored, key=lambda p: scored[p][0])
         best_score, best_path = scored[best_phase]
@@ -1644,8 +1775,14 @@ def optimize_phase_sequential(
                             )
                             best_sym = c_sym
         if refine:
+            # 0.2.77:评分饱和短路——默认评分上界 100,轴最优已饱和时 p1 精修
+            # 不可能更优,直接跳过(结果逐位一致,省 2-3 次后端/轴)
+            p1_refine_candidates = [0.0, 22.5, -22.5]
+            if not custom_score and best_score >= 100.0 - 1e-9:
+                p1_refine_candidates = []
+                logs.append(f"{axis}: 评分饱和(100 分),跳过 p1 精修(不可能更优)")
             # p1 精修(旧方案):仅试 {0, ±22.5},有提升才替换(更省)
-            for p1 in (0.0, 22.5, -22.5):
+            for p1 in p1_refine_candidates:
                 cand = (best_phase[0] % 360.0, p1)
                 if cand not in scored:
                     _run_phase(cand)
@@ -1703,6 +1840,8 @@ def optimize_phase_sequential(
             [backend_runs],
             phase_cache,
             trace_map=axis_traces,
+            parallel=parallel,
+            max_workers=n_workers,
         )
         if joint_phases == fixed:
             logs.append(
@@ -1733,6 +1872,29 @@ def optimize_phase_sequential(
         + "; "
         + ("未优化 " + ",".join(unchanged) if unchanged else "未优化 无")
     )
+    # 0.2.77:候选唯一输出名,搜索结束后清理中间候选谱(含联合复核 _j*),
+    # 仅保留最终谱(控制存储,避免 3D 候选终谱积压 GB 级)
+    keep = {Path(spectrum_path)} if spectrum_path else set()
+    for _score, path in phase_cache.values():
+        p = Path(path)
+        if p in keep or p.suffix not in (".ft2", ".ft3"):
+            continue
+        try:
+            p.unlink(missing_ok=True)
+        except OSError:
+            pass
+    cleanup_dir = Path(work_dir) if work_dir else default_work_dir(experiment, backend)
+    for pattern in (
+        f"{experiment.dataset_id}_c*.ft*",
+        f"{experiment.dataset_id}_j*.ft*",
+    ):
+        for p in cleanup_dir.glob(pattern):
+            if p in keep:
+                continue
+            try:
+                p.unlink(missing_ok=True)
+            except OSError:
+                pass
     # 注意:不做 p1 归一化!NMRPipe PS 的 p1 是频率相关线性相位
     # (相位 = p0 + p1·k/max),p1+360 在中间点 k 处不等价(-200° 与 160° 谱
     # 不同);0.2.64 曾归一化导致基线重渲用错误相位、峰形劣化,已移除。
