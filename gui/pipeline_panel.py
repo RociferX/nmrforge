@@ -1,7 +1,7 @@
-"""中间 Pipeline 面板:围绕当前数据/实验显示处理步骤与状态。
+"""中间 Pipeline 面板:围绕当前样品数据/实验类型显示处理步骤与状态。
 
 六步流程(契约 v1.2 / G2B-002,含可选 SMILE 优化):
-导入数据 → 生成 FID → 生成谱图(含 SMILE 重构)→ [SMILE 优化,可选] →
+导入样品数据 → 生成 FID → 生成谱图(含 SMILE 重构)→ [SMILE 优化,可选] →
 峰挑选 → 分析。
 
 - 步骤状态依据前置依赖与产物文件推断(LOCKED/READY/RUNNING/SUCCESS/FAILED);
@@ -38,7 +38,7 @@ from gui.processing import ProcessingController
 
 # 步骤定义:id / 名称 / 描述 / 前置步骤 id 列表
 PIPELINE_STEPS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
-    ("import", "导入数据", "读 Bruker 参数并复制到样本(raw),不触发处理", ()),
+    ("import", "导入样品数据", "读 Bruker 参数并复制到项目(raw),不触发处理", ()),
     ("fid", "生成 FID", "由原始数据转换为 fid(后端 bruker -AUTO/fid.com)", ("import",)),
     ("spectrum", "生成谱图", "后端处理生成谱(自动包含 NUS SMILE 重构)", ("fid",)),
     ("smile", "SMILE 优化", "可选:重构参数网格优化并采用最优谱(仅 NUS)", ("spectrum",)),
@@ -552,7 +552,7 @@ class PipelinePanel(QWidget):
     run_finished = pyqtSignal()
     manual_open_requested = pyqtSignal(str)  # step_id:打开人工处理对话框
     report_requested = pyqtSignal(str)  # step_id:打开报告页
-    import_data_requested = pyqtSignal(str)  # exp_id:在当前实验下导入数据
+    import_data_requested = pyqtSignal(str)  # exp_id:在当前实验类型下导入样品数据
     view_log_requested = pyqtSignal(str)  # step_id:定位日志面板
     progress_updated = pyqtSignal(str)  # 批量进度文本(主线程更新标签)
     batch_summary_requested = pyqtSignal(object)  # 批量汇总 dict
@@ -574,7 +574,7 @@ class PipelinePanel(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
 
-        self.context_label = QLabel("未打开样本")
+        self.context_label = QLabel("未打开项目")
         self.context_label.setStyleSheet("font-size: 13px; font-weight: bold; color: #2c3e50;")
         layout.addWidget(self.context_label)
 
@@ -582,7 +582,7 @@ class PipelinePanel(QWidget):
         self.next_label.setWordWrap(True)
         self.next_label.setStyleSheet("color: #16a085;")
         layout.addWidget(self.next_label)
-        self.import_button = QPushButton("导入数据...")
+        self.import_button = QPushButton("导入样品数据...")
         self.import_button.setVisible(False)
         self.import_button.clicked.connect(
             lambda: self.import_data_requested.emit(self._current_exp_id)
@@ -629,7 +629,7 @@ class PipelinePanel(QWidget):
     # 上下文
     # ------------------------------------------------------------------
     def set_context(self, exp_id: str, data_id: str | None = None) -> None:
-        """兼容入口:按实验设置上下文(data_id 缺省回退首个数据)。"""
+        """兼容入口:按实验类型设置上下文(data_id 缺省回退首个样品数据)。"""
         self._selection_kind = "experiment" if exp_id else ""
         self._current_exp_id = exp_id or ""
         if data_id is not None:
@@ -647,7 +647,7 @@ class PipelinePanel(QWidget):
         return self._current_exp_id
 
     def _current_statuses(self) -> dict[str, str]:
-        """当前选中数据的步骤状态;未选中数据/旧单数据回退实验聚合。"""
+        """当前选中样品数据的步骤状态;未选中样品数据/旧单样品数据回退实验类型聚合。"""
         if self._current_data_id:
             return compute_data_step_statuses(
                 self.manager, self._current_exp_id, self._current_data_id
@@ -658,7 +658,7 @@ class PipelinePanel(QWidget):
         """刷新上下文标签与步骤状态。"""
         project = self.manager.project
         if project is None or not self._current_exp_id:
-            self.context_label.setText("未打开样本")
+            self.context_label.setText("未打开项目")
             self.next_label.setText("")
             self.import_button.setVisible(False)
             for row in self._rows.values():
@@ -672,11 +672,11 @@ class PipelinePanel(QWidget):
             for row in self._rows.values():
                 row.set_status("LOCKED")
                 row.manual_button.setVisible(False)  # 未选中数据不显示人工
-            self.import_button.setVisible(True)  # 可直接在当前实验导入数据
+            self.import_button.setVisible(True)  # 可直接在当前实验类型导入样品数据
             self._rows["import"].setVisible(True)
             return
         self.import_button.setVisible(False)
-        # 导入数据属于实验层(点中实验时显示),数据层不再展示该步骤
+        # 导入样品数据属于实验类型层(点中实验类型时显示),样品数据层不再展示该步骤
         self._rows["import"].setVisible(False)
         exp = project.experiment(self._current_exp_id)
         exp_title = exp.title if exp is not None else self._current_exp_id
@@ -695,7 +695,7 @@ class PipelinePanel(QWidget):
             context_text += f" [批量 {current_batch}: {group_count} 数据]"
         self.context_label.setText(context_text)
         statuses = self._current_statuses()
-        # 数据层不提示/展示导入步骤(导入属于实验层动作)
+        # 样品数据层不提示/展示导入步骤(导入属于实验类型层动作)
         outdated_next = next(
             (
                 sid
@@ -722,7 +722,7 @@ class PipelinePanel(QWidget):
             self.next_label.setText(
                 "全部步骤已完成"
                 if any(st == "SUCCESS" for st in statuses.values())
-                else "等待导入数据"
+                else "等待导入样品数据"
             )
         reasons = _lock_reasons(statuses)
         outdated = _outdated_reasons(
@@ -743,7 +743,7 @@ class PipelinePanel(QWidget):
                 if run is not None and run.message:
                     reason = run.message
             self._rows[step_id].set_status(status, reason)
-            # 导入数据为自动化步骤,无人工入口;其余处理步骤保留人工
+            # 导入样品数据为自动化步骤,无人工入口;其余处理步骤保留人工
             self._rows[step_id].manual_button.setVisible(
                 step_id not in ("import", "smile")
             )
@@ -775,7 +775,7 @@ class PipelinePanel(QWidget):
             return
         row.name_label.setStyleSheet("font-weight: bold; color: #16a085;")
         self.hint_bubble.setText(
-            f"已导入数据:下一步可运行「{STEP_LABEL.get(next_step, next_step)}」"
+            f"已导入样品数据:下一步可运行「{STEP_LABEL.get(next_step, next_step)}」"
         )
         self.hint_bubble.setVisible(True)
         from PyQt6.QtCore import QTimer
@@ -863,7 +863,8 @@ class PipelinePanel(QWidget):
                 nodes = _data_nodes(self.manager, self._current_exp_id)
                 if not nodes:
                     self.log_message.emit(
-                        f"{STEP_LABEL.get(step_id, step_id)}: 该实验还没有数据,请先导入数据"
+                        f"{STEP_LABEL.get(step_id, step_id)}: "
+                        "该实验类型还没有样品数据,请先导入样品数据"
                     )
                     return
                 data_node = next(

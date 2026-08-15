@@ -55,7 +55,7 @@ class _FakeController:
 
 
 def _manager_with_artifacts(tmp_path: Path):
-    """实验 + 数据 + 全套产物(fid/谱/峰表/报告),无指纹状态。"""
+    """实验类型 + 样品数据 + 全套产物(fid/谱/峰表/报告),无指纹状态。"""
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     entry = manager.create_experiment("HSQC")
     data = manager.import_data(entry.id, "/fake/1")

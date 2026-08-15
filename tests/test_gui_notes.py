@@ -1,4 +1,4 @@
-"""样本/实验/数据三级注释功能测试:结构化字段 helper + 中间顶部注释条。"""
+"""项目/实验类型/样品数据三级注释功能测试:结构化字段 helper + 中间顶部注释条。"""
 
 from __future__ import annotations
 
@@ -43,7 +43,7 @@ def _manager(tmp_path: Path) -> tuple[ProjectManager, str, str]:
 
 
 def test_note_fields_schemas_differ_per_level() -> None:
-    """0.2.79:各级注释字段不同(样本=蛋白基本信息;实验=类型/维度/核;数据=重复/条件/pH/温度)。"""
+    """0.2.79:各级注释字段不同(项目=蛋白基本信息;实验类型=类型/维度/核;样品数据=重复/条件/pH/温度)。"""
     assert [key for key, _ in SAMPLE_FIELDS] == [
         "protein_name",
         "expression_system",
@@ -148,7 +148,7 @@ def test_center_panel_notes_bar(tmp_path: Path, qapp: QApplication) -> None:
 def test_main_window_menu_experiment(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """顶部菜单:「样本」改为「实验」,去掉样本管理/添加/删除样本。"""
+    """顶部菜单:「项目/实验类型」,去掉样本管理/添加/删除样本。"""
     from gui.main_window import MainWindow
 
     workspace = tmp_path / "ws"
@@ -175,18 +175,18 @@ def test_main_window_menu_experiment(
     )
     window = MainWindow()
     menus = [action.text() for action in window.menuBar().actions()]
-    assert "实验(&E)" in menus
+    assert "实验类型(&E)" in menus
     assert "样本(&S)" not in menus
     experiment_menu = next(
         action.menu()
         for action in window.menuBar().actions()
-        if action.text() == "实验(&E)"
+        if action.text() == "实验类型(&E)"
     )
     labels = [action.text() for action in experiment_menu.actions()]
-    assert "新建实验..." in labels
-    assert "样本管理" not in labels
-    assert "添加样本..." not in labels
-    assert "删除样本..." not in labels
+    assert "新建实验类型..." in labels
+    assert "项目管理" not in labels
+    assert "添加项目..." not in labels
+    assert "删除项目..." not in labels
     window.close()
 
 
