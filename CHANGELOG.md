@@ -68,6 +68,19 @@
   的 raw.fid,列表只列 .ft2/.ft3;FID 仍可拖放/直接打开查看。
 - 测试:新增查看器默认值/英文文案/FID 排除断言;VM 全量复测通过。
 
+## [0.2.79] - 2026-08-15
+
+- SMILE 线程默认改自动(用户要求):未显式指定(参数/配置缺省或 0)时
+  nthread = 机器线程数 - 2(最小 1),与相位优化候选并行一致;
+  大网格护栏不变:间接网格 >5000 点仍强制 ≤2(sampleM 事故防护)。
+  - backend/config.py 新增 `_auto_nthread()`;`load_processing_defaults`/
+    `resolve_nthread` 缺省回退自动;config/nmrforge.yaml `smile.nthread` 默认 0
+    (=自动);显式正整数仍优先;
+  - 测试:更新 test_config_defaults(空配置/无效值 → 自动);全量 476 passed,
+    ruff 全绿;
+  - VM 8 核实测:auto=6,小网格保持 6,sampleA 渲染 nThread=6;大网格 6396
+    强制 2。
+
 ## [0.2.78] - 2026-08-15
 
 - 去重统一(行为不变,本地全量 467 passed + ruff 全绿):
