@@ -860,3 +860,61 @@ def test_candidates_run_with_zero_fill_none(
     )
     assert backend.process_params, "应至少跑一次候选 process"
     assert all(p == expected for p in backend.process_params)
+
+
+def test_preview_direct_phase_no_smile(tmp_path: Path, bruker_dir: Path) -> None:
+    """0.2.89:直接维相位预览(无 SMILE/零后端)写 phase.json v2 与预览谱。"""
+    import nmrglue as ng
+
+    from core.data.bruker_reader import read_dataset
+    from workflow.phase_optimize import preview_direct_phase
+
+    experiment = read_dataset(bruker_dir / "nus_2d")
+    work = tmp_path / "work"
+    fid_dir = work / "fid"
+    fid_dir.mkdir(parents=True)
+    n = 512
+    k = np.arange(n)
+    rng = np.random.default_rng(0)
+    for index in range(8):
+        spec = np.zeros(n, dtype=complex)
+        for peak in (140, 260, 380):
+            spec += np.exp(-((k - peak) ** 2) / (2 * 6.0**2))
+        # 信号相位 +33°(p0)/p1 斜坡 -42°;t1=0(首增量语义)
+        spec *= np.exp(1j * np.deg2rad(33.0 + (-42.0) * k / max(n - 1, 1)))
+        spec += rng.normal(0.0, 0.02, size=n)
+        spec += 1j * rng.normal(0.0, 0.02, size=n)
+        dic = {kk: "0" for kk in ng.pipe.fdata_dic}
+        dic["FDMAGIC"] = 9.2330230000000007e14
+        dic["FDDIMCOUNT"] = 1
+        dic["FDSIZE"] = n
+        dic["FDSPECNUM"] = 1
+        dic["FDQUADFLAG"] = 1
+        dic["FDOBS"] = "600.0"
+        dic["FDCAR"] = "4.7"
+        dic["FDSW"] = "6000.0"
+        dic["FDORIG"] = "1000.0"
+        ng.pipe.write(
+            str(fid_dir / f"test{index:03d}.fid"),
+            dic,
+            np.fft.ifft(spec).astype(np.complex64),
+            overwrite=True,
+        )
+    result = preview_direct_phase(
+        experiment, work, out_preview="direct_preview.ft2"
+    )
+    assert result.backend_runs == 0
+    assert len(result.phases) == 1
+    direct = result.phases[0]
+    assert direct.axis == "F2"
+    # 校正值 ≈ (-33, +42)(信号相位相反数)
+    assert abs(((direct.p0 + 33.0 + 180.0) % 360.0) - 180.0) <= 12.0, direct.p0
+    assert abs(direct.p1 - 42.0) <= 10.0, direct.p1
+    cached = json.loads((work / "phase.json").read_text(encoding="utf-8"))
+    assert cached["version"] == 2
+    assert cached["p0"] == direct.p0
+    assert cached["p1"] == direct.p1
+    preview = work / "direct_preview.ft2"
+    assert preview.is_file()
+    _dic2, data = ng.pipe.read(str(preview))
+    assert data.shape == (8, 512)

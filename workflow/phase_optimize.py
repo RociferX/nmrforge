@@ -181,6 +181,199 @@ def search_direct_phase(
     )
 
 
+def _write_direct_preview(
+    spectra: np.ndarray,
+    p0: float,
+    p1: float,
+    out_path: Path,
+    logs: list[str],
+    direct_dic: dict[str, Any] | None = None,
+    *,
+    max_slices: int = 8,
+) -> str:
+    """把直接维 FT 谱前 K 条强迹线按 (p0, p1) 调相,写 2D 实型 ft2 预览谱。
+
+    沿直接维(F2)按 NMRPipe PS 语义旋转取实部;F2 轴头尽量从原 fid 头
+    继承(FDOBS/FDCAR/FDSW → FDF2*),缺失时用占位值,谱图软件按点序
+    显示即可。返回写入路径。
+    """
+    from nmrglue.fileio import pipe
+
+    arr = np.asarray(spectra, dtype=np.complex128)
+    n = arr.shape[-1]
+    k = np.arange(n, dtype=float)
+    rot = arr * np.exp(1j * np.deg2rad(p0 + p1 * k / max(n - 1, 1)))
+    heights = np.max(np.abs(arr), axis=-1)
+    top = min(max_slices, arr.shape[0])
+    order = np.argsort(heights)[::-1][:top]
+    preview = np.real(rot[order])
+    dic = {kk: "0" for kk in pipe.fdata_dic}
+    dic["FDMAGIC"] = 9.2330230000000007e14
+    dic["FDDIMCOUNT"] = 2
+    dic["FDSIZE"] = n
+    dic["FDSPECNUM"] = top
+    dic["FDQUADFLAG"] = 1
+    dic["FDF1QUADFLAG"] = 1
+    dic["FDF2QUADFLAG"] = 1
+    src = direct_dic or {}
+    dic["FDF2OBS"] = str(src.get("FDOBS", "600.0"))
+    dic["FDF2CAR"] = str(src.get("FDCAR", "4.7"))
+    dic["FDF2SW"] = str(src.get("FDSW", "6000.0"))
+    dic["FDF2ORIG"] = str(src.get("FDORIG", "1000.0"))
+    # F1 轴仅为切片堆叠序号,占位即可
+    dic["FDF1SW"] = "1.0"
+    dic["FDF1OBS"] = "1.0"
+    dic["FDF1CAR"] = "1.0"
+    dic["FDF1ORIG"] = "1.0"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    pipe.write(str(out_path), dic, preview.astype(np.float32), overwrite=True)
+    logs.append(f"直接维预览谱 → {out_path}")
+    return str(out_path)
+
+
+def preview_direct_phase(
+    experiment: Experiment,
+    work_dir: Path | str,
+    *,
+    out_preview: Path | str | None = None,
+    min_gain: float = 0.02,
+) -> PhaseOptimizeResult:
+    """直接维相位预览:无 SMILE、零后端运行。
+
+    从转换后的复型 fid/切片(test%03d.fid)内存内做直接维 FT + (p0, p1)
+    搜索(与 reconstruct_nus 重构前搜索同算法),把结果写入
+    work/phase.json(version=2)——后续 reconstruct_nus 直接复用,不再重搜。
+    用户可先跑本函数核对(可选 out_preview 输出已调相的直接维预览谱),
+    再决定是否运行 SMILE;不满意可改参重跑或手改 phase.json(保持 v2)。
+
+    返回 PhaseOptimizeResult(backend_runs=0);未找到 fid/切片或搜索无信号
+    时 phases 为空并记录原因。
+    """
+    work = Path(work_dir)
+    direct_axis = "F2" if experiment.ndim == 2 else "F3"
+    logs: list[str] = []
+    paths: list[Path] = []
+    slice_dir = work / "fid"
+    if slice_dir.is_dir():
+        paths = sorted(slice_dir.glob("test*.fid"))
+    if not paths:
+        fid_path = _direct_fid_path(work, experiment)
+        if fid_path is not None:
+            paths = [fid_path]
+    if not paths:
+        return PhaseOptimizeResult(
+            phases=[],
+            candidates_scored=0,
+            backend_runs=0,
+            spectrum_path="",
+            work_dir=str(work),
+            logs=["直接维相位预览:未找到转换后的 fid/切片(请先生成 FID)"],
+        )
+    if len(paths) > 16:
+        index = np.linspace(0, len(paths) - 1, 16).astype(int)
+        paths = [paths[i] for i in index]
+    try:
+        import nmrglue as ng
+
+        rows: list[np.ndarray] = []
+        first_dic: dict[str, Any] | None = None
+        for path in paths:
+            dic, fid = ng.pipe.read(str(path))
+            arr = np.asarray(fid)
+            if arr.ndim < 1 or arr.shape[-1] < 8:
+                continue
+            if first_dic is None:
+                first_dic = dic
+            traces = direct_ft_traces(
+                arr, sp_off=0.45, sp_end=0.95, sp_pow=1
+            )
+            rows.append(traces.reshape(-1, traces.shape[-1]))
+        if not rows:
+            return PhaseOptimizeResult(
+                phases=[],
+                candidates_scored=0,
+                backend_runs=0,
+                spectrum_path="",
+                work_dir=str(work),
+                logs=["直接维相位预览:无可用切片"],
+            )
+        spectra = np.concatenate(rows, axis=0)
+        est = search_direct_spectrum_phase(spectra)
+        if est is None:
+            return PhaseOptimizeResult(
+                phases=[],
+                candidates_scored=0,
+                backend_runs=0,
+                spectrum_path="",
+                work_dir=str(work),
+                logs=["直接维相位预览:直接维谱无信号"],
+            )
+        p0, p1, score, gain = est
+        note = ""
+        if gain < min_gain or score < 0.55:
+            note = (
+                f"相位信息弱(gain={gain:.3f}, score={score:.3f}),"
+                "保持 p0=p1=0"
+            )
+            p0, p1 = 0.0, 0.0
+        phase_file = work / "phase.json"
+        phase_file.write_text(
+            json.dumps(
+                {
+                    "version": 2,
+                    "p0": p0,
+                    "p1": p1,
+                    "score": score,
+                    "gain": gain,
+                    "n": int(spectra.shape[0]),
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        preview_path = ""
+        if out_preview is not None:
+            target = Path(out_preview)
+            if not target.is_absolute():
+                target = work / target
+            preview_path = _write_direct_preview(
+                spectra, p0, p1, target, logs, first_dic
+            )
+        logs.append(
+            f"直接维相位预览: p0={p0:g} p1={p1:g} "
+            f"(score={score:.3f}, gain={gain:.3f}, "
+            f"{spectra.shape[0]} 迹线,已写 phase.json v2)"
+        )
+        return PhaseOptimizeResult(
+            phases=[
+                AxisPhaseEstimate(
+                    axis=direct_axis,
+                    p0=p0,
+                    p1=p1,
+                    score=score,
+                    gain=gain,
+                    source="direct_preview",
+                    note=note,
+                )
+            ],
+            candidates_scored=0,
+            backend_runs=0,
+            spectrum_path=preview_path,
+            work_dir=str(work),
+            logs=logs,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logs.append(f"直接维相位预览失败: {exc}")
+        return PhaseOptimizeResult(
+            phases=[],
+            candidates_scored=0,
+            backend_runs=0,
+            spectrum_path="",
+            work_dir=str(work),
+            logs=logs,
+        )
+
+
 def estimate_direct_axis(
     experiment: Experiment,
     work_dir: Path,
@@ -422,6 +615,7 @@ __all__ = [
     "estimate_recon_planes",
     "format_phase_report",
     "run_with_auto_phase",
+    "preview_direct_phase",
     "save_report",
     "search_direct_phase",
 ]

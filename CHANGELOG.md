@@ -1,5 +1,19 @@
 # 变更日志
 
+## [0.2.89] - 2026-08-16
+
+- 直接维相位预览路径(无 SMILE、零后端运行,用户要求):
+  - workflow.phase_optimize.preview_direct_phase(experiment, work_dir,
+    out_preview=...):读转换后的 fid/切片(work/fid/test%03d.fid 或单文件
+    fid),内存内直接维 FT + (p0,p1) 搜索(与 reconstruct_nus 重构前搜索
+    同算法),写 phase.json(version=2,后续 reconstruct_nus 直接复用不再
+    重搜),可选输出「已调相直接维预览谱」(前 K 条强迹线实部,2D ft2,
+    F2 轴头继承 fid)供肉眼核对;
+  - 用途:生成 FID 后先跑预览确认直接维纯吸收,再决定是否运行 SMILE;
+    不满意可改参重跑或手改 phase.json(保持 version=2);
+  - 测试:构造 8 个含已知相位切片用例,断言零后端运行、phase.json v2、
+    校正值 (p0,p1) 恢复、预览谱文件与尺寸;全量 482 passed,ruff 全绿。
+
 ## [0.2.88] - 2026-08-16
 
 - NUS/均匀直接维相位搜索升级:从「原始 FID p1 共识(p0 恒 0)」改为
