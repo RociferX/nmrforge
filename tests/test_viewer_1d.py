@@ -92,6 +92,29 @@ def _write_fid(path: Path, data: np.ndarray) -> None:
     pipe.write(str(path), dic, data.astype(np.float32), overwrite=True)
 
 
+def _write_fid2d(path: Path, data: np.ndarray) -> None:
+    """写二维时域 FID(FDDIMCOUNT=2:行=间接维增量,列=直接维时点)。"""
+    from nmrglue.fileio import pipe
+
+    data = np.asarray(data)
+    dic = {key: "0" for key in pipe.fdata_dic}
+    dic["FDMAGIC"] = 9.2330230000000007e14
+    dic["FDDIMCOUNT"] = 2
+    dic["FDSIZE"] = data.shape[-1]
+    dic["FDSPECNUM"] = data.shape[0]
+    dic["FDQUADFLAG"] = 1
+    dic["FDF1QUADFLAG"] = 1
+    dic["FDF2QUADFLAG"] = 1
+    dic["FDTRANSPOSED"] = 0
+    dic["FDF1TDSIZE"] = data.shape[0]
+    dic["FDF2TDSIZE"] = data.shape[1]
+    dic["FDF2SW"] = 6000.0
+    dic["FDF2OBS"] = 600.0
+    dic["FDF2CAR"] = 4.7
+    dic["FDF2ORIG"] = 4.7 * 600.0
+    pipe.write(str(path), dic, data.astype(np.float32), overwrite=True)
+
+
 def test_spectrum1d_load_from_fid_roundtrip(tmp_path: Path) -> None:
     data = np.linspace(0.0, 1.0, 64)
     path = tmp_path / "test.fid"
@@ -103,6 +126,45 @@ def test_spectrum1d_load_from_fid_roundtrip(tmp_path: Path) -> None:
     assert not loaded.ppm_valid  # 时间域 FID 不用 ppm 轴
     np.testing.assert_allclose(loaded.x_values(), np.arange(64))
     assert loaded.source == path
+
+
+def test_spectrum1d_load_from_fid_2d_returns_timedomain_spectrum(
+    tmp_path: Path,
+) -> None:
+    """0.2.78:二维 FID 按 nmrDraw 式显示整块时域图(行=各 FID,列=时点)。"""
+    rng = np.random.default_rng(1)
+    data = rng.normal(size=(16, 32))
+    data[0, 3] += 10000.0  # 个别尖峰:不影响分位数基准
+    path = tmp_path / "raw.fid"
+    _write_fid2d(path, data)
+    loaded = Spectrum1D.load_from_fid(path)
+    assert isinstance(loaded, Spectrum)
+    assert loaded.data.shape == (16, 32)
+    np.testing.assert_allclose(loaded.data, data)
+    assert loaded.axes[0].label == "FID"
+    assert loaded.axes[1].label == "Points"
+    assert loaded.axes[0].size == 16
+    assert loaded.axes[1].size == 32
+    assert loaded.source == path
+    # 等高线默认基准用高分位数,避免被尖峰淹没
+    assert 0 < loaded.robust_max < loaded.max_intensity
+
+
+def test_viewer_fid_2d_window_load(tmp_path: Path, qapp: QApplication) -> None:
+    """0.2.78:二维 FID 打开后按 2D 时域图显示,而非第一条 FID 的 1D 迹线。"""
+    rng = np.random.default_rng(2)
+    data = rng.normal(size=(16, 64))
+    data[0, :] = np.exp(-np.arange(64) / 10.0) * 5000.0
+    path = tmp_path / "2d.fid"
+    _write_fid2d(path, data)
+    window = SpectrumWindow()
+    assert window.load_spectrum(path) is True
+    assert not window.viewer._mode_1d
+    assert len(window.viewer.layers) == 1
+    assert isinstance(window.viewer._primary, Spectrum)
+    assert window.viewer._primary.data.shape == (16, 64)
+    assert "FID" in window.statusBar().currentMessage()
+    window.close()
 
 
 def test_viewer_1d_strips_toggle_and_update(qapp: QApplication) -> None:

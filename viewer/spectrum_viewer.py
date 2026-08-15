@@ -28,7 +28,7 @@ from PyQt6.QtWidgets import (
 
 from viewer.contour_layer import ContourLayer
 from viewer.nmr_viewbox import NMRViewBox
-from viewer.spectrum import Spectrum, Spectrum1D
+from viewer.spectrum import Spectrum, Spectrum1D, SpectrumAxis
 
 _COLORS = ("#1f77b4", "#d62728", "#2ca02c", "#9467bd", "#ff7f0e", "#17becf")
 _DEFAULT_LEVELS = 8
@@ -276,8 +276,14 @@ class SpectrumViewer(QWidget):
         return f"Contour start {self._level_fraction() * 100:.2f}%"
 
     def _levels_for(self, spectrum: Spectrum) -> np.ndarray:
-        """从起点(base)到最大值之间取 n 级对数间隔,含对称负级。"""
-        maximum = spectrum.max_intensity
+        """从起点(base)到最大值之间取 n 级对数间隔,含对称负级。
+
+        二维 FID 等动态范围大的数据可用 ``robust_max``(高分位数)代替
+        全局最大值作为基准,避免被个别尖峰淹没。
+        """
+        maximum = float(
+            getattr(spectrum, "robust_max", 0.0) or spectrum.max_intensity
+        )
         if maximum <= 0:
             maximum = abs(float(np.min(spectrum.data))) if spectrum.data.size else 0.0
         if maximum <= 0:
@@ -301,22 +307,30 @@ class SpectrumViewer(QWidget):
         self.count_label.setText(f"Levels {value}")
         self._update_levels()
 
+    @staticmethod
+    def _axis_ticks(
+        axis: SpectrumAxis, count: int
+    ) -> tuple[list[tuple[int, str]], str]:
+        """ppm 有效轴显示 ppm 刻度;时间域轴(如 FID 时点)显示点序号。"""
+        if axis.sw_hz > 0 and axis.obs_mhz > 0:
+            ticks = [
+                (int(i), f"{axis.ppm_at(int(i)):.2f}")
+                for i in np.linspace(0, axis.size - 1, count)
+            ]
+            return ticks, f"{axis.label} (ppm)"
+        ticks = [
+            (int(i), str(int(i))) for i in np.linspace(0, axis.size - 1, 6)
+        ]
+        return ticks, axis.label
+
     def _setup_axes(self, spectrum: Spectrum) -> None:
         x_axis = spectrum.x_axis
         y_axis = spectrum.y_axis
-        x_ticks = [
-            (int(i), f"{x_axis.ppm_at(int(i)):.2f}")
-            for i in np.linspace(0, x_axis.size - 1, 8)
-        ]
-        y_ticks = [
-            (int(i), f"{y_axis.ppm_at(int(i)):.2f}")
-            for i in np.linspace(0, y_axis.size - 1, 8)
-        ]
+        x_ticks, x_label = self._axis_ticks(x_axis, 8)
+        y_ticks, y_label = self._axis_ticks(y_axis, 8)
         self.plot.getAxis("bottom").setTicks([x_ticks])
         self.plot.getAxis("left").setTicks([y_ticks])
-        self.plot.setLabels(
-            bottom=f"{x_axis.label} (ppm)", left=f"{y_axis.label} (ppm)"
-        )
+        self.plot.setLabels(bottom=x_label, left=y_label)
 
     def _on_layer_toggle(self, item: QListWidgetItem) -> None:
         index = self.layer_list.row(item)
@@ -405,23 +419,17 @@ class SpectrumViewer(QWidget):
             self._restore_strips()
 
     def _setup_strip_axes(self) -> None:
-        """给 1D 条带设置 ppm 刻度(与主谱联动)。"""
+        """给 1D 条带设置刻度(ppm 轴显示 ppm,时间域轴显示点序号)。"""
         if self._primary is None:
             return
         x_axis = self._primary.x_axis
         y_axis = self._primary.y_axis
-        x_ticks = [
-            (int(i), f"{x_axis.ppm_at(int(i)):.2f}")
-            for i in np.linspace(0, x_axis.size - 1, 6)
-        ]
-        y_ticks = [
-            (int(i), f"{y_axis.ppm_at(int(i)):.2f}")
-            for i in np.linspace(0, y_axis.size - 1, 6)
-        ]
+        x_ticks, x_label = self._axis_ticks(x_axis, 6)
+        y_ticks, y_label = self._axis_ticks(y_axis, 6)
         self.strip_top.getAxis("bottom").setTicks([x_ticks])
-        self.strip_top.setLabels(bottom=f"{x_axis.label} (ppm)", left="Intensity")
+        self.strip_top.setLabels(bottom=x_label, left="Intensity")
         self.strip_right.getAxis("left").setTicks([y_ticks])
-        self.strip_right.setLabels(left=f"{y_axis.label} (ppm)", bottom="Intensity")
+        self.strip_right.setLabels(left=y_label, bottom="Intensity")
 
     def _update_strips(self, row: int, col: int) -> None:
         """更新十字线处两个一维迹线(行=F2 迹线,列=F1 迹线)。"""
