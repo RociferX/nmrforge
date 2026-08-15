@@ -394,17 +394,17 @@ def search_direct_spectrum_phase(
     traces: np.ndarray,
     *,
     max_rows: int = 128,
+    p0_source: str = "first",
 ) -> tuple[float, float, float, float] | None:
     """直接维 FT 谱的 (p0, p1) 聚合搜索(全程 numpy,不重跑后端)。
 
     输入:(..., n) 复型谱,最后一维为直接维;每一行视为一个间接增量
-    (切片式 fid 每文件一行;单文件 fid 每增量一行)。NUS 增量 i 的直接维
-    相位 = 公共相位 + ω1·t1(i)(t1 调制,t1(0)=0);只有首条迹线(增量 0)
-    直接维相位干净。聚合策略:
+    (切片式 fid 每文件一行;单文件 fid 每增量一行)。聚合策略:
     1) p1 共识:多峰迹线相位集中度拟合取中位数(t1 只是逐峰常数偏置,
        不影响 p1 斜坡;单峰迹线无法区分 p1,不参与);
-    2) p0 锚点:取首条有峰的迹线(增量 0,t1=0)的 p0 校正——其余迹线的
-       t1 偏置无法与 p0 分离,不参与 p0 平均。
+    2) p0 锚点:p0_source="first" 取首条有峰的迹线(增量 0,t1=0,切片式
+       NUS 直接维相位干净);"strongest" 取峰高最强的迹线(伪均匀谱:
+       最强行对应真实间接频率,零填充旁瓣的常数相位偏置 δ≈0)。
     返回 (p0, p1, score, gain);无信号/点数不足返回 None。
     """
     arr = np.asarray(traces, dtype=np.complex128)
@@ -429,8 +429,14 @@ def search_direct_spectrum_phase(
     # p1 拟合得到的是信号斜坡;PS 校正取反(与 p0 同为校正约定)
     p1_signal = float(np.median(p1_rows)) if p1_rows else 0.0
     p1 = -p1_signal
-    # p0 锚点:首条有峰的迹线(增量 0,t1=0,直接维相位干净)
-    _arr, pos, heights = infos[0]
+    # p0 锚点:first=首条有峰迹线(增量 0,t1=0);strongest=峰高最强迹线
+    if p0_source == "strongest":
+        anchor = max(
+            range(len(infos)), key=lambda i: float(np.max(infos[i][2]))
+        )
+    else:
+        anchor = 0
+    _arr, pos, heights = infos[anchor]
     p0, score = _row_p0_at_p1(_arr, pos, heights, p1_signal)
     baseline, _sign = _row_absorption(_arr, pos, heights, 0.0, 0.0)
     gain = score - baseline

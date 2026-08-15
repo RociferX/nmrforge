@@ -918,3 +918,77 @@ def test_preview_direct_phase_no_smile(tmp_path: Path, bruker_dir: Path) -> None
     assert preview.is_file()
     _dic2, data = ng.pipe.read(str(preview))
     assert data.shape == (8, 512)
+
+
+def test_preview_direct_phase_nus_pseudo_uniform(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """0.2.90:伪均匀传统 FT 路径(NUS,无 SMILE)恢复直接维 (p0, p1)。
+
+    构造 16 个切片:每个直接维 3 峰,信号相位 +33°(p0)/斜坡 -42°(p1),
+    另叠 t1 调制 θ(i)=2π·16·i/128(网格上 F1=16);nuslist 摆网格 + 传统
+    F1 FT 后直接维相位不再与 t1 纠缠,校正值应 ≈ (-33, +42)。
+    """
+    import nmrglue as ng
+
+    from core.data.bruker_reader import read_dataset
+    from workflow.phase_optimize import preview_direct_phase
+
+    experiment = read_dataset(bruker_dir / "nus_2d")
+    work = tmp_path / "work"
+    fid_dir = work / "fid"
+    fid_dir.mkdir(parents=True)
+    n = 512
+    k = np.arange(n)
+    rng = np.random.default_rng(1)
+    n_f1 = 128  # fixture nus_2d 的 F1 复点网格
+    points = []
+    for index in range(16):
+        i_f1 = 4 * index  # 采样点:0,4,8,...,60
+        points.append((i_f1,))
+        spec = np.zeros(n, dtype=complex)
+        for peak in (140, 260, 380):
+            spec += np.exp(-((k - peak) ** 2) / (2 * 6.0**2))
+        theta = 2.0 * np.pi * 16.0 * i_f1 / n_f1  # 网格上 F1=16 的 t1 调制
+        spec *= np.exp(
+            1j * np.deg2rad(33.0 + (-42.0) * k / max(n - 1, 1)) + 1j * theta
+        )
+        spec += rng.normal(0.0, 0.02, size=n)
+        spec += 1j * rng.normal(0.0, 0.02, size=n)
+        dic = {kk: "0" for kk in ng.pipe.fdata_dic}
+        dic["FDMAGIC"] = 9.2330230000000007e14
+        dic["FDDIMCOUNT"] = 1
+        dic["FDSIZE"] = n
+        dic["FDSPECNUM"] = 1
+        dic["FDQUADFLAG"] = 1
+        dic["FDOBS"] = "600.0"
+        dic["FDCAR"] = "4.7"
+        dic["FDSW"] = "600.0"  # sw_ppm=1:EXT 窗口落在谱外 → 回退全谱
+        dic["FDORIG"] = "1000.0"
+        ng.pipe.write(
+            str(fid_dir / f"test{index:03d}.fid"),
+            dic,
+            np.fft.ifft(spec).astype(np.complex64),
+            overwrite=True,
+        )
+    (work / "nuslist").write_text(
+        "".join(f"{p[0]}\n" for p in points), encoding="utf-8"
+    )
+    result = preview_direct_phase(
+        experiment, work, out_preview="direct_pseudo.ft2"
+    )
+    assert result.backend_runs == 0
+    assert len(result.phases) == 1
+    direct = result.phases[0]
+    assert direct.source == "direct_pseudo"
+    # 校正值 ≈ (-33, +42)(信号相位相反数)
+    assert abs(((direct.p0 + 33.0 + 180.0) % 360.0) - 180.0) <= 15.0, direct.p0
+    assert abs(direct.p1 - 42.0) <= 12.0, direct.p1
+    cached = json.loads((work / "phase.json").read_text(encoding="utf-8"))
+    assert cached["version"] == 2
+    assert cached["source"] == "direct_pseudo"
+    assert cached["p0"] == direct.p0
+    preview = work / "direct_pseudo.ft2"
+    assert preview.is_file()
+    _d2, data = ng.pipe.read(str(preview))
+    assert data.shape == (n_f1, n)
