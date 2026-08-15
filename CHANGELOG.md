@@ -1,5 +1,19 @@
 # 变更日志
 
+## [0.2.88] - 2026-08-16
+
+- merge(Architect):并入 GUI 0.2.85(注释下拉选项 + 右侧谱图自动显示)与
+  Backend 0.2.85-0.2.87(三维切片流/NUS 直接维 1×TD、ext 窗口配置化、
+  相位候选零填零);GUI 与 Backend 的 0.2.85 版本号撞号,CHANGELOG 合并归一;
+- 对接修复(Architect):ext_lo/ext_hi 默认值全栈统一 10.5/6.5——GUI
+  param_schema 与参数对话框原硬编码 11.0/6.0,与后端 0.2.86 配置默认
+  (10.5/6.5)不一致;同步补齐后端 0.2.86 漏改的 param_schema 属性默认值、
+  render_scripts 回退值与 ProcessingBackend docstring;
+- 测试:本地全量 484 passed、VM 全量 480 passed + 4 skipped(Python 3.12.13,
+  HEAD 03478da),ruff 全绿;
+- 待办:GUI 设置对话框动态读取 load_processing_defaults 暴露 ext_lo/ext_hi,
+  仍待 GUI Agent 接线(B2G-003)。
+
 ## [0.2.87] - 2026-08-16
 
 - 相位优化候选谱零填零 + 填零放在优化最后(用户要求):
