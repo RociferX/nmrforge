@@ -1,5 +1,21 @@
 # 变更日志
 
+## [0.2.85] - 2026-08-16
+
+- 三维处理全切片流 + NUS 直接维填零 1×TD(用户实测根因修复):
+  - bruker 在 acqu3s TD 正确时输出切片式 fid/test%03d.fid(每 F1 一个切片);
+    convert 接受切片输出(保留 work/fid/),reconstruct_nus 与 process(均匀 3D)
+    均优先使用切片 in_file 流式处理——与用户手动传递顺序一致
+    (fid/test%03d.fid → 直接维 FT/EXT → planes → SMILE/间接 FT → 终谱);
+  - NUS 直接维填零 1×TD:2×TD 使直接维平面翻倍 → SMILE 工作量翻倍导致
+    重载关机(用户实测;手动 1×TD 34s 安全完成);均匀路径保持 2×TD;
+  - 直接维相位搜索对切片形式回退用首切片;
+  - 测试:新增切片归位/单文件兼容/缺失失败用例;更新 NUS 直接维 1×TD 与
+    均匀 2×TD 断言;全量 479 passed,ruff 全绿;
+  - 注:VM 验证按用户手动参数(直接维 ZF 2048、窗口 9.0-7.4、sampleCount 700)
+    进行;后端默认窗口 6-11ppm 下处理超大 NUS(如 sampleJ)请用
+    ext_lo/ext_hi 传参收紧窗口,避免 SMILE 重载。
+
 ## [0.2.84] - 2026-08-15
 
 - GUI(Architect):修复 3D 数据生成 FID 后「导入数据 / 生成FID」双双
