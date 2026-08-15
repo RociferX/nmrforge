@@ -1,5 +1,23 @@
 # 变更日志
 
+## [0.2.78] - 2026-08-15
+
+- 去重统一(行为不变,本地全量 467 passed + ruff 全绿):
+  - FT 标志逻辑统一:新增 `_ft_flags(base_neg, base_alt, sampling, axis)`,
+    `_ft_flag_line`(NUS/finalize)与 `_stage_lines` 的 ft 分支(均匀)共用同一
+    sampling 覆盖实现——此前两处重复,且同一 FnMODE 在均匀/NUS 路径的默认
+    neg 推导可能不一致,已收敛为显式传基值;
+  - NUS 填零尺寸统一:`_nus_zf_size(cfg, td_points)`,2D/3D NUS 脚本与
+    finalize 的 6 处 `next_pow2(2×TD)` 推导收敛;
+  - 候选后端调用统一:`phase_optimize` 新增 `_resolve_workers`(机器线程数-2)
+    与 `_candidate_backend_run`(唯一脚本/输出名 + process/finalize_nus 调用),
+    `_evaluate_one`(逐轴候选)与 `_joint_eval`(联合复核)共用;
+  - effective_params 基础块统一:`nmrpipe_backend._effective_params_base`,
+    process 与 reconstruct_nus 共用(process 追加 window/direct_phase,
+    reconstruct 追加 SMILE 键);
+  - 无行为变化:脚本输出、评分、相位选择均不变(FT 标志顺序统一为
+    `-neg -alt`,NMRPipe 独立解析,等价)。
+
 ## [0.2.77] - 2026-08-15
 
 - 相位优化性能(用户要求,结果逐位一致):
