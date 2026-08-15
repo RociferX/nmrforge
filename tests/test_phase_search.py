@@ -80,3 +80,37 @@ def test_search_direct_spectrum_phase_recovers_p0_p1() -> None:
     assert abs(p1 + sig_p1) <= 10.0, p1
     assert score > 0.6
     assert gain > 0.05
+
+
+def test_nus_direct_phase_matches_existing_sign_convention() -> None:
+    """0.2.92:NU-DFT 直接维 p0 与现有方法同语义(取正峰解,消除 ±180 歧义)。
+
+    现有方法(验证过)对 θ_true=-120 断言 p0≈120(±7.5);NU-DFT 在等效复型
+    切片上应给出相同答案,而非 300(±180 反转)。
+    """
+    from scipy.signal import hilbert
+
+    from core.optimization.phase_search import nus_direct_phase
+
+    def make_slices(theta_true: float, n1: int = 32, n2: int = 64) -> np.ndarray:
+        x = np.arange(n2)
+        a = 100.0 / (1.0 + ((x - 30) / 2.0) ** 2)
+        d = -np.imag(hilbert(a))
+        spectrum = (a + 1j * d) * np.exp(1j * np.deg2rad(theta_true))
+        return np.array(
+            [
+                np.fft.ifft(spectrum)
+                * np.exp(1j * 2.0 * np.pi * 16 * i / n1)
+                for i in range(n1)
+            ]
+        )
+
+    for theta, expected in ((-120.0, 120.0), (33.0, 327.0), (90.0, 270.0)):
+        est = nus_direct_phase(
+            make_slices(theta), [(i,) for i in range(32)], 32, 1
+        )
+        assert est is not None
+        p0, p1, score, _gain, _kstar = est
+        assert abs(((p0 - expected + 180.0) % 360.0) - 180.0) <= 7.5, p0
+        assert abs(p1) <= 1e-6
+        assert score >= 2.0

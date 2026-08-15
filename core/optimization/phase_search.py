@@ -546,18 +546,11 @@ def nus_direct_phase(
     # p0_corr = -(φ(k*) - p1_sig·k*/(n-1));p1_corr = -p1_sig
     p0_corr = (-(phase - p1_sig * kstar / max(spectra.shape[-1] - 1, 1))) % 360.0
     p1_corr = -p1_sig
-    # ±180 消歧(最强切片正峰解;吸收度仅用于消歧,不用作门控——
-    # SP 窗非线性相位使吸收度在正确相位下可能反而不高,0.2.91 实证)
-    best_slice = int(np.argmax(np.max(np.abs(spectra), axis=-1)))
-    peaks = _row_peak_positions(spectra[best_slice])
-    if peaks is None:
-        return None
-    pos, heights = peaks
-    _a0, s0 = _row_absorption(spectra[best_slice], pos, heights, p0_corr, p1_corr)
-    _a1, s1 = _row_absorption(
-        spectra[best_slice], pos, heights, (p0_corr + 180.0) % 360.0, p1_corr
-    )
-    if s1 > s0:
+    # ±180 消歧:NU-DFT 峰复值相位 = φ(k*)(t1 调制已在真实 F1 频率处精确
+    # 抵消),p0_corr = -φ(k*) 是唯一解,与现有方法「取正峰解」语义一致。
+    # 不能用单切片吸收符号判正负——该切片 t1 相位可能为 180°(峰反转),
+    # 0.2.91 曾因此把 p0 误翻 180°。这里仅留数值守卫(正常恒为正实)。
+    if float(np.real(Vf[idf] * np.exp(1j * np.deg2rad(p0_corr)))) < 0.0:
         p0_corr = (p0_corr + 180.0) % 360.0
     # 门控用相干 SNR:|V_peak|/(√N·mean|v|)——信号≈√N,噪声≈1
     v_mean = float(np.mean(np.abs(v))) + 1e-12
