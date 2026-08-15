@@ -22,6 +22,8 @@ DEFAULT_LINEWIDTH_HZ: dict[str, float] = {
     "": 15.0,
 }
 DEFAULT_POINTS_PER_LINE = 2.0
+DEFAULT_EXT_LO = "10.5"
+DEFAULT_EXT_HI = "6.5"
 
 
 def _auto_nthread() -> int:
@@ -94,6 +96,8 @@ def load_processing_defaults(config: dict[str, Any] | None = None) -> dict[str, 
         ),
         "nthread": _as_int(smile.get("nthread"), 0) or _auto_nthread(),
         "nmrpipe_path": _as_str(nmrpipe.get("path") or nmrpipe.get("nmrpipe_bin")),
+        "ext_lo": _as_str(processing.get("ext_lo"), DEFAULT_EXT_LO),
+        "ext_hi": _as_str(processing.get("ext_hi"), DEFAULT_EXT_HI),
     }
 
 
@@ -130,6 +134,24 @@ def resolve_nthread(value: Any, config: dict[str, Any] | None = None) -> int:
     return int(load_processing_defaults(config)["nthread"])
 
 
+def resolve_ext_lo(value: Any, config: dict[str, Any] | None = None) -> str:
+    """直接维提取窗口高端(EXT -x1):显式值优先,否则配置默认,再否则内置默认。"""
+    if value is not None:
+        s = str(value).strip()
+        if s:
+            return s
+    return str(load_processing_defaults(config)["ext_lo"])
+
+
+def resolve_ext_hi(value: Any, config: dict[str, Any] | None = None) -> str:
+    """直接维提取窗口低端(EXT -xn):显式值优先,否则配置默认,再否则内置默认。"""
+    if value is not None:
+        s = str(value).strip()
+        if s:
+            return s
+    return str(load_processing_defaults(config)["ext_hi"])
+
+
 def nmrpipe_path(config: dict[str, Any] | None = None) -> str:
     """显式 NMRPipe bin 目录/可执行文件(config backend.nmrpipe.path 优先 nmrpipe_bin)。"""
     return load_processing_defaults(config)["nmrpipe_path"]
@@ -138,10 +160,14 @@ def nmrpipe_path(config: dict[str, Any] | None = None) -> str:
 __all__ = [
     "DEFAULT_LINEWIDTH_HZ",
     "DEFAULT_POINTS_PER_LINE",
+    "DEFAULT_EXT_LO",
+    "DEFAULT_EXT_HI",
     "linewidth_hz_for",
     "load_config",
     "load_processing_defaults",
     "nmrpipe_path",
+    "resolve_ext_hi",
+    "resolve_ext_lo",
     "resolve_nthread",
     "resolve_points_per_line",
 ]

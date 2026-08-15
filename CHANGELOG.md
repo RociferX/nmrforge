@@ -1,5 +1,15 @@
 # 变更日志
 
+## [0.2.86] - 2026-08-16
+
+- 直接维提取窗口默认 6-11 ppm → **6.5-10.5 ppm**(用户指定)并配置化:
+  - config/nmrforge.yaml processing.ext_lo/ext_hi(10.5/6.5);
+    backend.config.load_processing_defaults 返回(供 GUI 设置对话框改默认值);
+    resolve_ext_lo/resolve_ext_hi:显式 params > 配置 > 内置默认;
+  - process/reconstruct_nus/_process 与 param_schema/脚本默认值全部同步;
+  - 测试:更新 4 处旧默认断言(11/6 → 10.5/6.5);全量 479 passed,ruff 全绿;
+  - GUI 侧需在设置对话框暴露 ext_lo/ext_hi(待 GUI Agent 接线,后端数据源已就绪)。
+
 ## [0.2.85] - 2026-08-16
 
 - 三维处理全切片流 + NUS 直接维填零 1×TD(用户实测根因修复):

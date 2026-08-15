@@ -22,7 +22,12 @@ from typing import Any
 
 from backend.base import BackendCapabilities
 from backend.bruker_workflow import patch_fid_com, patch_nus_expand_count
-from backend.config import resolve_nthread, resolve_points_per_line
+from backend.config import (
+    resolve_ext_hi,
+    resolve_ext_lo,
+    resolve_nthread,
+    resolve_points_per_line,
+)
 from backend.nmrpipe_finder import find_nmrpipe_bin, find_tool
 from backend.runtime import CshRuntime
 from backend.script_generator import (
@@ -223,8 +228,8 @@ class NMRPipeBackend:
         if sampling.get("auto_phase") is False:
             direct_phase_search = False
         extract = _as_bool(proc_params.get("extract", True))
-        ext_lo = str(proc_params.get("ext_lo", "11.0"))
-        ext_hi = str(proc_params.get("ext_hi", "6.0"))
+        ext_lo = resolve_ext_lo(proc_params.get("ext_lo"))
+        ext_hi = resolve_ext_hi(proc_params.get("ext_hi"))
         baseline = expand_baseline(experiment, proc_params.get("baseline"))
         window = proc_params.get("window")
         zero_fill = proc_params.get("zero_fill")
@@ -468,8 +473,8 @@ class NMRPipeBackend:
         nthread, guard_log = enforce_smile_thread_guardrail(nthread, grid_points)
         if guard_log:
             logs.append(guard_log)
-        ext_lo = str(params.get("ext_lo", "11.0"))
-        ext_hi = str(params.get("ext_hi", "6.0"))
+        ext_lo = resolve_ext_lo(params.get("ext_lo"))
+        ext_hi = resolve_ext_hi(params.get("ext_hi"))
         extract = _as_bool(params.get("extract", True))
         baseline = expand_baseline(experiment, params.get("baseline"))
         zero_fill = params.get("zero_fill")
@@ -942,8 +947,8 @@ class NMRPipeBackend:
         linewidth_hz: dict[str, float] | None = None,
         points_per_line: float = DEFAULT_POINTS_PER_LINE,
         extract: bool = True,
-        ext_lo: str = "11.0",
-        ext_hi: str = "6.0",
+        ext_lo: str = "10.5",
+        ext_hi: str = "6.5",
         sampling: dict[str, Any] | None = None,
         progress: Callable[[str], None] | None = None,
         out_file: str | None = None,

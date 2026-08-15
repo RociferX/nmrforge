@@ -159,7 +159,7 @@ def test_2d_nus_script_extract_off(bruker_dir: Path) -> None:
         exp, in_file="e.fid", nuslist="nuslist", out_file="e.ft2"
     )
     assert "| nmrPipe -fn EXT" in on
-    assert "-x1 11.0ppm -xn 6.0ppm" in on
+    assert "-x1 10.5ppm -xn 6.5ppm" in on
     off = generate_2d_nus_script(
         exp, in_file="e.fid", nuslist="nuslist", out_file="e.ft2",
         extract=False,
@@ -274,7 +274,7 @@ def test_process_script_ext_default_6_11(bruker_dir: Path) -> None:
         i for i, line in enumerate(lines) if "| nmrPipe -fn TP" in line
     )
     assert ps_index < ext_index < tp_index
-    assert "| nmrPipe -fn EXT -x1 11.0ppm -xn 6.0ppm -sw -round 2" in script
+    assert "| nmrPipe -fn EXT -x1 10.5ppm -xn 6.5ppm -sw -round 2" in script
 
 
 def test_process_script_extract_disabled_and_custom(bruker_dir: Path) -> None:

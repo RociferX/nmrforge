@@ -553,14 +553,14 @@ def generate_process_script(
     zero_fill: dict[str, Any] | int | None = None,
     linewidth_hz: dict[str, float] | None = None,
     points_per_line: float = DEFAULT_POINTS_PER_LINE,
-    ext_lo: str = "11.0",
-    ext_hi: str = "6.0",
+    ext_lo: str = "10.5",
+    ext_hi: str = "6.5",
     extract: bool = True,
     sampling: dict[str, Any] | None = None,
 ) -> str:
     """把处理计划（DAG）翻译为 NMRPipe 管道脚本（直接维 → EXT → TP → 间接维）。
 
-    EXT 沿直接维(1H)提取窗口,默认 6-11 ppm(ext_lo=11, ext_hi=6),
+    EXT 沿直接维(1H)提取窗口,默认 6.5-10.5 ppm(ext_lo=10.5, ext_hi=6.5),
     与 NUS 脚本一致;extract=False 可关闭。
     """
     axes = [dim.logical_axis for dim in experiment.dimensions]
@@ -654,8 +654,8 @@ def generate_2d_nus_script(
     out_file: str,
     nthread: int = 2,
     nuslist_count: int = 0,
-    ext_lo: str = "11.0",
-    ext_hi: str = "6.0",
+    ext_lo: str = "10.5",
+    ext_hi: str = "6.5",
     nsigma: float = 5.0,
     thresh: float = 0.95,
     smile_xq1: float = 0.45,
@@ -780,8 +780,8 @@ def generate_3d_nus_script(
     out_file: str,
     nthread: int = 2,
     nuslist_count: int = 0,
-    ext_lo: str = "11.0",
-    ext_hi: str = "6.0",
+    ext_lo: str = "10.5",
+    ext_hi: str = "6.5",
     nsigma: float = 5.0,
     thresh: float = 0.95,
     smile_xq1: float = 0.45,
@@ -997,8 +997,8 @@ def param_schema() -> dict[str, Any]:
             "zero_fill": 2,
             "linewidth_hz": {},
             "points_per_line": 2.0,
-            "ext_lo": "11.0",
-            "ext_hi": "6.0",
+            "ext_lo": "10.5",
+            "ext_hi": "6.5",
             "extract": True,
             "baseline": {
                 "enabled": True,
