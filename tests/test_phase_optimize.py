@@ -268,6 +268,185 @@ def test_score_in_memory_direct_ranks_true_p1_magnitude() -> None:
             assert abs(best_p1) >= 30.0  # 非零校正(±180 歧义内)
 
 
+def _spectrum_with_negative_peak():
+    """2D 谱:多个正峰 + 一枚强负峰(折叠/数据性质,旧 top-5 池化会被其主导)。"""
+    import numpy as np
+    from scipy.ndimage import gaussian_filter
+
+    n = 64
+    base = np.zeros((32, n))
+    # 正峰分布在不同行(每条迹线一个主峰),负峰单独一行——
+    # 使中位数由多数正迹线决定,不被单枚强负峰主导
+    for y, x in ((8, 20), (16, 40), (24, 52)):
+        base[y, x] = 200.0
+    base[12, 8] = -180.0  # 强负峰(折叠伪影)
+    return gaussian_filter(base, sigma=1.0)
+
+
+def test_fixed_trace_median_rejects_negative_peak() -> None:
+    """负峰存在时,固定迹线中位数聚合的好相位显著高于坏相位(旧 top-5 池化
+    会被单枚强负峰主导,判别差仅 ~0.3;中位数不受其主导)。"""
+    import numpy as np
+
+    from workflow.phase_optimize import (
+        _trace_indices_fixed,
+        _trace_metrics_median,
+    )
+
+    base = _spectrum_with_negative_peak()
+    threshold = max(float(np.percentile(base, 99.5)), 0.0)
+    indices, positions = _trace_indices_fixed(base, 1, threshold)
+    assert len(indices) >= 3  # 多数信号迹线(正峰)
+    # 好相位 ≈ 纯吸收(实部);坏相位 ≈ 纯色散(gradient 近似:峰过零、
+    # 两侧一正一负,净吸收≈0),与旧实现实测对照(0.68 vs -0.76)一致方向
+    dispersion = np.gradient(base, axis=1)
+    good_median = _trace_metrics_median(base, 1, indices, positions)
+    bad_median = _trace_metrics_median(dispersion, 1, indices, positions)
+    # 0-100 映射判别差应显著(>25 分;旧池化判别差仅 ~32 分但方向相反风险)
+    assert good_median > bad_median + 0.5
+    assert 50.0 * (good_median + 1.0) > 50.0 * (bad_median + 1.0) + 25.0
+
+
+def test_fixed_trace_metrics_stays_on_locked_traces() -> None:
+    """固定迹线/峰位评分:基线锁定后,候选谱在锁定位置打分(不重新选峰)。"""
+    import numpy as np
+
+    from workflow.phase_optimize import (
+        _profile_metric_fixed,
+        _trace_indices_fixed,
+        _trace_metrics_median,
+    )
+
+    base = _spectrum_with_negative_peak()
+    threshold = max(float(np.percentile(base, 99.5)), 0.0)
+    indices, positions = _trace_indices_fixed(base, 1, threshold)
+    # 基线锁定位置不变
+    indices2, positions2 = _trace_indices_fixed(base, 1, threshold)
+    assert indices == indices2 and positions == positions2
+    # 单迹线剖面:正峰(吸收)净吸收高,负峰(180° 反相)净吸收低
+    pos_trace = _profile_metric_fixed(base, 16, 40, axis=1)
+    neg_trace = _profile_metric_fixed(base, 12, 8, axis=1)
+    assert pos_trace > 0.5
+    assert neg_trace < 0.0  # 负吸收(反转惩罚保留)
+    # 中位数由多数正峰迹线决定(>0)
+    assert _trace_metrics_median(base, 1, indices, positions) > 0.0
+
+
+def _write_ft2_real(path: Path, data: np.ndarray) -> None:
+    """写最小可读 2D ft2(数据内容可指定)。"""
+    from nmrglue.fileio import pipe
+
+    dic = {k: "0" for k in pipe.fdata_dic}
+    dic["FDMAGIC"] = 9.2330230000000007e14
+    dic["FDDIMCOUNT"] = 2
+    dic["FDSIZE"] = data.shape[1]
+    dic["FDSPECNUM"] = data.shape[0]
+    dic["FDQUADFLAG"] = 1
+    dic["FDF1QUADFLAG"] = 1
+    dic["FDF2QUADFLAG"] = 1
+    for prefix in ("FDF1", "FDF2"):
+        dic[prefix + "SW"] = "6000.0"
+        dic[prefix + "OBS"] = "600.0"
+        dic[prefix + "CAR"] = "4.7"
+        dic[prefix + "ORIG"] = "1000.0"
+    pipe.write(str(path), dic, data.astype(np.float32), overwrite=True)
+
+
+class _PhaseEmbedBackend:
+    """假后端:按 NMRPipe PS 语义把候选相位应用到嵌入 θ_true 的谱上。
+
+    默认评分(固定迹线中位数)应从 F2 找回 p0 ≈ -θ_true(mod 360);
+    首个轴基线谱必须先跑 (0,0) 锁定迹线,否则退化到 zeros 分支。
+    """
+
+    def __init__(self, work_dir: Path, theta_true: float = -120.0) -> None:
+        self.work_dir = str(work_dir)
+        self.theta_true = theta_true
+        self.calls: list[dict] = []
+
+    def _spectrum(self, override: dict) -> np.ndarray:
+        from scipy.signal import hilbert
+
+        n1, n2 = 32, 64
+        x = np.arange(n2)
+        y0, x0 = 16, 30
+        a = 100.0 / (1.0 + ((x - x0) / 2.0) ** 2)  # 洛伦兹吸收峰
+        d = -np.imag(hilbert(a))  # 色散(近似)
+        p0, p1 = override.get("F2", (0.0, 0.0))
+        phi = np.deg2rad(
+            self.theta_true + float(p0) % 360.0 + float(p1) * (x - x0) / n2
+        )
+        trace = a * np.cos(phi) - d * np.sin(phi)
+        data = np.zeros((n1, n2), dtype=np.float32)
+        data[y0, :] = trace
+        rng = np.random.default_rng(0)
+        data += rng.normal(0.0, 1e-3, size=(n1, n2)).astype(np.float32)
+        return data
+
+    def _path_for(self, override: dict) -> Path:
+        f2 = override.get("F2", (0.0, 0.0))
+        f1 = override.get("F1", (0.0, 0.0))
+        name = (
+            f"out_F2{float(f2[0]):.0f}_{float(f2[1]):.0f}"
+            f"_F1{float(f1[0]):.0f}_{float(f1[1]):.0f}.ft2"
+        )
+        return Path(self.work_dir) / name
+
+    def process(self, experiment, plan, direct_phase_override=None) -> dict:
+        self.calls.append(dict(direct_phase_override or {}))
+        path = self._path_for(direct_phase_override or {})
+        _write_ft2_real(path, self._spectrum(direct_phase_override or {}))
+        return {
+            "success": True,
+            "spectrum_path": str(path),
+            "message": "ok",
+            "logs": [],
+        }
+
+
+def test_fixed_trace_metrics_3d_generic() -> None:
+    """3D 谱(3D NUS finalize 产物)固定迹线在任意轴上正确(不把 F3 折叠成 2D 切片)。"""
+    from scipy.ndimage import gaussian_filter
+
+    from workflow.phase_optimize import (
+        _axis_traces,
+        _trace_indices_fixed,
+        _trace_metrics_median,
+    )
+
+    n1, n2, n3 = 16, 24, 32
+    base = np.zeros((n1, n2, n3))
+    base[8, 12, 16] = 500.0
+    base = gaussian_filter(base, sigma=1.0)
+    threshold = max(float(np.percentile(base, 99.5)), 0.0)
+    for axis in (0, 1, 2):
+        traces = _axis_traces(base, axis)
+        assert traces.shape == (base.size // base.shape[axis], base.shape[axis])
+        idx, pos = _trace_indices_fixed(base, axis, threshold)
+        assert len(idx) >= 1
+        assert max(pos) < base.shape[axis]
+        med = _trace_metrics_median(base, axis, idx, pos)
+        assert med > 0.5  # 纯吸收主峰:锁定的都是其邻域迹线,中位数净吸收接近 +1
+
+
+def test_default_score_recovers_embedded_f2_phase(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """0.2.75 回归:首个轴基线谱必须先跑 (0,0) 再锁定迹线——否则退化到
+    zeros 分支(迹线位置全部 argmax=0),默认评分失效、F2 被带偏。
+
+    嵌入真实相位 θ=-120°,正确修正相位 p0≈120°(mod 360)。
+    """
+    experiment = read_dataset(bruker_dir / "hsqc_2d")
+    backend = _PhaseEmbedBackend(tmp_path / "work", theta_true=-120.0)
+    result = optimize_phase_sequential(experiment, backend)
+    f2_p0 = float(result.phases["F2"][0]) % 360.0
+    assert (
+        abs(((f2_p0 - 120.0 + 180.0) % 360.0) - 180.0) <= 7.5
+    ), f"F2 p0={f2_p0:g},期望≈120(mod 360)"
+    assert len(backend.calls) > 12 * 2  # 默认 p0-only 粗网格 12 点/轴
+
+
 def test_same_phase_tolerance() -> None:
     assert _same_phase({"p0": 0.0, "p1": 90.0}, {"p0": 0.0, "p1": 90.0}, 30.0)
     assert _same_phase({"p0": 0.0, "p1": 90.0}, {"p0": 0.0, "p1": -90.0}, 30.0)
@@ -477,8 +656,9 @@ def test_default_p0_grid_covers_beyond_pm45() -> None:
 
     sig = inspect.signature(optimize_phase_sequential)
     p0 = sig.parameters["p0_values"].default
-    assert -135.0 in p0 and 135.0 in p0
-    assert min(p0) <= -120.0 and max(p0) >= 120.0
+    # 0.2.75:全圆 0-360 30° 步;sampleI F2 p0=-120° 等价 240°(在网格内)
+    assert 240.0 in p0 and 120.0 in p0
+    assert len(p0) == 12 and max(p0) < 360.0
 
 
 def test_default_phase_score_ranks_phase_quality(tmp_path: Path) -> None:
@@ -558,11 +738,12 @@ def test_optimize_phase_sequential_multiscale_refine(
         p1_values=(-60.0, 0.0, 30.0, 60.0),
         score_fn=_peak12,
     )
-    # 粗网格最优 p1=0(偏离真值 12°);细化窗口 ±20@10 → 10,±5@5 → 10(偏差 2°)
-    assert result.phases["F2"][1] == 10.0
-    assert result.phases["F1"][1] == 10.0
+    # 粗网格最优 p1=0(偏离真值 12°);细化窗口 ±20@10 → 10,±5@5 → 10;
+    # 0.2.75 平台圆中位数(10,15 平台)精修到 12.5(偏差 0.5°)
+    assert result.phases["F2"][1] == 12.5
+    assert result.phases["F1"][1] == 12.5
     assert result.backend_runs > 2 * 4  # 细化产生额外后端运行
-    assert result.optimized == ["F2", "F1"]
+    assert result.optimized == ["F1", "F2"]  # 0.2.75:均匀路径间接维先
 
 def test_optimize_phase_sequential_3d_uniform(
     tmp_path: Path, bruker_dir: Path
