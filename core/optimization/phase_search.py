@@ -258,3 +258,180 @@ def search_spectrum_phase(
         work = apply_phase_axis(work, axis, p0, p1)
         phases[f"F{axis + 1}"] = {"p0": p0, "p1": p1, "score": score}
     return work, phases
+
+
+# ------------------------------------------------- 直接维 FT 谱 (p0, p1) 频域搜索
+
+
+def _row_peak_positions(
+    spectrum: np.ndarray,
+    *,
+    max_peaks: int = 8,
+) -> tuple[np.ndarray, np.ndarray] | None:
+    """锁定 1D 直接维谱 top-K 局部峰,返回 (下标, 峰高)。
+
+    峰高须高于 5×拐角噪声(纯噪声迹线返回 None)。
+    """
+    arr = np.asarray(spectrum, dtype=np.complex128)
+    n = arr.shape[-1]
+    if n < 8:
+        return None
+    mag = np.abs(arr)
+    corner = slice(0, min(16, n))
+    noise = float(np.std(mag[corner])) if n else 0.0
+    if float(np.max(mag)) <= max(noise * 5.0, 1e-9):
+        return None
+    threshold = max(float(np.percentile(mag, 99.0)), noise * 5.0)
+    interior = np.zeros(n, dtype=bool)
+    interior[1:-1] = (mag[1:-1] >= mag[:-2]) & (mag[1:-1] >= mag[2:])
+    candidates = np.where(interior & (mag > threshold))[0]
+    if not candidates.size:
+        return None
+    order = np.argsort(mag[candidates])[::-1][:max_peaks]
+    positions = candidates[order]
+    return positions, mag[positions]
+
+
+def _row_absorption(
+    arr: np.ndarray,
+    positions: np.ndarray,
+    heights: np.ndarray,
+    p0: float,
+    p1: float,
+    *,
+    radius: int = 1,
+) -> tuple[float, float]:
+    """固定峰窗 ±radius 的峰高加权 (吸收度, 正负符号),与 NMRPipe PS 频域旋转一致。
+
+    半径默认 1:SP 窗函数边缘使峰尾带非线性相位,±5 窗口吸收度在正确相位
+    下反而下降(实测 0.46 vs 0.51);±1 窗口能正确区分(0.65 vs 0.47)。
+    """
+    n = arr.shape[-1]
+    k = np.arange(n, dtype=float)
+    ramp = np.exp(1j * np.deg2rad(p0 + p1 * k / max(n - 1, 1)))
+    rot = arr * ramp
+    rows2d = np.repeat(rot.reshape(1, -1), positions.size, axis=0)
+    profiles = _trace_profiles(rows2d, positions, radius=radius)
+    absorption, sign = _window_metrics(profiles)
+    weights = heights + 1e-12
+    return (
+        float(np.average(absorption, weights=weights)),
+        float(np.average(sign, weights=weights)),
+    )
+
+
+def _row_p1_fit(
+    arr: np.ndarray,
+    positions: np.ndarray,
+    heights: np.ndarray,
+    *,
+    coarse_step: float = 10.0,
+) -> tuple[float, float] | None:
+    """多峰迹线的 p1 拟合:旋转后各峰相位圆集中度最大。
+
+    每条迹线峰值相位 = 公共 p0 + 该增量 t1(常数)+ p1·k/(n-1);对候选 p1
+    旋转后,若 p1 正确,各峰相位应全部相等(p0+t1)——单位向量圆均值模
+    |vec| 最大(相位集中度)。p1 与 p0/t1 天然解耦,吸收度指标在 p1 方向
+    太平(小角度饱和)的问题在此不存在。返回 (p1, concentration)。
+    """
+    if positions.size < 2:
+        return None
+    n = arr.shape[-1]
+    vals = arr[positions]
+    weights = heights + 1e-12
+    denom = float(np.sum(weights))
+
+    def _concentration(p1: float) -> float:
+        ramp = np.exp(-1j * np.deg2rad(p1 * positions / max(n - 1, 1)))
+        unit = np.exp(1j * np.angle(vals * ramp))
+        vec = np.sum(weights * unit) / denom
+        return float(np.abs(vec))
+
+    best_p1, best_conc = 0.0, -1.0
+    for p1 in np.arange(-90.0, 91.0, coarse_step):
+        conc = _concentration(float(p1))
+        if conc > best_conc:
+            best_conc, best_p1 = conc, float(p1)
+    for span, step in ((30.0, 5.0), (10.0, 2.5)):
+        for offset in np.arange(-span, span + 1e-9, step):
+            conc = _concentration(best_p1 + offset)
+            if conc > best_conc:
+                best_conc, best_p1 = conc, best_p1 + offset
+    return best_p1, best_conc
+
+
+def _row_p0_at_p1(
+    arr: np.ndarray,
+    positions: np.ndarray,
+    heights: np.ndarray,
+    p1_signal: float,
+) -> tuple[float, float]:
+    """p1(信号斜坡)固定后单条迹线的 p0 校正。
+
+    旋转移除信号斜坡后,各峰相位 = 常数(公共 p0 + t1);取其加权圆均值
+    取反得 PS 校正 p0,±180 消歧取正峰解。返回 (p0, score);score 为
+    (p0, -p1_signal) 校正下的峰窗加权吸收度。
+    """
+    n = arr.shape[-1]
+    vals = arr[positions]
+    ramp = np.exp(-1j * np.deg2rad(p1_signal * positions / max(n - 1, 1)))
+    unit = np.exp(1j * np.angle(vals * ramp))
+    weights = heights + 1e-12
+    vec = np.sum(weights * unit) / max(float(np.sum(weights)), 1e-12)
+    p0 = float((-np.rad2deg(np.angle(vec))) % 360.0)
+    p1_corr = -p1_signal
+    _a0, sign0 = _row_absorption(arr, positions, heights, p0, p1_corr)
+    _a1, sign1 = _row_absorption(
+        arr, positions, heights, (p0 + 180.0) % 360.0, p1_corr
+    )
+    if sign1 > sign0:
+        p0 = (p0 + 180.0) % 360.0
+    score, _sign = _row_absorption(arr, positions, heights, p0, p1_corr)
+    return p0, score
+
+
+def search_direct_spectrum_phase(
+    traces: np.ndarray,
+    *,
+    max_rows: int = 128,
+) -> tuple[float, float, float, float] | None:
+    """直接维 FT 谱的 (p0, p1) 聚合搜索(全程 numpy,不重跑后端)。
+
+    输入:(..., n) 复型谱,最后一维为直接维;每一行视为一个间接增量
+    (切片式 fid 每文件一行;单文件 fid 每增量一行)。NUS 增量 i 的直接维
+    相位 = 公共相位 + ω1·t1(i)(t1 调制,t1(0)=0);只有首条迹线(增量 0)
+    直接维相位干净。聚合策略:
+    1) p1 共识:多峰迹线相位集中度拟合取中位数(t1 只是逐峰常数偏置,
+       不影响 p1 斜坡;单峰迹线无法区分 p1,不参与);
+    2) p0 锚点:取首条有峰的迹线(增量 0,t1=0)的 p0 校正——其余迹线的
+       t1 偏置无法与 p0 分离,不参与 p0 平均。
+    返回 (p0, p1, score, gain);无信号/点数不足返回 None。
+    """
+    arr = np.asarray(traces, dtype=np.complex128)
+    if arr.ndim == 0 or arr.shape[-1] < 8:
+        return None
+    rows = arr.reshape(-1, arr.shape[-1])
+    if rows.shape[0] > max_rows:
+        index = np.linspace(0, rows.shape[0] - 1, max_rows).astype(int)
+        rows = rows[index]
+    infos: list[tuple[np.ndarray, np.ndarray, np.ndarray]] = []
+    for index in range(rows.shape[0]):
+        peaks = _row_peak_positions(rows[index])
+        if peaks is not None:
+            infos.append((rows[index], peaks[0], peaks[1]))
+    if not infos:
+        return None
+    p1_rows: list[float] = []
+    for _arr, pos, heights in infos:
+        fit = _row_p1_fit(_arr, pos, heights)
+        if fit is not None:
+            p1_rows.append(fit[0])
+    # p1 拟合得到的是信号斜坡;PS 校正取反(与 p0 同为校正约定)
+    p1_signal = float(np.median(p1_rows)) if p1_rows else 0.0
+    p1 = -p1_signal
+    # p0 锚点:首条有峰的迹线(增量 0,t1=0,直接维相位干净)
+    _arr, pos, heights = infos[0]
+    p0, score = _row_p0_at_p1(_arr, pos, heights, p1_signal)
+    baseline, _sign = _row_absorption(_arr, pos, heights, 0.0, 0.0)
+    gain = score - baseline
+    return p0, p1, score, gain

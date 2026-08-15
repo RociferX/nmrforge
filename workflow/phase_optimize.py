@@ -32,7 +32,10 @@ import numpy as np
 
 from core.data.internal_data_model import Experiment, SamplingMode
 from core.data.pipe_io import read_pipe_planes
-from core.optimization.phase_search import direct_ft_traces, search_phase
+from core.optimization.phase_search import (
+    direct_ft_traces,
+    search_direct_spectrum_phase,
+)
 from core.planning.method_selector import select_method
 from core.qc import spectrum_quality
 from workflow.recon_phase_search import search_recon_phase
@@ -128,10 +131,15 @@ def search_direct_phase(
     fid: np.ndarray,
     *,
     zf_size: int | None = None,
-    p0_values: np.ndarray | None = None,
-    p1_values: np.ndarray | None = None,
 ) -> AxisPhaseEstimate:
-    """在转换后的复型 .fid 上做内存内 p1 共识搜索(不重跑后端)。"""
+    """直接维 FT 谱(频域)上做 (p0, p1) 相位搜索,不重跑后端。
+
+    0.2.88:从「原始 FID p1 共识(p0 恒 0)」升级为「直接维 FT 谱频域搜索」:
+    频域旋转与 NMRPipe PS 语义等价(p0 + p1·k/(n-1));每条迹线(一个间接
+    增量)独立估计后按吸收度加权聚合,随增量变化的 t1 相位被平均掉,
+    直接维公共 p0 不再丢失。估计尺寸与脚本 PS 应用尺寸一致
+    (默认 2×TD;NUS 直接维 1×TD 由 backend 显式传 zf_size=None)。
+    """
     arr = np.asarray(fid)
     n_points = arr.shape[-1] if arr.ndim >= 1 else 0
     if n_points < 8:
@@ -141,23 +149,36 @@ def search_direct_phase(
             p1=0.0,
             score=0.0,
             gain=0.0,
-            source="direct_fid",
+            source="direct_spectrum",
             note="FID 点数不足,跳过",
         )
     if zf_size is None:
         zf_size = 1
         while zf_size < 2 * n_points:
             zf_size *= 2
-    p0_values = p0_values if p0_values is not None else DIRECT_P0_VALUES
-    p1_values = p1_values if p1_values is not None else DIRECT_P1_VALUES
-    traces = direct_ft_traces(arr, zf_size=zf_size, sp_off=0.45, sp_end=0.95, sp_pow=1)
-    p0, p1, score, gain = search_phase(
-        traces, p0_values=p0_values, p1_values=p1_values
+    traces = direct_ft_traces(
+        arr, zf_size=zf_size, sp_off=0.45, sp_end=0.95, sp_pow=1
     )
+    est = search_direct_spectrum_phase(traces)
+    if est is None:
+        return AxisPhaseEstimate(
+            axis="",
+            p0=0.0,
+            p1=0.0,
+            score=0.0,
+            gain=0.0,
+            source="direct_spectrum",
+            note="直接维谱无信号,跳过",
+        )
+    p0, p1, score, gain = est
     return AxisPhaseEstimate(
-        axis="", p0=p0, p1=p1, score=score, gain=gain, source="direct_fid"
+        axis="",
+        p0=p0,
+        p1=p1,
+        score=score,
+        gain=gain,
+        source="direct_spectrum",
     )
-
 
 
 def estimate_direct_axis(
@@ -175,6 +196,8 @@ def estimate_direct_axis(
     if cache.is_file():
         try:
             data = json.loads(cache.read_text(encoding="utf-8"))
+            if data.get("version") != 2:
+                raise ValueError("旧版缓存(0.2.87 前 p0 恒 0),需重搜")
             return (
                 AxisPhaseEstimate(
                     axis=direct_axis,
@@ -188,7 +211,7 @@ def estimate_direct_axis(
                 0,
             )
         except (OSError, TypeError, ValueError, KeyError):
-            pass  # 缓存损坏则重新搜索
+            pass  # 缓存损坏/旧版则重新搜索
     fid_path = _direct_fid_path(Path(work_dir), experiment)
     if fid_path is None:
         return None, 0
@@ -1933,3 +1956,4 @@ def optimize_phase_sequential(
         optimized=optimized,
         skipped=[],
     )
+

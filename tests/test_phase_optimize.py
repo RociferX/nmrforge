@@ -59,7 +59,7 @@ def test_search_direct_phase_recovers_p1_magnitude() -> None:
     平台差异使 true=-60 → est=-180),按 ±45° 先例改为
     「非零解 + 正增益」断言(±180/±120 歧义内)。"""
     for true_p1 in (90.0, -60.0, 45.0):
-        est = search_direct_phase(_p1_fid(true_p1))
+        est = search_direct_phase(_p1_fid(true_p1), zf_size=512)
         assert abs(est.p1) >= 30.0  # 非零校正(网格分辨率)
         assert est.gain > 0.01
         assert est.score > 0.5
@@ -96,7 +96,15 @@ def test_estimate_auto_phase_uses_cache(tmp_path: Path, bruker_dir: Path) -> Non
     work = tmp_path / "work"
     work.mkdir()
     (work / "phase.json").write_text(
-        json.dumps({"p0": 0.0, "p1": 45.0, "score": 0.9, "gain": 0.05}),
+        json.dumps(
+            {
+                "version": 2,
+                "p0": 0.0,
+                "p1": 45.0,
+                "score": 0.9,
+                "gain": 0.05,
+            }
+        ),
         encoding="utf-8",
     )
     result = estimate_auto_phase(

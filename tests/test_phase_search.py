@@ -49,3 +49,34 @@ def test_direct_ft_traces() -> None:
     assert out.shape == (4, 16)
     out2 = direct_ft_traces(fid)
     assert out2.shape == (4, 8)
+
+
+def test_search_direct_spectrum_phase_recovers_p0_p1() -> None:
+    """0.2.88:直接维 FT 谱频域搜索同时恢复 (p0, p1)(t1 相位逐增量随机)。"""
+    from core.optimization.phase_search import search_direct_spectrum_phase
+
+    rng = np.random.default_rng(7)
+    n = 512
+    k = np.arange(n)
+    # 信号相位(+33°, p1 斜坡 -42°);搜索返回 PS 校正值(相反数)
+    sig_p0, sig_p1 = 33.0, -42.0
+    traces = []
+    for _ in range(80):
+        # NUS 增量 0 的 t1=0:直接维相位干净(首条迹线锚点语义)
+        spec = np.zeros(n, dtype=complex)
+        for peak in (140, 260, 380):
+            spec += np.exp(-((k - peak) ** 2) / (2 * 6.0**2))
+        spec *= np.exp(
+            1j * np.deg2rad(sig_p0 + sig_p1 * k / max(n - 1, 1))
+        )
+        spec += rng.normal(0.0, 0.02, size=n)
+        spec += 1j * rng.normal(0.0, 0.02, size=n)
+        traces.append(spec)
+    est = search_direct_spectrum_phase(np.array(traces))
+    assert est is not None
+    p0, p1, score, gain = est
+    # p0/p1 为校正值(信号相位相反数);p0 锚定首条迹线(t1=0)
+    assert abs(((p0 + sig_p0 + 180.0) % 360.0) - 180.0) <= 12.0, p0
+    assert abs(p1 + sig_p1) <= 10.0, p1
+    assert score > 0.6
+    assert gain > 0.05

@@ -20,6 +20,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from backend.base import BackendCapabilities
 from backend.bruker_workflow import patch_fid_com, patch_nus_expand_count
 from backend.config import (
@@ -46,7 +48,10 @@ from backend.script_generator import (
 )
 from core.data.internal_data_model import Experiment, SamplingMode
 from core.data.nus_reader import merge_nuslists, read_nuslist
-from core.optimization.phase_search import direct_ft_traces, search_phase
+from core.optimization.phase_search import (
+    direct_ft_traces,
+    search_direct_spectrum_phase,
+)
 from core.planning.processing_plan import ProcessingPlan
 
 
@@ -199,34 +204,47 @@ class NMRPipeBackend:
                         logs.append("使用 bruker 切片式 fid（fid/test%03d.fid,流式处理）")
         if not converted:
             return {"success": False, "message": "Bruker→NMRPipe 转换失败", "logs": logs}
+        proc_params = dict(params or {})
+        sampling = proc_params.get("sampling") or {}
+        # sampling.auto_phase=False → 关闭直接维自动相位(PS 保持 plan 默认 0/0)
+        # 0.2.88:检查移到搜索前(此前在搜索之后才置位,实际关不掉自动相位)
+        if sampling.get("auto_phase") is False:
+            direct_phase_search = False
         direct_phase: dict[str, tuple[float, float]] | None = None
         if direct_phase_override:
             direct_phase = dict(direct_phase_override)
             logs.append(f"直接维相位覆盖: {direct_phase}")
         elif direct_phase_search:
-            _progress("开始相位优化(直接维 p1 共识)")
+            _progress("开始相位优化(直接维)")
+            phase_inputs: Path | list[Path]
             if experiment.segments:
-                fid_for_phase = work / "seg_001" / f"{experiment.dataset_id}.fid"
+                phase_inputs = work / "seg_001" / f"{experiment.dataset_id}.fid"
             else:
-                fid_for_phase = work / f"{experiment.dataset_id}.fid"
-                if not fid_for_phase.is_file():
-                    slices = sorted(
-                        (work / "fid").glob("test*.fid")
-                    ) if (work / "fid").is_dir() else []
-                    if slices:
-                        fid_for_phase = slices[0]
-                        logs.append("切片式 fid：直接维相位搜索用首切片")
-                    else:
-                        fid_for_phase = None
-            p0, p1 = self._search_direct_phase(work, fid_for_phase, logs)
-            direct_axis = "F2" if experiment.ndim == 2 else "F3"
-            direct_phase = {direct_axis: (p0, p1)}
-            _progress(f"完成相位优化(直接维 {direct_axis} p1={p1:g}°)")
-        proc_params = dict(params or {})
-        sampling = proc_params.get("sampling") or {}
-        # sampling.auto_phase=False → 关闭直接维自动相位(PS 保持 plan 默认 0/0)
-        if sampling.get("auto_phase") is False:
-            direct_phase_search = False
+                slice_dir = work / "fid"
+                slices = (
+                    sorted(slice_dir.glob("test*.fid"))
+                    if slice_dir.is_dir()
+                    else []
+                )
+                if slices:
+                    phase_inputs = slices
+                    logs.append(
+                        f"切片式 fid:直接维相位搜索用 {len(slices)} 个切片"
+                    )
+                else:
+                    phase_inputs = work / f"{experiment.dataset_id}.fid"
+            if isinstance(phase_inputs, Path) and not phase_inputs.is_file():
+                logs.append("直接维相位搜索:未找到 fid/切片,保持 p0=p1=0")
+            else:
+                p0, p1 = self._search_direct_phase(
+                    work, phase_inputs, logs, is_nus=False
+                )
+                direct_axis = "F2" if experiment.ndim == 2 else "F3"
+                direct_phase = {direct_axis: (p0, p1)}
+                _progress(
+                    f"完成相位优化(直接维 {direct_axis} "
+                    f"p0={p0:g}° p1={p1:g}°)"
+                )
         extract = _as_bool(proc_params.get("extract", True))
         ext_lo = resolve_ext_lo(proc_params.get("ext_lo"))
         ext_hi = resolve_ext_hi(proc_params.get("ext_hi"))
@@ -432,22 +450,28 @@ class NMRPipeBackend:
         if sampling.get("auto_phase") is False:
             direct_phase_search = False
         elif direct_phase_search:
+            phase_inputs: Path | list[Path]
             if experiment.segments:
-                fid_for_phase = work / "seg_001" / f"{experiment.dataset_id}.fid"
+                phase_inputs = work / "seg_001" / f"{experiment.dataset_id}.fid"
             else:
-                fid_for_phase = work / f"{experiment.dataset_id}.fid"
-                if not fid_for_phase.is_file():
-                    slices = sorted(
-                        (work / "fid").glob("test*.fid")
-                    ) if (work / "fid").is_dir() else []
-                    if slices:
-                        fid_for_phase = slices[0]
-                        logs.append("切片式 fid：直接维相位搜索用首切片")
-                    else:
-                        fid_for_phase = None
-            if fid_for_phase is not None and fid_for_phase.is_file():
+                slice_dir = work / "fid"
+                slices = (
+                    sorted(slice_dir.glob("test*.fid"))
+                    if slice_dir.is_dir()
+                    else []
+                )
+                if slices:
+                    phase_inputs = slices
+                    logs.append(
+                        f"切片式 fid:直接维相位搜索用 {len(slices)} 个切片"
+                    )
+                else:
+                    phase_inputs = work / f"{experiment.dataset_id}.fid"
+            if isinstance(phase_inputs, Path) and not phase_inputs.is_file():
+                logs.append("直接维相位搜索:未找到 fid/切片,保持 p0=p1=0")
+            else:
                 direct_p0, direct_p1 = self._search_direct_phase(
-                    work, fid_for_phase, logs
+                    work, phase_inputs, logs, is_nus=True
                 )
 
         td = effective_td(experiment)
@@ -761,43 +785,100 @@ class NMRPipeBackend:
     def _search_direct_phase(
         self,
         work: Path,
-        fid_file: Path,
+        fid_files: Path | list[Path],
         logs: list[str],
         min_gain: float = 0.02,
+        is_nus: bool = False,
     ) -> tuple[float, float]:
-        """直接维统计相位搜索（内存内 FT + 全迹统计），结果缓存到 work/phase.json。"""
+        """直接维相位搜索:直接维 FT 谱上 (p0, p1) 频域搜索,结果缓存 phase.json。
+
+        0.2.88:从「原始 FID p1 共识(p0 恒 0)」升级为「直接维 FT 谱频域
+        搜索」:增量 i 的直接维相位 = 公共相位 + ω1·t1(i)(t1 调制,
+        t1(0)=0);p1 用多峰迹线相位集中度拟合取中位数(t1 只是逐峰常数
+        偏置,不影响斜坡),p0 锚定首条有峰的迹线(增量 0)的峰相位圆均值
+        取反(PS 校正约定),±180 消歧取正峰解——直接维公共 p0 不再丢失。
+        估计在 PS 应用尺寸上做(NUS 直接维 1×TD、均匀 2×TD),p1 语义与
+        脚本 PS 一致,无需缩放。fid_files 支持单个文件或切片列表
+        (均匀子采样 ≤16 个,3D 海量切片不拖慢)。
+        """
         phase_file = work / "phase.json"
         if phase_file.is_file():
-            data = json.loads(phase_file.read_text(encoding="utf-8"))
-            logs.append(f"直接维相位（缓存）: p0={data['p0']:g} p1={data['p1']:g}")
-            return float(data["p0"]), float(data["p1"])
+            try:
+                data = json.loads(phase_file.read_text(encoding="utf-8"))
+                if data.get("version") != 2:
+                    raise ValueError("旧版缓存(0.2.87 前 p0 恒 0),需重搜")
+                logs.append(
+                    f"直接维相位(缓存): p0={data['p0']:g} p1={data['p1']:g}"
+                )
+                return float(data["p0"]), float(data["p1"])
+            except (OSError, TypeError, ValueError, KeyError):
+                pass  # 缓存损坏/旧版则重新搜索
+        paths = [fid_files] if isinstance(fid_files, Path) else list(fid_files)
+        if not paths:
+            return 0.0, 0.0
+        if len(paths) > 16:
+            index = np.linspace(0, len(paths) - 1, 16).astype(int)
+            paths = [paths[i] for i in index]
         try:
             import nmrglue as ng
 
-            _dic, fid = ng.pipe.read(str(fid_file))
-            direct_points = fid.shape[-1]
-            zf_size = 1
-            while zf_size < 2 * direct_points:
-                zf_size *= 2
-            traces = direct_ft_traces(
-                fid, zf_size=zf_size, sp_off=0.45, sp_end=0.95, sp_pow=1
-            )
-            p0, p1, score, gain = search_phase(traces)
+            rows: list[np.ndarray] = []
+            for path in paths:
+                _dic, fid = ng.pipe.read(str(path))
+                arr = np.asarray(fid)
+                n_points = arr.shape[-1] if arr.ndim >= 1 else 0
+                if n_points < 8:
+                    continue
+                if is_nus:
+                    zf_size = None  # NUS 直接维 PS 在 1×TD 上应用
+                else:
+                    zf_size = 1
+                    while zf_size < 2 * n_points:
+                        zf_size *= 2
+                traces = direct_ft_traces(
+                    arr,
+                    zf_size=zf_size,
+                    sp_off=0.45,
+                    sp_end=0.95,
+                    sp_pow=1,
+                )
+                rows.append(traces.reshape(-1, traces.shape[-1]))
+            if not rows:
+                logs.append("直接维相位搜索:无可用切片,保持 p0=p1=0")
+                return 0.0, 0.0
+            spectra = np.concatenate(rows, axis=0)
+            est = search_direct_spectrum_phase(spectra)
+            if est is None:
+                logs.append("直接维相位搜索:直接维谱无信号,保持 p0=p1=0")
+                return 0.0, 0.0
+            p0, p1, score, gain = est
             phase_file.write_text(
-                json.dumps({"p0": p0, "p1": p1, "score": score, "gain": gain}, indent=2),
+                json.dumps(
+                    {
+                        "version": 2,
+                        "p0": p0,
+                        "p1": p1,
+                        "score": score,
+                        "gain": gain,
+                        "n": int(spectra.shape[0]),
+                    },
+                    indent=2,
+                ),
                 encoding="utf-8",
             )
-            if gain < min_gain:
+            if gain < min_gain or score < 0.55:
                 logs.append(
-                    f"直接维相位信息弱（gain={gain:.3f} < {min_gain:g}），保持 p1=0"
+                    f"直接维相位信息弱(gain={gain:.3f}, score={score:.3f}),"
+                    "保持 p0=p1=0"
                 )
                 return 0.0, 0.0
             logs.append(
-                f"直接维相位搜索: p1={p1:g} (score={score:.3f}, gain={gain:.3f})"
+                f"直接维相位搜索: p0={p0:g} p1={p1:g} "
+                f"(score={score:.3f}, gain={gain:.3f}, {spectra.shape[0]} 迹线)"
             )
             return p0, p1
         except Exception as exc:  # noqa: BLE001
-            logs.append(f"直接维相位搜索失败（回退 p0=p1=0）: {exc}")
+            logs.append(f"直接维相位搜索失败(回退 p0=p1=0): {exc}")
             return 0.0, 0.0
 
     def _convert(
@@ -995,3 +1076,4 @@ class NMRPipeBackend:
             return False, logs + [f"未生成 {out_file}"], spectrum
         logs.append(f"谱图 → {spectrum}")
         return True, logs, spectrum
+
