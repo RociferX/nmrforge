@@ -21,8 +21,8 @@ SAMPLE_FIELDS: tuple[tuple[str, str], ...] = (
     ("notes", "备注"),
 )
 EXPERIMENT_FIELDS: tuple[tuple[str, str], ...] = (
-    ("experiment_type", "实验类型"),
     ("dimension", "维度"),
+    ("experiment_type", "实验类型"),
     ("nuclei", "核"),
     ("notes", "备注"),
 )
@@ -39,6 +39,68 @@ _FIELD_BY_KIND: dict[str, tuple[tuple[str, str], ...]] = {
     "experiment": EXPERIMENT_FIELDS,
     "data": DATA_FIELDS,
 }
+
+# 仅有几种取值的字段,表单直接给下拉选项(0.2.85)
+DIMENSION_OPTIONS: tuple[str, ...] = ("2D", "3D")
+NUCLEI_OPTIONS: tuple[str, ...] = (
+    "1H-15N",
+    "1H-13C",
+    "1H-1H",
+    "1H-15N-13C",
+    "1H-13C-15N",
+    "1H-13C-1H",
+    "1H-15N-1H",
+    "13C-13C-1H",
+)
+_GENERIC_PRESET_NAMES = {"Generic2D", "Generic3D"}
+_PRESET_OPTIONS: list[tuple[str, int]] | None = None
+
+
+def _preset_options() -> list[tuple[str, int]]:
+    """presets/*.yaml 的 (name, ndim) 列表(惰性加载 + 缓存)。"""
+    global _PRESET_OPTIONS
+    if _PRESET_OPTIONS is not None:
+        return _PRESET_OPTIONS
+    import yaml
+
+    from core.app_paths import resource_path
+
+    options: list[tuple[str, int]] = []
+    presets_dir = resource_path("presets")
+    try:
+        files = sorted(presets_dir.glob("*.yaml")) if presets_dir.is_dir() else []
+    except OSError:
+        files = []
+    for file in files:
+        try:
+            data = yaml.safe_load(file.read_text(encoding="utf-8")) or {}
+        except Exception:  # noqa: BLE001 - 单个模板损坏不影响其它选项
+            continue
+        name = str(data.get("name", "")).strip()
+        ndim = int(data.get("constraints", {}).get("ndim", 0) or 0)
+        if name and name not in _GENERIC_PRESET_NAMES and (name, ndim) not in options:
+            options.append((name, ndim))
+    _PRESET_OPTIONS = options
+    return options
+
+
+def _ndim_int(ndim: str | int) -> int:
+    """把 '2D'/'3D' 或 2/3 归一化为维度数;无法解析返回 0。"""
+    digits = "".join(ch for ch in str(ndim) if ch.isdigit())
+    try:
+        return int(digits) if digits else 0
+    except (TypeError, ValueError):
+        return 0
+
+
+def experiment_type_options(ndim: str | int = "") -> list[str]:
+    """常见实验类型选项(来自 presets 模板);ndim 非空时按维度过滤。"""
+    if ndim in ("", None):
+        return [name for name, _ in _preset_options()]
+    target = _ndim_int(ndim)
+    if target <= 0:
+        return []
+    return [name for name, n in _preset_options() if n == target]
 
 _FIELD_LABELS: dict[str, str] = {
     key: label
