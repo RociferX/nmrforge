@@ -90,7 +90,13 @@ def test_zero_fill_plan_uses_config_defaults(
     )
     plan = zero_fill_plan(exp)
     td = effective_td(exp)
-    assert plan["F2"]["size"] == 1 << max(0, int(2 * td[0]) - 1).bit_length()
+    # 0.2.81:NUS 直接维填零 1×TD(2×TD 使 SMILE 平面翻倍→重载关机)
+    assert plan["F2"]["size"] == 1 << max(0, int(td[0]) - 1).bit_length()
+    # 均匀路径保持 2×TD
+    uniform = read_dataset(bruker_dir / "hsqc_2d")
+    plan_uniform = zero_fill_plan(uniform)
+    td_u = effective_td(uniform)
+    assert plan_uniform["F2"]["size"] == 1 << max(0, int(2 * td_u[0]) - 1).bit_length()
     # 点距更细(ppl 4.0)→ 目标 SI 更大或相等(单调)
     cfg_defaults["points_per_line"] = 4.0
     plan_fine = zero_fill_plan(exp)

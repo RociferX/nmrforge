@@ -214,6 +214,11 @@ def zero_fill_plan(
     axes = [dim.logical_axis for dim in experiment.dimensions]
     td = effective_td(experiment)
     direct_axis = axes[0] if axes else ''
+    # 0.2.81:NUS 直接维填零 1×TD(2×TD 使直接维平面翻倍→SMILE 重载关机;
+    # 手动验证 1×TD 安全且 34s 完成);均匀路径保持 2×TD
+    direct_factor = (
+        1 if experiment.sampling.mode is SamplingMode.NUS else DIRECT_ZF_FACTOR
+    )
     plan: dict[str, dict[str, Any]] = {}
 
     override: dict[str, dict[str, Any]] = {}
@@ -223,7 +228,7 @@ def zero_fill_plan(
             if axis == direct_axis:
                 override[axis] = {
                     "mode": "size",
-                    "size": _next_pow2(DIRECT_ZF_FACTOR * n),
+                    "size": _next_pow2(direct_factor * n),
                 }
             else:
                 override[axis] = {
@@ -251,8 +256,8 @@ def zero_fill_plan(
                 plan[axis] = {"mode": "size", "size": size, "note": f"显式 SI={size}"}
                 continue
             if axis == direct_axis:
-                size = _next_pow2(DIRECT_ZF_FACTOR * n)
-                note = f"直接维 2×TD({n}→{size})"
+                size = _next_pow2(direct_factor * n)
+                note = f"直接维 {direct_factor}×TD({n}→{size})"
             else:
                 lw = _linewidth_for(axis, linewidth_hz) or _default_linewidth(
                     experiment, axis

@@ -185,6 +185,13 @@ class NMRPipeBackend:
             else:
                 converted, convert_logs = self._convert(runtime, experiment, raw, work)
                 logs += convert_logs
+                # 0.2.81:bruker 切片式输出(fid/test%03d.fid,三维 TD 正确时),
+                # process 同样走切片流(与 NUS 一致)
+                if not (work / in_file).is_file():
+                    slice_dir = work / "fid"
+                    if slice_dir.is_dir() and list(slice_dir.glob("test*.fid")):
+                        in_file = "fid/test%03d.fid"
+                        logs.append("使用 bruker 切片式 fid（fid/test%03d.fid,流式处理）")
         if not converted:
             return {"success": False, "message": "Bruker→NMRPipe 转换失败", "logs": logs}
         direct_phase: dict[str, tuple[float, float]] | None = None
@@ -193,11 +200,19 @@ class NMRPipeBackend:
             logs.append(f"直接维相位覆盖: {direct_phase}")
         elif direct_phase_search:
             _progress("开始相位优化(直接维 p1 共识)")
-            fid_for_phase = (
-                work / "seg_001" / f"{experiment.dataset_id}.fid"
-                if experiment.segments
-                else work / f"{experiment.dataset_id}.fid"
-            )
+            if experiment.segments:
+                fid_for_phase = work / "seg_001" / f"{experiment.dataset_id}.fid"
+            else:
+                fid_for_phase = work / f"{experiment.dataset_id}.fid"
+                if not fid_for_phase.is_file():
+                    slices = sorted(
+                        (work / "fid").glob("test*.fid")
+                    ) if (work / "fid").is_dir() else []
+                    if slices:
+                        fid_for_phase = slices[0]
+                        logs.append("切片式 fid：直接维相位搜索用首切片")
+                    else:
+                        fid_for_phase = None
             p0, p1 = self._search_direct_phase(work, fid_for_phase, logs)
             direct_axis = "F2" if experiment.ndim == 2 else "F3"
             direct_phase = {direct_axis: (p0, p1)}
@@ -394,7 +409,13 @@ class NMRPipeBackend:
             nuslist_count = len(
                 (work / "nuslist").read_text(encoding="utf-8").splitlines()
             )
-            in_file = fid_file.name
+            # 0.2.80:bruker 切片式输出(fid/test%03d.fid)优先,否则单文件
+            slice_dir = work / "fid"
+            if slice_dir.is_dir() and list(slice_dir.glob("test*.fid")):
+                in_file = "fid/test%03d.fid"
+                logs.append("使用 bruker 切片式 fid（fid/test%03d.fid,流式处理）")
+            else:
+                in_file = fid_file.name
 
         direct_p0, direct_p1 = 0.0, 0.0
         override = params.get("direct_phase_override")
@@ -406,14 +427,23 @@ class NMRPipeBackend:
         if sampling.get("auto_phase") is False:
             direct_phase_search = False
         elif direct_phase_search:
-            fid_for_phase = (
-                work / "seg_001" / f"{experiment.dataset_id}.fid"
-                if experiment.segments
-                else work / f"{experiment.dataset_id}.fid"
-            )
-            direct_p0, direct_p1 = self._search_direct_phase(
-                work, fid_for_phase, logs
-            )
+            if experiment.segments:
+                fid_for_phase = work / "seg_001" / f"{experiment.dataset_id}.fid"
+            else:
+                fid_for_phase = work / f"{experiment.dataset_id}.fid"
+                if not fid_for_phase.is_file():
+                    slices = sorted(
+                        (work / "fid").glob("test*.fid")
+                    ) if (work / "fid").is_dir() else []
+                    if slices:
+                        fid_for_phase = slices[0]
+                        logs.append("切片式 fid：直接维相位搜索用首切片")
+                    else:
+                        fid_for_phase = None
+            if fid_for_phase is not None and fid_for_phase.is_file():
+                direct_p0, direct_p1 = self._search_direct_phase(
+                    work, fid_for_phase, logs
+                )
 
         td = effective_td(experiment)
         if experiment.ndim >= 3:
@@ -633,6 +663,34 @@ class NMRPipeBackend:
 
     # ------------------------------------------------------------------ 转换
 
+    def _finalize_converted_fid(
+        self,
+        raw_dir: Path,
+        dest_work: Path,
+        dataset_id: str,
+        logs: list[str],
+    ) -> bool:
+        """把 bruker 转换产物归位:单文件 test.fid 或切片式 fid/test%03d.fid。
+
+        acqu3s TD 修正后 bruker 输出切片式(每 F1 一个 fid 切片);
+        0.2.80 起两种形式都接受,切片式保留为 work/fid/ 供流式处理。
+        """
+        source = raw_dir / "test.fid"
+        if source.is_file():
+            shutil.move(str(source), dest_work / f"{dataset_id}.fid")
+            logs.append(f"{dataset_id}.fid 已就位（{raw_dir.name}）")
+            return True
+        slice_dir = raw_dir / "fid"
+        slices = sorted(slice_dir.glob("test*.fid")) if slice_dir.is_dir() else []
+        if not slices:
+            return False
+        dest_slice = dest_work / "fid"
+        if dest_slice.exists():
+            shutil.rmtree(dest_slice)
+        shutil.copytree(slice_dir, dest_slice)
+        logs.append(f"切片式 fid → {dest_slice.name}/（{len(slices)} 个切片）")
+        return True
+
     def _convert_dir(
         self,
         runtime: CshRuntime,
@@ -684,12 +742,11 @@ class NMRPipeBackend:
             logs.append(f"convert.com: rc={run_result.returncode}")
             if run_result.returncode != 0:
                 return False
-        source = raw_dir / "test.fid"
-        if not source.is_file():
+        if not self._finalize_converted_fid(
+            raw_dir, dest_work, experiment.dataset_id, logs
+        ):
             return False
-        shutil.move(str(source), dest_work / f"{experiment.dataset_id}.fid")
-        logs.append(f"{experiment.dataset_id}.fid 已就位（{raw_dir.name}）")
-        # SMILE 只需 nuslist；ser_full/mask.fid 可再生，转换后清理省磁盘
+        # SMILE 只需 nuslist;ser_full/mask.fid 等中间产物删除省空间
         for stale in ("ser_full", "mask.fid"):
             stale_path = raw_dir / stale
             if stale_path.is_file():
