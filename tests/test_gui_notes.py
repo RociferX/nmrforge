@@ -19,6 +19,7 @@ from gui.notes import (
     data_note_fields,
     experiment_note,
     experiment_note_fields,
+    experiment_type_options,
     format_fields,
     note_fields,
     sample_note,
@@ -52,8 +53,8 @@ def test_note_fields_schemas_differ_per_level() -> None:
         "notes",
     ]
     assert [key for key, _ in EXPERIMENT_FIELDS] == [
-        "experiment_type",
         "dimension",
+        "experiment_type",
         "nuclei",
         "notes",
     ]
@@ -242,3 +243,45 @@ def test_edit_notes_saves(
     assert fields["experiment_type"] == "新实验注释"
     assert "新实验注释" in window.center_panel.notes_label.text()
     window.close()
+def test_experiment_type_options_from_presets() -> None:
+    """0.2.85:实验类型选项来自 presets,按维度过滤(排除 Generic 兜底)。"""
+    options_2d = experiment_type_options("2D")
+    options_3d = experiment_type_options("3D")
+    assert "HSQC" in options_2d and "COSY" in options_2d
+    assert "HNCA" in options_3d and "HNCACB" in options_3d
+    assert "HNCA" not in options_2d
+    assert "HSQC" not in options_3d
+    assert "Generic2D" not in options_2d
+    assert "Generic3D" not in options_3d
+    assert set(options_2d) | set(options_3d) == set(experiment_type_options())
+
+
+def test_notes_dialog_combos_dimension_then_type(
+    qapp: QApplication,
+) -> None:
+    """0.2.85:注释表单用下拉;先选维度,再按 presets 过滤实验类型。"""
+    from gui.dialogs import NotesDialog
+
+    dialog = NotesDialog(
+        None,
+        "实验类型注释",
+        "experiment",
+        {"dimension": "2D", "experiment_type": "HSQC"},
+    )
+    assert dialog._combos["dimension"].currentText() == "2D"
+    type_combo = dialog._combos["experiment_type"]
+    assert type_combo.currentText() == "HSQC"
+    items = [type_combo.itemText(i) for i in range(type_combo.count())]
+    assert "HNCA" not in items
+    # 维度切到 3D → 类型选项切换为三共振谱
+    dialog._combos["dimension"].setCurrentText("3D")
+    items = [type_combo.itemText(i) for i in range(type_combo.count())]
+    assert "HNCA" in items
+    assert "HSQC" not in items
+    type_combo.setCurrentText("HNCA")
+    dialog._combos["nuclei"].setCurrentText("1H-15N-13C")
+    fields = dialog.result_fields()
+    assert fields["dimension"] == "3D"
+    assert fields["experiment_type"] == "HNCA"
+    assert fields["nuclei"] == "1H-15N-13C"
+    dialog.close()

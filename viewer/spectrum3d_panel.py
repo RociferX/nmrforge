@@ -32,7 +32,7 @@ class Spectrum3DPanel(QWidget):
         super().__init__(parent)
         self._spectrum3d: Spectrum3D | None = None
         self._slice_axis = 2  # 默认 F1-F2 平面(固定 F3)
-        self._mode = "slice"
+        self._mode = "max"  # 默认 MIP 投影(右侧直接显示一个投影)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
@@ -49,6 +49,7 @@ class Spectrum3DPanel(QWidget):
         )
         self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
         layout.addWidget(self.mode_combo)
+        self.mode_combo.setCurrentIndex(1)  # 默认 MIP 投影
         self.slice_slider = QSlider(Qt.Orientation.Horizontal)
         self.slice_slider.setToolTip("第三轴切片位置(拖动后松开刷新)")
         self.slice_slider.valueChanged.connect(self._on_slider_value)
@@ -61,17 +62,17 @@ class Spectrum3DPanel(QWidget):
 
     # ------------------------------------------------------------- API
     def set_spectrum3d(self, spectrum3d: Spectrum3D) -> None:
-        """绑定 3D 谱并重置到默认平面(F1-F2, 中间切片);自动发出重绘。"""
+        """绑定 3D 谱并重置到默认平面(F1-F2, MIP 投影);自动发出重绘。"""
         self._spectrum3d = spectrum3d
         self._slice_axis = 2
-        self._mode = "slice"
+        self._mode = "max"  # 默认显示一个投影(MIP)
         # 平面下拉项用核名(如 N-H / N-C / H-C);下标由轴标签决定
         for index, (_, axis) in enumerate(_PLANES):
             remaining = [i for i in range(3) if i != axis]
             name = "-".join(self._spectrum3d.axes[i].label for i in remaining)
             self.plane_combo.setItemText(index, name)
         self.plane_combo.setCurrentIndex(0)
-        self.mode_combo.setCurrentIndex(0)
+        self.mode_combo.setCurrentIndex(1)  # 默认 MIP 投影
         self._update_slider_range()
         self._update_position_label()
         self._emit()

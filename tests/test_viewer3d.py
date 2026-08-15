@@ -254,6 +254,8 @@ def test_spectrum_panel_opens_ft3(
     assert panel._current_spectrum == ft3
     assert panel.viewer.layer_list.count() == 1
     assert not panel._spectrum3d_panel.isHidden()
+    # 0.2.85:3D 默认显示一个投影(MIP)
+    assert panel._spectrum3d_panel._mode == "max"
     # 峰表 3D 列联动
     peaks = manager.data_dir(entry.id, data.id, "peaks")
     peaks.mkdir(parents=True, exist_ok=True)

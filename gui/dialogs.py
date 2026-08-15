@@ -31,7 +31,12 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from gui.notes import note_fields
+from gui.notes import (
+    DIMENSION_OPTIONS,
+    NUCLEI_OPTIONS,
+    experiment_type_options,
+    note_fields,
+)
 
 
 class InfoDialog(QDialog):
@@ -228,7 +233,11 @@ class SampleDialog(QDialog):
 
 
 class NotesDialog(QDialog):
-    """三级注释表单:按层级字段列表逐行填写(项目/实验类型/样品数据字段不同)。"""
+    """三级注释表单:按层级字段列表逐行填写;仅有几种取值的字段用下拉。
+
+    实验类型注释先选维度,再按 presets 过滤给出实验类型选项;
+    核(组合)同样给常用选项。其余字段保持文本输入。
+    """
 
     def __init__(
         self,
@@ -244,13 +253,46 @@ class NotesDialog(QDialog):
         hint = QLabel("常规信息(可留空):")
         layout.addWidget(hint)
         self._edits: dict[str, QLineEdit] = {}
+        self._combos: dict[str, QComboBox] = {}
+        self._type_combo: QComboBox | None = None
+        values = dict(values or {})
         form = QFormLayout()
         for key, label in note_fields(kind):
-            edit = QLineEdit()
-            edit.setText(str((values or {}).get(key, "") or ""))
-            edit.setPlaceholderText("可留空")
-            self._edits[key] = edit
-            form.addRow(f"{label}:", edit)
+            if key == "dimension":
+                combo = QComboBox()
+                combo.addItem("", "")
+                for option in DIMENSION_OPTIONS:
+                    combo.addItem(option, option)
+                current = str(values.get("dimension", "") or "")
+                if current in DIMENSION_OPTIONS:
+                    combo.setCurrentText(current)
+                combo.currentIndexChanged.connect(self._on_dimension_changed)
+                self._combos[key] = combo
+                form.addRow(f"{label}:", combo)
+            elif key == "experiment_type":
+                combo = QComboBox()
+                combo.setEditable(True)
+                self._type_combo = combo
+                self._combos[key] = combo
+                current = str(values.get("experiment_type", "") or "")
+                if current:
+                    combo.setEditText(current)
+                form.addRow(f"{label}:", combo)
+            elif key == "nuclei":
+                combo = QComboBox()
+                combo.setEditable(True)
+                combo.addItems(NUCLEI_OPTIONS)
+                current = str(values.get("nuclei", "") or "")
+                if current:
+                    combo.setCurrentText(current)
+                self._combos[key] = combo
+                form.addRow(f"{label}:", combo)
+            else:
+                edit = QLineEdit()
+                edit.setText(str(values.get(key, "") or ""))
+                edit.setPlaceholderText("可留空")
+                self._edits[key] = edit
+                form.addRow(f"{label}:", edit)
         layout.addLayout(form)
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok
@@ -261,14 +303,46 @@ class NotesDialog(QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+        # 维度确定后再填充实验类型选项(先选维度,再选类型)
+        self._on_dimension_changed()
+
+    def _dimension_value(self) -> str:
+        """当前选中的维度(空表示未选)。"""
+        combo = self._combos.get("dimension")
+        if combo is None:
+            return ""
+        return str(combo.currentData() or combo.currentText() or "")
+
+    def _on_dimension_changed(self, *_args) -> None:
+        """维度变化 → 按 presets 重新填充实验类型选项。"""
+        type_combo = self._type_combo
+        if type_combo is None:
+            return
+        current = type_combo.currentText().strip()
+        options = experiment_type_options(self._dimension_value())
+        type_combo.blockSignals(True)
+        try:
+            type_combo.clear()
+            type_combo.addItems(options)
+            if current in options:
+                type_combo.setCurrentText(current)
+            elif current:
+                type_combo.setEditText(current)
+        finally:
+            type_combo.blockSignals(False)
 
     def result_fields(self) -> dict[str, str]:
         """返回填写后的字段 dict(空值剔除)。"""
-        return {
-            key: edit.text().strip()
-            for key, edit in self._edits.items()
-            if edit.text().strip()
-        }
+        fields: dict[str, str] = {}
+        for key, edit in self._edits.items():
+            text = edit.text().strip()
+            if text:
+                fields[key] = text
+        for key, combo in self._combos.items():
+            text = combo.currentText().strip()
+            if text:
+                fields[key] = text
+        return fields
 
 
 class ParameterTableDialog(QDialog):

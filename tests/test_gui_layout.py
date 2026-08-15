@@ -595,6 +595,27 @@ def test_spectrum_panel_excludes_fid_from_list(
     panel.close()
 
 
+def test_spectrum_panel_empty_spectra_clears_viewer(
+    tmp_path: Path, qapp: QApplication
+) -> None:
+    """0.2.85:样品数据无谱图时右侧留空(切换后不残留上一张谱)。"""
+    manager = ProjectManager.create_project(tmp_path / "proj2", "demo")
+    entry = manager.create_experiment("A")
+    data1 = manager.import_data(entry.id, "/fake/1")
+    data2 = manager.import_data(entry.id, "/fake/2")
+    spectra1 = manager.data_dir(entry.id, data1.id, "spectra")
+    spectra1.mkdir(parents=True, exist_ok=True)
+    _write_ft2(spectra1 / f"{entry.id}-{data1.id}.ft2")
+    panel = SpectrumPanel(manager)
+    panel.set_context(entry.id, data1.id)
+    assert panel.viewer.layer_list.count() == 1
+    # data2 谱图文件夹为空 → 查看器清空
+    panel.set_context(entry.id, data2.id)
+    assert panel.viewer.layer_list.count() == 0
+    assert panel._current_spectrum is None
+    panel.close()
+
+
 def test_pipeline_status_peaks_from_data_dir(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:

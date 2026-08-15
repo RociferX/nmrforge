@@ -188,6 +188,7 @@ class SpectrumPanel(QWidget):
         else:
             self._current_spectrum = None
             self._spectrum3d_panel.clear()
+            self.viewer.clear()  # 谱图文件夹无谱时右侧留空
             self._clear_peaks()
 
     def _spectrum_paths(self) -> list[Path]:
