@@ -1,5 +1,15 @@
 # 变更日志
 
+## [0.2.89] - 2026-08-16
+
+- merge(Architect):并入 GUI 0.2.86(查看器交互调相 P0/P1 + 生成谱图参数
+  报告 + 导入自动填注释/原始数据质量);GUI 与 Backend 的 0.2.86 版本号
+  撞号,CHANGELOG 合并归一(两条记录并列于 0.2.86 节);
+- 审查(Architect):GUI 对 Shared Contract viewer/spectrum.py 的改动为
+  追加式兼容(Spectrum 增加可选 complex_data 供 FID 调相),契约字段未破坏;
+- 测试:本地全量 488 passed、VM 全量 484 passed + 4 skipped(Python 3.12.13,
+  HEAD 306321b),ruff 全绿。
+
 ## [0.2.88] - 2026-08-16
 
 - merge(Architect):并入 GUI 0.2.85(注释下拉选项 + 右侧谱图自动显示)与
