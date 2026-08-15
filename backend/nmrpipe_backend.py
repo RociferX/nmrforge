@@ -109,6 +109,8 @@ class NMRPipeBackend:
         direct_phase_search: bool = True,
         direct_phase_override: dict[str, tuple[float, float]] | None = None,
         progress: Callable[[str], None] | None = None,
+        out_file: str | None = None,
+        script_name: str | None = None,
     ) -> dict[str, Any]:
         """均匀采样：转换（含多段合并）+ NMRPipe 处理管道（NUS 请用 reconstruct_nus）。
 
@@ -216,6 +218,8 @@ class NMRPipeBackend:
             ext_hi=ext_hi,
             sampling=sampling,
             progress=progress,
+            out_file=out_file,
+            script_name=script_name,
         )
         logs += process_logs
         if not processed:
@@ -518,6 +522,8 @@ class NMRPipeBackend:
         baseline: dict[str, dict[str, Any]] | None = None,
         params: dict[str, Any] | None = None,
         sampling: dict[str, Any] | None = None,
+        out_file: str | None = None,
+        script_name: str | None = None,
     ) -> dict[str, Any]:
         """从 SMILE 重构平面做间接维 FT 定稿(逐维相位候选,不重跑 SMILE)。
 
@@ -548,7 +554,7 @@ class NMRPipeBackend:
                     "logs": [],
                 }
         out_ext = "ft3" if experiment.ndim >= 3 else "ft2"
-        out_file = f"{experiment.dataset_id}.{out_ext}"
+        out_file = out_file or f"{experiment.dataset_id}.{out_ext}"
         zf_params = dict(params or {})
         zf_plan = zero_fill_plan(
             experiment,
@@ -567,7 +573,9 @@ class NMRPipeBackend:
             zero_fill=zf_plan,
             sampling=sampling,
         )
-        finalize_com = work / f"{experiment.dataset_id}_finalize.com"
+        finalize_com = work / (
+            script_name or f"{experiment.dataset_id}_finalize.com"
+        )
         finalize_com.write_text(script, encoding="utf-8", newline="\n")
         runtime = CshRuntime()
         result = runtime.run(
@@ -851,12 +859,14 @@ class NMRPipeBackend:
         ext_hi: str = "6.0",
         sampling: dict[str, Any] | None = None,
         progress: Callable[[str], None] | None = None,
+        out_file: str | None = None,
+        script_name: str | None = None,
     ) -> tuple[bool, list[str], Path]:
         """生成并执行 NMRPipe 处理管道（输出 ft2/ft3）。"""
         logs: list[str] = []
         ext = "ft3" if experiment.ndim >= 3 else "ft2"
         in_file = in_file or f"{experiment.dataset_id}.fid"
-        out_file = f"{experiment.dataset_id}.{ext}"
+        out_file = out_file or f"{experiment.dataset_id}.{ext}"
         script = generate_process_script(
             experiment,
             plan,
@@ -873,7 +883,9 @@ class NMRPipeBackend:
             ext_hi=ext_hi,
             sampling=sampling,
         )
-        process_com = work / f"{experiment.dataset_id}_process.com"
+        process_com = work / (
+            script_name or f"{experiment.dataset_id}_process.com"
+        )
         process_com.write_text(script, encoding="utf-8", newline="\n")
         run_result = runtime.run(
             ["csh", process_com.name],

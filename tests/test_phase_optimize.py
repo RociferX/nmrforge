@@ -392,7 +392,10 @@ class _PhaseEmbedBackend:
         )
         return Path(self.work_dir) / name
 
-    def process(self, experiment, plan, direct_phase_override=None) -> dict:
+    def process(
+        self, experiment, plan, direct_phase_override=None,
+        out_file=None, script_name=None,
+    ) -> dict:
         self.calls.append(dict(direct_phase_override or {}))
         path = self._path_for(direct_phase_override or {})
         _write_ft2_real(path, self._spectrum(direct_phase_override or {}))
@@ -447,6 +450,38 @@ def test_default_score_recovers_embedded_f2_phase(
     assert len(backend.calls) > 12 * 2  # 默认 p0-only 粗网格 12 点/轴
 
 
+def test_parallel_matches_sequential(tmp_path: Path, bruker_dir: Path) -> None:
+    """0.2.77:并行(worker=4)与串行(worker=1)选择结果逐位一致。"""
+    from core.data.bruker_reader import read_dataset
+
+    experiment = read_dataset(bruker_dir / "hsqc_2d")
+    seq_backend = _PhaseEmbedBackend(tmp_path / "seq", theta_true=-120.0)
+    seq = optimize_phase_sequential(
+        experiment, seq_backend, parallel=True, max_workers=1
+    )
+    par_backend = _PhaseEmbedBackend(tmp_path / "par", theta_true=-120.0)
+    par = optimize_phase_sequential(
+        experiment, par_backend, parallel=True, max_workers=4
+    )
+    assert seq.phases == par.phases
+    assert seq.backend_runs == par.backend_runs
+    assert seq.optimized == par.optimized
+
+
+def test_saturated_axis_skips_p1_refine(tmp_path: Path, bruker_dir: Path) -> None:
+    """0.2.77:轴最优饱和(100 分)时跳过 p1 精修,日志有记录且结果不变。"""
+    from core.data.bruker_reader import read_dataset
+
+    experiment = read_dataset(bruker_dir / "hsqc_2d")
+    backend = _PhaseEmbedBackend(tmp_path / "work", theta_true=-120.0)
+    result = optimize_phase_sequential(
+        experiment, backend, parallel=True, max_workers=1
+    )
+    assert "跳过 p1 精修" in " ".join(result.logs)
+    f2_p0 = float(result.phases["F2"][0]) % 360.0
+    assert abs(((f2_p0 - 120.0 + 180.0) % 360.0) - 180.0) <= 7.5
+
+
 def test_same_phase_tolerance() -> None:
     assert _same_phase({"p0": 0.0, "p1": 90.0}, {"p0": 0.0, "p1": 90.0}, 30.0)
     assert _same_phase({"p0": 0.0, "p1": 90.0}, {"p0": 0.0, "p1": -90.0}, 30.0)
@@ -461,7 +496,10 @@ class _OverrideBackend:
         self.work_dir = str(work_dir)
         self.overrides: list[dict] = []
 
-    def process(self, experiment, plan, direct_phase_override=None) -> dict:
+    def process(
+        self, experiment, plan, direct_phase_override=None,
+        out_file=None, script_name=None,
+    ) -> dict:
         self.overrides.append(dict(direct_phase_override or {}))
         # 逐维搜索时覆盖含多个轴,取末轴(正在搜索的轴)的 p0/p1
         p0, p1 = list(direct_phase_override.values())[-1]
@@ -479,7 +517,10 @@ class _OverrideBackend:
             "logs": [],
         }
 
-    def finalize_nus(self, experiment, phases=None, work_dir=None, baseline=None) -> dict:
+    def finalize_nus(
+        self, experiment, phases=None, work_dir=None, baseline=None,
+        out_file=None, script_name=None,
+    ) -> dict:
         self.overrides.append(dict(phases or {}))
         p0, p1 = list((phases or {}).values())[-1]
         return {
@@ -636,7 +677,10 @@ def test_optimize_phase_sequential_failure(tmp_path: Path, bruker_dir: Path) -> 
     experiment = read_dataset(bruker_dir / "hsqc_2d")
 
     class _FailBackend(_OverrideBackend):
-        def process(self, experiment, plan, direct_phase_override=None) -> dict:
+        def process(
+        self, experiment, plan, direct_phase_override=None,
+        out_file=None, script_name=None,
+    ) -> dict:
             return {"success": False, "message": "boom", "logs": []}
 
     backend = _FailBackend(tmp_path / "work")

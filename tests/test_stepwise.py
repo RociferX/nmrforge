@@ -43,6 +43,8 @@ class _FakeBackend:
         direct_phase_override=None,
         params=None,
         progress=None,
+        out_file=None,
+        script_name=None,
     ) -> dict:
         self.calls.append("process")
         self.last_params = params
