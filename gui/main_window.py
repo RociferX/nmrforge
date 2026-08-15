@@ -85,6 +85,8 @@ class MainWindow(QMainWindow):
         self.manual_run_log.connect(self._append_log)
         self.manual_run_done.connect(self._on_manual_run_done)
         self._pending_data_names: dict[str, str] = {}
+        self._last_auto_fill: dict = {}
+        self._last_raw_quality: dict | None = None
         self.setWindowTitle("NMRForge")
         self.resize(1280, 720)
         self.setAcceptDrops(True)  # 拖拽 Bruker 数据目录导入
@@ -361,10 +363,36 @@ class MainWindow(QMainWindow):
                 self._append_log(
                     f"  导入完成: {item['folder']} → {item['data_id']}"
                 )
+                try:
+                    from gui.notes import auto_fill_notes_from_metadata
+                    from gui.raw_quality import (
+                        check_raw_quality,
+                        format_quality_report,
+                    )
+
+                    data_id = item.get("data_id", "")
+                    meta = self._read_data_metadata(exp_id, data_id)
+                    filled = auto_fill_notes_from_metadata(
+                        self.manager, exp_id, data_id, meta
+                    )
+                    if filled:
+                        summary = "、".join(
+                            f"{key}={value}" for key, value in filled.items()
+                        )
+                        self._append_log(f"  自动填充注释: {summary}")
+                    quality = check_raw_quality(self.manager, exp_id, data_id)
+                    self._append_log("  原始数据质量:")
+                    self._append_log(format_quality_report(quality))
+                except Exception:  # noqa: BLE001 - 自动填充/质检失败不阻断批量导入
+                    pass
             else:
                 self._append_log(
                     f"  导入失败: {item['folder']} ({item.get('error')})"
                 )
+        try:
+            self.manager.save()
+        except ProjectError:
+            pass
         self._append_log(
             f"批量导入完成: 实验类型 {exp_id} 组 {batch_id_value},共 {count} 个样品数据"
         )
@@ -443,6 +471,21 @@ class MainWindow(QMainWindow):
                             data_id,
                             {"notes": notes},
                         )
+                    # 0.2.86:导入后自动填充注释 + 检查并报告原始数据质量
+                    try:
+                        from gui.notes import auto_fill_notes_from_metadata
+                        from gui.raw_quality import check_raw_quality
+
+                        meta = self._read_data_metadata(target_exp_id, data_id)
+                        self._last_auto_fill = auto_fill_notes_from_metadata(
+                            self.manager, target_exp_id, data_id, meta
+                        )
+                        self._last_raw_quality = check_raw_quality(
+                            self.manager, target_exp_id, data_id
+                        )
+                    except Exception:  # noqa: BLE001 - 自动填充/质检失败不阻断导入
+                        self._last_auto_fill = {}
+                        self._last_raw_quality = None
                 self.manager.save()
                 self.import_finished.emit(result)  # 回主线程刷新 UI
             except Exception as exc:  # noqa: BLE001 - 错误统一回主线程提示
@@ -465,6 +508,16 @@ class MainWindow(QMainWindow):
         )
         for warning in result.warnings:
             self._append_log(f"  提示: {warning}")
+        quality = getattr(self, "_last_raw_quality", None) or {}
+        auto_fill = getattr(self, "_last_auto_fill", None) or {}
+        if auto_fill:
+            summary = "、".join(f"{key}={value}" for key, value in auto_fill.items())
+            self._append_log(f"自动填充注释: {summary}")
+        if quality:
+            from gui.raw_quality import format_quality_report
+
+            self._append_log("原始数据质量:")
+            self._append_log(format_quality_report(quality))
         exp_id = getattr(result, "experiment_id", None) or result.get("experiment_id", "")
         data_id = getattr(result, "data_id", "") or ""
         name = self._pending_data_names.pop(exp_id, "") if exp_id else ""
@@ -481,10 +534,30 @@ class MainWindow(QMainWindow):
         if exp_id:
             self.project_tree.select_experiment(exp_id)
         self._maybe_show_first_import_hint()
-        if result.warnings:
-            InfoDialog.show_info(
-                self, "导入完成(有提示)", "\n".join(result.warnings)
+        warnings = list(result.warnings)
+        quality = getattr(self, "_last_raw_quality", None) or {}
+        if quality and quality.get("issues"):
+            warnings.extend(
+                f"质量警告: {issue}" for issue in quality["issues"]
             )
+        if warnings:
+            InfoDialog.show_info(
+                self, "导入完成(有提示)", "\n".join(warnings)
+            )
+
+    def _read_data_metadata(self, exp_id: str, data_id: str) -> dict:
+        """读样品数据 metadata.json(缺失返回空 dict)。"""
+        if self.manager.project is None:
+            return {}
+        try:
+            meta_path = self.manager.data_metadata_path(exp_id, data_id)
+            if meta_path is None or not meta_path.is_file():
+                return {}
+            import json
+
+            return json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001 - 读不到 metadata 按空处理
+            return {}
 
     def rename_experiment(self) -> None:
         exp_id = self.project_tree.current_experiment_id()

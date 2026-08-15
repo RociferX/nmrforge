@@ -248,6 +248,11 @@ def test_import_workflow_e2e(
             self._target()
 
     monkeypatch.setattr("threading.Thread", SyncThread)
+    # 0.2.86:导入完成提示可能含质量警告,测试里 stub 模态对话框避免阻塞
+    monkeypatch.setattr(
+        "gui.dialogs.InfoDialog.show_info",
+        staticmethod(lambda *args, **kwargs: None),
+    )
     window = MainWindow(manager=manager)
     window.add_experiment_via_import(str(dataset), title="HSQC")
     assert manager.project is not None

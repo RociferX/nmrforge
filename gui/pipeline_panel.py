@@ -407,6 +407,29 @@ def _format_params(params: dict) -> str:
     return ", ".join(f"{key}={value}" for key, value in sorted(params.items()))
 
 
+# 生成谱图步骤参数报告的常见键名标签(0.2.86)
+_SPECTRUM_PARAM_LABELS = {
+    "extract": "提取窗口",
+    "ext_lo": "提取下限(ppm)",
+    "ext_hi": "提取上限(ppm)",
+    "zero_fill": "填零",
+    "window": "窗函数",
+    "baseline": "基线",
+    "phases": "相位",
+    "sampling": "采样",
+    "smile": "SMILE",
+}
+
+
+def _spectrum_param_report(params: dict) -> str:
+    """把生成谱图实际生效参数整理为可读参数报告(点击步骤展开查看)。"""
+    lines = [
+        f"  {_SPECTRUM_PARAM_LABELS.get(key, key)}: {value}"
+        for key, value in sorted(params.items())
+    ]
+    return "\n".join(lines) if lines else "  (无参数记录)"
+
+
 class PipelineStepRow(QWidget):
     """单个步骤行:状态图标 + 名称 + 描述 + 运行/人工入口 + 内嵌详情。
 
@@ -836,6 +859,9 @@ class PipelinePanel(QWidget):
             if run.params:
                 params = dict(run.params)
                 lines.append(f"参数: {_format_params(run.params)}")
+                if step_id == "spectrum":
+                    lines.append("参数报告(生成谱图实际生效参数):")
+                    lines.append(_spectrum_param_report(run.params))
         return "\n".join(lines) if lines else "无详情", params, failed
 
     def _on_run_requested(self, step_id: str) -> None:

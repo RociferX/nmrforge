@@ -15,6 +15,7 @@ from gui.notes import (
     DATA_FIELDS,
     EXPERIMENT_FIELDS,
     SAMPLE_FIELDS,
+    auto_fill_notes_from_metadata,
     data_note,
     data_note_fields,
     experiment_note,
@@ -254,6 +255,38 @@ def test_experiment_type_options_from_presets() -> None:
     assert "Generic2D" not in options_2d
     assert "Generic3D" not in options_3d
     assert set(options_2d) | set(options_3d) == set(experiment_type_options())
+
+
+def test_auto_fill_notes_from_metadata(tmp_path: Path) -> None:
+    """0.2.86:导入后按 metadata/acqus 自动填充注释(不覆盖已有值)。"""
+    manager, exp_id, data_id = _manager(tmp_path)
+    set_experiment_note_fields(
+        manager.project, exp_id, {"experiment_type": "HSQC"}
+    )
+    raw = manager.data_dir(exp_id, data_id, "raw")
+    raw.mkdir(parents=True, exist_ok=True)
+    (raw / "acqus").write_text(
+        "##$NUC1= 1H\n##$NUC2= 15N\n##$TE= 2980\n",
+        encoding="latin-1",
+    )
+    metadata = {
+        "dataset": {
+            "ndim": 2,
+            "dimensions": [{"nucleus": "1H"}, {"nucleus": "15N"}],
+            "experiment_type": {"name": "HSQC"},
+        }
+    }
+    filled = auto_fill_notes_from_metadata(
+        manager, exp_id, data_id, metadata
+    )
+    exp_fields = experiment_note_fields(manager.project, exp_id)
+    assert exp_fields["dimension"] == "2D"
+    assert exp_fields["experiment_type"] == "HSQC"  # 已有值不覆盖
+    assert exp_fields["nuclei"] == "1H-15N"
+    data_fields = data_note_fields(manager.project, exp_id, data_id)
+    assert data_fields["temperature"].startswith("24")
+    assert "experiment.dimension" in filled
+    assert "data.temperature" in filled
 
 
 def test_notes_dialog_combos_dimension_then_type(

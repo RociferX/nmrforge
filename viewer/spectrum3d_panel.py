@@ -49,7 +49,6 @@ class Spectrum3DPanel(QWidget):
         )
         self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
         layout.addWidget(self.mode_combo)
-        self.mode_combo.setCurrentIndex(1)  # 默认 MIP 投影
         self.slice_slider = QSlider(Qt.Orientation.Horizontal)
         self.slice_slider.setToolTip("第三轴切片位置(拖动后松开刷新)")
         self.slice_slider.valueChanged.connect(self._on_slider_value)
@@ -59,6 +58,7 @@ class Spectrum3DPanel(QWidget):
         self.position_label = QLabel("Slice: -")
         self.position_label.setWordWrap(True)
         layout.addWidget(self.position_label)
+        self.mode_combo.setCurrentIndex(1)  # 默认 MIP 投影(控件就绪后)
 
     # ------------------------------------------------------------- API
     def set_spectrum3d(self, spectrum3d: Spectrum3D) -> None:
@@ -139,9 +139,10 @@ class Spectrum3DPanel(QWidget):
     def _on_mode_changed(self, index: int) -> None:
         if 0 <= index < len(_MODES):
             self._mode = _MODES[index][1]
-        self.slice_slider.setEnabled(
-            self._spectrum3d is not None and self._mode == "slice"
-        )
+        if hasattr(self, "slice_slider"):
+            self.slice_slider.setEnabled(
+                self._spectrum3d is not None and self._mode == "slice"
+            )
         self._update_position_label()
         self._emit()
 
