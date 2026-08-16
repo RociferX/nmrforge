@@ -36,7 +36,7 @@ def estimate_all_axes(
     path = Path(spectrum_path)
     if not path.is_file():
         return {}
-    _header, data = ng.pipe.read(str(path))
+    header, data = ng.pipe.read(str(path))
     arr = np.asarray(data)
     phases: dict[str, tuple[float, float]] = {}
     if arr.ndim < 2:
@@ -45,7 +45,8 @@ def estimate_all_axes(
     for estimate in inspected["phases"]:
         if estimate is None:
             continue
-        logical = axis_to_logical(experiment, estimate.axis)
+        # NMRPipe 谱头约定:数组轴 0/1/2 对应 F1/F2/F3
+        logical = f"F{estimate.axis + 1}"
         phases[logical] = (estimate.p0, estimate.p1)
     return phases
 

@@ -1,5 +1,20 @@
 # 变更日志
 
+## [0.2.101] - 2026-08-16
+
+- 相位优化简单/进阶两条途径整合并真实数据标定:
+  - 简单途径(默认):第一遍处理 → nmrPipe HT 重建虚部 → 逐维显示层
+    固定迹线净吸收评分 → 重跑填相位;所有谱型统一;
+  - 进阶途径:uniform 全维度后端优化(optimize_phase_sequential),NUS
+    混合(直接维 HT 显示层 + 间接维逐候选 finalize);
+  - 关键修正:显示层虚部必须用 nmrPipe HT,不能用 scipy.signal.hilbert
+    (scipy 使 sampleI F2 误选 140°,HT 后选 295°,正确 307.5°);
+  - 3D 轴名按 NMRPipe 谱头 FDF1/FDF2/FDF3 映射(修复 reversed dims 错位);
+  - VM 标定:sampleI F2 295°(正确 307.5°,F1 仍偏),sampleA 100%/25%
+    直接维均恢复 (0,0);简单途径对 NUS 可靠,uniform 复杂谱建议 advanced;
+  - generate_spectrum 支持 params["phase_route"],默认 simple,保留 none。
+
+
 ## [0.2.98] - 2026-08-16
 
 - 修复 3D NUS 显示层相位搜索/填相位(实型交错复型约定,sampleB 真实数据验证):
