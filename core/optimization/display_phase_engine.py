@@ -136,76 +136,92 @@ def search_axis_phase(
     real: np.ndarray,
     axis: int,
     *,
-    radius: int = 12,
-    min_windows: int = 3,
-    max_rows: int = 128,
+    radius: int = 5,
+    max_traces: int = 128,
+    coarse_p0_step: float = 30.0,
 ) -> AxisPhaseEstimate | None:
-    """在实型谱的指定维度上做显示层相位估计(希尔伯特重建 + 逐行选峰)。"""
-    arr = np.asarray(real, dtype=float)
-    axis = axis if axis >= 0 else arr.ndim - 1
-    n = arr.shape[axis]
-    if arr.ndim < 2 or n < 8:
-        return None
-    analytic = analytic_axis(arr, axis)
-    rows = np.moveaxis(analytic, axis, -1).reshape(-1, n)
-    if rows.shape[0] > max_rows:
-        index = np.linspace(0, rows.shape[0] - 1, max_rows).astype(int)
-        rows = rows[index]
-    infos: list[tuple[np.ndarray, np.ndarray, np.ndarray]] = []
-    for row in rows:
-        peaks = _row_peaks(row)
-        if peaks is not None and peaks[0].size >= 1:
-            infos.append((row, peaks[0], peaks[1]))
-    if len(infos) < min_windows:
-        return None
-    p1_signals = [
-        _p1_concentration(row, positions, heights)
-        for row, positions, heights in infos
-        if positions.size >= 2
-    ]
-    p1_signal = float(np.median(p1_signals)) if p1_signals else 0.0
-    p1 = -p1_signal
-    anchor = max(range(len(infos)), key=lambda i: float(np.max(infos[i][2])))
-    _arr, positions, heights = infos[anchor]
-    vals = _arr[positions]
-    ramp = np.exp(-1j * np.deg2rad(p1_signal * positions / max(n - 1, 1)))
-    unit = np.exp(1j * np.angle(vals * ramp))
-    weights = heights + 1e-12
-    vec = np.sum(weights * unit) / max(float(np.sum(weights)), 1e-12)
-    p0 = float((-np.rad2deg(np.angle(vec))) % 360.0)
+    """在实型谱的指定维度上做显示层相位估计。
 
-    # 显示层评分:在锚点迹线内,按锁定的峰窗口对 analytic 旋转取实部评分
-    anchor_rows = np.moveaxis(analytic, axis, -1).reshape(-1, n)
-    anchor_row_idx = anchor
-    def _anchor_score(candidate_p0: float, candidate_p1: float) -> float:
+    评价方法与进阶版(optimize_phase_sequential)一致:基线固定迹线中位数
+    净吸收。唯一区别是候选谱的虚部来源——进阶版由真实后端生成复型谱,
+    这里由希尔伯特重建实型谱虚部后,在显示层旋转取实部。
+
+    流程:
+    1. 在 PS(0,0) 实型谱上锁定信号迹线和每条迹线最强峰位;
+    2. 希尔伯特重建该维解析信号;
+    3. 对候选 (p0, p1) 做频域旋转取实部;
+    4. 在锁定的固定迹线/峰位窗口上算净吸收中位数(与进阶版同一指标);
+    5. 网格 + 细化搜索使统计评分最高的 (p0, p1)。
+    """
+    axis = axis if axis >= 0 else np.asarray(real).ndim - 1
+    if np.iscomplexobj(real):
+        analytic = np.asarray(real, dtype=np.complex128)
+    else:
+        analytic = analytic_axis(np.asarray(real, dtype=float), axis)
+    n = analytic.shape[axis]
+    if analytic.ndim < 2 or n < 8:
+        return None
+
+    analytic_rows = np.moveaxis(analytic, axis, -1).reshape(-1, n)
+    trace_mag = np.max(np.abs(analytic_rows), axis=-1)
+    locked = np.argsort(trace_mag)[::-1][:max_traces]
+    locked = locked[trace_mag[locked] > 0]
+    if locked.size == 0:
+        return None
+    positions = np.argmax(np.abs(analytic_rows[locked]), axis=-1).astype(int)
+
+    def _score(p0: float, p1: float) -> float:
         k = np.arange(n, dtype=float)
-        ramp = np.exp(1j * np.deg2rad(candidate_p0 + candidate_p1 * k / max(n - 1, 1)))
-        rot = np.real(anchor_rows[anchor_row_idx] * ramp)
-        values = []
-        for peak in positions:
-            lo, hi = max(0, int(peak) - radius), min(n, int(peak) + radius + 1)
-            values.append(_symmetry_score(rot[lo:hi]))
-        return 100.0 * float(np.mean(values))
+        ramp = np.exp(1j * np.deg2rad(p0 + p1 * k / max(n - 1, 1)))
+        rotated = np.real(analytic_rows[locked] * ramp)
+        metrics = []
+        for index, peak in enumerate(positions):
+            lo = max(0, int(peak) - radius)
+            hi = min(n, int(peak) + radius + 1)
+            profile = rotated[index, lo:hi]
+            positive = float(np.clip(profile, 0.0, None).sum())
+            negative = float(np.clip(profile, None, 0.0).sum())
+            total = float(np.abs(profile).sum()) + 1e-12
+            metrics.append((positive + negative) / total)
+        median = float(np.median(metrics)) if metrics else 0.0
+        return 50.0 * (median + 1.0)
 
-    if (
-        _anchor_score(p0, p1) < 10.0
-        and _anchor_score((p0 + 180.0) % 360.0, p1) > _anchor_score(p0, p1)
-    ):
-        p0 = (p0 + 180.0) % 360.0
-    best = (_anchor_score(p0, p1), p0, p1)
-    for dp0 in (-10.0, -5.0, 0.0, 5.0, 10.0):
-        for dp1 in (-10.0, -5.0, 0.0, 5.0, 10.0):
-            candidate = _anchor_score((p0 + dp0) % 360.0, p1 + dp1)
-            if candidate > best[0]:
-                best = (candidate, (p0 + dp0) % 360.0, p1 + dp1)
+    # 与进阶版 uniform 相同:粗搜/细化只搜 p0(p1 固定 0),末尾小 p1 精修
+    best = None
+    for p0 in np.arange(0.0, 360.0, coarse_p0_step):
+        score = _score(float(p0), 0.0)
+        if best is None or score > best[0]:
+            best = (score, float(p0), 0.0)
+    assert best is not None
     score, p0, p1 = best
-    if abs(_anchor_score(p0, 0.0) - score) < 1.0:
+    for _ in range(2):
+        for dp0 in (-15.0, -5.0, 0.0, 5.0, 15.0):
+            candidate = _score((p0 + dp0) % 360.0, 0.0)
+            if candidate > score:
+                score, p0, p1 = candidate, (p0 + dp0) % 360.0, 0.0
+    for dp1 in (-22.5, -10.0, 0.0, 10.0, 22.5):
+        candidate = _score(p0, p1 + dp1)
+        if candidate > score:
+            score, p1 = candidate, p1 + dp1
+    if abs(_score(p0, 0.0) - score) < 1.0:
         p1 = 0.0
-        score = _anchor_score(p0, 0.0)
+        score = _score(p0, 0.0)
+    # 近最优平台取最小修正(人工习惯:谱已接近好相位时不乱加修正)
+    near = []
+    for dp0 in np.arange(-180.0, 181.0, 5.0):
+        for dp1 in np.arange(-20.0, 21.0, 5.0):
+            pc = (p0 + dp0) % 360.0
+            qc = p1 + dp1
+            sc = _score(pc, qc)
+            if sc >= score - 5.0:
+                near.append((sc, pc, qc))
+    if near:
+        near.sort(key=lambda item: (min(item[1], 360.0 - item[1]), abs(item[2]), -item[0]))
+        score, p0, p1 = near[0]
     if abs(p1) > 20.0:
         p1 = 0.0
     return AxisPhaseEstimate(
-        axis=axis, p0=float(p0), p1=float(p1), score=float(score), windows=len(infos)
+        axis=axis, p0=float(p0), p1=float(p1), score=float(score), windows=int(locked.size)
     )
 
 
@@ -264,11 +280,12 @@ def inspect_spectrum(
     axes: list[int] | None = None,
 ) -> dict[str, object]:
     """一次性对实型谱逐维做相位/基线/填零显示层评估。"""
-    arr = np.asarray(real, dtype=float)
+    arr = np.asarray(real)
     selected = axes if axes is not None else list(range(arr.ndim))
+    real_arr = np.real(arr).astype(float)
     phases = [search_axis_phase(arr, axis) for axis in selected]
-    baselines = [assess_baseline(arr, axis) for axis in selected]
-    fills = [assess_fill(arr, axis) for axis in selected]
+    baselines = [assess_baseline(real_arr, axis) for axis in selected]
+    fills = [assess_fill(real_arr, axis) for axis in selected]
     return {
         "phases": phases,
         "baselines": baselines,

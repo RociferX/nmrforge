@@ -804,6 +804,44 @@ class NMRPipeBackend:
             "logs": logs,
         }
 
+    def hilbert_spectrum(
+        self,
+        spectrum_path: Path | str,
+        *,
+        work_dir: Path | str | None = None,
+        out_file: str | None = None,
+        timeout: float = 600.0,
+    ) -> dict[str, Any]:
+        """对实型终谱跑 nmrPipe HT,重建虚部得到复型显示谱(轻后端)。
+
+        nmrDraw 的显示层调相即使用 HT 重建虚部,因此简单途径以该复型谱
+        为对象,与进阶版的真实后端 PS 保持同一数学运算。
+        """
+        bin_dir = self._bin_dir()
+        if bin_dir is None:
+            return {"success": False, "message": "未找到 nmrPipe", "logs": []}
+        work = Path(work_dir) if work_dir else Path(spectrum_path).parent
+        src = Path(spectrum_path)
+        if src.parent.resolve() != work.resolve():
+            shutil.copy2(src, work / src.name)
+        out_name = out_file or f"{src.stem}_ht.{src.suffix.lstrip('.')}"
+        runtime = CshRuntime()
+        result = runtime.run(
+            [
+                "nmrPipe", "-in", src.name,
+                "|", "nmrPipe", "-fn", "HT",
+                "-out", out_name, "-ov",
+            ],
+            cwd=str(work),
+            timeout=timeout,
+        )
+        logs = [f"nmrPipe HT: rc={result.returncode}"]
+        out = work / out_name
+        if result.returncode != 0 or not out.is_file() or out.stat().st_size == 0:
+            return {"success": False, "message": "nmrPipe HT 失败", "logs": logs}
+        logs.append(f"复型显示谱 → {out}")
+        return {"success": True, "spectrum_path": str(out), "logs": logs}
+
     # ------------------------------------------------------------------ 转换
 
     def _finalize_converted_fid(

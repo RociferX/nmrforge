@@ -37,7 +37,7 @@ def estimate_all_axes(
     if not path.is_file():
         return {}
     _header, data = ng.pipe.read(str(path))
-    arr = np.asarray(data, dtype=float)
+    arr = np.asarray(data)
     phases: dict[str, tuple[float, float]] = {}
     if arr.ndim < 2:
         return phases
@@ -68,7 +68,16 @@ def simple_route(
         first = backend.process(experiment, plan or select_method(experiment), params=params_first)
     if not first.get("success") or not first.get("spectrum_path"):
         raise RuntimeError(f"第一遍处理失败: {first.get('message')}")
-    phases = estimate_all_axes(first["spectrum_path"], experiment)
+    display_path = first["spectrum_path"]
+    hilbert = getattr(backend, "hilbert_spectrum", None)
+    if callable(hilbert):
+        ht = hilbert(
+            first["spectrum_path"],
+            work_dir=work_dir,
+        )
+        if ht.get("success") and ht.get("spectrum_path"):
+            display_path = ht["spectrum_path"]
+    phases = estimate_all_axes(display_path, experiment)
 
     if is_nus:
         direct = experiment.direct_dimension.logical_axis if experiment.direct_dimension else "F2"

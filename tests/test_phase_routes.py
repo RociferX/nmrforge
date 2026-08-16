@@ -28,6 +28,9 @@ class _FakeBackend:
         self.finalize_phases.append(dict(phases or {}))
         return {"success": True, "spectrum_path": "out_final.ft3", "logs": []}
 
+    def hilbert_spectrum(self, spectrum_path, work_dir=None, out_file=None, timeout=None):
+        return {"success": True, "spectrum_path": "out_ht.ft2", "logs": []}
+
 
 def test_simple_route_uniform_two_passes(monkeypatch, bruker_dir: Path) -> None:
     experiment = read_dataset(bruker_dir / "hsqc_small")
