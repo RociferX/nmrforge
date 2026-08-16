@@ -550,103 +550,36 @@ class NMRPipeBackend:
             points_per_line=points_per_line,
         )
         logs += zero_fill_report(zf_plan)
-        # 0.2.95:显示层相位搜索(nmrDraw 思路)——先用 PS(0,0) 正式重构预览,
-        # 在终谱上做频域旋转对称性评分,主重构用估出相位(2× SMILE,与人工
-        # 「跑→看→改→重跑」一致;phase.json 缓存后跳过)。
+        # 0.2.96:显示层相位搜索(1× SMILE,无额外后端)——主重构用 PS(0,0)
+        # (或缓存相位);重构后在复型 recon 平面上对称性评分,最后一步把相位
+        # 旋转应用到 recon 并便宜重渲 stage-2(非 SMILE)
+        smile_phase = (direct_p0, direct_p1)
+        run_display_search = False
         if (
             display_phase_search
             and direct_phase_search
             and params.get("direct_phase_override") is None
-            and not (work / "phase.json").is_file()
         ):
-            preview_out = f"{experiment.dataset_id}_preview.{ext}"
-            p_script = script_fn(
-                experiment,
-                in_file=in_file,
-                nuslist="nuslist",
-                out_file=preview_out,
-                nthread=nthread,
-                nuslist_count=nuslist_count,
-                ext_lo=ext_lo,
-                ext_hi=ext_hi,
-                nsigma=nsigma,
-                thresh=thresh,
-                smile_xq3=smile_xq3,
-                smile_scaling=smile_scaling,
-                smile_report=smile_report,
-                direct_phase=(0.0, 0.0),
-                extract=extract,
-                baseline=baseline,
-                zero_fill=zf_plan,
-                linewidth_hz=linewidth_hz,
-                points_per_line=points_per_line,
-                sampling=sampling,
-            )
-            p_com = work / f"{experiment.dataset_id}_preview.com"
-            p_com.write_text(p_script, encoding="utf-8", newline="\n")
-            logs.append(
-                f"显示层相位搜索: PS(0,0) 预览重构({nuslist_count} 点,"
-                f"{ext_lo}-{ext_hi} ppm)后对称性评分"
-            )
-            if progress is not None:
-                progress("开始预览 SMILE 重构(相位搜索)")
-            p_timeout = float(params.get("timeout_s", 3600))
-            p_res = runtime.run(
-                ["csh", p_com.name],
-                cwd=str(work),
-                timeout=p_timeout,
-                on_line=(lambda line: progress(line) if progress else None),
-            )
-            logs.append(f"preview.com: rc={p_res.returncode}")
-            preview_ft = work / preview_out
-            if (
-                p_res.returncode == 0
-                and preview_ft.is_file()
-                and preview_ft.stat().st_size
-            ):
+            if (work / "phase.json").is_file():
                 try:
-                    import nmrglue as ng
-
-                    _dic, data = ng.pipe.read(str(preview_ft))
-                    est = search_direct_phase_on_spectrum(
-                        np.asarray(data), metric="symmetry"
+                    data = json.loads(
+                        (work / "phase.json").read_text(encoding="utf-8")
                     )
-                except Exception as exc:  # noqa: BLE001
-                    logs.append(f"显示层评分失败: {exc}")
-                    est = None
-                if est is not None:
-                    direct_p0, direct_p1, score = est
-                    # 置信度门控:重构伪影会把评分最优值带偏(VM 实测 25% 重构
-                    # 给 105° score=68.6 vs 100% 重构 0° score=83.7);score
-                    # 过低时拒绝应用,保持默认相位,避免错误相位写入
-                    if score >= 75.0:
-                        (work / "phase.json").write_text(
-                            json.dumps(
-                                {
-                                    "version": 2,
-                                    "source": "display_recon",
-                                    "p0": direct_p0,
-                                    "p1": direct_p1,
-                                    "score": score,
-                                },
-                                indent=2,
-                            ),
-                            encoding="utf-8",
-                        )
+                    if data.get("version") == 2:
+                        smile_phase = (float(data["p0"]), float(data["p1"]))
                         logs.append(
-                            f"显示层相位: F2=({direct_p0:g}, {direct_p1:g}) "
-                            f"score={score:.2f}(已写 phase.json,主重构复用)"
+                            f"直接维相位(缓存): p0={smile_phase[0]:g} "
+                            f"p1={smile_phase[1]:g}"
                         )
-                    else:
-                        logs.append(
-                            f"显示层相位置信度不足(score={score:.1f}<75),"
-                            "保持默认相位(未写 phase.json)"
-                        )
-                        direct_p0, direct_p1 = 0.0, 0.0
-                else:
-                    logs.append("显示层相位搜索失败,主重构用默认相位")
+                except (OSError, TypeError, ValueError, KeyError):
+                    pass
             else:
-                logs.append("预览重构失败,主重构用默认相位")
+                smile_phase = (0.0, 0.0)
+                run_display_search = True
+                logs.append(
+                    "显示层相位搜索: 主重构 PS(0,0),重构后对称性评分"
+                )
+
         out_file = f"{experiment.dataset_id}.{ext}"
         script = script_fn(
             experiment,
@@ -662,7 +595,7 @@ class NMRPipeBackend:
             smile_xq3=smile_xq3,
             smile_scaling=smile_scaling,
             smile_report=smile_report,
-            direct_phase=(direct_p0, direct_p1),
+            direct_phase=smile_phase,
             extract=extract,
             baseline=baseline,
             zero_fill=zf_plan,
@@ -706,6 +639,44 @@ class NMRPipeBackend:
         except OSError:
             pass  # 参数指纹写盘失败不影响重构结果
         logs.append(f"终谱 → {spectrum}")
+        # 0.2.96:最后一步填相位(显示层搜索 + recon 旋转 + 便宜 finalize 重渲)
+        if run_display_search:
+            est = self._display_phase_search(experiment, work, logs)
+            if est is not None and est[2] >= 30.0:
+                p0, p1, score = est
+                logs.append(
+                    f"显示层相位: F2=({p0:g}, {p1:g}) score={score:.2f}"
+                )
+                if abs(p1) > 20.0:
+                    logs.append(
+                        f"显示层相位 p1={p1:g}° 幅值异常(>20°),归零"
+                    )
+                    p1 = 0.0
+                (work / "phase.json").write_text(
+                    json.dumps(
+                        {
+                            "version": 2,
+                            "source": "display_recon",
+                            "p0": p0,
+                            "p1": p1,
+                            "score": score,
+                        },
+                        indent=2,
+                    ),
+                    encoding="utf-8",
+                )
+                if (
+                    abs(((p0 + 180.0) % 360.0) - 180.0) > 2.0
+                    or abs(p1) > 2.0
+                ):
+                    if self._apply_direct_phase(
+                        experiment, work, p0, p1, logs
+                    ):
+                        logs.append(
+                            "终谱已按显示层相位重渲(stage-2 重跑,无 SMILE)"
+                        )
+            else:
+                logs.append("显示层相位置信度不足或搜索失败,保持默认相位")
         if progress is not None:
             progress("完成 SMILE 重构;终谱已就位")
         return {
@@ -1073,6 +1044,103 @@ class NMRPipeBackend:
             "(已写 phase.json,正式重构复用)"
         )
         return p0, p1
+
+
+    def _display_phase_search(
+        self,
+        experiment: Experiment,
+        work: Path,
+        logs: list[str],
+    ) -> tuple[float, float, float] | None:
+        """显示层相位搜索(0.2.96,nmrDraw 思路):在复型重构平面上做对称性
+        评分(直接维在 axis 0),无需 Hilbert/额外后端。返回 (p0, p1, score);
+        无干净信号峰返回 None。
+        """
+        try:
+            import nmrglue as ng
+
+            from core.optimization.phase_search import (
+                search_direct_phase_on_spectrum,
+            )
+
+            if experiment.ndim >= 3:
+                plane_dir = work / "nus3d_rc"
+                paths = sorted(plane_dir.glob("test*.ft1"))
+                if not paths:
+                    return None
+                arrays = []
+                for path in paths[:8]:
+                    _dic, data = ng.pipe.read(str(path))
+                    arrays.append(np.asarray(data))
+                arr = (
+                    np.stack(arrays, axis=-1)
+                    if len(arrays) > 1
+                    else arrays[0]
+                )
+            else:
+                recon = work / "nus2d" / "recon.ft1"
+                if not recon.is_file():
+                    return None
+                _dic, data = ng.pipe.read(str(recon))
+                arr = np.asarray(data)
+            est = search_direct_phase_on_spectrum(
+                arr, axis=0, metric="symmetry"
+            )
+            if est is None:
+                logs.append("显示层相位搜索:无干净信号峰")
+                return None
+            logs.append(
+                f"显示层相位搜索: F2=({est[0]:.1f}, {est[1]:.1f}) "
+                f"score={est[2]:.1f}"
+            )
+            return est
+        except Exception as exc:  # noqa: BLE001
+            logs.append(f"显示层相位搜索失败: {exc}")
+            return None
+
+    def _apply_direct_phase(
+        self,
+        experiment: Experiment,
+        work: Path,
+        p0: float,
+        p1: float,
+        logs: list[str],
+    ) -> bool:
+        """最后一步填相位:旋转复型重构平面直接维(axis 0)后重跑 stage-2
+        finalize(便宜,非 SMILE),终谱带正确直接维相位。"""
+        try:
+            import nmrglue as ng
+
+            if experiment.ndim >= 3:
+                plane_dir = work / "nus3d_rc"
+                paths = sorted(plane_dir.glob("test*.ft1"))
+            else:
+                paths = [work / "nus2d" / "recon.ft1"]
+            if not paths or not paths[0].is_file():
+                return False
+            for path in paths:
+                dic, data = ng.pipe.read(str(path))
+                arr = np.asarray(data)
+                n = arr.shape[0]  # 直接维在 axis 0
+                k = np.arange(n, dtype=float)
+                ramp = np.exp(
+                    1j * np.deg2rad(p0 + p1 * k / max(n - 1, 1))
+                ).reshape(n, *([1] * (arr.ndim - 1)))
+                rot = arr * ramp
+                ng.pipe.write(
+                    str(path),
+                    dic,
+                    rot.astype(np.complex64),
+                    overwrite=True,
+                )
+            resp = self.finalize_nus(experiment, work_dir=work)
+            if not resp.get("success"):
+                logs.append(f"finalize 重渲失败: {resp.get('message')}")
+                return False
+            return True
+        except Exception as exc:  # noqa: BLE001
+            logs.append(f"应用直接维相位失败: {exc}")
+            return False
 
 
     def _search_direct_phase(
