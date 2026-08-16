@@ -143,7 +143,7 @@ def test_search_direct_phase_on_spectrum_recovers() -> None:
     window = np.sin(np.pi * (0.45 + 0.5 * np.linspace(0, 1, n)))
     grid = np.array([np.fft.fft(f * window) for f in fids])
     spec2d = np.fft.fft(grid, axis=0)
-    est = search_direct_phase_on_spectrum(spec2d)
+    est = search_direct_phase_on_spectrum(spec2d, metric="net")
     assert est is not None
     p0, p1, score = est
     # net/|Re| 指标对干净对称峰在 ±90° 内平台饱和(与现有优化同特性,真实

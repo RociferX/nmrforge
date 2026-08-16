@@ -582,31 +582,108 @@ def _net_window_metric(profile: np.ndarray) -> float:
     return (positive + negative) / total if total else 0.0
 
 
+def _symmetry_sign_metric(profile: np.ndarray) -> float:
+    """峰窗口对称性 + 正峰约束(0..1)——模仿 nmrDraw 显示层人工调相。
+
+    吸收峰实部偶对称(左=右)→ 1;色散峰奇对称 → 0;±180 反转峰同样对称,
+    用净 Re 为负重罚(与现有方法正峰语义一致)。
+    """
+    f = np.asarray(profile, dtype=float)
+    n = f.size
+    if n < 2:
+        return 0.0
+    half = n // 2
+    left = f[:half]
+    right = f[n - half:][::-1]
+    denom = 2.0 * (left**2 + right**2) + 1e-12
+    sym = float(np.mean((left + right) ** 2 / denom))
+    if n % 2 == 1:
+        c = f[half]
+        sym = float(
+            np.mean(
+                np.concatenate(
+                    [np.asarray((left + right) ** 2 / denom), [c**2 / (c**2 + 1e-12)]]
+                )
+            )
+        )
+    return sym if float(np.sum(f)) >= 0.0 else sym * 0.05
+
+
+def _signal_peak_windows(
+    real: np.ndarray,
+    *,
+    snr: float = 10.0,
+    global_frac: float = 0.05,
+    margin: int = 8,
+    max_peaks: int = 8,
+) -> list[tuple[int, int]]:
+    """信号行峰选择(用户方案:蛋白谱每行只有几个高耸峰,先排除噪音/伪影区域)。
+
+    对每条迹线(非直接维组合)找局部极大峰,要求峰高 ≥ max(snr×行噪音
+    (MAD), global_frac×全局最大峰高),且每行峰数 ≤ max_peaks(伪影行峰
+    密被排除)。返回 [(row, peak_pos), ...];无干净行返回 []。
+    """
+    n = real.shape[-1]
+    traces = np.abs(real).reshape(-1, n)
+    gmax = float(np.max(traces))
+    windows: list[tuple[int, int]] = []
+    for row in range(traces.shape[0]):
+        mag = traces[row]
+        mad = float(np.median(np.abs(mag - np.median(mag)))) * 1.4826 + 1e-12
+        lo, hi = margin, n - margin
+        if hi <= lo + 2:
+            continue
+        local = np.zeros(n, dtype=bool)
+        local[lo:hi] = (mag[lo:hi] >= mag[lo - 1 : hi - 1]) & (
+            mag[lo:hi] > mag[lo + 1 : hi + 1]
+        )
+        peaks = np.where(local & (mag > max(snr * mad, global_frac * gmax)))[0]
+        if 0 < len(peaks) <= max_peaks:
+            for p in peaks:
+                windows.append((row, int(p)))
+    return windows
+
+
 def search_direct_phase_on_spectrum(
     spectrum: np.ndarray,
     *,
     coarse_p0_step: float = 30.0,
+    metric: str = "symmetry",
+    radius: int = 12,
+    min_windows: int = 5,
+    prefer_p1_zero: bool = True,
 ) -> tuple[float, float, float] | None:
-    """最终谱(直接维=最后一维)固定迹线中位数净吸收评分,搜索直接维 (p0, p1)。
+    """最终谱(直接维=最后一维)直接维相位评分搜索 (p0, p1)。
 
-    与现有 uniform 优化(optimize_phase_sequential 默认评分)同一指标;用于
-    轻量 SMILE 重构谱的直接维相位估计(0.2.94)。返回 (p0, p1, score);
-    无信号/点数不足返回 None。
+    0.2.95(nmrDraw 显示层调相思路,默认 metric="symmetry"):先用信号行峰
+    选择排除噪音/伪影区域(每行少数高耸峰),再对锁定峰窗做频域旋转对称性
+    评分(±180 正峰约束),近最优平台取最小修正(VM 全量重构实测恢复真值
+    0°,55° 被明确拒绝)。metric="net" 保留旧净吸收指标(±90° 平台)。
+
+    返回 (p0, p1, score);无干净信号峰返回 None。
     """
     arr = np.asarray(spectrum)
     if arr.ndim < 2 or arr.shape[-1] < 8:
         return None
     n = arr.shape[-1]
     real = np.real(arr) if np.iscomplexobj(arr) else arr
-    traces = real.reshape(-1, n)
-    peak_mag = np.max(np.abs(traces), axis=-1)
-    corner = tuple(slice(0, min(16, s)) for s in real.shape)
-    noise = float(np.std(real[corner])) if real.size else 0.0
-    threshold = max(float(np.percentile(real, 99.5)), noise * 5.0)
-    idx = np.where(peak_mag > threshold)[0]
-    if idx.size == 0:
-        return None
-    pos = np.argmax(np.abs(traces[idx]), axis=-1)
+    if metric == "symmetry":
+        windows = _signal_peak_windows(real)
+        if len(windows) < min_windows:
+            return None
+        window_metric = _symmetry_sign_metric
+    else:
+        traces = real.reshape(-1, n)
+        peak_mag = np.max(np.abs(traces), axis=-1)
+        corner = tuple(slice(0, min(16, s)) for s in real.shape)
+        noise = float(np.std(real[corner])) if real.size else 0.0
+        threshold = max(float(np.percentile(real, 99.5)), noise * 5.0)
+        idx = np.where(peak_mag > threshold)[0]
+        if idx.size == 0:
+            return None
+        pos = np.argmax(np.abs(traces[idx]), axis=-1)
+        windows = list(zip(idx.tolist(), pos.tolist()))
+        window_metric = _net_window_metric
     comp = np.asarray(arr, dtype=np.complex128)
 
     def _score(p0: float, p1: float) -> float:
@@ -614,9 +691,11 @@ def search_direct_phase_on_spectrum(
         rot = comp * np.exp(1j * np.deg2rad(p0 + p1 * k / max(n - 1, 1)))
         rot_real = np.real(rot).reshape(-1, n)
         vals = []
-        for i, peak in zip(idx, pos):
-            lo, hi = max(0, peak - 5), min(n, peak + 6)
-            vals.append(_net_window_metric(rot_real[i, lo:hi]))
+        for i, peak in windows:
+            lo, hi = max(0, peak - radius), min(n, peak + radius + 1)
+            vals.append(window_metric(rot_real[i, lo:hi]))
+        if metric == "symmetry":
+            return 100.0 * float(np.mean(vals))
         return 50.0 * (float(np.median(vals)) + 1.0)
 
     best = None
@@ -633,4 +712,28 @@ def search_direct_phase_on_spectrum(
                 if ss > s0:
                     best = (ss, (p0 + dp0) % 360.0, p1 + dp1)
                     s0, p0, p1 = best
+    if prefer_p1_zero and abs(_score(p0, 0.0) - s0) < 1.0:
+        p1 = 0.0
+        s0 = _score(p0, 0.0)
+    if metric == "symmetry":
+        # 全圆近最优平台取「最小修正」(人工习惯:谱已接近好相位不乱加修正;
+        # 真值远离 0 时平台中心在真值处,近最优集合不含 (0,0))
+        near = []
+        for dp0 in np.arange(-180.0, 181.0, 5.0):
+            for dp1 in np.arange(-60.0, 61.0, 5.0):
+                pc = (p0 + dp0) % 360.0
+                qc = p1 + dp1
+                sc = _score(pc, qc)
+                if sc >= s0 - 2.0:
+                    near.append((sc, pc, qc))
+        if near:
+            near.sort(
+                key=lambda t: (
+                    min(t[1], 360.0 - t[1]),
+                    abs(t[2]),
+                    -t[0],
+                )
+            )
+            p0, p1 = near[0][1], near[0][2]
+            s0 = _score(p0, p1)
     return p0, p1, s0

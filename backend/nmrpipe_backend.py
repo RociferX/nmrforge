@@ -448,14 +448,19 @@ class NMRPipeBackend:
             logs.append(f"直接维相位覆盖: p0={direct_p0:g} p1={direct_p1:g}")
         sampling = params.get("sampling") or {}
         direct_phase_search = bool(params.get("direct_phase_search", True))
+        # 0.2.95:显示层相位搜索(nmrDraw 思路,默认开启)——正式重构终谱上
+        # 频域旋转对称性评分;开启时跳过 NU-DFT/轻量(它们不可靠/实验性)
+        display_phase_search = bool(params.get("display_phase_search", True))
+        light_phase = bool(params.get("light_phase_search", False))
         if sampling.get("auto_phase") is False:
             direct_phase_search = False
         # 0.2.94:轻量 SMILE 相位搜索(实验性,默认关闭——VM 实测重构伪影会
         # 把固定迹线评分最优值带偏:16/32 点子采样 → F2 偏 55°)
         if (
             direct_phase_search
+            and not display_phase_search
             and params.get("direct_phase_override") is None
-            and bool(params.get("light_phase_search", False))
+            and light_phase
         ):
             light_result = self._light_phase_search(
                 experiment,
@@ -472,7 +477,12 @@ class NMRPipeBackend:
                 direct_phase_search = False
             else:
                 logs.append("轻量 SMILE 相位搜索失败,回退 NU-DFT")
-        if direct_phase_search and params.get("direct_phase_override") is None:
+        if (
+            direct_phase_search
+            and not display_phase_search
+            and not light_phase
+            and params.get("direct_phase_override") is None
+        ):
             phase_inputs: Path | list[Path]
             if experiment.segments:
                 phase_inputs = work / "seg_001" / f"{experiment.dataset_id}.fid"
@@ -540,6 +550,103 @@ class NMRPipeBackend:
             points_per_line=points_per_line,
         )
         logs += zero_fill_report(zf_plan)
+        # 0.2.95:显示层相位搜索(nmrDraw 思路)——先用 PS(0,0) 正式重构预览,
+        # 在终谱上做频域旋转对称性评分,主重构用估出相位(2× SMILE,与人工
+        # 「跑→看→改→重跑」一致;phase.json 缓存后跳过)。
+        if (
+            display_phase_search
+            and direct_phase_search
+            and params.get("direct_phase_override") is None
+            and not (work / "phase.json").is_file()
+        ):
+            preview_out = f"{experiment.dataset_id}_preview.{ext}"
+            p_script = script_fn(
+                experiment,
+                in_file=in_file,
+                nuslist="nuslist",
+                out_file=preview_out,
+                nthread=nthread,
+                nuslist_count=nuslist_count,
+                ext_lo=ext_lo,
+                ext_hi=ext_hi,
+                nsigma=nsigma,
+                thresh=thresh,
+                smile_xq3=smile_xq3,
+                smile_scaling=smile_scaling,
+                smile_report=smile_report,
+                direct_phase=(0.0, 0.0),
+                extract=extract,
+                baseline=baseline,
+                zero_fill=zf_plan,
+                linewidth_hz=linewidth_hz,
+                points_per_line=points_per_line,
+                sampling=sampling,
+            )
+            p_com = work / f"{experiment.dataset_id}_preview.com"
+            p_com.write_text(p_script, encoding="utf-8", newline="\n")
+            logs.append(
+                f"显示层相位搜索: PS(0,0) 预览重构({nuslist_count} 点,"
+                f"{ext_lo}-{ext_hi} ppm)后对称性评分"
+            )
+            if progress is not None:
+                progress("开始预览 SMILE 重构(相位搜索)")
+            p_timeout = float(params.get("timeout_s", 3600))
+            p_res = runtime.run(
+                ["csh", p_com.name],
+                cwd=str(work),
+                timeout=p_timeout,
+                on_line=(lambda line: progress(line) if progress else None),
+            )
+            logs.append(f"preview.com: rc={p_res.returncode}")
+            preview_ft = work / preview_out
+            if (
+                p_res.returncode == 0
+                and preview_ft.is_file()
+                and preview_ft.stat().st_size
+            ):
+                try:
+                    import nmrglue as ng
+
+                    _dic, data = ng.pipe.read(str(preview_ft))
+                    est = search_direct_phase_on_spectrum(
+                        np.asarray(data), metric="symmetry"
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logs.append(f"显示层评分失败: {exc}")
+                    est = None
+                if est is not None:
+                    direct_p0, direct_p1, score = est
+                    # 置信度门控:重构伪影会把评分最优值带偏(VM 实测 25% 重构
+                    # 给 105° score=68.6 vs 100% 重构 0° score=83.7);score
+                    # 过低时拒绝应用,保持默认相位,避免错误相位写入
+                    if score >= 75.0:
+                        (work / "phase.json").write_text(
+                            json.dumps(
+                                {
+                                    "version": 2,
+                                    "source": "display_recon",
+                                    "p0": direct_p0,
+                                    "p1": direct_p1,
+                                    "score": score,
+                                },
+                                indent=2,
+                            ),
+                            encoding="utf-8",
+                        )
+                        logs.append(
+                            f"显示层相位: F2=({direct_p0:g}, {direct_p1:g}) "
+                            f"score={score:.2f}(已写 phase.json,主重构复用)"
+                        )
+                    else:
+                        logs.append(
+                            f"显示层相位置信度不足(score={score:.1f}<75),"
+                            "保持默认相位(未写 phase.json)"
+                        )
+                        direct_p0, direct_p1 = 0.0, 0.0
+                else:
+                    logs.append("显示层相位搜索失败,主重构用默认相位")
+            else:
+                logs.append("预览重构失败,主重构用默认相位")
         out_file = f"{experiment.dataset_id}.{ext}"
         script = script_fn(
             experiment,
