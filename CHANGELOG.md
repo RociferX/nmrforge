@@ -1,5 +1,20 @@
 # 变更日志
 
+## [0.2.97] - 2026-08-16
+
+- 记录相位优化方法演进与回退(用户要求,方便随时回退)+ 交接新窗口:
+  - docs/PROJECT_STATUS.md 新增「相位优化方法演进与回退(0.2.87→0.2.96)」
+    表:各版本方法/位置/结论/回退开关(display_phase_search=False →
+    NU-DFT;light_phase_search=True → 轻量 SMILE;direct_phase_override →
+    手动;删 phase.json → 重搜;uniform 现有优化完整保留为基准);
+  - docs/AGENT_PROMPTS.md 追加 Backend 启动提示词(0.2.97 起):全谱型
+    (2D/3D、uniform/NUS)统一到「1× 处理 + 显示层相位搜索 + 最后一步填
+    相位」流程——3D NUS 验证/修复 3D 分支(sampleB)、uniform 接入评估、
+    全谱型回归(sampleI、sampleA、sampleB),以现有方法为正确答案;
+  - 全谱型统一可行性:2D NUS 已统一;3D NUS 代码已写待验证;uniform 建议
+    保持现有优化(已验证且便宜),显示层作可选快速估计;
+  - 主仓库临时对比脚本(vm_*.py)已清理。
+
 ## [0.2.96] - 2026-08-16
 
 - 显示层相位搜索改 1× SMILE(用户要求:相位优化不需要额外后端,找到正确
