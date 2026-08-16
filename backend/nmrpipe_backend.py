@@ -50,6 +50,7 @@ from core.data.internal_data_model import Experiment, SamplingMode
 from core.data.nus_reader import merge_nuslists, read_nuslist
 from core.optimization.phase_search import (
     direct_ft_traces,
+    search_direct_phase_on_spectrum,
     search_direct_spectrum_phase,
 )
 from core.planning.processing_plan import ProcessingPlan
@@ -449,7 +450,29 @@ class NMRPipeBackend:
         direct_phase_search = bool(params.get("direct_phase_search", True))
         if sampling.get("auto_phase") is False:
             direct_phase_search = False
-        elif direct_phase_search:
+        # 0.2.94:轻量 SMILE 相位搜索(实验性,默认关闭——VM 实测重构伪影会
+        # 把固定迹线评分最优值带偏:16/32 点子采样 → F2 偏 55°)
+        if (
+            direct_phase_search
+            and params.get("direct_phase_override") is None
+            and bool(params.get("light_phase_search", False))
+        ):
+            light_result = self._light_phase_search(
+                experiment,
+                work,
+                in_file,
+                runtime,
+                logs,
+                params,
+                nuslist_count=nuslist_count,
+                sampling=sampling,
+            )
+            if light_result is not None:
+                direct_p0, direct_p1 = light_result
+                direct_phase_search = False
+            else:
+                logs.append("轻量 SMILE 相位搜索失败,回退 NU-DFT")
+        if direct_phase_search and params.get("direct_phase_override") is None:
             phase_inputs: Path | list[Path]
             if experiment.segments:
                 phase_inputs = work / "seg_001" / f"{experiment.dataset_id}.fid"
@@ -787,6 +810,163 @@ class NMRPipeBackend:
             if stale_path.is_file():
                 stale_path.unlink()
         return True
+
+    def _light_phase_search(
+        self,
+        experiment: Experiment,
+        work: Path,
+        in_file: str,
+        runtime: Any,
+        logs: list[str],
+        params: dict[str, Any],
+        *,
+        nuslist_count: int,
+        sampling: dict[str, Any],
+    ) -> tuple[float, float] | None:
+        """轻量 SMILE 相位搜索(0.2.94,用户方案):子采样 nuslist + PS(0,0)
+        亚秒轻量重构,再用现有固定迹线评分在轻量终谱上估直接维 (p0, p1)。
+
+        单文件/多文件统一处理:轻量子目录 work/light/ 里放子采样 nuslist
+        (SMILE -sample None 时读默认文件 nuslist),转换产物符号链接复用。
+        成功写 phase.json(v2, source=phase_only_recon)并返回 (p0, p1);
+        失败返回 None(调用方保留 NU-DFT 结果或 (0,0))。
+        """
+        phase_file = work / "phase.json"
+        if phase_file.is_file():
+            try:
+                data = json.loads(phase_file.read_text(encoding="utf-8"))
+                if data.get("version") == 2:
+                    logs.append(
+                        f"直接维相位(缓存): p0={data['p0']:g} "
+                        f"p1={data['p1']:g}"
+                    )
+                    return float(data["p0"]), float(data["p1"])
+            except (OSError, TypeError, ValueError, KeyError):
+                pass
+        points = read_nuslist(work / "nuslist")
+        if len(points) < 8:
+            return None
+        target = max(16, len(points) // 4)
+        if target >= len(points):
+            return None  # 采样点太少,轻量无意义
+        step = max(1, len(points) // target)
+        sub = points[::step][:target]
+        if not sub or 0 not in [int(p[0]) for p in sub]:
+            sub[0] = points[0]
+        light_dir = work / "light"
+        if light_dir.exists():
+            shutil.rmtree(light_dir)
+        light_dir.mkdir()
+        (light_dir / "nuslist").write_text(
+            "".join(" ".join(str(v) for v in p) + "\n" for p in sub),
+            encoding="utf-8",
+        )
+        try:
+            if "%" in in_file:
+                (light_dir / "fid").symlink_to(
+                    work / "fid", target_is_directory=True
+                )
+            else:
+                (light_dir / Path(in_file).name).symlink_to(
+                    work / Path(in_file).name
+                )
+        except OSError:
+            logs.append("轻量 SMILE 相位搜索:符号链接失败,跳过")
+            return None
+        nthread = resolve_nthread(params.get("nthread"))
+        td = effective_td(experiment)
+        grid_points = int(td[1]) * (int(td[2]) if len(td) > 2 else 1)
+        nthread, guard_log = enforce_smile_thread_guardrail(
+            nthread, grid_points
+        )
+        if guard_log:
+            logs.append(guard_log)
+        ext_lo = resolve_ext_lo(params.get("ext_lo"))
+        ext_hi = resolve_ext_hi(params.get("ext_hi"))
+        extract = _as_bool(params.get("extract", True))
+        baseline = expand_baseline(experiment, params.get("baseline"))
+        zero_fill = params.get("zero_fill")
+        linewidth_hz = params.get("linewidth_hz")
+        points_per_line = resolve_points_per_line(
+            params.get("points_per_line")
+        )
+        if experiment.ndim >= 3:
+            script_fn = generate_3d_nus_script
+            ext = "ft3"
+        else:
+            script_fn = generate_2d_nus_script
+            ext = "ft2"
+        out_light = f"{experiment.dataset_id}_light.{ext}"
+        script = script_fn(
+            experiment,
+            in_file=in_file,
+            nuslist="nuslist",
+            out_file=out_light,
+            nthread=nthread,
+            nuslist_count=len(sub),
+            ext_lo=ext_lo,
+            ext_hi=ext_hi,
+            nsigma=5.0,
+            thresh=0.95,
+            smile_xq3=2.0,
+            smile_scaling=True,
+            smile_report=1,
+            direct_phase=(0.0, 0.0),
+            extract=extract,
+            baseline=baseline,
+            zero_fill=zero_fill,
+            linewidth_hz=linewidth_hz,
+            points_per_line=points_per_line,
+            sampling=sampling,
+        )
+        light_com = light_dir / "light.com"
+        light_com.write_text(script, encoding="utf-8", newline="\n")
+        logs.append(
+            f"轻量 SMILE 相位搜索: {len(sub)}/{len(points)} 采样点,"
+            f"窗口 {ext_lo}-{ext_hi} ppm,PS(0,0) 重构"
+        )
+        result = runtime.run(["csh", "light.com"], cwd=str(light_dir), timeout=600)
+        logs.append(f"light.com: rc={result.returncode}")
+        light_ft = light_dir / out_light
+        if (
+            result.returncode != 0
+            or not light_ft.is_file()
+            or light_ft.stat().st_size == 0
+        ):
+            logs.append("轻量 SMILE 相位搜索失败(回退 NU-DFT/默认)")
+            return None
+        try:
+            import nmrglue as ng
+
+            _dic, data = ng.pipe.read(str(light_ft))
+            est = search_direct_phase_on_spectrum(np.asarray(data))
+        except Exception as exc:  # noqa: BLE001
+            logs.append(f"轻量谱评分失败(回退): {exc}")
+            return None
+        if est is None:
+            logs.append("轻量谱无信号(回退)")
+            return None
+        p0, p1, score = est
+        phase_file.write_text(
+            json.dumps(
+                {
+                    "version": 2,
+                    "source": "phase_only_recon",
+                    "p0": p0,
+                    "p1": p1,
+                    "score": score,
+                    "n": len(sub),
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        logs.append(
+            f"轻量 SMILE 相位: F2=({p0:g}, {p1:g}) score={score:.2f}"
+            "(已写 phase.json,正式重构复用)"
+        )
+        return p0, p1
+
 
     def _search_direct_phase(
         self,

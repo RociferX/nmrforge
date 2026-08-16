@@ -572,3 +572,65 @@ def nus_direct_phase(
     v_mean = float(np.mean(np.abs(v))) + 1e-12
     score = float(np.abs(Vf[idf])) / (np.sqrt(len(points)) * v_mean)
     return p0_corr, p1_corr, score, score - 1.0, kstar
+
+
+def _net_window_metric(profile: np.ndarray) -> float:
+    """净吸收(正面积+负面积)/总绝对面积——与现有 uniform 优化评分一致。"""
+    positive = float(np.clip(profile, 0.0, None).sum())
+    negative = float(np.clip(profile, None, 0.0).sum())
+    total = float(np.abs(profile).sum())
+    return (positive + negative) / total if total else 0.0
+
+
+def search_direct_phase_on_spectrum(
+    spectrum: np.ndarray,
+    *,
+    coarse_p0_step: float = 30.0,
+) -> tuple[float, float, float] | None:
+    """最终谱(直接维=最后一维)固定迹线中位数净吸收评分,搜索直接维 (p0, p1)。
+
+    与现有 uniform 优化(optimize_phase_sequential 默认评分)同一指标;用于
+    轻量 SMILE 重构谱的直接维相位估计(0.2.94)。返回 (p0, p1, score);
+    无信号/点数不足返回 None。
+    """
+    arr = np.asarray(spectrum)
+    if arr.ndim < 2 or arr.shape[-1] < 8:
+        return None
+    n = arr.shape[-1]
+    real = np.real(arr) if np.iscomplexobj(arr) else arr
+    traces = real.reshape(-1, n)
+    peak_mag = np.max(np.abs(traces), axis=-1)
+    corner = tuple(slice(0, min(16, s)) for s in real.shape)
+    noise = float(np.std(real[corner])) if real.size else 0.0
+    threshold = max(float(np.percentile(real, 99.5)), noise * 5.0)
+    idx = np.where(peak_mag > threshold)[0]
+    if idx.size == 0:
+        return None
+    pos = np.argmax(np.abs(traces[idx]), axis=-1)
+    comp = np.asarray(arr, dtype=np.complex128)
+
+    def _score(p0: float, p1: float) -> float:
+        k = np.arange(n, dtype=float)
+        rot = comp * np.exp(1j * np.deg2rad(p0 + p1 * k / max(n - 1, 1)))
+        rot_real = np.real(rot).reshape(-1, n)
+        vals = []
+        for i, peak in zip(idx, pos):
+            lo, hi = max(0, peak - 5), min(n, peak + 6)
+            vals.append(_net_window_metric(rot_real[i, lo:hi]))
+        return 50.0 * (float(np.median(vals)) + 1.0)
+
+    best = None
+    for p0 in np.arange(0.0, 360.0, coarse_p0_step):
+        for p1 in (-90, -60, -30, 0, 30, 60, 90):
+            s = _score(float(p0), float(p1))
+            if best is None or s > best[0]:
+                best = (s, float(p0), float(p1))
+    s0, p0, p1 = best
+    for _ in range(2):
+        for dp0 in (-15, -5, 0, 5, 15):
+            for dp1 in (-15, -5, 0, 5, 15):
+                ss = _score((p0 + dp0) % 360.0, p1 + dp1)
+                if ss > s0:
+                    best = (ss, (p0 + dp0) % 360.0, p1 + dp1)
+                    s0, p0, p1 = best
+    return p0, p1, s0

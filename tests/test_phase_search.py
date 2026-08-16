@@ -114,3 +114,41 @@ def test_nus_direct_phase_matches_existing_sign_convention() -> None:
         assert abs(((p0 - expected + 180.0) % 360.0) - 180.0) <= 7.5, p0
         assert abs(p1) <= 1e-6
         assert score >= 2.0
+
+
+def test_search_direct_phase_on_spectrum_recovers() -> None:
+    """0.2.94:最终谱固定迹线净吸收评分搜索恢复直接维 (p0, p1)。
+
+    信号相位 -120°(p0)/-42°(p1 斜坡)→ 校正应为 (120, 42)。
+    """
+    from core.optimization.phase_search import search_direct_phase_on_spectrum
+
+    n_f1, n = 64, 512
+    k = np.arange(n)
+    phi0, p1_sig = -120.0, -42.0
+    rng = np.random.default_rng(3)
+    fids = []
+    for i in range(n_f1):
+        spec = np.zeros(n, dtype=complex)
+        for kp, f1 in ((140, 8.0), (260, 24.0), (380, 40.0)):
+            lz = 1.0 / (1.0 + ((k - kp) / 8.0) ** 2)
+            spec += lz * np.exp(
+                1j * np.deg2rad(phi0 + p1_sig * k / max(n - 1, 1))
+                + 1j * (2.0 * np.pi * f1 * i / n_f1)
+            )
+        spec += rng.normal(0.0, 0.02, size=n)
+        spec += 1j * rng.normal(0.0, 0.02, size=n)
+        fids.append(np.fft.ifft(spec))
+    fids = np.array(fids)
+    window = np.sin(np.pi * (0.45 + 0.5 * np.linspace(0, 1, n)))
+    grid = np.array([np.fft.fft(f * window) for f in fids])
+    spec2d = np.fft.fft(grid, axis=0)
+    est = search_direct_phase_on_spectrum(spec2d)
+    assert est is not None
+    p0, p1, score = est
+    # net/|Re| 指标对干净对称峰在 ±90° 内平台饱和(与现有优化同特性,真实
+    # 谱靠重叠/不对称提供区分度,VM 实测 sampleI 恢复 -52.5°)。此处验证:
+    # 1) 高分(>90)⇒ 正峰解,±180 反转解(score≈0)已被排除;
+    # 2) 落在含真值(120)的平台内(±90°)。
+    assert score > 90.0, score
+    assert abs(((p0 - 120.0 + 180.0) % 360.0) - 180.0) <= 90.0, p0

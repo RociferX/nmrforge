@@ -1,5 +1,25 @@
 # 变更日志
 
+## [0.2.94] - 2026-08-16
+
+- 实装「phase-only 轻量 SMILE」模式(用户方案;实验性,默认关闭):
+  - core.optimization.phase_search.search_direct_phase_on_spectrum:最终谱
+    固定迹线中位数净吸收评分搜索直接维 (p0, p1)(与现有 uniform 优化同一
+    指标,含 ±180 正峰消歧);
+  - backend.reconstruct_nus 增 params["light_phase_search"]=True:子采样
+    nuslist(目标 max(16, n/4),强制含点 0)→ work/light/ 子目录(符号链接
+    复用转换产物 + 子采样 nuslist)→ PS(0,0) 轻量 SMILE → 评分搜 F2 →
+    写 phase.json(v2, source=phase_only_recon)→ 正式 SMILE 复用;
+  - VM 实测(sampleA 25% NUS):轻量路径端到端 1.2s(轻量 16 点 + 正式 32 点);
+    但 16 点子采样重构把直接维相位带偏 ~55°(该谱 (55,45) 评分 95.1 vs
+    (0,0) 86.9,非平台——重构伪影污染固定迹线中位数评分);32 点重构也轻微
+    偏好 (55,45) 而非真值 (356.7,0);
+  - 结论:重构伪影随采样率下降而增大,「轻量重构 + 现有评分」在激进子采样
+    下达不到现有方法精度;模式保留但默认关闭,待真实数据(高采样率)验证或
+    改为温和子采样后再启用;
+  - 测试:search_direct_phase_on_spectrum 单测(±180 消歧 + 平台语义);
+    全量 486 passed(1 失败为 GUI 遗留 ext_lo 断言),ruff 全绿。
+
 ## [0.2.93] - 2026-08-16
 
 - 真实 2D uniform 数据对比(VM sampleI):NU-DFT vs 现有优化,结论:
