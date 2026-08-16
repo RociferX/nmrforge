@@ -720,10 +720,13 @@ class NMRPipeBackend:
         sampling: dict[str, Any] | None = None,
         out_file: str | None = None,
         script_name: str | None = None,
+        planes: str | None = None,
     ) -> dict[str, Any]:
         """从 SMILE 重构平面做间接维 FT 定稿(逐维相位候选,不重跑 SMILE)。
 
         phases:{轴 -> (p0, p1)},缺省 0;供逐维相位优化(用户方案)。
+        planes:重构平面输入覆盖(默认 nus3d_rc/test%04d.ft1 或
+        nus2d/recon.ft1;显示层填相位用 nus3d_rc_ph/ 副本)。
         """
         bin_dir = self._bin_dir()
         if bin_dir is None:
@@ -733,8 +736,13 @@ class NMRPipeBackend:
                 "logs": [],
             }
         work = Path(work_dir) if work_dir else self._work_path(experiment)
+        if planes is None:
+            planes = (
+                "nus3d_rc/test%04d.ft1"
+                if experiment.ndim >= 3
+                else "nus2d/recon.ft1"
+            )
         if experiment.ndim >= 3:
-            planes = "nus3d_rc/test%04d.ft1"
             if not (work / "nus3d_rc").is_dir():
                 return {
                     "success": False,
@@ -742,7 +750,6 @@ class NMRPipeBackend:
                     "logs": [],
                 }
         else:
-            planes = "nus2d/recon.ft1"
             if not (work / "nus2d" / "recon.ft1").is_file():
                 return {
                     "success": False,
@@ -1055,10 +1062,16 @@ class NMRPipeBackend:
         """显示层相位搜索(0.2.96,nmrDraw 思路):在复型重构平面上做对称性
         评分(直接维在 axis 0),无需 Hilbert/额外后端。返回 (p0, p1, score);
         无干净信号峰返回 None。
+
+        0.2.98:3D 平面文件为「第一轴实/虚交错」实型存储(nmrglue 读成翻倍
+        实型),此前直接当复型旋转/评分是错误约定——现用 read_pipe_complex
+        拆包复型后再搜索;2D recon.ft1 为 nmrglue 直接可读的复型。3D 按
+        间接维增量均布子采样(≤8 个平面,直接维 1×TD),控制搜索成本。
         """
         try:
             import nmrglue as ng
 
+            from core.data.pipe_io import read_pipe_complex
             from core.optimization.phase_search import (
                 search_direct_phase_on_spectrum,
             )
@@ -1068,14 +1081,18 @@ class NMRPipeBackend:
                 paths = sorted(plane_dir.glob("test*.ft1"))
                 if not paths:
                     return None
-                arrays = []
-                for path in paths[:8]:
-                    _dic, data = ng.pipe.read(str(path))
-                    arrays.append(np.asarray(data))
+                if len(paths) > 8:
+                    index = np.linspace(0, len(paths) - 1, 8).astype(int)
+                    paths = [paths[i] for i in index]
+                arrays = [read_pipe_complex(path) for path in paths]
                 arr = (
                     np.stack(arrays, axis=-1)
                     if len(arrays) > 1
                     else arrays[0]
+                )
+                logs.append(
+                    f"显示层相位搜索: 3D 复型平面 {len(arrays)} 个"
+                    f"(增量子采样,直接维 axis 0)"
                 )
             else:
                 recon = work / "nus2d" / "recon.ft1"
@@ -1107,33 +1124,65 @@ class NMRPipeBackend:
         logs: list[str],
     ) -> bool:
         """最后一步填相位:旋转复型重构平面直接维(axis 0)后重跑 stage-2
-        finalize(便宜,非 SMILE),终谱带正确直接维相位。"""
+        finalize(便宜,非 SMILE),终谱带正确直接维相位。
+
+        0.2.98:旋转结果写入副本(nus3d_rc_ph/ 或 recon_ph.ft1)而不是原地
+        改写源平面——源平面保持 PS(0,0) 复型供后续复用/重搜;3D 平面为
+        第一轴实/虚交错实型存储,旋转前必须 read_pipe_complex 拆包复型。
+        """
         try:
             import nmrglue as ng
+
+            from core.data.pipe_io import read_pipe_complex
 
             if experiment.ndim >= 3:
                 plane_dir = work / "nus3d_rc"
                 paths = sorted(plane_dir.glob("test*.ft1"))
+                if not paths or not paths[0].is_file():
+                    return False
+                out_dir = work / "nus3d_rc_ph"
+                if out_dir.exists():
+                    shutil.rmtree(out_dir)
+                out_dir.mkdir()
+                for path in paths:
+                    dic, _data = ng.pipe.read(str(path))
+                    arr = read_pipe_complex(path)
+                    n = arr.shape[0]  # 直接维在 axis 0
+                    k = np.arange(n, dtype=float)
+                    ramp = np.exp(
+                        1j * np.deg2rad(p0 + p1 * k / max(n - 1, 1))
+                    ).reshape(n, *([1] * (arr.ndim - 1)))
+                    rot = arr * ramp
+                    ng.pipe.write(
+                        str(out_dir / path.name),
+                        dic,
+                        rot.astype(np.complex64),
+                        overwrite=True,
+                    )
+                planes = "nus3d_rc_ph/test%04d.ft1"
             else:
-                paths = [work / "nus2d" / "recon.ft1"]
-            if not paths or not paths[0].is_file():
-                return False
-            for path in paths:
-                dic, data = ng.pipe.read(str(path))
+                recon = work / "nus2d" / "recon.ft1"
+                if not recon.is_file():
+                    return False
+                dic, data = ng.pipe.read(str(recon))
                 arr = np.asarray(data)
-                n = arr.shape[0]  # 直接维在 axis 0
+                n = arr.shape[0]
                 k = np.arange(n, dtype=float)
                 ramp = np.exp(
                     1j * np.deg2rad(p0 + p1 * k / max(n - 1, 1))
                 ).reshape(n, *([1] * (arr.ndim - 1)))
                 rot = arr * ramp
+                out_file = work / "nus2d" / "recon_ph.ft1"
                 ng.pipe.write(
-                    str(path),
+                    str(out_file),
                     dic,
                     rot.astype(np.complex64),
                     overwrite=True,
                 )
-            resp = self.finalize_nus(experiment, work_dir=work)
+                planes = "nus2d/recon_ph.ft1"
+            resp = self.finalize_nus(
+                experiment, work_dir=work, planes=planes
+            )
             if not resp.get("success"):
                 logs.append(f"finalize 重渲失败: {resp.get('message')}")
                 return False
