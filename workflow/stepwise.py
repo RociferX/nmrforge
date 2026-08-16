@@ -136,38 +136,83 @@ def generate_spectrum(
     work_dir: Path | str | None = None,
     progress: Callable[[str], None] | None = None,
 ) -> str:
-    """第 3 步:生成谱图(NUS 自动走 SMILE 重构;复用已转换 fid)。"""
+    """第 3 步:生成谱图(NUS 自动走 SMILE 重构;复用已转换 fid)。
+
+    params["phase_route"] 选择相位优化途径:
+    - "simple"(默认):先跑一遍 → 实型谱逐维显示层调相 → 重跑一遍;
+    - "advanced":uniform 全维度后端优化,NUS 混合(直接维显示层 +
+      间接维后端候选);
+    - "none":保持旧路径,直接 process/reconstruct_nus,不额外优化。
+    """
     experiment = _read_experiment(manager, exp_id, data_id)
     work = Path(work_dir) if work_dir else _work_dir(manager, exp_id, data_id)
     _ensure_work_dir(backend, work)
     params = dict(params or {})
-    if experiment.sampling.mode is SamplingMode.NUS:
-        workflow_ref = "reconstruct_nus"
-        resp = backend.reconstruct_nus(experiment, params, progress=progress)
+    route = str(params.pop("phase_route", "simple"))
+    plan = select_method(experiment)
+    if route == "none":
+        if experiment.sampling.mode is SamplingMode.NUS:
+            workflow_ref = "reconstruct_nus"
+            resp = backend.reconstruct_nus(experiment, params, progress=progress)
+        else:
+            workflow_ref = "process"
+            resp = backend.process(
+                experiment, plan, params=params, progress=progress
+            )
+        logs = list(resp.get("logs", []))
+        if not resp.get("success"):
+            raise StepwiseError(
+                str(resp.get("message", "谱图生成失败")) + " | " + " | ".join(logs)
+            )
+        spectrum_path = _register_spectrum(
+            manager, exp_id, data_id, str(resp.get("spectrum_path", ""))
+        )
+        merged_params = dict(resp.get("effective_params") or {})
+        merged_params.update(params)
+        _finish_step(
+            manager,
+            exp_id,
+            data_id,
+            workflow_ref,
+            outputs={"spectrum_path": spectrum_path},
+            message="生成谱图",
+            params=merged_params,
+        )
+        return spectrum_path
+
+    if route not in ("simple", "advanced"):
+        raise StepwiseError(f"未知 phase_route: {route}")
+
+    from workflow.phase_routes import advanced_route, simple_route
+
+    if route == "simple":
+        result = simple_route(
+            experiment, backend, plan=plan, work_dir=work, base_params=params
+        )
+        workflow_ref = "phase_optimize_simple"
     else:
-        workflow_ref = "process"
-        plan = select_method(experiment)
-        resp = backend.process(
-            experiment, plan, params=params, progress=progress
+        result = advanced_route(
+            experiment, backend, plan=plan, work_dir=work, base_params=params
         )
-    logs = list(resp.get("logs", []))
-    if not resp.get("success"):
-        raise StepwiseError(
-            str(resp.get("message", "谱图生成失败")) + " | " + " | ".join(logs)
-        )
+        workflow_ref = "phase_optimize_advanced"
+
+    if not result.get("spectrum_path"):
+        raise StepwiseError("相位优化未产出谱图")
     spectrum_path = _register_spectrum(
-        manager, exp_id, data_id, str(resp.get("spectrum_path", ""))
+        manager, exp_id, data_id, str(result.get("spectrum_path"))
     )
-    # 实际生效参数(effective_params)与调用方 params 合并,调用方显式参数优先
-    merged_params = dict(resp.get("effective_params") or {})
-    merged_params.update(params)
+    merged_params = dict(params)
+    merged_params["phase_route"] = route
+    for key in ("phases", "baseline", "fill", "backend_runs", "direct_phase"):
+        if key in result:
+            merged_params[key] = result[key]
     _finish_step(
         manager,
         exp_id,
         data_id,
         workflow_ref,
         outputs={"spectrum_path": spectrum_path},
-        message="生成谱图",
+        message="生成谱图(相位优化)",
         params=merged_params,
     )
     return spectrum_path
@@ -209,7 +254,9 @@ def optimize_phase_brute_force(
     work = Path(work_dir) if work_dir else _work_dir(manager, exp_id, data_id)
     _ensure_work_dir(backend, work)
     if not data_entry.spectrum_path or not Path(data_entry.spectrum_path).is_file():
-        generate_spectrum(manager, exp_id, data_id, backend, work_dir=work)
+        generate_spectrum(
+            manager, exp_id, data_id, backend, work_dir=work, params={"phase_route": "none"}
+        )
 
     p1_values: tuple[float, ...] | None = None
     if candidates is not None:
