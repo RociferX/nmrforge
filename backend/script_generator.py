@@ -470,6 +470,7 @@ def _stage_lines(
     keep_direct_complex: bool = False,
     direct_axis: str = "",
     complex_axes: frozenset[str] | None = None,
+    skip_baseline_axes: frozenset[str] | None = None,
 ) -> list[str]:
     lines: list[str] = []
     for op, params in stages:
@@ -533,8 +534,10 @@ def _stage_lines(
                 f"| nmrPipe -fn PS -p0 {_fmt(p0)} -p1 {_fmt(p1)}{di} \\"
             )
         elif op == "baseline":
-            cfg = dict(params)
             axis = str(params.get("axis", ""))
+            if skip_baseline_axes and axis in skip_baseline_axes:
+                continue  # 预览搜索轴:跳过 POLY(见 generate_preview_script)
+            cfg = dict(params)
             if baseline and axis in baseline:
                 cfg.update(baseline[axis])
             if not _as_bool(cfg.get("enabled", True)):
@@ -567,6 +570,7 @@ def generate_process_script(
     sampling: dict[str, Any] | None = None,
     keep_direct_complex: bool = False,
     complex_axes: frozenset[str] | None = None,
+    skip_baseline_axes: frozenset[str] | None = None,
 ) -> str:
     """把处理计划（DAG）翻译为 NMRPipe 管道脚本（直接维 → EXT → TP → 间接维）。
 
@@ -597,6 +601,7 @@ def generate_process_script(
             keep_direct_complex=keep_direct_complex and index == 0,
             direct_axis=axes[0],
             complex_axes=complex_axes,
+            skip_baseline_axes=skip_baseline_axes,
         )
         if extract and index == 0:
             lines.append(
@@ -632,6 +637,11 @@ def generate_preview_script(
 
     输出为生产布局复型文件(pipe2xyz -x),显示层读该文件沿 preview_axis
     的数组轴做内存旋转评分。3D 的 F2/F1 预览同样走生产布局,避免转置歧义。
+
+    preview_axis 自身跳过 POLY:旧方案候选是「旋转取实后再逐候选 POLY
+    重拟合」;若把 (0,0) 状态拟合的 POLY 固化进预览,内存旋转后基线会被
+    污染并偏置评分(VM sampleF F1 被带偏 30°,去 POLY 后与旧方案一致)。
+    其它轴(已固定相位)的 POLY 保留,与旧候选一致。
     """
     axes = [dim.logical_axis for dim in experiment.dimensions]
     zf_none = {axis: {"mode": "none"} for axis in axes}
@@ -657,6 +667,7 @@ def generate_preview_script(
         extract=extract,
         sampling=sampling,
         complex_axes=frozenset({preview_axis}),
+        skip_baseline_axes=frozenset({preview_axis}),
     )
 
 

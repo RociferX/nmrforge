@@ -108,6 +108,7 @@ def test_preview_script_2d_f2_keeps_complex(bruker_dir: Path) -> None:
     assert "| nmrPipe -fn PS -p0 0 -p1 0 -di \\" in script  # F1 加 -di
     assert "| nmrPipe -fn ZF" not in script  # 零填零(与旧相位候选同参)
     assert script.count("| nmrPipe -fn PS") == 2
+    assert script.count("| nmrPipe -fn POLY") == 1  # 搜索轴 F2 跳过 POLY
     assert "| pipe2xyz -out p_F2.ft2 -x" in script
 
 
@@ -129,6 +130,7 @@ def test_preview_script_2d_f1_fixed_phases_only_other_axes(bruker_dir: Path) -> 
     assert "| nmrPipe -fn PS -p0 0 -p1 0 \\" in script
     assert "| nmrPipe -fn PS -p0 5 -p1 0 -di \\" in script  # F2 固定相位应用
     assert "p0 10" not in script
+    assert script.count("| nmrPipe -fn POLY") == 1  # 搜索轴 F1 跳过 POLY
 
 
 def test_preview_script_3d(bruker_dir: Path) -> None:
@@ -145,6 +147,7 @@ def test_preview_script_3d(bruker_dir: Path) -> None:
     assert "| nmrPipe -fn PS -p0 0 -p1 0 \\" in script
     assert script.count("| nmrPipe -fn TP") == 2
     assert "| nmrPipe -fn ZF" not in script
+    assert script.count("| nmrPipe -fn POLY") == 2  # 搜索轴 F2 跳过 POLY
 
 
 def test_2d_nus_script(bruker_dir: Path) -> None:
