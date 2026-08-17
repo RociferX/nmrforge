@@ -64,7 +64,7 @@ PHASE_PLATEAU_TOL = 1.0
 # 内存统一方案的 p1 采纳最小增益:旧算法 p1 精修/联合复核任何正增益都采纳,
 # 但 p1 是弱维度(±22.5 网格),微小增益采纳会把 p1 带偏(VM sampleB F2 出现 -27.5°);
 # 按「最小修正」原则,只采纳 ≥1.0 分增益的 p1(sampleB 手动 F2=(90,0))。
-P1_REFINE_MIN_GAIN = 1.0
+P1_REFINE_MIN_GAIN = 2.0
 PHASE_SYMMETRY_TOL = 2.5
 
 
