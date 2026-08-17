@@ -1,5 +1,39 @@
 # 变更日志
 
+
+## [0.2.106] - 2026-08-17
+
+- 相位优化统一为「逐维复型预览 + 内存调相」(替代简单/进阶分派):
+  - 第一遍:整条生产管道仅搜索轴 PS 不加 -di(其它轴按已固定相位 -di)、
+    零填零,输出生产布局复型文件(uniform 每轴一条;NUS 直接维复用 SMILE
+    recon 复型平面,间接维由 finalize 复型预览提供——该轴不加 -di,
+    FT/-alt/ZTP 约定由真实后端保证);
+  - 内存调相:固定迹线净吸收评分(旧算法判断标准),粗网格+细化+门控+
+    联合复核原样搬到内存,零额外 SMILE;
+  - 末遍:窗函数/填零/基线/各维 PS/EXT/-di 完整重跑出良谱。
+- 实验类型符号早约束:presets 新增 peak_sign(uniform/mixed;HNCACB=mixed),
+  mixed 用「|净吸收| 中位数 + 正负共存」评分(uniform 保持签名净吸收);
+  VM sampleB(HNCACB)间接维 p0 恢复手动 F2=90°/F1≈0°。
+- 离散峰迹线选择(仅 mixed 实验):95 分位阈值 + 半高占窗比(duty)与峰
+  显著性过滤中央混杂峰团;uniform 保持旧 99.5 分位全部强迹线锁定
+  (离散过滤曾把 sampleL 带偏 180°,已限定范围)。
+- 3D 输出轴序实测为 (F2,F1,F3)(FDF 头标签不可靠),复型预览按搜索轴拆包
+  (交错实型轴不固定);NUS 直接维沿用旧对称性搜索(|p1|>20° 归零)。
+- 删除 nmrPipe HT / scipy hilbert 路径:phase_ht_candidate_axis、
+  phase_ht_candidate、hilbert_spectrum、display_phase_engine、
+  display_hybrid_optimize(及其测试)。
+- generate_spectrum 默认 phase_route=unified,phase_route=none 保留逃生口;
+  VM 前置实验确认 SMILE 不接受复型直接维输入(报错 Imaginary in the
+  direct dim must be deleted),NUS stage1 保持 -di。
+- VM 全谱型同决策回归:sampleI/103/3/4/5、sampleA 25%/100%、sampleB;
+  p0 一致(±2.5–10°,大多 ≤5°),sampleL 旧简单路径 F2=0°/F1=300° 异常
+  消除;sampleB F2=90° 与手动一致,后端次数 46→3(uniform)/47→4(3D NUS)。
+
+## [0.2.105] - 2026-08-17
+
+- 第一遍 uniform 直接维 PS 保留真实虚部(keep_direct_complex),为逐维复型
+  预览铺路(后续 0.2.106 统一方案取代)。
+
 ## [0.2.104] - 2026-08-17
 
 - 简单途径改为逐维 nmrPipe PS -ht:目标轴转置到管道轴(2D 间接维 -y),

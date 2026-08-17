@@ -172,31 +172,57 @@
 结论:不再分简单/进阶两条途径,统一为一种途径;显示层虚部必须是
 FID 复型 FT 后的真实虚部,不再用 HT 重建。
 
-### 流程
+### 流程(已落地,2026-08-17)
 
-1. 第一遍:每个维度只做 FT(直接维保留 EXT 窗口),所有 PS 都不加 -di;
-   按轴把该维作为管道轴单独 `pipe2xyz` 输出复型文件:
-   - 直接维:`-x`;
-   - 2D 间接维 F1:`-y`;
-   - 3D F2:`-y`,F1:`-z`;
-   - NUS 间接维直接复用 SMILE recon 复型平面(nus2d/recon.ft1 /
-     nus3d_rc/test%04d.ft1)。
-2. 显示层调相:读取这些真实复型文件,在内存做频域旋转取实部,用
-   固定迹线净吸收评分逐维搜 (p0,p1);零额外后端;NUS 间接维做 ±90°
-   消歧即可。
-3. 最后完整重跑:窗函数、填零、基线、各维 PS(填入相位)、EXT、-di,
-   一次生成良谱。
+1. 第一遍(复型预览):整条生产管道,仅「搜索轴」的 PS 不加 -di(该轴输出真实
+   虚部),其它轴按已固定相位加 -di;零填零(与旧相位候选同参);输出生产布局
+   复型文件(pipe2xyz -x,不是逐轴 -y/-z——避免转置歧义):
+   - uniform:每轴一条预览管道(2D 两条 F1/F2、3D 三条 F3/F2/F1),后一轴
+     预览携带前一轴已搜出的固定相位(旧算法逐轴固定语义);
+   - NUS:直接维复用 SMILE recon 复型平面(axis 0);间接维由 finalize 复型
+     预览提供(该轴不加 -di,FT/-alt/ZTP 约定由真实后端保证)。
+2. 显示层调相:读复型文件,内存频域旋转取实部,固定迹线净吸收评分逐维搜
+   (p0,p1)——粗网格 p0 30° → 1/3 细化到 5° → 平台圆中位数 → ±90° 对称性
+   消歧 → p1 {0,±22.5};平坦门控/可复现性/联合复核与旧算法一致;零额外
+   SMILE。NUS 直接维沿用旧 0.2.96 对称性搜索(|p1|>20° 归零,score<30 保持
+   (0,0))。
+3. 最后完整重跑:窗函数、填零、基线、各维 PS(填入相位)、EXT、-di,一次生成
+   良谱(uniform process;NUS finalize,直接维相位先旋转 recon 平面副本)。
 
-### 关键原则
+### 关键原则(落地修正)
 
-- 后端只跑两次:第一遍出复型数据,最后一遍完整处理;调相在内存。
-- 所有维度都保留真实虚部,不使用 nmrPipe HT / scipy hilbert。
-- 删除 simple/advanced 分派;`params["phase_route"]="none"` 保留为
-  旧暴力路径的逃生口。
-- NUS SMILE 能否接受复型直接维输入需 VM 实验确认后,再改 stage1 的
-  `-di`;在此之前 NUS 直接维暂保持实型并待实验。
+- 后端次数:uniform 2D = 3(2 预览 + 1 终跑)、3D = 4;NUS 2D = 3(SMILE +
+  1 预览 + 1 finalize)、3D = 4(SMILE + 2 预览 + 1 finalize)。全部为廉价
+  nmrPipe/finalize,无额外 SMILE。
+- 不用 nmrPipe HT / scipy hilbert(已删 phase_ht_candidate_axis/
+  phase_ht_candidate/hilbert_spectrum/display_phase_engine/
+  display_hybrid_optimize)。
+- 删除 simple/advanced 分派;`params["phase_route"]="none"` 保留旧路径逃生口。
+- SMILE 前置实验结论:不接受复型直接维输入(报错 Imaginary in the direct
+  dim must be deleted)→ NUS stage1 的 -di 保持。
+- 3D 输出轴序实测为 (F2,F1,F3)(FDF 头标签不可靠);复型预览按搜索轴拆包
+  (交错实型轴不固定:F2 预览在轴 0、F1 预览在轴 1)。
+- 实验类型符号早约束(0.2.106):presets/*.yaml 新增 peak_sign(uniform/mixed;
+  HNCACB=mixed)。mixed 评分 = |各窗净吸收| 中位数 + 正负共存约束(缺一种
+  符号 ×0.7);uniform 保持签名净吸收中位数(正峰偏好消解 ±180)。
+- 离散峰迹线选择(仅 mixed 实验):阈值 95 分位 + 半高占窗比(duty)≤0.5 +
+  峰显著性 ≥2.5,过滤中央混杂峰团;uniform 保持旧 99.5 分位全部强迹线锁定
+  (离散过滤曾把 sampleL 带偏 180°,已限定范围)。
+- POLY 顺序:预览对搜索轴跳过 POLY(旧方案逐候选旋转取实后再 POLY;固化
+  (0,0) POLY 会在内存旋转后污染评分,VM sampleF F1 校准)。3D finalize 本来
+  就无 POLY。
 
 ### 状态
 
-- uniform 直接维保留真实虚部已落地(sampleI F2 300°/F1 95°,残差 ≤10°);
-- 逐维复型输出、NUS 复型输入、统一分派、删除 HT 路径为待办。
+- 已落地:逐维复型预览(uniform/NUS)、内存调相(旧算法判断标准)、符号早约束、
+  离散峰选择、3D 轴序修复、删 HT 与简单/进阶分派、generate_spectrum 统一
+  默认流程(phase_route=none 保留)。
+- VM 全谱型同决策回归(sampleI/103/3/4/5、sampleA 25%/100%、sampleB):
+  p0 与旧 optimize_phase_sequential 一致(±2.5–10°,大多 ≤5°);
+  sampleL 旧简单路径 F2=0°/F1=300° 异常消除(统一方案 F2=307.5°/F1=87.5°);
+  sampleB(HNCACB)F2=90°/F1≈0° 与手动一致(旧 sequential 为门控回退 (0,0));
+  nus20_100/nus20_25 直接维与 F1 均 (0,0)/(5,0)。
+- 待办:基线/填零评估结果回写(assess_baseline/assess_fill 曾属显示引擎,
+  已随 HT 路径删除,统一流程的基线/填零由 params 显式控制);3D uniform
+  实测(无现成 3D uniform 数据集);±180° 符号歧义在 mixed 实验仍存在
+  (需峰归属先验,超出相位搜索范围)。
