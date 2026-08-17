@@ -60,6 +60,49 @@ def score_axis_memory(
     return 50.0 * (median + 1.0)
 
 
+def _lock_discrete_traces(
+    complex_arr: np.ndarray,
+    axis: int,
+    *,
+    prominence_min: float = 2.5,
+    window: int = 10,
+    threshold_pct: float = 95.0,
+) -> tuple[list[int], list[int]]:
+    """锁定「离散峰」迹线用于调相评分。
+
+    与人工 nmrDraw「挑离散峰调相」一致:中央混杂峰团(宽平台/多峰叠加)
+    难调相且会带偏评分,这里按峰位处 |trace| 相对局部背景的低分位显著性
+    (prominence)过滤——离散尖峰的局部背景远低于峰顶(prominence 高),
+    混杂峰团背景接近峰顶(prominence 低)。阈值逻辑与旧方案一致
+    (max(99.5 分位, noise×5)),无离散峰时回退全部超过阈值的迹线。
+    """
+    real0 = np.real(complex_arr)
+    moved = np.moveaxis(real0, axis, -1)
+    traces = moved.reshape(-1, moved.shape[-1])
+    n = moved.shape[-1]
+    noise = float(np.std(real0[:80, :40])) if real0.size else 0.0
+    # 阈值放宽到 95 分位(中央大团会抬高 99.5 分位,把离散峰淘汰);
+    # 无离散峰时逐级降阈值回退
+    for pct in (threshold_pct, 75.0):
+        threshold = max(float(np.percentile(real0, pct)), noise * 5.0)
+        indices: list[int] = []
+        positions: list[int] = []
+        for i in range(traces.shape[0]):
+            mag = np.abs(traces[i])
+            peak = int(np.argmax(mag))
+            if float(mag[peak]) <= threshold:
+                continue
+            lo = max(0, peak - window)
+            hi = min(n, peak + window + 1)
+            bg = float(np.percentile(mag[lo:hi], 25.0))
+            if float(mag[peak]) / (bg + 1e-12) >= prominence_min:
+                indices.append(i)
+                positions.append(peak)
+        if indices:
+            return indices, positions
+    return _trace_indices_fixed(real0, axis, -1.0)
+
+
 def _subsampled_score_memory(
     real: np.ndarray, axis: int, k: int = 500, group: str = "even"
 ) -> float:
@@ -119,16 +162,13 @@ def search_axis_memory(
     def _score(p0: float, p1: float) -> float:
         return score_axis_memory(arr, axis, p0, p1, trace_indices, trace_positions)
 
-    # 基线 (0,0) 锁定迹线(与旧方案一致:阈值 = max(99.5 分位, noise×5))
-    baseline_real = rotate_real(arr, axis, 0.0, 0.0)
-    noise = float(np.std(baseline_real[:80, :40])) if baseline_real.size else 0.0
-    threshold = max(float(np.percentile(baseline_real, 99.5)), noise * 5.0)
-    trace_indices, trace_positions = _trace_indices_fixed(
-        baseline_real, axis, threshold
-    )
+    # 基线 (0,0) 锁定「离散峰」迹线(阈值同旧方案,另按峰位显著性过滤
+    # 中央混杂峰团,VM sampleB 校准:混杂大团会带偏相位,离散峰可调到
+    # F2=(90,0)/F1=(0,0))
+    trace_indices, trace_positions = _lock_discrete_traces(arr, axis)
     if not trace_indices:
         trace_indices, trace_positions = _trace_indices_fixed(
-            baseline_real, axis, -1.0
+            np.real(arr), axis, -1.0
         )
     if not trace_indices:
         return None

@@ -97,6 +97,32 @@ def test_score_axis_memory_matches_formula() -> None:
     assert s > 95.0  # 纯吸收谱应接近满分
 
 
+def test_lock_discrete_traces_excludes_clump() -> None:
+    """离散尖峰迹线入选,中央混杂大团(宽平台)被排除(用户反馈:混杂峰团
+    会带偏相位,只调离散峰)。"""
+    from workflow.memory_phase_search import _lock_discrete_traces
+
+    n0, n1 = 128, 128
+    k0 = np.arange(n0, dtype=float)
+    k1 = np.arange(n1, dtype=float)
+    arr = np.zeros((n0, n1), dtype=np.complex128)
+    w = 1.2
+    z0 = 1.0 / (1.0 + 1j * (k0 - 30) / w)
+    arr += 400.0 * np.outer(z0, 1.0 / (1.0 + ((k1 - 40) / 2.0) ** 2))
+    # 中央大团:幅度 300、宽 8、间隔 8 的多峰叠加(尾部不淹没离散峰)
+    for c0 in range(60, 97, 8):
+        for c1 in range(56, 97, 8):
+            zz0 = 1.0 / (1.0 + ((k0 - c0) / 8.0) ** 2)
+            zz1 = 1.0 / (1.0 + ((k1 - c1) / 8.0) ** 2)
+            arr += 300.0 * np.outer(zz0, zz1)
+    idx, pos = _lock_discrete_traces(arr, 0)
+    assert idx, "应有迹线入选"
+    # 离散峰位于 k0=30;大团位于 k0>=60。多数入选迹线峰位应落在离散峰附近
+    near = sum(1 for p0 in pos if abs(p0 - 30) <= 5)
+    assert near / len(pos) >= 0.7, (near, len(pos))
+    assert len(idx) < n1, "不应选中全部迹线"
+
+
 def test_joint_recheck_tie_keeps_fixed() -> None:
     """联合复核 p1 平坦(±5° 同分)时,不应显著优于顺序固定(调用方按
     PHASE_SCORE_FLAT_MARGIN 门控,不再整体回退)。"""
