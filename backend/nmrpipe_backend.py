@@ -804,6 +804,64 @@ class NMRPipeBackend:
             "logs": logs,
         }
 
+    def phase_ht_candidate_axis(
+        self,
+        spectrum_path: Path | str,
+        axis: int,
+        p0: float,
+        p1: float,
+        *,
+        work_dir: Path | str | None = None,
+        out_file: str | None = None,
+        timeout: float = 600.0,
+    ) -> dict[str, Any]:
+        """把指定轴转置到管道轴后跑 nmrPipe PS -ht,生成该维候选显示谱。
+
+        axis 为谱数组轴(0=F1,1=F2,2=F3);输出为转置布局,目标轴在最后轴。
+        """
+        import nmrglue as ng
+
+        bin_dir = self._bin_dir()
+        if bin_dir is None:
+            return {"success": False, "message": "未找到 nmrPipe", "logs": []}
+        work = Path(work_dir) if work_dir else Path(spectrum_path).parent
+        work.mkdir(parents=True, exist_ok=True)
+        src = Path(spectrum_path)
+        if src.parent.resolve() != work.resolve():
+            shutil.copy2(src, work / src.name)
+        _dic, data = ng.pipe.read(str(src))
+        ndim = int(_dic.get("FDDIMCOUNT", 2) or 2)
+        # 目标轴 -> xyz2pipe 输出向量标志;最后轴(直接管道轴)无需转置
+        if axis == ndim - 1:
+            cmd = ["nmrPipe", "-in", src.name, "|", "nmrPipe", "-fn", "PS",
+                   "-p0", f"{p0:g}", "-p1", f"{p1:g}", "-ht", "-di",
+                   "-out", "", "-ov"]
+        else:
+            if ndim == 2:
+                vec = "-y"
+            else:
+                vec = {0: "-z", 1: "-y", 2: "-x"}.get(axis, "-y")
+            out_base = out_file or (
+                f"{src.stem}_ax{axis}_ph_{p0:g}_{p1:g}.{src.suffix.lstrip('.')}"
+            )
+            cmd = ["xyz2pipe", "-in", src.name, vec,
+                   "|", "nmrPipe", "-fn", "PS",
+                   "-p0", f"{p0:g}", "-p1", f"{p1:g}", "-ht", "-di",
+                   "|", "pipe2xyz", "-out", out_base, "-x"]
+        out_name = out_file or (
+            f"{src.stem}_ax{axis}_ph_{p0:g}_{p1:g}.{src.suffix.lstrip('.')}"
+        )
+        if axis == ndim - 1:
+            cmd[-2] = out_name
+        runtime = CshRuntime()
+        result = runtime.run(cmd, cwd=str(work), timeout=timeout)
+        logs = [f"nmrPipe PS -ht(axis {axis}): rc={result.returncode}"]
+        out = work / out_name
+        if result.returncode != 0 or not out.is_file() or out.stat().st_size == 0:
+            return {"success": False, "message": "nmrPipe PS -ht(axis) 失败", "logs": logs}
+        logs.append(f"候选显示谱 → {out}")
+        return {"success": True, "spectrum_path": str(out), "logs": logs}
+
     def phase_ht_candidate(
         self,
         spectrum_path: Path | str,
@@ -823,6 +881,7 @@ class NMRPipeBackend:
         if bin_dir is None:
             return {"success": False, "message": "未找到 nmrPipe", "logs": []}
         work = Path(work_dir) if work_dir else Path(spectrum_path).parent
+        work.mkdir(parents=True, exist_ok=True)
         src = Path(spectrum_path)
         if src.parent.resolve() != work.resolve():
             shutil.copy2(src, work / src.name)

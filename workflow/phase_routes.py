@@ -51,6 +51,58 @@ def estimate_all_axes(
     return phases
 
 
+def _axis_net_absorption(path: str, axis: int) -> float:
+    """候选显示谱沿 axis 动态锁定峰位后,固定迹线净吸收中位数。"""
+    import nmrglue as ng
+
+    from workflow.phase_optimize import _trace_indices_fixed, _trace_metrics_median
+
+    _dic, data = ng.pipe.read(path)
+    real = np.real(np.asarray(data)).astype(float)
+    indices, positions = _trace_indices_fixed(real, axis)
+    if not indices:
+        return 0.0
+    return 50.0 * (_trace_metrics_median(real, axis, indices, positions) + 1.0)
+
+
+def estimate_axis_phase_ht(
+    backend: Any,
+    spectrum_path: Path | str,
+    axis: int,
+    *,
+    work_dir: Path | str | None = None,
+    coarse_p0_step: float = 30.0,
+) -> tuple[float, float, float] | None:
+    """对任意谱轴用 nmrPipe PS -ht 候选 + 动态峰锁定评分估计相位。"""
+    path = Path(spectrum_path)
+
+    def score(p0: float, p1: float) -> float:
+        resp = backend.phase_ht_candidate_axis(
+            path, axis, p0, p1, work_dir=work_dir
+        )
+        if not resp.get("success") or not resp.get("spectrum_path"):
+            return 0.0
+        return _axis_net_absorption(str(resp["spectrum_path"]), -1)
+
+    best = None
+    for p0 in np.arange(0.0, 360.0, coarse_p0_step):
+        s = score(float(p0), 0.0)
+        if best is None or s > best[0]:
+            best = (s, float(p0), 0.0)
+    assert best is not None
+    s, p0, p1 = best
+    for _ in range(2):
+        for dp0 in (-15.0, -5.0, 0.0, 5.0, 15.0):
+            ss = score((p0 + dp0) % 360.0, 0.0)
+            if ss > s:
+                s, p0, p1 = ss, (p0 + dp0) % 360.0, 0.0
+    for dp1 in (-22.5, -10.0, 0.0, 10.0, 22.5):
+        ss = score(p0, p1 + dp1)
+        if ss > s:
+            s, p1 = ss, p1 + dp1
+    return p0, p1, s
+
+
 def estimate_direct_phase_ht(
     backend: Any,
     spectrum_path: Path | str,
@@ -135,22 +187,32 @@ def simple_route(
         first = backend.process(experiment, plan or select_method(experiment), params=params_first)
     if not first.get("success") or not first.get("spectrum_path"):
         raise RuntimeError(f"第一遍处理失败: {first.get('message')}")
-    display_path = first["spectrum_path"]
-    hilbert = getattr(backend, "hilbert_spectrum", None)
-    if callable(hilbert):
-        ht = hilbert(
-            first["spectrum_path"],
-            work_dir=work_dir,
+    import nmrglue as ng
+
+    from workflow.display_hybrid_optimize import direct_axis_from_header
+
+    try:
+        _header, _data = ng.pipe.read(str(first["spectrum_path"]))
+        ndim = int(_header.get("FDDIMCOUNT", 2) or 2)
+        direct_nucleus = (
+            experiment.direct_dimension.nucleus if experiment.direct_dimension else None
         )
-        if ht.get("success") and ht.get("spectrum_path"):
-            display_path = ht["spectrum_path"]
-    phases = estimate_all_axes(display_path, experiment)
-    direct_key = experiment.direct_dimension.logical_axis if experiment.direct_dimension else "F2"
-    direct_est = estimate_direct_phase_ht(
-        backend, first["spectrum_path"], experiment, work_dir=work_dir
-    )
-    if direct_est is not None:
-        phases[direct_key] = (direct_est[0], direct_est[1])
+        direct_axis = direct_axis_from_header(dict(_header), direct_nucleus)
+    except Exception:  # noqa: BLE001 - 假后端/占位谱回退按维度推断
+        ndim = experiment.ndim
+        direct_axis = ndim - 1
+    phases: dict[str, tuple[float, float]] = {}
+    for ax in range(ndim):
+        if ax == direct_axis:
+            est = estimate_direct_phase_ht(
+                backend, first["spectrum_path"], experiment, work_dir=work_dir
+            )
+        else:
+            est = estimate_axis_phase_ht(
+                backend, first["spectrum_path"], ax, work_dir=work_dir
+            )
+        if est is not None:
+            phases[f"F{ax + 1}"] = (est[0], est[1])
 
     if is_nus:
         direct = experiment.direct_dimension.logical_axis if experiment.direct_dimension else "F2"
