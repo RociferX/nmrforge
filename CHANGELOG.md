@@ -14,6 +14,10 @@
 - 实验类型符号早约束:presets 新增 peak_sign(uniform/mixed;HNCACB=mixed),
   mixed 用「|净吸收| 中位数 + 正负共存」评分(uniform 保持签名净吸收);
   VM sampleB(HNCACB)间接维 p0 恢复手动 F2=90°/F1≈0°。
+- ±180° 绝对符号消歧(mixed 实验):presets 新增 peak_sign_regions
+  (化学位移分区+期望符号,HNCACB 13C Cα 负/Cβ 正,默认值来自 sampleB 实测),
+  区域符号分离干净(≥70%/≥4 强峰)才翻转,保守;并修复批量加 peak_sign
+  时 YAML 行错位的数据问题。
 - 离散峰迹线选择(仅 mixed 实验):95 分位阈值 + 半高占窗比(duty)与峰
   显著性过滤中央混杂峰团;uniform 保持旧 99.5 分位全部强迹线锁定
   (离散过滤曾把 sampleL 带偏 180°,已限定范围)。
