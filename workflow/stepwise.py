@@ -138,17 +138,17 @@ def generate_spectrum(
 ) -> str:
     """第 3 步:生成谱图(NUS 自动走 SMILE 重构;复用已转换 fid)。
 
-    params["phase_route"] 选择相位优化途径:
-    - "simple"(默认):先跑一遍 → 实型谱逐维显示层调相 → 重跑一遍;
-    - "advanced":uniform 全维度后端优化,NUS 混合(直接维显示层 +
-      间接维后端候选);
-    - "none":保持旧路径,直接 process/reconstruct_nus,不额外优化。
+    params["phase_route"] 选择处理途径:
+    - "unified"(默认):统一方案——第一遍逐维复型预览(仅搜索轴
+      不加 -di),内存调相(旧算法判断标准,零额外后端),完整终跑;
+    - "none":保持旧路径,直接 process/reconstruct_nus,不额外优化
+      (逃生口)。
     """
     experiment = _read_experiment(manager, exp_id, data_id)
     work = Path(work_dir) if work_dir else _work_dir(manager, exp_id, data_id)
     _ensure_work_dir(backend, work)
     params = dict(params or {})
-    route = str(params.pop("phase_route", "simple"))
+    route = str(params.pop("phase_route", "unified"))
     plan = select_method(experiment)
     if route == "none":
         if experiment.sampling.mode is SamplingMode.NUS:
@@ -180,21 +180,20 @@ def generate_spectrum(
         )
         return spectrum_path
 
-    if route not in ("simple", "advanced"):
+    if route != "unified":
         raise StepwiseError(f"未知 phase_route: {route}")
 
-    from workflow.phase_routes import advanced_route, simple_route
+    from workflow.phase_routes import unified_route
 
-    if route == "simple":
-        result = simple_route(
-            experiment, backend, plan=plan, work_dir=work, base_params=params
-        )
-        workflow_ref = "phase_optimize_simple"
-    else:
-        result = advanced_route(
-            experiment, backend, plan=plan, work_dir=work, base_params=params
-        )
-        workflow_ref = "phase_optimize_advanced"
+    result = unified_route(
+        experiment,
+        backend,
+        plan=plan,
+        work_dir=work,
+        base_params=params,
+        progress=progress,
+    )
+    workflow_ref = "phase_optimize_unified"
 
     if not result.get("spectrum_path"):
         raise StepwiseError("相位优化未产出谱图")

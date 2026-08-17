@@ -41,6 +41,7 @@ from backend.script_generator import (
     generate_3d_nus_script,
     generate_convert_script,
     generate_nus_finalize_script,
+    generate_preview_script,
     generate_process_script,
     select_smile_params,
     zero_fill_plan,
@@ -66,14 +67,12 @@ def enforce_smile_thread_guardrail(nthread: int, grid_points: int) -> tuple[int,
         return 2, f"大网格 {grid_points}：SMILE 线程数限制为 2（原 {nthread}）"
     return nthread, ""
 
-
 def zf_summary(plan: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
     """填零计划摘要(WorkflowRun params 用):{轴: {"mode", "size"}}。"""
     return {
         axis: {"mode": str(cfg.get("mode", "auto")), "size": cfg.get("size")}
         for axis, cfg in plan.items()
     }
-
 
 def _effective_params_base(
     extract: bool,
@@ -96,7 +95,6 @@ def _effective_params_base(
         "points_per_line": points_per_line,
         "sampling": dict(sampling),
     }
-
 
 @dataclass
 class NMRPipeBackend:
@@ -212,6 +210,12 @@ class NMRPipeBackend:
         if sampling.get("auto_phase") is False:
             direct_phase_search = False
         direct_phase: dict[str, tuple[float, float]] | None = None
+        # 0.2.106:逐维复型预览模式——仅 preview_axis 的 PS 不加 -di
+        # (其它轴按 direct_phase_override 固定相位加 -di),零填零;
+        # 预览数据保持 PS(0,0),关闭直接维相位搜索
+        preview_axis = proc_params.get("preview_axis")
+        if preview_axis:
+            direct_phase_search = False
         if direct_phase_override:
             direct_phase = dict(direct_phase_override)
             logs.append(f"直接维相位覆盖: {direct_phase}")
@@ -283,6 +287,7 @@ class NMRPipeBackend:
             out_file=out_file,
             script_name=script_name,
             keep_direct_complex=_as_bool(proc_params.get("keep_direct_complex", False)),
+            preview_axis=preview_axis,
         )
         logs += process_logs
         if not processed:
@@ -805,146 +810,6 @@ class NMRPipeBackend:
             "logs": logs,
         }
 
-    def phase_ht_candidate_axis(
-        self,
-        spectrum_path: Path | str,
-        axis: int,
-        p0: float,
-        p1: float,
-        *,
-        work_dir: Path | str | None = None,
-        out_file: str | None = None,
-        timeout: float = 600.0,
-    ) -> dict[str, Any]:
-        """把指定轴转置到管道轴后跑 nmrPipe PS -ht,生成该维候选显示谱。
-
-        axis 为谱数组轴(0=F1,1=F2,2=F3);输出为转置布局,目标轴在最后轴。
-        """
-        import nmrglue as ng
-
-        bin_dir = self._bin_dir()
-        if bin_dir is None:
-            return {"success": False, "message": "未找到 nmrPipe", "logs": []}
-        work = Path(work_dir) if work_dir else Path(spectrum_path).parent
-        work.mkdir(parents=True, exist_ok=True)
-        src = Path(spectrum_path)
-        if src.parent.resolve() != work.resolve():
-            shutil.copy2(src, work / src.name)
-        _dic, data = ng.pipe.read(str(src))
-        ndim = int(_dic.get("FDDIMCOUNT", 2) or 2)
-        # 目标轴 -> xyz2pipe 输出向量标志;最后轴(直接管道轴)无需转置
-        if axis == ndim - 1:
-            cmd = ["nmrPipe", "-in", src.name, "|", "nmrPipe", "-fn", "PS",
-                   "-p0", f"{p0:g}", "-p1", f"{p1:g}", "-ht", "-di",
-                   "-out", "", "-ov"]
-        else:
-            if ndim == 2:
-                vec = "-y"
-            else:
-                vec = {0: "-z", 1: "-y", 2: "-x"}.get(axis, "-y")
-            out_base = out_file or (
-                f"{src.stem}_ax{axis}_ph_{p0:g}_{p1:g}.{src.suffix.lstrip('.')}"
-            )
-            cmd = ["xyz2pipe", "-in", src.name, vec,
-                   "|", "nmrPipe", "-fn", "PS",
-                   "-p0", f"{p0:g}", "-p1", f"{p1:g}", "-ht", "-di",
-                   "|", "pipe2xyz", "-out", out_base, "-x"]
-        out_name = out_file or (
-            f"{src.stem}_ax{axis}_ph_{p0:g}_{p1:g}.{src.suffix.lstrip('.')}"
-        )
-        if axis == ndim - 1:
-            cmd[-2] = out_name
-        runtime = CshRuntime()
-        result = runtime.run(cmd, cwd=str(work), timeout=timeout)
-        logs = [f"nmrPipe PS -ht(axis {axis}): rc={result.returncode}"]
-        out = work / out_name
-        if result.returncode != 0 or not out.is_file() or out.stat().st_size == 0:
-            return {"success": False, "message": "nmrPipe PS -ht(axis) 失败", "logs": logs}
-        logs.append(f"候选显示谱 → {out}")
-        return {"success": True, "spectrum_path": str(out), "logs": logs}
-
-    def phase_ht_candidate(
-        self,
-        spectrum_path: Path | str,
-        p0: float,
-        p1: float,
-        *,
-        work_dir: Path | str | None = None,
-        out_file: str | None = None,
-        timeout: float = 600.0,
-    ) -> dict[str, Any]:
-        """用 nmrPipe PS -ht 对实型谱生成一个候选显示谱(轻后端)。
-
-        这等价于 nmrDraw 在显示层的相位旋转 + 虚部重建,评分必须用该谱,
-        不要用 numpy 模拟旋转。当前作用于谱文件管道轴(直接维)。
-        """
-        bin_dir = self._bin_dir()
-        if bin_dir is None:
-            return {"success": False, "message": "未找到 nmrPipe", "logs": []}
-        work = Path(work_dir) if work_dir else Path(spectrum_path).parent
-        work.mkdir(parents=True, exist_ok=True)
-        src = Path(spectrum_path)
-        if src.parent.resolve() != work.resolve():
-            shutil.copy2(src, work / src.name)
-        out_name = out_file or (
-            f"{src.stem}_ph_{p0:g}_{p1:g}.{src.suffix.lstrip('.')}"
-        )
-        runtime = CshRuntime()
-        result = runtime.run(
-            [
-                "nmrPipe", "-in", src.name,
-                "|", "nmrPipe", "-fn", "PS",
-                "-p0", f"{p0:g}", "-p1", f"{p1:g}", "-ht", "-di",
-                "-out", out_name, "-ov",
-            ],
-            cwd=str(work),
-            timeout=timeout,
-        )
-        logs = [f"nmrPipe PS -ht candidate: rc={result.returncode}"]
-        out = work / out_name
-        if result.returncode != 0 or not out.is_file() or out.stat().st_size == 0:
-            return {"success": False, "message": "nmrPipe PS -ht 失败", "logs": logs}
-        logs.append(f"候选显示谱 → {out}")
-        return {"success": True, "spectrum_path": str(out), "logs": logs}
-
-    def hilbert_spectrum(
-        self,
-        spectrum_path: Path | str,
-        *,
-        work_dir: Path | str | None = None,
-        out_file: str | None = None,
-        timeout: float = 600.0,
-    ) -> dict[str, Any]:
-        """对实型终谱跑 nmrPipe HT,重建虚部得到复型显示谱(轻后端)。
-
-        nmrDraw 的显示层调相即使用 HT 重建虚部,因此简单途径以该复型谱
-        为对象,与进阶版的真实后端 PS 保持同一数学运算。
-        """
-        bin_dir = self._bin_dir()
-        if bin_dir is None:
-            return {"success": False, "message": "未找到 nmrPipe", "logs": []}
-        work = Path(work_dir) if work_dir else Path(spectrum_path).parent
-        src = Path(spectrum_path)
-        if src.parent.resolve() != work.resolve():
-            shutil.copy2(src, work / src.name)
-        out_name = out_file or f"{src.stem}_ht.{src.suffix.lstrip('.')}"
-        runtime = CshRuntime()
-        result = runtime.run(
-            [
-                "nmrPipe", "-in", src.name,
-                "|", "nmrPipe", "-fn", "HT",
-                "-out", out_name, "-ov",
-            ],
-            cwd=str(work),
-            timeout=timeout,
-        )
-        logs = [f"nmrPipe HT: rc={result.returncode}"]
-        out = work / out_name
-        if result.returncode != 0 or not out.is_file() or out.stat().st_size == 0:
-            return {"success": False, "message": "nmrPipe HT 失败", "logs": logs}
-        logs.append(f"复型显示谱 → {out}")
-        return {"success": True, "spectrum_path": str(out), "logs": logs}
-
     # ------------------------------------------------------------------ 转换
 
     def _finalize_converted_fid(
@@ -1193,7 +1058,6 @@ class NMRPipeBackend:
         )
         return p0, p1
 
-
     def _display_phase_search(
         self,
         experiment: Experiment,
@@ -1331,7 +1195,6 @@ class NMRPipeBackend:
         except Exception as exc:  # noqa: BLE001
             logs.append(f"应用直接维相位失败: {exc}")
             return False
-
 
     def _search_direct_phase(
         self,
@@ -1652,29 +1515,46 @@ class NMRPipeBackend:
         out_file: str | None = None,
         script_name: str | None = None,
         keep_direct_complex: bool = False,
+        preview_axis: str | None = None,
     ) -> tuple[bool, list[str], Path]:
         """生成并执行 NMRPipe 处理管道（输出 ft2/ft3）。"""
         logs: list[str] = []
         ext = "ft3" if experiment.ndim >= 3 else "ft2"
         in_file = in_file or f"{experiment.dataset_id}.fid"
         out_file = out_file or f"{experiment.dataset_id}.{ext}"
-        script = generate_process_script(
-            experiment,
-            plan,
-            in_file=in_file,
-            out_file=out_file,
-            direct_phase=direct_phase,
-            baseline=baseline,
-            window=window,
-            zero_fill=zero_fill,
-            linewidth_hz=linewidth_hz,
-            points_per_line=points_per_line,
-            extract=extract,
-            ext_lo=ext_lo,
-            ext_hi=ext_hi,
-            sampling=sampling,
-            keep_direct_complex=keep_direct_complex,
-        )
+        if preview_axis:
+            script = generate_preview_script(
+                experiment,
+                plan,
+                in_file=in_file,
+                out_file=out_file,
+                preview_axis=preview_axis,
+                fixed_phases=direct_phase,
+                baseline=baseline,
+                window=window,
+                ext_lo=ext_lo,
+                ext_hi=ext_hi,
+                extract=extract,
+                sampling=sampling,
+            )
+        else:
+            script = generate_process_script(
+                experiment,
+                plan,
+                in_file=in_file,
+                out_file=out_file,
+                direct_phase=direct_phase,
+                baseline=baseline,
+                window=window,
+                zero_fill=zero_fill,
+                linewidth_hz=linewidth_hz,
+                points_per_line=points_per_line,
+                extract=extract,
+                ext_lo=ext_lo,
+                ext_hi=ext_hi,
+                sampling=sampling,
+                keep_direct_complex=keep_direct_complex,
+            )
         process_com = work / (
             script_name or f"{experiment.dataset_id}_process.com"
         )

@@ -1,9 +1,8 @@
-"""简单/进阶两条相位优化途径。
+"""统一相位优化途径(替代简单/进阶分派,2026-08-17)。
 
-- 简单途径(新方法):先正常处理一遍得到实型谱,在每维显示层做希尔伯特
-  调相,再把每维相位填回脚本重生成一次;所有谱型统一。
-- 进阶途径(旧方法):uniform 谱所有维度重跑后端优化;NUS 谱采用混合方案
-  ——直接维走显示层,间接维走逐候选后端 finalize。
+统一方案:第一遍逐维复型预览(仅搜索轴 PS 不加 -di,其它轴按已固定
+相位加 -di,零填零)→ 内存调相(旧算法判断标准:固定迹线中位数净吸收,
+零额外后端)→ 联合复核 → 完整终跑(窗函数/填零/基线/各维 PS/EXT/-di)。
 """
 
 from __future__ import annotations
@@ -15,9 +14,7 @@ from typing import Any
 import numpy as np
 
 from core.data.internal_data_model import Experiment, SamplingMode
-from core.optimization.display_phase_engine import inspect_spectrum
 from core.planning.method_selector import select_method
-from workflow.display_hybrid_optimize import optimize_nus_hybrid
 
 
 def axis_to_logical(experiment: Experiment, axis: int) -> str:
@@ -26,287 +23,332 @@ def axis_to_logical(experiment: Experiment, axis: int) -> str:
     return dims[axis]
 
 
-def estimate_all_axes(
-    spectrum_path: Path | str,
-    experiment: Experiment,
-) -> dict[str, tuple[float, float]]:
-    """读实型谱,逐维做显示层相位估计,返回 {逻辑轴: (p0, p1)}。"""
+def _axis_index(axis: str) -> int:
+    """逻辑轴名 → 生产布局谱数组下标(F1=0, F2=1, F3=2)。"""
+    return {"F1": 0, "F2": 1, "F3": 2}.get(axis, 0)
+
+
+def _read_complex_preview(path: Path | str) -> np.ndarray:
+    """读复型预览文件:nmrglue 直接读为复型则用之,否则按交错实型拆包。"""
     import nmrglue as ng
 
-    path = Path(spectrum_path)
-    if not path.is_file():
-        return {}
-    header, data = ng.pipe.read(str(path))
+    from core.data.pipe_io import read_pipe_complex
+
+    path = Path(path)
+    _dic, data = ng.pipe.read(str(path))
     arr = np.asarray(data)
-    phases: dict[str, tuple[float, float]] = {}
-    if arr.ndim < 2:
-        return phases
-    inspected = inspect_spectrum(arr)
-    for estimate in inspected["phases"]:
-        if estimate is None:
-            continue
-        # NMRPipe 谱头约定:数组轴 0/1/2 对应 F1/F2/F3
-        logical = f"F{estimate.axis + 1}"
-        phases[logical] = (estimate.p0, estimate.p1)
-    return phases
-
-
-def _axis_net_absorption(path: str, axis: int) -> float:
-    """候选显示谱沿 axis 动态锁定峰位后,固定迹线净吸收中位数。"""
-    import nmrglue as ng
-
-    from workflow.phase_optimize import _trace_indices_fixed, _trace_metrics_median
-
-    _dic, data = ng.pipe.read(path)
-    real = np.real(np.asarray(data)).astype(float)
-    indices, positions = _trace_indices_fixed(real, axis)
-    if not indices:
-        return 0.0
-    return 50.0 * (_trace_metrics_median(real, axis, indices, positions) + 1.0)
-
-
-def estimate_axis_phase_ht(
-    backend: Any,
-    spectrum_path: Path | str,
-    axis: int,
-    *,
-    work_dir: Path | str | None = None,
-    coarse_p0_step: float = 30.0,
-) -> tuple[float, float, float] | None:
-    """对任意谱轴用 nmrPipe PS -ht 候选 + 动态峰锁定评分估计相位。"""
-    path = Path(spectrum_path)
-
-    def score(p0: float, p1: float) -> float:
-        resp = backend.phase_ht_candidate_axis(
-            path, axis, p0, p1, work_dir=work_dir
-        )
-        if not resp.get("success") or not resp.get("spectrum_path"):
-            return 0.0
-        return _axis_net_absorption(str(resp["spectrum_path"]), -1)
-
-    best = None
-    for p0 in np.arange(0.0, 360.0, coarse_p0_step):
-        s = score(float(p0), 0.0)
-        if best is None or s > best[0]:
-            best = (s, float(p0), 0.0)
-    assert best is not None
-    s, p0, p1 = best
-    for _ in range(2):
-        for dp0 in (-15.0, -5.0, 0.0, 5.0, 15.0):
-            ss = score((p0 + dp0) % 360.0, 0.0)
-            if ss > s:
-                s, p0, p1 = ss, (p0 + dp0) % 360.0, 0.0
-    for dp1 in (-22.5, -10.0, 0.0, 10.0, 22.5):
-        ss = score(p0, p1 + dp1)
-        if ss > s:
-            s, p1 = ss, p1 + dp1
-    return p0, p1, s
-
-
-def estimate_direct_phase_ht(
-    backend: Any,
-    spectrum_path: Path | str,
-    experiment: Experiment,
-    *,
-    work_dir: Path | str | None = None,
-    coarse_p0_step: float = 30.0,
-) -> tuple[float, float, float] | None:
-    """用 nmrPipe PS -ht 候选 + 进阶版固定迹线评分估计直接维相位。
-
-    不依赖 numpy 模拟旋转,与 nmrDraw/真实 PS 同源。
-    """
-    import nmrglue as ng
-
-    from workflow.display_hybrid_optimize import direct_axis_from_header
-    from workflow.phase_optimize import (
-        _score_fixed_traces,
-        _spectrum_real,
-        _trace_indices_fixed,
-        _trace_metrics_median,
-    )
-
-    path = Path(spectrum_path)
-    header, data = ng.pipe.read(str(path))
-    arr = np.asarray(data)
-    real = np.real(arr).astype(float)
-    direct = experiment.direct_dimension
-    nucleus = direct.nucleus if direct is not None else None
-    axis = direct_axis_from_header(dict(header), nucleus)
-    axis_name = f"F{axis + 1}"
-    indices, positions = _trace_indices_fixed(real, axis)
-    if not indices:
-        return None
-
     if np.iscomplexobj(arr):
-        # 第一遍谱已保留真实虚部(不加 -di):直接 numpy 频域旋转,与真实后端等价
-        complex_arr = arr.astype(np.complex128)
-        n = complex_arr.shape[axis]
-        ramp_shape = [1] * complex_arr.ndim
-        ramp_shape[axis] = n
-
-        def score(p0: float, p1: float) -> float:
-            k = np.arange(n, dtype=float)
-            ramp = np.exp(
-                1j * np.deg2rad(p0 + p1 * k / max(n - 1, 1))
-            ).reshape(ramp_shape)
-            rotated = np.real(complex_arr * ramp)
-            return 50.0 * (
-                _trace_metrics_median(rotated, axis, indices, positions) + 1.0
-            )
-    else:
-
-        def score(p0: float, p1: float) -> float:
-            resp = backend.phase_ht_candidate(
-                path, p0, p1, work_dir=work_dir
-            )
-            if not resp.get("success") or not resp.get("spectrum_path"):
-                return 0.0
-            candidate_real = _spectrum_real(str(resp["spectrum_path"]))
-            candidate_indices, candidate_positions = _trace_indices_fixed(
-                candidate_real, axis
-            )
-            if not candidate_indices:
-                candidate_indices, candidate_positions = indices, positions
-            return _score_fixed_traces(
-                str(resp["spectrum_path"]),
-                axis_name,
-                candidate_indices,
-                candidate_positions,
-            )[0]
-
-    best = None
-    for p0 in np.arange(0.0, 360.0, coarse_p0_step):
-        s = score(float(p0), 0.0)
-        if best is None or s > best[0]:
-            best = (s, float(p0), 0.0)
-    assert best is not None
-    s, p0, p1 = best
-    for _ in range(2):
-        for dp0 in (-15.0, -5.0, 0.0, 5.0, 15.0):
-            ss = score((p0 + dp0) % 360.0, 0.0)
-            if ss > s:
-                s, p0, p1 = ss, (p0 + dp0) % 360.0, 0.0
-    for dp1 in (-22.5, -10.0, 0.0, 10.0, 22.5):
-        ss = score(p0, p1 + dp1)
-        if ss > s:
-            s, p1 = ss, p1 + dp1
-    return p0, p1, s
+        return arr.astype(np.complex128)
+    return read_pipe_complex(path)
 
 
-def simple_route(
+def unified_route(
     experiment: Experiment,
     backend: Any,
     *,
     plan: Any | None = None,
     work_dir: Path | str | None = None,
     base_params: dict[str, Any] | None = None,
+    progress: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
-    """简单途径:先跑一遍 → 显示层逐维调相 → 填回重跑一遍。"""
-    is_nus = experiment.sampling.mode is SamplingMode.NUS
-    params_first = dict(base_params or {})
-    params_first.update({"direct_phase_search": False, "display_phase_search": False})
-    if is_nus:
-        first = backend.reconstruct_nus(experiment, params_first)
-    else:
-        params_first["keep_direct_complex"] = True
-        first = backend.process(experiment, plan or select_method(experiment), params=params_first)
-    if not first.get("success") or not first.get("spectrum_path"):
-        raise RuntimeError(f"第一遍处理失败: {first.get('message')}")
-    import nmrglue as ng
+    """统一方案(替代简单/进阶分派):第一遍逐维复型预览 → 内存调相
+    (旧算法判断标准,零额外后端)→ 联合复核 → 完整终跑。
 
-    from workflow.display_hybrid_optimize import direct_axis_from_header
+    uniform:每轴一条生产管道复型预览(仅搜索轴 PS 不加 -di,其它轴按已固定
+    相位加 -di,零填零);NUS:SMILE 一次出复型 recon 平面,直接维在平面上
+    内存搜索,间接维内存复刻 finalize 链完整搜索;最后完整重跑出良谱。
+    """
+    from workflow.memory_phase_search import (
+        joint_recheck_memory,
+        search_axis_memory,
+    )
+    from workflow.phase_optimize import PHASE_SCORE_FLAT_MARGIN
 
-    try:
-        _header, _data = ng.pipe.read(str(first["spectrum_path"]))
-        ndim = int(_header.get("FDDIMCOUNT", 2) or 2)
-        direct_nucleus = (
-            experiment.direct_dimension.nucleus if experiment.direct_dimension else None
-        )
-        direct_axis = direct_axis_from_header(dict(_header), direct_nucleus)
-    except Exception:  # noqa: BLE001 - 假后端/占位谱回退按维度推断
-        ndim = experiment.ndim
-        direct_axis = ndim - 1
-    phases: dict[str, tuple[float, float]] = {}
-    for ax in range(ndim):
-        if ax == direct_axis:
-            est = estimate_direct_phase_ht(
-                backend, first["spectrum_path"], experiment, work_dir=work_dir
-            )
-        else:
-            est = estimate_axis_phase_ht(
-                backend, first["spectrum_path"], ax, work_dir=work_dir
-            )
-        if est is not None:
-            phases[f"F{ax + 1}"] = (est[0], est[1])
-
-    if is_nus:
-        direct = experiment.direct_dimension.logical_axis if experiment.direct_dimension else "F2"
-        direct_phase = phases.get(direct, (0.0, 0.0))
-        params_second = dict(base_params or {})
-        params_second.update(
-            {
-                "direct_phase_override": direct_phase,
-                "direct_phase_search": False,
-                "display_phase_search": False,
-            }
-        )
-        second = backend.reconstruct_nus(experiment, params_second)
-        indirect_phases = {
-            axis: value for axis, value in phases.items() if axis != direct
-        }
-        final = backend.finalize_nus(
+    plan = plan or select_method(experiment)
+    if experiment.sampling.mode is SamplingMode.NUS:
+        return _unified_nus(
             experiment,
-            phases=indirect_phases,
+            backend,
+            plan=plan,
             work_dir=work_dir,
+            base_params=base_params,
+            progress=progress,
         )
-        spectrum_path = final.get("spectrum_path")
-        backend_runs = 2 + 1
-    else:
-        params_second = dict(base_params or {})
-        params_second["direct_phase_search"] = False
-        second = backend.process(
+    params = dict(base_params or {})
+    params.pop("preview_axis", None)
+    ext = "ft3" if experiment.ndim >= 3 else "ft2"
+    direct_axis = "F2" if experiment.ndim == 2 else "F3"
+    axes = [dim.logical_axis for dim in experiment.dimensions]
+    # 0.2.75:均匀路径先间接后直接(旧算法顺序,直接维在间接维校正后的谱上锁点)
+    search_axes = [a for a in axes if a != direct_axis] + [direct_axis]
+    fixed: dict[str, tuple[float, float]] = {}
+    axis_arrays: dict[str, np.ndarray] = {}
+    axis_index: dict[str, int] = {}
+    axis_traces: dict[str, tuple[list[int], list[int]]] = {}
+    logs: list[str] = []
+    backend_runs = 0
+    for axis in search_axes:
+        out_file = f"{experiment.dataset_id}_preview_{axis}.{ext}"
+        resp = backend.process(
             experiment,
-            plan or select_method(experiment),
-            direct_phase_override=dict(phases),
-            params=params_second,
+            plan,
+            direct_phase_override=dict(fixed) if fixed else None,
+            params={**params, "preview_axis": axis},
+            out_file=out_file,
+            script_name=f"{experiment.dataset_id}_preview_{axis}.com",
+            progress=progress,
         )
-        spectrum_path = second.get("spectrum_path")
-        backend_runs = 2
+        backend_runs += 1
+        if not resp.get("success") or not resp.get("spectrum_path"):
+            raise RuntimeError(f"复型预览({axis})失败: {resp.get('message')}")
+        arr = _read_complex_preview(str(resp["spectrum_path"]))
+        ax = _axis_index(axis)
+        est = search_axis_memory(arr, ax)
+        if est is None:
+            raise RuntimeError(f"内存相位搜索({axis})无可用迹线")
+        fixed[axis] = est.phase
+        axis_arrays[axis] = arr
+        axis_index[axis] = ax
+        axis_traces[axis] = est.traces
+        logs += est.logs
+        logs.append(
+            f"{axis}: 内存相位 = ({est.phase[0]:g}°, {est.phase[1]:g}°) "
+            f"score={est.score:.2f}"
+        )
+    if len(search_axes) >= 2:
+        best, best_score, fixed_score, zero_score = joint_recheck_memory(
+            axis_arrays, axis_index, axis_traces, fixed
+        )
+        if best != fixed and best_score - fixed_score >= PHASE_SCORE_FLAT_MARGIN:
+            logs.append(
+                f"联合复核: 联合最优 {best} (score={best_score:.2f}) "
+                f"优于顺序固定 {fixed} (score={fixed_score:.2f}),已更新"
+            )
+            fixed = best
+        else:
+            logs.append(
+                f"联合复核: 联合面平坦(顺序 {fixed} score={fixed_score:.2f} "
+                f"vs 联合最优 {best} score={best_score:.2f}),保持顺序固定"
+            )
+    params_final = dict(params)
+    resp = backend.process(
+        experiment,
+        plan,
+        direct_phase_override=fixed,
+        params=params_final,
+        progress=progress,
+    )
+    backend_runs += 1
+    if not resp.get("success") or not resp.get("spectrum_path"):
+        raise RuntimeError(f"终跑失败: {resp.get('message')}")
+    logs += list(resp.get("logs", []))
     return {
-        "phases": phases,
-        "spectrum_path": spectrum_path,
+        "phases": fixed,
+        "spectrum_path": str(resp["spectrum_path"]),
         "backend_runs": backend_runs,
-        "logs": [],
+        "logs": logs,
+        "direct_phase": fixed.get(direct_axis),
     }
 
 
-def advanced_route(
+def _load_recon_planes(experiment: Experiment, work: Path) -> np.ndarray:
+    """读 SMILE 重构复型平面:2D recon.ft1(直接维, F1 时间);
+    3D nus3d_rc/test%04d.ft1 交错拆包后按 F1 增量堆叠(直接维, F2 时间, F1 时间)。"""
+    from core.data.pipe_io import read_pipe_complex
+
+    if experiment.ndim >= 3:
+        plane_dir = work / "nus3d_rc"
+        paths = sorted(plane_dir.glob("test*.ft1"))
+        if not paths:
+            raise RuntimeError(f"缺少 3D 重构平面: {plane_dir}")
+        arrays = [read_pipe_complex(path) for path in paths]
+        return np.stack(arrays, axis=-1)
+    recon = work / "nus2d" / "recon.ft1"
+    if not recon.is_file():
+        raise RuntimeError(f"缺少 2D 重构平面: {recon}")
+    return _read_complex_preview(recon)
+
+
+def _finalize_substrate_nus(
+    planes: np.ndarray,
+    experiment: Experiment,
+    searched_axis: str,
+    fixed: dict[str, tuple[float, float]],
+) -> tuple[np.ndarray, int]:
+    """内存复刻 finalize 链,输出「搜索轴复型、其它间接轴按 fixed 相位实型」
+    的生产布局数组,供逐维内存搜索(与 uniform 预览语义一致)。"""
+    from core.experiment.acquisition_mode_detector import ft_alt_for
+    from workflow.memory_phase_search import finalize_axis_in_memory
+
+    if experiment.ndim == 2:
+        # recon: (direct, f1_time) → FT(-alt) F1 → (f1_freq, direct)
+        f1_fnmode = int(
+            experiment.acquisition_parameters.get("acqu2s", {}).get("FnMODE", 0) or 0
+        )
+        arr = finalize_axis_in_memory(
+            planes,
+            1,
+            p0=0.0,
+            p1=0.0,
+            alt=ft_alt_for(f1_fnmode),
+            keep_complex=True,
+        )
+        return np.moveaxis(arr, 1, 0), 0
+    # 3D recon: (direct, f2_time, f1_time)
+    f2_fnmode = int(
+        experiment.acquisition_parameters.get("acqu2s", {}).get("FnMODE", 0) or 0
+    )
+    f1_fnmode = int(
+        experiment.acquisition_parameters.get("acqu3s", {}).get("FnMODE", 0) or 0
+    )
+    f2_fixed = fixed.get("F2", (0.0, 0.0))
+    f1_fixed = fixed.get("F1", (0.0, 0.0))
+    if searched_axis == "F1":
+        # F2 固定(实型),F1 复型
+        base = finalize_axis_in_memory(
+            planes,
+            1,
+            p0=f2_fixed[0],
+            p1=f2_fixed[1],
+            alt=ft_alt_for(f2_fnmode),
+            keep_complex=False,
+        )
+        base = np.moveaxis(base, 1, -1)  # (direct, f1_time, f2_freq)
+        base = finalize_axis_in_memory(
+            base,
+            1,
+            p0=0.0,
+            p1=0.0,
+            alt=ft_alt_for(f1_fnmode),
+            keep_complex=True,
+        )
+        return np.transpose(base, (1, 2, 0)), 0  # (f1_freq, f2_freq, direct)
+    # F2 搜索:F2 复型,F1 固定(实型)
+    base = finalize_axis_in_memory(
+        planes,
+        1,
+        p0=0.0,
+        p1=0.0,
+        alt=ft_alt_for(f2_fnmode),
+        keep_complex=True,
+    )
+    base = np.moveaxis(base, 1, -1)  # (direct, f1_time, f2_freq)
+    base = finalize_axis_in_memory(
+        base,
+        1,
+        p0=f1_fixed[0],
+        p1=f1_fixed[1],
+        alt=ft_alt_for(f1_fnmode),
+        keep_complex=False,
+    )
+    return np.transpose(base, (1, 2, 0)), 1  # (f1_freq, f2_freq, direct)
+
+
+def _unified_nus(
     experiment: Experiment,
     backend: Any,
     *,
-    plan: Any | None = None,
-    work_dir: Path | str | None = None,
-    score_fn: Callable[[str], tuple[float, dict[str, float]]] | None = None,
-    base_params: dict[str, Any] | None = None,
+    plan: Any,
+    work_dir: Path | str | None,
+    base_params: dict[str, Any] | None,
+    progress: Callable[[str], None] | None,
 ) -> dict[str, Any]:
-    """进阶途径:uniform 全维度后端优化;NUS 混合优化。"""
-    is_nus = experiment.sampling.mode is SamplingMode.NUS
-    if is_nus:
-        from workflow.phase_optimize import _default_phase_score
+    """NUS 统一流程:SMILE 一次(直接维 PS(0,0))→ 直接维在 recon 复型平面
+    内存搜索 → 间接维内存复刻 finalize 链完整逐维搜索 → 旋转 recon 平面应用
+    直接维相位 → finalize 终跑。"""
+    from core.data.internal_data_model import AxisRole
+    from workflow.memory_phase_search import (
+        joint_recheck_memory,
+        search_axis_memory,
+    )
+    from workflow.phase_optimize import PHASE_SCORE_FLAT_MARGIN
 
-        return optimize_nus_hybrid(
-            experiment,
-            backend,
-            score_fn=score_fn or _default_phase_score,
-            work_dir=work_dir,
-            base_params=base_params,
+    work = Path(work_dir) if work_dir else backend._work_path(experiment)
+    params_first = dict(base_params or {})
+    params_first.update(
+        {"direct_phase_search": False, "display_phase_search": False}
+    )
+    first = backend.reconstruct_nus(experiment, params_first, progress=progress)
+    if not first.get("success") or not first.get("spectrum_path"):
+        raise RuntimeError(f"第一遍 SMILE 重构失败: {first.get('message')}")
+    logs: list[str] = [
+        f"第一遍 SMILE 重构完成: {first.get('spectrum_path')}"
+    ]
+    backend_runs = 1
+    planes = _load_recon_planes(experiment, work)
+    direct_axis = "F3" if experiment.ndim >= 3 else "F2"
+    indirect_axes = [
+        dim.logical_axis
+        for dim in experiment.dimensions
+        if dim.role is not AxisRole.DIRECT
+    ]
+    # 直接维:recon 平面 axis 0 复型 → 内存搜索(统一判断标准)
+    direct_est = search_axis_memory(planes, 0)
+    direct_phase = direct_est.phase if direct_est is not None else (0.0, 0.0)
+    if direct_est is not None:
+        logs += direct_est.logs
+    logs.append(
+        f"直接维内存相位: {direct_axis}=({direct_phase[0]:g}°, {direct_phase[1]:g}°)"
+    )
+    fixed: dict[str, tuple[float, float]] = {}
+    axis_arrays: dict[str, np.ndarray] = {}
+    axis_index: dict[str, int] = {}
+    axis_traces: dict[str, tuple[list[int], list[int]]] = {}
+    for axis in indirect_axes:
+        arr, ax = _finalize_substrate_nus(planes, experiment, axis, fixed)
+        est = search_axis_memory(arr, ax)
+        if est is None:
+            raise RuntimeError(f"内存相位搜索({axis})无可用迹线")
+        fixed[axis] = est.phase
+        axis_arrays[axis] = arr
+        axis_index[axis] = ax
+        axis_traces[axis] = est.traces
+        logs += est.logs
+        logs.append(
+            f"{axis}: 内存相位 = ({est.phase[0]:g}°, {est.phase[1]:g}°) "
+            f"score={est.score:.2f}"
         )
-    from workflow.phase_optimize import optimize_phase_sequential
-
-    result = optimize_phase_sequential(experiment, backend, work_dir=work_dir)
+    if len(indirect_axes) >= 2:
+        best, best_score, fixed_score, zero_score = joint_recheck_memory(
+            axis_arrays, axis_index, axis_traces, fixed
+        )
+        if best != fixed and best_score - fixed_score >= PHASE_SCORE_FLAT_MARGIN:
+            logs.append(
+                f"联合复核: 联合最优 {best} (score={best_score:.2f}) "
+                f"优于顺序固定 {fixed} (score={fixed_score:.2f}),已更新"
+            )
+            fixed = best
+        else:
+            logs.append(
+                f"联合复核: 联合面平坦(顺序 {fixed} score={fixed_score:.2f} "
+                f"vs 联合最优 {best} score={best_score:.2f}),保持顺序固定"
+            )
+    # 应用直接维相位:旋转 recon 平面写副本(源平面不动),再 finalize
+    planes_arg = None
+    if abs((direct_phase[0] + 180.0) % 360.0 - 180.0) > 2.0 or abs(direct_phase[1]) > 2.0:
+        if backend._apply_direct_phase(experiment, work, direct_phase[0], direct_phase[1], logs):
+            planes_arg = (
+                "nus3d_rc_ph/test%04d.ft1"
+                if experiment.ndim >= 3
+                else "nus2d/recon_ph.ft1"
+            )
+            logs.append("recon 平面已按直接维相位旋转(源平面不动)")
+        else:
+            logs.append("直接维相位应用失败,保持原 recon 平面")
+    final = backend.finalize_nus(
+        experiment,
+        phases=fixed,
+        work_dir=work,
+        planes=planes_arg,
+    )
+    backend_runs += 1
+    if not final.get("success") or not final.get("spectrum_path"):
+        raise RuntimeError(f"finalize 终跑失败: {final.get('message')}")
+    logs += list(final.get("logs", []))
     return {
-        "phases": dict(result.phases),
-        "spectrum_path": result.spectrum_path,
-        "backend_runs": result.backend_runs,
-        "logs": result.logs,
+        "phases": fixed,
+        "direct_phase": direct_phase,
+        "spectrum_path": str(final["spectrum_path"]),
+        "backend_runs": backend_runs,
+        "logs": logs,
     }
