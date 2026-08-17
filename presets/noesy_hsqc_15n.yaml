@@ -3,8 +3,8 @@ description: 3D NOESY-HSQC(15N 编辑,1H-15N-1H)
 phase_sensitive: true
 direct_nucleus: 1H
 indirect_nuclei: [15N, 1H]
-expected_peak_mode:
-peak_sign: uniform absorption
+expected_peak_mode: absorption
+peak_sign: uniform
 display_orientation: "1H/15N/1H"
 priors:
   "1H": [0.0, 11.0]

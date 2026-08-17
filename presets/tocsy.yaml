@@ -3,8 +3,8 @@ description: 1H-1H TOCSY(2D,同核,两轴同为 1H)
 phase_sensitive: true
 direct_nucleus: 1H
 indirect_nuclei: [1H]
-expected_peak_mode:
-peak_sign: uniform absorption
+expected_peak_mode: absorption
+peak_sign: uniform
 display_orientation: "1H/1H"
 priors:
   "1H": [0.0, 10.0]

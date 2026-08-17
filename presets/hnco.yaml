@@ -3,8 +3,8 @@ description: 15N-1H 3D HNCO(13C 羰基)
 phase_sensitive: true
 direct_nucleus: 1H
 indirect_nuclei: [15N, 13C]
-expected_peak_mode:
-peak_sign: uniform absorption
+expected_peak_mode: absorption
+peak_sign: uniform
 display_orientation: "13C/15N/1H"
 priors:
   "1H": [6.0, 11.0]

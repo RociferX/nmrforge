@@ -21,6 +21,9 @@ class ExperimentTemplate:
     # 峰符号约定:uniform=信号峰同号(HSQC/CBCA(CO)NH 等);
     # mixed=正负峰共存(HNCACB 等,13Cα/13Cβ 反相)。相位搜索用它做早约束。
     peak_sign: str = "uniform"
+    # 化学位移分区符号先验:{核: {区名: {ppm: [lo, hi], sign: ±1}}}。
+    # 用于 mixed 实验的 ±180° 绝对符号消歧(如 HNCACB 13C 轴 Cα/Cβ)。
+    peak_sign_regions: dict[str, Any] = field(default_factory=dict)
     display_orientation: str = ""
     priors: dict[str, Any] = field(default_factory=dict)
     constraints: dict[str, Any] = field(default_factory=dict)

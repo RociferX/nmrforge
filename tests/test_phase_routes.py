@@ -117,6 +117,52 @@ def test_unified_route_uniform_order_and_phases(
     assert "spectrum_path" in result
 
 
+def test_disambiguate_180_mixed_uses_region_sign_convention() -> None:
+    """±180° 化学位移分区消歧:预设 Cα 负/Cβ 正——相位 0 不翻,相位 180 翻回。"""
+    from core.data.internal_data_model import (
+        AxisRole,
+        Dimension,
+        Experiment,
+        ExperimentType,
+        Sampling,
+        SamplingMode,
+    )
+    from workflow.phase_routes import _disambiguate_180_mixed
+
+    n = 64
+    dims = [
+        Dimension(logical_axis="F3", nucleus="1H", sf=600.0, sw=8196.0,
+                  o1p=4.7, role=AxisRole.DIRECT),
+        Dimension(logical_axis="F2", nucleus="15N", sf=60.8, sw=2189.0,
+                  o1p=118.0),
+        Dimension(logical_axis="F1", nucleus="13C", sf=150.9, sw=11312.0,
+                  o1p=39.0, td=n, ft_size=n),
+    ]
+    exp = Experiment(
+        dataset_id="x",
+        source_path=Path("x"),
+        ndim=3,
+        acquisition_order=["F3", "F2", "F1"],
+        dimensions=dims,
+        sampling=Sampling(mode=SamplingMode.NUS),
+        experiment_type=ExperimentType(name="HNCACB", confidence=1.0),
+    )
+    k = np.arange(n)
+    ppm = 39.0 + (n / 2.0 - k) * (11312.0 / (n * 150.9))
+    arr = np.zeros((4, n), dtype=np.complex128)
+    for target in (50.0, 55.0, 60.0, 65.0):  # Cα 区(40-70),期望负
+        i = int(np.argmin(np.abs(ppm - target)))
+        arr[:, i] += -1.0
+    for target in (18.0, 25.0, 30.0, 40.0):  # Cβ 区(15-45),期望正
+        i = int(np.argmin(np.abs(ppm - target)))
+        arr[:, i] += 1.0
+    assert _disambiguate_180_mixed(arr, 1, (0.0, 0.0), exp, "F1") == (0.0, 0.0)
+    flipped = _disambiguate_180_mixed(arr, 1, (180.0, 0.0), exp, "F1")
+    assert abs((flipped[0] - 0.0 + 180.0) % 360.0 - 180.0) < 1e-6, flipped
+    # 15N 轴无分区先验,不消歧
+    assert _disambiguate_180_mixed(arr, 0, (90.0, 0.0), exp, "F2") == (90.0, 0.0)
+
+
 def test_unified_route_nus_reconstruct_then_finalize(
     tmp_path: Path, monkeypatch, bruker_dir: Path
 ) -> None:

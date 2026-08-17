@@ -4,7 +4,7 @@ phase_sensitive: false
 direct_nucleus: ""
 indirect_nuclei: []
 expected_peak_mode:
-peak_sign: uniform unknown
+peak_sign: uniform
 display_orientation: ""
 constraints:
   ndim: 3

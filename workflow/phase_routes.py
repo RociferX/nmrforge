@@ -32,9 +32,8 @@ def _axis_index(axis: str, ndim: int = 2) -> int:
         return {"F2": 0, "F1": 1, "F3": 2}.get(axis, 0)
     return {"F1": 0, "F2": 1}.get(axis, 0)
 
-def _sign_mode(experiment: Experiment) -> str:
-    """按实验模板 peak_sign 返回评分符号约束
-    (mixed=正负峰共存,uniform=同号;默认 uniform)。"""
+def _template(experiment: Experiment) -> Any:
+    """按实验类型名查模板(先精确,再大小写兜底)。"""
     import core.experiments  # noqa: F401  导入即注册内置模板
     from core.experiments.registry import get as get_template
 
@@ -45,9 +44,74 @@ def _sign_mode(experiment: Experiment) -> str:
             tpl = get_template(tname)
             if tpl is not None:
                 break
+    return tpl
+
+
+def _sign_mode(experiment: Experiment) -> str:
+    """按实验模板 peak_sign 返回评分符号约束
+    (mixed=正负峰共存,uniform=同号;默认 uniform)。"""
+    tpl = _template(experiment)
     if tpl is not None and tpl.peak_sign == "mixed":
         return "mixed"
     return "uniform"
+
+
+def _disambiguate_180_mixed(
+    complex_arr: np.ndarray,
+    axis: int,
+    phase: tuple[float, float],
+    experiment: Experiment,
+    searched_axis: str,
+) -> tuple[float, float]:
+    """mixed 实验的 ±180° 绝对符号消歧(化学位移分区先验)。
+
+    搜索轴所在核若预设给出 peak_sign_regions(如 HNCACB 13C 的 Cα/Cβ),
+    则在当前相位下统计各区内强峰占优符号:两区符号相反且各自干净(占优
+    比例 ≥0.7、强峰数 ≥4)时,若绝对约定与预设不符则 p0 += 180 整体翻转;
+    区域不干净/峰不足/核不匹配时不翻转(保守)。
+    """
+    tpl = _template(experiment)
+    if tpl is None:
+        return phase
+    dim = next(
+        (d for d in experiment.dimensions if d.logical_axis == searched_axis),
+        None,
+    )
+    if dim is None or not dim.nucleus:
+        return phase
+    regions = (tpl.peak_sign_regions or {}).get(dim.nucleus)
+    if not regions or len(regions) < 2:
+        return phase
+    from workflow.memory_phase_search import rotate_real
+    n = complex_arr.shape[axis]
+    ppm = dim.o1p + (n / 2.0 - np.arange(n)) * (float(dim.sw) / (n * float(dim.sf)))
+    real = rotate_real(complex_arr, axis, phase[0], phase[1])
+    moved = np.moveaxis(real, axis, -1)
+    flat = moved.reshape(-1, n)
+    mag = np.abs(flat)
+    peak_val = flat[np.argmax(mag, axis=0), np.arange(n)]
+    global_max = float(np.max(np.abs(peak_val)))
+    if global_max <= 0:
+        return phase
+    observed: list[int] = []
+    for cfg in regions.values():
+        lo, hi = cfg["ppm"]
+        idx = np.where((ppm >= lo) & (ppm <= hi))[0]
+        if idx.size == 0:
+            return phase
+        vals = peak_val[idx]
+        strong = vals[np.abs(vals) > 0.2 * global_max]
+        if strong.size < 4:
+            return phase
+        pos = int((strong > 0).sum())
+        neg = int((strong < 0).sum())
+        if max(pos, neg) / strong.size < 0.7:
+            return phase
+        observed.append(1 if pos > neg else -1)
+    expected = [int(cfg["sign"]) for cfg in regions.values()]
+    if len(set(observed)) < 2 or observed == expected:
+        return phase
+    return ((phase[0] + 180.0) % 360.0, phase[1])
 
 
 def _read_complex_preview(
@@ -139,7 +203,18 @@ def unified_route(
         est = search_axis_memory(arr, ax, sign_mode=sign_mode)
         if est is None:
             raise RuntimeError(f"内存相位搜索({axis})无可用迹线")
-        fixed[axis] = est.phase
+        if sign_mode == "mixed":
+            resolved = _disambiguate_180_mixed(
+                arr, ax, est.phase, experiment, axis
+            )
+            if resolved != est.phase:
+                logs.append(
+                    f"{axis}: ±180° 化学位移分区消歧 "
+                    f"{est.phase} → {resolved}"
+                )
+            fixed[axis] = resolved
+        else:
+            fixed[axis] = est.phase
         axis_arrays[axis] = arr
         axis_index[axis] = ax
         axis_traces[axis] = est.traces
@@ -292,7 +367,18 @@ def _unified_nus(
         est = search_axis_memory(arr, ax, sign_mode=sign_mode)
         if est is None:
             raise RuntimeError(f"内存相位搜索({axis})无可用迹线")
-        fixed[axis] = est.phase
+        if sign_mode == "mixed":
+            resolved = _disambiguate_180_mixed(
+                arr, ax, est.phase, experiment, axis
+            )
+            if resolved != est.phase:
+                logs.append(
+                    f"{axis}: ±180° 化学位移分区消歧 "
+                    f"{est.phase} → {resolved}"
+                )
+            fixed[axis] = resolved
+        else:
+            fixed[axis] = est.phase
         axis_arrays[axis] = arr
         axis_index[axis] = ax
         axis_traces[axis] = est.traces
