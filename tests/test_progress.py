@@ -111,6 +111,11 @@ def test_stepwise_generate_spectrum_forwards_progress(
     messages: list[str] = []
     generate_fid(manager, entry.id, data.id, backend)
     generate_spectrum(
-        manager, entry.id, data.id, backend, progress=messages.append
+        manager,
+        entry.id,
+        data.id,
+        backend,
+        params={"phase_route": "none"},
+        progress=messages.append,
     )
     assert "处理中" in messages

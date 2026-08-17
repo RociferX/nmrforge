@@ -95,7 +95,11 @@ def test_generate_spectrum_records_effective_params(
     backend = _EffectiveBackend(tmp_path / "work")
     generate_fid(manager, exp_id, data_id, backend)
     generate_spectrum(
-        manager, exp_id, data_id, backend, params={"extract": False}
+        manager,
+        exp_id,
+        data_id,
+        backend,
+        params={"phase_route": "none", "extract": False},
     )
     run = _last_run(manager, exp_id, "process")
     params = run.params
@@ -150,7 +154,11 @@ def test_legacy_backend_params_unchanged(tmp_path: Path, bruker_dir: Path) -> No
     backend = _LegacyBackend(tmp_path / "work")
     generate_fid(manager, exp_id, data_id, backend)
     generate_spectrum(
-        manager, exp_id, data_id, backend, params={"extract": False}
+        manager,
+        exp_id,
+        data_id,
+        backend,
+        params={"phase_route": "none", "extract": False},
     )
     run = _last_run(manager, exp_id, "process")
     assert run.params == {"extract": False}
