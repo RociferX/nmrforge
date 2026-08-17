@@ -94,7 +94,7 @@ def unified_route(
         joint_recheck_memory,
         search_axis_memory,
     )
-    from workflow.phase_optimize import PHASE_SCORE_FLAT_MARGIN
+    from workflow.phase_optimize import P1_REFINE_MIN_GAIN
 
     plan = plan or select_method(experiment)
     if experiment.sampling.mode is SamplingMode.NUS:
@@ -152,7 +152,10 @@ def unified_route(
         best, best_score, fixed_score, zero_score = joint_recheck_memory(
             axis_arrays, axis_index, axis_traces, fixed, sign_mode=sign_mode
         )
-        if best != fixed and best_score - fixed_score >= PHASE_SCORE_FLAT_MARGIN:
+        if (
+            best != fixed
+            and best_score - fixed_score >= P1_REFINE_MIN_GAIN
+        ):
             logs.append(
                 f"联合复核: 联合最优 {best} (score={best_score:.2f}) "
                 f"优于顺序固定 {fixed} (score={fixed_score:.2f}),已更新"
@@ -217,7 +220,7 @@ def _unified_nus(
         joint_recheck_memory,
         search_axis_memory,
     )
-    from workflow.phase_optimize import PHASE_SCORE_FLAT_MARGIN
+    from workflow.phase_optimize import P1_REFINE_MIN_GAIN
 
     work = Path(work_dir) if work_dir else backend._work_path(experiment)
     params_first = dict(base_params or {})
@@ -305,7 +308,10 @@ def _unified_nus(
         best, best_score, fixed_score, zero_score = joint_recheck_memory(
             axis_arrays, axis_index, axis_traces, fixed, sign_mode=sign_mode
         )
-        if best != fixed and best_score - fixed_score >= PHASE_SCORE_FLAT_MARGIN:
+        if (
+            best != fixed
+            and best_score - fixed_score >= P1_REFINE_MIN_GAIN
+        ):
             logs.append(
                 f"联合复核: 联合最优 {best} (score={best_score:.2f}) "
                 f"优于顺序固定 {fixed} (score={fixed_score:.2f}),已更新"
