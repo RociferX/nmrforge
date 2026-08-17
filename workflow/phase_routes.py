@@ -66,7 +66,7 @@ def estimate_direct_phase_ht(
     import nmrglue as ng
 
     from workflow.display_hybrid_optimize import direct_axis_from_header
-    from workflow.phase_optimize import _score_fixed_traces, _trace_indices_fixed
+    from workflow.phase_optimize import _score_fixed_traces, _spectrum_real, _trace_indices_fixed
 
     path = Path(spectrum_path)
     header, data = ng.pipe.read(str(path))
@@ -85,8 +85,17 @@ def estimate_direct_phase_ht(
         )
         if not resp.get("success") or not resp.get("spectrum_path"):
             return 0.0
+        candidate_real = _spectrum_real(str(resp["spectrum_path"]))
+        candidate_indices, candidate_positions = _trace_indices_fixed(
+            candidate_real, axis
+        )
+        if not candidate_indices:
+            candidate_indices, candidate_positions = indices, positions
         return _score_fixed_traces(
-            str(resp["spectrum_path"]), axis_name, indices, positions
+            str(resp["spectrum_path"]),
+            axis_name,
+            candidate_indices,
+            candidate_positions,
         )[0]
 
     best = None
