@@ -466,6 +466,9 @@ def _stage_lines(
     window: dict[str, dict[str, Any]] | None = None,
     zero_fill: dict[str, dict[str, Any]] | None = None,
     sampling: dict[str, Any] | None = None,
+    *,
+    keep_direct_complex: bool = False,
+    direct_axis: str = "",
 ) -> list[str]:
     lines: list[str] = []
     for op, params in stages:
@@ -521,8 +524,9 @@ def _stage_lines(
             axis = params.get("axis", "")
             if direct_phase and axis in direct_phase:
                 p0, p1 = direct_phase[axis]
+            di = "" if (keep_direct_complex and axis == direct_axis) else " -di"
             lines.append(
-                f"| nmrPipe -fn PS -p0 {_fmt(p0)} -p1 {_fmt(p1)} -di \\"
+                f"| nmrPipe -fn PS -p0 {_fmt(p0)} -p1 {_fmt(p1)}{di} \\"
             )
         elif op == "baseline":
             cfg = dict(params)
@@ -557,6 +561,7 @@ def generate_process_script(
     ext_hi: str = "6.5",
     extract: bool = True,
     sampling: dict[str, Any] | None = None,
+    keep_direct_complex: bool = False,
 ) -> str:
     """把处理计划（DAG）翻译为 NMRPipe 管道脚本（直接维 → EXT → TP → 间接维）。
 
@@ -584,6 +589,8 @@ def generate_process_script(
             window,
             zf_plan,
             sampling,
+            keep_direct_complex=keep_direct_complex and index == 0,
+            direct_axis=axes[0],
         )
         if extract and index == 0:
             lines.append(

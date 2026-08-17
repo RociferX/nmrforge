@@ -118,11 +118,17 @@ def estimate_direct_phase_ht(
     import nmrglue as ng
 
     from workflow.display_hybrid_optimize import direct_axis_from_header
-    from workflow.phase_optimize import _score_fixed_traces, _spectrum_real, _trace_indices_fixed
+    from workflow.phase_optimize import (
+        _score_fixed_traces,
+        _spectrum_real,
+        _trace_indices_fixed,
+        _trace_metrics_median,
+    )
 
     path = Path(spectrum_path)
     header, data = ng.pipe.read(str(path))
-    real = np.real(np.asarray(data)).astype(float)
+    arr = np.asarray(data)
+    real = np.real(arr).astype(float)
     direct = experiment.direct_dimension
     nucleus = direct.nucleus if direct is not None else None
     axis = direct_axis_from_header(dict(header), nucleus)
@@ -131,24 +137,42 @@ def estimate_direct_phase_ht(
     if not indices:
         return None
 
-    def score(p0: float, p1: float) -> float:
-        resp = backend.phase_ht_candidate(
-            path, p0, p1, work_dir=work_dir
-        )
-        if not resp.get("success") or not resp.get("spectrum_path"):
-            return 0.0
-        candidate_real = _spectrum_real(str(resp["spectrum_path"]))
-        candidate_indices, candidate_positions = _trace_indices_fixed(
-            candidate_real, axis
-        )
-        if not candidate_indices:
-            candidate_indices, candidate_positions = indices, positions
-        return _score_fixed_traces(
-            str(resp["spectrum_path"]),
-            axis_name,
-            candidate_indices,
-            candidate_positions,
-        )[0]
+    if np.iscomplexobj(arr):
+        # 第一遍谱已保留真实虚部(不加 -di):直接 numpy 频域旋转,与真实后端等价
+        complex_arr = arr.astype(np.complex128)
+        n = complex_arr.shape[axis]
+        ramp_shape = [1] * complex_arr.ndim
+        ramp_shape[axis] = n
+
+        def score(p0: float, p1: float) -> float:
+            k = np.arange(n, dtype=float)
+            ramp = np.exp(
+                1j * np.deg2rad(p0 + p1 * k / max(n - 1, 1))
+            ).reshape(ramp_shape)
+            rotated = np.real(complex_arr * ramp)
+            return 50.0 * (
+                _trace_metrics_median(rotated, axis, indices, positions) + 1.0
+            )
+    else:
+
+        def score(p0: float, p1: float) -> float:
+            resp = backend.phase_ht_candidate(
+                path, p0, p1, work_dir=work_dir
+            )
+            if not resp.get("success") or not resp.get("spectrum_path"):
+                return 0.0
+            candidate_real = _spectrum_real(str(resp["spectrum_path"]))
+            candidate_indices, candidate_positions = _trace_indices_fixed(
+                candidate_real, axis
+            )
+            if not candidate_indices:
+                candidate_indices, candidate_positions = indices, positions
+            return _score_fixed_traces(
+                str(resp["spectrum_path"]),
+                axis_name,
+                candidate_indices,
+                candidate_positions,
+            )[0]
 
     best = None
     for p0 in np.arange(0.0, 360.0, coarse_p0_step):
@@ -184,6 +208,7 @@ def simple_route(
     if is_nus:
         first = backend.reconstruct_nus(experiment, params_first)
     else:
+        params_first["keep_direct_complex"] = True
         first = backend.process(experiment, plan or select_method(experiment), params=params_first)
     if not first.get("success") or not first.get("spectrum_path"):
         raise RuntimeError(f"第一遍处理失败: {first.get('message')}")

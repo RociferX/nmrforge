@@ -282,6 +282,7 @@ class NMRPipeBackend:
             progress=progress,
             out_file=out_file,
             script_name=script_name,
+            keep_direct_complex=_as_bool(proc_params.get("keep_direct_complex", False)),
         )
         logs += process_logs
         if not processed:
@@ -1650,6 +1651,7 @@ class NMRPipeBackend:
         progress: Callable[[str], None] | None = None,
         out_file: str | None = None,
         script_name: str | None = None,
+        keep_direct_complex: bool = False,
     ) -> tuple[bool, list[str], Path]:
         """生成并执行 NMRPipe 处理管道（输出 ft2/ft3）。"""
         logs: list[str] = []
@@ -1671,6 +1673,7 @@ class NMRPipeBackend:
             ext_lo=ext_lo,
             ext_hi=ext_hi,
             sampling=sampling,
+            keep_direct_complex=keep_direct_complex,
         )
         process_com = work / (
             script_name or f"{experiment.dataset_id}_process.com"
