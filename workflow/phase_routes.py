@@ -291,6 +291,11 @@ def _unified_nus(
     direct_phase = (0.0, 0.0)
     if direct_est is not None and direct_est[2] >= 30.0:
         direct_phase = (float(direct_est[0]), float(direct_est[1]))
+        if abs(direct_phase[1]) > 20.0:
+            logs.append(
+                f"直接维对称性搜索 p1={direct_phase[1]:g}° 幅值异常(>20°),归零"
+            )
+            direct_phase = (direct_phase[0], 0.0)
         logs.append(
             f"直接维对称性搜索: {direct_axis}=({direct_phase[0]:g}°, "
             f"{direct_phase[1]:g}°) score={direct_est[2]:.2f}"
