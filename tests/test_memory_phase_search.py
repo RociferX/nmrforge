@@ -109,12 +109,13 @@ def test_lock_discrete_traces_excludes_clump() -> None:
     w = 1.2
     z0 = 1.0 / (1.0 + 1j * (k0 - 30) / w)
     arr += 400.0 * np.outer(z0, 1.0 / (1.0 + ((k1 - 40) / 2.0) ** 2))
-    # 中央大团:幅度 300、宽 8、间隔 8 的多峰叠加(尾部不淹没离散峰)
+    # 中央大团:空间集中在 k1≥64 的「一团」(幅度 200、宽 8、间隔 8 叠加),
+    # 不污染 k1≈40 的离散峰列
     for c0 in range(60, 97, 8):
-        for c1 in range(56, 97, 8):
+        for c1 in range(64, 97, 8):
             zz0 = 1.0 / (1.0 + ((k0 - c0) / 8.0) ** 2)
             zz1 = 1.0 / (1.0 + ((k1 - c1) / 8.0) ** 2)
-            arr += 300.0 * np.outer(zz0, zz1)
+            arr += 200.0 * np.outer(zz0, zz1)
     idx, pos = _lock_discrete_traces(arr, 0)
     assert idx, "应有迹线入选"
     # 离散峰位于 k0=30;大团位于 k0>=60。多数入选迹线峰位应落在离散峰附近

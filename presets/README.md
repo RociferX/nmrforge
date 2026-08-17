@@ -2,6 +2,9 @@
 
 模板 = 先验 + 约束 + 期望行为（框架 §43），具体参数由优化器决定。
 YAML 由 core/experiments/registry.ExperimentTemplate.from_yaml 加载（Phase 2 实现）。
+每个模板的 `peak_sign` 描述峰符号约定：`uniform`＝信号峰同号（HSQC/CBCA(CO)NH 等），
+`mixed`＝正负峰共存（HNCACB 等，13Cα/13Cβ 反相）。相位优化按此做早约束：
+mixed 用「|净吸收| 中位数 + 正负共存」评分,uniform 用签名净吸收。
 每个模板的 `priors` 给出各核的化学位移范围，可用于实验类型判断时按化学位移进一步确认核
 （例如 HNCO 的 13C 应落在 165–185 ppm 羰基区，与 HNCACB 的 10–80 ppm 区分）。
 

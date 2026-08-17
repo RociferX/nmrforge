@@ -3,7 +3,8 @@ description: 15N-1H 3D CBCA(CO)NH(13Cα+13Cβ,仅羰基连接残基)
 phase_sensitive: true
 direct_nucleus: 1H
 indirect_nuclei: [15N, 13C]
-expected_peak_mode: absorption
+expected_peak_mode:
+peak_sign: uniform absorption
 display_orientation: "13C/15N/1H"
 priors:
   "1H": [6.0, 11.0]

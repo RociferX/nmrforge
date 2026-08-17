@@ -3,7 +3,8 @@ description: 15N-1H 3D HNHA(第三维 1Hα)
 phase_sensitive: true
 direct_nucleus: 1H
 indirect_nuclei: [15N, 1H]
-expected_peak_mode: absorption
+expected_peak_mode:
+peak_sign: uniform absorption
 display_orientation: "1H/15N/1H"
 priors:
   "1H": [0.0, 11.0]

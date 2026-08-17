@@ -7,6 +7,7 @@ TEMPLATE = ExperimentTemplate(
     direct_nucleus="1H",
     indirect_nuclei=["15N", "13C"],
     expected_peak_mode="absorption",
+    peak_sign="mixed",
     display_orientation="13C/15N/1H",
     priors={
         "1H": (6.0, 11.0),

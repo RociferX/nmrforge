@@ -3,7 +3,8 @@ description: 未知 3D 实验的安全兜底
 phase_sensitive: false
 direct_nucleus: ""
 indirect_nuclei: []
-expected_peak_mode: unknown
+expected_peak_mode:
+peak_sign: uniform unknown
 display_orientation: ""
 constraints:
   ndim: 3

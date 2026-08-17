@@ -26,7 +26,6 @@ from workflow.phase_optimize import (
     _refine_steps,
     _refine_window,
     _trace_indices_fixed,
-    _trace_metrics_median,
 )
 
 
@@ -45,6 +44,24 @@ def rotate_real(
     return np.real(arr * ramp.reshape(shape))
 
 
+def _window_nets(
+    real: np.ndarray, axis: int, indices: list[int], positions: list[int]
+) -> list[float]:
+    """每窗签名净吸收 (pos+neg)/total(与旧 _window_metric 同公式)。"""
+    moved = np.moveaxis(real, axis, -1)
+    traces = moved.reshape(-1, moved.shape[-1])
+    nets: list[float] = []
+    for index, peak in zip(indices, positions):
+        if index < 0 or index >= traces.shape[0]:
+            continue
+        profile = traces[index, max(0, peak - 5) : peak + 6]
+        positive = float(np.clip(profile, 0.0, None).sum())
+        negative = float(np.clip(profile, None, 0.0).sum())
+        total = float(np.abs(profile).sum())
+        nets.append((positive + negative) / total if total else 0.0)
+    return nets
+
+
 def score_axis_memory(
     complex_arr: np.ndarray,
     axis: int,
@@ -52,11 +69,32 @@ def score_axis_memory(
     p1: float,
     indices: list[int],
     positions: list[int],
+    *,
+    sign_mode: str = "uniform",
 ) -> float:
-    """候选相位在锁定迹线/峰位上的净吸收评分(0-100,与 _score_fixed_traces
-    同公式:50 × (中位数 + 1))。"""
+    """候选相位评分(0-100)。
+
+    sign_mode="mixed"(HNCACB 等正负峰共存):吸收度 = |各窗净吸收| 的
+    中位数——正峰/负峰都能得高分;再要求强弱峰正负共存(缺一种符号
+    惩罚 ×0.7),避免色散/全同号假解。
+    sign_mode="uniform"(HSQC/CBCACONH 等同号峰):保留旧签名净吸收中位数
+    (正峰偏好消解 ±180 歧义)。
+    """
     real = rotate_real(complex_arr, axis, p0, p1)
-    median = _trace_metrics_median(real, axis, indices, positions)
+    nets = _window_nets(real, axis, indices, positions)
+    if not nets:
+        return 50.0
+    if sign_mode == "mixed":
+        score = 50.0 * (float(np.median(np.abs(nets))) + 1.0)
+        strong = [n for n in nets if abs(n) > 0.35]
+        if strong:
+            pos = sum(1 for n in strong if n > 0)
+            neg = sum(1 for n in strong if n < 0)
+            if pos >= 1 and neg >= 1:
+                return score
+            return score * 0.7
+        return score
+    median = float(np.median(nets))
     return 50.0 * (median + 1.0)
 
 
@@ -66,23 +104,22 @@ def _lock_discrete_traces(
     *,
     prominence_min: float = 2.5,
     window: int = 10,
+    max_duty: float = 0.5,
     threshold_pct: float = 95.0,
 ) -> tuple[list[int], list[int]]:
     """锁定「离散峰」迹线用于调相评分。
 
-    与人工 nmrDraw「挑离散峰调相」一致:中央混杂峰团(宽平台/多峰叠加)
-    难调相且会带偏评分,这里按峰位处 |trace| 相对局部背景的低分位显著性
-    (prominence)过滤——离散尖峰的局部背景远低于峰顶(prominence 高),
-    混杂峰团背景接近峰顶(prominence 低)。阈值逻辑与旧方案一致
-    (max(99.5 分位, noise×5)),无离散峰时回退全部超过阈值的迹线。
+    与人工 nmrDraw「挑离散峰调相」一致:阈值取低分位(默认 95,中央大团会
+    抬高 99.5 分位把离散峰淘汰);再用峰形尖锐性过滤——峰位 ±window 内
+    ≥半高点的占比(duty)≤ max_duty 且峰顶相对局部背景低分位显著
+    (prominence)。中央混杂峰团(密集峰簇)占窗口比例大、被排除;无离散峰时
+    逐级降阈值,最后回退全部迹线。
     """
     real0 = np.real(complex_arr)
     moved = np.moveaxis(real0, axis, -1)
     traces = moved.reshape(-1, moved.shape[-1])
     n = moved.shape[-1]
     noise = float(np.std(real0[:80, :40])) if real0.size else 0.0
-    # 阈值放宽到 95 分位(中央大团会抬高 99.5 分位,把离散峰淘汰);
-    # 无离散峰时逐级降阈值回退
     for pct in (threshold_pct, 75.0):
         threshold = max(float(np.percentile(real0, pct)), noise * 5.0)
         indices: list[int] = []
@@ -92,9 +129,16 @@ def _lock_discrete_traces(
             peak = int(np.argmax(mag))
             if float(mag[peak]) <= threshold:
                 continue
+            half = 0.5 * float(mag[peak])
             lo = max(0, peak - window)
             hi = min(n, peak + window + 1)
-            bg = float(np.percentile(mag[lo:hi], 25.0))
+            seg = mag[lo:hi]
+            if seg.size == 0:
+                continue
+            duty = float(np.mean(seg >= half))
+            if duty > max_duty:
+                continue
+            bg = float(np.percentile(seg, 25.0))
             if float(mag[peak]) / (bg + 1e-12) >= prominence_min:
                 indices.append(i)
                 positions.append(peak)
@@ -150,6 +194,7 @@ def search_axis_memory(
     p0_values: tuple[float, ...] = tuple(float(v) for v in range(0, 360, 30)),
     final_step: float = 5.0,
     refine: bool = True,
+    sign_mode: str = "uniform",
 ) -> MemoryAxisResult | None:
     """在复型数据的指定轴上做内存相位搜索(旧算法判断标准,零后端)。"""
     arr = np.asarray(complex_arr, dtype=np.complex128)
@@ -160,7 +205,9 @@ def search_axis_memory(
     scored: dict[tuple[float, float], float] = {}
 
     def _score(p0: float, p1: float) -> float:
-        return score_axis_memory(arr, axis, p0, p1, trace_indices, trace_positions)
+        return score_axis_memory(
+            arr, axis, p0, p1, trace_indices, trace_positions, sign_mode=sign_mode
+        )
 
     # 基线 (0,0) 锁定「离散峰」迹线(阈值同旧方案,另按峰位显著性过滤
     # 中央混杂峰团,VM sampleB 校准:混杂大团会带偏相位,离散峰可调到
@@ -360,6 +407,7 @@ def joint_recheck_memory(
     fixed: dict[str, tuple[float, float]],
     *,
     final_step: float = 5.0,
+    sign_mode: str = "uniform",
 ) -> tuple[dict[str, tuple[float, float]], float, float, float]:
     """联合 ±final_step 邻域复核(内存版):各轴 p1 3 值组合 + 全零,
     逐轴在各自复型数组上旋转评分取均值(与旧方案 trace_map 同基准)。
@@ -388,7 +436,15 @@ def joint_recheck_memory(
                 continue
             p0, p1 = phases[axis]
             vals.append(
-                score_axis_memory(axis_arrays[axis], axis_index[axis], p0, p1, idx, pos)
+                score_axis_memory(
+                    axis_arrays[axis],
+                    axis_index[axis],
+                    p0,
+                    p1,
+                    idx,
+                    pos,
+                    sign_mode=sign_mode,
+                )
             )
         return float(np.mean(vals)) if vals else -1.0
 

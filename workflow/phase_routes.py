@@ -32,6 +32,24 @@ def _axis_index(axis: str, ndim: int = 2) -> int:
         return {"F2": 0, "F1": 1, "F3": 2}.get(axis, 0)
     return {"F1": 0, "F2": 1}.get(axis, 0)
 
+def _sign_mode(experiment: Experiment) -> str:
+    """按实验模板 peak_sign 返回评分符号约束
+    (mixed=正负峰共存,uniform=同号;默认 uniform)。"""
+    import core.experiments  # noqa: F401  导入即注册内置模板
+    from core.experiments.registry import get as get_template
+
+    name = experiment.experiment_type.name if experiment.experiment_type else ""
+    tpl = get_template(name)
+    if tpl is None:
+        for tname in (name.upper(), name.lower()):
+            tpl = get_template(tname)
+            if tpl is not None:
+                break
+    if tpl is not None and tpl.peak_sign == "mixed":
+        return "mixed"
+    return "uniform"
+
+
 def _read_complex_preview(
     path: Path | str, unpack_axis: int | None = None
 ) -> np.ndarray:
@@ -92,6 +110,7 @@ def unified_route(
     params.pop("preview_axis", None)
     ext = "ft3" if experiment.ndim >= 3 else "ft2"
     direct_axis = "F2" if experiment.ndim == 2 else "F3"
+    sign_mode = _sign_mode(experiment)
     axes = [dim.logical_axis for dim in experiment.dimensions]
     # 0.2.75:均匀路径先间接后直接(旧算法顺序,直接维在间接维校正后的谱上锁点)
     search_axes = [a for a in axes if a != direct_axis] + [direct_axis]
@@ -117,7 +136,7 @@ def unified_route(
             raise RuntimeError(f"复型预览({axis})失败: {resp.get('message')}")
         ax = _axis_index(axis, experiment.ndim)
         arr = _read_complex_preview(str(resp["spectrum_path"]), unpack_axis=ax)
-        est = search_axis_memory(arr, ax)
+        est = search_axis_memory(arr, ax, sign_mode=sign_mode)
         if est is None:
             raise RuntimeError(f"内存相位搜索({axis})无可用迹线")
         fixed[axis] = est.phase
@@ -131,7 +150,7 @@ def unified_route(
         )
     if len(search_axes) >= 2:
         best, best_score, fixed_score, zero_score = joint_recheck_memory(
-            axis_arrays, axis_index, axis_traces, fixed
+            axis_arrays, axis_index, axis_traces, fixed, sign_mode=sign_mode
         )
         if best != fixed and best_score - fixed_score >= PHASE_SCORE_FLAT_MARGIN:
             logs.append(
@@ -214,6 +233,7 @@ def _unified_nus(
     backend_runs = 1
     planes = _load_recon_planes(experiment, work)
     direct_axis = "F3" if experiment.ndim >= 3 else "F2"
+    sign_mode = _sign_mode(experiment)
     indirect_axes = [
         dim.logical_axis
         for dim in experiment.dimensions
@@ -269,7 +289,7 @@ def _unified_nus(
             raise RuntimeError(f"NUS 复型预览({axis})失败: {resp.get('message')}")
         ax = _axis_index(axis, experiment.ndim)
         arr = _read_complex_preview(str(resp["spectrum_path"]), unpack_axis=ax)
-        est = search_axis_memory(arr, ax)
+        est = search_axis_memory(arr, ax, sign_mode=sign_mode)
         if est is None:
             raise RuntimeError(f"内存相位搜索({axis})无可用迹线")
         fixed[axis] = est.phase
@@ -283,7 +303,7 @@ def _unified_nus(
         )
     if len(indirect_axes) >= 2:
         best, best_score, fixed_score, zero_score = joint_recheck_memory(
-            axis_arrays, axis_index, axis_traces, fixed
+            axis_arrays, axis_index, axis_traces, fixed, sign_mode=sign_mode
         )
         if best != fixed and best_score - fixed_score >= PHASE_SCORE_FLAT_MARGIN:
             logs.append(

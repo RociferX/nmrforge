@@ -18,6 +18,9 @@ class ExperimentTemplate:
     direct_nucleus: str = "1H"
     indirect_nuclei: list[str] = field(default_factory=list)
     expected_peak_mode: str = "absorption"
+    # 峰符号约定:uniform=信号峰同号(HSQC/CBCA(CO)NH 等);
+    # mixed=正负峰共存(HNCACB 等,13Cα/13Cβ 反相)。相位搜索用它做早约束。
+    peak_sign: str = "uniform"
     display_orientation: str = ""
     priors: dict[str, Any] = field(default_factory=dict)
     constraints: dict[str, Any] = field(default_factory=dict)

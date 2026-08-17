@@ -3,7 +3,8 @@ description: 13C-1H 3D HCCH-TOCSY(1H-13C-1H)
 phase_sensitive: true
 direct_nucleus: 1H
 indirect_nuclei: [13C, 1H]
-expected_peak_mode: absorption
+expected_peak_mode:
+peak_sign: uniform absorption
 display_orientation: "1H/13C/1H"
 priors:
   "1H": [0.0, 7.0]
