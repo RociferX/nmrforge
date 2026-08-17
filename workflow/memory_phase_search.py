@@ -106,16 +106,28 @@ def _lock_discrete_traces(
     window: int = 10,
     max_duty: float = 0.5,
     threshold_pct: float = 95.0,
+    discrete: bool = True,
 ) -> tuple[list[int], list[int]]:
     """锁定「离散峰」迹线用于调相评分。
 
-    与人工 nmrDraw「挑离散峰调相」一致:阈值取低分位(默认 95,中央大团会
-    抬高 99.5 分位把离散峰淘汰);再用峰形尖锐性过滤——峰位 ±window 内
-    ≥半高点的占比(duty)≤ max_duty 且峰顶相对局部背景低分位显著
-    (prominence)。中央混杂峰团(密集峰簇)占窗口比例大、被排除;无离散峰时
-    逐级降阈值,最后回退全部迹线。
+    与人工 nmrDraw「挑离散峰调相」一致:离散峰选择(discrete=True)阈值取
+    低分位(默认 95,中央大团会抬高 99.5 分位把离散峰淘汰),再用峰形尖锐性
+    过滤——峰位 ±window 内 ≥半高点的占比(duty)≤ max_duty 且峰顶相对
+    局部背景低分位显著(prominence)。中央混杂峰团(密集峰簇)占窗口比例大、
+    被排除;无离散峰时逐级降阈值,最后回退全部迹线。
+
+    该选择只用于 mixed(HNCACB 等正负共存)实验——uniform 谱用旧锁定
+    (99.5 分位全部强迹线)即可,离散过滤会改变迹线集把 d103 等带偏 180°
+    (VM d103 回归校准)。
     """
     real0 = np.real(complex_arr)
+    if not discrete:
+        noise_old = float(np.std(real0[:80, :40])) if real0.size else 0.0
+        thr_old = max(float(np.percentile(real0, 99.5)), noise_old * 5.0)
+        out = _trace_indices_fixed(real0, axis, thr_old)
+        if out[0]:
+            return out
+        return _trace_indices_fixed(real0, axis, -1.0)
     moved = np.moveaxis(real0, axis, -1)
     traces = moved.reshape(-1, moved.shape[-1])
     n = moved.shape[-1]
@@ -195,6 +207,7 @@ def search_axis_memory(
     final_step: float = 5.0,
     refine: bool = True,
     sign_mode: str = "uniform",
+    discrete: bool | None = None,
 ) -> MemoryAxisResult | None:
     """在复型数据的指定轴上做内存相位搜索(旧算法判断标准,零后端)。"""
     arr = np.asarray(complex_arr, dtype=np.complex128)
@@ -209,10 +222,13 @@ def search_axis_memory(
             arr, axis, p0, p1, trace_indices, trace_positions, sign_mode=sign_mode
         )
 
-    # 基线 (0,0) 锁定「离散峰」迹线(阈值同旧方案,另按峰位显著性过滤
-    # 中央混杂峰团,VM sampleB 校准:混杂大团会带偏相位,离散峰可调到
-    # F2=(90,0)/F1=(0,0))
-    trace_indices, trace_positions = _lock_discrete_traces(arr, axis)
+    # 基线 (0,0) 锁定迹线:mixed(HNCACB 等)用离散峰选择过滤中央混杂峰团
+    # (VM sampleB 校准:大团会带偏相位,离散峰调到 F2=90°/F1≈0°);
+    # uniform 用旧锁定(离散过滤会改变迹线集,VM d103 曾带偏 180°)
+    use_discrete = (sign_mode == "mixed") if discrete is None else discrete
+    trace_indices, trace_positions = _lock_discrete_traces(
+        arr, axis, discrete=use_discrete
+    )
     if not trace_indices:
         trace_indices, trace_positions = _trace_indices_fixed(
             np.real(arr), axis, -1.0
