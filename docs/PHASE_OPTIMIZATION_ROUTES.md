@@ -121,6 +121,16 @@
   - NUS → `optimize_nus_hybrid`;
   - uniform → `workflow.phase_optimize.optimize_phase_sequential`。
 
+## 3.4 显示层相位应用原则(0.2.102)
+
+- 显示层虚部重建、相位旋转、取实部,优先直接调用 nmrPipe 函数
+  (HT / PS -ht),不自己用 numpy/scipy 模拟;只有能严格证明 numpy 与
+  nmrPipe 逐位等价时才可替换,否则以 nmrPipe 函数为准。
+- 每一维的 HT 符号/轴必须对照该维生成脚本中的 FT/TP/EXT 变换,逐维
+  转置到管道轴后再 HT;镜像 Hilbert(-ps90-180)按该维频率方向选择。
+- 候选显示谱用 nmrPipe PS -p0 -p1 -ht -di 生成,再复用进阶版固定迹线
+  净吸收评分,避免 numpy 模拟旋转引入残差。
+
 ## 4. 关键约定与门控
 
 - 显示层相位是「校正相位」:对解析信号乘

@@ -40,6 +40,11 @@ def test_simple_route_uniform_two_passes(monkeypatch, bruker_dir: Path) -> None:
         "estimate_all_axes",
         lambda path, exp: {"F1": (10.0, -2.0), "F2": (20.0, 3.0)},
     )
+    monkeypatch.setattr(
+        routes,
+        "estimate_direct_phase_ht",
+        lambda backend_, path, exp, work_dir=None: (20.0, 3.0, 100.0),
+    )
     result = routes.simple_route(experiment, backend)
     assert len(backend.process_calls) == 2
     assert backend.process_calls[0][2].get("direct_phase_search") is False
@@ -59,6 +64,11 @@ def test_simple_route_nus_direct_override_and_indirect_finalize(
         routes,
         "estimate_all_axes",
         lambda path, exp: {"F3": (30.0, -5.0), "F2": (11.0, 0.0), "F1": (22.0, 0.0)},
+    )
+    monkeypatch.setattr(
+        routes,
+        "estimate_direct_phase_ht",
+        lambda backend_, path, exp, work_dir=None: (30.0, -5.0, 100.0),
     )
     result = routes.simple_route(experiment, backend)
     assert len(backend.reconstruct_params) == 2

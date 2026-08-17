@@ -51,6 +51,63 @@ def estimate_all_axes(
     return phases
 
 
+def estimate_direct_phase_ht(
+    backend: Any,
+    spectrum_path: Path | str,
+    experiment: Experiment,
+    *,
+    work_dir: Path | str | None = None,
+    coarse_p0_step: float = 30.0,
+) -> tuple[float, float, float] | None:
+    """用 nmrPipe PS -ht 候选 + 进阶版固定迹线评分估计直接维相位。
+
+    不依赖 numpy 模拟旋转,与 nmrDraw/真实 PS 同源。
+    """
+    import nmrglue as ng
+
+    from workflow.display_hybrid_optimize import direct_axis_from_header
+    from workflow.phase_optimize import _score_fixed_traces, _trace_indices_fixed
+
+    path = Path(spectrum_path)
+    header, data = ng.pipe.read(str(path))
+    real = np.real(np.asarray(data)).astype(float)
+    direct = experiment.direct_dimension
+    nucleus = direct.nucleus if direct is not None else None
+    axis = direct_axis_from_header(dict(header), nucleus)
+    axis_name = f"F{axis + 1}"
+    indices, positions = _trace_indices_fixed(real, axis)
+    if not indices:
+        return None
+
+    def score(p0: float, p1: float) -> float:
+        resp = backend.phase_ht_candidate(
+            path, p0, p1, work_dir=work_dir
+        )
+        if not resp.get("success") or not resp.get("spectrum_path"):
+            return 0.0
+        return _score_fixed_traces(
+            str(resp["spectrum_path"]), axis_name, indices, positions
+        )[0]
+
+    best = None
+    for p0 in np.arange(0.0, 360.0, coarse_p0_step):
+        s = score(float(p0), 0.0)
+        if best is None or s > best[0]:
+            best = (s, float(p0), 0.0)
+    assert best is not None
+    s, p0, p1 = best
+    for _ in range(2):
+        for dp0 in (-15.0, -5.0, 0.0, 5.0, 15.0):
+            ss = score((p0 + dp0) % 360.0, 0.0)
+            if ss > s:
+                s, p0, p1 = ss, (p0 + dp0) % 360.0, 0.0
+    for dp1 in (-22.5, -10.0, 0.0, 10.0, 22.5):
+        ss = score(p0, p1 + dp1)
+        if ss > s:
+            s, p1 = ss, p1 + dp1
+    return p0, p1, s
+
+
 def simple_route(
     experiment: Experiment,
     backend: Any,
@@ -79,6 +136,12 @@ def simple_route(
         if ht.get("success") and ht.get("spectrum_path"):
             display_path = ht["spectrum_path"]
     phases = estimate_all_axes(display_path, experiment)
+    direct_key = experiment.direct_dimension.logical_axis if experiment.direct_dimension else "F2"
+    direct_est = estimate_direct_phase_ht(
+        backend, first["spectrum_path"], experiment, work_dir=work_dir
+    )
+    if direct_est is not None:
+        phases[direct_key] = (direct_est[0], direct_est[1])
 
     if is_nus:
         direct = experiment.direct_dimension.logical_axis if experiment.direct_dimension else "F2"

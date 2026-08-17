@@ -804,6 +804,49 @@ class NMRPipeBackend:
             "logs": logs,
         }
 
+    def phase_ht_candidate(
+        self,
+        spectrum_path: Path | str,
+        p0: float,
+        p1: float,
+        *,
+        work_dir: Path | str | None = None,
+        out_file: str | None = None,
+        timeout: float = 600.0,
+    ) -> dict[str, Any]:
+        """用 nmrPipe PS -ht 对实型谱生成一个候选显示谱(轻后端)。
+
+        这等价于 nmrDraw 在显示层的相位旋转 + 虚部重建,评分必须用该谱,
+        不要用 numpy 模拟旋转。当前作用于谱文件管道轴(直接维)。
+        """
+        bin_dir = self._bin_dir()
+        if bin_dir is None:
+            return {"success": False, "message": "未找到 nmrPipe", "logs": []}
+        work = Path(work_dir) if work_dir else Path(spectrum_path).parent
+        src = Path(spectrum_path)
+        if src.parent.resolve() != work.resolve():
+            shutil.copy2(src, work / src.name)
+        out_name = out_file or (
+            f"{src.stem}_ph_{p0:g}_{p1:g}.{src.suffix.lstrip('.')}"
+        )
+        runtime = CshRuntime()
+        result = runtime.run(
+            [
+                "nmrPipe", "-in", src.name,
+                "|", "nmrPipe", "-fn", "PS",
+                "-p0", f"{p0:g}", "-p1", f"{p1:g}", "-ht", "-di",
+                "-out", out_name, "-ov",
+            ],
+            cwd=str(work),
+            timeout=timeout,
+        )
+        logs = [f"nmrPipe PS -ht candidate: rc={result.returncode}"]
+        out = work / out_name
+        if result.returncode != 0 or not out.is_file() or out.stat().st_size == 0:
+            return {"success": False, "message": "nmrPipe PS -ht 失败", "logs": logs}
+        logs.append(f"候选显示谱 → {out}")
+        return {"success": True, "spectrum_path": str(out), "logs": logs}
+
     def hilbert_spectrum(
         self,
         spectrum_path: Path | str,
