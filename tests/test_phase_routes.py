@@ -123,6 +123,11 @@ def test_unified_route_nus_reconstruct_then_finalize(
     fid1 = np.exp(-t1 / 8.0) * np.cos(2.0 * np.pi * 8.0 * t1 / n_t1)
     planes = np.outer(direct, fid1)  # (direct, f1_time)
     monkeypatch.setattr(routes, "_load_recon_planes", lambda exp, wk: planes)
+    # NUS 直接维沿用旧权威对称性搜索(0.2.96 机制)
+    monkeypatch.setattr(
+        "core.optimization.phase_search.search_direct_phase_on_spectrum",
+        lambda arr, axis=0, metric="symmetry": (30.0, 0.0, 80.0),
+    )
     result = routes.unified_route(experiment, backend, work_dir=work)
     assert len(backend.reconstruct_params) == 1
     assert backend.reconstruct_params[0].get("display_phase_search") is False

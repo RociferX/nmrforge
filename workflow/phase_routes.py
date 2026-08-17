@@ -282,11 +282,21 @@ def _unified_nus(
         for dim in experiment.dimensions
         if dim.role is not AxisRole.DIRECT
     ]
-    # 直接维:recon 平面 axis 0 复型 → 内存搜索(统一判断标准)
-    direct_est = search_axis_memory(planes, 0)
-    direct_phase = direct_est.phase if direct_est is not None else (0.0, 0.0)
-    if direct_est is not None:
-        logs += direct_est.logs
+    # 直接维:recon 平面 axis 0 复型 → 沿用旧权威的显示层对称性搜索
+    # (0.2.96/0.2.98 机制;旧几十次后端方案从不把固定迹线净吸收用于 NUS
+    # 直接维,直接维随 SMILE 固化)。score<30 时保持 (0,0)。
+    from core.optimization.phase_search import search_direct_phase_on_spectrum
+
+    direct_est = search_direct_phase_on_spectrum(planes, axis=0, metric="symmetry")
+    direct_phase = (0.0, 0.0)
+    if direct_est is not None and direct_est[2] >= 30.0:
+        direct_phase = (float(direct_est[0]), float(direct_est[1]))
+        logs.append(
+            f"直接维对称性搜索: {direct_axis}=({direct_phase[0]:g}°, "
+            f"{direct_phase[1]:g}°) score={direct_est[2]:.2f}"
+        )
+    else:
+        logs.append("直接维对称性搜索无干净信号峰或置信度不足,保持 (0,0)")
     logs.append(
         f"直接维内存相位: {direct_axis}=({direct_phase[0]:g}°, {direct_phase[1]:g}°)"
     )
