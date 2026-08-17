@@ -469,6 +469,7 @@ def _stage_lines(
     *,
     keep_direct_complex: bool = False,
     direct_axis: str = "",
+    complex_axes: frozenset[str] | None = None,
 ) -> list[str]:
     lines: list[str] = []
     for op, params in stages:
@@ -524,7 +525,10 @@ def _stage_lines(
             axis = params.get("axis", "")
             if direct_phase and axis in direct_phase:
                 p0, p1 = direct_phase[axis]
-            di = "" if (keep_direct_complex and axis == direct_axis) else " -di"
+            keep_cplx = (complex_axes and axis in complex_axes) or (
+                keep_direct_complex and axis == direct_axis
+            )
+            di = "" if keep_cplx else " -di"
             lines.append(
                 f"| nmrPipe -fn PS -p0 {_fmt(p0)} -p1 {_fmt(p1)}{di} \\"
             )
@@ -562,6 +566,7 @@ def generate_process_script(
     extract: bool = True,
     sampling: dict[str, Any] | None = None,
     keep_direct_complex: bool = False,
+    complex_axes: frozenset[str] | None = None,
 ) -> str:
     """把处理计划（DAG）翻译为 NMRPipe 管道脚本（直接维 → EXT → TP → 间接维）。
 
@@ -591,6 +596,7 @@ def generate_process_script(
             sampling,
             keep_direct_complex=keep_direct_complex and index == 0,
             direct_axis=axes[0],
+            complex_axes=complex_axes,
         )
         if extract and index == 0:
             lines.append(
@@ -603,6 +609,56 @@ def generate_process_script(
         lines.append("| nmrPipe -fn TP \\")
     lines.append(f"| pipe2xyz -out {out_file} -x")
     return "\n".join(lines) + "\n"
+
+
+def generate_preview_script(
+    experiment: Experiment,
+    plan: ProcessingPlan,
+    *,
+    in_file: str,
+    out_file: str,
+    preview_axis: str,
+    fixed_phases: dict[str, tuple[float, float]] | None = None,
+    baseline: dict[str, dict[str, Any]] | None = None,
+    window: dict[str, dict[str, Any]] | None = None,
+    ext_lo: str = "10.5",
+    ext_hi: str = "6.5",
+    extract: bool = True,
+    sampling: dict[str, Any] | None = None,
+) -> str:
+    """第一遍复型预览脚本(uniform):整条生产管道,仅 preview_axis 的 PS
+    不加 -di(该维输出真实虚部),其它轴按 fixed_phases(缺省 0)加 -di;
+    零填零(与旧相位候选同参,保证内存旋转候选与旧后端候选同源)。
+
+    输出为生产布局复型文件(pipe2xyz -x),显示层读该文件沿 preview_axis
+    的数组轴做内存旋转评分。3D 的 F2/F1 预览同样走生产布局,避免转置歧义。
+    """
+    axes = [dim.logical_axis for dim in experiment.dimensions]
+    zf_none = {axis: {"mode": "none"} for axis in axes}
+    phases = {
+        axis: value
+        for axis, value in (fixed_phases or {}).items()
+        if axis != preview_axis
+    }
+    for axis in axes:
+        if axis != preview_axis:
+            phases.setdefault(axis, (0.0, 0.0))
+    return generate_process_script(
+        experiment,
+        plan,
+        in_file=in_file,
+        out_file=out_file,
+        direct_phase=phases,
+        baseline=baseline,
+        window=window,
+        zero_fill=zf_none,
+        ext_lo=ext_lo,
+        ext_hi=ext_hi,
+        extract=extract,
+        sampling=sampling,
+        complex_axes=frozenset({preview_axis}),
+    )
+
 
 
 def _nus_zf_size(cfg: dict[str, Any], td_points: int) -> int:

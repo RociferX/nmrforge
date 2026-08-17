@@ -95,6 +95,58 @@ def test_scripts_deterministic(bruker_dir: Path) -> None:
     )
 
 
+def test_preview_script_2d_f2_keeps_complex(bruker_dir: Path) -> None:
+    """F2 预览:F2 PS 不加 -di,间接维 F1 加 -di,零填零。"""
+    exp = read_dataset(bruker_dir / "hsqc_2d")
+    plan = select_method(exp)
+    from backend.script_generator import generate_preview_script
+
+    script = generate_preview_script(
+        exp, plan, in_file="test.fid", out_file="p_F2.ft2", preview_axis="F2"
+    )
+    assert "| nmrPipe -fn PS -p0 0 -p1 0 \\" in script  # F2 不加 -di
+    assert "| nmrPipe -fn PS -p0 0 -p1 0 -di \\" in script  # F1 加 -di
+    assert "| nmrPipe -fn ZF" not in script  # 零填零(与旧相位候选同参)
+    assert script.count("| nmrPipe -fn PS") == 2
+    assert "| pipe2xyz -out p_F2.ft2 -x" in script
+
+
+def test_preview_script_2d_f1_fixed_phases_only_other_axes(bruker_dir: Path) -> None:
+    """F1 预览:preview_axis 自身保持 PS(0,0) 不加 -di;固定相位只作用于其它轴。"""
+    exp = read_dataset(bruker_dir / "hsqc_2d")
+    plan = select_method(exp)
+    from backend.script_generator import generate_preview_script
+
+    script = generate_preview_script(
+        exp,
+        plan,
+        in_file="test.fid",
+        out_file="p_F1.ft2",
+        preview_axis="F1",
+        fixed_phases={"F1": (10.0, -2.0), "F2": (5.0, 0.0)},
+    )
+    # 预览轴 F1 必须 PS(0,0) 无 -di;传入的 F1 固定相位不得应用
+    assert "| nmrPipe -fn PS -p0 0 -p1 0 \\" in script
+    assert "| nmrPipe -fn PS -p0 5 -p1 0 -di \\" in script  # F2 固定相位应用
+    assert "p0 10" not in script
+
+
+def test_preview_script_3d(bruker_dir: Path) -> None:
+    """3D F2 预览:F3/F1 加 -di,F2 不加;零填零;2 个 TP。"""
+    exp = read_dataset(bruker_dir / "hnca_3d")
+    plan = select_method(exp)
+    from backend.script_generator import generate_preview_script
+
+    script = generate_preview_script(
+        exp, plan, in_file="test.fid", out_file="p_F2.ft3", preview_axis="F2"
+    )
+    assert script.count("| nmrPipe -fn PS") == 3
+    assert script.count("| nmrPipe -fn PS -p0 0 -p1 0 -di \\") == 2
+    assert "| nmrPipe -fn PS -p0 0 -p1 0 \\" in script
+    assert script.count("| nmrPipe -fn TP") == 2
+    assert "| nmrPipe -fn ZF" not in script
+
+
 def test_2d_nus_script(bruker_dir: Path) -> None:
     """两阶段:stage1 nmrPipe -in + SMILE(-sample None,-xT 复点网格);
     stage2 nmrPipe -in recon.ft1 + FT -alt + -out -ov。"""
