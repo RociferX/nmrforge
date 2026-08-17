@@ -18,7 +18,6 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from workflow.phase_optimize import (
-    P1_REFINE_MIN_GAIN,
     PHASE_PLATEAU_TOL,
     PHASE_REPRODUCIBILITY_TOL,
     PHASE_SCORE_FLAT_MARGIN,
@@ -382,7 +381,7 @@ def search_axis_memory(
                 _run_batch([cand])
             if cand in scored:
                 c_score = scored[cand]
-                if c_score >= best_score + P1_REFINE_MIN_GAIN:
+                if c_score > best_score:
                     logs.append(
                         f"轴{axis}: p1 精修 {best_phase[1]:g}° → {p1:g}° "
                         f"(score={c_score:.2f})"
