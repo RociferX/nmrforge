@@ -63,9 +63,20 @@ class _FakeBackend:
         self.reconstruct_params.append(dict(params or {}))
         return {"success": True, "spectrum_path": str(self.work / "out.ft2"), "logs": []}
 
-    def finalize_nus(self, experiment, phases=None, work_dir=None, planes=None, params=None):
-        self.finalize_calls.append({"phases": dict(phases or {}), "planes": planes})
-        path = str(self.work / "final.ft2")
+    def finalize_nus(
+        self,
+        experiment,
+        phases=None,
+        work_dir=None,
+        planes=None,
+        params=None,
+        out_file=None,
+        script_name=None,
+    ):
+        self.finalize_calls.append(
+            {"phases": dict(phases or {}), "planes": planes, "params": dict(params or {})}
+        )
+        path = str(self.work / (out_file or "final.ft2"))
         Path(path).write_bytes(b"x")
         return {"success": True, "spectrum_path": path, "logs": []}
 
@@ -109,8 +120,8 @@ def test_unified_route_uniform_order_and_phases(
 def test_unified_route_nus_reconstruct_then_finalize(
     tmp_path: Path, monkeypatch, bruker_dir: Path
 ) -> None:
-    """NUS:SMILE 一次(关搜索)→ 直接维内存调相 → 间接维内存搜索 → 应用直接维
-    相位 → finalize 一次(后端仅 2 次)。"""
+    """NUS:SMILE 一次(关搜索)→ 直接维对称性调相 → 间接维 finalize 复型预览
+    (该轴不加 -di)+ 内存搜索 → 应用直接维相位 → finalize 终跑。"""
     experiment = read_dataset(bruker_dir / "nus_2d")
     backend = _FakeBackend(tmp_path / "nus_work")
     work = backend.work
@@ -119,7 +130,6 @@ def test_unified_route_nus_reconstruct_then_finalize(
     t1 = np.arange(n_t1, dtype=float)
     direct = 1.0 / (1.0 + 1j * (k0 - 22) / 1.5)
     direct = direct * np.exp(-1j * np.deg2rad(30.0))
-    # F1 时间域用实型衰减余弦(避免复数 FID 相位污染直接维评分)
     fid1 = np.exp(-t1 / 8.0) * np.cos(2.0 * np.pi * 8.0 * t1 / n_t1)
     planes = np.outer(direct, fid1)  # (direct, f1_time)
     monkeypatch.setattr(routes, "_load_recon_planes", lambda exp, wk: planes)
@@ -128,12 +138,25 @@ def test_unified_route_nus_reconstruct_then_finalize(
         "core.optimization.phase_search.search_direct_phase_on_spectrum",
         lambda arr, axis=0, metric="symmetry": (30.0, 0.0, 80.0),
     )
+    # finalize 复型预览产物:按文件名给 F1 已知相位 -10°
+    def fake_read(path: str):
+        name = Path(path).name
+        if "preview_F1" in name:
+            return _synthetic_preview(0, -30.0)
+        return _synthetic_preview(0, 0.0)
+
+    monkeypatch.setattr(routes, "_read_complex_preview", fake_read)
     result = routes.unified_route(experiment, backend, work_dir=work)
     assert len(backend.reconstruct_params) == 1
     assert backend.reconstruct_params[0].get("display_phase_search") is False
-    assert len(backend.finalize_calls) == 1
+    # finalize 调用 2 次:间接维预览(带 preview_axis) + 终跑(带全部相位)
+    assert len(backend.finalize_calls) == 2
+    preview_call, final_call = backend.finalize_calls
+    assert preview_call["params"]["preview_axis"] == "F1"
+    assert preview_call["phases"] == {}
+    assert final_call["planes"] == "nus2d/recon_ph.ft1"
     assert abs((result["direct_phase"][0] - 30.0 + 180.0) % 360.0 - 180.0) <= 8.0
-    assert abs(result["phases"]["F1"][0]) <= 8.0
+    # 预览基底含 F1=-30° → 校正 +30°
+    assert abs((result["phases"]["F1"][0] - 30.0 + 180.0) % 360.0 - 180.0) <= 8.0
     assert backend.apply_direct_calls  # 直接维相位已应用
-    assert backend.finalize_calls[0]["planes"] == "nus2d/recon_ph.ft1"
-    assert result["backend_runs"] == 2
+    assert result["backend_runs"] == 3  # SMILE + 预览 + 终跑

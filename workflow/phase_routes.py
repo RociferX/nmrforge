@@ -22,11 +22,9 @@ def axis_to_logical(experiment: Experiment, axis: int) -> str:
     dims = [dim.logical_axis for dim in reversed(experiment.dimensions)]
     return dims[axis]
 
-
 def _axis_index(axis: str) -> int:
     """逻辑轴名 → 生产布局谱数组下标(F1=0, F2=1, F3=2)。"""
     return {"F1": 0, "F2": 1, "F3": 2}.get(axis, 0)
-
 
 def _read_complex_preview(path: Path | str) -> np.ndarray:
     """读复型预览文件:nmrglue 直接读为复型则用之,否则按交错实型拆包。"""
@@ -40,7 +38,6 @@ def _read_complex_preview(path: Path | str) -> np.ndarray:
     if np.iscomplexobj(arr):
         return arr.astype(np.complex128)
     return read_pipe_complex(path)
-
 
 def unified_route(
     experiment: Experiment,
@@ -150,7 +147,6 @@ def unified_route(
         "direct_phase": fixed.get(direct_axis),
     }
 
-
 def _load_recon_planes(experiment: Experiment, work: Path) -> np.ndarray:
     """读 SMILE 重构复型平面:2D recon.ft1(直接维, F1 时间);
     3D nus3d_rc/test%04d.ft1 交错拆包后按 F1 增量堆叠(直接维, F2 时间, F1 时间)。"""
@@ -167,82 +163,6 @@ def _load_recon_planes(experiment: Experiment, work: Path) -> np.ndarray:
     if not recon.is_file():
         raise RuntimeError(f"缺少 2D 重构平面: {recon}")
     return _read_complex_preview(recon)
-
-
-def _finalize_substrate_nus(
-    planes: np.ndarray,
-    experiment: Experiment,
-    searched_axis: str,
-    fixed: dict[str, tuple[float, float]],
-) -> tuple[np.ndarray, int]:
-    """内存复刻 finalize 链,输出「搜索轴复型、其它间接轴按 fixed 相位实型」
-    的生产布局数组,供逐维内存搜索(与 uniform 预览语义一致)。"""
-    from core.experiment.acquisition_mode_detector import ft_alt_for
-    from workflow.memory_phase_search import finalize_axis_in_memory
-
-    if experiment.ndim == 2:
-        # recon: (direct, f1_time) → FT(-alt) F1 → (f1_freq, direct)
-        f1_fnmode = int(
-            experiment.acquisition_parameters.get("acqu2s", {}).get("FnMODE", 0) or 0
-        )
-        arr = finalize_axis_in_memory(
-            planes,
-            1,
-            p0=0.0,
-            p1=0.0,
-            alt=ft_alt_for(f1_fnmode),
-            keep_complex=True,
-        )
-        return np.moveaxis(arr, 1, 0), 0
-    # 3D recon: (direct, f2_time, f1_time)
-    f2_fnmode = int(
-        experiment.acquisition_parameters.get("acqu2s", {}).get("FnMODE", 0) or 0
-    )
-    f1_fnmode = int(
-        experiment.acquisition_parameters.get("acqu3s", {}).get("FnMODE", 0) or 0
-    )
-    f2_fixed = fixed.get("F2", (0.0, 0.0))
-    f1_fixed = fixed.get("F1", (0.0, 0.0))
-    if searched_axis == "F1":
-        # F2 固定(实型),F1 复型
-        base = finalize_axis_in_memory(
-            planes,
-            1,
-            p0=f2_fixed[0],
-            p1=f2_fixed[1],
-            alt=ft_alt_for(f2_fnmode),
-            keep_complex=False,
-        )
-        base = np.moveaxis(base, 1, -1)  # (direct, f1_time, f2_freq)
-        base = finalize_axis_in_memory(
-            base,
-            1,
-            p0=0.0,
-            p1=0.0,
-            alt=ft_alt_for(f1_fnmode),
-            keep_complex=True,
-        )
-        return np.transpose(base, (1, 2, 0)), 0  # (f1_freq, f2_freq, direct)
-    # F2 搜索:F2 复型,F1 固定(实型)
-    base = finalize_axis_in_memory(
-        planes,
-        1,
-        p0=0.0,
-        p1=0.0,
-        alt=ft_alt_for(f2_fnmode),
-        keep_complex=True,
-    )
-    base = np.moveaxis(base, 1, -1)  # (direct, f1_time, f2_freq)
-    base = finalize_axis_in_memory(
-        base,
-        1,
-        p0=f1_fixed[0],
-        p1=f1_fixed[1],
-        alt=ft_alt_for(f1_fnmode),
-        keep_complex=False,
-    )
-    return np.transpose(base, (1, 2, 0)), 1  # (f1_freq, f2_freq, direct)
-
 
 def _unified_nus(
     experiment: Experiment,
@@ -305,12 +225,33 @@ def _unified_nus(
     logs.append(
         f"直接维内存相位: {direct_axis}=({direct_phase[0]:g}°, {direct_phase[1]:g}°)"
     )
+    # 间接维:finalize 复型预览(该轴 PS 不加 -di,其它轴按已固定相位 -di,
+    # 零填零)提供基底,内存完整逐维搜索——FT/-alt/ZTP 约定由真实后端保证
     fixed: dict[str, tuple[float, float]] = {}
     axis_arrays: dict[str, np.ndarray] = {}
     axis_index: dict[str, int] = {}
     axis_traces: dict[str, tuple[list[int], list[int]]] = {}
+    ext = "ft3" if experiment.ndim >= 3 else "ft2"
+    zf_none = {
+        "zero_fill": {
+            dim.logical_axis: {"mode": "none"} for dim in experiment.dimensions
+        }
+    }
     for axis in indirect_axes:
-        arr, ax = _finalize_substrate_nus(planes, experiment, axis, fixed)
+        out_file = f"{experiment.dataset_id}_preview_{axis}.{ext}"
+        resp = backend.finalize_nus(
+            experiment,
+            phases=fixed,
+            work_dir=work,
+            params={**zf_none, "preview_axis": axis},
+            out_file=out_file,
+            script_name=f"{experiment.dataset_id}_preview_{axis}_finalize.com",
+        )
+        backend_runs += 1
+        if not resp.get("success") or not resp.get("spectrum_path"):
+            raise RuntimeError(f"NUS 复型预览({axis})失败: {resp.get('message')}")
+        arr = _read_complex_preview(str(resp["spectrum_path"]))
+        ax = _axis_index(axis)
         est = search_axis_memory(arr, ax)
         if est is None:
             raise RuntimeError(f"内存相位搜索({axis})无可用迹线")

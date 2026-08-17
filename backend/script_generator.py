@@ -1175,8 +1175,12 @@ def generate_nus_finalize_script(
     linewidth_hz: dict[str, float] | None = None,
     points_per_line: float = DEFAULT_POINTS_PER_LINE,
     sampling: dict[str, Any] | None = None,
+    preview_axis: str | None = None,
 ) -> str:
     """NUS 重构平面(复型)的间接维 FT 定稿脚本(逐维 PS 可配)。
+
+    preview_axis 非空时为复型预览模式:该轴 PS 不加 -di(保留真实
+    虚部供内存调相),其它轴按 phases 加 -di;与 uniform 预览同构。
 
     planes:重构平面输入(2D nus2d/recon.ft1;3D nus3d_rc/test%04d.ft1);
     phases:{轴 -> (p0, p1)},缺省 0——供逐维相位候选运行,不重跑 SMILE;
@@ -1195,6 +1199,8 @@ def generate_nus_finalize_script(
         f2_fnmode = _fnmode(experiment, "F2")
         f2_p0, f2_p1 = phases.get("F2", (0.0, 0.0))
         f1_p0, f1_p1 = phases.get("F1", (0.0, 0.0))
+        f2_di = "" if preview_axis == "F2" else " -di"
+        f1_di = "" if preview_axis == "F1" else " -di"
         f2_size = _nus_zf_size(zf_plan.get("F2", {}), td[1])
         f1_size = _nus_zf_size(zf_plan.get("F1", {}), td[2])
         lines = [
@@ -1210,7 +1216,7 @@ def generate_nus_finalize_script(
                 else []
             ),
             _ft_flag_line(f2_fnmode, sampling=sampling, axis="F2"),
-            f"| nmrPipe -fn PS -p0 {f2_p0:g} -p1 {f2_p1:g} -di \\",
+            f"| nmrPipe -fn PS -p0 {f2_p0:g} -p1 {f2_p1:g}{f2_di} \\",
             "| nmrPipe -fn TP \\",
             *(
                 [
@@ -1220,13 +1226,14 @@ def generate_nus_finalize_script(
                 else []
             ),
             _ft_flag_line(f1_fnmode, sampling=sampling, axis="F1"),
-            f"| nmrPipe -fn PS -p0 {f1_p0:g} -p1 {f1_p1:g} -di \\",
+            f"| nmrPipe -fn PS -p0 {f1_p0:g} -p1 {f1_p1:g}{f1_di} \\",
             "| nmrPipe -fn TP \\",
             "| nmrPipe -fn ZTP \\",
             f"| pipe2xyz -out {out_file} -x",
         ]
     else:
         f1_p0, f1_p1 = phases.get("F1", (0.0, 0.0))
+        f1_di = "" if preview_axis == "F1" else " -di"
         f1_size = _nus_zf_size(zf_plan.get("F1", {}), td[1])
         expanded = expand_baseline(experiment, baseline)
         lines = [
@@ -1242,7 +1249,7 @@ def generate_nus_finalize_script(
                 else []
             ),
             _ft_flag_line(f1_fnmode, sampling=sampling, axis="F1"),
-            f"| nmrPipe -fn PS -p0 {f1_p0:g} -p1 {f1_p1:g} -di \\",
+            f"| nmrPipe -fn PS -p0 {f1_p0:g} -p1 {f1_p1:g}{f1_di} \\",
             *_baseline_line(expanded, "F1"),
             "| nmrPipe -fn TP \\",
             f"  -out {out_file} -ov",

@@ -365,35 +365,3 @@ def joint_recheck_memory(
         if s > best_score:
             best_score, best_phases = s, dict(phases)
     return best_phases, best_score, fixed_score, zero_score
-def finalize_axis_in_memory(
-    planes: np.ndarray,
-    axis: int,
-    *,
-    p0: float,
-    p1: float,
-    alt: bool,
-    keep_complex: bool,
-) -> np.ndarray:
-    """内存复刻 NUS finalize 的间接维 FT 链一步:
-    FT(-alt 时先对奇偶时间点变号)→ PS 旋转(keep_complex=False 时取实部,
-    等价 -di;True 时保留复型供继续搜索)。
-
-    POLY -auto 暂不复刻(峰窗 ±5 内影响小),由 VM 同决策回归校准。
-    """
-    work = np.asarray(planes, dtype=np.complex128)
-    n = work.shape[axis]
-    if alt and n > 1:
-        signs = np.where(np.arange(n) % 2 == 0, 1.0, -1.0)
-        shape = [1] * work.ndim
-        shape[axis] = n
-        work = work * signs.reshape(shape)
-    spec = np.fft.fft(work, axis=axis)
-    k = np.arange(n, dtype=float)
-    ramp = np.exp(1j * np.deg2rad(p0 + p1 * k / max(n - 1, 1)))
-    shape = [1] * spec.ndim
-    shape[axis] = n
-    spec = spec * ramp.reshape(shape)
-    if not keep_complex:
-        spec = np.real(spec)
-    return spec
-

@@ -781,6 +781,7 @@ class NMRPipeBackend:
             baseline=baseline,
             zero_fill=zf_plan,
             sampling=sampling,
+            preview_axis=zf_params.get("preview_axis"),
         )
         finalize_com = work / (
             script_name or f"{experiment.dataset_id}_finalize.com"
