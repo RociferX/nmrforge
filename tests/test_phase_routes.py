@@ -93,7 +93,7 @@ def test_unified_route_uniform_order_and_phases(
     backend = _FakeBackend(tmp_path / "pv_work")
     work = backend.work
 
-    def fake_read(path: str):
+    def fake_read(path: str, unpack_axis: int | None = None):
         name = Path(path).name
         if "F1" in name:
             return _synthetic_preview(0, -25.0)
@@ -139,7 +139,7 @@ def test_unified_route_nus_reconstruct_then_finalize(
         lambda arr, axis=0, metric="symmetry": (30.0, 0.0, 80.0),
     )
     # finalize 复型预览产物:按文件名给 F1 已知相位 -10°
-    def fake_read(path: str):
+    def fake_read(path: str, unpack_axis: int | None = None):
         name = Path(path).name
         if "preview_F1" in name:
             return _synthetic_preview(0, -30.0)

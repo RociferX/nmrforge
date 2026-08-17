@@ -22,12 +22,22 @@ def axis_to_logical(experiment: Experiment, axis: int) -> str:
     dims = [dim.logical_axis for dim in reversed(experiment.dimensions)]
     return dims[axis]
 
-def _axis_index(axis: str) -> int:
-    """逻辑轴名 → 生产布局谱数组下标(F1=0, F2=1, F3=2)。"""
-    return {"F1": 0, "F2": 1, "F3": 2}.get(axis, 0)
+def _axis_index(axis: str, ndim: int = 2) -> int:
+    """逻辑轴名 → 生产布局谱数组下标。
 
-def _read_complex_preview(path: Path | str) -> np.ndarray:
-    """读复型预览文件:nmrglue 直接读为复型则用之,否则按交错实型拆包。"""
+    实测 NMRPipe 输出布局:2D 为 (F1, F2);3D(含 finalize ZTP 链)为
+    (F2, F1, F3)——FDF 头标签在 3D 输出中不可靠,以尺寸/复型轴位置为准。
+    """
+    if ndim >= 3:
+        return {"F2": 0, "F1": 1, "F3": 2}.get(axis, 0)
+    return {"F1": 0, "F2": 1}.get(axis, 0)
+
+def _read_complex_preview(
+    path: Path | str, unpack_axis: int | None = None
+) -> np.ndarray:
+    """读复型预览文件:nmrglue 直接读为复型则用之;否则交错实型沿
+    unpack_axis 拆包(3D 输出复型轴不固定:preview_F2 在轴 0,preview_F1
+    在轴 1,read_pipe_complex 只拆轴 0 会拆错)。"""
     import nmrglue as ng
 
     from core.data.pipe_io import read_pipe_complex
@@ -37,6 +47,13 @@ def _read_complex_preview(path: Path | str) -> np.ndarray:
     arr = np.asarray(data)
     if np.iscomplexobj(arr):
         return arr.astype(np.complex128)
+    if unpack_axis is not None:
+        moved = np.moveaxis(arr, unpack_axis, -1)
+        even = moved[..., 0::2]
+        odd = moved[..., 1::2]
+        return np.moveaxis(even + 1j * odd, -1, unpack_axis).astype(
+            np.complex128
+        )
     return read_pipe_complex(path)
 
 def unified_route(
@@ -98,8 +115,8 @@ def unified_route(
         backend_runs += 1
         if not resp.get("success") or not resp.get("spectrum_path"):
             raise RuntimeError(f"复型预览({axis})失败: {resp.get('message')}")
-        arr = _read_complex_preview(str(resp["spectrum_path"]))
-        ax = _axis_index(axis)
+        ax = _axis_index(axis, experiment.ndim)
+        arr = _read_complex_preview(str(resp["spectrum_path"]), unpack_axis=ax)
         est = search_axis_memory(arr, ax)
         if est is None:
             raise RuntimeError(f"内存相位搜索({axis})无可用迹线")
@@ -250,8 +267,8 @@ def _unified_nus(
         backend_runs += 1
         if not resp.get("success") or not resp.get("spectrum_path"):
             raise RuntimeError(f"NUS 复型预览({axis})失败: {resp.get('message')}")
-        arr = _read_complex_preview(str(resp["spectrum_path"]))
-        ax = _axis_index(axis)
+        ax = _axis_index(axis, experiment.ndim)
+        arr = _read_complex_preview(str(resp["spectrum_path"]), unpack_axis=ax)
         est = search_axis_memory(arr, ax)
         if est is None:
             raise RuntimeError(f"内存相位搜索({axis})无可用迹线")
