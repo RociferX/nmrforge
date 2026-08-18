@@ -19,7 +19,7 @@
   (nusExpand→ser_full→bruk2pipe)输出单个 test.fid,归位为单文件,属设计
   行为(模块文档「单数据集不做切片追加」);切片式 fid 仅用于 3D uniform
   (acqu3s TD 正确)与多段合并;是否切片化待 Backend 决策;
-- 测试:本地全量 559 passed、ruff 全绿;VM 全量待复测。
+- 测试:本地全量 559 passed、ruff 全绿;VM 全量 555 passed + 4 skipped(Python 3.12.13,HEAD 6399cf4),ruff 全绿。
 
 ## [0.2.116] - 2026-08-18
 
