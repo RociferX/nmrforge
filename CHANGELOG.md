@@ -1,5 +1,19 @@
 # 变更日志
 
+## [0.2.109] - 2026-08-18
+
+- merge(Architect):并入 GUI 0.2.108(B2G-004 对接完成)——生成谱图步骤
+  「相位优化途径」选择(Unified 默认 / None 逃生口)经 params["phase_route"]
+  透传,步骤详情「参数报告」展示逐维相位(p0/p1)、direct_phase 与
+  backend_runs;导入流程识别容器目录自动走 import_segmented_dataset(合并
+  为一条数据),导入对话框新增「分段采集导入」;ProcessingController 增加
+  params 透传与 import_segmented_dataset 方法(Shared Contract 向后兼容
+  扩展,Architect 预批);
+- 修复(GUI Agent,VM 冒烟):分段合并 FID 产物为 process/merged/fid 目录,
+  _fid_file/_node_artifacts 现支持目录产物,生成 FID 后步骤状态正确;
+- 测试:本地全量 532 passed、VM 全量 528 passed + 4 skipped(5243150),
+  ruff 全绿;B2G-004 与分段采集 GUI 接入两项待办关闭。
+
 ## [0.2.108] - 2026-08-18
 
 - 新增(GUI Agent,B2G-004):生成谱图步骤提供「相位优化途径」选择——
