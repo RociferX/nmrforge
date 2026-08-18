@@ -1,5 +1,14 @@
 # 变更日志
 
+## [0.2.123] - 2026-08-18
+
+- G2B-011 Backend(分段采集导入到当前实验类型):
+  import_segmented_dataset 增加可选 exp_id;非空时校验存在后导入到
+  指定实验类型(ImportResult 结构不变),空值保持新建(现状);非法
+  exp_id 抛 ImportWorkflowError;
+- 测试:exp_id 指定落实验(不新建实验类型)/非法 exp_id 抛错/空值新建
+  回归;本地全量 580 passed(578+2)+ ruff 全绿。
+
 ## [0.2.122] - 2026-08-18
 
 - 处理过程进度可见(Backend):finalize_nus 增加可选 progress 回调
