@@ -156,6 +156,7 @@ def import_data(
     *,
     segments: list[Path | str] | None = None,
     copy: bool = True,
+    segmented: bool = False,
 ) -> ImportResult:
     """导入数据到实验:只读参数 + 链接 raw/<exp_id>/<data_id>/ + metadata + import run。
 
@@ -166,13 +167,26 @@ def import_data(
     if manager.project is None or manager.root is None:
         raise ImportWorkflowError("未加载项目,无法导入数据")
     src = Path(source).resolve()
-    _validate_dataset_dir(src)
-    segment_paths = [Path(seg).resolve() for seg in (segments or [])]
-    for seg in segment_paths:
-        _validate_dataset_dir(seg)
+    segment_paths: list[Path] = []
+    if segmented:
+        # 单数据分段采集:source 为包含全部分段的容器目录(与批量导入区分,
+        # 批量导入把多个独立数据集各自建条目;这里合并为一条 DataEntry)
+        from core.data.bruker_reader import read_dataset_container
 
-    # 登记前先解析元数据,避免留下半成品条目
-    experiment = read_dataset(src)
+        experiment, discovered = read_dataset_container(src)
+        if len(discovered) < 2:
+            raise ImportWorkflowError(
+                f"分段导入至少需要 2 个含 acqus 的分段子目录: {src}"
+            )
+        experiment.dataset_id = src.name  # 容器名作为数据标识
+        segment_paths = [Path(seg).resolve() for seg in discovered]
+    else:
+        _validate_dataset_dir(src)
+        experiment = read_dataset(src)
+        segment_paths = [Path(seg).resolve() for seg in (segments or [])]
+        for seg in segment_paths:
+            _validate_dataset_dir(seg)
+
 
     warnings: list[str] = []
     link_stats = {"hardlink": 0, "symlink": 0, "copy": 0, "writable": 0}
@@ -191,24 +205,44 @@ def import_data(
         effective_root = src
         if should_copy:
             copied_dir = manager.data_dir(exp_id, data_id, "raw")
-            _link_tree(src, copied_dir, link_stats)
-            data_entry.raw_dir = copied_dir.relative_to(manager.root).as_posix()
-            if segment_paths:
+            if segmented:
+                # 单数据分段采集:只拷贝各分段到 raw/segments/NN,
+                # 不拷贝容器级杂项(如脚本);与批量导入(多条 DataEntry)区分
                 seg_base = copied_dir / "segments"
-                seg_base.mkdir()
+                seg_base.mkdir(parents=True)
                 copied_segments: list[str] = []
                 for index, seg in enumerate(segment_paths, start=1):
                     dest = seg_base / f"{index:02d}"
                     _link_tree(seg, dest, link_stats)
                     copied_segments.append(str(dest))
                 data_entry.segments = copied_segments
-            effective_root = copied_dir
+                data_entry.raw_dir = copied_dir.relative_to(manager.root).as_posix()
+                effective_root = copied_dir
+            else:
+                _link_tree(src, copied_dir, link_stats)
+                data_entry.raw_dir = copied_dir.relative_to(manager.root).as_posix()
+                if segment_paths:
+                    seg_base = copied_dir / "segments"
+                    seg_base.mkdir()
+                    copied_segments = []
+                    for index, seg in enumerate(segment_paths, start=1):
+                        dest = seg_base / f"{index:02d}"
+                        _link_tree(seg, dest, link_stats)
+                        copied_segments.append(str(dest))
+                    data_entry.segments = copied_segments
+                effective_root = copied_dir
             if link_stats["copy"]:
                 warnings.append(
                     f"{link_stats['copy']} 个文件无法建立链接,已回退复制"
                 )
 
-        checksums = _key_checksums(effective_root)
+        if segmented and segment_paths:
+            checksums = {}
+            for index, seg in enumerate(segment_paths, start=1):
+                for name, digest in _key_checksums(seg).items():
+                    checksums[f"seg_{index:02d}/{name}"] = digest
+        else:
+            checksums = _key_checksums(effective_root)
         manifest_checksums, file_count, total_bytes = _manifest(effective_root)
         data_entry.checksums = checksums
 
@@ -318,10 +352,40 @@ def import_bruker_dataset(
         raise
 
 
+def import_segmented_dataset(
+    manager: ProjectManager,
+    source: Path | str,
+    *,
+    title: str = "",
+    sample_id: str = "",
+    copy: bool = True,
+) -> ImportResult:
+    """单数据分段采集导入:source 为包含全部分段的容器目录,合并为一条 DataEntry。
+
+    与批量导入明确区分:批量导入把容器下多个独立数据集各自建条目;本入口把
+    容器下直接含 acqus 的各分段作为同一次采集的采样段(read_segments 校验
+    维数/核/TD/谱宽一致),合并为一条数据,由后端逐段转换 + addNMR 合并。
+    """
+    if manager.project is None:
+        raise ImportWorkflowError("未加载项目,无法导入实验")
+    entry = manager.create_experiment(title=title, sample_id=sample_id)
+    try:
+        return import_data(manager, entry.id, source, segmented=True, copy=copy)
+    except Exception:
+        if (
+            manager.project is not None
+            and entry in manager.project.experiments
+            and not entry.data
+        ):
+            manager.project.experiments.remove(entry)
+        raise
+
+
 __all__ = [
     "IMPORT_WORKFLOW_REF",
     "ImportResult",
     "ImportWorkflowError",
+    "import_segmented_dataset",
     "import_bruker_dataset",
     "import_data",
 ]

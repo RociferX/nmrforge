@@ -23,6 +23,51 @@ def _source(bruker_dir: Path) -> Path:
     return bruker_dir / "hsqc_2d"
 
 
+def _make_segment_container(tmp_path: Path, bruker_dir: Path, n: int = 2) -> Path:
+    """构造容器目录:同一数据的 n 个分段(直接含 acqus 的子目录)。"""
+    container = tmp_path / "segmented_data"
+    for i in range(1, n + 1):
+        shutil.copytree(bruker_dir / "hsqc_2d", container / f"s{i:02d}")
+    return container
+
+
+def test_import_segmented_container_single_entry(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """容器导入:多个分段合并为一条 DataEntry(与批量导入多条明确区分)。"""
+    from workflow.import_workflow import import_segmented_dataset
+
+    manager = ProjectManager.create_project(tmp_path / "proj", "demo")
+    container = _make_segment_container(tmp_path, bruker_dir)
+    result = import_segmented_dataset(manager, container, title="seg")
+    assert result.data_id == "d_001"
+    entry = manager.project.experiment("exp_001")
+    assert entry is not None
+    assert len(entry.data) == 1  # 一条 DataEntry
+    data = entry.data[0]
+    assert len(data.segments) == 2
+    raw_dir = manager.data_dir("exp_001", "d_001", "raw")
+    assert (raw_dir / "segments" / "01" / "acqus").is_file()
+    assert (raw_dir / "segments" / "02" / "acqus").is_file()
+    meta = json.loads(
+        manager.data_metadata_path("exp_001", "d_001").read_text(encoding="utf-8")
+    )
+    assert len(meta["segments"]) == 2
+
+
+def test_import_container_rejected_unless_segmented(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """容器目录不是单 Bruker 数据集:普通导入应报错,不自动当成分段/批量。"""
+    from workflow.import_workflow import ImportWorkflowError, import_data
+
+    manager = ProjectManager.create_project(tmp_path / "proj2", "demo")
+    entry = manager.create_experiment()
+    container = _make_segment_container(tmp_path, bruker_dir)
+    with pytest.raises(ImportWorkflowError):
+        import_data(manager, entry.id, container)
+
+
 def test_import_links_and_registers(tmp_path: Path, bruker_dir: Path) -> None:
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     result = import_bruker_dataset(manager, _source(bruker_dir), title="HSQC")
