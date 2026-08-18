@@ -1,5 +1,26 @@
 # 变更日志
 
+## [0.2.117] - 2026-08-18
+
+- merge(Architect):并入 GUI 0.2.112 补充(弹窗统一居中到所在屏幕中心、
+  修复「展示谱图」找不到谱图[谱图面板按 spectra/ 目录全量扫描]、导入后
+  清空表单、右键重命名输入框 transientParent + 点击外部提交)与 Backend
+  0.2.106 补充(实验类型分类器核组合优先重构 + 固体核磁 NNH/CCH);两侧
+  版本号与已并入内容撞号,CHANGELOG 按版本合并归一;
+- 集成修复(Architect,合并审查):experiment_classifier 补回 Counter 导入,
+  _nuclei_candidates 按模板对象去重(0.2.111 双注册后「唯一候选」分支
+  失效,NNH 0.95 置信路径恢复);presets/cch.yaml priors 15N 笔误 → 13C;
+  删除合并带入的死代码 core/experiments/{cch,nnh}.py(presets/*.yaml
+  单一数据源,0.2.111);补回被合并冲突吞掉的 gui/dialogs.py 弹窗居中
+  函数(install_dialog_centering 等);
+- 批准(Architect):G2B-010 终谱归位按契约命名
+  spectra/<exp_id>-<data_id>.ft2|ft3(任务分派 docs/tasks/g2b-010-backend.md);
+- 排查(Architect):3D NUS 单文件 FID 根因——单数据集 NUS 经 bruker -AUTO
+  (nusExpand→ser_full→bruk2pipe)输出单个 test.fid,归位为单文件,属设计
+  行为(模块文档「单数据集不做切片追加」);切片式 fid 仅用于 3D uniform
+  (acqu3s TD 正确)与多段合并;是否切片化待 Backend 决策;
+- 测试:本地全量 559 passed、ruff 全绿;VM 全量待复测。
+
 ## [0.2.116] - 2026-08-18
 
 - merge(Architect):并入 GUI 0.2.112 补充——导入页「链接原始数据到项目」
