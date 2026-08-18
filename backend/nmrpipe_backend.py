@@ -108,16 +108,6 @@ def _validate_nus_points(
     return valid, bad, reasons
 
 
-def enforce_smile_thread_guardrail(nthread: int, grid_points: int) -> tuple[int, str]:
-    """SMILE 线程护栏（D006）：间接网格 >5000 点时线程数上限 2。
-
-    2026-08-11 sampleM 事故：宽窗口 SMILE 满核曾致宿主断电；大网格强制
-    2 线程。返回 (线程数, 日志)；未超限时日志为空串。
-    """
-    if grid_points > 5000 and nthread > 2:
-        return 2, f"大网格 {grid_points}：SMILE 线程数限制为 2（原 {nthread}）"
-    return nthread, ""
-
 def zf_summary(plan: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
     """填零计划摘要(WorkflowRun params 用):{轴: {"mode", "size"}}。"""
     return {
@@ -596,12 +586,9 @@ class NMRPipeBackend:
         smile_scaling = bool(params.get("smile_scaling", True))
         smile_report = int(params.get("smile_report", 1))
         nthread = resolve_nthread(params.get("nthread"))
-        # 安全护栏（2026-08-11 sampleM 事故）：大网格 SMILE 满核曾致宿主断电，
-        # 间接网格 >5000 点时线程数上限 2
+        # 0.2.113:不再按网格限线程——sampleM 事故根因是直接维内存
+        # (非切片流/直接维填零过多),由 0.2.112 内存护栏兜底
         grid_points = int(td[1]) * (int(td[2]) if len(td) > 2 else 1)
-        nthread, guard_log = enforce_smile_thread_guardrail(nthread, grid_points)
-        if guard_log:
-            logs.append(guard_log)
         ext_lo = resolve_ext_lo(params.get("ext_lo"))
         ext_hi = resolve_ext_hi(params.get("ext_hi"))
         extract = _as_bool(params.get("extract", True))
@@ -1088,13 +1075,6 @@ class NMRPipeBackend:
             logs.append("轻量 SMILE 相位搜索:符号链接失败,跳过")
             return None
         nthread = resolve_nthread(params.get("nthread"))
-        td = effective_td(experiment)
-        grid_points = int(td[1]) * (int(td[2]) if len(td) > 2 else 1)
-        nthread, guard_log = enforce_smile_thread_guardrail(
-            nthread, grid_points
-        )
-        if guard_log:
-            logs.append(guard_log)
         ext_lo = resolve_ext_lo(params.get("ext_lo"))
         ext_hi = resolve_ext_hi(params.get("ext_hi"))
         extract = _as_bool(params.get("extract", True))

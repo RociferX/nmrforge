@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from backend.nmrpipe_backend import enforce_smile_thread_guardrail
 from core.data.bruker_reader import read_dataset
 from workflow.phase_optimize import optimize_phase_sequential
 
@@ -83,12 +82,3 @@ def test_3d_nus_phase_optimize_guardrails_and_runs(
     assert all(result.phases[axis][1] == 30.0 for axis in ("F2", "F1"))
     assert result.backend_runs == 1 + 2 * 4
 
-
-def test_smile_thread_guardrail_default_and_cap() -> None:
-    """SMILE 线程护栏(D006):默认 2;大网格(间接点>5000)强制≤2。"""
-    assert enforce_smile_thread_guardrail(2, 1000) == (2, "")
-    assert enforce_smile_thread_guardrail(4, 1000) == (4, "")
-    capped, log = enforce_smile_thread_guardrail(4, 6000)
-    assert capped == 2
-    assert "大网格 6000" in log
-    assert enforce_smile_thread_guardrail(2, 6000) == (2, "")
