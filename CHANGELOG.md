@@ -1,5 +1,19 @@
 # 变更日志
 
+## [0.2.112] - 2026-08-18
+
+- feat(Architect,用户要求):SMILE 内存估计与护栏——生成谱图(NUS)前估计
+  SMILE 峰值内存,超限先降直接维填零 1×TD 并提示,仍不足则返回「请至少
+  提供 X GB 内存」,GUI 弹窗(日志 + InfoDialog,主线程信号);
+- 实测标定(VM 2026-08-18):3D SMILE 峰值 ∝ 直接维点数(EXT 窗口内),
+  ≈1.15 MB/点(150/600/2048 点 → 179/665/2284 MB),与采样点数无关;
+  2D 峰值≈3MB 不构成瓶颈;小内存处理大数据的可行手段 = 切片流 + 直接维
+  1×TD + 收紧 EXT 窗口(线性降);sampleB 估计 690MB vs 实测 665MB;
+- 新增 backend/memory_guard.py(估计/可用内存/护栏);reconstruct_nus 接入;
+  GUI pipeline_panel/center_panel/main_window 增加 memory_guard_requested 信号;
+- 测试:tests/test_memory_guard.py(标定/护栏/消息);本地全量 540 passed、
+  VM 全量 536 passed + 4 skipped(e39b5b2),ruff 全绿。
+
 ## [0.2.111] - 2026-08-18
 
 - 重构(Architect,用户要求「不多处资源,能合并就合并」):实验模板单一数据源
