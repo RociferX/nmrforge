@@ -1,5 +1,14 @@
 # 变更日志
 
+## [0.2.93] - 2026-08-18
+
+- 新增(GUI Agent,用户反馈):样品数据子文件夹(raw/process/spectra/等)
+  与样品数据节点的右键菜单增加「在终端中打开」——打开终端并默认进入
+  csh(Linux 用 gnome-terminal/konsole/xterm 启动 csh,自动读取
+  ~/.cshrc 的 NMRPipe 环境;Windows 优先找到的 csh,否则回退 cmd)。
+- 测试:菜单项与信号、终端命令构造(优先 csh / Windows 回退);本地全量
+  pytest + ruff 全绿。
+
 ## [0.2.92] - 2026-08-16
 
 - 调整(GUI Agent,用户反馈):移除「文件指纹检测」「显示已过期状态」

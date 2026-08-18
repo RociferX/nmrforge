@@ -157,6 +157,7 @@ class MainWindow(QMainWindow):
             lambda path: self._open_root(Path(path))
         )
         self.project_tree.open_path_requested.connect(self._open_path)
+        self.project_tree.open_terminal_requested.connect(self._open_terminal)
         self.project_tree.open_spectrum_requested.connect(self._open_spectrum_from_tree)
         self.project_tree.rename_requested.connect(self._rename_experiment_by_id)
         self.project_tree.delete_requested.connect(self._delete_experiment_by_id)
@@ -1258,6 +1259,13 @@ class MainWindow(QMainWindow):
             self.spectrum_panel._current_spectrum = target
             self.spectrum_panel._load_peaks(target)
             self.statusBar().showMessage(f"已打开: {target.name}")
+
+    def _open_terminal(self, path: str) -> None:
+        """在终端中打开目录(优先 csh,便于直接运行 NMRPipe 命令)。"""
+        from gui.project_tree import open_in_terminal
+
+        if not open_in_terminal(path):
+            InfoDialog.show_info(self, "提示", "未找到可用的终端程序")
 
     def _open_path(self, path: str) -> None:
         """用系统文件管理器打开目录(双击/右键 data/子文件夹),中间保持 Pipeline。"""

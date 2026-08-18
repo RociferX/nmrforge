@@ -424,6 +424,56 @@ def test_tree_data_node_context_menu_actions(
     panel.close()
 
 
+def test_tree_folder_terminal_menu_action(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.2.93:raw 等子文件夹右键含「在终端中打开」,点击发出路径。"""
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    panel = ProjectTreePanel(manager)
+    data_item = panel.tree.topLevelItem(0).child(0).child(0).child(0)
+    raw_item = data_item.child(0)  # raw 子文件夹
+    seen: list[str] = []
+    panel.open_terminal_requested.connect(seen.append)
+    menu = QMenu()
+    panel._on_context_menu_impl(menu, raw_item)
+    labels = [a.text() for a in menu.actions()]
+    assert "在终端中打开" in labels
+    action = next(a for a in menu.actions() if a.text() == "在终端中打开")
+    action.trigger()
+    assert seen and Path(seen[0]).name == "raw"
+    panel.close()
+
+
+def test_terminal_argv_prefers_csh(monkeypatch: pytest.MonkeyPatch) -> None:
+    """0.2.93:在终端中打开优先 csh;Windows 回退 cmd。"""
+    import sys
+
+    from gui.project_tree import _terminal_argv
+
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(
+        "shutil.which",
+        lambda name: f"/usr/bin/{name}"
+        if name in ("csh", "gnome-terminal")
+        else None,
+    )
+    argv = _terminal_argv("/data/raw")
+    assert argv is not None
+    assert "csh" in argv
+    assert "--working-directory=/data/raw" in argv
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(
+        "shutil.which",
+        lambda name: "C:/cygwin/bin/csh.exe"
+        if name == "csh"
+        else (r"C:\Windows\System32\cmd.exe" if name == "cmd" else None),
+    )
+    argv = _terminal_argv("C:/data/raw")
+    assert argv is not None
+    assert "csh" in argv[0]
+
+
 def test_tree_subfolder_context_menu_has_open_path(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
