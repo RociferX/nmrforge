@@ -152,7 +152,7 @@ class ProcessingController:
         )
 
     def batch_import(self, exp_id: str, folders: list) -> dict:
-        """批量导入多个数据目录到实验类型,同一批样品数据标记同一 batch_id。
+        """批量导入多个数据目录到数据类型,同一批样品数据标记同一 batch_id。
 
         返回 {"batch_id", "results": [{folder, data_id, ok, error}]};
         单个目录失败不阻断整批(结果中带 error 信息)。
@@ -164,7 +164,7 @@ class ProcessingController:
             raise RuntimeError("ProcessingController 未绑定项目(ProjectManager)")
         entry = self._manager.project.experiment(exp_id)
         if entry is None:
-            raise RuntimeError(f"实验类型不存在: {exp_id}")
+            raise RuntimeError(f"数据类型不存在: {exp_id}")
         batch = next_batch_id(self._manager, exp_id)
         results: list[dict] = []
         for folder in folders:

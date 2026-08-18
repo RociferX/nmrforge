@@ -60,7 +60,7 @@ def test_batch_helpers(tmp_path: Path) -> None:
 
 
 def test_batch_import_marks_group(tmp_path: Path, bruker_dir: Path) -> None:
-    """批量导入:多个目录导入同一实验类型,标记同一 batch_id,多次导入序号递增。"""
+    """批量导入:多个目录导入同一数据类型,标记同一 batch_id,多次导入序号递增。"""
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     entry = manager.create_experiment("batch")
     manager.save()
@@ -233,7 +233,7 @@ def test_batch_subfolder_scan(tmp_path: Path) -> None:
 def test_experiment_dashboard_single_batch_groups(
     qapp: QApplication,
 ) -> None:
-    """实验类型页:单个导入与批量处理分组展示(视觉区分)。"""
+    """数据类型页:单个导入与批量处理分组展示(视觉区分)。"""
     from PyQt6.QtWidgets import QGroupBox
 
     from gui.dashboards import ExperimentDashboard
@@ -249,7 +249,7 @@ def test_experiment_dashboard_single_batch_groups(
 def test_experiment_dashboard_segmented_between_single_and_batch(
     qapp: QApplication,
 ) -> None:
-    """实验类型页:分段采集导入(合并 FID)入口位于单个导入与批量处理之间。"""
+    """数据类型页:分段采集导入(合并 FID)入口位于单个导入与批量处理之间。"""
     from PyQt6.QtWidgets import QGroupBox
 
     from gui.dashboards import ExperimentDashboard

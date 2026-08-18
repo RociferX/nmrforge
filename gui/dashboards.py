@@ -1,6 +1,6 @@
-"""Dashboard 面板:项目/实验类型概览(GUI_ARCHITECTURE_VISION §11-12)。
+"""Dashboard 面板:项目/数据类型概览(GUI_ARCHITECTURE_VISION §11-12)。
 
-- ProjectDashboard:项目统计(实验类型/样品数据/处理完成度)+ 最近运行 + 新建实验类型表单;
+- ProjectDashboard:项目统计(数据类型/样品数据/处理完成度)+ 最近运行 + 新建数据类型表单;
 - ExperimentDashboard:样品数据列表(每样品数据状态)+ 导入样品数据表单。
 
 数据来源:core.project(ProjectManager);运行历史来自 workflow_runs。
@@ -45,9 +45,9 @@ def _data_processed(project) -> int:
 
 
 class ProjectDashboard(QWidget):
-    """项目概览:统计 + 处理完成度 + 最近运行 + 新建实验类型。"""
+    """项目概览:统计 + 处理完成度 + 最近运行 + 新建数据类型。"""
 
-    create_experiment_requested = pyqtSignal(str)  # 实验类型标题
+    create_experiment_requested = pyqtSignal(str)  # 数据类型标题
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -81,9 +81,9 @@ class ProjectDashboard(QWidget):
 
         form = QHBoxLayout()
         self.title_edit = QLineEdit()
-        self.title_edit.setPlaceholderText("实验类型标题(可留空)")
+        self.title_edit.setPlaceholderText("数据类型标题(可留空)")
         form.addWidget(self.title_edit, 1)
-        self.create_button = QPushButton("新建实验类型")
+        self.create_button = QPushButton("新建数据类型")
         self.create_button.clicked.connect(self._on_create)
         form.addWidget(self.create_button)
         layout.addLayout(form)
@@ -102,7 +102,7 @@ class ProjectDashboard(QWidget):
         data_count = _data_count(project)
         processed = _data_processed(project)
         self.stats_label.setText(
-            f"实验类型: {exp_count}  |  样品数据: {data_count}  |  已处理: {processed}"
+            f"数据类型: {exp_count}  |  样品数据: {data_count}  |  已处理: {processed}"
         )
         if data_count:
             pct = round(processed * 100 / data_count)
@@ -127,7 +127,7 @@ class ProjectDashboard(QWidget):
 
 
 class ExperimentDashboard(QWidget):
-    """实验类型概览:样品数据列表(状态)+ 导入样品数据表单。"""
+    """数据类型概览:样品数据列表(状态)+ 导入样品数据表单。"""
 
     import_options_requested = pyqtSignal(str, str, str, bool)  # (exp_id, name, source, copy)
     segmented_import_requested = pyqtSignal(str)  # 分段采集容器目录
@@ -140,7 +140,7 @@ class ExperimentDashboard(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
 
-        title = QLabel("实验类型")
+        title = QLabel("数据类型")
         title.setStyleSheet("font-size: 15px; font-weight: bold; color: #2c3e50;")
         layout.addWidget(title)
         self.context_label = QLabel("")
@@ -315,7 +315,7 @@ class ExperimentDashboard(QWidget):
         self.batch_import_button.setEnabled(False)
 
     def _on_batch_import(self) -> None:
-        """把列表中的多个数据目录以同一批量组导入当前实验类型。"""
+        """把列表中的多个数据目录以同一批量组导入当前数据类型。"""
         if not self._exp_id or self.batch_list.count() == 0:
             return
         folders = [

@@ -196,7 +196,7 @@ def test_project_tree_current_experiment_from_data(
     panel = ProjectTreePanel(manager)
     panel.select_experiment("exp_002")
     assert panel.current_experiment_id() == "exp_002"
-    # 选中样品数据节点仍归一化到所属实验类型
+    # 选中样品数据节点仍归一化到所属数据类型
     exp_item = panel.tree.topLevelItem(0).child(0).child(1)
     panel.tree.setCurrentItem(exp_item.child(0))
     assert panel.current_experiment_id() == "exp_002"
@@ -346,7 +346,7 @@ def test_main_window_three_column_layout(
     assert window.project_tree is not None
     assert window.pipeline is not None
     assert window.spectrum_panel is not None
-    # 默认聚焦第一个实验类型 → 中间为实验类型页(内嵌导入样品数据表单)
+    # 默认聚焦第一个数据类型 → 中间为数据类型页(内嵌导入样品数据表单)
     assert window.center_panel.stack.currentIndex() == 2
     assert window.center_panel.experiment_page._exp_id == "exp_001"
     assert "demo" in window.windowTitle()
@@ -360,7 +360,7 @@ def test_main_window_context_updates_on_tree_selection(
     manager = _manager_with_experiment(tmp_path, monkeypatch)
     window = MainWindow(manager=manager)
     window.project_tree.select_experiment("exp_002")
-    assert window.center_panel.stack.currentIndex() == 2  # 实验类型页
+    assert window.center_panel.stack.currentIndex() == 2  # 数据类型页
     assert window.center_panel.experiment_page._exp_id == "exp_002"
     assert window.spectrum_panel._current_exp_id == "exp_002"
     window.close()
@@ -369,7 +369,7 @@ def test_main_window_context_updates_on_tree_selection(
 def test_pipeline_hides_import_step_for_data_selection(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """0.2.79:点中样品数据时中间不再显示「导入样品数据」步骤(导入属于实验类型层)。"""
+    """0.2.79:点中样品数据时中间不再显示「导入样品数据」步骤(导入属于数据类型层)。"""
     manager = _manager_with_experiment(tmp_path, monkeypatch)
     panel = PipelinePanel(manager, FakeProcessingController())
     panel.set_selection("data", "exp_001", "d_001")
@@ -491,7 +491,7 @@ def test_tree_subfolder_context_menu_has_open_path(
 def test_create_blank_experiment_action(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """空白处/Project 右键新建空白实验类型。"""
+    """空白处/Project 右键新建空白数据类型。"""
     manager = _manager_with_experiment(tmp_path, monkeypatch)
     window = MainWindow(manager=manager)
 
@@ -809,7 +809,7 @@ def test_pipeline_peaks_step_runs_pick_peaks(
 def test_data_delete_wires_manager_delete_data(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """样品数据删除接线:manager.delete_data(不删实验类型)。"""
+    """样品数据删除接线:manager.delete_data(不删数据类型)。"""
     from gui.dialogs import ConfirmDialog
 
     manager = _manager_with_experiment(tmp_path, monkeypatch)
@@ -818,7 +818,7 @@ def test_data_delete_wires_manager_delete_data(
     window.project_tree.select_experiment("exp_001")
     window._delete_data("exp_001", "d_001")
     entry = manager.project.experiment("exp_001")
-    assert entry is not None and entry.data == []  # 样品数据被删,实验类型保留
+    assert entry is not None and entry.data == []  # 样品数据被删,数据类型保留
     window.close()
 
 
@@ -966,7 +966,7 @@ def test_project_dashboard_stats_and_runs(
     proj_item = tree.topLevelItem(0).child(0)
     tree.setCurrentItem(proj_item)
     assert window.center_panel.stack.currentIndex() == 1  # Project Dashboard
-    assert "实验类型:" in window.center_panel.project_page.stats_label.text()
+    assert "数据类型:" in window.center_panel.project_page.stats_label.text()
     assert window.center_panel.project_page.runs_table.rowCount() >= 1
     window.close()
 
@@ -1266,7 +1266,7 @@ def test_reset_view_union_of_all_layers(qapp: QApplication) -> None:
 def test_rename_project_to_sample_wording(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """文件结构三级名称:项目 → 实验类型 → 样品数据(菜单/欢迎页/上下文条)。"""
+    """文件结构三级名称:项目 → 数据类型 → 样品数据(菜单/欢迎页/上下文条)。"""
     from gui.welcome_page import _FallbackWorkspaceManager
 
     workspace = tmp_path / "ws2"
@@ -1285,16 +1285,16 @@ def test_rename_project_to_sample_wording(
     # 未打开项目:上下文条与欢迎页入口文案
     assert window.context_bar.text() == "未打开项目"
     assert window.center_panel.welcome_page.new_button.text() == "新建项目..."
-    # 菜单栏:「实验类型(&E)」菜单,不含「项目管理/添加/删除项目」
+    # 菜单栏:「数据类型(&D)」菜单,不含「项目管理/添加/删除项目」
     menus = [action.text() for action in window.menuBar().actions()]
-    assert "实验类型(&E)" in menus
+    assert "数据类型(&D)" in menus
     experiment_menu = next(
         action.menu()
         for action in window.menuBar().actions()
-        if action.text() == "实验类型(&E)"
+        if action.text() == "数据类型(&D)"
     )
     labels = [action.text() for action in experiment_menu.actions()]
-    assert "新建实验类型..." in labels
+    assert "新建数据类型..." in labels
     assert "项目管理" not in labels
     assert "添加项目..." not in labels
     assert "删除项目..." not in labels
@@ -1332,7 +1332,7 @@ def test_welcome_page_new_project_inline_input(
 def test_tree_inline_create_experiment_editor_commit(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """新建实验类型:树内编辑器 commitData→closeEditor 后创建(模拟回车)。"""
+    """新建数据类型:树内编辑器 commitData→closeEditor 后创建(模拟回车)。"""
     from PyQt6.QtWidgets import QAbstractItemDelegate
 
     manager = _manager_with_experiment(tmp_path, monkeypatch)
@@ -1370,7 +1370,7 @@ def test_tree_inline_create_experiment_editor_commit(
 def test_tree_inline_create_cancel_removes_pending(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """新建实验类型:编辑取消(Esc)不创建并移除待命名节点。"""
+    """新建数据类型:编辑取消(Esc)不创建并移除待命名节点。"""
     from PyQt6.QtWidgets import QAbstractItemDelegate
 
     manager = _manager_with_experiment(tmp_path, monkeypatch)

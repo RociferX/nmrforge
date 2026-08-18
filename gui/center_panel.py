@@ -1,8 +1,8 @@
 """中间上下文面板:随左侧树选中层级切换。
 
 - Workspace 选中 → 新建项目/打开项目/最近项目(嵌入欢迎页);
-- 项目 选中 → 新建实验类型(内嵌表单);
-- 实验类型 选中 → 导入样品数据(内嵌表单);
+- 项目 选中 → 新建数据类型(内嵌表单);
+- 数据类型 选中 → 导入样品数据(内嵌表单);
 - Data / 子目录选中 → Pipeline 五步(生成 FID → 分析)。
 
 新建/导入表单直接内嵌在中间,不弹独立窗口。
@@ -35,7 +35,7 @@ class CenterPanel(QWidget):
     import_options_requested = pyqtSignal(str, str, str, bool)  # (exp_id, name, source, copy)
     batch_import_requested = pyqtSignal(str, list)  # (exp_id, folders)
     segmented_import_requested = pyqtSignal(str)  # 分段采集容器目录
-    create_experiment_requested = pyqtSignal(str)  # 实验类型标题
+    create_experiment_requested = pyqtSignal(str)  # 数据类型标题
     edit_notes_requested = pyqtSignal(str, str, str)  # (kind, exp_id, data_id)
     new_project_requested = pyqtSignal(str)  # 项目名称
     open_project_requested = pyqtSignal(str)  # 项目路径
@@ -83,7 +83,7 @@ class CenterPanel(QWidget):
         self.report_page = ReportPanel(manager)
         self.stack.addWidget(self.report_page)  # index 4: 报告
 
-        # 顶部注释条:项目/实验类型/样品数据三级注释展示 + 后补编辑入口
+        # 顶部注释条:项目/数据类型/样品数据三级注释展示 + 后补编辑入口
         self.notes_header = QHBoxLayout()
         self.notes_label = QLabel("")
         self.notes_label.setWordWrap(True)
@@ -93,7 +93,7 @@ class CenterPanel(QWidget):
         )
         self.notes_header.addWidget(self.notes_label, 1)
         self.edit_notes_button = QPushButton("编辑注释")
-        self.edit_notes_button.setToolTip("添加/修改当前项目、实验类型或样品数据的注释信息")
+        self.edit_notes_button.setToolTip("添加/修改当前项目、数据类型或样品数据的注释信息")
         self.edit_notes_button.clicked.connect(self._on_edit_notes)
         self.notes_header.addWidget(self.edit_notes_button)
 
@@ -125,7 +125,7 @@ class CenterPanel(QWidget):
 
     # ------------------------------------------------------------------
     def _update_notes(self, kind: str, exp_id: str, data_id: str = "") -> None:
-        """按选中层级显示项目/实验类型/样品数据注释(中间区域最上方)。"""
+        """按选中层级显示项目/数据类型/样品数据注释(中间区域最上方)。"""
         from gui.notes import data_note, experiment_note, sample_note
 
         self._notes_kind = kind if kind in ("project", "experiment", "data", "folder") else ""

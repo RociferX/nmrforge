@@ -1,7 +1,7 @@
-"""项目/实验类型/样品数据三级注释读写 helper(GUI 侧约定)。
+"""项目/数据类型/样品数据三级注释读写 helper(GUI 侧约定)。
 
 - 项目注释:ProjectInfo.protein.notes(JSON 字段串,兼容旧纯文本);
-- 实验类型注释:ExperimentEntry.metadata["note_fields"](dict,约定键);
+- 数据类型注释:ExperimentEntry.metadata["note_fields"](dict,约定键);
 - 样品数据注释:ExperimentEntry.metadata["data_notes"][data_id](dict,约定键)。
 各级字段为「常规信息列表」,由用户按表单逐行填写;写操作由调用方在
 manager.save() 前调用。
@@ -16,7 +16,8 @@ from pathlib import Path
 from viewer.axis_labels import infer_nucleus
 
 # 各级注释字段(键 / 显示名),0.2.79 起按层级区分:
-# 项目=蛋白样品基本信息;实验类型=类型/维度/核;样品数据=重复/条件/pH/温度。
+# 项目=蛋白样品基本信息;数据类型=实验类型(指认实验/动力学实验);
+# 样品数据=重复/条件/pH/温度 + 维度/实验类型(presets)/核。
 SAMPLE_FIELDS: tuple[tuple[str, str], ...] = (
     ("protein_name", "蛋白名称"),
     ("expression_system", "表达系统"),
@@ -25,16 +26,16 @@ SAMPLE_FIELDS: tuple[tuple[str, str], ...] = (
     ("notes", "备注"),
 )
 EXPERIMENT_FIELDS: tuple[tuple[str, str], ...] = (
-    ("dimension", "维度"),
     ("experiment_type", "实验类型"),
-    ("nuclei", "核"),
-    ("notes", "备注"),
 )
 DATA_FIELDS: tuple[tuple[str, str], ...] = (
     ("repeat", "重复号"),
     ("condition", "Buffer 组分"),
     ("buffer_ph", "Buffer pH"),
     ("temperature", "温度(°C)"),
+    ("dimension", "维度"),
+    ("experiment_type", "实验类型"),
+    ("nuclei", "核"),
     ("notes", "备注"),
 )
 
@@ -56,6 +57,8 @@ NUCLEI_OPTIONS: tuple[str, ...] = (
     "1H-15N-1H",
     "13C-13C-1H",
 )
+# 数据类型注释「实验类型」仅两种取值:指认实验 / 动力学实验
+EXPERIMENT_CATEGORY_OPTIONS: tuple[str, ...] = ("指认实验", "动力学实验")
 _GENERIC_PRESET_NAMES = {"Generic2D", "Generic3D"}
 _PRESET_OPTIONS: list[tuple[str, int]] | None = None
 
@@ -170,7 +173,7 @@ def set_sample_note(project, text: str) -> None:
         protein.notes = str(text or "")
 
 
-# ---------------------------------------------------------------- 实验类型
+# ---------------------------------------------------------------- 数据类型
 def experiment_note_fields(project, exp_id: str) -> dict:
     entry = project.experiment(exp_id) if project is not None else None
     if entry is None:
@@ -189,7 +192,7 @@ def set_experiment_note_fields(project, exp_id: str, fields: dict) -> None:
 
 
 def experiment_note(project, exp_id: str) -> str:
-    """实验类型注释展示文本(结构化字段优先,兼容 entry.notes 纯文本)。"""
+    """数据类型注释展示文本(结构化字段优先,兼容 entry.notes 纯文本)。"""
     fields = experiment_note_fields(project, exp_id)
     if fields:
         return format_fields(fields)
@@ -300,10 +303,10 @@ def _raw_dir_for(project, exp_id: str, data_id: str) -> Path | None:
 def auto_fill_notes_from_metadata(
     manager, exp_id: str, data_id: str, metadata: dict
 ) -> dict:
-    """导入后按 Bruker 文件/元数据自动填充注释里能填的字段(不覆盖已有值)。
+    """导入后按 Bruker 文件/元数据自动填充样品数据注释里能填的字段(不覆盖已有值)。
 
-    实验类型注释:维度 / 实验类型(presets 名)/ 核;
-    样品数据注释:温度(acqus TE)。返回本次实际填充的 {字段: 值} 摘要。
+    样品数据注释:维度 / 实验类型(presets 名)/ 核 / 温度(acqus TE)。
+    返回本次实际填充的 {字段: 值} 摘要。
     """
     filled: dict[str, str] = {}
     project = manager.project if manager is not None else None
@@ -311,17 +314,17 @@ def auto_fill_notes_from_metadata(
         return filled
     dataset = (metadata or {}).get("dataset") or {}
 
-    exp_fields = dict(experiment_note_fields(project, exp_id))
+    data_fields = dict(data_note_fields(project, exp_id, data_id))
     ndim = dataset.get("ndim")
-    if ndim and not exp_fields.get("dimension"):
-        exp_fields["dimension"] = f"{int(ndim)}D"
+    if ndim and not data_fields.get("dimension"):
+        data_fields["dimension"] = f"{int(ndim)}D"
     exptype = str((dataset.get("experiment_type") or {}).get("name", "") or "")
     if (
         exptype
-        and not exp_fields.get("experiment_type")
+        and not data_fields.get("experiment_type")
         and exptype.lower() not in ("unknown", "generic", "generic2d", "generic3d")
     ):
-        exp_fields["experiment_type"] = exptype
+        data_fields["experiment_type"] = exptype
     nuclei: list[str] = []
     for dim in dataset.get("dimensions") or []:
         try:
@@ -332,21 +335,16 @@ def auto_fill_notes_from_metadata(
         nucleus = infer_nucleus(sf) or str(dim.get("nucleus", "") or "").strip()
         if nucleus:
             nuclei.append(nucleus)
-    if nuclei and not exp_fields.get("nuclei"):
-        exp_fields["nuclei"] = "-".join(nuclei)
-    set_experiment_note_fields(project, exp_id, exp_fields)
-    for key in ("dimension", "experiment_type", "nuclei"):
-        value = exp_fields.get(key, "")
-        if value:
-            filled[f"experiment.{key}"] = value
-
-    data_fields = dict(data_note_fields(project, exp_id, data_id))
+    if nuclei and not data_fields.get("nuclei"):
+        data_fields["nuclei"] = "-".join(nuclei)
     if not data_fields.get("temperature"):
         raw_dir = _raw_dir_for(manager, exp_id, data_id)
         temp = temperature_from_acqus(raw_dir) if raw_dir is not None else ""
         if temp:
             data_fields["temperature"] = temp
     set_data_note_fields(project, exp_id, data_id, data_fields)
-    if data_fields.get("temperature"):
-        filled["data.temperature"] = data_fields["temperature"]
+    for key in ("dimension", "experiment_type", "nuclei", "temperature"):
+        value = data_fields.get(key, "")
+        if value:
+            filled[f"data.{key}"] = value
     return filled

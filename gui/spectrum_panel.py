@@ -122,7 +122,7 @@ class SpectrumPanel(QWidget):
         self._peaks: list[dict] = []
         self._current_spectrum: Path | None = None
         self.placeholder = QLabel(
-            "未打开项目\n\n从左侧选择项目下的实验类型,或点击谱图文件查看结果。"
+            "未打开项目\n\n从左侧选择项目下的数据类型,或点击谱图文件查看结果。"
         )
         self.placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.placeholder.setWordWrap(True)
@@ -215,7 +215,7 @@ class SpectrumPanel(QWidget):
         return True
 
     def _spectrum_paths(self) -> list[Path]:
-        """当前实验类型/样品数据下的谱图文件(新布局优先,旧扁平路径回退)。"""
+        """当前数据类型/样品数据下的谱图文件(新布局优先,旧扁平路径回退)。"""
         paths: list[Path] = []
         exp_id = self._current_exp_id
         data_id = self._current_data_id

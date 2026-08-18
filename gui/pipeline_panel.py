@@ -1,4 +1,4 @@
-"""中间 Pipeline 面板:围绕当前样品数据/实验类型显示处理步骤与状态。
+"""中间 Pipeline 面板:围绕当前样品数据/数据类型显示处理步骤与状态。
 
 六步流程(契约 v1.2 / G2B-002,含可选 SMILE 优化):
 导入样品数据 → 生成 FID → 生成谱图(含 SMILE 重构)→ [SMILE 优化,可选] →
@@ -655,7 +655,7 @@ class PipelinePanel(QWidget):
     manual_open_requested = pyqtSignal(str)  # step_id:打开人工处理对话框
     report_requested = pyqtSignal(str)  # step_id:打开报告页
     show_spectrum_requested = pyqtSignal(str)  # step_id:展示谱图
-    import_data_requested = pyqtSignal(str)  # exp_id:在当前实验类型下导入样品数据
+    import_data_requested = pyqtSignal(str)  # exp_id:在当前数据类型下导入样品数据
     view_log_requested = pyqtSignal(str)  # step_id:定位日志面板
     progress_updated = pyqtSignal(str)  # 批量进度文本(主线程更新标签)
     batch_summary_requested = pyqtSignal(object)  # 批量汇总 dict
@@ -733,7 +733,7 @@ class PipelinePanel(QWidget):
     # 上下文
     # ------------------------------------------------------------------
     def set_context(self, exp_id: str, data_id: str | None = None) -> None:
-        """兼容入口:按实验类型设置上下文(data_id 缺省回退首个样品数据)。"""
+        """兼容入口:按数据类型设置上下文(data_id 缺省回退首个样品数据)。"""
         self._selection_kind = "experiment" if exp_id else ""
         self._current_exp_id = exp_id or ""
         if data_id is not None:
@@ -751,7 +751,7 @@ class PipelinePanel(QWidget):
         return self._current_exp_id
 
     def _current_statuses(self) -> dict[str, str]:
-        """当前选中样品数据的步骤状态;未选中样品数据/旧单样品数据回退实验类型聚合。"""
+        """当前选中样品数据的步骤状态;未选中样品数据/旧单样品数据回退数据类型聚合。"""
         if self._current_data_id:
             return compute_data_step_statuses(
                 self.manager, self._current_exp_id, self._current_data_id
@@ -776,11 +776,11 @@ class PipelinePanel(QWidget):
             for row in self._rows.values():
                 row.set_status("LOCKED")
                 row.manual_button.setVisible(False)  # 未选中数据不显示人工
-            self.import_button.setVisible(True)  # 可直接在当前实验类型导入样品数据
+            self.import_button.setVisible(True)  # 可直接在当前数据类型导入样品数据
             self._rows["import"].setVisible(True)
             return
         self.import_button.setVisible(False)
-        # 导入样品数据属于实验类型层(点中实验类型时显示),样品数据层不再展示该步骤
+        # 导入样品数据属于数据类型层(点中数据类型时显示),样品数据层不再展示该步骤
         self._rows["import"].setVisible(False)
         exp = project.experiment(self._current_exp_id)
         exp_title = exp.title if exp is not None else self._current_exp_id
@@ -799,7 +799,7 @@ class PipelinePanel(QWidget):
             context_text += f" [批量 {current_batch}: {group_count} 数据]"
         self.context_label.setText(context_text)
         statuses = self._current_statuses()
-        # 样品数据层不提示/展示导入步骤(导入属于实验类型层动作)
+        # 样品数据层不提示/展示导入步骤(导入属于数据类型层动作)
         outdated_next = next(
             (
                 sid
@@ -979,7 +979,7 @@ class PipelinePanel(QWidget):
                 if not nodes:
                     self.log_message.emit(
                         f"{STEP_LABEL.get(step_id, step_id)}: "
-                        "该实验类型还没有样品数据,请先导入样品数据"
+                        "该数据类型还没有样品数据,请先导入样品数据"
                     )
                     return
                 data_node = next(

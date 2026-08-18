@@ -17,7 +17,7 @@ from gui.processing import ProcessingController
 
 
 def _manager_with_artifacts(tmp_path: Path):
-    """实验类型 + 样品数据 + fid/谱图(无峰表/报告)。"""
+    """数据类型 + 样品数据 + fid/谱图(无峰表/报告)。"""
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     entry = manager.create_experiment("NUS")
     data = manager.import_data(entry.id, "/fake/1")
