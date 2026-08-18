@@ -110,6 +110,7 @@ def test_run_batch_multiple_data(tmp_path: Path, bruker_dir: Path) -> None:
         data_ids,
         ["fid", "spectrum"],
         backend,
+        params={"phase_route": "none"},
         progress=events.append,
     )
     assert result["summary"] == {"total": 2, "success": 2, "failed": 0}
@@ -153,7 +154,14 @@ def test_run_batch_single_failure_continues(
         tmp_path, bruker_dir / "hsqc_2d", n=2
     )
     backend = _FakeBackend(tmp_path / "work", fail_fid_on=2)
-    result = run_batch(manager, exp_id, data_ids, ["fid", "spectrum"], backend)
+    result = run_batch(
+        manager,
+        exp_id,
+        data_ids,
+        ["fid", "spectrum"],
+        backend,
+        params={"phase_route": "none"},
+    )
     assert result["summary"] == {"total": 2, "success": 1, "failed": 1}
     assert result["failed"] == [data_ids[1]]
     assert result["results"][data_ids[0]]["status"] == "success"
@@ -223,11 +231,11 @@ def test_run_batch_reuses_stepwise(
         data_ids,
         ["fid", "spectrum"],
         backend,
-        params={"extract": False},
+        params={"phase_route": "none", "extract": False},
     )
     assert calls == [
         ("fid", data_ids[0]),
-        ("spectrum", data_ids[0], {"extract": False}),
+        ("spectrum", data_ids[0], {"phase_route": "none", "extract": False}),
     ]
     assert result["summary"]["success"] == 1
 
@@ -304,6 +312,7 @@ def test_run_batch_full_pipeline(tmp_path: Path, bruker_dir: Path) -> None:
         data_ids,
         ["import", "fid", "spectrum", "peaks", "analysis"],
         backend,
+        params={"phase_route": "none"},
     )
     per = result["results"][data_ids[0]]
     assert per["status"] == "success"

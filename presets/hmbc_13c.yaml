@@ -4,6 +4,7 @@ phase_sensitive: false
 direct_nucleus: 1H
 indirect_nuclei: [13C]
 expected_peak_mode: absorption
+peak_sign: uniform
 display_orientation: "13C/1H"
 priors:
   "1H": [0.0, 11.0]

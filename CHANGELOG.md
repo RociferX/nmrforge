@@ -1,5 +1,187 @@
 # 变更日志
 
+## [0.2.106] - 2026-08-17
+
+- 相位优化统一为「逐维复型预览 + 内存调相」(替代简单/进阶分派):
+  - 第一遍:整条生产管道仅搜索轴 PS 不加 -di(其它轴按已固定相位 -di)、
+    零填零,输出生产布局复型文件(uniform 每轴一条;NUS 直接维复用 SMILE
+    recon 复型平面,间接维由 finalize 复型预览提供——该轴不加 -di,
+    FT/-alt/ZTP 约定由真实后端保证);
+  - 内存调相:固定迹线净吸收评分(旧算法判断标准),粗网格+细化+门控+
+    联合复核原样搬到内存,零额外 SMILE;
+  - 末遍:窗函数/填零/基线/各维 PS/EXT/-di 完整重跑出良谱。
+- 实验类型符号早约束:presets 新增 peak_sign(uniform/mixed;HNCACB=mixed),
+  mixed 用「|净吸收| 中位数 + 正负共存」评分(uniform 保持签名净吸收);
+  VM sampleB(HNCACB)间接维 p0 恢复手动 F2=90°/F1≈0°。
+- ±180° 绝对符号消歧(mixed 实验):presets 新增 peak_sign_regions
+  (化学位移分区+期望符号,HNCACB 13C Cα 负/Cβ 正,默认值来自 sampleB 实测),
+  区域符号分离干净(≥70%/≥4 强峰)才翻转,保守;并修复批量加 peak_sign
+  时 YAML 行错位的数据问题。
+- 离散峰迹线选择(仅 mixed 实验):95 分位阈值 + 半高占窗比(duty)与峰
+  显著性过滤中央混杂峰团;uniform 保持旧 99.5 分位全部强迹线锁定
+  (离散过滤曾把 sampleL 带偏 180°,已限定范围)。
+- 3D 输出轴序实测为 (F2,F1,F3)(FDF 头标签不可靠),复型预览按搜索轴拆包
+  (交错实型轴不固定);NUS 直接维沿用旧对称性搜索(|p1|>20° 归零)。
+- 删除 nmrPipe HT / scipy hilbert 路径:phase_ht_candidate_axis、
+  phase_ht_candidate、hilbert_spectrum、display_phase_engine、
+  display_hybrid_optimize(及其测试)。
+- generate_spectrum 默认 phase_route=unified,phase_route=none 保留逃生口;
+  VM 前置实验确认 SMILE 不接受复型直接维输入(报错 Imaginary in the
+  direct dim must be deleted),NUS stage1 保持 -di。
+- VM 全谱型同决策回归:sampleI/103/3/4/5、sampleA 25%/100%、sampleB;
+  p0 一致(±2.5–10°,大多 ≤5°),sampleL 旧简单路径 F2=0°/F1=300° 异常
+  消除;sampleB F2=90° 与手动一致,后端次数 46→3(uniform)/47→4(3D NUS)。
+- 多段 NUS 合并验证(cc/61/63/65/67):各段独立 bruker -AUTO 生成的
+  fid.com 参数一致(仅空格排版不同),逐段转换→拆切片→addNMR 逐对合并
+  →合并 nuslist(348 点)→SMILE 出谱;与手工 1stfid/2ndAdd 流程等价
+  (手工复用参考段 fid.com 仅为方便);支持逐段 -rs 频移。
+- 单数据分段采集导入入口:import_segmented_dataset 直接接受包含全部分段
+  的容器目录(自动发现直接含 acqus 的子目录,read_segments 校验一致后
+  合并为一条 DataEntry,raw 只拷 segments/,逐段指纹);与批量导入(多条
+  DataEntry)明确区分,普通导入遇容器目录报错不自动猜测;stepwise 读取
+  分段数据走 read_segments,容器→FID→谱图链路 VM 端到端验证通过。
+- 分段合并坏点检测与清理:越界点/跨段重复点从合并 nuslist 剔除,有效网格
+  内坏点清零对应 FID 增量(States 双实行),⚠ 提示用户;cc/63 实测坏点
+  (27, 2350) 越界自动丢弃(349→348 点),SMILE 正常出谱。
+- 坏点检测/清理扩展到所有 NUS 数据:单 NUS 数据在 reconstruct_nus 中统一
+  校验 nuslist(越界+重复),剔除坏点、清理对应 FID(2D 单文件/3D 切片)、
+  ⚠ 提示;2D nuslist 索引上限 = 网格 td[1](nus20_25 索引到 126 不误判),
+  3D 保持 NusTD//2;注入坏点实测只标 (1000,) 且正常数据零误报。
+
+## [0.2.105] - 2026-08-17
+
+- 第一遍 uniform 直接维 PS 保留真实虚部(keep_direct_complex),为逐维复型
+  预览铺路(后续 0.2.106 统一方案取代)。
+
+## [0.2.104] - 2026-08-17
+
+- 简单途径改为逐维 nmrPipe PS -ht:目标轴转置到管道轴(2D 间接维 -y),
+  候选显示谱动态锁定峰位评分;消除间接维 180° 反相;
+- VM 批量:sampleF/4/5/8 直接维与间接维大多在 advanced 的 ±15° 内
+  (sampleI F2 300 vs 307.5、F1 95 vs 92.5);sampleL 异常待查
+  (F2=0°、F1=300°)。
+
+## [0.2.103] - 2026-08-17
+
+- 简单途径直接维评分改为候选谱动态锁定峰位(像人工调相时追踪峰);
+  sampleI F2 由 175° 修正到 300°(正确 307.5°,残差 7.5°);
+- 与进阶版评分/搜索同源,唯一额外区别是峰位锁定:简单在 PS -ht 候选谱上
+  动态锁定,进阶在真实后端谱上固定锁定——已在开发文档记录。
+
+## [0.2.101] - 2026-08-16
+
+- 相位优化简单/进阶两条途径整合并真实数据标定:
+  - 简单途径(默认):第一遍处理 → nmrPipe HT 重建虚部 → 逐维显示层
+    固定迹线净吸收评分 → 重跑填相位;所有谱型统一;
+  - 进阶途径:uniform 全维度后端优化(optimize_phase_sequential),NUS
+    混合(直接维 HT 显示层 + 间接维逐候选 finalize);
+  - 关键修正:显示层虚部必须用 nmrPipe HT,不能用 scipy.signal.hilbert
+    (scipy 使 sampleI F2 误选 140°,HT 后选 295°,正确 307.5°);
+  - 3D 轴名按 NMRPipe 谱头 FDF1/FDF2/FDF3 映射(修复 reversed dims 错位);
+  - VM 标定:sampleI F2 295°(正确 307.5°,F1 仍偏),sampleA 100%/25%
+    直接维均恢复 (0,0);简单途径对 NUS 可靠,uniform 复杂谱建议 advanced;
+  - generate_spectrum 支持 params["phase_route"],默认 simple,保留 none。
+
+## [0.2.98] - 2026-08-16
+
+- 修复 3D NUS 显示层相位搜索/填相位(实型交错复型约定,sampleB 真实数据验证):
+  - nus3d_rc 平面为「第一轴实/虚交错」实型存储(nmrglue 读成翻倍实型,
+    read_pipe_complex 拆包为复型);0.2.96 的 3D 分支把交错实型当复型
+    旋转/评分是错误约定——搜索在无意义空间打分、应用则写回错误数据;
+  - _display_phase_search 3D 分支改用 read_pipe_complex 拆包复型后
+    对称性评分(直接维 axis 0),间接维增量均布子采样 ≤8 个平面;
+  - _apply_direct_phase 旋转结果写入 nus3d_rc_ph/(或 nus2d/recon_ph.ft1)
+    副本再 finalize,源重构平面保持 PS(0,0) 复型供复用/重搜;finalize_nus
+    新增 planes 参数支持副本渲染;
+  - VM sampleB(250 点,6.2%,1H 9.0-6.5 ppm,1×TD):显示层 F2=(85,50)
+    score 38.3,p1 归零 → 应用 (85,0);终谱直接维 1H 吸收度 neg-area
+    -0.182/symmetry 0.631,优于 (0,0)(-0.593/0.276)与 NU-DFT 旧路径
+    (-0.513/0.337);三轴(15N/1H/13C)吸收度全面优于旧记录间接相位组合
+    (0.2.45 F2(-45,-30)/F1(45,-60))——显示层 + 间接 (0,0) 已近纯吸收;
+  - 新增回归测试:3D 交错复型拆包后近零相位返回 (0,0);填相位写副本且
+    源平面不变;本地全量 pytest 仅剩 GUI ext 默认值基线失败(backend-dev
+    与 vm/master 分叉,GUI 侧未同步 0.2.88 契约),ruff 全绿。
+
+## [0.2.97] - 2026-08-16
+
+- 记录相位优化方法演进与回退(用户要求,方便随时回退)+ 交接新窗口:
+  - docs/PROJECT_STATUS.md 新增「相位优化方法演进与回退(0.2.87→0.2.96)」
+    表:各版本方法/位置/结论/回退开关(display_phase_search=False →
+    NU-DFT;light_phase_search=True → 轻量 SMILE;direct_phase_override →
+    手动;删 phase.json → 重搜;uniform 现有优化完整保留为基准);
+  - docs/AGENT_PROMPTS.md 追加 Backend 启动提示词(0.2.97 起):全谱型
+    (2D/3D、uniform/NUS)统一到「1× 处理 + 显示层相位搜索 + 最后一步填
+    相位」流程——3D NUS 验证/修复 3D 分支(sampleB)、uniform 接入评估、
+    全谱型回归(sampleI、sampleA、sampleB),以现有方法为正确答案;
+  - 全谱型统一可行性:2D NUS 已统一;3D NUS 代码已写待验证;uniform 建议
+    保持现有优化(已验证且便宜),显示层作可选快速估计;
+  - 主仓库临时对比脚本(vm_*.py)已清理。
+
+## [0.2.96] - 2026-08-16
+
+- 显示层相位搜索改 1× SMILE(用户要求:相位优化不需要额外后端,找到正确
+  相位在最后一步填上去)+ nmrDraw 机制核对:
+  - 核对结论:nmrDraw 显示层调相 = 对复型谱做频域旋转(乘 e^{i(p0+p1·k)})
+    再取实部;即使一维谱"只有实部",虚部参与旋转使实部形状随相位变化(吸收
+    偶对称/色散奇对称/混合);若数据只剩实部(-di),nmrDraw "需要时重建虚部"
+    (Hilbert)——我们的最终 ft2 是实型,复型重构平面 recon.ft1 直接可用且
+    相位精确(无 Hilbert 偏移,实测 Hilbert 有 ~30° 约定偏移);
+  - 架构:1× SMILE(PS 0,0,或缓存相位)→ 在复型 recon 平面上信号行峰选择 +
+    对称性评分(直接维 axis 0)→ phase.json → 最后一步把相位旋转应用到
+    recon + 便宜 stage-2 finalize 重渲终谱(非 SMILE);不再 2× SMILE;
+  - search_direct_phase_on_spectrum 增 axis 参数(直接维所在轴);p1 幅值
+    护栏(|p1|>20° 归零,直接维 p1 通常很小,recon 伪影偏好大 p1);
+  - VM 实测(sampleA 100% NUS):1× SMILE 3.2s;显示层搜索 F2=(0,30) score
+    36.6 → p1 归零 → phase.json (0,0)(匹配现有方法 356.7≈0);终谱保持
+    PS(0,0);25% NUS 无干净信号峰 → 安全保持默认相位;
+  - 测试:全量 486 passed(1 失败为 GUI 遗留 ext_lo 断言,待 GUI Agent),
+    ruff 全绿;
+  - 待 VM 真实 NUS 高采样数据验证:显示层相位 vs 完整流程,以及非平凡相位
+    (p0≠0)时的应用路径。
+
+## [0.2.95] - 2026-08-16
+
+- 显示层相位搜索(nmrDraw 人工调相思路,默认开启;用户方案):
+  - 原理:人工在 nmrDraw 看终谱、切一维谱、显示层调相(仅频域旋转取实部,
+    不动谱数据),按「峰是否对称吸收」判断。本实现完整模仿:正式 SMILE
+    预览(PS 0,0)→ 终谱上信号行峰选择 → 频域旋转对称性评分 → 主 SMILE
+    复用估出相位(2× SMILE,与人工「跑→看→改→重跑」一致);
+  - 信号行峰选择(用户关键点:蛋白谱每行只有几个峰、信号高):每迹线局部
+    极大 + 峰高 ≥ max(10×行 MAD 噪音, 5% 全局最大)+ 每行峰数 ≤8——先排除
+    噪音/伪影区域,只留高耸稀疏信号峰;
+  - 评分:峰窗口对称性(吸收偶对称≈1/色散奇对称≈0)+ 正峰约束(±180 消歧);
+    近最优平台取最小修正(谱已接近好相位不乱加修正);
+  - 置信度门控:score<75 拒绝应用(VM 实测 25% NUS 重构伪影给 105°、
+    score=68.6 → 拒绝保持默认;100% 重构精确恢复 (0,0)、score=83.7 应用);
+  - reconstruct_nus 增 params["display_phase_search"](默认 True),开启时
+    跳过 NU-DFT/轻量(它们真实数据不可靠);phase.json(v2, source=
+    display_recon)缓存,后续运行复用不再重搜;
+  - 测试:search_direct_phase_on_spectrum 显式 net 指标平台语义 + 新默认
+    symmetry 信号行选择;全量 487 passed(1 失败为 GUI 遗留 ext_lo 断言,
+    待 GUI Agent),ruff 全绿;
+  - 待 VM 真实 NUS 数据(用户的高采样数据)验证:显示层相位 vs 完整流程
+    对比;25% 低采样重构伪影重时门控拒绝、保持默认相位(安全)。
+
+## [0.2.94] - 2026-08-16
+
+- 实装「phase-only 轻量 SMILE」模式(用户方案;实验性,默认关闭):
+  - core.optimization.phase_search.search_direct_phase_on_spectrum:最终谱
+    固定迹线中位数净吸收评分搜索直接维 (p0, p1)(与现有 uniform 优化同一
+    指标,含 ±180 正峰消歧);
+  - backend.reconstruct_nus 增 params["light_phase_search"]=True:子采样
+    nuslist(目标 max(16, n/4),强制含点 0)→ work/light/ 子目录(符号链接
+    复用转换产物 + 子采样 nuslist)→ PS(0,0) 轻量 SMILE → 评分搜 F2 →
+    写 phase.json(v2, source=phase_only_recon)→ 正式 SMILE 复用;
+  - VM 实测(sampleA 25% NUS):轻量路径端到端 1.2s(轻量 16 点 + 正式 32 点);
+    但 16 点子采样重构把直接维相位带偏 ~55°(该谱 (55,45) 评分 95.1 vs
+    (0,0) 86.9,非平台——重构伪影污染固定迹线中位数评分);32 点重构也轻微
+    偏好 (55,45) 而非真值 (356.7,0);
+  - 结论:重构伪影随采样率下降而增大,「轻量重构 + 现有评分」在激进子采样
+    下达不到现有方法精度;模式保留但默认关闭,待真实数据(高采样率)验证或
+    改为温和子采样后再启用;
+  - 测试:search_direct_phase_on_spectrum 单测(±180 消歧 + 平台语义);
+    全量 486 passed(1 失败为 GUI 遗留 ext_lo 断言),ruff 全绿。
+
 ## [0.2.93] - 2026-08-18
 
 - 新增(GUI Agent,用户反馈):样品数据子文件夹(raw/process/spectra/等)
@@ -9,6 +191,20 @@
 - 测试:菜单项与信号、终端命令构造(优先 csh / Windows 回退);本地全量
   pytest + ruff 全绿。
 
+- 真实 2D uniform 数据对比(VM sampleI):NU-DFT vs 现有优化,结论:
+  - 合成 2D 传统数据:NU-DFT 达到/超过现有(p0 误差 0-6°、0 后端);
+  - 真实 sampleI:现有(验证过)F2=(307.5, -5.0)46 次后端;NU-DFT 多峰
+    相位互不一致(浓度 0.41,p0 偏 180°+、p1 失真)——真实谱峰重叠/基线/
+    近 Nyquist 伪影破坏「单峰干净相位」假设;「F1 普通 FFT + 逐轴搜索」
+    的零后端捷径同样复现不了现有答案(四象限 FT/ZF/EXT/POLY 差异);
+  - 结论:按「达到一样效果才可用」标准,NU-DFT 暂不能替代 2D uniform
+    的现有优化,后端节省不成立;现有优化保持;
+  - 边缘伪影修复(对比中发现):直接维 FT 首尾 DC/Nyquist 伪影可比真实峰
+    强数倍(sampleI k=0 4.9e8 vs 真实峰 8e7),nus_direct_phase 峰选择
+    (_row_peak_positions 增 margin 参数 + 内部局部极大)排除之;
+  - 0.2.91 NUS 直接维集成不受影响(填补空缺),但真实数据准确性同样存疑,
+    建议在 sampleA 上验证或改「伪均匀 + 真实后端候选」路线;
+  - 全量 485 passed(1 失败为 GUI 遗留 ext_lo 断言),ruff 全绿。
 
 ## [0.2.92] - 2026-08-16
 
@@ -19,6 +215,20 @@
   「已过期」,旧配置里的 fingerprint_check/outdated_enabled 键忽略。
 - 测试:开关测试收敛为简单模式断言;本地全量 pytest + ruff 全绿。
 
+- NU-DFT 直接维相位修复 ±180 消歧(以现有方法为正确答案基准,用户要求):
+  - 现状:NU-DFT 峰复值相位 = φ(k*)(t1 调制已在真实 F1 频率处精确抵消),
+    p0_corr = -φ(k*) 是唯一解,与现有方法「取正峰解」语义一致——θ=-120
+    应得 p0=120 而非 300;
+  - 修复:弃用「单切片吸收符号」判正负(该切片 t1 相位可能为 180° 使峰
+    反转,曾把 p0 误翻 180°),改为 NU-DFT 峰复值校正后应为正实的数值守卫;
+  - 2D 传统数据对比(同合成):NU-DFT p0 误差 0-6°、p1 误差 0-8°、0 后端
+    (现有 uniform 优化 49 次后端,其 net/|Re| 指标在窄峰合成上饱和);
+    单峰(现有测试场景)各 θ 均精确恢复且无 ±180 歧义;
+  - 测试:新增 nus_direct_phase 单峰 ±180 语义断言(θ=-120/33/90 → p0≈
+    -θ,≠p0+180);全量 485 passed(1 失败为 GUI 遗留 ext_lo 断言),ruff
+    全绿;
+  - 待 VM 真实 2D uniform 数据:同数据分别走现有优化与 NU-DFT,对比直接
+    维相位与终谱线型(现有方法为正确答案)。
 
 ## [0.2.91] - 2026-08-16
 
@@ -36,9 +246,6 @@
 - VM 实测(sampleB 真实转换):fid.com 与 raw.fid 均在 process/,raw 无
   fid.com(1682 软链接 + 仅 profYZ.dat 实体),转换正常。
 
-
-## [0.2.91] - 2026-08-16
-
 - 新增(GUI Agent,用户反馈):「简单模式」开关(设置对话框 →
   config/nmrforge.local.yaml pipeline.simple_mode,重启生效)——
   开启后 Pipeline 下一步只认上一步有没有对应格式的产物文件
@@ -47,6 +254,25 @@
 - 测试:简单模式下输入变化不再出现 OUTDATED 断言;本地全量 pytest
   + ruff 全绿。
 
+- NUS 直接维相位自动优化改「非均匀 DFT 最强峰相位」(用户要求:不要人工
+  确认,保证能优化正确,走后端也没事):
+  - 原理:切片 i 直接维峰 k* 的相位 = φ(k*) + ω1·Δt1·p1_i + ω2·Δt2·p2_i;
+    沿增量对最强直接峰复值做非均匀 DFT,在真实 F1/F2 频率处 t1 调制
+    精确抵消(δ=0),峰相位 = φ(k*) = φ0 + p1·k*/(n-1) ——离网格频率也
+    成立(合成实测 p0 平均误差 3.6°、p1 约 5°,0.2.90 伪均匀单发估计
+    离网格可偏 50-95°的问题消除);p1 由各切片多峰相位集中度拟合取
+    中位数;
+  - 自动集成:reconstruct_nus 的 _search_direct_phase 对 NUS(有 nuslist
+    + 切片)优先走 NU-DFT(用全部切片,零后端运行,无需人工确认),
+    phase.json v2(source=direct_nudft)缓存;失败回退逐切片锚定路径;
+  - 门控改相干 SNR:|V_peak|/(√N·mean|v|)——信号≈√N、噪声≈1,阈值 2.0
+    (吸收度门控受 SP 窗非线性相位污染,正确相位下反而偏低,已弃用);
+  - preview_direct_phase 同步改 NU-DFT 估计,预览谱(伪均匀产物)仍可选
+    输出;0.2.90 伪均匀谱保留为预览产物;
+  - 测试:新增后端 _search_direct_phase 自动路径断言(source=direct_nudft,
+    离网格 F1=20.7 恢复 ±12°);预览测试改离网格 F1=17.3;全量 484 passed
+    (1 失败为 GUI 遗留 ext_lo 断言,待 GUI Agent),ruff 全绿;
+  - 待 VM 真实数据复核:重构后直接维主峰纯吸收。
 
 ## [0.2.90] - 2026-08-16
 
@@ -62,9 +288,6 @@
 - VM 实测(sampleB,3D HNCACB):raw 1682 文件全部软链接、0 复制,
   fid.com/profYZ.dat 实体复制,无 warnings。
 
-
-## [0.2.90] - 2026-08-16
-
 - 新增(GUI Agent,用户反馈):两个 Pipeline 行为开关(设置对话框 →
   config/nmrforge.local.yaml 的 pipeline 段,重启生效):
   ①「文件指纹检测」关闭后不再做输入/脚本指纹与产物新旧比较,输入
@@ -73,6 +296,26 @@
   SUCCESS,否则 READY/LOCKED)。
 - 测试:关闭开关后不再出现 OUTDATED 断言;本地全量 pytest + ruff 全绿。
 
+- NUS 直接维相位预览改走「伪均匀传统 FT」路径(用户方案:直接维全采样,
+  先不做 SMILE 把间接维变换出来,像传统采样一样优化直接维):
+  - preview_direct_phase 对 NUS(有 nuslist + 切片)按 nuslist 把稀疏切片
+    摆到完整网格、缺位补零,内存内做传统逐维 FT(直接维 SP+FT+EXT 窗口
+    + 间接维 FFT)→ 伪均匀谱;直接维相位不再与 t1 调制纠缠(间接 FT 把
+    t1 变成间接频率),可像传统采样一样估 (p0, p1);
+  - search_direct_spectrum_phase 增 p0_source 参数:"first"(切片式,首条
+    迹线 t1=0 锚定,默认)与 "strongest"(伪均匀谱,峰高最强迹线对应真实
+    间接频率,零填充旁瓣常数相位偏置 δ≈0);
+  - 结果写 phase.json(version=2,source=direct_pseudo),后续
+    reconstruct_nus 直接复用,不再重搜;可选 out_preview 输出已调相伪
+    均匀谱(2D/3D ft2/ft3);
+  - 网格按 effective_td 摆位,索引用模运算容错(1-based/复点单位差异);
+    3D 间接网格过大时均匀子采样(≤4096 格,直接维相位不变);EXT 窗口
+    由 ext_lo/ext_hi(默认 10.5/6.5)决定,窗口为空时回退全谱;
+  - 无 nuslist/切片不匹配时回退「首条迹线锚定」路径(0.2.88/89 行为);
+  - 测试:构造 16 个含 t1 调制切片的用例,断言伪均匀路径零后端运行、
+    校正值 (p0,p1) 恢复、phase.json v2/source、预览谱形状;全量
+    483 passed,ruff 全绿;
+  - 待 VM 真实数据复核:预览伪均匀谱直接维主峰纯吸收后再跑 SMILE。
 
 ## [0.2.89] - 2026-08-16
 
@@ -83,9 +326,6 @@
   追加式兼容(Spectrum 增加可选 complex_data 供 FID 调相),契约字段未破坏;
 - 测试:本地全量 488 passed、VM 全量 484 passed + 4 skipped(Python 3.12.13,
   HEAD 306321b),ruff 全绿。
-
-
-## [0.2.89] - 2026-08-16
 
 - 修复(GUI Agent,用户反馈):核种类按化学位移(观测频率 sf)推断——
   sf/旋磁比对应 1H 频率并与常见磁场匹配(600→1H、60.8→15N、
@@ -106,6 +346,17 @@
 - 测试:infer_nucleus、project_nmrpipe 阈值求和、3D 默认 Proj、
   大 .ft3 异步加载、raw 处理产物忽略;本地全量 pytest + ruff 全绿。
 
+- 直接维相位预览路径(无 SMILE、零后端运行,用户要求):
+  - workflow.phase_optimize.preview_direct_phase(experiment, work_dir,
+    out_preview=...):读转换后的 fid/切片(work/fid/test%03d.fid 或单文件
+    fid),内存内直接维 FT + (p0,p1) 搜索(与 reconstruct_nus 重构前搜索
+    同算法),写 phase.json(version=2,后续 reconstruct_nus 直接复用不再
+    重搜),可选输出「已调相直接维预览谱」(前 K 条强迹线实部,2D ft2,
+    F2 轴头继承 fid)供肉眼核对;
+  - 用途:生成 FID 后先跑预览确认直接维纯吸收,再决定是否运行 SMILE;
+    不满意可改参重跑或手改 phase.json(保持 version=2);
+  - 测试:构造 8 个含已知相位切片用例,断言零后端运行、phase.json v2、
+    校正值 (p0,p1) 恢复、预览谱文件与尺寸;全量 482 passed,ruff 全绿。
 
 ## [0.2.88] - 2026-08-16
 
@@ -121,9 +372,6 @@
 - 待办:GUI 设置对话框动态读取 load_processing_defaults 暴露 ext_lo/ext_hi,
   仍待 GUI Agent 接线(B2G-003)。
 
-
-## [0.2.88] - 2026-08-16
-
 - 调整(GUI Agent,用户反馈):取消选中样品数据时自动显示谱图——右侧
   谱图改为文件列表点击或 Pipeline「生成谱图」步骤完成后出现的
   「展示谱图」按钮打开;切换样品数据时清空旧谱,不残留上一张。
@@ -132,6 +380,27 @@
 - 测试:更新自动加载断言为显式加载;新增「展示谱图」按钮可见性与
   信号测试;本地全量 pytest + ruff 全绿。
 
+- NUS/均匀直接维相位搜索升级:从「原始 FID p1 共识(p0 恒 0)」改为
+  「直接维 FT 谱频域 (p0, p1) 搜索」:
+  - 物理背景:NUS 增量 i 的直接维相位 = 公共相位 + ω1·t1(i)(t1 调制,
+    t1(0)=0);只有首条迹线(增量 0)直接维相位干净,其余迹线的 t1 偏置
+    无法与 p0 分离。聚合策略:p1 用多峰迹线相位集中度拟合(旋转后各峰
+    相位圆集中度最大)取中位数——t1 只是逐峰常数偏置,不影响 p1 斜坡;
+    p0 锚定首条有峰的迹线(增量 0)的峰相位加权圆均值取反(PS 校正约定,
+    与 _search_axis 一致),±180 消歧取正峰解;
+  - 吸收窗口半径 1:SP 窗函数边缘给峰尾带非线性相位,±5 窗口吸收度在
+    正确相位下反而下降(实测 0.46 vs 0.51),±1 窗口能正确区分
+    (0.65 vs 0.47)——评分/消歧均用半径 1;
+  - 估计尺寸与脚本 PS 应用尺寸一致(NUS 直接维 1×TD、均匀 2×TD),p1
+    无需缩放;切片式数据均匀子采样 ≤16 切片,单文件 fid 按增量行处理;
+  - phase.json 缓存加 version=2(旧版 p0=0 缓存失效自动重搜);
+  - 修复 process 路径 auto_phase=False 检查顺序(此前在搜索之后才置位,
+    实际关不掉自动相位,与 0.2.67 约定不符);
+  - 测试:新增 search_direct_spectrum_phase 合成谱 (p0,p1) 恢复断言
+    (±12°/±10°)、p1 幅值回归;更新缓存 version 断言;全量 481 passed,
+    ruff 全绿;
+  - 待 VM 真实数据复核:sampleA 2D NUS、sampleB 3D NUS 重构后直接维主峰
+    纯吸收(p0 非零解,此前直接维恒混合)。
 
 ## [0.2.87] - 2026-08-16
 
@@ -146,8 +415,6 @@
     候选体积与 I/O 显著下降(3D NUS 候选由全尺寸 ft3 降为 SI=TD);
   - 测试:新增候选 zero_fill=none 与最终 auto 断言;fake backend 补 params;
   - 待 VM 用户手动参数复核:终谱尺寸/峰位/线宽与全采样对照。
-
-## [0.2.87] - 2026-08-16
 
 - 调整(GUI Agent,用户反馈):交互调相改为 nmrDraw 式「仅显示」——查看
   一维谱/开启 1D 条带后拖 P0/P1 肉眼看相,不改变数据,实数谱即可用
@@ -279,8 +546,6 @@
 - 修复(GUI Agent,用户反馈):主页面右侧谱图文件列表不再混入 process 目录
   的 raw.fid,列表只列 .ft2/.ft3;FID 仍可拖放/直接打开查看。
 - 测试:新增查看器默认值/英文文案/FID 排除断言;VM 全量复测通过。
-
-## [0.2.79] - 2026-08-15
 
 - SMILE 线程默认改自动(用户要求):未显式指定(参数/配置缺省或 0)时
   nthread = 机器线程数 - 2(最小 1),与相位优化候选并行一致;
@@ -722,7 +987,6 @@
 - 测试:全量 424 passed(本地 Windows + offscreen),ruff 全绿;
 - VM 全量回归:420 passed + 4 skipped(2026-08-13,推送后同步复测)。
 
-
 ## [0.2.51] - 2026-08-13
 
 - 阶段 D:引导与性能(愿景 §33/§31):
@@ -733,7 +997,6 @@
     大项目刷新不卡顿。
 - 测试:新增 test_gui_phase_d(4 例:节点保留/文件夹指纹/首次提示/只出现一次),
   全量 420 passed,ruff 全绿。
-
 
 ## [0.2.50] - 2026-08-13
 
@@ -747,7 +1010,6 @@
     config/nmrforge.local.yaml,重启生效,未配置显示默认值。
 - 测试:新增 test_gui_phase_c(5 例),全量 416 passed,ruff 全绿。
 
-
 ## [0.2.49] - 2026-08-13
 
 - 阶段 B:Pipeline 深交互(愿景 §17/§23/§28,原则 2/3):
@@ -758,7 +1020,6 @@
   - LOCKED/OUTDATED/FAILED 原因灰字直显(不只 tooltip);FAILED 行显示
     错误摘要 + 「查看日志」「重试」按钮(日志定位到 LogPanel 并滚底)。
 - 测试:新增 test_gui_pipeline_detail(5 例),全量 411 passed,ruff 全绿。
-
 
 ## [0.2.48] - 2026-08-13
 
@@ -771,7 +1032,6 @@
   - 3D 切片/投影模式按数据记忆(切走再切回恢复平面与投影)。
 - 测试:新增 test_gui_context(5 例:上下文条/参数摘要/历史数据/定位/3D 记忆),
   全量 406 passed,ruff 全绿。
-
 
 ## [0.2.46] - 2026-08-13
 
@@ -851,7 +1111,6 @@
   批量标记;ProjectTree 标记显示与右键加入/移出。
 - 测试:新增 test_gui_batch(5 例),全量 354 passed,ruff 全绿。
 
-
 ## [0.2.42] - 2026-08-13
 
 - 修订(用户反馈):
@@ -863,7 +1122,6 @@
     峰表」才写盘。
 - 测试:更新 test_viewer_1d(条带)、test_gui_poky / test_gui_manual /
   test_gui_processing(.list),全量 349 passed,ruff 全绿。
-
 
 ## [0.2.41] - 2026-08-13
 
@@ -883,7 +1141,6 @@
     快照、指纹刷新使下游过期)。
 - 测试:新增 test_viewer_1d / test_gui_smile / test_gui_poky,更新
   test_gui_layout(六步流程/上下布局),全量 349 passed,ruff 全绿。
-
 
 ## [0.2.40] - 2026-08-13
 
@@ -998,7 +1255,6 @@
   标签映射联动;状态栏/帮助补充 3D 操作说明。
 - 测试:新增 test_viewer3d(12 例),全量通过,ruff 全绿。
 
-
 ## [0.2.31] - 2026-08-12
 
 - Backend(G2B-007):逐维基线校正(默认全维 POLY -auto):
@@ -1010,7 +1266,6 @@
 - 测试:默认两行 POLY -auto、关闭/order 覆盖、NUS 2D/3D 插入位置、
   schema 默认、逐维优化选校正/平谱选 off;全量通过,ruff 全绿。
 
-
 ## [0.2.30] - 2026-08-12
 
 - Backend:逐维暴力相位优化默认改用相位专用评分
@@ -1019,7 +1274,6 @@
   (SNR/基线/伪影与相位基本无关,加权会稀释相位排名);score_fn 仍可注入
   (需要综合评估时传 spectrum_quality)。
 - 测试:错相(负峰)评分低于正相、负峰比例差异断言;全量通过。
-
 
 ## [0.2.29] - 2026-08-12
 
@@ -1034,7 +1288,6 @@
   stepwise.optimize_phase_brute_force 改用逐维暴力。
 - 测试:sequential 逐维/失败、finalize 2D/3D 脚本、stepwise 断言;
   全量通过,ruff 全绿。
-
 
 ## [0.2.28] - 2026-08-12
 
@@ -1128,7 +1381,6 @@
 - 谱图显示方向对齐 nmrDraw:反转 x 轴(1H 高 ppm 在左)+ 反转 y 轴
   (15N 高 ppm 在下),水峰/信号/侧链峰位置与参考工具一致。
 
-
 ## [0.2.22] - 2026-08-12
 
 - fix(shared):create_project 不再预建扁平目录模板(raw/processing/spectra/
@@ -1171,7 +1423,6 @@
 
 ## [0.2.21] - 2026-08-12
 
-
 - 峰表工具栏新增「导出 Poky」:当前峰表导出为 Poky/Sparky .list
   (Assignment w1 w2 Data Height Volume,未命名峰 ?-?),默认路径
   data_dir(...,"peaks")/<exp>-<data>.list;无峰表/谱图时按钮禁用。
@@ -1189,7 +1440,6 @@
   输出数字 Peak_ID(1..n,不再 "P001"),列与旧项目一致。
 - 测试:新增 tests/test_peak_table.py 9 项(往返/导出导入/2D/3D/占位/
   pick_peaks 列);全量 270 passed,ruff 全绿。
-
 
 ## [0.2.20] - 2026-08-12
 
@@ -1229,7 +1479,6 @@
   process//spectra/,登记 manual_fid/manual_process/manual_nus
   WorkflowRun,失败登记 failed 并抛 ManualRunError。
 - 测试:新增 tests/test_manual.py 7 项;全量 247 passed,ruff 全绿。
-
 
 ## [0.2.19.5] - 2026-08-12
 
@@ -1294,7 +1543,6 @@
   infer_status 保留兼容回退;
 - 测试:新增 test_pick_peaks(2)+ test_script_schema(3),
   project_manager 30 / workspace 11;全量 240 passed,ruff 全绿。
-
 
 ## [0.2.18.1] - 2026-08-12
 
@@ -1453,7 +1701,6 @@
   自动化处理仍只经 ProcessingController.auto_run_async 调用后端。
 - 测试:新增 tests/test_gui_manual.py 5 项 + 导入工作流端到端 1 项 +
   对话框复制选项/acqus 校验 2 项;全量 178 passed,ruff 全绿。
-
 
 ## [0.2.9] - 2026-08-12
 

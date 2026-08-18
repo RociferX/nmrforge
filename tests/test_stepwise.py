@@ -106,7 +106,7 @@ def test_generate_spectrum_uniform(tmp_path: Path, bruker_dir: Path) -> None:
     )
     backend = _FakeBackend(work)
     generate_fid(manager, exp_id, data_id, backend)
-    spectrum = generate_spectrum(manager, exp_id, data_id, backend)
+    spectrum = generate_spectrum(manager, exp_id, data_id, backend, params={"phase_route": "none"})
     assert spectrum.endswith(".ft2")
     # 契约 §9.2:终谱落盘 data_dir(..., "spectra")
     assert Path(spectrum).parent == manager.data_dir(exp_id, data_id, "spectra")
@@ -133,7 +133,7 @@ def test_generate_spectrum_passes_params(
         exp_id,
         data_id,
         backend,
-        params={"extract": False, "ext_lo": "9.0"},
+        params={"phase_route": "none", "extract": False, "ext_lo": "9.0"},
     )
     assert backend.last_params == {"extract": False, "ext_lo": "9.0"}
 
@@ -144,9 +144,55 @@ def test_generate_spectrum_nus_uses_reconstruct(tmp_path: Path, bruker_dir: Path
     )
     backend = _FakeBackend(work)
     generate_fid(manager, exp_id, data_id, backend)
-    generate_spectrum(manager, exp_id, data_id, backend)
+    generate_spectrum(manager, exp_id, data_id, backend, params={"phase_route": "none"})
     assert "reconstruct_nus" in backend.calls
     assert any(r.workflow_ref == "reconstruct_nus" for r in manager.project.workflow_runs)
+
+
+def test_generate_spectrum_defaults_to_unified_route(
+    tmp_path: Path, bruker_dir: Path, monkeypatch
+) -> None:
+    """默认 phase_route=unified,生成谱图走统一方案(复型预览+内存调相+终跑)。"""
+    import workflow.phase_routes as phase_routes
+
+    manager, exp_id, data_id, work = _manager_with_data(
+        tmp_path, bruker_dir / "hsqc_2d"
+    )
+    backend = _FakeBackend(work)
+    generate_fid(manager, exp_id, data_id, backend)
+    seen = {}
+
+    def fake_unified(
+        experiment, backend_, plan=None, work_dir=None, base_params=None, progress=None
+    ):
+        seen["base_params"] = base_params
+        return {
+            "spectrum_path": str(Path(work) / "unified.ft2"),
+            "phases": {"F1": (0.0, 0.0), "F2": (10.0, 0.0)},
+            "backend_runs": 3,
+            "logs": [],
+        }
+
+    monkeypatch.setattr(phase_routes, "unified_route", fake_unified)
+    spectrum = generate_spectrum(manager, exp_id, data_id, backend)
+    assert spectrum.endswith("unified.ft2")
+    assert seen["base_params"] == {}
+    assert any(r.workflow_ref == "phase_optimize_unified" for r in manager.project.workflow_runs)
+
+
+def test_generate_spectrum_unknown_route_raises(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """旧 simple/advanced 分派已删除,未知 phase_route 抛错。"""
+    manager, exp_id, data_id, work = _manager_with_data(
+        tmp_path, bruker_dir / "hsqc_2d"
+    )
+    backend = _FakeBackend(work)
+    generate_fid(manager, exp_id, data_id, backend)
+    with pytest.raises(StepwiseError, match="未知 phase_route"):
+        generate_spectrum(
+            manager, exp_id, data_id, backend, params={"phase_route": "advanced"}
+        )
 
 
 def test_generate_fid_failure_raises(tmp_path: Path, bruker_dir: Path) -> None:

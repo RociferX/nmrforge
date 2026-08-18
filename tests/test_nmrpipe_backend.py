@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from backend.factory import create_backend
@@ -114,6 +115,133 @@ def test_finalize_converted_fid_single_file(tmp_path: Path) -> None:
     assert (dest / "exp.fid").is_file()
 
 
+def _write_plane(
+    out: Path, arr: np.ndarray, *, f1_size: int = 30, f3_size: int = 4
+) -> None:
+    """用 nmrglue 写一个 3D 重构平面(第一轴实/虚交错,与 nus3d_rc 一致)。
+
+    nus3d_rc 平面为复型 (n_dir, n_f1) 实/虚交错存储,读回为 (2·n_dir,
+    n_f1) 实型;头部用 FDSIZE=n_f1、FDSPECNUM=n_dir(nmrglue 2D 平面
+    读取约定,已按真实平面头部核对)。
+    """
+    import nmrglue as ng
+
+    dic = ng.pipe.create_empty_dic()
+    dic.update(
+        {
+            "FDSIZE": float(arr.shape[1]),
+            "FDSPECNUM": float(arr.shape[0]),
+            "FDREALSIZE": float(2 * arr.shape[0]),
+            "FDF1LABEL": "15N",
+            "FDF1TDSIZE": float(f1_size),
+            "FDF2LABEL": "1H",
+            "FDF2TDSIZE": 1024.0,
+            "FDF3LABEL": "13C",
+            "FDF3TDSIZE": 75.0,
+            "FDF3SIZE": float(f3_size),
+            "FDFILECOUNT": float(f3_size),
+            "FDDIMCOUNT": 3.0,
+            "FDF2FTFLAG": 1.0,
+            "FDF2QUADFLAG": 1.0,
+        }
+    )
+    ng.pipe.write(str(out), dic, arr.astype(np.complex64), overwrite=True)
+
+
+def _synthetic_3d_planes(
+    work: Path, n_planes: int = 4, *, theta: float = 0.0
+) -> Path:
+    """合成 3D 复型平面:直接维 axis 0,干净信号峰,可带已知相位旋转。"""
+    import nmrglue as ng
+
+    rng = np.random.default_rng(7)
+    n_dir, n_f1 = 64, 12
+    plane_dir = work / "nus3d_rc"
+    plane_dir.mkdir(parents=True, exist_ok=True)
+    k = np.arange(n_dir, dtype=float)
+    for p in range(n_planes):
+        base = np.zeros((n_dir, n_f1), dtype=np.complex128)
+        for j in range(0, n_f1, 4):
+            center = 16 + p * 2
+            for jj in range(j, j + 4):
+                base[:, jj] = 400.0 / (1.0 + ((k - center) / 4.0) ** 2)
+        if theta:
+            ramp = np.exp(
+                1j * np.deg2rad(theta + 12.0 * k / (n_dir - 1))
+            )
+            base = base * ramp[:, None]
+        base = base + rng.normal(0, 0.05, size=base.shape)
+        base = base + 1j * rng.normal(0, 0.05, size=base.shape)
+        _write_plane(plane_dir / f"test{p + 1:04d}.ft1", base, f3_size=n_planes)
+    dic, data = ng.pipe.read(str(plane_dir / "test0001.ft1"))
+    assert np.asarray(data).dtype == np.float32, "平面应为实型交错存储"
+    assert np.asarray(data).shape == (2 * n_dir, n_f1), "交错复型布局错误"
+    return plane_dir
+
+
+def test_display_phase_search_3d_unpacks_interleaved(
+    tmp_path: Path,
+) -> None:
+    """0.2.98:3D 显示层相位搜索必须先把实型交错平面拆包为复型。
+
+    主重构按 PS(0,0) 输出,干净峰近零相位时最小修正应返回 (0,0)
+    (与 2D sampleA 100% 实测一致);拆包失败/交错数据直接评分会报错或
+    返回无意义结果。
+    """
+    from backend.nmrpipe_backend import NMRPipeBackend
+
+    backend = NMRPipeBackend(nmrpipe_bin="")
+    plane_dir = _synthetic_3d_planes(tmp_path)
+    logs: list[str] = []
+    experiment = type("Exp", (), {"ndim": 3})()
+    est = backend._display_phase_search(experiment, tmp_path, logs)
+    assert est is not None, f"logs={logs}"
+    p0, p1, score = est
+    assert score >= 30.0
+    assert abs(p0) <= 5.0, est
+    assert abs(p1) <= 5.0, est
+    assert plane_dir.is_dir()
+
+
+def test_apply_direct_phase_3d_rotates_copy_not_source(
+    tmp_path: Path,
+) -> None:
+    """0.2.98:3D 填相位写 nus3d_rc_ph/ 副本并 finalize,源平面保持不动。"""
+    import nmrglue as ng
+
+    from backend.nmrpipe_backend import NMRPipeBackend
+
+    backend = NMRPipeBackend(nmrpipe_bin="")
+    plane_dir = _synthetic_3d_planes(tmp_path)
+    before = {
+        path.name: np.asarray(ng.pipe.read(str(path))[1]).copy()
+        for path in sorted(plane_dir.glob("test*.ft1"))
+    }
+    calls: list[tuple[Path | str | None, str | None]] = []
+
+    def fake_finalize(experiment, *, work_dir=None, planes=None, **kwargs):
+        calls.append((work_dir, planes))
+        return {"success": True, "spectrum_path": str(tmp_path / "out.ft3")}
+
+    backend.finalize_nus = fake_finalize  # type: ignore[method-assign]
+    logs: list[str] = []
+    experiment = type("Exp", (), {"ndim": 3})()
+    ok = backend._apply_direct_phase(experiment, tmp_path, 33.0, 12.0, logs)
+    assert ok
+    assert calls and calls[0][0] == tmp_path
+    assert calls[0][1] == "nus3d_rc_ph/test%04d.ft1"
+    out_dir = tmp_path / "nus3d_rc_ph"
+    assert out_dir.is_dir()
+    assert len(list(out_dir.glob("test*.ft1"))) == len(
+        list(plane_dir.glob("test*.ft1"))
+    )
+    # 源平面逐字节不动
+    for path in sorted(plane_dir.glob("test*.ft1")):
+        after = np.asarray(ng.pipe.read(str(path))[1])
+        assert np.array_equal(after, before[path.name])
+
+
+
 def test_finalize_converted_fid_missing(tmp_path: Path) -> None:
     """既无 test.fid 也无切片时失败(不静默)。"""
     backend = NMRPipeBackend(nmrpipe_bin="")
@@ -137,3 +265,66 @@ def test_reconstruct_nus_segments_missing_nmrpipe(bruker_dir: Path, tmp_path: Pa
     backend = NMRPipeBackend(nmrpipe_bin="")
     result = backend.reconstruct_nus(exp, {})
     assert result["success"] is False
+
+def test_write_merged_nuslist_detects_bad_points(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """坏点检测:越界点 + 跨段重复点从合并 nuslist 剔除并 ⚠ 提示。"""
+    import shutil
+
+    from backend.nmrpipe_backend import NMRPipeBackend
+    from core.data.bruker_reader import read_segments
+
+    seg1 = tmp_path / "s1"
+    seg2 = tmp_path / "s2"
+    shutil.copytree(bruker_dir / "nus_3d", seg1)
+    shutil.copytree(bruker_dir / "nus_3d", seg2)
+    nl1 = (seg1 / "nuslist").read_text(encoding="utf-8").splitlines()
+    nl2 = (seg2 / "nuslist").read_text(encoding="utf-8").splitlines()
+    first2 = nl2[0]
+    nl1 = [first2] + nl1
+    nl2 = nl2 + ["1000 1000"]
+    (seg1 / "nuslist").write_text("\n".join(nl1) + "\n", encoding="utf-8")
+    (seg2 / "nuslist").write_text("\n".join(nl2) + "\n", encoding="utf-8")
+    exp = read_segments([seg1, seg2])
+    backend = NMRPipeBackend()
+    logs: list[str] = []
+    count, bad = backend._write_merged_nuslist(tmp_path, [seg1, seg2], exp, logs)
+    assert (1000, 1000) in bad
+    assert tuple(int(v) for v in first2.split()) in bad
+    joined = "\n".join(logs)
+    assert "⚠ 检测到采样坏点" in joined
+    assert "越界" in joined
+    assert "重复" in joined
+    written = (tmp_path / "nuslist").read_text(encoding="utf-8").splitlines()
+    assert all(tuple(int(v) for v in line.split()) not in bad for line in written)
+    assert count == len(written)
+
+def test_clean_work_nuslist_single_dataset(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """单 NUS 数据坏点清理:越界点剔除 + ⚠ 提示(所有 NUS 数据统一)。"""
+    import shutil
+
+    from backend.nmrpipe_backend import NMRPipeBackend
+    from core.data.bruker_reader import read_dataset
+
+    src = tmp_path / "nus"
+    shutil.copytree(bruker_dir / "nus_2d", src)
+    # 注入越界点(nus_2d F1 复点网格上限 td//2)
+    lines = (src / "nuslist").read_text(encoding="utf-8").splitlines()
+    (src / "nuslist").write_text("\n".join(lines) + "\n1000\n", encoding="utf-8")
+    exp = read_dataset(src)
+    work = tmp_path / "work"
+    work.mkdir()
+    shutil.copy2(src / "nuslist", work / "nuslist")
+    backend = NMRPipeBackend()
+    logs: list[str] = []
+    count, bad = backend._clean_work_nuslist(work, exp, logs)
+    assert (1000,) in bad
+    assert count == len(lines)
+    joined = "\n".join(logs)
+    assert "⚠ 检测到采样坏点" in joined
+    written = (work / "nuslist").read_text(encoding="utf-8").splitlines()
+    assert len(written) == len(lines)
+

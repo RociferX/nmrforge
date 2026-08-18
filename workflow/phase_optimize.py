@@ -30,9 +30,15 @@ from typing import Any
 
 import numpy as np
 
+from backend.script_generator import effective_td
 from core.data.internal_data_model import Experiment, SamplingMode
+from core.data.nus_reader import read_nuslist
 from core.data.pipe_io import read_pipe_planes
-from core.optimization.phase_search import direct_ft_traces, search_phase
+from core.optimization.phase_search import (
+    direct_ft_traces,
+    nus_direct_phase,
+    search_direct_spectrum_phase,
+)
 from core.planning.method_selector import select_method
 from core.qc import spectrum_quality
 from workflow.recon_phase_search import search_recon_phase
@@ -128,10 +134,15 @@ def search_direct_phase(
     fid: np.ndarray,
     *,
     zf_size: int | None = None,
-    p0_values: np.ndarray | None = None,
-    p1_values: np.ndarray | None = None,
 ) -> AxisPhaseEstimate:
-    """在转换后的复型 .fid 上做内存内 p1 共识搜索(不重跑后端)。"""
+    """直接维 FT 谱(频域)上做 (p0, p1) 相位搜索,不重跑后端。
+
+    0.2.88:从「原始 FID p1 共识(p0 恒 0)」升级为「直接维 FT 谱频域搜索」:
+    频域旋转与 NMRPipe PS 语义等价(p0 + p1·k/(n-1));每条迹线(一个间接
+    增量)独立估计后按吸收度加权聚合,随增量变化的 t1 相位被平均掉,
+    直接维公共 p0 不再丢失。估计尺寸与脚本 PS 应用尺寸一致
+    (默认 2×TD;NUS 直接维 1×TD 由 backend 显式传 zf_size=None)。
+    """
     arr = np.asarray(fid)
     n_points = arr.shape[-1] if arr.ndim >= 1 else 0
     if n_points < 8:
@@ -141,23 +152,443 @@ def search_direct_phase(
             p1=0.0,
             score=0.0,
             gain=0.0,
-            source="direct_fid",
+            source="direct_spectrum",
             note="FID 点数不足,跳过",
         )
     if zf_size is None:
         zf_size = 1
         while zf_size < 2 * n_points:
             zf_size *= 2
-    p0_values = p0_values if p0_values is not None else DIRECT_P0_VALUES
-    p1_values = p1_values if p1_values is not None else DIRECT_P1_VALUES
-    traces = direct_ft_traces(arr, zf_size=zf_size, sp_off=0.45, sp_end=0.95, sp_pow=1)
-    p0, p1, score, gain = search_phase(
-        traces, p0_values=p0_values, p1_values=p1_values
+    traces = direct_ft_traces(
+        arr, zf_size=zf_size, sp_off=0.45, sp_end=0.95, sp_pow=1
     )
+    est = search_direct_spectrum_phase(traces)
+    if est is None:
+        return AxisPhaseEstimate(
+            axis="",
+            p0=0.0,
+            p1=0.0,
+            score=0.0,
+            gain=0.0,
+            source="direct_spectrum",
+            note="直接维谱无信号,跳过",
+        )
+    p0, p1, score, gain = est
     return AxisPhaseEstimate(
-        axis="", p0=p0, p1=p1, score=score, gain=gain, source="direct_fid"
+        axis="",
+        p0=p0,
+        p1=p1,
+        score=score,
+        gain=gain,
+        source="direct_spectrum",
     )
 
+
+def _write_spectrum_preview(
+    data: np.ndarray,
+    out_path: Path,
+    dic: dict[str, Any] | None = None,
+) -> str:
+    """写 2D/3D 实型谱预览(轴头尽量继承,缺失用占位)。返回写入路径。"""
+    from nmrglue.fileio import pipe
+
+    arr = np.real(np.asarray(data))
+    ndim = arr.ndim
+    d = {kk: "0" for kk in pipe.fdata_dic}
+    d["FDMAGIC"] = 9.2330230000000007e14
+    d["FDDIMCOUNT"] = ndim
+    d["FDSIZE"] = arr.shape[-1]
+    d["FDSPECNUM"] = arr.shape[-2] if ndim >= 2 else 1
+    d["FDQUADFLAG"] = 1
+    src = dic or {}
+    for i in range(1, ndim + 1):
+        prefix = f"FDF{i}"
+        d[prefix + "QUADFLAG"] = 1
+        if i == ndim:  # 直接维:继承 fid 头
+            obs = src.get("FDOBS", "600.0")
+            car = src.get("FDCAR", "4.7")
+            sw = src.get("FDSW", "6000.0")
+            orig = src.get("FDORIG", "1000.0")
+        else:
+            obs = car = sw = orig = "1.0"
+        d[prefix + "OBS"] = str(obs)
+        d[prefix + "CAR"] = str(car)
+        d[prefix + "SW"] = str(sw)
+        d[prefix + "ORIG"] = str(orig)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    pipe.write(str(out_path), d, arr.astype(np.float32), overwrite=True)
+    return str(out_path)
+
+
+def _ext_window_indices(
+    dic: dict[str, Any] | None,
+    n: int,
+    ext_lo: str,
+    ext_hi: str,
+) -> tuple[int, int]:
+    """ppm 窗口 → 直接维点索引(NMRPipe 约定:ppm(idx)=CAR+(n/2-idx)·SW/n)。"""
+    if not dic:
+        return 0, n
+    try:
+        obs = float(dic.get("FDOBS") or dic.get("FDF2OBS") or 0.0)
+        car = float(dic.get("FDCAR") or dic.get("FDF2CAR") or 0.0)
+        sw = float(dic.get("FDSW") or dic.get("FDF2SW") or 0.0)
+    except (TypeError, ValueError):
+        return 0, n
+    if obs <= 0 or sw <= 0:
+        return 0, n
+    sw_ppm = sw / obs
+
+    def _idx(ppm: float) -> int:
+        return int(round(n / 2 - (ppm - car) * n / sw_ppm))
+
+    lo = min(max(_idx(float(ext_lo)), 0), n)
+    hi = min(max(_idx(float(ext_hi)), 0), n)
+    if hi < lo:
+        lo, hi = hi, lo
+    return lo, hi
+
+
+def _nus_pseudo_uniform_spectrum(
+    experiment: Experiment,
+    paths: list[Path],
+    points: list[tuple[int, ...]],
+    ext_lo: str,
+    ext_hi: str,
+    logs: list[str],
+    *,
+    max_cells: int = 4096,
+) -> tuple[np.ndarray, dict[str, Any]] | None:
+    """NUS 切片按 nuslist 摆到完整网格(缺位补零)+ 传统逐维 FT(预览产物)。
+
+    返回伪均匀谱(直接维在最后一维)与元信息;摆放顺序/索引单位差异不
+    影响直接维相位(间接 FT 把 t1 调制变成间接频率);间接网格过大时均匀
+    子采样。
+    """
+    import nmrglue as ng
+
+    td = effective_td(experiment)
+    if len(td) < 2:
+        return None
+    if experiment.ndim >= 3 and len(td) >= 3:
+        n_f1, n_f2 = int(td[2]), int(td[1])
+    else:
+        n_f1, n_f2 = int(td[1]), 1
+    if n_f1 <= 0:
+        return None
+    fids: list[np.ndarray] = []
+    first_dic: dict[str, Any] | None = None
+    for path in paths:
+        dic, fid = ng.pipe.read(str(path))
+        arr = np.asarray(fid)
+        if arr.ndim < 1 or arr.shape[-1] < 8:
+            continue
+        if first_dic is None:
+            first_dic = dic
+        fids.append(arr.reshape(-1, arr.shape[-1]))
+    if not fids or len(fids) != len(points):
+        return None
+    n = fids[0].shape[-1]
+    lo_idx, hi_idx = _ext_window_indices(first_dic, n, ext_lo, ext_hi)
+    if hi_idx <= lo_idx:
+        lo_idx, hi_idx = 0, n
+    window = hi_idx - lo_idx
+    direct_ft: list[np.ndarray] = []
+    for fid in fids:
+        tr = direct_ft_traces(fid, sp_off=0.45, sp_end=0.95, sp_pow=1)
+        direct_ft.append(tr[:, lo_idx:hi_idx])
+    f1_grid = np.arange(n_f1)
+    f2_grid = np.arange(n_f2) if n_f2 > 1 else np.array([0])
+    if f1_grid.size * f2_grid.size > max_cells:
+        step = int(np.ceil((f1_grid.size * f2_grid.size / max_cells) ** 0.5))
+        f1_grid = f1_grid[::step]
+        if f2_grid.size > 1:
+            f2_grid = f2_grid[::step]
+    grid = np.zeros(
+        (f1_grid.size, f2_grid.size, window), dtype=np.complex128
+    )
+    placed = 0
+    for fid_ft, point in zip(direct_ft, points):
+        if len(point) >= 2 and n_f2 > 1:
+            i_f2 = int(point[0]) % n_f2
+            i_f1 = int(point[1]) % n_f1
+        else:
+            i_f2 = 0
+            i_f1 = int(point[0]) % n_f1
+        p1 = int(np.searchsorted(f1_grid, i_f1))
+        p2 = int(np.searchsorted(f2_grid, i_f2))
+        if (
+            p1 >= f1_grid.size
+            or f1_grid[p1] != i_f1
+            or p2 >= f2_grid.size
+            or f2_grid[p2] != i_f2
+        ):
+            continue
+        grid[p1, p2, :] += fid_ft[0]
+        placed += 1
+    if placed == 0:
+        return None
+    spectrum = grid
+    if n_f2 > 1:
+        spectrum = np.fft.fft(spectrum, axis=1)
+    spectrum = np.fft.fft(spectrum, axis=0)
+    if n_f2 == 1:
+        spectrum = spectrum[:, 0, :]
+    meta: dict[str, Any] = {
+        "placed": placed,
+        "grid": (f1_grid.size, f2_grid.size),
+        "window": window,
+        "n": placed,
+        "dic": first_dic,
+    }
+    logs.append(
+        f"直接维相位预览(伪均匀): {len(fids)} 切片 → "
+        f"{f1_grid.size}×{f2_grid.size} 网格,放置 {placed} 点,"
+        f"窗口 {ext_lo}-{ext_hi} ppm"
+    )
+    return spectrum, meta
+
+
+def _finish_direct_preview(
+    experiment: Experiment,
+    work: Path,
+    est: tuple[float, float, float, float],
+    preview_spectra: np.ndarray | None,
+    meta: dict[str, Any],
+    out_preview: Path | str | None,
+    min_gain: float,
+    logs: list[str],
+    source: str,
+    *,
+    gate_score: float = 0.55,
+) -> PhaseOptimizeResult:
+    """门控 + 写 phase.json(v2)+ 可选预览谱(直接维按校正相位旋转后写实部)。"""
+    direct_axis = "F2" if experiment.ndim == 2 else "F3"
+    p0, p1, score, gain = est
+    note = ""
+    if gain < min_gain or score < gate_score:
+        note = (
+            f"相位信息弱(gain={gain:.3f}, score={score:.3f}),保持 p0=p1=0"
+        )
+        p0, p1 = 0.0, 0.0
+    phase_file = work / "phase.json"
+    phase_file.write_text(
+        json.dumps(
+            {
+                "version": 2,
+                "source": source,
+                "p0": p0,
+                "p1": p1,
+                "score": score,
+                "gain": gain,
+                "n": int(meta.get("n", 0)),
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    preview_path = ""
+    if out_preview is not None and preview_spectra is not None:
+        target = Path(out_preview)
+        if not target.is_absolute():
+            target = work / target
+        arr = np.asarray(preview_spectra, dtype=np.complex128)
+        nd = arr.shape[-1]
+        kk = np.arange(nd, dtype=float)
+        rot = arr * np.exp(1j * np.deg2rad(p0 + p1 * kk / max(nd - 1, 1)))
+        preview_path = _write_spectrum_preview(rot, target, meta.get("dic"))
+    logs.append(
+        f"直接维相位预览: p0={p0:g} p1={p1:g} "
+        f"(score={score:.3f}, gain={gain:.3f}, {source},已写 phase.json v2)"
+    )
+    return PhaseOptimizeResult(
+        phases=[
+            AxisPhaseEstimate(
+                axis=direct_axis,
+                p0=p0,
+                p1=p1,
+                score=score,
+                gain=gain,
+                source=source,
+                note=note,
+            )
+        ],
+        candidates_scored=0,
+        backend_runs=0,
+        spectrum_path=preview_path,
+        work_dir=str(work),
+        logs=logs,
+    )
+
+
+def preview_direct_phase(
+    experiment: Experiment,
+    work_dir: Path | str,
+    *,
+    out_preview: Path | str | None = None,
+    min_gain: float = 0.02,
+    ext_lo: str | None = None,
+    ext_hi: str | None = None,
+) -> PhaseOptimizeResult:
+    """直接维相位预览:无 SMILE、零后端运行。
+
+    NUS(有 nuslist + 切片)走「非均匀 DFT 最强峰相位」路径:沿增量对最强
+    直接峰复值做 NU-DFT,在真实 F1/F2 频率处 t1 调制精确抵消,峰相位 =
+    φ(k*),直接维 (p0, p1) 校正可靠;结果写 phase.json(version=2),后续
+    reconstruct_nus 直接复用。可选 out_preview 输出已调相伪均匀谱/切片
+    预览。无 nuslist/切片不匹配时回退「首条迹线锚定」路径。
+
+    返回 PhaseOptimizeResult(backend_runs=0);未找到 fid/切片或搜索无信号
+    时 phases 为空并记录原因。
+    """
+    work = Path(work_dir)
+    logs: list[str] = []
+    paths: list[Path] = []
+    slice_dir = work / "fid"
+    if slice_dir.is_dir():
+        paths = sorted(slice_dir.glob("test*.fid"))
+    if not paths:
+        fid_path = _direct_fid_path(work, experiment)
+        if fid_path is not None:
+            paths = [fid_path]
+    if not paths:
+        return PhaseOptimizeResult(
+            phases=[],
+            candidates_scored=0,
+            backend_runs=0,
+            spectrum_path="",
+            work_dir=str(work),
+            logs=["直接维相位预览:未找到转换后的 fid/切片(请先生成 FID)"],
+        )
+    # NUS 自动路径:非均匀 DFT(正确性优先,无需人工确认)
+    if experiment.sampling.mode is SamplingMode.NUS:
+        nuslist_file = work / "nuslist"
+        if not nuslist_file.is_file():
+            nuslist_file = Path(experiment.source_path) / "nuslist"
+        if nuslist_file.is_file():
+            points = read_nuslist(nuslist_file)
+            try:
+                import nmrglue as ng
+
+                fids: list[np.ndarray] = []
+                first_dic: dict[str, Any] | None = None
+                for path in paths:
+                    dic, fid = ng.pipe.read(str(path))
+                    arr = np.asarray(fid)
+                    if arr.ndim < 1 or arr.shape[-1] < 8:
+                        continue
+                    if first_dic is None:
+                        first_dic = dic
+                    fids.append(arr.reshape(-1, arr.shape[-1]))
+                if fids and len(fids) == len(points):
+                    td = effective_td(experiment)
+                    n_f1 = int(td[1]) if len(td) > 1 else 0
+                    n_f2 = int(td[2]) if len(td) > 2 else 1
+                    est = nus_direct_phase(
+                        np.concatenate(fids, axis=0), points, n_f1, n_f2
+                    )
+                    if est is not None:
+                        preview_spectra: np.ndarray | None = None
+                        meta: dict[str, Any] = {
+                            "n": len(fids),
+                            "dic": first_dic,
+                        }
+                        if out_preview is not None:
+                            from backend.config import (
+                                resolve_ext_hi,
+                                resolve_ext_lo,
+                            )
+
+                            pseudo = _nus_pseudo_uniform_spectrum(
+                                experiment,
+                                paths,
+                                points,
+                                resolve_ext_lo(ext_lo),
+                                resolve_ext_hi(ext_hi),
+                                logs,
+                            )
+                            if pseudo is not None:
+                                preview_spectra = pseudo[0]
+                                meta["dic"] = pseudo[1].get("dic") or first_dic
+                        return _finish_direct_preview(
+                            experiment,
+                            work,
+                            est[:4],
+                            preview_spectra,
+                            meta,
+                            out_preview,
+                            min_gain,
+                            logs,
+                            "direct_nudft",
+                            gate_score=2.0,
+                        )
+            except Exception as exc:  # noqa: BLE001
+                logs.append(f"直接维相位预览(NU-DFT)失败: {exc}")
+            logs.append(
+                "直接维相位预览:NU-DFT 路径不可用"
+                "(nuslist/切片不匹配或无信号),回退逐切片路径"
+            )
+    # 回退:逐切片/FID 路径(首条迹线 t1=0 锚定)
+    if len(paths) > 16:
+        index = np.linspace(0, len(paths) - 1, 16).astype(int)
+        paths = [paths[i] for i in index]
+    try:
+        import nmrglue as ng
+
+        rows: list[np.ndarray] = []
+        first_dic: dict[str, Any] | None = None
+        for path in paths:
+            dic, fid = ng.pipe.read(str(path))
+            arr = np.asarray(fid)
+            if arr.ndim < 1 or arr.shape[-1] < 8:
+                continue
+            if first_dic is None:
+                first_dic = dic
+            traces = direct_ft_traces(
+                arr, sp_off=0.45, sp_end=0.95, sp_pow=1
+            )
+            rows.append(traces.reshape(-1, traces.shape[-1]))
+        if not rows:
+            return PhaseOptimizeResult(
+                phases=[],
+                candidates_scored=0,
+                backend_runs=0,
+                spectrum_path="",
+                work_dir=str(work),
+                logs=["直接维相位预览:无可用切片"],
+            )
+        spectra = np.concatenate(rows, axis=0)
+        est = search_direct_spectrum_phase(spectra)
+        if est is None:
+            return PhaseOptimizeResult(
+                phases=[],
+                candidates_scored=0,
+                backend_runs=0,
+                spectrum_path="",
+                work_dir=str(work),
+                logs=["直接维相位预览:直接维谱无信号"],
+            )
+        return _finish_direct_preview(
+            experiment,
+            work,
+            est,
+            spectra,
+            {"n": int(spectra.shape[0]), "dic": first_dic},
+            out_preview,
+            min_gain,
+            logs,
+            "direct_preview",
+        )
+    except Exception as exc:  # noqa: BLE001
+        logs.append(f"直接维相位预览失败: {exc}")
+        return PhaseOptimizeResult(
+            phases=[],
+            candidates_scored=0,
+            backend_runs=0,
+            spectrum_path="",
+            work_dir=str(work),
+            logs=logs,
+        )
 
 
 def estimate_direct_axis(
@@ -175,6 +606,8 @@ def estimate_direct_axis(
     if cache.is_file():
         try:
             data = json.loads(cache.read_text(encoding="utf-8"))
+            if data.get("version") != 2:
+                raise ValueError("旧版缓存(0.2.87 前 p0 恒 0),需重搜")
             return (
                 AxisPhaseEstimate(
                     axis=direct_axis,
@@ -188,7 +621,7 @@ def estimate_direct_axis(
                 0,
             )
         except (OSError, TypeError, ValueError, KeyError):
-            pass  # 缓存损坏则重新搜索
+            pass  # 缓存损坏/旧版则重新搜索
     fid_path = _direct_fid_path(Path(work_dir), experiment)
     if fid_path is None:
         return None, 0
@@ -399,6 +832,7 @@ __all__ = [
     "estimate_recon_planes",
     "format_phase_report",
     "run_with_auto_phase",
+    "preview_direct_phase",
     "save_report",
     "search_direct_phase",
 ]
@@ -1933,3 +2367,4 @@ def optimize_phase_sequential(
         optimized=optimized,
         skipped=[],
     )
+

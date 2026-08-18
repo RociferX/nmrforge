@@ -32,8 +32,19 @@ def _require_data(manager: ProjectManager, exp_id: str, data_id: str) -> Any:
 
 
 def _read_experiment(manager: ProjectManager, exp_id: str, data_id: str) -> Experiment:
-    """从数据条目读取 Experiment(优先项目内 raw 副本)。"""
+    """从数据条目读取 Experiment(优先项目内 raw 副本;单数据分段采集用各段目录)。"""
     data_entry = _require_data(manager, exp_id, data_id)
+    if data_entry.segments:
+        # 分段采集:source 是容器目录(无 acqus),各段在 data_entry.segments
+        from core.data.bruker_reader import read_segments
+
+        seg_paths: list[Path] = []
+        for seg in data_entry.segments:
+            seg_path = Path(seg)
+            if not seg_path.is_absolute():
+                seg_path = manager.root / seg_path
+            seg_paths.append(seg_path)
+        return read_segments(seg_paths)
     source = Path(data_entry.raw_dir) if data_entry.raw_dir else Path(data_entry.source)
     if not source.is_absolute():
         source = manager.root / source
@@ -136,38 +147,82 @@ def generate_spectrum(
     work_dir: Path | str | None = None,
     progress: Callable[[str], None] | None = None,
 ) -> str:
-    """第 3 步:生成谱图(NUS 自动走 SMILE 重构;复用已转换 fid)。"""
+    """第 3 步:生成谱图(NUS 自动走 SMILE 重构;复用已转换 fid)。
+
+    params["phase_route"] 选择处理途径:
+    - "unified"(默认):统一方案——第一遍逐维复型预览(仅搜索轴
+      不加 -di),内存调相(旧算法判断标准,零额外后端),完整终跑;
+    - "none":保持旧路径,直接 process/reconstruct_nus,不额外优化
+      (逃生口)。
+    """
     experiment = _read_experiment(manager, exp_id, data_id)
     work = Path(work_dir) if work_dir else _work_dir(manager, exp_id, data_id)
     _ensure_work_dir(backend, work)
     params = dict(params or {})
-    if experiment.sampling.mode is SamplingMode.NUS:
-        workflow_ref = "reconstruct_nus"
-        resp = backend.reconstruct_nus(experiment, params, progress=progress)
-    else:
-        workflow_ref = "process"
-        plan = select_method(experiment)
-        resp = backend.process(
-            experiment, plan, params=params, progress=progress
+    route = str(params.pop("phase_route", "unified"))
+    plan = select_method(experiment)
+    if route == "none":
+        if experiment.sampling.mode is SamplingMode.NUS:
+            workflow_ref = "reconstruct_nus"
+            resp = backend.reconstruct_nus(experiment, params, progress=progress)
+        else:
+            workflow_ref = "process"
+            resp = backend.process(
+                experiment, plan, params=params, progress=progress
+            )
+        logs = list(resp.get("logs", []))
+        if not resp.get("success"):
+            raise StepwiseError(
+                str(resp.get("message", "谱图生成失败")) + " | " + " | ".join(logs)
+            )
+        spectrum_path = _register_spectrum(
+            manager, exp_id, data_id, str(resp.get("spectrum_path", ""))
         )
-    logs = list(resp.get("logs", []))
-    if not resp.get("success"):
-        raise StepwiseError(
-            str(resp.get("message", "谱图生成失败")) + " | " + " | ".join(logs)
+        merged_params = dict(resp.get("effective_params") or {})
+        merged_params.update(params)
+        _finish_step(
+            manager,
+            exp_id,
+            data_id,
+            workflow_ref,
+            outputs={"spectrum_path": spectrum_path},
+            message="生成谱图",
+            params=merged_params,
         )
-    spectrum_path = _register_spectrum(
-        manager, exp_id, data_id, str(resp.get("spectrum_path", ""))
+        return spectrum_path
+
+    if route != "unified":
+        raise StepwiseError(f"未知 phase_route: {route}")
+
+    from workflow.phase_routes import unified_route
+
+    result = unified_route(
+        experiment,
+        backend,
+        plan=plan,
+        work_dir=work,
+        base_params=params,
+        progress=progress,
     )
-    # 实际生效参数(effective_params)与调用方 params 合并,调用方显式参数优先
-    merged_params = dict(resp.get("effective_params") or {})
-    merged_params.update(params)
+    workflow_ref = "phase_optimize_unified"
+
+    if not result.get("spectrum_path"):
+        raise StepwiseError("相位优化未产出谱图")
+    spectrum_path = _register_spectrum(
+        manager, exp_id, data_id, str(result.get("spectrum_path"))
+    )
+    merged_params = dict(params)
+    merged_params["phase_route"] = route
+    for key in ("phases", "baseline", "fill", "backend_runs", "direct_phase"):
+        if key in result:
+            merged_params[key] = result[key]
     _finish_step(
         manager,
         exp_id,
         data_id,
         workflow_ref,
         outputs={"spectrum_path": spectrum_path},
-        message="生成谱图",
+        message="生成谱图(相位优化)",
         params=merged_params,
     )
     return spectrum_path
@@ -209,7 +264,9 @@ def optimize_phase_brute_force(
     work = Path(work_dir) if work_dir else _work_dir(manager, exp_id, data_id)
     _ensure_work_dir(backend, work)
     if not data_entry.spectrum_path or not Path(data_entry.spectrum_path).is_file():
-        generate_spectrum(manager, exp_id, data_id, backend, work_dir=work)
+        generate_spectrum(
+            manager, exp_id, data_id, backend, work_dir=work, params={"phase_route": "none"}
+        )
 
     p1_values: tuple[float, ...] | None = None
     if candidates is not None:

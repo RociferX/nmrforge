@@ -273,6 +273,32 @@ def read_segments(paths: list[Path | str]) -> Experiment:
     return base
 
 
+def discover_segment_dirs(container: Path | str) -> list[Path]:
+    """容器目录下直接含 acqus 的子目录(按名称排序),作为同一次分段采集的各段。
+
+    与批量导入区分:批量导入把多个独立数据集各自建条目;这里是同一实验按
+    采样时间拆成的多个段,合并为一条数据(由调用方显式选择,不自动猜测)。
+    """
+    root = Path(container)
+    if not root.is_dir():
+        raise ValueError(f"目录不存在: {root}")
+    return sorted(
+        p for p in root.iterdir() if p.is_dir() and (p / "acqus").is_file()
+    )
+
+
+def read_dataset_container(path: Path | str) -> tuple[Experiment, list[Path]]:
+    """读数据集容器:单 Bruker 目录直接读(segments=[]);
+    容器目录(多个直接含 acqus 的子目录)按分段读取(read_segments 校验一致)。"""
+    p = Path(path)
+    if (p / "acqus").is_file():
+        return read_dataset(p), []
+    segments = discover_segment_dirs(p)
+    if not segments:
+        raise ValueError(f"既不是 Bruker 数据集目录,也没有分段子目录: {p}")
+    return read_segments(segments), segments
+
+
 def read_dataset(path: Path) -> Experiment:
     """读取一个 Bruker 数据集目录并生成 Experiment（元数据，不做语义判断）。"""
     dataset_dir = path

@@ -466,6 +466,11 @@ def _stage_lines(
     window: dict[str, dict[str, Any]] | None = None,
     zero_fill: dict[str, dict[str, Any]] | None = None,
     sampling: dict[str, Any] | None = None,
+    *,
+    keep_direct_complex: bool = False,
+    direct_axis: str = "",
+    complex_axes: frozenset[str] | None = None,
+    skip_baseline_axes: frozenset[str] | None = None,
 ) -> list[str]:
     lines: list[str] = []
     for op, params in stages:
@@ -521,12 +526,18 @@ def _stage_lines(
             axis = params.get("axis", "")
             if direct_phase and axis in direct_phase:
                 p0, p1 = direct_phase[axis]
+            keep_cplx = (complex_axes and axis in complex_axes) or (
+                keep_direct_complex and axis == direct_axis
+            )
+            di = "" if keep_cplx else " -di"
             lines.append(
-                f"| nmrPipe -fn PS -p0 {_fmt(p0)} -p1 {_fmt(p1)} -di \\"
+                f"| nmrPipe -fn PS -p0 {_fmt(p0)} -p1 {_fmt(p1)}{di} \\"
             )
         elif op == "baseline":
-            cfg = dict(params)
             axis = str(params.get("axis", ""))
+            if skip_baseline_axes and axis in skip_baseline_axes:
+                continue  # 预览搜索轴:跳过 POLY(见 generate_preview_script)
+            cfg = dict(params)
             if baseline and axis in baseline:
                 cfg.update(baseline[axis])
             if not _as_bool(cfg.get("enabled", True)):
@@ -557,6 +568,9 @@ def generate_process_script(
     ext_hi: str = "6.5",
     extract: bool = True,
     sampling: dict[str, Any] | None = None,
+    keep_direct_complex: bool = False,
+    complex_axes: frozenset[str] | None = None,
+    skip_baseline_axes: frozenset[str] | None = None,
 ) -> str:
     """把处理计划（DAG）翻译为 NMRPipe 管道脚本（直接维 → EXT → TP → 间接维）。
 
@@ -584,6 +598,10 @@ def generate_process_script(
             window,
             zf_plan,
             sampling,
+            keep_direct_complex=keep_direct_complex and index == 0,
+            direct_axis=axes[0],
+            complex_axes=complex_axes,
+            skip_baseline_axes=skip_baseline_axes,
         )
         if extract and index == 0:
             lines.append(
@@ -596,6 +614,62 @@ def generate_process_script(
         lines.append("| nmrPipe -fn TP \\")
     lines.append(f"| pipe2xyz -out {out_file} -x")
     return "\n".join(lines) + "\n"
+
+
+def generate_preview_script(
+    experiment: Experiment,
+    plan: ProcessingPlan,
+    *,
+    in_file: str,
+    out_file: str,
+    preview_axis: str,
+    fixed_phases: dict[str, tuple[float, float]] | None = None,
+    baseline: dict[str, dict[str, Any]] | None = None,
+    window: dict[str, dict[str, Any]] | None = None,
+    ext_lo: str = "10.5",
+    ext_hi: str = "6.5",
+    extract: bool = True,
+    sampling: dict[str, Any] | None = None,
+) -> str:
+    """第一遍复型预览脚本(uniform):整条生产管道,仅 preview_axis 的 PS
+    不加 -di(该维输出真实虚部),其它轴按 fixed_phases(缺省 0)加 -di;
+    零填零(与旧相位候选同参,保证内存旋转候选与旧后端候选同源)。
+
+    输出为生产布局复型文件(pipe2xyz -x),显示层读该文件沿 preview_axis
+    的数组轴做内存旋转评分。3D 的 F2/F1 预览同样走生产布局,避免转置歧义。
+
+    preview_axis 自身跳过 POLY:旧方案候选是「旋转取实后再逐候选 POLY
+    重拟合」;若把 (0,0) 状态拟合的 POLY 固化进预览,内存旋转后基线会被
+    污染并偏置评分(VM sampleF F1 被带偏 30°,去 POLY 后与旧方案一致)。
+    其它轴(已固定相位)的 POLY 保留,与旧候选一致。
+    """
+    axes = [dim.logical_axis for dim in experiment.dimensions]
+    zf_none = {axis: {"mode": "none"} for axis in axes}
+    phases = {
+        axis: value
+        for axis, value in (fixed_phases or {}).items()
+        if axis != preview_axis
+    }
+    for axis in axes:
+        if axis != preview_axis:
+            phases.setdefault(axis, (0.0, 0.0))
+    return generate_process_script(
+        experiment,
+        plan,
+        in_file=in_file,
+        out_file=out_file,
+        direct_phase=phases,
+        baseline=baseline,
+        window=window,
+        zero_fill=zf_none,
+        ext_lo=ext_lo,
+        ext_hi=ext_hi,
+        extract=extract,
+        sampling=sampling,
+        complex_axes=frozenset({preview_axis}),
+        skip_baseline_axes=frozenset({preview_axis}),
+    )
+
 
 
 def _nus_zf_size(cfg: dict[str, Any], td_points: int) -> int:
@@ -1101,8 +1175,12 @@ def generate_nus_finalize_script(
     linewidth_hz: dict[str, float] | None = None,
     points_per_line: float = DEFAULT_POINTS_PER_LINE,
     sampling: dict[str, Any] | None = None,
+    preview_axis: str | None = None,
 ) -> str:
     """NUS 重构平面(复型)的间接维 FT 定稿脚本(逐维 PS 可配)。
+
+    preview_axis 非空时为复型预览模式:该轴 PS 不加 -di(保留真实
+    虚部供内存调相),其它轴按 phases 加 -di;与 uniform 预览同构。
 
     planes:重构平面输入(2D nus2d/recon.ft1;3D nus3d_rc/test%04d.ft1);
     phases:{轴 -> (p0, p1)},缺省 0——供逐维相位候选运行,不重跑 SMILE;
@@ -1121,6 +1199,8 @@ def generate_nus_finalize_script(
         f2_fnmode = _fnmode(experiment, "F2")
         f2_p0, f2_p1 = phases.get("F2", (0.0, 0.0))
         f1_p0, f1_p1 = phases.get("F1", (0.0, 0.0))
+        f2_di = "" if preview_axis == "F2" else " -di"
+        f1_di = "" if preview_axis == "F1" else " -di"
         f2_size = _nus_zf_size(zf_plan.get("F2", {}), td[1])
         f1_size = _nus_zf_size(zf_plan.get("F1", {}), td[2])
         lines = [
@@ -1136,7 +1216,7 @@ def generate_nus_finalize_script(
                 else []
             ),
             _ft_flag_line(f2_fnmode, sampling=sampling, axis="F2"),
-            f"| nmrPipe -fn PS -p0 {f2_p0:g} -p1 {f2_p1:g} -di \\",
+            f"| nmrPipe -fn PS -p0 {f2_p0:g} -p1 {f2_p1:g}{f2_di} \\",
             "| nmrPipe -fn TP \\",
             *(
                 [
@@ -1146,13 +1226,14 @@ def generate_nus_finalize_script(
                 else []
             ),
             _ft_flag_line(f1_fnmode, sampling=sampling, axis="F1"),
-            f"| nmrPipe -fn PS -p0 {f1_p0:g} -p1 {f1_p1:g} -di \\",
+            f"| nmrPipe -fn PS -p0 {f1_p0:g} -p1 {f1_p1:g}{f1_di} \\",
             "| nmrPipe -fn TP \\",
             "| nmrPipe -fn ZTP \\",
             f"| pipe2xyz -out {out_file} -x",
         ]
     else:
         f1_p0, f1_p1 = phases.get("F1", (0.0, 0.0))
+        f1_di = "" if preview_axis == "F1" else " -di"
         f1_size = _nus_zf_size(zf_plan.get("F1", {}), td[1])
         expanded = expand_baseline(experiment, baseline)
         lines = [
@@ -1168,7 +1249,7 @@ def generate_nus_finalize_script(
                 else []
             ),
             _ft_flag_line(f1_fnmode, sampling=sampling, axis="F1"),
-            f"| nmrPipe -fn PS -p0 {f1_p0:g} -p1 {f1_p1:g} -di \\",
+            f"| nmrPipe -fn PS -p0 {f1_p0:g} -p1 {f1_p1:g}{f1_di} \\",
             *_baseline_line(expanded, "F1"),
             "| nmrPipe -fn TP \\",
             f"  -out {out_file} -ov",

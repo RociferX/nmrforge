@@ -20,6 +20,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from backend.base import BackendCapabilities
 from backend.bruker_workflow import patch_fid_com, patch_nus_expand_count
 from backend.config import (
@@ -39,15 +41,71 @@ from backend.script_generator import (
     generate_3d_nus_script,
     generate_convert_script,
     generate_nus_finalize_script,
+    generate_preview_script,
     generate_process_script,
     select_smile_params,
     zero_fill_plan,
     zero_fill_report,
 )
 from core.data.internal_data_model import Experiment, SamplingMode
-from core.data.nus_reader import merge_nuslists, read_nuslist
-from core.optimization.phase_search import direct_ft_traces, search_phase
+from core.data.nus_reader import read_nuslist
+from core.optimization.phase_search import (
+    direct_ft_traces,
+    search_direct_phase_on_spectrum,
+    search_direct_spectrum_phase,
+)
 from core.planning.processing_plan import ProcessingPlan
+
+
+def _nus_grid_bounds(experiment: Experiment) -> list[int] | None:
+    """NUS nuslist 索引上限。
+
+    2D:nuslist 单列 = F1 复点索引,上限 = NUS 网格 td[1](如 nus20_25 索引到
+    126、网格 128,不能按 NusTD//2 判);
+    3D:nuslist 列为复点索引,上限 = NusTD//2(cc F2 索引到 84、NusTD 170)。
+    """
+    td = effective_td(experiment)
+    if experiment.ndim == 2 and len(td) > 1:
+        return [int(td[1])]
+    if experiment.ndim >= 3 and len(td) > 2:
+        return [int(td[1]) // 2, int(td[2]) // 2]
+    return None
+
+
+def _validate_nus_points(
+    points: list[tuple[int, ...]],
+    experiment: Experiment,
+) -> tuple[list[tuple[int, ...]], list[tuple[int, ...]], dict[tuple[int, ...], list[str]]]:
+    """NUS 采样点坏点校验:越界点 + 重复点。返回 (有效点, 坏点, 坏点原因)。"""
+    from collections import Counter
+
+    counts = Counter(points)
+    bounds = _nus_grid_bounds(experiment)
+    valid: list[tuple[int, ...]] = []
+    bad: list[tuple[int, ...]] = []
+    reasons: dict[tuple[int, ...], list[str]] = {}
+    seen: set[tuple[int, ...]] = set()
+    for raw_point in points:
+        point = tuple(raw_point)
+        oob = bounds is not None and any(
+            point[i] >= bounds[i] for i in range(min(len(point), len(bounds)))
+        )
+        dup = counts[point] > 1
+        if oob or dup:
+            if point not in bad:
+                bad.append(point)
+                r: list[str] = []
+                if oob:
+                    r.append(f"越界(网格 {bounds})")
+                if dup:
+                    r.append(f"重复({counts[point]})")
+                reasons[point] = r
+            continue
+        if point in seen:
+            continue
+        seen.add(point)
+        valid.append(point)
+    return valid, bad, reasons
 
 
 def enforce_smile_thread_guardrail(nthread: int, grid_points: int) -> tuple[int, str]:
@@ -60,14 +118,12 @@ def enforce_smile_thread_guardrail(nthread: int, grid_points: int) -> tuple[int,
         return 2, f"大网格 {grid_points}：SMILE 线程数限制为 2（原 {nthread}）"
     return nthread, ""
 
-
 def zf_summary(plan: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
     """填零计划摘要(WorkflowRun params 用):{轴: {"mode", "size"}}。"""
     return {
         axis: {"mode": str(cfg.get("mode", "auto")), "size": cfg.get("size")}
         for axis, cfg in plan.items()
     }
-
 
 def _effective_params_base(
     extract: bool,
@@ -90,7 +146,6 @@ def _effective_params_base(
         "points_per_line": points_per_line,
         "sampling": dict(sampling),
     }
-
 
 @dataclass
 class NMRPipeBackend:
@@ -199,34 +254,53 @@ class NMRPipeBackend:
                         logs.append("使用 bruker 切片式 fid（fid/test%03d.fid,流式处理）")
         if not converted:
             return {"success": False, "message": "Bruker→NMRPipe 转换失败", "logs": logs}
+        proc_params = dict(params or {})
+        sampling = proc_params.get("sampling") or {}
+        # sampling.auto_phase=False → 关闭直接维自动相位(PS 保持 plan 默认 0/0)
+        # 0.2.88:检查移到搜索前(此前在搜索之后才置位,实际关不掉自动相位)
+        if sampling.get("auto_phase") is False:
+            direct_phase_search = False
         direct_phase: dict[str, tuple[float, float]] | None = None
+        # 0.2.106:逐维复型预览模式——仅 preview_axis 的 PS 不加 -di
+        # (其它轴按 direct_phase_override 固定相位加 -di),零填零;
+        # 预览数据保持 PS(0,0),关闭直接维相位搜索
+        preview_axis = proc_params.get("preview_axis")
+        if preview_axis:
+            direct_phase_search = False
         if direct_phase_override:
             direct_phase = dict(direct_phase_override)
             logs.append(f"直接维相位覆盖: {direct_phase}")
         elif direct_phase_search:
-            _progress("开始相位优化(直接维 p1 共识)")
+            _progress("开始相位优化(直接维)")
+            phase_inputs: Path | list[Path]
             if experiment.segments:
-                fid_for_phase = work / "seg_001" / f"{experiment.dataset_id}.fid"
+                phase_inputs = work / "seg_001" / f"{experiment.dataset_id}.fid"
             else:
-                fid_for_phase = work / f"{experiment.dataset_id}.fid"
-                if not fid_for_phase.is_file():
-                    slices = sorted(
-                        (work / "fid").glob("test*.fid")
-                    ) if (work / "fid").is_dir() else []
-                    if slices:
-                        fid_for_phase = slices[0]
-                        logs.append("切片式 fid：直接维相位搜索用首切片")
-                    else:
-                        fid_for_phase = None
-            p0, p1 = self._search_direct_phase(work, fid_for_phase, logs)
-            direct_axis = "F2" if experiment.ndim == 2 else "F3"
-            direct_phase = {direct_axis: (p0, p1)}
-            _progress(f"完成相位优化(直接维 {direct_axis} p1={p1:g}°)")
-        proc_params = dict(params or {})
-        sampling = proc_params.get("sampling") or {}
-        # sampling.auto_phase=False → 关闭直接维自动相位(PS 保持 plan 默认 0/0)
-        if sampling.get("auto_phase") is False:
-            direct_phase_search = False
+                slice_dir = work / "fid"
+                slices = (
+                    sorted(slice_dir.glob("test*.fid"))
+                    if slice_dir.is_dir()
+                    else []
+                )
+                if slices:
+                    phase_inputs = slices
+                    logs.append(
+                        f"切片式 fid:直接维相位搜索用 {len(slices)} 个切片"
+                    )
+                else:
+                    phase_inputs = work / f"{experiment.dataset_id}.fid"
+            if isinstance(phase_inputs, Path) and not phase_inputs.is_file():
+                logs.append("直接维相位搜索:未找到 fid/切片,保持 p0=p1=0")
+            else:
+                p0, p1 = self._search_direct_phase(
+                    work, phase_inputs, logs, is_nus=False
+                )
+                direct_axis = "F2" if experiment.ndim == 2 else "F3"
+                direct_phase = {direct_axis: (p0, p1)}
+                _progress(
+                    f"完成相位优化(直接维 {direct_axis} "
+                    f"p0={p0:g}° p1={p1:g}°)"
+                )
         extract = _as_bool(proc_params.get("extract", True))
         ext_lo = resolve_ext_lo(proc_params.get("ext_lo"))
         ext_hi = resolve_ext_hi(proc_params.get("ext_hi"))
@@ -263,6 +337,8 @@ class NMRPipeBackend:
             progress=progress,
             out_file=out_file,
             script_name=script_name,
+            keep_direct_complex=_as_bool(proc_params.get("keep_direct_complex", False)),
+            preview_axis=preview_axis,
         )
         logs += process_logs
         if not processed:
@@ -320,6 +396,11 @@ class NMRPipeBackend:
             )
             logs += convert_logs
             fid_path = work / "merged" / "fid"
+            if converted:
+                _count, bad_points = self._write_merged_nuslist(
+                    work, experiment.segments, experiment, logs
+                )
+                self._zero_bad_point_fid(work, bad_points, logs)
         else:
             converted, convert_logs = self._convert(runtime, experiment, raw, work)
             logs += convert_logs
@@ -374,6 +455,7 @@ class NMRPipeBackend:
                 merged_fid.is_dir()
                 and list(merged_fid.glob("test*.fid"))
                 and (work / "nuslist").is_file()
+                and not params.get("segment_shift_hz")  # 有频移必须重转
             )
             if not merged_ready:
                 shifts = [float(v) for v in params.get("segment_shift_hz", [])]
@@ -387,9 +469,10 @@ class NMRPipeBackend:
                         "message": "多段 NUS 转换/合并失败",
                         "logs": logs,
                     }
-                nuslist_count = self._write_merged_nuslist(
+                nuslist_count, bad_points = self._write_merged_nuslist(
                     work, experiment.segments, experiment, logs
                 )
+                self._zero_bad_point_fid(work, bad_points, logs)
             else:
                 logs.append("复用已合并切片（跳过转换/合并）")
                 nuslist_count = len(
@@ -411,8 +494,9 @@ class NMRPipeBackend:
             if not raw_nuslist.is_file():
                 return {"success": False, "message": "缺少 nuslist 采样表", "logs": logs}
             shutil.copy2(raw_nuslist, work / "nuslist")
-            nuslist_count = len(
-                (work / "nuslist").read_text(encoding="utf-8").splitlines()
+            # 坏点检测/清理(所有 NUS 数据统一):越界/重复点剔除 + 对应 FID 清理
+            nuslist_count, bad_points = self._clean_work_nuslist(
+                work, experiment, logs
             )
             # 0.2.80:bruker 切片式输出(fid/test%03d.fid)优先,否则单文件
             slice_dir = work / "fid"
@@ -421,6 +505,7 @@ class NMRPipeBackend:
                 logs.append("使用 bruker 切片式 fid（fid/test%03d.fid,流式处理）")
             else:
                 in_file = fid_file.name
+            self._zero_bad_point_fid(work, bad_points, logs, in_file=in_file)
 
         direct_p0, direct_p1 = 0.0, 0.0
         override = params.get("direct_phase_override")
@@ -429,25 +514,69 @@ class NMRPipeBackend:
             logs.append(f"直接维相位覆盖: p0={direct_p0:g} p1={direct_p1:g}")
         sampling = params.get("sampling") or {}
         direct_phase_search = bool(params.get("direct_phase_search", True))
+        # 0.2.95:显示层相位搜索(nmrDraw 思路,默认开启)——正式重构终谱上
+        # 频域旋转对称性评分;开启时跳过 NU-DFT/轻量(它们不可靠/实验性)
+        display_phase_search = bool(params.get("display_phase_search", True))
+        light_phase = bool(params.get("light_phase_search", False))
         if sampling.get("auto_phase") is False:
             direct_phase_search = False
-        elif direct_phase_search:
-            if experiment.segments:
-                fid_for_phase = work / "seg_001" / f"{experiment.dataset_id}.fid"
+        # 0.2.94:轻量 SMILE 相位搜索(实验性,默认关闭——VM 实测重构伪影会
+        # 把固定迹线评分最优值带偏:16/32 点子采样 → F2 偏 55°)
+        if (
+            direct_phase_search
+            and not display_phase_search
+            and params.get("direct_phase_override") is None
+            and light_phase
+        ):
+            light_result = self._light_phase_search(
+                experiment,
+                work,
+                in_file,
+                runtime,
+                logs,
+                params,
+                nuslist_count=nuslist_count,
+                sampling=sampling,
+            )
+            if light_result is not None:
+                direct_p0, direct_p1 = light_result
+                direct_phase_search = False
             else:
-                fid_for_phase = work / f"{experiment.dataset_id}.fid"
-                if not fid_for_phase.is_file():
-                    slices = sorted(
-                        (work / "fid").glob("test*.fid")
-                    ) if (work / "fid").is_dir() else []
-                    if slices:
-                        fid_for_phase = slices[0]
-                        logs.append("切片式 fid：直接维相位搜索用首切片")
-                    else:
-                        fid_for_phase = None
-            if fid_for_phase is not None and fid_for_phase.is_file():
+                logs.append("轻量 SMILE 相位搜索失败,回退 NU-DFT")
+        if (
+            direct_phase_search
+            and not display_phase_search
+            and not light_phase
+            and params.get("direct_phase_override") is None
+        ):
+            phase_inputs: Path | list[Path]
+            if experiment.segments:
+                phase_inputs = work / "seg_001" / f"{experiment.dataset_id}.fid"
+            else:
+                slice_dir = work / "fid"
+                slices = (
+                    sorted(slice_dir.glob("test*.fid"))
+                    if slice_dir.is_dir()
+                    else []
+                )
+                if slices:
+                    phase_inputs = slices
+                    logs.append(
+                        f"切片式 fid:直接维相位搜索用 {len(slices)} 个切片"
+                    )
+                else:
+                    phase_inputs = work / f"{experiment.dataset_id}.fid"
+            if isinstance(phase_inputs, Path) and not phase_inputs.is_file():
+                logs.append("直接维相位搜索:未找到 fid/切片,保持 p0=p1=0")
+            else:
+                _td = effective_td(experiment)
                 direct_p0, direct_p1 = self._search_direct_phase(
-                    work, fid_for_phase, logs
+                    work,
+                    phase_inputs,
+                    logs,
+                    is_nus=True,
+                    n_f1=int(_td[1]) if len(_td) > 1 else 0,
+                    n_f2=int(_td[2]) if len(_td) > 2 else 1,
                 )
 
         td = effective_td(experiment)
@@ -487,6 +616,36 @@ class NMRPipeBackend:
             points_per_line=points_per_line,
         )
         logs += zero_fill_report(zf_plan)
+        # 0.2.96:显示层相位搜索(1× SMILE,无额外后端)——主重构用 PS(0,0)
+        # (或缓存相位);重构后在复型 recon 平面上对称性评分,最后一步把相位
+        # 旋转应用到 recon 并便宜重渲 stage-2(非 SMILE)
+        smile_phase = (direct_p0, direct_p1)
+        run_display_search = False
+        if (
+            display_phase_search
+            and direct_phase_search
+            and params.get("direct_phase_override") is None
+        ):
+            if (work / "phase.json").is_file():
+                try:
+                    data = json.loads(
+                        (work / "phase.json").read_text(encoding="utf-8")
+                    )
+                    if data.get("version") == 2:
+                        smile_phase = (float(data["p0"]), float(data["p1"]))
+                        logs.append(
+                            f"直接维相位(缓存): p0={smile_phase[0]:g} "
+                            f"p1={smile_phase[1]:g}"
+                        )
+                except (OSError, TypeError, ValueError, KeyError):
+                    pass
+            else:
+                smile_phase = (0.0, 0.0)
+                run_display_search = True
+                logs.append(
+                    "显示层相位搜索: 主重构 PS(0,0),重构后对称性评分"
+                )
+
         out_file = f"{experiment.dataset_id}.{ext}"
         script = script_fn(
             experiment,
@@ -502,7 +661,7 @@ class NMRPipeBackend:
             smile_xq3=smile_xq3,
             smile_scaling=smile_scaling,
             smile_report=smile_report,
-            direct_phase=(direct_p0, direct_p1),
+            direct_phase=smile_phase,
             extract=extract,
             baseline=baseline,
             zero_fill=zf_plan,
@@ -546,6 +705,44 @@ class NMRPipeBackend:
         except OSError:
             pass  # 参数指纹写盘失败不影响重构结果
         logs.append(f"终谱 → {spectrum}")
+        # 0.2.96:最后一步填相位(显示层搜索 + recon 旋转 + 便宜 finalize 重渲)
+        if run_display_search:
+            est = self._display_phase_search(experiment, work, logs)
+            if est is not None and est[2] >= 30.0:
+                p0, p1, score = est
+                logs.append(
+                    f"显示层相位: F2=({p0:g}, {p1:g}) score={score:.2f}"
+                )
+                if abs(p1) > 20.0:
+                    logs.append(
+                        f"显示层相位 p1={p1:g}° 幅值异常(>20°),归零"
+                    )
+                    p1 = 0.0
+                (work / "phase.json").write_text(
+                    json.dumps(
+                        {
+                            "version": 2,
+                            "source": "display_recon",
+                            "p0": p0,
+                            "p1": p1,
+                            "score": score,
+                        },
+                        indent=2,
+                    ),
+                    encoding="utf-8",
+                )
+                if (
+                    abs(((p0 + 180.0) % 360.0) - 180.0) > 2.0
+                    or abs(p1) > 2.0
+                ):
+                    if self._apply_direct_phase(
+                        experiment, work, p0, p1, logs
+                    ):
+                        logs.append(
+                            "终谱已按显示层相位重渲(stage-2 重跑,无 SMILE)"
+                        )
+            else:
+                logs.append("显示层相位置信度不足或搜索失败,保持默认相位")
         if progress is not None:
             progress("完成 SMILE 重构;终谱已就位")
         return {
@@ -589,10 +786,13 @@ class NMRPipeBackend:
         sampling: dict[str, Any] | None = None,
         out_file: str | None = None,
         script_name: str | None = None,
+        planes: str | None = None,
     ) -> dict[str, Any]:
         """从 SMILE 重构平面做间接维 FT 定稿(逐维相位候选,不重跑 SMILE)。
 
         phases:{轴 -> (p0, p1)},缺省 0;供逐维相位优化(用户方案)。
+        planes:重构平面输入覆盖(默认 nus3d_rc/test%04d.ft1 或
+        nus2d/recon.ft1;显示层填相位用 nus3d_rc_ph/ 副本)。
         """
         bin_dir = self._bin_dir()
         if bin_dir is None:
@@ -602,8 +802,13 @@ class NMRPipeBackend:
                 "logs": [],
             }
         work = Path(work_dir) if work_dir else self._work_path(experiment)
+        if planes is None:
+            planes = (
+                "nus3d_rc/test%04d.ft1"
+                if experiment.ndim >= 3
+                else "nus2d/recon.ft1"
+            )
         if experiment.ndim >= 3:
-            planes = "nus3d_rc/test%04d.ft1"
             if not (work / "nus3d_rc").is_dir():
                 return {
                     "success": False,
@@ -611,7 +816,6 @@ class NMRPipeBackend:
                     "logs": [],
                 }
         else:
-            planes = "nus2d/recon.ft1"
             if not (work / "nus2d" / "recon.ft1").is_file():
                 return {
                     "success": False,
@@ -637,6 +841,7 @@ class NMRPipeBackend:
             baseline=baseline,
             zero_fill=zf_plan,
             sampling=sampling,
+            preview_axis=zf_params.get("preview_axis"),
         )
         finalize_com = work / (
             script_name or f"{experiment.dataset_id}_finalize.com"
@@ -767,46 +972,463 @@ class NMRPipeBackend:
                 stale_path.unlink()
         return True
 
-    def _search_direct_phase(
+    def _light_phase_search(
         self,
+        experiment: Experiment,
         work: Path,
-        fid_file: Path,
+        in_file: str,
+        runtime: Any,
         logs: list[str],
-        min_gain: float = 0.02,
-    ) -> tuple[float, float]:
-        """直接维统计相位搜索（内存内 FT + 全迹统计），结果缓存到 work/phase.json。"""
+        params: dict[str, Any],
+        *,
+        nuslist_count: int,
+        sampling: dict[str, Any],
+    ) -> tuple[float, float] | None:
+        """轻量 SMILE 相位搜索(0.2.94,用户方案):子采样 nuslist + PS(0,0)
+        亚秒轻量重构,再用现有固定迹线评分在轻量终谱上估直接维 (p0, p1)。
+
+        单文件/多文件统一处理:轻量子目录 work/light/ 里放子采样 nuslist
+        (SMILE -sample None 时读默认文件 nuslist),转换产物符号链接复用。
+        成功写 phase.json(v2, source=phase_only_recon)并返回 (p0, p1);
+        失败返回 None(调用方保留 NU-DFT 结果或 (0,0))。
+        """
         phase_file = work / "phase.json"
         if phase_file.is_file():
-            data = json.loads(phase_file.read_text(encoding="utf-8"))
-            logs.append(f"直接维相位（缓存）: p0={data['p0']:g} p1={data['p1']:g}")
-            return float(data["p0"]), float(data["p1"])
+            try:
+                data = json.loads(phase_file.read_text(encoding="utf-8"))
+                if data.get("version") == 2:
+                    logs.append(
+                        f"直接维相位(缓存): p0={data['p0']:g} "
+                        f"p1={data['p1']:g}"
+                    )
+                    return float(data["p0"]), float(data["p1"])
+            except (OSError, TypeError, ValueError, KeyError):
+                pass
+        points = read_nuslist(work / "nuslist")
+        if len(points) < 8:
+            return None
+        target = max(16, len(points) // 4)
+        if target >= len(points):
+            return None  # 采样点太少,轻量无意义
+        step = max(1, len(points) // target)
+        sub = points[::step][:target]
+        if not sub or 0 not in [int(p[0]) for p in sub]:
+            sub[0] = points[0]
+        light_dir = work / "light"
+        if light_dir.exists():
+            shutil.rmtree(light_dir)
+        light_dir.mkdir()
+        (light_dir / "nuslist").write_text(
+            "".join(" ".join(str(v) for v in p) + "\n" for p in sub),
+            encoding="utf-8",
+        )
+        try:
+            if "%" in in_file:
+                (light_dir / "fid").symlink_to(
+                    work / "fid", target_is_directory=True
+                )
+            else:
+                (light_dir / Path(in_file).name).symlink_to(
+                    work / Path(in_file).name
+                )
+        except OSError:
+            logs.append("轻量 SMILE 相位搜索:符号链接失败,跳过")
+            return None
+        nthread = resolve_nthread(params.get("nthread"))
+        td = effective_td(experiment)
+        grid_points = int(td[1]) * (int(td[2]) if len(td) > 2 else 1)
+        nthread, guard_log = enforce_smile_thread_guardrail(
+            nthread, grid_points
+        )
+        if guard_log:
+            logs.append(guard_log)
+        ext_lo = resolve_ext_lo(params.get("ext_lo"))
+        ext_hi = resolve_ext_hi(params.get("ext_hi"))
+        extract = _as_bool(params.get("extract", True))
+        baseline = expand_baseline(experiment, params.get("baseline"))
+        zero_fill = params.get("zero_fill")
+        linewidth_hz = params.get("linewidth_hz")
+        points_per_line = resolve_points_per_line(
+            params.get("points_per_line")
+        )
+        if experiment.ndim >= 3:
+            script_fn = generate_3d_nus_script
+            ext = "ft3"
+        else:
+            script_fn = generate_2d_nus_script
+            ext = "ft2"
+        out_light = f"{experiment.dataset_id}_light.{ext}"
+        script = script_fn(
+            experiment,
+            in_file=in_file,
+            nuslist="nuslist",
+            out_file=out_light,
+            nthread=nthread,
+            nuslist_count=len(sub),
+            ext_lo=ext_lo,
+            ext_hi=ext_hi,
+            nsigma=5.0,
+            thresh=0.95,
+            smile_xq3=2.0,
+            smile_scaling=True,
+            smile_report=1,
+            direct_phase=(0.0, 0.0),
+            extract=extract,
+            baseline=baseline,
+            zero_fill=zero_fill,
+            linewidth_hz=linewidth_hz,
+            points_per_line=points_per_line,
+            sampling=sampling,
+        )
+        light_com = light_dir / "light.com"
+        light_com.write_text(script, encoding="utf-8", newline="\n")
+        logs.append(
+            f"轻量 SMILE 相位搜索: {len(sub)}/{len(points)} 采样点,"
+            f"窗口 {ext_lo}-{ext_hi} ppm,PS(0,0) 重构"
+        )
+        result = runtime.run(["csh", "light.com"], cwd=str(light_dir), timeout=600)
+        logs.append(f"light.com: rc={result.returncode}")
+        light_ft = light_dir / out_light
+        if (
+            result.returncode != 0
+            or not light_ft.is_file()
+            or light_ft.stat().st_size == 0
+        ):
+            logs.append("轻量 SMILE 相位搜索失败(回退 NU-DFT/默认)")
+            return None
         try:
             import nmrglue as ng
 
-            _dic, fid = ng.pipe.read(str(fid_file))
-            direct_points = fid.shape[-1]
-            zf_size = 1
-            while zf_size < 2 * direct_points:
-                zf_size *= 2
-            traces = direct_ft_traces(
-                fid, zf_size=zf_size, sp_off=0.45, sp_end=0.95, sp_pow=1
+            _dic, data = ng.pipe.read(str(light_ft))
+            est = search_direct_phase_on_spectrum(np.asarray(data))
+        except Exception as exc:  # noqa: BLE001
+            logs.append(f"轻量谱评分失败(回退): {exc}")
+            return None
+        if est is None:
+            logs.append("轻量谱无信号(回退)")
+            return None
+        p0, p1, score = est
+        phase_file.write_text(
+            json.dumps(
+                {
+                    "version": 2,
+                    "source": "phase_only_recon",
+                    "p0": p0,
+                    "p1": p1,
+                    "score": score,
+                    "n": len(sub),
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        logs.append(
+            f"轻量 SMILE 相位: F2=({p0:g}, {p1:g}) score={score:.2f}"
+            "(已写 phase.json,正式重构复用)"
+        )
+        return p0, p1
+
+    def _display_phase_search(
+        self,
+        experiment: Experiment,
+        work: Path,
+        logs: list[str],
+    ) -> tuple[float, float, float] | None:
+        """显示层相位搜索(0.2.96,nmrDraw 思路):在复型重构平面上做对称性
+        评分(直接维在 axis 0),无需 Hilbert/额外后端。返回 (p0, p1, score);
+        无干净信号峰返回 None。
+
+        0.2.98:3D 平面文件为「第一轴实/虚交错」实型存储(nmrglue 读成翻倍
+        实型),此前直接当复型旋转/评分是错误约定——现用 read_pipe_complex
+        拆包复型后再搜索;2D recon.ft1 为 nmrglue 直接可读的复型。3D 按
+        间接维增量均布子采样(≤8 个平面,直接维 1×TD),控制搜索成本。
+        """
+        try:
+            import nmrglue as ng
+
+            from core.data.pipe_io import read_pipe_complex
+            from core.optimization.phase_search import (
+                search_direct_phase_on_spectrum,
             )
-            p0, p1, score, gain = search_phase(traces)
+
+            if experiment.ndim >= 3:
+                plane_dir = work / "nus3d_rc"
+                paths = sorted(plane_dir.glob("test*.ft1"))
+                if not paths:
+                    return None
+                if len(paths) > 8:
+                    index = np.linspace(0, len(paths) - 1, 8).astype(int)
+                    paths = [paths[i] for i in index]
+                arrays = [read_pipe_complex(path) for path in paths]
+                arr = (
+                    np.stack(arrays, axis=-1)
+                    if len(arrays) > 1
+                    else arrays[0]
+                )
+                logs.append(
+                    f"显示层相位搜索: 3D 复型平面 {len(arrays)} 个"
+                    f"(增量子采样,直接维 axis 0)"
+                )
+            else:
+                recon = work / "nus2d" / "recon.ft1"
+                if not recon.is_file():
+                    return None
+                _dic, data = ng.pipe.read(str(recon))
+                arr = np.asarray(data)
+            est = search_direct_phase_on_spectrum(
+                arr, axis=0, metric="symmetry"
+            )
+            if est is None:
+                logs.append("显示层相位搜索:无干净信号峰")
+                return None
+            logs.append(
+                f"显示层相位搜索: F2=({est[0]:.1f}, {est[1]:.1f}) "
+                f"score={est[2]:.1f}"
+            )
+            return est
+        except Exception as exc:  # noqa: BLE001
+            logs.append(f"显示层相位搜索失败: {exc}")
+            return None
+
+    def _apply_direct_phase(
+        self,
+        experiment: Experiment,
+        work: Path,
+        p0: float,
+        p1: float,
+        logs: list[str],
+    ) -> bool:
+        """最后一步填相位:旋转复型重构平面直接维(axis 0)后重跑 stage-2
+        finalize(便宜,非 SMILE),终谱带正确直接维相位。
+
+        0.2.98:旋转结果写入副本(nus3d_rc_ph/ 或 recon_ph.ft1)而不是原地
+        改写源平面——源平面保持 PS(0,0) 复型供后续复用/重搜;3D 平面为
+        第一轴实/虚交错实型存储,旋转前必须 read_pipe_complex 拆包复型。
+        """
+        try:
+            import nmrglue as ng
+
+            from core.data.pipe_io import read_pipe_complex
+
+            if experiment.ndim >= 3:
+                plane_dir = work / "nus3d_rc"
+                paths = sorted(plane_dir.glob("test*.ft1"))
+                if not paths or not paths[0].is_file():
+                    return False
+                out_dir = work / "nus3d_rc_ph"
+                if out_dir.exists():
+                    shutil.rmtree(out_dir)
+                out_dir.mkdir()
+                for path in paths:
+                    dic, _data = ng.pipe.read(str(path))
+                    arr = read_pipe_complex(path)
+                    n = arr.shape[0]  # 直接维在 axis 0
+                    k = np.arange(n, dtype=float)
+                    ramp = np.exp(
+                        1j * np.deg2rad(p0 + p1 * k / max(n - 1, 1))
+                    ).reshape(n, *([1] * (arr.ndim - 1)))
+                    rot = arr * ramp
+                    ng.pipe.write(
+                        str(out_dir / path.name),
+                        dic,
+                        rot.astype(np.complex64),
+                        overwrite=True,
+                    )
+                planes = "nus3d_rc_ph/test%04d.ft1"
+            else:
+                recon = work / "nus2d" / "recon.ft1"
+                if not recon.is_file():
+                    return False
+                dic, data = ng.pipe.read(str(recon))
+                arr = np.asarray(data)
+                n = arr.shape[0]
+                k = np.arange(n, dtype=float)
+                ramp = np.exp(
+                    1j * np.deg2rad(p0 + p1 * k / max(n - 1, 1))
+                ).reshape(n, *([1] * (arr.ndim - 1)))
+                rot = arr * ramp
+                out_file = work / "nus2d" / "recon_ph.ft1"
+                ng.pipe.write(
+                    str(out_file),
+                    dic,
+                    rot.astype(np.complex64),
+                    overwrite=True,
+                )
+                planes = "nus2d/recon_ph.ft1"
+            resp = self.finalize_nus(
+                experiment, work_dir=work, planes=planes
+            )
+            if not resp.get("success"):
+                logs.append(f"finalize 重渲失败: {resp.get('message')}")
+                return False
+            return True
+        except Exception as exc:  # noqa: BLE001
+            logs.append(f"应用直接维相位失败: {exc}")
+            return False
+
+    def _search_direct_phase(
+        self,
+        work: Path,
+        fid_files: Path | list[Path],
+        logs: list[str],
+        min_gain: float = 0.02,
+        is_nus: bool = False,
+        n_f1: int = 0,
+        n_f2: int = 1,
+    ) -> tuple[float, float]:
+        """直接维相位搜索:直接维 FT 谱上 (p0, p1) 频域搜索,结果缓存 phase.json。
+
+        0.2.88:从「原始 FID p1 共识(p0 恒 0)」升级为「直接维 FT 谱频域
+        搜索」:增量 i 的直接维相位 = 公共相位 + ω1·t1(i)(t1 调制,
+        t1(0)=0);p1 用多峰迹线相位集中度拟合取中位数(t1 只是逐峰常数
+        偏置,不影响斜坡),p0 锚定首条有峰的迹线(增量 0)的峰相位圆均值
+        取反(PS 校正约定),±180 消歧取正峰解——直接维公共 p0 不再丢失。
+        估计在 PS 应用尺寸上做(NUS 直接维 1×TD、均匀 2×TD),p1 语义与
+        脚本 PS 一致,无需缩放。fid_files 支持单个文件或切片列表。
+
+        0.2.91(NUS 自动路径):有 nuslist + 切片时优先走「非均匀 DFT 最强
+        峰相位」(core.optimization.phase_search.nus_direct_phase)——沿增量
+        对最强直接峰复值做 NU-DFT,在真实 F1/F2 频率处 t1 调制精确抵消,
+        峰相位 = φ(k*),直接维 (p0, p1) 校正可靠,无需人工确认;失败回退
+        逐切片锚定。n_f1/n_f2 为间接维网格尺寸(effective_td)。
+        """
+        phase_file = work / "phase.json"
+        if phase_file.is_file():
+            try:
+                data = json.loads(phase_file.read_text(encoding="utf-8"))
+                if data.get("version") != 2:
+                    raise ValueError("旧版缓存(0.2.87 前 p0 恒 0),需重搜")
+                logs.append(
+                    f"直接维相位(缓存): p0={data['p0']:g} p1={data['p1']:g}"
+                )
+                return float(data["p0"]), float(data["p1"])
+            except (OSError, TypeError, ValueError, KeyError):
+                pass  # 缓存损坏/旧版则重新搜索
+        paths = [fid_files] if isinstance(fid_files, Path) else list(fid_files)
+        if not paths:
+            return 0.0, 0.0
+        # 0.2.91:NUS 自动路径——非均匀 DFT 最强峰相位(用全部切片,无需人工确认)
+        if is_nus and n_f1 > 0:
+            nuslist_file = work / "nuslist"
+            if nuslist_file.is_file():
+                try:
+                    import nmrglue as ng
+
+                    from core.optimization.phase_search import nus_direct_phase
+
+                    points = read_nuslist(nuslist_file)
+                    fids: list[np.ndarray] = []
+                    for path in paths:
+                        _dic, fid = ng.pipe.read(str(path))
+                        arr = np.asarray(fid)
+                        if arr.ndim < 1 or arr.shape[-1] < 8:
+                            continue
+                        fids.append(arr.reshape(-1, arr.shape[-1]))
+                    if fids and len(fids) == len(points):
+                        est = nus_direct_phase(
+                            np.concatenate(fids, axis=0),
+                            points,
+                            n_f1,
+                            n_f2,
+                        )
+                        if est is not None:
+                            p0, p1, score, gain, kstar = est
+                            phase_file.write_text(
+                                json.dumps(
+                                    {
+                                        "version": 2,
+                                        "source": "direct_nudft",
+                                        "p0": p0,
+                                        "p1": p1,
+                                        "score": score,
+                                        "gain": gain,
+                                        "n": int(len(fids)),
+                                        "kstar": kstar,
+                                    },
+                                    indent=2,
+                                ),
+                                encoding="utf-8",
+                            )
+                            if score < 2.0:
+                                logs.append(
+                                    f"直接维相位信息弱(相干 SNR="
+                                    f"{score:.2f} < 2),保持 p0=p1=0"
+                                )
+                                return 0.0, 0.0
+                            logs.append(
+                                f"直接维相位搜索(NU-DFT): p0={p0:g} "
+                                f"p1={p1:g} (相干 SNR={score:.2f}, "
+                                f"峰 k*={kstar}, {len(fids)} 切片)"
+                            )
+                            return p0, p1
+                except Exception as exc:  # noqa: BLE001
+                    logs.append(
+                        f"直接维相位搜索(NU-DFT)失败,回退逐切片: {exc}"
+                    )
+        # 逐切片回退:均匀子采样 ≤16
+        if len(paths) > 16:
+            index = np.linspace(0, len(paths) - 1, 16).astype(int)
+            paths = [paths[i] for i in index]
+        try:
+            import nmrglue as ng
+
+            rows: list[np.ndarray] = []
+            for path in paths:
+                _dic, fid = ng.pipe.read(str(path))
+                arr = np.asarray(fid)
+                n_points = arr.shape[-1] if arr.ndim >= 1 else 0
+                if n_points < 8:
+                    continue
+                if is_nus:
+                    zf_size = None  # NUS 直接维 PS 在 1×TD 上应用
+                else:
+                    zf_size = 1
+                    while zf_size < 2 * n_points:
+                        zf_size *= 2
+                traces = direct_ft_traces(
+                    arr,
+                    zf_size=zf_size,
+                    sp_off=0.45,
+                    sp_end=0.95,
+                    sp_pow=1,
+                )
+                rows.append(traces.reshape(-1, traces.shape[-1]))
+            if not rows:
+                logs.append("直接维相位搜索:无可用切片,保持 p0=p1=0")
+                return 0.0, 0.0
+            spectra = np.concatenate(rows, axis=0)
+            est = search_direct_spectrum_phase(spectra)
+            if est is None:
+                logs.append("直接维相位搜索:直接维谱无信号,保持 p0=p1=0")
+                return 0.0, 0.0
+            p0, p1, score, gain = est
             phase_file.write_text(
-                json.dumps({"p0": p0, "p1": p1, "score": score, "gain": gain}, indent=2),
+                json.dumps(
+                    {
+                        "version": 2,
+                        "p0": p0,
+                        "p1": p1,
+                        "score": score,
+                        "gain": gain,
+                        "n": int(spectra.shape[0]),
+                    },
+                    indent=2,
+                ),
                 encoding="utf-8",
             )
-            if gain < min_gain:
+            if gain < min_gain or score < 0.55:
                 logs.append(
-                    f"直接维相位信息弱（gain={gain:.3f} < {min_gain:g}），保持 p1=0"
+                    f"直接维相位信息弱(gain={gain:.3f}, score={score:.3f}),"
+                    "保持 p0=p1=0"
                 )
                 return 0.0, 0.0
             logs.append(
-                f"直接维相位搜索: p1={p1:g} (score={score:.3f}, gain={gain:.3f})"
+                f"直接维相位搜索: p0={p0:g} p1={p1:g} "
+                f"(score={score:.3f}, gain={gain:.3f}, {spectra.shape[0]} 迹线)"
             )
             return p0, p1
         except Exception as exc:  # noqa: BLE001
-            logs.append(f"直接维相位搜索失败（回退 p0=p1=0）: {exc}")
+            logs.append(f"直接维相位搜索失败(回退 p0=p1=0): {exc}")
             return 0.0, 0.0
 
     def _convert(
@@ -851,6 +1473,8 @@ class NMRPipeBackend:
     ) -> bool:
         """addNMR 逐对时间域合并各段切片（参考实验室 2ndAdd.com）。"""
         merged = work / "merged" / "fid"
+        if merged.exists():
+            shutil.rmtree(merged)  # 幂等:旧合并(如 generate_fid 产物)先清
         shutil.copytree(work / "seg_001" / "fid", merged)
         for index in range(2, n_segments + 1):
             tmp = work / "merge_tmp"
@@ -886,7 +1510,13 @@ class NMRPipeBackend:
         work: Path,
         shifts: list[float],
     ) -> tuple[bool, list[str]]:
-        """多段实验：每段 bruker 转换 → 拆切片 → addNMR 合并。"""
+        """多段实验：每段 bruker 转换 → 拆切片 → addNMR 合并。
+
+        参考实验室 1stfid.com/2ndAdd.com 流程：分段实验是同一实验按采样时间拆
+        段,各段 bruker -AUTO 生成的 fid.com 参数一致(均用 NusTD 网格;acqu2s
+        TD 只反映各自采样点数),逐段独立转换即可等价(手工复用参考段 fid.com
+        只是方便);每段可带 -rs 频移。
+        """
         logs: list[str] = []
         is_nus = experiment.sampling.mode is SamplingMode.NUS
         for index, seg_dir in enumerate(experiment.segments, start=1):
@@ -916,28 +1546,108 @@ class NMRPipeBackend:
         segment_dirs: list[Path],
         experiment: Experiment,
         logs: list[str],
-    ) -> int:
-        points = merge_nuslists([Path(d) / "nuslist" for d in segment_dirs])
-        # 3D 校验：nuslist 列为复点索引（上限 NusTD//2），越界点属数据录入错误，丢弃并警告
-        if experiment.ndim >= 3:
-            td = effective_td(experiment)
-            bounds = [int(td[1]) // 2, int(td[2]) // 2] if len(td) > 2 else []
-            valid: list[tuple[int, ...]] = []
-            dropped = 0
-            for point in points:
-                if len(point) >= 2 and (
-                    point[0] >= bounds[0] or point[1] >= bounds[1]
-                ):
-                    dropped += 1
-                else:
-                    valid.append(point)
-            if dropped:
-                logs.append(f"nuslist 越界点 {dropped} 个已丢弃（网格 {bounds}）")
-            points = valid
-        text = "".join(" ".join(str(v) for v in point) + "\n" for point in points)
+    ) -> tuple[int, list[tuple[int, ...]]]:
+        """合并各段 nuslist 并检测采样坏点（越界/重复），返回 (有效点数, 坏点列表)。
+
+        分段采样可能有个别「写错并采错」的点（如 cc/63 的 27 2350：F1 索引远超
+        网格上限）。坏点从合并 nuslist 剔除并由调用方清理对应 FID，同时以 ⚠ 提示用户。
+        """
+        all_points: list[tuple[int, ...]] = []
+        for seg_dir in segment_dirs:
+            nuslist_path = Path(seg_dir) / "nuslist"
+            if nuslist_path.is_file():
+                all_points += [tuple(p) for p in read_nuslist(nuslist_path)]
+        valid, bad, reasons = _validate_nus_points(all_points, experiment)
+        for point in bad:
+            logs.append(
+                f"⚠ 检测到采样坏点 {point}:{'、'.join(reasons.get(point, []) or ['未知'])},"
+                f"已从合并 nuslist 丢弃"
+            )
+        text = "".join(" ".join(str(v) for v in point) + "\n" for point in valid)
         (work / "nuslist").write_text(text, encoding="utf-8")
-        logs.append(f"合并 nuslist：{len(points)} 采样点")
-        return len(points)
+        logs.append(f"合并 nuslist：{len(valid)} 采样点（坏点 {len(bad)}）")
+        return len(valid), bad
+
+    def _zero_bad_point_fid(
+        self,
+        work: Path,
+        bad_points: list[tuple[int, ...]],
+        logs: list[str],
+        in_file: str | None = None,
+    ) -> None:
+        """清理坏点对应的 FID 数据(所有 NUS 路径)。
+
+        有效网格内的坏点(越界重复等)对应 States 双实行(2y, 2y+1):
+        3D 在切片 test{z:03d}.fid、2D 在单 fid 文件的这些行清零;
+        越界点无对应槽位,记录即可。
+        """
+        if not bad_points:
+            return
+        import nmrglue as ng
+
+        if in_file and "%" in in_file:
+            base = work / in_file.replace("%03d", "{z:03d}").replace("%04d", "{z:03d}")
+        else:
+            base = work / (in_file or f"{Path(in_file or '').name}") if in_file else None
+        slice_dir = work / "merged" / "fid"
+        if not slice_dir.is_dir():
+            slice_dir = work / "fid"
+        for point in bad_points:
+            if not point:
+                continue
+            y = int(point[0])
+            z = int(point[1]) if len(point) > 1 else None
+            target: Path | None = None
+            if z is not None and slice_dir.is_dir():
+                target = slice_dir / f"test{z:03d}.fid"
+                if not target.is_file():
+                    logs.append(
+                        f"⚠ 坏点 {point}:越界,无对应切片,合并 FID 无需清理"
+                    )
+                    continue
+            elif z is None and base is not None and base.is_file():
+                target = base
+            if target is None:
+                logs.append(f"⚠ 坏点 {point}:无对应 FID 文件,无需清理")
+                continue
+            try:
+                dic, data = ng.pipe.read(str(target))
+                arr = np.asarray(data)
+                if arr.ndim < 2:
+                    continue
+                rows = [r for r in (2 * y, 2 * y + 1) if r < arr.shape[0]]
+                if not rows:
+                    logs.append(f"⚠ 坏点 {point}:行越界,无需清理")
+                    continue
+                arr[rows, :] = 0
+                ng.pipe.write(str(target), dic, arr, overwrite=True)
+                logs.append(
+                    f"⚠ 坏点 {point}:对应 FID 增量已清零"
+                    f"({target.name} 行 {rows})"
+                )
+            except Exception as exc:  # noqa: BLE001 - 清理失败不阻断
+                logs.append(f"⚠ 坏点 {point}:FID 清理失败 {exc}")
+
+    def _clean_work_nuslist(
+        self, work: Path, experiment: Experiment, logs: list[str]
+    ) -> tuple[int, list[tuple[int, ...]]]:
+        """校验并清理工作目录 nuslist(单 NUS 数据):坏点剔除 + ⚠ 提示。
+        返回 (有效点数, 坏点列表)。"""
+        nuslist_path = work / "nuslist"
+        if not nuslist_path.is_file():
+            return 0, []
+        points = [tuple(p) for p in read_nuslist(nuslist_path)]
+        valid, bad, reasons = _validate_nus_points(points, experiment)
+        if bad:
+            text = "".join(" ".join(str(v) for v in point) + "\n" for point in valid)
+            nuslist_path.write_text(text, encoding="utf-8")
+            for point in bad:
+                logs.append(
+                    f"⚠ 检测到采样坏点 {point}:{'、'.join(reasons.get(point, []) or ['未知'])},"
+                    f"已从 nuslist 丢弃并清理对应 FID"
+                )
+            logs.append(f"nuslist 清理: {len(points)} → {len(valid)} 采样点(坏点 {len(bad)})")
+        return len(valid), bad
 
     # ------------------------------------------------------------------ 处理
 
@@ -962,28 +1672,47 @@ class NMRPipeBackend:
         progress: Callable[[str], None] | None = None,
         out_file: str | None = None,
         script_name: str | None = None,
+        keep_direct_complex: bool = False,
+        preview_axis: str | None = None,
     ) -> tuple[bool, list[str], Path]:
         """生成并执行 NMRPipe 处理管道（输出 ft2/ft3）。"""
         logs: list[str] = []
         ext = "ft3" if experiment.ndim >= 3 else "ft2"
         in_file = in_file or f"{experiment.dataset_id}.fid"
         out_file = out_file or f"{experiment.dataset_id}.{ext}"
-        script = generate_process_script(
-            experiment,
-            plan,
-            in_file=in_file,
-            out_file=out_file,
-            direct_phase=direct_phase,
-            baseline=baseline,
-            window=window,
-            zero_fill=zero_fill,
-            linewidth_hz=linewidth_hz,
-            points_per_line=points_per_line,
-            extract=extract,
-            ext_lo=ext_lo,
-            ext_hi=ext_hi,
-            sampling=sampling,
-        )
+        if preview_axis:
+            script = generate_preview_script(
+                experiment,
+                plan,
+                in_file=in_file,
+                out_file=out_file,
+                preview_axis=preview_axis,
+                fixed_phases=direct_phase,
+                baseline=baseline,
+                window=window,
+                ext_lo=ext_lo,
+                ext_hi=ext_hi,
+                extract=extract,
+                sampling=sampling,
+            )
+        else:
+            script = generate_process_script(
+                experiment,
+                plan,
+                in_file=in_file,
+                out_file=out_file,
+                direct_phase=direct_phase,
+                baseline=baseline,
+                window=window,
+                zero_fill=zero_fill,
+                linewidth_hz=linewidth_hz,
+                points_per_line=points_per_line,
+                extract=extract,
+                ext_lo=ext_lo,
+                ext_hi=ext_hi,
+                sampling=sampling,
+                keep_direct_complex=keep_direct_complex,
+            )
         process_com = work / (
             script_name or f"{experiment.dataset_id}_process.com"
         )
@@ -1004,3 +1733,4 @@ class NMRPipeBackend:
             return False, logs + [f"未生成 {out_file}"], spectrum
         logs.append(f"谱图 → {spectrum}")
         return True, logs, spectrum
+
