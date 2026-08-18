@@ -78,3 +78,20 @@ def test_memory_guard_respects_safety_factor() -> None:
     # 峰值 690MB,可用 812MB×0.85≈690 → 临界
     res = memory_guard(3, 600, 4000, available_mb=812)
     assert res["ok"] is (690.0 <= 812 * MEM_SAFETY)
+
+
+def test_memory_guard_block_false_warns_not_blocks() -> None:
+    """0.2.124:block=False 时超限仅警告(不阻断),可强制运行。"""
+    res = memory_guard(3, 2048, 4000, available_mb=1024, block=False)
+    assert res["ok"] is False
+    assert res["blocked"] is False
+    assert res["needed_gb"] >= 2
+    assert "请至少提供" not in res["message"]
+    assert "已超可用预算" in res["message"]
+
+
+def test_memory_guard_block_true_default() -> None:
+    """0.2.124:block 默认 True,保持原阻断语义。"""
+    res = memory_guard(3, 2048, 4000, available_mb=1024)
+    assert res["blocked"] is True
+    assert "请至少提供" in res["message"]
