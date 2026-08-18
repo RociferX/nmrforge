@@ -4,6 +4,8 @@
   - 峰值内存 ∝ 直接维点数(EXT 窗口内的点数),≈1.15 MB/点:
     直接维 150/600/2048 点 → 峰值 179/665/2284 MB;
   - 与采样点数无关(SMILE 按全网格分配,100 与 250 采样峰值相同);
+  - 与线程数无关(1/2/4/6 线程峰值均为 ~665MB,线程只影响速度
+    (19.7→11.4s),并行共享同一全网格工作集,不复制数据);
   - 2D 峰值 ≈3MB,不构成瓶颈(护栏用保守下限 128MB);
   - 网格(间接维 TD 积)是另一个线性因子(未直接实测,按 4000 基准外推)。
 
@@ -47,9 +49,9 @@ def direct_points_after_ext(
 
 
 def estimate_smile_peak_mb(
-    ndim: int, direct_points: int, indirect_grid: int, nthread: int = 2
+    ndim: int, direct_points: int, indirect_grid: int
 ) -> float:
-    """SMILE 峰值内存估计(MB)。"""
+    """SMILE 峰值内存估计(MB);与线程数/采样点数无关(VM 实测)。"""
     if int(ndim) < 3:
         return MB_FLOOR_2D
     scale = max(int(indirect_grid), 1) / REF_INDIRECT_GRID
@@ -78,13 +80,12 @@ def memory_guard(
     direct_points: int,
     indirect_grid: int,
     available_mb: int | None = None,
-    nthread: int = 2,
 ) -> dict[str, Any]:
     """SMILE 内存护栏判定。
 
     返回 {"ok", "peak_mb", "available_mb", "needed_gb", "message"}。
     """
-    peak = estimate_smile_peak_mb(ndim, direct_points, indirect_grid, nthread)
+    peak = estimate_smile_peak_mb(ndim, direct_points, indirect_grid)
     avail = int(available_mb or available_memory_mb())
     budget = max(int(avail * MEM_SAFETY), 1)
     if peak <= budget:

@@ -620,7 +620,7 @@ class NMRPipeBackend:
         zf_direct = int((zf_plan.get(direct_axis) or {}).get("size") or td[0])
         direct_pts = direct_points_after_ext(experiment, zf_direct, ext_lo, ext_hi)
         peak_mb = estimate_smile_peak_mb(
-            experiment.ndim, direct_pts, grid_points, nthread
+            experiment.ndim, direct_pts, grid_points
         )
         avail_mb = available_memory_mb()
         if peak_mb > avail_mb * MEM_SAFETY:
@@ -642,7 +642,7 @@ class NMRPipeBackend:
                     experiment, one_x, ext_lo, ext_hi
                 )
                 peak_mb = estimate_smile_peak_mb(
-                    experiment.ndim, direct_pts, grid_points, nthread
+                    experiment.ndim, direct_pts, grid_points
                 )
             if peak_mb > avail_mb * MEM_SAFETY:
                 import math
