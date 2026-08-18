@@ -1437,6 +1437,9 @@ class MainWindow(QMainWindow):
         import sys
 
         app = QApplication(sys.argv)
+        from gui.dialogs import install_dialog_centering
+
+        install_dialog_centering(app)
         window = MainWindow()
         window.show()
         return app.exec()

@@ -21,6 +21,8 @@
   谱图面板改为按数据级 spectra/ 目录内全部 .ft2/.ft3 查找(不再假设
   exp_id-data_id 前缀)。
 - 导入:导入成功后清空中间页导入表单(样品数据名称/目录),便于连续导入。
+- 弹窗:所有自定义 QDialog 弹窗统一在所在屏幕中心弹出(应用级事件过滤器,
+  主窗口与独立查看器入口均安装)。
 - 修复:右键重命名输入框(Qt.Popup)补上 transientParent(顶层窗口父级),
   消除 Wayland 下 "Failed to create grabbing popup" 警告;点击外部自动
   关闭并提交,回车/Esc 行为不变,不再残留显示。

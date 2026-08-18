@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from PyQt6.QtCore import QEvent, QObject, QTimer
 from PyQt6.QtGui import QAction, QDragEnterEvent, QDropEvent
 from PyQt6.QtWidgets import (
     QDialog,
@@ -264,6 +265,34 @@ class SpectrumWindow(QMainWindow):
                 self.load_spectrum(path)
 
 
+def _install_dialog_centering(app) -> None:
+    """独立查看器:QDialog 显示时自动居中到所在屏幕(与主应用一致,0.2.112)。"""
+    from PyQt6.QtWidgets import QApplication
+
+    def _center(dialog: QDialog) -> None:
+        parent = dialog.parentWidget()
+        screen = None
+        if parent is not None and parent.window() is not None:
+            screen = QApplication.screenAt(parent.window().frameGeometry().center())
+        screen = screen or QApplication.primaryScreen()
+        if screen is None:
+            return
+        geo = screen.availableGeometry()
+        dialog.move(
+            geo.left() + max(0, (geo.width() - dialog.width()) // 2),
+            geo.top() + max(0, (geo.height() - dialog.height()) // 2),
+        )
+
+    class _DialogCenterFilter(QObject):
+        def eventFilter(self, obj, event) -> bool:
+            if isinstance(obj, QDialog) and event.type() == QEvent.Type.Show:
+                QTimer.singleShot(0, lambda d=obj: _center(d))
+            return super().eventFilter(obj, event)
+
+    app._dialog_centering_filter = _DialogCenterFilter(app)
+    app.installEventFilter(app._dialog_centering_filter)
+
+
 def main(argv: list[str] | None = None) -> int:
     """命令行入口:nmrforge-viewer [spectrum.ft2 ...]"""
     from PyQt6.QtWidgets import QApplication
@@ -271,6 +300,7 @@ def main(argv: list[str] | None = None) -> int:
     args = argv if argv is not None else sys.argv[1:]
     paths = [Path(a) for a in args if Path(a).suffix in (".ft2", ".ft3", ".ft1", ".fid")]
     app = QApplication(sys.argv[:1] + args)
+    _install_dialog_centering(app)
     window = SpectrumWindow()
     window.show()
     for path in paths:

@@ -8,8 +8,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QEvent, QObject, Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -37,6 +38,39 @@ from gui.notes import (
     experiment_type_options,
     note_fields,
 )
+
+
+def _center_on_screen(dialog: QDialog) -> None:
+    """把对话框移到其所在屏幕中心(所有弹窗统一居中,0.2.112)。"""
+    parent = dialog.parentWidget()
+    screen = None
+    if parent is not None:
+        window = parent.window()
+        if window is not None:
+            screen = QApplication.screenAt(window.frameGeometry().center())
+    screen = screen or QApplication.primaryScreen()
+    if screen is None:
+        return
+    geo = screen.availableGeometry()
+    dialog.move(
+        geo.left() + max(0, (geo.width() - dialog.width()) // 2),
+        geo.top() + max(0, (geo.height() - dialog.height()) // 2),
+    )
+
+
+class _DialogCenteringFilter(QObject):
+    """QDialog 显示时自动居中到所在屏幕(0.2.112)。"""
+
+    def eventFilter(self, obj, event) -> bool:
+        if isinstance(obj, QDialog) and event.type() == QEvent.Type.Show:
+            QTimer.singleShot(0, lambda d=obj: _center_on_screen(d))
+        return super().eventFilter(obj, event)
+
+
+def install_dialog_centering(app) -> None:
+    """安装应用级对话框居中过滤器(主窗口/独立查看器入口调用)。"""
+    app._dialog_centering_filter = _DialogCenteringFilter(app)
+    app.installEventFilter(app._dialog_centering_filter)
 
 
 class InfoDialog(QDialog):
