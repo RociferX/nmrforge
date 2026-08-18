@@ -11,8 +11,7 @@ from typing import Any
 
 from core.app_paths import resource_path
 
-# 核素默认估计线宽(Hz):与 backend.script_generator._DEFAULT_LINEWIDTH_HZ 一致,
-# 配置 processing.linewidth_hz 可覆盖。
+# 核素默认估计线宽(Hz):配置 processing.linewidth_hz 可覆盖。
 DEFAULT_LINEWIDTH_HZ: dict[str, float] = {
     "1H": 8.0,
     "15N": 15.0,

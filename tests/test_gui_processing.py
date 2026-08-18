@@ -306,3 +306,13 @@ def test_param_schema_returns_editable_defaults() -> None:
     assert default["zero_fill"] == 2
     assert default["ext_lo"] == "10.5"
     assert default["sampling"]["ft_alt"] is True
+
+
+def test_param_schema_ext_matches_backend_defaults() -> None:
+    """GUI 参数骨架的 ext 默认值与 backend.config 一致(单一数据源)。"""
+    from backend.config import load_processing_defaults
+
+    d = load_processing_defaults()
+    schema = ProcessingController().param_schema()
+    assert schema["default"]["ext_lo"] == str(d["ext_lo"])
+    assert schema["default"]["ext_hi"] == str(d["ext_hi"])

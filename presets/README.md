@@ -1,7 +1,9 @@
 # 实验模板（presets/）
 
 模板 = 先验 + 约束 + 期望行为（框架 §43），具体参数由优化器决定。
-YAML 由 core/experiments/registry.ExperimentTemplate.from_yaml 加载（Phase 2 实现）。
+YAML 是模板的单一数据源(0.2.111 起):core/experiments/registry.from_yaml +
+load_presets 实现,导入 core.experiments 即从 presets/*.yaml 注册全部模板
+(按显示名与文件 stem 双注册);原逐模块 Python 模板已删除,不再双源维护。
 每个模板的 `peak_sign` 描述峰符号约定：`uniform`＝信号峰同号（HSQC/CBCA(CO)NH 等），
 `mixed`＝正负峰共存（HNCACB 等，13Cα/13Cβ 反相）。相位优化按此做早约束：
 mixed 用「|净吸收| 中位数 + 正负共存」评分,uniform 用签名净吸收。

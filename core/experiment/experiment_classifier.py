@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import core.experiments  # noqa: F401  导入即从 presets/*.yaml 注册模板
 from core.data.internal_data_model import Experiment, ExperimentType
 from core.experiments.registry import REGISTRY
 

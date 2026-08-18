@@ -39,6 +39,18 @@ from gui.notes import (
 )
 
 
+def _ext_default(key: str) -> str:
+    """ext_lo/ext_hi 默认值:优先 backend.config(单一数据源,0.2.111)。"""
+    try:
+        from backend.config import load_processing_defaults
+
+        return str(load_processing_defaults()[key])
+    except Exception:  # noqa: BLE001 - 后端配置缺失时用内置常量
+        from backend.config import DEFAULT_EXT_HI, DEFAULT_EXT_LO
+
+        return DEFAULT_EXT_LO if key == "ext_lo" else DEFAULT_EXT_HI
+
+
 class InfoDialog(QDialog):
     """带确定按钮的信息对话框(替代 QMessageBox.information/critical/about)。"""
 
@@ -446,8 +458,8 @@ class ParameterTableDialog(QDialog):
             else {}
         )
         default.setdefault("zero_fill", 2)
-        default.setdefault("ext_lo", "10.5")
-        default.setdefault("ext_hi", "6.5")
+        default.setdefault("ext_lo", _ext_default("ext_lo"))
+        default.setdefault("ext_hi", _ext_default("ext_hi"))
         default.setdefault("extract", True)
         default.setdefault(
             "sampling",
@@ -473,8 +485,8 @@ class ParameterTableDialog(QDialog):
 
         rows = [
             ("zero_fill", self.params.get("zero_fill", 2), _desc("zero_fill")),
-            ("ext_lo", self.params.get("ext_lo", "10.5"), _desc("ext_lo")),
-            ("ext_hi", self.params.get("ext_hi", "6.5"), _desc("ext_hi")),
+            ("ext_lo", self.params.get("ext_lo", _ext_default("ext_lo")), _desc("ext_lo")),
+            ("ext_hi", self.params.get("ext_hi", _ext_default("ext_hi")), _desc("ext_hi")),
             ("extract", self.params.get("extract", True), _desc("extract")),
         ]
         for key in ("ft_neg", "ft_alt", "flip_f1", "auto_phase"):

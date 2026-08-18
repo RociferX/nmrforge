@@ -467,6 +467,16 @@ class ProcessingController:
                 return schema
         except Exception:  # noqa: BLE001 - 后端未落地时用默认骨架
             pass
+        try:
+            from backend.config import load_processing_defaults
+
+            _pd = load_processing_defaults()
+            _ext_lo = str(_pd.get("ext_lo", "10.5"))
+            _ext_hi = str(_pd.get("ext_hi", "6.5"))
+        except Exception:  # noqa: BLE001 - 后端配置缺失时用内置常量
+            from backend.config import DEFAULT_EXT_HI, DEFAULT_EXT_LO
+
+            _ext_lo, _ext_hi = DEFAULT_EXT_LO, DEFAULT_EXT_HI
         return {
             'type': 'object',
             'title': 'NMRForge 处理参数',
@@ -505,12 +515,12 @@ class ProcessingController:
                 },
                 'ext_lo': {
                     'type': 'string',
-                    'default': '10.5',
+                    'default': _ext_lo,
                     'description': '直接维 1H 提取窗口高 ppm(EXT -x1)',
                 },
                 'ext_hi': {
                     'type': 'string',
-                    'default': '6.5',
+                    'default': _ext_hi,
                     'description': '直接维 1H 提取窗口低 ppm(EXT -xn)',
                 },
                 'extract': {
@@ -526,8 +536,8 @@ class ProcessingController:
             },
             'default': {
                 'zero_fill': 2,
-                'ext_lo': '10.5',
-                'ext_hi': '6.5',
+                'ext_lo': _ext_lo,
+                'ext_hi': _ext_hi,
                 'extract': True,
                 'sampling': {
                     'ft_neg': False,
