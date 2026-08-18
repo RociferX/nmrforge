@@ -1319,13 +1319,22 @@ def test_welcome_page_new_project_inline_input(
     page.new_project_requested.connect(names.append)
     page._on_new_clicked()
     assert page._name_edit.isVisible()
+    assert page._name_edit.placeholderText() == "输入项目名称"
+    assert page._name_ok_button.isVisible()
     page._name_edit.setText("demo")
     page._commit_name()
     assert names == ["demo"]
-    # Esc 取消:输入行隐藏且不发信号
+    assert page._name_ok_button.isHidden()
+    # 确定按钮提交
+    page._on_new_clicked()
+    page._name_edit.setText("demo2")
+    page._name_ok_button.click()
+    assert names == ["demo", "demo2"]
+    # Esc 取消:输入行与确定按钮隐藏且不发信号
     page._on_new_clicked()
     page._cancel_name()
     assert page._name_edit.isHidden()
+    assert page._name_ok_button.isHidden()
     page.close()
 
 
@@ -1444,13 +1453,15 @@ def test_rename_editor_appears_at_click_position(
 
     manager = _manager_with_experiment(tmp_path, monkeypatch)
     window = MainWindow(manager=manager)
+    window.show()  # 子控件可见性依赖父窗口显示
     panel = window.project_tree
     exp_item = panel.tree.topLevelItem(0).child(0).child(0)
     anchor = panel.tree.viewport().mapToGlobal(QPoint(30, 10))
     panel._begin_rename("experiment", exp_item, anchor)
     editor = panel._rename_editor
     assert editor.isVisible()
-    assert editor.pos() == anchor  # 输入框出现在右键位置(未越出屏幕)
+    # 0.2.112:输入框为树视口内嵌子控件,位置为视口内坐标
+    assert editor.pos() == panel.tree.viewport().mapFromGlobal(anchor)
     editor._edit.setText("HNCACB2")
     editor._commit()
     assert manager.project is not None
@@ -1467,6 +1478,7 @@ def test_context_menu_rename_opens_inline_editor(
 
     manager = _manager_with_experiment(tmp_path, monkeypatch)
     panel = ProjectTreePanel(manager)
+    panel.show()  # 子控件可见性依赖父窗口显示
     project_item = panel.tree.topLevelItem(0).child(0)
     menu = QMenu()
     panel._on_context_menu_impl(menu, project_item, QPoint(10, 20))

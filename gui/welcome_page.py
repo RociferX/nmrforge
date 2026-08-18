@@ -108,12 +108,16 @@ class WelcomePage(QWidget):
         self.new_button.clicked.connect(self._on_new_clicked)
         actions.addWidget(self.new_button)
         self._name_edit = QLineEdit()
-        self._name_edit.setPlaceholderText("项目名称,回车创建")
+        self._name_edit.setPlaceholderText("输入项目名称")
         self._name_edit.setMaximumWidth(240)
         self._name_edit.setVisible(False)
         self._name_edit.installEventFilter(self)
         self._name_edit.editingFinished.connect(self._commit_name)
         actions.addWidget(self._name_edit)
+        self._name_ok_button = QPushButton("确定")
+        self._name_ok_button.setVisible(False)
+        self._name_ok_button.clicked.connect(self._commit_name)
+        actions.addWidget(self._name_ok_button)
         actions.addStretch(1)
         layout.addLayout(actions)
 
@@ -148,11 +152,12 @@ class WelcomePage(QWidget):
     def _on_new_clicked(self) -> None:
         self.begin_inline_name()
 
-    def begin_inline_name(self, initial: str = "unnamed") -> None:
-        """页内内联命名(不弹窗):显示名称输入行并聚焦,回车提交 / Esc 取消。"""
+    def begin_inline_name(self, initial: str = "") -> None:
+        """页内内联命名(不弹窗):显示名称输入行 + 确定按钮并聚焦,回车提交 / Esc 取消。"""
         self._name_edit.setText(initial)
         self._name_edit.selectAll()
         self._name_edit.setVisible(True)
+        self._name_ok_button.setVisible(True)
         self._name_edit.setFocus()
 
     def _commit_name(self) -> None:
@@ -162,6 +167,7 @@ class WelcomePage(QWidget):
         try:
             name = self._name_edit.text().strip()
             self._name_edit.setVisible(False)
+            self._name_ok_button.setVisible(False)
             if name:
                 self.new_project_requested.emit(name)
         finally:
@@ -169,6 +175,7 @@ class WelcomePage(QWidget):
 
     def _cancel_name(self) -> None:
         self._name_edit.setVisible(False)
+        self._name_ok_button.setVisible(False)
 
     def eventFilter(self, obj, event) -> bool:
         """Esc 取消内联命名(其它事件交回默认处理)。"""
