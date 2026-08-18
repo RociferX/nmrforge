@@ -345,6 +345,10 @@ class NMRPipeBackend:
             )
             logs += convert_logs
             fid_path = work / "merged" / "fid"
+            if converted:
+                self._write_merged_nuslist(
+                    work, experiment.segments, experiment, logs
+                )
         else:
             converted, convert_logs = self._convert(runtime, experiment, raw, work)
             logs += convert_logs
@@ -399,6 +403,7 @@ class NMRPipeBackend:
                 merged_fid.is_dir()
                 and list(merged_fid.glob("test*.fid"))
                 and (work / "nuslist").is_file()
+                and not params.get("segment_shift_hz")  # 有频移必须重转
             )
             if not merged_ready:
                 shifts = [float(v) for v in params.get("segment_shift_hz", [])]
@@ -1404,6 +1409,8 @@ class NMRPipeBackend:
     ) -> bool:
         """addNMR 逐对时间域合并各段切片（参考实验室 2ndAdd.com）。"""
         merged = work / "merged" / "fid"
+        if merged.exists():
+            shutil.rmtree(merged)  # 幂等:旧合并(如 generate_fid 产物)先清
         shutil.copytree(work / "seg_001" / "fid", merged)
         for index in range(2, n_segments + 1):
             tmp = work / "merge_tmp"
