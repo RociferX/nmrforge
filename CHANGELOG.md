@@ -1,5 +1,13 @@
 # 变更日志
 
+## [0.2.110] - 2026-08-18
+
+- 运维(Architect,用户要求):VM 测试产物归置——新增 scripts/vm_test.sh 统一
+  入口,全量回归时 pytest basetemp / `__pycache__` / ruff 缓存全部落到
+  `~/nmrforge-test-artifacts/`,`~/NMRForge` 主目录不再堆积缓存(清理了
+  512 个 `__pycache__`、`.pytest_cache`、`nmrforge.egg-info`);
+- HANDOVER:VM 执行环境与测试命令已更新为统一入口。
+
 ## [0.2.109] - 2026-08-18
 
 - merge(Architect):并入 GUI 0.2.108(B2G-004 对接完成)——生成谱图步骤
