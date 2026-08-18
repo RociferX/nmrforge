@@ -831,6 +831,7 @@ class NMRPipeBackend:
         out_file: str | None = None,
         script_name: str | None = None,
         planes: str | None = None,
+        progress: Callable[[str], None] | None = None,
     ) -> dict[str, Any]:
         """从 SMILE 重构平面做间接维 FT 定稿(逐维相位候选,不重跑 SMILE)。
 
@@ -891,6 +892,8 @@ class NMRPipeBackend:
             script_name or f"{experiment.dataset_id}_finalize.com"
         )
         finalize_com.write_text(script, encoding="utf-8", newline="\n")
+        if progress is not None:
+            progress("开始 finalize(复型预览/终跑)")
         runtime = CshRuntime()
         result = runtime.run(
             ["csh", finalize_com.name], cwd=str(work), timeout=timeout
@@ -908,6 +911,8 @@ class NMRPipeBackend:
                 "logs": logs,
             }
         logs.append(f"谱图 → {spectrum}")
+        if progress is not None:
+            progress("finalize 完成")
         return {
             "success": True,
             "spectrum_path": str(spectrum),
@@ -1320,6 +1325,7 @@ class NMRPipeBackend:
         p0: float,
         p1: float,
         logs: list[str],
+        progress: Callable[[str], None] | None = None,
     ) -> bool:
         """最后一步填相位:旋转复型重构平面直接维(axis 0)后重跑 stage-2
         finalize(便宜,非 SMILE),终谱带正确直接维相位。
@@ -1329,6 +1335,8 @@ class NMRPipeBackend:
         第一轴实/虚交错实型存储,旋转前必须 read_pipe_complex 拆包复型。
         """
         try:
+            if progress is not None:
+                progress("应用直接维相位(recon 平面旋转)")
             import nmrglue as ng
 
             from core.data.pipe_io import read_pipe_complex

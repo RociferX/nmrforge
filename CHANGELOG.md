@@ -1,5 +1,16 @@
 # 变更日志
 
+## [0.2.122] - 2026-08-18
+
+- 处理过程进度可见(Backend):finalize_nus 增加可选 progress 回调
+  (None 不回调),阶段文案「开始 finalize(复型预览/终跑)」「finalize
+  完成」;_apply_direct_phase 同增可选 progress;
+- phase_routes 统一流程补齐进度覆盖:uniform 每轴复型预览与终跑,
+  NUS「第一遍 SMILE 完成」「F2/F1 复型预览中/完成」「finalize 终跑
+  中/完成」,消除 finalize 阶段静默长等待(用户反馈 cc 多段 3D NUS);
+- 测试:新增 NUS/uniform 编排进度覆盖与 finalize_nus 直接回调 3 例;
+  本地全量 578 passed(574+4)+ ruff 全绿。
+
 ## [0.2.121] - 2026-08-18
 
 - merge(Architect):并入 Backend 0.2.118-0.2.120——3D NUS acqu3s TD 修正

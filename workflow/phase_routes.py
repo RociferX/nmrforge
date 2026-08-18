@@ -186,6 +186,8 @@ def unified_route(
     backend_runs = 0
     for axis in search_axes:
         out_file = f"{experiment.dataset_id}_preview_{axis}.{ext}"
+        if progress is not None:
+            progress(f"{axis} 复型预览中")
         resp = backend.process(
             experiment,
             plan,
@@ -198,6 +200,8 @@ def unified_route(
         backend_runs += 1
         if not resp.get("success") or not resp.get("spectrum_path"):
             raise RuntimeError(f"复型预览({axis})失败: {resp.get('message')}")
+        if progress is not None:
+            progress(f"{axis} 复型预览完成")
         ax = _axis_index(axis, experiment.ndim)
         arr = _read_complex_preview(str(resp["spectrum_path"]), unpack_axis=ax)
         est = search_axis_memory(arr, ax, sign_mode=sign_mode)
@@ -238,6 +242,8 @@ def unified_route(
                 f"联合复核: 联合面平坦(顺序 {fixed} score={fixed_score:.2f} "
                 f"vs 联合最优 {best} score={best_score:.2f}),保持顺序固定"
             )
+    if progress is not None:
+        progress("终跑(完整重跑)中")
     params_final = dict(params)
     resp = backend.process(
         experiment,
@@ -248,7 +254,9 @@ def unified_route(
     )
     backend_runs += 1
     if not resp.get("success") or not resp.get("spectrum_path"):
-        raise RuntimeError(f"终跑失败: {resp.get('message')}")
+            raise RuntimeError(f"终跑失败: {resp.get('message')}")
+    if progress is not None:
+        progress("终跑完成")
     logs += list(resp.get("logs", []))
     return {
         "phases": fixed,
@@ -305,6 +313,8 @@ def _unified_nus(
     logs: list[str] = [
         f"第一遍 SMILE 重构完成: {first.get('spectrum_path')}"
     ]
+    if progress is not None:
+        progress("第一遍 SMILE 完成")
     backend_runs = 1
     planes = _load_recon_planes(experiment, work)
     direct_axis = "F3" if experiment.ndim >= 3 else "F2"
@@ -351,6 +361,8 @@ def _unified_nus(
     }
     for axis in indirect_axes:
         out_file = f"{experiment.dataset_id}_preview_{axis}.{ext}"
+        if progress is not None:
+            progress(f"{axis} 复型预览中")
         resp = backend.finalize_nus(
             experiment,
             phases=fixed,
@@ -358,10 +370,13 @@ def _unified_nus(
             params={**zf_none, "preview_axis": axis},
             out_file=out_file,
             script_name=f"{experiment.dataset_id}_preview_{axis}_finalize.com",
+            progress=progress,
         )
         backend_runs += 1
         if not resp.get("success") or not resp.get("spectrum_path"):
             raise RuntimeError(f"NUS 复型预览({axis})失败: {resp.get('message')}")
+        if progress is not None:
+            progress(f"{axis} 复型预览完成")
         ax = _axis_index(axis, experiment.ndim)
         arr = _read_complex_preview(str(resp["spectrum_path"]), unpack_axis=ax)
         est = search_axis_memory(arr, ax, sign_mode=sign_mode)
@@ -405,7 +420,9 @@ def _unified_nus(
     # 应用直接维相位:旋转 recon 平面写副本(源平面不动),再 finalize
     planes_arg = None
     if abs((direct_phase[0] + 180.0) % 360.0 - 180.0) > 2.0 or abs(direct_phase[1]) > 2.0:
-        if backend._apply_direct_phase(experiment, work, direct_phase[0], direct_phase[1], logs):
+        if backend._apply_direct_phase(
+            experiment, work, direct_phase[0], direct_phase[1], logs, progress=progress
+        ):
             planes_arg = (
                 "nus3d_rc_ph/test%04d.ft1"
                 if experiment.ndim >= 3
@@ -414,15 +431,20 @@ def _unified_nus(
             logs.append("recon 平面已按直接维相位旋转(源平面不动)")
         else:
             logs.append("直接维相位应用失败,保持原 recon 平面")
+    if progress is not None:
+        progress("finalize 终跑中")
     final = backend.finalize_nus(
         experiment,
         phases=fixed,
         work_dir=work,
         planes=planes_arg,
+        progress=progress,
     )
     backend_runs += 1
     if not final.get("success") or not final.get("spectrum_path"):
-        raise RuntimeError(f"finalize 终跑失败: {final.get('message')}")
+            raise RuntimeError(f"finalize 终跑失败: {final.get('message')}")
+    if progress is not None:
+        progress("finalize 终跑完成")
     logs += list(final.get("logs", []))
     return {
         "phases": fixed,

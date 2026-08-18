@@ -72,15 +72,21 @@ class _FakeBackend:
         params=None,
         out_file=None,
         script_name=None,
+        progress=None,
     ):
         self.finalize_calls.append(
-            {"phases": dict(phases or {}), "planes": planes, "params": dict(params or {})}
+            {
+                "phases": dict(phases or {}),
+                "planes": planes,
+                "params": dict(params or {}),
+                "progress": progress,
+            }
         )
         path = str(self.work / (out_file or "final.ft2"))
         Path(path).write_bytes(b"x")
         return {"success": True, "spectrum_path": path, "logs": []}
 
-    def _apply_direct_phase(self, experiment, work, p0, p1, logs):
+    def _apply_direct_phase(self, experiment, work, p0, p1, logs, progress=None):
         self.apply_direct_calls.append((p0, p1))
         return True
 
@@ -206,3 +212,90 @@ def test_unified_route_nus_reconstruct_then_finalize(
     assert abs((result["phases"]["F1"][0] - 30.0 + 180.0) % 360.0 - 180.0) <= 8.0
     assert backend.apply_direct_calls  # 直接维相位已应用
     assert result["backend_runs"] == 3  # SMILE + 预览 + 终跑
+
+
+def test_unified_route_nus_progress_stages(
+    tmp_path: Path, monkeypatch, bruker_dir: Path
+) -> None:
+    """NUS:progress 覆盖 第一遍 SMILE/F1 复型预览/finalize 终跑 各阶段。"""
+    experiment = read_dataset(bruker_dir / "nus_2d")
+    backend = _FakeBackend(tmp_path / "nus_prog_work")
+    work = backend.work
+    n_direct, n_t1 = 64, 32
+    k0 = np.arange(n_direct, dtype=float)
+    t1 = np.arange(n_t1, dtype=float)
+    direct = 1.0 / (1.0 + 1j * (k0 - 22) / 1.5)
+    fid1 = np.exp(-t1 / 8.0) * np.cos(2.0 * np.pi * 8.0 * t1 / n_t1)
+    planes = np.outer(direct, fid1)
+    monkeypatch.setattr(routes, "_load_recon_planes", lambda exp, wk: planes)
+    monkeypatch.setattr(
+        "core.optimization.phase_search.search_direct_phase_on_spectrum",
+        lambda arr, axis=0, metric="symmetry": (30.0, 0.0, 80.0),
+    )
+    monkeypatch.setattr(
+        routes, "_read_complex_preview",
+        lambda path, unpack_axis=None: _synthetic_preview(0, -30.0),
+    )
+    messages: list[str] = []
+    result = routes.unified_route(experiment, backend, work_dir=work, progress=messages.append)
+    joined = "\n".join(messages)
+    assert "第一遍 SMILE 完成" in joined, messages
+    assert "F1 复型预览中" in joined, messages
+    assert "F1 复型预览完成" in joined, messages
+    assert "finalize 终跑中" in joined, messages
+    assert "finalize 终跑完成" in joined, messages
+    assert all(call["progress"] is not None for call in backend.finalize_calls)
+    assert result["backend_runs"] == 3
+
+
+def test_unified_route_uniform_progress_stages(
+    tmp_path: Path, monkeypatch, bruker_dir: Path
+) -> None:
+    """uniform:progress 覆盖 F1/F2 复型预览与终跑。"""
+    experiment = read_dataset(bruker_dir / "hsqc_2d")
+    backend = _FakeBackend(tmp_path / "uni_prog_work")
+    work = backend.work
+
+    def fake_read(path: str, unpack_axis: int | None = None):
+        name = Path(path).name
+        if "F1" in name:
+            return _synthetic_preview(0, -25.0)
+        return _synthetic_preview(1, -35.0)
+
+    monkeypatch.setattr(routes, "_read_complex_preview", fake_read)
+    messages: list[str] = []
+    routes.unified_route(experiment, backend, work_dir=work, progress=messages.append)
+    joined = "\n".join(messages)
+    assert "F1 复型预览中" in joined, messages
+    assert "F1 复型预览完成" in joined, messages
+    assert "F2 复型预览中" in joined, messages
+    assert "F2 复型预览完成" in joined, messages
+    assert "终跑(完整重跑)中" in joined, messages
+    assert "终跑完成" in joined, messages
+
+
+def test_finalize_nus_progress_callback(tmp_path: Path, monkeypatch, bruker_dir: Path) -> None:
+    """finalize_nus 直接调用:progress 覆盖 开始 finalize 与 finalize 完成。"""
+    from backend.nmrpipe_backend import NMRPipeBackend
+    from backend.runtime import CompletedProcess
+
+    experiment = read_dataset(bruker_dir / "nus_2d")
+    work = tmp_path / "fw_work"
+    (work / "nus2d").mkdir(parents=True)
+    (work / "nus2d" / "recon.ft1").write_bytes(b"x")
+
+    class _FakeCsh:
+        def run(self, argv, *, cwd=None, timeout=3600, on_line=None):
+            (Path(cwd) / f"{experiment.dataset_id}.ft2").write_bytes(b"x")
+            return CompletedProcess("", "", "", 0)
+
+    monkeypatch.setattr("backend.nmrpipe_backend.CshRuntime", _FakeCsh)
+    monkeypatch.setattr(
+        "backend.nmrpipe_backend.find_nmrpipe_bin", lambda explicit="": Path("/bin")
+    )
+    messages: list[str] = []
+    backend = NMRPipeBackend(nmrpipe_bin="")
+    resp = backend.finalize_nus(experiment, work_dir=work, progress=messages.append)
+    assert resp["success"] is True, resp
+    assert "开始 finalize(复型预览/终跑)" in messages, messages
+    assert "finalize 完成" in messages, messages
