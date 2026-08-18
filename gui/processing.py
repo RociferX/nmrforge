@@ -292,7 +292,10 @@ class ProcessingController:
         if route is not None:
             # 0.2.108:相位优化途径由后端处理(unified 统一方案 / none
             # 逃生口),不再叠加旧逐维暴力优化
-            emit(f"基础谱图完成,相位优化途径: {route}")
+            label = {"unified": "Auto-optimize", "none": "None"}.get(
+                str(route), route
+            )
+            emit(f"基础谱图完成,相位优化途径: {label}")
         elif phase_optimize:
             emit("基础谱图完成,开始逐维相位优化")
             from workflow.stepwise import optimize_phase_brute_force

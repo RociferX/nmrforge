@@ -434,6 +434,10 @@ def _format_params(params: dict) -> str:
     return ", ".join(f"{key}={value}" for key, value in sorted(params.items()))
 
 
+# 相位优化途径显示名(0.2.110):数据值保持后端契约 unified/none
+_PHASE_ROUTE_LABELS = {"unified": "Auto-optimize", "none": "None"}
+
+
 # 生成谱图步骤参数报告的常见键名标签(0.2.86)
 _SPECTRUM_PARAM_LABELS = {
     "extract": "提取窗口",
@@ -474,6 +478,10 @@ def _spectrum_param_report(params: dict) -> str:
             lines.append(f"  直接维相位: {_format_phase_pair(value)}")
         elif key == "backend_runs":
             lines.append(f"  后端运行次数: {value}")
+        elif key == "phase_route":
+            lines.append(
+                f"  相位优化途径: {_PHASE_ROUTE_LABELS.get(str(value), value)}"
+            )
         elif key == "phases":
             continue
         else:
@@ -541,10 +549,10 @@ class PipelineStepRow(QWidget):
         header.addWidget(self.show_spectrum_button)
         # 0.2.108:相位优化途径选择(仅生成谱图步骤显示)
         self.phase_route_combo = QComboBox()
-        self.phase_route_combo.addItem("Unified", "unified")
+        self.phase_route_combo.addItem("Auto-optimize", "unified")
         self.phase_route_combo.addItem("None", "none")
         self.phase_route_combo.setToolTip(
-            "相位优化途径:Unified=统一方案(逐维复型预览+内存调相,默认);"
+            "相位优化途径:Auto-optimize=统一方案(逐维复型预览+内存调相,默认);"
             "None=跳过相位优化(逃生口)"
         )
         self.phase_route_combo.setVisible(False)

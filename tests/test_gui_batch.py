@@ -246,6 +246,28 @@ def test_experiment_dashboard_single_batch_groups(
     page.close()
 
 
+def test_experiment_dashboard_segmented_between_single_and_batch(
+    qapp: QApplication,
+) -> None:
+    """实验类型页:分段采集导入(合并 FID)入口位于单个导入与批量处理之间。"""
+    from PyQt6.QtWidgets import QGroupBox
+
+    from gui.dashboards import ExperimentDashboard
+
+    page = ExperimentDashboard()
+    assert isinstance(page.segmented_group, QGroupBox)
+    assert page.segmented_group.title() == "分段采集导入(合并 FID)"
+    layout = page.layout()
+    assert layout.indexOf(page.single_group) < layout.indexOf(page.segmented_group)
+    assert layout.indexOf(page.segmented_group) < layout.indexOf(page.batch_group)
+    emitted: list[str] = []
+    page.segmented_import_requested.connect(emitted.append)
+    page.segmented_source_edit.setText("/data/container")
+    page._on_segmented_import()
+    assert emitted == ["/data/container"]
+    page.close()
+
+
 def test_project_single_click_opens(
     tmp_path: Path, qapp: QApplication
 ) -> None:

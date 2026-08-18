@@ -186,6 +186,7 @@ class MainWindow(QMainWindow):
             self._import_data_with_options
         )
         self.center_panel.batch_import_requested.connect(self._batch_import)
+        self.center_panel.segmented_import_requested.connect(self._segmented_import)
         self.pipeline.view_log_requested.connect(self._on_view_step_log)
         self.pipeline.batch_summary_requested.connect(self._on_batch_summary)
         # 首次导入提示:导入完成信号里触发(见 _on_import_done/_on_batch_import_done)
@@ -346,6 +347,34 @@ class MainWindow(QMainWindow):
         """直接按路径导入(供测试与自动化场景使用,不弹对话框)。"""
         self._import_experiment_async(
             {"source": source, "title": title, "sample_id": "", "copy": True}
+        )
+
+    def _segmented_import(self, source: str) -> None:
+        """分段采集导入:容器目录(≥2 个含 acqus 的子目录)合并为一条样品数据。"""
+        if self.manager.project is None:
+            InfoDialog.show_info(self, "提示", "请先新建或打开项目")
+            return
+        source = source.strip()
+        if not source:
+            InfoDialog.show_info(self, "提示", "请选择分段采集容器目录")
+            return
+        from gui.processing import is_segmented_container
+
+        if not is_segmented_container(source):
+            InfoDialog.show_info(
+                self,
+                "分段采集导入",
+                "所选目录不是分段采集容器(顶层无 acqus 且至少 2 个子目录含 acqus)",
+            )
+            return
+        self._import_experiment_async(
+            {
+                "source": source,
+                "title": Path(source).name,
+                "sample_id": "",
+                "copy": True,
+                "segmented": True,
+            }
         )
 
     def _batch_import(self, exp_id: str, folders: list) -> None:
