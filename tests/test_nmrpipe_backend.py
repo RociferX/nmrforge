@@ -328,3 +328,150 @@ def test_clean_work_nuslist_single_dataset(
     written = (work / "nuslist").read_text(encoding="utf-8").splitlines()
     assert len(written) == len(lines)
 
+
+class _FakeConvertRuntime:
+    """模拟 bruker/fid.com:按请求产出单文件或切片式 fid。"""
+
+    def __init__(self, slices: int = 0, single: bool = False) -> None:
+        self.slices = slices
+        self.single = single
+        self.calls: list[tuple[list[str], str | None]] = []
+        self.bruker_cwd: str | None = None
+        self.acqu3s_td: int | None = None
+
+    def run(self, argv, *, cwd=None, timeout=3600, on_line=None):
+        from backend.runtime import CompletedProcess
+
+        self.calls.append((list(argv), cwd))
+        if argv[:2] == ["bruker", "-AUTO"]:
+            from core.experiment.bruker_parser import parse_param_file
+
+            base = Path(cwd)
+            self.bruker_cwd = cwd
+            if (base / "acqu3s").is_file():
+                self.acqu3s_td = parse_param_file(base / "acqu3s")["TD"]
+            (base / "fid.com").write_text(
+                "bruk2pipe -in ./ser -out ./test.fid \\\n"
+                " -xN 96 -yN 48 -zN 128\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+            if self.slices:
+                slice_dir = base / "fid"
+                slice_dir.mkdir(exist_ok=True)
+                for i in range(1, self.slices + 1):
+                    (slice_dir / f"test{i:03d}.fid").write_bytes(b"x")
+            elif self.single:
+                (base / "test.fid").write_bytes(b"x")
+        return CompletedProcess("", "", "", 0)
+
+
+def _fake_bruker(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "backend.nmrpipe_backend.find_tool",
+        lambda name, nmrpipe_bin=None: (
+            Path("/bin/bruker") if name == "bruker" else None
+        ),
+    )
+
+
+def test_convert_dir_nus3d_stages_acqu3s_td_fix(
+    tmp_path: Path, bruker_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """3D NUS(acqu3s TD=1):bruker 在 TD 修正暂存副本中运行,切片归位 work/fid。"""
+    import shutil
+
+    from backend.nmrpipe_backend import NMRPipeBackend
+    from core.experiment.bruker_parser import parse_param_file
+
+    raw = tmp_path / "raw"
+    shutil.copytree(bruker_dir / "nus_3d", raw)
+    work = tmp_path / "work"
+    work.mkdir()
+    exp = read_dataset(raw)
+    fake = _FakeConvertRuntime(slices=128)
+    backend = NMRPipeBackend(nmrpipe_bin="")
+    _fake_bruker(monkeypatch)
+    logs: list[str] = []
+    assert backend._convert_dir(fake, exp, raw, work, True, logs)
+    stage = Path(fake.bruker_cwd)
+    assert stage != raw
+    assert fake.acqu3s_td == 128  # 暂存副本 TD=NusTD
+    assert parse_param_file(raw / "acqu3s")["TD"] == 1  # 原件未动
+    assert len(list((work / "fid").glob("test*.fid"))) == 128
+    assert not (work / f"{exp.dataset_id}.fid").exists()
+    assert any("acqu3s TD" in line for line in logs)
+    assert any("切片式" in line for line in logs)
+    # 暂存已清理,raw 未产生 test.fid/fid.com/ser_full
+    assert not stage.exists()
+    assert not (raw / "test.fid").exists()
+    assert not (raw / "fid.com").exists()
+    assert not (raw / "ser_full").exists()
+
+
+def test_convert_dir_nus2d_no_stage(
+    tmp_path: Path, bruker_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2D NUS 不受 acqu3s 修正影响:仍在 raw 中转换,单文件归位。"""
+    import shutil
+
+    from backend.nmrpipe_backend import NMRPipeBackend
+
+    raw = tmp_path / "raw2d"
+    shutil.copytree(bruker_dir / "nus_2d", raw)
+    work = tmp_path / "work"
+    work.mkdir()
+    exp = read_dataset(raw)
+    fake = _FakeConvertRuntime(single=True)
+    backend = NMRPipeBackend(nmrpipe_bin="")
+    _fake_bruker(monkeypatch)
+    logs: list[str] = []
+    assert backend._convert_dir(fake, exp, raw, work, True, logs)
+    bruker_cwd = next(
+        cwd for argv, cwd in fake.calls if argv[:2] == ["bruker", "-AUTO"]
+    )
+    assert Path(bruker_cwd) == raw
+    assert (work / f"{exp.dataset_id}.fid").is_file()
+    assert not (work / "fid").exists()
+
+
+def test_converted_fid_path_slices_and_single(tmp_path: Path) -> None:
+    """convert_to_fid 产物路径:切片式 → work/fid/,单文件 → work/<id>.fid。"""
+    from backend.nmrpipe_backend import NMRPipeBackend
+
+    work = tmp_path / "work"
+    work.mkdir()
+    assert NMRPipeBackend._converted_fid_path(work, "exp") == work / "exp.fid"
+    slice_dir = work / "fid"
+    slice_dir.mkdir()
+    (slice_dir / "test001.fid").write_bytes(b"x")
+    assert NMRPipeBackend._converted_fid_path(work, "exp") == slice_dir
+
+
+def test_needs_acqu3s_td_fix_gates(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """修正仅用于 NUS 3D 单数据集(acqu3s TD=1);均匀/2D/多段不触发。"""
+    import shutil
+
+    from backend.nmrpipe_backend import NMRPipeBackend
+    from core.data.bruker_reader import read_segments
+
+    backend = NMRPipeBackend(nmrpipe_bin="")
+    raw3d = tmp_path / "raw3d"
+    shutil.copytree(bruker_dir / "nus_3d", raw3d)
+    assert backend._needs_acqu3s_td_fix(read_dataset(raw3d))
+    # 多段:experiment.segments 非空 → 不触发(保持每段单文件 + 拆切片)
+    seg_a = tmp_path / "seg_a"
+    seg_b = tmp_path / "seg_b"
+    shutil.copytree(bruker_dir / "nus_3d", seg_a)
+    shutil.copytree(bruker_dir / "nus_3d", seg_b)
+    assert not backend._needs_acqu3s_td_fix(read_segments([seg_a, seg_b]))
+    # 2D NUS 与均匀 3D 不触发
+    raw2d = tmp_path / "raw2d"
+    shutil.copytree(bruker_dir / "nus_2d", raw2d)
+    assert not backend._needs_acqu3s_td_fix(read_dataset(raw2d))
+    rawu = tmp_path / "rawu"
+    shutil.copytree(bruker_dir / "hsqc_small", rawu)
+    assert not backend._needs_acqu3s_td_fix(read_dataset(rawu))
+

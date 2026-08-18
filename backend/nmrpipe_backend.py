@@ -4,8 +4,10 @@ NMRPipe 语义只存在于本层（backend/）与生成的脚本；上层通过 
 查找路径：csh 环境 ``source ~/.cshrc; which nmrPipe`` 优先（用户要求），可显式指定 bin 目录。
 
 重要设计（真实数据验证）：
-- NUS 时 bruker -AUTO 原生识别正确（按 NusTD 取间接维、nusExpand/ser_full/mask.fid、
-  单文件 test.fid），单数据集不做切片追加，SMILE 直接从单文件走直接维处理；
+- NUS 3D 的 acqu3s TD 可能被写成 1（如 sampleB：TD=1、NusTD=100），bruker -AUTO
+  会据此按单增量输出单文件 test.fid；转换层先在暂存副本把 acqu3s TD 修正为
+  NusTD 再跑 bruker，输出切片式 fid/test%03d.fid（每 F1 一个切片，与实验室手工
+  流程一致），SMILE/直接维相位搜索按切片流消费（不再依赖单文件）；
 - 多段实验（同实验拆多个数据集，如 61/63/65/67）：参考实验室脚本
   （Desktop/data/脚本/1stfid.com + 2ndAdd.com）——每段 bruker 转换后拆成 fid 切片，
   addNMR 逐对时间域合并，再统一 SMILE 重构；支持每段可选频移（-rs Hz，防场飘）。
@@ -14,6 +16,8 @@ NMRPipe 语义只存在于本层（backend/）与生成的脚本；上层通过 
 from __future__ import annotations
 
 import json
+import os
+import re
 import shutil
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -394,7 +398,7 @@ class NMRPipeBackend:
         else:
             converted, convert_logs = self._convert(runtime, experiment, raw, work)
             logs += convert_logs
-            fid_path = work / f"{experiment.dataset_id}.fid"
+            fid_path = self._converted_fid_path(work, experiment.dataset_id)
         if not converted:
             return {
                 "success": False,
@@ -913,6 +917,78 @@ class NMRPipeBackend:
 
     # ------------------------------------------------------------------ 转换
 
+    @staticmethod
+    def _converted_fid_path(work: Path, dataset_id: str) -> Path:
+        """转换产物 fid 路径:切片式 fid/test%03d.fid → work/fid/,否则单文件。"""
+        slice_dir = work / "fid"
+        if slice_dir.is_dir() and list(slice_dir.glob("test*.fid")):
+            return slice_dir
+        return work / f"{dataset_id}.fid"
+
+    def _needs_acqu3s_td_fix(self, experiment: Experiment) -> bool:
+        """NUS 3D 单数据集:acqu3s TD 被写成 1 而 NusTD 正确时,需暂存修正。"""
+        if experiment.ndim != 3 or experiment.segments:
+            return False
+        if experiment.sampling.mode is not SamplingMode.NUS:
+            return False
+        block = experiment.acquisition_parameters.get("acqu3s", {})
+        try:
+            td = int(block.get("TD", 0) or 0)
+            nus_td = int(block.get("NusTD", 0) or 0)
+        except (TypeError, ValueError):
+            return False
+        return nus_td > 0 and td != nus_td
+
+    def _stage_acqu3s_td_fix(
+        self,
+        experiment: Experiment,
+        raw_dir: Path,
+        dest_work: Path,
+        logs: list[str],
+    ) -> Path:
+        """建暂存目录并修正 acqu3s TD=NusTD(仅副本,raw 原件不动)。
+
+        bruker -AUTO 按 acqu3s TD 决定输出形态:TD=1 会按单增量输出单文件
+        test.fid;TD=NusTD 时输出切片式 fid/test%03d.fid。暂存目录放在
+        dest_work 下,硬链接优先(省空间),失败回退复制。
+        """
+        block = experiment.acquisition_parameters.get("acqu3s", {})
+        nus_td = int(block.get("NusTD", 0) or 0)
+        stage = dest_work / "conv_stage"
+        if stage.exists():
+            shutil.rmtree(stage)
+        stage.mkdir(parents=True, exist_ok=True)
+        linked = copied = 0
+        for src in sorted(raw_dir.iterdir()):
+            if not src.is_file():
+                continue
+            dst = stage / src.name
+            # acqu3s 会被改写(TD=NusTD),必须复制而非硬链接,否则会穿透
+            # 链接污染 raw 原件
+            if src.name == "acqu3s":
+                shutil.copy2(src, dst)
+                copied += 1
+                continue
+            try:
+                os.link(src, dst)
+                linked += 1
+            except OSError:
+                shutil.copy2(src, dst)
+                copied += 1
+        acqu3s = stage / "acqu3s"
+        text = acqu3s.read_text(encoding="utf-8", errors="replace")
+        patched, count = re.subn(
+            r"(?m)^##\$TD=\s*\d+", f"##$TD= {nus_td}", text, count=1
+        )
+        if count != 1:
+            raise RuntimeError(f"acqu3s 缺少 TD 参数:{acqu3s}")
+        acqu3s.write_text(patched, encoding="utf-8", newline="\n")
+        logs.append(
+            f"acqu3s TD 修正副本(暂存):TD → {nus_td}"
+            f"（{linked} 链接/{copied} 复制,raw 原件未改）"
+        )
+        return stage
+
     def _finalize_converted_fid(
         self,
         raw_dir: Path,
@@ -950,67 +1026,81 @@ class NMRPipeBackend:
         is_nus: bool,
         logs: list[str],
     ) -> bool:
-        """在 raw_dir 中 bruker -AUTO → fid.com 归位 dest_work → patch → 执行
-        (脚本在 work 目录,相对路径以 raw_dir 为 cwd 解析)→ 移动 test.fid 到 dest_work。
+        """在 raw_dir（或 NUS 3D 的 TD 修正暂存副本）中 bruker -AUTO → fid.com
+        归位 dest_work → patch → 执行（脚本在 work 目录,相对路径以转换目录为
+        cwd 解析）→ 产物（单文件 test.fid 或切片式 fid/test%03d.fid）归位 dest_work。
 
-        NUS 时信任 bruker 原生识别（nusExpand/mask/单文件 test.fid）；bruker 失败时
-        仅均匀采样走 bruk2pipe 回退。转换后清理 ser_full（可再生，避免占空间）。
+        NUS 3D 的 acqu3s TD=1 时先在 dest_work/conv_stage 修正 TD=NusTD 再跑
+        bruker（输出切片式 fid,与实验室手工流程一致;raw 原件不改动,暂存用完即删）。
+        多段路径（experiment.segments）保持原流程:每段单文件 + xyz2pipe 拆切片。
+        bruker 失败时仅均匀采样走 bruk2pipe 回退。转换后清理 ser_full（可再生）。
         """
-        raw_fid = raw_dir / "fid.com"
-        fid_com = dest_work / "fid.com"
-        bruker_ok = False
-        bruker = find_tool("bruker", self._bin_dir())
-        if bruker is not None:
-            result = runtime.run(["bruker", "-AUTO"], cwd=str(raw_dir), timeout=120)
-            logs.append(f"bruker -AUTO ({raw_dir.name}): rc={result.returncode}")
-            if result.returncode == 0 and raw_fid.is_file():
-                # 0.2.91:fid.com 归位 process/(dest_work),raw 不再保留生成脚本
-                if raw_fid != fid_com:
-                    fid_com.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.move(str(raw_fid), str(fid_com))
-                text = fid_com.read_text(encoding="utf-8", errors="replace")
-                patched, corrections = patch_fid_com(text, experiment)
-                if is_nus:
-                    nuslist_path = raw_dir / "nuslist"
-                    if nuslist_path.is_file():
-                        nuslist_count = len(read_nuslist(nuslist_path))
-                        patched, nus_corrections = patch_nus_expand_count(
-                            patched, nuslist_count
-                        )
-                        corrections += nus_corrections
-                for correction in corrections:
-                    logs.append(f"参数修正: {correction}")
-                # LF 行尾必须：CRLF 会让 csh 的 \ 续行失效;脚本在 work 目录,
-                # 内部相对路径(./ser)以 raw_dir 为 cwd 解析
-                fid_com.write_text(patched, encoding="utf-8", newline="\n")
-                run_result = runtime.run(
-                    ["csh", str(fid_com)], cwd=str(raw_dir), timeout=900
+        stage: Path | None = None
+        convert_dir = raw_dir
+        if self._needs_acqu3s_td_fix(experiment):
+            stage = self._stage_acqu3s_td_fix(experiment, raw_dir, dest_work, logs)
+            convert_dir = stage
+        try:
+            raw_fid = convert_dir / "fid.com"
+            fid_com = dest_work / "fid.com"
+            bruker_ok = False
+            bruker = find_tool("bruker", self._bin_dir())
+            if bruker is not None:
+                result = runtime.run(
+                    ["bruker", "-AUTO"], cwd=str(convert_dir), timeout=120
                 )
-                logs.append(f"fid.com: rc={run_result.returncode}")
-                bruker_ok = run_result.returncode == 0
-        if not bruker_ok:
-            if is_nus:
+                logs.append(f"bruker -AUTO ({convert_dir.name}): rc={result.returncode}")
+                if result.returncode == 0 and raw_fid.is_file():
+                    # 0.2.91:fid.com 归位 process/(dest_work),raw 不再保留生成脚本
+                    if raw_fid != fid_com:
+                        fid_com.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.move(str(raw_fid), str(fid_com))
+                    text = fid_com.read_text(encoding="utf-8", errors="replace")
+                    patched, corrections = patch_fid_com(text, experiment)
+                    if is_nus:
+                        nuslist_path = convert_dir / "nuslist"
+                        if nuslist_path.is_file():
+                            nuslist_count = len(read_nuslist(nuslist_path))
+                            patched, nus_corrections = patch_nus_expand_count(
+                                patched, nuslist_count
+                            )
+                            corrections += nus_corrections
+                    for correction in corrections:
+                        logs.append(f"参数修正: {correction}")
+                    # LF 行尾必须：CRLF 会让 csh 的 \ 续行失效;脚本在 work 目录,
+                    # 内部相对路径(./ser)以转换目录为 cwd 解析
+                    fid_com.write_text(patched, encoding="utf-8", newline="\n")
+                    run_result = runtime.run(
+                        ["csh", str(fid_com)], cwd=str(convert_dir), timeout=900
+                    )
+                    logs.append(f"fid.com: rc={run_result.returncode}")
+                    bruker_ok = run_result.returncode == 0
+            if not bruker_ok:
+                if is_nus:
+                    return False
+                logs.append("回退：使用内置 bruk2pipe 参数转换")
+                script = generate_convert_script(experiment)
+                convert_script = dest_work / f"{experiment.dataset_id}_convert.com"
+                convert_script.write_text(script, encoding="utf-8", newline="\n")
+                run_result = runtime.run(
+                    ["csh", str(convert_script)], cwd=str(convert_dir), timeout=600
+                )
+                logs.append(f"convert.com: rc={run_result.returncode}")
+                if run_result.returncode != 0:
+                    return False
+            if not self._finalize_converted_fid(
+                convert_dir, dest_work, experiment.dataset_id, logs
+            ):
                 return False
-            logs.append("回退：使用内置 bruk2pipe 参数转换")
-            script = generate_convert_script(experiment)
-            convert_script = dest_work / f"{experiment.dataset_id}_convert.com"
-            convert_script.write_text(script, encoding="utf-8", newline="\n")
-            run_result = runtime.run(
-                ["csh", str(convert_script)], cwd=str(raw_dir), timeout=600
-            )
-            logs.append(f"convert.com: rc={run_result.returncode}")
-            if run_result.returncode != 0:
-                return False
-        if not self._finalize_converted_fid(
-            raw_dir, dest_work, experiment.dataset_id, logs
-        ):
-            return False
-        # SMILE 只需 nuslist;ser_full/mask.fid 等中间产物删除省空间
-        for stale in ("ser_full", "mask.fid"):
-            stale_path = raw_dir / stale
-            if stale_path.is_file():
-                stale_path.unlink()
-        return True
+            # SMILE 只需 nuslist;ser_full/mask.fid 等中间产物删除省空间
+            for stale in ("ser_full", "mask.fid"):
+                stale_path = convert_dir / stale
+                if stale_path.is_file():
+                    stale_path.unlink()
+            return True
+        finally:
+            if stage is not None and stage.is_dir():
+                shutil.rmtree(stage, ignore_errors=True)
 
     def _light_phase_search(
         self,

@@ -5,8 +5,9 @@
 - xMODE DQD / yMODE Echo-AntiEcho|Complex / zMODE Complex；
 - DSPFVS=21 → -ws 8 -noi2f；禁用 -DMX；
 - -aq2D 数值（FnMODE 4/6→3，5→2）；
-- NUS 间接维 TD 用 NusTD（acqu3s TD=1 时 bruker 原生按 NusTD 识别，
-  输出单文件 test.fid + mask.fid，SMILE 直接消费，无需切片追加）。
+- NUS 间接维 TD 用 NusTD；3D NUS 的 acqu3s TD 被写成 1 时（如 sampleB），
+  转换层先在暂存副本把 TD 修正为 NusTD 再跑 bruker，输出切片式
+  fid/test%03d.fid（SMILE 按切片流消费，见 nmrpipe_backend._convert_dir）。
 SMILE 重构参数可经 reconstruct_nus params 覆盖（nSigma/thresh/xQ3/scaling/report），
 用于对照实验室脚本（data/脚本/smile2.com）调优。
 """

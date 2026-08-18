@@ -1,5 +1,22 @@
 # 变更日志
 
+## [0.2.118] - 2026-08-18
+
+- 修复(Backend):3D NUS 生成单文件 FID——NUS 数据 acqu3s TD 被写成 1
+  (sampleB:##$TD= 1,##$NusTD= 100)时,bruker -AUTO 按单增量输出单文件
+  test.fid;现转换前在暂存副本(work/conv_stage,硬链接优先、acqu3s 复制)
+  把 acqu3s TD 修正为 NusTD 再跑 bruker,输出切片式 fid/test%03d.fid
+  (每 F1 一个切片,与实验室手工流程一致),归位 process/fid/,raw 原件
+  不被改动;暂存用完即删;
+- convert_to_fid 对切片式产物返回 work/fid/ 目录路径(单文件路径兼容
+  保留);reconstruct_nus/直接维相位搜索/finalize 按 0.2.85 切片流消费;
+- 同步更新模块 docstring 与 script_generator 注释,删除「单数据集不做
+  切片追加」旧结论;新增测试:3D NUS 暂存修正(副本 TD=NusTD、raw 原件
+  不变、切片归位、暂存清理)、2D NUS 不受影响、产物路径选择、gate 条件
+  (均匀/2D/多段不触发);
+- 测试:本地全量 563 passed(0.2.117 基线 559 + 新增 4)+ ruff 全绿;
+  VM 验证见 docs/PROJECT_STATUS.md。
+
 ## [0.2.117] - 2026-08-18
 
 - merge(Architect):并入 GUI 0.2.112 补充(弹窗统一居中到所在屏幕中心、
