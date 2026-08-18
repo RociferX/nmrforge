@@ -157,3 +157,113 @@ def test_classify_hncoca_only_with_13c() -> None:
     assert result.name == "HN(CO)CA"
     assert result.confidence >= 0.8
 
+
+def test_classify_ssnmr_nca_nco_by_pulprog() -> None:
+    """2D 15N/13C:NCA/NCO 按 PULPROG 区分。"""
+    from core.experiment.experiment_classifier import classify
+
+    nca = classify(_experiment_with_nuclei(2, ["13C", "15N"], "SPECIFIC-CP nca"))
+    assert nca.name == "NCA"
+    nco = classify(_experiment_with_nuclei(2, ["13C", "15N"], "nco"))
+    assert nco.name == "NCO"
+
+
+def test_classify_ssnmr_3d_correlation_by_pulprog() -> None:
+    """3D 15N/13C/13C:NCACX/NCOCX/NCACB/NCOCACB 按 PULPROG 区分。"""
+    from core.experiment.experiment_classifier import classify
+
+    cases = {
+        "ncacx": "NCACX",
+        "ncocx": "NCOCX",
+        "ncacb": "NCACB",
+        "ncocacb": "NCOCACB",
+        "ncocb": "NCOCACB",
+    }
+    for pulprog, expected in cases.items():
+        result = classify(_experiment_with_nuclei(3, ["13C", "15N", "13C"], pulprog))
+        assert result.name == expected, pulprog
+        assert result.confidence >= 0.8, pulprog
+
+
+def test_classify_ssnmr_canco_family() -> None:
+    """3D 13C/15N/13C:CANCO/CAN(CO)CA/CBCANCO 按 PULPROG 区分。"""
+    from core.experiment.experiment_classifier import classify
+
+    cases = {
+        "canco": "CANCO",
+        "cancoCA": "CAN(CO)CA",
+        "cbcanco": "CBCANCO",
+    }
+    for pulprog, expected in cases.items():
+        result = classify(_experiment_with_nuclei(3, ["13C", "15N", "13C"], pulprog))
+        assert result.name == expected, pulprog
+
+
+def test_classify_ssnmr_cc_correlation_family() -> None:
+    """2D 13C/13C:DARR/PDSD/RFDR/CORD/INADEQUATE/HCC 按 PULPROG 区分。"""
+    from core.experiment.experiment_classifier import classify
+
+    cases = {
+        "darr": "DARR",
+        "pdsd": "PDSD",
+        "rfdr": "RFDR",
+        "cord": "CORD",
+        "inadequate": "INADEQUATE",
+        "cshi.hCC_sd": "HCC",
+    }
+    for pulprog, expected in cases.items():
+        result = classify(_experiment_with_nuclei(2, ["13C", "13C"], pulprog))
+        assert result.name == expected, pulprog
+
+
+def test_classify_ssnmr_hetcor_by_nuclei() -> None:
+    """HETCOR:同一 PULPROG 按核组合区分 1H-13C / 1H-15N。"""
+    from core.experiment.experiment_classifier import classify
+
+    hc = classify(_experiment_with_nuclei(2, ["13C", "1H"], "FSLGhetcor"))
+    assert hc.name == "HETCOR"
+    hn = classify(_experiment_with_nuclei(2, ["15N", "1H"], "FSLGhetcor"))
+    assert hn.name == "HNHETCOR"
+
+
+def test_classify_ssnmr_tedor_pain_nn() -> None:
+    """2D 距离约束:TEDOR/PAIN-CP(15N/13C)、NN(15N/15N)。"""
+    from core.experiment.experiment_classifier import classify
+
+    tedor = classify(_experiment_with_nuclei(2, ["13C", "15N"], "tedor"))
+    assert tedor.name == "TEDOR"
+    pain = classify(_experiment_with_nuclei(2, ["13C", "15N"], "paincp"))
+    assert pain.name == "PAIN-CP"
+    nn = classify(_experiment_with_nuclei(2, ["15N", "15N"], "nn"))
+    assert nn.name == "NN"
+
+
+def test_classify_ssnmr_chhc_nhhc_and_ccc() -> None:
+    """2D 1H/1H:CHHC/NHHC 按 PULPROG 区分;3D 13C/13C/13C:CCC 唯一命中。"""
+    from core.experiment.experiment_classifier import classify
+
+    chhc = classify(_experiment_with_nuclei(2, ["1H", "1H"], "chhc"))
+    assert chhc.name == "CHHC"
+    nhhc = classify(_experiment_with_nuclei(2, ["1H", "1H"], "nhhc"))
+    assert nhhc.name == "NHHC"
+    ccc = classify(_experiment_with_nuclei(3, ["13C", "13C", "13C"], "ccc"))
+    assert ccc.name == "CCC"
+    assert ccc.confidence >= 0.9  # 核组合唯一命中
+
+
+def test_classify_liquid_not_shadowed_by_solid() -> None:
+    """液体关键词不被固体模板抢占(同核组合靠 PULPROG 区分)。"""
+    from core.experiment.experiment_classifier import classify
+
+    cases = [
+        (3, ["1H", "15N", "13C"], "hncacb", "HNCACB"),
+        (3, ["1H", "15N", "13C"], "hnca", "HNCA"),
+        (3, ["1H", "15N", "13C"], "hnco", "HNCO"),
+        (3, ["1H", "15N", "13C"], "cbcanh", "CBCANH"),
+        (3, ["1H", "15N", "13C"], "cbcaconh", "CBCA(CO)NH"),
+        (2, ["1H", "1H"], "noesyph", "NOESY"),
+    ]
+    for ndim, nuclei, pulprog, expected in cases:
+        result = classify(_experiment_with_nuclei(ndim, nuclei, pulprog))
+        assert result.name == expected, (pulprog, result)
+

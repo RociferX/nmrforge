@@ -7,7 +7,7 @@ expected_peak_mode: absorption
 peak_sign: uniform
 display_orientation: "13C/13C/1H"
 priors:
-  "1H": [-10.0, 20.0]
-  "13C": [-50.0, 250.0]
+  "1H": [-5.0, 20.0]
+  "13C": [10.0, 190.0]
 constraints:
   ndim: 3

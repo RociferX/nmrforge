@@ -1,5 +1,29 @@
 # 变更日志
 
+## [0.2.119] - 2026-08-18
+
+- 固体核磁(MAS)实验类型预设扩充(Backend,presets/*.yaml 单一数据源,
+  不新增 core/experiments/*.py 模板模块):
+  - 2D 15N-13C:NCA/NCO(SPECIFIC-CP)、TEDOR/PAIN-CP(距离约束);
+  - 2D 13C-13C:DARR/PDSD/RFDR/CORD/INADEQUATE/HCC;
+  - 2D 1H-X:HETCOR/HNHETCOR(CP/FSLG)、NN(15N-15N PAR)、
+    CHHC/NHHC(1H-1H 空间,核组合待真实数据验证);
+  - 3D 15N/13C/13C:NCACX/NCOCX/NCACB/NCOCACB(Cα/Cβ 反相 → mixed +
+    peak_sign_regions);3D 13C/15N/13C 序列行走:CANCO/CAN(CO)CA/
+    CBCANCO;3D 13C-13C-13C:CCC;
+  - 化学位移先验按 BMRB(Ulrich et al., Nucleic Acids Res. 36, D402
+    (2008))与固体核磁文献:1H -5–20、15N 90–140(同核 90–160)、
+    13C 脂肪 10–75、Cα 40–70、Cβ 15–45、羰基 165–185、13C 全谱
+    10–190;同步收紧 nnh/cch 的 -50–250 占位;
+  - 分类器 _PULPROG_TYPES 扩展(长/具体在前;同核组合靠候选核匹配
+    区分,FSLGhetcor 按核组合分 HETCOR/HNHETCOR);液体关键词不被
+    固体抢占(hncacb/hnca/hnco/cbcanh/cbcaconh/noesy 回归);
+  - presets/README.md 按类别登记并给出文献依据;
+  - 1D 类型(CP13C/CP15N/PROTON1D/C13_1D)仍不收录 YAML:
+    test_gui_presets 仅允许 ndim=2/3,待 GUI 放开后补(汇报 Architect);
+  - 测试:新增 8 个分类器回归;本地全量 571 passed + ruff 全绿;
+    VM 真实数据分类验证见 docs/PROJECT_STATUS.md。
+
 ## [0.2.118] - 2026-08-18
 
 - 修复(Backend):3D NUS 生成单文件 FID——NUS 数据 acqu3s TD 被写成 1
