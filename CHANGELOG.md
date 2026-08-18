@@ -11,7 +11,7 @@
   双注册去重(0.2.117 修复)与 MAS 关键词共存;cch/nnh.yaml priors 已由
   Backend 按 BMRB 收紧(废弃 -50~250 占位);与 backend-dev 逐文件 diff
   为空(无代码丢失);
-- 测试:本地全量 574 passed、ruff 全绿;VM 全量待复测。
+- 测试:本地全量 574 passed、ruff 全绿;VM 全量 570 passed + 4 skipped(Python 3.12.13,HEAD 2316ce1),ruff 全绿。
 
 ## [0.2.120] - 2026-08-18
 
