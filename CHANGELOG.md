@@ -1,5 +1,18 @@
 # 变更日志
 
+## [0.2.115] - 2026-08-18
+
+- merge(Architect):并入 GUI 0.2.109-0.2.112(新建内联命名/右键重命名原地
+  编辑、日志温度开尔文 + Auto-optimize 文案、1200 MHz-2 GHz 核推断、分段
+  采集导入入口、实验类型→数据类型改名 + 注释字段挪层、设置对话框裁剪
+  [移除 SMILE 线程上限/points_per_line,与 0.2.113 线程护栏移除一致] +
+  默认线宽接入生成谱图参数);0.2.109-0.2.112 与 Architect 版本号撞号,
+  CHANGELOG 按版本归一;
+- 审查(Architect):gui/processing.py 线宽注入为 Shared Contract 向后兼容
+  扩展(显式 params 优先,后端按轴取值/回退);
+- 测试:本地全量 552 passed、VM 全量 548 passed + 4 skipped(0687243),
+  ruff 全绿。
+
 ## [0.2.114] - 2026-08-18
 
 - 测量结论(VM 实测):SMILE 峰值内存与线程数无关——同一 3D HNCACB
