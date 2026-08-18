@@ -1453,15 +1453,14 @@ def test_rename_editor_appears_at_click_position(
 
     manager = _manager_with_experiment(tmp_path, monkeypatch)
     window = MainWindow(manager=manager)
-    window.show()  # 子控件可见性依赖父窗口显示
     panel = window.project_tree
     exp_item = panel.tree.topLevelItem(0).child(0).child(0)
     anchor = panel.tree.viewport().mapToGlobal(QPoint(30, 10))
+    assert not panel._rename_editor.isVisible()  # 默认不显示(0.2.112 回归)
     panel._begin_rename("experiment", exp_item, anchor)
     editor = panel._rename_editor
     assert editor.isVisible()
-    # 0.2.112:输入框为树视口内嵌子控件,位置为视口内坐标
-    assert editor.pos() == panel.tree.viewport().mapFromGlobal(anchor)
+    assert editor.pos() == anchor  # 输入框出现在右键位置(未越出屏幕)
     editor._edit.setText("HNCACB2")
     editor._commit()
     assert manager.project is not None
@@ -1478,7 +1477,7 @@ def test_context_menu_rename_opens_inline_editor(
 
     manager = _manager_with_experiment(tmp_path, monkeypatch)
     panel = ProjectTreePanel(manager)
-    panel.show()  # 子控件可见性依赖父窗口显示
+    assert not panel._rename_editor.isVisible()  # 默认不显示(0.2.112 回归)
     project_item = panel.tree.topLevelItem(0).child(0)
     menu = QMenu()
     panel._on_context_menu_impl(menu, project_item, QPoint(10, 20))

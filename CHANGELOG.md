@@ -17,8 +17,9 @@
   显式 params 优先,后端按轴取值)。
 - 导入页:「链接原始数据到项目」复选框移到三个导入入口(单个/分段/批量)上方;
   欢迎页新建项目输入行:占位文案「输入项目名称」,右侧新增「确定」按钮。
-- 修复:右键重命名输入框由 Qt.Popup 顶层窗口改为树视口内嵌子控件,消除
-  Wayland 下 "Failed to create grabbing popup" 警告。
+- 修复:右键重命名输入框(Qt.Popup)补上 transientParent(顶层窗口父级),
+  消除 Wayland 下 "Failed to create grabbing popup" 警告;点击外部自动
+  关闭并提交,回车/Esc 行为不变,不再残留显示。
 
 ## [0.2.111] - 2026-08-18
 
