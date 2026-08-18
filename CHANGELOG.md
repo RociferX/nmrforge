@@ -1,5 +1,22 @@
 # 变更日志
 
+## [0.2.111] - 2026-08-18
+
+- 重构(Architect,用户要求「不多处资源,能合并就合并」):实验模板单一数据源
+  presets/*.yaml——core/experiments/registry 实现 ExperimentTemplate.from_yaml
+  与 load_presets(导入 core.experiments 即加载,按显示名 + 文件 stem 双注册,
+  Generic/大小写命名差异均可解析);删除 15 个逐模块 Python 模板
+  (cbcaconh/cbcanh/cosy/generic/hmbc/hmqc/hnca/hncacb/hnco/hnco_ca/hnha/
+  hsqc/noesy/roesy/tocsy),presets 成为唯一数据源;分类器显式触发注册;
+- 顺带合并重复默认值:GUI param_schema 兜底骨架与参数对话框的 ext_lo/ext_hi
+  回退改读 backend.config.load_processing_defaults(消除第三处硬编码);
+  清理 backend/config.py 过时注释(script_generator 已无 _DEFAULT_LINEWIDTH_HZ);
+  presets/hncacb.yaml priors 补 13C_alpha/13C_beta(保留原 Python 版细分);
+- 防漂移测试:冒烟新增 YAML 全注册/stem 别名/分类器 pulprog 名单防漂移;
+  test_gui_processing 新增 GUI ext 默认值与后端一致断言;
+- 测试:本地全量 535 passed、VM 全量 531 passed + 4 skipped(8088e63),
+  ruff 全绿。
+
 ## [0.2.110] - 2026-08-18
 
 - 运维(Architect,用户要求):VM 测试产物归置——新增 scripts/vm_test.sh 统一
