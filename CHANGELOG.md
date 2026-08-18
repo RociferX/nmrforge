@@ -1,5 +1,24 @@
 # 变更日志
 
+## [0.2.113] - 2026-08-18
+
+- 调整(Architect,用户指出):移除「大网格 SMILE 线程数强制 ≤2」护栏(D006)——
+
+  sampleM 事故根因是直接维内存(非切片流 / 直接维填零过多),已由 0.2.112
+
+  内存护栏兜底(估计 → 降直接维填零 1×TD → 提示所需 GB);按网格限线程只会
+
+  无谓拖慢大网格 SMILE。SMILE 线程恢复为 resolve_nthread 默认(机器线程数-2),
+
+  配置 smile.nthread 仍可显式覆盖;
+
+- 删除 enforce_smile_thread_guardrail 及其两处调用(reconstruct_nus / 轻量
+
+  相位搜索);test_phase_nus_3d 中过时护栏测试移除;
+
+- 测试:本地全量 539 passed、VM 全量(待复跑),ruff 全绿。
+
+
 ## [0.2.112] - 2026-08-18
 
 - feat(Architect,用户要求):SMILE 内存估计与护栏——生成谱图(NUS)前估计
