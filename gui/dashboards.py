@@ -337,6 +337,12 @@ class ExperimentDashboard(QWidget):
             self.copy_check.isChecked(),
         )
 
+    def clear_import_form(self) -> None:
+        """导入成功后清空单个/分段导入表单的名称与路径(0.2.112)。"""
+        self.name_edit.clear()
+        self.source_edit.clear()
+        self.segmented_source_edit.clear()
+
     def _on_segmented_browse(self) -> None:
         """选择分段采集容器目录。"""
         path = QFileDialog.getExistingDirectory(

@@ -361,3 +361,18 @@ def test_experiment_dashboard_copy_check_above_groups(
     assert layout.indexOf(page.segmented_group) < layout.indexOf(page.batch_group)
     assert page.copy_check.isChecked()
     page.close()
+
+
+def test_experiment_dashboard_clear_import_form(qapp: QApplication) -> None:
+    """0.2.112:导入表单提供清理(名称/路径),便于连续导入。"""
+    from gui.dashboards import ExperimentDashboard
+
+    page = ExperimentDashboard()
+    page.name_edit.setText("样品1")
+    page.source_edit.setText("/data/a")
+    page.segmented_source_edit.setText("/data/container")
+    page.clear_import_form()
+    assert page.name_edit.text() == ""
+    assert page.source_edit.text() == ""
+    assert page.segmented_source_edit.text() == ""
+    page.close()
