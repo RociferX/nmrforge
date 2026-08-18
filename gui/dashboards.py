@@ -157,6 +157,11 @@ class ExperimentDashboard(QWidget):
         layout.addWidget(self.data_table)
         layout.addSpacing(10)
 
+        self.copy_check = QCheckBox("链接原始数据到项目(只读文件链接,必要时复制)")
+        self.copy_check.setChecked(True)
+        layout.addWidget(self.copy_check)
+        layout.addSpacing(4)
+
         self.single_group = QGroupBox("单个导入")
         single_layout = QVBoxLayout(self.single_group)
         self.name_edit = QLineEdit()
@@ -170,9 +175,6 @@ class ExperimentDashboard(QWidget):
         browse.clicked.connect(self._browse)
         form.addWidget(browse)
         single_layout.addLayout(form)
-        self.copy_check = QCheckBox("链接原始数据到项目(只读文件链接,必要时复制)")
-        self.copy_check.setChecked(True)
-        single_layout.addWidget(self.copy_check)
         self.import_button = QPushButton("导入样品数据")
         self.import_button.setEnabled(False)
         self.import_button.clicked.connect(self._on_import)

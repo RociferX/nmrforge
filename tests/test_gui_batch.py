@@ -346,3 +346,18 @@ def test_welcome_single_click_opens(
     page._on_recent_clicked(item)
     assert opened and Path(opened[0]).name == "projA"
     page.close()
+
+
+def test_experiment_dashboard_copy_check_above_groups(
+    qapp: QApplication,
+) -> None:
+    """0.2.112:「链接原始数据到项目」复选框位于三个导入分组上方。"""
+    from gui.dashboards import ExperimentDashboard
+
+    page = ExperimentDashboard()
+    layout = page.layout()
+    assert layout.indexOf(page.copy_check) < layout.indexOf(page.single_group)
+    assert layout.indexOf(page.single_group) < layout.indexOf(page.segmented_group)
+    assert layout.indexOf(page.segmented_group) < layout.indexOf(page.batch_group)
+    assert page.copy_check.isChecked()
+    page.close()
