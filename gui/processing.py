@@ -131,14 +131,16 @@ class ProcessingController:
         self,
         source: str,
         *,
+        exp_id: str = "",
         title: str = "",
         sample_id: str = "",
         copy: bool = True,
     ):
-        """分段采集导入透传(0.2.108):容器目录下多个含 acqus 的分段子目录
+        """分段采集导入透传(0.2.108/G2B-011):容器目录下多个含 acqus 的
+        分段子目录合并为一条样品数据(后端逐段转换 + addNMR 合并)。
 
-        合并为一条样品数据(后端逐段转换 + addNMR 合并),并新建实验;
-        与批量导入(多条条目)明确区分。返回 workflow ImportResult。
+        exp_id 非空时导入到该实验类型(与普通单个导入一致),为空时后端
+        新建实验(旧行为);与批量导入(多条条目)明确区分。返回 ImportResult。
         """
         from workflow.import_workflow import import_segmented_dataset
 
@@ -146,6 +148,7 @@ class ProcessingController:
         return import_segmented_dataset(
             self._manager,
             source,
+            exp_id=exp_id,
             title=title,
             sample_id=sample_id,
             copy=copy,

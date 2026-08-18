@@ -1,5 +1,18 @@
 # 变更日志
 
+## [0.2.122] - 2026-08-18
+
+- viewer 轴序校对与重排(GUI):Spectrum3D.load_from_ft3 / load_from_ft2
+  加载后按存储头 FDF*LABEL/FDF*OBS 推断核,与 metadata 逻辑轴核对照,
+  不一致时重排 data/axes 到逻辑序(F1,F2,F3)并告警「轴序重排」;3D
+  标签/切片/投影/峰表列映射跟随重排;每轴核与常见 ppm 范围不符时自检
+  告警;独立查看器与 GUI 谱图面板均接入;
+- 分段采集导入到当前实验类型(G2B-011):分段导入不再总是新建实验类型,
+  改为在当前选中实验类型下新增样品数据;无当前实验类型时后端新建;
+  ProcessingController.import_segmented_dataset 增加 exp_id 透传(向后兼容);
+- 测试:轴序重排/自检告警/2D 重排、分段导入 exp_id 透传与信号携带当前
+  实验类型;本地全量 pytest + ruff 全绿。
+
 ## [0.2.121] - 2026-08-18
 
 - merge(Architect):并入 Backend 0.2.118-0.2.120——3D NUS acqu3s TD 修正

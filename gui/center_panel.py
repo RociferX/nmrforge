@@ -35,7 +35,7 @@ class CenterPanel(QWidget):
     import_data_requested = pyqtSignal(str)  # exp_id(兼容:打开导入表单)
     import_options_requested = pyqtSignal(str, str, str, bool)  # (exp_id, name, source, copy)
     batch_import_requested = pyqtSignal(str, list)  # (exp_id, folders)
-    segmented_import_requested = pyqtSignal(str)  # 分段采集容器目录
+    segmented_import_requested = pyqtSignal(str, str)  # (exp_id, 分段采集容器目录)
     create_experiment_requested = pyqtSignal(str)  # 实验类型标题
     edit_notes_requested = pyqtSignal(str, str, str)  # (kind, exp_id, data_id)
     new_project_requested = pyqtSignal(str)  # 项目名称

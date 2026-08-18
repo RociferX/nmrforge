@@ -1458,10 +1458,11 @@ def test_segmented_import_entry_validates_and_calls_async(
         "_import_experiment_async",
         lambda self, data: captured.append(data),
     )
-    window._segmented_import(str(container))
+    window._segmented_import("exp_001", str(container))
     assert captured and captured[0]["segmented"] is True
     assert captured[0]["source"] == str(container)
     assert captured[0]["title"] == "container"
+    assert captured[0]["experiment_id"] == "exp_001"  # G2B-011:导入当前实验类型
     window.close()
 
 
@@ -1485,9 +1486,35 @@ def test_segmented_import_rejects_non_container(
     single = tmp_path / "single"
     single.mkdir()
     (single / "acqus").write_text("x", encoding="utf-8")
-    window._segmented_import(str(single))
+    window._segmented_import("exp_001", str(single))
     assert not captured
     assert messages and "不是分段采集容器" in messages[0]
+    window.close()
+
+
+def test_segmented_import_emits_current_experiment(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """G2B-011:实验类型页分段入口发请求时携带当前实验类型 id。"""
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    window = MainWindow(manager=manager)
+    captured: list[dict] = []
+    monkeypatch.setattr(
+        MainWindow,
+        "_import_experiment_async",
+        lambda self, data: captured.append(data),
+    )
+    container = tmp_path / "container"
+    container.mkdir()
+    for seg in ("s1", "s2"):
+        (container / seg).mkdir()
+        (container / seg / "acqus").write_text("x", encoding="utf-8")
+    page = window.center_panel.experiment_page
+    page.set_context(manager, "exp_001", "标签")
+    page.segmented_source_edit.setText(str(container))
+    page._on_segmented_import()
+    assert captured and captured[0]["segmented"] is True
+    assert captured[0]["experiment_id"] == "exp_001"
     window.close()
 
 
