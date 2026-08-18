@@ -83,10 +83,7 @@ def test_window_empty_state(qapp: QApplication) -> None:
 def test_new_project_action(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(
-        "gui.main_window.QInputDialog.getText",
-        staticmethod(lambda *args, **kwargs: ("demo", True)),
-    )
+    """未打开项目时,「新建项目」为欢迎页内联命名(不弹窗)。"""
     # 新建项目落在默认工作区(避免污染真实 ~/NMRForgeWorkspace)
     workspace = tmp_path / "ws"
     workspace.mkdir()
@@ -95,6 +92,7 @@ def test_new_project_action(
         lambda: _WorkspaceStub(workspace),
     )
     window = MainWindow()
+
     class _FakeNotesDialog:
         DialogCode = QDialog.DialogCode
 
@@ -109,9 +107,46 @@ def test_new_project_action(
 
     monkeypatch.setattr("gui.main_window.NotesDialog", _FakeNotesDialog)
     window.new_project()
+    page = window.center_panel.welcome_page
+    assert not page._name_edit.isHidden()  # 页内输入行出现,非弹窗
+    page._name_edit.setText("demo")
+    page._commit_name()
     assert window.manager.project is not None
     assert window.manager.project.name == "demo"
     assert window.experiment_tree.topLevelItemCount() == 0
+    window.close()
+
+
+def test_new_project_tree_inline_when_project_open(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """项目已打开时,「新建项目」在项目树内联命名(不弹窗)。"""
+    manager = _build_manager(tmp_path, monkeypatch)
+    workspace = tmp_path / "ws"
+    monkeypatch.setattr(
+        "gui.main_window.WorkspaceManager",
+        lambda: _WorkspaceStub(workspace),
+    )
+
+    class _FakeNotesDialog:
+        DialogCode = QDialog.DialogCode
+
+        def __init__(self, parent, title, kind="", values=None):
+            pass
+
+        def exec(self):
+            return QDialog.DialogCode.Accepted
+
+        def result_fields(self):
+            return {}
+
+    monkeypatch.setattr("gui.main_window.NotesDialog", _FakeNotesDialog)
+    window = MainWindow(manager=manager)
+    window.new_project()
+    assert window.project_tree._pending_kind == "project"
+    window.project_tree._commit_pending_create("demo2")
+    assert window.manager.project is not None
+    assert window.manager.project.name == "demo2"
     window.close()
 
 
@@ -156,12 +191,8 @@ def test_open_project_action(
 def test_add_experiment_action(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """「添加实验类型」= 新建空白实验类型(不产生样品数据,不弹数据文件夹选择)。"""
+    """「添加实验类型」= 新建空白实验类型:项目树内联命名(不弹窗)。"""
     manager = _build_manager(tmp_path, monkeypatch)
-    monkeypatch.setattr(
-        "gui.main_window.QInputDialog.getText",
-        staticmethod(lambda *args, **kwargs: ("3D HNCACB", True)),
-    )
 
     class _FakeNotesDialog:
         DialogCode = QDialog.DialogCode
@@ -178,6 +209,8 @@ def test_add_experiment_action(
     monkeypatch.setattr("gui.main_window.NotesDialog", _FakeNotesDialog)
     window = MainWindow(manager=manager)
     window.add_experiment()
+    assert window.project_tree._pending_kind == "experiment"
+    window.project_tree._commit_pending_create("3D HNCACB")
     assert window.experiment_tree.topLevelItemCount() == 3
     last = window.experiment_tree.topLevelItem(2)
     assert last.text(0) == "exp_003"

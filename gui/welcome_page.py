@@ -10,11 +10,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import QEvent, Qt, pyqtSignal
+from PyQt6.QtGui import QKeyEvent
 from PyQt6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QPushButton,
@@ -74,6 +76,7 @@ class WelcomePage(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.ws = workspace_manager()
+        self._name_committing = False
         layout = QVBoxLayout(self)
         layout.setContentsMargins(32, 32, 32, 32)
 
@@ -104,6 +107,13 @@ class WelcomePage(QWidget):
         self.new_button = QPushButton("新建项目...")
         self.new_button.clicked.connect(self._on_new_clicked)
         actions.addWidget(self.new_button)
+        self._name_edit = QLineEdit()
+        self._name_edit.setPlaceholderText("项目名称,回车创建")
+        self._name_edit.setMaximumWidth(240)
+        self._name_edit.setVisible(False)
+        self._name_edit.installEventFilter(self)
+        self._name_edit.editingFinished.connect(self._commit_name)
+        actions.addWidget(self._name_edit)
         actions.addStretch(1)
         layout.addLayout(actions)
 
@@ -136,13 +146,41 @@ class WelcomePage(QWidget):
             self.open_project_requested.emit(str(path))
 
     def _on_new_clicked(self) -> None:
-        from PyQt6.QtWidgets import QInputDialog
+        self.begin_inline_name()
 
-        name, ok = QInputDialog.getText(
-            self, "新建项目", "项目名称:", text="unnamed"
-        )
-        if ok and name.strip():
-            self.new_project_requested.emit(name.strip())
+    def begin_inline_name(self, initial: str = "unnamed") -> None:
+        """页内内联命名(不弹窗):显示名称输入行并聚焦,回车提交 / Esc 取消。"""
+        self._name_edit.setText(initial)
+        self._name_edit.selectAll()
+        self._name_edit.setVisible(True)
+        self._name_edit.setFocus()
+
+    def _commit_name(self) -> None:
+        if self._name_committing:
+            return
+        self._name_committing = True
+        try:
+            name = self._name_edit.text().strip()
+            self._name_edit.setVisible(False)
+            if name:
+                self.new_project_requested.emit(name)
+        finally:
+            self._name_committing = False
+
+    def _cancel_name(self) -> None:
+        self._name_edit.setVisible(False)
+
+    def eventFilter(self, obj, event) -> bool:
+        """Esc 取消内联命名(其它事件交回默认处理)。"""
+        if (
+            obj is self._name_edit
+            and isinstance(event, QKeyEvent)
+            and event.type() == QEvent.Type.KeyPress
+            and event.key() == Qt.Key.Key_Escape
+        ):
+            self._cancel_name()
+            return True
+        return super().eventFilter(obj, event)
 
     def recent_paths(self) -> list[str]:
         return [

@@ -494,10 +494,6 @@ def test_create_blank_experiment_action(
     """空白处/Project 右键新建空白实验类型。"""
     manager = _manager_with_experiment(tmp_path, monkeypatch)
     window = MainWindow(manager=manager)
-    monkeypatch.setattr(
-        "gui.main_window.QInputDialog.getText",
-        staticmethod(lambda *args, **kwargs: ("T4", True)),
-    )
 
     class _FakeNotesDialog:
         DialogCode = QDialog.DialogCode
@@ -513,6 +509,8 @@ def test_create_blank_experiment_action(
 
     monkeypatch.setattr("gui.main_window.NotesDialog", _FakeNotesDialog)
     window._create_experiment()
+    assert window.project_tree._pending_kind == "experiment"
+    window.project_tree._commit_pending_create("T4")
     assert manager.project is not None
     assert any(e.title == "T4" for e in manager.project.experiments)
     window.close()
@@ -827,11 +825,7 @@ def test_data_rename_persists_title(
     """数据重命名:写 DataEntry.title 并落盘(重启可读)。"""
     manager = _manager_with_experiment(tmp_path, monkeypatch)
     window = MainWindow(manager=manager)
-    monkeypatch.setattr(
-        "gui.main_window.QInputDialog.getText",
-        staticmethod(lambda *a, **k: ("重命名后", True)),
-    )
-    window._rename_data("exp_001", "d_001")
+    window._rename_data("exp_001", "d_001", "重命名后")
     data_entry = manager.project.experiment("exp_001").data[0]
     assert data_entry.title == "重命名后"
     # 树显示 title
@@ -1302,3 +1296,129 @@ def test_rename_project_to_sample_wording(
     assert "添加项目..." not in labels
     assert "删除项目..." not in labels
     window.close()
+
+
+def test_welcome_page_new_project_inline_input(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """欢迎页「新建项目」:页内内联命名(不弹窗),回车提交发信号 / Esc 取消。"""
+    from gui.welcome_page import WelcomePage, _FallbackWorkspaceManager
+
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    monkeypatch.setattr(
+        "gui.welcome_page.workspace_manager",
+        lambda: _FallbackWorkspaceManager(workspace),
+    )
+    page = WelcomePage()
+    page.show()
+    names: list[str] = []
+    page.new_project_requested.connect(names.append)
+    page._on_new_clicked()
+    assert page._name_edit.isVisible()
+    page._name_edit.setText("demo")
+    page._commit_name()
+    assert names == ["demo"]
+    # Esc 取消:输入行隐藏且不发信号
+    page._on_new_clicked()
+    page._cancel_name()
+    assert page._name_edit.isHidden()
+    page.close()
+
+
+def test_tree_inline_create_experiment_editor_commit(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """新建实验类型:树内编辑器 commitData→closeEditor 后创建(模拟回车)。"""
+    from PyQt6.QtWidgets import QAbstractItemDelegate
+
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    window = MainWindow(manager=manager)
+
+    class _FakeNotesDialog:
+        DialogCode = QDialog.DialogCode
+
+        def __init__(self, parent, title, kind="", values=None):
+            pass
+
+        def exec(self):
+            return QDialog.DialogCode.Accepted
+
+        def result_fields(self):
+            return {}
+
+    monkeypatch.setattr("gui.main_window.NotesDialog", _FakeNotesDialog)
+    window._create_experiment()
+    assert window.project_tree._pending_kind == "experiment"
+
+    class _Editor:
+        def text(self):
+            return "HNCACB"
+
+    window.project_tree._on_editor_commit_data(_Editor())
+    window.project_tree._on_editor_closed(
+        None, QAbstractItemDelegate.EndEditHint.NoHint
+    )
+    assert manager.project is not None
+    assert any(e.title == "HNCACB" for e in manager.project.experiments)
+    window.close()
+
+
+def test_tree_inline_create_cancel_removes_pending(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """新建实验类型:编辑取消(Esc)不创建并移除待命名节点。"""
+    from PyQt6.QtWidgets import QAbstractItemDelegate
+
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    window = MainWindow(manager=manager)
+    before = len(manager.project.experiments)
+    window._create_experiment()
+    assert window.project_tree._pending_item is not None
+    window.project_tree._on_editor_closed(
+        None, QAbstractItemDelegate.EndEditHint.RevertModelCache
+    )
+    assert window.project_tree._pending_item is None
+    assert len(manager.project.experiments) == before
+    window.close()
+
+
+def test_rename_editor_appears_at_click_position(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """点「重命名」后,右键位置直接出现重命名输入框(回车提交)。"""
+    from PyQt6.QtCore import QPoint
+
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    window = MainWindow(manager=manager)
+    panel = window.project_tree
+    exp_item = panel.tree.topLevelItem(0).child(0).child(0)
+    anchor = panel.tree.viewport().mapToGlobal(QPoint(30, 10))
+    panel._begin_rename("experiment", exp_item, anchor)
+    editor = panel._rename_editor
+    assert editor.isVisible()
+    assert editor.pos() == anchor  # 输入框出现在右键位置(未越出屏幕)
+    editor._edit.setText("HNCACB2")
+    editor._commit()
+    assert manager.project is not None
+    assert any(e.title == "HNCACB2" for e in manager.project.experiments)
+    assert not editor.isVisible()
+    window.close()
+
+
+def test_context_menu_rename_opens_inline_editor(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """树右键「重命名」:菜单项触发后,右键位置变为重命名输入框。"""
+    from PyQt6.QtCore import QPoint
+
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    panel = ProjectTreePanel(manager)
+    project_item = panel.tree.topLevelItem(0).child(0)
+    menu = QMenu()
+    panel._on_context_menu_impl(menu, project_item, QPoint(10, 20))
+    action = next(a for a in menu.actions() if "重命名项目" in a.text())
+    action.triggered.emit()
+    assert panel._rename_editor.isVisible()
+    assert panel._rename_target == ("project",)
+    panel.close()
