@@ -5,6 +5,8 @@
 
 from core.experiments import (  # noqa: F401
     cbcaconh,
+    cch,
+    nnh,
     cbcanh,
     cosy,
     generic,
