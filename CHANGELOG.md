@@ -15,10 +15,12 @@
   函数(install_dialog_centering 等);
 - 批准(Architect):G2B-010 终谱归位按契约命名
   spectra/<exp_id>-<data_id>.ft2|ft3(任务分派 docs/tasks/g2b-010-backend.md);
-- 排查(Architect):3D NUS 单文件 FID 根因——单数据集 NUS 经 bruker -AUTO
-  (nusExpand→ser_full→bruk2pipe)输出单个 test.fid,归位为单文件,属设计
-  行为(模块文档「单数据集不做切片追加」);切片式 fid 仅用于 3D uniform
-  (acqu3s TD 正确)与多段合并;是否切片化待 Backend 决策;
+- 排查(Architect,用户纠正):3D NUS 单文件 FID 根因——NUS 数据 acqu3s 的
+  TD 被写成 1(sampleB:##$TD= 1,##$NusTD= 100),bruker -AUTO 据此按单增量
+  生成单文件 test.fid;修复方案(用户指定):为 NUS 数据生成一份 acqu3s
+  副本、TD 改为正确值(NusTD),让 bruker 读取副本,输出切片式
+  fid/test%03d.fid(与实验室手工流程一致);模块 docstring「单数据集不做
+  切片追加」的旧结论作废,任务已分派 Backend(提示词见 docs/AGENT_PROMPTS.md);
 - 测试:本地全量 559 passed、ruff 全绿;VM 全量 555 passed + 4 skipped(Python 3.12.13,HEAD 6399cf4),ruff 全绿。
 
 ## [0.2.116] - 2026-08-18
