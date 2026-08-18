@@ -306,3 +306,87 @@ def test_param_schema_returns_editable_defaults() -> None:
     assert default["zero_fill"] == 2
     assert default["ext_lo"] == "10.5"
     assert default["sampling"]["ft_alt"] is True
+
+def test_generate_spectrum_wires_linewidth_from_settings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.2.112:软件设置线宽(核素键)接入生成谱图 params(按轴映射)。"""
+    from types import SimpleNamespace
+
+    from core.data.internal_data_model import SamplingMode
+
+    manager = _manager_with_experiment(tmp_path)
+    controller = ProcessingController(manager)
+    controller.set_manager(manager)
+    captured: dict = {}
+
+    fake_exp = SimpleNamespace(
+        sampling=SimpleNamespace(mode=SamplingMode.UNIFORM),
+        dimensions=[
+            SimpleNamespace(logical_axis="F2", nucleus="1H"),
+            SimpleNamespace(logical_axis="F1", nucleus="15N"),
+        ],
+    )
+    monkeypatch.setattr(
+        controller, "_read_experiment", lambda exp_id, data_id: fake_exp
+    )
+    monkeypatch.setattr(
+        "gui.settings.load_settings",
+        lambda: {"linewidth_hz": {"1H": 10.0, "15N": 12.0, "13C": 14.0}},
+    )
+
+    def fake_spectrum(manager_, exp_id, data_id, backend, **kwargs):
+        captured.update(kwargs)
+        return "/tmp/x.ft2"
+
+    monkeypatch.setattr("workflow.stepwise.generate_spectrum", fake_spectrum)
+    path = controller.generate_spectrum(
+        None,
+        exp_id="exp_001",
+        data_id="d_001",
+        params={"phase_route": "unified"},
+    )
+    assert path == "/tmp/x.ft2"
+    params = captured.get("params") or {}
+    assert params["phase_route"] == "unified"
+    assert params["linewidth_hz"] == {"F2": 10.0, "F1": 12.0}
+
+
+def test_generate_spectrum_explicit_linewidth_wins(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.2.112:显式传入 params["linewidth_hz"] 时不覆盖。"""
+    from types import SimpleNamespace
+
+    from core.data.internal_data_model import SamplingMode
+
+    manager = _manager_with_experiment(tmp_path)
+    controller = ProcessingController(manager)
+    controller.set_manager(manager)
+    captured: dict = {}
+
+    fake_exp = SimpleNamespace(
+        sampling=SimpleNamespace(mode=SamplingMode.UNIFORM),
+        dimensions=[SimpleNamespace(logical_axis="F2", nucleus="1H")],
+    )
+    monkeypatch.setattr(
+        controller, "_read_experiment", lambda exp_id, data_id: fake_exp
+    )
+    monkeypatch.setattr(
+        "gui.settings.load_settings",
+        lambda: {"linewidth_hz": {"1H": 10.0}},
+    )
+
+    def fake_spectrum(manager_, exp_id, data_id, backend, **kwargs):
+        captured.update(kwargs)
+        return "/tmp/x.ft2"
+
+    monkeypatch.setattr("workflow.stepwise.generate_spectrum", fake_spectrum)
+    controller.generate_spectrum(
+        None,
+        exp_id="exp_001",
+        data_id="d_001",
+        params={"phase_route": "none", "linewidth_hz": {"F2": 99.0}},
+    )
+    params = captured.get("params") or {}
+    assert params["linewidth_hz"] == {"F2": 99.0}

@@ -24,7 +24,6 @@ from PyQt6.QtWidgets import (
     QListWidgetItem,
     QPlainTextEdit,
     QPushButton,
-    QSpinBox,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -802,8 +801,8 @@ class BatchSummaryDialog(QDialog):
 
 
 class SettingsDialog(QDialog):
-    """软件设置(精简,阶段 C3):NMRPipe 路径、默认线宽、points_per_line、
-    SMILE 线程上限;保存到 config/nmrforge.local.yaml,重启生效。
+    """软件设置(精简,阶段 C3):NMRPipe 路径、默认线宽、简单模式;线宽接入
+    生成谱图参数;保存到 config/nmrforge.local.yaml,重启生效。
     """
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -826,14 +825,6 @@ class SettingsDialog(QDialog):
             spin.setValue(float(settings["linewidth_hz"].get(nucleus, default)))
             form.addRow(f"{nucleus} 默认线宽 (Hz)", spin)
             self.linewidth_spins[nucleus] = spin
-        self.ppl_spin = QSpinBox()
-        self.ppl_spin.setRange(1, 8)
-        self.ppl_spin.setValue(int(settings.get("points_per_line", 2)))
-        form.addRow("填零 points_per_line", self.ppl_spin)
-        self.smile_spin = QSpinBox()
-        self.smile_spin.setRange(1, 16)
-        self.smile_spin.setValue(int(settings.get("smile_thread_cap", 2)))
-        form.addRow("SMILE 线程上限", self.smile_spin)
         layout.addLayout(form)
         pipeline = settings.get("pipeline") or {}
         self.simple_mode_check = QCheckBox(
@@ -870,8 +861,6 @@ class SettingsDialog(QDialog):
                 nucleus: spin.value()
                 for nucleus, spin in self.linewidth_spins.items()
             },
-            "points_per_line": self.ppl_spin.value(),
-            "smile_thread_cap": self.smile_spin.value(),
             "pipeline": {
                 "simple_mode": self.simple_mode_check.isChecked(),
             },

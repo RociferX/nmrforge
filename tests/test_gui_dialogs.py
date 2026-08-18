@@ -141,3 +141,30 @@ def test_info_dialog_constructs(qapp: QApplication) -> None:
     assert dialog.windowTitle() == "标题"
     dialog.accept()
     assert dialog.result() == 1
+
+
+def test_settings_dialog_trimmed_and_linewidth_saved(
+    qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.2.112:设置对话框移除 SMILE 线程/填零,保留线宽并保存。"""
+    from gui.dialogs import SettingsDialog
+
+    monkeypatch.setattr(
+        "gui.settings.load_settings",
+        lambda: {"linewidth_hz": {"1H": 8, "15N": 15, "13C": 20}, "pipeline": {}},
+    )
+    dialog = SettingsDialog(None)
+    assert set(dialog.linewidth_spins) == {"1H", "15N", "13C"}
+    assert not hasattr(dialog, "ppl_spin")
+    assert not hasattr(dialog, "smile_spin")
+    saved: dict = {}
+
+    def fake_save(settings: dict) -> None:
+        saved.update(settings)
+
+    monkeypatch.setattr("gui.settings.save_settings", fake_save)
+    dialog._on_accept()
+    assert "linewidth_hz" in saved
+    assert "points_per_line" not in saved
+    assert "smile_thread_cap" not in saved
+    dialog.close()

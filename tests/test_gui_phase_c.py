@@ -136,25 +136,27 @@ def test_settings_defaults_and_roundtrip(
     cfg = tmp_path / "nmrforge.local.yaml"
     monkeypatch.setattr(settings_module, "_settings_path", lambda: cfg)
     loaded = settings_module.load_settings()
-    assert loaded["points_per_line"] == 2
-    assert loaded["smile_thread_cap"] == 2
+    assert "points_per_line" not in loaded
+    assert "smile_thread_cap" not in loaded
     assert loaded["linewidth_hz"]["1H"] == 8
     settings_module.save_settings(
-        {"points_per_line": 4, "linewidth_hz": {"1H": 10}}
+        {"linewidth_hz": {"1H": 10}}
     )
     loaded2 = settings_module.load_settings()
-    assert loaded2["points_per_line"] == 4
     assert loaded2["linewidth_hz"]["1H"] == 10
     assert loaded2["linewidth_hz"]["15N"] == 15
-    assert loaded2["smile_thread_cap"] == 2
+    assert loaded2["linewidth_hz"]["13C"] == 20
 
 
 def test_settings_dialog_defaults(qapp: QApplication) -> None:
     from gui.dialogs import SettingsDialog
 
     dialog = SettingsDialog()
-    assert dialog.ppl_spin.value() == 2
-    assert dialog.smile_spin.value() == 2
+    assert dialog.linewidth_spins["1H"].value() == 8
+    assert dialog.linewidth_spins["15N"].value() == 15
+    assert dialog.linewidth_spins["13C"].value() == 20
+    assert not hasattr(dialog, "ppl_spin")
+    assert not hasattr(dialog, "smile_spin")
     dialog.close()
 
 

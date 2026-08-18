@@ -1,7 +1,7 @@
 """GUI 设置读写(阶段 C3):config/nmrforge.local.yaml,重启生效。
 
-默认值:线宽 1H 8 / 15N 15 / 13C 20 Hz,points_per_line 2,
-SMILE 线程上限 2(与后端护栏一致);未配置时显示默认值。
+默认值:线宽 1H 8 / 15N 15 / 13C 20 Hz(接入生成谱图参数);
+未配置时显示默认值。
 """
 
 from __future__ import annotations
@@ -16,8 +16,6 @@ SETTINGS_FILENAME = "nmrforge.local.yaml"
 DEFAULTS: dict = {
     "nmrpipe_path": "",
     "linewidth_hz": {"1H": 8, "15N": 15, "13C": 20},
-    "points_per_line": 2,
-    "smile_thread_cap": 2,
     "guide": {"first_import_hint_shown": False},
     "pipeline": {"simple_mode": False},
 }
