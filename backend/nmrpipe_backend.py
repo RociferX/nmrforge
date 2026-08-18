@@ -58,10 +58,15 @@ from core.planning.processing_plan import ProcessingPlan
 
 
 def _nus_grid_bounds(experiment: Experiment) -> list[int] | None:
-    """NUS 网格上限(nuslist 复点索引):2D [F1],3D [F2, F1],上限 NusTD//2。"""
+    """NUS nuslist 索引上限。
+
+    2D:nuslist 单列 = F1 复点索引,上限 = NUS 网格 td[1](如 nus20_25 索引到
+    126、网格 128,不能按 NusTD//2 判);
+    3D:nuslist 列为复点索引,上限 = NusTD//2(cc F2 索引到 84、NusTD 170)。
+    """
     td = effective_td(experiment)
     if experiment.ndim == 2 and len(td) > 1:
-        return [int(td[1]) // 2]
+        return [int(td[1])]
     if experiment.ndim >= 3 and len(td) > 2:
         return [int(td[1]) // 2, int(td[2]) // 2]
     return None
