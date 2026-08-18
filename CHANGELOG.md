@@ -1,5 +1,23 @@
 # 变更日志
 
+## [0.2.108] - 2026-08-18
+
+- 新增(GUI Agent,B2G-004):生成谱图步骤提供「相位优化途径」选择——
+  Unified(默认,后端统一方案:逐维复型预览 + 内存调相 + 完整终跑)/
+  None(逃生口,跳过相位优化);经 ProcessingController.generate_spectrum
+  透传 params["phase_route"](未传时保持旧行为,Shared Contract 扩展已
+  获 Architect 批准)。
+- 新增:生成谱图完成后在步骤详情「参数报告」展示每维相位结果——逐逻辑
+  轴 p0/p1、直接维相位、后端运行次数(如实展示来源)。
+- 新增(Backend 请求):分段采集导入入口——导入流程识别容器目录(顶层无
+  acqus 且 ≥2 个子目录含 acqus)自动走 import_segmented_dataset(合并
+  为一条数据,后端逐段转换 + addNMR 合并),与批量导入(多条条目)明确
+  区分;导入对话框提供「分段采集导入」复选框并自动勾选;Processing-
+  Controller 增加 import_segmented_dataset 透传(与 import_data 并列)。
+- 测试:phase_route 透传与跳过优化、容器目录识别、分段导入控制器透传、
+  导入对话框容器校验、Pipeline 途径选择与运行透传;本地全量 pytest +
+  ruff 全绿。
+
 ## [0.2.107] - 2026-08-18
 
 - merge(Architect):并入 GUI 0.2.88-0.2.93(展示谱图按钮/核化学位移推断/

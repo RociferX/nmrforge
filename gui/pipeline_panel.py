@@ -16,6 +16,7 @@ from pathlib import Path
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
+    QComboBox,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -442,12 +443,36 @@ _SPECTRUM_PARAM_LABELS = {
 }
 
 
+def _format_phase_pair(value) -> str:
+    """相位对 ((p0,p1) 元组或 {p0,p1,source} dict) → 可读文本。"""
+    if isinstance(value, dict):
+        p0 = value.get("p0", "")
+        p1 = value.get("p1", "")
+        text = f"p0={p0}° p1={p1}°"
+        if value.get("source"):
+            text += " (" + str(value.get("source")) + ")"
+        return text
+    if isinstance(value, (tuple, list)) and len(value) >= 2:
+        return f"p0={value[0]}° p1={value[1]}°"
+    return str(value)
+
+
 def _spectrum_param_report(params: dict) -> str:
     """把生成谱图实际生效参数整理为可读参数报告(点击步骤展开查看)。"""
-    lines = [
-        f"  {_SPECTRUM_PARAM_LABELS.get(key, key)}: {value}"
-        for key, value in sorted(params.items())
-    ]
+    lines: list[str] = []
+    for key, value in sorted(params.items()):
+        if key == "phases" and value:
+            lines.append("  逐维相位:")
+            for axis, pair in sorted((value or {}).items()):
+                lines.append(f"    {axis}: {_format_phase_pair(pair)}")
+        elif key == "direct_phase":
+            lines.append(f"  直接维相位: {_format_phase_pair(value)}")
+        elif key == "backend_runs":
+            lines.append(f"  后端运行次数: {value}")
+        elif key == "phases":
+            continue
+        else:
+            lines.append(f"  {_SPECTRUM_PARAM_LABELS.get(key, key)}: {value}")
     return "\n".join(lines) if lines else "  (无参数记录)"
 
 
@@ -509,6 +534,16 @@ class PipelineStepRow(QWidget):
             lambda: self.show_spectrum_requested.emit(self.step_id)
         )
         header.addWidget(self.show_spectrum_button)
+        # 0.2.108:相位优化途径选择(仅生成谱图步骤显示)
+        self.phase_route_combo = QComboBox()
+        self.phase_route_combo.addItem("Unified", "unified")
+        self.phase_route_combo.addItem("None", "none")
+        self.phase_route_combo.setToolTip(
+            "相位优化途径:Unified=统一方案(逐维复型预览+内存调相,默认);"
+            "None=跳过相位优化(逃生口)"
+        )
+        self.phase_route_combo.setVisible(False)
+        header.addWidget(self.phase_route_combo)
         self.manual_button = QPushButton("人工")
         self.manual_button.setToolTip("人工参数表格 / 脚本编辑器")
         self.manual_button.setVisible(False)
@@ -807,6 +842,10 @@ class PipelinePanel(QWidget):
             self._rows[step_id].show_spectrum_button.setVisible(
                 step_id == "spectrum" and status == "SUCCESS"
             )
+            # 0.2.108:生成谱图步骤提供「相位优化途径」选择
+            self._rows[step_id].phase_route_combo.setVisible(
+                step_id == "spectrum"
+            )
 
     # ------------------------------------------------------------------
     # 运行
@@ -983,6 +1022,18 @@ class PipelinePanel(QWidget):
                                         f"{step_label} {d}: {msg}"
                                     )
                                 )
+                            if (
+                                step_id == "spectrum"
+                                and "params" in inspect.signature(method).parameters
+                            ):
+                                # 0.2.108:相位优化途径(unified/none)透传后端
+                                kwargs["params"] = {
+                                    "phase_route": (
+                                        self._rows["spectrum"]
+                                        .phase_route_combo.currentData()
+                                        or "unified"
+                                    )
+                                }
                             result = method(node, **kwargs)
                         item["ok"] = True
                         message = (

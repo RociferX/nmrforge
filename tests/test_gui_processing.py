@@ -29,6 +29,131 @@ class FakeAutoProcessor:
         )
 
 
+def test_is_segmented_container(tmp_path: Path) -> None:
+    """0.2.108:容器目录 = 顶层无 acqus 且 ≥2 个子目录含 acqus。"""
+    from gui.processing import is_segmented_container
+
+    container = tmp_path / "container"
+    container.mkdir()
+    for seg in ("seg1", "seg2"):
+        (container / seg).mkdir()
+        (container / seg / "acqus").write_text("x", encoding="utf-8")
+    assert is_segmented_container(container)
+    # 顶层直接是 Bruker 数据集 → 不是容器
+    single = tmp_path / "single"
+    single.mkdir()
+    (single / "acqus").write_text("x", encoding="utf-8")
+    assert not is_segmented_container(single)
+    # 只有 1 个分段子目录 → 不算容器
+    one = tmp_path / "one"
+    one.mkdir()
+    (one / "seg1").mkdir()
+    (one / "seg1" / "acqus").write_text("x", encoding="utf-8")
+    assert not is_segmented_container(one)
+    assert not is_segmented_container(tmp_path / "missing")
+
+
+def test_import_segmented_dataset_passthrough(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.2.108:分段采集导入透传 workflow.import_segmented_dataset。"""
+    manager = _manager_with_experiment(tmp_path)
+    controller = ProcessingController(manager)
+    captured: dict = {}
+
+    class _Result:
+        experiment_id = "exp_009"
+        data_id = "d_001"
+        run_id = "R-1"
+        warnings: list = []
+
+    def fake(manager, source, *, title="", sample_id="", copy=True):
+        captured.update(
+            source=str(source),
+            title=title,
+            sample_id=sample_id,
+            copy=copy,
+        )
+        return _Result()
+
+    monkeypatch.setattr(
+        "workflow.import_workflow.import_segmented_dataset", fake
+    )
+    result = controller.import_segmented_dataset(
+        "/data/container", title="seg", copy=False
+    )
+    assert captured["source"] == "/data/container"
+    assert captured["title"] == "seg"
+    assert captured["copy"] is False
+    assert result.data_id == "d_001"
+
+
+def test_generate_spectrum_passes_phase_route_params(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.2.108:params["phase_route"] 透传 stepwise,且不再叠加旧暴力优化。"""
+    manager = _manager_with_experiment(tmp_path)
+    controller = ProcessingController(manager)
+    controller.set_manager(manager)
+    captured: dict = {}
+
+    def fake_spectrum(manager_, exp_id, data_id, backend, **kwargs):
+        captured.update(kwargs)
+        return "/tmp/x.ft2"
+
+    monkeypatch.setattr(
+        "workflow.stepwise.generate_spectrum", fake_spectrum
+    )
+
+    def boom(*args, **kwargs):
+        raise AssertionError("不应调用旧暴力优化")
+
+    monkeypatch.setattr(
+        "workflow.stepwise.optimize_phase_brute_force", boom
+    )
+    path = controller.generate_spectrum(
+        None,
+        exp_id="exp_001",
+        data_id="d_001",
+        params={"phase_route": "unified"},
+    )
+    assert path == "/tmp/x.ft2"
+    assert captured.get("params") == {"phase_route": "unified"}
+
+
+def test_generate_spectrum_phase_route_none_skips_optimize(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.2.108:phase_route="none" 逃生口跳过相位优化。"""
+    manager = _manager_with_experiment(tmp_path)
+    controller = ProcessingController(manager)
+    controller.set_manager(manager)
+    captured: dict = {}
+
+    def fake_spectrum(manager_, exp_id, data_id, backend, **kwargs):
+        captured.update(kwargs)
+        return "/tmp/x.ft2"
+
+    monkeypatch.setattr(
+        "workflow.stepwise.generate_spectrum", fake_spectrum
+    )
+
+    def boom(*args, **kwargs):
+        raise AssertionError("不应调用旧暴力优化")
+
+    monkeypatch.setattr(
+        "workflow.stepwise.optimize_phase_brute_force", boom
+    )
+    path = controller.generate_spectrum(
+        None,
+        exp_id="exp_001",
+        data_id="d_001",
+        params={"phase_route": "none"},
+    )
+    assert path == "/tmp/x.ft2"
+    assert captured.get("params") == {"phase_route": "none"}
+
+
 def test_auto_run_sync(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     manager = _manager_with_experiment(tmp_path)
     entry = manager.project.experiment("exp_001")

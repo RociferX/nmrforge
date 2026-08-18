@@ -76,6 +76,28 @@ def test_import_dialog_validation_requires_acqus(
     dialog.close()
 
 
+def test_import_dialog_segmented_container(
+    qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.2.108:容器目录导入校验通过并自动勾选分段采集。"""
+    container = tmp_path / "container"
+    container.mkdir()
+    for seg in ("seg1", "seg2"):
+        (container / seg).mkdir()
+        (container / seg / "acqus").write_text("x", encoding="utf-8")
+    dialog = ImportExperimentDialog(None)
+    dialog.source_edit.setText(str(container))
+    assert dialog.segmented_check.isChecked()
+    monkeypatch.setattr(
+        "gui.dialogs.InfoDialog.show_info",
+        staticmethod(lambda *args, **kwargs: None),
+    )
+    dialog._validate_and_accept()
+    assert dialog.result() == dialog.DialogCode.Accepted
+    assert dialog.result_data()["segmented"] is True
+    dialog.close()
+
+
 def test_sample_dialog_result_data(qapp: QApplication) -> None:
     dialog = SampleDialog(None, sample_id="S001")
     dialog.name_edit.setText("sample B")

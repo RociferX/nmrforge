@@ -25,6 +25,23 @@ def _load_config() -> dict:
     return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
 
 
+def is_segmented_container(path) -> bool:
+    """容器目录判定:本身不是 Bruker 数据集(顶层无 acqus),
+    但含 ≥2 个直接带 acqus 的分段子目录(分段采集导入用)。
+    """
+    try:
+        root = Path(path)
+        if not root.is_dir() or (root / "acqus").is_file():
+            return False
+        segments = [
+            p for p in root.iterdir()
+            if p.is_dir() and (p / "acqus").is_file()
+        ]
+        return len(segments) >= 2
+    except OSError:
+        return False
+
+
 class ProcessingController:
     """GUI 层处理控制:三步流程(import_data → generate_fid → generate_spectrum)
     对接 workflow/stepwise(契约 v1.2 §8.3);人工路径对接 workflow/manual。"""
@@ -109,6 +126,30 @@ class ProcessingController:
             "run_id": getattr(result, "run_id", ""),
             "warnings": list(getattr(result, "warnings", []) or []),
         }
+
+    def import_segmented_dataset(
+        self,
+        source: str,
+        *,
+        title: str = "",
+        sample_id: str = "",
+        copy: bool = True,
+    ):
+        """分段采集导入透传(0.2.108):容器目录下多个含 acqus 的分段子目录
+
+        合并为一条样品数据(后端逐段转换 + addNMR 合并),并新建实验;
+        与批量导入(多条条目)明确区分。返回 workflow ImportResult。
+        """
+        from workflow.import_workflow import import_segmented_dataset
+
+        self._require_manager()
+        return import_segmented_dataset(
+            self._manager,
+            source,
+            title=title,
+            sample_id=sample_id,
+            copy=copy,
+        )
 
     def batch_import(self, exp_id: str, folders: list) -> dict:
         """批量导入多个数据目录到实验类型,同一批样品数据标记同一 batch_id。
@@ -200,12 +241,16 @@ class ProcessingController:
         data_id: str | None = None,
         progress: Callable[[str], None] | None = None,
         phase_optimize: bool = True,
+        params: dict | None = None,
     ) -> str:
         """第 3 步:生成谱图(process/reconstruct_nus,含 NUS SMILE 重构)。
 
-        默认在基础谱后跑逐维相位优化(optimize_phase_brute_force,
-        0.2.62-0.2.64 相位处理),最终谱相位正确;phase_optimize=False
-        仅生成基础谱(调试/测试用)。progress 可选回调:阶段进展。
+        params["phase_route"] 选择相位优化途径(0.2.108):
+        - "unified"(默认):统一方案(逐维复型预览 + 内存调相 + 完整终跑);
+        - "none":逃生口,直接 process/reconstruct_nus,跳过相位优化。
+        未传 params 时保持旧行为(基础谱 + phase_optimize 的逐维暴力
+        优化);phase_optimize=False 仅生成基础谱(调试/测试用)。
+        progress 可选回调:阶段进展。
         """
         import inspect
 
@@ -232,6 +277,8 @@ class ProcessingController:
         except Exception:  # noqa: BLE001 - 采样信息不可用给通用提示
             emit("后端执行中(转换/重构/相位优化)")
         kwargs: dict = {}
+        if params:
+            kwargs["params"] = dict(params)
         if "progress" in inspect.signature(stepwise_spectrum).parameters:
             kwargs["progress"] = emit
         spectrum_path = stepwise_spectrum(
@@ -241,8 +288,13 @@ class ProcessingController:
             self._backend_instance(),
             **kwargs,
         )
-        emit("基础谱图完成,开始逐维相位优化")
-        if phase_optimize:
+        route = (params or {}).get("phase_route")
+        if route is not None:
+            # 0.2.108:相位优化途径由后端处理(unified 统一方案 / none
+            # 逃生口),不再叠加旧逐维暴力优化
+            emit(f"基础谱图完成,相位优化途径: {route}")
+        elif phase_optimize:
+            emit("基础谱图完成,开始逐维相位优化")
             from workflow.stepwise import optimize_phase_brute_force
 
             opt = optimize_phase_brute_force(

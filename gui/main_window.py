@@ -452,22 +452,39 @@ class MainWindow(QMainWindow):
 
         def worker() -> None:
             try:
-                from workflow.import_workflow import import_data
+                from gui.processing import is_segmented_container
 
-                target_exp_id = exp_id
-                if not target_exp_id:
-                    if self.manager.project is None:
-                        raise ProjectError("未加载项目")
-                    entry = self.manager.create_experiment(
-                        title=data.get("title", "") or "unnamed"
-                    )
-                    target_exp_id = entry.id
-                result = import_data(
-                    self.manager,
-                    target_exp_id,
-                    source,
-                    copy=bool(data.get("copy", True)),
+                segmented = bool(data.get("segmented", False)) or (
+                    is_segmented_container(source)
                 )
+                if segmented:
+                    # 0.2.108:分段采集导入(容器目录合并为一条数据,后端新建实验)
+                    result = self.controller.import_segmented_dataset(
+                        source,
+                        title=data.get("title", "") or "",
+                        sample_id=data.get("sample_id", "") or "",
+                        copy=bool(data.get("copy", True)),
+                    )
+                    target_exp_id = getattr(
+                        result, "experiment_id", ""
+                    ) or exp_id
+                else:
+                    from workflow.import_workflow import import_data
+
+                    target_exp_id = exp_id
+                    if not target_exp_id:
+                        if self.manager.project is None:
+                            raise ProjectError("未加载项目")
+                        entry = self.manager.create_experiment(
+                            title=data.get("title", "") or "unnamed"
+                        )
+                        target_exp_id = entry.id
+                    result = import_data(
+                        self.manager,
+                        target_exp_id,
+                        source,
+                        copy=bool(data.get("copy", True)),
+                    )
                 data_id = getattr(result, "data_id", "") or ""
                 if data_id:
                     from gui.pipeline_state import record_step_success
@@ -477,7 +494,10 @@ class MainWindow(QMainWindow):
                         target_exp_id,
                         data_id,
                         "import",
-                        params={"copy": bool(data.get("copy", True))},
+                        params={
+                            "copy": bool(data.get("copy", True)),
+                            "segmented": segmented,
+                        },
                     )
                     notes = (data or {}).get("notes", "") or ""
                     if notes:

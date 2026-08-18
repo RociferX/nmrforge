@@ -667,6 +667,69 @@ def test_spectrum_panel_empty_spectra_clears_viewer(
     panel.close()
 
 
+def test_spectrum_param_report_shows_phase_results() -> None:
+    """0.2.108:参数报告展示逐维相位/直接维相位/后端运行次数。"""
+    from gui.pipeline_panel import _spectrum_param_report
+
+    report = _spectrum_param_report(
+        {
+            "phase_route": "unified",
+            "phases": {"F2": (0.0, 10.0), "F1": (-45.0, 0.0)},
+            "direct_phase": (0.0, 10.0),
+            "backend_runs": 3,
+            "extract": True,
+        }
+    )
+    assert "逐维相位" in report
+    assert "F1: p0=-45.0° p1=0.0°" in report
+    assert "F2: p0=0.0° p1=10.0°" in report
+    assert "直接维相位" in report
+    assert "后端运行次数: 3" in report
+
+
+def test_pipeline_spectrum_phase_route_combo(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.2.108:生成谱图步骤显示「相位优化途径」选择(unified 默认/none)。"""
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    panel = PipelinePanel(manager, FakeProcessingController())
+    panel.set_selection("data", "exp_001", "d_001")
+    combo = panel._rows["spectrum"].phase_route_combo
+    assert not combo.isHidden()
+    assert combo.currentData() == "unified"
+    items = [combo.itemData(i) for i in range(combo.count())]
+    assert items == ["unified", "none"]
+    assert panel._rows["fid"].phase_route_combo.isHidden()
+    panel.close()
+
+
+def test_pipeline_spectrum_run_passes_phase_route(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.2.108:运行生成谱图时把选中途径透传给控制器。"""
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    spectra = manager.data_dir("exp_001", "d_001", "spectra")
+    spectra.mkdir(parents=True, exist_ok=True)
+    _write_ft2(spectra / "exp_001-d_001.ft2")
+    seen: list[dict] = []
+
+    class _RouteController:
+        def generate_fid(self, data, exp_id=None, data_id=None):
+            return "x.fid"
+
+        def generate_spectrum(self, data, exp_id=None, data_id=None, params=None):
+            seen.append(dict(params or {}))
+            return "x.ft2"
+
+    monkeypatch.setattr("threading.Thread", SyncThread)
+    panel = PipelinePanel(manager, _RouteController())
+    panel.set_selection("data", "exp_001", "d_001")
+    panel._rows["spectrum"].phase_route_combo.setCurrentIndex(1)  # none
+    panel._on_run_requested("spectrum")
+    assert seen and seen[-1] == {"phase_route": "none"}
+    panel.close()
+
+
 def test_pipeline_show_spectrum_button_on_spectrum_success(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
