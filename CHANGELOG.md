@@ -14,9 +14,11 @@
   为一条数据,后端逐段转换 + addNMR 合并),与批量导入(多条条目)明确
   区分;导入对话框提供「分段采集导入」复选框并自动勾选;Processing-
   Controller 增加 import_segmented_dataset 透传(与 import_data 并列)。
+- 修复:分段采集的合并 FID 产物为 process/merged/fid 目录(逐增量文件),
+  Pipeline 状态判定支持目录产物,FID 步骤不再误显示 READY。
 - 测试:phase_route 透传与跳过优化、容器目录识别、分段导入控制器透传、
-  导入对话框容器校验、Pipeline 途径选择与运行透传;本地全量 pytest +
-  ruff 全绿。
+  导入对话框容器校验、Pipeline 途径选择与运行透传、合并 FID 目录状态;
+  本地全量 pytest + ruff 全绿。
 
 ## [0.2.107] - 2026-08-18
 

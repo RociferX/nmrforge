@@ -121,7 +121,8 @@ def _node_artifacts(
         path = Path(fid_candidate)
         if not path.is_absolute():
             path = manager.root / path
-        if path.is_file():
+        # 0.2.108:分段合并 FID 为目录(process/merged/fid),文件或目录均视为产物
+        if path.is_file() or path.is_dir():
             artifacts['fid'] = path
     if artifacts['fid'] is None:
         proc = manager.data_dir(exp_id, data_id, 'process')
@@ -131,6 +132,10 @@ def _node_artifacts(
             fids = []
         if fids:
             artifacts['fid'] = fids[0]
+        else:
+            merged_fid = proc / 'merged' / 'fid'
+            if merged_fid.is_dir():
+                artifacts['fid'] = merged_fid
     spec_candidate = getattr(data, 'spectrum_path', '') or ''
     if spec_candidate:
         path = Path(spec_candidate)

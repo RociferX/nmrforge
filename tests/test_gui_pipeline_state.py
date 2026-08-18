@@ -186,6 +186,22 @@ def test_raw_change_marks_import_fid_outdated_and_propagates(
     assert statuses["analysis"] == "OUTDATED"
 
 
+def test_segmented_merged_fid_directory_counts_as_done(
+    tmp_path: Path, qapp: QApplication
+) -> None:
+    """0.2.108:分段合并 FID 为 process/merged/fid 目录时,FID 步骤 SUCCESS。"""
+    manager, exp_id, data_id, _artifacts = _manager_with_artifacts(tmp_path)
+    process = manager.data_dir(exp_id, data_id, "process")
+    merged_fid = process / "merged" / "fid"
+    merged_fid.mkdir(parents=True, exist_ok=True)
+    (merged_fid / "test001.fid").write_bytes(b"x")
+    manager.set_data_fid(exp_id, data_id, merged_fid)
+    record_step_success(manager, exp_id, data_id, "fid")
+    manager.save()
+    statuses = compute_step_statuses(manager, exp_id)
+    assert statuses["fid"] == "SUCCESS"
+
+
 def test_simple_mode_disables_outdated(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
