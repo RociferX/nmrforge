@@ -257,6 +257,22 @@ def test_experiment_type_options_from_presets() -> None:
     assert set(options_2d) | set(options_3d) == set(experiment_type_options())
 
 
+def test_temperature_from_acqus_detects_celsius_and_kelvin(
+    tmp_path: Path,
+) -> None:
+    """0.2.87:温度识别 0.1K(2980→24.9°C)、K(298.0→24.9)、°C(25→25.0)。"""
+    from gui.notes import temperature_from_acqus
+
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    (raw / "acqus").write_text("##$TE= 2980\n", encoding="latin-1")
+    assert temperature_from_acqus(raw) == "24.9"
+    (raw / "acqus").write_text("##$TE= 298.0\n", encoding="latin-1")
+    assert temperature_from_acqus(raw) == "24.9"
+    (raw / "acqus").write_text("##$TE= 25\n", encoding="latin-1")
+    assert temperature_from_acqus(raw) == "25.0"
+
+
 def test_auto_fill_notes_from_metadata(tmp_path: Path) -> None:
     """0.2.86:导入后按 metadata/acqus 自动填充注释(不覆盖已有值)。"""
     manager, exp_id, data_id = _manager(tmp_path)

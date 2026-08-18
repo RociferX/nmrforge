@@ -192,6 +192,21 @@ def _mtime_ns(path: Path) -> int:
         return 0
 
 
+def _pipeline_flags() -> bool:
+    """Pipeline 简单模式开关(config/nmrforge.local.yaml → gui.settings):
+
+    开启后只按上一步产物文件是否存在判断状态(下一步只认对应格式的
+    文件),不做输入/脚本指纹与产物新旧比较,也不显示「已过期」。
+    """
+    try:
+        from gui.settings import load_settings
+
+        pipeline = load_settings().get("pipeline") or {}
+    except Exception:  # noqa: BLE001 - 设置不可读时按默认关闭
+        pipeline = {}
+    return bool(pipeline.get("simple_mode", False))
+
+
 def _node_step_statuses(
     manager: ProjectManager, exp_id: str, node
 ) -> dict[str, str]:
@@ -199,6 +214,7 @@ def _node_step_statuses(
     data_id = getattr(node, 'id', exp_id)
     artifacts = _node_artifacts(manager, exp_id, data_id)
     state = load_pipeline_state(manager, exp_id, data_id)
+    simple_mode = _pipeline_flags()
     statuses: dict[str, str] = {}
     for step_id, _, _, deps in PIPELINE_STEPS:
         artifact = (
@@ -210,14 +226,18 @@ def _node_step_statuses(
         if step_id == 'import':
             done = True  # 实验下存在数据节点即导入完成
             entry = state['steps'].get('import')
-            if entry and entry.get('input_hash'):
+            if (
+                entry
+                and entry.get('input_hash')
+                and not simple_mode
+            ):
                 current = raw_fingerprint(manager, exp_id, data_id)
                 outdated = current is not None and current != entry['input_hash']
         elif step_id == 'smile':
             # 可选步骤:运行过即完成(产物复用谱图,指纹校验输入变化)
             entry = state['steps'].get('smile')
             done = entry is not None
-            if done:
+            if done and not simple_mode:
                 current = input_fingerprint(manager, exp_id, data_id, 'smile')
                 if (
                     current is not None
@@ -227,7 +247,7 @@ def _node_step_statuses(
                     outdated = True
         else:
             done = artifact is not None
-            if done:
+            if done and not simple_mode:
                 entry = state['steps'].get(step_id)
                 if entry:
                     current_input = input_fingerprint(
@@ -268,12 +288,13 @@ def _node_step_statuses(
             statuses[step_id] = 'READY'
         else:
             statuses[step_id] = 'LOCKED'
-    # 上游 OUTDATED 传播:下游即使指纹匹配也视为过期
-    for step_id, _, _, deps in PIPELINE_STEPS:
-        if statuses.get(step_id) == 'SUCCESS' and any(
-            statuses.get(dep) == 'OUTDATED' for dep in deps
-        ):
-            statuses[step_id] = 'OUTDATED'
+    # 上游 OUTDATED 传播:下游即使指纹匹配也视为过期(开关关闭时不传播)
+    if not simple_mode:
+        for step_id, _, _, deps in PIPELINE_STEPS:
+            if statuses.get(step_id) == 'SUCCESS' and any(
+                statuses.get(dep) == 'OUTDATED' for dep in deps
+            ):
+                statuses[step_id] = 'OUTDATED'
     return statuses
 
 
@@ -440,6 +461,7 @@ class PipelineStepRow(QWidget):
     run_requested = pyqtSignal(str)  # step_id
     manual_requested = pyqtSignal(str)  # step_id:打开人工参数表格/脚本编辑器
     report_requested = pyqtSignal(str)  # step_id:分析完成后打开报告页
+    show_spectrum_requested = pyqtSignal(str)  # step_id:生成谱图完成后展示谱图
     detail_toggled = pyqtSignal(str)  # step_id:点击行切换详情
     view_log_requested = pyqtSignal(str)  # step_id:定位日志面板
 
@@ -478,6 +500,15 @@ class PipelineStepRow(QWidget):
             lambda: self.report_requested.emit(self.step_id)
         )
         header.addWidget(self.report_button)
+        self.show_spectrum_button = QPushButton("展示谱图")
+        self.show_spectrum_button.setToolTip(
+            "在右侧谱图面板显示当前数据 spectra 文件夹的最终谱"
+        )
+        self.show_spectrum_button.setVisible(False)
+        self.show_spectrum_button.clicked.connect(
+            lambda: self.show_spectrum_requested.emit(self.step_id)
+        )
+        header.addWidget(self.show_spectrum_button)
         self.manual_button = QPushButton("人工")
         self.manual_button.setToolTip("人工参数表格 / 脚本编辑器")
         self.manual_button.setVisible(False)
@@ -575,6 +606,7 @@ class PipelinePanel(QWidget):
     run_finished = pyqtSignal()
     manual_open_requested = pyqtSignal(str)  # step_id:打开人工处理对话框
     report_requested = pyqtSignal(str)  # step_id:打开报告页
+    show_spectrum_requested = pyqtSignal(str)  # step_id:展示谱图
     import_data_requested = pyqtSignal(str)  # exp_id:在当前实验类型下导入样品数据
     view_log_requested = pyqtSignal(str)  # step_id:定位日志面板
     progress_updated = pyqtSignal(str)  # 批量进度文本(主线程更新标签)
@@ -634,6 +666,7 @@ class PipelinePanel(QWidget):
             row.run_requested.connect(self._on_run_requested)
             row.manual_requested.connect(self.manual_open_requested.emit)
             row.report_requested.connect(self.report_requested.emit)
+            row.show_spectrum_requested.connect(self.show_spectrum_requested.emit)
             row.detail_toggled.connect(self._toggle_step_detail)
             row.view_log_requested.connect(self.view_log_requested.emit)
             steps_box.addWidget(row)
@@ -769,6 +802,10 @@ class PipelinePanel(QWidget):
             # 导入样品数据为自动化步骤,无人工入口;其余处理步骤保留人工
             self._rows[step_id].manual_button.setVisible(
                 step_id not in ("import", "smile")
+            )
+            # 0.2.88:生成谱图完成后出现「展示谱图」按钮(不再自动显示谱)
+            self._rows[step_id].show_spectrum_button.setVisible(
+                step_id == "spectrum" and status == "SUCCESS"
             )
 
     # ------------------------------------------------------------------

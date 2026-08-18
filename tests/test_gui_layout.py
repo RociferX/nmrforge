@@ -424,6 +424,56 @@ def test_tree_data_node_context_menu_actions(
     panel.close()
 
 
+def test_tree_folder_terminal_menu_action(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.2.93:raw 等子文件夹右键含「在终端中打开」,点击发出路径。"""
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    panel = ProjectTreePanel(manager)
+    data_item = panel.tree.topLevelItem(0).child(0).child(0).child(0)
+    raw_item = data_item.child(0)  # raw 子文件夹
+    seen: list[str] = []
+    panel.open_terminal_requested.connect(seen.append)
+    menu = QMenu()
+    panel._on_context_menu_impl(menu, raw_item)
+    labels = [a.text() for a in menu.actions()]
+    assert "在终端中打开" in labels
+    action = next(a for a in menu.actions() if a.text() == "在终端中打开")
+    action.trigger()
+    assert seen and Path(seen[0]).name == "raw"
+    panel.close()
+
+
+def test_terminal_argv_prefers_csh(monkeypatch: pytest.MonkeyPatch) -> None:
+    """0.2.93:在终端中打开优先 csh;Windows 回退 cmd。"""
+    import sys
+
+    from gui.project_tree import _terminal_argv
+
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(
+        "shutil.which",
+        lambda name: f"/usr/bin/{name}"
+        if name in ("csh", "gnome-terminal")
+        else None,
+    )
+    argv = _terminal_argv("/data/raw")
+    assert argv is not None
+    assert "csh" in argv
+    assert "--working-directory=/data/raw" in argv
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(
+        "shutil.which",
+        lambda name: "C:/cygwin/bin/csh.exe"
+        if name == "csh"
+        else (r"C:\Windows\System32\cmd.exe" if name == "cmd" else None),
+    )
+    argv = _terminal_argv("C:/data/raw")
+    assert argv is not None
+    assert "csh" in argv[0]
+
+
 def test_tree_subfolder_context_menu_has_open_path(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -608,11 +658,33 @@ def test_spectrum_panel_empty_spectra_clears_viewer(
     _write_ft2(spectra1 / f"{entry.id}-{data1.id}.ft2")
     panel = SpectrumPanel(manager)
     panel.set_context(entry.id, data1.id)
+    assert panel.load_current_spectrum() is True
     assert panel.viewer.layer_list.count() == 1
     # data2 谱图文件夹为空 → 查看器清空
     panel.set_context(entry.id, data2.id)
     assert panel.viewer.layer_list.count() == 0
     assert panel._current_spectrum is None
+    panel.close()
+
+
+def test_pipeline_show_spectrum_button_on_spectrum_success(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.2.88:生成谱图完成后出现「展示谱图」按钮,点击发出请求。"""
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    spectra = manager.data_dir("exp_001", "d_001", "spectra")
+    spectra.mkdir(parents=True, exist_ok=True)
+    _write_ft2(spectra / "exp_001-d_001.ft2")
+    from gui.pipeline_panel import PipelinePanel
+
+    panel = PipelinePanel(manager, FakeProcessingController())
+    panel.set_selection("data", "exp_001", "d_001")
+    button = panel._rows["spectrum"].show_spectrum_button
+    assert not button.isHidden()
+    seen: list[str] = []
+    panel.show_spectrum_requested.connect(seen.append)
+    button.click()
+    assert seen == ["spectrum"]
     panel.close()
 
 
@@ -887,6 +959,7 @@ def test_spectrum_peak_linkage(
         writer.writerow(["2", "7.5", "118.0", "80", "15", "A2"])
     panel = SpectrumPanel(manager)
     panel.set_context("exp_001", "d_001")
+    panel._load_peaks(spectra / "exp_001-d_001.ft2")  # 0.2.88:显式加载峰表
     assert panel.peak_table.rowCount() == 2
     assert len(panel.viewer._peaks) == 2
     panel.peak_table.selectRow(1)
@@ -913,6 +986,7 @@ def test_export_poky_button_generates_list(
         writer.writerow(["1", "8.0", "115.0", "100", "20", "G1"])
     panel = SpectrumPanel(manager)
     panel.set_context("exp_001", "d_001")
+    panel._load_peaks(spectra / "exp_001-d_001.ft2")  # 0.2.88:显式加载峰表
     assert panel.export_poky_button.isEnabled()
 
     out = tmp_path / "out.list"
@@ -954,6 +1028,7 @@ def test_peak_linkage_via_load_peaks(
         writer.writerow(["2", "7.5", "118.0", "80", "15", "A2"])
     panel = SpectrumPanel(manager)
     panel.set_context("exp_001", "d_001")
+    panel._load_peaks(spectra / "exp_001-d_001.ft2")  # 0.2.88:显式加载峰表
     assert panel.peak_table.rowCount() == 2
     assert len(panel.viewer._peaks) == 2
     panel.peak_table.selectRow(1)
@@ -995,10 +1070,12 @@ def test_spectrum_auto_shown_on_data_select(
     pipe.write(str(spectra / "exp_001-d_001.ft2"), dic, data, overwrite=True)
     panel = SpectrumPanel(manager)
     panel.set_context("exp_001", "d_001")
-    assert panel.viewer.layer_list.count() == 1  # 自动加载
+    assert panel.viewer.layer_list.count() == 0  # 0.2.88:不自动显示
+    assert panel.load_current_spectrum() is True
+    assert panel.viewer.layer_list.count() == 1
     assert panel._current_spectrum is not None
     panel.refresh()
-    assert panel.viewer.layer_list.count() == 1  # 不重复加载
+    assert panel.viewer.layer_list.count() == 1  # 刷新不重开
     panel.close()
 
 def test_folder_node_shows_files(

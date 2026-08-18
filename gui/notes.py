@@ -13,6 +13,8 @@ import json
 import re
 from pathlib import Path
 
+from viewer.axis_labels import infer_nucleus
+
 # 各级注释字段(键 / 显示名),0.2.79 起按层级区分:
 # 项目=蛋白样品基本信息;实验类型=类型/维度/核;样品数据=重复/条件/pH/温度。
 SAMPLE_FIELDS: tuple[tuple[str, str], ...] = (
@@ -30,7 +32,7 @@ EXPERIMENT_FIELDS: tuple[tuple[str, str], ...] = (
 )
 DATA_FIELDS: tuple[tuple[str, str], ...] = (
     ("repeat", "重复号"),
-    ("condition", "条件变化"),
+    ("condition", "Buffer 组分"),
     ("buffer_ph", "Buffer pH"),
     ("temperature", "温度(°C)"),
     ("notes", "备注"),
@@ -262,15 +264,27 @@ def _acqus_value(raw_dir, key: str) -> str:
 
 
 def temperature_from_acqus(raw_dir) -> str:
-    """Bruker TE(0.1 K 单位)→ 摄氏温度字符串;无法解析返回空串。"""
+    """Bruker TE → 摄氏温度字符串;自动识别 0.1 K / K / °C,无法解析返回空串。
+
+    - TE 惯例为 0.1 K(如 2980 → 298.0 K → 24.9 °C);
+    - 部分数据直接存 K(如 298.0)或 °C(如 25),按数值范围判定。
+    """
     value = _acqus_value(raw_dir, "TE")
     if not value:
         return ""
     try:
-        tenths = float(value.split()[0])
+        number = float(value.split()[0])
     except (TypeError, ValueError):
         return ""
-    return f"{tenths / 10.0 - 273.15:.1f}"
+    kelvin_tenths = number / 10.0
+    celsius: float | None = None
+    if 240.0 <= kelvin_tenths <= 340.0:
+        celsius = kelvin_tenths - 273.15
+    elif 240.0 <= number <= 340.0:
+        celsius = number - 273.15
+    elif -40.0 <= number <= 100.0:
+        celsius = number
+    return f"{celsius:.1f}" if celsius is not None else ""
 
 
 def _raw_dir_for(project, exp_id: str, data_id: str) -> Path | None:
@@ -308,11 +322,16 @@ def auto_fill_notes_from_metadata(
         and exptype.lower() not in ("unknown", "generic", "generic2d", "generic3d")
     ):
         exp_fields["experiment_type"] = exptype
-    nuclei = [
-        str(dim.get("nucleus", "")).strip()
-        for dim in (dataset.get("dimensions") or [])
-        if str(dim.get("nucleus", "")).strip()
-    ]
+    nuclei: list[str] = []
+    for dim in dataset.get("dimensions") or []:
+        try:
+            sf = float(dim.get("sf", 0) or 0)
+        except (TypeError, ValueError):
+            sf = 0.0
+        # 0.2.89:优先按化学位移(观测频率 sf)推断核,失败回退存储字段
+        nucleus = infer_nucleus(sf) or str(dim.get("nucleus", "") or "").strip()
+        if nucleus:
+            nuclei.append(nucleus)
     if nuclei and not exp_fields.get("nuclei"):
         exp_fields["nuclei"] = "-".join(nuclei)
     set_experiment_note_fields(project, exp_id, exp_fields)

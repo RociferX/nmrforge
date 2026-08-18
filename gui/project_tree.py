@@ -39,6 +39,59 @@ _STATUS_TEXT = {
 }
 
 
+def _terminal_argv(directory: str) -> list[str] | None:
+    """构造「在终端中打开目录」的命令(优先 csh);无可用终端返回 None。
+
+    Linux/macOS:优先 gnome-terminal/konsole/x-terminal-emulator/xterm
+    启动 csh(自动读取 ~/.cshrc 的 NMRPipe 环境);Windows 优先找到的
+    csh(如 Cygwin/Git Bash),否则回退 cmd。
+    """
+    import shlex
+    import shutil
+    import sys
+
+    if sys.platform.startswith("win"):
+        csh = shutil.which("csh")
+        if csh:
+            return [csh, "-c", f"cd {shlex.quote(directory)} && exec csh"]
+        cmd = shutil.which("cmd") or "cmd.exe"
+        return [cmd, "/K", f'cd /d "{directory}"']
+
+    csh = shutil.which("csh")
+    terminal = None
+    for name in ("x-terminal-emulator", "gnome-terminal", "konsole", "xterm"):
+        candidate = shutil.which(name)
+        if candidate:
+            terminal = candidate
+            break
+    if terminal is None:
+        return None
+    base = terminal
+    if "gnome-terminal" in base:
+        args = [base, f"--working-directory={directory}"]
+        if csh:
+            args += ["--", "csh"]
+        return args
+    if "konsole" in base:
+        args = [base, f"--workdir={directory}"]
+        if csh:
+            args += ["-e", "csh"]
+        return args
+    shell = "csh" if csh else "bash"
+    quoted = shlex.quote(directory)
+    return [base, "-e", shell, "-c", f"cd {quoted} && exec {shell}"]
+
+
+def open_in_terminal(path: str) -> bool:
+    """在终端中打开目录(优先 csh),返回是否成功启动。"""
+    from PyQt6.QtCore import QProcess
+
+    argv = _terminal_argv(str(path))
+    if not argv:
+        return False
+    return QProcess.startDetached(argv[0], argv[1:])
+
+
 class ProjectTreePanel(QWidget):
     """项目管理树;selection_changed 在上下文(实验类型)变化时发出。"""
 
@@ -48,6 +101,7 @@ class ProjectTreePanel(QWidget):
     data_rename_requested = pyqtSignal(str, str)  # (exp_id, data_id):重命名数据
     rename_project_requested = pyqtSignal()  # 重命名当前项目
     open_path_requested = pyqtSignal(str)  # 打开所在目录(子文件夹右键)
+    open_terminal_requested = pyqtSignal(str)  # 在终端中打开(子文件夹右键)
     open_spectrum_requested = pyqtSignal(str)  # 双击谱图文件:右侧直接显示
     delete_project_requested = pyqtSignal()  # Project 右键:删除项目
     create_experiment_requested = pyqtSignal()  # 空白处右键:新建空白实验
@@ -664,6 +718,10 @@ class ProjectTreePanel(QWidget):
                         "打开所在目录",
                         lambda p=folder_path: self.open_path_requested.emit(str(p)),
                     )
+                    menu.addAction(
+                        "在终端中打开",
+                        lambda p=folder_path: self.open_terminal_requested.emit(str(p)),
+                    )
                 menu.addAction(
                     "重命名...",
                     lambda: self.data_rename_requested.emit(exp_id, data_id),
@@ -691,6 +749,10 @@ class ProjectTreePanel(QWidget):
                     menu.addAction(
                         "打开所在目录",
                         lambda p=folder_path: self.open_path_requested.emit(str(p)),
+                    )
+                    menu.addAction(
+                        "在终端中打开",
+                        lambda p=folder_path: self.open_terminal_requested.emit(str(p)),
                     )
         return menu
 

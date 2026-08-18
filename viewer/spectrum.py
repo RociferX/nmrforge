@@ -254,6 +254,33 @@ class Spectrum3D:
             source=self.source,
         )
 
+    def estimate_noise(self, fraction: float = 0.1) -> float:
+        """用角落小块(三维)的标准差估计噪声水平。"""
+        if self.data.size == 0:
+            return 0.0
+        s0 = max(1, int(self.data.shape[0] * fraction))
+        s1 = max(1, int(self.data.shape[1] * fraction))
+        s2 = max(1, int(self.data.shape[2] * fraction))
+        region = self.data[-s0:, -s1:, -s2:]
+        return float(np.std(region)) if region.size else 0.0
+
+    def project_nmrpipe(self, axis_idx: int, thresh: float) -> Spectrum:
+        """nmrPipe projZ 式投影:低于阈值的点置零后沿轴求和。
+
+        projZ.M 的做法:每张平面先做 ±阈值截断(噪声置零),再把平面
+        累加——峰强度保留、噪声不累积,投影谱观感接近常规二维谱
+        (如 HNCA 沿 13C 投影得到类似 HSQC 的 HN 平面)。
+        """
+        data = np.asarray(self.data, dtype=float)
+        if thresh > 0:
+            data = np.where(np.abs(data) < thresh, 0.0, data)
+        data2d = np.sum(data, axis=axis_idx)
+        remaining = [i for i in range(3) if i != axis_idx]
+        return Spectrum(
+            np.asarray(data2d), [self.axes[i] for i in remaining],
+            source=self.source,
+        )
+
 class Spectrum1D:
     """一维谱(时间域 FID 或二维切片):``data`` 形状 (N,),一个 SpectrumAxis。"""
 
@@ -322,13 +349,10 @@ class Spectrum1D:
 
         _dic, data = ng.pipe.read(str(path))
         data = np.asarray(data)
-        complex_data = data if np.iscomplexobj(data) else None
         if np.iscomplexobj(data):
             data = data.real
         while data.ndim > 2:
             data = data[0]  # 3D+ FID:显示首个间接增量的二维时域平面
-            if complex_data is not None and complex_data.ndim > 2:
-                complex_data = complex_data[0]
         if data.ndim == 1:
             axis = SpectrumAxis(
                 label=label or "FID 数据点",
@@ -338,11 +362,8 @@ class Spectrum1D:
                 carrier_ppm=0.0,
                 orig_hz=0.0,
             )
-            spectrum1d = cls(data, axis, source=Path(path))
-            if complex_data is not None:
-                spectrum1d.complex_data = complex_data
             logger.info("载入 FID: %s (%s)", path, data.shape)
-            return spectrum1d
+            return cls(data, axis, source=Path(path))
         fid_axis = SpectrumAxis(
             label=label or "FID",
             size=int(data.shape[0]),
@@ -360,8 +381,6 @@ class Spectrum1D:
             orig_hz=0.0,
         )
         spectrum = Spectrum(data, [fid_axis, point_axis], source=Path(path))
-        if complex_data is not None:
-            spectrum.complex_data = complex_data
         # FID 动态范围大(ADC 累积值),等高线默认基准取高分位数,
         # 避免被个别尖峰淹没,看不到大部分 FID 的时域包络。
         robust_max = float(np.percentile(np.abs(data), 99.0))

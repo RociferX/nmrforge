@@ -403,67 +403,57 @@ class SpectrumViewer(QWidget):
 
     # ------------------------------------------------------------ phase
     def _refresh_phase_availability(self) -> None:
-        """按当前谱图是否有复型数据启用/禁用相位面板。"""
-        complex_data, _kind = self._complex_for_phase()
-        self.phase_panel.set_available(complex_data is not None)
+        """按当前显示启用相位面板:一维谱或 1D 条带时可用(仅显示,不改数据)。"""
+        self.phase_panel.set_available(self._phase_target() is not None)
 
-    def _complex_for_phase(self) -> tuple[np.ndarray | None, str]:
-        """当前可用于交互调相的复型数据(1D FID 或二维时域 FID)。"""
+    def _phase_target(self) -> str:
+        """当前可调相的 1D 目标:主一维迹线 / 1D 条带。"""
         if self._mode_1d and self._primary_1d is not None:
-            return getattr(self._primary_1d, "complex_data", None), "1d"
-        if self._primary is not None:
-            return getattr(self._primary, "complex_data", None), "2d"
-        return None, ""
-
-    def _on_phase_changed(self, final: bool) -> None:
-        """相位滑块变化:1D 实时更新,2D 松手后重建轮廓。"""
-        complex_data, kind = self._complex_for_phase()
-        if complex_data is None:
-            return
-        if kind == "1d":
-            self._update_phased_1d(complex_data)
-        elif kind == "2d" and final:
-            self._update_phased_2d(complex_data)
+            return "1d"
+        if self._strips_active and self._primary is not None:
+            return "strips"
+        return ""
 
     @staticmethod
-    def _phase_rotate(
-        complex_data: np.ndarray, p0: float, p1: float, axis: int
-    ) -> np.ndarray:
-        """沿指定轴 FT 后按 P0/P1 旋转相位,返回实部显示数据。"""
-        spec = np.fft.fft(complex_data, axis=axis)
-        n = spec.shape[axis]
+    def _display_phase(real: np.ndarray, p0: float, p1: float) -> np.ndarray:
+        """显示用相位旋转(不改变数据):解析信号(实部+Hilbert 虚部)旋转后取实部。
+
+        P0/P1 仅影响显示,等价 nmrDraw 的肉眼看相;实数谱也可用。
+        """
+        try:
+            from scipy.signal import hilbert
+        except ImportError:  # pragma: no cover - scipy 为项目依赖
+            return np.asarray(real, dtype=float)
+        data = np.asarray(real, dtype=float)
+        if data.ndim != 1 or data.size == 0:
+            return data
+        analytic = hilbert(data)
+        n = data.shape[0]
         k = np.arange(n, dtype=float)
         angle = np.deg2rad(p0 + p1 * k / max(1, n - 1))
-        shape = [1] * spec.ndim
-        shape[axis] = n
-        return (spec * np.exp(1j * angle.reshape(shape))).real
+        return (analytic * np.exp(1j * angle)).real
 
-    def _update_phased_1d(self, complex_data: np.ndarray) -> None:
+    def _on_phase_changed(self, final: bool) -> None:
+        """相位滑块变化:1D 实时更新显示;条带模式下同步两个一维迹线。"""
+        target = self._phase_target()
+        if target == "1d":
+            self._update_phased_1d()
+        elif target == "strips":
+            self._refresh_strips_phase()
+
+    def _update_phased_1d(self) -> None:
         if self._plot_1d is None or self._primary_1d is None:
             return
         p0, p1 = self.phase_panel.values()
-        phased = self._phase_rotate(np.asarray(complex_data), p0, p1, axis=0)
+        phased = self._display_phase(self._primary_1d.data, p0, p1)
         self._plot_1d.setData(self._primary_1d.x_values(), phased)
 
-    def _update_phased_2d(self, complex_data: np.ndarray) -> None:
-        if self._primary is None or not self.layers:
+    def _refresh_strips_phase(self) -> None:
+        """按当前相位重算两个 1D 条带迹线(显示用)。"""
+        pos = getattr(self, "_strip_pos", None)
+        if pos is None or not self._strips_active or self._primary is None:
             return
-        p0, p1 = self.phase_panel.values()
-        phased = self._phase_rotate(np.asarray(complex_data), p0, p1, axis=1)
-        display = Spectrum(phased, self._primary.axes, source=self._primary.source)
-        layer = ContourLayer(
-            display.data,
-            self._levels_for(display),
-            pg.mkPen("#1f77b4", width=1),
-            neg_pen=pg.mkPen("#e74c3c", width=1),
-            zoom=self._contour_zoom,
-        )
-        self.plot.addItem(layer)
-        old = self.layers[0]
-        self.plot.removeItem(old)
-        self.layers[0] = layer
-        self.layer_spectra[0] = display
-        self._apply_peak_items()
+        self._update_strips(pos[0], pos[1])
 
     def set_1d_mode(self, active: bool) -> None:
         """开关一维谱显示(TopSpin 式):十字线 + 上/右 1D 条带。"""
@@ -490,6 +480,7 @@ class SpectrumViewer(QWidget):
             self._move_crosshair(cols // 2, rows // 2)
         else:
             self._restore_strips()
+        self._refresh_phase_availability()
 
     def _setup_strip_axes(self) -> None:
         """给 1D 条带设置刻度(ppm 轴显示 ppm,时间域轴显示点序号)。"""
@@ -505,18 +496,18 @@ class SpectrumViewer(QWidget):
         self.strip_right.setLabels(left=y_label, bottom="Intensity")
 
     def _update_strips(self, row: int, col: int) -> None:
-        """更新十字线处两个一维迹线(行=F2 迹线,列=F1 迹线)。"""
+        """更新十字线处两个一维迹线(行=F2 迹线,列=F1 迹线;显示相位)。"""
         if self._primary is None or not self._strips_active:
             return
         rows, cols = self._primary.data.shape
         row = max(0, min(rows - 1, int(row)))
         col = max(0, min(cols - 1, int(col)))
-        self.strip_top_curve.setData(
-            np.arange(cols), np.asarray(self._primary.data[row, :])
-        )
-        self.strip_right_curve.setData(
-            np.asarray(self._primary.data[:, col]), np.arange(rows)
-        )
+        self._strip_pos = (row, col)
+        p0, p1 = self.phase_panel.values()
+        row_trace = self._display_phase(self._primary.data[row, :], p0, p1)
+        col_trace = self._display_phase(self._primary.data[:, col], p0, p1)
+        self.strip_top_curve.setData(np.arange(cols), row_trace)
+        self.strip_right_curve.setData(col_trace, np.arange(rows))
 
     def _move_crosshair(self, x: float, y: float) -> None:
         """移动十字线到视图坐标 (x=列, y=view y;view y 即数据行)。"""

@@ -160,6 +160,18 @@ def test_slice_out_of_range_raises() -> None:
         spectrum3d.slice(0, -1)
 
 
+def test_project_nmrpipe_thresholded_sum() -> None:
+    """0.2.89:nmrPipe projZ 式投影:低于阈值置零后沿轴求和。"""
+    spectrum3d = _synthetic3d()
+    thresh = 0.5
+    proj = spectrum3d.project_nmrpipe(2, thresh)
+    assert proj.data.shape == (4, 6)
+    expected = np.where(
+        np.abs(spectrum3d.data) < thresh, 0.0, spectrum3d.data
+    ).sum(axis=2)
+    np.testing.assert_allclose(proj.data, expected)
+
+
 def test_project_modes() -> None:
     spectrum3d = _synthetic3d()
     # MIP 沿 F3 → 平面 F1-F2
@@ -251,11 +263,12 @@ def test_spectrum_panel_opens_ft3(
 
     panel = SpectrumPanel(manager)
     panel.set_context(entry.id, data.id)
+    assert panel.load_current_spectrum() is True
     assert panel._current_spectrum == ft3
     assert panel.viewer.layer_list.count() == 1
     assert not panel._spectrum3d_panel.isHidden()
-    # 0.2.85:3D 默认显示一个投影(MIP)
-    assert panel._spectrum3d_panel._mode == "max"
+    # 0.2.89:3D 默认 nmrPipe 式阈值求和投影(Proj)
+    assert panel._spectrum3d_panel._mode == "proj"
     # 峰表 3D 列联动
     peaks = manager.data_dir(entry.id, data.id, "peaks")
     peaks.mkdir(parents=True, exist_ok=True)

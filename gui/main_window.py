@@ -157,6 +157,7 @@ class MainWindow(QMainWindow):
             lambda path: self._open_root(Path(path))
         )
         self.project_tree.open_path_requested.connect(self._open_path)
+        self.project_tree.open_terminal_requested.connect(self._open_terminal)
         self.project_tree.open_spectrum_requested.connect(self._open_spectrum_from_tree)
         self.project_tree.rename_requested.connect(self._rename_experiment_by_id)
         self.project_tree.delete_requested.connect(self._delete_experiment_by_id)
@@ -194,9 +195,15 @@ class MainWindow(QMainWindow):
         )
         self.center_panel.edit_notes_requested.connect(self._edit_notes)
         self.pipeline.run_finished.connect(self._on_pipeline_run_finished)
+        self.pipeline.show_spectrum_requested.connect(
+            self._show_spectrum_from_pipeline
+        )
 
         self.spectrum_panel = SpectrumPanel(self.manager, controller=self.controller)
         self.spectrum_panel.peaks_saved.connect(self._on_peaks_saved)
+        self.spectrum_panel.status_message.connect(
+            self.statusBar().showMessage
+        )
 
         self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
         self.main_splitter.addWidget(self.project_tree)
@@ -205,10 +212,13 @@ class MainWindow(QMainWindow):
         self.main_splitter.setStretchFactor(0, 20)
         self.main_splitter.setStretchFactor(1, 40)
         self.main_splitter.setStretchFactor(2, 40)
-        self.main_splitter.setSizes([260, 460, 560])
+        # 0.2.87:左侧树加宽,状态列不被遮挡
+        self.project_tree.setMinimumWidth(330)
+        self.main_splitter.setSizes([340, 420, 560])
 
         self.log_panel = LogPanel()
-        self.log_panel.setMaximumHeight(160)
+        self.log_panel.setMinimumHeight(120)
+        self.log_panel.setMaximumHeight(320)
         self.log_panel.setVisible(False)
 
         central = QWidget()
@@ -221,9 +231,15 @@ class MainWindow(QMainWindow):
             "background: #ecf0f1; padding: 4px 10px; "
             "font-weight: bold; color: #2c3e50;"
         )
+        # 0.2.87:主内容与日志上下可拖调整占比,日志默认更高
+        self.vertical_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.vertical_splitter.addWidget(self.main_splitter)
+        self.vertical_splitter.addWidget(self.log_panel)
+        self.vertical_splitter.setStretchFactor(0, 1)
+        self.vertical_splitter.setStretchFactor(1, 0)
+        self.vertical_splitter.setSizes([640, 220])
         central_layout.addWidget(self.context_bar)
-        central_layout.addWidget(self.main_splitter, 1)
-        central_layout.addWidget(self.log_panel)
+        central_layout.addWidget(self.vertical_splitter, 1)
         self.setCentralWidget(central)
 
         # 兼容旧测试/旧代码:保留扁平实验表(隐藏),仍随 refresh() 同步。
@@ -399,6 +415,8 @@ class MainWindow(QMainWindow):
         self.refresh()
         self.project_tree.select_experiment(exp_id)
         self.center_panel.set_selection("experiment", exp_id)
+        # 0.2.87:批量导入自动填充注释后立即刷新注释条
+        self.center_panel._update_notes("experiment", exp_id, "")
         self._maybe_show_first_import_hint()
 
     def _assign_batch(self, exp_id: str, data_id: str, batch: str) -> None:
@@ -533,6 +551,8 @@ class MainWindow(QMainWindow):
         self.refresh()
         if exp_id:
             self.project_tree.select_experiment(exp_id)
+            # 0.2.87:导入自动填充注释后立即刷新注释条
+            self.center_panel._update_notes("experiment", exp_id, "")
         self._maybe_show_first_import_hint()
         warnings = list(result.warnings)
         quality = getattr(self, "_last_raw_quality", None) or {}
@@ -932,7 +952,18 @@ class MainWindow(QMainWindow):
         """Pipeline 处理步骤完成后刷新左侧树/中间/谱图面板(主线程)。"""
         self.refresh()
         self.center_panel.refresh()
+        # 0.2.88:不自动显示谱,刷新文件列表即可(「展示谱图」按钮已出现)
         self.spectrum_panel.refresh()
+
+    def _show_spectrum_from_pipeline(self, _step_id: str = "") -> None:
+        """「展示谱图」按钮:在右侧谱图面板显示当前数据的最终谱。"""
+        exp_id = self.pipeline.current_experiment_id()
+        data_id = getattr(self.pipeline, "_current_data_id", "")
+        if not (exp_id and data_id) or self.manager.project is None:
+            return
+        self.spectrum_panel.set_context(exp_id, data_id)
+        if not self.spectrum_panel.load_current_spectrum():
+            InfoDialog.show_info(self, "提示", "该样品数据还没有谱图文件")
 
     def _on_manual_run_done(self) -> None:
         """人工脚本运行完成后刷新 Pipeline/报告页(主线程)。"""
@@ -1228,6 +1259,13 @@ class MainWindow(QMainWindow):
             self.spectrum_panel._current_spectrum = target
             self.spectrum_panel._load_peaks(target)
             self.statusBar().showMessage(f"已打开: {target.name}")
+
+    def _open_terminal(self, path: str) -> None:
+        """在终端中打开目录(优先 csh,便于直接运行 NMRPipe 命令)。"""
+        from gui.project_tree import open_in_terminal
+
+        if not open_in_terminal(path):
+            InfoDialog.show_info(self, "提示", "未找到可用的终端程序")
 
     def _open_path(self, path: str) -> None:
         """用系统文件管理器打开目录(双击/右键 data/子文件夹),中间保持 Pipeline。"""

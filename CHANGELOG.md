@@ -1,5 +1,25 @@
 # 变更日志
 
+## [0.2.93] - 2026-08-18
+
+- 新增(GUI Agent,用户反馈):样品数据子文件夹(raw/process/spectra/等)
+  与样品数据节点的右键菜单增加「在终端中打开」——打开终端并默认进入
+  csh(Linux 用 gnome-terminal/konsole/xterm 启动 csh,自动读取
+  ~/.cshrc 的 NMRPipe 环境;Windows 优先找到的 csh,否则回退 cmd)。
+- 测试:菜单项与信号、终端命令构造(优先 csh / Windows 回退);本地全量
+  pytest + ruff 全绿。
+
+
+## [0.2.92] - 2026-08-16
+
+- 调整(GUI Agent,用户反馈):移除「文件指纹检测」「显示已过期状态」
+  两个细分开关,设置对话框只保留「简单模式」一个 Pipeline 开关
+  (config/nmrforge.local.yaml pipeline.simple_mode,重启生效);
+  简单模式=只按上一步产物文件判断状态,不做指纹/新旧比较、不显示
+  「已过期」,旧配置里的 fingerprint_check/outdated_enabled 键忽略。
+- 测试:开关测试收敛为简单模式断言;本地全量 pytest + ruff 全绿。
+
+
 ## [0.2.91] - 2026-08-16
 
 - 调整(Architect,用户要求):fid.com 等生成脚本归位 process/ 工作目录——
@@ -16,6 +36,18 @@
 - VM 实测(sampleB 真实转换):fid.com 与 raw.fid 均在 process/,raw 无
   fid.com(1682 软链接 + 仅 profYZ.dat 实体),转换正常。
 
+
+## [0.2.91] - 2026-08-16
+
+- 新增(GUI Agent,用户反馈):「简单模式」开关(设置对话框 →
+  config/nmrforge.local.yaml pipeline.simple_mode,重启生效)——
+  开启后 Pipeline 下一步只认上一步有没有对应格式的产物文件
+  (.fid/.ft2/.ft3/.list/报告),不再比较输入/脚本指纹,也不显示
+  「已过期」;相当于同时关闭指纹检测与过期显示。
+- 测试:简单模式下输入变化不再出现 OUTDATED 断言;本地全量 pytest
+  + ruff 全绿。
+
+
 ## [0.2.90] - 2026-08-16
 
 - 修复/调整(G2B-009 修订,Architect,用户要求):raw 导入只读文件改为
@@ -30,6 +62,18 @@
 - VM 实测(sampleB,3D HNCACB):raw 1682 文件全部软链接、0 复制,
   fid.com/profYZ.dat 实体复制,无 warnings。
 
+
+## [0.2.90] - 2026-08-16
+
+- 新增(GUI Agent,用户反馈):两个 Pipeline 行为开关(设置对话框 →
+  config/nmrforge.local.yaml 的 pipeline 段,重启生效):
+  ①「文件指纹检测」关闭后不再做输入/脚本指纹与产物新旧比较,输入
+  变化不再触发「已过期」,同时省去每次刷新的指纹计算;
+  ②「显示已过期状态」关闭后任何步骤都不再出现 OUTDATED(有产物即
+  SUCCESS,否则 READY/LOCKED)。
+- 测试:关闭开关后不再出现 OUTDATED 断言;本地全量 pytest + ruff 全绿。
+
+
 ## [0.2.89] - 2026-08-16
 
 - merge(Architect):并入 GUI 0.2.86(查看器交互调相 P0/P1 + 生成谱图参数
@@ -39,6 +83,29 @@
   追加式兼容(Spectrum 增加可选 complex_data 供 FID 调相),契约字段未破坏;
 - 测试:本地全量 488 passed、VM 全量 484 passed + 4 skipped(Python 3.12.13,
   HEAD 306321b),ruff 全绿。
+
+
+## [0.2.89] - 2026-08-16
+
+- 修复(GUI Agent,用户反馈):核种类按化学位移(观测频率 sf)推断——
+  sf/旋磁比对应 1H 频率并与常见磁场匹配(600→1H、60.8→15N、
+  150.9→13C),推断失败才回退 acqus 的 NUC1 标签;注释自动填充的
+  核与查看器轴标签(N-H/C-N-H)同步使用该推断。
+- 修复(GUI Agent,用户反馈):3D 谱导入后打开卡顿——大 .ft3
+  (>32MB)改为后台线程读取,状态栏提示加载进度,完成后再绑定
+  渲染,UI 不再长时间无响应。
+- 调整(GUI Agent,用户反馈):3D 投影方式对齐 nmrPipe projZ.M——
+  新增 Proj 模式(每张平面低于阈值的点置零后沿轴求和,峰保留、
+  噪声不累积),并设为默认;如 HNCACB 沿 13C 投影得到类似 HSQC
+  的 HN 平面(选 F2-F3 平面 + Proj)。阈值取 3×噪声估计。
+- 修复(GUI Agent,用户反馈):3D 谱生成后整链莫名 OUTDATED + 左侧点击
+  卡顿——raw 输入指纹只统计权威 Bruker 输入文件(acqus/acqu2s/acqu3s/
+  ser/fid/nuslist,与导入登记一致)+ metadata.json;3D NUS 处理写入
+  raw/fid、raw/mask、raw/ft 等数百个中间产物不再使导入/FID 误判过期,
+  状态计算从 ~1s/次(1537 文件全量哈希)降到毫秒级。
+- 测试:infer_nucleus、project_nmrpipe 阈值求和、3D 默认 Proj、
+  大 .ft3 异步加载、raw 处理产物忽略;本地全量 pytest + ruff 全绿。
+
 
 ## [0.2.88] - 2026-08-16
 
@@ -54,6 +121,18 @@
 - 待办:GUI 设置对话框动态读取 load_processing_defaults 暴露 ext_lo/ext_hi,
   仍待 GUI Agent 接线(B2G-003)。
 
+
+## [0.2.88] - 2026-08-16
+
+- 调整(GUI Agent,用户反馈):取消选中样品数据时自动显示谱图——右侧
+  谱图改为文件列表点击或 Pipeline「生成谱图」步骤完成后出现的
+  「展示谱图」按钮打开;切换样品数据时清空旧谱,不残留上一张。
+- 修复:0.2.87 的「生成谱图后强制重载」随之移除,由「展示谱图」按钮
+  显式触发(重新处理后点按钮即显示最新谱)。
+- 测试:更新自动加载断言为显式加载;新增「展示谱图」按钮可见性与
+  信号测试;本地全量 pytest + ruff 全绿。
+
+
 ## [0.2.87] - 2026-08-16
 
 - 相位优化候选谱零填零 + 填零放在优化最后(用户要求):
@@ -67,6 +146,22 @@
     候选体积与 I/O 显著下降(3D NUS 候选由全尺寸 ft3 降为 SI=TD);
   - 测试:新增候选 zero_fill=none 与最终 auto 断言;fake backend 补 params;
   - 待 VM 用户手动参数复核:终谱尺寸/峰位/线宽与全采样对照。
+
+## [0.2.87] - 2026-08-16
+
+- 调整(GUI Agent,用户反馈):交互调相改为 nmrDraw 式「仅显示」——查看
+  一维谱/开启 1D 条带后拖 P0/P1 肉眼看相,不改变数据,实数谱即可用
+  (解析信号 Hilbert 旋转);值可复制回写脚本 PS 行。
+- 修复(GUI Agent,用户反馈):刷新不及时——生成谱图/重新处理后右侧谱图
+  强制重新加载(同路径重处理不残留旧图);导入自动填充注释后立即刷新
+  顶部注释条(单条与批量导入)。
+- 调整(GUI Agent,用户反馈):样品数据注释字段「条件变化」改为
+  「Buffer 组分」;温度自动识别 0.1 K / K / °C(Bruker TE 惯例
+  2980→24.9°C,直接存 K 或 °C 也能识别)。
+- 调整(GUI Agent,用户反馈):日志面板改为上下可拖拽调整占比、默认
+  高度更高(220);左侧项目树加宽(状态列不再被遮挡)。
+- 测试:显示相位数学/仅显示不改数据、温度单位识别;本地全量 pytest
+  + ruff 全绿。
 
 ## [0.2.86] - 2026-08-16
 

@@ -1,8 +1,7 @@
-"""交互式相位校正面板(P0/P1 滑块,0.2.86)。
+"""交互式相位校正面板(P0/P1 滑块,0.2.87)。
 
-对复型数据(1D FID / 二维时域 FID)在频率域做 P0/P1 相位旋转后显示实部,
-等价 nmrDraw 的交互调相;实型终谱(ft2/ft3)无法再事后调相,面板提示禁用。
-值可一键复制,供回写人工相位参数或脚本 PS 行。
+像 nmrDraw 一样查看一维谱后拖 P0/P1 肉眼看相——仅显示,不改变数据,
+实数谱也可用;值可一键复制,供回写人工相位参数或脚本 PS 行。
 """
 
 from __future__ import annotations
@@ -93,7 +92,9 @@ class PhasePanel(QWidget):
         ):
             widget.setEnabled(available)
         self.hint_label.setText(
-            "" if available else (hint or "当前谱图无复型数据,仅 FID/复型谱可交互调相")
+            ""
+            if available
+            else (hint or "仅显示调相(不改数据):查看一维谱或开启 1D 条带后可用")
         )
 
     # ------------------------------------------------------------- slots

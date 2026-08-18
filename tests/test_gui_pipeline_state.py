@@ -92,15 +92,42 @@ def test_raw_fingerprint_ignores_mtime_touch() -> None:
         raw.mkdir(parents=True, exist_ok=True)
         data.raw_dir = str(raw)  # 指向项目内 raw 副本(模拟真实导入)
         manager.save()
-        (raw / "profYZ.dat").write_text("payload-v1", encoding="utf-8")
+        # 0.2.89:输入指纹只统计权威输入文件(acqus 等),touch/内容变化以
+        # 该文件为准;处理产物(profYZ.dat 等辅助文件)不计入
+        (raw / "acqus").write_text("payload-v1", encoding="utf-8")
         f1 = ps.raw_fingerprint(manager, entry.id, data.id)
-        st = (raw / "profYZ.dat").stat()
-        os.utime(raw / "profYZ.dat", (st.st_atime + 1, st.st_mtime + 1))
+        st = (raw / "acqus").stat()
+        os.utime(raw / "acqus", (st.st_atime + 1, st.st_mtime + 1))
         f2 = ps.raw_fingerprint(manager, entry.id, data.id)
         assert f1 == f2, "mtime touch 不应改变 raw 指纹"
-        (raw / "profYZ.dat").write_text("payload-v2", encoding="utf-8")
+        (raw / "acqus").write_text("payload-v2", encoding="utf-8")
         f3 = ps.raw_fingerprint(manager, entry.id, data.id)
         assert f1 != f3, "内容变化应改变 raw 指纹"
+
+
+def test_raw_processing_artifacts_ignored(tmp_path: Path) -> None:
+    """0.2.89:处理在 raw/ 下写入/移动中间产物(fid/、mask/ 等)不改输入指纹。"""
+    from gui import pipeline_state as ps
+
+    manager = ProjectManager.create_project(tmp_path / "proj", "demo")
+    entry = manager.create_experiment(title="e")
+    data = manager.import_data(entry.id, str(tmp_path / "src"))
+    raw = manager.data_dir(entry.id, data.id, "raw")
+    raw.mkdir(parents=True, exist_ok=True)
+    data.raw_dir = str(raw)
+    manager.save()
+    (raw / "acqus").write_text("acqus-v1", encoding="utf-8")
+    (raw / "ser").write_text("ser-v1", encoding="utf-8")
+    f1 = ps.raw_fingerprint(manager, entry.id, data.id)
+    # 模拟 3D NUS 处理:raw/ 下写入 fid/、mask/ 中间产物并移动个别文件
+    (raw / "fid").mkdir()
+    (raw / "mask").mkdir()
+    (raw / "fid" / "test001.fid").write_text("x", encoding="utf-8")
+    (raw / "mask" / "test001.fid").write_text("y", encoding="utf-8")
+    (raw / "test.fid").write_text("z", encoding="utf-8")
+    (raw / "test.fid").unlink()  # 模拟处理移动文件
+    f2 = ps.raw_fingerprint(manager, entry.id, data.id)
+    assert f1 == f2, "处理产物不应改变 raw 输入指纹"
 
 
 def test_statuses_success_without_state(
@@ -157,6 +184,25 @@ def test_raw_change_marks_import_fid_outdated_and_propagates(
     assert statuses["spectrum"] == "OUTDATED"
     assert statuses["peaks"] == "OUTDATED"
     assert statuses["analysis"] == "OUTDATED"
+
+
+def test_simple_mode_disables_outdated(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.2.91:简单模式——只按产物文件判断,不出现 OUTDATED。"""
+    manager, exp_id, data_id, artifacts = _manager_with_artifacts(tmp_path)
+    _record_all(manager, exp_id, data_id)
+    # spectrum 步骤的输入是 FID 文件:改写 FID → 默认 OUTDATED
+    artifacts["fid"].write_bytes(b"fid-v2")
+    assert compute_step_statuses(manager, exp_id)["spectrum"] == "OUTDATED"
+
+    monkeypatch.setattr(
+        "gui.settings.load_settings",
+        lambda: {"pipeline": {"simple_mode": True}},
+    )
+    statuses = compute_step_statuses(manager, exp_id)
+    assert "OUTDATED" not in statuses.values()
+    assert statuses["spectrum"] == "SUCCESS"
 
 
 def test_mtime_fallback_without_state(

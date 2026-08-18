@@ -25,6 +25,18 @@ def qapp() -> QApplication:
     yield app
 
 
+def test_infer_nucleus_from_sf() -> None:
+    """0.2.89:按观测频率 sf 推断核:600→1H、60.8→15N、150.9→13C。"""
+    from viewer.axis_labels import infer_nucleus
+
+    assert infer_nucleus(600.13) == "1H"
+    assert infer_nucleus(60.82) == "15N"
+    assert infer_nucleus(150.9) == "13C"
+    assert infer_nucleus(10) == ""
+    assert infer_nucleus(2000) == ""
+    assert infer_nucleus(0) == ""
+
+
 def test_nucleus_symbol() -> None:
     assert nucleus_symbol("1H") == "H"
     assert nucleus_symbol("15N") == "N"
@@ -110,6 +122,7 @@ def test_spectrum_panel_uses_nucleus_labels(
     manager.save()
     panel = SpectrumPanel(manager)
     panel.set_context(exp_id, data_id)
+    assert panel.load_current_spectrum() is True  # 0.2.88:显式加载
     assert panel.viewer._primary is not None
     assert panel.viewer._primary.x_axis.label == "H"
     assert panel.viewer._primary.y_axis.label == "N"
@@ -132,6 +145,7 @@ def test_spectrum_panel_fallback_labels(
     manager.save()
     panel = SpectrumPanel(manager)
     panel.set_context(exp_id, data_id)
+    assert panel.load_current_spectrum() is True  # 0.2.88:显式加载
     assert panel.viewer._primary is not None
     assert panel.viewer._primary.x_axis.label == "F2"
     assert panel.viewer._primary.y_axis.label == "F1"

@@ -19,6 +19,38 @@ _NUCLEUS_ALIASES = {
 }
 _SUBSCRIPT = "xyz"
 
+# 核的旋磁比(相对 1H),用于按观测频率 sf 推断核种类(0.2.89)
+_NUCLEUS_RATIOS: dict[str, float] = {
+    "1H": 1.0,
+    "2H": 0.15351,
+    "13C": 0.25145,
+    "15N": 0.10137,
+    "19F": 0.94077,
+    "31P": 0.40481,
+    "23Na": 0.26452,
+    "29Si": 0.19837,
+}
+_COMMON_B0_H1 = (300.0, 400.0, 500.0, 600.0, 700.0, 800.0, 850.0, 900.0, 1000.0)
+
+
+def infer_nucleus(sf: float) -> str:
+    """按观测频率(sf, MHz)推断核种类(化学位移对应)。
+
+    sf/旋磁比 = 该维对应的 1H 频率,与常见磁场(300-1000 MHz)最接近
+    者为该核;无法置信判定返回空串。
+    """
+    if not sf or sf <= 0:
+        return ""
+    best, best_err = "", float("inf")
+    for nucleus, ratio in _NUCLEUS_RATIOS.items():
+        implied_1h = sf / ratio
+        if not (300.0 <= implied_1h <= 1100.0):
+            continue
+        err = min(abs(implied_1h - b0) for b0 in _COMMON_B0_H1) / implied_1h
+        if err < best_err:
+            best, best_err = nucleus, err
+    return best if best_err < 0.05 else ""
+
 
 def nucleus_symbol(nucleus: str) -> str:
     """核字符串 → 显示符号:15N→N、1H→H;未知时去掉前导数字。"""
@@ -53,13 +85,23 @@ def axis_labels_from_nuclei(nuclei: list[str]) -> tuple[str, ...]:
 
 
 def nuclei_from_metadata(metadata: dict | None) -> list[str] | None:
-    """按 F1/F2/F3 顺序从导入 metadata 提取核列表;缺信息返回 None。"""
+    """按 F1/F2/F3 顺序从导入 metadata 提取核列表;缺信息返回 None。
+
+    0.2.89:优先按观测频率 sf(化学位移对应)推断核,推断失败回退
+    存储的 nucleus 字段。
+    """
     dims = ((metadata or {}).get("dataset") or {}).get("dimensions") or []
     by_axis: dict[int, str] = {}
     for dim in dims:
         axis = str((dim or {}).get("logical_axis", "") or "")
-        nucleus = str((dim or {}).get("nucleus", "") or "")
-        if axis[:1] == "F" and axis[1:].isdigit() and nucleus:
+        if axis[:1] != "F" or not axis[1:].isdigit():
+            continue
+        try:
+            sf = float((dim or {}).get("sf", 0) or 0)
+        except (TypeError, ValueError):
+            sf = 0.0
+        nucleus = infer_nucleus(sf) or str((dim or {}).get("nucleus", "") or "")
+        if nucleus:
             by_axis[int(axis[1:])] = nucleus
     if not by_axis:
         return None
