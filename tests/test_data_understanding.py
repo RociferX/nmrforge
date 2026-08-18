@@ -85,7 +85,7 @@ def test_direct_dimension_sw_prefers_sw_h(bruker_dir: Path) -> None:
 
 
 def test_carrier_ppm_fallback_without_o1p(tmp_path: Path, bruker_dir: Path) -> None:
-    """真实数据无 O1P 时载波 ppm = O1 / SFO1。"""
+    """BF1 缺失时载波 ppm 回退 O1/SFO1(兼容旧数据;fixture 无 BF1)。"""
     import shutil
 
     dst = tmp_path / "no_o1p"
@@ -102,6 +102,71 @@ def test_carrier_ppm_fallback_without_o1p(tmp_path: Path, bruker_dir: Path) -> N
     direct = exp.direct_dimension
     assert direct is not None
     assert direct.o1p == pytest.approx(2821.062748 / 599.8937495)
+
+
+def test_o1p_uses_bf1_matching_topspin(tmp_path: Path) -> None:
+    """sampleK 实测参数(15N):O1/BF1 = 117.000,与 TopSpin 显示一致。"""
+    params = (
+        "##$PULPROG= nuc\n"
+        "##$TD= 1024\n"
+        "##$SW_h= 10000.000000\n"
+        "##$SFO1= 121.666934964\n"
+        "##$BF1= 121.652701598\n"
+        "##$O1= 14233.366\n"
+        "##$NUC1= 15N\n"
+        "##$PARMODE= 1\n"
+        "##$FnMODE= 5\n"
+        "##$END=\n"
+    )
+    dst = tmp_path / "o1p_bf1"
+    dst.mkdir()
+    (dst / "acqus").write_text(params, encoding="utf-8", newline="\n")
+    (dst / "acqu2s").write_text(params, encoding="utf-8", newline="\n")
+    exp = read_dataset(dst)
+    assert len(exp.dimensions) == 2
+    for dim in exp.dimensions:
+        assert dim.sf == pytest.approx(121.666934964)  # sf 仍为 SFO1
+        assert dim.o1p == pytest.approx(117.000, abs=1e-3)  # O1/BF1
+        assert abs(dim.o1p - 116.986) > 0.01  # 不再是 O1/SFO1
+
+
+def test_o1p_prefers_explicit_o1p(tmp_path: Path, bruker_dir: Path) -> None:
+    """显式 O1P 优先:即使 BF1 存在也不重算。"""
+    import shutil
+
+    dst = tmp_path / "o1p_explicit"
+    shutil.copytree(bruker_dir / "hsqc_2d", dst)
+    acqus = dst / "acqus"
+    lines = acqus.read_text(encoding="utf-8").splitlines()
+    lines.append("##$BF1= 599.890928437")
+    acqus.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
+    exp = read_dataset(dst)
+    direct = exp.direct_dimension
+    assert direct is not None
+    assert direct.o1p == pytest.approx(4.703)  # O1P 原值,不因 BF1 重算
+
+
+def test_o1p_fallback_bf1_for_1h(tmp_path: Path, bruker_dir: Path) -> None:
+    """1H 维度:BF1 存在时回退 O1/BF1(≈O1P 4.703,sampleI 4.700 同族)。"""
+    import shutil
+
+    dst = tmp_path / "o1p_1h"
+    shutil.copytree(bruker_dir / "hsqc_2d", dst)
+    acqus = dst / "acqus"
+    lines = [
+        line
+        for line in acqus.read_text(encoding="utf-8").splitlines()
+        if not line.startswith("##$O1P")
+    ]
+    # SFO1 = BF1 + O1 → BF1 = 599.8937495 MHz − 2821.062748 Hz
+    lines.append("##$BF1= 599.890928437252")
+    acqus.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
+    exp = read_dataset(dst)
+    direct = exp.direct_dimension
+    assert direct is not None
+    assert direct.o1p == pytest.approx(4.703, abs=1e-3)
+    # 与旧 O1/SFO1 值的差 ≈ O1P²/1e6,证明走 BF1 分支
+    assert abs(direct.o1p - 2821.062748 / 599.8937495) > 1e-5
 
 def _experiment_with_nuclei(
     ndim: int, nuclei: list[str], pulprog: str

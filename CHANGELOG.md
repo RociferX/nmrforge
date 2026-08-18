@@ -1,5 +1,17 @@
 # 变更日志
 
+## [0.2.120] - 2026-08-18
+
+- 修复(Backend):o1p(谱中心)定义与 TopSpin 一致——O1P 缺失时改为
+  O1/BF1(偏移相对基频 BF1),替代旧 O1/SFO1(相对实际载频 SFO1=BF1+O1);
+  两者差 ≈ O1P²/1e6(sampleK 15N:117.000 vs 116.986,差 0.014 ppm);
+  显式 O1P 仍优先,BF1 缺失回退 SFO1 兼容旧数据;Dimension.sf 仍为
+  SFO1(fid.com OBS 用),bruker_workflow CAR 逻辑不变自动取正确值;
+- 测试:新增 O1/BF1=117.000(sampleK 实测参数)、1H BF1 回退(≈4.703)、
+  显式 O1P 优先;更新回退用例说明(BF1 缺失走 O1/SFO1);
+- 本地全量 574 passed(571+3)+ ruff 全绿;VM 复核 sampleK fid.com
+  yCAR/zCAR=117.000 见 docs/PROJECT_STATUS.md。
+
 ## [0.2.119] - 2026-08-18
 
 - 固体核磁(MAS)实验类型预设扩充(Backend,presets/*.yaml 单一数据源,
