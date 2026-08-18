@@ -299,3 +299,32 @@ def test_write_merged_nuslist_detects_bad_points(
     written = (tmp_path / "nuslist").read_text(encoding="utf-8").splitlines()
     assert all(tuple(int(v) for v in line.split()) not in bad for line in written)
     assert count == len(written)
+
+def test_clean_work_nuslist_single_dataset(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """单 NUS 数据坏点清理:越界点剔除 + ⚠ 提示(所有 NUS 数据统一)。"""
+    import shutil
+
+    from backend.nmrpipe_backend import NMRPipeBackend
+    from core.data.bruker_reader import read_dataset
+
+    src = tmp_path / "nus"
+    shutil.copytree(bruker_dir / "nus_2d", src)
+    # 注入越界点(nus_2d F1 复点网格上限 td//2)
+    lines = (src / "nuslist").read_text(encoding="utf-8").splitlines()
+    (src / "nuslist").write_text("\n".join(lines) + "\n1000\n", encoding="utf-8")
+    exp = read_dataset(src)
+    work = tmp_path / "work"
+    work.mkdir()
+    shutil.copy2(src / "nuslist", work / "nuslist")
+    backend = NMRPipeBackend()
+    logs: list[str] = []
+    count, bad = backend._clean_work_nuslist(work, exp, logs)
+    assert (1000,) in bad
+    assert count == len(lines)
+    joined = "\n".join(logs)
+    assert "⚠ 检测到采样坏点" in joined
+    written = (work / "nuslist").read_text(encoding="utf-8").splitlines()
+    assert len(written) == len(lines)
+

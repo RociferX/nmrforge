@@ -57,6 +57,52 @@ from core.optimization.phase_search import (
 from core.planning.processing_plan import ProcessingPlan
 
 
+def _nus_grid_bounds(experiment: Experiment) -> list[int] | None:
+    """NUS 网格上限(nuslist 复点索引):2D [F1],3D [F2, F1],上限 NusTD//2。"""
+    td = effective_td(experiment)
+    if experiment.ndim == 2 and len(td) > 1:
+        return [int(td[1]) // 2]
+    if experiment.ndim >= 3 and len(td) > 2:
+        return [int(td[1]) // 2, int(td[2]) // 2]
+    return None
+
+
+def _validate_nus_points(
+    points: list[tuple[int, ...]],
+    experiment: Experiment,
+) -> tuple[list[tuple[int, ...]], list[tuple[int, ...]], dict[tuple[int, ...], list[str]]]:
+    """NUS 采样点坏点校验:越界点 + 重复点。返回 (有效点, 坏点, 坏点原因)。"""
+    from collections import Counter
+
+    counts = Counter(points)
+    bounds = _nus_grid_bounds(experiment)
+    valid: list[tuple[int, ...]] = []
+    bad: list[tuple[int, ...]] = []
+    reasons: dict[tuple[int, ...], list[str]] = {}
+    seen: set[tuple[int, ...]] = set()
+    for raw_point in points:
+        point = tuple(raw_point)
+        oob = bounds is not None and any(
+            point[i] >= bounds[i] for i in range(min(len(point), len(bounds)))
+        )
+        dup = counts[point] > 1
+        if oob or dup:
+            if point not in bad:
+                bad.append(point)
+                r: list[str] = []
+                if oob:
+                    r.append(f"越界(网格 {bounds})")
+                if dup:
+                    r.append(f"重复({counts[point]})")
+                reasons[point] = r
+            continue
+        if point in seen:
+            continue
+        seen.add(point)
+        valid.append(point)
+    return valid, bad, reasons
+
+
 def enforce_smile_thread_guardrail(nthread: int, grid_points: int) -> tuple[int, str]:
     """SMILE 线程护栏（D006）：间接网格 >5000 点时线程数上限 2。
 
@@ -443,8 +489,9 @@ class NMRPipeBackend:
             if not raw_nuslist.is_file():
                 return {"success": False, "message": "缺少 nuslist 采样表", "logs": logs}
             shutil.copy2(raw_nuslist, work / "nuslist")
-            nuslist_count = len(
-                (work / "nuslist").read_text(encoding="utf-8").splitlines()
+            # 坏点检测/清理(所有 NUS 数据统一):越界/重复点剔除 + 对应 FID 清理
+            nuslist_count, bad_points = self._clean_work_nuslist(
+                work, experiment, logs
             )
             # 0.2.80:bruker 切片式输出(fid/test%03d.fid)优先,否则单文件
             slice_dir = work / "fid"
@@ -453,6 +500,7 @@ class NMRPipeBackend:
                 logs.append("使用 bruker 切片式 fid（fid/test%03d.fid,流式处理）")
             else:
                 in_file = fid_file.name
+            self._zero_bad_point_fid(work, bad_points, logs, in_file=in_file)
 
         direct_p0, direct_p1 = 0.0, 0.0
         override = params.get("direct_phase_override")
@@ -1490,47 +1538,16 @@ class NMRPipeBackend:
         分段采样可能有个别「写错并采错」的点（如 cc/63 的 27 2350：F1 索引远超
         网格上限）。坏点从合并 nuslist 剔除并由调用方清理对应 FID，同时以 ⚠ 提示用户。
         """
-        from collections import Counter
-
         all_points: list[tuple[int, ...]] = []
         for seg_dir in segment_dirs:
             nuslist_path = Path(seg_dir) / "nuslist"
             if nuslist_path.is_file():
                 all_points += [tuple(p) for p in read_nuslist(nuslist_path)]
-        counts = Counter(all_points)
-        td = effective_td(experiment)
-        bounds: list[int] | None = None
-        if experiment.ndim >= 3 and len(td) > 2:
-            # 3D nuslist 列为复点索引（上限 NusTD//2）
-            bounds = [int(td[1]) // 2, int(td[2]) // 2]
-        valid: list[tuple[int, ...]] = []
-        bad: list[tuple[int, ...]] = []
-        seen: set[tuple[int, ...]] = set()
-        for point in all_points:
-            oob = (
-                bounds is not None
-                and len(point) >= 2
-                and (point[0] >= bounds[0] or point[1] >= bounds[1])
-            )
-            dup = counts[point] > 1
-            if oob or dup:
-                if point not in bad:
-                    bad.append(point)
-                continue
-            if point in seen:
-                continue
-            seen.add(point)
-            valid.append(point)
+        valid, bad, reasons = _validate_nus_points(all_points, experiment)
         for point in bad:
-            reasons: list[str] = []
-            if bounds is not None and len(point) >= 2 and (
-                point[0] >= bounds[0] or point[1] >= bounds[1]
-            ):
-                reasons.append(f"越界(网格 {bounds})")
-            if counts[point] > 1:
-                reasons.append(f"重复({counts[point]} 段)")
             logs.append(
-                f"⚠ 检测到采样坏点 {point}:{'、'.join(reasons)},已从合并 nuslist 丢弃"
+                f"⚠ 检测到采样坏点 {point}:{'、'.join(reasons.get(point, []) or ['未知'])},"
+                f"已从合并 nuslist 丢弃"
             )
         text = "".join(" ".join(str(v) for v in point) + "\n" for point in valid)
         (work / "nuslist").write_text(text, encoding="utf-8")
@@ -1538,32 +1555,49 @@ class NMRPipeBackend:
         return len(valid), bad
 
     def _zero_bad_point_fid(
-        self, work: Path, bad_points: list[tuple[int, ...]], logs: list[str]
+        self,
+        work: Path,
+        bad_points: list[tuple[int, ...]],
+        logs: list[str],
+        in_file: str | None = None,
     ) -> None:
-        """清理坏点对应的合并 FID 数据。
+        """清理坏点对应的 FID 数据(所有 NUS 路径)。
 
-        有效网格内的坏点（如跨段重复）在切片中对应 States 双实行(2y, 2y+1)，
-        清零以去掉错误/重复贡献;越界点无对应切片槽位,记录即可。
+        有效网格内的坏点(越界重复等)对应 States 双实行(2y, 2y+1):
+        3D 在切片 test{z:03d}.fid、2D 在单 fid 文件的这些行清零;
+        越界点无对应槽位,记录即可。
         """
         if not bad_points:
             return
         import nmrglue as ng
 
-        merged = work / "merged" / "fid"
-        if not merged.is_dir():
-            return
+        if in_file and "%" in in_file:
+            base = work / in_file.replace("%03d", "{z:03d}").replace("%04d", "{z:03d}")
+        else:
+            base = work / (in_file or f"{Path(in_file or '').name}") if in_file else None
+        slice_dir = work / "merged" / "fid"
+        if not slice_dir.is_dir():
+            slice_dir = work / "fid"
         for point in bad_points:
-            if len(point) < 2:
+            if not point:
                 continue
-            y, z = int(point[0]), int(point[1])
-            slice_path = merged / f"test{z:03d}.fid"
-            if not slice_path.is_file():
-                logs.append(
-                    f"⚠ 坏点 {point}:越界,无对应切片,合并 FID 无需清理"
-                )
+            y = int(point[0])
+            z = int(point[1]) if len(point) > 1 else None
+            target: Path | None = None
+            if z is not None and slice_dir.is_dir():
+                target = slice_dir / f"test{z:03d}.fid"
+                if not target.is_file():
+                    logs.append(
+                        f"⚠ 坏点 {point}:越界,无对应切片,合并 FID 无需清理"
+                    )
+                    continue
+            elif z is None and base is not None and base.is_file():
+                target = base
+            if target is None:
+                logs.append(f"⚠ 坏点 {point}:无对应 FID 文件,无需清理")
                 continue
             try:
-                dic, data = ng.pipe.read(str(slice_path))
+                dic, data = ng.pipe.read(str(target))
                 arr = np.asarray(data)
                 if arr.ndim < 2:
                     continue
@@ -1572,13 +1606,34 @@ class NMRPipeBackend:
                     logs.append(f"⚠ 坏点 {point}:行越界,无需清理")
                     continue
                 arr[rows, :] = 0
-                ng.pipe.write(str(slice_path), dic, arr, overwrite=True)
+                ng.pipe.write(str(target), dic, arr, overwrite=True)
                 logs.append(
                     f"⚠ 坏点 {point}:对应 FID 增量已清零"
-                    f"(切片 {slice_path.name} 行 {rows})"
+                    f"({target.name} 行 {rows})"
                 )
             except Exception as exc:  # noqa: BLE001 - 清理失败不阻断
                 logs.append(f"⚠ 坏点 {point}:FID 清理失败 {exc}")
+
+    def _clean_work_nuslist(
+        self, work: Path, experiment: Experiment, logs: list[str]
+    ) -> tuple[int, list[tuple[int, ...]]]:
+        """校验并清理工作目录 nuslist(单 NUS 数据):坏点剔除 + ⚠ 提示。
+        返回 (有效点数, 坏点列表)。"""
+        nuslist_path = work / "nuslist"
+        if not nuslist_path.is_file():
+            return 0, []
+        points = [tuple(p) for p in read_nuslist(nuslist_path)]
+        valid, bad, reasons = _validate_nus_points(points, experiment)
+        if bad:
+            text = "".join(" ".join(str(v) for v in point) + "\n" for point in valid)
+            nuslist_path.write_text(text, encoding="utf-8")
+            for point in bad:
+                logs.append(
+                    f"⚠ 检测到采样坏点 {point}:{'、'.join(reasons.get(point, []) or ['未知'])},"
+                    f"已从 nuslist 丢弃并清理对应 FID"
+                )
+            logs.append(f"nuslist 清理: {len(points)} → {len(valid)} 采样点(坏点 {len(bad)})")
+        return len(valid), bad
 
     # ------------------------------------------------------------------ 处理
 
