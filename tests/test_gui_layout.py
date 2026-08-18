@@ -665,6 +665,24 @@ def test_spectrum_panel_empty_spectra_clears_viewer(
     panel.close()
 
 
+def test_spectrum_panel_finds_dataset_id_named_spectrum(
+    tmp_path: Path, qapp: QApplication
+) -> None:
+    """0.2.112:终谱按 dataset_id 命名(非 exp_id-data_id)也能被找到。"""
+    manager = ProjectManager.create_project(tmp_path / "proj", "demo")
+    entry = manager.create_experiment("A")
+    data = manager.import_data(entry.id, "/data/hsqc_2d")
+    spectra = manager.data_dir(entry.id, data.id, "spectra")
+    spectra.mkdir(parents=True, exist_ok=True)
+    _write_ft2(spectra / "hsqc_2d.ft2")
+    panel = SpectrumPanel(manager)
+    panel.set_context(entry.id, data.id)
+    assert panel.load_current_spectrum() is True
+    assert panel.file_list.count() == 1
+    assert panel.file_list.item(0).text() == "hsqc_2d.ft2"
+    panel.close()
+
+
 def test_spectrum_param_report_shows_phase_results() -> None:
     """0.2.108:参数报告展示逐维相位/直接维相位/后端运行次数。"""
     from gui.pipeline_panel import _spectrum_param_report
@@ -750,6 +768,34 @@ def test_pipeline_show_spectrum_button_on_spectrum_success(
     button.click()
     assert seen == ["spectrum"]
     panel.close()
+
+
+def test_import_done_clears_import_form(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.2.112:导入成功后清空中间页导入表单(名称/路径)。"""
+    from types import SimpleNamespace
+
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    window = MainWindow(manager=manager)
+    window.center_panel.experiment_page.name_edit.setText("样品1")
+    window.center_panel.experiment_page.source_edit.setText("/data/a")
+    monkeypatch.setattr(
+        "gui.settings.load_settings",
+        lambda: {"guide": {"first_import_hint_shown": True}},
+    )
+    result = SimpleNamespace(
+        experiment_id="exp_001",
+        data_id="d_001",
+        run_id="R-1",
+        file_count=1,
+        total_bytes=10,
+        warnings=[],
+    )
+    window._on_import_done(result)
+    assert window.center_panel.experiment_page.name_edit.text() == ""
+    assert window.center_panel.experiment_page.source_edit.text() == ""
+    window.close()
 
 
 def test_pipeline_status_peaks_from_data_dir(
@@ -1453,15 +1499,14 @@ def test_rename_editor_appears_at_click_position(
 
     manager = _manager_with_experiment(tmp_path, monkeypatch)
     window = MainWindow(manager=manager)
-    window.show()  # 子控件可见性依赖父窗口显示
     panel = window.project_tree
     exp_item = panel.tree.topLevelItem(0).child(0).child(0)
     anchor = panel.tree.viewport().mapToGlobal(QPoint(30, 10))
+    assert not panel._rename_editor.isVisible()  # 默认不显示(0.2.112 回归)
     panel._begin_rename("experiment", exp_item, anchor)
     editor = panel._rename_editor
     assert editor.isVisible()
-    # 0.2.112:输入框为树视口内嵌子控件,位置为视口内坐标
-    assert editor.pos() == panel.tree.viewport().mapFromGlobal(anchor)
+    assert editor.pos() == anchor  # 输入框出现在右键位置(未越出屏幕)
     editor._edit.setText("HNCACB2")
     editor._commit()
     assert manager.project is not None
@@ -1478,7 +1523,7 @@ def test_context_menu_rename_opens_inline_editor(
 
     manager = _manager_with_experiment(tmp_path, monkeypatch)
     panel = ProjectTreePanel(manager)
-    panel.show()  # 子控件可见性依赖父窗口显示
+    assert not panel._rename_editor.isVisible()  # 默认不显示(0.2.112 回归)
     project_item = panel.tree.topLevelItem(0).child(0)
     menu = QMenu()
     panel._on_context_menu_impl(menu, project_item, QPoint(10, 20))

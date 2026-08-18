@@ -17,6 +17,7 @@ from PyQt6.QtCore import QEvent, QPoint, Qt, pyqtSignal
 from PyQt6.QtGui import QKeyEvent
 from PyQt6.QtWidgets import (
     QAbstractItemDelegate,
+    QApplication,
     QHBoxLayout,
     QHeaderView,
     QInputDialog,
@@ -103,9 +104,12 @@ class _InlineRenameEditor(QWidget):
     cancelled = pyqtSignal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
-        # 树视口内嵌子控件:Wayland 下 Qt.Popup 顶层窗口需要 transientParent,
-        # 否则触发 "Failed to create grabbing popup" 警告
-        super().__init__(parent)
+        # 轻量 Popup:必须带 transientParent(parent 传入顶层窗口),
+        # 否则 Wayland 下触发 "Failed to create grabbing popup" 警告
+        super().__init__(
+            parent,
+            Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint,
+        )
         self._finished = True
         layout = QHBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
@@ -121,20 +125,27 @@ class _InlineRenameEditor(QWidget):
         self.setFocusProxy(self._edit)
 
     def open_at(self, point, text: str) -> None:
-        """在全局坐标 point 处显示并聚焦(视口内自动收边,文本默认全选)。"""
+        """在全局坐标 point 处显示并聚焦(文本默认全选,屏幕边缘自动收进)。"""
         self._finished = False
         self._edit.setText(text)
         self._edit.selectAll()
         self.adjustSize()
-        parent = self.parentWidget()
-        if parent is not None:
-            local = parent.mapFromGlobal(point)
-            x = min(max(local.x(), 0), max(0, parent.width() - self.width()))
-            y = min(max(local.y(), 0), max(0, parent.height() - self.height()))
+        screen = QApplication.screenAt(point) or QApplication.primaryScreen()
+        if screen is not None:
+            geo = screen.availableGeometry()
+            x = min(
+                max(point.x(), geo.left()),
+                max(geo.left(), geo.right() - self.width()),
+            )
+            y = min(
+                max(point.y(), geo.top()),
+                max(geo.top(), geo.bottom() - self.height()),
+            )
             point = QPoint(x, y)
         self.move(point)
         self.show()
         self.raise_()
+        self.activateWindow()
         self._edit.setFocus()
 
     def eventFilter(self, obj, event) -> bool:
@@ -225,8 +236,9 @@ class ProjectTreePanel(QWidget):
         self._pending_kind: str | None = None
         self._pending_text: str | None = None
         # 重命名输入框:右键菜单原地变成输入框(回车提交/Esc 取消);
-        # 内嵌于树视口,避免 Wayland 弹出窗口问题
-        self._rename_editor = _InlineRenameEditor(self.tree.viewport())
+        # parent 传顶层窗口,Popup 获得 transientParent(Wayland 必需),
+        # 点击外部自动关闭并提交
+        self._rename_editor = _InlineRenameEditor(self.tree.window())
         self._rename_editor.submitted.connect(self._on_rename_editor_submitted)
         self._rename_editor.cancelled.connect(self._clear_rename_state)
         self._rename_target: tuple | None = None

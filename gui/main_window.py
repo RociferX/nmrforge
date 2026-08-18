@@ -609,6 +609,8 @@ class MainWindow(QMainWindow):
                     self.manager.save()
                 except ProjectError:
                     pass
+        # 0.2.112:导入成功后清空导入表单(名称/路径),便于连续导入
+        self.center_panel.experiment_page.clear_import_form()
         self.refresh()
         if exp_id:
             self.project_tree.select_experiment(exp_id)
@@ -1441,6 +1443,9 @@ class MainWindow(QMainWindow):
         import sys
 
         app = QApplication(sys.argv)
+        from gui.dialogs import install_dialog_centering
+
+        install_dialog_centering(app)
         window = MainWindow()
         window.show()
         return app.exec()

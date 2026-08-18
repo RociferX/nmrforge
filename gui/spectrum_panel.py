@@ -215,7 +215,11 @@ class SpectrumPanel(QWidget):
         return True
 
     def _spectrum_paths(self) -> list[Path]:
-        """当前实验类型/样品数据下的谱图文件(新布局优先,旧扁平路径回退)。"""
+        """当前实验类型/样品数据下的谱图文件(新布局优先,旧扁平路径回退)。
+
+        新布局按数据级 spectra/ 目录内全部 .ft2/.ft3 列——后端终谱按
+        dataset_id 命名(如 hsqc_2d.ft2),不假设 exp_id-data_id 前缀(0.2.112)。
+        """
         paths: list[Path] = []
         exp_id = self._current_exp_id
         data_id = self._current_data_id
@@ -225,9 +229,7 @@ class SpectrumPanel(QWidget):
             if data_id:
                 spectra_dir = self.manager.data_dir(exp_id, data_id, "spectra")
                 for ext in (".ft2", ".ft3"):
-                    paths.extend(
-                        sorted(spectra_dir.glob(f"{exp_id}-{data_id}*{ext}"))
-                    )
+                    paths.extend(sorted(spectra_dir.glob(f"*{ext}")))
                 if paths:
                     return paths
         except Exception:  # noqa: BLE001 - 新布局不可用回退旧路径

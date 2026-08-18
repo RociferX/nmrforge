@@ -168,3 +168,32 @@ def test_settings_dialog_trimmed_and_linewidth_saved(
     assert "points_per_line" not in saved
     assert "smile_thread_cap" not in saved
     dialog.close()
+
+
+def test_dialog_centered_on_screen(qapp: QApplication) -> None:
+    """0.2.112:应用级过滤器把弹窗移到所在屏幕中心。"""
+    from PyQt6.QtCore import QEventLoop, QTimer
+    from PyQt6.QtWidgets import QDialog
+
+    from gui.dialogs import install_dialog_centering
+
+    app = QApplication.instance()
+    install_dialog_centering(app)
+    dialog = QDialog()
+    dialog.show()
+    center: tuple[int, int] | None = None
+    loop = QEventLoop()
+
+    def _check() -> None:
+        nonlocal center
+        c = dialog.frameGeometry().center()
+        center = (c.x(), c.y())
+        loop.quit()
+
+    QTimer.singleShot(60, _check)
+    loop.exec()
+    geo = app.primaryScreen().availableGeometry()
+    assert center is not None
+    assert abs(center[0] - geo.center().x()) <= 2
+    assert abs(center[1] - geo.center().y()) <= 2
+    dialog.close()
