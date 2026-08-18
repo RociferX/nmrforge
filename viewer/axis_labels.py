@@ -30,13 +30,16 @@ _NUCLEUS_RATIOS: dict[str, float] = {
     "23Na": 0.26452,
     "29Si": 0.19837,
 }
-_COMMON_B0_H1 = (300.0, 400.0, 500.0, 600.0, 700.0, 800.0, 850.0, 900.0, 1000.0)
+_COMMON_B0_H1 = (
+    300.0, 400.0, 500.0, 600.0, 700.0, 800.0, 850.0, 900.0, 950.0,
+    1000.0, 1100.0, 1200.0, 1300.0, 1500.0, 2000.0,
+)
 
 
 def infer_nucleus(sf: float) -> str:
     """按观测频率(sf, MHz)推断核种类(化学位移对应)。
 
-    sf/旋磁比 = 该维对应的 1H 频率,与常见磁场(300-1000 MHz)最接近
+    sf/旋磁比 = 该维对应的 1H 频率,与常见磁场(300-2000 MHz)最接近
     者为该核;无法置信判定返回空串。
     """
     if not sf or sf <= 0:
@@ -44,7 +47,7 @@ def infer_nucleus(sf: float) -> str:
     best, best_err = "", float("inf")
     for nucleus, ratio in _NUCLEUS_RATIOS.items():
         implied_1h = sf / ratio
-        if not (300.0 <= implied_1h <= 1100.0):
+        if not (300.0 <= implied_1h <= 2100.0):
             continue
         err = min(abs(implied_1h - b0) for b0 in _COMMON_B0_H1) / implied_1h
         if err < best_err:

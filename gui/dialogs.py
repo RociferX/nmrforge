@@ -24,7 +24,6 @@ from PyQt6.QtWidgets import (
     QListWidgetItem,
     QPlainTextEdit,
     QPushButton,
-    QSpinBox,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -33,6 +32,7 @@ from PyQt6.QtWidgets import (
 
 from gui.notes import (
     DIMENSION_OPTIONS,
+    EXPERIMENT_CATEGORY_OPTIONS,
     NUCLEI_OPTIONS,
     experiment_type_options,
     note_fields,
@@ -277,8 +277,9 @@ class SampleDialog(QDialog):
 class NotesDialog(QDialog):
     """三级注释表单:按层级字段列表逐行填写;仅有几种取值的字段用下拉。
 
-    实验类型注释先选维度,再按 presets 过滤给出实验类型选项;
-    核(组合)同样给常用选项。其余字段保持文本输入。
+    样品数据注释先选维度,再按 presets 过滤给出数据类型选项;
+    实验类型注释「实验类型」为指认实验/动力学实验;核(组合)同样给常用选项。
+    其余字段保持文本输入。
     """
 
     def __init__(
@@ -314,7 +315,11 @@ class NotesDialog(QDialog):
             elif key == "experiment_type":
                 combo = QComboBox()
                 combo.setEditable(True)
-                self._type_combo = combo
+                if kind == "experiment":
+                    # 实验类型注释:实验类型仅指认实验 / 动力学实验
+                    combo.addItems(EXPERIMENT_CATEGORY_OPTIONS)
+                else:
+                    self._type_combo = combo
                 self._combos[key] = combo
                 current = str(values.get("experiment_type", "") or "")
                 if current:
@@ -345,7 +350,7 @@ class NotesDialog(QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
-        # 维度确定后再填充实验类型选项(先选维度,再选类型)
+        # 样品数据注释:维度确定后再填充数据类型选项(先选维度,再选类型)
         self._on_dimension_changed()
 
     def _dimension_value(self) -> str:
@@ -356,7 +361,7 @@ class NotesDialog(QDialog):
         return str(combo.currentData() or combo.currentText() or "")
 
     def _on_dimension_changed(self, *_args) -> None:
-        """维度变化 → 按 presets 重新填充实验类型选项。"""
+        """样品数据注释:维度变化 → 按 presets 重新填充数据类型选项。"""
         type_combo = self._type_combo
         if type_combo is None:
             return
@@ -808,8 +813,8 @@ class BatchSummaryDialog(QDialog):
 
 
 class SettingsDialog(QDialog):
-    """软件设置(精简,阶段 C3):NMRPipe 路径、默认线宽、points_per_line、
-    SMILE 线程上限;保存到 config/nmrforge.local.yaml,重启生效。
+    """软件设置(精简,阶段 C3):NMRPipe 路径、默认线宽、简单模式;线宽接入
+    生成谱图参数;保存到 config/nmrforge.local.yaml,重启生效。
     """
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -832,14 +837,6 @@ class SettingsDialog(QDialog):
             spin.setValue(float(settings["linewidth_hz"].get(nucleus, default)))
             form.addRow(f"{nucleus} 默认线宽 (Hz)", spin)
             self.linewidth_spins[nucleus] = spin
-        self.ppl_spin = QSpinBox()
-        self.ppl_spin.setRange(1, 8)
-        self.ppl_spin.setValue(int(settings.get("points_per_line", 2)))
-        form.addRow("填零 points_per_line", self.ppl_spin)
-        self.smile_spin = QSpinBox()
-        self.smile_spin.setRange(1, 16)
-        self.smile_spin.setValue(int(settings.get("smile_thread_cap", 2)))
-        form.addRow("SMILE 线程上限", self.smile_spin)
         layout.addLayout(form)
         pipeline = settings.get("pipeline") or {}
         self.simple_mode_check = QCheckBox(
@@ -876,8 +873,6 @@ class SettingsDialog(QDialog):
                 nucleus: spin.value()
                 for nucleus, spin in self.linewidth_spins.items()
             },
-            "points_per_line": self.ppl_spin.value(),
-            "smile_thread_cap": self.smile_spin.value(),
             "pipeline": {
                 "simple_mode": self.simple_mode_check.isChecked(),
             },

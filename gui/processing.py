@@ -266,8 +266,11 @@ class ProcessingController:
                 progress(message)
 
         emit("读取数据,准备处理")
+        linewidth_by_axis: dict[str, float] | None = None
         try:
             experiment = self._read_experiment(exp_id, data_id)
+            # 0.2.112:软件设置「线宽」接入(核素 → 轴映射,显式 params 优先)
+            linewidth_by_axis = self._linewidth_by_axis(experiment)
             from core.data.internal_data_model import SamplingMode
 
             if experiment.sampling.mode is SamplingMode.NUS:
@@ -276,6 +279,9 @@ class ProcessingController:
                 emit("均匀采样: 开始 NMRPipe 处理(含直接维相位)")
         except Exception:  # noqa: BLE001 - 采样信息不可用给通用提示
             emit("后端执行中(转换/重构/相位优化)")
+        params = dict(params or {})
+        if linewidth_by_axis is not None and "linewidth_hz" not in params:
+            params["linewidth_hz"] = linewidth_by_axis
         kwargs: dict = {}
         if params:
             kwargs["params"] = dict(params)
@@ -292,7 +298,10 @@ class ProcessingController:
         if route is not None:
             # 0.2.108:相位优化途径由后端处理(unified 统一方案 / none
             # 逃生口),不再叠加旧逐维暴力优化
-            emit(f"基础谱图完成,相位优化途径: {route}")
+            label = {"unified": "Auto-optimize", "none": "None"}.get(
+                str(route), route
+            )
+            emit(f"基础谱图完成,相位优化途径: {label}")
         elif phase_optimize:
             emit("基础谱图完成,开始逐维相位优化")
             from workflow.stepwise import optimize_phase_brute_force
@@ -566,6 +575,28 @@ class ProcessingController:
         if not raw.is_absolute():
             raw = self._manager.root / raw
         return read_dataset(raw)
+
+    def _linewidth_by_axis(self, experiment) -> dict[str, float]:
+        """软件设置「线宽」(核素 → Hz)→ 轴映射(生成谱图 params,0.2.112)。
+
+        后端 params["linewidth_hz"] 按轴(logical_axis)取值;设置里未配置的
+        核素置 0,由后端回退核素默认表。
+        """
+        from gui.settings import load_settings
+
+        settings = load_settings()
+        lw = settings.get("linewidth_hz") or {}
+        mapping: dict[str, float] = {}
+        for dim in getattr(experiment, "dimensions", None) or []:
+            axis = str(getattr(dim, "logical_axis", "") or "").strip()
+            nucleus = str(getattr(dim, "nucleus", "") or "").strip()
+            try:
+                value = float(lw.get(nucleus) or 0.0)
+            except (TypeError, ValueError):
+                value = 0.0
+            if axis:
+                mapping[axis] = value
+        return mapping
 
     def optimize_smile(self, data, exp_id=None, data_id=None) -> dict:
         """SMILE 优化(可选):参数网格搜索,把最优谱归位并登记运行。"""

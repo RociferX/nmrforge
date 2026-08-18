@@ -32,8 +32,16 @@ def test_infer_nucleus_from_sf() -> None:
     assert infer_nucleus(600.13) == "1H"
     assert infer_nucleus(60.82) == "15N"
     assert infer_nucleus(150.9) == "13C"
+    # 0.2.110:1200 MHz(1.2 GHz)系统回归——sampleI 间接维 sf≈121.7 不再误判为 31P
+    assert infer_nucleus(121.67) == "15N"
+    assert infer_nucleus(301.9) == "13C"
+    assert infer_nucleus(1200.58) == "1H"
+    # 0.2.111:磁场列表补到 2 GHz(未来更高场谱仪)
+    assert infer_nucleus(2000.0) == "1H"
+    assert infer_nucleus(202.74) == "15N"  # 2 GHz 系统 15N
+    assert infer_nucleus(502.9) == "13C"  # 2 GHz 系统 13C"
     assert infer_nucleus(10) == ""
-    assert infer_nucleus(2000) == ""
+    assert infer_nucleus(3000) == ""  # 3 GHz 超出列表,判定为空
     assert infer_nucleus(0) == ""
 
 

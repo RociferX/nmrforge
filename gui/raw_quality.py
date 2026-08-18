@@ -44,6 +44,26 @@ def _param(acqus: Path, key: str) -> str:
     return match.group(1).strip() if match else ""
 
 
+def _te_to_kelvin(te: str) -> float | None:
+    """Bruker TE → 开尔文;自动识别 0.1 K / K / °C,无法解析返回 None。
+
+    - TE 惯例为 0.1 K(如 2980 → 298.0 K);
+    - 部分数据直接存 K(如 298.0)或 °C(如 25),按数值范围判定。
+    """
+    try:
+        number = float(te.split()[0])
+    except (TypeError, ValueError, IndexError):
+        return None
+    kelvin_tenths = number / 10.0
+    if 240.0 <= kelvin_tenths <= 340.0:
+        return kelvin_tenths
+    if 240.0 <= number <= 340.0:
+        return number
+    if -40.0 <= number <= 100.0:
+        return number + 273.15
+    return None
+
+
 def _estimate_snr(raw: Path) -> float | None:
     """用 Bruker 读取器读时域数据,估算首段峰值/尾部噪声标准差。"""
     try:
@@ -94,11 +114,9 @@ def check_raw_quality(project, exp_id: str, data_id: str) -> dict:
             info["核"] = "-".join(nuclei)
         te = _param(acqus, "TE")
         if te:
-            try:
-                celsius = float(te.split()[0]) / 10.0 - 273.15
-                info["温度"] = f"{celsius:.1f} °C"
-            except (TypeError, ValueError, IndexError):
-                pass
+            kelvin = _te_to_kelvin(te)
+            if kelvin is not None:
+                info["温度"] = f"{kelvin:.1f} K"
         td = _param(acqus, "TD")
         if td:
             info["直接维 TD"] = td.split()[0]

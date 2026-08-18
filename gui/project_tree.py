@@ -13,10 +13,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QEvent, QPoint, Qt, pyqtSignal
+from PyQt6.QtGui import QKeyEvent
 from PyQt6.QtWidgets import (
+    QAbstractItemDelegate,
+    QApplication,
+    QHBoxLayout,
     QHeaderView,
     QInputDialog,
+    QLineEdit,
     QMenu,
     QTreeWidget,
     QTreeWidgetItem,
@@ -92,14 +97,93 @@ def open_in_terminal(path: str) -> bool:
     return QProcess.startDetached(argv[0], argv[1:])
 
 
+class _InlineRenameEditor(QWidget):
+    """轻量重命名输入框:显示在右键菜单位置(菜单原地变输入框),回车提交/Esc 取消。"""
+
+    submitted = pyqtSignal(str)
+    cancelled = pyqtSignal()
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(
+            parent,
+            Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint,
+        )
+        self._finished = True
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(4, 4, 4, 4)
+        self._edit = QLineEdit()
+        self._edit.setMinimumWidth(180)
+        self._edit.setStyleSheet(
+            "QLineEdit { border: 1px solid #2c3e50; border-radius: 3px; "
+            "padding: 2px 6px; background: white; }"
+        )
+        self._edit.installEventFilter(self)
+        self._edit.editingFinished.connect(self._commit)
+        layout.addWidget(self._edit)
+        self.setFocusProxy(self._edit)
+
+    def open_at(self, point, text: str) -> None:
+        """在全局坐标 point 处显示并聚焦(文本默认全选,屏幕边缘自动收进)。"""
+        self._finished = False
+        self._edit.setText(text)
+        self._edit.selectAll()
+        self.adjustSize()
+        screen = QApplication.screenAt(point) or QApplication.primaryScreen()
+        if screen is not None:
+            geo = screen.availableGeometry()
+            x = min(
+                max(point.x(), geo.left()),
+                max(geo.left(), geo.right() - self.width()),
+            )
+            y = min(
+                max(point.y(), geo.top()),
+                max(geo.top(), geo.bottom() - self.height()),
+            )
+            point = QPoint(x, y)
+        self.move(point)
+        self.show()
+        self.raise_()
+        self.activateWindow()
+        self._edit.setFocus()
+
+    def eventFilter(self, obj, event) -> bool:
+        """回车提交 / Esc 取消(其它事件交回默认处理)。"""
+        if obj is self._edit and isinstance(event, QKeyEvent):
+            if event.type() == QEvent.Type.KeyPress and event.key() == Qt.Key.Key_Return:
+                self._commit()
+                return True
+            if event.type() == QEvent.Type.KeyPress and event.key() == Qt.Key.Key_Escape:
+                self._cancel()
+                return True
+        return super().eventFilter(obj, event)
+
+    def _commit(self) -> None:
+        if self._finished:
+            return
+        self._finished = True
+        text = self._edit.text().strip()
+        self.hide()
+        if text:
+            self.submitted.emit(text)
+
+    def _cancel(self) -> None:
+        if self._finished:
+            return
+        self._finished = True
+        self.hide()
+        self.cancelled.emit()
+
+
 class ProjectTreePanel(QWidget):
     """项目管理树;selection_changed 在上下文(实验类型)变化时发出。"""
 
     selection_changed = pyqtSignal(str, str, str)  # (kind, exp_id, data_id)
     open_requested = pyqtSignal(str)  # 双击实验:请求打开/聚焦该实验
     open_project_requested = pyqtSignal(str)  # 双击未打开项目:请求打开
-    data_rename_requested = pyqtSignal(str, str)  # (exp_id, data_id):重命名数据
-    rename_project_requested = pyqtSignal()  # 重命名当前项目
+    data_rename_requested = pyqtSignal(str, str, str)  # (exp_id, data_id, new_name):重命名数据
+    rename_project_requested = pyqtSignal(str)  # (new_name):重命名当前项目
+    project_create_submitted = pyqtSignal(str)  # 内联命名提交:项目名称
+    experiment_create_submitted = pyqtSignal(str)  # 内联命名提交:实验类型标题
     open_path_requested = pyqtSignal(str)  # 打开所在目录(子文件夹右键)
     open_terminal_requested = pyqtSignal(str)  # 在终端中打开(子文件夹右键)
     open_spectrum_requested = pyqtSignal(str)  # 双击谱图文件:右侧直接显示
@@ -109,7 +193,7 @@ class ProjectTreePanel(QWidget):
     data_action_requested = pyqtSignal(str, str)  # (action, data_id):生成FID/谱/删除
     batch_assign_requested = pyqtSignal(str, str, str)  # (exp_id, data_id, batch_id)
     batch_remove_requested = pyqtSignal(str, str)  # (exp_id, data_id)
-    rename_requested = pyqtSignal(str)  # 重命名实验类型(exp_id)
+    rename_requested = pyqtSignal(str, str)  # (exp_id, new_title):重命名实验类型
     delete_requested = pyqtSignal(str)  # 删除实验类型(exp_id)
 
     def __init__(
@@ -142,6 +226,18 @@ class ProjectTreePanel(QWidget):
         self.tree.itemClicked.connect(self._on_item_clicked)
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._on_context_menu)
+        # 内联命名(新建项目/实验类型):监听树内编辑器提交/取消
+        delegate = self.tree.itemDelegate()
+        delegate.commitData.connect(self._on_editor_commit_data)
+        delegate.closeEditor.connect(self._on_editor_closed)
+        self._pending_item: QTreeWidgetItem | None = None
+        self._pending_kind: str | None = None
+        self._pending_text: str | None = None
+        # 重命名输入框:右键菜单原地变成输入框(回车提交/Esc 取消)
+        self._rename_editor = _InlineRenameEditor()
+        self._rename_editor.submitted.connect(self._on_rename_editor_submitted)
+        self._rename_editor.cancelled.connect(self._clear_rename_state)
+        self._rename_target: tuple | None = None
         layout.addWidget(self.tree)
         self.refresh()
 
@@ -675,12 +771,13 @@ class ProjectTreePanel(QWidget):
     # ------------------------------------------------------------------
     def _on_context_menu(self, pos) -> None:
         item = self.tree.itemAt(pos)
-        menu = self._on_context_menu_impl(QMenu(self), item)
+        menu = self._on_context_menu_impl(QMenu(self), item, pos)
         if not menu.isEmpty():
             menu.exec(self.tree.viewport().mapToGlobal(pos))
 
-    def _on_context_menu_impl(self, menu: QMenu, item) -> QMenu:
-        """构建右键菜单(独立方法便于测试触发动作)。"""
+    def _on_context_menu_impl(self, menu: QMenu, item, pos=None) -> QMenu:
+        """构建右键菜单(独立方法便于测试触发动作);pos 为视口内坐标,用于弹窗定位。"""
+        anchor = self.tree.viewport().mapToGlobal(pos) if pos is not None else None
         if item is None:
             # 空白处:新建空白实验类型(项目已打开时)
             if self.manager.project is not None:
@@ -703,12 +800,18 @@ class ProjectTreePanel(QWidget):
                     )
                 else:
                     menu.addAction("新建空白实验类型...", self.create_experiment_requested.emit)
-                    menu.addAction("重命名项目...", self.rename_project_requested.emit)
+                    menu.addAction(
+                        "重命名项目...",
+                        lambda _checked=False: self._begin_rename("project", item, anchor),
+                    )
                     menu.addSeparator()
                     menu.addAction("删除项目...", self.delete_project_requested.emit)
             elif kind == "experiment" and exp_id:
                 menu.addAction("导入样品数据...", lambda: self.import_data_requested.emit(exp_id))
-                menu.addAction("重命名...", lambda: self.rename_requested.emit(exp_id))
+                menu.addAction(
+                    "重命名...",
+                    lambda _checked=False: self._begin_rename("experiment", item, anchor),
+                )
                 menu.addSeparator()
                 menu.addAction("删除实验类型", lambda: self.delete_requested.emit(exp_id))
             elif kind == "data" and exp_id and data_id:
@@ -724,7 +827,7 @@ class ProjectTreePanel(QWidget):
                     )
                 menu.addAction(
                     "重命名...",
-                    lambda: self.data_rename_requested.emit(exp_id, data_id),
+                    lambda _checked=False: self._begin_rename("data", item, anchor),
                 )
                 menu.addSeparator()
                 from gui.pipeline_state import batch_id
@@ -767,6 +870,185 @@ class ProjectTreePanel(QWidget):
         if path.is_dir():
             return path
         return path.parent if path.exists() else None
+
+    # ------------------------------------------------------------------
+    # 内联命名(新建项目/实验类型,不弹窗)
+    # ------------------------------------------------------------------
+    def begin_create_project(self, initial: str = "unnamed") -> None:
+        """新建项目:项目树内内联命名(不弹窗),回车提交 / Esc 取消。"""
+        self._cancel_pending_create()
+        workspace_item = self.tree.topLevelItem(0)
+        if workspace_item is None:
+            return
+        item = QTreeWidgetItem([initial or "unnamed", ""])
+        item.setIcon(0, self._icon("project"))
+        item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
+        item.setData(0, Qt.ItemDataRole.UserRole, {"kind": "pending_project"})
+        item.setToolTip(0, "输入项目名称后回车创建,Esc 取消")
+        workspace_item.addChild(item)
+        workspace_item.setExpanded(True)
+        self.tree.setCurrentItem(item)
+        self.tree.scrollToItem(item)
+        self._pending_item = item
+        self._pending_kind = "project"
+        self._pending_text = initial
+        self._start_editing(item)
+
+    def begin_create_experiment(self, initial: str = "") -> None:
+        """新建空白实验类型:项目树内内联命名(不弹窗),回车提交 / Esc 取消。"""
+        if self.manager.project is None:
+            return
+        project_item = self._current_project_item()
+        if project_item is None:
+            return
+        self._cancel_pending_create()
+        item = QTreeWidgetItem([initial or "新实验类型", ""])
+        item.setIcon(0, self._icon("experiment"))
+        item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
+        item.setData(0, Qt.ItemDataRole.UserRole, {"kind": "pending_experiment"})
+        item.setToolTip(0, "输入实验类型标题后回车创建,Esc 取消")
+        project_item.addChild(item)
+        project_item.setExpanded(True)
+        self.tree.setCurrentItem(item)
+        self.tree.scrollToItem(item)
+        self._pending_item = item
+        self._pending_kind = "experiment"
+        self._pending_text = initial
+        self._start_editing(item)
+
+    def _start_editing(self, item: QTreeWidgetItem) -> None:
+        """树可见时直接进入编辑(测试/离屏场景由提交钩子驱动)。"""
+        if self.tree.isVisible():
+            self.tree.editItem(item, 0)
+
+    def _on_editor_commit_data(self, editor) -> None:
+        if self._pending_item is not None and editor is not None:
+            self._pending_text = editor.text()
+
+    def _on_editor_closed(self, _editor, hint) -> None:
+        if self._pending_item is None:
+            return
+        if hint == QAbstractItemDelegate.EndEditHint.RevertModelCache:
+            self._cancel_pending_create()
+            return
+        self._commit_pending_create(self._pending_text or "")
+
+    def _commit_pending_create(self, text: str) -> None:
+        """提交内联命名(回车/失焦提交,测试可直调);空文本视为取消。"""
+        kind = self._pending_kind
+        self._remove_pending()
+        text = (text or "").strip()
+        if kind == "project" and text:
+            self.project_create_submitted.emit(text)
+        elif kind == "experiment" and text:
+            self.experiment_create_submitted.emit(text)
+
+    def _cancel_pending_create(self) -> None:
+        """取消内联命名(移除待命名节点)。"""
+        self._remove_pending()
+
+    def _remove_pending(self) -> None:
+        item, self._pending_item = self._pending_item, None
+        self._pending_kind = None
+        self._pending_text = None
+        if item is None:
+            return
+        parent = item.parent()
+        if parent is not None and parent.indexOfChild(item) >= 0:
+            parent.removeChild(item)
+
+    def _current_project_item(self) -> QTreeWidgetItem | None:
+        """当前打开项目对应的树节点(找不到时回退首个项目节点)。"""
+        workspace_item = self.tree.topLevelItem(0)
+        if workspace_item is None:
+            return None
+        root = self.manager.root
+        for index in range(workspace_item.childCount()):
+            child = workspace_item.child(index)
+            data = child.data(0, Qt.ItemDataRole.UserRole)
+            if not isinstance(data, dict) or data.get("kind") != "project":
+                continue
+            path = data.get("path")
+            if root is None:
+                return child
+            try:
+                if path and Path(str(path)).resolve() == Path(root).resolve():
+                    return child
+            except OSError:
+                continue
+        return workspace_item.child(0) if workspace_item.childCount() else None
+
+    # ------------------------------------------------------------------
+    # 重命名:右键菜单原地变成重命名输入框(回车提交/Esc 取消)
+    # ------------------------------------------------------------------
+    def begin_rename_experiment(self, exp_id: str) -> None:
+        """菜单「重命名实验类型」:在树节点附近显示重命名输入框。"""
+        item = self._find_experiment_item(exp_id)
+        if item is None:
+            return
+        exp = self.manager.project.experiment(exp_id) if self.manager.project else None
+        current = exp.title if exp is not None else item.text(0)
+        anchor = self.tree.viewport().mapToGlobal(self.tree.visualItemRect(item).center())
+        self._rename_target = ("experiment", exp_id)
+        self._rename_editor.open_at(anchor, current)
+
+    def _begin_rename(self, kind: str, item: QTreeWidgetItem, anchor) -> None:
+        """右键「重命名」:记录目标并在右键位置打开重命名输入框。"""
+        current = ""
+        target: tuple | None = None
+        if kind == "project":
+            current = (
+                self.manager.project.name
+                if self.manager.project is not None
+                else item.text(0)
+            )
+            target = ("project",)
+        elif kind == "experiment":
+            exp_id = self._experiment_id_of(item)
+            exp = (
+                self.manager.project.experiment(exp_id)
+                if self.manager.project is not None
+                else None
+            )
+            current = exp.title if exp is not None else item.text(0)
+            target = ("experiment", exp_id)
+        elif kind == "data":
+            exp_id = self._experiment_id_of(item)
+            data_id = self._data_id_of(item)
+            entry = (
+                self.manager.project.experiment(exp_id)
+                if self.manager.project is not None
+                else None
+            )
+            data_entry = (
+                next((d for d in entry.data if d.id == data_id), None)
+                if entry is not None
+                else None
+            )
+            current = getattr(data_entry, "title", "") or ""
+            target = ("data", exp_id, data_id)
+        if target is None or anchor is None:
+            return
+        self._rename_target = target
+        self._rename_editor.open_at(anchor, current)
+
+    def _on_rename_editor_submitted(self, text: str) -> None:
+        """重命名输入框回车提交:按目标发出重命名信号。"""
+        target = self._rename_target
+        self._rename_target = None
+        if target is None:
+            return
+        kind = target[0]
+        if kind == "project":
+            self.rename_project_requested.emit(text)
+        elif kind == "experiment":
+            self.rename_requested.emit(target[1], text)
+        elif kind == "data":
+            self.data_rename_requested.emit(target[1], target[2], text)
+
+    def _clear_rename_state(self) -> None:
+        """重命名取消(Esc/点击外部):清理目标。"""
+        self._rename_target = None
 
     def _folder_path(self, exp_id: str, data_id: str, folder: str) -> Path | None:
         """样品数据子文件夹真实路径(契约 v1.3:data_dir(exp_id, data_id, key))。"""

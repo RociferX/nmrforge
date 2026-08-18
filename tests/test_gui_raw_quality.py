@@ -28,6 +28,6 @@ def test_raw_quality_reports_missing_fid(tmp_path: Path) -> None:
     assert any("ser/fid" in issue for issue in report["issues"])
     assert report["info"]["维度"] == "2D"
     assert report["info"]["核"] == "1H-15N"
-    assert "温度" in report["info"]
+    assert report["info"]["温度"] == "298.0 K"  # TE=2980 → 298.0 K(开尔文)
     text = format_quality_report(report)
     assert "警告" in text

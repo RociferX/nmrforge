@@ -19,7 +19,6 @@ from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (
     QApplication,
     QFileDialog,
-    QInputDialog,
     QLabel,
     QMainWindow,
     QMenu,
@@ -169,6 +168,12 @@ class MainWindow(QMainWindow):
         self.project_tree.import_data_requested.connect(self._import_data_for)
         self.project_tree.data_action_requested.connect(self._on_data_action)
         self.project_tree.data_rename_requested.connect(self._rename_data)
+        self.project_tree.project_create_submitted.connect(
+            self._on_project_create_submitted
+        )
+        self.project_tree.experiment_create_submitted.connect(
+            self._on_experiment_create_submitted
+        )
         self.project_tree.batch_assign_requested.connect(self._assign_batch)
         self.project_tree.batch_remove_requested.connect(self._remove_batch)
 
@@ -181,6 +186,7 @@ class MainWindow(QMainWindow):
             self._import_data_with_options
         )
         self.center_panel.batch_import_requested.connect(self._batch_import)
+        self.center_panel.segmented_import_requested.connect(self._segmented_import)
         self.pipeline.view_log_requested.connect(self._on_view_step_log)
         self.pipeline.batch_summary_requested.connect(self._on_batch_summary)
         self.center_panel.memory_guard_requested.connect(self._on_memory_guard)
@@ -189,7 +195,7 @@ class MainWindow(QMainWindow):
             self._create_experiment_with_title
         )
         self.center_panel.new_project_requested.connect(
-            self._new_project_in_workspace
+            self._on_project_create_submitted
         )
         self.center_panel.open_project_requested.connect(
             lambda path: self._open_root(Path(path))
@@ -255,10 +261,16 @@ class MainWindow(QMainWindow):
     # 项目动作
     # ------------------------------------------------------------------
     def new_project(self) -> None:
-        name, ok = QInputDialog.getText(self, "新建项目", "项目名称:", text="unnamed")
-        if ok and name.strip():
-            fields = self._ask_note_fields("新建项目 - 常规信息(可选)", "project")
-            self._new_project_in_workspace(name.strip(), fields=fields)
+        """新建项目:内联命名(不弹窗)。未打开项目时在欢迎页输入;已打开时在项目树输入。"""
+        if self.manager.project is None:
+            self.center_panel.welcome_page.begin_inline_name()
+        else:
+            self.project_tree.begin_create_project()
+
+    def _on_project_create_submitted(self, name: str) -> None:
+        """内联命名提交(欢迎页/项目树):填常规信息后创建工作区项目。"""
+        fields = self._ask_note_fields("新建项目 - 常规信息(可选)", "project")
+        self._new_project_in_workspace(name.strip(), fields=fields)
 
     def _new_project_in_workspace(
         self, name: str, fields: dict | None = None
@@ -336,6 +348,34 @@ class MainWindow(QMainWindow):
         """直接按路径导入(供测试与自动化场景使用,不弹对话框)。"""
         self._import_experiment_async(
             {"source": source, "title": title, "sample_id": "", "copy": True}
+        )
+
+    def _segmented_import(self, source: str) -> None:
+        """分段采集导入:容器目录(≥2 个含 acqus 的子目录)合并为一条样品数据。"""
+        if self.manager.project is None:
+            InfoDialog.show_info(self, "提示", "请先新建或打开项目")
+            return
+        source = source.strip()
+        if not source:
+            InfoDialog.show_info(self, "提示", "请选择分段采集容器目录")
+            return
+        from gui.processing import is_segmented_container
+
+        if not is_segmented_container(source):
+            InfoDialog.show_info(
+                self,
+                "分段采集导入",
+                "所选目录不是分段采集容器(顶层无 acqus 且至少 2 个子目录含 acqus)",
+            )
+            return
+        self._import_experiment_async(
+            {
+                "source": source,
+                "title": Path(source).name,
+                "sample_id": "",
+                "copy": True,
+                "segmented": True,
+            }
         )
 
     def _batch_import(self, exp_id: str, folders: list) -> None:
@@ -603,20 +643,18 @@ class MainWindow(QMainWindow):
     def rename_experiment(self) -> None:
         exp_id = self.project_tree.current_experiment_id()
         if exp_id:
-            self._rename_experiment_by_id(exp_id)
+            self.project_tree.begin_rename_experiment(exp_id)
 
-    def _rename_experiment_by_id(self, exp_id: str) -> None:
+    def _rename_experiment_by_id(self, exp_id: str, new_title: str) -> None:
         entry = self.manager.project.experiment(exp_id) if self.manager.project else None
         if entry is None:
             return
-        title, ok = QInputDialog.getText(self, "重命名实验类型", "新标题:", text=entry.title)
-        if ok:
-            try:
-                self.manager.rename_experiment(exp_id, title)
-                self.manager.save()
-            except ProjectError as exc:
-                InfoDialog.show_info(self, "重命名失败", str(exc))
-            self.refresh()
+        try:
+            self.manager.rename_experiment(exp_id, new_title)
+            self.manager.save()
+        except ProjectError as exc:
+            InfoDialog.show_info(self, "重命名失败", str(exc))
+        self.refresh()
 
     def delete_experiment(self) -> None:
         exp_id = self.project_tree.current_experiment_id()
@@ -1011,17 +1049,14 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     # 树动作(契约 v1.2 §8.5)
     # ------------------------------------------------------------------
-    def _rename_project(self) -> None:
+    def _rename_project(self, new_name: str = "") -> None:
         """重命名当前项目:优先 WorkspaceManager.rename_project(目录+name)。"""
         if self.manager.project is None or self.manager.root is None:
             return
         old_name = self.manager.root.name
-        new_name, ok = QInputDialog.getText(
-            self, "重命名项目", "项目名称:", text=self.manager.project.name
-        )
-        if not ok or not new_name.strip():
-            return
         new_name = new_name.strip()
+        if not new_name or new_name == old_name:
+            return
         try:
             new_root = self.workspace.rename_project(old_name, new_name)
             self.manager = ProjectManager.open_project(new_root)
@@ -1072,32 +1107,18 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("项目已关闭")
 
     def _create_experiment(self) -> None:
-        """新建空白实验类型(Project/空白处右键),可同时填写注释。"""
+        """新建空白实验类型(菜单/Project/空白处右键):项目树内内联命名(不弹窗)。"""
         if self.manager.project is None:
             InfoDialog.show_info(self, "提示", "请先新建或打开项目")
             return
-        title, ok = QInputDialog.getText(self, "新建实验类型", "实验类型标题:")
-        if not ok:
+        self.project_tree.begin_create_experiment()
+
+    def _on_experiment_create_submitted(self, title: str) -> None:
+        """项目树内联命名提交:填常规信息后创建空白实验类型。"""
+        if self.manager.project is None:
             return
         fields = self._ask_note_fields("新建实验类型 - 常规信息(可选)", "experiment")
-        create = getattr(self.manager, "create_experiment", None)
-        try:
-            if create is not None:
-                entry = create(title=title.strip())
-            else:
-                entry = self.manager.add_experiment("", title=title.strip())
-            if fields:
-                from gui.notes import set_experiment_note_fields
-
-                set_experiment_note_fields(
-                    self.manager.project, entry.id, fields
-                )
-            self.manager.save()
-        except ProjectError as exc:
-            InfoDialog.show_info(self, "新建实验类型失败", str(exc))
-            return
-        self.refresh()
-        self.project_tree.select_experiment(entry.id)
+        self._create_experiment_with_title_and_fields(title.strip(), fields)
 
     def _import_data_with_options(
         self, exp_id: str, name: str, source: str, copy: bool
@@ -1114,17 +1135,15 @@ class MainWindow(QMainWindow):
             }
         )
 
-    def _rename_data(self, exp_id: str, data_id: str) -> None:
+    def _rename_data(self, exp_id: str, data_id: str, new_name: str = "") -> None:
         """数据右键重命名:优先 manager.rename_data 落盘;缺失时直接写 title 并提示。"""
         entry = self.manager.project.experiment(exp_id) if self.manager.project else None
         if entry is None:
             return
         data_entry = next((d for d in entry.data if d.id == data_id), None)
-        current = getattr(data_entry, "title", "") or "" if data_entry else ""
-        new_name, ok = QInputDialog.getText(self, "重命名数据", "数据名称:", text=current)
-        if not ok:
-            return
         new_name = new_name.strip()
+        if not new_name:
+            return
         rename_data = getattr(self.manager, "rename_data", None)
         if rename_data is not None:
             try:
@@ -1166,11 +1185,25 @@ class MainWindow(QMainWindow):
 
     def _create_experiment_with_title(self, title: str) -> None:
         """中间面板内嵌表单:新建空白实验类型。"""
+        self._create_experiment_with_title_and_fields(title.strip())
+
+    def _create_experiment_with_title_and_fields(
+        self, title: str, fields: dict | None = None
+    ) -> None:
+        """按标题(可带常规信息字段)创建空白实验类型。"""
         if self.manager.project is None:
             InfoDialog.show_info(self, "提示", "请先新建或打开项目")
             return
         try:
-            entry = self.manager.create_experiment(title=title)
+            create = getattr(self.manager, "create_experiment", None)
+            if create is not None:
+                entry = create(title=title.strip())
+            else:
+                entry = self.manager.add_experiment("", title=title.strip())
+            if fields:
+                from gui.notes import set_experiment_note_fields
+
+                set_experiment_note_fields(self.manager.project, entry.id, fields)
             self.manager.save()
         except ProjectError as exc:
             InfoDialog.show_info(self, "新建实验类型失败", str(exc))
