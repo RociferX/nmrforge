@@ -48,7 +48,7 @@ from backend.script_generator import (
     zero_fill_report,
 )
 from core.data.internal_data_model import Experiment, SamplingMode
-from core.data.nus_reader import merge_nuslists, read_nuslist
+from core.data.nus_reader import read_nuslist
 from core.optimization.phase_search import (
     direct_ft_traces,
     search_direct_phase_on_spectrum,
@@ -346,9 +346,10 @@ class NMRPipeBackend:
             logs += convert_logs
             fid_path = work / "merged" / "fid"
             if converted:
-                self._write_merged_nuslist(
+                _count, bad_points = self._write_merged_nuslist(
                     work, experiment.segments, experiment, logs
                 )
+                self._zero_bad_point_fid(work, bad_points, logs)
         else:
             converted, convert_logs = self._convert(runtime, experiment, raw, work)
             logs += convert_logs
@@ -417,9 +418,10 @@ class NMRPipeBackend:
                         "message": "多段 NUS 转换/合并失败",
                         "logs": logs,
                     }
-                nuslist_count = self._write_merged_nuslist(
+                nuslist_count, bad_points = self._write_merged_nuslist(
                     work, experiment.segments, experiment, logs
                 )
+                self._zero_bad_point_fid(work, bad_points, logs)
             else:
                 logs.append("复用已合并切片（跳过转换/合并）")
                 nuslist_count = len(
@@ -1482,28 +1484,101 @@ class NMRPipeBackend:
         segment_dirs: list[Path],
         experiment: Experiment,
         logs: list[str],
-    ) -> int:
-        points = merge_nuslists([Path(d) / "nuslist" for d in segment_dirs])
-        # 3D 校验：nuslist 列为复点索引（上限 NusTD//2），越界点属数据录入错误，丢弃并警告
-        if experiment.ndim >= 3:
-            td = effective_td(experiment)
-            bounds = [int(td[1]) // 2, int(td[2]) // 2] if len(td) > 2 else []
-            valid: list[tuple[int, ...]] = []
-            dropped = 0
-            for point in points:
-                if len(point) >= 2 and (
-                    point[0] >= bounds[0] or point[1] >= bounds[1]
-                ):
-                    dropped += 1
-                else:
-                    valid.append(point)
-            if dropped:
-                logs.append(f"nuslist 越界点 {dropped} 个已丢弃（网格 {bounds}）")
-            points = valid
-        text = "".join(" ".join(str(v) for v in point) + "\n" for point in points)
+    ) -> tuple[int, list[tuple[int, ...]]]:
+        """合并各段 nuslist 并检测采样坏点（越界/重复），返回 (有效点数, 坏点列表)。
+
+        分段采样可能有个别「写错并采错」的点（如 cc/63 的 27 2350：F1 索引远超
+        网格上限）。坏点从合并 nuslist 剔除并由调用方清理对应 FID，同时以 ⚠ 提示用户。
+        """
+        from collections import Counter
+
+        all_points: list[tuple[int, ...]] = []
+        for seg_dir in segment_dirs:
+            nuslist_path = Path(seg_dir) / "nuslist"
+            if nuslist_path.is_file():
+                all_points += [tuple(p) for p in read_nuslist(nuslist_path)]
+        counts = Counter(all_points)
+        td = effective_td(experiment)
+        bounds: list[int] | None = None
+        if experiment.ndim >= 3 and len(td) > 2:
+            # 3D nuslist 列为复点索引（上限 NusTD//2）
+            bounds = [int(td[1]) // 2, int(td[2]) // 2]
+        valid: list[tuple[int, ...]] = []
+        bad: list[tuple[int, ...]] = []
+        seen: set[tuple[int, ...]] = set()
+        for point in all_points:
+            oob = (
+                bounds is not None
+                and len(point) >= 2
+                and (point[0] >= bounds[0] or point[1] >= bounds[1])
+            )
+            dup = counts[point] > 1
+            if oob or dup:
+                if point not in bad:
+                    bad.append(point)
+                continue
+            if point in seen:
+                continue
+            seen.add(point)
+            valid.append(point)
+        for point in bad:
+            reasons: list[str] = []
+            if bounds is not None and len(point) >= 2 and (
+                point[0] >= bounds[0] or point[1] >= bounds[1]
+            ):
+                reasons.append(f"越界(网格 {bounds})")
+            if counts[point] > 1:
+                reasons.append(f"重复({counts[point]} 段)")
+            logs.append(
+                f"⚠ 检测到采样坏点 {point}:{'、'.join(reasons)},已从合并 nuslist 丢弃"
+            )
+        text = "".join(" ".join(str(v) for v in point) + "\n" for point in valid)
         (work / "nuslist").write_text(text, encoding="utf-8")
-        logs.append(f"合并 nuslist：{len(points)} 采样点")
-        return len(points)
+        logs.append(f"合并 nuslist：{len(valid)} 采样点（坏点 {len(bad)}）")
+        return len(valid), bad
+
+    def _zero_bad_point_fid(
+        self, work: Path, bad_points: list[tuple[int, ...]], logs: list[str]
+    ) -> None:
+        """清理坏点对应的合并 FID 数据。
+
+        有效网格内的坏点（如跨段重复）在切片中对应 States 双实行(2y, 2y+1)，
+        清零以去掉错误/重复贡献;越界点无对应切片槽位,记录即可。
+        """
+        if not bad_points:
+            return
+        import nmrglue as ng
+
+        merged = work / "merged" / "fid"
+        if not merged.is_dir():
+            return
+        for point in bad_points:
+            if len(point) < 2:
+                continue
+            y, z = int(point[0]), int(point[1])
+            slice_path = merged / f"test{z:03d}.fid"
+            if not slice_path.is_file():
+                logs.append(
+                    f"⚠ 坏点 {point}:越界,无对应切片,合并 FID 无需清理"
+                )
+                continue
+            try:
+                dic, data = ng.pipe.read(str(slice_path))
+                arr = np.asarray(data)
+                if arr.ndim < 2:
+                    continue
+                rows = [r for r in (2 * y, 2 * y + 1) if r < arr.shape[0]]
+                if not rows:
+                    logs.append(f"⚠ 坏点 {point}:行越界,无需清理")
+                    continue
+                arr[rows, :] = 0
+                ng.pipe.write(str(slice_path), dic, arr, overwrite=True)
+                logs.append(
+                    f"⚠ 坏点 {point}:对应 FID 增量已清零"
+                    f"(切片 {slice_path.name} 行 {rows})"
+                )
+            except Exception as exc:  # noqa: BLE001 - 清理失败不阻断
+                logs.append(f"⚠ 坏点 {point}:FID 清理失败 {exc}")
 
     # ------------------------------------------------------------------ 处理
 

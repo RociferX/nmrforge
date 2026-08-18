@@ -265,3 +265,37 @@ def test_reconstruct_nus_segments_missing_nmrpipe(bruker_dir: Path, tmp_path: Pa
     backend = NMRPipeBackend(nmrpipe_bin="")
     result = backend.reconstruct_nus(exp, {})
     assert result["success"] is False
+
+def test_write_merged_nuslist_detects_bad_points(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """坏点检测:越界点 + 跨段重复点从合并 nuslist 剔除并 ⚠ 提示。"""
+    import shutil
+
+    from backend.nmrpipe_backend import NMRPipeBackend
+    from core.data.bruker_reader import read_segments
+
+    seg1 = tmp_path / "s1"
+    seg2 = tmp_path / "s2"
+    shutil.copytree(bruker_dir / "nus_3d", seg1)
+    shutil.copytree(bruker_dir / "nus_3d", seg2)
+    nl1 = (seg1 / "nuslist").read_text(encoding="utf-8").splitlines()
+    nl2 = (seg2 / "nuslist").read_text(encoding="utf-8").splitlines()
+    first2 = nl2[0]
+    nl1 = [first2] + nl1
+    nl2 = nl2 + ["1000 1000"]
+    (seg1 / "nuslist").write_text("\n".join(nl1) + "\n", encoding="utf-8")
+    (seg2 / "nuslist").write_text("\n".join(nl2) + "\n", encoding="utf-8")
+    exp = read_segments([seg1, seg2])
+    backend = NMRPipeBackend()
+    logs: list[str] = []
+    count, bad = backend._write_merged_nuslist(tmp_path, [seg1, seg2], exp, logs)
+    assert (1000, 1000) in bad
+    assert tuple(int(v) for v in first2.split()) in bad
+    joined = "\n".join(logs)
+    assert "⚠ 检测到采样坏点" in joined
+    assert "越界" in joined
+    assert "重复" in joined
+    written = (tmp_path / "nuslist").read_text(encoding="utf-8").splitlines()
+    assert all(tuple(int(v) for v in line.split()) not in bad for line in written)
+    assert count == len(written)
