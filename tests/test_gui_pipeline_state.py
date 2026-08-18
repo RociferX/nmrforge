@@ -27,7 +27,7 @@ def qapp() -> QApplication:
 
 
 def _manager_with_artifacts(tmp_path: Path):
-    """项目 + 数据类型 + 样品数据 + 全套产物(fid/谱/峰表/报告,无指纹状态)。"""
+    """项目 + 实验类型 + 样品数据 + 全套产物(fid/谱/峰表/报告,无指纹状态)。"""
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     entry = manager.create_experiment("HSQC")
     data = manager.import_data(entry.id, "/fake/bruker/1")

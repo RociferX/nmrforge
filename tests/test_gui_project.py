@@ -191,7 +191,7 @@ def test_open_project_action(
 def test_add_experiment_action(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """「添加数据类型」= 新建空白数据类型:项目树内联命名(不弹窗)。"""
+    """「添加实验类型」= 新建空白实验类型:项目树内联命名(不弹窗)。"""
     manager = _build_manager(tmp_path, monkeypatch)
 
     class _FakeNotesDialog:
@@ -216,7 +216,7 @@ def test_add_experiment_action(
     assert last.text(0) == "exp_003"
     assert last.text(1) == "3D HNCACB"
     entry = manager.project.experiment("exp_003")
-    assert entry is not None and len(entry.data) == 0  # 空白数据类型无样品数据
+    assert entry is not None and len(entry.data) == 0  # 空白实验类型无样品数据
     window.close()
 
 

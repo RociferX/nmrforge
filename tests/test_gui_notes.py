@@ -1,4 +1,4 @@
-"""项目/数据类型/样品数据三级注释功能测试:结构化字段 helper + 中间顶部注释条。"""
+"""项目/实验类型/样品数据三级注释功能测试:结构化字段 helper + 中间顶部注释条。"""
 
 from __future__ import annotations
 
@@ -45,7 +45,7 @@ def _manager(tmp_path: Path) -> tuple[ProjectManager, str, str]:
 
 
 def test_note_fields_schemas_differ_per_level() -> None:
-    """2026-08-18:数据类型=实验类型(指认/动力学);样品=重复/条件/pH/温度+维度/类型/核。"""
+    """2026-08-18:实验类型注释=实验类型(指认/动力学);样品=重复/条件/pH/温度+维度/数据类型/核。"""
     assert [key for key, _ in SAMPLE_FIELDS] == [
         "protein_name",
         "expression_system",
@@ -104,6 +104,7 @@ def test_notes_helper_roundtrip(tmp_path: Path) -> None:
     assert "浓度: 0.5 mM" in sample_note(manager.project)
     assert "实验类型: 指认实验" in experiment_note(manager.project, exp_id)
     assert "重复号: 2" in data_note(manager.project, exp_id, data_id)
+    assert "数据类型: HSQC" in data_note(manager.project, exp_id, data_id)
     assert "Buffer pH: 7.0" in data_note(manager.project, exp_id, data_id)
     manager.save()
     reopened = ProjectManager.open_project(tmp_path / "proj")
@@ -159,7 +160,7 @@ def test_center_panel_notes_bar(tmp_path: Path, qapp: QApplication) -> None:
 def test_main_window_menu_experiment(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """顶部菜单:「项目/数据类型」,去掉样本管理/添加/删除样本。"""
+    """顶部菜单:「项目/实验类型」,去掉样本管理/添加/删除样本。"""
     from gui.main_window import MainWindow
 
     workspace = tmp_path / "ws"
@@ -186,15 +187,15 @@ def test_main_window_menu_experiment(
     )
     window = MainWindow()
     menus = [action.text() for action in window.menuBar().actions()]
-    assert "数据类型(&D)" in menus
+    assert "实验类型(&E)" in menus
     assert "样本(&S)" not in menus
     experiment_menu = next(
         action.menu()
         for action in window.menuBar().actions()
-        if action.text() == "数据类型(&D)"
+        if action.text() == "实验类型(&E)"
     )
     labels = [action.text() for action in experiment_menu.actions()]
-    assert "新建数据类型..." in labels
+    assert "新建实验类型..." in labels
     assert "项目管理" not in labels
     assert "添加项目..." not in labels
     assert "删除项目..." not in labels
@@ -254,7 +255,7 @@ def test_edit_notes_saves(
     assert "指认实验" in window.center_panel.notes_label.text()
     window.close()
 def test_experiment_type_options_from_presets() -> None:
-    """0.2.85:实验类型选项来自 presets,按维度过滤(排除 Generic 兜底)。"""
+    """0.2.85:数据类型选项来自 presets,按维度过滤(排除 Generic 兜底)。"""
     options_2d = experiment_type_options("2D")
     options_3d = experiment_type_options("3D")
     assert "HSQC" in options_2d and "COSY" in options_2d
@@ -305,7 +306,7 @@ def test_auto_fill_notes_from_metadata(tmp_path: Path) -> None:
         manager, exp_id, data_id, metadata
     )
     exp_fields = experiment_note_fields(manager.project, exp_id)
-    assert exp_fields == {}  # 数据类型注释不再由导入自动填充
+    assert exp_fields == {}  # 实验类型注释不再由导入自动填充
     data_fields = data_note_fields(manager.project, exp_id, data_id)
     assert data_fields["dimension"] == "2D"
     assert data_fields["experiment_type"] == "HSQC"  # 已有值不覆盖
@@ -320,7 +321,7 @@ def test_auto_fill_notes_from_metadata(tmp_path: Path) -> None:
 def test_notes_dialog_combos_dimension_then_type(
     qapp: QApplication,
 ) -> None:
-    """0.2.85:样品数据注释用下拉;先选维度,再按 presets 过滤实验类型。"""
+    """0.2.85:样品数据注释用下拉;先选维度,再按 presets 过滤数据类型。"""
     from gui.dialogs import NotesDialog
 
     dialog = NotesDialog(
@@ -349,12 +350,12 @@ def test_notes_dialog_combos_dimension_then_type(
 
 
 def test_notes_dialog_experiment_category_options(qapp: QApplication) -> None:
-    """2026-08-18:数据类型注释仅「实验类型」字段,选项为指认实验/动力学实验。"""
+    """2026-08-18:实验类型注释仅「实验类型」字段,选项为指认实验/动力学实验。"""
     from gui.dialogs import NotesDialog
 
     dialog = NotesDialog(
         None,
-        "数据类型注释",
+        "实验类型注释",
         "experiment",
         {"experiment_type": "指认实验"},
     )

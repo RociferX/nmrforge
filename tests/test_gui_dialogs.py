@@ -1,4 +1,4 @@
-"""对话框组件测试:导入样品数据/项目表单/信息/确认(offscreen)。"""
+"""对话框组件测试:导入实验类型/项目表单/信息/确认(offscreen)。"""
 
 from __future__ import annotations
 
