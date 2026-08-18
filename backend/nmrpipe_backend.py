@@ -1439,16 +1439,68 @@ class NMRPipeBackend:
         work: Path,
         shifts: list[float],
     ) -> tuple[bool, list[str]]:
-        """多段实验：每段 bruker 转换 → 拆切片 → addNMR 合并。"""
+        """多段实验：参考段 fid.com 统一转换 → 拆切片 → addNMR 合并。
+
+        参考实验室 1stfid.com/2ndAdd.com 流程：
+        1. 用参考段（首个）bruker -AUTO 生成正确的 fid.com（全网格 NusTD
+           参数）；
+        2. 其余段复用该 fid.com（仅 nusExpand -sampleCount 按各自 nuslist
+           修正），保证各段 bruk2pipe 参数一致——分段实验的 acqu2s TD 可能
+           各不相同（如 cc/61:200、63/65:400、67:396），逐段独立转换会得到
+           不一致网格；
+        3. 每段拆切片（可带 -rs 频移）→ addNMR 逐对合并。
+        """
         logs: list[str] = []
         is_nus = experiment.sampling.mode is SamplingMode.NUS
-        for index, seg_dir in enumerate(experiment.segments, start=1):
+        n_segments = len(experiment.segments)
+        # 1) 参考段（首个）转换，得到统一 fid.com
+        ref_work = work / "seg_001"
+        ref_work.mkdir(parents=True, exist_ok=True)
+        ref_dir = Path(experiment.segments[0])
+        if not self._convert_dir(
+            runtime, experiment, ref_dir, ref_work, is_nus, logs
+        ):
+            return False, logs + [f"参考段 1（{ref_dir.name}）转换失败"]
+        ref_fid_com = ref_dir / "fid.com"
+        if not ref_fid_com.is_file():
+            return False, logs + ["参考段 fid.com 缺失"]
+        ref_text = ref_fid_com.read_text(encoding="utf-8", errors="replace")
+        logs.append(
+            f"参考段 fid.com 已生成（{ref_dir.name}），其余段复用其 bruk2pipe 参数"
+        )
+        # 2) 其余段：复用参考 fid.com（仅 -sampleCount 按各自 nuslist 修正）
+        for index in range(2, n_segments + 1):
+            seg_dir = Path(experiment.segments[index - 1])
             seg_work = work / f"seg_{index:03d}"
             seg_work.mkdir(parents=True, exist_ok=True)
-            if not self._convert_dir(
-                runtime, experiment, Path(seg_dir), seg_work, is_nus, logs
+            seg_fid_com = seg_dir / "fid.com"
+            seg_text = ref_text
+            nuslist_path = seg_dir / "nuslist"
+            if is_nus and nuslist_path.is_file():
+                seg_count = len(read_nuslist(nuslist_path))
+                seg_text, corrections = patch_nus_expand_count(
+                    seg_text, seg_count
+                )
+                for correction in corrections:
+                    logs.append(f"段 {index}（{seg_dir.name}）{correction}")
+            seg_fid_com.write_text(seg_text, encoding="utf-8", newline="\n")
+            run_result = runtime.run(
+                ["csh", "fid.com"], cwd=str(seg_dir), timeout=900
+            )
+            logs.append(f"fid.com（{seg_dir.name}）: rc={run_result.returncode}")
+            if run_result.returncode != 0:
+                return False, logs + [f"段 {index}（{seg_dir.name}）转换失败"]
+            if not self._finalize_converted_fid(
+                seg_dir, seg_work, experiment.dataset_id, logs
             ):
-                return False, logs + [f"数据段 {index}（{Path(seg_dir).name}）转换失败"]
+                return False, logs + [f"段 {index} 产物归位失败"]
+            for stale in ("ser_full", "mask.fid"):
+                stale_path = seg_dir / stale
+                if stale_path.is_file():
+                    stale_path.unlink()
+        # 3) 各段拆切片（带可选 -rs 频移）→ addNMR 合并
+        for index, seg_dir in enumerate(experiment.segments, start=1):
+            seg_work = work / f"seg_{index:03d}"
             shift_hz = shifts[index - 1] if index - 1 < len(shifts) else 0.0
             if not self._split_slices(
                 runtime,
@@ -1459,7 +1511,7 @@ class NMRPipeBackend:
                 logs,
             ):
                 return False, logs + [f"数据段 {index} 切片失败"]
-        if not self._merge_slices(runtime, work, len(experiment.segments), logs):
+        if not self._merge_slices(runtime, work, n_segments, logs):
             return False, logs + ["多段切片合并失败"]
         return True, logs
 
