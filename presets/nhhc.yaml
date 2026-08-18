@@ -1,0 +1,12 @@
+name: NHHC
+description: 固体核磁:2D 经 15N 的 1H-1H 空间相关(距离约束;核组合待真实数据验证)
+phase_sensitive: true
+direct_nucleus: 1H
+indirect_nuclei: [1H]
+expected_peak_mode: absorption
+peak_sign: uniform
+display_orientation: "1H/1H"
+priors:
+  "1H": [-5.0, 20.0]
+constraints:
+  ndim: 2

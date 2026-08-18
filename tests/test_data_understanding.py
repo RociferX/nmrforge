@@ -85,7 +85,7 @@ def test_direct_dimension_sw_prefers_sw_h(bruker_dir: Path) -> None:
 
 
 def test_carrier_ppm_fallback_without_o1p(tmp_path: Path, bruker_dir: Path) -> None:
-    """真实数据无 O1P 时载波 ppm = O1 / SFO1。"""
+    """BF1 缺失时载波 ppm 回退 O1/SFO1(兼容旧数据;fixture 无 BF1)。"""
     import shutil
 
     dst = tmp_path / "no_o1p"
@@ -102,6 +102,71 @@ def test_carrier_ppm_fallback_without_o1p(tmp_path: Path, bruker_dir: Path) -> N
     direct = exp.direct_dimension
     assert direct is not None
     assert direct.o1p == pytest.approx(2821.062748 / 599.8937495)
+
+
+def test_o1p_uses_bf1_matching_topspin(tmp_path: Path) -> None:
+    """sampleK 实测参数(15N):O1/BF1 = 117.000,与 TopSpin 显示一致。"""
+    params = (
+        "##$PULPROG= nuc\n"
+        "##$TD= 1024\n"
+        "##$SW_h= 10000.000000\n"
+        "##$SFO1= 121.666934964\n"
+        "##$BF1= 121.652701598\n"
+        "##$O1= 14233.366\n"
+        "##$NUC1= 15N\n"
+        "##$PARMODE= 1\n"
+        "##$FnMODE= 5\n"
+        "##$END=\n"
+    )
+    dst = tmp_path / "o1p_bf1"
+    dst.mkdir()
+    (dst / "acqus").write_text(params, encoding="utf-8", newline="\n")
+    (dst / "acqu2s").write_text(params, encoding="utf-8", newline="\n")
+    exp = read_dataset(dst)
+    assert len(exp.dimensions) == 2
+    for dim in exp.dimensions:
+        assert dim.sf == pytest.approx(121.666934964)  # sf 仍为 SFO1
+        assert dim.o1p == pytest.approx(117.000, abs=1e-3)  # O1/BF1
+        assert abs(dim.o1p - 116.986) > 0.01  # 不再是 O1/SFO1
+
+
+def test_o1p_prefers_explicit_o1p(tmp_path: Path, bruker_dir: Path) -> None:
+    """显式 O1P 优先:即使 BF1 存在也不重算。"""
+    import shutil
+
+    dst = tmp_path / "o1p_explicit"
+    shutil.copytree(bruker_dir / "hsqc_2d", dst)
+    acqus = dst / "acqus"
+    lines = acqus.read_text(encoding="utf-8").splitlines()
+    lines.append("##$BF1= 599.890928437")
+    acqus.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
+    exp = read_dataset(dst)
+    direct = exp.direct_dimension
+    assert direct is not None
+    assert direct.o1p == pytest.approx(4.703)  # O1P 原值,不因 BF1 重算
+
+
+def test_o1p_fallback_bf1_for_1h(tmp_path: Path, bruker_dir: Path) -> None:
+    """1H 维度:BF1 存在时回退 O1/BF1(≈O1P 4.703,sampleI 4.700 同族)。"""
+    import shutil
+
+    dst = tmp_path / "o1p_1h"
+    shutil.copytree(bruker_dir / "hsqc_2d", dst)
+    acqus = dst / "acqus"
+    lines = [
+        line
+        for line in acqus.read_text(encoding="utf-8").splitlines()
+        if not line.startswith("##$O1P")
+    ]
+    # SFO1 = BF1 + O1 → BF1 = 599.8937495 MHz − 2821.062748 Hz
+    lines.append("##$BF1= 599.890928437252")
+    acqus.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
+    exp = read_dataset(dst)
+    direct = exp.direct_dimension
+    assert direct is not None
+    assert direct.o1p == pytest.approx(4.703, abs=1e-3)
+    # 与旧 O1/SFO1 值的差 ≈ O1P²/1e6,证明走 BF1 分支
+    assert abs(direct.o1p - 2821.062748 / 599.8937495) > 1e-5
 
 def _experiment_with_nuclei(
     ndim: int, nuclei: list[str], pulprog: str
@@ -156,4 +221,114 @@ def test_classify_hncoca_only_with_13c() -> None:
     result = classify(exp)
     assert result.name == "HN(CO)CA"
     assert result.confidence >= 0.8
+
+
+def test_classify_ssnmr_nca_nco_by_pulprog() -> None:
+    """2D 15N/13C:NCA/NCO 按 PULPROG 区分。"""
+    from core.experiment.experiment_classifier import classify
+
+    nca = classify(_experiment_with_nuclei(2, ["13C", "15N"], "SPECIFIC-CP nca"))
+    assert nca.name == "NCA"
+    nco = classify(_experiment_with_nuclei(2, ["13C", "15N"], "nco"))
+    assert nco.name == "NCO"
+
+
+def test_classify_ssnmr_3d_correlation_by_pulprog() -> None:
+    """3D 15N/13C/13C:NCACX/NCOCX/NCACB/NCOCACB 按 PULPROG 区分。"""
+    from core.experiment.experiment_classifier import classify
+
+    cases = {
+        "ncacx": "NCACX",
+        "ncocx": "NCOCX",
+        "ncacb": "NCACB",
+        "ncocacb": "NCOCACB",
+        "ncocb": "NCOCACB",
+    }
+    for pulprog, expected in cases.items():
+        result = classify(_experiment_with_nuclei(3, ["13C", "15N", "13C"], pulprog))
+        assert result.name == expected, pulprog
+        assert result.confidence >= 0.8, pulprog
+
+
+def test_classify_ssnmr_canco_family() -> None:
+    """3D 13C/15N/13C:CANCO/CAN(CO)CA/CBCANCO 按 PULPROG 区分。"""
+    from core.experiment.experiment_classifier import classify
+
+    cases = {
+        "canco": "CANCO",
+        "cancoCA": "CAN(CO)CA",
+        "cbcanco": "CBCANCO",
+    }
+    for pulprog, expected in cases.items():
+        result = classify(_experiment_with_nuclei(3, ["13C", "15N", "13C"], pulprog))
+        assert result.name == expected, pulprog
+
+
+def test_classify_ssnmr_cc_correlation_family() -> None:
+    """2D 13C/13C:DARR/PDSD/RFDR/CORD/INADEQUATE/HCC 按 PULPROG 区分。"""
+    from core.experiment.experiment_classifier import classify
+
+    cases = {
+        "darr": "DARR",
+        "pdsd": "PDSD",
+        "rfdr": "RFDR",
+        "cord": "CORD",
+        "inadequate": "INADEQUATE",
+        "cshi.hCC_sd": "HCC",
+    }
+    for pulprog, expected in cases.items():
+        result = classify(_experiment_with_nuclei(2, ["13C", "13C"], pulprog))
+        assert result.name == expected, pulprog
+
+
+def test_classify_ssnmr_hetcor_by_nuclei() -> None:
+    """HETCOR:同一 PULPROG 按核组合区分 1H-13C / 1H-15N。"""
+    from core.experiment.experiment_classifier import classify
+
+    hc = classify(_experiment_with_nuclei(2, ["13C", "1H"], "FSLGhetcor"))
+    assert hc.name == "HETCOR"
+    hn = classify(_experiment_with_nuclei(2, ["15N", "1H"], "FSLGhetcor"))
+    assert hn.name == "HNHETCOR"
+
+
+def test_classify_ssnmr_tedor_pain_nn() -> None:
+    """2D 距离约束:TEDOR/PAIN-CP(15N/13C)、NN(15N/15N)。"""
+    from core.experiment.experiment_classifier import classify
+
+    tedor = classify(_experiment_with_nuclei(2, ["13C", "15N"], "tedor"))
+    assert tedor.name == "TEDOR"
+    pain = classify(_experiment_with_nuclei(2, ["13C", "15N"], "paincp"))
+    assert pain.name == "PAIN-CP"
+    nn = classify(_experiment_with_nuclei(2, ["15N", "15N"], "nn"))
+    assert nn.name == "NN"
+
+
+def test_classify_ssnmr_chhc_nhhc_and_ccc() -> None:
+    """2D 1H/1H:CHHC/NHHC 按 PULPROG 区分;3D 13C/13C/13C:CCC 唯一命中。"""
+    from core.experiment.experiment_classifier import classify
+
+    chhc = classify(_experiment_with_nuclei(2, ["1H", "1H"], "chhc"))
+    assert chhc.name == "CHHC"
+    nhhc = classify(_experiment_with_nuclei(2, ["1H", "1H"], "nhhc"))
+    assert nhhc.name == "NHHC"
+    ccc = classify(_experiment_with_nuclei(3, ["13C", "13C", "13C"], "ccc"))
+    assert ccc.name == "CCC"
+    assert ccc.confidence >= 0.9  # 核组合唯一命中
+
+
+def test_classify_liquid_not_shadowed_by_solid() -> None:
+    """液体关键词不被固体模板抢占(同核组合靠 PULPROG 区分)。"""
+    from core.experiment.experiment_classifier import classify
+
+    cases = [
+        (3, ["1H", "15N", "13C"], "hncacb", "HNCACB"),
+        (3, ["1H", "15N", "13C"], "hnca", "HNCA"),
+        (3, ["1H", "15N", "13C"], "hnco", "HNCO"),
+        (3, ["1H", "15N", "13C"], "cbcanh", "CBCANH"),
+        (3, ["1H", "15N", "13C"], "cbcaconh", "CBCA(CO)NH"),
+        (2, ["1H", "1H"], "noesyph", "NOESY"),
+    ]
+    for ndim, nuclei, pulprog, expected in cases:
+        result = classify(_experiment_with_nuclei(ndim, nuclei, pulprog))
+        assert result.name == expected, (pulprog, result)
 

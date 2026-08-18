@@ -1,0 +1,12 @@
+name: CORD
+description: 固体核磁:2D 13C-13C 组合 R2nv 驱动重耦合(侧链/长程)
+phase_sensitive: true
+direct_nucleus: 13C
+indirect_nuclei: [13C]
+expected_peak_mode: absorption
+peak_sign: uniform
+display_orientation: "13C/13C"
+priors:
+  "13C": [10.0, 190.0]
+constraints:
+  ndim: 2

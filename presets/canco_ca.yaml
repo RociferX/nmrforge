@@ -1,0 +1,14 @@
+name: CAN(CO)CA
+description: 固体核磁:3D 13Cα(i/i-1)-15N-13Cα(CO 仅转移不采集)
+phase_sensitive: true
+direct_nucleus: 13C
+indirect_nuclei: [13C, 15N]
+expected_peak_mode: absorption
+peak_sign: uniform
+display_orientation: "13C/15N/13C"
+priors:
+  "13C": [10.0, 80.0]
+  "13C_alpha": [40.0, 70.0]
+  "15N": [90.0, 140.0]
+constraints:
+  ndim: 3

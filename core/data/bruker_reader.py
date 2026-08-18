@@ -211,8 +211,14 @@ def _build_dimensions(params: dict, ndim: int) -> list[Dimension]:
         sf = _param_float(block, "SFO1")
         o1 = _param_float(block, "O1")
         o1p = _param_float(block, "O1P")
-        if not o1p and sf:
-            o1p = o1 / sf
+        if not o1p:
+            # TopSpin 的 O1P = O1/BF1(偏移相对基频);旧计算用 O1/SFO1
+            # (相对实际载频 SFO1=BF1+O1)会差 ≈ O1P²/1e6(117 ppm → 0.014 ppm)
+            bf1 = _param_float(block, "BF1")
+            if o1 and bf1:
+                o1p = o1 / bf1
+            elif o1 and sf:
+                o1p = o1 / sf  # BF1 缺失时兼容旧数据(相对 SFO1)
         dims.append(
             Dimension(
                 logical_axis=logical,

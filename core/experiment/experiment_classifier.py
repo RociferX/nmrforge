@@ -4,7 +4,9 @@
 1. 先识别正确核(各维度核素);
 2. 按核组合(含同核重复计数,如 15N/15N)排除不匹配的模板;
 3. 在剩余候选中用 PULPROG 关键词精排;无候选时 PULPROG 兜底(降置信)。
-固体核磁类型(如 NNH/CCH,液体核磁没有)通过核组合规则自动入选。
+固体核磁类型(如 NNH/CCH/NCA/NCACB/DARR,液体核磁没有)通过核组合规则
+自动入选,同一核组合(如 15N/13C/13C 的 NCACX/NCOCX/NCACB/NCOCACB)由
+PULPROG 区分。
 
 置信度约定:>0.9 自动处理;0.6-0.9 自动 + warning;<0.6 走 Generic 并请求用户确认。
 """
@@ -17,12 +19,46 @@ import core.experiments  # noqa: F401  导入即从 presets/*.yaml 注册模板
 from core.data.internal_data_model import Experiment, ExperimentType
 from core.experiments.registry import REGISTRY
 
-# (pulprog 子串, 模板名)；长/具体关键词在前,避免 hncacb 被 hnca 误匹配
+# (pulprog 子串, 模板名)；长/具体关键词在前,避免 hnca 被 nca、hncacb 被
+# ncacb、ncocx 被 nco、cbcanco 被 canco 误匹配;同一关键词(如 hetcor/fslg)
+# 对应多个模板时由「候选核匹配」过滤——FSLGhetcor 按核组合区分
+# HETCOR(1H-13C)/HNHETCOR(1H-15N)。1D 类型(CP13C/CP15N/PROTON1D/
+# C13_1D)暂无 presets YAML(test_gui_presets 仅允许 ndim=2/3),关键词待
+# GUI 侧放开 ndim=1 后补。
 _PULPROG_TYPES: list[tuple[str, str]] = [
+    # —— 固体核磁:15N/13C 主链与 1H 检测同核 ——
     ("hncocannh", "NNH"),
     ("hncannh", "NNH"),
     ("nnh", "NNH"),
+    ("nhhc", "NHHC"),
+    ("chhc", "CHHC"),
     ("cch", "CCH"),
+    ("cbcanco", "CBCANCO"),
+    ("cancoca", "CAN(CO)CA"),
+    ("canco", "CANCO"),
+    ("ncocacb", "NCOCACB"),
+    ("ncocb", "NCOCACB"),
+    ("ncocx", "NCOCX"),
+    ("ncacb", "NCACB"),
+    ("ncacx", "NCACX"),
+    ("nco", "NCO"),
+    ("nca", "NCA"),
+    # —— 固体核磁:13C-13C / 同核 / 距离约束 ——
+    ("cshi.hcc", "HCC"),
+    ("ccc", "CCC"),
+    ("inadequate", "INADEQUATE"),
+    ("darr", "DARR"),
+    ("pdsd", "PDSD"),
+    ("rfdr", "RFDR"),
+    ("cord", "CORD"),
+    ("tedor", "TEDOR"),
+    ("pain", "PAIN-CP"),
+    ("fslg", "HNHETCOR"),
+    ("fslg", "HETCOR"),
+    ("hetcor", "HNHETCOR"),
+    ("hetcor", "HETCOR"),
+    ("nn", "NN"),
+    # —— 液体核磁 ——
     ("hncacb", "HNCACB"),
     ("cbcaconh", "CBCA(CO)NH"),
     ("cbcanh", "CBCANH"),

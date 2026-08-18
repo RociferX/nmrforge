@@ -1,5 +1,58 @@
 # 变更日志
 
+## [0.2.120] - 2026-08-18
+
+- 修复(Backend):o1p(谱中心)定义与 TopSpin 一致——O1P 缺失时改为
+  O1/BF1(偏移相对基频 BF1),替代旧 O1/SFO1(相对实际载频 SFO1=BF1+O1);
+  两者差 ≈ O1P²/1e6(sampleK 15N:117.000 vs 116.986,差 0.014 ppm);
+  显式 O1P 仍优先,BF1 缺失回退 SFO1 兼容旧数据;Dimension.sf 仍为
+  SFO1(fid.com OBS 用),bruker_workflow CAR 逻辑不变自动取正确值;
+- 测试:新增 O1/BF1=117.000(sampleK 实测参数)、1H BF1 回退(≈4.703)、
+  显式 O1P 优先;更新回退用例说明(BF1 缺失走 O1/SFO1);
+- 本地全量 574 passed(571+3)+ ruff 全绿;VM 复核 sampleK fid.com
+  yCAR/zCAR=117.000 见 docs/PROJECT_STATUS.md。
+
+## [0.2.119] - 2026-08-18
+
+- 固体核磁(MAS)实验类型预设扩充(Backend,presets/*.yaml 单一数据源,
+  不新增 core/experiments/*.py 模板模块):
+  - 2D 15N-13C:NCA/NCO(SPECIFIC-CP)、TEDOR/PAIN-CP(距离约束);
+  - 2D 13C-13C:DARR/PDSD/RFDR/CORD/INADEQUATE/HCC;
+  - 2D 1H-X:HETCOR/HNHETCOR(CP/FSLG)、NN(15N-15N PAR)、
+    CHHC/NHHC(1H-1H 空间,核组合待真实数据验证);
+  - 3D 15N/13C/13C:NCACX/NCOCX/NCACB/NCOCACB(Cα/Cβ 反相 → mixed +
+    peak_sign_regions);3D 13C/15N/13C 序列行走:CANCO/CAN(CO)CA/
+    CBCANCO;3D 13C-13C-13C:CCC;
+  - 化学位移先验按 BMRB(Ulrich et al., Nucleic Acids Res. 36, D402
+    (2008))与固体核磁文献:1H -5–20、15N 90–140(同核 90–160)、
+    13C 脂肪 10–75、Cα 40–70、Cβ 15–45、羰基 165–185、13C 全谱
+    10–190;同步收紧 nnh/cch 的 -50–250 占位;
+  - 分类器 _PULPROG_TYPES 扩展(长/具体在前;同核组合靠候选核匹配
+    区分,FSLGhetcor 按核组合分 HETCOR/HNHETCOR);液体关键词不被
+    固体抢占(hncacb/hnca/hnco/cbcanh/cbcaconh/noesy 回归);
+  - presets/README.md 按类别登记并给出文献依据;
+  - 1D 类型(CP13C/CP15N/PROTON1D/C13_1D)仍不收录 YAML:
+    test_gui_presets 仅允许 ndim=2/3,待 GUI 放开后补(汇报 Architect);
+  - 测试:新增 8 个分类器回归;本地全量 571 passed + ruff 全绿;
+    VM 真实数据分类验证见 docs/PROJECT_STATUS.md。
+
+## [0.2.118] - 2026-08-18
+
+- 修复(Backend):3D NUS 生成单文件 FID——NUS 数据 acqu3s TD 被写成 1
+  (sampleB:##$TD= 1,##$NusTD= 100)时,bruker -AUTO 按单增量输出单文件
+  test.fid;现转换前在暂存副本(work/conv_stage,硬链接优先、acqu3s 复制)
+  把 acqu3s TD 修正为 NusTD 再跑 bruker,输出切片式 fid/test%03d.fid
+  (每 F1 一个切片,与实验室手工流程一致),归位 process/fid/,raw 原件
+  不被改动;暂存用完即删;
+- convert_to_fid 对切片式产物返回 work/fid/ 目录路径(单文件路径兼容
+  保留);reconstruct_nus/直接维相位搜索/finalize 按 0.2.85 切片流消费;
+- 同步更新模块 docstring 与 script_generator 注释,删除「单数据集不做
+  切片追加」旧结论;新增测试:3D NUS 暂存修正(副本 TD=NusTD、raw 原件
+  不变、切片归位、暂存清理)、2D NUS 不受影响、产物路径选择、gate 条件
+  (均匀/2D/多段不触发);
+- 测试:本地全量 563 passed(0.2.117 基线 559 + 新增 4)+ ruff 全绿;
+  VM 验证见 docs/PROJECT_STATUS.md。
+
 ## [0.2.117] - 2026-08-18
 
 - merge(Architect):并入 GUI 0.2.112 补充(弹窗统一居中到所在屏幕中心、

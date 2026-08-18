@@ -1,0 +1,13 @@
+name: PAIN-CP
+description: 固体核磁:2D 15N-13C 质子辅助交叉极化(距离约束)
+phase_sensitive: true
+direct_nucleus: 13C
+indirect_nuclei: [15N]
+expected_peak_mode: absorption
+peak_sign: uniform
+display_orientation: "15N/13C"
+priors:
+  "15N": [90.0, 140.0]
+  "13C": [10.0, 190.0]
+constraints:
+  ndim: 2
