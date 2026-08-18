@@ -183,6 +183,7 @@ class MainWindow(QMainWindow):
         self.center_panel.batch_import_requested.connect(self._batch_import)
         self.pipeline.view_log_requested.connect(self._on_view_step_log)
         self.pipeline.batch_summary_requested.connect(self._on_batch_summary)
+        self.center_panel.memory_guard_requested.connect(self._on_memory_guard)
         # 首次导入提示:导入完成信号里触发(见 _on_import_done/_on_batch_import_done)
         self.center_panel.create_experiment_requested.connect(
             self._create_experiment_with_title
@@ -730,6 +731,11 @@ class MainWindow(QMainWindow):
         from gui.dialogs import SettingsDialog
 
         SettingsDialog(self).exec()
+
+    def _on_memory_guard(self, message: str) -> None:
+        """SMILE 内存不足:日志 + 弹窗(主线程)。"""
+        self._append_log(message)
+        InfoDialog.show_info(self, "内存不足", message)
 
     def _on_batch_summary(self, summary: dict) -> None:
         """批量处理汇总弹窗:失败项双击定位到数据(阶段 C1)。"""

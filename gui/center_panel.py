@@ -30,6 +30,7 @@ class CenterPanel(QWidget):
     """中间面板容器:按选中层级切换页面。"""
 
     log_message = pyqtSignal(str)
+    memory_guard_requested = pyqtSignal(str)  # 0.2.112:转发 SMILE 内存不足
     manual_open_requested = pyqtSignal(str)
     import_data_requested = pyqtSignal(str)  # exp_id(兼容:打开导入表单)
     import_options_requested = pyqtSignal(str, str, str, bool)  # (exp_id, name, source, copy)
@@ -54,6 +55,9 @@ class CenterPanel(QWidget):
 
         self.pipeline = PipelinePanel(manager, controller)
         self.pipeline.log_message.connect(self.log_message.emit)
+        self.pipeline.memory_guard_requested.connect(
+            self.memory_guard_requested.emit
+        )
         self.pipeline.manual_open_requested.connect(self.manual_open_requested.emit)
         self.pipeline.report_requested.connect(self.show_report)
         self.pipeline.import_data_requested.connect(self.import_data_requested.emit)

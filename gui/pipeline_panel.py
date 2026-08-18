@@ -643,6 +643,7 @@ class PipelinePanel(QWidget):
     """Pipeline 功能区:上下文面包屑 + 下一步提示 + 步骤列表。"""
 
     log_message = pyqtSignal(str)
+    memory_guard_requested = pyqtSignal(str)  # 0.2.112:SMILE 内存不足弹窗
     run_finished = pyqtSignal()
     manual_open_requested = pyqtSignal(str)  # step_id:打开人工处理对话框
     report_requested = pyqtSignal(str)  # step_id:打开报告页
@@ -1052,6 +1053,8 @@ class PipelinePanel(QWidget):
                         self.log_message.emit(
                             f"失败 {step_label} {data_id}: {item['error']}"
                         )
+                        if "无法处理该谱" in str(exc):
+                            self.memory_guard_requested.emit(str(exc))
                     results.append(item)
                 self.progress_updated.emit("")
                 if total > 1:
@@ -1068,6 +1071,8 @@ class PipelinePanel(QWidget):
                 self.log_message.emit(
                     f"失败 {STEP_LABEL.get(step_id, step_id)}: {exc}"
                 )
+                if "无法处理该谱" in str(exc):
+                    self.memory_guard_requested.emit(str(exc))
             finally:
                 self.refresh()
                 self.run_finished.emit()

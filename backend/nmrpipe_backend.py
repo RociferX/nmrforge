@@ -616,6 +616,59 @@ class NMRPipeBackend:
             points_per_line=points_per_line,
         )
         logs += zero_fill_report(zf_plan)
+        # 0.2.112:内存护栏——SMILE 峰值估计(VM 实测:3D ∝ 直接维点数,
+        # ≈1.15MB/点,与采样点数无关);超限先降直接维填零 1×TD,仍超则报错
+        from backend.memory_guard import (
+            MEM_SAFETY,
+            available_memory_mb,
+            direct_points_after_ext,
+            estimate_smile_peak_mb,
+        )
+
+        direct_axis = (
+            experiment.dimensions[0].logical_axis
+            if experiment.dimensions
+            else ""
+        )
+        zf_direct = int((zf_plan.get(direct_axis) or {}).get("size") or td[0])
+        direct_pts = direct_points_after_ext(experiment, zf_direct, ext_lo, ext_hi)
+        peak_mb = estimate_smile_peak_mb(
+            experiment.ndim, direct_pts, grid_points, nthread
+        )
+        avail_mb = available_memory_mb()
+        if peak_mb > avail_mb * MEM_SAFETY:
+            td0 = max(int(td[0]), 1)
+            one_x = 1 << (td0 - 1).bit_length()  # 1×TD 的 next_pow2
+            if zf_direct > one_x:
+                logs.append(
+                    f"内存护栏:峰值约 {peak_mb:.0f}MB > 可用 {avail_mb}MB×"
+                    f"{MEM_SAFETY:.2f},直接维填零降为 1×TD({zf_direct}→{one_x})"
+                )
+                if progress is not None:
+                    progress("内存不足:直接维填零已降为 1×TD 以降低 SMILE 内存")
+                zf_plan[direct_axis] = {
+                    "mode": "size",
+                    "size": one_x,
+                    "note": "内存护栏:直接维填零降为 1×TD",
+                }
+                direct_pts = direct_points_after_ext(
+                    experiment, one_x, ext_lo, ext_hi
+                )
+                peak_mb = estimate_smile_peak_mb(
+                    experiment.ndim, direct_pts, grid_points, nthread
+                )
+            if peak_mb > avail_mb * MEM_SAFETY:
+                import math
+
+                needed_gb = math.ceil(peak_mb / 1024.0)
+                return {
+                    "success": False,
+                    "message": (
+                        f"当前内存无法处理该谱(可用约 {avail_mb} MB,SMILE "
+                        f"峰值约 {peak_mb:.0f} MB),请至少提供 {needed_gb} GB 内存"
+                    ),
+                    "logs": logs,
+                }
         # 0.2.96:显示层相位搜索(1× SMILE,无额外后端)——主重构用 PS(0,0)
         # (或缓存相位);重构后在复型 recon 平面上对称性评分,最后一步把相位
         # 旋转应用到 recon 并便宜重渲 stage-2(非 SMILE)
