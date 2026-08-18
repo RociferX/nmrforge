@@ -36,6 +36,11 @@
   fid.com 参数一致(仅空格排版不同),逐段转换→拆切片→addNMR 逐对合并
   →合并 nuslist(348 点)→SMILE 出谱;与手工 1stfid/2ndAdd 流程等价
   (手工复用参考段 fid.com 仅为方便);支持逐段 -rs 频移。
+- 单数据分段采集导入入口:import_segmented_dataset 直接接受包含全部分段
+  的容器目录(自动发现直接含 acqus 的子目录,read_segments 校验一致后
+  合并为一条 DataEntry,raw 只拷 segments/,逐段指纹);与批量导入(多条
+  DataEntry)明确区分,普通导入遇容器目录报错不自动猜测;stepwise 读取
+  分段数据走 read_segments,容器→FID→谱图链路 VM 端到端验证通过。
 
 ## [0.2.105] - 2026-08-17
 
