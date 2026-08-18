@@ -11,6 +11,8 @@
 
 from __future__ import annotations
 
+from collections import Counter
+
 import core.experiments  # noqa: F401  导入即从 presets/*.yaml 注册模板
 from core.data.internal_data_model import Experiment, ExperimentType
 from core.experiments.registry import REGISTRY
@@ -51,13 +53,19 @@ def _template_nuclei(template) -> Counter[str] | None:
 
 
 def _nuclei_candidates(experiment: Experiment) -> list[str]:
-    """按核组合过滤模板:核组合(含同核计数)一致才入选。"""
+    """按核组合过滤模板:核组合(含同核计数)一致才入选。
+
+    REGISTRY 按显示名 + stem 双注册(0.2.111 起),同一模板会重复出现,
+    按模板对象去重后再返回,保证「唯一候选」语义成立。
+    """
     data = _data_nuclei(experiment)
-    return [
-        name
-        for name, template in REGISTRY.items()
-        if _template_nuclei(template) == data
-    ]
+    seen: set[int] = set()
+    out: list[str] = []
+    for name, template in REGISTRY.items():
+        if _template_nuclei(template) == data and id(template) not in seen:
+            seen.add(id(template))
+            out.append(name)
+    return out
 
 
 def classify(experiment: Experiment) -> ExperimentType:
