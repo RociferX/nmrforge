@@ -1,5 +1,18 @@
 # 变更日志
 
+## [0.2.121] - 2026-08-18
+
+- merge(Architect):并入 Backend 0.2.118-0.2.120——3D NUS acqu3s TD 修正
+  副本(bruker 按 NusTD 输出切片式 fid/test%03d.fid,归位 process/fid/)、
+  固体核磁(MAS)预设扩充 23 个(presets YAML 单一数据源 + 分类器关键词)、
+  O1P 定义修正(O1/BF1,谱中心与 TopSpin 一致);版本号 0.2.118+ 与 master
+  0.2.117 顺延无撞号,CHANGELOG 直接归并;
+- 集成审查(Architect):三路合并自动完成无冲突;分类器 Counter 导入/模板
+  双注册去重(0.2.117 修复)与 MAS 关键词共存;cch/nnh.yaml priors 已由
+  Backend 按 BMRB 收紧(废弃 -50~250 占位);与 backend-dev 逐文件 diff
+  为空(无代码丢失);
+- 测试:本地全量 574 passed、ruff 全绿;VM 全量待复测。
+
 ## [0.2.120] - 2026-08-18
 
 - 修复(Backend):o1p(谱中心)定义与 TopSpin 一致——O1P 缺失时改为
