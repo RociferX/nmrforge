@@ -32,6 +32,10 @@
 - VM 全谱型同决策回归:sampleI/103/3/4/5、sampleA 25%/100%、sampleB;
   p0 一致(±2.5–10°,大多 ≤5°),sampleL 旧简单路径 F2=0°/F1=300° 异常
   消除;sampleB F2=90° 与手动一致,后端次数 46→3(uniform)/47→4(3D NUS)。
+- 多段 NUS 合并验证(cc/61/63/65/67):各段独立 bruker -AUTO 生成的
+  fid.com 参数一致(仅空格排版不同),逐段转换→拆切片→addNMR 逐对合并
+  →合并 nuslist(348 点)→SMILE 出谱;与手工 1stfid/2ndAdd 流程等价
+  (手工复用参考段 fid.com 仅为方便);支持逐段 -rs 频移。
 
 ## [0.2.105] - 2026-08-17
 
