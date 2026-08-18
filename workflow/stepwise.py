@@ -32,8 +32,19 @@ def _require_data(manager: ProjectManager, exp_id: str, data_id: str) -> Any:
 
 
 def _read_experiment(manager: ProjectManager, exp_id: str, data_id: str) -> Experiment:
-    """从数据条目读取 Experiment(优先项目内 raw 副本)。"""
+    """从数据条目读取 Experiment(优先项目内 raw 副本;单数据分段采集用各段目录)。"""
     data_entry = _require_data(manager, exp_id, data_id)
+    if data_entry.segments:
+        # 分段采集:source 是容器目录(无 acqus),各段在 data_entry.segments
+        from core.data.bruker_reader import read_segments
+
+        seg_paths: list[Path] = []
+        for seg in data_entry.segments:
+            seg_path = Path(seg)
+            if not seg_path.is_absolute():
+                seg_path = manager.root / seg_path
+            seg_paths.append(seg_path)
+        return read_segments(seg_paths)
     source = Path(data_entry.raw_dir) if data_entry.raw_dir else Path(data_entry.source)
     if not source.is_absolute():
         source = manager.root / source
