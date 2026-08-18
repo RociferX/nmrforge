@@ -102,3 +102,58 @@ def test_carrier_ppm_fallback_without_o1p(tmp_path: Path, bruker_dir: Path) -> N
     direct = exp.direct_dimension
     assert direct is not None
     assert direct.o1p == pytest.approx(2821.062748 / 599.8937495)
+
+def _experiment_with_nuclei(
+    ndim: int, nuclei: list[str], pulprog: str
+):
+    """构造指定核组合与 PULPROG 的 Experiment(分类器测试用)。"""
+    from pathlib import Path
+
+    from core.data.internal_data_model import (
+        AxisRole,
+        Dimension,
+        Experiment,
+        Sampling,
+    )
+
+    axes = ["F2", "F1"] if ndim == 2 else ["F3", "F2", "F1"]
+    dims = []
+    for i, axis in enumerate(axes):
+        dims.append(
+            Dimension(
+                logical_axis=axis,
+                nucleus=nuclei[i],
+                role=AxisRole.DIRECT if i == 0 else AxisRole.INDIRECT,
+            )
+        )
+    exp = Experiment(
+        dataset_id="x",
+        source_path=Path("x"),
+        ndim=ndim,
+        dimensions=dims,
+        sampling=Sampling(),
+        acquisition_parameters={"acqus": {"PULPROG": pulprog}},
+    )
+    return exp
+
+
+def test_classify_nnh_by_nuclei() -> None:
+    """固体核磁 NNH:核组合 1H/15N/15N 唯一匹配,不再被 PULPROG 误配 HN(CO)CA。"""
+    from core.experiment.experiment_classifier import classify
+
+    exp = _experiment_with_nuclei(3, ["1H", "15N", "15N"], "hncocannhgpwg3d")
+    result = classify(exp)
+    assert result.name == "NNH"
+    assert result.confidence >= 0.9
+    assert any("核组合唯一匹配" in e for e in result.evidence)
+
+
+def test_classify_hncoca_only_with_13c() -> None:
+    """真正含 13C 的数据(核组合 1H/15N/13C)才按 PULPROG 判定为 HN(CO)CA。"""
+    from core.experiment.experiment_classifier import classify
+
+    exp = _experiment_with_nuclei(3, ["1H", "15N", "13C"], "hncocannhgpwg3d")
+    result = classify(exp)
+    assert result.name == "HN(CO)CA"
+    assert result.confidence >= 0.8
+

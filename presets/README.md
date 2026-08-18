@@ -43,6 +43,11 @@ ppm 区间与期望符号），用于 mixed 实验的 ±180° 绝对符号消歧
 - noesy_hsqc_15n.yaml：3D NOESY-HSQC（15N 编辑, 1H-15N-1H）
 - noesy_hsqc_13c.yaml：3D NOESY-HSQC（13C 编辑, 1H-13C-1H）
 
+## 固体核磁(液体核磁没有的类型,按核组合识别)
+
+- nnh.yaml:NNH(1H 检测的 15N-15N 相关,两间接维均为 15N)
+- cch.yaml:CCH(1H 检测的 13C-13C 相关,两间接维均为 13C)
+
 ## 通用回退
 
 - generic_2d.yaml / generic_3d.yaml：未识别实验的保守管线。
