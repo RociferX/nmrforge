@@ -34,6 +34,8 @@ OptimizationBudget 执行、NUS quality score（data consistency + SNR + peak qu
 
 ## Phase 4：深度优化与报告
 
+- 谱中心/引用偏移调整(分析部分):改 ft3/ft2 FDF 头部 CAR/ORIG 平移谱轴,
+  数据不变;对齐实验室显示约定与手动校正(机制已验证 2026-08-18)
 - peak stability 分析
 - BayesianOptimizer（昂贵任务）
 - ProcessingReport：report.json / report.html / processing_recipe.json
