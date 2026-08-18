@@ -5,9 +5,8 @@
 
 from core.experiments import (  # noqa: F401
     cbcaconh,
-    cch,
-    nnh,
     cbcanh,
+    cch,
     cosy,
     generic,
     hmbc,
@@ -18,6 +17,7 @@ from core.experiments import (  # noqa: F401
     hnco_ca,
     hnha,
     hsqc,
+    nnh,
     noesy,
     roesy,
     tocsy,
