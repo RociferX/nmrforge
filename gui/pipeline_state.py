@@ -158,14 +158,21 @@ def _fid_file(manager: Any, exp_id: str, data_id: str) -> Path | None:
         path = Path(candidate)
         if not path.is_absolute():
             path = manager.root / path
-        if path.is_file():
+        # 0.2.108:分段采集的合并 FID 是 process/merged/fid 目录
+        # (逐增量 test%03d.fid),文件或目录均视为产物
+        if path.is_file() or path.is_dir():
             return path
     proc = manager.data_dir(exp_id, data_id, "process")
     try:
         fids = sorted(proc.glob("*.fid"))
     except OSError:
         fids = []
-    return fids[0] if fids else None
+    if fids:
+        return fids[0]
+    merged_fid = proc / "merged" / "fid"
+    if merged_fid.is_dir():
+        return merged_fid
+    return None
 
 
 def _spectrum_file(manager: Any, exp_id: str, data_id: str) -> Path | None:

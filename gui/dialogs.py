@@ -100,6 +100,7 @@ class ImportExperimentDialog(QDialog):
         form = QFormLayout()
 
         self.source_edit = QLineEdit()
+        self.source_edit.textChanged.connect(self._update_segmented_hint)
         browse = QPushButton("浏览...")
         browse.clicked.connect(self._browse)
         source_row = QHBoxLayout()
@@ -131,6 +132,16 @@ class ImportExperimentDialog(QDialog):
             "不勾选仅登记引用(源目录需保持可访问)。"
         )
         form.addRow("", self.copy_check)
+        # 0.2.108:分段采集导入(容器目录,多个含 acqus 的子目录合并为一条数据)
+        self.segmented_check = QCheckBox(
+            "分段采集导入(容器目录:多个含 acqus 的子目录合并为一条数据)"
+        )
+        self.segmented_check.setToolTip(
+            "适用于同一次采集分成多段的数据;普通单数据集目录保持不勾选。"
+            "选择容器目录时自动勾选。"
+        )
+        self.segmented_check.setChecked(False)
+        form.addRow("", self.segmented_check)
         layout.addLayout(form)
 
         buttons = QDialogButtonBox(
@@ -150,6 +161,16 @@ class ImportExperimentDialog(QDialog):
         if path:
             self.source_edit.setText(path)
 
+    def _update_segmented_hint(self, text: str = "") -> None:
+        """源目录为容器目录(≥2 个含 acqus 的子目录)时自动勾选分段导入。"""
+        try:
+            from gui.processing import is_segmented_container
+
+            if text and is_segmented_container(text):
+                self.segmented_check.setChecked(True)
+        except Exception:  # noqa: BLE001 - 目录不可读时保持当前状态
+            pass
+
     def _validate_and_accept(self) -> None:
         source = self.source_edit.text().strip()
         if not source:
@@ -160,8 +181,16 @@ class ImportExperimentDialog(QDialog):
             InfoDialog.show_info(self, "提示", "所选目录不存在")
             return
         if not source_path.joinpath("acqus").is_file():
-            InfoDialog.show_info(self, "提示", "所选目录不是 Bruker 数据集(缺少 acqus 文件)")
-            return
+            from gui.processing import is_segmented_container
+
+            if not is_segmented_container(source_path):
+                InfoDialog.show_info(
+                    self,
+                    "提示",
+                    "所选目录既不是 Bruker 数据集(缺少 acqus),\n"
+                    "也不是分段采集容器目录(≥2 个含 acqus 的子目录)",
+                )
+                return
         self.accept()
 
     def result_data(self) -> dict:
@@ -171,6 +200,7 @@ class ImportExperimentDialog(QDialog):
             "notes": self.notes_edit.toPlainText().strip(),
             "sample_id": self.sample_combo.currentData() or "",
             "copy": self.copy_check.isChecked(),
+            "segmented": self.segmented_check.isChecked(),
         }
 
 
