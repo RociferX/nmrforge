@@ -1,5 +1,19 @@
 # 变更日志
 
+## [0.2.126] - 2026-08-19
+
+- 3D 谱投影改用 NMRPipe 自带 proj3D.tcl(Task E):终谱生成后用 pipe2xyz
+  拆平面 + proj3D.tcl -sum 生成三个 2D 投影,落
+  spectra/<exp>-<data>_proj_F{1,2,3}.ft2;viewer 3D 面板删除 MIP/Sum 投影
+  模式,改为加载投影文件(缺失提示「投影未生成」,切片保留);
+  VM sampleB 实测:xy→13C、xz→1H、yz→15N,三投影产物与手工一致;
+- 分段导入忽略非数据子目录(Task F):新增 is_data_directory(任一关键
+  文件);导入源解析 resolve_import_source——数据集/容器(≥2 数据子目录,
+  分段)/恰好 1 个数据子目录(忽略杂物按单个导入)/0 个报错;拖拽与异步
+  导入接入,不再对总文件夹误报「缺失 acqus」;
+- 测试:本地全量 593 passed、ruff 全绿;VM 全量 589 passed + 4 skipped
+  (Python 3.12.13,HEAD ef94403)。
+
 ## [0.2.125] - 2026-08-19
 
 - merge(Architect):并入 GUI 0.2.122(viewer 轴序校对与重排 + G2B-011 分段
