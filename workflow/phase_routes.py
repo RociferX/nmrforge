@@ -140,6 +140,38 @@ def _read_complex_preview(
         )
     return read_pipe_complex(path)
 
+
+def _cleanup_unified_intermediates(
+    work: Path,
+    dataset_id: str,
+) -> None:
+    """清理 unified 流程中间产物(相位校正预览与窗函数优化评分谱)。
+
+    清理(仅限 process 工作目录,不递归、不跨目录):
+    - {dataset_id}_preview_* 的 .com/.ft2/.ft3/.fdf
+    - {dataset_id}_joint* 的 .com/.ft3/.fdf
+    - {dataset_id}_win1* / _win2* / _win3* 的 .com/.ft3/.fdf
+
+    保留项(终谱、最终脚本、phase.json、fid/、重构平面)不受影响。
+    """
+    if not work.is_dir():
+        return
+    exts = (".com", ".ft2", ".ft3", ".fdf")
+    for base_pattern in (
+        f"{dataset_id}_preview_*",
+        f"{dataset_id}_joint*",
+        f"{dataset_id}_win1*",
+        f"{dataset_id}_win2*",
+        f"{dataset_id}_win3*",
+    ):
+        for p in work.glob(base_pattern):
+            if p.suffix in exts:
+                try:
+                    p.unlink(missing_ok=True)
+                except OSError:
+                    pass
+
+
 def unified_route(
     experiment: Experiment,
     backend: Any,
@@ -173,6 +205,7 @@ def unified_route(
             base_params=base_params,
             progress=progress,
         )
+    work = Path(work_dir) if work_dir else backend._work_path(experiment)
     params = dict(base_params or {})
     params.pop("preview_axis", None)
     ext = "ft3" if experiment.ndim >= 3 else "ft2"
@@ -261,6 +294,7 @@ def unified_route(
     if progress is not None:
         progress("终跑完成")
     logs += list(resp.get("logs", []))
+    _cleanup_unified_intermediates(work, experiment.dataset_id)
     return {
         "phases": fixed,
         "spectrum_path": str(resp["spectrum_path"]),
@@ -788,6 +822,7 @@ def _unified_nus(
         + "),未生成 nus3d_rc_ph 旋转副本"
     )
     logs += list(final.get("logs", []))
+    _cleanup_unified_intermediates(work, experiment.dataset_id)
     return {
         "phases": fixed,
         "direct_phase": direct_phase,

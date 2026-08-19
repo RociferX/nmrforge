@@ -492,3 +492,72 @@ def test_direct_phase_cache_roundtrip(tmp_path: Path) -> None:
         )
         is None
     )
+
+
+
+def test_cleanup_unified_intermediates(tmp_path: Path) -> None:
+    """清理后中间产物已删,保留项仍在。"""
+    from workflow.phase_routes import _cleanup_unified_intermediates
+
+    proc = tmp_path / "process"
+    proc.mkdir()
+    dataset_id = "d_001"
+
+    # === 中间产物(应被删) ===
+    intermediates = [
+        # preview
+        proc / f"{dataset_id}_preview_F1.com",
+        proc / f"{dataset_id}_preview_F1.ft2",
+        proc / f"{dataset_id}_preview_F1.ft3",
+        proc / f"{dataset_id}_preview_F1.fdf",
+        proc / f"{dataset_id}_preview_F2.com",
+        proc / f"{dataset_id}_preview_F2.ft2",
+        proc / f"{dataset_id}_preview_F2.fdf",
+        proc / f"{dataset_id}_preview_F3.com",
+        proc / f"{dataset_id}_preview_F3.ft3",
+        # joint
+        proc / f"{dataset_id}_joint.ft3",
+        proc / f"{dataset_id}_joint.fdf",
+        proc / f"{dataset_id}_joint_finalize.com",
+        # win
+        proc / f"{dataset_id}_win1.ft3",
+        proc / f"{dataset_id}_win1.fdf",
+        proc / f"{dataset_id}_win1_finalize.com",
+        proc / f"{dataset_id}_win2.ft3",
+        proc / f"{dataset_id}_win2_finalize.com",
+        proc / f"{dataset_id}_win3.ft3",
+        proc / f"{dataset_id}_win3_finalize.com",
+    ]
+    for p in intermediates:
+        p.write_text("x")
+
+    # === 保留项(不应被删) ===
+    kept = [
+        proc / f"{dataset_id}_nus.com",
+        proc / f"{dataset_id}_process.com",
+        proc / f"{dataset_id}_finalize.com",
+        proc / "phase.json",
+        proc / "fid" / "test001.fid",
+        proc / "nus3d_rc" / "test0001.ft1",
+        proc / "nus2d" / "recon.ft1",
+        proc / "spectra" / f"{dataset_id}.ft3",
+        # 保留 prob 为 0 的 _c* / _j* 旧中间产物(0.2.77 清理范围,本次不碰)
+        proc / f"{dataset_id}_c_0.ft3",
+        proc / f"{dataset_id}_j_0.ft3",
+    ]
+    for p in kept:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("x")
+
+    _cleanup_unified_intermediates(proc, dataset_id)
+
+    # 验证中间产物已删
+    for p in intermediates:
+        assert not p.exists(), f"中间产物未删: {p}"
+
+    # 验证保留项仍在
+    for p in kept:
+        assert p.exists(), f"保留项被误删: {p}"
+
+    # 验证不存在的目录不报错
+    _cleanup_unified_intermediates(tmp_path / "nonexistent", dataset_id)

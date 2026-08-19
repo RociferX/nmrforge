@@ -16,6 +16,18 @@
 - 测试:完整脚本相位填入/PS 在 EXT 后/窗函数位置/处理参数优化编排与窗择优/
   finalize window 透传;本地全量 601 passed、ruff 全绿。
 
+## [0.2.131] - 2026-08-19
+
+- unified 流程中间产物清理(相位校正预览与窗函数优化):
+  - 新增 _cleanup_unified_intermediates(),在 unified_route 与 _unified_nus 终跑
+    返回前清理 process 目录下 {data_id}_preview_*、_joint*、_win{n}* 的
+    .com/.ft2/.ft3/.fdf 中间文件(显式 glob + Path.unlink,包 OSError 容错);
+  - 不跨目录、不递归,保留终谱(spectra/)、最终完整脚本(nus.com/process.com/
+    finalize.com)、phase.json 缓存、fid/切片与 SMILE 重构平面;
+  - 测试:新增 test_cleanup_unified_intermediates 构造含中间产物+保留项
+    的 process 目录,验证清理后中间产物已删、保留项仍在;
+  - 本地全量 pytest + ruff 全绿。
+
 ## [0.2.129] - 2026-08-19
 
 - 中间产物/终谱/投影命名前缀统一为样品数据 id(d_001)(用户要求,重命名不影响):
