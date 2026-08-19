@@ -225,6 +225,36 @@ def generate_spectrum(
         message="生成谱图(相位优化)",
         params=merged_params,
     )
+    # Task E:3D 终谱用 NMRPipe proj3D.tcl 生成三个投影,落 spectra/<id>_proj_F*.ft2
+    if experiment.ndim >= 3 and getattr(backend, "project_3d", None):
+        try:
+            spectra_dir = manager.data_dir(exp_id, data_id, "spectra")
+            proj = backend.project_3d(
+                spectrum_path,
+                spectra_dir,
+                prefix=f"{exp_id}-{data_id}_proj",
+            )
+            labels = proj.get("labels", {})
+            for tag, path in proj.get("paths", {}).items():
+                fixed_nucleus = str(labels.get(tag, "") or "")
+                logical = next(
+                    (
+                        dim.logical_axis
+                        for dim in experiment.dimensions
+                        if dim.nucleus == fixed_nucleus
+                    ),
+                    "",
+                )
+                target = spectra_dir / f"{exp_id}-{data_id}_proj_{logical or tag}.ft2"
+                if Path(path) != target:
+                    if target.exists():
+                        target.unlink()
+                    Path(path).replace(str(target))
+                merged_params.setdefault("projections", {})[logical or tag] = str(
+                    target
+                )
+        except Exception as exc:  # noqa: BLE001 - 投影失败不阻断谱图
+            merged_params.setdefault("projections", {})["error"] = str(exc)
     return spectrum_path
 
 

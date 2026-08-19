@@ -944,6 +944,98 @@ class NMRPipeBackend:
             "logs": logs,
         }
 
+    def project_3d(
+        self,
+        spectrum_path: Path | str,
+        out_dir: Path | str,
+        *,
+        prefix: str = "proj",
+        timeout: float = 900,
+        labels: list[str] | None = None,
+    ) -> dict[str, dict[str, str]]:
+        """用 NMRPipe 自带 proj3D.tcl 从 3D 终谱生成三个 2D 投影(沿轴求和)。
+
+        返回 {"paths": {"xy": path, "xz": path, "yz": path},
+              "labels": {"xy": 固定轴核, "xz": ..., "yz": ...}};
+        固定轴含义:xy 输出 = 沿文件 z 轴求和(xz=沿 y,yz=沿 x)。
+        投影失败抛 ToolError(由调用方降级,不阻断谱图生成)。
+        """
+        import nmrglue as ng
+
+        from backend.nmrpipe_finder import find_tool
+        from backend.runtime import ToolError
+
+        runtime = CshRuntime()
+        src = Path(spectrum_path)
+        dest = Path(out_dir)
+        dest.mkdir(parents=True, exist_ok=True)
+        work = dest / ".proj3d_tmp"
+        planes = work / "planes"
+        if planes.exists():
+            shutil.rmtree(planes)
+        planes.mkdir(parents=True)
+        pipe2xyz = find_tool("pipe2xyz", self._bin_dir())
+        proj3d = find_tool("proj3D.tcl", self._bin_dir())
+        if pipe2xyz is None or proj3d is None:
+            raise ToolError("未找到 pipe2xyz/proj3D.tcl(NMRPipe 投影工具)")
+        split = runtime.run(
+            [
+                str(pipe2xyz),
+                "-in",
+                str(src),
+                "-z",
+                "-out",
+                "planes/test%03d.ft3",
+            ],
+            cwd=str(work),
+            timeout=timeout,
+        )
+        if split.returncode != 0 or not list(planes.glob("test*.ft3")):
+            raise ToolError(f"3D 谱拆分为平面失败(pipe2xyz): rc={split.returncode}")
+        if labels is None:
+            dic, _ = ng.pipe.read(str(src))
+            labels = [
+                str(dic.get(k, "") or "")
+                for k in ("FDF1LABEL", "FDF2LABEL", "FDF3LABEL")
+            ]
+        xy = str(dest / f"{prefix}_xy.ft2")
+        xz = str(dest / f"{prefix}_xz.ft2")
+        yz = str(dest / f"{prefix}_yz.ft2")
+        run = runtime.run(
+            [
+                str(proj3d),
+                "-in",
+                "planes/test%03d.ft3",
+                "-outDir",
+                str(dest.resolve()),
+                "-xyOutName",
+                xy,
+                "-xzOutName",
+                xz,
+                "-yzOutName",
+                yz,
+                "-sum",
+                "-noverb",
+            ],
+            cwd=str(work),
+            timeout=timeout,
+        )
+        shutil.rmtree(work, ignore_errors=True)
+        if run.returncode != 0 or not all(
+            Path(p).is_file() for p in (xy, xz, yz)
+        ):
+            raise ToolError(f"proj3D 投影失败: rc={run.returncode}")
+        labels = list(labels) + [""] * (3 - len(labels))
+        return {
+            "paths": {"xy": xy, "xz": xz, "yz": yz},
+            "labels": {
+                "xy": labels[2],
+                "xz": labels[1],
+                "yz": labels[0],
+            },
+        }
+
+
     # ------------------------------------------------------------------ 转换
 
     @staticmethod

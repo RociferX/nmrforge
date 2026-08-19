@@ -332,3 +332,63 @@ def test_classify_liquid_not_shadowed_by_solid() -> None:
         result = classify(_experiment_with_nuclei(ndim, nuclei, pulprog))
         assert result.name == expected, (pulprog, result)
 
+def test_is_data_directory(tmp_path: Path) -> None:
+    '''含任一 Bruker 关键文件视为数据目录,全无则非数据(忽略用,Task F)。'''
+    from core.data.bruker_reader import is_data_directory
+
+    d = tmp_path / "segA"
+    d.mkdir()
+    (d / "acqus").write_text("x", encoding="utf-8")
+    assert is_data_directory(d)
+    assert is_data_directory(tmp_path / "segA")
+    ser_only = tmp_path / "ser_only"
+    ser_only.mkdir()
+    (ser_only / "ser").write_text("x", encoding="utf-8")
+    assert is_data_directory(ser_only)
+    junk = tmp_path / "notes"
+    junk.mkdir()
+    (junk / "readme.txt").write_text("x", encoding="utf-8")
+    assert not is_data_directory(junk)
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    assert not is_data_directory(empty)
+    assert not is_data_directory(tmp_path / "missing")
+
+
+def test_discover_segment_dirs_ignores_non_data(tmp_path: Path) -> None:
+    '''容器发现只返回含 acqus 的子目录,非数据子目录被忽略(Task F)。'''
+    from core.data.bruker_reader import discover_segment_dirs
+
+    container = tmp_path / "container"
+    container.mkdir()
+    for name in ("segA", "segB"):
+        d = container / name
+        d.mkdir()
+        (d / "acqus").write_text("x", encoding="utf-8")
+    (container / "notes").mkdir()
+    (container / "notes" / "readme.txt").write_text("x", encoding="utf-8")
+    (container / "empty").mkdir()
+    found = [p.name for p in discover_segment_dirs(container)]
+    assert found == ["segA", "segB"]
+
+
+def test_read_dataset_container_non_data_errors(tmp_path: Path) -> None:
+    '''0 个或 1 个数据子目录时给出明确错误(非数据子目录已忽略),不报缺失 acqus。'''
+    from core.data.bruker_reader import read_dataset_container
+
+    no_data = tmp_path / "no_data"
+    no_data.mkdir()
+    (no_data / "notes").mkdir()
+    (no_data / "notes" / "readme.txt").write_text("x", encoding="utf-8")
+    with pytest.raises(ValueError, match="未找到任何含数据文件"):
+        read_dataset_container(no_data)
+
+    one = tmp_path / "one_data"
+    one.mkdir()
+    seg = one / "segA"
+    seg.mkdir()
+    (seg / "acqus").write_text("x", encoding="utf-8")
+    (one / "notes").mkdir()
+    (one / "notes" / "readme.txt").write_text("x", encoding="utf-8")
+    with pytest.raises(ValueError, match="仅找到 1 个含数据文件的子目录"):
+        read_dataset_container(one)
