@@ -1,5 +1,16 @@
 # 变更日志
 
+## [0.2.125] - 2026-08-19
+
+- merge(Architect):并入 GUI 0.2.122(viewer 轴序校对与重排 + G2B-011 分段
+  导入到当前实验类型)与 Backend 0.2.122-0.2.124(处理过程进度可见/G2B-011
+  exp_id/NUS 错点源头删除+备份);0.2.122 双端撞号,CHANGELOG 按版本合并
+  归一(GUI+Backend 一节);
+- 集成审查(Architect):GUI viewer/backend workflow 与分支逐文件 diff 为空
+  (无代码丢失);开发模式记忆库(manager/gui/backend/tasks)完整保留;
+- 验收:任务 G2B-011/进度可见/轴序校对全部落地,归档见 docs/tasks/archive/;
+- 测试:本地全量 586 passed、ruff 全绿;VM 全量待复测。
+
 ## [0.2.124] - 2026-08-18
 
 - NUS 错点删除改到源头(用户要求):不再在生成 fid 上清零,而是删除最开始的
