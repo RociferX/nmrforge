@@ -44,11 +44,16 @@ def _read_experiment(manager: ProjectManager, exp_id: str, data_id: str) -> Expe
             if not seg_path.is_absolute():
                 seg_path = manager.root / seg_path
             seg_paths.append(seg_path)
-        return read_segments(seg_paths)
-    source = Path(data_entry.raw_dir) if data_entry.raw_dir else Path(data_entry.source)
-    if not source.is_absolute():
-        source = manager.root / source
-    return read_dataset(source)
+        experiment = read_segments(seg_paths)
+    else:
+        source = Path(data_entry.raw_dir) if data_entry.raw_dir else Path(data_entry.source)
+        if not source.is_absolute():
+            source = manager.root / source
+        experiment = read_dataset(source)
+    # 2026-08-19:中间产物/终谱前缀统一用数据 id(d_001),不随重命名变化;
+    # read_dataset 的 dataset_id 取自 raw 目录名(常为 raw),必须覆盖
+    experiment.dataset_id = data_id
+    return experiment
 
 
 def _work_dir(manager: ProjectManager, exp_id: str, data_id: str) -> Path:
@@ -66,7 +71,8 @@ def _register_spectrum(
     source = Path(spectrum_path)
     spectra_dir = manager.data_dir(exp_id, data_id, "spectra")
     spectra_dir.mkdir(parents=True, exist_ok=True)
-    target = spectra_dir / source.name
+    # 2026-08-19:终谱命名前缀用数据 id(d_001),重命名不影响
+    target = spectra_dir / f"{data_id}{source.suffix}"
     if source.is_file() and source.resolve() != target.resolve():
         shutil.move(str(source), str(target))
     manager.set_data_spectrum(exp_id, data_id, target)
@@ -232,7 +238,7 @@ def generate_spectrum(
             proj = backend.project_3d(
                 spectrum_path,
                 spectra_dir,
-                prefix=f"{exp_id}-{data_id}_proj",
+                prefix=f"{data_id}_proj",
             )
             labels = proj.get("labels", {})
             for tag, path in proj.get("paths", {}).items():
@@ -245,7 +251,7 @@ def generate_spectrum(
                     ),
                     "",
                 )
-                target = spectra_dir / f"{exp_id}-{data_id}_proj_{logical or tag}.ft2"
+                target = spectra_dir / f"{data_id}_proj_{logical or tag}.ft2"
                 if Path(path) != target:
                     if target.exists():
                         target.unlink()

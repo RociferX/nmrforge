@@ -175,7 +175,8 @@ def test_generate_spectrum_defaults_to_unified_route(
 
     monkeypatch.setattr(phase_routes, "unified_route", fake_unified)
     spectrum = generate_spectrum(manager, exp_id, data_id, backend)
-    assert spectrum.endswith("unified.ft2")
+    # 2026-08-19:终谱命名前缀为数据 id(d_001)
+    assert spectrum.endswith("d_001.ft2")
     assert seen["base_params"] == {}
     assert any(r.workflow_ref == "phase_optimize_unified" for r in manager.project.workflow_runs)
 
@@ -228,7 +229,7 @@ def test_optimize_phase_brute_force(tmp_path: Path, bruker_dir: Path) -> None:
     # 逐维暴力:直接维 F2 → 间接维 F1,各粗 21 候选 + 多尺度细化(默认 5°)
     assert result["phase"]["F2"][1] == 30.0
     assert result["phase"]["F1"][1] == 30.0
-    assert result["spectrum_path"].endswith("out_p00_p130.ft2")
+    assert result["spectrum_path"].endswith("d_001.ft2")
     assert backend.calls.count("process") >= 42
     assert result["optimized"] == ["F1", "F2"]  # 0.2.75:均匀路径间接维先
     assert result["skipped"] == []
