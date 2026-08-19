@@ -721,6 +721,38 @@ def _ft_flag_line(
     return f"| nmrPipe -fn FT{suffix} \\"
 
 
+def _ps_line(phases: dict[str, tuple[float, float]] | None, axis: str) -> str:
+    """间接维 PS 行:填入已优化相位(缺省 0),直接取实(-di);2026-08-19
+    完整脚本终跑。"""
+    p0, p1 = (phases or {}).get(axis, (0.0, 0.0))
+    return f"| nmrPipe -fn PS -p0 {p0:g} -p1 {p1:g} -di \\"
+
+
+def _window_line(cfg: dict[str, Any] | None) -> str | None:
+    """NUS 窗函数行(与 uniform _stage_lines apodization 同映射);None=不插窗。
+
+    直接维在 step1 SP(FT 前),间接维在 step3 SP(ZF/FT 前);缺省不插窗
+    (保持历史脚本结构),显式配置才生成。gaussian→GM、exp→EM,其余按
+    sine_bell(off/end/pow/c)。
+    """
+    if not cfg:
+        return None
+    wtype = str(cfg.get("type", "sine_bell"))
+    if wtype == "gaussian":
+        return (
+            f"| nmrPipe -fn GM -lb {_fmt(cfg.get('lb', 5.0))} "
+            f"-gb {_fmt(cfg.get('gb', 0.1))} \\"
+        )
+    if wtype == "exp":
+        return f"| nmrPipe -fn EM -lb {_fmt(cfg.get('lb', 5.0))} \\"
+    powv = 2 if wtype == "sine_bell_squared" else cfg.get("pow", 1)
+    return (
+        f"| nmrPipe -fn SP -off {_fmt(cfg.get('off', 0.45))} "
+        f"-end {_fmt(cfg.get('end', 0.95))} -pow {_fmt(powv)} "
+        f"-c {_fmt(cfg.get('c', 0.5))} \\"
+    )
+
+
 def generate_2d_nus_script(
     experiment: Experiment,
     *,
@@ -739,6 +771,8 @@ def generate_2d_nus_script(
     smile_scaling: bool = True,
     smile_report: int = 1,
     direct_phase: tuple[float, float] = (0.0, 0.0),
+    phases: dict[str, tuple[float, float]] | None = None,
+    window: dict[str, dict[str, Any]] | None = None,
     extract: bool = True,
     baseline: dict[str, Any] | None = None,
     zero_fill: dict[str, Any] | int | None = None,
@@ -770,19 +804,21 @@ def generate_2d_nus_script(
     expanded = expand_baseline(experiment, baseline)
     direct_poly = _baseline_line(expanded, "F2")
     indirect_poly = _baseline_line(expanded, "F1")
+    direct_window = _window_line((window or {}).get("F2"))
     direct_stages = [
-        "| nmrPipe -fn SP -off 0.45 -end 0.98 -pow 1 -c 0.5 \\",
+        direct_window or "| nmrPipe -fn SP -off 0.45 -end 0.98 -pow 1 -c 0.5 \\",
     ]
     if f2_zf.get("mode") != "none":
         direct_stages.append(f"| nmrPipe -fn ZF -zf -size {direct_zf} \\")
-    direct_stages += [
-        "| nmrPipe -fn FT \\",
-        f"| nmrPipe -fn PS -p0 {direct_phase[0]:g} -p1 {direct_phase[1]:g} -di \\",
-    ]
+    direct_stages.append("| nmrPipe -fn FT \\")
     if extract:
         direct_stages.append(
             f"| nmrPipe -fn EXT -x1 {ext_lo}ppm -xn {ext_hi}ppm -sw -round 2 \\"
         )
+    # 直接维相位在 EXT 后应用:p1 归一化到提取后尺寸(与 recon 平面内存旋转一致)
+    direct_stages.append(
+        f"| nmrPipe -fn PS -p0 {direct_phase[0]:g} -p1 {direct_phase[1]:g} -di \\"
+    )
     direct_stages += direct_poly
     smile_tail = [
         f"           -xApod SP -xQ1 {smile_xq1:g} -xQ2 {smile_xq2:g} "
@@ -833,13 +869,15 @@ def generate_2d_nus_script(
         f1_zf_line = [
             f"| nmrPipe -fn ZF -size {f1_zf.get('size') or _next_pow2(2 * max(int(td[1]), 1))} \\"
         ]
+    f1_window = _window_line((window or {}).get("F1"))
     lines += [
         "",
-        "# stage 2: indirect dim (F1) FT -alt + PS + POLY",
+        "# stage 2: indirect dim (F1) window + ZF + FT -alt + PS + POLY",
         "nmrPipe -in nus2d/recon.ft1 \\",
+        *([f1_window] if f1_window else []),
         *f1_zf_line,
         _ft_flag_line(f1_fnmode, sampling=sampling, axis="F1"),
-        "| nmrPipe -fn PS -p0 0 -p1 0 -di \\",
+        _ps_line(phases, "F1"),
         *indirect_poly,
         "| nmrPipe -fn TP \\",
         f"  -out {out_file} -ov",
@@ -865,6 +903,8 @@ def generate_3d_nus_script(
     smile_scaling: bool = True,
     smile_report: int = 1,
     direct_phase: tuple[float, float] = (0.0, 0.0),
+    phases: dict[str, tuple[float, float]] | None = None,
+    window: dict[str, dict[str, Any]] | None = None,
     extract: bool = True,
     baseline: dict[str, Any] | None = None,
     zero_fill: dict[str, Any] | int | None = None,
@@ -888,22 +928,29 @@ def generate_3d_nus_script(
     f1_zf_size = _nus_zf_size(f1_zf, ctx["meta.td.z"])
     f2_fnmode = _fnmode(experiment, "F2")
     f1_fnmode = _fnmode(experiment, "F1")
+    f3_window = _window_line((window or {}).get("F3"))
+    f2_window = _window_line((window or {}).get("F2"))
+    f1_window = _window_line((window or {}).get("F1"))
     lines = [
         "#!/bin/csh",
         "# NMRForge 3D NUS SMILE reconstruction",
         f"# experiment: {experiment.dataset_id}",
         "mkdir -p nus3d_1 nus3d_rc",
-        "# step 1: direct dim (F3) FT + EXT",
+        "# step 1: direct dim (F3) FT + EXT + PS",
         f"xyz2pipe -in {in_file} -x \\",
-        "| nmrPipe -fn SP -off 0.45 -end 0.98 -pow 2 -c 0.5 \\",
+        (
+            f3_window
+            or "| nmrPipe -fn SP -off 0.45 -end 0.98 -pow 2 -c 0.5 \\"
+        ),
         *(
             [f"| nmrPipe -fn ZF -zf -size {direct_zf} \\"]
             if f3_zf.get("mode") != "none"
             else []
         ),
         "| nmrPipe -fn FT \\",
-        f"| nmrPipe -fn PS -p0 {direct_phase[0]:g} -p1 {direct_phase[1]:g} -di \\",
         f"| nmrPipe -fn EXT -x1 {ext_lo}ppm -xn {ext_hi}ppm -sw -round 2 \\",
+        # 直接维相位在 EXT 后应用:p1 归一化到提取后尺寸(与 recon 平面内存旋转一致)
+        f"| nmrPipe -fn PS -p0 {direct_phase[0]:g} -p1 {direct_phase[1]:g} -di \\",
         "| pipe2xyz -out nus3d_1/test%04d.ft1 -z",
         "",
         "# step 2: SMILE reconstruct indirect dims (F2/F1)",
@@ -920,8 +967,9 @@ def generate_3d_nus_script(
         f"           -xCT 0 -thresh {thresh:g} \\",
         "| pipe2xyz -out nus3d_rc/test%04d.ft1 -x",
         "",
-        "# step 3: indirect dims (F2/F1) FT",
+        "# step 3: indirect dims (F2/F1) window + ZF + FT + PS",
         "xyz2pipe -in nus3d_rc/test%04d.ft1 -x \\",
+        *([f2_window] if f2_window else []),
         *(
             [
                 f"| nmrPipe -fn ZF -size {f2_zf_size} \\"
@@ -930,8 +978,9 @@ def generate_3d_nus_script(
             else []
         ),
         _ft_flag_line(f2_fnmode, sampling=sampling, axis="F2"),
-        "| nmrPipe -fn PS -p0 0 -p1 0 -di \\",
+        _ps_line(phases, "F2"),
         "| nmrPipe -fn TP \\",
+        *([f1_window] if f1_window else []),
         *(
             [
                 f"| nmrPipe -fn ZF -size {f1_zf_size} \\"
@@ -940,7 +989,7 @@ def generate_3d_nus_script(
             else []
         ),
         _ft_flag_line(f1_fnmode, sampling=sampling, axis="F1"),
-        "| nmrPipe -fn PS -p0 0 -p1 0 -di \\",
+        _ps_line(phases, "F1"),
         "| nmrPipe -fn TP \\",
         "| nmrPipe -fn ZTP \\",
         f"| pipe2xyz -out {out_file} -x",
@@ -1177,6 +1226,7 @@ def generate_nus_finalize_script(
     points_per_line: float = DEFAULT_POINTS_PER_LINE,
     sampling: dict[str, Any] | None = None,
     preview_axis: str | None = None,
+    window: dict[str, dict[str, Any]] | None = None,
 ) -> str:
     """NUS 重构平面(复型)的间接维 FT 定稿脚本(逐维 PS 可配)。
 
@@ -1204,11 +1254,14 @@ def generate_nus_finalize_script(
         f1_di = "" if preview_axis == "F1" else " -di"
         f2_size = _nus_zf_size(zf_plan.get("F2", {}), td[1])
         f1_size = _nus_zf_size(zf_plan.get("F1", {}), td[2])
+        f2_window = _window_line((window or {}).get("F2"))
+        f1_window = _window_line((window or {}).get("F1"))
         lines = [
             "#!/bin/csh",
             "# NMRForge NUS finalize script (indirect FT from reconstructed planes)",
             f"# experiment: {experiment.dataset_id}",
             f"xyz2pipe -in {planes} -x \\",
+            *([f2_window] if f2_window else []),
             *(
                 [
                     f"| nmrPipe -fn ZF -size {f2_size} \\"
@@ -1219,6 +1272,7 @@ def generate_nus_finalize_script(
             _ft_flag_line(f2_fnmode, sampling=sampling, axis="F2"),
             f"| nmrPipe -fn PS -p0 {f2_p0:g} -p1 {f2_p1:g}{f2_di} \\",
             "| nmrPipe -fn TP \\",
+            *([f1_window] if f1_window else []),
             *(
                 [
                     f"| nmrPipe -fn ZF -size {f1_size} \\"
@@ -1236,12 +1290,14 @@ def generate_nus_finalize_script(
         f1_p0, f1_p1 = phases.get("F1", (0.0, 0.0))
         f1_di = "" if preview_axis == "F1" else " -di"
         f1_size = _nus_zf_size(zf_plan.get("F1", {}), td[1])
+        f1_window = _window_line((window or {}).get("F1"))
         expanded = expand_baseline(experiment, baseline)
         lines = [
             "#!/bin/csh",
             "# NMRForge NUS finalize script (indirect FT from reconstructed planes)",
             f"# experiment: {experiment.dataset_id}",
             f"nmrPipe -in {planes} \\",
+            *([f1_window] if f1_window else []),
             *(
                 [
                     f"| nmrPipe -fn ZF -size {f1_size} \\"

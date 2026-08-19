@@ -513,3 +513,116 @@ def test_finalize_script_zero_fill_plan(bruker_dir: Path) -> None:
         zero_fill={"F1": {"mode": "none"}},
     )
     assert "| nmrPipe -fn ZF" not in off
+
+def test_3d_nus_script_phases_baked(bruker_dir: Path) -> None:
+    """完整脚本终跑:直接维相位在 EXT 后(与 recon 平面内存旋转同归一化),
+    间接维相位填入 step3 PS,无冗余 PS(0,0) 行。"""
+    exp = read_dataset(bruker_dir / "nus_3d")
+    from backend.script_generator import generate_3d_nus_script
+
+    script = generate_3d_nus_script(
+        exp, in_file="e.fid", nuslist="nuslist", out_file="e.ft3",
+        direct_phase=(12.0, -3.0),
+        phases={"F2": (10.0, -5.0), "F1": (20.0, 3.0)},
+    )
+    lines = script.splitlines()
+    ext_i = next(i for i, line in enumerate(lines) if "| nmrPipe -fn EXT" in line)
+    step1_ps = next(
+        i for i, line in enumerate(lines)
+        if "| nmrPipe -fn PS -p0 12 -p1 -3 -di" in line
+    )
+    assert step1_ps > ext_i  # 直接维相位在 EXT 后
+    assert "| nmrPipe -fn PS -p0 10 -p1 -5 -di \\" in script
+    assert "| nmrPipe -fn PS -p0 20 -p1 3 -di \\" in script
+    assert script.count("| nmrPipe -fn PS") == 3  # step1 + F2 + F1,无冗余 0 行
+
+
+def test_2d_nus_script_phases_baked(bruker_dir: Path) -> None:
+    exp = read_dataset(bruker_dir / "nus_2d")
+    from backend.script_generator import generate_2d_nus_script
+
+    script = generate_2d_nus_script(
+        exp, in_file="e.fid", nuslist="nuslist", out_file="e.ft2",
+        direct_phase=(12.0, -3.0),
+        phases={"F1": (20.0, 3.0)},
+    )
+    lines = script.splitlines()
+    ext_i = next(i for i, line in enumerate(lines) if "| nmrPipe -fn EXT" in line)
+    step1_ps = next(
+        i for i, line in enumerate(lines)
+        if "| nmrPipe -fn PS -p0 12 -p1 -3 -di" in line
+    )
+    assert step1_ps > ext_i
+    assert "| nmrPipe -fn PS -p0 20 -p1 3 -di \\" in script
+    assert script.count("| nmrPipe -fn PS") == 2
+
+
+def test_3d_nus_script_window(bruker_dir: Path) -> None:
+    """NUS 窗函数:直接维(step1)与间接维(step3)分别可配,缺省不插窗。"""
+    exp = read_dataset(bruker_dir / "nus_3d")
+    from backend.script_generator import generate_3d_nus_script
+
+    script = generate_3d_nus_script(
+        exp, in_file="e.fid", nuslist="nuslist", out_file="e.ft3",
+        window={
+            "F3": {"type": "gaussian", "lb": 3.0, "gb": 0.2},
+            "F2": {"type": "sine_bell_squared"},
+            "F1": {"type": "sine_bell", "off": 0.3, "end": 0.9},
+        },
+    )
+    assert "| nmrPipe -fn GM -lb 3 -gb 0.2 \\" in script
+    assert "| nmrPipe -fn SP -off 0.45 -end 0.95 -pow 2 -c 0.5 \\" in script
+    assert "| nmrPipe -fn SP -off 0.3 -end 0.9 -pow 1 -c 0.5 \\" in script
+    lines = script.splitlines()
+    f2_sp = next(i for i, line in enumerate(lines) if "pow 2 -c 0.5" in line)
+    f2_zf = next(
+        i for i, line in enumerate(lines)
+        if line.startswith("| nmrPipe -fn ZF") and i > f2_sp
+    )
+    f2_ft = next(
+        i for i, line in enumerate(lines)
+        if "| nmrPipe -fn FT" in line and i > f2_zf
+    )
+    assert f2_sp < f2_zf < f2_ft  # 窗在 ZF/FT 前
+    plain = generate_3d_nus_script(
+        exp, in_file="e.fid", nuslist="nuslist", out_file="e.ft3"
+    )
+    assert "| nmrPipe -fn GM" not in plain
+    assert plain.count("| nmrPipe -fn SP") == 1  # 仅 step1 直接维默认窗
+
+
+def test_nus_finalize_script_3d_window(bruker_dir: Path) -> None:
+    exp = read_dataset(bruker_dir / "nus_3d")
+    from backend.script_generator import generate_nus_finalize_script
+
+    script = generate_nus_finalize_script(
+        exp, planes="nus3d_rc/test%04d.ft1", out_file="e.ft3",
+        phases={"F2": (10.0, -5.0), "F1": (20.0, 3.0)},
+        window={
+            "F2": {"type": "sine_bell"},
+            "F1": {"type": "gaussian", "lb": 4.0},
+        },
+    )
+    assert "| nmrPipe -fn SP -off 0.45 -end 0.95 -pow 1 -c 0.5 \\" in script
+    assert "| nmrPipe -fn GM -lb 4 -gb 0.1 \\" in script
+    lines = script.splitlines()
+    sp_idx = next(i for i, line in enumerate(lines) if "pow 1 -c 0.5" in line)
+    zf_idx = next(
+        i for i, line in enumerate(lines)
+        if "| nmrPipe -fn ZF" in line and i > sp_idx
+    )
+    ft_idx = next(
+        i for i, line in enumerate(lines)
+        if "| nmrPipe -fn FT" in line and i > zf_idx
+    )
+    assert sp_idx < zf_idx < ft_idx
+    gm_idx = next(i for i, line in enumerate(lines) if "GM -lb 4" in line)
+    zf2_idx = next(
+        i for i, line in enumerate(lines)
+        if "| nmrPipe -fn ZF" in line and i > gm_idx
+    )
+    ft2_idx = next(
+        i for i, line in enumerate(lines)
+        if "| nmrPipe -fn FT" in line and i > zf2_idx
+    )
+    assert gm_idx < zf2_idx < ft2_idx

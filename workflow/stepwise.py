@@ -219,7 +219,15 @@ def generate_spectrum(
     )
     merged_params = dict(params)
     merged_params["phase_route"] = route
-    for key in ("phases", "baseline", "fill", "backend_runs", "direct_phase"):
+    for key in (
+        "phases",
+        "baseline",
+        "zero_fill",
+        "window",
+        "fill",
+        "backend_runs",
+        "direct_phase",
+    ):
         if key in result:
             merged_params[key] = result[key]
     _finish_step(

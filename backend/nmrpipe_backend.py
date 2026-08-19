@@ -730,6 +730,8 @@ class NMRPipeBackend:
             smile_scaling=smile_scaling,
             smile_report=smile_report,
             direct_phase=smile_phase,
+            phases=params.get("phases"),
+            window=params.get("window"),
             extract=extract,
             baseline=baseline,
             zero_fill=zf_plan,
@@ -862,6 +864,7 @@ class NMRPipeBackend:
         phases:{轴 -> (p0, p1)},缺省 0;供逐维相位优化(用户方案)。
         planes:重构平面输入覆盖(默认 nus3d_rc/test%04d.ft1 或
         nus2d/recon.ft1;显示层填相位用 nus3d_rc_ph/ 副本)。
+        window:{轴 -> 窗函数配置},缺省不插窗(间接维 FT 前)。
         """
         bin_dir = self._bin_dir()
         if bin_dir is None:
@@ -911,6 +914,7 @@ class NMRPipeBackend:
             zero_fill=zf_plan,
             sampling=sampling,
             preview_axis=zf_params.get("preview_axis"),
+            window=zf_params.get("window"),
         )
         finalize_com = work / (
             script_name or f"{experiment.dataset_id}_finalize.com"

@@ -2,7 +2,9 @@
 
 统一方案:第一遍逐维复型预览(仅搜索轴 PS 不加 -di,其它轴按已固定
 相位加 -di,零填零)→ 内存调相(旧算法判断标准:固定迹线中位数净吸收,
-零额外后端)→ 联合复核 → 完整终跑(窗函数/填零/基线/各维 PS/EXT/-di)。
+零额外后端)→ 联合复核 → 处理参数优化(基线/填零/窗函数)→ 完整终跑:
+各维最终相位填入初始脚本生成新的完整脚本(NUS 不再写 nus3d_rc_ph 旋转
+副本;直接维相位进 step1 PS(EXT 后),间接维相位进 step3 PS)。
 """
 
 from __future__ import annotations
@@ -152,7 +154,8 @@ def unified_route(
 
     uniform:每轴一条生产管道复型预览(仅搜索轴 PS 不加 -di,其它轴按已固定
     相位加 -di,零填零);NUS:SMILE 一次出复型 recon 平面,直接维在平面上
-    内存搜索,间接维内存复刻 finalize 链完整搜索;最后完整重跑出良谱。
+    内存搜索,间接维内存复刻 finalize 链完整搜索;最后把各维最终相位填入
+    完整脚本重跑出良谱(不写旋转平面副本)。
     """
     from workflow.memory_phase_search import (
         joint_recheck_memory,
@@ -377,6 +380,189 @@ def _load_recon_planes(experiment: Experiment, work: Path) -> np.ndarray:
         raise RuntimeError(f"缺少 2D 重构平面: {recon}")
     return _read_complex_preview(recon)
 
+def _optimize_nus_processing(
+    experiment: Experiment,
+    backend: Any,
+    work: Path,
+    fixed: dict[str, tuple[float, float]],
+    base_params: dict[str, Any] | None,
+    progress: Callable[[str], None] | None = None,
+) -> dict[str, Any]:
+    """联合复核后的处理参数优化(NUS):基线(内存评分)+ 间接维窗函数/填零
+    (候选 finalize 重渲评分,不重跑 SMILE)。
+
+    返回 {"baseline", "zero_fill", "window", "logs"},优化结果写回终跑
+    完整脚本。直接维基线仍逐轴评分后写回(终跑 step1 POLY 应用);直接维
+    窗/SMILE 内部 apod 在重构内,候选评估需重跑 SMILE,保持默认并日志说明。
+    任何评估失败均降级:保持 base_params 既有配置或默认,不阻断终跑。
+    """
+    axes = [dim.logical_axis for dim in experiment.dimensions]
+    direct_axis = "F3" if experiment.ndim >= 3 else "F2"
+    indirect_axes = [a for a in axes if a != direct_axis]
+    ext = "ft3" if experiment.ndim >= 3 else "ft2"
+    zf_params = {a: {"mode": "auto"} for a in axes}
+    base = dict(base_params or {})
+    out_logs: list[str] = []
+    baseline_cfg = dict(base.get("baseline") or {})
+    window_cfg = base.get("window")
+    # 1) 联合复核谱:间接维最终相位 + 完整填零,作基线/窗函数评分基底
+    joint_file = f"{experiment.dataset_id}_joint.{ext}"
+    resp = backend.finalize_nus(
+        experiment,
+        phases=fixed,
+        work_dir=work,
+        params={"zero_fill": zf_params},
+        out_file=joint_file,
+        script_name=f"{experiment.dataset_id}_joint_finalize.com",
+        progress=progress,
+    )
+    if not resp.get("success") or not resp.get("spectrum_path"):
+        out_logs.append(
+            "处理参数优化: 联合复核谱生成失败("
+            + str(resp.get("message"))
+            + "),保持现有基线/填零/窗配置"
+        )
+        return {
+            "baseline": baseline_cfg,
+            "zero_fill": zf_params,
+            "window": window_cfg,
+            "logs": out_logs,
+        }
+    base_path = Path(resp["spectrum_path"])
+    # 2) 基线:每轴内存评分(off/auto/order1-3),写回终跑完整脚本
+    try:
+        from workflow.baseline_optimize import optimize_baseline
+
+        if progress is not None:
+            progress("基线优化中(内存评分)")
+        opt = optimize_baseline(experiment, base_path)
+        baseline_cfg = dict(opt.baseline)
+        out_logs += opt.logs
+    except Exception as exc:  # noqa: BLE001 - 基线评估失败不影响相位/终跑
+        out_logs.append(f"基线优化(嵌入)失败: {exc}")
+    # 间接维基线变化 → 用新基线重渲基底谱(供窗/填零评分);直接维基线在
+    # SMILE 重构内,重渲不生效,由终跑完整脚本 step1 POLY 统一应用
+    default_cfg: dict[str, Any] = {"enabled": True, "mode": "auto", "order": 0}
+    changed_indirect = [
+        a for a in indirect_axes if baseline_cfg.get(a) not in (None, default_cfg)
+    ]
+    apply_baseline: dict[str, Any] = {}
+    if changed_indirect:
+        apply_baseline = {a: baseline_cfg[a] for a in indirect_axes}
+        resp = backend.finalize_nus(
+            experiment,
+            phases=fixed,
+            work_dir=work,
+            baseline=apply_baseline,
+            params={"zero_fill": zf_params},
+            out_file=joint_file,
+            script_name=f"{experiment.dataset_id}_joint_finalize.com",
+            progress=progress,
+        )
+        if resp.get("success") and resp.get("spectrum_path"):
+            base_path = Path(resp["spectrum_path"])
+            out_logs.append("基线(嵌入): 间接维已用最优基线重渲基底谱")
+        else:
+            out_logs.append(
+                "基线(嵌入): 间接维基线重渲失败("
+                + str(resp.get("message"))
+                + "),评分沿用默认基线"
+            )
+            apply_baseline = {}
+    # 3) 间接维窗函数/填零候选:finalize 重渲 + 谱质量评分;直接维窗/SMILE
+    #    apod 在重构内,保持默认(日志说明)
+    try:
+        import numpy as np
+
+        from backend.script_generator import zero_fill_plan as _zf_plan
+        from core.qc import spectrum_quality
+
+        if progress is not None:
+            progress("填零/窗函数候选评分中")
+        auto_plan = _zf_plan(experiment, zf_params)
+        min_shape = tuple(
+            int(auto_plan.get(a, {}).get("size") or 1) for a in axes
+        )
+
+        def _score_path(path: Path) -> float:
+            import nmrglue as ng
+
+            _dic, data = ng.pipe.read(str(path))
+            q = spectrum_quality.evaluate(
+                np.asarray(data), min_shape=min_shape
+            )
+            return float(q.score.overall)
+
+        base_score = _score_path(base_path)
+        windows: list[dict[str, Any]] = [
+            {"type": "sine_bell"},
+            {"type": "sine_bell_squared"},
+            {"type": "gaussian", "lb": 5.0, "gb": 0.1},
+        ]
+        best_window: dict[str, Any] | None = None
+        best_score = base_score
+        for index, w in enumerate(windows, 1):
+            wname = str(w.get("type"))
+            resp = backend.finalize_nus(
+                experiment,
+                phases=fixed,
+                work_dir=work,
+                baseline=apply_baseline or None,
+                params={
+                    "zero_fill": zf_params,
+                    "window": {a: dict(w) for a in indirect_axes},
+                },
+                out_file=f"{experiment.dataset_id}_win{index}.{ext}",
+                script_name=f"{experiment.dataset_id}_win{index}_finalize.com",
+                progress=progress,
+            )
+            if not resp.get("success") or not resp.get("spectrum_path"):
+                out_logs.append(
+                    f"窗函数/填零(嵌入): {wname} 运行失败,跳过"
+                )
+                continue
+            try:
+                score = _score_path(Path(resp["spectrum_path"]))
+            except Exception as exc:  # noqa: BLE001
+                out_logs.append(
+                    f"窗函数/填零(嵌入): {wname} 评分失败 {exc},跳过"
+                )
+                continue
+            out_logs.append(
+                f"窗函数/填零(嵌入): 间接维 {wname}+填零=auto "
+                f"score={score:.1f}"
+            )
+            if score > best_score:
+                best_score = score
+                best_window = dict(w)
+        if best_window is not None and best_score > base_score + 0.5:
+            window_cfg = {a: dict(best_window) for a in indirect_axes}
+            out_logs.append(
+                "窗函数/填零(嵌入): 已选 "
+                f"{best_window.get('type')}+填零=auto "
+                f"(score={base_score:.1f} → {best_score:.1f}),"
+                "终跑完整脚本应用"
+            )
+        elif best_window is not None:
+            out_logs.append(
+                "窗函数/填零(嵌入): 候选未优于当前(无窗),保持默认"
+            )
+        else:
+            out_logs.append("窗函数/填零(嵌入): 无有效候选,保持默认")
+    except Exception as exc:  # noqa: BLE001
+        out_logs.append(f"填零/窗函数优化(嵌入)失败: {exc}")
+    out_logs.append(
+        "窗函数(嵌入): 直接维窗/SMILE 内部 apod 保持默认"
+        "(调整需重跑 SMILE,未纳入候选)"
+    )
+    return {
+        "baseline": baseline_cfg,
+        "zero_fill": zf_params,
+        "window": window_cfg,
+        "logs": out_logs,
+    }
+
+
 def _unified_nus(
     experiment: Experiment,
     backend: Any,
@@ -387,8 +573,10 @@ def _unified_nus(
     progress: Callable[[str], None] | None,
 ) -> dict[str, Any]:
     """NUS 统一流程:SMILE 一次(直接维 PS(0,0))→ 直接维在 recon 复型平面
-    内存搜索 → 间接维内存复刻 finalize 链完整逐维搜索 → 旋转 recon 平面应用
-    直接维相位 → finalize 终跑。"""
+    内存搜索 → 间接维内存复刻 finalize 链完整逐维搜索 → 联合复核 →
+    处理参数优化(基线/填零/窗函数)→ 终跑:各维最终相位填入初始脚本生成
+    新的完整脚本(直接维相位进 step1 PS,EXT 后;间接维进 step3 PS),
+    不再写 nus3d_rc_ph 旋转副本。"""
     from core.data.internal_data_model import AxisRole
     from workflow.memory_phase_search import (
         joint_recheck_memory,
@@ -549,38 +737,63 @@ def _unified_nus(
                 f"联合复核: 联合面平坦(顺序 {fixed} score={fixed_score:.2f} "
                 f"vs 联合最优 {best} score={best_score:.2f}),保持顺序固定"
             )
-    # 应用直接维相位:旋转 recon 平面写副本(源平面不动),再 finalize
-    planes_arg = None
-    if abs((direct_phase[0] + 180.0) % 360.0 - 180.0) > 2.0 or abs(direct_phase[1]) > 2.0:
-        if backend._apply_direct_phase(
-            experiment, work, direct_phase[0], direct_phase[1], logs, progress=progress
-        ):
-            planes_arg = (
-                "nus3d_rc_ph/test%04d.ft1"
-                if experiment.ndim >= 3
-                else "nus2d/recon_ph.ft1"
-            )
-            logs.append("recon 平面已按直接维相位旋转(源平面不动)")
-        else:
-            logs.append("直接维相位应用失败,保持原 recon 平面")
+    # 处理参数优化(基线/填零/窗函数):联合复核后、终跑前;各维最终相位
+    # 与优化后的处理参数一起填入初始脚本,生成新的完整脚本做终跑——
+    # 直接维相位进 step1 PS(EXT 后,与 recon 平面内存旋转同归一化),
+    # 间接维相位进 step3 PS;不写 nus3d_rc_ph 旋转副本。
     if progress is not None:
-        progress("finalize 终跑中")
-    final = backend.finalize_nus(
+        progress("联合复核完成,开始处理参数优化(基线/填零/窗函数)")
+    proc = _optimize_nus_processing(
         experiment,
-        phases=fixed,
-        work_dir=work,
-        planes=planes_arg,
+        backend,
+        work,
+        fixed,
+        base_params,
         progress=progress,
     )
+    logs += proc["logs"]
+    params_final = dict(base_params or {})
+    params_final.update(
+        {
+            "direct_phase_search": False,
+            "display_phase_search": False,
+            "direct_phase_override": [
+                float(direct_phase[0]),
+                float(direct_phase[1]),
+            ],
+            "phases": {
+                axis: [float(p0), float(p1)]
+                for axis, (p0, p1) in fixed.items()
+            },
+            "baseline": proc["baseline"],
+            "zero_fill": proc["zero_fill"],
+            "window": proc["window"],
+        }
+    )
+    if progress is not None:
+        progress("终跑(完整脚本,含各维最终相位)中")
+    final = backend.reconstruct_nus(experiment, params_final, progress=progress)
     backend_runs += 1
     if not final.get("success") or not final.get("spectrum_path"):
-            raise RuntimeError(f"finalize 终跑失败: {final.get('message')}")
+        raise RuntimeError(f"终跑(完整脚本)失败: {final.get('message')}")
     if progress is not None:
-        progress("finalize 终跑完成")
+        progress("终跑完成")
+    logs.append(
+        "终跑: 各维最终相位已填入完整脚本 "
+        f"(直接维 {direct_axis}=({direct_phase[0]:g}°, {direct_phase[1]:g}°)"
+        + "".join(
+            f" {axis}=({p0:g}°, {p1:g}°)"
+            for axis, (p0, p1) in fixed.items()
+        )
+        + "),未生成 nus3d_rc_ph 旋转副本"
+    )
     logs += list(final.get("logs", []))
     return {
         "phases": fixed,
         "direct_phase": direct_phase,
+        "baseline": proc["baseline"],
+        "zero_fill": proc["zero_fill"],
+        "window": proc["window"],
         "spectrum_path": str(final["spectrum_path"]),
         "backend_runs": backend_runs,
         "logs": logs,
