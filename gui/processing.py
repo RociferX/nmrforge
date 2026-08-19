@@ -42,6 +42,44 @@ def is_segmented_container(path) -> bool:
         return False
 
 
+def resolve_import_source(path) -> tuple[str, bool]:
+    """解析导入源(2026-08-19 Task F:忽略非数据子文件夹)。
+
+    返回 (data_source, is_segmented):
+    - 本身是 Bruker 数据集(含 acqus) → (path, False);
+    - 容器含 ≥2 个数据子目录 → (path, True),走分段采集导入;
+    - 恰好 1 个数据子目录(其余非数据,忽略)→ (该子目录, False),按单个导入;
+    - 0 个 → 抛 ImportWorkflowError。
+    """
+    from workflow.import_workflow import ImportWorkflowError
+
+    _data_key_files = ('acqus', 'acqu2s', 'acqu3s', 'ser', 'fid', 'nuslist')
+
+    root = Path(path)
+    if (root / 'acqus').is_file():
+        return str(root), False
+    if not root.is_dir():
+        raise ImportWorkflowError(f'目录不存在: {root}')
+    data_subdirs = sorted(
+        p
+        for p in root.iterdir()
+        if p.is_dir() and any((p / name).is_file() for name in _data_key_files)
+    )
+    if len(data_subdirs) >= 2:
+        return str(root), True
+    if len(data_subdirs) == 1:
+        single = data_subdirs[0]
+        if not (single / 'acqus').is_file():
+            raise ImportWorkflowError(
+                f'子目录 {single.name} 含数据文件但缺少 acqus,无法导入'
+            )
+        return str(single), False
+    raise ImportWorkflowError(
+        '所选目录既不是 Bruker 数据集,也没有含数据文件的子目录'
+        '(acqus/acqu2s/acqu3s/ser/fid/nuslist);非数据子目录已忽略'
+    )
+
+
 class ProcessingController:
     """GUI 层处理控制:三步流程(import_data → generate_fid → generate_spectrum)
     对接 workflow/stepwise(契约 v1.2 §8.3);人工路径对接 workflow/manual。"""

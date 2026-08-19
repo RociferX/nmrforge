@@ -597,7 +597,7 @@ def test_import_failure_handled_on_main_thread(
     monkeypatch.setattr("workflow.import_workflow.import_data", fail_import)
     window = MainWindow(manager=manager)
     window.add_experiment_via_import(str(tmp_path / "nonexistent"), title="T")
-    assert messages and "导入失败" in messages[0]
+    assert messages and ("目录不存在" in messages[0] or "导入失败" in messages[0])
     assert "导入失败" in window.log_panel.text.toPlainText()
     window.close()
 
