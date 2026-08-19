@@ -329,6 +329,115 @@ def test_clean_work_nuslist_single_dataset(
     assert len(written) == len(lines)
 
 
+def test_clean_source_nus_single_removes_with_backup(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """0.2.124:坏点在源头 ser/nuslist 删除并备份,不再等生成 FID 清零。"""
+    import shutil
+
+    from backend.nmrpipe_backend import NMRPipeBackend
+
+    raw = tmp_path / "raw"
+    shutil.copytree(bruker_dir / "nus_2d", raw)
+    lines = (raw / "nuslist").read_text(encoding="utf-8").splitlines()
+    (raw / "nuslist").write_text("\n".join(lines) + "\n1000\n", encoding="utf-8")
+    n = len(lines) + 1
+    row_bytes = 100
+    ser = b"".join(bytes([i % 256]) * row_bytes for i in range(n))
+    (raw / "ser").write_bytes(ser)
+    exp = read_dataset(raw)
+    backend = NMRPipeBackend()
+    logs: list[str] = []
+    count, bad, removed = backend._clean_source_nus(exp, [raw], logs)
+    assert removed is True
+    assert count == len(lines)
+    assert (1000,) in bad
+    assert (raw / "ser.bak").is_file()
+    assert (raw / "ser.bak").stat().st_size == len(ser)
+    kept = (raw / "ser").read_bytes()
+    assert len(kept) == len(ser) - row_bytes  # 坏点(末行)整块删除
+    assert kept == ser[: len(lines) * row_bytes]
+    written = (raw / "nuslist").read_text(encoding="utf-8").splitlines()
+    assert all(tuple(int(v) for v in line.split()) != (1000,) for line in written)
+    assert (raw / "nuslist.bak").is_file()
+    joined = "\n".join(logs)
+    assert "源头" in joined and "备份" in joined
+
+
+def test_clean_source_nus_breaks_link_external_untouched(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """0.2.124:raw/ser 为硬链接时,源头删除不污染外部原件。"""
+    import os
+    import shutil
+
+    from backend.nmrpipe_backend import NMRPipeBackend
+
+    raw = tmp_path / "raw"
+    shutil.copytree(bruker_dir / "nus_2d", raw)
+    lines = (raw / "nuslist").read_text(encoding="utf-8").splitlines()
+    (raw / "nuslist").write_text("\n".join(lines) + "\n1000\n", encoding="utf-8")
+    n = len(lines) + 1
+    row_bytes = 64
+    ser = b"".join(bytes([i % 256]) * row_bytes for i in range(n))
+    external = tmp_path / "external_ser"
+    external.write_bytes(ser)
+    os.link(external, raw / "ser")
+    exp = read_dataset(raw)
+    backend = NMRPipeBackend()
+    logs: list[str] = []
+    _count, _bad, removed = backend._clean_source_nus(exp, [raw], logs)
+    assert removed is True
+    assert external.read_bytes() == ser  # 外部原件不变
+    assert (raw / "ser").stat().st_size == len(ser) - row_bytes
+    assert (raw / "ser.bak").stat().st_size == len(ser)
+
+
+def test_clean_source_nus_segments_drops_bad_and_dups(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """0.2.124:多段源头清理——越界点与跨段重复点从各段 ser/nuslist 删除。"""
+    import shutil
+
+    from backend.nmrpipe_backend import NMRPipeBackend
+    from core.data.bruker_reader import read_segments
+
+    seg1 = tmp_path / "s1"
+    seg2 = tmp_path / "s2"
+    shutil.copytree(bruker_dir / "nus_2d", seg1)
+    shutil.copytree(bruker_dir / "nus_2d", seg2)
+    nl1 = (seg1 / "nuslist").read_text(encoding="utf-8").splitlines()
+    dup_x = "7 3"  # 不在 fixture 中,只在 seg1/seg2 各出现一次 → 跨段重复
+    (seg1 / "nuslist").write_text("\n".join(nl1) + "\n" + dup_x + "\n", encoding="utf-8")
+    seg2_pts = [dup_x, "9 10", "11 12", "13 14", "15 16", "1000 1000"]
+    (seg2 / "nuslist").write_text("\n".join(seg2_pts) + "\n", encoding="utf-8")
+    n1, n2 = len(nl1) + 1, len(seg2_pts)
+    row_bytes = 64
+    (seg1 / "ser").write_bytes(b"".join(bytes([i % 256]) * row_bytes for i in range(n1)))
+    (seg2 / "ser").write_bytes(b"".join(bytes([j % 256]) * row_bytes for j in range(n2)))
+    exp = read_segments([seg1, seg2])
+    backend = NMRPipeBackend()
+    logs: list[str] = []
+    count, bad, removed = backend._clean_source_nus(exp, [seg1, seg2], logs)
+    assert removed is True
+    # seg1 删 1 行(跨段重复 dup_x);seg2 删 2 行(dup_x + 越界)
+    assert (seg1 / "ser").stat().st_size == n1 * row_bytes - row_bytes
+    assert (seg2 / "ser").stat().st_size == n2 * row_bytes - 2 * row_bytes
+    assert (seg1 / "ser.bak").is_file() and (seg2 / "ser.bak").is_file()
+    def _points(dir_path: Path) -> list[tuple[int, ...]]:
+        return [
+            tuple(int(v) for v in line.split())
+            for line in (dir_path / "nuslist")
+            .read_text(encoding="utf-8")
+            .splitlines()
+        ]
+
+    merged = _points(seg1) + _points(seg2)
+    assert len(merged) == count
+    assert len(set(merged)) == len(merged)
+    assert all(p != (1000, 1000) for p in merged)
+
+
 class _FakeConvertRuntime:
     """模拟 bruker/fid.com:按请求产出单文件或切片式 fid。"""
 

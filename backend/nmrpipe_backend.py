@@ -394,7 +394,9 @@ class NMRPipeBackend:
                 _count, bad_points = self._write_merged_nuslist(
                     work, experiment.segments, experiment, logs
                 )
-                self._zero_bad_point_fid(work, bad_points, logs)
+                if bad_points:
+                    # 源头删除不可行时回退到生成 FID 清零
+                    self._zero_bad_point_fid(work, bad_points, logs)
         else:
             converted, convert_logs = self._convert(runtime, experiment, raw, work)
             logs += convert_logs
@@ -444,6 +446,10 @@ class NMRPipeBackend:
         logs: list[str] = []
 
         if experiment.segments:
+            # 0.2.124:坏点在源头 ser/nuslist 删除并备份(用户要求)
+            _count, _bad, source_removed = self._clean_source_nus(
+                experiment, [Path(s) for s in experiment.segments], logs
+            )
             merged_fid = work / "merged" / "fid"
             merged_ready = (
                 merged_fid.is_dir()
@@ -451,6 +457,11 @@ class NMRPipeBackend:
                 and (work / "nuslist").is_file()
                 and not params.get("segment_shift_hz")  # 有频移必须重转
             )
+            if source_removed:
+                # 源头已变:旧合并产物失效,强制重转
+                if merged_fid.is_dir():
+                    shutil.rmtree(merged_fid)
+                merged_ready = False
             if not merged_ready:
                 shifts = [float(v) for v in params.get("segment_shift_hz", [])]
                 converted, convert_logs = self._convert_segments(
@@ -466,7 +477,9 @@ class NMRPipeBackend:
                 nuslist_count, bad_points = self._write_merged_nuslist(
                     work, experiment.segments, experiment, logs
                 )
-                self._zero_bad_point_fid(work, bad_points, logs)
+                if bad_points:
+                    # 源头删除不可行时回退到生成 FID 清零
+                    self._zero_bad_point_fid(work, bad_points, logs)
             else:
                 logs.append("复用已合并切片（跳过转换/合并）")
                 nuslist_count = len(
@@ -474,7 +487,18 @@ class NMRPipeBackend:
                 )
             in_file = "merged/fid/test%03d.fid"
         else:
+            # 0.2.124:坏点在源头 ser/nuslist 删除并备份(用户要求),转换前执行
+            nuslist_count, bad_points, source_removed = self._clean_source_nus(
+                experiment, [raw], logs
+            )
             fid_file = work / f"{experiment.dataset_id}.fid"
+            if source_removed:
+                # 源头已变:旧的已转换 fid 失效,强制重转
+                if fid_file.is_file():
+                    fid_file.unlink()
+                stale_slice = work / "fid"
+                if stale_slice.is_dir():
+                    shutil.rmtree(stale_slice)
             if not fid_file.is_file():
                 converted, convert_logs = self._convert(runtime, experiment, raw, work)
                 logs += convert_logs
@@ -488,10 +512,8 @@ class NMRPipeBackend:
             if not raw_nuslist.is_file():
                 return {"success": False, "message": "缺少 nuslist 采样表", "logs": logs}
             shutil.copy2(raw_nuslist, work / "nuslist")
-            # 坏点检测/清理(所有 NUS 数据统一):越界/重复点剔除 + 对应 FID 清理
-            nuslist_count, bad_points = self._clean_work_nuslist(
-                work, experiment, logs
-            )
+            # 安全网:工作 nuslist 再校验(源头已清理时应为 0 坏点)
+            nuslist_count, _leftover = self._clean_work_nuslist(work, experiment, logs)
             # 0.2.80:bruker 切片式输出(fid/test%03d.fid)优先,否则单文件
             slice_dir = work / "fid"
             if slice_dir.is_dir() and list(slice_dir.glob("test*.fid")):
@@ -499,7 +521,9 @@ class NMRPipeBackend:
                 logs.append("使用 bruker 切片式 fid（fid/test%03d.fid,流式处理）")
             else:
                 in_file = fid_file.name
-            self._zero_bad_point_fid(work, bad_points, logs, in_file=in_file)
+            if bad_points and not source_removed:
+                # 源头删除不可行(ser 缺失/大小不符)时回退到生成 FID 清零
+                self._zero_bad_point_fid(work, bad_points, logs, in_file=in_file)
 
         direct_p0, direct_p1 = 0.0, 0.0
         override = params.get("direct_phase_override")
@@ -1650,6 +1674,11 @@ class NMRPipeBackend:
         """
         logs: list[str] = []
         is_nus = experiment.sampling.mode is SamplingMode.NUS
+        if is_nus:
+            # 0.2.124:坏点在源头 ser/nuslist 删除并备份(用户要求,幂等)
+            self._clean_source_nus(
+                experiment, [Path(seg) for seg in experiment.segments], logs
+            )
         for index, seg_dir in enumerate(experiment.segments, start=1):
             seg_work = work / f"seg_{index:03d}"
             seg_work.mkdir(parents=True, exist_ok=True)
@@ -1670,6 +1699,110 @@ class NMRPipeBackend:
         if not self._merge_slices(runtime, work, len(experiment.segments), logs):
             return False, logs + ["多段切片合并失败"]
         return True, logs
+
+    def _clean_source_nus(
+        self,
+        experiment: Experiment,
+        raw_dirs: list[Path],
+        logs: list[str],
+    ) -> tuple[int, list[tuple[int, ...]], bool]:
+        """源头清理 NUS 坏点(用户要求,0.2.124):删除发生在最开始的 ser 文件,
+        而不是生成 fid 上清零。按 nuslist 行整块删除 ser(每行字节 =
+        ser_size / nuslist 行数,须整除),同步清理 nuslist;删除前备份
+        ser/nuslist 为 .bak(仅首次,幂等);os.replace 断硬/软链接,外部
+        原件不受影响。多段 raw_dirs 按同一校验规则处理(重复点全部剔除,
+        与 _write_merged_nuslist 语义一致)。
+
+        返回 (有效点数, 坏点列表, 是否实际执行了源头删除);ser 缺失或
+        大小不能按行整除时跳过源头删除并返回 removed=False(调用方回退
+        到生成 FID 清零)。
+        """
+        per_dir: list[list[tuple[int, ...]]] = []
+        entries: list[tuple[int, int, tuple[int, ...]]] = []
+        for dir_idx, raw_dir in enumerate(raw_dirs):
+            nuslist_path = Path(raw_dir) / "nuslist"
+            pts = (
+                [tuple(p) for p in read_nuslist(nuslist_path)]
+                if nuslist_path.is_file()
+                else []
+            )
+            per_dir.append(pts)
+            for row_idx, point in enumerate(pts):
+                entries.append((dir_idx, row_idx, point))
+        if not entries:
+            return 0, [], False
+        points = [entry[2] for entry in entries]
+        valid, bad, reasons = _validate_nus_points(points, experiment)
+        if not bad:
+            return len(points), [], False
+        kept = set(valid)
+        drop_by_dir: dict[int, set[int]] = {}
+        for dir_idx, row_idx, point in entries:
+            if point not in kept:
+                drop_by_dir.setdefault(dir_idx, set()).add(row_idx)
+        removed_any = False
+        for dir_idx, drop_rows in drop_by_dir.items():
+            if not drop_rows:
+                continue
+            raw_dir = Path(raw_dirs[dir_idx])
+            nuslist_path = raw_dir / "nuslist"
+            data_file = raw_dir / "ser"
+            if not data_file.is_file():
+                logs.append(
+                    f"⚠ 坏点需从源头 ser 删除,但 {raw_dir.name}/ser 缺失,"
+                    "回退为生成 FID 清理"
+                )
+                continue
+            n_rows = len(per_dir[dir_idx])
+            data_size = data_file.stat().st_size
+            if n_rows <= 0 or data_size % n_rows != 0:
+                logs.append(
+                    f"⚠ {raw_dir.name}/ser 大小 {data_size} 不能按 nuslist "
+                    f"{n_rows} 行整除,回退为生成 FID 清理"
+                )
+                continue
+            row_bytes = data_size // n_rows
+            try:
+                backup = raw_dir / "ser.bak"
+                if not backup.exists():
+                    shutil.copy2(data_file, backup)
+                    logs.append(
+                        f"源头 ser 已备份 → {raw_dir.name}/ser.bak({data_size} 字节)"
+                    )
+                raw = data_file.read_bytes()
+                kept_bytes = b"".join(
+                    raw[i * row_bytes : (i + 1) * row_bytes]
+                    for i in range(n_rows)
+                    if i not in drop_rows
+                )
+                tmp = raw_dir / "ser.tmp"
+                tmp.write_bytes(kept_bytes)
+                os.replace(tmp, data_file)  # 断硬/软链接,外部原件不受影响
+                nus_backup = raw_dir / "nuslist.bak"
+                if not nus_backup.exists():
+                    shutil.copy2(nuslist_path, nus_backup)
+                text = "".join(
+                    " ".join(str(v) for v in p) + "\n"
+                    for i, p in enumerate(per_dir[dir_idx])
+                    if i not in drop_rows
+                )
+                nus_tmp = raw_dir / "nuslist.tmp"
+                nus_tmp.write_text(text, encoding="utf-8", newline="\n")
+                os.replace(nus_tmp, nuslist_path)
+                removed_any = True
+                logs.append(
+                    f"源头清理 {raw_dir.name}:nuslist {n_rows} → "
+                    f"{n_rows - len(drop_rows)} 行,ser {data_size} → "
+                    f"{len(kept_bytes)} 字节(备份 .bak)"
+                )
+            except OSError as exc:  # noqa: BLE001 - 清理失败不阻断
+                logs.append(f"⚠ {raw_dir.name} 源头清理失败({exc}),回退生成 FID 清理")
+        for point in bad:
+            logs.append(
+                f"⚠ 检测到采样坏点 {point}:{'、'.join(reasons.get(point, []) or ['未知'])},"
+                "已从源头 ser/nuslist 删除(备份 .bak)"
+            )
+        return len(valid), bad, removed_any
 
     def _write_merged_nuslist(
         self,
@@ -1706,7 +1839,7 @@ class NMRPipeBackend:
         logs: list[str],
         in_file: str | None = None,
     ) -> None:
-        """清理坏点对应的 FID 数据(所有 NUS 路径)。
+        """清理坏点对应的 FID 数据(0.2.124 起仅作源头删除不可行时的回退)。
 
         有效网格内的坏点(越界重复等)对应 States 双实行(2y, 2y+1):
         3D 在切片 test{z:03d}.fid、2D 在单 fid 文件的这些行清零;
