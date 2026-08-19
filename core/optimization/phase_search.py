@@ -698,20 +698,26 @@ def search_direct_phase_on_spectrum(
         windows = list(zip(idx.tolist(), pos.tolist()))
         window_metric = _net_window_metric
     comp = np.asarray(arr, dtype=np.complex128)
-    ramp_shape = [1] * comp.ndim
-    ramp_shape[axis] = n
+    # 窗口迹线预提取(2026-08-19):旋转是逐点复乘,先切片后旋转与先旋转后
+    # 切片数学等价;只对窗口切片旋转,避免每次候选对整个数组旋转(真实数据
+    # 首跑从数分钟降到数秒量级,结果逐位一致)
+    flat = np.moveaxis(comp, axis, -1).reshape(-1, n)
+    seg_slices = [
+        (max(0, peak - radius), min(n, peak + radius + 1))
+        for _, peak in windows
+    ]
+    segments = np.stack(
+        [flat[i, lo:hi] for (i, _), (lo, hi) in zip(windows, seg_slices)]
+    )  # (W, width) complex
 
     def _score(p0: float, p1: float) -> float:
         k = np.arange(n, dtype=float)
-        ramp = np.exp(
-            1j * np.deg2rad(p0 + p1 * k / max(n - 1, 1))
-        ).reshape(ramp_shape)
-        rot = comp * ramp
-        rot_real = np.moveaxis(np.real(rot), axis, -1).reshape(-1, n)
-        vals = []
-        for i, peak in windows:
-            lo, hi = max(0, peak - radius), min(n, peak + radius + 1)
-            vals.append(window_metric(rot_real[i, lo:hi]))
+        base = np.deg2rad(p0 + p1 * k / max(n - 1, 1))
+        seg_ramp = np.stack(
+            [np.exp(1j * base[lo:hi]) for lo, hi in seg_slices]
+        )
+        rot = np.real(segments * seg_ramp)
+        vals = [window_metric(rot[j]) for j in range(len(segments))]
         if metric == "symmetry":
             return 100.0 * float(np.mean(vals))
         return 50.0 * (float(np.median(vals)) + 1.0)
