@@ -70,6 +70,37 @@ def test_import_segmented_container_single_entry(
     assert len(meta["segments"]) == 2
 
 
+def test_import_segmented_to_existing_experiment(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """G2B-011:exp_id 指定时导入到当前实验类型,不新建实验类型。"""
+    from workflow.import_workflow import import_segmented_dataset
+
+    manager = ProjectManager.create_project(tmp_path / "proj_exp", "demo")
+    entry = manager.create_experiment(title="target")
+    container = _make_segment_container(tmp_path, bruker_dir)
+    result = import_segmented_dataset(manager, container, exp_id=entry.id)
+    assert result.experiment_id == entry.id
+    assert manager.project is not None
+    assert len(manager.project.experiments) == 1  # 不新建实验类型
+    updated = manager.project.experiment(entry.id)
+    assert updated is not None and len(updated.data) == 1
+    assert len(updated.data[0].segments) == 2
+
+
+def test_import_segmented_invalid_exp_id_raises(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """G2B-011:非法 exp_id 抛错,不新建。"""
+    from workflow.import_workflow import ImportWorkflowError, import_segmented_dataset
+
+    manager = ProjectManager.create_project(tmp_path / "proj_bad", "demo")
+    container = _make_segment_container(tmp_path, bruker_dir)
+    with pytest.raises(ImportWorkflowError, match="实验类型不存在"):
+        import_segmented_dataset(manager, container, exp_id="exp_999")
+    assert manager.project is not None and len(manager.project.experiments) == 0
+
+
 def test_import_container_rejected_unless_segmented(
     tmp_path: Path, bruker_dir: Path
 ) -> None:

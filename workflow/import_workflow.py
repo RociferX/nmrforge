@@ -359,15 +359,22 @@ def import_segmented_dataset(
     title: str = "",
     sample_id: str = "",
     copy: bool = True,
+    exp_id: str = "",
 ) -> ImportResult:
     """单数据分段采集导入:source 为包含全部分段的容器目录,合并为一条 DataEntry。
 
     与批量导入明确区分:批量导入把容器下多个独立数据集各自建条目;本入口把
     容器下直接含 acqus 的各分段作为同一次采集的采样段(read_segments 校验
     维数/核/TD/谱宽一致),合并为一条数据,由后端逐段转换 + addNMR 合并。
+
+    G2B-011:exp_id 非空时导入到指定实验类型(校验存在),空时新建(现状)。
     """
     if manager.project is None:
         raise ImportWorkflowError("未加载项目,无法导入实验")
+    if exp_id:
+        if manager.project.experiment(exp_id) is None:
+            raise ImportWorkflowError(f"实验类型不存在: {exp_id}")
+        return import_data(manager, exp_id, source, segmented=True, copy=copy)
     entry = manager.create_experiment(title=title, sample_id=sample_id)
     try:
         return import_data(manager, entry.id, source, segmented=True, copy=copy)

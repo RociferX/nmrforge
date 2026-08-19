@@ -1,5 +1,25 @@
 # 变更日志
 
+## [0.2.124] - 2026-08-18
+
+- NUS 错点删除改到源头(用户要求):不再在生成 fid 上清零,而是删除最开始的
+  ser 文件(按 nuslist 行整块,每行字节 = ser_size/行数,须整除)并同步清理
+  nuslist;删除前备份 ser/nuslist 为 .bak(仅首次,幂等),os.replace 断
+  硬/软链接使外部原件不受影响;
+- 单 NUS 与多段统一:源头清理在转换前执行;清理过则旧 fid/合并产物失效
+  强制重转;ser 缺失或大小不符时回退到原「生成 FID 清零」并 ⚠ 提示;
+- 测试:新增 3 例(单段删除+备份/硬链接外部原件不受影响/多段越界与跨段
+  重复);本地全量 582 passed + ruff 全绿。
+
+## [0.2.123] - 2026-08-18
+
+- G2B-011 Backend(分段采集导入到当前实验类型):
+  import_segmented_dataset 增加可选 exp_id;非空时校验存在后导入到
+  指定实验类型(ImportResult 结构不变),空值保持新建(现状);非法
+  exp_id 抛 ImportWorkflowError;
+- 测试:exp_id 指定落实验(不新建实验类型)/非法 exp_id 抛错/空值新建
+  回归;本地全量 580 passed(578+2)+ ruff 全绿。
+
 ## [0.2.122] - 2026-08-18
 
 - viewer 轴序校对与重排(GUI):Spectrum3D.load_from_ft3 / load_from_ft2
@@ -9,9 +29,18 @@
   告警;独立查看器与 GUI 谱图面板均接入;
 - 分段采集导入到当前实验类型(G2B-011):分段导入不再总是新建实验类型,
   改为在当前选中实验类型下新增样品数据;无当前实验类型时后端新建;
-  ProcessingController.import_segmented_dataset 增加 exp_id 透传(向后兼容);
+  ProcessingController.import_segmented_dataset 增加 exp_id 透传
+  (向后兼容),后端 import_segmented_dataset 同增 exp_id;
+- 处理过程进度可见(Backend):finalize_nus 增加可选 progress 回调
+  (None 不回调),阶段文案「开始 finalize(复型预览/终跑)」「finalize
+  完成」;_apply_direct_phase 同增可选 progress;
+- phase_routes 统一流程补齐进度覆盖:uniform 每轴复型预览与终跑,
+  NUS「第一遍 SMILE 完成」「F2/F1 复型预览中/完成」「finalize 终跑
+  中/完成」,消除 finalize 阶段静默长等待(用户反馈 cc 多段 3D NUS);
 - 测试:轴序重排/自检告警/2D 重排、分段导入 exp_id 透传与信号携带当前
-  实验类型;本地全量 pytest + ruff 全绿。
+  实验类型、NUS/uniform 编排进度覆盖与 finalize_nus 直接回调;本地全量
+  pytest + ruff 全绿。
+
 
 ## [0.2.121] - 2026-08-18
 
