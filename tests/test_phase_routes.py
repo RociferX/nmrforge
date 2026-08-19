@@ -172,8 +172,9 @@ def test_disambiguate_180_mixed_uses_region_sign_convention() -> None:
 def test_unified_route_nus_reconstruct_then_finalize(
     tmp_path: Path, monkeypatch, bruker_dir: Path
 ) -> None:
-    """NUS:SMILE 一次(关搜索)→ 直接维对称性调相 → 间接维 finalize 复型预览
-    (该轴不加 -di)+ 内存搜索 → 应用直接维相位 → finalize 终跑。"""
+    """NUS:SMILE 首遍(关搜索)→ 直接维对称性调相 → 间接维 finalize 复型预览
+    + 内存搜索 → 联合复核 → 处理参数优化 → 终跑为完整脚本(各维相位填入,
+    不写 nus3d_rc_ph 旋转副本)。"""
     experiment = read_dataset(bruker_dir / "nus_2d")
     backend = _FakeBackend(tmp_path / "nus_work")
     work = backend.work
@@ -183,14 +184,13 @@ def test_unified_route_nus_reconstruct_then_finalize(
     direct = 1.0 / (1.0 + 1j * (k0 - 22) / 1.5)
     direct = direct * np.exp(-1j * np.deg2rad(30.0))
     fid1 = np.exp(-t1 / 8.0) * np.cos(2.0 * np.pi * 8.0 * t1 / n_t1)
-    planes = np.outer(direct, fid1)  # (direct, f1_time)
+    planes = np.outer(direct, fid1)
     monkeypatch.setattr(routes, "_load_recon_planes", lambda exp, wk: planes)
-    # NUS 直接维沿用旧权威对称性搜索(0.2.96 机制)
     monkeypatch.setattr(
         "core.optimization.phase_search.search_direct_phase_on_spectrum",
         lambda arr, axis=0, metric="symmetry", progress=None: (30.0, 0.0, 80.0),
     )
-    # finalize 复型预览产物:按文件名给 F1 已知相位 -10°
+
     def fake_read(path: str, unpack_axis: int | None = None):
         name = Path(path).name
         if "preview_F1" in name:
@@ -198,26 +198,154 @@ def test_unified_route_nus_reconstruct_then_finalize(
         return _synthetic_preview(0, 0.0)
 
     monkeypatch.setattr(routes, "_read_complex_preview", fake_read)
+    # 处理参数优化固定返回(基线/填零/窗),不依赖假后端写谱
+    monkeypatch.setattr(
+        routes,
+        "_optimize_nus_processing",
+        lambda exp, backend, work, fixed, base_params, progress=None: {
+            "baseline": {"F2": {"enabled": False}},
+            "zero_fill": {"F1": {"mode": "auto"}, "F2": {"mode": "auto"}},
+            "window": None,
+            "logs": ["处理参数优化(测试): 固定配置"],
+        },
+    )
     result = routes.unified_route(experiment, backend, work_dir=work)
-    assert len(backend.reconstruct_params) == 1
+    assert len(backend.reconstruct_params) == 2  # SMILE 首遍 + 终跑完整脚本
     assert backend.reconstruct_params[0].get("display_phase_search") is False
-    # finalize 调用 2 次:间接维预览(带 preview_axis) + 终跑(带全部相位)
-    assert len(backend.finalize_calls) == 2
-    preview_call, final_call = backend.finalize_calls
-    assert preview_call["params"]["preview_axis"] == "F1"
-    assert preview_call["phases"] == {}
-    assert final_call["planes"] == "nus2d/recon_ph.ft1"
+    final_params = backend.reconstruct_params[1]
+    assert final_params.get("direct_phase_search") is False
+    assert abs(final_params["direct_phase_override"][0] - 30.0) <= 8.0
+    assert abs(final_params["direct_phase_override"][1]) <= 8.0
     assert abs((result["direct_phase"][0] - 30.0 + 180.0) % 360.0 - 180.0) <= 8.0
-    # 预览基底含 F1=-30° → 校正 +30°
     assert abs((result["phases"]["F1"][0] - 30.0 + 180.0) % 360.0 - 180.0) <= 8.0
-    assert backend.apply_direct_calls  # 直接维相位已应用
-    assert result["backend_runs"] == 3  # SMILE + 预览 + 终跑
+    assert final_params["phases"]["F1"] == list(result["phases"]["F1"])
+    assert final_params["baseline"] == {"F2": {"enabled": False}}
+    assert final_params["zero_fill"] == {
+        "F1": {"mode": "auto"},
+        "F2": {"mode": "auto"},
+    }
+    assert final_params["window"] is None
+    # 末遍不写旋转平面副本:无 _apply_direct_phase 调用,无 planes 覆盖
+    assert not backend.apply_direct_calls
+    assert all(call["planes"] is None for call in backend.finalize_calls)
+    assert "处理参数优化(测试): 固定配置" in result["logs"]
+    assert result["backend_runs"] == 3  # SMILE 首遍 + F1 预览 + 终跑
+
+
+
+def test_optimize_nus_processing_baseline_and_window(
+    tmp_path: Path, monkeypatch, bruker_dir: Path
+) -> None:
+    """处理参数优化:基线内存评分写回 + 间接维窗函数候选评分择优(不重跑 SMILE)。"""
+    import nmrglue as ng
+
+    from workflow.baseline_optimize import BaselineOptimizeResult
+
+    experiment = read_dataset(bruker_dir / "nus_3d")
+    work = tmp_path / "proc_work"
+    work.mkdir()
+    calls: list[dict] = []
+
+    def _dic_3d() -> dict:
+        import nmrglue as ng
+
+        dic = ng.pipe.create_empty_dic()
+        dic.update(
+            {
+                "FDSIZE": 4.0,
+                "FDSPECNUM": 4.0,
+                "FDREALSIZE": 8.0,
+                "FDF1TDSIZE": 4.0,
+                "FDF2TDSIZE": 4.0,
+                "FDF3TDSIZE": 4.0,
+                "FDF3SIZE": 4.0,
+                "FDFILECOUNT": 4.0,
+                "FDDIMCOUNT": 3.0,
+                "FDF2FTFLAG": 1.0,
+                "FDF2QUADFLAG": 1.0,
+            }
+        )
+        return dic
+
+    def fake_finalize(
+        experiment,
+        *,
+        phases=None,
+        work_dir=None,
+        baseline=None,
+        params=None,
+        out_file=None,
+        script_name=None,
+        progress=None,
+    ):
+        out = Path(work_dir) / (out_file or "out.ft3")
+        ng.pipe.write(
+            str(out),
+            _dic_3d(),
+            np.zeros((4, 4, 4), dtype=np.complex64),
+            overwrite=True,
+        )
+        calls.append(
+            {
+                "phases": dict(phases or {}),
+                "baseline": dict(baseline or {}),
+                "params": dict(params or {}),
+                "out_file": out_file,
+            }
+        )
+        return {"success": True, "spectrum_path": str(out), "logs": []}
+
+    fixed = {"F2": (10.0, -5.0), "F1": (20.0, 3.0)}
+    fake_opt = BaselineOptimizeResult(
+        baseline={
+            "F3": {"enabled": True, "mode": "auto", "order": 0},
+            "F2": {"enabled": True, "mode": "auto", "order": 0},
+            "F1": {"enabled": True, "mode": "order", "order": 2},
+        },
+        scores={},
+        spectrum_path="",
+        logs=["F1: 基线已优化"],
+        optimized=["F1"],
+        skipped=[],
+    )
+    monkeypatch.setattr(
+        "workflow.baseline_optimize.optimize_baseline",
+        lambda experiment, spectrum_path, **kw: fake_opt,
+    )
+    scores = iter([40.0, 55.0, 48.0, 50.0])  # 基底/正弦钟/正弦钟²/高斯
+    monkeypatch.setattr(
+        "core.qc.spectrum_quality.evaluate",
+        lambda data, min_shape=None: type(
+            "Q", (), {"score": type("S", (), {"overall": next(scores)})()}
+        )(),
+    )
+    proc = routes._optimize_nus_processing(
+        experiment,
+        type("B", (), {"finalize_nus": staticmethod(fake_finalize)})(),
+        work,
+        fixed,
+        None,
+    )
+    assert proc["baseline"]["F1"]["order"] == 2
+    # 55 最优且 > 基底 40 + 0.5 → 选中正弦钟,填入间接维
+    assert proc["window"] == {
+        "F2": {"type": "sine_bell"},
+        "F1": {"type": "sine_bell"},
+    }
+    assert "F1: 基线已优化" in proc["logs"]
+    # 联合复核谱(1) + 间接维基线重渲(1) + 3 个窗候选
+    assert len(calls) == 5
+    assert calls[1]["baseline"]["F1"]["order"] == 2
+    assert calls[2]["params"]["window"] == {
+        "F2": {"type": "sine_bell"},
+        "F1": {"type": "sine_bell"},
+    }
 
 
 def test_unified_route_nus_progress_stages(
     tmp_path: Path, monkeypatch, bruker_dir: Path
 ) -> None:
-    """NUS:progress 覆盖 第一遍 SMILE/F1 复型预览/finalize 终跑 各阶段。"""
+    """NUS:progress 覆盖 第一遍 SMILE/处理参数优化/完整脚本终跑 各阶段。"""
     experiment = read_dataset(bruker_dir / "nus_2d")
     backend = _FakeBackend(tmp_path / "nus_prog_work")
     work = backend.work
@@ -236,16 +364,30 @@ def test_unified_route_nus_progress_stages(
         routes, "_read_complex_preview",
         lambda path, unpack_axis=None: _synthetic_preview(0, -30.0),
     )
+    monkeypatch.setattr(
+        routes,
+        "_optimize_nus_processing",
+        lambda exp, backend, work, fixed, base_params, progress=None: {
+            "baseline": {},
+            "zero_fill": {"F1": {"mode": "auto"}, "F2": {"mode": "auto"}},
+            "window": None,
+            "logs": [],
+        },
+    )
     messages: list[str] = []
-    result = routes.unified_route(experiment, backend, work_dir=work, progress=messages.append)
+    result = routes.unified_route(
+        experiment, backend, work_dir=work, progress=messages.append
+    )
     joined = "\n".join(messages)
     assert "第一遍 SMILE 完成" in joined, messages
     assert "F1 复型预览中" in joined, messages
     assert "F1 复型预览完成" in joined, messages
-    assert "finalize 终跑中" in joined, messages
-    assert "finalize 终跑完成" in joined, messages
+    assert "联合复核完成,开始处理参数优化(基线/填零/窗函数)" in joined, messages
+    assert "终跑(完整脚本,含各维最终相位)中" in joined, messages
+    assert "终跑完成" in joined, messages
     assert all(call["progress"] is not None for call in backend.finalize_calls)
     assert result["backend_runs"] == 3
+
 
 
 def test_unified_route_uniform_progress_stages(

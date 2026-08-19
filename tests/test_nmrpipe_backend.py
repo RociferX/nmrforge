@@ -634,3 +634,47 @@ def test_project_3d_mapping(tmp_path: Path, monkeypatch) -> None:
     assert Path(result["paths"]["xz"]).is_file()
     assert Path(result["paths"]["yz"]).is_file()
     assert len(calls) == 2
+
+def test_finalize_nus_window_param_passthrough(
+    tmp_path: Path, monkeypatch, bruker_dir: Path
+) -> None:
+    """finalize_nus 把 params.window 透传给定稿脚本(间接维 FT 前)。"""
+    from backend.nmrpipe_backend import NMRPipeBackend
+    from backend.runtime import CompletedProcess
+
+    experiment = read_dataset(bruker_dir / "nus_2d")
+    work = tmp_path / "win_work"
+    (work / "nus2d").mkdir(parents=True)
+    (work / "nus2d" / "recon.ft1").write_bytes(b"x")
+
+    class _FakeCsh:
+        def run(self, argv, *, cwd=None, timeout=3600, on_line=None):
+            (Path(cwd) / f"{experiment.dataset_id}.ft2").write_bytes(b"x")
+            return CompletedProcess("", "", "", 0)
+
+    monkeypatch.setattr("backend.nmrpipe_backend.CshRuntime", _FakeCsh)
+    monkeypatch.setattr(
+        "backend.nmrpipe_backend.find_nmrpipe_bin", lambda explicit="": Path("/bin")
+    )
+    backend = NMRPipeBackend(nmrpipe_bin="")
+    resp = backend.finalize_nus(
+        experiment,
+        work_dir=work,
+        params={"window": {"F1": {"type": "gaussian", "lb": 3.0}}},
+    )
+    assert resp["success"] is True, resp
+    script = (work / f"{experiment.dataset_id}_finalize.com").read_text(
+        encoding="utf-8"
+    )
+    assert "| nmrPipe -fn GM -lb 3 -gb 0.1 \\" in script
+    lines = script.splitlines()
+    gm = next(i for i, line in enumerate(lines) if "GM -lb 3" in line)
+    zf = next(
+        i for i, line in enumerate(lines)
+        if "| nmrPipe -fn ZF" in line and i > gm
+    )
+    ft = next(
+        i for i, line in enumerate(lines)
+        if "| nmrPipe -fn FT" in line and i > zf
+    )
+    assert gm < zf < ft
