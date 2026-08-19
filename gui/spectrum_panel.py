@@ -401,12 +401,13 @@ class SpectrumPanel(QWidget):
             )
         except Exception:  # noqa: BLE001
             return proj
+        # 2026-08-19:投影命名前缀为数据 id(d_001),按 *_proj_F{1,2,3}.ft2
+        # 扫描(兼容历史 exp-data 前缀)
         for index, logical in enumerate(("F1", "F2", "F3")):
-            path = spectra_dir / (
-                f"{self._current_exp_id}-{self._current_data_id}_proj_{logical}.ft2"
-            )
-            if not path.is_file():
+            matches = sorted(spectra_dir.glob(f"*_proj_{logical}.ft2"))
+            if not matches:
                 continue
+            path = matches[-1]
             try:
                 dic, _ = ng.pipe.read(str(path))
                 labels = (

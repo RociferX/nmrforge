@@ -271,12 +271,12 @@ def test_spectrum_panel_opens_ft3(
     data = manager.import_data(entry.id, "/fake/3d")
     spectra = manager.data_dir(entry.id, data.id, "spectra")
     spectra.mkdir(parents=True, exist_ok=True)
-    ft3 = spectra / f"{entry.id}-{data.id}.ft3"
+    ft3 = spectra / f"{data.id}.ft3"
     _write_ft3(ft3, _synthetic3d())
-    # Task E:三个投影文件(proj3D 产物)供面板加载
+    # Task E:三个投影文件(proj3D 产物,前缀 d_001)供面板加载
     for logical in ("F1", "F2", "F3"):
         _write_ft2(
-            spectra / f"{entry.id}-{data.id}_proj_{logical}.ft2",
+            spectra / f"{data.id}_proj_{logical}.ft2",
             np.zeros((4, 6)),
         )
     manager.save()
