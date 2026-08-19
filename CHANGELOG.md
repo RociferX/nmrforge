@@ -9,7 +9,7 @@
 - 集成审查(Architect):GUI viewer/backend workflow 与分支逐文件 diff 为空
   (无代码丢失);开发模式记忆库(manager/gui/backend/tasks)完整保留;
 - 验收:任务 G2B-011/进度可见/轴序校对全部落地,归档见 docs/tasks/archive/;
-- 测试:本地全量 586 passed、ruff 全绿;VM 全量待复测。
+- 测试:本地全量 586 passed、ruff 全绿;VM 全量 582 passed + 4 skipped(Python 3.12.13,HEAD 04ce203),ruff 全绿。
 
 ## [0.2.124] - 2026-08-18
 
