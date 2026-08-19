@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 
@@ -14,7 +15,7 @@ from PyQt6.QtWidgets import QApplication
 from core.project import ProjectManager
 from gui.spectrum_panel import SpectrumPanel
 from viewer.app import SpectrumWindow
-from viewer.spectrum import Spectrum3D, SpectrumAxis
+from viewer.spectrum import Spectrum, Spectrum3D, SpectrumAxis
 from viewer.spectrum_viewer import SpectrumViewer
 
 
@@ -342,3 +343,81 @@ def test_viewer_peak_xy_3d_mapping(qapp: QApplication) -> None:
     assert sl2.y_axis.index_at(y2) == 2
     viewer.close()
     viewer2.close()
+
+
+def _misordered_dic_and_data() -> tuple[dict, np.ndarray]:
+    """存储轴序 (15N, 1H, 13C)(对应逻辑 F2/F3/F1)的 ft3 头部与数据。"""
+    data = np.zeros((20, 40, 30), dtype=np.float32)
+    dic = {
+        "FDDIMCOUNT": 3,
+        "FDF1T": 20, "FDF1SW": 1703.0, "FDF1OBS": 81.1, "FDF1CAR": 117.5,
+        "FDF1ORIG": 117.5 * 81.1, "FDF1LABEL": "N15",
+        "FDF2T": 40, "FDF2SW": 6000.0, "FDF2OBS": 600.1, "FDF2CAR": 4.7,
+        "FDF2ORIG": 4.7 * 600.1, "FDF2LABEL": "H1",
+        "FDF3T": 30, "FDF3SW": 3000.0, "FDF3OBS": 150.9, "FDF3CAR": 117.0,
+        "FDF3ORIG": 117.0 * 150.9, "FDF3LABEL": "C13",
+    }
+    return dic, data
+
+
+def test_load_from_ft3_reorders_axes_to_logical(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog
+) -> None:
+    """0.2.122:存储轴序 (15N,1H,13C) 重排到逻辑序 (13C,15N,1H)。"""
+    dic, data = _misordered_dic_and_data()
+    monkeypatch.setattr("nmrglue.pipe.read", lambda path: (dic, data))
+    with caplog.at_level(logging.WARNING, logger="nmrforge.viewer.spectrum"):
+        spec = Spectrum3D.load_from_ft3(
+            tmp_path / "61.ft3", labels=("C", "N", "H"),
+            nuclei=["13C", "15N", "1H"],
+        )
+    assert [a.label for a in spec.axes] == ["C", "N", "H"]
+    assert spec.data.shape == (30, 20, 40)  # (13C, 15N, 1H)
+    assert round(spec.axes[0].obs_mhz, 1) == 150.9
+    assert round(spec.axes[1].obs_mhz, 1) == 81.1
+    assert round(spec.axes[2].obs_mhz, 1) == 600.1
+    assert "轴序重排" in caplog.text
+
+
+def test_load_from_ft3_warns_ppm_range_mismatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog
+) -> None:
+    """0.2.122:核/ppm 范围不符时自检告警(无 metadata 时保持存储序)。"""
+    data = np.zeros((8, 8, 8), dtype=np.float32)
+    dic = {
+        "FDDIMCOUNT": 3,
+        "FDF1T": 8, "FDF1SW": 600.0, "FDF1OBS": 81.0, "FDF1CAR": 4.7,
+        "FDF1ORIG": 4.7 * 81.0, "FDF1LABEL": "N15",
+        "FDF2T": 8, "FDF2SW": 6000.0, "FDF2OBS": 600.0, "FDF2CAR": 4.7,
+        "FDF2ORIG": 4.7 * 600.0, "FDF2LABEL": "H1",
+        "FDF3T": 8, "FDF3SW": 6000.0, "FDF3OBS": 600.0, "FDF3CAR": 4.7,
+        "FDF3ORIG": 4.7 * 600.0, "FDF3LABEL": "H1",
+    }
+    monkeypatch.setattr("nmrglue.pipe.read", lambda path: (dic, data))
+    with caplog.at_level(logging.WARNING, logger="nmrforge.viewer.spectrum"):
+        Spectrum3D.load_from_ft3(tmp_path / "x.ft3")
+    assert "轴序/引用自检" in caplog.text
+
+
+def test_load_from_ft2_reorders_axes_to_logical(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog
+) -> None:
+    """0.2.122:2D 同样按存储头重排到逻辑序(存储 1H/15N → 逻辑 15N/1H)。"""
+    data = np.zeros((40, 20), dtype=np.float32)
+    dic = {
+        "FDDIMCOUNT": 2,
+        "FDF1T": 40, "FDF1SW": 6000.0, "FDF1OBS": 600.0, "FDF1CAR": 4.7,
+        "FDF1ORIG": 4.7 * 600.0, "FDF1LABEL": "H1",
+        "FDF2T": 20, "FDF2SW": 1703.0, "FDF2OBS": 60.8, "FDF2CAR": 117.0,
+        "FDF2ORIG": 117.0 * 60.8, "FDF2LABEL": "N15",
+    }
+    monkeypatch.setattr("nmrglue.pipe.read", lambda path: (dic, data))
+    with caplog.at_level(logging.WARNING, logger="nmrforge.viewer.spectrum"):
+        spec = Spectrum.load_from_ft2(
+            tmp_path / "x.ft2", labels=("N", "H"), nuclei=["15N", "1H"]
+        )
+    assert spec.data.shape == (20, 40)
+    assert spec.y_axis.label == "N"
+    assert spec.x_axis.label == "H"
+    assert round(spec.y_axis.obs_mhz, 1) == 60.8
+    assert "轴序重排" in caplog.text

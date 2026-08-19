@@ -248,6 +248,8 @@ class SpectrumPanel(QWidget):
         """
         labels3d = self._axis_labels(3) or ("F1", "F2", "F3")
         labels2d = self._axis_labels(2) or ("F1", "F2")
+        nuclei3d = self._axis_nuclei(3)
+        nuclei2d = self._axis_nuclei(2)
         try:
             if path.suffix.lower() == ".ft3":
                 from viewer.spectrum import Spectrum3D
@@ -260,13 +262,15 @@ class SpectrumPanel(QWidget):
                         f"正在后台加载 3D 谱: {path.name} "
                         f"({size // (1024 * 1024)} MB)"
                     )
-                    self._load_ft3_async(path, labels3d)
+                    self._load_ft3_async(path, labels3d, nuclei3d)
                     return True
                 self._current_spectrum = path
                 # 在 set_spectrum3d(会重置平面/投影并触发保存)之前捕获记忆状态
                 state = self._viewer3d_state.get(self._current_data_id)
                 self._spectrum3d_panel.set_spectrum3d(
-                    Spectrum3D.load_from_ft3(path, labels=labels3d)
+                    Spectrum3D.load_from_ft3(
+                        path, labels=labels3d, nuclei=nuclei3d
+                    )
                 )
                 self._spectrum3d_panel.setVisible(True)
                 if state:
@@ -285,7 +289,9 @@ class SpectrumPanel(QWidget):
                 return True
             from viewer.spectrum import Spectrum
 
-            spectrum = Spectrum.load_from_ft2(path, labels=labels2d)
+            spectrum = Spectrum.load_from_ft2(
+                path, labels=labels2d, nuclei=nuclei2d
+            )
         except Exception:  # noqa: BLE001 - 损坏文件统一由调用方提示
             return False
         self._spectrum3d_panel.clear()
@@ -294,7 +300,7 @@ class SpectrumPanel(QWidget):
         return True
 
 
-    def _load_ft3_async(self, path: Path, labels3d) -> None:
+    def _load_ft3_async(self, path: Path, labels3d, nuclei3d=None) -> None:
         """后台线程读取大 .ft3,完成后经信号回主线程绑定渲染。"""
         import threading
 
@@ -302,7 +308,9 @@ class SpectrumPanel(QWidget):
             try:
                 from viewer.spectrum import Spectrum3D
 
-                spectrum3d = Spectrum3D.load_from_ft3(path, labels=labels3d)
+                spectrum3d = Spectrum3D.load_from_ft3(
+                    path, labels=labels3d, nuclei=nuclei3d
+                )
                 self._ft3_ready.emit(path, spectrum3d)
             except Exception as exc:  # noqa: BLE001 - 错误统一回主线程提示
                 self._ft3_failed.emit(path, f"{type(exc).__name__}: {exc}")
@@ -330,13 +338,9 @@ class SpectrumPanel(QWidget):
         self._current_spectrum = None
         self.status_message.emit(f"3D 谱加载失败: {message}")
 
-    def _axis_labels(self, required: int) -> tuple[str, ...] | None:
-        """按当前样品数据 metadata 的核信息生成轴名(F1/F2/F3→H/N/C)。
-        维度数不符/无 metadata 时返回 None(调用方回退 F1/F2/F3)。"""
-        from viewer.axis_labels import (
-            axis_labels_from_nuclei,
-            nuclei_from_metadata,
-        )
+    def _axis_nuclei(self, required: int) -> list[str] | None:
+        """按当前样品数据 metadata 返回逻辑轴核(F1/F2/F3 序);无则 None。"""
+        from viewer.axis_labels import nuclei_from_metadata
 
         if self._manager is None or not (
             self._current_exp_id and self._current_data_id
@@ -358,6 +362,16 @@ class SpectrumPanel(QWidget):
             return None
         nuclei = nuclei_from_metadata(metadata)
         if not nuclei or len(nuclei) != required:
+            return None
+        return nuclei
+
+    def _axis_labels(self, required: int) -> tuple[str, ...] | None:
+        """按当前样品数据 metadata 的核信息生成轴名(F1/F2/F3→H/N/C)。
+        维度数不符/无 metadata 时返回 None(调用方回退 F1/F2/F3)。"""
+        from viewer.axis_labels import axis_labels_from_nuclei
+
+        nuclei = self._axis_nuclei(required)
+        if not nuclei:
             return None
         return axis_labels_from_nuclei(nuclei)
 

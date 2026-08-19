@@ -130,7 +130,7 @@ class ExperimentDashboard(QWidget):
     """实验类型概览:样品数据列表(状态)+ 导入样品数据表单。"""
 
     import_options_requested = pyqtSignal(str, str, str, bool)  # (exp_id, name, source, copy)
-    segmented_import_requested = pyqtSignal(str)  # 分段采集容器目录
+    segmented_import_requested = pyqtSignal(str, str)  # (exp_id, 分段采集容器目录)
     batch_import_requested = pyqtSignal(str, list)  # (exp_id, folders)
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -354,8 +354,8 @@ class ExperimentDashboard(QWidget):
             self.segmented_source_edit.setText(path)
 
     def _on_segmented_import(self) -> None:
-        """分段采集导入:容器目录(合并 FID)直接发请求。"""
+        """分段采集导入:容器目录(合并 FID)直接发请求(带当前实验类型,0.2.122)。"""
         source = self.segmented_source_edit.text().strip()
         if not source:
             return
-        self.segmented_import_requested.emit(source)
+        self.segmented_import_requested.emit(self._exp_id, source)

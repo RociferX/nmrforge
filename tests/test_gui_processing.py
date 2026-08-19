@@ -67,9 +67,10 @@ def test_import_segmented_dataset_passthrough(
         run_id = "R-1"
         warnings: list = []
 
-    def fake(manager, source, *, title="", sample_id="", copy=True):
+    def fake(manager, source, *, exp_id="", title="", sample_id="", copy=True):
         captured.update(
             source=str(source),
+            exp_id=exp_id,
             title=title,
             sample_id=sample_id,
             copy=copy,
@@ -80,9 +81,10 @@ def test_import_segmented_dataset_passthrough(
         "workflow.import_workflow.import_segmented_dataset", fake
     )
     result = controller.import_segmented_dataset(
-        "/data/container", title="seg", copy=False
+        "/data/container", exp_id="exp_001", title="seg", copy=False
     )
     assert captured["source"] == "/data/container"
+    assert captured["exp_id"] == "exp_001"  # G2B-011:透传当前实验类型
     assert captured["title"] == "seg"
     assert captured["copy"] is False
     assert result.data_id == "d_001"

@@ -260,11 +260,14 @@ def test_experiment_dashboard_segmented_between_single_and_batch(
     layout = page.layout()
     assert layout.indexOf(page.single_group) < layout.indexOf(page.segmented_group)
     assert layout.indexOf(page.segmented_group) < layout.indexOf(page.batch_group)
-    emitted: list[str] = []
-    page.segmented_import_requested.connect(emitted.append)
+    emitted: list[tuple[str, str]] = []
+    page.segmented_import_requested.connect(
+        lambda exp_id, source: emitted.append((exp_id, source))
+    )
     page.segmented_source_edit.setText("/data/container")
+    page._exp_id = "exp_003"
     page._on_segmented_import()
-    assert emitted == ["/data/container"]
+    assert emitted == [("exp_003", "/data/container")]
     page.close()
 
 

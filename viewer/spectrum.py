@@ -13,7 +13,131 @@ from pathlib import Path
 
 import numpy as np
 
+from viewer.axis_labels import infer_nucleus
+
 logger = logging.getLogger("nmrforge.viewer.spectrum")
+
+# 常见核的化学位移范围(ppm),谱加载轴序/引用自检用(0.2.122)
+_NUCLEUS_PPM_RANGES: dict[str, tuple[float, float]] = {
+    "1H": (-5.0, 20.0),
+    "15N": (90.0, 140.0),
+    "13C": (10.0, 190.0),
+}
+_NUCLEI = set(_NUCLEUS_PPM_RANGES) | {"2H", "19F", "31P", "23Na", "29Si"}
+
+
+def _parse_nmrpipe_label(label: str) -> str:
+    """NMRPipe FDF*LABEL('N15'/'H1'/'C13') → 核名('15N'/'1H'/'13C');失败返回 ''。"""
+    text = str(label or "").strip().upper()
+    if not text:
+        return ""
+    if text in _NUCLEI:
+        return text
+    digits = "".join(ch for ch in text if ch.isdigit())
+    letters = "".join(ch for ch in text if ch.isalpha())
+    candidate = f"{digits}{letters}" if digits and letters else ""
+    return candidate if candidate in _NUCLEI else ""
+
+
+def _storage_nuclei(dic: dict, prefixes: tuple[str, ...]) -> list[str]:
+    """按 NMRPipe 头部推断各存储轴的核:LABEL 优先,OBS 兜底。"""
+    nuclei: list[str] = []
+    for prefix in prefixes:
+        nucleus = _parse_nmrpipe_label(dic.get(prefix + "LABEL", ""))
+        if not nucleus:
+            try:
+                obs = float(dic.get(prefix + "OBS", 0) or 0)
+            except (TypeError, ValueError):
+                obs = 0.0
+            nucleus = infer_nucleus(obs)
+        nuclei.append(nucleus)
+    return nuclei
+
+
+def _relabel_axes(
+    axes: list[SpectrumAxis], labels: tuple[str, ...]
+) -> list[SpectrumAxis]:
+    """按逻辑序重建轴对象(SpectrumAxis 冻结,label 需重建)。"""
+    return [
+        SpectrumAxis(
+            label=labels[i] if i < len(labels) else axis.label,
+            size=axis.size,
+            sw_hz=axis.sw_hz,
+            obs_mhz=axis.obs_mhz,
+            carrier_ppm=axis.carrier_ppm,
+            orig_hz=axis.orig_hz,
+        )
+        for i, axis in enumerate(axes)
+    ]
+
+
+def _permutation_to_logical(
+    storage_nuclei: list[str], logical_nuclei: list[str]
+) -> list[int] | None:
+    """storage 轴 → logical 位置排列;无法构成排列(长度/未知核/不匹配)返回 None。"""
+    n = len(storage_nuclei)
+    if n != len(logical_nuclei) or n == 0:
+        return None
+    if any(not s for s in storage_nuclei) or any(not t for t in logical_nuclei):
+        return None
+    perm: list[int | None] = [None] * n
+    used = [False] * n
+    for lpos, target in enumerate(logical_nuclei):
+        for spos, source in enumerate(storage_nuclei):
+            if source == target and not used[spos]:
+                perm[spos] = lpos
+                used[spos] = True
+                break
+        else:
+            return None
+    return [int(p) for p in perm]  # type: ignore[arg-type]
+
+
+def _reorder_to_logical(
+    data: np.ndarray,
+    axes: list[SpectrumAxis],
+    storage_nuclei: list[str],
+    logical_nuclei: list[str],
+    path: Path | str,
+) -> tuple[np.ndarray, list[SpectrumAxis], list[str]]:
+    """把存储轴序重排到逻辑序(F1,F2,F3);无法确认时保持现状并告警。"""
+    perm = _permutation_to_logical(storage_nuclei, logical_nuclei)
+    if perm is None:
+        logger.warning(
+            "轴序校对: 无法确认逻辑轴序,保持存储序(存储 %s, 逻辑 %s): %s",
+            storage_nuclei, logical_nuclei, path,
+        )
+        return data, axes, storage_nuclei
+    if perm == list(range(len(perm))):
+        return data, axes, storage_nuclei
+    inv = [0] * len(perm)
+    for spos, lpos in enumerate(perm):
+        inv[lpos] = spos
+    reordered = np.transpose(data, inv)
+    reordered_axes = [axes[spos] for spos in inv]
+    reordered_nuclei = [storage_nuclei[spos] for spos in inv]
+    logger.warning(
+        "轴序重排: 存储 (%s) → 逻辑 (%s): %s",
+        " ".join(storage_nuclei), " ".join(logical_nuclei), path,
+    )
+    return reordered, reordered_axes, reordered_nuclei
+
+
+def _warn_ppm_range_mismatch(
+    axes: list[SpectrumAxis], nuclei: list[str], path: Path | str
+) -> None:
+    """谱加载自检:每轴核与常见化学位移范围不符时告警(可能轴序/引用问题)。"""
+    for axis, nucleus in zip(axes, nuclei):
+        rng = _NUCLEUS_PPM_RANGES.get(nucleus)
+        if rng is None or axis.size == 0:
+            continue
+        lo = float(np.min(axis.ppm))
+        hi = float(np.max(axis.ppm))
+        if hi < rng[0] or lo > rng[1]:
+            logger.warning(
+                "轴序/引用自检: %s 轴(%s) ppm 范围 [%.1f, %.1f] 超出常见范围 %s: %s",
+                axis.label, nucleus, lo, hi, rng, path,
+            )
 
 
 @dataclass(frozen=True)
@@ -106,8 +230,14 @@ class Spectrum:
         cls,
         path: Path | str,
         labels: tuple[str, str] = ("F1", "F2"),
+        nuclei: list[str] | None = None,
     ) -> Spectrum:
-        """用 nmrglue 读取 NMRPipe 二维 .ft2 并构建 ppm 轴。"""
+        """用 nmrglue 读取 NMRPipe 二维 .ft2 并构建 ppm 轴。
+
+        nuclei 为 metadata 逻辑轴核(F1/F2 序);非空时按存储头
+        FDF*LABEL/FDF*OBS 推断存储轴核并重排到逻辑序,并做 ppm 范围
+        自检(0.2.122);缺省保持位置序(旧行为)。
+        """
         import nmrglue as ng
 
         dic, data = ng.pipe.read(str(path))
@@ -129,6 +259,13 @@ class Spectrum:
             _axis("FDF1", labels[0], int(data.shape[0])),
             _axis("FDF2", labels[1], int(data.shape[1])),
         ]
+        storage = _storage_nuclei(dic, ("FDF1", "FDF2"))
+        if nuclei:
+            data, axes, storage = _reorder_to_logical(
+                data, axes, storage, list(nuclei), path
+            )
+        axes = _relabel_axes(axes, labels)
+        _warn_ppm_range_mismatch(axes, storage, path)
         logger.info("载入谱图: %s (%s)", path, data.shape)
         return cls(data, axes, source=Path(path))
 
@@ -173,8 +310,14 @@ class Spectrum3D:
         cls,
         path: Path | str,
         labels: tuple[str, str, str] = ("F1", "F2", "F3"),
+        nuclei: list[str] | None = None,
     ) -> Spectrum3D:
         """用 nmrglue 读取 NMRPipe 三维 .ft3 并构建 ppm 轴(契约 §10.1)。
+
+        nuclei 为 metadata 逻辑轴核(F1/F2/F3 序);非空时按存储头
+        FDF*LABEL/FDF*OBS 推断存储轴核,不一致则重排 data/axes 到逻辑
+        序并告警日志「轴序重排」,并做 ppm 范围自检(0.2.122);缺省
+        保持位置序(旧行为)。
 
         单文件 3D 流(xyz2pipe 产物,FDPIPEFLAG=1)读回形状 (F1, F2, F3),
         其中 F1=FDF3SIZE、F2=FDSPECNUM、F3=FDSIZE;非流文件按同约定重塑。
@@ -211,6 +354,13 @@ class Spectrum3D:
             _axis("FDF2", labels[1], int(data.shape[1])),
             _axis("FDF3", labels[2], int(data.shape[2])),
         ]
+        storage = _storage_nuclei(dic, ("FDF1", "FDF2", "FDF3"))
+        if nuclei:
+            data, axes, storage = _reorder_to_logical(
+                data, axes, storage, list(nuclei), path
+            )
+        axes = _relabel_axes(axes, labels)
+        _warn_ppm_range_mismatch(axes, storage, path)
         logger.info("载入三维谱: %s (%s)", path, data.shape)
         return cls(data, axes, source=Path(path))
 

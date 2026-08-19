@@ -350,8 +350,11 @@ class MainWindow(QMainWindow):
             {"source": source, "title": title, "sample_id": "", "copy": True}
         )
 
-    def _segmented_import(self, source: str) -> None:
-        """分段采集导入:容器目录(≥2 个含 acqus 的子目录)合并为一条样品数据。"""
+    def _segmented_import(self, exp_id: str, source: str) -> None:
+        """分段采集导入:容器目录(≥2 个含 acqus 的子目录)合并为一条样品数据。
+
+        exp_id 为当前实验类型;为空时后端新建实验(G2B-011)。
+        """
         if self.manager.project is None:
             InfoDialog.show_info(self, "提示", "请先新建或打开项目")
             return
@@ -375,6 +378,7 @@ class MainWindow(QMainWindow):
                 "sample_id": "",
                 "copy": True,
                 "segmented": True,
+                "experiment_id": exp_id,
             }
         )
 
@@ -499,9 +503,11 @@ class MainWindow(QMainWindow):
                     is_segmented_container(source)
                 )
                 if segmented:
-                    # 0.2.108:分段采集导入(容器目录合并为一条数据,后端新建实验)
+                    # 0.2.108/G2B-011:分段采集导入(容器目录合并为一条数据,
+                    # 导入到当前实验类型;exp_id 为空时后端新建)
                     result = self.controller.import_segmented_dataset(
                         source,
+                        exp_id=exp_id or "",
                         title=data.get("title", "") or "",
                         sample_id=data.get("sample_id", "") or "",
                         copy=bool(data.get("copy", True)),
