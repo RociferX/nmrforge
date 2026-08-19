@@ -584,3 +584,53 @@ def test_needs_acqu3s_td_fix_gates(
     shutil.copytree(bruker_dir / "hsqc_small", rawu)
     assert not backend._needs_acqu3s_td_fix(read_dataset(rawu))
 
+def test_project_3d_mapping(tmp_path: Path, monkeypatch) -> None:
+    '''project_3d 用 proj3D.tcl:xy/xz/yz 输出按文件轴标签映射固定轴核。'''
+    from backend.nmrpipe_backend import NMRPipeBackend
+
+    fake_tool = tmp_path / "tool"
+    fake_tool.write_text("#!/bin/sh\n", encoding="utf-8")
+
+    def fake_find(name, _bin=None):
+        return fake_tool
+
+    monkeypatch.setattr("backend.nmrpipe_finder.find_tool", fake_find)
+
+    calls: list[list[str]] = []
+
+    class FakeRun:
+        def __init__(self, rc):
+            self.returncode = rc
+
+    def fake_run(argv, *, cwd=None, timeout=3600, on_line=None):
+        calls.append(list(argv))
+        if "-outDir" in argv:
+            out_dir = Path(argv[argv.index("-outDir") + 1])
+            for name in ("proj_xy.ft2", "proj_xz.ft2", "proj_yz.ft2"):
+                (out_dir / name).write_bytes(b"x" * 2048)
+            return FakeRun(0)
+        else:
+            planes = Path(cwd) / "planes"
+            planes.mkdir(parents=True, exist_ok=True)
+            (planes / "test001.ft3").write_bytes(b"x" * 2048)
+            return FakeRun(0)
+
+    monkeypatch.setattr(
+        "backend.nmrpipe_backend.CshRuntime.run", staticmethod(fake_run)
+    )
+    backend = NMRPipeBackend()
+    out = tmp_path / "out"
+    out.mkdir()
+    result = backend.project_3d(
+        tmp_path / "final.ft3",
+        out,
+        prefix="proj",
+        labels=["15N", "1H", "13C"],
+    )
+    assert result["labels"]["xy"] == "13C"  # 沿文件 z(13C)求和
+    assert result["labels"]["xz"] == "1H"  # 沿文件 y(1H)
+    assert result["labels"]["yz"] == "15N"  # 沿文件 x(15N)
+    assert Path(result["paths"]["xy"]).is_file()
+    assert Path(result["paths"]["xz"]).is_file()
+    assert Path(result["paths"]["yz"]).is_file()
+    assert len(calls) == 2

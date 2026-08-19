@@ -23,6 +23,17 @@ from core.experiment.bruker_parser import parse_dataset_params
 from core.experiment.experiment_classifier import classify
 from core.experiment.sampling_detector import detect
 
+# 判断目录是否为 Bruker 数据的关键文件(任一存在即视为数据目录,用于导入时
+# 忽略非数据子文件夹,2026-08-19 Task F)
+DATA_KEY_FILES = ("acqus", "acqu2s", "acqu3s", "ser", "fid", "nuslist")
+
+
+def is_data_directory(path: Path | str) -> bool:
+    """目录含任一 Bruker 关键数据文件即视为数据目录(非数据文件夹返回 False)。"""
+    p = Path(path)
+    return any((p / name).is_file() for name in DATA_KEY_FILES)
+
+
 
 class BrukerDataError(Exception):
     """Bruker 数据读取/校验错误（携带可操作提示）。"""
@@ -301,7 +312,15 @@ def read_dataset_container(path: Path | str) -> tuple[Experiment, list[Path]]:
         return read_dataset(p), []
     segments = discover_segment_dirs(p)
     if not segments:
-        raise ValueError(f"既不是 Bruker 数据集目录,也没有分段子目录: {p}")
+        raise ValueError(
+            f"所选目录既不是 Bruker 数据集,子目录中也未找到任何含数据文件"
+            f"(acqus/acqu2s/acqu3s/ser/fid/nuslist)的数据段: {p}"
+        )
+    if len(segments) == 1:
+        raise ValueError(
+            f"仅找到 1 个含数据文件的子目录({segments[0].name}),分段导入至少"
+            f"需要 2 个;非数据子目录已忽略: {p}"
+        )
     return read_segments(segments), segments
 
 

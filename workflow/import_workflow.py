@@ -176,7 +176,7 @@ def import_data(
         experiment, discovered = read_dataset_container(src)
         if len(discovered) < 2:
             raise ImportWorkflowError(
-                f"分段导入至少需要 2 个含 acqus 的分段子目录: {src}"
+                f"分段导入至少需要 2 个含 acqus 的分段子目录(非数据子目录已忽略): {src}"
             )
         experiment.dataset_id = src.name  # 容器名作为数据标识
         segment_paths = [Path(seg).resolve() for seg in discovered]
