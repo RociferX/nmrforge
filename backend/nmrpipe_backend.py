@@ -1028,7 +1028,11 @@ class NMRPipeBackend:
             raise ToolError(f"proj3D 投影失败: rc={run.returncode}")
         labels = list(labels) + [""] * (3 - len(labels))
         return {
-            "paths": {"xy": xy, "xz": xz, "yz": yz},
+            "paths": {
+                "xy": str(dest / xy),
+                "xz": str(dest / xz),
+                "yz": str(dest / yz),
+            },
             "labels": {
                 "xy": labels[2],
                 "xz": labels[1],
