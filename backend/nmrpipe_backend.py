@@ -998,9 +998,10 @@ class NMRPipeBackend:
                 str(dic.get(k, "") or "")
                 for k in ("FDF1LABEL", "FDF2LABEL", "FDF3LABEL")
             ]
-        xy = str(dest / f"{prefix}_xy.ft2")
-        xz = str(dest / f"{prefix}_xz.ft2")
-        yz = str(dest / f"{prefix}_yz.ft2")
+        # proj3D.tcl 会把 outDir 自动拼到输出名前,因此只传文件名
+        xy = f"{prefix}_xy.ft2"
+        xz = f"{prefix}_xz.ft2"
+        yz = f"{prefix}_yz.ft2"
         run = runtime.run(
             [
                 str(proj3d),
@@ -1022,7 +1023,7 @@ class NMRPipeBackend:
         )
         shutil.rmtree(work, ignore_errors=True)
         if run.returncode != 0 or not all(
-            Path(p).is_file() for p in (xy, xz, yz)
+            (dest / p).is_file() for p in (xy, xz, yz)
         ):
             raise ToolError(f"proj3D 投影失败: rc={run.returncode}")
         labels = list(labels) + [""] * (3 - len(labels))
