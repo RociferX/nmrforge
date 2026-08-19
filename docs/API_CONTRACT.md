@@ -202,8 +202,9 @@ def process(self, experiment, plan) -> dict        # 保持;内部自动判断 N
 
 - raw 链接/副本:raw/<exp_id>/<data_id>/(G2B-009:默认硬链接→符号链接→复制回退)
 - metadata:metadata/<exp_id>-<data_id>.json
-- fid:processing/<exp_id>/<data_id>.fid(或 data 内)
-- 谱:spectra/<exp_id>-<data_id>.ft2|ft3
+- fid/中间产物:process/ 内以 <data_id> 为前缀(d_001.fid、d_001_nus.com、
+  d_001_preview_*.ft3、d_001_finalize.com 等;2026-08-19 起,重命名不影响)
+- 谱:spectra/<data_id>.ft2|ft3;3D 投影 spectra/<data_id>_proj_F{1,2,3}.ft2
 
 ### 8.5 GUI 树层级
 

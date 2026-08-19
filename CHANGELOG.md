@@ -1,5 +1,17 @@
 # 变更日志
 
+## [0.2.129] - 2026-08-19
+
+- 中间产物/终谱/投影命名前缀统一为样品数据 id(d_001)(用户要求,重命名不影响):
+  - stepwise._read_experiment 覆盖 experiment.dataset_id = data_id,消除
+    read_dataset(raw_dir) 造成的 raw_ 前缀(d_001.fid、d_001_nus.com、
+    d_001_preview_F1.ft3、d_001_finalize.com 等);
+  - 终谱归位 spectra/<data_id>.ft2|ft3(G2B-010 的 exp-data 前缀改为 d_001);
+  - 3D 投影 spectra/<data_id>_proj_F{1,2,3}.ft2;GUI 投影加载按
+    *_proj_F{1,2,3}.ft2 扫描(兼容旧命名);
+- 测试:本地全量 595 passed、ruff 全绿;VM 全量 591 passed + 4 skipped
+  (Python 3.12.13,HEAD 832ea41)。
+
 ## [0.2.128] - 2026-08-19
 
 - 直接维相位搜索(Backend,0.2.127-0.2.128):
