@@ -702,20 +702,22 @@ def search_direct_phase_on_spectrum(
     # 切片数学等价;只对窗口切片旋转,避免每次候选对整个数组旋转(真实数据
     # 首跑从数分钟降到数秒量级,结果逐位一致)
     flat = np.moveaxis(comp, axis, -1).reshape(-1, n)
+    width = 2 * radius + 1
     seg_slices = [
         (max(0, peak - radius), min(n, peak + radius + 1))
         for _, peak in windows
     ]
-    segments = np.stack(
-        [flat[i, lo:hi] for (i, _), (lo, hi) in zip(windows, seg_slices)]
-    )  # (W, width) complex
+    # 等宽零填充:窗口指标按元素求和/比值,零不贡献,与不等宽切片等价
+    segments = np.zeros((len(windows), width), dtype=np.complex128)
+    for j, ((i, _), (lo, hi)) in enumerate(zip(windows, seg_slices)):
+        segments[j, : hi - lo] = flat[i, lo:hi]
 
     def _score(p0: float, p1: float) -> float:
         k = np.arange(n, dtype=float)
         base = np.deg2rad(p0 + p1 * k / max(n - 1, 1))
-        seg_ramp = np.stack(
-            [np.exp(1j * base[lo:hi]) for lo, hi in seg_slices]
-        )
+        seg_ramp = np.zeros((len(segments), width), dtype=np.complex128)
+        for j, (lo, hi) in enumerate(seg_slices):
+            seg_ramp[j, : hi - lo] = np.exp(1j * base[lo:hi])
         rot = np.real(segments * seg_ramp)
         vals = [window_metric(rot[j]) for j in range(len(segments))]
         if metric == "symmetry":
