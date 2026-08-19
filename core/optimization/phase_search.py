@@ -615,30 +615,6 @@ def _symmetry_sign_metric(profile: np.ndarray) -> float:
     return sym if float(np.sum(f)) >= 0.0 else sym * 0.05
 
 
-def _symmetry_metric_vectorized(f2d: np.ndarray) -> np.ndarray:
-    """(W, width) 窗口批量对称性指标,与 _symmetry_sign_metric 逐窗一致。"""
-    n = f2d.shape[1]
-    half = n // 2
-    left = f2d[:, :half]
-    right = f2d[:, n - half :][:, ::-1]
-    denom = 2.0 * (left**2 + right**2) + 1e-12
-    sym = np.mean((left + right) ** 2 / denom, axis=1)
-    if n % 2 == 1:
-        c = f2d[:, half]
-        cterm = c**2 / (c**2 + 1e-12)
-        sym = (sym * half + cterm) / (half + 1)
-    sign_ok = f2d.sum(axis=1) >= 0.0
-    return np.where(sign_ok, sym, sym * 0.05)
-
-
-def _net_metric_vectorized(f2d: np.ndarray) -> np.ndarray:
-    """(W, width) 窗口批量净吸收指标,与 _net_window_metric 逐窗一致。"""
-    positive = np.clip(f2d, 0.0, None).sum(axis=1)
-    negative = np.clip(f2d, None, 0.0).sum(axis=1)
-    total = np.abs(f2d).sum(axis=1)
-    return np.where(total > 0, (positive + negative) / total, 0.0)
-
-
 def _signal_peak_windows(
     real: np.ndarray,
     *,
@@ -708,6 +684,7 @@ def search_direct_phase_on_spectrum(
         windows = _signal_peak_windows(real, axis=axis)
         if len(windows) < min_windows:
             return None
+        window_metric = _symmetry_sign_metric
     else:
         traces = np.moveaxis(real, axis, -1).reshape(-1, n)
         peak_mag = np.max(np.abs(traces), axis=-1)
@@ -719,42 +696,24 @@ def search_direct_phase_on_spectrum(
             return None
         pos = np.argmax(np.abs(traces[idx]), axis=-1)
         windows = list(zip(idx.tolist(), pos.tolist()))
+        window_metric = _net_window_metric
     comp = np.asarray(arr, dtype=np.complex128)
-    # 窗口迹线预提取(2026-08-19):旋转是逐点复乘,先切片后旋转与先旋转后
-    # 切片数学等价;只对窗口切片旋转,避免每次候选对整个数组旋转(真实数据
-    # 首跑从数分钟降到数秒量级,结果逐位一致)
-    flat = np.moveaxis(comp, axis, -1).reshape(-1, n)
-    width = 2 * radius + 1
-    k_arr = np.arange(n, dtype=float) / max(n - 1, 1)
-    interior_segs: list[np.ndarray] = []
-    interior_ks: list[np.ndarray] = []
-    edge_items: list[tuple[np.ndarray, np.ndarray]] = []
-    for i, peak in windows:
-        lo, hi = max(0, peak - radius), min(n, peak + radius + 1)
-        seg = flat[i, lo:hi]
-        kseg = k_arr[lo:hi]
-        if hi - lo == width:
-            interior_segs.append(seg)
-            interior_ks.append(kseg)
-        else:
-            edge_items.append((seg, kseg))
-    seg_int = (
-        np.stack(interior_segs) if interior_segs else np.empty((0, width), dtype=np.complex128)
-    )
-    k_int = np.stack(interior_ks) if interior_ks else np.empty((0, width))
+    ramp_shape = [1] * comp.ndim
+    ramp_shape[axis] = n
 
     def _score(p0: float, p1: float) -> float:
-        rot_int = np.real(seg_int * np.exp(1j * np.deg2rad(p0 + p1 * k_int)))
+        k = np.arange(n, dtype=float)
+        ramp = np.exp(
+            1j * np.deg2rad(p0 + p1 * k / max(n - 1, 1))
+        ).reshape(ramp_shape)
+        rot = comp * ramp
+        rot_real = np.moveaxis(np.real(rot), axis, -1).reshape(-1, n)
+        vals = []
+        for i, peak in windows:
+            lo, hi = max(0, peak - radius), min(n, peak + radius + 1)
+            vals.append(window_metric(rot_real[i, lo:hi]))
         if metric == "symmetry":
-            vals = _symmetry_metric_vectorized(rot_int).tolist()
-            for seg, kseg in edge_items:
-                r = np.real(seg * np.exp(1j * np.deg2rad(p0 + p1 * kseg)))
-                vals.append(_symmetry_sign_metric(r))
             return 100.0 * float(np.mean(vals))
-        vals = _net_metric_vectorized(rot_int).tolist()
-        for seg, kseg in edge_items:
-            r = np.real(seg * np.exp(1j * np.deg2rad(p0 + p1 * kseg)))
-            vals.append(_net_window_metric(r))
         return 50.0 * (float(np.median(vals)) + 1.0)
 
     t0 = time.time()

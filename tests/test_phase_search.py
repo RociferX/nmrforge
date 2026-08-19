@@ -171,3 +171,4 @@ def test_direct_phase_search_progress_and_result() -> None:
     if messages:
         assert "直接维相位搜索中" in messages[0]
         assert "完成" in messages[-1]
+
