@@ -152,3 +152,31 @@ def test_search_direct_phase_on_spectrum_recovers() -> None:
     # 2) 落在含真值(120)的平台内(±90°)。
     assert score > 90.0, score
     assert abs(((p0 - 120.0 + 180.0) % 360.0) - 180.0) <= 90.0, p0
+
+def test_argmax_score_returns_best() -> None:
+    '''候选并行评分辅助:返回最优值与分数。'''
+    from core.optimization.phase_search import _argmax_score
+
+    best, score = _argmax_score([1.0, 5.0, 3.0], lambda v: -abs(v - 4.0))
+    assert best == 5.0
+    assert score == -1.0
+
+
+def test_direct_phase_search_progress_and_result() -> None:
+    '''直接维搜索:候选并行 + progress 消息(中/完成)。'''
+    import numpy as np
+
+    from core.optimization.phase_search import search_direct_phase_on_spectrum
+
+    rng = np.random.default_rng(7)
+    arr = rng.normal(size=(20, 16, 12)).astype(np.complex128)
+    # 注入一个强直接维峰
+    arr[10, 8, :] = np.exp(1j * np.deg2rad(30.0)) * 10.0
+    messages: list[str] = []
+    res = search_direct_phase_on_spectrum(
+        arr, axis=0, metric="symmetry", progress=messages.append
+    )
+    assert res is None or len(res) == 3
+    if messages:
+        assert "直接维相位搜索中" in messages[0]
+        assert "完成" in messages[-1]

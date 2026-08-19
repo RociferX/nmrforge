@@ -266,6 +266,100 @@ def unified_route(
         "direct_phase": fixed.get(direct_axis),
     }
 
+_DIRECT_PHASE_FP_KEYS = (
+    "extract", "ext_lo", "ext_hi", "nsigma", "thresh",
+    "smile_xq3", "smile_scaling", "zero_fill", "linewidth_hz",
+    "points_per_line", "segment_shift_hz", "sampling",
+)
+
+
+def _direct_phase_params_fp(experiment: Experiment, params: dict) -> str:
+    """直接维相位缓存指纹:影响重构平面的参数 + 数据集标识。"""
+    import hashlib
+    import json as _json
+
+    payload = {
+        "dataset_id": experiment.dataset_id,
+        "ndim": experiment.ndim,
+        "segments": [str(s) for s in (experiment.segments or [])],
+        "params": {k: params.get(k) for k in _DIRECT_PHASE_FP_KEYS},
+    }
+    return hashlib.sha256(
+        _json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+
+
+def _direct_phase_cache_path(work: Path) -> Path:
+    return work / "phase.json"
+
+
+def _estimate_direct_phase_seconds(work: Path) -> float | None:
+    """读上次 unified_direct 相位搜索耗时(用于进度预估)。"""
+    import json as _json
+
+    path = _direct_phase_cache_path(work)
+    if not path.is_file():
+        return None
+    try:
+        data = _json.loads(path.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return None
+    if data.get("source") != "unified_direct":
+        return None
+    dur = data.get("duration_s")
+    return float(dur) if dur else None
+
+
+def _load_direct_phase_cache(
+    work: Path, experiment: Experiment, params: dict, shape
+) -> dict | None:
+    """参数与谱面未变时复用 phase.json 缓存(跳过重复搜索)。"""
+    import json as _json
+
+    path = _direct_phase_cache_path(work)
+    if not path.is_file():
+        return None
+    try:
+        data = _json.loads(path.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return None
+    if data.get("version") != 2 or data.get("source") != "unified_direct":
+        return None
+    if list(data.get("shape") or []) != list(shape):
+        return None
+    if data.get("params_fp") != _direct_phase_params_fp(experiment, params):
+        return None
+    return data
+
+
+def _save_direct_phase_cache(
+    work: Path, experiment: Experiment, params: dict, shape,
+    p0: float, p1: float, score: float, duration_s: float,
+) -> None:
+    import json as _json
+
+    try:
+        _direct_phase_cache_path(work).write_text(
+            _json.dumps(
+                {
+                    "version": 2,
+                    "source": "unified_direct",
+                    "p0": p0,
+                    "p1": p1,
+                    "score": score,
+                    "shape": list(shape),
+                    "params_fp": _direct_phase_params_fp(experiment, params),
+                    "duration_s": round(float(duration_s), 2),
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
+
+
 def _load_recon_planes(experiment: Experiment, work: Path) -> np.ndarray:
     """读 SMILE 重构复型平面:2D recon.ft1(直接维, F1 时间);
     3D nus3d_rc/test%04d.ft1 交错拆包后按 F1 增量堆叠(直接维, F2 时间, F1 时间)。"""
@@ -327,23 +421,61 @@ def _unified_nus(
     # 直接维:recon 平面 axis 0 复型 → 沿用旧权威的显示层对称性搜索
     # (0.2.96/0.2.98 机制;旧几十次后端方案从不把固定迹线净吸收用于 NUS
     # 直接维,直接维随 SMILE 固化)。score<30 时保持 (0,0)。
+    import time as _time
+
     from core.optimization.phase_search import search_direct_phase_on_spectrum
 
-    direct_est = search_direct_phase_on_spectrum(planes, axis=0, metric="symmetry")
-    direct_phase = (0.0, 0.0)
-    if direct_est is not None and direct_est[2] >= 30.0:
-        direct_phase = (float(direct_est[0]), float(direct_est[1]))
-        if abs(direct_phase[1]) > 20.0:
-            logs.append(
-                f"直接维对称性搜索 p1={direct_phase[1]:g}° 幅值异常(>20°),归零"
-            )
-            direct_phase = (direct_phase[0], 0.0)
-        logs.append(
-            f"直接维对称性搜索: {direct_axis}=({direct_phase[0]:g}°, "
-            f"{direct_phase[1]:g}°) score={direct_est[2]:.2f}"
-        )
+    sampling_block = dict((base_params or {}).get("sampling") or {})
+    if sampling_block.get("auto_phase") is False:
+        direct_phase = (0.0, 0.0)
+        logs.append("sampling.auto_phase=False,直接维相位保持 (0,0)(跳过搜索)")
     else:
-        logs.append("直接维对称性搜索无干净信号峰或置信度不足,保持 (0,0)")
+        cache = _load_direct_phase_cache(
+            work, experiment, base_params or {}, planes.shape
+        )
+        if cache is not None:
+            direct_phase = (float(cache["p0"]), float(cache["p1"]))
+            logs.append(
+                f"直接维相位复用缓存 phase.json: {direct_axis}="
+                f"({direct_phase[0]:g}°, {direct_phase[1]:g}°)"
+            )
+        else:
+            last_s = _estimate_direct_phase_seconds(work)
+            if progress is not None:
+                if last_s:
+                    progress(
+                        f"直接维相位搜索中(上次约 {last_s:.0f} 秒),请稍候"
+                    )
+                else:
+                    progress("直接维相位搜索中(首次运行,通常数十秒),请稍候")
+            t0 = _time.time()
+            direct_est = search_direct_phase_on_spectrum(
+                planes, axis=0, metric="symmetry", progress=progress
+            )
+            elapsed = _time.time() - t0
+            if progress is not None:
+                progress(f"直接维相位搜索完成,耗时 {elapsed:.1f} 秒")
+            direct_phase = (0.0, 0.0)
+            if direct_est is not None and direct_est[2] >= 30.0:
+                direct_phase = (float(direct_est[0]), float(direct_est[1]))
+                if abs(direct_phase[1]) > 20.0:
+                    logs.append(
+                        f"直接维对称性搜索 p1={direct_phase[1]:g}° 幅值异常(>20°),归零"
+                    )
+                    direct_phase = (direct_phase[0], 0.0)
+                logs.append(
+                    f"直接维对称性搜索: {direct_axis}=({direct_phase[0]:g}°, "
+                    f"{direct_phase[1]:g}°) score={direct_est[2]:.2f}"
+                )
+                _save_direct_phase_cache(
+                    work, experiment, base_params or {}, planes.shape,
+                    direct_phase[0], direct_phase[1], float(direct_est[2]),
+                    elapsed,
+                )
+            else:
+                logs.append(
+                    "直接维对称性搜索无干净信号峰或置信度不足,保持 (0,0)"
+                )
     logs.append(
         f"直接维内存相位: {direct_axis}=({direct_phase[0]:g}°, {direct_phase[1]:g}°)"
     )

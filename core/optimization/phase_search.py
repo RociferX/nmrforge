@@ -13,7 +13,15 @@
 
 from __future__ import annotations
 
+import concurrent.futures
+import logging
+import os
+import time
+from collections.abc import Callable
+
 import numpy as np
+
+logger = logging.getLogger("nmrforge.optimization.phase_search")
 
 # ---------------------------------------------------------------- p1 共识
 
@@ -647,6 +655,32 @@ def _signal_peak_windows(
     return windows
 
 
+def _argmax_score(values: list[float], score_fn: Callable[[float], float]) -> tuple[float, float]:
+    """在候选值上并行评分,返回 (最优值, 分数)(2026-08-19 候选并行)。"""
+    if len(values) <= 1:
+        return float(values[0]), float(score_fn(float(values[0])))
+    workers = min(8, max(1, (os.cpu_count() or 1)))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        scores = list(pool.map(lambda v: score_fn(float(v)), values))
+    idx = int(np.argmax(scores))
+    return float(values[idx]), float(scores[idx])
+
+
+def _parallel_best(
+    pairs: list[tuple[float, float]], score_fn: Callable[[float, float], float]
+) -> tuple[float, float, float]:
+    """在 (p0,p1) 候选对上并行评分,返回 (score, p0, p1)(2026-08-19)。"""
+    if len(pairs) <= 1:
+        p0, p1 = pairs[0]
+        return float(score_fn(p0, p1)), p0, p1
+    workers = min(8, max(1, (os.cpu_count() or 1)))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        scores = list(pool.map(lambda pair: score_fn(pair[0], pair[1]), pairs))
+    idx = int(np.argmax(scores))
+    p0, p1 = pairs[idx]
+    return float(scores[idx]), p0, p1
+
+
 def search_direct_phase_on_spectrum(
     spectrum: np.ndarray,
     *,
@@ -656,6 +690,7 @@ def search_direct_phase_on_spectrum(
     radius: int = 12,
     min_windows: int = 5,
     prefer_p1_zero: bool = True,
+    progress: Callable[[str], None] | None = None,
 ) -> tuple[float, float, float] | None:
     """谱上直接维相位评分搜索 (p0, p1)。
 
@@ -709,34 +744,44 @@ def search_direct_phase_on_spectrum(
             return 100.0 * float(np.mean(vals))
         return 50.0 * (float(np.median(vals)) + 1.0)
 
-    best = None
-    for p0 in np.arange(0.0, 360.0, coarse_p0_step):
-        for p1 in (-90, -60, -30, 0, 30, 60, 90):
-            s = _score(float(p0), float(p1))
-            if best is None or s > best[0]:
-                best = (s, float(p0), float(p1))
-    s0, p0, p1 = best
+    t0 = time.time()
+    if progress is not None:
+        progress("直接维相位搜索中(候选并行),请稍候")
+    # 粗网格 p0×p1(候选并行)
+    coarse_pairs = [
+        (float(p0), float(p1))
+        for p0 in np.arange(0.0, 360.0, coarse_p0_step)
+        for p1 in (-90, -60, -30, 0, 30, 60, 90)
+    ]
+    s0, p0, p1 = _parallel_best(coarse_pairs, _score)
+    # 两级局部细化(候选并行)
     for _ in range(2):
-        for dp0 in (-15, -5, 0, 5, 15):
-            for dp1 in (-15, -5, 0, 5, 15):
-                ss = _score((p0 + dp0) % 360.0, p1 + dp1)
-                if ss > s0:
-                    best = (ss, (p0 + dp0) % 360.0, p1 + dp1)
-                    s0, p0, p1 = best
+        win = [
+            ((p0 + dp0) % 360.0, p1 + dp1)
+            for dp0 in (-15, -5, 0, 5, 15)
+            for dp1 in (-15, -5, 0, 5, 15)
+        ]
+        s, pc, qc = _parallel_best(win, _score)
+        if s > s0:
+            s0, p0, p1 = s, pc, qc
     if prefer_p1_zero and abs(_score(p0, 0.0) - s0) < 1.0:
         p1 = 0.0
         s0 = _score(p0, 0.0)
     if metric == "symmetry":
-        # 全圆近最优平台取「最小修正」(人工习惯:谱已接近好相位不乱加修正;
-        # 真值远离 0 时平台中心在真值处,近最优集合不含 (0,0))
-        near = []
-        for dp0 in np.arange(-180.0, 181.0, 5.0):
-            for dp1 in np.arange(-60.0, 61.0, 5.0):
-                pc = (p0 + dp0) % 360.0
-                qc = p1 + dp1
-                sc = _score(pc, qc)
-                if sc >= s0 - 5.0:
-                    near.append((sc, pc, qc))
+        # 全圆近最优平台取「最小修正」(候选并行;原串行 1825 次评分热点)
+        near_pairs = [
+            ((p0 + dp0) % 360.0, p1 + dp1)
+            for dp0 in np.arange(-180.0, 181.0, 5.0)
+            for dp1 in np.arange(-60.0, 61.0, 5.0)
+        ]
+        workers = min(8, max(1, (os.cpu_count() or 1)))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+            scores = list(pool.map(lambda pair: _score(pair[0], pair[1]), near_pairs))
+        near = [
+            (float(sc), pc, qc)
+            for (pc, qc), sc in zip(near_pairs, scores)
+            if sc >= s0 - 5.0
+        ]
         if near:
             near.sort(
                 key=lambda t: (
@@ -747,4 +792,11 @@ def search_direct_phase_on_spectrum(
             )
             p0, p1 = near[0][1], near[0][2]
             s0 = _score(p0, p1)
+    logger.info(
+        "直接维相位搜索: shape=%s 候选并行完成, 耗时 %.1fs",
+        tuple(comp.shape),
+        time.time() - t0,
+    )
+    if progress is not None:
+        progress(f"直接维相位搜索完成,耗时 {time.time() - t0:.1f} 秒")
     return p0, p1, s0
