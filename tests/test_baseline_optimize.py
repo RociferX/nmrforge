@@ -33,12 +33,8 @@ def test_optimize_baseline_direct_axis_slope(
     tmp_path: Path, bruker_dir: Path
 ) -> None:
     """直接维(F2)线性漂移:优化选校正(off 分数低于最优)。"""
-    from scipy.ndimage import gaussian_filter
-
     spec = np.zeros((32, 64))
     spec += np.linspace(-50.0, 50.0, 64)[np.newaxis, :]
-    spec[16, 30] = 500.0
-    spec = gaussian_filter(spec, sigma=(0.8, 1.2))
     ft2 = tmp_path / "spec.ft2"
     _write_ft2(ft2, spec)
     experiment = read_dataset(bruker_dir / "hsqc_2d")

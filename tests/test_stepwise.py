@@ -270,7 +270,6 @@ def test_optimize_phase_brute_force_embeds_baseline(
             x = np.linspace(-1.0, 1.0, 64)
             data = np.zeros((32, 64))
             data += (x**2) * 120.0
-            data[16, 30] = 500.0
             from nmrglue.fileio import pipe
 
             dic = {k: "0" for k in pipe.fdata_dic}

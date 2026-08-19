@@ -1,5 +1,24 @@
 # 变更日志
 
+## [0.2.132] - 2026-08-19
+
+- 修复自动基线优化(0.2.130 全轴写回)导致的终谱竖线条纹伪影:
+  - 根因:逐迹多项式拟合被强峰拉偏 → 相邻迹拟合系数跳变 → 竖线条纹;
+    旧评分只测两端/中部均值,对条纹不敏感,且评分轴用 enumerate 序号
+    (dimensions 直接维在前时评错 numpy 轴),间接轴逐列校正"吃平"整列
+    被高分误选进入终谱;
+  - core/qc/baseline_quality.py:新增条纹罚项 stripe_penalty(相邻迹端部
+    均值跳变 max/median,稀疏强峰拉偏显著增大),并入 score 与
+    needs_correction;
+  - workflow/baseline_optimize.py:评分轴改为 axis_index 逻辑轴→numpy 轴
+    映射(与 baseline.apply 校正轴一致);逐迹候选 plain polyfit(与真实
+    脚本 POLY 一致)引入明显迹间断层时硬性否决(不计入择优,保持 off);
+    无实质增益(≤0.5)保持 off,不再写 POLY -auto;
+  - 测试:新增 tests/test_baseline_stripe.py 三个回归(条纹罚项敏感、
+    强峰谱择优保持 off、评分/校正轴一致);既有基线择优/写回测试的
+    合成谱去掉被拉偏用的强峰点(保持各自漂移/曲率意图),断言不变;
+  - 本地全量 pytest + ruff 全绿。
+
 ## [0.2.130] - 2026-08-19
 
 - NUS 末遍改完整脚本终跑(用户方案,不再产生 nus3d_rc_ph 旋转副本):
