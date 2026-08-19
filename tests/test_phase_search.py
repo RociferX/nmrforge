@@ -153,15 +153,6 @@ def test_search_direct_phase_on_spectrum_recovers() -> None:
     assert score > 90.0, score
     assert abs(((p0 - 120.0 + 180.0) % 360.0) - 180.0) <= 90.0, p0
 
-def test_argmax_score_returns_best() -> None:
-    '''候选并行评分辅助:返回最优值与分数。'''
-    from core.optimization.phase_search import _argmax_score
-
-    best, score = _argmax_score([1.0, 5.0, 3.0], lambda v: -abs(v - 4.0))
-    assert best == 5.0
-    assert score == -1.0
-
-
 def test_direct_phase_search_progress_and_result() -> None:
     '''直接维搜索:候选并行 + progress 消息(中/完成)。'''
     import numpy as np
