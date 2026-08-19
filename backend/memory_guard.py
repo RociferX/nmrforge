@@ -80,13 +80,10 @@ def memory_guard(
     direct_points: int,
     indirect_grid: int,
     available_mb: int | None = None,
-    block: bool = True,
 ) -> dict[str, Any]:
     """SMILE 内存护栏判定。
 
-    返回 {"ok", "peak_mb", "available_mb", "needed_gb", "blocked", "message"}。
-    block=True(默认)超限给出阻断消息;block=False 时超限仅警告(调用方
-    决定是否强制运行,0.2.124)。
+    返回 {"ok", "peak_mb", "available_mb", "needed_gb", "message"}。
     """
     peak = estimate_smile_peak_mb(ndim, direct_points, indirect_grid)
     avail = int(available_mb or available_memory_mb())
@@ -97,25 +94,16 @@ def memory_guard(
             "peak_mb": peak,
             "available_mb": avail,
             "needed_gb": 0,
-            "blocked": False,
             "message": "",
         }
     needed_gb = math.ceil(peak / 1024.0)
-    if block:
-        message = (
-            f"当前可用内存约 {avail} MB,处理该谱 SMILE 峰值约 {peak:.0f} MB,"
-            f"无法在当前内存下处理,请至少提供 {needed_gb} GB 内存"
-        )
-    else:
-        message = (
-            f"当前可用内存约 {avail} MB,处理该谱 SMILE 峰值约 {peak:.0f} MB,"
-            f"已超可用预算(×{MEM_SAFETY:.2f});继续运行需额外内存(约 {needed_gb} GB)"
-        )
     return {
         "ok": False,
         "peak_mb": peak,
         "available_mb": avail,
         "needed_gb": needed_gb,
-        "blocked": block,
-        "message": message,
+        "message": (
+            f"当前可用内存约 {avail} MB,处理该谱 SMILE 峰值约 {peak:.0f} MB,"
+            f"无法在当前内存下处理,请至少提供 {needed_gb} GB 内存"
+        ),
     }

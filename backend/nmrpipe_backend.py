@@ -608,17 +608,14 @@ class NMRPipeBackend:
         )
         logs += zero_fill_report(zf_plan)
         # 0.2.112:内存护栏——SMILE 峰值估计(VM 实测:3D ∝ 直接维点数,
-        # ≈1.15MB/点,与采样点数无关);超限先降直接维填零 1×TD,仍超默认
-        # 警告并允许强制运行(0.2.124,smile_allow_over_limit 默认 True),
-        # 原阻断语义经 smile_allow_over_limit=False 可配置
+        # ≈1.15MB/点,与采样点数无关);超限先降直接维填零 1×TD,仍超则报错
         from backend.memory_guard import (
             MEM_SAFETY,
             available_memory_mb,
             direct_points_after_ext,
-            memory_guard,
+            estimate_smile_peak_mb,
         )
 
-        allow_over_limit = _as_bool(params.get("smile_allow_over_limit", True))
         direct_axis = (
             experiment.dimensions[0].logical_axis
             if experiment.dimensions
@@ -626,19 +623,17 @@ class NMRPipeBackend:
         )
         zf_direct = int((zf_plan.get(direct_axis) or {}).get("size") or td[0])
         direct_pts = direct_points_after_ext(experiment, zf_direct, ext_lo, ext_hi)
-        avail_mb = available_memory_mb()
-        guard = memory_guard(
-            experiment.ndim, direct_pts, grid_points,
-            available_mb=avail_mb, block=False,
+        peak_mb = estimate_smile_peak_mb(
+            experiment.ndim, direct_pts, grid_points
         )
-        if not guard["ok"]:
+        avail_mb = available_memory_mb()
+        if peak_mb > avail_mb * MEM_SAFETY:
             td0 = max(int(td[0]), 1)
             one_x = 1 << (td0 - 1).bit_length()  # 1×TD 的 next_pow2
             if zf_direct > one_x:
                 logs.append(
-                    f"内存护栏:峰值约 {guard['peak_mb']:.0f}MB > 可用 "
-                    f"{avail_mb}MB×{MEM_SAFETY:.2f},直接维填零降为 "
-                    f"1×TD({zf_direct}→{one_x})"
+                    f"内存护栏:峰值约 {peak_mb:.0f}MB > 可用 {avail_mb}MB×"
+                    f"{MEM_SAFETY:.2f},直接维填零降为 1×TD({zf_direct}→{one_x})"
                 )
                 if progress is not None:
                     progress("内存不足:直接维填零已降为 1×TD 以降低 SMILE 内存")
@@ -650,29 +645,21 @@ class NMRPipeBackend:
                 direct_pts = direct_points_after_ext(
                     experiment, one_x, ext_lo, ext_hi
                 )
-                guard = memory_guard(
-                    experiment.ndim, direct_pts, grid_points,
-                    available_mb=avail_mb, block=False,
+                peak_mb = estimate_smile_peak_mb(
+                    experiment.ndim, direct_pts, grid_points
                 )
-        memory_warning: dict[str, Any] | None = None
-        if not guard["ok"]:
-            if not allow_over_limit:
+            if peak_mb > avail_mb * MEM_SAFETY:
+                import math
+
+                needed_gb = math.ceil(peak_mb / 1024.0)
                 return {
                     "success": False,
-                    "message": guard["message"],
+                    "message": (
+                        f"当前内存无法处理该谱(可用约 {avail_mb} MB,SMILE "
+                        f"峰值约 {peak_mb:.0f} MB),请至少提供 {needed_gb} GB 内存"
+                    ),
                     "logs": logs,
                 }
-            memory_warning = {
-                "peak_mb": guard["peak_mb"],
-                "available_mb": guard["available_mb"],
-                "needed_gb": guard["needed_gb"],
-                "message": guard["message"],
-            }
-            logs.append(
-                "⚠ " + guard["message"] + "（smile_allow_over_limit,强制运行）"
-            )
-            if progress is not None:
-                progress("SMILE 内存超护栏估计,按 smile_allow_over_limit 继续运行")
         # 0.2.96:显示层相位搜索(1× SMILE,无额外后端)——主重构用 PS(0,0)
         # (或缓存相位);重构后在复型 recon 平面上对称性评分,最后一步把相位
         # 旋转应用到 recon 并便宜重渲 stage-2(非 SMILE)
@@ -807,7 +794,6 @@ class NMRPipeBackend:
             "message": "SMILE 重构成功",
             "spectrum_path": str(spectrum),
             "logs": logs,
-            "memory_warning": memory_warning,
             "effective_params": {
                 **_effective_params_base(
                     extract,
