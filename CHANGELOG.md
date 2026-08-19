@@ -1,5 +1,21 @@
 # 变更日志
 
+## [0.2.130] - 2026-08-19
+
+- NUS 末遍改完整脚本终跑(用户方案,不再产生 nus3d_rc_ph 旋转副本):
+  - 各维最终相位填入初始脚本成为新的完整脚本:直接维相位进 step1 PS
+    (移到 EXT 之后,p1 归一化与 recon 平面内存旋转一致),间接维相位进
+    step3 PS(-di),终跑为完整 nus.com 重跑(含 SMILE);
+  - 联合复核与终跑之间新增处理参数优化:基线(内存评分,全部轴写回)、
+    间接维窗函数/填零(候选 finalize 重渲 + 谱质量评分,不重跑 SMILE),
+    结果一并写入终跑完整脚本;直接维窗/SMILE 内部 apod 保持默认并日志说明;
+  - NUS 完整脚本/finalize 支持 window(直接维 step1、间接维 step3/finalize
+    FT 前可配,gaussian/sine_bell/sine_bell²/exp,缺省不插窗);
+  - reconstruct_nus/finalize_nus 透传 window;stepwise 状态并入
+    zero_fill/window;
+- 测试:完整脚本相位填入/PS 在 EXT 后/窗函数位置/处理参数优化编排与窗择优/
+  finalize window 透传;本地全量 601 passed、ruff 全绿。
+
 ## [0.2.127] - 2026-08-19
 
 - 直接维相位搜索加速(Backend,用户要求 3 项):
