@@ -1,0 +1,10 @@
+docs: 开发模式更新——总管 Agent 工作原则设为首轮必读 + 固定记忆结构
+
+- .codex/AGENTS.md 重写:总管原则(记忆文件化/任务独立/短提示词/快速交接)
+  作为首轮必读,附项目事实速查(环境/测试/ownership/VM 同步/补丁模式);
+- 建立固定记忆库:docs/manager|gui|backend/{project_state|state,
+  architecture,decisions,handoff}.md,按职责分层记录,避免无关上下文;
+- 当前任务独立记录:docs/tasks/current.md(合并验收 G2B-011/进度可见/
+  轴序校对);已完成任务迁移 docs/tasks/archive/;
+- GUI/Backend 角色文件加长期记忆指向;HANDOVER 标注为旧文档;
+- 修正任务归档后的旧路径引用。
