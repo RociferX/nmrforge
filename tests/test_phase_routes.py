@@ -188,7 +188,7 @@ def test_unified_route_nus_reconstruct_then_finalize(
     # NUS 直接维沿用旧权威对称性搜索(0.2.96 机制)
     monkeypatch.setattr(
         "core.optimization.phase_search.search_direct_phase_on_spectrum",
-        lambda arr, axis=0, metric="symmetry": (30.0, 0.0, 80.0),
+        lambda arr, axis=0, metric="symmetry", progress=None: (30.0, 0.0, 80.0),
     )
     # finalize 复型预览产物:按文件名给 F1 已知相位 -10°
     def fake_read(path: str, unpack_axis: int | None = None):
@@ -230,7 +230,7 @@ def test_unified_route_nus_progress_stages(
     monkeypatch.setattr(routes, "_load_recon_planes", lambda exp, wk: planes)
     monkeypatch.setattr(
         "core.optimization.phase_search.search_direct_phase_on_spectrum",
-        lambda arr, axis=0, metric="symmetry": (30.0, 0.0, 80.0),
+        lambda arr, axis=0, metric="symmetry", progress=None: (30.0, 0.0, 80.0),
     )
     monkeypatch.setattr(
         routes, "_read_complex_preview",
@@ -299,3 +299,54 @@ def test_finalize_nus_progress_callback(tmp_path: Path, monkeypatch, bruker_dir:
     assert resp["success"] is True, resp
     assert "开始 finalize(复型预览/终跑)" in messages, messages
     assert "finalize 完成" in messages, messages
+
+def test_direct_phase_cache_roundtrip(tmp_path: Path) -> None:
+    '''直接维相位缓存:保存→加载命中;shape/参数变化则失效。'''
+    from core.data.internal_data_model import (
+        AxisRole,
+        Dimension,
+        Experiment,
+        Sampling,
+    )
+    from workflow.phase_routes import (
+        _direct_phase_params_fp,
+        _load_direct_phase_cache,
+        _save_direct_phase_cache,
+    )
+
+    dims = [
+        Dimension(logical_axis="F3", nucleus="1H", role=AxisRole.DIRECT),
+        Dimension(logical_axis="F2", nucleus="15N", role=AxisRole.INDIRECT),
+        Dimension(logical_axis="F1", nucleus="13C", role=AxisRole.INDIRECT),
+    ]
+    exp = Experiment(
+        dataset_id="x",
+        source_path=Path("x"),
+        ndim=3,
+        dimensions=dims,
+        sampling=Sampling(),
+        acquisition_parameters={},
+        processing_state={},
+        segments=[],
+    )
+    params = {"ext_lo": 10.5, "ext_hi": 6.5, "extract": True}
+    shape = (20, 16, 12)
+    fp = _direct_phase_params_fp(exp, params)
+    assert fp == _direct_phase_params_fp(exp, dict(params))
+    assert fp != _direct_phase_params_fp(exp, {"ext_lo": 9.0, "ext_hi": 7.0})
+
+    _save_direct_phase_cache(
+        tmp_path, exp, params, shape, 12.5, -3.0, 40.0, 22.3
+    )
+    data = _load_direct_phase_cache(tmp_path, exp, params, shape)
+    assert data is not None
+    assert float(data["p0"]) == 12.5
+    assert float(data["p1"]) == -3.0
+    assert float(data["duration_s"]) == 22.3
+    assert _load_direct_phase_cache(tmp_path, exp, params, (21, 16, 12)) is None
+    assert (
+        _load_direct_phase_cache(
+            tmp_path, exp, {"ext_lo": 9.0, "ext_hi": 7.0}, shape
+        )
+        is None
+    )
