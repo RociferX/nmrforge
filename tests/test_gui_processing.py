@@ -404,3 +404,47 @@ def test_generate_spectrum_explicit_linewidth_wins(
     )
     params = captured.get("params") or {}
     assert params["linewidth_hz"] == {"F2": 99.0}
+
+def test_resolve_import_source(tmp_path: Path) -> None:
+    '''Task F:忽略非数据子目录,解析导入源(数据集/分段/单数据/无数据)。'''
+    from gui.processing import resolve_import_source
+    from workflow.import_workflow import ImportWorkflowError
+
+    dataset = tmp_path / "dataset"
+    dataset.mkdir()
+    (dataset / "acqus").write_text("x", encoding="utf-8")
+    src, seg = resolve_import_source(dataset)
+    assert src == str(dataset.resolve()) or src == str(dataset)
+    assert seg is False
+
+    container = tmp_path / "container"
+    container.mkdir()
+    for name in ("segA", "segB"):
+        d = container / name
+        d.mkdir()
+        (d / "acqus").write_text("x", encoding="utf-8")
+    (container / "notes").mkdir()
+    (container / "notes" / "readme.txt").write_text("x", encoding="utf-8")
+    src, seg = resolve_import_source(container)
+    assert seg is True
+
+    one = tmp_path / "one"
+    one.mkdir()
+    segd = one / "segA"
+    segd.mkdir()
+    (segd / "acqus").write_text("x", encoding="utf-8")
+    (one / "notes").mkdir()
+    (one / "notes" / "readme.txt").write_text("x", encoding="utf-8")
+    src, seg = resolve_import_source(one)
+    assert seg is False
+    assert Path(src).name == "segA"
+
+    nothing = tmp_path / "nothing"
+    nothing.mkdir()
+    (nothing / "notes").mkdir()
+    (nothing / "notes" / "readme.txt").write_text("x", encoding="utf-8")
+    try:
+        resolve_import_source(nothing)
+        raise AssertionError("应抛 ImportWorkflowError")
+    except ImportWorkflowError:
+        pass

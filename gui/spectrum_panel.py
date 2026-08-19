@@ -229,7 +229,10 @@ class SpectrumPanel(QWidget):
             if data_id:
                 spectra_dir = self.manager.data_dir(exp_id, data_id, "spectra")
                 for ext in (".ft2", ".ft3"):
-                    paths.extend(sorted(spectra_dir.glob(f"*{ext}")))
+                    for p in sorted(spectra_dir.glob(f"*{ext}")):
+                        if "_proj_" in p.name:
+                            continue
+                        paths.append(p)
                 if paths:
                     return paths
         except Exception:  # noqa: BLE001 - 新布局不可用回退旧路径
@@ -237,7 +240,11 @@ class SpectrumPanel(QWidget):
         # 旧扁平布局回退(项目根 spectra/,{exp_id}* 通配)
         spectra_dir = self.manager.dir_path("spectra")
         for ext in (".ft2", ".ft3"):
-            paths.extend(sorted(spectra_dir.glob(f"{exp_id}*{ext}")))
+            for p in sorted(spectra_dir.glob(f"{exp_id}*{ext}")):
+                # Task E:投影文件(proj3D 产物)由 3D 面板内部加载,不列为谱图
+                if "_proj_" in p.name:
+                    continue
+                paths.append(p)
         return paths
 
     def open_spectrum(self, path: Path, name: str | None = None) -> bool:
@@ -271,6 +278,9 @@ class SpectrumPanel(QWidget):
                     Spectrum3D.load_from_ft3(
                         path, labels=labels3d, nuclei=nuclei3d
                     )
+                )
+                self._spectrum3d_panel.set_projections(
+                    self._load_3d_projections()
                 )
                 self._spectrum3d_panel.setVisible(True)
                 if state:
@@ -323,6 +333,7 @@ class SpectrumPanel(QWidget):
             return
         state = self._viewer3d_state.get(self._current_data_id)
         self._spectrum3d_panel.set_spectrum3d(spectrum3d)
+        self._spectrum3d_panel.set_projections(self._load_3d_projections())
         self._spectrum3d_panel.setVisible(True)
         if state:
             self._spectrum3d_panel.plane_combo.setCurrentIndex(state[0])
@@ -374,6 +385,39 @@ class SpectrumPanel(QWidget):
         if not nuclei:
             return None
         return axis_labels_from_nuclei(nuclei)
+
+    def _load_3d_projections(self) -> dict[int, object]:
+        """加载 nmrPipe proj3D 生成的三个投影文件(键=逻辑轴下标,Task E)。"""
+        import nmrglue as ng
+
+        from viewer.spectrum import Spectrum
+
+        proj: dict[int, object] = {}
+        if not (self._current_exp_id and self._current_data_id):
+            return proj
+        try:
+            spectra_dir = self._manager.data_dir(
+                self._current_exp_id, self._current_data_id, "spectra"
+            )
+        except Exception:  # noqa: BLE001
+            return proj
+        for index, logical in enumerate(("F1", "F2", "F3")):
+            path = spectra_dir / (
+                f"{self._current_exp_id}-{self._current_data_id}_proj_{logical}.ft2"
+            )
+            if not path.is_file():
+                continue
+            try:
+                dic, _ = ng.pipe.read(str(path))
+                labels = (
+                    str(dic.get("FDF1LABEL") or "F1"),
+                    str(dic.get("FDF2LABEL") or "F2"),
+                )
+                proj[index] = Spectrum.load_from_ft2(path, labels=labels)
+            except Exception:  # noqa: BLE001 - 单个投影损坏不影响其它
+                continue
+        return proj
+
 
     def _render_3d_view(self) -> None:
         """按 3D 面板当前平面/切片/投影渲染二维视图并重挂峰标记。"""

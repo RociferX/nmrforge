@@ -124,7 +124,10 @@ def test_drag_drop_import(
     window._handle_dropped_import_paths([bruker_dir / "hsqc_2d", bad])
     entry_now = manager.project.experiment(entry.id)
     assert len(entry_now.data) == 1
-    assert any("缺少 acqus" in text for text in shown)
+    assert any(
+        "缺少 acqus" in text or "既不是 Bruker 数据集" in text
+        for text in shown
+    )
     window.close()
 
 

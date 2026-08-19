@@ -497,16 +497,21 @@ class MainWindow(QMainWindow):
 
         def worker() -> None:
             try:
-                from gui.processing import is_segmented_container
+                explicit_segmented = bool(data.get("segmented", False))
+                if explicit_segmented:
+                    resolved_source = source
+                    segmented = True
+                else:
+                    # Task F:忽略非数据子文件夹;容器 ≥2 数据子目录走分段,
+                    # 恰好 1 个按单个数据目录导入
+                    from gui.processing import resolve_import_source
 
-                segmented = bool(data.get("segmented", False)) or (
-                    is_segmented_container(source)
-                )
+                    resolved_source, segmented = resolve_import_source(source)
                 if segmented:
                     # 0.2.108/G2B-011:分段采集导入(容器目录合并为一条数据,
                     # 导入到当前实验类型;exp_id 为空时后端新建)
                     result = self.controller.import_segmented_dataset(
-                        source,
+                        resolved_source,
                         exp_id=exp_id or "",
                         title=data.get("title", "") or "",
                         sample_id=data.get("sample_id", "") or "",
@@ -529,7 +534,7 @@ class MainWindow(QMainWindow):
                     result = import_data(
                         self.manager,
                         target_exp_id,
-                        source,
+                        resolved_source,
                         copy=bool(data.get("copy", True)),
                     )
                 data_id = getattr(result, "data_id", "") or ""
@@ -815,22 +820,24 @@ class MainWindow(QMainWindow):
         for path in paths:
             if not path.is_dir():
                 continue
-            if not (path / "acqus").is_file():
-                InfoDialog.show_info(
-                    self,
-                    "导入失败",
-                    f"不是 Bruker 数据集目录(缺少 acqus):\n{path}",
-                )
+            try:
+                from gui.processing import resolve_import_source
+                from workflow.import_workflow import ImportWorkflowError
+
+                resolved, seg = resolve_import_source(path)
+            except ImportWorkflowError as exc:
+                InfoDialog.show_info(self, "导入失败", str(exc))
                 continue
             exp_id = self.project_tree.current_experiment_id()
             if exp_id:
-                self._pending_data_names[exp_id] = path.name
+                self._pending_data_names[exp_id] = Path(resolved).name
             self._import_experiment_async(
                 {
-                    "source": str(path),
-                    "title": path.name,
+                    "source": str(resolved),
+                    "title": Path(resolved).name,
                     "sample_id": "",
                     "copy": True,
+                    "segmented": seg,
                     "experiment_id": exp_id or "",
                 }
             )

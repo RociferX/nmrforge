@@ -22,9 +22,7 @@ from viewer.spectrum import Spectrum, Spectrum3D
 _PLANES = (("F1-F2", 2), ("F1-F3", 1), ("F2-F3", 0))
 _MODES = (
     ("Slice", "slice"),
-    ("Proj", "proj"),  # nmrPipe projZ 式:阈值截断后沿轴求和
-    ("MIP", "max"),
-    ("Sum", "sum"),
+    ("Projection", "proj"),  # 加载 nmrPipe proj3D 生成的投影文件(Task E)
 )
 
 
@@ -36,8 +34,9 @@ class Spectrum3DPanel(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._spectrum3d: Spectrum3D | None = None
+        self._projections: dict[int, Spectrum] = {}  # 固定轴下标→投影文件谱
         self._slice_axis = 2  # 默认 F1-F2 平面(固定 F3)
-        self._mode = "proj"  # 默认 nmrPipe 式阈值求和投影
+        self._mode = "proj"  # 默认投影(加载 nmrPipe proj3D 文件)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
@@ -50,7 +49,7 @@ class Spectrum3DPanel(QWidget):
         self.mode_combo = QComboBox()
         self.mode_combo.addItems([name for name, _ in _MODES])
         self.mode_combo.setToolTip(
-            "切片 / Proj(nmrPipe 式:低于阈值置零后沿轴求和)/ MIP 最大强度 / 求和投影"
+            "切片 / 投影(加载 nmrPipe proj3D 生成的投影文件)"
         )
         self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
         layout.addWidget(self.mode_combo)
@@ -66,11 +65,17 @@ class Spectrum3DPanel(QWidget):
         self.mode_combo.setCurrentIndex(1)  # 默认 Proj 投影(控件就绪后)
 
     # ------------------------------------------------------------- API
+    def set_projections(self, projections: dict[int, Spectrum]) -> None:
+        """绑定 nmrPipe proj3D 生成的投影文件(键=固定轴下标 0/1/2,Task E)。"""
+        self._projections = dict(projections or {})
+
+
     def set_spectrum3d(self, spectrum3d: Spectrum3D) -> None:
-        """绑定 3D 谱并重置到默认平面(F1-F2, Proj 投影);自动发出重绘。"""
+        """绑定 3D 谱并重置到默认平面(F1-F2, 投影);自动发出重绘。"""
         self._spectrum3d = spectrum3d
+        self._projections = {}
         self._slice_axis = 2
-        self._mode = "proj"  # 默认 nmrPipe projZ 式阈值求和投影
+        self._mode = "proj"  # 默认投影(文件缺失时提示)
         noise = spectrum3d.estimate_noise()
         self._proj_thresh = (
             3.0 * noise
@@ -103,12 +108,13 @@ class Spectrum3DPanel(QWidget):
             spectrum = self._spectrum3d.slice(
                 self._slice_axis, self.slice_slider.value()
             )
-        elif self._mode == "proj":
-            spectrum = self._spectrum3d.project_nmrpipe(
-                self._slice_axis, getattr(self, "_proj_thresh", 0.0)
-            )
-        else:
-            spectrum = self._spectrum3d.project(self._slice_axis, self._mode)
+        else:  # proj:加载 nmrPipe proj3D 生成的投影文件(Task E)
+            spectrum = self._projections.get(self._slice_axis)
+            if spectrum is None:
+                self.position_label.setText(
+                    "投影未生成:spectra/ 缺少该平面的 proj 文件"
+                )
+                return None
         # 记录剩余两轴的原始维序(F1=0/F2=1/F3=2),供峰表 F*_shift 映射
         spectrum.dim_indices = tuple(
             i for i in range(3) if i != self._slice_axis
