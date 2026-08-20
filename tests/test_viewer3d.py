@@ -205,20 +205,12 @@ def test_spectrum3d_panel_widget(qapp: QApplication) -> None:
     panel = Spectrum3DPanel()
     panel.set_spectrum3d(_synthetic3d())
     assert panel.slice_axis_label() == "F3"  # 默认 F1-F2 平面,固定 F3
-    # Task E:切片模式出谱
-    panel.mode_combo.setCurrentIndex(0)
+    # 0.2.133:仅 slice 模式(默认),无 mode_combo
+    assert panel._mode == "slice"
+    assert not hasattr(panel, "mode_combo")
     spectrum = panel.current_spectrum()
     assert spectrum is not None and spectrum.data.shape == (4, 6)
-    # 投影模式(加载文件):未注入时提示,注入后返回投影谱
-    panel.mode_combo.setCurrentIndex(1)
-    assert panel.slice_slider.isEnabled() is False
-    assert panel.current_spectrum() is None
-    axes = panel._spectrum3d.axes
-    panel.set_projections(
-        {2: Spectrum(np.zeros((4, 6)), [axes[0], axes[1]])}
-    )
-    spectrum = panel.current_spectrum()
-    assert spectrum is not None and spectrum.data.shape == (4, 6)
+    assert panel.slice_slider.isEnabled() is True
     panel.close()
 
 
@@ -234,22 +226,13 @@ def test_spectrum_window_3d_mode(
     assert window.load_spectrum(path) is True
     assert window._spectrum3d_active is True
     assert not window._spectrum3d_panel.isHidden()
-    # Task E:默认投影无文件时提示,切到切片后出谱
-    window._spectrum3d_panel.mode_combo.setCurrentIndex(0)
+    # 0.2.133:仅 slice 模式(默认),打开即出谱
+    assert window._spectrum3d_panel._mode == "slice"
     assert window.viewer.layer_list.count() == 1
     # 切换平面 F2-F3
     window._spectrum3d_panel.plane_combo.setCurrentIndex(2)
     assert window.viewer.layer_list.count() == 1
-    # 投影模式(加载文件):注入后显示,滑块禁用
-    axes = window._spectrum3d_panel._spectrum3d.axes
-    window._spectrum3d_panel.set_projections(
-        {0: Spectrum(np.zeros((6, 8)), [axes[1], axes[2]])}
-    )
-    window._spectrum3d_panel.mode_combo.setCurrentIndex(1)
-    assert window._spectrum3d_panel.slice_slider.isEnabled() is False
-    assert window.viewer.layer_list.count() == 1
-    # 回到切片并移动滑块
-    window._spectrum3d_panel.mode_combo.setCurrentIndex(0)
+    # 移动滑块刷新切片
     assert window._spectrum3d_panel.slice_slider.isEnabled() is True
     window._spectrum3d_panel.slice_slider.setValue(5)
     window._spectrum3d_panel.refresh()
@@ -287,8 +270,8 @@ def test_spectrum_panel_opens_ft3(
     assert panel._current_spectrum == ft3
     assert panel.viewer.layer_list.count() == 1
     assert not panel._spectrum3d_panel.isHidden()
-    # 0.2.89:3D 默认 nmrPipe 式阈值求和投影(Proj)
-    assert panel._spectrum3d_panel._mode == "proj"
+    # 0.2.133:3D 默认切片模式(投影文件由列表直接点开)
+    assert panel._spectrum3d_panel._mode == "slice"
     # 峰表 3D 列联动
     peaks = manager.data_dir(entry.id, data.id, "peaks")
     peaks.mkdir(parents=True, exist_ok=True)
@@ -441,42 +424,21 @@ def test_load_from_ft2_reorders_axes_to_logical(
     assert round(spec.y_axis.obs_mhz, 1) == 60.8
     assert "轴序重排" in caplog.text
 
-def test_3d_panel_modes_no_mip_sum() -> None:
-    '''Task E:3D 面板删除 MIP/Sum,只保留切片与投影(加载文件)。'''
-    from viewer.spectrum3d_panel import _MODES, Spectrum3DPanel
-
-    modes = [m for _, m in _MODES]
-    assert "max" not in modes
-    assert "sum" not in modes
-    assert "slice" in modes
-    assert "proj" in modes
-    panel = Spectrum3DPanel()
-    assert panel.mode_combo.count() == 2
-
-
-def test_3d_panel_projection_from_files(qapp: QApplication) -> None:
-    '''Task E:proj 模式返回 set_projections 注入的投影文件谱;缺失提示不崩溃。'''
+def test_3d_panel_slice_only() -> None:
+    '''0.2.133:3D 面板只保留切片(slice),无 MIP/Sum/投影模式。'''
     from viewer.spectrum3d_panel import Spectrum3DPanel
 
+    panel = Spectrum3DPanel()
+    assert panel._mode == "slice"
+    assert not hasattr(panel, "mode_combo")
+    assert not hasattr(panel, "set_projections")
     axes = [_axis3("C", 8, 40.0), _axis3("N", 8, 118.0), _axis3("H", 8, 4.7)]
     spec3d = Spectrum3D(np.zeros((8, 8, 8), dtype=float), axes)
-    panel = Spectrum3DPanel()
     panel.set_spectrum3d(spec3d)
-    # 未注入投影:proj 模式返回 None 并提示,不崩溃
-    panel.mode_combo.setCurrentIndex(1)
-    assert panel.current_spectrum() is None
-    assert "投影未生成" in panel.position_label.text()
-    # 注入投影文件谱:返回对应平面的 Spectrum
-    proj_axes = [_axis3("N", 8, 118.0), _axis3("H", 8, 4.7)]
-    proj = {2: Spectrum(np.zeros((8, 8), dtype=float), proj_axes)}
-    panel.set_projections(proj)
     out = panel.current_spectrum()
     assert out is not None
     assert out.data.shape == (8, 8)
-    # 切片模式仍可用
-    panel.mode_combo.setCurrentIndex(0)
-    panel.slice_slider.setEnabled(True)
-    assert panel.current_spectrum() is not None
+    panel.close()
 
 
 def test_load_projections_new_naming(tmp_path: Path, qapp: QApplication) -> None:
@@ -528,20 +490,22 @@ def test_load_projections_new_naming(tmp_path: Path, qapp: QApplication) -> None
     panel.set_context(entry.id, data.id)
     proj = panel._load_3d_projections()
     assert len(proj) == 3, f'expected 3, got {len(proj)}: {list(proj.keys())}'
-    # 15N-1H 平面:固定轴 = 13C(F1, 下标 0);x=15N(N), y=1H(H)
+    # 0.2.133:ppm 小的核放横坐标(载波/参考表排序,必要时转置)
+    # 15N-1H 平面:固定轴 = 13C(F1, 下标 0);x=1H(H) < 15N(N)
     s0 = proj[0]
-    assert s0.x_axis.label == 'N', f'x label {s0.x_axis.label}'
-    assert s0.y_axis.label == 'H', f'y label {s0.y_axis.label}'
-    assert s0.data.shape == (8, 16)
-    # 13C-1H 平面:固定轴 = 15N(F2, 下标 1);x=13C(C), y=1H(H)
+    assert s0.x_axis.label == 'H', f'x label {s0.x_axis.label}'
+    assert s0.y_axis.label == 'N', f'y label {s0.y_axis.label}'
+    assert s0.data.shape == (16, 8)
+    # 13C-1H 平面:固定轴 = 15N(F2, 下标 1);x=1H(H) < 13C(C)
     s1 = proj[1]
-    assert s1.x_axis.label == 'C', f'x label {s1.x_axis.label}'
-    assert s1.y_axis.label == 'H', f'y label {s1.y_axis.label}'
-    assert s1.data.shape == (16, 8)
-    # 13C-15N 平面:固定轴 = 1H(F3, 下标 2);x=13C(C), y=15N(N)
+    assert s1.x_axis.label == 'H', f'x label {s1.x_axis.label}'
+    assert s1.y_axis.label == 'C', f'y label {s1.y_axis.label}'
+    assert s1.data.shape == (8, 16)
+    # 13C-15N 平面:固定轴 = 1H(F3, 下标 2);x=13C(C) < 15N(N)
     s2 = proj[2]
     assert s2.x_axis.label == 'C'
     assert s2.y_axis.label == 'N'
+    assert s2.data.shape == (8, 8)
     panel.close()
 
 

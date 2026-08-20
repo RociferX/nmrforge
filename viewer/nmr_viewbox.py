@@ -53,6 +53,23 @@ class NMRViewBox(pg.ViewBox):
 
     # ---------------------------------------------------------- 范围
 
+    # ---------------------------------------------------------- 缩放
+
+    def wheelEvent(self, ev, axis=None):
+        """滚轮缩放后立即 clamp(缩小不能越过完整范围)。"""
+        super().wheelEvent(ev, axis)
+        self._clamp_view_range()
+
+    def scaleBy(self, s=None, center=None, **kwargs):
+        """缩放(滚轮/缩放动画)后立即 clamp。"""
+        super().scaleBy(s=s, center=center, **kwargs)
+        self._clamp_view_range()
+
+    def translateBy(self, t=None, **kwargs):
+        """平移后立即 clamp(谱图不能被移出视野)。"""
+        super().translateBy(t=t, **kwargs)
+        self._clamp_view_range()
+
     def set_full_range(self, x_range, y_range, padding=0) -> None:
         """恢复完整视图并更新缩小基准(reset_view 专用)。
 

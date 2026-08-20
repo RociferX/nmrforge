@@ -18,6 +18,16 @@
   - 测试:test_stepwise.py 3D 投影新命名+注册+旧名回退;test_nmrpipe_backend.py
     project_3d 映射更新(自动命名解析固定轴/平面核,不重写头断言);
     test_viewer3d.py 投影新命名加载断言(x/y 核由文件名为准)。
+- GUI/Viewer(0.2.133 修订):
+  - 3D 面板只保留 slice 模式(删除 Proj/mode_combo);投影 .ft2 列为谱图
+    文件,点击直接查看(文件名解析两核,ppm 小的核放横坐标,必要时转置);
+  - 缩放下限补齐:wheelEvent/scaleBy/translateBy 后 clamp,滚轮缩小不能
+    越过完整范围、平移不能把谱图移出视野;
+  - 坐标轴刻度:标签尽量取整(±0.1 ppm 内整数,否则 1 位小数),缩放/平移
+    后按可视范围重建 5 个刻度,避免缩小时标签重叠;
+  - 谱图列表按文件名全排序(主谱 .ft3 在前,投影随后);「展示谱图」优先主谱;
+  - 测试:test_viewer3d slice-only 与投影 ppm 排序断言、test_gui_context
+    3D 状态仅平面、test_viewer 新增缩小/平移边界回归。
 
 
 ## [0.2.132] - 2026-08-19

@@ -151,12 +151,11 @@ def test_3d_viewer_state_memory(tmp_path: Path, qapp: QApplication) -> None:
     panel = SpectrumPanel(manager)
     panel.set_context(entry.id, data1.id)
     panel._spectrum3d_panel.plane_combo.setCurrentIndex(2)
-    panel._spectrum3d_panel.mode_combo.setCurrentIndex(1)
     panel._render_3d_view()
-    assert panel._viewer3d_state.get(data1.id) == (2, 1)
-    # 切走再切回 → 平面/投影记忆恢复
+    assert panel._viewer3d_state.get(data1.id) == 2
+    # 切走再切回 → 平面记忆恢复(0.2.133 仅 slice,无模式记忆)
     panel.set_context(entry.id, data2.id)
     panel.set_context(entry.id, data1.id)
     assert panel._spectrum3d_panel.plane_combo.currentIndex() == 2
-    assert panel._spectrum3d_panel.mode_combo.currentIndex() == 1
+    assert panel._spectrum3d_panel._mode == "slice"
     panel.close()

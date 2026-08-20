@@ -333,12 +333,19 @@ class SpectrumViewer(QWidget):
     def _axis_ticks(
         axis: SpectrumAxis, count: int
     ) -> tuple[list[tuple[int, str]], str]:
-        """ppm 有效轴显示 ppm 刻度;时间域轴(如 FID 时点)显示点序号。"""
+        """ppm 有效轴显示 ppm 刻度;时间域轴(如 FID 时点)显示点序号。
+
+        0.2.133:刻度标签尽量取整(±0.1 ppm 内显示整数,否则 1 位
+        小数),避免长小数标签在缩小时相互重叠。
+        """
         if axis.sw_hz > 0 and axis.obs_mhz > 0:
-            ticks = [
-                (int(i), f"{axis.ppm_at(int(i)):.2f}")
-                for i in np.linspace(0, axis.size - 1, count)
-            ]
+            ticks = []
+            for i in np.linspace(0, axis.size - 1, count):
+                ppm = axis.ppm_at(int(i))
+                if abs(ppm - round(ppm)) < 0.1:
+                    ticks.append((int(i), f"{round(ppm):.0f}"))
+                else:
+                    ticks.append((int(i), f"{ppm:.1f}"))
             return ticks, f"{axis.label} (ppm)"
         ticks = [
             (int(i), str(int(i))) for i in np.linspace(0, axis.size - 1, 6)
@@ -348,11 +355,81 @@ class SpectrumViewer(QWidget):
     def _setup_axes(self, spectrum: Spectrum) -> None:
         x_axis = spectrum.x_axis
         y_axis = spectrum.y_axis
-        x_ticks, x_label = self._axis_ticks(x_axis, 8)
-        y_ticks, y_label = self._axis_ticks(y_axis, 8)
+        x_ticks, x_label = self._axis_ticks(x_axis, 10)
+        y_ticks, y_label = self._axis_ticks(y_axis, 10)
         self.plot.getAxis("bottom").setTicks([x_ticks])
         self.plot.getAxis("left").setTicks([y_ticks])
         self.plot.setLabels(bottom=x_label, left=y_label)
+        self._connect_axis_refresh()
+
+
+    def _connect_axis_refresh(self) -> None:
+        """缩放/平移后按当前可视范围重建刻度(0.2.133)。
+
+        固定 ticks 在缩小时标签会挤在一起;这里随视角重选 5 个刻度,
+        每个刻度标签尽量取整,避免重叠与长小数标签。
+        """
+        if getattr(self, "_axis_refresh_connected", False):
+            return
+        try:
+            self.plot.getViewBox().sigRangeChanged.connect(
+                self._refresh_visible_ticks
+            )
+            self._axis_refresh_connected = True
+        except Exception:  # noqa: BLE001
+            self._axis_refresh_connected = False
+
+    def _refresh_visible_ticks(self, *_args) -> None:
+        """按可视数据范围重建底轴/左轴刻度(每轴最多 5 个)。"""
+        if not self.layers or self._mode_1d:
+            return
+        spectrum = self.layer_spectra[0] if self.layer_spectra else None
+        if spectrum is None:
+            return
+        try:
+            x_range, y_range = self.plot.getViewBox().viewRange()
+        except Exception:  # noqa: BLE001
+            return
+        x_ticks, _ = self._visible_axis_ticks(spectrum.x_axis, x_range)
+        y_ticks, _ = self._visible_axis_ticks(spectrum.y_axis, y_range)
+        self.plot.getAxis("bottom").setTicks([x_ticks])
+        self.plot.getAxis("left").setTicks([y_ticks])
+
+    @staticmethod
+    def _visible_axis_ticks(
+        axis: SpectrumAxis, span: tuple[float, float]
+    ) -> tuple[list[tuple[int, str]], str]:
+        """可视跨度内选 5 个等距刻度(索引位置,标签取整 ppm/序号)。"""
+        lo, hi = span
+        lo = max(0.0, float(lo))
+        hi = min(float(axis.size - 1), float(hi))
+        if hi <= lo or axis.size <= 1:
+            return [], ""
+        indices = np.linspace(lo, hi, 5)
+        ticks: list[tuple[int, str]] = []
+        seen: set[int] = set()
+        for idx in indices:
+            i = int(round(idx))
+            if i in seen:
+                continue
+            seen.add(i)
+            if i < 0 or i >= axis.size:
+                continue
+            if axis.sw_hz > 0 and axis.obs_mhz > 0:
+                ppm = axis.ppm_at(i)
+                label = (
+                    f"{round(ppm):.0f}"
+                    if abs(ppm - round(ppm)) < 0.1
+                    else f"{ppm:.1f}"
+                )
+            else:
+                label = str(i)
+            ticks.append((i, label))
+        if len(ticks) <= 1 and axis.size > 1:
+            mid = int(round((lo + hi) / 2.0))
+            ticks.append((mid, str(mid)))
+        return ticks, ""
+
 
     def _on_layer_toggle(self, item: QListWidgetItem) -> None:
         index = self.layer_list.row(item)
@@ -377,10 +454,13 @@ class SpectrumViewer(QWidget):
             layer.setVisible(False)
         axis = spectrum1d.axis
         if spectrum1d.ppm_valid:
-            ticks = [
-                (int(i), f"{axis.ppm_at(int(i)):.2f}")
-                for i in np.linspace(0, axis.size - 1, 8)
-            ]
+            ticks = []
+            for i in np.linspace(0, axis.size - 1, 10):
+                ppm = axis.ppm_at(int(i))
+                if abs(ppm - round(ppm)) < 0.1:
+                    ticks.append((int(i), f"{round(ppm):.0f}"))
+                else:
+                    ticks.append((int(i), f"{ppm:.1f}"))
             self.plot.getAxis("bottom").setTicks([ticks])
             self.plot.setLabels(bottom=f"{axis.label} (ppm)", left="Intensity")
         else:
@@ -393,6 +473,7 @@ class SpectrumViewer(QWidget):
         self.plot.getViewBox().invertY(False)
         self.set_1d_mode(False)
         self.reset_view()
+        self._connect_axis_refresh()
         self._refresh_phase_availability()
         return name or (
             spectrum1d.source.stem if spectrum1d.source is not None else "1D"

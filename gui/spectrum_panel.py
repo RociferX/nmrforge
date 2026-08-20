@@ -56,7 +56,7 @@ class SpectrumPanel(QWidget):
         self._current_exp_id: str = ""
         self._current_data_id: str = ""
         self._loading_peaks = False
-        self._viewer3d_state: dict[str, tuple[int, int]] = {}
+        self._viewer3d_state: dict[str, int] = {}
         self._peak_keys: tuple[str, ...] = (
             "Peak_ID",
             "H_shift",
@@ -74,9 +74,6 @@ class SpectrumPanel(QWidget):
         self._ft3_failed.connect(self._on_ft3_failed)
         self._spectrum3d_panel.slice_changed.connect(self._render_3d_view)
         self._spectrum3d_panel.plane_combo.currentIndexChanged.connect(
-            self._save_3d_state
-        )
-        self._spectrum3d_panel.mode_combo.currentIndexChanged.connect(
             self._save_3d_state
         )
         self.viewer.add_control_panel(self._spectrum3d_panel)
@@ -203,11 +200,14 @@ class SpectrumPanel(QWidget):
             self._clear_peaks()
 
     def load_current_spectrum(self) -> bool:
-        """加载当前样品数据 spectra 文件夹的首个谱(「展示谱图」按钮)。"""
+        """加载当前样品数据的主谱(投影文件由列表点击直接查看)。"""
         paths = self._spectrum_paths()
         if not paths:
             return False
-        first = paths[0]
+        main = [
+            p for p in paths if not self._is_projection_name(p.name)
+        ] or paths
+        first = main[0]
         if not self.open_spectrum(first):
             return False
         self._current_spectrum = first
@@ -228,25 +228,20 @@ class SpectrumPanel(QWidget):
         try:
             if data_id:
                 spectra_dir = self.manager.data_dir(exp_id, data_id, "spectra")
-                for ext in (".ft2", ".ft3"):
-                    for p in sorted(spectra_dir.glob(f"*{ext}")):
-                        # 0.2.133:投影命名 {data_id}_{核A}-{核B}.ft2
-                        if "_proj_" in p.name or p.name.startswith(f"{data_id}_"):
-                            continue
-                        paths.append(p)
+                files = list(spectra_dir.glob("*.ft2")) + list(
+                    spectra_dir.glob("*.ft3")
+                )
+                paths = sorted(files)
                 if paths:
                     return paths
         except Exception:  # noqa: BLE001 - 新布局不可用回退旧路径
             pass
         # 旧扁平布局回退(项目根 spectra/,{exp_id}* 通配)
         spectra_dir = self.manager.dir_path("spectra")
-        for ext in (".ft2", ".ft3"):
-            for p in sorted(spectra_dir.glob(f"{exp_id}*{ext}")):
-                # Task E:投影文件(proj3D 产物)由 3D 面板内部加载,不列为谱图
-                if "_proj_" in p.name:
-                    continue
-                paths.append(p)
-        return paths
+        files = list(spectra_dir.glob(f"{exp_id}*.ft2")) + list(
+            spectra_dir.glob(f"{exp_id}*.ft3")
+        )
+        return sorted(files)
 
     def open_spectrum(self, path: Path, name: str | None = None) -> bool:
         """加载谱图到查看器;失败返回 False(不弹窗,由调用方决定提示)。
@@ -284,13 +279,9 @@ class SpectrumPanel(QWidget):
                         path, labels=labels3d, nuclei=nuclei3d
                     )
                 )
-                self._spectrum3d_panel.set_projections(
-                    self._load_3d_projections()
-                )
                 self._spectrum3d_panel.setVisible(True)
                 if state:
-                    self._spectrum3d_panel.plane_combo.setCurrentIndex(state[0])
-                    self._spectrum3d_panel.mode_combo.setCurrentIndex(state[1])
+                    self._spectrum3d_panel.plane_combo.setCurrentIndex(state)
                 self._render_3d_view()
                 return True
             if path.suffix.lower() == ".fid":
@@ -304,9 +295,15 @@ class SpectrumPanel(QWidget):
                 return True
             from viewer.spectrum import Spectrum
 
-            spectrum = Spectrum.load_from_ft2(
-                path, labels=labels2d, nuclei=nuclei2d
-            )
+            if self._is_projection_name(path.name):
+                proj_spec = self._load_projection_ft2(path)
+                if proj_spec is None:
+                    return False
+                spectrum = proj_spec
+            else:
+                spectrum = Spectrum.load_from_ft2(
+                    path, labels=labels2d, nuclei=nuclei2d
+                )
         except Exception:  # noqa: BLE001 - 损坏文件统一由调用方提示
             return False
         self._spectrum3d_panel.clear()
@@ -338,11 +335,9 @@ class SpectrumPanel(QWidget):
             return
         state = self._viewer3d_state.get(self._current_data_id)
         self._spectrum3d_panel.set_spectrum3d(spectrum3d)
-        self._spectrum3d_panel.set_projections(self._load_3d_projections())
         self._spectrum3d_panel.setVisible(True)
         if state:
-            self._spectrum3d_panel.plane_combo.setCurrentIndex(state[0])
-            self._spectrum3d_panel.mode_combo.setCurrentIndex(state[1])
+            self._spectrum3d_panel.plane_combo.setCurrentIndex(state)
         self._render_3d_view()
         self._load_peaks(path)
         self.status_message.emit(f"已加载 3D 谱: {path.name}")
@@ -391,21 +386,169 @@ class SpectrumPanel(QWidget):
             return None
         return axis_labels_from_nuclei(nuclei)
 
-    def _load_3d_projections(self) -> dict[int, object]:
-        """加载 nmrPipe proj3D 生成的三个投影(键=固定轴逻辑下标,0.2.133)。
+    def _is_projection_name(self, name: str) -> bool:
+        """投影文件识别:新命名 {data_id}_{核A}-{核B}.ft2 或旧 *_proj_*.ft2。"""
+        if "_proj_" in name:
+            return True
+        data_id = self._current_data_id or ""
+        if data_id and name.startswith(f"{data_id}_") and name.endswith(".ft2"):
+            body = name[len(data_id) + 1:-4]
+            if "-" in body:
+                return True
+        return False
 
-        命名规范:{data_id}_{核A}-{核B}.ft2(旧 *_proj_*.ft2 兼容);proj3D
-        输出文件名中的核顺序 = (X 轴=列, Y 轴=行)。投影文件头槽位
-        (FDF1/FDF2 LABEL 等)对 nmrglue 直读不可靠,因此**不信任文件头
-        标签**:两核从文件名解析,固定轴 = metadata 核序中不在平面内的
-        那个;轴参数(SW/OBS/CAR/ORIG)取自已加载 3D 谱对应核的轴。
+    def _load_projection_ft2(self, path: Path) -> object | None:
+        """按文件名两核加载单个投影 .ft2(0.2.133,直接点击查看)。
+
+        核从文件名解析;显示规则:ppm 小的核放横坐标(载波 ppm
+        比较,缺失时按核参考化学位移),必要时转置数据矩阵。
+        轴参数优先取自已加载 3D 谱对应核的轴(SW/OBS/CAR/ORIG),
+        否则用文件头槽位兜底。返回 Pydantic Spectrum;解析失败 None。
         """
+        import re as _re
+        from types import SimpleNamespace as _Sn
+
         import nmrglue as ng
         import numpy as np
 
         from viewer.axis_labels import nucleus_symbol
         from viewer.spectrum import Spectrum, SpectrumAxis
 
+        # 核参考化学位移(ppm),用于头参数缺失时决定横纵轴
+        _REF_PPM = {
+            "H": 5.0,
+            "D": 5.0,
+            "C": 100.0,
+            "N": 118.0,
+            "F": -50.0,
+            "P": 0.0,
+            "Na": 0.0,
+            "Si": 0.0,
+        }
+
+        def _norm(nuc: str) -> str:
+            return _re.sub(r"[^A-Za-z0-9]", "", str(nuc or "")).upper()
+
+        def _axis_ppm(axis) -> tuple[float, float]:
+            """(载波 ppm, 参考 ppm):用于横纵轴排序。
+
+            载波有效时优先;两者载波相同(如文件头兜底全是同核参数)时
+            用参考化学位移决胜负,保证 1H 始终小于 13C/15N。
+            """
+            ref = _REF_PPM.get(str(getattr(axis, "label", "")), 75.0)
+            try:
+                carrier = float(axis.carrier_ppm)
+                if carrier and abs(carrier) > 1e-6:
+                    return (carrier, ref)
+            except (TypeError, ValueError):
+                pass
+            return (ref, ref)
+
+        name = path.name
+        data_id = self._current_data_id or ""
+        nuclei = self._axis_nuclei(3) or []
+        a = b = None
+        if data_id and name.startswith(f"{data_id}_") and name.endswith(".ft2"):
+            body = name[len(data_id) + 1:-4]
+            if "-" in body:
+                parts = body.split("-", 1)
+                a, b = parts[0], parts[1]
+        if not (a and b):
+            m = _re.search(r"_proj_F(\d)\.ft2$", name)
+            if m and len(nuclei) == 3:
+                fixed_axis = int(m.group(1)) - 1
+                remaining = [i for i in range(3) if i != fixed_axis]
+                a = nuclei[remaining[1]]
+                b = nuclei[remaining[0]]
+            else:
+                # 旧名 _proj_NH 之类:按后缀符号对尝试
+                m2 = _re.search(r"_proj_([A-Za-z0-9]{2,6})\.ft2$", name)
+                if m2 and len(nuclei) == 3:
+                    body = m2.group(1)
+                    symbols = {nucleus_symbol(n).upper(): n for n in nuclei}
+                    match = [symbols.get(c.upper()) for c in body]
+                    if len(match) == 2 and all(match):
+                        a, b = match[0], match[1]
+                else:
+                    # 最终回退:直接按文件头加载(尽力)
+                    try:
+                        return Spectrum.load_from_ft2(str(path))
+                    except Exception:  # noqa: BLE001
+                        return None
+        if not (a and b):
+            return None
+        try:
+            dic, data = ng.pipe.read(str(path))
+        except Exception:  # noqa: BLE001
+            return None
+        data = np.asarray(data, dtype=float)
+        if data.ndim != 2:
+            return None
+        na, nb = _norm(a), _norm(b)
+        fixed_axis = -1
+        if len(nuclei) == 3:
+            for i, nuc in enumerate(nuclei):
+                if _norm(nuc) not in (na, nb):
+                    fixed_axis = i
+                    break
+        s3d = getattr(self._spectrum3d_panel, "_spectrum3d", None)
+        s3d_axes = list(getattr(s3d, "axes", []) or []) if s3d is not None else []
+        x_params = y_params = None
+        if len(s3d_axes) == 3:
+            for i, nuc in enumerate(nuclei):
+                if _norm(nuc) == na:
+                    x_params = s3d_axes[i]
+                if _norm(nuc) == nb:
+                    y_params = s3d_axes[i]
+        if x_params is None or y_params is None:
+            # 轴参数缺失:用文件头槽位兜底(与 0.2.126 一致)
+            x_params = _Sn(
+                label=nucleus_symbol(a),
+                size=int(data.shape[1]),
+                sw_hz=float(dic.get("FDF2SW", 1.0) or 1.0),
+                obs_mhz=float(dic.get("FDF2OBS", 1.0) or 1.0),
+                carrier_ppm=float(dic.get("FDF2CAR", 0.0) or 0.0),
+                orig_hz=float(dic.get("FDF2ORIG", 0.0) or 0.0),
+            )
+            y_params = _Sn(
+                label=nucleus_symbol(b),
+                size=int(data.shape[0]),
+                sw_hz=float(dic.get("FDF1SW", 1.0) or 1.0),
+                obs_mhz=float(dic.get("FDF1OBS", 1.0) or 1.0),
+                carrier_ppm=float(dic.get("FDF1CAR", 0.0) or 0.0),
+                orig_hz=float(dic.get("FDF1ORIG", 0.0) or 0.0),
+            )
+        # 0.2.133:ppm 小的核放横坐标(必要时转置数据矩阵)
+        if _axis_ppm(x_params) > _axis_ppm(y_params):
+            data = data.T
+            x_params, y_params = y_params, x_params
+            a, b = b, a
+            na, nb = nb, na
+        x_axis = SpectrumAxis(
+            label=nucleus_symbol(a),
+            size=int(data.shape[1]),
+            sw_hz=x_params.sw_hz,
+            obs_mhz=x_params.obs_mhz,
+            carrier_ppm=x_params.carrier_ppm,
+            orig_hz=x_params.orig_hz,
+        )
+        y_axis = SpectrumAxis(
+            label=nucleus_symbol(b),
+            size=int(data.shape[0]),
+            sw_hz=y_params.sw_hz,
+            obs_mhz=y_params.obs_mhz,
+            carrier_ppm=y_params.carrier_ppm,
+            orig_hz=y_params.orig_hz,
+        )
+        spectrum = Spectrum(data, [y_axis, x_axis], source=path)
+        if fixed_axis >= 0:
+            spectrum.dim_indices = tuple(
+                i for i in range(3) if i != fixed_axis
+            )
+        return spectrum
+
+    def _load_3d_projections(self) -> dict[int, object]:
+        """兼容接口:扫描全部投影文件并按键=固定轴下标返回(0.2.133)。"""
         proj: dict[int, object] = {}
         if not (self._current_exp_id and self._current_data_id):
             return proj
@@ -415,27 +558,6 @@ class SpectrumPanel(QWidget):
             )
         except Exception:  # noqa: BLE001
             return proj
-        nuclei = self._axis_nuclei(3) or []
-        # 旧命名回退(无 metadata 或旧文件):d_001_proj_F{1,2,3}.ft2
-        if len(nuclei) != 3:
-            from viewer.spectrum import Spectrum as _Spec
-
-            for logical in ("F1", "F2", "F3"):
-                matches = sorted(spectra_dir.glob(f"*_proj_{logical}.ft2"))
-                if not matches:
-                    continue
-                try:
-                    proj[int(logical[1:]) - 1] = _Spec.load_from_ft2(
-                        matches[-1]
-                    )
-                except Exception:  # noqa: BLE001
-                    continue
-            return proj
-        import re as _re
-
-        def _norm(nuc: str) -> str:
-            return _re.sub(r"[^A-Za-z0-9]", "", str(nuc or "")).upper()
-
         data_id = self._current_data_id
         candidates: list[Path] = []
         for p in sorted(spectra_dir.glob(f"{data_id}_*.ft2")):
@@ -446,86 +568,18 @@ class SpectrumPanel(QWidget):
         for p in sorted(spectra_dir.glob("*_proj_*.ft2")):
             if p not in candidates:
                 candidates.append(p)
-        s3d = getattr(self._spectrum3d_panel, "_spectrum3d", None)
-        s3d_axes = list(getattr(s3d, "axes", []) or []) if s3d is not None else []
-
         for path in candidates:
             try:
-                name = path.name
-                a = b = None
-                fixed_logical: str | None = None
-                if name.startswith(f"{data_id}_") and name.endswith(".ft2"):
-                    body = name[len(data_id) + 1:-4]
-                    if "-" in body:
-                        parts = body.split("-", 1)
-                        a, b = parts[0], parts[1]
-                if not (a and b):
-                    m = _re.search(r"_proj_F(\d)\.ft2$", name)
-                    if not m:
-                        continue
-                    fixed_logical = f"F{m.group(1)}"
-                    a = b = None
-                if a and b:
-                    na, nb = _norm(a), _norm(b)
-                    fixed_axis = -1
-                    for i, nuc in enumerate(nuclei):
-                        if _norm(nuc) not in (na, nb):
-                            fixed_axis = i
-                            break
-                    if fixed_axis < 0:
-                        continue
-                else:
-                    fixed_axis = int(fixed_logical[1:]) - 1  # type: ignore[index]
-                    if not (0 <= fixed_axis <= 2):
-                        continue
-                    a = nuclei[[i for i in range(3) if i != fixed_axis][1]]
-                    b = nuclei[[i for i in range(3) if i != fixed_axis][0]]
-                dic, data = ng.pipe.read(str(path))
-                data = np.asarray(data, dtype=float)
-                if data.ndim != 2:
-                    continue
-                na, nb = _norm(a), _norm(b)
-                x_params = y_params = None
-                if len(s3d_axes) == 3:
-                    for i, nuc in enumerate(nuclei):
-                        if _norm(nuc) == na:
-                            x_params = s3d_axes[i]
-                        if _norm(nuc) == nb:
-                            y_params = s3d_axes[i]
-                def _null_axis(label, size, prefix):
-                    return SpectrumAxis(
-                        label=label,
-                        size=size,
-                        sw_hz=float(dic.get(prefix + "SW", 1.0) or 1.0),
-                        obs_mhz=float(dic.get(prefix + "OBS", 1.0) or 1.0),
-                        carrier_ppm=float(dic.get(prefix + "CAR", 0.0) or 0.0),
-                        orig_hz=float(dic.get(prefix + "ORIG", 0.0) or 0.0),
-                    )
-                if x_params is None:
-                    x_params = _null_axis(nucleus_symbol(a), int(data.shape[1]), "FDF2")
-                if y_params is None:
-                    y_params = _null_axis(nucleus_symbol(b), int(data.shape[0]), "FDF1")
-                x_axis = SpectrumAxis(
-                    label=nucleus_symbol(a),
-                    size=int(data.shape[1]),
-                    sw_hz=x_params.sw_hz,
-                    obs_mhz=x_params.obs_mhz,
-                    carrier_ppm=x_params.carrier_ppm,
-                    orig_hz=x_params.orig_hz,
-                )
-                y_axis = SpectrumAxis(
-                    label=nucleus_symbol(b),
-                    size=int(data.shape[0]),
-                    sw_hz=y_params.sw_hz,
-                    obs_mhz=y_params.obs_mhz,
-                    carrier_ppm=y_params.carrier_ppm,
-                    orig_hz=y_params.orig_hz,
-                )
-                proj[fixed_axis] = Spectrum(
-                    data, [y_axis, x_axis], source=path
-                )
-            except Exception:  # noqa: BLE001 - 单个投影损坏不影响其它
+                spec = self._load_projection_ft2(path)
+            except Exception:  # noqa: BLE001
                 continue
+            if spec is None:
+                continue
+            indices = getattr(spec, "dim_indices", ())
+            if len(indices) == 2:
+                fixed = next((i for i in range(3) if i not in indices), None)
+                if fixed is not None:
+                    proj[fixed] = spec
         return proj
 
 
@@ -543,11 +597,10 @@ class SpectrumPanel(QWidget):
         if self._peaks:
             self.viewer.set_peaks(self._peaks)
     def _save_3d_state(self, *_args) -> None:
-        """记忆当前样品数据的 3D 查看平面/投影模式。"""
+        """记忆当前样品数据的 3D 查看平面(0.2.133 仅 slice 模式)。"""
         if self._current_data_id:
             self._viewer3d_state[self._current_data_id] = (
-                self._spectrum3d_panel.plane_combo.currentIndex(),
-                self._spectrum3d_panel.mode_combo.currentIndex(),
+                self._spectrum3d_panel.plane_combo.currentIndex()
             )
 
     def _on_file_clicked(self, item) -> None:

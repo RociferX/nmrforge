@@ -302,6 +302,31 @@ def test_viewer_zoom_min_limit(qapp: QApplication) -> None:
     viewer.close()
 
 
+def test_viewer_zoom_out_bounded(qapp: QApplication) -> None:
+    """0.2.133:滚轮/scaleBy 缩小不能越过完整范围,平移不能移出谱图。"""
+    from PyQt6.QtCore import QPointF
+
+    viewer = SpectrumViewer()
+    viewer.add_spectrum(_synthetic_spectrum((64, 128)))
+    vb = viewer.plot.getViewBox()
+    full = vb.viewRange()
+    full_x_span = full[0][1] - full[0][0]
+    # 缩小(滚轮路径 scaleBy)20 次:跨度与位置都必须留在完整范围内
+    vb.setRange(xRange=(10, 20), yRange=(10, 20), padding=0)
+    for _ in range(20):
+        vb.scaleBy((0.9, 0.9), center=QPointF(16.0, 16.0))
+    vr = vb.viewRange()
+    assert vr[0][1] - vr[0][0] <= full_x_span + 1e-6
+    assert vr[0][0] >= full[0][0] - 1e-6
+    assert vr[0][1] <= full[0][1] + 1e-6
+    # 平移出界:视图被拉回,不能把谱图移出视野
+    vb.translateBy(x=-500.0, y=0.0)
+    vr = vb.viewRange()
+    assert vr[0][0] >= full[0][0] - 1e-6
+    assert vr[0][1] <= full[0][1] + 1e-6
+    viewer.close()
+
+
 def test_viewer_right_click_disabled(qapp: QApplication) -> None:
     viewer = SpectrumViewer()
     viewer.add_spectrum(_synthetic_spectrum())
