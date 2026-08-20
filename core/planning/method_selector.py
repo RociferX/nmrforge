@@ -8,20 +8,20 @@ Phase 1：默认策略 = 逐维 apodization → ZF → FT → phase 链（unifor
 from __future__ import annotations
 
 from core.data.internal_data_model import AxisRole, Experiment
-from core.experiment.acquisition_mode_detector import ft_alt_for
+from core.experiment.acquisition_mode_detector import ft_alt_for, ft_neg_for
 from core.planning.dependency_graph import PlanNode, ProcessingDag
 from core.planning.processing_plan import ProcessingPlan
 
+# Bruker TopSpin 官方枚举(与 nmrglue 一致):1/2=Magnitude(QF/QSEQ,
+# 非超复数无需合并),3=TPPI(real),4=States,5=States-TPPI,6=Echo-Antiecho
 _HYPER_MODE = {
     0: "states",
-    1: "states_tppi",
-    2: "states_tppi",
-    4: "echo_antiecho",
+    4: "states",
     5: "states_tppi",
     6: "echo_antiecho",
 }
 
-_MULT_FNMODE = {0, 1, 2, 4, 5, 6}
+_MULT_FNMODE = {0, 4, 5, 6}
 
 
 def _fnmode_for(experiment: Experiment, axis: str) -> int:
@@ -75,7 +75,11 @@ def select_method(
             ("zero_fill", {"size": "auto", "axis": axis}),
             (
                 "ft",
-                {"axis": axis, "alt": ft_alt_for(fnmode), "neg": False},
+                {
+                    "axis": axis,
+                    "alt": ft_alt_for(fnmode),
+                    "neg": ft_neg_for(experiment, fnmode, axis),
+                },
             ),
             (
                 "phase",

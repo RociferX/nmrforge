@@ -52,9 +52,28 @@ def test_read_unknown_2d_generic(bruker_dir: Path) -> None:
 def test_detect_modes_and_ft_alt(bruker_dir: Path) -> None:
     exp = read_dataset(bruker_dir / "hnca_3d")
     modes = detect_modes(exp)
-    assert modes == {"F1": "Echo-Antiecho", "F2": "States-TPPI", "F3": "States"}
-    assert ft_alt_for(5) is True
-    assert ft_alt_for(4) is False
+    assert modes == {"F1": "States", "F2": "States-TPPI", "F3": "States"}  # 官方枚举:4=States
+    assert ft_alt_for(5) is True  # States-TPPI 需 -alt
+    assert ft_alt_for(4) is False  # States 不需 -alt
+
+
+def test_ft_neg_for_3d_first_indirect(bruker_dir: Path) -> None:
+    """3D 第一间接维(acqu2s/F2)States 系需 -neg;E-A/第二间接/2D 不加。
+
+    依据:bruk2pipe ACQUISITION MODES 官方表(-neg 对应 States-N/
+    States-TPPI-N 谱反向)+ Bruker 3D ser 使 F2 维镜像;真实验证
+    sampleC(15N FnMODE=5 手工 FT -alt -neg)与 sampleB(FnMODE=6 E-A 无)。
+    """
+    from core.experiment.acquisition_mode_detector import ft_neg_for
+
+    exp3 = read_dataset(bruker_dir / "hnca_3d")  # F2(acqu2s)=5
+    assert ft_neg_for(exp3, 5, "F2") is True   # States-TPPI → -alt -neg
+    assert ft_neg_for(exp3, 4, "F2") is True   # States → -neg(配合无 -alt)
+    assert ft_neg_for(exp3, 6, "F2") is False  # Echo-Antiecho → 无
+    assert ft_neg_for(exp3, 5, "F1") is False  # 第二间接维不加
+    assert ft_neg_for(exp3, 5, "F3") is False  # 直接维不加
+    exp2 = read_dataset(bruker_dir / "hsqc_2d")
+    assert ft_neg_for(exp2, 5, "F1") is False  # 2D 间接维不加
 
 
 def test_map_dimensions_2d(bruker_dir: Path) -> None:

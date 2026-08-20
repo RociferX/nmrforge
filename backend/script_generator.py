@@ -4,7 +4,7 @@
 保证可复现性。关键参数遵循 NMRFlow 审计结论（SOFTWARE_SUMMARY §6.2）：
 - xMODE DQD / yMODE Echo-AntiEcho|Complex / zMODE Complex；
 - DSPFVS=21 → -ws 8 -noi2f；禁用 -DMX；
-- -aq2D 数值（FnMODE 4/6→3，5→2）；
+# -aq2D 数值（FnMODE 6→3 E-A，4→2 States，5→2 States-TPPI）；
 - NUS 间接维 TD 用 NusTD；3D NUS 的 acqu3s TD 被写成 1 时（如 sampleB），
   转换层先在暂存副本把 TD 修正为 NusTD 再跑 bruker，输出切片式
   fid/test%03d.fid（SMILE 按切片流消费，见 nmrpipe_backend._convert_dir）。
@@ -18,17 +18,23 @@ import math
 from typing import Any
 
 from core.data.internal_data_model import Experiment, SamplingMode
+from core.experiment.acquisition_mode_detector import ft_neg_for
 from core.planning.method_selector import select_method
 from core.planning.processing_plan import ProcessingPlan
 
-_AQ2D_KEYWORDS = {0: "2", 1: "1", 2: "2", 3: "2", 4: "3", 5: "2", 6: "3"}
+_AQ2D_KEYWORDS = {0: "2", 1: "1", 2: "2", 3: "2", 4: "2", 5: "2", 6: "3"}
 
-# FnMODE -> (FT -neg, FT -alt)：States/QF 普通；TPPI/States-TPPI 需 -alt；
-# Echo-Antiecho 由 bruk2pipe 转换完成，无需额外标志。
+# FnMODE -> (FT -neg, FT -alt)：Bruker TopSpin 官方枚举 +
+# bruk2pipe ACQUISITION MODES 官方表（nmrPipe/format 文档）：
+#   0=undefined, 1/2=Magnitude(QF/QSEQ) 无需标志, 3=TPPI 走 FT -real,
+#   4=States 无需标志, 5=States-TPPI 需 -alt, 6=Echo-Antiecho 由
+#   bruk2pipe 转换时 shuffling 完成无需标志。
+# 3D 第一间接维(F2)的 States 系 -neg 由调用方 force_neg 叠加（见
+# core.experiment.acquisition_mode_detector.ft_neg_for）。
 _FT_FLAGS = {
     0: (False, False),
-    1: (True, True),
-    2: (True, True),
+    1: (False, False),
+    2: (False, False),
     3: (False, False),
     4: (False, False),
     5: (False, True),
@@ -353,7 +359,7 @@ def _group_tokens(tokens: list[str]) -> list[list[str]]:
 def _bruk2pipe_tokens(experiment: Experiment, ctx: dict[str, Any]) -> list[str]:
     ndim = experiment.ndim
     y_fnmode = _fnmode(experiment, "F1" if ndim == 2 else "F2")
-    y_mode = "Echo-AntiEcho" if y_fnmode in (4, 6) else "Complex"
+    y_mode = "Echo-AntiEcho" if y_fnmode == 6 else "Complex"  # 官方枚举仅 6=E-A
     tokens = [
         "bruk2pipe",
         "-in",
@@ -684,12 +690,15 @@ def _ft_flags(
     *,
     sampling: dict[str, Any] | None = None,
     axis: str = "",
+    force_neg: bool = False,
 ) -> list[str]:
     """FT 标志列表(sampling 覆盖逻辑唯一实现)。
 
     base_neg/base_alt 由调用方给定(均匀路径来自 plan 节点;NUS/finalize
     来自 FnMODE 推导);sampling.ft_neg/ft_alt 非 None 时覆盖,
-    flip_f1=True 时 F1 轴强制 -neg(翻转);默认保持推导输出不变。
+    flip_f1=True 时 F1 轴强制 -neg(翻转);force_neg=True 时默认态加
+    -neg(3D 第一间接维 States 系修正,见 ft_neg_for),显式
+    sampling.ft_neg 仍优先;默认保持推导输出不变。
     """
     neg, alt = bool(base_neg), bool(base_alt)
     if sampling:
@@ -699,11 +708,14 @@ def _ft_flags(
             alt = False  # True=按采集方式自动;False=强制关闭
         if axis == "F1" and bool(sampling.get("flip_f1")):
             neg = True
+    if force_neg and (not sampling or sampling.get("ft_neg") is None):
+        neg = True
     flags = []
-    if neg:
-        flags.append("-neg")
+    # 顺序固定为 -alt -neg(与实验室手工模板一致,便于 diff 对比)
     if alt:
         flags.append("-alt")
+    if neg:
+        flags.append("-neg")
     return flags
 
 
@@ -712,11 +724,15 @@ def _ft_flag_line(
     *,
     sampling: dict[str, Any] | None = None,
     axis: str = "",
+    force_neg: bool = False,
 ) -> str:
     """FT 行标志:sampling.ft_neg/ft_alt 非 None 时覆盖 FnMODE 推导,
-    flip_f1=True 时 F1 轴强制 -neg(翻转);默认保持推导输出不变。"""
+    flip_f1=True 时 F1 轴强制 -neg(翻转);force_neg=True 默认态加 -neg
+    (3D 第一间接维 States 系修正);默认保持推导输出不变。"""
     neg, alt = _FT_FLAGS.get(int(fnmode), (False, False))
-    flags = _ft_flags(neg, alt, sampling=sampling, axis=axis)
+    flags = _ft_flags(
+        neg, alt, sampling=sampling, axis=axis, force_neg=force_neg
+    )
     suffix = (" " + " ".join(flags)) if flags else ""
     return f"| nmrPipe -fn FT{suffix} \\"
 
@@ -977,7 +993,12 @@ def generate_3d_nus_script(
             if f2_zf.get("mode") != "none"
             else []
         ),
-        _ft_flag_line(f2_fnmode, sampling=sampling, axis="F2"),
+        _ft_flag_line(
+            f2_fnmode,
+            sampling=sampling,
+            axis="F2",
+            force_neg=ft_neg_for(experiment, f2_fnmode, "F2"),
+        ),
         _ps_line(phases, "F2"),
         "| nmrPipe -fn TP \\",
         *([f1_window] if f1_window else []),
@@ -1269,7 +1290,12 @@ def generate_nus_finalize_script(
                 if zf_plan.get("F2", {}).get("mode") != "none"
                 else []
             ),
-            _ft_flag_line(f2_fnmode, sampling=sampling, axis="F2"),
+            _ft_flag_line(
+                f2_fnmode,
+                sampling=sampling,
+                axis="F2",
+                force_neg=ft_neg_for(experiment, f2_fnmode, "F2"),
+            ),
             f"| nmrPipe -fn PS -p0 {f2_p0:g} -p1 {f2_p1:g}{f2_di} \\",
             "| nmrPipe -fn TP \\",
             *([f1_window] if f1_window else []),

@@ -51,10 +51,19 @@ def test_convert_script_nus3d_td1_uses_nustd(bruker_dir: Path) -> None:
 
 def test_convert_script_echo_antiecho_mode(bruker_dir: Path) -> None:
     exp = read_dataset(bruker_dir / "hsqc_2d")
+    exp.acquisition_parameters["acqu2s"]["FnMODE"] = 6
+    script = _convert(exp)
+    assert "-yMODE Echo-AntiEcho" in script  # F1 FnMODE=6(官方枚举 E-A)
+    assert "-aq2D 3" in script  # FnMODE 6 → 3
+
+
+def test_convert_script_states_mode(bruker_dir: Path) -> None:
+    """官方枚举 FnMODE=4=States:转换仍 Complex + aq2D States(2)。"""
+    exp = read_dataset(bruker_dir / "hsqc_2d")
     exp.acquisition_parameters["acqu2s"]["FnMODE"] = 4
     script = _convert(exp)
-    assert "-yMODE Echo-AntiEcho" in script  # F1 FnMODE=4
-    assert "-aq2D 3" in script  # FnMODE 4 → 3
+    assert "-yMODE Complex" in script  # States 非 Echo-AntiEcho
+    assert "-aq2D 2" in script  # FnMODE 4 → 2
 
 
 def test_convert_script_3d_y_mode_from_acqu2s(bruker_dir: Path) -> None:
@@ -84,6 +93,11 @@ def test_process_script_3d_two_tps(bruker_dir: Path) -> None:
     script = generate_process_script(exp, plan, in_file="test.fid", out_file="out.ft3")
     assert script.count("| nmrPipe -fn TP") == 2
     assert "| pipe2xyz -out out.ft3 -x" in script
+    # 3D 第一间接维 F2(acqu2s FnMODE=5 States-TPPI)→ FT -alt -neg;
+    # 第二间接维 F1(acqu3s FnMODE=4 States)→ FT 无标志
+    assert "| nmrPipe -fn FT -alt -neg" in script
+    assert "| nmrPipe -fn FT -alt \\" not in script
+    assert "| nmrPipe -fn FT \\" in script
 
 
 def test_scripts_deterministic(bruker_dir: Path) -> None:
@@ -191,6 +205,7 @@ def test_nus_finalize_script_2d(bruker_dir: Path) -> None:
         phases={"F1": (12.0, -3.0)},
     )
     assert "| nmrPipe -fn PS -p0 12 -p1 -3 -di" in phased
+    assert "-neg" not in phased  # 2D 间接维(F1)不加 -neg(与 3D F2 规则区分)
 def test_nus_finalize_script_3d(bruker_dir: Path) -> None:
     exp = read_dataset(bruker_dir / "nus_3d")
     from backend.script_generator import generate_nus_finalize_script
@@ -203,6 +218,10 @@ def test_nus_finalize_script_3d(bruker_dir: Path) -> None:
     assert "| nmrPipe -fn PS -p0 12 -p1 -3 -di" in phased
     assert "| nmrPipe -fn PS -p0 5 -p1 2 -di" in phased
     assert phased.count("| nmrPipe -fn TP") == 2
+    # F2(acqu2s FnMODE=5 States-TPPI)→ FT -alt -neg;F1(acqu3s FnMODE=4 States)→ 无标志
+    assert "| nmrPipe -fn FT -alt -neg" in phased
+    assert "| nmrPipe -fn FT -alt \\" not in phased
+    assert "| nmrPipe -fn FT \\" in phased
 
 
 def test_2d_nus_script_extract_off(bruker_dir: Path) -> None:
@@ -250,6 +269,10 @@ def test_3d_nus_script(bruker_dir: Path) -> None:
     assert "| pipe2xyz -out exp.ft3 -x" in script
     assert script.count("| nmrPipe -fn TP") == 2
     assert "\r" not in script
+    # F2(acqu2s FnMODE=5 States-TPPI)→ FT -alt -neg;F1(acqu3s FnMODE=4 States)→ 无标志
+    assert "| nmrPipe -fn FT -alt -neg" in script
+    assert "| nmrPipe -fn FT -alt \\" not in script
+    assert "| nmrPipe -fn FT \\" in script
     assert generate_3d_nus_script(
         exp, in_file="exp.fid", nuslist="nuslist", out_file="exp.ft3"
     ) == generate_3d_nus_script(
