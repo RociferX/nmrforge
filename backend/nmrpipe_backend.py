@@ -736,6 +736,7 @@ class NMRPipeBackend:
             linewidth_hz=linewidth_hz,
             points_per_line=points_per_line,
             sampling=sampling,
+            direct_poly_time=bool(params.get("direct_poly_time", False)),
         )
         nus_com = work / f"{experiment.dataset_id}_nus.com"
         nus_com.write_text(script, encoding="utf-8", newline="\n")

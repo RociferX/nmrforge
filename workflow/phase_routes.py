@@ -636,14 +636,43 @@ def _unified_nus(
     from workflow.phase_optimize import PHASE_SCORE_FLAT_MARGIN
 
     work = Path(work_dir) if work_dir else backend._work_path(experiment)
+    # 0.2.140:生成谱图最开端先跑直接维数据质量诊断(FID 内存扫描,
+    # 不重跑 SMILE):直流偏置→POLY -time、坏点→自动替换(备份),无法
+    # 纠正的问题(漂移/宽带峰/分布不均)列报告建议用户处理
+    diagnostics: dict[str, Any] = {}
+    diag_logs: list[str] = []
+    try:
+        from workflow.direct_diagnostics import run_direct_diagnostics
+
+        if progress is not None:
+            progress("数据质量诊断中(直接维 FID 内存扫描)")
+        diag_result = run_direct_diagnostics(work, experiment)
+        diagnostics = {
+            "reports": list(diag_result.reports),
+            "metrics": dict(diag_result.metrics),
+            "apply_poly_time": diag_result.apply_poly_time,
+            "repaired_badpoints": diag_result.repaired_badpoints,
+            "backup_dir": diag_result.backup_dir,
+        }
+        if diag_result.reports:
+            diag_logs = ["== 数据质量诊断 =="] + [
+                f"{i + 1}. {r}"
+                for i, r in enumerate(diag_result.reports)
+            ]
+    except Exception as exc:  # noqa: BLE001 - 诊断失败不阻断谱图生成
+        diag_logs = [f"数据质量诊断失败: {exc}"]
     params_first = dict(base_params or {})
     params_first.update(
-        {"direct_phase_search": False, "display_phase_search": False}
+        {
+            "direct_phase_search": False,
+            "display_phase_search": False,
+            "direct_poly_time": bool(diagnostics.get("apply_poly_time")),
+        }
     )
     first = backend.reconstruct_nus(experiment, params_first, progress=progress)
     if not first.get("success") or not first.get("spectrum_path"):
         raise RuntimeError(f"第一遍 SMILE 重构失败: {first.get('message')}")
-    logs: list[str] = [
+    logs: list[str] = list(diag_logs) + [
         f"第一遍 SMILE 重构完成: {first.get('spectrum_path')}"
     ]
     if progress is not None:
@@ -846,6 +875,7 @@ def _unified_nus(
         "baseline": proc["baseline"],
         "zero_fill": proc["zero_fill"],
         "window": proc["window"],
+        "diagnostics": diagnostics,
         "spectrum_path": str(final["spectrum_path"]),
         "backend_runs": backend_runs,
         "logs": logs,

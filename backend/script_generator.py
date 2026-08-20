@@ -902,6 +902,7 @@ def generate_2d_nus_script(
     linewidth_hz: dict[str, float] | None = None,
     points_per_line: float = DEFAULT_POINTS_PER_LINE,
     sampling: dict[str, Any] | None = None,
+    direct_poly_time: bool = False,
 ) -> str:
     """2D NUS SMILE 重构(两阶段,Architect VM 验证 sampleA 25% NUS)。
 
@@ -943,6 +944,8 @@ def generate_2d_nus_script(
     direct_window_cfg = (window or {}).get("F2")
     direct_window = _window_line(direct_window_cfg)
     direct_stages = []
+    if direct_poly_time:
+        direct_stages.append("| nmrPipe -fn POLY -time " + "\\")
     if direct_window_cfg is None:
         direct_stages.append(
             "| nmrPipe -fn SP -off 0.45 -end 0.98 -pow 1 -c 0.5 " + "\\",
@@ -1066,6 +1069,7 @@ def generate_3d_nus_script(
     linewidth_hz: dict[str, float] | None = None,
     points_per_line: float = DEFAULT_POINTS_PER_LINE,
     sampling: dict[str, Any] | None = None,
+    direct_poly_time: bool = False,
 ) -> str:
     """3D NUS SMILE 重构：直接维（F3）FT+EXT → SMILE -nDim 3 → 间接维 FT（ft3）。"""
     _check_real_modes(experiment)
@@ -1088,6 +1092,8 @@ def generate_3d_nus_script(
     f2_window = _window_line((window or {}).get("F2"))
     f1_window = _window_line((window or {}).get("F1"))
     step1_direct: list[str] = []
+    if direct_poly_time:
+        step1_direct.append("| nmrPipe -fn POLY -time " + "\\")
     if (window or {}).get("F3") is None:
         step1_direct.append(
             "| nmrPipe -fn SP -off 0.45 -end 0.98 -pow 2 -c 0.5 " + "\\",

@@ -228,6 +228,7 @@ def generate_spectrum(
         "fill",
         "backend_runs",
         "direct_phase",
+        "diagnostics",
     ):
         if key in result:
             merged_params[key] = result[key]
