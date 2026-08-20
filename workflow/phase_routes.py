@@ -503,8 +503,25 @@ def _optimize_nus_processing(
                 + "),评分沿用默认基线"
             )
             apply_baseline = {}
-    # 3) 间接维窗函数/填零候选:finalize 重渲 + 谱质量评分;直接维窗/SMILE
-    #    apod 在重构内,保持默认(日志说明)
+    # 2.5) 直接维窗函数:FID 直接维迹内存评分(不重跑 SMILE 重构),
+    #      分辨率优先 + 信噪比/线形平衡,写回终跑 step1 SP
+    try:
+        from workflow.window_optimize import optimize_direct_window_from_work
+
+        if progress is not None:
+            progress("直接维窗函数优化中(FID 内存评分,不重跑 SMILE)")
+        wres = optimize_direct_window_from_work(
+            work, experiment, current=(window_cfg or {}).get(direct_axis)
+        )
+        if wres.changed:
+            win = dict(window_cfg or {})
+            win[direct_axis] = wres.choice
+            window_cfg = win
+        out_logs += wres.logs
+    except Exception as exc:  # noqa: BLE001 - 窗优化失败不影响相位/终跑
+        out_logs.append(f"直接维窗优化失败: {exc}")
+    # 3) 间接维窗函数/填零候选:finalize 重渲 + 谱质量评分;直接维窗已由
+    #    2.5 FID 内存评分(不重跑 SMILE);间接 apod 保持默认(日志说明)
     try:
         import numpy as np
 

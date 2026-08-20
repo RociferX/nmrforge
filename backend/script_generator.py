@@ -862,6 +862,8 @@ def _window_line(cfg: dict[str, Any] | None) -> str | None:
     if not cfg:
         return None
     wtype = str(cfg.get("type", "sine_bell"))
+    if wtype in ("none", "off"):
+        return None  # 显式无窗(窗优化候选之一),直接维不插 SP
     if wtype == "gaussian":
         return (
             f"| nmrPipe -fn GM -lb {_fmt(cfg.get('lb', 5.0))} "
@@ -938,10 +940,15 @@ def generate_2d_nus_script(
     expanded = expand_baseline(experiment, baseline)
     direct_poly = _baseline_line(expanded, "F2")
     indirect_poly = _baseline_line(expanded, "F1")
-    direct_window = _window_line((window or {}).get("F2"))
-    direct_stages = [
-        direct_window or "| nmrPipe -fn SP -off 0.45 -end 0.98 -pow 1 -c 0.5 \\",
-    ]
+    direct_window_cfg = (window or {}).get("F2")
+    direct_window = _window_line(direct_window_cfg)
+    direct_stages = []
+    if direct_window_cfg is None:
+        direct_stages.append(
+            "| nmrPipe -fn SP -off 0.45 -end 0.98 -pow 1 -c 0.5 " + "\\",
+        )
+    elif direct_window:
+        direct_stages.append(direct_window)
     if f2_zf.get("mode") != "none":
         direct_stages.append(f"| nmrPipe -fn ZF -zf -size {direct_zf} \\")
     direct_stages.append("| nmrPipe -fn FT \\")
@@ -1080,6 +1087,13 @@ def generate_3d_nus_script(
     f3_window = _window_line((window or {}).get("F3"))
     f2_window = _window_line((window or {}).get("F2"))
     f1_window = _window_line((window or {}).get("F1"))
+    step1_direct: list[str] = []
+    if (window or {}).get("F3") is None:
+        step1_direct.append(
+            "| nmrPipe -fn SP -off 0.45 -end 0.98 -pow 2 -c 0.5 " + "\\",
+        )
+    elif f3_window:
+        step1_direct.append(f3_window)
     # SMILE 内部方向标志与 step3 同源:同一 _FT_FLAGS 推导 + sampling
     # 覆盖;F2 叠加 force_neg(3D 第一间接维 States 系,见 ft_neg_for)
     x_dir_flags = _ft_flags(
@@ -1106,10 +1120,7 @@ def generate_3d_nus_script(
         "mkdir -p nus3d_1 nus3d_rc",
         "# step 1: direct dim (F3) FT + EXT + PS",
         f"xyz2pipe -in {in_file} -x \\",
-        (
-            f3_window
-            or "| nmrPipe -fn SP -off 0.45 -end 0.98 -pow 2 -c 0.5 \\"
-        ),
+        *step1_direct,
         *(
             [f"| nmrPipe -fn ZF -zf -size {direct_zf} \\"]
             if f3_zf.get("mode") != "none"
