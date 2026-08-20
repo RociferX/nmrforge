@@ -759,6 +759,23 @@ def _ft_flags(
     return flags
 
 
+_SMILE_DIRECTION_FLAG = {"-alt": "Alt", "-neg": "Neg"}
+
+
+def _smile_direction_args(flags: list[str], prefix: str) -> str:
+    """_ft_flags 输出 -> SMILE 维度方向参数(-xAlt/-xNeg/-yAlt/-yNeg)。
+
+    SMILE 命令内方向标志与 step3 FT 行同源(同一 sampling 覆盖与
+    force_neg 推导),保证重构内部 FT 与后处理方向一致。
+    """
+    parts = [
+        f"-{prefix}{_SMILE_DIRECTION_FLAG[f]}"
+        for f in flags
+        if f in _SMILE_DIRECTION_FLAG
+    ]
+    return " ".join(parts)
+
+
 def _ft_flag_line(
     fnmode: int,
     *,
@@ -854,6 +871,14 @@ def generate_2d_nus_script(
     direct_zf = _nus_zf_size(f2_zf, td[0])
     f1_fnmode = _fnmode(experiment, "F1")
     x_t = max(1, int(td[1])) if len(td) > 1 else 1  # 间接维复点网格
+    # SMILE 内部方向标志与 stage-2 finalize 同源(同一 _FT_FLAGS)
+    # 推导 + sampling 覆盖;2D 单间接维(F1)无 force_neg
+    f1_dir_flags = _ft_flags(
+        *_FT_FLAGS.get(int(f1_fnmode), (False, False)),
+        sampling=sampling,
+        axis="F1",
+    )
+    f1_dir_arg = _smile_direction_args(f1_dir_flags, "x")
     multi = "%" in in_file
     expanded = expand_baseline(experiment, baseline)
     direct_poly = _baseline_line(expanded, "F2")
@@ -877,6 +902,7 @@ def generate_2d_nus_script(
     smile_tail = [
         # SMILE 不带窗/调相(0.2.134):窗与相位由后续 finalize/step3 后处理承担
         f"           -xT {x_t} \\",
+        *([f"           {f1_dir_arg} \\"] if f1_dir_arg else []),
         f"           -xCT 0 -thresh {thresh:g} \\",
         "| pipe2xyz -out nus2d/recon.ft1 -x -ov",
     ]
@@ -998,6 +1024,21 @@ def generate_3d_nus_script(
     f3_window = _window_line((window or {}).get("F3"))
     f2_window = _window_line((window or {}).get("F2"))
     f1_window = _window_line((window or {}).get("F1"))
+    # SMILE 内部方向标志与 step3 同源:同一 _FT_FLAGS 推导 + sampling
+    # 覆盖;F2 叠加 force_neg(3D 第一间接维 States 系,见 ft_neg_for)
+    x_dir_flags = _ft_flags(
+        *_FT_FLAGS.get(int(f2_fnmode), (False, False)),
+        sampling=sampling,
+        axis="F2",
+        force_neg=ft_neg_for(experiment, f2_fnmode, "F2"),
+    )
+    y_dir_flags = _ft_flags(
+        *_FT_FLAGS.get(int(f1_fnmode), (False, False)),
+        sampling=sampling,
+        axis="F1",
+    )
+    x_dir_arg = _smile_direction_args(x_dir_flags, "x")
+    y_dir_arg = _smile_direction_args(y_dir_flags, "y")
     lines = [
         "#!/bin/csh",
         "# NMRForge 3D NUS SMILE reconstruction",
@@ -1027,10 +1068,12 @@ def generate_3d_nus_script(
         f"           -sampleCount {nuslist_count} -nSigma {nsigma:g} -off 0 0 "
         f"-report {smile_report} \\",
         *(["           -scaling 1 \\"] if smile_scaling else []),
-        # SMILE 不带窗/调相(0.2.134):显式窗(xApod)与相位(xP0/xP1)由
-        # step3 后处理承担,避免重构与后处理双重叠加;FT 方向标志保留
-        "           -xNeg -xAlt \\",
-        "           -yNeg -yAlt \\",
+        # SMILE 不带窗/调相(0.2.134):窗/相位由 step3 后处理承担;
+        # 方向标志(0.2.135)与 step3 FT 同源:F2 按 FnMODE 推导并叠加
+        # force_neg(3D 第一间接维 States 系 -neg),F1 同 FnMODE 推导,
+        # 均受 sampling 覆盖——避免重构内部方向与后处理不一致
+        *([f"           {x_dir_arg} \\"] if x_dir_arg else []),
+        *([f"           {y_dir_arg} \\"] if y_dir_arg else []),
         f"           -xCT 0 -thresh {thresh:g} \\",
         "| pipe2xyz -out nus3d_rc/test%04d.ft1 -x",
         "",

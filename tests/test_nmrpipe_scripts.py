@@ -350,7 +350,9 @@ def test_3d_nus_script_smile_tuning(bruker_dir: Path) -> None:
     assert "-thresh 0.99" in script
     assert "-xApod" not in script  # SMILE 不带窗(窗由 step3 后处理承担)
     assert "-xP0" not in script    # SMILE 不带调相(step3 PS 承担)
-    assert "-xNeg -xAlt" in script  # FT 方向标志保留
+    assert "-xAlt -xNeg" in script  # F2=States-TPPI:与 step3 FT -alt -neg 一致
+    assert "-yNeg" not in script  # F1=States:无方向标志
+    assert "-yAlt" not in script  # F1=States:无方向标志
     assert "-scaling 1" in script
     assert "-report 2" in script
 
@@ -372,8 +374,37 @@ def test_3d_nus_script_default_smile_params(bruker_dir: Path) -> None:
     )
     assert "-xApod" not in script  # SMILE 不带窗(窗由 step3 后处理承担)
     assert "-xP0" not in script    # SMILE 不带调相(step3 PS 承担)
-    assert "-xNeg -xAlt" in script  # FT 方向标志保留
+    assert "-xAlt -xNeg" in script  # F2=States-TPPI:与 step3 FT -alt -neg 一致
+    assert "-yNeg" not in script  # F1=States:无方向标志
+    assert "-yAlt" not in script  # F1=States:无方向标志
     assert "-scaling 1" in script
+
+
+def test_smile_direction_flags_match_step3(bruker_dir: Path) -> None:
+    """SMILE 命令内方向标志与 step3 FT 行同源(同一 _FT_FLAGS + sampling
+    覆盖):nus_3d fixture 的 F2=States-TPPI(5) 为 -xAlt -xNeg 且 step3
+    FT -alt -neg;F1=States(4) 无 y 标志且 step3 FT 无标志;2D F1=5 为
+    -xAlt 且最终 FT -alt;flip_f1 覆盖在 SMILE 与 step3 同步。
+    """
+    from backend.script_generator import generate_2d_nus_script, generate_3d_nus_script
+
+    exp3 = read_dataset(bruker_dir / "nus_3d")
+    s = generate_3d_nus_script(
+        exp3, in_file="e.fid", nuslist="nuslist", out_file="e.ft3"
+    )
+    assert "-xAlt -xNeg" in s and "| nmrPipe -fn FT -alt -neg" in s
+    assert "-yNeg" not in s and "-yAlt" not in s
+    s = generate_3d_nus_script(
+        exp3, in_file="e.fid", nuslist="nuslist", out_file="e.ft3",
+        sampling={"flip_f1": True},
+    )
+    assert "-yNeg" in s and "| nmrPipe -fn FT -neg" in s  # F1 翻转同步
+    exp2 = read_dataset(bruker_dir / "hsqc_2d")
+    s2 = generate_2d_nus_script(
+        exp2, in_file="e.fid", nuslist="nuslist", out_file="e.ft2"
+    )
+    assert "-xAlt" in s2 and "| nmrPipe -fn FT -alt" in s2
+    assert "-xNeg" not in s2
 
 
 def test_process_script_direct_phase(bruker_dir: Path) -> None:
