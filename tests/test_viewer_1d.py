@@ -225,9 +225,17 @@ def test_viewer_1d_strips_toggle_and_update(qapp: QApplication) -> None:
     np.testing.assert_allclose(np.asarray(yt), spectrum.data[40, :])
     xr, _yr = viewer.strip_right_curve.getData()
     np.testing.assert_allclose(np.asarray(xr), spectrum.data[:, 120])
-    # 鼠标在数据 (120, 40) 处(view y 即数据行):条带应显示 data[40,:] 与 data[:,120]
+    # 0.2.133:1D 模式十字虚线需按住左键才跟随;先模拟按下再移动
+    viewer._mouse_left_pressed = True
     scene_pt = viewer.plot.getViewBox().mapViewToScene(QPointF(120.0, 40))
     viewer._on_mouse_moved(scene_pt)
+    # 松开左键后十字线不再跟随新位置
+    viewer._mouse_left_pressed = False
+    scene_pt2 = viewer.plot.getViewBox().mapViewToScene(QPointF(90.0, 30))
+    viewer._on_mouse_moved(scene_pt2)
+    _xt, yt = viewer.strip_top_curve.getData()
+    np.testing.assert_allclose(np.asarray(yt), spectrum.data[40, :])
+    assert viewer._crosshair_v.pos().x() == pytest.approx(120.0)
     _xt, yt = viewer.strip_top_curve.getData()
     np.testing.assert_allclose(np.asarray(yt), spectrum.data[40, :])
     xr, _yr = viewer.strip_right_curve.getData()

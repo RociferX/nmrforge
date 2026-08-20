@@ -6,19 +6,18 @@
   - 投影命名定稿:`{data_id}_{核A}-{核B}.ft2`(文件名含平面实际两核,
     旧 `_proj_*` 名兼容);stepwise 注册键=被求和第三轴(logical),且投影
     注册写回 `run.params["projections"]`;
-  - 投影 .ft2 头修复:实测 proj3D.tcl 三输出头均复制输入平面头(全部错位,
-    即「三个平面都显示 NH」根因);project_3d 生成后按数据形状匹配源谱
-    轴尺寸重写 FDF1/FDF2 的 LABEL/OBS/CAR/ORIG/SW 并修正
-    FDSIZE/FDSPECNUM(backend/projection_headers.py + nmrglue);
-  - 真实数据 28.ft3 VM 验证:三个投影头与物理轴一一对应(见
-    docs/backend/state.md 0.2.133-B 段,含 before/after 头输出);
+  - proj3D 正确用法:project_3d 直接对 3D 终谱调 proj3D.tcl(-sum),自动
+    命名输出 {核A}.{核B}.dat,showhdr 验证头在 NMRPipe 语义下正确;
+    真实数据 28.ft3 VM 验证(见 docs/backend/state.md 0.2.133-B 段)。
+    0.2.133-B 早期「三输出头均错位」是 nmrglue 直读 FDF 槽位的读取端
+    现象,文件头本身正确——projection_headers.py 头重写已删除,不再改头;
   - HT 语义结论(供 GUI 等价性检查):普通 HT 虚部 = −scipy.hilbert(x)
     虚部(标准频率方向;镜像 -ps90-180 反号),幅值 1:1;0.2.101
     「必须用 nmrPipe HT,不能用 scipy」结论仍适用;真实样例与命令见
     docs/backend/state.md;
-  - 测试:test_projection_headers.py 新增(尺寸匹配/头重写/命名);
-    test_stepwise.py 3D 投影新命名+注册+旧名回退;test_nmrpipe_backend.py
-    project_3d 映射更新(固定轴核/平面核/头重写断言)。
+  - 测试:test_stepwise.py 3D 投影新命名+注册+旧名回退;test_nmrpipe_backend.py
+    project_3d 映射更新(自动命名解析固定轴/平面核,不重写头断言);
+    test_viewer3d.py 投影新命名加载断言(x/y 核由文件名为准)。
 
 
 ## [0.2.132] - 2026-08-19

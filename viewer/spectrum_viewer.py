@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import numpy as np
 import pyqtgraph as pg
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QEvent, Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QCheckBox,
     QGridLayout,
@@ -142,6 +142,17 @@ class SpectrumViewer(QWidget):
         self.show_peaks_checkbox.setChecked(True)
         self.show_peaks_checkbox.toggled.connect(self.set_peaks_visible)
         controls_layout.addWidget(self.show_peaks_checkbox)
+        # 0.2.133: aspect ratio slider
+        self.aspect_slider = QSlider(Qt.Orientation.Horizontal)
+        self.aspect_slider.setRange(0, 400)
+        self.aspect_slider.setValue(100)
+        self.aspect_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self.aspect_slider.setTickInterval(50)
+        self.aspect_slider.valueChanged.connect(self._on_aspect_changed)
+        self.aspect_label = QLabel("Aspect: 1.00x")
+        controls_layout.addWidget(QLabel("Aspect ratio"))
+        controls_layout.addWidget(self.aspect_slider)
+        controls_layout.addWidget(self.aspect_label)
         from viewer.phase_panel import PhasePanel
 
         self.phase_panel = PhasePanel()
@@ -207,6 +218,10 @@ class SpectrumViewer(QWidget):
         self.plot.scene().sigMouseMoved.connect(self._on_mouse_moved)
         self.plot.scene().sigMouseClicked.connect(self._on_plot_clicked)
         self.set_aspect_ratio(1.0)  # 默认正方形(1:1 数据长宽比)
+        # 0.2.133: contour state
+        self._contour_states: dict[str, tuple[int, int]] = {}
+        self._mouse_left_pressed = False
+        self.plot.scene().installEventFilter(self)
 
     # ------------------------------------------------------------ layers
 
@@ -441,6 +456,19 @@ class SpectrumViewer(QWidget):
         elif target == "strips":
             self._refresh_strips_phase()
 
+
+    # 0.2.133: 左键按住状态跟踪(1D 模式下十字虚线跟随)
+    def eventFilter(self, obj, event) -> bool:
+        if obj is self.plot.scene():
+            if event.type() == QEvent.Type.MouseButtonPress:
+                if event.button() == Qt.MouseButton.LeftButton:
+                    self._mouse_left_pressed = True
+            elif event.type() == QEvent.Type.MouseButtonRelease:
+                if event.button() == Qt.MouseButton.LeftButton:
+                    self._mouse_left_pressed = False
+        return super().eventFilter(obj, event)
+
+
     def _update_phased_1d(self) -> None:
         if self._plot_1d is None or self._primary_1d is None:
             return
@@ -454,6 +482,20 @@ class SpectrumViewer(QWidget):
         if pos is None or not self._strips_active or self._primary is None:
             return
         self._update_strips(pos[0], pos[1])
+
+    def save_contour_state(self, key: str) -> None:
+        """Save current contour state by key."""
+        self._contour_states[key] = (self.level_slider.value(), self._level_count)
+
+    def restore_contour_state(self, key: str) -> None:
+        """Restore contour state; default to 3%, 8 levels."""
+        state = self._contour_states.get(key)
+        if state is not None:
+            self.level_slider.setValue(state[0])
+            self.count_slider.setValue(state[1])
+        else:
+            self.level_slider.setValue(31)
+            self.count_slider.setValue(8)
 
     def set_1d_mode(self, active: bool) -> None:
         """开关一维谱显示(TopSpin 式):十字线 + 上/右 1D 条带。"""
@@ -478,8 +520,12 @@ class SpectrumViewer(QWidget):
             rows, cols = self._primary.data.shape
             self._update_strips(rows // 2, cols // 2)
             self._move_crosshair(cols // 2, rows // 2)
+            # 0.2.133: 1D mode: PanMode (no RectMode zoom)
+            self.plot.getViewBox().setMouseMode(pg.ViewBox.PanMode)
         else:
             self._restore_strips()
+            # 0.2.133: exit 1D mode: restore RectMode
+            self.plot.getViewBox().setMouseMode(pg.ViewBox.RectMode)
         self._refresh_phase_availability()
 
     def _setup_strip_axes(self) -> None:
@@ -566,9 +612,9 @@ class SpectrumViewer(QWidget):
             y = self._primary_1d.data
             if y.size == 0:
                 return
-            self.plot.getViewBox().setRange(
-                xRange=(float(np.min(x)), float(np.max(x))),
-                yRange=(float(np.min(y)), float(np.max(y))),
+            self.plot.getViewBox().set_full_range(
+                (float(np.min(x)), float(np.max(x))),
+                (float(np.min(y)), float(np.max(y))),
                 padding=0.02,
             )
             return
@@ -578,11 +624,24 @@ class SpectrumViewer(QWidget):
         y0 = min(layer.boundingRect().top() for layer in self.layers)
         x1 = max(layer.boundingRect().right() for layer in self.layers)
         y1 = max(layer.boundingRect().bottom() for layer in self.layers)
-        self.plot.getViewBox().setRange(
-            xRange=(x0, x1),
-            yRange=(y0, y1),
-            padding=0,
+        self.plot.getViewBox().set_full_range(
+            (x0, x1), (y0, y1), padding=0
         )
+
+    def _aspect_ratio_from_slider(self, value: int) -> float | None:
+        """Slider value (0-400) -> aspect ratio; 0 = None (free)."""
+        if value <= 0:
+            return None
+        return max(0.25, min(4.0, value / 100.0))
+
+    def _on_aspect_changed(self, value: int) -> None:
+        """Aspect ratio slider callback."""
+        ratio = self._aspect_ratio_from_slider(value)
+        if ratio is None:
+            self.aspect_label.setText("Aspect: free")
+        else:
+            self.aspect_label.setText(f"Aspect: {ratio:.2f}x")
+        self.set_aspect_ratio(ratio)
 
     def set_aspect_ratio(self, ratio: float | None) -> None:
         """锁定显示长宽比(数据单位 x/y);None 表示自由拉伸(默认)。"""
@@ -782,8 +841,10 @@ class SpectrumViewer(QWidget):
         if xi < 0:
             return
         if self._strips_active:
-            self._move_crosshair(float(point.x()), float(point.y()))
-            self._update_strips(yi, xi)
+            # 0.2.133: 1D crosshair only on left button hold
+            if self._mouse_left_pressed:
+                self._move_crosshair(float(point.x()), float(point.y()))
+                self._update_strips(yi, xi)
         x_axis = self._primary.x_axis
         y_axis = self._primary.y_axis
         self.crosshair_label.setText(

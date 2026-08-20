@@ -635,7 +635,7 @@ def _write_proj_ft2(path: Path, nrow: int, ncol: int) -> None:
 
 
 def test_project_3d_mapping(tmp_path: Path, monkeypatch) -> None:
-    """project_3d 用 proj3D.tcl 生成后按实际形状重写头:labels=固定轴核,nuclei=平面两核。"""
+    """project_3d 直接喂 3D 谱给 proj3D.tcl:自动命名 *.dat,不重写头。"""
     from backend.nmrpipe_backend import NMRPipeBackend
 
     fake_tool = tmp_path / "tool"
@@ -654,18 +654,12 @@ def test_project_3d_mapping(tmp_path: Path, monkeypatch) -> None:
 
     def fake_run(argv, *, cwd=None, timeout=3600, on_line=None):
         calls.append(list(argv))
-        if "-outDir" in argv:
-            # proj3D 流几何实测:xy=(13C,15N)、xz=(1H,15N)、yz=(1H,13C)
-            out_dir = Path(argv[argv.index("-outDir") + 1])
-            _write_proj_ft2(out_dir / "proj_xy.ft2", 64, 256)
-            _write_proj_ft2(out_dir / "proj_xz.ft2", 750, 256)
-            _write_proj_ft2(out_dir / "proj_yz.ft2", 750, 64)
-            return FakeRun(0)
-        else:
-            planes = Path(cwd) / "planes"
-            planes.mkdir(parents=True, exist_ok=True)
-            (planes / "test001.ft3").write_bytes(b"x" * 2048)
-            return FakeRun(0)
+        # 0.2.133:proj3D.tcl 自动命名输出 {核A}.{核B}.dat(不预拆平面)
+        out_dir = Path(argv[argv.index("-outDir") + 1])
+        _write_proj_ft2(out_dir / "13C.15N.dat", 128, 256)
+        _write_proj_ft2(out_dir / "1H.13C.dat", 256, 600)
+        _write_proj_ft2(out_dir / "1H.15N.dat", 128, 600)
+        return FakeRun(0)
 
     monkeypatch.setattr(
         "backend.nmrpipe_backend.CshRuntime.run", staticmethod(fake_run)
@@ -675,36 +669,37 @@ def test_project_3d_mapping(tmp_path: Path, monkeypatch) -> None:
     _write_3d_stream_ft3(src)
     out = tmp_path / "out"
     out.mkdir()
-    result = backend.project_3d(
-        src,
-        out,
-        prefix="proj",
-        labels=["15N", "1H", "13C"],
-    )
-    # 0.2.133:固定轴 = 被求和第三轴(实测 xz 沿 F1=15N 行,yz 沿 F2=1H 列)
-    assert result["labels"]["xy"] == "1H"
-    assert result["labels"]["xz"] == "13C"
-    assert result["labels"]["yz"] == "15N"
-    assert result["nuclei"] == {
-        "xy": ["13C", "15N"],
-        "xz": ["1H", "15N"],
-        "yz": ["1H", "13C"],
+    result = backend.project_3d(src, out, prefix="proj", labels=["15N", "1H", "13C"])
+    # 键 = 文件名两核;labels=固定轴核,nuclei=平面两核(文件名 X.Y 顺序)
+    assert result["labels"] == {
+        "13C-15N": "1H",
+        "1H-13C": "15N",
+        "1H-15N": "13C",
     }
-    assert Path(result["paths"]["xy"]).is_file()
-    assert Path(result["paths"]["xz"]).is_file()
-    assert Path(result["paths"]["yz"]).is_file()
-    # 头已重写为平面实际两核(OBS/SW 来自源谱对应轴)
+    assert result["nuclei"] == {
+        "13C-15N": ["13C", "15N"],
+        "1H-13C": ["1H", "13C"],
+        "1H-15N": ["1H", "15N"],
+    }
+    assert len(result["paths"]) == 3
+    for key, p in result["paths"].items():
+        assert Path(p).is_file()
+    # 头未被重写:保持 proj3D 原样输出(槽位仍为 fake 写入的 15N/1H)
     import nmrglue as ng
 
-    expect = {"xy": ("13C", "15N"), "xz": ("1H", "15N"), "yz": ("1H", "13C")}
-    for tag, (f1, f2) in expect.items():
-        dic, data = ng.pipe.read(result["paths"][tag])
-        assert str(dic["FDF1LABEL"]) == f1
-        assert str(dic["FDF2LABEL"]) == f2
-        assert float(dic["FDSIZE"]) == data.shape[1]
-        assert float(dic["FDSPECNUM"]) == data.shape[0]
-        assert float(dic["FDDIMCOUNT"]) == 2.0
-    assert len(calls) == 2
+    dic, _ = ng.pipe.read(result["paths"]["13C-15N"])
+    assert str(dic["FDF1LABEL"]) == "15N"
+    assert str(dic["FDF2LABEL"]) == "1H"
+    # 只调用一次 proj3D.tcl 的等效命令(直接喂 3D 谱,自动命名,含 -sum)
+    assert len(calls) == 1
+    argv = calls[0]
+    joined = " ".join(str(a) for a in argv)
+    assert "-in" in argv and argv[argv.index("-in") + 1].endswith("final.ft3")
+    assert "-outDir" in argv
+    assert "-sum" in argv
+    assert "-xyOutName" not in joined
+    assert "-xzOutName" not in joined
+
 
 def test_finalize_nus_window_param_passthrough(
     tmp_path: Path, monkeypatch, bruker_dir: Path

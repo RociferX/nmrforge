@@ -477,3 +477,88 @@ def test_3d_panel_projection_from_files(qapp: QApplication) -> None:
     panel.mode_combo.setCurrentIndex(0)
     panel.slice_slider.setEnabled(True)
     assert panel.current_spectrum() is not None
+
+
+def test_load_projections_new_naming(tmp_path: Path, qapp: QApplication) -> None:
+    """0.2.133: 投影按 {data_id}_{核A}-{核B}.ft2 新命名加载,核由文件名解析。"""
+    import numpy as np
+
+    from core.project import ProjectManager
+    from gui.spectrum_panel import SpectrumPanel
+
+    def _write_ft2(path, data):
+        from nmrglue.fileio import pipe
+        dic = {k: '0' for k in pipe.fdata_dic}
+        dic['FDMAGIC'] = 9.2330230000000007e14
+        dic['FDDIMCOUNT'] = 2
+        dic['FDSIZE'] = data.shape[1]
+        dic['FDSPECNUM'] = data.shape[0]
+        dic['FDQUADFLAG'] = 1
+        dic['FDF1QUADFLAG'] = 1
+        dic['FDF2QUADFLAG'] = 1
+        for i, prefix in enumerate(('FDF1', 'FDF2')):
+            dic[prefix + 'SW'] = 6000.0
+            dic[prefix + 'OBS'] = 600.0
+            dic[prefix + 'CAR'] = 4.7
+            dic[prefix + 'ORIG'] = 4.7 * 600.0
+            dic[prefix + 'LABEL'] = '1H'
+        pipe.write(str(path), dic, data.astype(np.float32), overwrite=True)
+
+    manager = ProjectManager.create_project(tmp_path / 'proj_proj', 'demo')
+    entry = manager.create_experiment('3D')
+    data = manager.import_data(entry.id, '/fake/3d')
+    spectra = manager.data_dir(entry.id, data.id, 'spectra')
+    spectra.mkdir(parents=True, exist_ok=True)
+
+    meta_path = manager.data_metadata_path(entry.id, data.id)
+    meta_path.parent.mkdir(parents=True, exist_ok=True)
+    meta_path.write_text(
+        '{"dataset": {"dimensions": ['
+        '{"logical_axis": "F1", "nucleus": "13C", "sf": 150.9},'
+        '{"logical_axis": "F2", "nucleus": "15N", "sf": 60.8},'
+        '{"logical_axis": "F3", "nucleus": "1H", "sf": 600.1}'
+        ']}}', encoding='utf-8')
+
+    # 文件名 = {data_id}_{核A}-{核B}.ft2(核A=X 轴/列,核B=Y 轴/行)
+    _write_ft2(spectra / f'{data.id}_15N-1H.ft2', np.zeros((8, 16)))
+    _write_ft2(spectra / f'{data.id}_13C-1H.ft2', np.zeros((16, 8)))
+    _write_ft2(spectra / f'{data.id}_13C-15N.ft2', np.zeros((8, 8)))
+
+    panel = SpectrumPanel(manager)
+    panel.set_context(entry.id, data.id)
+    proj = panel._load_3d_projections()
+    assert len(proj) == 3, f'expected 3, got {len(proj)}: {list(proj.keys())}'
+    # 15N-1H 平面:固定轴 = 13C(F1, 下标 0);x=15N(N), y=1H(H)
+    s0 = proj[0]
+    assert s0.x_axis.label == 'N', f'x label {s0.x_axis.label}'
+    assert s0.y_axis.label == 'H', f'y label {s0.y_axis.label}'
+    assert s0.data.shape == (8, 16)
+    # 13C-1H 平面:固定轴 = 15N(F2, 下标 1);x=13C(C), y=1H(H)
+    s1 = proj[1]
+    assert s1.x_axis.label == 'C', f'x label {s1.x_axis.label}'
+    assert s1.y_axis.label == 'H', f'y label {s1.y_axis.label}'
+    assert s1.data.shape == (16, 8)
+    # 13C-15N 平面:固定轴 = 1H(F3, 下标 2);x=13C(C), y=15N(N)
+    s2 = proj[2]
+    assert s2.x_axis.label == 'C'
+    assert s2.y_axis.label == 'N'
+    panel.close()
+
+
+def test_contour_state_memory(monkeypatch, tmp_path: Path, qapp: QApplication) -> None:
+    """0.2.133: contour state persists per spectrum path."""
+    from viewer.spectrum_viewer import SpectrumViewer
+
+    viewer = SpectrumViewer()
+    assert viewer.level_slider.value() == 31
+    assert viewer._level_count == 8
+    viewer.level_slider.setValue(50)
+    viewer.count_slider.setValue(16)
+    viewer.save_contour_state('spec1')
+    viewer.restore_contour_state('spec2')
+    assert viewer.level_slider.value() == 31
+    assert viewer._level_count == 8
+    viewer.restore_contour_state('spec1')
+    assert viewer.level_slider.value() == 50
+    assert viewer._level_count == 16
+    viewer.close()

@@ -959,15 +959,16 @@ class NMRPipeBackend:
     ) -> dict[str, dict[str, object]]:
         """用 NMRPipe 自带 proj3D.tcl 从 3D 终谱生成三个 2D 投影(沿轴求和)。
 
-        返回 {"paths": {"xy": path, "xz": path, "yz": path},
-              "labels": {"xy": 固定轴核, "xz": ..., "yz": ...},
-              "nuclei": {"xy": [平面两核], "xz": [...], "yz": [...]}};
-        0.2.133:proj3D.tcl 输出头实测不可靠(三个输出都把输入平面头原样
-        复制),生成后按输出数据形状匹配源谱轴尺寸重写
-        FDF1/FDF2 的 LABEL/OBS/CAR/ORIG/SW(backend.projection_headers),
-        保证 GUI 按头显示正确的核与 ppm;"labels" 为各投影被求和的
-        第三轴(固定轴)核,尺寸无法唯一匹配时保持旧头并按旧标签。
-        投影失败抛 ToolError(由调用方降级,不阻断谱图生成)。
+        0.2.133 正确用法:直接把 3D 谱交给 proj3D.tcl,不预拆平面、不
+        重写任何输出头(proj3D 自动按轴标签命名输出 ``{核A}.{核B}.dat``,
+        输出头在 NMRPipe 语义下正确,showhdr 验证)。返回:
+          {"paths": {"核A-核B": path, ...},
+           "labels": {"核A-核B": 固定轴核, ...},
+           "nuclei": {"核A-核B": [核A, 核B], ...}};
+        固定轴核 = 源谱三个 FDF 标签中不在该平面两核内的那一个
+        (例如 13C-15N 平面固定 1H)。输出文件名中的核顺序即 proj3D
+        的 X.Y 轴序,不做字符推断以外的任何猜测。投影失败抛
+        ToolError(由调用方降级,不阻断谱图生成)。
         """
         import nmrglue as ng
 
@@ -978,87 +979,55 @@ class NMRPipeBackend:
         src = Path(spectrum_path)
         dest = Path(out_dir)
         dest.mkdir(parents=True, exist_ok=True)
-        work = dest / ".proj3d_tmp"
-        planes = work / "planes"
-        if planes.exists():
-            shutil.rmtree(planes)
-        planes.mkdir(parents=True)
-        pipe2xyz = find_tool("pipe2xyz", self._bin_dir())
         proj3d = find_tool("proj3D.tcl", self._bin_dir())
-        if pipe2xyz is None or proj3d is None:
-            raise ToolError("未找到 pipe2xyz/proj3D.tcl(NMRPipe 投影工具)")
-        split = runtime.run(
-            [
-                str(pipe2xyz),
-                "-in",
-                str(src),
-                "-z",
-                "-out",
-                "planes/test%03d.ft3",
-            ],
-            cwd=str(work),
-            timeout=timeout,
-        )
-        if split.returncode != 0 or not list(planes.glob("test*.ft3")):
-            raise ToolError(f"3D 谱拆分为平面失败(pipe2xyz): rc={split.returncode}")
+        if proj3d is None:
+            raise ToolError("未找到 proj3D.tcl(NMRPipe 投影工具)")
         dic, _ = ng.pipe.read(str(src))
         if labels is None:
             labels = [
                 str(dic.get(k, "") or "")
                 for k in ("FDF1LABEL", "FDF2LABEL", "FDF3LABEL")
             ]
-        # proj3D.tcl 会把 outDir 自动拼到输出名前,因此只传文件名
-        xy = f"{prefix}_xy.ft2"
-        xz = f"{prefix}_xz.ft2"
-        yz = f"{prefix}_yz.ft2"
+        # 清除残留 .dat,只保留本次输出
+        for stale in dest.glob("*.dat"):
+            stale.unlink(missing_ok=True)
         run = runtime.run(
             [
                 str(proj3d),
                 "-in",
-                "planes/test%03d.ft3",
+                str(src),
                 "-outDir",
                 str(dest.resolve()),
-                "-xyOutName",
-                xy,
-                "-xzOutName",
-                xz,
-                "-yzOutName",
-                yz,
                 "-sum",
                 "-noverb",
             ],
-            cwd=str(work),
             timeout=timeout,
         )
-        shutil.rmtree(work, ignore_errors=True)
-        if run.returncode != 0 or not all(
-            (dest / p).is_file() for p in (xy, xz, yz)
-        ):
+        if run.returncode != 0:
             raise ToolError(f"proj3D 投影失败: rc={run.returncode}")
-        from backend.projection_headers import (
-            fixed_nucleus_for,
-            rewrite_projection_headers,
-        )
+        dat_files = sorted(dest.glob("*.dat"))
+        outputs: dict[str, str] = {}
+        nuclei: dict[str, list[str]] = {}
+        fixed: dict[str, str] = {}
+        for dat in dat_files:
+            parts = dat.stem.split(".")
+            if len(parts) != 2 or not all(parts):
+                continue
+            n1, n2 = parts[0], parts[1]
+            key = f"{n1}-{n2}"
+            outputs[key] = str(dat)
+            nuclei[key] = [n1, n2]
+            fixed[key] = next(
+                (str(lbl or "") for lbl in labels if str(lbl or "") not in (n1, n2)),
+                "",
+            )
+        if len(outputs) != 3:
+            raise ToolError(
+                f"proj3D 输出解析异常(期望 3 个 *.dat,实际 {len(outputs)}): "
+                f"{[p.name for p in dat_files]}"
+            )
+        return {"paths": outputs, "labels": fixed, "nuclei": nuclei}
 
-        outputs = {
-            "xy": dest / xy,
-            "xz": dest / xz,
-            "yz": dest / yz,
-        }
-        nuclei = rewrite_projection_headers(outputs, dic)
-        src_labels = list(labels) + [""] * (3 - len(labels))
-        fixed = {
-            tag: fixed_nucleus_for(tag, nuclei, src_labels)
-            for tag in ("xy", "xz", "yz")
-        }
-        return {
-            "paths": {tag: str(p) for tag, p in outputs.items()},
-            "labels": fixed,
-            "nuclei": nuclei,
-        }
-
-
-    # ------------------------------------------------------------------ 转换
 
     @staticmethod
     def _converted_fid_path(work: Path, dataset_id: str) -> Path:

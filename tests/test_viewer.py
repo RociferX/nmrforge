@@ -271,9 +271,43 @@ def test_viewer_aspect_ratio(qapp: QApplication) -> None:
     viewer = SpectrumViewer()
     viewer.add_spectrum(_synthetic_spectrum())
     viewer.set_aspect_ratio(2.0)
-    assert viewer.plot.getViewBox().state["aspectLocked"] == 2.0
+    assert viewer.plot.getViewBox().state['aspectLocked'] == 2.0
     viewer.set_aspect_ratio(None)
-    assert viewer.plot.getViewBox().state["aspectLocked"] is False
+    assert viewer.plot.getViewBox().state['aspectLocked'] is False
+    viewer.close()
+
+
+def test_viewer_aspect_slider(qapp: QApplication) -> None:
+    viewer = SpectrumViewer()
+    viewer.add_spectrum(_synthetic_spectrum())
+    assert viewer.aspect_slider.value() == 100
+    assert viewer.plot.getViewBox().state['aspectLocked'] == 1.0
+    viewer.aspect_slider.setValue(200)
+    assert viewer.plot.getViewBox().state['aspectLocked'] == 2.0
+    viewer.aspect_slider.setValue(0)
+    assert viewer.plot.getViewBox().state['aspectLocked'] is False
+    viewer.close()
+
+
+def test_viewer_zoom_min_limit(qapp: QApplication) -> None:
+    viewer = SpectrumViewer()
+    viewer.add_spectrum(_synthetic_spectrum((64, 128)))
+    vb = viewer.plot.getViewBox()
+    # Test min zoom: cannot zoom in below _MIN_VIEW_RANGE
+    vb.setRange(xRange=(0, 2), yRange=(0, 2), padding=0)
+    vr = vb.viewRange()
+    # Should be clamped to at least _MIN_VIEW_RANGE (8.0)
+    assert vr[0][1] - vr[0][0] >= 8.0
+    assert vr[1][1] - vr[1][0] >= 8.0
+    viewer.close()
+
+
+def test_viewer_right_click_disabled(qapp: QApplication) -> None:
+    viewer = SpectrumViewer()
+    viewer.add_spectrum(_synthetic_spectrum())
+    vb = viewer.plot.getViewBox()
+    # Check that right-click is disabled (no context menu created yet)
+    assert not hasattr(vb, 'menu') or vb.menu is None
     viewer.close()
 
 
