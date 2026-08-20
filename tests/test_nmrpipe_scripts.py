@@ -57,6 +57,64 @@ def test_convert_script_echo_antiecho_mode(bruker_dir: Path) -> None:
     assert "-aq2D 3" in script  # FnMODE 6 → 3
 
 
+def test_real_modes_nus_rejected(bruker_dir: Path) -> None:
+    """SMILE(NUS) 路径对 real 间接维显式拒绝(重构仅支持 complex 编码)。
+
+    Bruker NUS 采样器生成的 FnMODE 恒为 States-TPPI/Echo-Antiecho;
+    TPPI/QSEQ/QF 无 quadrature 信息,SMILE -nDim 3 无法重构,入口报错
+    防止静默生成错误 complex 脚本(uniform 路径已支持这些模式)。
+    """
+    from backend.script_generator import (
+        generate_3d_nus_script,
+        generate_nus_finalize_script,
+    )
+
+    exp = read_dataset(bruker_dir / "hsqc_2d")
+    exp.acquisition_parameters["acqu2s"]["FnMODE"] = 3  # TPPI
+    import pytest
+
+    with pytest.raises(NotImplementedError, match="real/magnitude"):
+        generate_nus_finalize_script(exp, planes="recon.ft1", out_file="e.ft2")
+    exp3 = read_dataset(bruker_dir / "nus_3d")
+    exp3.acquisition_parameters["acqu3s"]["FnMODE"] = 1  # QF
+    with pytest.raises(NotImplementedError, match="FnMODE=1"):
+        generate_3d_nus_script(
+            exp3, in_file="e.fid", nuslist="nuslist", out_file="e.ft3"
+        )
+
+
+def test_real_modes_uniform_scripts(bruker_dir: Path) -> None:
+    """uniform 路径对 real/magnitude 模式(TPPI/QSEQ/QF)生成正确脚本。
+
+    依据:NMRPipe 官方模板(bruk2pipe ACQUISITION MODES + notilt2.com
+    magnitude 示例)——TPPI→-yMODE TPPI/-aq2D 1/FT -real;QSEQ→
+    -yMODE Sequential/-aq2D 2/FT -bruk;QF→-yMODE Real/-aq2D 0/FT+MC。
+    real 类 -yT 不除 2(notilt2.com -yT ySize)。magnitude 无相位节点。
+    """
+    td_y = None
+    for mode, mode_kw, aq2d, ft_line, has_mc in (
+        (3, "-yMODE TPPI", "-aq2D 1", "| nmrPipe -fn FT -real \\", False),
+        (2, "-yMODE Sequential", "-aq2D 2", "| nmrPipe -fn FT -bruk \\", False),
+        (1, "-yMODE Real", "-aq2D 0", "| nmrPipe -fn FT \\", True),
+    ):
+        exp = read_dataset(bruker_dir / "hsqc_2d")
+        td_y = int(exp.acquisition_parameters["acqu2s"]["TD"])
+        exp.acquisition_parameters["acqu2s"]["FnMODE"] = mode
+        plan = select_method(exp)
+        script = generate_process_script(
+            exp, plan, in_file="a.fid", out_file="a.ft2"
+        )
+        assert ft_line in script, (mode, ft_line)
+        assert ("| nmrPipe -fn MC \\" in script) == has_mc, mode
+        assert script.count("| nmrPipe -fn PS") == (1 if mode == 1 else 2)  # QF 仅直接维 PS
+        conv = _convert(exp)
+        assert mode_kw in conv, (mode, mode_kw)  # 转换 MODE 关键字
+        assert aq2d in conv, (mode, aq2d)
+        assert f"-yT {td_y}" in conv  # real 类 -yT 不除 2
+        assert "-yT " + str(td_y // 2) not in conv
+    assert td_y is not None
+
+
 def test_convert_script_states_mode(bruker_dir: Path) -> None:
     """官方枚举 FnMODE=4=States:转换仍 Complex + aq2D States(2)。"""
     exp = read_dataset(bruker_dir / "hsqc_2d")

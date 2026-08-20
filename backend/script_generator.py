@@ -18,7 +18,12 @@ import math
 from typing import Any
 
 from core.data.internal_data_model import Experiment, SamplingMode
-from core.experiment.acquisition_mode_detector import ft_neg_for
+from core.experiment.acquisition_mode_detector import (
+    _REAL_FNMODE,
+    ft_kind_for,
+    ft_neg_for,
+    unsupported_real_mode_error,
+)
 from core.planning.method_selector import select_method
 from core.planning.processing_plan import ProcessingPlan
 
@@ -26,7 +31,8 @@ _AQ2D_KEYWORDS = {0: "2", 1: "1", 2: "2", 3: "2", 4: "2", 5: "2", 6: "3"}
 
 # FnMODE -> (FT -neg, FT -alt)：Bruker TopSpin 官方枚举 +
 # bruk2pipe ACQUISITION MODES 官方表（nmrPipe/format 文档）：
-#   0=undefined, 1/2=Magnitude(QF/QSEQ) 无需标志, 3=TPPI 走 FT -real,
+#   0=undefined, 1/2=Magnitude(QF/QSEQ) 与 3=TPPI 为 real/magnitude
+#   类,需 -yMODE Real + FT -real/-bruk/MC 路径(未实现,入口报错),
 #   4=States 无需标志, 5=States-TPPI 需 -alt, 6=Echo-Antiecho 由
 #   bruk2pipe 转换时 shuffling 完成无需标志。
 # 3D 第一间接维(F2)的 States 系 -neg 由调用方 force_neg 叠加（见
@@ -359,7 +365,14 @@ def _group_tokens(tokens: list[str]) -> list[list[str]]:
 def _bruk2pipe_tokens(experiment: Experiment, ctx: dict[str, Any]) -> list[str]:
     ndim = experiment.ndim
     y_fnmode = _fnmode(experiment, "F1" if ndim == 2 else "F2")
-    y_mode = "Echo-AntiEcho" if y_fnmode == 6 else "Complex"  # 官方枚举仅 6=E-A
+    y_kind = ft_kind_for(y_fnmode)
+    y_mode = {
+        "complex": "Echo-AntiEcho" if y_fnmode == 6 else "Complex",
+        "magnitude": "Real",
+        "tppi": "TPPI",
+        "sequential": "Sequential",
+    }[y_kind]
+    y_real = y_kind in ("magnitude", "tppi", "sequential")  # real 类 -yT 不除 2
     tokens = [
         "bruk2pipe",
         "-in",
@@ -390,7 +403,7 @@ def _bruk2pipe_tokens(experiment: Experiment, ctx: dict[str, Any]) -> list[str]:
         "-xT",
         str(int(ctx["meta.td.x"]) // 2),
         "-yT",
-        str(int(ctx["meta.td.y"]) // 2),
+        str(int(ctx["meta.td.y"]) if y_real else int(ctx["meta.td.y"]) // 2),
         "-xSW",
         _fmt(ctx["meta.sw.x"]),
         "-ySW",
@@ -412,15 +425,26 @@ def _bruk2pipe_tokens(experiment: Experiment, ctx: dict[str, Any]) -> list[str]:
     ]
     if ndim >= 2:
         keyword = _AQ2D_KEYWORDS.get(y_fnmode, "")
+        if y_kind != "complex":
+            keyword = {"magnitude": "0", "tppi": "1", "sequential": "2"}[y_kind]
         tokens += ["-aq2D", keyword] if keyword else ["-aq2D"]
     if ndim >= 3:
+        z_fnmode = _fnmode(experiment, "F1")
+        z_kind = ft_kind_for(z_fnmode)
+        z_mode = {
+            "complex": "Complex",
+            "magnitude": "Real",
+            "tppi": "TPPI",
+            "sequential": "Sequential",
+        }[z_kind]
+        z_real = z_kind in ("magnitude", "tppi", "sequential")
         tokens += [
             "-zMODE",
-            "Complex",
+            z_mode,
             "-zN",
             str(ctx["meta.td.z"]),
             "-zT",
-            str(int(ctx["meta.td.z"]) // 2),
+            str(int(ctx["meta.td.z"]) if z_real else int(ctx["meta.td.z"]) // 2),
             "-zSW",
             _fmt(ctx["meta.sw.z"]),
             "-zOBS",
@@ -518,15 +542,30 @@ def _stage_lines(
                 lines.append(f"| nmrPipe -fn ZF -size {int(size)} \\")
         elif op == "ft":
             axis = str(params.get("axis", ""))
-            # 采样覆盖与标志装配统一走 _ft_flags(与 NUS/finalize 同源)
-            flags = _ft_flags(
-                bool(params.get("neg")),
-                bool(params.get("alt")),
-                sampling=sampling,
-                axis=axis,
-            )
-            suffix = (" " + " ".join(flags)) if flags else ""
-            lines.append(f"| nmrPipe -fn FT{suffix} \\")
+            kind = str(params.get("kind", "complex") or "complex")
+            if kind == "tppi":
+                # TPPI(phase-sensitive real):FT -real
+                lines.append("| nmrPipe -fn FT -real \\")
+            elif kind == "sequential":
+                # QSEQ/Sequential:Bruker 直接检测,FT -bruk(= -alt -real)
+                lines.append("| nmrPipe -fn FT -bruk \\")
+            elif kind == "magnitude":
+                # QF/magnitude:间接维 complex FT(方向可用 -neg),后接 MC
+                neg = bool(params.get("neg"))
+                suffix = " -neg" if neg else ""
+                lines.append(f"| nmrPipe -fn FT{suffix} \\")
+            else:
+                # 采样覆盖与标志装配统一走 _ft_flags(与 NUS/finalize 同源)
+                flags = _ft_flags(
+                    bool(params.get("neg")),
+                    bool(params.get("alt")),
+                    sampling=sampling,
+                    axis=axis,
+                )
+                suffix = (" " + " ".join(flags)) if flags else ""
+                lines.append(f"| nmrPipe -fn FT{suffix} \\")
+        elif op == "magnitude":
+            lines.append("| nmrPipe -fn MC \\")
         elif op == "phase":
             p0 = params.get("p0", 0.0)
             p1 = params.get("p1", 0.0)
@@ -804,6 +843,7 @@ def generate_2d_nus_script(
     单文件用 nmrPipe -in(2D 单文件只有 1 平面,不能用 xyz2pipe);
     分段多文件(test%03d.fid)回退 xyz2pipe + -sample nuslist。
     """
+    _check_real_modes(experiment)
     td = effective_td(experiment)
     zf_plan = zero_fill_plan(
         experiment,
@@ -901,6 +941,22 @@ def generate_2d_nus_script(
     return "\n".join(lines) + "\n"
 
 
+def _check_real_modes(experiment: Experiment) -> None:
+    """real/magnitude 间接维(FnMODE 1/2/3)显式报错,防止静默错脚本。
+
+    间接维按逻辑轴取对应 acquire 文件(F1=acqu3s/F2=acqu2s,2D 时
+    间接维为 F1=acqu2s,由 _fnmode 统一处理)。
+    """
+    for dim in experiment.dimensions:
+        if dim.role.name.startswith("DIRECT"):
+            continue
+        fnmode = _fnmode(experiment, dim.logical_axis)
+        if fnmode in _REAL_FNMODE:
+            raise NotImplementedError(
+                unsupported_real_mode_error(fnmode, logical_axis=dim.logical_axis)
+            )
+
+
 def generate_3d_nus_script(
     experiment: Experiment,
     *,
@@ -929,6 +985,7 @@ def generate_3d_nus_script(
     sampling: dict[str, Any] | None = None,
 ) -> str:
     """3D NUS SMILE 重构：直接维（F3）FT+EXT → SMILE -nDim 3 → 间接维 FT（ft3）。"""
+    _check_real_modes(experiment)
     ctx = build_context(experiment)
     zf_plan = zero_fill_plan(
         experiment,
@@ -1258,6 +1315,7 @@ def generate_nus_finalize_script(
     phases:{轴 -> (p0, p1)},缺省 0——供逐维相位候选运行,不重跑 SMILE;
     2D 单文件用 nmrPipe -in + -out -ov(与验证 s2.com 一致),F1 POLY 可配。
     """
+    _check_real_modes(experiment)
     phases = phases or {}
     td = effective_td(experiment)
     zf_plan = zero_fill_plan(

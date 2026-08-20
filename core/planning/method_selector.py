@@ -8,7 +8,11 @@ Phase 1：默认策略 = 逐维 apodization → ZF → FT → phase 链（unifor
 from __future__ import annotations
 
 from core.data.internal_data_model import AxisRole, Experiment
-from core.experiment.acquisition_mode_detector import ft_alt_for, ft_neg_for
+from core.experiment.acquisition_mode_detector import (
+    ft_alt_for,
+    ft_kind_for,
+    ft_neg_for,
+)
 from core.planning.dependency_graph import PlanNode, ProcessingDag
 from core.planning.processing_plan import ProcessingPlan
 
@@ -55,6 +59,7 @@ def select_method(
     for dim in experiment.dimensions:
         axis = dim.logical_axis
         fnmode = _fnmode_for(experiment, axis)
+        kind = ft_kind_for(fnmode) if dim.role is not AxisRole.DIRECT else "complex"
         steps: list[tuple[str, dict]] = []
         if dim.role is not AxisRole.DIRECT and fnmode in _MULT_FNMODE:
             steps.append(
@@ -79,19 +84,26 @@ def select_method(
                     "axis": axis,
                     "alt": ft_alt_for(fnmode),
                     "neg": ft_neg_for(experiment, fnmode, axis),
-                },
-            ),
-            (
-                "phase",
-                {
-                    "p0": 0.0,
-                    "p1": 0.0,
-                    "axis": axis,
-                    "source": "preset",
-                    "confidence": 0.0,
+                    "kind": kind,
                 },
             ),
         ]
+        if kind != "magnitude":
+            # magnitude(QF) 无相位概念,FT 后直接 MC 取模
+            steps.append(
+                (
+                    "phase",
+                    {
+                        "p0": 0.0,
+                        "p1": 0.0,
+                        "axis": axis,
+                        "source": "preset",
+                        "confidence": 0.0,
+                    },
+                )
+            )
+        if kind == "magnitude":
+            steps.append(("magnitude", {"axis": axis}))
         baseline_cfg = {"axis": axis, "enabled": True, "mode": "auto", "order": 0}
         baseline_cfg.update(baseline.get(axis, {}))
         steps.append(("baseline", baseline_cfg))

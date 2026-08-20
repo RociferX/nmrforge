@@ -55,6 +55,9 @@ def test_detect_modes_and_ft_alt(bruker_dir: Path) -> None:
     assert modes == {"F1": "States", "F2": "States-TPPI", "F3": "States"}  # 官方枚举:4=States
     assert ft_alt_for(5) is True  # States-TPPI 需 -alt
     assert ft_alt_for(4) is False  # States 不需 -alt
+    assert ft_alt_for(6) is False  # Echo-Antiecho:转换时已 shuffle
+    assert ft_alt_for(1) is False  # QF(magnitude)
+    assert ft_alt_for(3) is False  # TPPI 是 -real 而非 -alt
 
 
 def test_ft_neg_for_3d_first_indirect(bruker_dir: Path) -> None:

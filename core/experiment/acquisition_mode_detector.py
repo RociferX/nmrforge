@@ -24,9 +24,54 @@ _FNMODE_TO_MODE = {
 # bruk2pipe ACQUISITION MODES 官方表(见 nmrPipe/format 文档):
 #   States/DQD/Complex -> FT 无标志; States-TPPI -> FT -alt;
 #   States-N/Complex-N/States-TPPI-N -> 加 -neg; TPPI -> FT -real;
+#   Sequential/QSEQ -> FT -alt(且 -real,等价 FT -bruk);
 #   Echo-Antiecho -> 转换时 shuffling 完成,无需 FT 标志。
-# 故需 -alt 的间接维 FnMODE 只有 States-TPPI(=5)。
-_FNMODE_FT_ALT = {5}
+# 需 -alt 的间接维 FnMODE: States-TPPI(=5) 与 Sequential/QSEQ(=2,
+# 以 -real 组合);TPPI(=3) 是 -real 而非 -alt。real/magnitude 类
+# (1/2/3)的 NMRPipe real 处理路径未实现,入口显式报错(见
+# unsupported_real_mode_error),因此实际落到脚本的 -alt 仅来自 5。
+_FNMODE_FT_ALT = {2, 5}
+
+# real/magnitude 间接维(QF/QSEQ/TPPI):uniform 处理已支持(-yMODE
+# Real/TPPI/Sequential + FT -real/-bruk/MC,见 FT_KIND);SMILE 重构
+# 仅支持 complex 编码(States/States-TPPI/E-A),NUS 入口对 real 类
+# 显式拒绝(见 unsupported_real_mode_error)。
+_REAL_FNMODE = {1, 2, 3}
+
+# FnMODE -> NMRPipe 处理形态:
+#   complex:    FT [-neg] [-alt](当前 Complex 系)
+#   magnitude:  FT + MC(QF,aq2D Magnitude)
+#   sequential: FT -bruk(= -alt -real,QSEQ/Sequential 直接检测)
+#   tppi:       FT -real(phase-sensitive TPPI)
+FT_KIND = {
+    0: "complex",
+    1: "magnitude",
+    2: "sequential",
+    3: "tppi",
+    4: "complex",
+    5: "complex",
+    6: "complex",
+}
+
+
+def ft_kind_for(fnmode: int) -> str:
+    """FnMODE 对应的 NMRPipe FT 处理形态(complex/magnitude/sequential/tppi)。"""
+    return FT_KIND.get(fnmode, "complex")
+
+
+def unsupported_real_mode_error(fnmode: int, *, logical_axis: str) -> str:
+    """SMILE(NUS) 路径对 real 间接维的拒绝文案。
+
+    uniform 处理已支持 real 模式;此处仅限 SMILE 重构:real/magnitude
+    编码(TPPI/QSEQ/QF)无 quadrature 相位信息,Bruker NUS 采样器不会
+    生成此类数据(实际 FnMODE 恒为 States-TPPI/Echo-Antiecho)。
+    """
+    name = _FNMODE_TO_MODE.get(fnmode, f"unknown({fnmode})")
+    return (
+        f"维度 {logical_axis} 采集模式 FnMODE={fnmode}({name}) 为 "
+        "real/magnitude 类,NUS/SMILE 重构仅支持 complex 编码"
+        "(States/States-TPPI/Echo-Antiecho);均匀采样路径已支持此模式。"
+    )
 
 # 3D 第一间接维(acqu2s/F2)需 -neg 的模式:States(=4)/States-TPPI(=5)。
 # 依据: Bruker 3D ser 布局使 F2 维 States 系数据频率反向
