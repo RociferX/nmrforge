@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 from collections.abc import Callable
 from pathlib import Path
@@ -230,7 +231,7 @@ def generate_spectrum(
     ):
         if key in result:
             merged_params[key] = result[key]
-    _finish_step(
+    run_id = _finish_step(
         manager,
         exp_id,
         data_id,
@@ -239,7 +240,9 @@ def generate_spectrum(
         message="生成谱图(相位优化)",
         params=merged_params,
     )
-    # Task E:3D 终谱用 NMRPipe proj3D.tcl 生成三个投影,落 spectra/<id>_proj_F*.ft2
+    # Task E(0.2.133):3D 终谱用 NMRPipe proj3D.tcl 生成三个投影,落
+    # spectra/<id>_<核A>-<核B>.ft2(文件名含平面实际两核,GUI 以
+    # <data_id>_*.ft2 通配扫描,旧 *_proj_*.ft2 亦兼容)。
     if experiment.ndim >= 3 and getattr(backend, "project_3d", None):
         try:
             spectra_dir = manager.data_dir(exp_id, data_id, "spectra")
@@ -249,6 +252,7 @@ def generate_spectrum(
                 prefix=f"{data_id}_proj",
             )
             labels = proj.get("labels", {})
+            nuclei = proj.get("nuclei", {})
             for tag, path in proj.get("paths", {}).items():
                 fixed_nucleus = str(labels.get(tag, "") or "")
                 logical = next(
@@ -259,7 +263,9 @@ def generate_spectrum(
                     ),
                     "",
                 )
-                target = spectra_dir / f"{data_id}_proj_{logical or tag}.ft2"
+                target = spectra_dir / projection_filename(
+                    data_id, nuclei.get(tag), logical, tag
+                )
                 if Path(path) != target:
                     if target.exists():
                         target.unlink()
@@ -269,7 +275,34 @@ def generate_spectrum(
                 )
         except Exception as exc:  # noqa: BLE001 - 投影失败不阻断谱图
             merged_params.setdefault("projections", {})["error"] = str(exc)
+        _run = manager.project.run(run_id)
+        if _run is not None and "projections" in merged_params:
+            # 0.2.133:投影注册写回运行参数(供 GUI/汇报读取)
+            _run.params["projections"] = merged_params["projections"]
     return spectrum_path
+
+
+def projection_filename(
+    data_id: str,
+    nuclei: list[str] | None,
+    logical: str,
+    tag: str,
+) -> str:
+    """投影文件名(0.2.133):d_001_15N-1H.ft2 —— 含平面实际两核。
+
+    核缺失/不可用时回退旧名 d_001_proj_<logical|tag>.ft2(仍被 GUI
+    <data_id>_*.ft2 与 *_proj_*.ft2 通配扫描命中,兼容历史文件)。
+    """
+    if nuclei and len(nuclei) >= 2:
+        safe = [
+            re.sub(r"[^A-Za-z0-9]", "", str(nuc or ""))
+            for nuc in nuclei[:2]
+        ]
+        if all(safe):
+            return f"{data_id}_{safe[0]}-{safe[1]}.ft2"
+    return f"{data_id}_proj_{logical or tag}.ft2"
+
+
 
 
 def optimize_phase_brute_force(

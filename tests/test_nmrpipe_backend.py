@@ -584,12 +584,62 @@ def test_needs_acqu3s_td_fix_gates(
     shutil.copytree(bruker_dir / "hsqc_small", rawu)
     assert not backend._needs_acqu3s_td_fix(read_dataset(rawu))
 
+def _write_3d_stream_ft3(path: Path) -> None:
+    """写单流 3D 终谱头(FDSIZE=1H 直接维,尺寸与 sampleB.ft3 实测一致)。"""
+    import nmrglue as ng
+
+    dic = {k: "0" for k in ng.fileio.pipe.fdata_dic}
+    dic["FDMAGIC"] = 9.2330230000000007e14
+    dic["FDDIMCOUNT"] = 3
+    dic["FDSIZE"] = 750.0
+    dic["FDSPECNUM"] = 256.0
+    dic["FDF3SIZE"] = 64.0
+    dic["FDPIPEFLAG"] = 1.0
+    dic["FDQUADFLAG"] = 1
+    for pre, label, obs, car, orig, sw in (
+        ("FDF1", "15N", 60.818, 117.986, 6115.307, 2189.142),
+        ("FDF2", "1H", 600.133, 4.696, 3602.677, 3001.729),
+        ("FDF3", "13C", 150.909, 38.996, 272.927, 11312.218),
+    ):
+        dic[pre + "LABEL"] = label
+        dic[pre + "OBS"] = obs
+        dic[pre + "CAR"] = car
+        dic[pre + "ORIG"] = orig
+        dic[pre + "SW"] = sw
+        dic[pre + "QUADFLAG"] = 1
+    data = np.zeros((64, 256, 750), dtype=np.float32)
+    ng.pipe.write(str(path), dic, data, overwrite=True)
+
+
+def _write_proj_ft2(path: Path, nrow: int, ncol: int) -> None:
+    """写投影输出(头为 proj3D 实测的错误平面头 15N/1H,待重写)。"""
+    import nmrglue as ng
+
+    dic = {k: "0" for k in ng.fileio.pipe.fdata_dic}
+    dic["FDMAGIC"] = 9.2330230000000007e14
+    dic["FDDIMCOUNT"] = 2
+    dic["FDSPECNUM"] = float(nrow)
+    dic["FDSIZE"] = float(ncol)
+    dic["FDQUADFLAG"] = 1
+    dic["FDF1QUADFLAG"] = 1
+    dic["FDF2QUADFLAG"] = 1
+    for pre in ("FDF1", "FDF2"):
+        dic[pre + "LABEL"] = "15N" if pre == "FDF1" else "1H"
+        dic[pre + "OBS"] = 60.818 if pre == "FDF1" else 600.133
+        dic[pre + "CAR"] = 117.986 if pre == "FDF1" else 4.696
+        dic[pre + "ORIG"] = 6115.307 if pre == "FDF1" else 3602.677
+        dic[pre + "SW"] = 2189.142 if pre == "FDF1" else 3001.729
+    ng.pipe.write(
+        str(path), dic, np.zeros((nrow, ncol), dtype=np.float32), overwrite=True
+    )
+
+
 def test_project_3d_mapping(tmp_path: Path, monkeypatch) -> None:
-    '''project_3d 用 proj3D.tcl:xy/xz/yz 输出按文件轴标签映射固定轴核。'''
+    """project_3d 用 proj3D.tcl 生成后按实际形状重写头:labels=固定轴核,nuclei=平面两核。"""
     from backend.nmrpipe_backend import NMRPipeBackend
 
     fake_tool = tmp_path / "tool"
-    fake_tool.write_text("#!/bin/sh\n", encoding="utf-8")
+    fake_tool.write_text("#!/bin/sh", encoding="utf-8")
 
     def fake_find(name, _bin=None):
         return fake_tool
@@ -605,9 +655,11 @@ def test_project_3d_mapping(tmp_path: Path, monkeypatch) -> None:
     def fake_run(argv, *, cwd=None, timeout=3600, on_line=None):
         calls.append(list(argv))
         if "-outDir" in argv:
+            # proj3D 流几何实测:xy=(13C,15N)、xz=(1H,15N)、yz=(1H,13C)
             out_dir = Path(argv[argv.index("-outDir") + 1])
-            for name in ("proj_xy.ft2", "proj_xz.ft2", "proj_yz.ft2"):
-                (out_dir / name).write_bytes(b"x" * 2048)
+            _write_proj_ft2(out_dir / "proj_xy.ft2", 64, 256)
+            _write_proj_ft2(out_dir / "proj_xz.ft2", 750, 256)
+            _write_proj_ft2(out_dir / "proj_yz.ft2", 750, 64)
             return FakeRun(0)
         else:
             planes = Path(cwd) / "planes"
@@ -619,20 +671,39 @@ def test_project_3d_mapping(tmp_path: Path, monkeypatch) -> None:
         "backend.nmrpipe_backend.CshRuntime.run", staticmethod(fake_run)
     )
     backend = NMRPipeBackend()
+    src = tmp_path / "final.ft3"
+    _write_3d_stream_ft3(src)
     out = tmp_path / "out"
     out.mkdir()
     result = backend.project_3d(
-        tmp_path / "final.ft3",
+        src,
         out,
         prefix="proj",
         labels=["15N", "1H", "13C"],
     )
-    assert result["labels"]["xy"] == "13C"  # 沿文件 z(13C)求和
-    assert result["labels"]["xz"] == "1H"  # 沿文件 y(1H)
-    assert result["labels"]["yz"] == "15N"  # 沿文件 x(15N)
+    # 0.2.133:固定轴 = 被求和第三轴(实测 xz 沿 F1=15N 行,yz 沿 F2=1H 列)
+    assert result["labels"]["xy"] == "1H"
+    assert result["labels"]["xz"] == "13C"
+    assert result["labels"]["yz"] == "15N"
+    assert result["nuclei"] == {
+        "xy": ["13C", "15N"],
+        "xz": ["1H", "15N"],
+        "yz": ["1H", "13C"],
+    }
     assert Path(result["paths"]["xy"]).is_file()
     assert Path(result["paths"]["xz"]).is_file()
     assert Path(result["paths"]["yz"]).is_file()
+    # 头已重写为平面实际两核(OBS/SW 来自源谱对应轴)
+    import nmrglue as ng
+
+    expect = {"xy": ("13C", "15N"), "xz": ("1H", "15N"), "yz": ("1H", "13C")}
+    for tag, (f1, f2) in expect.items():
+        dic, data = ng.pipe.read(result["paths"][tag])
+        assert str(dic["FDF1LABEL"]) == f1
+        assert str(dic["FDF2LABEL"]) == f2
+        assert float(dic["FDSIZE"]) == data.shape[1]
+        assert float(dic["FDSPECNUM"]) == data.shape[0]
+        assert float(dic["FDDIMCOUNT"]) == 2.0
     assert len(calls) == 2
 
 def test_finalize_nus_window_param_passthrough(

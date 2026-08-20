@@ -1,4 +1,25 @@
-# 变更日志
+# 修改记录(历史条目)
+
+## 0.2.133(2026-08-20,与 GUI 同版本,总管协调合并)
+
+- Backend(0.2.133-B):
+  - 投影命名定稿:`{data_id}_{核A}-{核B}.ft2`(文件名含平面实际两核,
+    旧 `_proj_*` 名兼容);stepwise 注册键=被求和第三轴(logical),且投影
+    注册写回 `run.params["projections"]`;
+  - 投影 .ft2 头修复:实测 proj3D.tcl 三输出头均复制输入平面头(全部错位,
+    即「三个平面都显示 NH」根因);project_3d 生成后按数据形状匹配源谱
+    轴尺寸重写 FDF1/FDF2 的 LABEL/OBS/CAR/ORIG/SW 并修正
+    FDSIZE/FDSPECNUM(backend/projection_headers.py + nmrglue);
+  - 真实数据 28.ft3 VM 验证:三个投影头与物理轴一一对应(见
+    docs/backend/state.md 0.2.133-B 段,含 before/after 头输出);
+  - HT 语义结论(供 GUI 等价性检查):普通 HT 虚部 = −scipy.hilbert(x)
+    虚部(标准频率方向;镜像 -ps90-180 反号),幅值 1:1;0.2.101
+    「必须用 nmrPipe HT,不能用 scipy」结论仍适用;真实样例与命令见
+    docs/backend/state.md;
+  - 测试:test_projection_headers.py 新增(尺寸匹配/头重写/命名);
+    test_stepwise.py 3D 投影新命名+注册+旧名回退;test_nmrpipe_backend.py
+    project_3d 映射更新(固定轴核/平面核/头重写断言)。
+
 
 ## [0.2.132] - 2026-08-19
 

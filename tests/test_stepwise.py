@@ -17,19 +17,21 @@ from workflow.stepwise import (
 
 
 class _FakeBackend:
-    """记录调用的假后端(convert_to_fid / process / reconstruct_nus)。"""
+    """记录调用的假后端(convert_to_fid / process / reconstruct_nus / project_3d)。"""
 
     def __init__(self, work_dir: Path, *, success: bool = True) -> None:
         self.work_dir = str(work_dir)
         self.success = success
         self.calls: list[str] = []
         self.process_params: list[dict | None] = []
+        self.experiment = None
 
     def _touch(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"x")
 
     def convert_to_fid(self, experiment, data_dir, progress=None) -> dict:
+        self.experiment = experiment
         self.calls.append("convert_to_fid")
         if not self.success:
             return {"success": False, "message": "转换失败", "logs": []}
@@ -70,6 +72,49 @@ class _FakeBackend:
         return {
             "success": True,
             "spectrum_path": str(spectrum),
+            "message": "ok",
+            "logs": [],
+        }
+
+    def project_3d(
+        self,
+        spectrum_path,
+        out_dir,
+        *,
+        prefix="proj",
+        timeout=900,
+        labels=None,
+    ) -> dict:
+        """按 0.2.133 实测几何返回三个投影:xy=(固定第三轴 F3,F1)、
+        xz=(F2,F1)、yz=(F2,F3),头为平面实际两核。"""
+        self.calls.append("project_3d")
+        out_dir = Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        by_axis = {
+            dim.logical_axis: dim.nucleus for dim in self.experiment.dimensions
+        }
+        pairs = {  # 生产流几何(实测):xy=(F3,F1), xz=(F2,F1), yz=(F2,F3)
+            "xy": (by_axis["F3"], by_axis["F1"]),
+            "xz": (by_axis["F2"], by_axis["F1"]),
+            "yz": (by_axis["F2"], by_axis["F3"]),
+        }
+        fixed = {  # 被求和的第三轴核
+            "xy": by_axis["F2"],
+            "xz": by_axis["F3"],
+            "yz": by_axis["F1"],
+        }
+        paths, nuclei, fixed_labels = {}, {}, {}
+        for tag, (n1, n2) in pairs.items():
+            path = out_dir / f"{prefix}_{tag}.ft2"
+            self._touch(path)
+            paths[tag] = str(path)
+            nuclei[tag] = [n1, n2]
+            fixed_labels[tag] = fixed[tag]
+        return {
+            "success": True,
+            "paths": paths,
+            "labels": fixed_labels,
+            "nuclei": nuclei,
             "message": "ok",
             "logs": [],
         }
@@ -147,6 +192,95 @@ def test_generate_spectrum_nus_uses_reconstruct(tmp_path: Path, bruker_dir: Path
     generate_spectrum(manager, exp_id, data_id, backend, params={"phase_route": "none"})
     assert "reconstruct_nus" in backend.calls
     assert any(r.workflow_ref == "reconstruct_nus" for r in manager.project.workflow_runs)
+
+
+def test_generate_spectrum_3d_projections_new_naming(
+    tmp_path: Path, bruker_dir: Path, monkeypatch
+) -> None:
+    """0.2.133:3D 投影文件名含平面实际两核,注册按固定轴逻辑轴;兼容旧名。"""
+    import workflow.phase_routes as phase_routes
+
+    manager, exp_id, data_id, work = _manager_with_data(
+        tmp_path, bruker_dir / "nus_3d"
+    )
+    backend = _FakeBackend(work)
+    generate_fid(manager, exp_id, data_id, backend)
+
+    def fake_unified(
+        experiment, backend_, plan=None, work_dir=None, base_params=None, progress=None
+    ):
+        return {
+            "spectrum_path": str(Path(work) / "d_001.ft3"),
+            "phases": {"F1": (0.0, 0.0), "F2": (0.0, 0.0), "F3": (0.0, 0.0)},
+            "backend_runs": 1,
+            "logs": [],
+        }
+
+    monkeypatch.setattr(phase_routes, "unified_route", fake_unified)
+    result = generate_spectrum(manager, exp_id, data_id, backend)
+    assert result.endswith("d_001.ft3")
+    # nus_3d fixture 逻辑轴:F1=13C, F2=15N, F3=1H(direct)
+    spectra_dir = manager.data_dir(exp_id, data_id, "spectra")
+    assert sorted(p.name for p in spectra_dir.glob("d_001_*.ft2")) == [
+        "d_001_15N-13C.ft2",
+        "d_001_15N-1H.ft2",
+        "d_001_1H-13C.ft2",
+    ]
+    # 无旧式 *_proj_*.ft2 名
+    assert not list(spectra_dir.glob("d_001_proj_*.ft2"))
+    run = next(
+        r
+        for r in reversed(manager.project.workflow_runs)
+        if r.workflow_ref == "phase_optimize_unified"
+    )
+    projections = run.params.get("projections", {})
+    # 注册键 = 被求和第三轴(logical):xy→F2(15N)、xz→F3(1H)、yz→F1(13C)
+    assert projections["F2"].endswith("d_001_1H-13C.ft2")
+    assert projections["F3"].endswith("d_001_15N-13C.ft2")
+    assert projections["F1"].endswith("d_001_15N-1H.ft2")
+
+
+def test_generate_spectrum_3d_projections_fallback_old_naming(
+    tmp_path: Path, bruker_dir: Path, monkeypatch
+) -> None:
+    """后端未返回 nuclei 时回退 d_001_proj_<logical|tag>.ft2(兼容旧名)。"""
+    import workflow.phase_routes as phase_routes
+
+    manager, exp_id, data_id, work = _manager_with_data(
+        tmp_path, bruker_dir / "nus_3d"
+    )
+    backend = _FakeBackend(work)
+    generate_fid(manager, exp_id, data_id, backend)
+
+    def fake_unified(
+        experiment, backend_, plan=None, work_dir=None, base_params=None, progress=None
+    ):
+        return {
+            "spectrum_path": str(Path(work) / "d_001.ft3"),
+            "phases": {"F1": (0.0, 0.0), "F2": (0.0, 0.0), "F3": (0.0, 0.0)},
+            "backend_runs": 1,
+            "logs": [],
+        }
+
+    def fake_project_3d(spectrum_path, out_dir, *, prefix="proj", timeout=900, labels=None):
+        out_dir = Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        paths = {}
+        for tag in ("xy", "xz", "yz"):
+            path = out_dir / f"{prefix}_{tag}.ft2"
+            path.write_bytes(b"x")
+            paths[tag] = str(path)
+        return {"paths": paths, "labels": {"xy": "15N", "xz": "1H", "yz": "13C"}}
+
+    monkeypatch.setattr(phase_routes, "unified_route", fake_unified)
+    backend.project_3d = fake_project_3d  # type: ignore[method-assign]
+    generate_spectrum(manager, exp_id, data_id, backend)
+    spectra_dir = manager.data_dir(exp_id, data_id, "spectra")
+    assert sorted(p.name for p in spectra_dir.glob("d_001_proj_*.ft2")) == [
+        "d_001_proj_F1.ft2",
+        "d_001_proj_F2.ft2",
+        "d_001_proj_F3.ft2",
+    ]
 
 
 def test_generate_spectrum_defaults_to_unified_route(

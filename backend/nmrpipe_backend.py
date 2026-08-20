@@ -956,12 +956,17 @@ class NMRPipeBackend:
         prefix: str = "proj",
         timeout: float = 900,
         labels: list[str] | None = None,
-    ) -> dict[str, dict[str, str]]:
+    ) -> dict[str, dict[str, object]]:
         """用 NMRPipe 自带 proj3D.tcl 从 3D 终谱生成三个 2D 投影(沿轴求和)。
 
         返回 {"paths": {"xy": path, "xz": path, "yz": path},
-              "labels": {"xy": 固定轴核, "xz": ..., "yz": ...}};
-        固定轴含义:xy 输出 = 沿文件 z 轴求和(xz=沿 y,yz=沿 x)。
+              "labels": {"xy": 固定轴核, "xz": ..., "yz": ...},
+              "nuclei": {"xy": [平面两核], "xz": [...], "yz": [...]}};
+        0.2.133:proj3D.tcl 输出头实测不可靠(三个输出都把输入平面头原样
+        复制),生成后按输出数据形状匹配源谱轴尺寸重写
+        FDF1/FDF2 的 LABEL/OBS/CAR/ORIG/SW(backend.projection_headers),
+        保证 GUI 按头显示正确的核与 ppm;"labels" 为各投影被求和的
+        第三轴(固定轴)核,尺寸无法唯一匹配时保持旧头并按旧标签。
         投影失败抛 ToolError(由调用方降级,不阻断谱图生成)。
         """
         import nmrglue as ng
@@ -996,8 +1001,8 @@ class NMRPipeBackend:
         )
         if split.returncode != 0 or not list(planes.glob("test*.ft3")):
             raise ToolError(f"3D 谱拆分为平面失败(pipe2xyz): rc={split.returncode}")
+        dic, _ = ng.pipe.read(str(src))
         if labels is None:
-            dic, _ = ng.pipe.read(str(src))
             labels = [
                 str(dic.get(k, "") or "")
                 for k in ("FDF1LABEL", "FDF2LABEL", "FDF3LABEL")
@@ -1030,18 +1035,26 @@ class NMRPipeBackend:
             (dest / p).is_file() for p in (xy, xz, yz)
         ):
             raise ToolError(f"proj3D 投影失败: rc={run.returncode}")
-        labels = list(labels) + [""] * (3 - len(labels))
+        from backend.projection_headers import (
+            fixed_nucleus_for,
+            rewrite_projection_headers,
+        )
+
+        outputs = {
+            "xy": dest / xy,
+            "xz": dest / xz,
+            "yz": dest / yz,
+        }
+        nuclei = rewrite_projection_headers(outputs, dic)
+        src_labels = list(labels) + [""] * (3 - len(labels))
+        fixed = {
+            tag: fixed_nucleus_for(tag, nuclei, src_labels)
+            for tag in ("xy", "xz", "yz")
+        }
         return {
-            "paths": {
-                "xy": str(dest / xy),
-                "xz": str(dest / xz),
-                "yz": str(dest / yz),
-            },
-            "labels": {
-                "xy": labels[2],
-                "xz": labels[1],
-                "yz": labels[0],
-            },
+            "paths": {tag: str(p) for tag, p in outputs.items()},
+            "labels": fixed,
+            "nuclei": nuclei,
         }
 
 
