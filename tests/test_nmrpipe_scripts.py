@@ -234,7 +234,7 @@ def test_2d_nus_script(bruker_dir: Path) -> None:
     )
     assert script.startswith("#!/bin/csh")
     assert "nmrPipe -in exp.fid \\" in script
-    assert "| nusPipe -fn SMILE -nDim 2" in script
+    assert "| nmrPipe -fn SMILE -nDim 2" in script
     assert "-sample None" in script
     assert "-sampleCount 5" in script
     assert "-x1 9.0ppm -xn 7.5ppm" in script
@@ -344,11 +344,13 @@ def test_3d_nus_script_smile_tuning(bruker_dir: Path) -> None:
 
     script = generate_3d_nus_script(
         exp, in_file="exp.fid", nuslist="nuslist", out_file="exp.ft3",
-        nsigma=5.0, thresh=0.99, smile_xq3=2.0, smile_scaling=True, smile_report=2,
+        nsigma=5.0, thresh=0.99, smile_scaling=True, smile_report=2,
     )
     assert "-nSigma 5" in script
     assert "-thresh 0.99" in script
-    assert "-xQ3 2" in script
+    assert "-xApod" not in script  # SMILE 不带窗(窗由 step3 后处理承担)
+    assert "-xP0" not in script    # SMILE 不带调相(step3 PS 承担)
+    assert "-xNeg -xAlt" in script  # FT 方向标志保留
     assert "-scaling 1" in script
     assert "-report 2" in script
 
@@ -368,7 +370,9 @@ def test_3d_nus_script_default_smile_params(bruker_dir: Path) -> None:
     script = generate_3d_nus_script(
         exp, in_file="exp.fid", nuslist="nuslist", out_file="exp.ft3"
     )
-    assert "-xQ3 2" in script
+    assert "-xApod" not in script  # SMILE 不带窗(窗由 step3 后处理承担)
+    assert "-xP0" not in script    # SMILE 不带调相(step3 PS 承担)
+    assert "-xNeg -xAlt" in script  # FT 方向标志保留
     assert "-scaling 1" in script
 
 

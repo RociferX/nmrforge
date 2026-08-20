@@ -610,7 +610,6 @@ class NMRPipeBackend:
         tier_nsigma, tier_thresh = select_smile_params(fraction)
         nsigma = float(params.get("nsigma", tier_nsigma))
         thresh = float(params.get("thresh", tier_thresh))
-        smile_xq3 = float(params.get("smile_xq3", 2.0))
         smile_scaling = bool(params.get("smile_scaling", True))
         smile_report = int(params.get("smile_report", 1))
         nthread = resolve_nthread(params.get("nthread"))
@@ -726,7 +725,6 @@ class NMRPipeBackend:
             ext_hi=ext_hi,
             nsigma=nsigma,
             thresh=thresh,
-            smile_xq3=smile_xq3,
             smile_scaling=smile_scaling,
             smile_report=smile_report,
             direct_phase=smile_phase,
@@ -833,7 +831,6 @@ class NMRPipeBackend:
                 ),
                 "nSigma": nsigma,
                 "thresh": thresh,
-                "smile_xq3": smile_xq3,
                 "smile_scaling": smile_scaling,
                 "smile_report": smile_report,
                 "nthread": nthread,
@@ -1304,7 +1301,6 @@ class NMRPipeBackend:
             ext_hi=ext_hi,
             nsigma=5.0,
             thresh=0.95,
-            smile_xq3=2.0,
             smile_scaling=True,
             smile_report=1,
             direct_phase=(0.0, 0.0),

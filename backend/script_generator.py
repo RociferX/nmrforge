@@ -8,7 +8,8 @@
 - NUS 间接维 TD 用 NusTD；3D NUS 的 acqu3s TD 被写成 1 时（如 sampleB），
   转换层先在暂存副本把 TD 修正为 NusTD 再跑 bruker，输出切片式
   fid/test%03d.fid（SMILE 按切片流消费，见 nmrpipe_backend._convert_dir）。
-SMILE 重构参数可经 reconstruct_nus params 覆盖（nSigma/thresh/xQ3/scaling/report），
+SMILE 重构参数可经 reconstruct_nus params 覆盖（nSigma/thresh/scaling/report）；
+# SMILE 命令不携带窗/调相参数（窗与相位由 step3 后处理承担），
 用于对照实验室脚本（data/脚本/smile2.com）调优。
 """
 
@@ -820,9 +821,6 @@ def generate_2d_nus_script(
     ext_hi: str = "6.5",
     nsigma: float = 5.0,
     thresh: float = 0.95,
-    smile_xq1: float = 0.45,
-    smile_xq2: float = 0.95,
-    smile_xq3: float = 2.0,
     smile_scaling: bool = True,
     smile_report: int = 1,
     direct_phase: tuple[float, float] = (0.0, 0.0),
@@ -877,9 +875,8 @@ def generate_2d_nus_script(
     )
     direct_stages += direct_poly
     smile_tail = [
-        f"           -xApod SP -xQ1 {smile_xq1:g} -xQ2 {smile_xq2:g} "
-        f"-xQ3 {smile_xq3:g} \\",
-        f"           -xT {x_t} -xP0 0 -xP1 0 \\",
+        # SMILE 不带窗/调相(0.2.134):窗与相位由后续 finalize/step3 后处理承担
+        f"           -xT {x_t} \\",
         f"           -xCT 0 -thresh {thresh:g} \\",
         "| pipe2xyz -out nus2d/recon.ft1 -x -ov",
     ]
@@ -896,7 +893,7 @@ def generate_2d_nus_script(
             "",
             "# SMILE reconstruct indirect dim (F1)",
             "xyz2pipe -in nus2d/test%03d.ft1 -x \\",
-            "| nusPipe -fn SMILE -nDim 2 \\",
+            "| nmrPipe -fn SMILE -nDim 2 \\",
             f"           -sample {nuslist} -nThread {nthread} \\",
             f"           -sampleCount {nuslist_count} -nSigma {nsigma:g} "
             f"-off 0 0 -report {smile_report} \\",
@@ -913,7 +910,7 @@ def generate_2d_nus_script(
             f"nmrPipe -in {in_file} \\",
             *direct_stages,
             "| nmrPipe -fn TP \\",
-            "| nusPipe -fn SMILE -nDim 2 \\",
+            "| nmrPipe -fn SMILE -nDim 2 \\",
             f"           -sample None -nThread {nthread} \\",
             f"           -sampleCount {nuslist_count} -nSigma {nsigma:g} "
             f"-off 0 0 -report {smile_report} \\",
@@ -969,9 +966,6 @@ def generate_3d_nus_script(
     ext_hi: str = "6.5",
     nsigma: float = 5.0,
     thresh: float = 0.95,
-    smile_xq1: float = 0.45,
-    smile_xq2: float = 0.95,
-    smile_xq3: float = 2.0,
     smile_scaling: bool = True,
     smile_report: int = 1,
     direct_phase: tuple[float, float] = (0.0, 0.0),
@@ -1033,10 +1027,10 @@ def generate_3d_nus_script(
         f"           -sampleCount {nuslist_count} -nSigma {nsigma:g} -off 0 0 "
         f"-report {smile_report} \\",
         *(["           -scaling 1 \\"] if smile_scaling else []),
-        f"           -xApod SP -xQ1 {smile_xq1:g} -xQ2 {smile_xq2:g} -xQ3 {smile_xq3:g} \\",
-        f"           -yApod SP -yQ1 {smile_xq1:g} -yQ2 {smile_xq2:g} -yQ3 {smile_xq3:g} \\",
-        "           -xP0 0 -xP1 0 -xNeg -xAlt \\",
-        "           -yP0 0 -yP1 0 -yNeg -yAlt \\",
+        # SMILE 不带窗/调相(0.2.134):显式窗(xApod)与相位(xP0/xP1)由
+        # step3 后处理承担,避免重构与后处理双重叠加;FT 方向标志保留
+        "           -xNeg -xAlt \\",
+        "           -yNeg -yAlt \\",
         f"           -xCT 0 -thresh {thresh:g} \\",
         "| pipe2xyz -out nus3d_rc/test%04d.ft1 -x",
         "",
@@ -1255,7 +1249,6 @@ def render_scripts(
             "nuslist_count": int(nus.get("nuslist_count", 0)),
             "nsigma": float(nus.get("nsigma", 5.0)),
             "thresh": float(nus.get("thresh", 0.95)),
-            "smile_xq3": float(nus.get("smile_xq3", 2.0)),
             "smile_scaling": _as_bool(nus.get("smile_scaling", True)),
             "smile_report": int(nus.get("smile_report", 1)),
             "direct_phase": direct,
