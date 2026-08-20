@@ -3,9 +3,9 @@
 与自动处理对应,集合了此前命令行人工处理的流程:
 - 生成 FID:自动阶段先产出 fid.com(backend.convert_to_fid)→ 人工查看内容
   (manual_fid_com)→ 修改 → 运行(csh fid.com,run_manual_fid_com)→ 登记 fid;
-- 生成谱图:表格参数(param_schema/render_scripts)或直接脚本编辑
-  (manual_scripts 渲染 → 修改)→ 运行 process.com / nus*.com
-  (run_manual_spectrum)→ 终谱归位 spectra/ 并登记。
+- 生成谱图:脚本编辑(manual_scripts 渲染,process/ 已有脚本优先展示
+  → 修改)→ 运行(process.com / nus*.com,run_manual_spectrum)→
+  终谱归位 spectra/ 并登记。
 
 运行复用 backend.runtime.CshRuntime;产物登记 set_data_fid /
 set_data_spectrum + WorkflowRun(审计)。
@@ -139,15 +139,49 @@ def manual_scripts(
     data_id: str,
     params: dict[str, Any] | None = None,
 ) -> dict[str, str]:
-    """渲染谱图步骤脚本(process.com / nus*.com,供表格或脚本编辑器展示)。
+    """谱图步骤脚本(process.com / nus*.com,供脚本编辑器展示)。
 
-    只返回谱图脚本——fid 由「生成 FID」步骤(manual_fid_com / generate_fid)
-    产出,谱图步骤只消费已转换 fid,不执行 fid.com。
+    优先返回 process/ 目录下的已有脚本(自动处理运行过或上次人工保存的
+    版本,与自动生成的保持一致);没有时才重新渲染默认脚本。只返回谱图
+    脚本——fid 由「生成 FID」步骤产出。
     """
     data_entry = manager.data(exp_id, data_id)
     raw_dir = _resolve_raw_dir(manager, data_entry)
-    experiment = read_dataset(raw_dir)
-    rendered = render_scripts(experiment, params)
+    work = _work_dir(manager, exp_id, data_id)
+    existing: dict[str, str] = {}
+    if work.is_dir():
+        for path in sorted(work.glob("*.com")):
+            if path.name == "fid.com":
+                continue
+            existing[path.name] = path.read_text(
+                encoding="utf-8", errors="replace"
+            )
+    if existing:
+        return existing
+    if params is None:
+        params = {}
+    nus = dict(params.get("nus") or {})
+    if not nus.get("nuslist_count"):
+        nuslist_path = raw_dir / "nuslist"
+        if nuslist_path.is_file():
+            try:
+                nus_rows = [
+                    row
+                    for row in nuslist_path.read_text(
+                        encoding="utf-8", errors="replace"
+                    ).splitlines()
+                    if row.strip() and not row.lstrip().startswith("#")
+                ]
+                if nus_rows:
+                    nus["nuslist_count"] = len(nus_rows)
+                    params = {**params, "nus": {**nus}}
+            except OSError:
+                pass
+    try:
+        experiment = read_dataset(raw_dir)
+        rendered = render_scripts(experiment, params)
+    except NotImplementedError as exc:
+        raise ManualRunError(f"无法渲染处理脚本(采集模式不支持): {exc}") from exc
     script_key = (
         "nus.com"
         if experiment.sampling.mode is SamplingMode.NUS
@@ -173,12 +207,14 @@ def run_manual_spectrum(
     work = Path(work_dir) if work_dir else _work_dir(manager, exp_id, data_id)
     work.mkdir(parents=True, exist_ok=True)
     experiment = read_dataset(raw_dir)
-    if experiment.sampling.mode is SamplingMode.NUS:
-        script_key = "nus.com"
-        workflow_ref = "manual_nus"
-    else:
-        script_key = "process.com"
-        workflow_ref = "manual_process"
+    workflow_ref = (
+        "manual_nus"
+        if experiment.sampling.mode is SamplingMode.NUS
+        else "manual_process"
+    )
+    if not scripts:
+        raise ManualRunError("缺少处理脚本(编辑器内容为空)")
+    script_key = next(iter(scripts))
     runtime = CshRuntime()
     try:
         return _run_manual_spectrum_impl(

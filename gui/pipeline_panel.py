@@ -497,7 +497,7 @@ class PipelineStepRow(QWidget):
     """
 
     run_requested = pyqtSignal(str)  # step_id
-    manual_requested = pyqtSignal(str)  # step_id:打开人工参数表格/脚本编辑器
+    manual_requested = pyqtSignal(str)  # step_id:打开脚本编辑器(已有脚本优先)
     report_requested = pyqtSignal(str)  # step_id:分析完成后打开报告页
     show_spectrum_requested = pyqtSignal(str)  # step_id:生成谱图完成后展示谱图
     detail_toggled = pyqtSignal(str)  # step_id:点击行切换详情
@@ -558,7 +558,7 @@ class PipelineStepRow(QWidget):
         self.phase_route_combo.setVisible(False)
         header.addWidget(self.phase_route_combo)
         self.manual_button = QPushButton("人工")
-        self.manual_button.setToolTip("人工参数表格 / 脚本编辑器")
+        self.manual_button.setToolTip("脚本编辑器:自动运行过则展示已有脚本,可直接修改运行")
         self.manual_button.setVisible(False)
         self.manual_button.clicked.connect(
             lambda: self.manual_requested.emit(self.step_id)

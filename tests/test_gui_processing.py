@@ -296,31 +296,6 @@ def test_generate_spectrum_phase_optimize_disabled(
     assert not any("相位优化完成" in msg for msg in messages)
 
 
-def test_param_schema_returns_editable_defaults() -> None:
-    """param_schema:返回可编辑参数结构(zero_fill/ext/sampling 等键)。"""
-    schema = ProcessingController().param_schema()
-    assert "properties" in schema
-    props = schema["properties"]
-    assert "zero_fill" in props
-    assert "ext_lo" in props and "ext_hi" in props and "extract" in props
-    assert "sampling" in props
-    default = schema["default"]
-    assert default["zero_fill"] == 2
-    assert default["ext_lo"] == "10.5"
-    assert default["sampling"]["ft_alt"] is True
-
-
-
-def test_param_schema_ext_matches_backend_defaults() -> None:
-    """GUI 参数骨架的 ext 默认值与 backend.config 一致(单一数据源)。"""
-    from backend.config import load_processing_defaults
-
-    d = load_processing_defaults()
-    schema = ProcessingController().param_schema()
-    assert schema["default"]["ext_lo"] == str(d["ext_lo"])
-    assert schema["default"]["ext_hi"] == str(d["ext_hi"])
-
-
 def test_generate_spectrum_wires_linewidth_from_settings(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -40,7 +40,6 @@ from gui.dialogs import (
     ImportExperimentDialog,
     InfoDialog,
     NotesDialog,
-    ParameterTableDialog,
     ScriptEditorDialog,
 )
 from gui.log_panel import LogPanel
@@ -54,6 +53,20 @@ from gui.project_tree import ProjectTreePanel
 from gui.spectrum_panel import SpectrumPanel
 from gui.workspace import WorkspaceManager
 from workflow.import_workflow import ImportResult
+
+
+def _pick_script_key(scripts: dict[str, str], data_id: str) -> str:
+    """选择脚本编辑器的默认脚本:优先数据同名主脚本,回退常用名/首个。"""
+    for key in (
+        f"{data_id}_nus.com",
+        f"{data_id}_process.com",
+        "nus.com",
+        "process.com",
+        f"{data_id}_finalize.com",
+    ):
+        if key in scripts:
+            return key
+    return next(iter(scripts), "process.com")
 
 
 class MainWindow(QMainWindow):
@@ -118,7 +131,6 @@ class MainWindow(QMainWindow):
 
         process_menu = bar.addMenu("处理(&R)")
         process_menu.addAction("运行自动化处理", self.run_auto)
-        process_menu.addAction("人工参数表格...", self._manual_param_table_menu)
         process_menu.addAction("人工脚本编辑器...", self._manual_script_editor_menu)
         process_menu.addAction("人工 FID 脚本...", self._manual_fid_menu)
         process_menu.addSeparator()
@@ -749,9 +761,6 @@ class MainWindow(QMainWindow):
         )
         dialog.exec()
 
-    def _manual_param_table_menu(self) -> None:
-        self._open_manual_dialog("spectrum")
-
     def _manual_script_editor_menu(self) -> None:
         self._open_manual_dialog("script")
 
@@ -846,7 +855,7 @@ class MainWindow(QMainWindow):
             self._append_log(f"拖拽导入: {imported} 个数据目录")
 
     def _open_manual_dialog(self, step_id: str) -> None:
-        """人工处理入口:按步骤打开参数表格/脚本编辑器/fid 编辑器。"""
+        """人工处理入口:按步骤打开脚本编辑器/fid 编辑器。"""
         exp_id = self.project_tree.current_experiment_id()
         if not exp_id:
             InfoDialog.show_info(self, "提示", "请先在左侧选择一个实验类型")
@@ -862,9 +871,7 @@ class MainWindow(QMainWindow):
         data_id = getattr(data_node, "id", exp_id)
         if step_id == "fid":
             self._open_fid_editor(data_node, exp_id, data_id, label)
-        elif step_id == "spectrum":
-            self._open_param_table(data_node, exp_id, data_id, label)
-        elif step_id == "script":
+        elif step_id in ("spectrum", "script"):
             self._open_script_editor(data_node, exp_id, data_id, label)
         elif step_id == "peaks":
             InfoDialog.show_info(
@@ -914,19 +921,8 @@ class MainWindow(QMainWindow):
         if dialog.exec() == ScriptEditorDialog.DialogCode.Accepted:
             dialog.save_script()
 
-    def _open_param_table(self, data_node, exp_id: str, data_id: str, label: str) -> None:
-        """参数表格:param_schema 填充 → 渲染脚本 → 脚本编辑器运行。"""
-        schema = self.controller.param_schema()
-        dialog = ParameterTableDialog(self, label, params=schema)
-        dialog.render_requested.connect(
-            lambda params: self._render_scripts_and_edit(
-                params, data_node, exp_id, data_id, label
-            )
-        )
-        dialog.exec()
-
     def _open_script_editor(self, data_node, exp_id: str, data_id: str, label: str) -> None:
-        """脚本编辑器:manual_scripts 渲染当前脚本 → 编辑/保存/运行。"""
+        """脚本编辑器:已有脚本优先(自动运行过的直接展示),无则渲染默认 → 编辑/保存/运行。"""
         try:
             scripts = self.controller.manual_scripts(
                 data_node, params=None, exp_id=exp_id, data_id=data_id
@@ -936,7 +932,7 @@ class MainWindow(QMainWindow):
                 self, "加载脚本失败", f"{type(exc).__name__}: {exc}"
             )
             return
-        script_key = next(iter(scripts), "process.com")
+        script_key = _pick_script_key(scripts, data_id)
         save_dir = None
         try:
             save_dir = self.manager.data_dir(exp_id, data_id, "process")
@@ -951,42 +947,6 @@ class MainWindow(QMainWindow):
         )
         self._wire_script_run(dialog, data_node, exp_id, data_id, script_key)
         dialog.exec()
-
-    def _render_scripts_and_edit(
-        self, params: dict, data_node, exp_id: str, data_id: str, label: str
-    ) -> None:
-        """按参数渲染谱图脚本并打开脚本编辑器(保存到 process/ 后可运行)。"""
-        try:
-            scripts = self.controller.manual_scripts(
-                data_node, params=params, exp_id=exp_id, data_id=data_id
-            )
-        except Exception as exc:  # noqa: BLE001
-            InfoDialog.show_info(
-                self, "渲染失败", f"{type(exc).__name__}: {exc}"
-            )
-            return
-        if not scripts:
-            InfoDialog.show_info(self, "渲染失败", "后端未返回脚本")
-            return
-        script_key = next(iter(scripts), "process.com")
-        save_dir = None
-        try:
-            save_dir = self.manager.data_dir(exp_id, data_id, "process")
-        except Exception:  # noqa: BLE001
-            save_dir = None
-        editor = ScriptEditorDialog(
-            self,
-            label,
-            script_name=script_key,
-            content=scripts.get(script_key, ""),
-            save_dir=save_dir,
-        )
-        self._wire_script_run(editor, data_node, exp_id, data_id, script_key)
-        if editor.exec() == ScriptEditorDialog.DialogCode.Accepted:
-            editor.save_script()
-            self._append_log(
-                f"已保存脚本: {save_dir / script_key}" if save_dir else f"已保存脚本: {script_key}"
-            )
 
     def _wire_script_run(
         self, dialog, data_node, exp_id: str, data_id: str, script_name: str

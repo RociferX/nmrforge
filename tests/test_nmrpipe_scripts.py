@@ -237,6 +237,9 @@ def test_2d_nus_script(bruker_dir: Path) -> None:
     assert "| nmrPipe -fn SMILE -nDim 2" in script
     assert "-sample None" in script
     assert "-sampleCount 5" in script
+    assert "-maxIter 1500" in script  # 5/128=3.9% -> 最低档 1500
+    assert "-xCT" not in script  # 普通实验不加交叉项参数(仅 CT 实验加)
+    assert "-thresh 0.85" in script
     assert "-x1 9.0ppm -xn 7.5ppm" in script
     assert "-xT 128" in script  # F1 复点网格 256//2
     assert "| nmrPipe -fn FT -alt \\" in script  # States 间接维
@@ -244,6 +247,63 @@ def test_2d_nus_script(bruker_dir: Path) -> None:
     assert "  -out exp.ft2 -ov" in script
     assert "| pipe2xyz -out exp.ft2" not in script
     assert "\r" not in script
+def test_smile_max_iter_tiers() -> None:
+    """0.2.137:SMILE -maxIter 按采样率分档(>0.5->300,>0.3->600,
+    >0.15->1000,其余 1500)。"""
+    from backend.script_generator import smile_max_iter
+
+    assert smile_max_iter(0.6) == 300
+    assert smile_max_iter(0.5) == 600  # 边界:>0.5 才 300
+    assert smile_max_iter(0.4) == 600
+    assert smile_max_iter(0.3) == 1000  # 边界:>0.3 才 600
+    assert smile_max_iter(0.2) == 1000
+    assert smile_max_iter(0.15) == 1500  # 边界:>0.15 才 1000
+    assert smile_max_iter(0.0) == 1500
+
+
+def test_smile_cross_term_args_only_by_ct(bruker_dir: Path) -> None:
+    """0.2.138:-xCT/-yCT 加不加只由是否 CT 实验决定(与采样率无关)。"""
+    exp2 = read_dataset(bruker_dir / "nus_2d")
+    exp3 = read_dataset(bruker_dir / "nus_3d")
+    from backend.script_generator import smile_cross_term_args
+
+    assert smile_cross_term_args(exp2) == ""  # 普通 2D 不加
+    assert smile_cross_term_args(exp3) == ""  # 普通 3D 不加
+    # constant-time:间接维显式关闭交叉项
+    exp2.acquisition_parameters.setdefault("acqus", {})["PULPROG"] = (
+        "hsqcctetgpsp.2"
+    )
+    assert smile_cross_term_args(exp2) == "-xCT 1 "
+    exp3.acquisition_parameters.setdefault("acqus", {})["PULPROG"] = (
+        "cthsqcetgp.2"
+    )
+    assert smile_cross_term_args(exp3) == "-xCT 1 -yCT 1 "
+
+
+def test_3d_nus_script_max_iter_by_sampling(bruker_dir: Path) -> None:
+    """-maxIter 随采样率变化:0.6->300、0.1->1500;无 count 回退元数据 sf。"""
+    exp = read_dataset(bruker_dir / "nus_3d")
+    from backend.script_generator import effective_td, generate_3d_nus_script
+
+    td = effective_td(exp)
+    grid = int(td[1]) * int(td[2])
+    base = dict(in_file="e.fid", nuslist="nuslist", out_file="e.ft3")
+    assert "-maxIter 300" in generate_3d_nus_script(exp, **base)  # sf=1.0 回退
+    hi = generate_3d_nus_script(exp, nuslist_count=int(grid * 0.6), **base)
+    assert "-maxIter 300" in hi
+    assert "-xCT" not in hi  # 普通实验(非 CT)不加交叉项参数
+    lo = generate_3d_nus_script(
+        exp, nuslist_count=max(1, int(grid * 0.1)), **base
+    )
+    assert "-maxIter 1500" in lo
+    assert "-xCT" not in lo  # 普通实验(非 CT)不加交叉项参数
+    exp.acquisition_parameters.setdefault("acqus", {})["PULPROG"] = (
+        "cthsqcetgp.2"
+    )
+    ct = generate_3d_nus_script(exp, nuslist_count=int(grid * 0.8), **base)
+    assert "-xCT 1 -yCT 1 -thresh" in ct  # CT 实验高采样也关闭交叉项
+
+
 def test_nus_finalize_script_2d(bruker_dir: Path) -> None:
     """重构平面定稿(2D):nmrPipe -in + FT -alt + POLY + -out -ov,逐维 PS 可配。"""
     exp = read_dataset(bruker_dir / "nus_2d")

@@ -297,16 +297,67 @@ def zero_fill_report(plan: dict[str, dict[str, Any]]) -> list[str]:
 
 
 def select_smile_params(fraction: float) -> tuple[float, float]:
-    """按采样率分档选择 SMILE 经验参数（nSigma, thresh）。
+    """SMILE tier params (nSigma, thresh) by sampling fraction.
 
-    2026-08-11 真实验证（61/63/65/67 合并 3.9%）：低采样用 nSigma=7/thresh=0.85
-    得 QC 57.5（SNR 17）；nSigma=5/thresh=0.95 得 74.1（SNR 92）。
+    2026-08-11 validation (61/63/65/67 merged 3.9%): low sampling with
+    nSigma=7/thresh=0.85 gave QC 57.5 (SNR 17); nSigma=5/thresh=0.95
+    gave 74.1 (SNR 92).
     """
     if fraction >= 0.5:
         return 5.0, 0.95
     if fraction >= 0.2:
         return 5.0, 0.95
     return 5.0, 0.95
+
+
+def smile_max_iter(fraction: float) -> int:
+    """SMILE -maxIter by sampling fraction (final reconstruction).
+
+    Higher sampling converges faster: >0.5 -> 300, >0.3 -> 600,
+    >0.15 -> 1000, otherwise 1500 (user rule, 0.2.137).
+    """
+    if fraction > 0.5:
+        return 300
+    if fraction > 0.3:
+        return 600
+    if fraction > 0.15:
+        return 1000
+    return 1500
+
+
+def _is_constant_time(experiment: Experiment) -> bool:
+    # constant-time 实验判据:hsqcct/cthsqc/cthmqc/hmqcct/ctet 等 PULPROG。
+    acqus = experiment.acquisition_parameters.get("acqus", {}) or {}
+    pulprog = str(acqus.get("PULPROG", "")).lower()
+    return any(
+        k in pulprog
+        for k in ("cthsqc", "cthmqc", "hsqcct", "hmqcct", "ctet")
+    )
+
+
+def smile_cross_term_args(experiment: Experiment) -> str:
+    # SMILE -xCT/-yCT 是否添加只由实验类型决定:constant-time 实验的
+    # 间接维需要显式关闭交叉项(-xCT 1/-yCT 1,恒定时间期间无耦合同时
+    # 演化,交叉项会引入假峰);普通实验不加,走 SMILE 默认行为。
+    if not _is_constant_time(experiment):
+        return ""
+    axes = ["x", "y"] if experiment.ndim >= 3 else ["x"]
+    return "".join(f"-{axis}CT 1 " for axis in axes)
+
+
+def _smile_fraction(
+    experiment: Experiment, grid: int, nuslist_count: int
+) -> float:
+    """SMILE sampling fraction: nuslist_count/grid, fallback metadata."""
+    if nuslist_count and grid:
+        return nuslist_count / grid
+    try:
+        frac = float(
+            getattr(experiment.sampling, "sampling_fraction", 0.0) or 0.0
+        )
+    except (TypeError, ValueError):
+        frac = 0.0
+    return frac
 
 
 def build_context(experiment: Experiment) -> dict[str, Any]:
@@ -879,6 +930,10 @@ def generate_2d_nus_script(
         axis="F1",
     )
     f1_dir_arg = _smile_direction_args(f1_dir_flags, "x")
+    _grid2 = max(int(td[1]), 1)
+    _frac2 = _smile_fraction(experiment, _grid2, nuslist_count)
+    max_iter = smile_max_iter(_frac2)
+    xct_arg = smile_cross_term_args(experiment)
     multi = "%" in in_file
     expanded = expand_baseline(experiment, baseline)
     direct_poly = _baseline_line(expanded, "F2")
@@ -901,9 +956,10 @@ def generate_2d_nus_script(
     direct_stages += direct_poly
     smile_tail = [
         # SMILE 不带窗/调相(0.2.134):窗与相位由后续 finalize/step3 后处理承担
+        f"           -maxIter {max_iter} \\",
         f"           -xT {x_t} \\",
         *([f"           {f1_dir_arg} \\"] if f1_dir_arg else []),
-        f"           -xCT 0 -thresh {thresh:g} \\",
+        f"           {xct_arg}-thresh {thresh:g} \\",
         "| pipe2xyz -out nus2d/recon.ft1 -x -ov",
     ]
     if multi:
@@ -1039,6 +1095,10 @@ def generate_3d_nus_script(
     )
     x_dir_arg = _smile_direction_args(x_dir_flags, "x")
     y_dir_arg = _smile_direction_args(y_dir_flags, "y")
+    _grid = max(int(ctx["meta.td.y"]) * int(ctx["meta.td.z"]), 1)
+    _frac = _smile_fraction(experiment, _grid, nuslist_count)
+    max_iter = smile_max_iter(_frac)
+    xct_arg = smile_cross_term_args(experiment)
     lines = [
         "#!/bin/csh",
         "# NMRForge 3D NUS SMILE reconstruction",
@@ -1068,13 +1128,14 @@ def generate_3d_nus_script(
         f"           -sampleCount {nuslist_count} -nSigma {nsigma:g} -off 0 0 "
         f"-report {smile_report} \\",
         *(["           -scaling 1 \\"] if smile_scaling else []),
+        f"           -maxIter {max_iter} \\",
         # SMILE 不带窗/调相(0.2.134):窗/相位由 step3 后处理承担;
         # 方向标志(0.2.135)与 step3 FT 同源:F2 按 FnMODE 推导并叠加
         # force_neg(3D 第一间接维 States 系 -neg),F1 同 FnMODE 推导,
         # 均受 sampling 覆盖——避免重构内部方向与后处理不一致
         *([f"           {x_dir_arg} \\"] if x_dir_arg else []),
         *([f"           {y_dir_arg} \\"] if y_dir_arg else []),
-        f"           -xCT 0 -thresh {thresh:g} \\",
+        f"           {xct_arg}-thresh {thresh:g} \\",
         "| pipe2xyz -out nus3d_rc/test%04d.ft1 -x",
         "",
         "# step 3: indirect dims (F2/F1) window + ZF + FT + PS",

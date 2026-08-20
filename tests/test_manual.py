@@ -154,7 +154,7 @@ def test_run_manual_spectrum_missing_script(
     runtime = _FakeRuntime(spectrum_name=f"{raw.name}.ft2")
     monkeypatch.setattr("workflow.manual.CshRuntime", lambda: runtime)
     run_manual_fid_com(manager, exp_id, data_id, "#!/bin/csh\n# fid\n")
-    with pytest.raises(ManualRunError, match="缺少脚本"):
+    with pytest.raises(ManualRunError, match="缺少处理脚本"):
         run_manual_spectrum(manager, exp_id, data_id, {})
 
 

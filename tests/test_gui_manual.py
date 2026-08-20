@@ -1,4 +1,4 @@
-"""人工处理入口测试:参数表格 / 脚本编辑器 / 主窗口接线 + 峰表编辑回写(offscreen)。"""
+"""人工处理入口测试:脚本编辑器 / 主窗口接线 + 峰表编辑回写(offscreen)。"""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import pytest
 from PyQt6.QtWidgets import QApplication
 
 from core.project import ProjectManager
-from gui.dialogs import ParameterTableDialog, ScriptEditorDialog
+from gui.dialogs import ScriptEditorDialog
 from gui.main_window import MainWindow
 from gui.peaks_io import import_peaks_poky
 from gui.processing import ProcessingController
@@ -95,48 +95,9 @@ class FakeManualController:
         self.calls.append(("run_manual_spectrum", scripts))
         return "/tmp/x.ft2"
 
-    def param_schema(self) -> dict:
-        return {"properties": {}, "default": {}}
-
     def save_peaks_manual(self, data, peaks, exp_id=None, data_id=None) -> str:
         self.calls.append(("save_peaks_manual", len(peaks), exp_id, data_id))
         return f"/tmp/{exp_id}-{data_id}.csv"
-
-
-def test_parameter_table_dialog_structure(qapp: QApplication) -> None:
-    """参数表格以 param_schema 填充:标量行 + stages 表。"""
-    dialog = ParameterTableDialog(None, "HSQC (exp_001)")
-    assert dialog.param_table.rowCount() == 8  # zero_fill/ext_lo/ext_hi/extract + sampling.*
-    keys = [
-        dialog.param_table.item(row, 0).text()
-        for row in range(dialog.param_table.rowCount())
-    ]
-    assert "zero_fill" in keys
-    assert "ext_lo" in keys and "ext_hi" in keys and "extract" in keys
-    assert "sampling.ft_neg" in keys and "sampling.ft_alt" in keys
-    data = dialog.result_data()
-    assert data["zero_fill"] == 2
-    assert data["ext_lo"] == "10.5"
-    assert data["sampling"]["ft_alt"] is True
-    dialog.close()
-
-
-def test_parameter_table_dialog_edit_values(qapp: QApplication) -> None:
-    """编辑标量行后 result_data 回读(布尔/数值转换)。"""
-    dialog = ParameterTableDialog(None, "HSQC (exp_001)")
-    for row in range(dialog.param_table.rowCount()):
-        key = dialog.param_table.item(row, 0).text()
-        if key == "ext_hi":
-            dialog.param_table.item(row, 1).setText("8.5")
-        elif key == "sampling.ft_neg":
-            dialog.param_table.item(row, 1).setText("true")
-        elif key == "zero_fill":
-            dialog.param_table.item(row, 1).setText("4")
-    data = dialog.result_data()
-    assert data["ext_hi"] == "8.5"  # schema type=string 保持原样
-    assert data["zero_fill"] == 4
-    assert data["sampling"]["ft_neg"] is True
-    dialog.close()
 
 
 def test_script_editor_dialog_content_and_run_signal(qapp: QApplication) -> None:
@@ -161,7 +122,6 @@ def test_main_window_manual_flows(
         staticmethod(lambda parent, title, text_: messages.append(text_)),
     )
     monkeypatch.setattr("gui.main_window.ScriptEditorDialog.exec", lambda self: 0)
-    monkeypatch.setattr("gui.main_window.ParameterTableDialog.exec", lambda self: 0)
     manager = _manager(tmp_path, monkeypatch)
     controller = FakeManualController()
     window = MainWindow(manager=manager, controller=controller)
@@ -171,31 +131,13 @@ def test_main_window_manual_flows(
     assert ("manual_fid_com", "exp_001", "d_001") in controller.calls
 
     window._open_manual_dialog("spectrum")
-    assert ("manual_scripts", "exp_001", "d_001", None) not in controller.calls  # 未点渲染
+    assert ("manual_scripts", "exp_001", "d_001", None) in controller.calls  # 打开脚本编辑器
 
     window._open_manual_dialog("peaks")
     assert any("峰表" in message for message in messages)
 
     window._open_manual_dialog("analysis")
     assert any("分析" in message for message in messages)
-    window.close()
-
-
-def test_render_scripts_opens_editor(
-    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """参数渲染:manual_scripts(params) 打开脚本编辑器。"""
-    monkeypatch.setattr("gui.main_window.ScriptEditorDialog.exec", lambda self: 0)
-    manager = _manager(tmp_path, monkeypatch)
-    controller = FakeManualController()
-    window = MainWindow(manager=manager, controller=controller)
-    window.project_tree.select_experiment("exp_001")
-    entry = manager.project.experiment("exp_001")
-    data_node = entry.data[0]
-    window._render_scripts_and_edit(
-        {"zero_fill": 4}, data_node, "exp_001", "d_001", "label"
-    )
-    assert ("manual_scripts", "exp_001", "d_001", {"zero_fill": 4}) in controller.calls
     window.close()
 
 
@@ -226,7 +168,7 @@ def test_manual_menu_actions_require_experiment(
         staticmethod(lambda parent, title, text_: messages.append(text_)),
     )
     window = MainWindow()
-    window._manual_param_table_menu()
+    window._manual_script_editor_menu()
     assert messages and "选择" in messages[0]
     window.close()
 
