@@ -352,14 +352,19 @@ def test_main_window_three_column_layout(
         < window.main_splitter.indexOf(window.log_panel)
         < window.main_splitter.indexOf(window.spectrum_panel)
     )
-    assert window.log_panel.minimumWidth() >= 200
-    assert 0 < window.log_panel.maximumWidth() <= 420
-    # 默认几何:顶住屏幕可用区上沿、高度不超过可用区(不遮任务栏)
+    # 0.2.143:列宽无硬性上限,可自由拖拽(下限为内容自然尺寸)
+    assert window.log_panel.minimumWidth() <= 400
+    assert window.log_panel.maximumWidth() >= 10000
+    assert window.project_tree.minimumWidth() <= 1  # 不再强制 330
+    # 默认初始列宽固定 [420,600,300,600](合计 1920),窄屏由 splitter 收窄
     from PyQt6.QtGui import QGuiApplication
 
     screen = window.screen() or QGuiApplication.primaryScreen()
     if screen is not None:
         avail = screen.availableGeometry()
+        cols = window.main_splitter.sizes()
+        assert sum(cols) <= avail.width()
+        assert min(cols) > 0
         assert window.geometry().top() == avail.top()
         assert window.height() <= avail.height()
     # 默认聚焦第一个实验类型 → 中间为实验类型页(内嵌导入样品数据表单)
@@ -402,7 +407,8 @@ def test_main_window_log_panel_expands_on_message(
     monkeypatch.setattr("threading.Thread", SyncThread)
     manager = _manager_with_experiment(tmp_path, monkeypatch)
     window = MainWindow(manager=manager, controller=FakeProcessingController())
-    assert window.log_panel.isHidden()
+    # 0.2.143:log 常驻显示
+    assert not window.log_panel.isHidden()
     window.center_panel.set_selection("data", "exp_001", "d_001")
     window.pipeline._on_run_requested("fid")
     assert not window.log_panel.isHidden()
@@ -1624,3 +1630,29 @@ def test_main_window_stop_no_task_notice(
     window.log_panel.stop_button.click()
     assert "当前没有正在运行的任务" in window.log_panel.text.toPlainText()
     window.close()
+
+
+def test_default_column_widths_1920(qapp: QApplication) -> None:
+    """默认列宽固定 [420, 600, 300, 600] 合计 1920;窄屏收窄不溢出。"""
+    from PyQt6.QtGui import QGuiApplication
+
+    window = MainWindow()
+    screen = window.screen() or QGuiApplication.primaryScreen()
+    cols = window.main_splitter.sizes()
+    if screen is None:
+        assert sum(cols) == 1920
+        window.close()
+        return
+    avail = screen.availableGeometry()
+    if avail.width() >= 1920:
+        assert sum(cols) == 1920
+        assert abs(cols[0] - 420) <= 1
+        assert abs(cols[1] - 600) <= 1
+        assert abs(cols[2] - 300) <= 1
+        assert abs(cols[3] - 600) <= 1
+        assert window.width() == 1920
+    else:
+        assert sum(cols) <= avail.width()
+        assert window.width() == avail.width()
+    window.close()
+

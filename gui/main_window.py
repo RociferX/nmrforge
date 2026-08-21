@@ -101,32 +101,38 @@ class MainWindow(QMainWindow):
         self._last_auto_fill: dict = {}
         self._last_raw_quality: dict | None = None
         self.setWindowTitle("NMRForge")
-        # 0.2.141:打开默认顶住屏幕上沿,高度用满屏幕可用区(任务栏不被遮挡)
-        self._apply_default_geometry()
         self.setAcceptDrops(True)  # 拖拽 Bruker 数据目录导入
         self._build_menus()
         self._build_central()
+        # 0.2.143:默认几何依赖 main_splitter 列宽,在中央构建后应用
+        self._apply_default_geometry()
         self.refresh()
 
     # ------------------------------------------------------------------
     # UI 构建
     # ------------------------------------------------------------------
     def _apply_default_geometry(self) -> None:
-        """打开默认几何:顶部贴屏幕可用区上沿,高度用满可用区(任务栏可见)。
+        """打开默认几何:顶部贴屏幕上沿、高度用满可用区(不遮任务栏)。
 
-        宽度保持默认 1280(屏幕更窄时收窄);多屏幕时以主屏为准。
+        默认列宽固定 [420, 600, 300, 600] 合计 1920,适配 1080p 满宽;
+        屏幕比 1920 窄时窗口收窄到可用宽,列由 QSplitter 自动分配
+        (用户仍可自由拖拽每列长宽)。
         """
         from PyQt6.QtGui import QGuiApplication
 
         from PyQt6.QtCore import QRect
 
+        cols = [420, 600, 300, 600]
         screen = self.screen() or QGuiApplication.primaryScreen()
         if screen is None:
-            self.resize(1280, 720)
+            self.main_splitter.setSizes(cols)
+            self.resize(1920, 1080)
             return
         avail = screen.availableGeometry()
-        width = min(1280, avail.width())
-        self.setGeometry(QRect(avail.left(), avail.top(), width, avail.height()))
+        self.main_splitter.setSizes(cols)
+        self.setGeometry(
+            QRect(avail.left(), avail.top(), min(1920, avail.width()), avail.height())
+        )
 
     def _build_menus(self) -> None:
         bar = self.menuBar()
@@ -248,19 +254,16 @@ class MainWindow(QMainWindow):
         self.main_splitter.addWidget(self.center_panel)
         self.log_panel = LogPanel()
         self.log_panel.stop_requested.connect(self._on_stop_requested)
-        self.log_panel.setMinimumWidth(200)
-        self.log_panel.setMaximumWidth(420)
-        self.log_panel.setVisible(False)
+        # 0.2.143:log 界面常驻显示(不再默认隐藏),宽度不限可拖拽
+        self.log_panel.setVisible(True)
         self.main_splitter.addWidget(self.log_panel)
         self.main_splitter.addWidget(self.spectrum_panel)
         self.main_splitter.setStretchFactor(0, 20)
         self.main_splitter.setStretchFactor(1, 40)
         self.main_splitter.setStretchFactor(2, 0)
         self.main_splitter.setStretchFactor(3, 40)
-        # 0.2.87:左侧树加宽,状态列不被遮挡
-        self.project_tree.setMinimumWidth(330)
-        # 0.2.141:log 竖列位于 pipeline 与谱图查看器之间
-        self.main_splitter.setSizes([340, 460, 240, 520])
+        # 0.2.143:不再设列宽硬限制,四列可自由拖拽调整;
+        # 默认初始宽度见 _apply_default_geometry(基础列宽 x1.4)
 
         central = QWidget()
         central_layout = QVBoxLayout(central)
