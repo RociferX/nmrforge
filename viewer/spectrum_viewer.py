@@ -11,16 +11,21 @@ from __future__ import annotations
 
 import numpy as np
 import pyqtgraph as pg
-from PyQt6.QtCore import QEvent, Qt, pyqtSignal
+from PyQt6.QtCore import QEvent, QRectF, Qt, pyqtSignal
+from PyQt6.QtGui import QColor, QPen
 from PyQt6.QtWidgets import (
     QCheckBox,
     QGridLayout,
+    QFrame,
+    QGraphicsRectItem,
     QHBoxLayout,
     QLabel,
     QListWidget,
     QListWidgetItem,
     QMenu,
     QPushButton,
+    QDoubleSpinBox,
+    QSpinBox,
     QSlider,
     QSplitter,
     QVBoxLayout,
@@ -100,37 +105,84 @@ class SpectrumViewer(QWidget):
         self.level_slider.setValue(31)
         self.level_slider.valueChanged.connect(self._update_levels_debounced)
         self.level_slider.sliderReleased.connect(self._update_levels)
-        self.level_label = QLabel(self._level_label_text())
 
         self.count_slider = QSlider(Qt.Orientation.Horizontal)
         self.count_slider.setFixedHeight(18)
         self.count_slider.setRange(5, 60)
         self.count_slider.setValue(self._level_count)
         self.count_slider.valueChanged.connect(self._on_level_count)
-        self.count_label = QLabel(f"Levels {self._level_count}")
 
         self.reset_button = QPushButton("Full view")
         self.reset_button.clicked.connect(self.reset_view)
 
-        # 0.2.133: aspect ratio slider(0.2.147 ????? 0 ??)
+        # 0.2.148:当前谱图边界框(图上虚线矩形 + 控制区边界信息框)
+        self._bounds_rect_item = QGraphicsRectItem()
+        self._bounds_rect_item.setPen(
+            QPen(QColor("#2e7d32"), 1, Qt.PenStyle.DashLine)
+        )
+        self._bounds_rect_item.setZValue(25)
+        self.plot.addItem(self._bounds_rect_item)
+        self.bounds_frame = QFrame()
+        self.bounds_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        bounds_layout = QHBoxLayout(self.bounds_frame)
+        bounds_layout.setContentsMargins(6, 2, 6, 2)
+        bounds_layout.setSpacing(6)
+        bounds_title = QLabel("边界:")
+        bounds_title.setStyleSheet("font-weight: bold;")
+        bounds_layout.addWidget(bounds_title)
+        self.bounds_label = QLabel("—")
+        self.bounds_label.setStyleSheet("color: #2e7d32;")
+        bounds_layout.addWidget(self.bounds_label)
+        bounds_layout.addStretch(1)
+        self.plot.getViewBox().sigRangeChanged.connect(
+            self._on_view_range_changed
+        )
+
+        # 0.2.133: aspect ratio slider(0.2.147 移到控件行 0 并排)
         self.aspect_slider = QSlider(Qt.Orientation.Horizontal)
         self.aspect_slider.setRange(0, 400)
         self.aspect_slider.setValue(100)
         self.aspect_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
         self.aspect_slider.setTickInterval(50)
         self.aspect_slider.valueChanged.connect(self._on_aspect_changed)
-        self.aspect_label = QLabel("Aspect: 1.00x")
 
-        # Show peaks ???(0.2.147 ??????,?? Add peak ?)
+        # Show peaks 复选框(0.2.147 移到峰操作行,位于 Add peak 前)
         self.show_peaks_checkbox = QCheckBox("Show peaks")
         self.show_peaks_checkbox.setChecked(True)
         self.show_peaks_checkbox.toggled.connect(self.set_peaks_visible)
+        # 0.2.148:数值可直接输入(标题后显示具体值);滑块与输入双向同步
+        self.level_label = QDoubleSpinBox()
+        self.level_label.setPrefix("Contour start ")
+        self.level_label.setSuffix("%")
+        self.level_label.setRange(0.0, 100.0)
+        self.level_label.setDecimals(2)
+        self.level_label.setValue(self._level_fraction() * 100.0)
+        self.level_label.setFixedWidth(150)
+        self.level_label.valueChanged.connect(self._on_level_spin_changed)
 
-        # TopSpin ? 1D ????(0.2.147 ? 1: ? Full view ??)
+        self.count_label = QSpinBox()
+        self.count_label.setPrefix("Levels ")
+        self.count_label.setRange(5, 60)
+        self.count_label.setValue(self._level_count)
+        self.count_label.setFixedWidth(110)
+        self.count_label.valueChanged.connect(self._on_count_spin_changed)
+
+        self.aspect_label = QDoubleSpinBox()
+        self.aspect_label.setPrefix("Aspect ")
+        self.aspect_label.setSuffix("x")
+        self.aspect_label.setRange(0.0, 4.0)
+        self.aspect_label.setDecimals(2)
+        self.aspect_label.setValue(1.00)
+        self.aspect_label.setFixedWidth(130)
+        self.aspect_label.setSpecialValueText("Aspect free")
+        self.aspect_label.valueChanged.connect(self._on_aspect_spin_changed)
+
+
+        # TopSpin 式 1D 条带开关(0.2.147 行 1: 与 Full view 并排)
         self.show_1d_button = QPushButton("1D")
         self.show_1d_button.setCheckable(True)
         self.show_1d_button.setToolTip(
-            "???????????,???????????(TopSpin ?)"
+            "开启后出现随鼠标十字线,点击显示该处两个一维谱(TopSpin 式)"
         )
         self.show_1d_button.toggled.connect(self.set_1d_mode)
 
@@ -141,36 +193,34 @@ class SpectrumViewer(QWidget):
 
         controls = QWidget()
         controls_layout = QGridLayout(controls)
-        # 0.2.147:??????????;Layers ??????????
+        # 0.2.147:横向控件行间隔明显;Layers 列表移出到面板顶部行
         controls_layout.setContentsMargins(6, 4, 6, 4)
         controls_layout.setHorizontalSpacing(20)
         controls_layout.setVerticalSpacing(6)
 
-        # ? 0:contour start / Levels / Aspect ratio ????
-        def _labeled_slider(label: str, slider, value_label) -> QVBoxLayout:
+        # 行 0:contour start / Levels / Aspect ratio 三组并排
+        def _labeled_slider(spinbox, slider) -> QVBoxLayout:
+            """标题+数值(可输入)一行,slider 在下方。"""
             box = QVBoxLayout()
             box.setSpacing(2)
-            lab = QLabel(label)
-            lab.setAlignment(Qt.AlignmentFlag.AlignLeft)
-            box.addWidget(lab)
+            box.addWidget(spinbox)
             box.addWidget(slider)
-            box.addWidget(value_label)
             return box
 
         controls_layout.addLayout(
-            _labeled_slider("Contour start (%)", self.level_slider, self.level_label),
+            _labeled_slider(self.level_label, self.level_slider),
             0, 0,
         )
         controls_layout.addLayout(
-            _labeled_slider("Levels", self.count_slider, self.count_label),
+            _labeled_slider(self.count_label, self.count_slider),
             0, 1,
         )
         controls_layout.addLayout(
-            _labeled_slider("Aspect ratio", self.aspect_slider, self.aspect_label),
+            _labeled_slider(self.aspect_label, self.aspect_slider),
             0, 2,
         )
 
-        # ? 1:Full view + 1D
+        # 行 1:Full view + 1D
         row1 = QHBoxLayout()
         row1.setSpacing(16)
         row1.addWidget(self.reset_button)
@@ -178,20 +228,23 @@ class SpectrumViewer(QWidget):
         row1.addStretch(1)
         controls_layout.addLayout(row1, 1, 0, 1, 3)
 
-        # ? 2:????
+        # 行 2:读数信息
         row2 = QHBoxLayout()
         row2.setSpacing(20)
         row2.addWidget(self.crosshair_label, 1)
         row2.addWidget(self.peak_label, 1)
         controls_layout.addLayout(row2, 2, 0, 1, 3)
 
-        # ? 3:p0/p1 ???? ?? ??,? 1D ????
+        # 行 3:p0/p1 相位面板 —— 单行,仅 1D 模式显示
         from viewer.phase_panel import PhasePanel
 
         self.phase_panel = PhasePanel()
         self.phase_panel.phase_changed.connect(self._on_phase_changed)
         controls_layout.addWidget(self.phase_panel, 3, 0, 1, 3)
         self.phase_panel.setVisible(False)
+
+        # 行 4:边界信息框
+        controls_layout.addWidget(self.bounds_frame, 4, 0, 1, 3)
 
         self.controls_layout = controls_layout
 
@@ -350,19 +403,30 @@ class SpectrumViewer(QWidget):
         return np.concatenate([-positive[::-1], positive])
 
     def _update_levels_debounced(self) -> None:
-        """拖动过程中仅刷新标签,避免每格都重建轮廓(性能)。"""
-        self.level_label.setText(self._level_label_text())
+        """拖动过程中仅刷新数值,避免每格都重建轮廓(性能)。"""
+        self.level_label.setValue(self._level_fraction() * 100.0)
 
     def _update_levels(self) -> None:
         """松开滑块/级数变化时重建轮廓(复用已缓存插值数据)。"""
-        self.level_label.setText(self._level_label_text())
+        self.level_label.setValue(self._level_fraction() * 100.0)
         for layer, spectrum in zip(self.layers, self.layer_spectra):
             layer.set_levels(self._levels_for(spectrum))
 
     def _on_level_count(self, value: int) -> None:
         self._level_count = value
-        self.count_label.setText(f"Levels {value}")
+        self.count_label.setValue(value)
         self._update_levels()
+
+    def _on_level_spin_changed(self, percent: float) -> None:
+        """输入轮廓起始百分比 -> 反推滑块值(立方映射取整)。"""
+        v = int(round(100.0 * (max(percent, 0.0) / 100.0) ** (1.0 / 3.0)))
+        self.level_slider.setValue(max(1, min(100, v)))
+
+    def _on_count_spin_changed(self, value: int) -> None:
+        self.count_slider.setValue(value)
+
+    def _on_aspect_spin_changed(self, value: float) -> None:
+        self.aspect_slider.setValue(int(round(value * 100.0)))
 
     @staticmethod
     def _axis_ticks(
@@ -573,25 +637,46 @@ class SpectrumViewer(QWidget):
             self._refresh_strips_phase()
 
 
-    # 0.2.133: 左键按住状态跟踪(1D 模式下十字虚线跟随)
-    # 0.2.145: 按住拖动期间直接处理 MouseMove(pyqtgraph Pan 时
-    #          sigMouseMoved 不可靠),十字线/条带实时跟随
+    # 0.2.133: 左键按住状态跟踪(1D 模式下十字虚线随动)
+    # 0.2.145: 按住拖动期间直接处理 MouseMove
+    # 0.2.148: 真实场景事件类型是 GraphicsSceneMouse*,
+    #          与普通 MouseButtonPress/Move 均认为按住/移动
+    @staticmethod
+    def _mouse_event_kind(etype) -> str:
+        if etype in (
+            QEvent.Type.GraphicsSceneMousePress,
+            QEvent.Type.MouseButtonPress,
+        ):
+            return "press"
+        if etype in (
+            QEvent.Type.GraphicsSceneMouseRelease,
+            QEvent.Type.MouseButtonRelease,
+        ):
+            return "release"
+        if etype in (
+            QEvent.Type.GraphicsSceneMouseMove,
+            QEvent.Type.MouseMove,
+        ):
+            return "move"
+        return ""
+
     def eventFilter(self, obj, event) -> bool:
         if obj is self.plot.scene():
-            etype = event.type()
-            if etype == QEvent.Type.MouseButtonPress:
+            kind = self._mouse_event_kind(event.type())
+            if kind == "press":
                 if event.button() == Qt.MouseButton.LeftButton:
                     self._mouse_left_pressed = True
-            elif etype == QEvent.Type.MouseButtonRelease:
+            elif kind == "release":
                 if event.button() == Qt.MouseButton.LeftButton:
                     self._mouse_left_pressed = False
             elif (
-                etype == QEvent.Type.MouseMove
+                kind == "move"
                 and self._mouse_left_pressed
                 and (self._strips_active or self._mode_1d)
             ):
                 self._follow_drag(event.scenePosition())
         return super().eventFilter(obj, event)
+
 
     def _follow_drag(self, scene_pos) -> None:
         """按住左键拖动:条带模式移动十字线+两个 1D 迹线;1D 数据模式更新读数。"""
@@ -779,13 +864,36 @@ class SpectrumViewer(QWidget):
             return None
         return max(0.25, min(4.0, value / 100.0))
 
+    def _on_view_range_changed(self) -> None:
+        """当前视图边界:ppm 范围信息框 + 图上虚线矩形跟随。"""
+        vb = self.plot.getViewBox()
+        self._bounds_rect_item.setRect(vb.viewRect())
+        if self._mode_1d and self._primary_1d is not None:
+            axis = self._primary_1d.axis
+            (x0, _y0), (x1, _y1) = vb.viewRange()
+            self.bounds_label.setText(
+                f"{axis.label} {axis.ppm_at_f(x0):.2f} - "
+                f"{axis.ppm_at_f(x1):.2f} ppm"
+            )
+            return
+        if self._primary is None:
+            self.bounds_label.setText("—")
+            return
+        (x0, x1), (y0, y1) = vb.viewRange()
+        x_axis = self._primary.x_axis
+        y_axis = self._primary.y_axis
+        self.bounds_label.setText(
+            f"X {x_axis.ppm_at_f(x0):.2f} - {x_axis.ppm_at_f(x1):.2f} ppm | "
+            f"Y {y_axis.ppm_at_f(y0):.2f} - {y_axis.ppm_at_f(y1):.2f} ppm"
+        )
+
     def _on_aspect_changed(self, value: int) -> None:
         """Aspect ratio slider callback."""
         ratio = self._aspect_ratio_from_slider(value)
         if ratio is None:
-            self.aspect_label.setText("Aspect: free")
+            self.aspect_label.setValue(0.0)  # SpecialValueText 显示 "Aspect free"
         else:
-            self.aspect_label.setText(f"Aspect: {ratio:.2f}x")
+            self.aspect_label.setValue(ratio)
         self.set_aspect_ratio(ratio)
 
     def set_aspect_ratio(self, ratio: float | None) -> None:
@@ -1000,6 +1108,14 @@ class SpectrumViewer(QWidget):
             axis = self._primary_1d.axis
             self.crosshair_label.setText(
                 f"{axis.label} {axis.ppm_at(xi):.3f} ppm"
+            )
+        else:
+            # 0.2.148:普通 2D(含 3D 切片)鼠标移动实时刷新 ppm 读数
+            x_axis = self._primary.x_axis
+            y_axis = self._primary.y_axis
+            self.crosshair_label.setText(
+                f"{x_axis.label} {x_axis.ppm_at(xi):.3f} ppm | "
+                f"{y_axis.label} {y_axis.ppm_at(yi):.3f} ppm"
             )
 
     # ------------------------------------------------------------- misc

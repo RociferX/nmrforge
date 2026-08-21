@@ -12,6 +12,7 @@ from __future__ import annotations
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QComboBox,
+    QHBoxLayout,
     QLabel,
     QSlider,
     QVBoxLayout,
@@ -37,21 +38,26 @@ class Spectrum3DPanel(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(4)
         layout.addWidget(QLabel("3D view"))
+        # 0.2.148:平面切换按钮 / 切片条 / 切片具体值 一行并排
+        row = QHBoxLayout()
+        row.setSpacing(12)
         self.plane_combo = QComboBox()
         self.plane_combo.addItems([name for name, _ in _PLANES])
         self.plane_combo.setToolTip("选择查看平面(第三轴用于切片)")
         self.plane_combo.currentIndexChanged.connect(self._on_plane_changed)
-        layout.addWidget(self.plane_combo)
+        row.addWidget(self.plane_combo)
         self.slice_slider = QSlider(Qt.Orientation.Horizontal)
         self.slice_slider.setToolTip("第三轴切片位置(拖动后松开刷新)")
         self.slice_slider.valueChanged.connect(self._on_slider_value)
         self.slice_slider.sliderReleased.connect(self._emit)
         self.slice_slider.setEnabled(False)
-        layout.addWidget(self.slice_slider)
+        row.addWidget(self.slice_slider, 1)
         self.position_label = QLabel("Slice: -")
-        self.position_label.setWordWrap(True)
-        layout.addWidget(self.position_label)
+        self.position_label.setMinimumWidth(230)
+        row.addWidget(self.position_label)
+        layout.addLayout(row)
 
     # ------------------------------------------------------------- API
     def set_spectrum3d(self, spectrum3d: Spectrum3D) -> None:

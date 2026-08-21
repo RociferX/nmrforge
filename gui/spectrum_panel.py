@@ -83,7 +83,7 @@ class SpectrumPanel(QWidget):
         self.file_list.itemClicked.connect(self._on_file_clicked)
 
         self.peak_toolbar = QHBoxLayout()
-        # 0.2.147:?????,??????;Show peaks ?? Add peak ??
+        # 0.2.147:峰操作一行,列间间隔显明;Show peaks 位于 Add peak 前
         self.peak_toolbar.setSpacing(12)
         self.peak_toolbar.addWidget(self.viewer.show_peaks_checkbox)
         self.add_peak_button = QPushButton("Add peak")

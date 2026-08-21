@@ -428,3 +428,89 @@ def test_viewer_drag_1d_updates_readout(qapp: QApplication) -> None:
     assert "1H" in text and "ppm" in text
     assert text != "Move mouse to read ppm"
     viewer.close()
+
+def test_scene_mouse_event_kind_maps_graphics_types(qapp: QApplication) -> None:
+    """0.2.148:pyqtgraph 场景着重事件类型 GraphicsSceneMouse* 必须认为按住/移动。"""
+    from PyQt6.QtCore import QEvent
+    from viewer.spectrum_viewer import SpectrumViewer
+
+    viewer = SpectrumViewer()
+    assert QEvent.Type.GraphicsSceneMouseMove != QEvent.Type.MouseMove
+    assert viewer._mouse_event_kind(QEvent.Type.GraphicsSceneMousePress) == "press"
+    assert viewer._mouse_event_kind(QEvent.Type.GraphicsSceneMouseMove) == "move"
+    assert viewer._mouse_event_kind(QEvent.Type.GraphicsSceneMouseRelease) == "release"
+    viewer.close()
+
+def test_value_spinboxes_roundtrip(qapp: QApplication) -> None:
+    """0.2.148:数值可输入与滑块双向同步;级数自动取整。"""
+    viewer = SpectrumViewer()
+    # 输入 -> 滑块
+    viewer.count_label.setValue(12)
+    assert viewer.count_slider.value() == 12
+    assert viewer._level_count == 12
+    viewer.aspect_label.setValue(2.0)
+    assert viewer.aspect_slider.value() == 200
+    viewer.level_label.setValue(12.5)  # 百分比反推立方映射约 50
+    assert 45 <= viewer.level_slider.value() <= 55
+    # 滑块 -> 输入
+    viewer.count_slider.setValue(20)
+    assert viewer.count_label.value() == 20
+    viewer.aspect_slider.setValue(150)
+    assert viewer.aspect_label.value() == 1.5
+    viewer.level_slider.setValue(50)
+    percent = viewer.level_label.value()
+    assert 12.0 <= percent <= 13.0  # (0.5)^3 = 12.5%
+    # 标题后直接显示数值
+    assert viewer.level_label.text().startswith("Contour start ")
+    assert viewer.level_label.text().endswith("%")
+    assert viewer.count_label.text().startswith("Levels ")
+    viewer.close()
+
+
+def test_phase_panel_spinboxes_roundtrip(qapp: QApplication) -> None:
+    """0.2.148:P0/P1 可输入,与滑块同步。"""
+    from viewer.spectrum_viewer import SpectrumViewer
+
+    viewer = SpectrumViewer()
+    panel = viewer.phase_panel
+    panel.p0_label.setValue(30.0)
+    assert panel.p0_slider.value() == 30
+    panel.p1_label.setValue(-45.0)
+    assert panel.p1_slider.value() == -45
+    panel.p0_slider.setValue(75)
+    assert panel.p0_label.value() == 75.0
+    assert panel.p0_label.text() == "P0: 75°"
+    viewer.close()
+
+
+def test_2d_readout_refreshes_on_mouse_move(qapp: QApplication) -> None:
+    """0.2.148:普通 2D(含 3D 切片)鼠标移动实时刷新 ppm 读数。"""
+    from PyQt6.QtCore import QPointF
+
+    viewer = SpectrumViewer()
+    viewer.add_spectrum(_synthetic_spectrum())
+    point = viewer.plot.getViewBox().mapViewToScene(QPointF(40.0, 60.0))
+    viewer._on_mouse_moved(point)
+    text = viewer.crosshair_label.text()
+    assert "ppm" in text
+    assert "F2" in text and "F1" in text
+    assert text != "Move mouse to read ppm"
+    viewer.close()
+
+
+def test_bounds_frame_tracks_view_range(qapp: QApplication) -> None:
+    """0.2.148:边界框显示当前视图 ppm 范围并随缩放刷新。"""
+    viewer = SpectrumViewer()
+    assert not viewer.bounds_frame.isHidden()
+    assert viewer.bounds_label.text() == "—"
+    viewer.add_spectrum(_synthetic_spectrum())
+    text = viewer.bounds_label.text()
+    assert "ppm" in text and "X" in text and "Y" in text
+    rect = viewer._bounds_rect_item.rect()
+    assert not rect.isEmpty()
+    # 缩放后边界随之变化
+    vb = viewer.plot.getViewBox()
+    vb.setRange(xRange=(10.0, 60.0), yRange=(5.0, 90.0), padding=0)
+    text2 = viewer.bounds_label.text()
+    assert text2 != text
+    viewer.close()
