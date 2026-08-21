@@ -14,6 +14,7 @@ import shutil
 import signal
 import subprocess
 import threading
+import time as _time
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -61,8 +62,52 @@ def terminate_current_tasks() -> int:
     return len(procs)
 
 
+_DESCENDANTS_CACHE_TTL = 0.5
+_descendants_cache: tuple[float, dict[int, list[int]]] = (0.0, {})
+
+
+def _children_map(timeout: float = 5.0) -> dict[int, list[int]]:
+    """ps 全表 → {ppid: [pid]}(带短 TTL 缓存,终止整树时避免反复扫表)。"""
+    global _descendants_cache
+    now = _time.monotonic()
+    if now - _descendants_cache[0] < _DESCENDANTS_CACHE_TTL:
+        return _descendants_cache[1]
+    try:
+        out = subprocess.run(
+            ["ps", "-eo", "pid=,ppid="],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        ).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return _descendants_cache[1]
+    children: dict[int, list[int]] = {}
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) == 2:
+            try:
+                children.setdefault(int(parts[1]), []).append(int(parts[0]))
+            except ValueError:
+                pass
+    _descendants_cache = (now, children)
+    return children
+
+
+def _collect_descendants(root_pid: int) -> list[int]:
+    """递归收集根进程的全部后代 PID(处理应用自建新进程组的逃逸)。"""
+    children = _children_map()
+    found: list[int] = []
+    stack = [root_pid]
+    while stack:
+        pid = stack.pop()
+        for child in children.get(pid, []):
+            found.append(child)
+            stack.append(child)
+    return found
+
+
 def _kill_process_tree(proc: subprocess.Popen) -> None:
-    """终止整个进程树,不残留子进程。"""
+    """终止整个进程树,不残留子进程(含逃逸到其它进程组的后代)。"""
     if proc.poll() is not None:
         return
     try:
@@ -73,8 +118,16 @@ def _kill_process_tree(proc: subprocess.Popen) -> None:
                 stderr=subprocess.DEVNULL,
             )
         else:
-            # start_new_session=True → pid 即进程组组长
-            os.killpg(proc.pid, signal.SIGKILL)
+            # start_new_session=True → pid 即根进程组组长;再递归覆盖所有后代
+            pids = [proc.pid] + _collect_descendants(proc.pid)
+            for pid in pids:
+                try:
+                    os.killpg(pid, signal.SIGKILL)
+                except (OSError, ProcessLookupError):
+                    try:
+                        os.kill(pid, signal.SIGKILL)
+                    except (OSError, ProcessLookupError):
+                        pass
             proc.wait()
     except (OSError, ProcessLookupError):
         pass
