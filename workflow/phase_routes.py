@@ -173,22 +173,6 @@ def _cleanup_unified_intermediates(
                     pass
 
 
-def _fmt_opt_mode_map(cfg: Any) -> str:
-    """{axis: {mode/type/size...}} → 'F1=auto F2=none' 紧凑文本;
-    非 dict 值(旧格式整数等)原样返回。"""
-    if not isinstance(cfg, dict):
-        return str(cfg)
-    parts: list[str] = []
-    for axis, conf in sorted(cfg.items()):
-        if isinstance(conf, dict):
-            mode = conf.get("mode") or conf.get("type") or "默认"
-            size = conf.get("size")
-            parts.append(f"{axis}={mode}" + (f"×{size}" if size else ""))
-        else:
-            parts.append(f"{axis}={conf}")
-    return " ".join(parts) or "默认"
-
-
 def _append_final_summary(
     logs: list[str],
     spectrum_path: str,
@@ -201,9 +185,13 @@ def _append_final_summary(
     zero_fill: Any = None,
     window: Any = None,
     diagnostics: dict[str, Any] | None = None,
+    progress: Callable[[str], None] | None = None,
 ) -> None:
-    """日志末尾质量与优化汇总(0.2.155)。"""
-    logs.append("== 质量与优化汇总 ==")
+    """日志末尾质量与优化汇总(0.2.155/0.2.157):与 pipeline 参数报告
+    共用统一格式(诊断显示详情),并同步经 progress 进入日志面板。"""
+    from workflow.optimization_report import format_optimization_report
+
+    lines: list[str] = ["== 质量与优化汇总 =="]
     try:
         import nmrglue as ng
 
@@ -214,26 +202,25 @@ def _append_final_summary(
         text = f"谱图质量: {q.decision.value}(综合分 {q.score.overall:.1f})"
         if q.reasons:
             text += " | " + "、".join(q.reasons[:3])
-        logs.append(text)
+        lines.append(text)
     except Exception as exc:  # noqa: BLE001 - 质量评估失败不阻断报告
-        logs.append(f"谱图质量: 评估跳过({exc})")
-    if direct_axis and direct_phase is not None:
-        logs.append(
-            f"直接维相位: {direct_axis}=({direct_phase[0]:g}°, "
-            f"{direct_phase[1]:g}°)"
-        )
-    for axis, pair in sorted((phases or {}).items()):
-        logs.append(f"间接维相位: {axis}=({pair[0]:g}°, {pair[1]:g}°)")
-    logs.append(f"后端运行次数: {backend_runs}")
-    if baseline:
-        logs.append(f"基线: {_fmt_opt_mode_map(baseline)}")
-    if window:
-        logs.append(f"窗函数: {_fmt_opt_mode_map(window)}")
-    if zero_fill:
-        logs.append(f"填零: {_fmt_opt_mode_map(zero_fill)}")
-    reports = (diagnostics or {}).get("reports") or []
-    if reports:
-        logs.append(f"数据质量诊断: 报告 {len(reports)} 项(见上文诊断段)")
+        lines.append(f"谱图质量: 评估跳过({exc})")
+    lines += format_optimization_report(
+        {
+            "phase_route": "unified",
+            "direct_phase": direct_phase,
+            "phases": {k: v for k, v in (phases or {}).items()},
+            "baseline": baseline,
+            "window": window,
+            "zero_fill": zero_fill,
+            "diagnostics": diagnostics,
+            "backend_runs": backend_runs,
+        }
+    )
+    logs += lines
+    if progress is not None:
+        for line in lines:
+            progress(line)
 
 
 def unified_route(    experiment: Experiment,
@@ -370,6 +357,7 @@ def unified_route(    experiment: Experiment,
         direct_phase=fixed.get(direct_axis),
         phases=fixed,
         backend_runs=backend_runs,
+        progress=progress,
     )
     _cleanup_unified_intermediates(work, experiment.dataset_id)
     return {
@@ -980,6 +968,7 @@ def _unified_nus(
         zero_fill=proc["zero_fill"],
         window=proc["window"],
         diagnostics=diagnostics,
+        progress=progress,
     )
     _cleanup_unified_intermediates(work, experiment.dataset_id)
     return {

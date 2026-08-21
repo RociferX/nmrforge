@@ -439,72 +439,12 @@ def _format_params(params: dict) -> str:
     return ", ".join(f"{key}={value}" for key, value in sorted(params.items()))
 
 
-# 相位优化途径显示名(0.2.110):数据值保持后端契约 unified/none
-_PHASE_ROUTE_LABELS = {"unified": "Auto-optimize", "none": "None"}
-
-
-
-def _format_phase_pair(value) -> str:
-    """相位对 ((p0,p1) 元组或 {p0,p1,source} dict) → 可读文本。"""
-    if isinstance(value, dict):
-        p0 = value.get("p0", "")
-        p1 = value.get("p1", "")
-        text = f"p0={p0}° p1={p1}°"
-        if value.get("source"):
-            text += " (" + str(value.get("source")) + ")"
-        return text
-    if isinstance(value, (tuple, list)) and len(value) >= 2:
-        return f"p0={value[0]}° p1={value[1]}°"
-    return str(value)
-
-
-def _fmt_opt_mode_map(cfg) -> str:
-    """{axis: {mode/type/size...}} → 'F1=auto F2=none' 紧凑文本;
-    非 dict 值(旧格式整数等)原样返回。"""
-    if not isinstance(cfg, dict):
-        return str(cfg)
-    parts: list[str] = []
-    for axis, conf in sorted(cfg.items()):
-        if isinstance(conf, dict):
-            mode = conf.get("mode") or conf.get("type") or "默认"
-            size = conf.get("size")
-            parts.append(f"{axis}={mode}" + (f"×{size}" if size else ""))
-        else:
-            parts.append(f"{axis}={conf}")
-    return " ".join(parts) or "默认"
-
-
 def _spectrum_param_report(params: dict) -> str:
-    """生成谱图参数报告(0.2.155 精简):只列用户关心的结果项。"""
-    lines: list[str] = []
-    route = params.get("phase_route")
-    if route is not None:
-        lines.append(
-            f"  相位优化途径: {_PHASE_ROUTE_LABELS.get(str(route), route)}"
-        )
-    direct = params.get("direct_phase")
-    if direct is not None:
-        lines.append(f"  直接维相位: {_format_phase_pair(direct)}")
-    phases = params.get("phases") or {}
-    if phases:
-        lines.append("  逐维相位:")
-        for axis, pair in sorted(phases.items()):
-            lines.append(f"    {axis}: {_format_phase_pair(pair)}")
-    baseline = params.get("baseline")
-    if baseline:
-        lines.append(f"  基线: {_fmt_opt_mode_map(baseline)}")
-    window = params.get("window")
-    if window:
-        lines.append(f"  窗函数: {_fmt_opt_mode_map(window)}")
-    zero_fill = params.get("zero_fill")
-    if zero_fill:
-        lines.append(f"  填零: {_fmt_opt_mode_map(zero_fill)}")
-    reports = (params.get("diagnostics") or {}).get("reports") or []
-    if reports:
-        lines.append(f"  数据质量诊断: {len(reports)} 项报告(详见运行日志)")
-    runs = params.get("backend_runs")
-    if runs is not None:
-        lines.append(f"  后端运行次数: {runs}")
+    """生成谱图参数报告(0.2.157):与日志末尾汇总共用统一格式,
+    数据质量诊断直接显示详情。"""
+    from workflow.optimization_report import format_optimization_report
+
+    lines = format_optimization_report(params)
     return "\n".join(lines) if lines else "  (无参数记录)"
 
 

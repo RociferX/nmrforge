@@ -718,7 +718,7 @@ def test_spectrum_param_report_shows_phase_results() -> None:
             "extract": True,
         }
     )
-    assert "相位优化途径: Auto-optimize" in report
+    assert "相位优化途径: 统一自动处理" in report
     assert "逐维相位" in report
     assert "F1: p0=-45.0° p1=0.0°" in report
     assert "F2: p0=0.0° p1=10.0°" in report
@@ -1660,3 +1660,26 @@ def _synthetic_spectrum_2d():
     )
     import numpy as np
     return Spectrum(data=np.zeros((32, 64)), axes=[axis_y, axis_x])
+
+
+
+def test_spectrum_param_report_shows_diagnostics_details() -> None:
+    """0.2.157:报告直接显示数据质量诊断详情(不再引用运行日志)。"""
+    from gui.pipeline_panel import _spectrum_param_report
+
+    report = _spectrum_param_report(
+        {
+            "diagnostics": {
+                "reports": [
+                    "直流偏置: 自动启用 POLY -time",
+                    "坏点: 已修复 3 处",
+                ],
+                "apply_poly_time": True,
+            },
+            "backend_runs": 2,
+        }
+    )
+    assert "数据质量诊断:" in report
+    assert "直流偏置: 自动启用 POLY -time" in report
+    assert "坏点: 已修复 3 处" in report
+    assert "详见运行日志" not in report

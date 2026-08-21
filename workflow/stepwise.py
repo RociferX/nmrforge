@@ -238,7 +238,7 @@ def generate_spectrum(
         data_id,
         workflow_ref,
         outputs={"spectrum_path": spectrum_path},
-        message="生成谱图(相位优化)",
+        message="生成谱图",
         params=merged_params,
     )
     # Task E(0.2.133):3D 终谱用 NMRPipe proj3D.tcl 生成三个投影,落
