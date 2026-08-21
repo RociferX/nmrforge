@@ -9,12 +9,14 @@ SpectrumViewer/ContourLayer 绘制(正黑负红、框选缩放/平移/滚轮均�
 
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QSignalBlocker, Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QComboBox,
+    QDoubleSpinBox,
     QHBoxLayout,
     QLabel,
     QSlider,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
@@ -54,9 +56,24 @@ class Spectrum3DPanel(QWidget):
         self.slice_slider.sliderReleased.connect(self._emit)
         self.slice_slider.setEnabled(False)
         row.addWidget(self.slice_slider, 1)
-        self.position_label = QLabel("Slice: -")
-        self.position_label.setMinimumWidth(230)
-        row.addWidget(self.position_label)
+        # 0.2.149:切片位置 point / ppm 可直接输入,与滑块三向同步
+        self.point_spin = QSpinBox()
+        self.point_spin.setPrefix("pt: ")
+        self.point_spin.setRange(0, 1)
+        self.point_spin.setValue(0)
+        self.point_spin.setFixedWidth(110)
+        self.point_spin.valueChanged.connect(self._on_point_spin)
+        self.point_spin.setEnabled(False)
+        row.addWidget(self.point_spin)
+        self.ppm_spin = QDoubleSpinBox()
+        self.ppm_spin.setSuffix(" ppm")
+        self.ppm_spin.setDecimals(3)
+        self.ppm_spin.setRange(0.0, 1.0)
+        self.ppm_spin.setValue(0.0)
+        self.ppm_spin.setFixedWidth(150)
+        self.ppm_spin.valueChanged.connect(self._on_ppm_spin)
+        self.ppm_spin.setEnabled(False)
+        row.addWidget(self.ppm_spin)
         layout.addLayout(row)
 
     # ------------------------------------------------------------- API
@@ -78,14 +95,18 @@ class Spectrum3DPanel(QWidget):
             self.plane_combo.setItemText(index, name)
         self.plane_combo.setCurrentIndex(0)
         self._update_slider_range()
-        self._update_position_label()
+        self._update_position_controls()
         self._emit()
 
     def clear(self) -> None:
         """解除 3D 谱绑定并隐藏面板。"""
         self._spectrum3d = None
         self.slice_slider.setEnabled(False)
-        self.position_label.setText("Slice: -")
+        self.slice_slider.setValue(0)
+        self.point_spin.setEnabled(False)
+        self.point_spin.setValue(0)
+        self.ppm_spin.setEnabled(False)
+        self.ppm_spin.setValue(0.0)
         self.setVisible(False)
 
     def current_spectrum(self) -> Spectrum | None:
@@ -116,7 +137,7 @@ class Spectrum3DPanel(QWidget):
 
     def refresh(self) -> None:
         """重新计算产物并发出重绘(滑块拖动后/外部触发)。"""
-        self._update_position_label()
+        self._update_position_controls()
         self._emit()
 
     # ------------------------------------------------------------- slots
@@ -124,11 +145,29 @@ class Spectrum3DPanel(QWidget):
         if 0 <= index < len(_PLANES):
             self._slice_axis = _PLANES[index][1]
             self._update_slider_range()
-            self._update_position_label()
+            self._update_position_controls()
             self._emit()
 
     def _on_slider_value(self, _value: int) -> None:
-        self._update_position_label()
+        self._update_position_controls()
+
+    def _on_point_spin(self, value: int) -> None:
+        """输入点序号 -> 同步滑块并刷新切片。"""
+        if self._spectrum3d is None or value == self.slice_slider.value():
+            return
+        self.slice_slider.setValue(value)
+        self._emit()
+
+    def _on_ppm_spin(self, value: float) -> None:
+        """输入 ppm -> 取最近像素点并刷新切片。"""
+        if self._spectrum3d is None:
+            return
+        axis = self._spectrum3d.axes[self._slice_axis]
+        index = axis.index_at(value)
+        if index == self.slice_slider.value():
+            return
+        self.slice_slider.setValue(index)
+        self._emit()
 
     def _update_slider_range(self) -> None:
         if self._spectrum3d is None:
@@ -138,17 +177,29 @@ class Spectrum3DPanel(QWidget):
         self.slice_slider.setRange(0, max(0, axis.size - 1))
         self.slice_slider.setValue(axis.size // 2)
         self.slice_slider.setEnabled(True)
+        # 设置范围时可能把当前值钳制到范围边界,
+        # 用 QSignalBlocker 避免回写触发滑块跳动
+        with QSignalBlocker(self.point_spin), QSignalBlocker(self.ppm_spin):
+            self.point_spin.setRange(0, max(0, axis.size - 1))
+            self.point_spin.setEnabled(True)
+            self.ppm_spin.setRange(
+                float(min(axis.ppm)), float(max(axis.ppm))
+            )
+            self.ppm_spin.setEnabled(True)
 
-    def _update_position_label(self) -> None:
+    def _update_position_controls(self) -> None:
+        """把当前滑块位置同步到 point/ppm 输入框(轴标签作前缀)。"""
         if self._spectrum3d is None:
-            self.position_label.setText("Slice: -")
             return
         axis = self._spectrum3d.axes[self._slice_axis]
         value = self.slice_slider.value()
-        ppm = axis.ppm_at(value) if axis.size else 0.0
-        self.position_label.setText(
-            f"{axis.label} slice: {ppm:.3f} ppm (point {value}/{axis.size - 1})"
-        )
+        with QSignalBlocker(self.point_spin), QSignalBlocker(self.ppm_spin):
+            self.point_spin.setValue(value)
+            ppm = axis.ppm_at(value) if axis.size else 0.0
+            self.ppm_spin.setPrefix(
+                f"{axis.label} " if axis.label else ""
+            )
+            self.ppm_spin.setValue(ppm)
 
     def _plane_name(self) -> str:
         index = self.plane_combo.currentIndex()

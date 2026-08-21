@@ -16,7 +16,6 @@ from PyQt6.QtGui import QColor, QPen
 from PyQt6.QtWidgets import (
     QCheckBox,
     QGridLayout,
-    QFrame,
     QGraphicsRectItem,
     QHBoxLayout,
     QLabel,
@@ -115,28 +114,18 @@ class SpectrumViewer(QWidget):
         self.reset_button = QPushButton("Full view")
         self.reset_button.clicked.connect(self.reset_view)
 
-        # 0.2.148:当前谱图边界框(图上虚线矩形 + 控制区边界信息框)
-        self._bounds_rect_item = QGraphicsRectItem()
-        self._bounds_rect_item.setPen(
+        # 0.2.149:谱图数据范围框(真实谱图边界).
+        # 直接入 scene(不经 ViewBox),不参与自动缩放计算,
+        # 避免开启时视图乱跳;不随视图变化,仅根据
+        # layer 数据大小绘制。
+        self._data_bounds_item = QGraphicsRectItem()
+        self._data_bounds_item.setPen(
             QPen(QColor("#2e7d32"), 1, Qt.PenStyle.DashLine)
         )
-        self._bounds_rect_item.setZValue(25)
-        self.plot.addItem(self._bounds_rect_item)
-        self.bounds_frame = QFrame()
-        self.bounds_frame.setFrameShape(QFrame.Shape.StyledPanel)
-        bounds_layout = QHBoxLayout(self.bounds_frame)
-        bounds_layout.setContentsMargins(6, 2, 6, 2)
-        bounds_layout.setSpacing(6)
-        bounds_title = QLabel("边界:")
-        bounds_title.setStyleSheet("font-weight: bold;")
-        bounds_layout.addWidget(bounds_title)
-        self.bounds_label = QLabel("—")
-        self.bounds_label.setStyleSheet("color: #2e7d32;")
-        bounds_layout.addWidget(self.bounds_label)
-        bounds_layout.addStretch(1)
-        self.plot.getViewBox().sigRangeChanged.connect(
-            self._on_view_range_changed
-        )
+        self._data_bounds_item.setZValue(25)
+        self._data_bounds_item.setVisible(False)
+        self.plot.scene().addItem(self._data_bounds_item)
+
 
         # 0.2.133: aspect ratio slider(0.2.147 移到控件行 0 并排)
         self.aspect_slider = QSlider(Qt.Orientation.Horizontal)
@@ -243,9 +232,6 @@ class SpectrumViewer(QWidget):
         controls_layout.addWidget(self.phase_panel, 3, 0, 1, 3)
         self.phase_panel.setVisible(False)
 
-        # 行 4:边界信息框
-        controls_layout.addWidget(self.bounds_frame, 4, 0, 1, 3)
-
         self.controls_layout = controls_layout
 
         # TopSpin 式 1D 条带:上方行迹线(F2)、右侧列迹线(F1),与主谱联动
@@ -329,6 +315,7 @@ class SpectrumViewer(QWidget):
         self.layer_spectra.clear()
         self.layer_list.clear()
         self._primary = None
+        self._data_bounds_item.setVisible(False)
         self.phase_panel.set_available(False)
         self.set_peaks([])
 
@@ -374,6 +361,7 @@ class SpectrumViewer(QWidget):
             self._primary = spectrum
             self._setup_axes(spectrum)
             self.reset_view()
+        self._update_data_bounds()
         self._refresh_phase_availability()
         return name
 
@@ -742,6 +730,7 @@ class SpectrumViewer(QWidget):
         self._crosshair_v.setVisible(active)
         self._crosshair_h.setVisible(active)
         if active:
+            self._data_bounds_item.setVisible(False)
             self._setup_strip_axes()
             # 右侧 1D 条带方向与二维谱 Y 轴保持一致(谱+坐标轴一起翻正)
             self.strip_right.getViewBox().invertY(
@@ -756,6 +745,7 @@ class SpectrumViewer(QWidget):
             self._restore_strips()
             # 0.2.133: exit 1D mode: restore RectMode
             self.plot.getViewBox().setMouseMode(pg.ViewBox.RectMode)
+            self._update_data_bounds()
         self._refresh_phase_availability()
 
     def _setup_strip_axes(self) -> None:
@@ -864,28 +854,17 @@ class SpectrumViewer(QWidget):
             return None
         return max(0.25, min(4.0, value / 100.0))
 
-    def _on_view_range_changed(self) -> None:
-        """当前视图边界:ppm 范围信息框 + 图上虚线矩形跟随。"""
-        vb = self.plot.getViewBox()
-        self._bounds_rect_item.setRect(vb.viewRect())
-        if self._mode_1d and self._primary_1d is not None:
-            axis = self._primary_1d.axis
-            (x0, _y0), (x1, _y1) = vb.viewRange()
-            self.bounds_label.setText(
-                f"{axis.label} {axis.ppm_at_f(x0):.2f} - "
-                f"{axis.ppm_at_f(x1):.2f} ppm"
-            )
+    def _update_data_bounds(self) -> None:
+        """根据当前 layer 数据大小绘制谱图数据范围矩形。"""
+        sx = max((s.x_axis.size for s in self.layer_spectra), default=0)
+        sy = max((s.y_axis.size for s in self.layer_spectra), default=0)
+        if not sx or not sy:
+            self._data_bounds_item.setVisible(False)
             return
-        if self._primary is None:
-            self.bounds_label.setText("—")
-            return
-        (x0, x1), (y0, y1) = vb.viewRange()
-        x_axis = self._primary.x_axis
-        y_axis = self._primary.y_axis
-        self.bounds_label.setText(
-            f"X {x_axis.ppm_at_f(x0):.2f} - {x_axis.ppm_at_f(x1):.2f} ppm | "
-            f"Y {y_axis.ppm_at_f(y0):.2f} - {y_axis.ppm_at_f(y1):.2f} ppm"
+        self._data_bounds_item.setRect(
+            QRectF(-0.5, -0.5, float(sx), float(sy))
         )
+        self._data_bounds_item.setVisible(not self._mode_1d)
 
     def _on_aspect_changed(self, value: int) -> None:
         """Aspect ratio slider callback."""
@@ -895,6 +874,7 @@ class SpectrumViewer(QWidget):
         else:
             self.aspect_label.setValue(ratio)
         self.set_aspect_ratio(ratio)
+
 
     def set_aspect_ratio(self, ratio: float | None) -> None:
         """锁定显示长宽比(数据单位 x/y);None 表示自由拉伸(默认)。"""

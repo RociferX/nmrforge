@@ -498,19 +498,68 @@ def test_2d_readout_refreshes_on_mouse_move(qapp: QApplication) -> None:
     viewer.close()
 
 
-def test_bounds_frame_tracks_view_range(qapp: QApplication) -> None:
-    """0.2.148:边界框显示当前视图 ppm 范围并随缩放刷新。"""
+def test_data_bounds_item_tracks_spectrum(qapp: QApplication) -> None:
+    """0.2.149:谱图数据范围框根据实际数据大小,不随视图变化。"""
     viewer = SpectrumViewer()
-    assert not viewer.bounds_frame.isHidden()
-    assert viewer.bounds_label.text() == "—"
+    assert not viewer._data_bounds_item.isVisible()
     viewer.add_spectrum(_synthetic_spectrum())
-    text = viewer.bounds_label.text()
-    assert "ppm" in text and "X" in text and "Y" in text
-    rect = viewer._bounds_rect_item.rect()
-    assert not rect.isEmpty()
-    # 缩放后边界随之变化
+    item = viewer._data_bounds_item
+    assert item.isVisible()
+    rect = item.rect()
+    assert rect.left() == -0.5 and rect.top() == -0.5
+    assert rect.width() == float(_synthetic_spectrum().x_axis.size)
+    assert rect.height() == float(_synthetic_spectrum().y_axis.size)
+    # 缩放后矩形不变(框的是数据范围,不是视图)
     vb = viewer.plot.getViewBox()
     vb.setRange(xRange=(10.0, 60.0), yRange=(5.0, 90.0), padding=0)
-    text2 = viewer.bounds_label.text()
-    assert text2 != text
+    assert item.rect() == rect
+    # 不经 ViewBox 管理:不参与自动缩放计算
+    assert item not in vb.addedItems
+    viewer.clear()
+    assert not item.isVisible()
     viewer.close()
+
+
+def test_slice_point_and_ppm_editable(qapp: QApplication) -> None:
+    """0.2.149:切片 point / ppm 可输入,与滑块三向同步。"""
+    import numpy as np
+
+    from viewer.spectrum3d_panel import Spectrum3DPanel
+    from viewer.spectrum import Spectrum3D, SpectrumAxis
+
+    axes = [
+        SpectrumAxis(label="H", size=24, sw_hz=3000.0, obs_mhz=500.0,
+                     carrier_ppm=4.7, orig_hz=4.7 * 500.0),
+        SpectrumAxis(label="N", size=16, sw_hz=1200.0, obs_mhz=50.0,
+                     carrier_ppm=118.0, orig_hz=118.0 * 50.0),
+        SpectrumAxis(label="C", size=12, sw_hz=4000.0, obs_mhz=125.0,
+                     carrier_ppm=55.0, orig_hz=55.0 * 125.0),
+    ]
+    spec = Spectrum3D(data=np.zeros((24, 16, 12)), axes=axes)
+    panel = Spectrum3DPanel()
+    fired: list[int] = []
+    panel.slice_changed.connect(lambda: fired.append(1))
+    panel.set_spectrum3d(spec)
+    axis = axes[2]  # 默认 F1-F2 平面,固定 F3
+    mid = 12 // 2
+    assert panel.slice_slider.value() == mid
+    assert panel.point_spin.value() == mid
+    assert abs(panel.ppm_spin.value() - axis.ppm_at(mid)) < 1e-2
+    # 输入 point
+    panel.point_spin.setValue(3)
+    assert panel.slice_slider.value() == 3
+    assert abs(panel.ppm_spin.value() - axis.ppm_at(3)) < 1e-2
+    # 输入 ppm
+    panel.ppm_spin.setValue(axis.ppm_at(7))
+    assert panel.slice_slider.value() == 7
+    assert panel.point_spin.value() == 7
+    # 滑块拖动反向同步
+    panel.slice_slider.setValue(9)
+    assert panel.point_spin.value() == 9
+    assert abs(panel.ppm_spin.value() - axis.ppm_at(9)) < 1e-2
+    assert fired  # set_spectrum3d/输入均触发重绘
+    panel.clear()
+    assert not panel.point_spin.isEnabled()
+    assert not panel.ppm_spin.isEnabled()
+    panel.close()
+
