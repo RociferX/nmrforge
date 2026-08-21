@@ -33,6 +33,7 @@ _NUMERIC_KEYS = {
     "F3_shift",
     "Intensity",
     "SN",
+    "Reliability(%)",
 }
 
 
@@ -59,15 +60,24 @@ class PeakTable:
         ]
 
 
-def save_peaks(path: Path | str, peaks: list[dict[str, Any]]) -> Path:
-    """把峰列表写为 CSV(数字 Peak_ID,缺列补空,2D/3D 自动判别),返回路径。"""
+def save_peaks(
+    path: Path | str,
+    peaks: list[dict[str, Any]],
+    extra_columns: tuple[str, ...] = (),
+) -> Path:
+    """把峰列表写为 CSV(数字 Peak_ID,缺列补空,2D/3D 自动判别),返回路径。
+
+    extra_columns 追加到标准列之后(如 "Reliability(%)",0.2.162-补4)。"""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    columns = (
+    columns = list(
         PEAK_3D_COLUMNS
         if peaks and "F1_shift" in peaks[0]
         else PEAK_COLUMNS
     )
+    for extra in extra_columns:
+        if extra not in columns:
+            columns.append(extra)
     with path.open("w", encoding="utf-8", newline="") as fh:
         writer = csv.DictWriter(fh, fieldnames=columns, extrasaction="ignore")
         writer.writeheader()

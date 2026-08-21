@@ -651,16 +651,22 @@ class SpectrumPanel(QWidget):
         self.save_peaks_button.setEnabled(True)
 
     def _set_peak_columns(self, is_3d: bool) -> None:
-        keys: tuple[str, ...] = (
-            ("Peak_ID", "F1_shift", "F2_shift", "F3_shift", "Intensity", "SN")
+        keys: list[str] = (
+            ["Peak_ID", "F1_shift", "F2_shift", "F3_shift", "Intensity", "SN"]
             if is_3d
-            else ("Peak_ID", "H_shift", "N_shift", "Intensity", "SN")
+            else ["Peak_ID", "H_shift", "N_shift", "Intensity", "SN"]
         )
-        if keys == self._peak_keys:
+        # 0.2.162-补4:峰带可靠性注释时追加显示列
+        if any(
+            str(p.get("Reliability(%)", "")).strip() for p in self._peaks
+        ) and "Reliability(%)" not in keys:
+            keys.append("Reliability(%)")
+        tuple_keys = tuple(keys)
+        if tuple_keys == self._peak_keys:
             return
-        self._peak_keys = keys
-        self.peak_table.setColumnCount(len(keys))
-        self.peak_table.setHorizontalHeaderLabels(list(keys))
+        self._peak_keys = tuple_keys
+        self.peak_table.setColumnCount(len(tuple_keys))
+        self.peak_table.setHorizontalHeaderLabels(list(tuple_keys))
 
     def _populate_peak_table(self) -> None:
         """把 self._peaks 写入表格(2D/3D 列自动切换)。"""

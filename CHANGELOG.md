@@ -1,5 +1,18 @@
 # 修改记录(历史条目)
 
+## 0.2.162-补4(2026-08-22,总管直接处理)
+
+- 逐峰可靠性记录:优化时对每个保留峰记录「跨组合支持度 / n_combos ×
+  100」(全部参数组合都有 = 100%,都没有 = 0%),写入
+  smile_optimized/{数据}_smile_reliability.json(position_pts + ppm
+  shifts + support + n_combos + reliability);smile_optimized CSV 增加
+  Reliability(%) 列;
+- 峰列表自动注释:峰挑选检测到可靠性文件时,按每轴 2 点 × ppm/点 容差
+  匹配(两种方式下同一峰化学位移可能有小偏差),自动给 peaks CSV 注释
+  Reliability(%) 列;viewer 峰表有注释时显示该列;
+- 测试:可靠性打分(全有 100/半有 50)、可靠性文件落盘、峰表自动注释、
+  附加列往返;本地全量 pytest + ruff 全绿。
+
 ## 0.2.162-补(2026-08-22,总管直接处理)
 
 - SMILE 优化:扫描阶段去掉组内重复(SMILE 为确定性算法,同参数同输入

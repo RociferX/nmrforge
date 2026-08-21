@@ -84,8 +84,10 @@ def test_apply_smile_result(tmp_path: Path) -> None:
     opt_dir = manager.data_dir(exp_id, data_id, "smile_optimized")
     csv_path = opt_dir / f"{exp_id}-{data_id}_smile_optimized.csv"
     json_path = opt_dir / f"{exp_id}-{data_id}_smile_optimized.json"
+    rel_path = opt_dir / f"{exp_id}-{data_id}_smile_reliability.json"
     assert csv_path.is_file()
     assert json_path.is_file()
+    assert rel_path.is_file()  # 0.2.162-补4:逐峰可靠性文件
     text = csv_path.read_text(encoding="utf-8")
     assert "H_shift" in text and "N_shift" in text
     runs = [
@@ -96,6 +98,7 @@ def test_apply_smile_result(tmp_path: Path) -> None:
     assert len(runs) == 1 and runs[0].status == "success"
     assert runs[0].params["nsigma"] == 5.0
     assert str(runs[0].outputs.get("peaks_path")) == str(csv_path)
+    assert str(runs[0].outputs.get("reliability_path")) == str(rel_path)
     assert runs[0].snapshot_dir  # 脚本快照补写
     state = load_pipeline_state(manager, exp_id, data_id)
     assert "smile" in state["steps"]

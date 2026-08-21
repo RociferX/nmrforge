@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -41,6 +42,74 @@ def _axes_ppm(dic: dict[str, Any], data: np.ndarray) -> list[np.ndarray]:
     return [_ppm_axis(dic, prefixes[i], data.shape[i]) for i in range(data.ndim)]
 
 
+def _reliability_tolerance(dic: dict[str, Any], data: np.ndarray) -> list[float]:
+    """每轴 ppm 容差 = 2 点 × ppm/点(与扫描快照容差 2 点对应)。"""
+    prefixes = ("FDF1", "FDF2", "FDF3")
+    tols: list[float] = []
+    for i in range(data.ndim):
+        obs = float(dic.get(prefixes[i] + "OBS", 0.0) or 0.0)
+        sw = float(dic.get(prefixes[i] + "SW", 0.0) or 0.0)
+        size = int(data.shape[i]) or 1
+        tols.append(2.0 * (sw / (size * obs)) if obs else 0.0)
+    return tols
+
+
+def _annotate_reliability(
+    rows: list[dict[str, Any]],
+    data: np.ndarray,
+    dic: dict[str, Any],
+    reliability_path: Path,
+) -> int:
+    """按 ppm 容差匹配 SMILE 可靠性文件,给峰行注释 Reliability(%);返回匹配数。
+
+    同一峰在扫描(跨组合)与去伪(注入噪声)两种方式下的化学位移可能略有
+    偏差,容差按每轴 2 点 × ppm/点 判定(0.2.162-补4)。"""
+    if not reliability_path.is_file():
+        return 0
+    try:
+        payload = json.loads(reliability_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return 0
+    entries = payload.get("peaks") or []
+    if not entries or not rows:
+        return 0
+    is_3d = "F1_shift" in rows[0]
+    keys = ("F1_shift", "F2_shift", "F3_shift") if is_3d else ("N_shift", "H_shift")
+    tols = _reliability_tolerance(dic, data)
+    tols = [tols[k] if k < len(tols) else 0.0 for k in range(len(keys))]
+
+    def _match(row: dict[str, Any]) -> float | None:
+        best: float | None = None
+        for entry in entries:
+            shifts = entry.get("shifts") or {}
+            ok = True
+            for k, key in enumerate(keys):
+                if key not in shifts or key not in row:
+                    ok = False
+                    break
+                try:
+                    diff = abs(float(shifts[key]) - float(row[key]))
+                except (TypeError, ValueError):
+                    ok = False
+                    break
+                if diff > tols[k]:
+                    ok = False
+                    break
+            if ok:
+                rel = float(entry.get("reliability", 0.0) or 0.0)
+                if best is None or rel > best:
+                    best = rel
+        return best
+
+    matched = 0
+    for row in rows:
+        rel = _match(row)
+        if rel is not None:
+            row["Reliability(%)"] = round(rel, 1)
+            matched += 1
+    return matched
+
+
 def _write_peaks_csv(
     manager: ProjectManager,
     exp_id: str,
@@ -48,8 +117,10 @@ def _write_peaks_csv(
     data: np.ndarray,
     dic: dict[str, Any],
     peaks: list[peak_detection.Peak],
-) -> Path:
-    """把检测峰写为契约 §6 峰表 CSV(数字 Peak_ID,经 PeakTable.save_peaks)。"""
+) -> tuple[Path, int]:
+    """把检测峰写为契约 §6 峰表 CSV(数字 Peak_ID,经 PeakTable.save_peaks)。
+
+    检测到 SMILE 可靠性文件时自动注释 Reliability(%) 列;返回 (path, 匹配数)。"""
     peaks_dir = manager.data_dir(exp_id, data_id, "peaks")
     peaks_dir.mkdir(parents=True, exist_ok=True)
     path = peaks_dir / f"{exp_id}-{data_id}.csv"
@@ -75,7 +146,15 @@ def _write_peaks_csv(
                     else 0.0
                 )
         rows.append(row)
-    return save_peaks(path, rows)
+    # 0.2.162-补4:检测到 SMILE 可靠性文件则自动给峰注释可靠性列
+    rel_path = (
+        manager.data_dir(exp_id, data_id, "smile_optimized")
+        / f"{exp_id}-{data_id}_smile_reliability.json"
+    )
+    matched = _annotate_reliability(rows, data, dic, rel_path)
+    extra = ("Reliability(%)",) if matched else ()
+    path = save_peaks(path, rows, extra_columns=extra)
+    return path, matched
 
 
 def pick_peaks(
@@ -111,7 +190,7 @@ def pick_peaks(
         if np.iscomplexobj(arr):
             arr = arr.real
         peaks = peak_detection.detect(arr)
-        peak_path = _write_peaks_csv(
+        peak_path, rel_matched = _write_peaks_csv(
             manager, exp_id, data_id, arr, dict(dic), peaks
         )
     except Exception as exc:  # noqa: BLE001 - 统一失败登记
@@ -122,13 +201,22 @@ def pick_peaks(
         run.run_id,
         "success",
         outputs={"peak_path": str(peak_path)},
-        message="峰挑选完成",
+        message=(
+            f"峰挑选完成({rel_matched} 峰含可靠性注释)"
+            if rel_matched
+            else "峰挑选完成"
+        ),
     )
+    logs = [f"峰挑选: {len(peaks)} 个峰 → {peak_path}"]
+    if rel_matched:
+        logs.append(
+            f"可靠性注释: {rel_matched}/{len(peaks)} 个峰匹配到 SMILE 可靠性文件"
+        )
     return {
         "status": "success",
         "peak_path": str(peak_path),
         "peak_count": len(peaks),
-        "logs": [f"峰挑选: {len(peaks)} 个峰 → {peak_path}"],
+        "logs": logs,
     }
 
 

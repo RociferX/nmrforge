@@ -37,6 +37,7 @@ class SmileParameterResult:
 
     params: dict[str, Any]
     repeats: int = 3
+    n_combos: int = 0
     decision: str = ""
     overall: float = 0.0
     components: dict[str, float] = field(default_factory=dict)
@@ -257,7 +258,19 @@ def optimize_smile_parameters(
         result.overall = overall
         result.components = components
         result.decision = "accept" if overall >= 60.0 and true_peaks else "warning"
-        result.stable_peaks = [dict(p) for p in true_peaks]
+        result.n_combos = n_combos
+        result.stable_peaks = []
+        for peak in true_peaks:
+            support = _support(_snap_key(tuple(peak["position"]), peak_tol_pts))
+            result.stable_peaks.append(
+                {
+                    **dict(peak),
+                    "support": support,
+                    "reliability": (
+                        round(support / n_combos * 100.0, 1) if n_combos else 0.0
+                    ),
+                }
+            )
         if best_entry is None or overall > best_entry["overall"]:
             best_entry = dict(entry=entry, overall=overall)
 
@@ -292,14 +305,24 @@ def optimize_smile_parameters(
                 stable, _union, _keys = _match_stable_peaks(
                     peak_sets, min_stability, peak_tol_pts
                 )
-                best.stable_peaks = [
-                    {
-                        "position": [float(v) for v in peak.position],
-                        "height": float(peak.height),
-                        "snr": float(peak.snr),
-                    }
-                    for peak in stable
-                ]
+                best.stable_peaks = []
+                for peak in stable:
+                    key = _snap_key(tuple(peak.position), peak_tol_pts)
+                    support = len(key_to_combos.get(key, set()))
+                    best.stable_peaks.append(
+                        {
+                            "position": [float(v) for v in peak.position],
+                            "height": float(peak.height),
+                            "snr": float(peak.snr),
+                            "support": support,
+                            "reliability": (
+                                round(support / n_combos * 100.0, 1)
+                                if n_combos
+                                else 0.0
+                            ),
+                        }
+                    )
+                best.n_combos = n_combos
                 best.spectrum_path = last_spec
                 best.repeats = final_repeats
                 best.overall = min(best.overall, 99.0) if stable else best.overall
@@ -317,10 +340,11 @@ def write_smile_optimized_output(
     data_id: str,
     spectrum_path: str,
     result: SmileParameterResult,
-) -> tuple[Path, Path]:
-    """把稳定峰写为契约 §6 峰表 CSV + 参数/评分 JSON 到 smile_optimized/。
+) -> tuple[Path, Path, Path]:
+    """把稳定峰写为契约 §6 峰表 CSV + 参数/评分 JSON + 逐峰可靠性 JSON。
 
-    smile_optimized/ 与 raw/ 同级(数据基座下)。返回 (csv_path, json_path)。"""
+    smile_optimized/ 与 raw/ 同级(数据基座下)。返回
+    (csv_path, json_path, reliability_path)。"""
     from core.peaks.peak_table import save_peaks
     from workflow.pick_peaks import _axes_ppm
 
@@ -355,14 +379,16 @@ def write_smile_optimized_output(
                     if k < len(axes) and k < len(pos)
                     else 0.0
                 )
+        row["Reliability(%)"] = float(peak.get("reliability", 0.0) or 0.0)
         rows.append(row)
-    save_peaks(csv_path, rows)
+    save_peaks(csv_path, rows, extra_columns=("Reliability(%)",))
     json_path = out_dir / f"{exp_id}-{data_id}_smile_optimized.json"
     json_path.write_text(
         json.dumps(
             {
                 "params": result.params,
                 "repeats": result.repeats,
+                "n_combos": int(result.n_combos or 0),
                 "decision": result.decision,
                 "overall": result.overall,
                 "components": result.components,
@@ -375,7 +401,53 @@ def write_smile_optimized_output(
         + "\n",
         encoding="utf-8",
     )
-    return csv_path, json_path
+    reliability_path = out_dir / f"{exp_id}-{data_id}_smile_reliability.json"
+    rel_peaks: list[dict[str, Any]] = []
+    for peak in result.stable_peaks:
+        pos = [float(v) for v in peak.get("position", [])]
+        shifts: dict[str, float] = {}
+        if arr.ndim == 2:
+            shifts["H_shift"] = (
+                float(axes[1][int(pos[1])])
+                if len(axes) > 1 and len(pos) > 1
+                else 0.0
+            )
+            shifts["N_shift"] = (
+                float(axes[0][int(pos[0])]) if len(pos) > 0 else 0.0
+            )
+        else:
+            for k in range(3):
+                shifts[f"F{k + 1}_shift"] = (
+                    float(axes[k][int(pos[k])])
+                    if k < len(axes) and k < len(pos)
+                    else 0.0
+                )
+        rel_peaks.append(
+            {
+                "position_pts": pos,
+                "shifts": shifts,
+                "support": int(peak.get("support", 0) or 0),
+                "n_combos": int(result.n_combos or 0),
+                "reliability": float(peak.get("reliability", 0.0) or 0.0),
+            }
+        )
+    reliability_path.write_text(
+        json.dumps(
+            {
+                "schema": "smile_reliability_v1",
+                "exp_id": exp_id,
+                "data_id": data_id,
+                "params": result.params,
+                "n_combos": int(result.n_combos or 0),
+                "peaks": rel_peaks,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return csv_path, json_path, reliability_path
 
 
 def format_results(results: list[SmileParameterResult]) -> str:

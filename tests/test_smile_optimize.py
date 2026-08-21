@@ -220,3 +220,67 @@ def test_cli_parse_grid() -> None:
         {"nsigma": 5.0, "thresh": 0.95},
         {"nsigma": 6.0, "thresh": 0.99},
     ]
+
+
+def test_reliability_scored_by_cross_support(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """0.2.162-补4:逐峰可靠性=跨组合支持度/n_combos×100(全有100%,半有50%)。"""
+    exp = read_dataset(bruker_dir / "nus_3d")
+    # 伪峰(25,25)只出现在扫描组合1(seed 1000)与全部最终重复(9000-9002)
+    backend, _seen = _fake_backend(tmp_path, spurious_in={1000, 9000, 9001, 9002})
+    results = optimize_smile_parameters(
+        exp,
+        backend,
+        grid=[
+            {"nsigma": 5.0, "thresh": 0.95},
+            {"nsigma": 6.0, "thresh": 0.99},
+        ],
+        final_repeats=3,
+    )
+    best = results[0]
+    assert best.n_combos == 2
+    by_pos = {
+        tuple(round(v) for v in p["position"]): p for p in best.stable_peaks
+    }
+    assert by_pos[(10, 20)]["reliability"] == 100.0  # 两个扫描组合都出现
+    assert by_pos[(30, 40)]["reliability"] == 100.0
+    assert by_pos[(25, 25)]["reliability"] == 50.0  # 只在一个扫描组合出现
+    assert by_pos[(25, 25)]["support"] == 1
+
+
+def test_write_reliability_file(tmp_path: Path, bruker_dir: Path) -> None:
+    """0.2.162-补4:smile_optimized 输出逐峰可靠性 JSON + CSV 可靠性列。"""
+    import json as _json
+
+    from core.project import ProjectManager
+    from workflow.smile_optimize import write_smile_optimized_output
+
+    exp = read_dataset(bruker_dir / "nus_3d")
+    backend, _seen = _fake_backend(tmp_path, spurious_in={1000, 9000, 9001, 9002})
+    results = optimize_smile_parameters(
+        exp,
+        backend,
+        grid=[
+            {"nsigma": 5.0, "thresh": 0.95},
+            {"nsigma": 6.0, "thresh": 0.99},
+        ],
+        final_repeats=3,
+    )
+    manager = ProjectManager.create_project(tmp_path / "proj", "demo")
+    entry = manager.create_experiment()
+    data = manager.import_data(entry.id, "/sampleD")
+    csv_path, _json_path, rel_path = write_smile_optimized_output(
+        manager, entry.id, data.id, results[0].spectrum_path, results[0]
+    )
+    payload = _json.loads(rel_path.read_text(encoding="utf-8"))
+    assert payload["schema"] == "smile_reliability_v1"
+    assert payload["n_combos"] == 2
+    rels = {
+        tuple(round(v) for v in p["position_pts"]): p["reliability"]
+        for p in payload["peaks"]
+    }
+    assert rels[(10, 20)] == 100.0
+    assert rels[(25, 25)] == 50.0
+    header = csv_path.read_text(encoding="utf-8").splitlines()[0]
+    assert "Reliability(%)" in header

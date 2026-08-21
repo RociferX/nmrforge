@@ -599,7 +599,7 @@ class ProcessingController:
         if source.is_file() and source.resolve() != target.resolve():
             shutil.copy2(source, target)
         self._manager.set_data_spectrum(exp_id, data_id, target)
-        peaks_path, report_path = write_smile_optimized_output(
+        peaks_path, report_path, reliability_path = write_smile_optimized_output(
             self._manager, exp_id, data_id, source, result
         )
         result.peaks_path = str(peaks_path)
@@ -616,6 +616,7 @@ class ProcessingController:
                 "spectrum_path": str(target),
                 "peaks_path": str(peaks_path),
                 "report_path": str(report_path),
+                "reliability_path": str(reliability_path),
             },
             message=str(getattr(result, "message", "") or "SMILE 优化完成")
             + f"(稳定峰 {len(getattr(result, 'stable_peaks', []))} 个)",

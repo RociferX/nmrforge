@@ -178,3 +178,22 @@ def test_pick_peaks_columns_match_old_project(tmp_path: Path) -> None:
     result = pick_peaks(manager, entry.id, data.id)
     first = Path(result["peak_path"]).read_text(encoding="utf-8").splitlines()[0]
     assert first.split(",") == list(PEAK_COLUMNS)
+
+
+def test_save_peaks_extra_columns(tmp_path: Path) -> None:
+    """0.2.162-补4:附加列保存与数值往返(Reliability(%))。"""
+    path = tmp_path / "peaks_rel.csv"
+    save_peaks(
+        path,
+        [
+            {
+                "Peak_ID": 1,
+                "H_shift": 8.0,
+                "N_shift": 118.0,
+                "Reliability(%)": 100.0,
+            }
+        ],
+        extra_columns=("Reliability(%)",),
+    )
+    loaded = load_peaks(path)
+    assert loaded[0]["Reliability(%)"] == 100.0
