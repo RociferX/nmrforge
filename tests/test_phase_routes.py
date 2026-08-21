@@ -61,6 +61,12 @@ class _FakeBackend:
 
     def reconstruct_nus(self, experiment, params, progress=None):
         self.reconstruct_params.append(dict(params or {}))
+        # 模拟真实后端:每次调用写 {dataset_id}_nus.com(供初跑脚本保留断言)
+        script = self.work / f"{experiment.dataset_id}_nus.com"
+        script.write_text(
+            f"# fake nus script #{len(self.reconstruct_params)}\n",
+            encoding="utf-8",
+        )
         return {"success": True, "spectrum_path": str(self.work / "out.ft2"), "logs": []}
 
     def finalize_nus(
@@ -175,9 +181,22 @@ def test_unified_route_nus_reconstruct_then_finalize(
     """NUS:SMILE 首遍(关搜索)→ 直接维对称性调相 → 间接维 finalize 复型预览
     + 内存搜索 → 联合复核 → 处理参数优化 → 终跑为完整脚本(各维相位填入,
     不写 nus3d_rc_ph 旋转副本)。"""
+    from types import SimpleNamespace
+
     experiment = read_dataset(bruker_dir / "nus_2d")
     backend = _FakeBackend(tmp_path / "nus_work")
     work = backend.work
+    # 0.2.156:诊断检测到直流偏置 → 第一遍与终跑脚本均带 direct_poly_time
+    monkeypatch.setattr(
+        "workflow.direct_diagnostics.run_direct_diagnostics",
+        lambda wk, exp: SimpleNamespace(
+            reports=["直流偏置: 自动启用 POLY -time"],
+            metrics={},
+            apply_poly_time=True,
+            repaired_badpoints=0,
+            backup_dir="",
+        ),
+    )
     n_direct, n_t1 = 64, 32
     k0 = np.arange(n_direct, dtype=float)
     t1 = np.arange(n_t1, dtype=float)
@@ -230,13 +249,21 @@ def test_unified_route_nus_reconstruct_then_finalize(
     assert all(call["planes"] is None for call in backend.finalize_calls)
     assert "处理参数优化(测试): 固定配置" in result["logs"]
     assert result["backend_runs"] == 3  # SMILE 首遍 + F1 预览 + 终跑
-    # 0.2.155:终跑携带诊断的 direct_poly_time;日志含分步耗时与末尾汇总
+    # 0.2.155/0.2.156:诊断检测到直流偏置时,第一遍 SMILE 与终跑脚本
+    # 均携带 direct_poly_time(POLY -time);日志含分步耗时与末尾汇总
     assert "direct_poly_time" in final_params
-    assert final_params.get("direct_poly_time") is False
+    assert backend.reconstruct_params[0].get("direct_poly_time") is True
+    assert final_params.get("direct_poly_time") is True
     assert "== 质量与优化汇总 ==" in result["logs"]
     assert any("谱图质量" in line for line in result["logs"])
     assert any("相位搜索完成,耗时" in line for line in result["logs"])
     assert any("终跑完成,耗时" in line for line in result["logs"])
+    # 0.2.156:初跑脚本保留为 {dataset_id}_before_optimize.com(内容=第一遍脚本)
+    no_opt = work / f"{experiment.dataset_id}_before_optimize.com"
+    assert no_opt.is_file()
+    assert "# fake nus script #1" in no_opt.read_text(encoding="utf-8")
+    assert "# fake nus script #2" not in no_opt.read_text(encoding="utf-8")
+    assert any("初跑脚本保留" in line for line in result["logs"])
 
 
 

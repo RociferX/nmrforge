@@ -754,6 +754,20 @@ def _unified_nus(
     ]
     if progress is not None:
         progress("第一遍 SMILE 完成")
+    # 0.2.156:初跑脚本保留(未含优化相位的完整 SMILE 脚本),命名
+    # {dataset_id}_before_optimize.com,便于与优化后终跑脚本对照
+    first_script = work / f"{experiment.dataset_id}_nus.com"
+    no_opt_script = work / f"{experiment.dataset_id}_before_optimize.com"
+    try:
+        if first_script.is_file():
+            no_opt_script.write_text(
+                first_script.read_text(encoding="utf-8"),
+                encoding="utf-8",
+                newline="\n",
+            )
+            logs.append(f"初跑脚本保留: {no_opt_script.name}")
+    except OSError as exc:  # noqa: BLE001 - 保留失败不影响流程
+        logs.append(f"初跑脚本保留失败: {exc}")
     backend_runs = 1
     planes = _load_recon_planes(experiment, work)
     direct_axis = "F3" if experiment.ndim >= 3 else "F2"

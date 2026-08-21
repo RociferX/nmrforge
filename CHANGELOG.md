@@ -1,5 +1,15 @@
 # 修改记录(历史条目)
 
+## 0.2.156(2026-08-21,总管直接处理)
+
+- 保留初跑脚本:unified NUS 第一遍 SMILE 的完整脚本(未含优化相位)复制为
+  {dataset_id}_before_optimize.com,与优化后终跑脚本 {dataset_id}_nus.com
+  对照;日志记录「初跑脚本保留」;
+- 回归测试:诊断检测到直流偏置(apply_poly_time)时,第一遍 SMILE 与终跑
+  脚本均携带 direct_poly_time(POLY -time),且 before_optimize.com 内容
+  为第一遍脚本;
+- 本地全量 pytest + ruff 全绿。
+
 ## 0.2.155(2026-08-21,总管直接处理)
 
 - 修复:数据质量诊断检测到直流偏置(apply_poly_time)时,终跑完整脚本
