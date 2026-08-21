@@ -127,3 +127,36 @@ def test_step_detail_light_background(qapp: QApplication) -> None:
     assert "background: #ffffff" in style
     assert "color: #222" in row.detail_label.styleSheet()
     row.close()
+
+
+
+def test_step_detail_refreshes_on_data_switch(
+    tmp_path: Path, qapp: QApplication
+) -> None:
+    """0.2.161:切换数据时,已展开的步骤详情立即刷新为新数据的报告。"""
+    manager = ProjectManager.create_project(tmp_path / "proj2", "demo")
+    entry = manager.create_experiment("HSQC")
+    d1 = manager.import_data(entry.id, "/fake/1")
+    d2 = manager.import_data(entry.id, "/fake/2")
+    for data, zf in ((d1, 2), (d2, 3)):
+        run = manager.start_run(
+            entry.id,
+            workflow_ref="process",
+            inputs={"data_id": data.id},
+            params={"zero_fill": zf},
+        )
+        manager.finish_run(run.run_id, "success", outputs={}, message="生成谱图")
+    manager.save()
+
+    panel = PipelinePanel(manager, _FakeController())
+    panel.set_selection("data", entry.id, d1.id)
+    panel._toggle_step_detail("spectrum")
+    row = panel._rows["spectrum"]
+    assert not row.detail_frame.isHidden()
+    assert "填零: 2" in row.detail_label.text()
+    # 切换到 d_002:已展开详情应立即刷新(无需重新点击展开)
+    panel.set_selection("data", entry.id, d2.id)
+    text2 = row.detail_label.text()
+    assert "填零: 3" in text2
+    assert "填零: 2" not in text2
+    panel.close()

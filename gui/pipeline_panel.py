@@ -717,6 +717,7 @@ class PipelinePanel(QWidget):
             self.import_button.setVisible(False)
             for row in self._rows.values():
                 row.set_status("LOCKED")
+            self._refresh_expanded_details()
             return
         if self._selection_kind in ("project", "experiment"):
             exp = project.experiment(self._current_exp_id)
@@ -728,6 +729,7 @@ class PipelinePanel(QWidget):
                 row.manual_button.setVisible(False)  # 未选中数据不显示人工
             self.import_button.setVisible(True)  # 可直接在当前实验类型导入样品数据
             self._rows["import"].setVisible(True)
+            self._refresh_expanded_details()
             return
         self.import_button.setVisible(False)
         # 导入样品数据属于实验类型层(点中实验类型时显示),样品数据层不再展示该步骤
@@ -806,6 +808,7 @@ class PipelinePanel(QWidget):
                 step_id == "spectrum" and status == "SUCCESS"
             )
             # 0.2.108:生成谱图步骤提供「相位优化途径」选择
+        self._refresh_expanded_details()
 
     # ------------------------------------------------------------------
     # 运行
@@ -903,6 +906,13 @@ class PipelinePanel(QWidget):
                 if run.params:
                     lines.append(f"参数: {_format_params(run.params)}")
         return "\n".join(lines) if lines else "无详情", params, failed
+
+    def _refresh_expanded_details(self) -> None:
+        """0.2.161:已展开的步骤详情(参数报告等)随数据/上下文切换立即刷新。"""
+        for step_id, row in self._rows.items():
+            if not row.detail_frame.isHidden():
+                text, _params, failed = self._step_detail(step_id)
+                row.set_detail(text, failed=failed)
 
     def _on_run_requested(self, step_id: str) -> None:
         if not self._current_exp_id:
