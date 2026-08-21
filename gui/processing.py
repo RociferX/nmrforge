@@ -539,9 +539,18 @@ class ProcessingController:
                 return dict(run.params or {})
         return {}
 
-    def optimize_smile(self, data, exp_id=None, data_id=None) -> dict:
+    def optimize_smile(
+        self,
+        data,
+        exp_id=None,
+        data_id=None,
+        progress: Callable[[str], None] | None = None,
+    ) -> str:
         """SMILE 优化(可选):基于已有参数仅优化 SMILE 参数,
-        多次重构去伪峰,稳定峰写入 smile_optimized/。"""
+        多次重构去伪峰,稳定峰写入 smile_optimized/。
+
+        progress 可选回调:扫描/去伪进度(正在优化 x/25 + 当前参数),
+        不转发后端 SMILE 原始输出(与生成谱图日志区分,0.2.162-补)。"""
         from core.data.internal_data_model import SamplingMode
         from workflow.smile_optimize import optimize_smile_parameters
 
@@ -552,10 +561,15 @@ class ProcessingController:
         if experiment.sampling.mode is not SamplingMode.NUS:
             raise RuntimeError("SMILE 优化仅适用于 NUS 数据(当前为均匀采样)")
         base_params = self._last_spectrum_params(exp_id, data_id)
+        def _smile_progress(index: int, total: int, msg: str) -> None:
+            if progress is not None:
+                progress(msg)
+
         results = optimize_smile_parameters(
             experiment,
             self._backend_instance(),
             base_params=base_params,
+            progress=_smile_progress,
         )
         valid = [
             result
@@ -566,16 +580,11 @@ class ProcessingController:
         if not valid:
             raise RuntimeError("SMILE 优化未获得可用候选")
         best = valid[0]
-        spectrum_path = self._apply_smile_result(exp_id, data_id, best)
-        return {
-            "status": "success",
-            "best_params": dict(getattr(best, "params", {}) or {}),
-            "spectrum_path": spectrum_path,
-            "peaks_path": str(getattr(best, "peaks_path", "") or ""),
-            "candidates": len(results),
-            "message": f"SMILE 优化: {len(results)} 组,最优 {best.params},"
-                        f"稳定峰 {len(getattr(best, 'stable_peaks', []))} 个",
-        }
+        self._apply_smile_result(exp_id, data_id, best)
+        return (
+            f"{len(results)} 组候选,最优 {best.params},"
+            f"稳定峰 {len(getattr(best, 'stable_peaks', []))} 个"
+        )
 
     def _apply_smile_result(self, exp_id: str, data_id: str, result) -> str:
         """最优谱归位 spectra/;稳定峰与评分写入 smile_optimized/(与 raw 同级)。"""

@@ -68,24 +68,24 @@ def _fake_backend(tmp_path: Path, spurious_in: set[int]):
 
 def test_default_smile_grid() -> None:
     grid = default_smile_grid()
-    assert len(grid) == 9
+    assert len(grid) == 25  # 0.2.162-补:扫描去重后加密网格(5×5),调参更细
     assert grid[0] == {"nsigma": 3.0, "thresh": 0.90}
     assert all("smile_xq3" not in g for g in grid)  # 0.2.162:xQ3 死参数移除
     combos = {(g["nsigma"], g["thresh"]) for g in grid}
-    assert len(combos) == 9
+    assert len(combos) == 25
 
 
 def test_optimize_filters_spurious_and_keeps_true(
     tmp_path: Path, bruker_dir: Path
 ) -> None:
-    """0.2.162:多次重构后,跨次不稳定的伪峰被剔除,真峰保留。"""
+    """0.2.162:最优参数多次重构(注入噪声)后,不稳定的伪峰被剔除,真峰保留。"""
     exp = read_dataset(bruker_dir / "nus_3d")
-    backend, _seen = _fake_backend(tmp_path, spurious_in={0, 1002, 2001})
+    # 伪峰只出现在扫描 seed(1000),最终重复(9000-9002)不含 → 被剔除
+    backend, _seen = _fake_backend(tmp_path, spurious_in={1000})
     results = optimize_smile_parameters(
         exp,
         backend,
         grid=[{"nsigma": 5.0, "thresh": 0.95}],
-        scan_repeats=3,
         final_repeats=3,
         min_stability=2,
     )
@@ -114,10 +114,10 @@ def test_optimize_uses_base_params_and_cross_support(
             {"nsigma": 3.0, "thresh": 0.90},
             {"nsigma": 5.0, "thresh": 0.99},
         ],
-        scan_repeats=2,
         final_repeats=3,
     )
     assert len(results) == 2
+    assert len(seen) == 5  # 扫描 2 次 + 最终 3 次
     for run_params in seen:
         assert run_params["ext_lo"] == "10.5"  # 基参数保留
         assert run_params["nthread"] == 4
@@ -187,3 +187,25 @@ def test_on_result_callback(tmp_path: Path, bruker_dir: Path) -> None:
         on_result=on_result,
     )
     assert len(received) == 2  # 每组评分后都立即回调
+
+
+def test_progress_reports_scan_and_final(tmp_path: Path, bruker_dir: Path) -> None:
+    """0.2.162-补:进度回调输出扫描(正在优化 x/N)与去伪重复阶段。"""
+    exp = read_dataset(bruker_dir / "nus_3d")
+    backend, _seen = _fake_backend(tmp_path, spurious_in=set())
+    progress: list[tuple[int, int, str]] = []
+    optimize_smile_parameters(
+        exp,
+        backend,
+        grid=[
+            {"nsigma": 3.0, "thresh": 0.90},
+            {"nsigma": 5.0, "thresh": 0.99},
+        ],
+        progress=lambda i, t, m: progress.append((i, t, m)),
+    )
+    assert len(progress) == 2 + 3  # 扫描 2 条 + 去伪重复 3 条
+    assert progress[0][0] == 1 and progress[0][1] == 2
+    assert "正在优化 1/2" in progress[0][2]
+    assert "正在优化 2/2" in progress[1][2]
+    assert "去伪重复 1/3" in progress[2][2]
+    assert "去伪重复 3/3" in progress[-1][2]
