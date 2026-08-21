@@ -251,8 +251,19 @@ class ProjectManager:
             raise ProjectError("未加载项目")
         if sample_id and self.project.sample(sample_id) is None:
             raise ProjectError(f"样本不存在: {sample_id}")
+        # 0.2.159:编号含历史(运行记录/审计)中已用过的实验号,删除不复用,
+        # 避免新实验沿用旧实验的注释/运行记录
+        used_exp = {e.id for e in self.project.experiments}
+        used_exp.update(
+            str(r.experiment_id)
+            for r in (self.project.workflow_runs or [])
+        )
+        used_exp.update(
+            str(h.fields.get("experiment_id", ""))
+            for h in (self.project.processing_history or [])
+        )
         entry = ExperimentEntry(
-            id=_next_sequence_id([e.id for e in self.project.experiments], "exp_"),
+            id=_next_sequence_id(sorted(used_exp), "exp_"),
             title=title,
             status=ExperimentStatus.REGISTERED.value,
             metadata=dict(metadata or {}),
@@ -283,8 +294,21 @@ class ProjectManager:
     ) -> DataEntry:
         """登记数据条目(d_001...);文件复制/metadata 落盘由 workflow 完成。"""
         entry = self._require_experiment(exp_id)
+        # 0.2.159:编号含历史(运行记录/审计)中该实验用过的数据号,删除不复用,
+        # 避免新数据沿用旧数据的注释/运行记录
+        used_data = {d.id for d in entry.data}
+        used_data.update(
+            str((r.inputs or {}).get("data_id", ""))
+            for r in (self.project.workflow_runs or [])
+            if r.experiment_id == exp_id
+        )
+        used_data.update(
+            str(h.fields.get("data_id", ""))
+            for h in (self.project.processing_history or [])
+            if str(h.fields.get("experiment_id", "")) == exp_id
+        )
         data_entry = DataEntry(
-            id=_next_sequence_id([d.id for d in entry.data], "d_"),
+            id=_next_sequence_id(sorted(used_data), "d_"),
             source=str(source),
             segments=[str(s) for s in (segments or [])],
             status="imported",
@@ -364,6 +388,14 @@ class ProjectManager:
                 target.unlink()
                 removed.append(str(target))
         entry.data.remove(data_entry)
+        # 0.2.159:清理该数据的样品注释(metadata.data_notes),避免残留
+        meta = dict(entry.metadata or {})
+        data_notes = meta.get("data_notes")
+        if isinstance(data_notes, dict) and data_id in data_notes:
+            data_notes.pop(data_id, None)
+            if not data_notes:
+                meta.pop("data_notes", None)
+            entry.metadata = meta
         if not entry.data:
             entry.status = ExperimentStatus.REGISTERED.value
         self.add_history(

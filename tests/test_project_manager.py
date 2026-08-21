@@ -482,3 +482,42 @@ def test_rename_data_persists_and_audits(tmp_path: Path) -> None:
     reopened = ProjectManager.open_project(tmp_path / "proj")
     assert reopened.project.experiment(entry.id).data[0].title == "骨架 A"
     assert any(h.action == "data_renamed" for h in manager.project.processing_history)
+
+
+
+def test_data_id_not_reused_after_delete(tmp_path: Path) -> None:
+    """0.2.159:删除数据后重新导入,数据编号不复用(避免注释/运行记录沿用)。"""
+    manager = ProjectManager.create_project(tmp_path / "proj", "demo")
+    entry = manager.create_experiment()
+    first = manager.import_data(entry.id, "/sampleD")
+    assert first.id == "d_001"
+    manager.delete_data(entry.id, first.id)
+    second = manager.import_data(entry.id, "/sampleE")
+    assert second.id == "d_002"
+    third = manager.import_data(entry.id, "/sampleF")
+    assert third.id == "d_003"
+
+
+def test_experiment_id_not_reused_after_delete(tmp_path: Path) -> None:
+    """0.2.159:删除实验后新建,实验编号不复用;新实验数据重新从 d_001 起。"""
+    manager = ProjectManager.create_project(tmp_path / "proj", "demo")
+    e1 = manager.create_experiment()
+    assert e1.id == "exp_001"
+    manager.import_data(e1.id, "/sampleD")
+    manager.delete_experiment(e1.id)
+    e2 = manager.create_experiment()
+    assert e2.id == "exp_002"
+    data = manager.import_data(e2.id, "/sampleE")
+    assert data.id == "d_001"
+
+
+def test_delete_data_cleans_data_notes(tmp_path: Path) -> None:
+    """0.2.159:删除数据时清除 metadata.data_notes 中该数据的注释。"""
+    manager = ProjectManager.create_project(tmp_path / "proj", "demo")
+    entry = manager.create_experiment()
+    data = manager.import_data(entry.id, "/sampleD")
+    meta = dict(entry.metadata or {})
+    meta["data_notes"] = {data.id: {"notes": "旧注释"}}
+    entry.metadata = meta
+    manager.delete_data(entry.id, data.id)
+    assert "data_notes" not in (entry.metadata or {})
