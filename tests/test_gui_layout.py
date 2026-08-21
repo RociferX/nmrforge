@@ -1611,3 +1611,49 @@ def test_default_column_widths_1920(qapp: QApplication) -> None:
         assert window.width() == avail.width()
     window.close()
 
+def test_phase_panel_visible_only_in_1d(qapp: QApplication) -> None:
+    """0.2.147:p0/p1 相位面板单行,仅 1D 模式出现。"""
+    from viewer.spectrum_viewer import SpectrumViewer
+
+    viewer = SpectrumViewer()
+    assert viewer.phase_panel.isHidden()
+    viewer.add_spectrum(_synthetic_spectrum_2d())
+    assert viewer.phase_panel.isHidden()  # 2D 不显示
+    viewer.set_1d_mode(True)
+    assert not viewer.phase_panel.isHidden()  # 条带 1D 模式显示
+    viewer.set_1d_mode(False)
+    assert viewer.phase_panel.isHidden()
+    viewer.close()
+
+
+def test_spectrum_panel_new_layout_constraints(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.2.147:Files/Layers 一行;Show peaks 在 Add peak 前;Poky 字样移除。"""
+    from gui.spectrum_panel import SpectrumPanel
+
+    panel = SpectrumPanel()
+    assert panel.file_list.parent() is panel.lists_row_widget
+    assert panel.viewer.layer_list.parent() is panel.lists_row_widget
+    first = panel.peak_toolbar_widget.layout().itemAt(0).widget()
+    assert first is panel.viewer.show_peaks_checkbox
+    assert panel.import_poky_button.text() == "Import peaks"
+    assert panel.export_poky_button.text() == "Export peaks"
+    # 峰操作行间距显明
+    assert panel.peak_toolbar.spacing() >= 10
+    panel.close()
+
+
+def _synthetic_spectrum_2d():
+    from viewer.spectrum import Spectrum, SpectrumAxis
+
+    axis_x = SpectrumAxis(
+        label="1H", size=64, sw_hz=6000.0, obs_mhz=600.0,
+        carrier_ppm=4.7, orig_hz=4.7 * 600.0,
+    )
+    axis_y = SpectrumAxis(
+        label="15N", size=32, sw_hz=2000.0, obs_mhz=60.0,
+        carrier_ppm=118.0, orig_hz=118.0 * 60.0,
+    )
+    import numpy as np
+    return Spectrum(data=np.zeros((32, 64)), axes=[axis_y, axis_x])

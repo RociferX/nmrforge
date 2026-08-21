@@ -28,10 +28,13 @@ class PhasePanel(QWidget):
         self._p0 = 0.0
         self._p1 = 0.0
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(4, 2, 4, 2)
-        layout.setSpacing(2)
-        layout.addWidget(QLabel("Phase (P0/P1)"))
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(4, 2, 4, 2)
+        outer.setSpacing(2)
+
+        # 0.2.147:P0/P1 一行并排,间隔显明
+        row = QHBoxLayout()
+        row.setSpacing(12)
 
         self.p0_slider = QSlider(Qt.Orientation.Horizontal)
         self.p0_slider.setRange(-180, 180)
@@ -39,8 +42,9 @@ class PhasePanel(QWidget):
         self.p0_slider.valueChanged.connect(self._on_p0_changed)
         self.p0_slider.sliderReleased.connect(lambda: self.phase_changed.emit(True))
         self.p0_label = QLabel("P0: 0°")
-        layout.addWidget(self.p0_slider)
-        layout.addWidget(self.p0_label)
+        row.addWidget(QLabel("P0"))
+        row.addWidget(self.p0_slider, 1)
+        row.addWidget(self.p0_label)
 
         self.p1_slider = QSlider(Qt.Orientation.Horizontal)
         self.p1_slider.setRange(-180, 180)
@@ -48,26 +52,29 @@ class PhasePanel(QWidget):
         self.p1_slider.valueChanged.connect(self._on_p1_changed)
         self.p1_slider.sliderReleased.connect(lambda: self.phase_changed.emit(True))
         self.p1_label = QLabel("P1: 0°")
-        layout.addWidget(self.p1_slider)
-        layout.addWidget(self.p1_label)
+        row.addWidget(QLabel("P1"))
+        row.addWidget(self.p1_slider, 1)
+        row.addWidget(self.p1_label)
 
-        row = QHBoxLayout()
         self.reset_button = QPushButton("Reset")
         self.reset_button.setToolTip("P0/P1 归零")
         self.reset_button.clicked.connect(self.reset)
         row.addWidget(self.reset_button)
         self.copy_button = QPushButton("Copy")
-        self.copy_button.setToolTip("复制 P0/P1 值,可粘贴到人工相位参数或脚本 PS 行")
+        self.copy_button.setToolTip(
+            "复制 P0/P1 值,可粘贴到人工相位参数或脚本 PS 行"
+        )
         self.copy_button.clicked.connect(self._copy_values)
         row.addWidget(self.copy_button)
-        row.addStretch(1)
-        layout.addLayout(row)
+        outer.addLayout(row)
 
         self.hint_label = QLabel("")
         self.hint_label.setWordWrap(True)
         self.hint_label.setStyleSheet("color: #888;")
-        layout.addWidget(self.hint_label)
+        outer.addWidget(self.hint_label)
         self.set_available(False)
+
+
 
     # ------------------------------------------------------------- API
     def values(self) -> tuple[float, float]:
@@ -81,6 +88,11 @@ class PhasePanel(QWidget):
     def reset(self) -> None:
         self.set_values(0.0, 0.0)
         self.phase_changed.emit(True)
+
+    def set_visible_1d_mode(self, visible: bool) -> None:
+        """1D 模式显示相位面板(条带模式亦显示);隐藏时不可交互。"""
+        self.setVisible(visible)
+        self.set_available(visible)
 
     def set_available(self, available: bool, hint: str = "") -> None:
         """复型数据可用时启用;实型谱等禁用并提示。"""

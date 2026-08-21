@@ -15,6 +15,7 @@ from PyQt6.QtCore import QEvent, Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QCheckBox,
     QGridLayout,
+    QHBoxLayout,
     QLabel,
     QListWidget,
     QListWidgetItem,
@@ -111,38 +112,7 @@ class SpectrumViewer(QWidget):
         self.reset_button = QPushButton("Full view")
         self.reset_button.clicked.connect(self.reset_view)
 
-        self.crosshair_label = QLabel("Move mouse to read ppm")
-        self.crosshair_label.setWordWrap(True)
-        self.peak_label = QLabel("")
-        self.peak_label.setWordWrap(True)
-
-        controls = QWidget()
-        controls_layout = QVBoxLayout(controls)
-        controls_layout.setContentsMargins(4, 2, 4, 2)
-        controls_layout.setSpacing(2)
-        controls_layout.addWidget(QLabel("Layers"))
-        controls_layout.addWidget(self.layer_list, 1)
-        controls_layout.addWidget(QLabel("Contour start (%)"))
-        controls_layout.addWidget(self.level_slider)
-        controls_layout.addWidget(self.level_label)
-        controls_layout.addWidget(QLabel("Levels"))
-        controls_layout.addWidget(self.count_slider)
-        controls_layout.addWidget(self.count_label)
-        controls_layout.addWidget(self.reset_button)
-        self.show_1d_button = QPushButton("1D")
-        self.show_1d_button.setCheckable(True)
-        self.show_1d_button.setToolTip(
-            "开启后出现随鼠标十字线,点击显示该处两个一维谱(TopSpin 式)"
-        )
-        self.show_1d_button.toggled.connect(self.set_1d_mode)
-        controls_layout.addWidget(self.show_1d_button)
-        controls_layout.addWidget(self.crosshair_label)
-        controls_layout.addWidget(self.peak_label)
-        self.show_peaks_checkbox = QCheckBox("Show peaks")
-        self.show_peaks_checkbox.setChecked(True)
-        self.show_peaks_checkbox.toggled.connect(self.set_peaks_visible)
-        controls_layout.addWidget(self.show_peaks_checkbox)
-        # 0.2.133: aspect ratio slider
+        # 0.2.133: aspect ratio slider(0.2.147 ????? 0 ??)
         self.aspect_slider = QSlider(Qt.Orientation.Horizontal)
         self.aspect_slider.setRange(0, 400)
         self.aspect_slider.setValue(100)
@@ -150,14 +120,79 @@ class SpectrumViewer(QWidget):
         self.aspect_slider.setTickInterval(50)
         self.aspect_slider.valueChanged.connect(self._on_aspect_changed)
         self.aspect_label = QLabel("Aspect: 1.00x")
-        controls_layout.addWidget(QLabel("Aspect ratio"))
-        controls_layout.addWidget(self.aspect_slider)
-        controls_layout.addWidget(self.aspect_label)
+
+        # Show peaks ???(0.2.147 ??????,?? Add peak ?)
+        self.show_peaks_checkbox = QCheckBox("Show peaks")
+        self.show_peaks_checkbox.setChecked(True)
+        self.show_peaks_checkbox.toggled.connect(self.set_peaks_visible)
+
+        # TopSpin ? 1D ????(0.2.147 ? 1: ? Full view ??)
+        self.show_1d_button = QPushButton("1D")
+        self.show_1d_button.setCheckable(True)
+        self.show_1d_button.setToolTip(
+            "???????????,???????????(TopSpin ?)"
+        )
+        self.show_1d_button.toggled.connect(self.set_1d_mode)
+
+        self.crosshair_label = QLabel("Move mouse to read ppm")
+        self.crosshair_label.setWordWrap(True)
+        self.peak_label = QLabel("")
+        self.peak_label.setWordWrap(True)
+
+        controls = QWidget()
+        controls_layout = QGridLayout(controls)
+        # 0.2.147:??????????;Layers ??????????
+        controls_layout.setContentsMargins(6, 4, 6, 4)
+        controls_layout.setHorizontalSpacing(20)
+        controls_layout.setVerticalSpacing(6)
+
+        # ? 0:contour start / Levels / Aspect ratio ????
+        def _labeled_slider(label: str, slider, value_label) -> QVBoxLayout:
+            box = QVBoxLayout()
+            box.setSpacing(2)
+            lab = QLabel(label)
+            lab.setAlignment(Qt.AlignmentFlag.AlignLeft)
+            box.addWidget(lab)
+            box.addWidget(slider)
+            box.addWidget(value_label)
+            return box
+
+        controls_layout.addLayout(
+            _labeled_slider("Contour start (%)", self.level_slider, self.level_label),
+            0, 0,
+        )
+        controls_layout.addLayout(
+            _labeled_slider("Levels", self.count_slider, self.count_label),
+            0, 1,
+        )
+        controls_layout.addLayout(
+            _labeled_slider("Aspect ratio", self.aspect_slider, self.aspect_label),
+            0, 2,
+        )
+
+        # ? 1:Full view + 1D
+        row1 = QHBoxLayout()
+        row1.setSpacing(16)
+        row1.addWidget(self.reset_button)
+        row1.addWidget(self.show_1d_button)
+        row1.addStretch(1)
+        controls_layout.addLayout(row1, 1, 0, 1, 3)
+
+        # ? 2:????
+        row2 = QHBoxLayout()
+        row2.setSpacing(20)
+        row2.addWidget(self.crosshair_label, 1)
+        row2.addWidget(self.peak_label, 1)
+        controls_layout.addLayout(row2, 2, 0, 1, 3)
+
+        # ? 3:p0/p1 ???? ?? ??,? 1D ????
         from viewer.phase_panel import PhasePanel
 
         self.phase_panel = PhasePanel()
         self.phase_panel.phase_changed.connect(self._on_phase_changed)
-        controls_layout.addWidget(self.phase_panel)
+        controls_layout.addWidget(self.phase_panel, 3, 0, 1, 3)
+        self.phase_panel.setVisible(False)
+
         self.controls_layout = controls_layout
 
         # TopSpin 式 1D 条带:上方行迹线(F2)、右侧列迹线(F1),与主谱联动
@@ -500,7 +535,7 @@ class SpectrumViewer(QWidget):
     # ------------------------------------------------------------ phase
     def _refresh_phase_availability(self) -> None:
         """按当前显示启用相位面板:一维谱或 1D 条带时可用(仅显示,不改数据)。"""
-        self.phase_panel.set_available(self._phase_target() is not None)
+        self.phase_panel.set_visible_1d_mode(self._phase_target() != "")
 
     def _phase_target(self) -> str:
         """当前可调相的 1D 目标:主一维迹线 / 1D 条带。"""
