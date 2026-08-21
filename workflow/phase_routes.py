@@ -372,6 +372,7 @@ _DIRECT_PHASE_FP_KEYS = (
     "extract", "ext_lo", "ext_hi", "nsigma", "thresh",
     "smile_xq3", "smile_scaling", "zero_fill", "linewidth_hz",
     "points_per_line", "segment_shift_hz", "sampling",
+    "direct_poly_time",  # 0.2.158:诊断结果变化(POLY -time)时缓存失效
 )
 
 
@@ -778,7 +779,7 @@ def _unified_nus(
         logs.append("sampling.auto_phase=False,直接维相位保持 (0,0)(跳过搜索)")
     else:
         cache = _load_direct_phase_cache(
-            work, experiment, base_params or {}, planes.shape
+            work, experiment, params_first, planes.shape
         )
         if cache is not None:
             direct_phase = (float(cache["p0"]), float(cache["p1"]))
@@ -816,7 +817,7 @@ def _unified_nus(
                     f"{direct_phase[1]:g}°) score={direct_est[2]:.2f}"
                 )
                 _save_direct_phase_cache(
-                    work, experiment, base_params or {}, planes.shape,
+                    work, experiment, params_first, planes.shape,
                     direct_phase[0], direct_phase[1], float(direct_est[2]),
                     elapsed,
                 )
