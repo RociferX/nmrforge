@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -172,8 +173,70 @@ def _cleanup_unified_intermediates(
                     pass
 
 
-def unified_route(
-    experiment: Experiment,
+def _fmt_opt_mode_map(cfg: Any) -> str:
+    """{axis: {mode/type/size...}} → 'F1=auto F2=none' 紧凑文本;
+    非 dict 值(旧格式整数等)原样返回。"""
+    if not isinstance(cfg, dict):
+        return str(cfg)
+    parts: list[str] = []
+    for axis, conf in sorted(cfg.items()):
+        if isinstance(conf, dict):
+            mode = conf.get("mode") or conf.get("type") or "默认"
+            size = conf.get("size")
+            parts.append(f"{axis}={mode}" + (f"×{size}" if size else ""))
+        else:
+            parts.append(f"{axis}={conf}")
+    return " ".join(parts) or "默认"
+
+
+def _append_final_summary(
+    logs: list[str],
+    spectrum_path: str,
+    *,
+    direct_axis: str = "",
+    direct_phase: tuple[float, float] | None = None,
+    phases: dict[str, tuple[float, float]] | None = None,
+    backend_runs: int = 0,
+    baseline: Any = None,
+    zero_fill: Any = None,
+    window: Any = None,
+    diagnostics: dict[str, Any] | None = None,
+) -> None:
+    """日志末尾质量与优化汇总(0.2.155)。"""
+    logs.append("== 质量与优化汇总 ==")
+    try:
+        import nmrglue as ng
+
+        from core.qc import spectrum_quality
+
+        _dic, data = ng.pipe.read(str(spectrum_path))
+        q = spectrum_quality.evaluate(np.asarray(data))
+        text = f"谱图质量: {q.decision.value}(综合分 {q.score.overall:.1f})"
+        if q.reasons:
+            text += " | " + "、".join(q.reasons[:3])
+        logs.append(text)
+    except Exception as exc:  # noqa: BLE001 - 质量评估失败不阻断报告
+        logs.append(f"谱图质量: 评估跳过({exc})")
+    if direct_axis and direct_phase is not None:
+        logs.append(
+            f"直接维相位: {direct_axis}=({direct_phase[0]:g}°, "
+            f"{direct_phase[1]:g}°)"
+        )
+    for axis, pair in sorted((phases or {}).items()):
+        logs.append(f"间接维相位: {axis}=({pair[0]:g}°, {pair[1]:g}°)")
+    logs.append(f"后端运行次数: {backend_runs}")
+    if baseline:
+        logs.append(f"基线: {_fmt_opt_mode_map(baseline)}")
+    if window:
+        logs.append(f"窗函数: {_fmt_opt_mode_map(window)}")
+    if zero_fill:
+        logs.append(f"填零: {_fmt_opt_mode_map(zero_fill)}")
+    reports = (diagnostics or {}).get("reports") or []
+    if reports:
+        logs.append(f"数据质量诊断: 报告 {len(reports)} 项(见上文诊断段)")
+
+
+def unified_route(    experiment: Experiment,
     backend: Any,
     *,
     plan: Any | None = None,
@@ -222,6 +285,7 @@ def unified_route(
     backend_runs = 0
     for axis in search_axes:
         out_file = f"{experiment.dataset_id}_preview_{axis}.{ext}"
+        t_axis = time.time()
         if progress is not None:
             progress(f"{axis} 复型预览中")
         resp = backend.process(
@@ -263,7 +327,9 @@ def unified_route(
             f"{axis}: 内存相位 = ({est.phase[0]:g}°, {est.phase[1]:g}°) "
             f"score={est.score:.2f}"
         )
+        logs.append(f"{axis} 相位搜索完成,耗时 {time.time() - t_axis:.1f} 秒")
     if len(search_axes) >= 2:
+        t_joint = time.time()
         best, best_score, fixed_score, zero_score = joint_recheck_memory(
             axis_arrays, axis_index, axis_traces, fixed, sign_mode=sign_mode
         )
@@ -278,8 +344,10 @@ def unified_route(
                 f"联合复核: 联合面平坦(顺序 {fixed} score={fixed_score:.2f} "
                 f"vs 联合最优 {best} score={best_score:.2f}),保持顺序固定"
             )
+        logs.append(f"联合复核完成,耗时 {time.time() - t_joint:.1f} 秒")
     if progress is not None:
         progress("终跑(完整重跑)中")
+    t_final = time.time()
     params_final = dict(params)
     resp = backend.process(
         experiment,
@@ -294,6 +362,15 @@ def unified_route(
     if progress is not None:
         progress("终跑完成")
     logs += list(resp.get("logs", []))
+    logs.append(f"终跑完成,耗时 {time.time() - t_final:.1f} 秒")
+    _append_final_summary(
+        logs,
+        str(resp["spectrum_path"]),
+        direct_axis=direct_axis,
+        direct_phase=fixed.get(direct_axis),
+        phases=fixed,
+        backend_runs=backend_runs,
+    )
     _cleanup_unified_intermediates(work, experiment.dataset_id)
     return {
         "phases": fixed,
@@ -723,6 +800,7 @@ def _unified_nus(
             elapsed = _time.time() - t0
             if progress is not None:
                 progress(f"直接维相位搜索完成,耗时 {elapsed:.1f} 秒")
+            logs.append(f"直接维相位搜索完成,耗时 {elapsed:.1f} 秒")
             direct_phase = (0.0, 0.0)
             if direct_est is not None and direct_est[2] >= 30.0:
                 direct_phase = (float(direct_est[0]), float(direct_est[1]))
@@ -761,6 +839,7 @@ def _unified_nus(
     }
     for axis in indirect_axes:
         out_file = f"{experiment.dataset_id}_preview_{axis}.{ext}"
+        t_axis = time.time()
         if progress is not None:
             progress(f"{axis} 复型预览中")
         resp = backend.finalize_nus(
@@ -802,7 +881,9 @@ def _unified_nus(
             f"{axis}: 内存相位 = ({est.phase[0]:g}°, {est.phase[1]:g}°) "
             f"score={est.score:.2f}"
         )
+        logs.append(f"{axis} 相位搜索完成,耗时 {time.time() - t_axis:.1f} 秒")
     if len(indirect_axes) >= 2:
+        t_joint = time.time()
         best, best_score, fixed_score, zero_score = joint_recheck_memory(
             axis_arrays, axis_index, axis_traces, fixed, sign_mode=sign_mode
         )
@@ -817,12 +898,14 @@ def _unified_nus(
                 f"联合复核: 联合面平坦(顺序 {fixed} score={fixed_score:.2f} "
                 f"vs 联合最优 {best} score={best_score:.2f}),保持顺序固定"
             )
+        logs.append(f"联合复核完成,耗时 {time.time() - t_joint:.1f} 秒")
     # 处理参数优化(基线/填零/窗函数):联合复核后、终跑前;各维最终相位
     # 与优化后的处理参数一起填入初始脚本,生成新的完整脚本做终跑——
     # 直接维相位进 step1 PS(EXT 后,与 recon 平面内存旋转同归一化),
     # 间接维相位进 step3 PS;不写 nus3d_rc_ph 旋转副本。
     if progress is not None:
         progress("联合复核完成,开始处理参数优化(基线/填零/窗函数)")
+    t_opt = time.time()
     proc = _optimize_nus_processing(
         experiment,
         backend,
@@ -832,11 +915,13 @@ def _unified_nus(
         progress=progress,
     )
     logs += proc["logs"]
+    logs.append(f"处理参数优化(基线/填零/窗函数)完成,耗时 {time.time() - t_opt:.1f} 秒")
     params_final = dict(base_params or {})
     params_final.update(
         {
             "direct_phase_search": False,
             "display_phase_search": False,
+            "direct_poly_time": bool(diagnostics.get("apply_poly_time")),
             "direct_phase_override": [
                 float(direct_phase[0]),
                 float(direct_phase[1]),
@@ -852,6 +937,7 @@ def _unified_nus(
     )
     if progress is not None:
         progress("终跑(完整脚本,含各维最终相位)中")
+    t_final = time.time()
     final = backend.reconstruct_nus(experiment, params_final, progress=progress)
     backend_runs += 1
     if not final.get("success") or not final.get("spectrum_path"):
@@ -868,6 +954,19 @@ def _unified_nus(
         + "),未生成 nus3d_rc_ph 旋转副本"
     )
     logs += list(final.get("logs", []))
+    logs.append(f"终跑完成,耗时 {time.time() - t_final:.1f} 秒")
+    _append_final_summary(
+        logs,
+        str(final["spectrum_path"]),
+        direct_axis=direct_axis,
+        direct_phase=direct_phase,
+        phases=fixed,
+        backend_runs=backend_runs,
+        baseline=proc["baseline"],
+        zero_fill=proc["zero_fill"],
+        window=proc["window"],
+        diagnostics=diagnostics,
+    )
     _cleanup_unified_intermediates(work, experiment.dataset_id)
     return {
         "phases": fixed,

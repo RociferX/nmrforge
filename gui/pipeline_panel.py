@@ -16,7 +16,6 @@ from pathlib import Path
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
-    QComboBox,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -444,19 +443,6 @@ def _format_params(params: dict) -> str:
 _PHASE_ROUTE_LABELS = {"unified": "Auto-optimize", "none": "None"}
 
 
-# 生成谱图步骤参数报告的常见键名标签(0.2.86)
-_SPECTRUM_PARAM_LABELS = {
-    "extract": "提取窗口",
-    "ext_lo": "提取下限(ppm)",
-    "ext_hi": "提取上限(ppm)",
-    "zero_fill": "填零",
-    "window": "窗函数",
-    "baseline": "基线",
-    "phases": "相位",
-    "sampling": "采样",
-    "smile": "SMILE",
-}
-
 
 def _format_phase_pair(value) -> str:
     """相位对 ((p0,p1) 元组或 {p0,p1,source} dict) → 可读文本。"""
@@ -472,26 +458,53 @@ def _format_phase_pair(value) -> str:
     return str(value)
 
 
-def _spectrum_param_report(params: dict) -> str:
-    """把生成谱图实际生效参数整理为可读参数报告(点击步骤展开查看)。"""
-    lines: list[str] = []
-    for key, value in sorted(params.items()):
-        if key == "phases" and value:
-            lines.append("  逐维相位:")
-            for axis, pair in sorted((value or {}).items()):
-                lines.append(f"    {axis}: {_format_phase_pair(pair)}")
-        elif key == "direct_phase":
-            lines.append(f"  直接维相位: {_format_phase_pair(value)}")
-        elif key == "backend_runs":
-            lines.append(f"  后端运行次数: {value}")
-        elif key == "phase_route":
-            lines.append(
-                f"  相位优化途径: {_PHASE_ROUTE_LABELS.get(str(value), value)}"
-            )
-        elif key == "phases":
-            continue
+def _fmt_opt_mode_map(cfg) -> str:
+    """{axis: {mode/type/size...}} → 'F1=auto F2=none' 紧凑文本;
+    非 dict 值(旧格式整数等)原样返回。"""
+    if not isinstance(cfg, dict):
+        return str(cfg)
+    parts: list[str] = []
+    for axis, conf in sorted(cfg.items()):
+        if isinstance(conf, dict):
+            mode = conf.get("mode") or conf.get("type") or "默认"
+            size = conf.get("size")
+            parts.append(f"{axis}={mode}" + (f"×{size}" if size else ""))
         else:
-            lines.append(f"  {_SPECTRUM_PARAM_LABELS.get(key, key)}: {value}")
+            parts.append(f"{axis}={conf}")
+    return " ".join(parts) or "默认"
+
+
+def _spectrum_param_report(params: dict) -> str:
+    """生成谱图参数报告(0.2.155 精简):只列用户关心的结果项。"""
+    lines: list[str] = []
+    route = params.get("phase_route")
+    if route is not None:
+        lines.append(
+            f"  相位优化途径: {_PHASE_ROUTE_LABELS.get(str(route), route)}"
+        )
+    direct = params.get("direct_phase")
+    if direct is not None:
+        lines.append(f"  直接维相位: {_format_phase_pair(direct)}")
+    phases = params.get("phases") or {}
+    if phases:
+        lines.append("  逐维相位:")
+        for axis, pair in sorted(phases.items()):
+            lines.append(f"    {axis}: {_format_phase_pair(pair)}")
+    baseline = params.get("baseline")
+    if baseline:
+        lines.append(f"  基线: {_fmt_opt_mode_map(baseline)}")
+    window = params.get("window")
+    if window:
+        lines.append(f"  窗函数: {_fmt_opt_mode_map(window)}")
+    zero_fill = params.get("zero_fill")
+    if zero_fill:
+        lines.append(f"  填零: {_fmt_opt_mode_map(zero_fill)}")
+    reports = (params.get("diagnostics") or {}).get("reports") or []
+    if reports:
+        lines.append(f"  数据质量诊断: {len(reports)} 项报告(详见运行日志)")
+    runs = params.get("backend_runs")
+    if runs is not None:
+        lines.append(f"  后端运行次数: {runs}")
     return "\n".join(lines) if lines else "  (无参数记录)"
 
 
@@ -932,19 +945,23 @@ class PipelinePanel(QWidget):
             lines.append(f"运行: {run.run_id} [{run.status}] {run.workflow_ref}")
             if run.message:
                 lines.append(f"消息: {run.message}")
-            if run.outputs:
-                outs = " | ".join(f"{k}={v}" for k, v in run.outputs.items())
-                lines.append(f"输出: {outs}")
-            if run.snapshot_dir:
-                lines.append(f"快照目录: {run.snapshot_dir}")
-            if run.scripts:
-                lines.append(f"脚本快照: {'、'.join(run.scripts)}")
-            if run.params:
-                params = dict(run.params)
-                lines.append(f"参数: {_format_params(run.params)}")
-                if step_id == "spectrum":
+            if step_id == "spectrum":
+                # 0.2.155:精简——生成谱图只展示可读参数报告,
+                # 不再 dump 原始参数/脚本快照等内部细节
+                if run.params:
+                    params = dict(run.params)
                     lines.append("参数报告(生成谱图实际生效参数):")
                     lines.append(_spectrum_param_report(run.params))
+            else:
+                if run.outputs:
+                    outs = " | ".join(f"{k}={v}" for k, v in run.outputs.items())
+                    lines.append(f"输出: {outs}")
+                if run.snapshot_dir:
+                    lines.append(f"快照目录: {run.snapshot_dir}")
+                if run.scripts:
+                    lines.append(f"脚本快照: {'、'.join(run.scripts)}")
+                if run.params:
+                    lines.append(f"参数: {_format_params(run.params)}")
         return "\n".join(lines) if lines else "无详情", params, failed
 
     def _on_run_requested(self, step_id: str) -> None:

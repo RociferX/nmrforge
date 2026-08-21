@@ -230,6 +230,13 @@ def test_unified_route_nus_reconstruct_then_finalize(
     assert all(call["planes"] is None for call in backend.finalize_calls)
     assert "处理参数优化(测试): 固定配置" in result["logs"]
     assert result["backend_runs"] == 3  # SMILE 首遍 + F1 预览 + 终跑
+    # 0.2.155:终跑携带诊断的 direct_poly_time;日志含分步耗时与末尾汇总
+    assert "direct_poly_time" in final_params
+    assert final_params.get("direct_poly_time") is False
+    assert "== 质量与优化汇总 ==" in result["logs"]
+    assert any("谱图质量" in line for line in result["logs"])
+    assert any("相位搜索完成,耗时" in line for line in result["logs"])
+    assert any("终跑完成,耗时" in line for line in result["logs"])
 
 
 

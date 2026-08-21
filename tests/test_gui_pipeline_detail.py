@@ -70,7 +70,9 @@ def test_step_detail_expands_with_params(tmp_path: Path, qapp: QApplication) -> 
     assert not row.detail_frame.isHidden()
     text = row.detail_label.text()
     assert "产物" in text and "参数" in text
-    assert "ext_lo=11.0" in text and "zero_fill=2" in text
+    # 0.2.155:精简——只保留可读参数报告,不再显示 ext_lo 等内部参数
+    assert "ext_lo" not in text
+    assert "填零: 2" in text
     assert not hasattr(row, "manual_with_params_button")
     panel._toggle_step_detail("spectrum")
     assert row.detail_frame.isHidden()
