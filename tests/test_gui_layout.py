@@ -342,10 +342,26 @@ def test_main_window_three_column_layout(
 ) -> None:
     manager = _manager_with_experiment(tmp_path, monkeypatch)
     window = MainWindow(manager=manager)
-    assert window.main_splitter.count() == 3
+    assert window.main_splitter.count() == 4
     assert window.project_tree is not None
     assert window.pipeline is not None
     assert window.spectrum_panel is not None
+    # 0.2.141:log 竖列位于 pipeline 与谱图查看器之间
+    assert (
+        window.main_splitter.indexOf(window.center_panel)
+        < window.main_splitter.indexOf(window.log_panel)
+        < window.main_splitter.indexOf(window.spectrum_panel)
+    )
+    assert window.log_panel.minimumWidth() >= 200
+    assert 0 < window.log_panel.maximumWidth() <= 420
+    # 默认几何:顶住屏幕可用区上沿、高度不超过可用区(不遮任务栏)
+    from PyQt6.QtGui import QGuiApplication
+
+    screen = window.screen() or QGuiApplication.primaryScreen()
+    if screen is not None:
+        avail = screen.availableGeometry()
+        assert window.geometry().top() == avail.top()
+        assert window.height() <= avail.height()
     # 默认聚焦第一个实验类型 → 中间为实验类型页(内嵌导入样品数据表单)
     assert window.center_panel.stack.currentIndex() == 2
     assert window.center_panel.experiment_page._exp_id == "exp_001"

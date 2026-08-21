@@ -4,7 +4,8 @@
 - 左侧:ProjectTreePanel(Project → Experiment → Input/Processing/Output/Figures);
 - 中间:PipelinePanel(上下文面包屑 + 状态驱动的步骤列表 + 下一步提示);
 - 右侧:SpectrumPanel(内嵌 viewer.SpectrumViewer + 项目谱图文件列表);
-- 底部:LogPanel(任务日志,运行/失败时自动展开)。
+- 中间竖列:LogPanel(任务日志,位于 pipeline 与谱图查看器之间,自动展开);
+- 窗口默认贴屏幕顶、高度用满可用区(不遮任务栏)。
 
 所有项目数据一律经 core.project 访问(GUI 不直接读写 project.json);
 所有后端处理一律经 gui/processing.ProcessingController 调用。
@@ -100,7 +101,8 @@ class MainWindow(QMainWindow):
         self._last_auto_fill: dict = {}
         self._last_raw_quality: dict | None = None
         self.setWindowTitle("NMRForge")
-        self.resize(1280, 720)
+        # 0.2.141:打开默认顶住屏幕上沿,高度用满屏幕可用区(任务栏不被遮挡)
+        self._apply_default_geometry()
         self.setAcceptDrops(True)  # 拖拽 Bruker 数据目录导入
         self._build_menus()
         self._build_central()
@@ -109,6 +111,23 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     # UI 构建
     # ------------------------------------------------------------------
+    def _apply_default_geometry(self) -> None:
+        """打开默认几何:顶部贴屏幕可用区上沿,高度用满可用区(任务栏可见)。
+
+        宽度保持默认 1280(屏幕更窄时收窄);多屏幕时以主屏为准。
+        """
+        from PyQt6.QtGui import QGuiApplication
+
+        from PyQt6.QtCore import QRect
+
+        screen = self.screen() or QGuiApplication.primaryScreen()
+        if screen is None:
+            self.resize(1280, 720)
+            return
+        avail = screen.availableGeometry()
+        width = min(1280, avail.width())
+        self.setGeometry(QRect(avail.left(), avail.top(), width, avail.height()))
+
     def _build_menus(self) -> None:
         bar = self.menuBar()
 
@@ -227,18 +246,20 @@ class MainWindow(QMainWindow):
         self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
         self.main_splitter.addWidget(self.project_tree)
         self.main_splitter.addWidget(self.center_panel)
+        self.log_panel = LogPanel()
+        self.log_panel.setMinimumWidth(200)
+        self.log_panel.setMaximumWidth(420)
+        self.log_panel.setVisible(False)
+        self.main_splitter.addWidget(self.log_panel)
         self.main_splitter.addWidget(self.spectrum_panel)
         self.main_splitter.setStretchFactor(0, 20)
         self.main_splitter.setStretchFactor(1, 40)
-        self.main_splitter.setStretchFactor(2, 40)
+        self.main_splitter.setStretchFactor(2, 0)
+        self.main_splitter.setStretchFactor(3, 40)
         # 0.2.87:左侧树加宽,状态列不被遮挡
         self.project_tree.setMinimumWidth(330)
-        self.main_splitter.setSizes([340, 420, 560])
-
-        self.log_panel = LogPanel()
-        self.log_panel.setMinimumHeight(120)
-        self.log_panel.setMaximumHeight(320)
-        self.log_panel.setVisible(False)
+        # 0.2.141:log 竖列位于 pipeline 与谱图查看器之间
+        self.main_splitter.setSizes([340, 460, 240, 520])
 
         central = QWidget()
         central_layout = QVBoxLayout(central)
@@ -250,15 +271,9 @@ class MainWindow(QMainWindow):
             "background: #ecf0f1; padding: 4px 10px; "
             "font-weight: bold; color: #2c3e50;"
         )
-        # 0.2.87:主内容与日志上下可拖调整占比,日志默认更高
-        self.vertical_splitter = QSplitter(Qt.Orientation.Vertical)
-        self.vertical_splitter.addWidget(self.main_splitter)
-        self.vertical_splitter.addWidget(self.log_panel)
-        self.vertical_splitter.setStretchFactor(0, 1)
-        self.vertical_splitter.setStretchFactor(1, 0)
-        self.vertical_splitter.setSizes([640, 220])
+        # 0.2.141:日志为中间竖列(水平分隔条内),不再占用底部高度
         central_layout.addWidget(self.context_bar)
-        central_layout.addWidget(self.vertical_splitter, 1)
+        central_layout.addWidget(self.main_splitter, 1)
         self.setCentralWidget(central)
 
         # 兼容旧测试/旧代码:保留扁平实验表(隐藏),仍随 refresh() 同步。

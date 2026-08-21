@@ -1,4 +1,4 @@
-"""底部 Task/Log 面板:任务日志与错误展示(可折叠)。"""
+"""Task/Log 竖列面板:pipeline 与谱图查看器之间的任务日志/错误展示。"""
 
 from __future__ import annotations
 
