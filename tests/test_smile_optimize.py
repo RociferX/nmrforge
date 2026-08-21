@@ -209,3 +209,14 @@ def test_progress_reports_scan_and_final(tmp_path: Path, bruker_dir: Path) -> No
     assert "正在优化 2/2" in progress[1][2]
     assert "去伪重复 1/3" in progress[2][2]
     assert "去伪重复 3/3" in progress[-1][2]
+
+
+def test_cli_parse_grid() -> None:
+    """0.2.162-补:CLI --grid 解析(nSigma,thresh 分号分隔)。"""
+    from scripts.smile_optimize import _parse_grid
+
+    grid = _parse_grid("5.0,0.95;6.0,0.99")
+    assert grid == [
+        {"nsigma": 5.0, "thresh": 0.95},
+        {"nsigma": 6.0, "thresh": 0.99},
+    ]
