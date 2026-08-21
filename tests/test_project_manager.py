@@ -521,3 +521,15 @@ def test_delete_data_cleans_data_notes(tmp_path: Path) -> None:
     entry.metadata = meta
     manager.delete_data(entry.id, data.id)
     assert "data_notes" not in (entry.metadata or {})
+def test_data_dir_supports_smile_optimized(tmp_path: Path) -> None:
+    """0.2.162:smile_optimized/ 作为数据基座子目录(与 raw 同级)。"""
+    manager = ProjectManager.create_project(tmp_path / "proj", "demo")
+    entry = manager.create_experiment()
+    data = manager.import_data(entry.id, "/sampleD")
+    opt = manager.data_dir(entry.id, data.id, "smile_optimized")
+    assert opt == manager.data_base(entry.id, data.id) / "smile_optimized"
+    opt.mkdir(parents=True, exist_ok=True)
+    (opt / "x.csv").write_text("x", encoding="utf-8")
+    # 删除数据时随数据基座一并清理
+    manager.delete_data(entry.id, data.id)
+    assert not opt.exists()

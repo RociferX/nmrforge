@@ -182,7 +182,8 @@ class ProjectManager:
 
     def data_dir(self, exp_id: str, data_id: str, key: str) -> Path:
         """数据内子目录(契约 §9.2):raw/process/spectra/peaks/figures/report。"""
-        if key not in ("raw", "process", "spectra", "peaks", "figures", "report"):
+        if key not in ("raw", "process", "spectra", "peaks", "figures", "report", "smile_optimized"
+        ):
             raise ProjectError(f"未知数据子目录: {key}")
         return self.data_base(exp_id, data_id) / key
 

@@ -527,8 +527,21 @@ class ProcessingController:
                 mapping[axis] = value
         return mapping
 
+    def _last_spectrum_params(self, exp_id: str, data_id: str) -> dict:
+        """最近一次成功生成谱图的运行参数(作为 SMILE 优化基参数)。"""
+        for run in reversed(self._manager.project.workflow_runs):
+            if (
+                run.experiment_id == exp_id
+                and run.workflow_ref in ("process", "reconstruct_nus")
+                and str((run.inputs or {}).get("data_id", "")) in ("", data_id)
+                and run.status == "success"
+            ):
+                return dict(run.params or {})
+        return {}
+
     def optimize_smile(self, data, exp_id=None, data_id=None) -> dict:
-        """SMILE 优化(可选):参数网格搜索,把最优谱归位并登记运行。"""
+        """SMILE 优化(可选):基于已有参数仅优化 SMILE 参数,
+        多次重构去伪峰,稳定峰写入 smile_optimized/。"""
         from core.data.internal_data_model import SamplingMode
         from workflow.smile_optimize import optimize_smile_parameters
 
@@ -538,8 +551,11 @@ class ProcessingController:
         experiment = self._read_experiment(exp_id, data_id)
         if experiment.sampling.mode is not SamplingMode.NUS:
             raise RuntimeError("SMILE 优化仅适用于 NUS 数据(当前为均匀采样)")
+        base_params = self._last_spectrum_params(exp_id, data_id)
         results = optimize_smile_parameters(
-            experiment, self._backend_instance()
+            experiment,
+            self._backend_instance(),
+            base_params=base_params,
         )
         valid = [
             result
@@ -555,13 +571,17 @@ class ProcessingController:
             "status": "success",
             "best_params": dict(getattr(best, "params", {}) or {}),
             "spectrum_path": spectrum_path,
+            "peaks_path": str(getattr(best, "peaks_path", "") or ""),
             "candidates": len(results),
-            "message": f"SMILE 优化: {len(results)} 组,最优 {best.params}",
+            "message": f"SMILE 优化: {len(results)} 组,最优 {best.params},"
+                        f"稳定峰 {len(getattr(best, 'stable_peaks', []))} 个",
         }
 
     def _apply_smile_result(self, exp_id: str, data_id: str, result) -> str:
-        """把最优 SMILE 谱归位 spectra/ 并登记运行与指纹(下游过期)。"""
+        """最优谱归位 spectra/;稳定峰与评分写入 smile_optimized/(与 raw 同级)。"""
         import shutil
+
+        from workflow.smile_optimize import write_smile_optimized_output
 
         source = Path(getattr(result, "spectrum_path", ""))
         spectra_dir = self._manager.data_dir(exp_id, data_id, "spectra")
@@ -570,6 +590,10 @@ class ProcessingController:
         if source.is_file() and source.resolve() != target.resolve():
             shutil.copy2(source, target)
         self._manager.set_data_spectrum(exp_id, data_id, target)
+        peaks_path, report_path = write_smile_optimized_output(
+            self._manager, exp_id, data_id, source, result
+        )
+        result.peaks_path = str(peaks_path)
         run = self._manager.start_run(
             exp_id,
             workflow_ref="smile_optimize",
@@ -579,8 +603,13 @@ class ProcessingController:
         self._manager.finish_run(
             run.run_id,
             "success",
-            outputs={"spectrum_path": str(target)},
-            message=str(getattr(result, "message", "") or "SMILE 优化完成"),
+            outputs={
+                "spectrum_path": str(target),
+                "peaks_path": str(peaks_path),
+                "report_path": str(report_path),
+            },
+            message=str(getattr(result, "message", "") or "SMILE 优化完成")
+            + f"(稳定峰 {len(getattr(result, 'stable_peaks', []))} 个)",
         )
         record_step_success(self._manager, exp_id, data_id, "smile")
         record_step_success(self._manager, exp_id, data_id, "spectrum")

@@ -713,6 +713,16 @@ class NMRPipeBackend:
                     "显示层相位搜索: 主重构 PS(0,0),重构后对称性评分"
                 )
 
+        # 0.2.162:SMILE 优化稳定性——对输入 fid 注入小幅噪声生成临时副本,
+        # 使同参数多次重构存在运行间差异(去伪峰用);只影响本次重构,用完即删
+        fid_noise = float(params.get("fid_noise", 0.0) or 0.0)
+        noise_seed = int(params.get("fid_noise_seed", 0) or 0)
+        if fid_noise > 0:
+            noisy_in = self._make_noisy_fid_input(
+                work, in_file, fid_noise, noise_seed, logs
+            )
+            if noisy_in is not None:
+                in_file = noisy_in
         out_file = f"{experiment.dataset_id}.{ext}"
         script = script_fn(
             experiment,
@@ -755,6 +765,8 @@ class NMRPipeBackend:
             on_line=(lambda line: progress(line) if progress else None),
         )
         logs.append(f"nus.com: rc={run_result.returncode}")
+        if fid_noise > 0:
+            shutil.rmtree(work / f".smile_noise_{noise_seed}", ignore_errors=True)
         spectrum = work / out_file
         if (
             run_result.returncode != 0
@@ -841,6 +853,80 @@ class NMRPipeBackend:
                 "sampling": dict(sampling),
             },
         }
+
+    def _make_noisy_fid_input(
+        self, work: Path, in_file: str, noise_scale: float, seed: int, logs: list[str]
+    ) -> str | None:
+        """把输入 fid(单文件或切片)复制到临时目录并注入高斯噪声。
+
+        返回新的 in_file 相对路径;失败返回 None(不影响主流程)。SMILE 为
+        确定性算法,同参数重构逐位一致;注入小幅测量噪声使多次重构存在
+        差异,供 SMILE 优化做峰稳定性去伪(0.2.162)。"""
+        import numpy as np
+
+        rng = np.random.default_rng(seed)
+        tmp = work / f".smile_noise_{seed}"
+        if in_file.startswith("fid/"):
+            src_dir = work / "fid"
+            if not src_dir.is_dir():
+                return None
+            try:
+                tmp.mkdir(parents=True, exist_ok=True)
+                for src in sorted(src_dir.glob("test*.fid")):
+                    self._write_noisy_fid(src, tmp / src.name, noise_scale, rng)
+                return f".smile_noise_{seed}/test%03d.fid"
+            except Exception as exc:  # noqa: BLE001
+                logs.append(f"fid 噪声注入(切片)失败: {exc}")
+                return None
+        src = work / in_file
+        if not src.is_file():
+            return None
+        try:
+            tmp.mkdir(parents=True, exist_ok=True)
+            target = tmp / src.name
+            self._write_noisy_fid(src, target, noise_scale, rng)
+            return f".smile_noise_{seed}/{src.name}"
+        except Exception as exc:  # noqa: BLE001
+            logs.append(f"fid 噪声注入(单文件)失败: {exc}")
+            return None
+
+    @staticmethod
+    def _write_noisy_fid(
+        src: Path, target: Path, noise_scale: float, rng: Any
+    ) -> None:
+        """按 nmrPipe fid 字节布局读取→注入噪声→写回副本(实/虚分块)。"""
+        import nmrglue as ng
+        import numpy as np
+
+        raw = src.read_bytes()
+        dic, data = ng.pipe.read(str(src))
+        arr = np.asarray(data).astype(np.complex64)
+        fdsize = int(float(dic["FDSIZE"]))
+        specnum = int(float(dic["FDSPECNUM"]))
+        header_len = next(
+            (
+                header
+                for header in (512, 1024, 2048)
+                if len(raw) == header + specnum * fdsize * 8
+            ),
+            None,
+        )
+        if header_len is None or arr.shape != (specnum, fdsize):
+            raise ValueError("fid 布局无法解析")
+        noisy = arr.copy()
+        for row in range(specnum):
+            sigma = float(np.std(np.imag(arr[row]))) if fdsize > 1 else 0.0
+            if sigma <= 0:
+                continue
+            noisy[row] = arr[row] + rng.normal(
+                0.0, sigma * noise_scale, fdsize
+            ) + 1j * rng.normal(0.0, sigma * noise_scale, fdsize)
+        out = bytearray(raw[:header_len])
+        for row in range(specnum):
+            re = np.ascontiguousarray(noisy[row].real, dtype="<f4")
+            im = np.ascontiguousarray(noisy[row].imag, dtype="<f4")
+            out += re.tobytes() + im.tobytes()
+        target.write_bytes(bytes(out))
 
     def finalize_nus(
         self,

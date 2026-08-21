@@ -1,4 +1,4 @@
-"""SMILE 参数优化模块测试（可选优化项，不进入自动流程）。"""
+"""SMILE 参数优化模块测试(0.2.162:两阶段 + 稳定性/跨组合去伪)。"""
 
 from __future__ import annotations
 
@@ -17,23 +17,51 @@ from workflow.smile_optimize import (
 )
 
 
-def _fake_reader(path: str):
-    """测试用谱图读取器：噪声水平随路径中的 nSigma 变化，评分可区分。"""
-    nsigma = float(Path(path).stem)
-    rng = np.random.default_rng(0)
-    data = rng.normal(0, max(0.2, 2.0 - nsigma * 0.4), size=(32, 64)).astype(np.float32)
-    data[8, 20] += 20.0
-    return {}, data
+def _write_ft2(path: Path, peaks, noise_std: float = 1.0, seed: int = 0):
+    """写合成 2D ft2:peaks=[(y, x, height)],带按 seed 变化的噪声底。"""
+    from nmrglue.fileio import pipe
+
+    data = np.zeros((64, 64), dtype=np.float32)
+    data += np.random.default_rng(seed).normal(0, noise_std, (64, 64)).astype(
+        np.float32
+    )
+    for y, x, height in peaks:
+        data[y, x] += height
+    dic = {k: "0" for k in pipe.fdata_dic}
+    dic["FDMAGIC"] = 9.2330230000000007e14
+    dic["FDDIMCOUNT"] = 2
+    dic["FDSIZE"] = 64
+    dic["FDSPECNUM"] = 64
+    dic["FDQUADFLAG"] = 1
+    dic["FDF1QUADFLAG"] = 1
+    dic["FDF2QUADFLAG"] = 1
+    for prefix in ("FDF1", "FDF2"):
+        dic[prefix + "SW"] = 6000.0
+        dic[prefix + "OBS"] = 600.0
+        dic[prefix + "CAR"] = 4.7
+        dic[prefix + "ORIG"] = 4.7 * 600.0
+    pipe.write(str(path), dic, data, overwrite=True)
 
 
-def _fake_backend(results_by_params: dict | None = None):
-    """测试用后端桩：成功返回合成谱。"""
+def _fake_backend(tmp_path: Path, spurious_in: set[int]):
+    """稳定峰固定;伪峰仅出现在指定 seed 的重构;噪声随 nSigma。"""
     seen: list[dict] = []
 
     class FakeBackend:
+        def __init__(self) -> None:
+            self.work = Path(tmp_path)
+
         def reconstruct_nus(self, experiment, params: dict) -> dict:
             seen.append(dict(params))
-            return {"success": True, "spectrum_path": f"/fake/{params['nsigma']}.ft3"}
+            seed = int(params.get("fid_noise_seed", 0))
+            nsigma = float(params.get("nsigma", 5.0))
+            peaks = [(10, 20, 30.0), (30, 40, 25.0)]
+            if seed in spurious_in:
+                peaks.append((25, 25, 15.0))
+            noise_std = 1.0 if nsigma <= 3.0 else 0.1
+            path = self.work / f"spec_{seed}.ft2"
+            _write_ft2(path, peaks, noise_std=noise_std, seed=seed)
+            return {"success": True, "spectrum_path": str(path)}
 
     return FakeBackend(), seen
 
@@ -41,36 +69,69 @@ def _fake_backend(results_by_params: dict | None = None):
 def test_default_smile_grid() -> None:
     grid = default_smile_grid()
     assert len(grid) == 9
-    assert grid[0] == {
-        "nsigma": 3.0,
-        "thresh": 0.90,
-        "smile_xq3": 2.0,
-        "smile_scaling": True,
-    }
+    assert grid[0] == {"nsigma": 3.0, "thresh": 0.90}
+    assert all("smile_xq3" not in g for g in grid)  # 0.2.162:xQ3 死参数移除
     combos = {(g["nsigma"], g["thresh"]) for g in grid}
     assert len(combos) == 9
 
 
-def test_optimize_scores_and_sorts(bruker_dir: Path) -> None:
+def test_optimize_filters_spurious_and_keeps_true(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """0.2.162:多次重构后,跨次不稳定的伪峰被剔除,真峰保留。"""
     exp = read_dataset(bruker_dir / "nus_3d")
-    backend, seen = _fake_backend()
-    grid = [
-        {"nsigma": 3.0, "thresh": 0.90},
-        {"nsigma": 5.0, "thresh": 0.99},
-    ]
+    backend, _seen = _fake_backend(tmp_path, spurious_in={0, 1002, 2001})
     results = optimize_smile_parameters(
-        exp, backend, grid, reader=_fake_reader
+        exp,
+        backend,
+        grid=[{"nsigma": 5.0, "thresh": 0.95}],
+        scan_repeats=3,
+        final_repeats=3,
+        min_stability=2,
+    )
+    assert len(results) == 1
+    best = results[0]
+    assert best.decision in ("accept", "warning")
+    assert best.spectrum_path
+    positions = [tuple(round(v) for v in p["position"]) for p in best.stable_peaks]
+    assert (10, 20) in positions and (30, 40) in positions
+    assert (25, 25) not in positions
+    assert best.components["peak_count"] >= 2  # 真峰保留,伪峰剔除
+
+
+def test_optimize_uses_base_params_and_cross_support(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """0.2.162:保留已有参数只调 SMILE 参数;低噪声参数组评分更高。"""
+    exp = read_dataset(bruker_dir / "nus_3d")
+    backend, seen = _fake_backend(tmp_path, spurious_in={0, 1002})
+    base = {"ext_lo": "10.5", "ext_hi": "6.5", "nthread": 4}
+    results = optimize_smile_parameters(
+        exp,
+        backend,
+        base_params=base,
+        grid=[
+            {"nsigma": 3.0, "thresh": 0.90},
+            {"nsigma": 5.0, "thresh": 0.99},
+        ],
+        scan_repeats=2,
+        final_repeats=3,
     )
     assert len(results) == 2
-    assert len(seen) == 2
-    assert results[0].overall > results[1].overall  # 降序
-    assert results[0].decision in ("accept", "warning", "rollback")
-    assert results[0].params["nsigma"] == 5.0  # 噪声更低 → 评分更高 → 排前面
-    assert results[0].components["snr"] > 0
+    for run_params in seen:
+        assert run_params["ext_lo"] == "10.5"  # 基参数保留
+        assert run_params["nthread"] == 4
+        assert run_params["direct_phase_search"] is False
+        assert run_params["display_phase_search"] is False
+        assert "fid_noise" in run_params and "fid_noise_seed" in run_params
+    # nSigma=5(噪声更低)→ SNR 更高 → 排前面
+    assert results[0].params["nsigma"] == 5.0
+    assert results[0].overall > results[1].overall
+    assert "cross_support" in results[0].components
 
 
-def test_optimize_failure_graceful() -> None:
-    exp = read_dataset(Path("tests/fixtures/bruker/nus_3d"))
+def test_optimize_failure_graceful(bruker_dir: Path) -> None:
+    exp = read_dataset(bruker_dir / "nus_3d")
 
     class FailingBackend:
         def reconstruct_nus(self, experiment, params: dict) -> dict:
@@ -90,7 +151,13 @@ def test_save_report_and_format(tmp_path: Path) -> None:
             params={"nsigma": 5.0, "thresh": 0.95},
             decision="accept",
             overall=74.1,
-            components={"snr": 92.0, "phase": 78.0, "baseline": 86.0, "artifact": 40.0},
+            components={
+                "stability": 0.8,
+                "cross_support": 1.0,
+                "snr": 12.0,
+                "peak_count": 40,
+                "artifact": 30.0,
+            },
         )
     ]
     out = save_report(results, tmp_path / "report.json")
@@ -98,26 +165,25 @@ def test_save_report_and_format(tmp_path: Path) -> None:
     assert payload[0]["params"]["nsigma"] == 5.0
     assert payload[0]["overall"] == 74.1
     table = format_results(results)
-    assert "nSigma" in table and "thresh" in table
+    assert "nSigma" in table and "stability" in table
     assert "5.0" in table and "74.1" in table
 
 
-def test_on_result_callback(bruker_dir: Path) -> None:
-    from core.data.bruker_reader import read_dataset
-
+def test_on_result_callback(tmp_path: Path, bruker_dir: Path) -> None:
     exp = read_dataset(bruker_dir / "nus_3d")
-    backend, _seen = _fake_backend()
-    received: list[dict] = []
+    backend, _seen = _fake_backend(tmp_path, spurious_in=set())
+    received: list[float] = []
 
     def on_result(result) -> None:
-        received.append((result.params["nsigma"], result.overall))
+        received.append(result.overall)
 
     optimize_smile_parameters(
         exp,
         backend,
-        grid=[{"nsigma": 3.0, "thresh": 0.90}, {"nsigma": 5.0, "thresh": 0.99}],
-        reader=_fake_reader,
+        grid=[
+            {"nsigma": 3.0, "thresh": 0.90},
+            {"nsigma": 5.0, "thresh": 0.99},
+        ],
         on_result=on_result,
     )
     assert len(received) == 2  # 每组评分后都立即回调
-    assert received[0][0] == 3.0 and received[1][0] == 5.0

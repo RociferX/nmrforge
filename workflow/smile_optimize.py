@@ -1,38 +1,46 @@
-"""SMILE 参数优化（可选，用户后选优化项；**不进入自动处理流程**）。
+"""SMILE 参数优化(可选,用户后选优化项;不进入自动处理流程)。
 
-对 nSigma × thresh（及可选 xQ3/scaling）参数网格逐组执行 SMILE 重构并评分，
-返回按总分排序的候选列表，把每组的「参数组合 + 评分」展示给用户。
+目标:在已有生成谱图参数(base_params)基础上只调整 SMILE 参数
+(nSigma/thresh),尽可能保留真峰、剔除伪峰。两阶段:
+  1) 网格扫描:各参数组合多次重构(SMILE 确定性,重构前向输入 fid 注入
+     小幅高斯噪声模拟测量噪声),取组内稳定峰;并跨组合统计每个峰的出现
+     组合数(真峰应在多个参数组合下都出现,伪峰只在个别组合出现);
+     按 稳定性/跨组合支持/信噪比/峰数/伪影 综合评分选出最优参数。
+  2) 重复去伪:对最优参数再做多次重构,组内稳定峰为最终保留峰,
+     写入与 raw 同级的 smile_optimized/ 目录。
 
-用法：
-    results = optimize_smile_parameters(experiment, backend)
+用法:
+    results = optimize_smile_parameters(experiment, backend, base_params=run_params)
     print(format_results(results))
     save_report(results, Path("smile_optimize_report.json"))
-
-注意：AutoProcessor.run 与 NMRPipeBackend.reconstruct_nus 的默认单次运行
-不受本模块影响；本模块仅供用户显式调用的参数选优。
 """
 
 from __future__ import annotations
 
 import json
+from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from core.data.internal_data_model import Experiment
-from core.qc import spectrum_quality
+from core.qc import peak_detection, spectrum_quality
 
 
 @dataclass
 class SmileParameterResult:
-    """一个参数组（SMILE 参数组合）的重构与评分结果。"""
+    """一个参数组(SMILE 参数组合)的稳定性/跨组合评分与保留峰。"""
 
     params: dict[str, Any]
+    repeats: int = 3
     decision: str = ""
     overall: float = 0.0
     components: dict[str, float] = field(default_factory=dict)
     spectrum_path: str = ""
+    stable_peaks: list[dict[str, Any]] = field(default_factory=list)
     message: str = ""
 
     def to_dict(self) -> dict[str, Any]:
@@ -42,113 +50,353 @@ class SmileParameterResult:
 def default_smile_grid(
     nsigma_values: tuple[float, ...] = (3.0, 5.0, 7.0),
     thresh_values: tuple[float, ...] = (0.90, 0.95, 0.99),
-    smile_xq3: float = 2.0,
-    smile_scaling: bool = True,
 ) -> list[dict[str, Any]]:
-    """默认参数网格：nSigma × thresh（xQ3/scaling 固定为实验室模板值）。"""
-    grid: list[dict[str, Any]] = []
-    for nsigma in nsigma_values:
-        for thresh in thresh_values:
-            grid.append(
-                {
-                    "nsigma": nsigma,
-                    "thresh": thresh,
-                    "smile_xq3": smile_xq3,
-                    "smile_scaling": smile_scaling,
-                }
-            )
-    return grid
+    """默认参数网格:nSigma × thresh(0.2.162 起仅优化 SMILE 参数)。"""
+    return [
+        {"nsigma": nsigma, "thresh": thresh}
+        for nsigma in nsigma_values
+        for thresh in thresh_values
+    ]
 
 
-def _default_reader(path: str) -> tuple[dict[str, Any], Any]:
-    """默认谱图读取器（nmrglue NMRPipe 格式）。"""
+def _read_spectrum(path: str):
+    """读取终谱(dic, data)。"""
     import nmrglue as ng
 
-    return ng.pipe.read(path)
+    return ng.pipe.read(str(path))
+
+
+def _detect_peaks(spectrum_path: str) -> list[peak_detection.Peak]:
+    """读取终谱并检测峰(2D/3D 通用)。"""
+    _dic, data = _read_spectrum(spectrum_path)
+    arr = np.asarray(data)
+    if np.iscomplexobj(arr):
+        arr = arr.real
+    return peak_detection.detect(arr)
+
+
+def _snap_key(position: tuple[float, ...], tol_pts: float) -> tuple[float, ...]:
+    """峰位置快照键:按容差网格取整,供组内/跨组合匹配。"""
+    if tol_pts > 0:
+        return tuple(round(float(v) / tol_pts) * tol_pts for v in position)
+    return tuple(round(float(v), 3) for v in position)
+
+
+def _match_stable_peaks(
+    peak_sets: list[list[peak_detection.Peak]],
+    min_stability: int,
+    tol_pts: float,
+) -> tuple[list[peak_detection.Peak], int, dict[tuple[float, ...], int]]:
+    """组内跨重构匹配峰;返回(稳定峰, 去重后总峰数, 键→出现次数)。"""
+    keys: dict[tuple[float, ...], int] = {}
+    best: dict[tuple[float, ...], peak_detection.Peak] = {}
+    for peaks in peak_sets:
+        matched: set[tuple[float, ...]] = set()
+        for peak in peaks:
+            key = _snap_key(peak.position, tol_pts)
+            if key in matched:
+                continue
+            keys[key] = keys.get(key, 0) + 1
+            matched.add(key)
+            if key not in best or peak.height > best[key].height:
+                best[key] = peak
+    stable = [best[k] for k, count in keys.items() if count >= min_stability]
+    stable.sort(key=lambda p: p.height, reverse=True)
+    return stable, len(keys), keys
+
+
+def _score_candidate(
+    stable: list[peak_detection.Peak],
+    union_count: int,
+    cross_support: float,
+    quality: Any,
+) -> tuple[float, dict[str, float]]:
+    """科学评分:稳定性 + 跨组合支持 + 信噪比 + 峰数 + 伪影(0.2.162)。"""
+    stability = len(stable) / max(union_count, 1)
+    mean_snr = float(np.mean([p.snr for p in stable])) if stable else 0.0
+    artifact = float(quality.score.components.artifact)
+    snr_norm = min(mean_snr / 10.0, 1.0)
+    count_norm = min(len(stable) / 20.0, 1.0)
+    overall = 100.0 * (
+        0.30 * stability
+        + 0.25 * cross_support
+        + 0.25 * snr_norm
+        + 0.10 * count_norm
+        + 0.10 * (artifact / 100.0)
+    )
+    return overall, {
+        "stability": round(stability, 3),
+        "cross_support": round(cross_support, 3),
+        "snr": round(mean_snr, 1),
+        "peak_count": len(stable),
+        "artifact": round(artifact, 1),
+    }
 
 
 def optimize_smile_parameters(
     experiment: Experiment,
     backend: Any,
+    base_params: dict[str, Any] | None = None,
     grid: list[dict[str, Any]] | None = None,
     *,
-    ext_lo: str = "9.0",
-    ext_hi: str = "7.5",
-    nthread: int = 2,
-    timeout_s: float = 600.0,
+    scan_repeats: int = 2,
+    final_repeats: int = 3,
+    min_stability: int = 2,
+    peak_tol_pts: float = 2.0,
+    fid_noise: float = 0.15,
     progress: Callable[[int, int, str], None] | None = None,
     on_result: Callable[[SmileParameterResult], None] | None = None,
-    reader: Callable[[str], tuple[dict[str, Any], Any]] | None = None,
 ) -> list[SmileParameterResult]:
-    """逐组执行 SMILE 重构并评分，返回按总分降序的候选列表。
+    """两阶段:网格扫描选优(跨组合峰真伪评估)→ 最优参数重复去伪峰。
 
-    backend 需提供 ``reconstruct_nus(experiment, params) -> dict``
-    （success/spectrum_path/message）；评分用 core.qc.spectrum_quality。
-    """
+    backend 需提供 reconstruct_nus(experiment, params);每组保留 base_params
+    的非 SMILE 参数(ext/window/baseline/填零/相位等),只覆盖 nsigma/thresh
+    与稳定性所需字段(direct_phase_search/display_phase_search=False、
+    fid_noise/seed)。"""
     grid = grid if grid is not None else default_smile_grid()
-    reader = reader or _default_reader
+    base = dict(base_params or {})
+    n_combos = len(grid)
     results: list[SmileParameterResult] = []
+    key_to_combos: dict[tuple[float, ...], set[int]] = defaultdict(set)
+    scanned: list[dict[str, Any]] = []
     total = len(grid)
     for index, params in enumerate(grid, start=1):
         if progress is not None:
-            progress(index, total, f"参数组 {params}")
-        run_params: dict[str, Any] = {
-            "ext_lo": ext_lo,
-            "ext_hi": ext_hi,
-            "nthread": nthread,
-            "timeout_s": timeout_s,
-            **params,
-        }
-        result = SmileParameterResult(params=dict(params))
+            progress(index, total, f"扫描 参数组 {params}")
+        result = SmileParameterResult(params=dict(params), repeats=scan_repeats)
         try:
-            resp = backend.reconstruct_nus(experiment, run_params)
-            if not resp.get("success"):
-                result.decision = "failed"
-                result.message = str(resp.get("message", "重构失败"))
-            else:
-                spec = Path(resp["spectrum_path"])
-                result.spectrum_path = str(spec)
-                _dic, data = reader(str(spec))
-                quality = spectrum_quality.evaluate(data)
-                result.decision = quality.decision.value
-                result.overall = quality.score.overall
-                result.components = asdict(quality.score.components)
-        except Exception as exc:  # noqa: BLE001
+            peak_sets: list[list[peak_detection.Peak]] = []
+            last_spec = ""
+            for repeat in range(scan_repeats):
+                run_params = {
+                    **base,
+                    **params,
+                    "direct_phase_search": False,
+                    "display_phase_search": False,
+                    "fid_noise": float(fid_noise or 0.0),
+                    "fid_noise_seed": index * 1000 + repeat,
+                }
+                resp = backend.reconstruct_nus(experiment, run_params)
+                if not resp.get("success"):
+                    result.decision = "failed"
+                    result.message = str(resp.get("message", "重构失败"))
+                    break
+                last_spec = str(resp["spectrum_path"])
+                peak_sets.append(_detect_peaks(last_spec))
+            if result.decision == "failed":
+                results.append(result)
+                if on_result is not None:
+                    on_result(result)
+                continue
+            stable, union, keys = _match_stable_peaks(
+                peak_sets, min_stability, peak_tol_pts
+            )
+            for key in keys:
+                key_to_combos[key].add(index)
+            _dic, data = _read_spectrum(last_spec)
+            quality = spectrum_quality.evaluate(data)
+            result.spectrum_path = last_spec
+            result.stable_peaks = [
+                {
+                    "position": [float(v) for v in peak.position],
+                    "height": float(peak.height),
+                    "snr": float(peak.snr),
+                }
+                for peak in stable
+            ]
+            scanned.append(
+                {
+                    "result": result,
+                    "stable_keys": [(_snap_key(p.position, peak_tol_pts)) for p in stable],
+                    "union": union,
+                    "quality": quality,
+                }
+            )
+        except Exception as exc:  # noqa: BLE001 - 单组失败不阻断其余候选
             result.decision = "error"
             result.message = str(exc)
         results.append(result)
         if on_result is not None:
             on_result(result)
+
+    # 跨组合峰真伪:某峰出现过的参数组合数(真峰应在多个组合下都出现)
+    def _support(key: tuple[float, ...]) -> int:
+        return len(key_to_combos.get(key, set()))
+
+    best_entry: dict[str, Any] | None = None
+    for entry in scanned:
+        result = entry["result"]
+        stable = result.stable_peaks
+        if stable:
+            supports = [_support(_snap_key(p["position"], peak_tol_pts)) for p in stable]
+            cross = float(np.mean(supports))
+        else:
+            cross = 0.0
+        if n_combos > 1 and cross > 0:
+            cross_norm = min((cross - 1.0) / (n_combos - 1), 1.0)
+        else:
+            cross_norm = 1.0 if cross > 0 else 0.0
+        overall, components = _score_candidate(
+            [
+                peak_detection.Peak(
+                    position=tuple(p["position"]),
+                    height=p["height"],
+                    snr=p["snr"],
+                )
+                for p in stable
+            ],
+            entry["union"],
+            cross_norm,
+            entry["quality"],
+        )
+        result.overall = overall
+        result.components = components
+        result.decision = "accept" if overall >= 60.0 and stable else "warning"
+        if best_entry is None or overall > best_entry["overall"]:
+            best_entry = dict(entry=entry, overall=overall)
+
+    # 第二阶段:对最优参数多次重复重构去伪峰,确定最终保留峰
+    if best_entry is not None:
+        best = best_entry["entry"]["result"]
+        best_params = best.params
+        try:
+            peak_sets: list[list[peak_detection.Peak]] = []
+            last_spec = ""
+            for repeat in range(final_repeats):
+                run_params = {
+                    **base,
+                    **best_params,
+                    "direct_phase_search": False,
+                    "display_phase_search": False,
+                    "fid_noise": float(fid_noise or 0.0),
+                    "fid_noise_seed": 9000 + repeat,
+                }
+                resp = backend.reconstruct_nus(experiment, run_params)
+                if not resp.get("success"):
+                    break
+                last_spec = str(resp["spectrum_path"])
+                peak_sets.append(_detect_peaks(last_spec))
+            if last_spec:
+                stable, _union, _keys = _match_stable_peaks(
+                    peak_sets, min_stability, peak_tol_pts
+                )
+                best.stable_peaks = [
+                    {
+                        "position": [float(v) for v in peak.position],
+                        "height": float(peak.height),
+                        "snr": float(peak.snr),
+                    }
+                    for peak in stable
+                ]
+                best.spectrum_path = last_spec
+                best.repeats = final_repeats
+                best.overall = min(best.overall, 99.0) if stable else best.overall
+                best.decision = "accept" if stable else "warning"
+                best.components["peak_count"] = len(stable)
+        except Exception as exc:  # noqa: BLE001
+            best.message = f"最终去伪失败: {exc}"
+
     results.sort(key=lambda r: r.overall, reverse=True)
     return results
 
 
+def write_smile_optimized_output(
+    manager: Any,
+    exp_id: str,
+    data_id: str,
+    spectrum_path: str,
+    result: SmileParameterResult,
+) -> tuple[Path, Path]:
+    """把稳定峰写为契约 §6 峰表 CSV + 参数/评分 JSON 到 smile_optimized/。
+
+    smile_optimized/ 与 raw/ 同级(数据基座下)。返回 (csv_path, json_path)。"""
+    from core.peaks.peak_table import save_peaks
+    from workflow.pick_peaks import _axes_ppm
+
+    dic, data = _read_spectrum(spectrum_path)
+    arr = np.asarray(data)
+    axes = _axes_ppm(dict(dic), arr)
+    out_dir = manager.data_dir(exp_id, data_id, "smile_optimized")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    csv_path = out_dir / f"{exp_id}-{data_id}_smile_optimized.csv"
+    rows: list[dict[str, Any]] = []
+    for i, peak in enumerate(result.stable_peaks, start=1):
+        pos = [float(v) for v in peak.get("position", [])]
+        row: dict[str, Any] = {
+            "Peak_ID": i,
+            "Intensity": float(peak.get("height", 0.0)),
+            "SN": float(peak.get("snr", 0.0)),
+            "label": "",
+        }
+        if arr.ndim == 2:
+            row["H_shift"] = (
+                float(axes[1][int(pos[1])])
+                if len(axes) > 1 and len(pos) > 1
+                else 0.0
+            )
+            row["N_shift"] = (
+                float(axes[0][int(pos[0])]) if len(pos) > 0 else 0.0
+            )
+        else:
+            for k in range(3):
+                row[f"F{k + 1}_shift"] = (
+                    float(axes[k][int(pos[k])])
+                    if k < len(axes) and k < len(pos)
+                    else 0.0
+                )
+        rows.append(row)
+    save_peaks(csv_path, rows)
+    json_path = out_dir / f"{exp_id}-{data_id}_smile_optimized.json"
+    json_path.write_text(
+        json.dumps(
+            {
+                "params": result.params,
+                "repeats": result.repeats,
+                "decision": result.decision,
+                "overall": result.overall,
+                "components": result.components,
+                "peak_count": len(result.stable_peaks),
+                "spectrum_path": result.spectrum_path,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return csv_path, json_path
+
+
 def format_results(results: list[SmileParameterResult]) -> str:
-    """把候选列表渲染为对齐的参数组合 + 评分表格。"""
-    header = (
-        f"{'nSigma':>6} {'thresh':>6} {'xQ3':>4} {'scaling':>7} "
-        f"{'decision':>8} {'overall':>7} {'snr':>5} {'phase':>5} "
-        f"{'base':>5} {'art':>5}"
+    """把候选列表渲染为对齐的参数组合 + 稳定性评分表格。"""
+    header = "{:>6} {:>6} {:>8} {:>7} {:>9} {:>6} {:>6} {:>6}".format(
+        "nSigma", "thresh", "decision", "overall", "stability", "cross", "snr", "peaks"
     )
     lines = [header, "-" * len(header)]
     for result in results:
         comp = result.components
         lines.append(
-            f"{result.params.get('nsigma', 0):>6} {result.params.get('thresh', 0):>6} "
-            f"{result.params.get('smile_xq3', 1):>4} "
-            f"{str(result.params.get('smile_scaling', False)):>7} "
-            f"{result.decision:>8} {result.overall:>7.1f} "
-            f"{comp.get('snr', 0):>5.0f} {comp.get('phase', 0):>5.0f} "
-            f"{comp.get('baseline', 0):>5.0f} {comp.get('artifact', 0):>5.0f}"
+            "{:>6} {:>6} {:>8} {:>7.1f} {:>9.2f} {:>6.2f} {:>6.1f} {:>6} {:>6.1f}".format(
+                result.params.get("nsigma", 0),
+                result.params.get("thresh", 0),
+                result.decision,
+                result.overall,
+                comp.get("stability", 0),
+                comp.get("cross_support", 0),
+                comp.get("snr", 0),
+                comp.get("peak_count", 0),
+                comp.get("artifact", 0),
+            )
         )
     return "\n".join(lines)
 
 
 def save_report(results: list[SmileParameterResult], path: Path | str) -> Path:
-    """保存参数组 + 评分报告（JSON）。"""
+    """保存参数组 + 评分报告(JSON)。"""
     out = Path(path)
     out.write_text(
-        json.dumps([r.to_dict() for r in results], ensure_ascii=False, indent=2) + "\n",
+        json.dumps([r.to_dict() for r in results], ensure_ascii=False, indent=2)
+        + "\n",
         encoding="utf-8",
     )
     return out
