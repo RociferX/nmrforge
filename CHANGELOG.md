@@ -14,6 +14,7 @@
   全量结果 dict);
 - scripts/smile_optimize.py CLI 适配新 API(ext/线程等入 base_params,
   只调 SMILE 参数)+ 新增 --grid 自定义网格选项;
+- format_results 表格补 artifact 列表头(9 列数据与表头对齐);
 - 测试:扫描 1 次/组合 + 最终 3 次重构次数锁定、默认网格 25 组、
   进度日志、CLI 网格解析;本地全量 pytest(658 项)+ ruff 全绿。
 

@@ -380,8 +380,9 @@ def write_smile_optimized_output(
 
 def format_results(results: list[SmileParameterResult]) -> str:
     """把候选列表渲染为对齐的参数组合 + 稳定性评分表格。"""
-    header = "{:>6} {:>6} {:>8} {:>7} {:>9} {:>6} {:>6} {:>6}".format(
-        "nSigma", "thresh", "decision", "overall", "stability", "cross", "snr", "peaks"
+    header = "{:>6} {:>6} {:>8} {:>7} {:>9} {:>6} {:>6} {:>6} {:>6}".format(
+        "nSigma", "thresh", "decision", "overall", "stability", "cross", "snr",
+        "peaks", "artifact"
     )
     lines = [header, "-" * len(header)]
     for result in results:
