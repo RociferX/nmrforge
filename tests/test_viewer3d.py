@@ -159,21 +159,21 @@ def test_load_from_ft3_honors_fddimorder_order_231(tmp_path: Path) -> None:
     np.testing.assert_allclose(sl.data, loaded.data[:, :, 1])
 
 
-def test_load_from_ft3_without_metadata_keeps_storage_axes_but_params_correct(
+def test_load_from_ft3_without_metadata_reorders_and_labels(
     tmp_path: Path,
 ) -> None:
-    """0.2.151:无 metadata 直接打开时,每数据轴参数按 FDDIMORDER 正确配对。"""
+    """0.2.152:无 metadata 直接打开时,按 FDDIMORDER 重排逻辑序并推导标签。"""
     nz, ny, nx = 2, 4, 6
     P = np.arange(nz * ny * nx, dtype=np.float32).reshape(nz, ny, nx)
     path = tmp_path / "order231_nomd.ft3"
     _write_ft3_ordered(path, P, [2.0, 3.0, 1.0])
     loaded = Spectrum3D.load_from_ft3(path)
-    # nmrglue 读回自然数组 (15N, 13C, 1H)
-    assert loaded.data.shape == (nz, ny, nx)
-    # 轴参数按 FDDIMORDER 配对:轴0=15N(FDF1)、轴1=13C(FDF3)、轴2=1H(FDF2)
+    # ORDER 2 3 1 → 逻辑序 (F1=15N, F2=1H, F3=13C),标签由头部核推导
+    assert loaded.data.shape == (nz, nx, ny)
+    assert [ax.label for ax in loaded.axes] == ["N", "H", "C"]
     assert loaded.axes[0].obs_mhz == pytest.approx(60.8)
-    assert loaded.axes[1].obs_mhz == pytest.approx(150.9)
-    assert loaded.axes[2].obs_mhz == pytest.approx(600.0)
+    assert loaded.axes[1].obs_mhz == pytest.approx(600.0)
+    assert loaded.axes[2].obs_mhz == pytest.approx(150.9)
 
 def _write_ft2(path: Path, data: np.ndarray) -> None:
     """写合成 2D 谱(供「ft3 拒绝 2D 文件」断言)。"""
@@ -206,7 +206,8 @@ def test_load_from_ft3_roundtrip(tmp_path: Path) -> None:
     assert loaded.data.shape == spectrum3d.data.shape
     np.testing.assert_allclose(loaded.data, spectrum3d.data)
     assert loaded.source == path
-    assert [axis.label for axis in loaded.axes] == ["F1", "F2", "F3"]
+    # 0.2.152:无 metadata 时按头部核推导标签(合成文件 OBS 全 1H → Hx/Hy/Hz)
+    assert [axis.label for axis in loaded.axes] == ["Hx", "Hy", "Hz"]
     assert loaded.max_intensity > 0
 
 

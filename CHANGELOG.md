@@ -1,5 +1,15 @@
 # 修改记录(历史条目)
 
+## 0.2.152(2026-08-21,总管直接处理)
+
+- viewer 无 metadata 直接打开:按头部 FDDIMORDER 重排逻辑序(F1/F2/F3),
+  并由头部核(LABEL/OBS 推断)推导轴标签(N/H/C、同核 Hx/Hy),不再回退
+  F1/F2/F3——与 nmrDraw 按 NAME 显示一致;
+- 背景:独立查看器直接打开 sampleC/hncacb.ft3 等谱图(无旁路 metadata)
+  时标签缺失;修复后 28.ft3/61.ft3/hncacb.ft3 直接打开均显示 N/H/C。
+- 测试:无 metadata 时 ORDER 2 3 1 重排+标签推导回归;roundtrip 与
+  fallback 标签断言更新;本地全量 pytest + ruff 全绿。
+
 ## 0.2.151(2026-08-21,总管直接处理)
 
 - viewer 3D 轴序修复:load_from_ft2/ft3 按头部 FDDIMORDER 建立数据轴→

@@ -13,7 +13,7 @@ from pathlib import Path
 
 import numpy as np
 
-from viewer.axis_labels import infer_nucleus
+from viewer.axis_labels import axis_labels_from_nuclei, infer_nucleus
 
 logger = logging.getLogger("nmrforge.viewer.spectrum")
 
@@ -72,6 +72,56 @@ def _fdf_prefix_for_axis(dic: dict, ndim: int, axis_idx: int) -> str:
         if 1 <= dim <= 4:
             return f"FDF{dim}"
     return f"FDF{axis_idx + 1}"
+
+
+
+
+def _logical_nuclei_from_order(
+    dic: dict, ndim: int, storage_nuclei: list[str]
+) -> list[str] | None:
+    """按 FDDIMORDER 推断逻辑序核列表(F1/F2/F3 序);无法构成排列返回 None。
+
+    nmrglue 数据轴 i 的逻辑维号 = FDDIMORDER[ndim-1-i];据此把存储序核
+    映射回逻辑序,使无 metadata 直接打开时也能按头部重排(0.2.152)。
+    """
+    try:
+        order = [int(v) for v in dic.get("FDDIMORDER") or []]
+    except (TypeError, ValueError):
+        return None
+    if len(order) < ndim:
+        return None
+    logical: list[str | None] = [None] * ndim
+    for axis_idx, nucleus in enumerate(storage_nuclei):
+        dim = order[ndim - 1 - axis_idx]
+        if not (1 <= dim <= ndim) or logical[dim - 1] is not None:
+            return None
+        logical[dim - 1] = nucleus
+    if any(n is None for n in logical):
+        return None
+    return [n for n in logical if n is not None]  # type: ignore[return-value]
+
+
+def _labels_from_nuclei(
+    nuclei: list[str], labels: tuple[str, ...]
+) -> tuple[str, ...]:
+    """generic F1/F2/F3 标签且核已知时,替换为核符号标签(N/H/C,Hx/Hy 等)。
+
+    独立查看器无 metadata 直接打开时,轴标签由头部 LABEL/OBS 推断的核
+    生成(与 nmrDraw 的 NAME 一致),不再显示 F1/F2/F3(0.2.152)。
+    """
+    if not labels or len(nuclei) != len(labels):
+        return labels
+    if any(
+        not str(label).startswith("F") or not str(label)[1:].isdigit()
+        for label in labels
+    ):
+        return labels
+    if any(not n for n in nuclei):
+        return labels
+    derived = axis_labels_from_nuclei(nuclei)
+    if derived and len(derived) == len(labels):
+        return derived
+    return labels
 
 
 def _relabel_axes(
@@ -259,6 +309,8 @@ class Spectrum:
         自检(0.2.122);缺省保持位置序(旧行为)。
         0.2.151:数据轴→FDF 块映射按头部 FDDIMORDER 建立(与 nmrglue
         guess_udic 同源),无 FDDIMORDER 时回退旧位置式。
+        0.2.152:无 metadata 时按 FDDIMORDER 重排逻辑序,并由头部核推导
+        轴标签(不再显示 F1/F2/F3)。
         """
         import nmrglue as ng
 
@@ -289,7 +341,13 @@ class Spectrum:
             data, axes, storage = _reorder_to_logical(
                 data, axes, storage, list(nuclei), path
             )
-        axes = _relabel_axes(axes, labels)
+        else:
+            logical = _logical_nuclei_from_order(dic, data.ndim, storage)
+            if logical:
+                data, axes, storage = _reorder_to_logical(
+                    data, axes, storage, logical, path
+                )
+        axes = _relabel_axes(axes, _labels_from_nuclei(storage, labels))
         _warn_ppm_range_mismatch(axes, storage, path)
         logger.info("载入谱图: %s (%s)", path, data.shape)
         return cls(data, axes, source=Path(path))
@@ -346,6 +404,8 @@ class Spectrum3D:
         0.2.151:数据轴→FDF 块映射按头部 FDDIMORDER 建立(与 nmrglue
         guess_udic 同源;真实 3D 输出 ORDER 2 3 1 = 存储 (F2,F3,F1)),
         无 FDDIMORDER 时回退旧位置式。
+        0.2.152:无 metadata 时按 FDDIMORDER 重排逻辑序,并由头部核推导
+        轴标签(不再显示 F1/F2/F3)。
 
         单文件 3D 流(xyz2pipe 产物,FDPIPEFLAG=1)读回形状 (F1, F2, F3),
         其中 F1=FDF3SIZE、F2=FDSPECNUM、F3=FDSIZE;非流文件按同约定重塑。
@@ -389,7 +449,13 @@ class Spectrum3D:
             data, axes, storage = _reorder_to_logical(
                 data, axes, storage, list(nuclei), path
             )
-        axes = _relabel_axes(axes, labels)
+        else:
+            logical = _logical_nuclei_from_order(dic, data.ndim, storage)
+            if logical:
+                data, axes, storage = _reorder_to_logical(
+                    data, axes, storage, logical, path
+                )
+        axes = _relabel_axes(axes, _labels_from_nuclei(storage, labels))
         _warn_ppm_range_mismatch(axes, storage, path)
         logger.info("载入三维谱: %s (%s)", path, data.shape)
         return cls(data, axes, source=Path(path))

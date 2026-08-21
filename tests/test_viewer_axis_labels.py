@@ -140,7 +140,7 @@ def test_spectrum_panel_uses_nucleus_labels(
 def test_spectrum_panel_fallback_labels(
     tmp_path: Path, qapp: QApplication
 ) -> None:
-    """无 metadata 时回退 F1/F2。"""
+    """无 metadata 时按头部核推导标签(0.2.152,不再回退 F1/F2)。"""
     from gui.spectrum_panel import SpectrumPanel
 
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
@@ -155,8 +155,9 @@ def test_spectrum_panel_fallback_labels(
     panel.set_context(exp_id, data_id)
     assert panel.load_current_spectrum() is True  # 0.2.88:显式加载
     assert panel.viewer._primary is not None
-    assert panel.viewer._primary.x_axis.label == "F2"
-    assert panel.viewer._primary.y_axis.label == "F1"
+    # 合成文件两轴 OBS 均 600 MHz → 推断为 1H,同核加下标
+    assert panel.viewer._primary.x_axis.label == "Hy"
+    assert panel.viewer._primary.y_axis.label == "Hx"
     panel.close()
 
 
