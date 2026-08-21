@@ -372,7 +372,7 @@ _DIRECT_PHASE_FP_KEYS = (
     "extract", "ext_lo", "ext_hi", "nsigma", "thresh",
     "smile_xq3", "smile_scaling", "zero_fill", "linewidth_hz",
     "points_per_line", "segment_shift_hz", "sampling",
-    "direct_poly_time",  # 0.2.158:诊断结果变化(POLY -time)时缓存失效
+    "direct_poly_time",  # 0.2.160:首遍脚本不再含 POLY -time,搜索基于原始平面
 )
 
 
@@ -732,7 +732,10 @@ def _unified_nus(
         {
             "direct_phase_search": False,
             "display_phase_search": False,
-            "direct_poly_time": bool(diagnostics.get("apply_poly_time")),
+            # 0.2.160:首遍脚本不加 POLY -time——直接维相位搜索以原始
+            # recon 平面为输入(POLY 会改变对称性评分,曾把 sampleC 直接维
+            # 相位从 (0,0) 带偏到 (40,-15) 且分数更低);POLY -time 只进
+            # 终跑完整脚本(params_final 的 direct_poly_time)。
         }
     )
     first = backend.reconstruct_nus(experiment, params_first, progress=progress)

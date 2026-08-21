@@ -249,10 +249,11 @@ def test_unified_route_nus_reconstruct_then_finalize(
     assert all(call["planes"] is None for call in backend.finalize_calls)
     assert "处理参数优化(测试): 固定配置" in result["logs"]
     assert result["backend_runs"] == 3  # SMILE 首遍 + F1 预览 + 终跑
-    # 0.2.155/0.2.156:诊断检测到直流偏置时,第一遍 SMILE 与终跑脚本
-    # 均携带 direct_poly_time(POLY -time);日志含分步耗时与末尾汇总
+    # 0.2.155/0.2.160:诊断检测到直流偏置时,终跑脚本携带
+    # direct_poly_time(POLY -time);首遍脚本不加(避免带偏直接维相位搜索);
+    # 日志含分步耗时与末尾汇总
     assert "direct_poly_time" in final_params
-    assert backend.reconstruct_params[0].get("direct_poly_time") is True
+    assert backend.reconstruct_params[0].get("direct_poly_time") is None
     assert final_params.get("direct_poly_time") is True
     assert "== 质量与优化汇总 ==" in result["logs"]
     assert any("谱图质量" in line for line in result["logs"])
