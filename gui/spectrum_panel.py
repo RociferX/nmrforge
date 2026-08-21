@@ -420,8 +420,8 @@ class SpectrumPanel(QWidget):
     def _load_projection_ft2(self, path: Path) -> object | None:
         """按文件名两核加载单个投影 .ft2(0.2.133,直接点击查看)。
 
-        核从文件名解析;显示规则:ppm 小的核放横坐标(载波 ppm
-        比较,缺失时按核参考化学位移),必要时转置数据矩阵。
+        核从文件名解析;显示规则:横坐标优先级 H > N > C(0.2.153),
+        必要时转置数据矩阵。
         轴参数优先取自已加载 3D 谱对应核的轴(SW/OBS/CAR/ORIG),
         否则用文件头槽位兜底。返回 Pydantic Spectrum;解析失败 None。
         """
@@ -434,35 +434,8 @@ class SpectrumPanel(QWidget):
         from viewer.axis_labels import nucleus_symbol
         from viewer.spectrum import Spectrum, SpectrumAxis
 
-        # 核参考化学位移(ppm),用于头参数缺失时决定横纵轴
-        _REF_PPM = {
-            "H": 5.0,
-            "D": 5.0,
-            "C": 100.0,
-            "N": 118.0,
-            "F": -50.0,
-            "P": 0.0,
-            "Na": 0.0,
-            "Si": 0.0,
-        }
-
         def _norm(nuc: str) -> str:
             return _re.sub(r"[^A-Za-z0-9]", "", str(nuc or "")).upper()
-
-        def _axis_ppm(axis) -> tuple[float, float]:
-            """(载波 ppm, 参考 ppm):用于横纵轴排序。
-
-            载波有效时优先;两者载波相同(如文件头兜底全是同核参数)时
-            用参考化学位移决胜负,保证 1H 始终小于 13C/15N。
-            """
-            ref = _REF_PPM.get(str(getattr(axis, "label", "")), 75.0)
-            try:
-                carrier = float(axis.carrier_ppm)
-                if carrier and abs(carrier) > 1e-6:
-                    return (carrier, ref)
-            except (TypeError, ValueError):
-                pass
-            return (ref, ref)
 
         name = path.name
         data_id = self._current_data_id or ""
@@ -538,8 +511,9 @@ class SpectrumPanel(QWidget):
                 carrier_ppm=float(dic.get("FDF1CAR", 0.0) or 0.0),
                 orig_hz=float(dic.get("FDF1ORIG", 0.0) or 0.0),
             )
-        # 0.2.133:ppm 小的核放横坐标(必要时转置数据矩阵)
-        if _axis_ppm(x_params) > _axis_ppm(y_params):
+        # 0.2.153:横坐标优先级 H > N > C(必要时转置数据矩阵)
+        _X_PRIORITY = {"1H": 0, "15N": 1, "13C": 2}
+        if _X_PRIORITY.get(_norm(a), 100) > _X_PRIORITY.get(_norm(b), 100):
             data = data.T
             x_params, y_params = y_params, x_params
             a, b = b, a

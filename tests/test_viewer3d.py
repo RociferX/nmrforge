@@ -596,10 +596,11 @@ def test_load_projections_new_naming(tmp_path: Path, qapp: QApplication) -> None
     assert s1.x_axis.label == 'H', f'x label {s1.x_axis.label}'
     assert s1.y_axis.label == 'C', f'y label {s1.y_axis.label}'
     assert s1.data.shape == (8, 16)
-    # 13C-15N 平面:固定轴 = 1H(F3, 下标 2);x=13C(C) < 15N(N)
+    # 13C-15N 平面:固定轴 = 1H(F3, 下标 2);0.2.153 起横坐标优先级
+    # H > N > C → x=15N(N) > 13C(C)
     s2 = proj[2]
-    assert s2.x_axis.label == 'C'
-    assert s2.y_axis.label == 'N'
+    assert s2.x_axis.label == 'N'
+    assert s2.y_axis.label == 'C'
     assert s2.data.shape == (8, 8)
     panel.close()
 
@@ -621,3 +622,31 @@ def test_contour_state_memory(monkeypatch, tmp_path: Path, qapp: QApplication) -
     assert viewer.level_slider.value() == 50
     assert viewer._level_count == 16
     viewer.close()
+
+
+
+def test_slice_orientation_x_priority_h_n_c(tmp_path: Path) -> None:
+    """0.2.153:3D 切片横坐标按 H > N > C 定向(必要时转置)。"""
+    nz, ny, nx = 2, 4, 6
+    P = np.zeros((nz, ny, nx), dtype=np.float32)
+    for z in range(nz):
+        for y in range(ny):
+            for x in range(nx):
+                P[z, y, x] = z * 100 + y * 10 + x
+    path = tmp_path / "orient.ft3"
+    _write_ft3_ordered(path, P, [2.0, 3.0, 1.0])
+    loaded = Spectrum3D.load_from_ft3(
+        path, labels=("N", "H", "C"), nuclei=["15N", "1H", "13C"]
+    )
+    # F1-F2 平面(固定 F3):(N, H) → H 已在横坐标,不转置
+    sl = loaded.slice(2, 1)
+    assert sl.y_axis.label == "N" and sl.x_axis.label == "H"
+    np.testing.assert_allclose(sl.data, loaded.data[:, :, 1])
+    # F1-F3 平面(固定 F2):(N, C) → N > C,转置后 N 在横坐标
+    sl = loaded.slice(1, 2)
+    assert sl.y_axis.label == "C" and sl.x_axis.label == "N"
+    np.testing.assert_allclose(sl.data, loaded.data[:, 2, :].T)
+    # F2-F3 平面(固定 F1):(H, C) → H > C,转置后 H 在横坐标
+    sl = loaded.slice(0, 1)
+    assert sl.y_axis.label == "C" and sl.x_axis.label == "H"
+    np.testing.assert_allclose(sl.data, loaded.data[1, :, :].T)

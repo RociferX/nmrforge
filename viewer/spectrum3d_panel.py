@@ -116,10 +116,15 @@ class Spectrum3DPanel(QWidget):
         spectrum = self._spectrum3d.slice(
             self._slice_axis, self.slice_slider.value()
         )
-        # 记录剩余两轴的原始维序(F1=0/F2=1/F3=2),供峰表 F*_shift 映射
-        spectrum.dim_indices = tuple(
-            i for i in range(3) if i != self._slice_axis
-        )
+        # 记录剩余两轴的原始维序(F1=0/F2=1/F3=2),供峰表 F*_shift 映射;
+        # 0.2.153:切片可能按横坐标优先级转置,按轴对象回查 3D 维序
+        dims: list[int] = []
+        for axis in spectrum.axes:
+            for i, axis3 in enumerate(self._spectrum3d.axes):
+                if axis is axis3:
+                    dims.append(i)
+                    break
+        spectrum.dim_indices = tuple(dims)
         return spectrum
 
     def current_name(self, base: str = "") -> str:

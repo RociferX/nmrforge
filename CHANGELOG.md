@@ -1,5 +1,19 @@
 # 修改记录(历史条目)
 
+## 0.2.153(2026-08-21,总管直接处理)
+
+- 显示方向规则(用户):3D 切片/投影二维谱横坐标优先级 H > N > C;
+  viewer/spectrum.py 新增 orient_x_priority,slice/project/project_nmrpipe
+  输出统一定向(必要时转置数据并交换轴,dim_indices 同步交换);
+- 3D 面板 current_spectrum 的 dim_indices 改为按轴对象回查 3D 维序,
+  转置后峰表 F*_shift 映射仍正确;
+- 投影加载(_load_projection_ft2)由原「ppm 小的核放横坐标」改为
+  H > N > C 优先级;
+- VM 实测 hncacb.ft3:F1-F2(N-H)→x=H、F1-F3(N-C)→x=N、
+  F2-F3(H-C)→x=H;
+- 测试:新增切片定向回归 + 投影 13C-15N 方向断言更新;本地全量
+  pytest + ruff 全绿。
+
 ## 0.2.152(2026-08-21,总管直接处理)
 
 - viewer 无 metadata 直接打开:按头部 FDDIMORDER 重排逻辑序(F1/F2/F3),

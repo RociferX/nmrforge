@@ -25,6 +25,9 @@ _NUCLEUS_PPM_RANGES: dict[str, tuple[float, float]] = {
 }
 _NUCLEI = set(_NUCLEUS_PPM_RANGES) | {"2H", "19F", "31P", "23Na", "29Si"}
 
+# 横坐标显示优先级(0.2.153,用户规则):H > N > C;未知核不参与转置
+_NUCLEUS_X_PRIORITY: dict[str, int] = {"1H": 0, "15N": 1, "13C": 2}
+
 
 def _parse_nmrpipe_label(label: str) -> str:
     """NMRPipe FDF*LABEL('N15'/'H1'/'C13') → 核名('15N'/'1H'/'13C');失败返回 ''。"""
@@ -122,6 +125,36 @@ def _labels_from_nuclei(
     if derived and len(derived) == len(labels):
         return derived
     return labels
+
+
+
+
+def orient_x_priority(spectrum: Spectrum) -> Spectrum:
+    """二维谱横坐标按核优先级 H > N > C 定向(0.2.153 显示规则)。
+
+    横坐标核优先级低于纵坐标时转置数据并交换轴(dim_indices 同步交换);
+    两轴同核、核未知或已满足优先级时保持原方向。
+    """
+    if spectrum.data.ndim != 2:
+        return spectrum
+    x_nuc = infer_nucleus(spectrum.x_axis.obs_mhz)
+    y_nuc = infer_nucleus(spectrum.y_axis.obs_mhz)
+    px = _NUCLEUS_X_PRIORITY.get(x_nuc, 100)
+    py = _NUCLEUS_X_PRIORITY.get(y_nuc, 100)
+    if px <= py:
+        return spectrum
+    transposed = Spectrum(
+        np.asarray(spectrum.data).T,
+        [spectrum.x_axis, spectrum.y_axis],
+        source=spectrum.source,
+    )
+    dims = getattr(spectrum, "dim_indices", None)
+    if dims:
+        transposed.dim_indices = (dims[1], dims[0])
+    robust = getattr(spectrum, "robust_max", None)
+    if robust is not None:
+        transposed.robust_max = robust
+    return transposed
 
 
 def _relabel_axes(
@@ -483,9 +516,11 @@ class Spectrum3D:
             data2d = self.data[:, index, :]
         else:
             data2d = self.data[:, :, index]
-        return Spectrum(
-            np.asarray(data2d), [self.axes[i] for i in remaining],
-            source=self.source,
+        return orient_x_priority(
+            Spectrum(
+                np.asarray(data2d), [self.axes[i] for i in remaining],
+                source=self.source,
+            )
         )
 
     def project(self, axis_idx: int, mode: str = "max") -> Spectrum:
@@ -495,9 +530,11 @@ class Spectrum3D:
         else:
             data2d = np.max(self.data, axis=axis_idx)
         remaining = [i for i in range(3) if i != axis_idx]
-        return Spectrum(
-            np.asarray(data2d), [self.axes[i] for i in remaining],
-            source=self.source,
+        return orient_x_priority(
+            Spectrum(
+                np.asarray(data2d), [self.axes[i] for i in remaining],
+                source=self.source,
+            )
         )
 
     def estimate_noise(self, fraction: float = 0.1) -> float:
@@ -522,9 +559,11 @@ class Spectrum3D:
             data = np.where(np.abs(data) < thresh, 0.0, data)
         data2d = np.sum(data, axis=axis_idx)
         remaining = [i for i in range(3) if i != axis_idx]
-        return Spectrum(
-            np.asarray(data2d), [self.axes[i] for i in remaining],
-            source=self.source,
+        return orient_x_priority(
+            Spectrum(
+                np.asarray(data2d), [self.axes[i] for i in remaining],
+                source=self.source,
+            )
         )
 
 class Spectrum1D:
