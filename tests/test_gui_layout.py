@@ -726,51 +726,6 @@ def test_spectrum_param_report_shows_phase_results() -> None:
     assert "后端运行次数: 3" in report
 
 
-def test_pipeline_spectrum_phase_route_combo(
-    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """0.2.110:生成谱图步骤「相位优化途径」显示 Auto-optimize(默认)/None。"""
-    manager = _manager_with_experiment(tmp_path, monkeypatch)
-    panel = PipelinePanel(manager, FakeProcessingController())
-    panel.set_selection("data", "exp_001", "d_001")
-    combo = panel._rows["spectrum"].phase_route_combo
-    assert not combo.isHidden()
-    assert combo.itemText(0) == "Auto-optimize"
-    assert combo.itemText(1) == "None"
-    assert combo.currentData() == "unified"  # 后端契约值不变
-    items = [combo.itemData(i) for i in range(combo.count())]
-    assert items == ["unified", "none"]
-    assert panel._rows["fid"].phase_route_combo.isHidden()
-    panel.close()
-
-
-def test_pipeline_spectrum_run_passes_phase_route(
-    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """0.2.108:运行生成谱图时把选中途径透传给控制器。"""
-    manager = _manager_with_experiment(tmp_path, monkeypatch)
-    spectra = manager.data_dir("exp_001", "d_001", "spectra")
-    spectra.mkdir(parents=True, exist_ok=True)
-    _write_ft2(spectra / "exp_001-d_001.ft2")
-    seen: list[dict] = []
-
-    class _RouteController:
-        def generate_fid(self, data, exp_id=None, data_id=None):
-            return "x.fid"
-
-        def generate_spectrum(self, data, exp_id=None, data_id=None, params=None):
-            seen.append(dict(params or {}))
-            return "x.ft2"
-
-    monkeypatch.setattr("threading.Thread", SyncThread)
-    panel = PipelinePanel(manager, _RouteController())
-    panel.set_selection("data", "exp_001", "d_001")
-    panel._rows["spectrum"].phase_route_combo.setCurrentIndex(1)  # none
-    panel._on_run_requested("spectrum")
-    assert seen and seen[-1] == {"phase_route": "none"}
-    panel.close()
-
-
 def test_pipeline_show_spectrum_button_on_spectrum_success(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:

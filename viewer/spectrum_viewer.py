@@ -539,15 +539,44 @@ class SpectrumViewer(QWidget):
 
 
     # 0.2.133: 左键按住状态跟踪(1D 模式下十字虚线跟随)
+    # 0.2.145: 按住拖动期间直接处理 MouseMove(pyqtgraph Pan 时
+    #          sigMouseMoved 不可靠),十字线/条带实时跟随
     def eventFilter(self, obj, event) -> bool:
         if obj is self.plot.scene():
-            if event.type() == QEvent.Type.MouseButtonPress:
+            etype = event.type()
+            if etype == QEvent.Type.MouseButtonPress:
                 if event.button() == Qt.MouseButton.LeftButton:
                     self._mouse_left_pressed = True
-            elif event.type() == QEvent.Type.MouseButtonRelease:
+            elif etype == QEvent.Type.MouseButtonRelease:
                 if event.button() == Qt.MouseButton.LeftButton:
                     self._mouse_left_pressed = False
+            elif (
+                etype == QEvent.Type.MouseMove
+                and self._mouse_left_pressed
+                and (self._strips_active or self._mode_1d)
+            ):
+                self._follow_drag(event.scenePosition())
         return super().eventFilter(obj, event)
+
+    def _follow_drag(self, scene_pos) -> None:
+        """按住左键拖动:条带模式移动十字线+两个 1D 迹线;1D 数据模式更新读数。"""
+        if self._primary is None:
+            return
+        try:
+            point = self.plot.getViewBox().mapSceneToView(scene_pos)
+        except Exception:  # noqa: BLE001
+            return
+        xi, yi = self._view_to_data(point)
+        if xi < 0:
+            return
+        if self._strips_active:
+            self._move_crosshair(float(point.x()), float(point.y()))
+            self._update_strips(yi, xi)
+        elif self._mode_1d and self._primary_1d is not None:
+            axis = self._primary_1d.axis
+            self.crosshair_label.setText(
+                f"{axis.label} {axis.ppm_at(xi):.3f} ppm"
+            )
 
 
     def _update_phased_1d(self) -> None:
@@ -912,7 +941,7 @@ class SpectrumViewer(QWidget):
         return best[1]
 
     def _on_mouse_moved(self, pos) -> None:
-        if self._primary is None or self._mode_1d:
+        if self._primary is None:
             return
         try:
             point = self.plot.getViewBox().mapSceneToView(pos)
@@ -926,12 +955,17 @@ class SpectrumViewer(QWidget):
             if self._mouse_left_pressed:
                 self._move_crosshair(float(point.x()), float(point.y()))
                 self._update_strips(yi, xi)
-        x_axis = self._primary.x_axis
-        y_axis = self._primary.y_axis
-        self.crosshair_label.setText(
-            f"{x_axis.label} {x_axis.ppm_at(xi):.3f} ppm | "
-            f"{y_axis.label} {y_axis.ppm_at(yi):.3f} ppm"
-        )
+            x_axis = self._primary.x_axis
+            y_axis = self._primary.y_axis
+            self.crosshair_label.setText(
+                f"{x_axis.label} {x_axis.ppm_at(xi):.3f} ppm | "
+                f"{y_axis.label} {y_axis.ppm_at(yi):.3f} ppm"
+            )
+        elif self._mode_1d and self._primary_1d is not None:
+            axis = self._primary_1d.axis
+            self.crosshair_label.setText(
+                f"{axis.label} {axis.ppm_at(xi):.3f} ppm"
+            )
 
     # ------------------------------------------------------------- misc
 

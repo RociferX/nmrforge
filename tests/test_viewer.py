@@ -360,3 +360,71 @@ def test_spectrum_window_load_failure(
     bad.write_bytes(b"not a pipe file")
     assert window.load_spectrum(bad) is False
     window.close()
+
+
+
+
+
+
+
+
+def test_viewer_drag_hold_follow_crosshair(qapp: QApplication) -> None:
+    """hold left-button drag: eventFilter MouseMove drives crosshair."""
+    from PyQt6.QtCore import QEvent, QPointF, Qt
+    from PyQt6.QtGui import QMouseEvent
+
+    viewer = SpectrumViewer()
+    viewer.add_spectrum(_synthetic_spectrum())
+    viewer.set_1d_mode(True)
+    assert viewer._strips_active
+    scene = viewer.plot.scene()
+    # ???? scene wrapper(PyQt ???? plot.scene() ???????)
+
+    viewer._mouse_left_pressed = True
+    calls: list[str] = []
+    viewer._move_crosshair = lambda x, y: calls.append(f"move {x} {y}") or None
+    viewer._update_strips = lambda y, x: calls.append(f"strips {y} {x}") or None
+
+    # ?????? 1:1,????? (40, 60) ????????
+    drag_pos = viewer.plot.getViewBox().mapViewToScene(QPointF(40.0, 60.0))
+    drag = QMouseEvent(
+        QEvent.Type.MouseMove,
+        drag_pos, drag_pos, drag_pos,
+        Qt.MouseButton.NoButton, Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    viewer.eventFilter(scene, drag)
+
+    assert any(c.startswith("move") for c in calls), f"crosshair not following: {calls}"
+    assert any(c.startswith("strips") for c in calls)
+    viewer.close()
+
+
+def test_viewer_drag_1d_updates_readout(qapp: QApplication) -> None:
+    """in 1D data mode, hold-drag updates readout label live."""
+    from types import SimpleNamespace
+
+    from PyQt6.QtCore import QEvent, QPointF, Qt
+    from PyQt6.QtGui import QMouseEvent
+
+    viewer = SpectrumViewer()
+    viewer.add_spectrum(_synthetic_spectrum())
+    scene = viewer.plot.scene()
+    viewer._mode_1d = True
+    viewer._primary_1d = SimpleNamespace(
+        axis=SimpleNamespace(label="1H", ppm_at=lambda i: 6.5 - i * 0.01)
+    )
+    viewer._mouse_left_pressed = True
+
+    drag_pos = viewer.plot.getViewBox().mapViewToScene(QPointF(20.0, 0.0))
+    drag = QMouseEvent(
+        QEvent.Type.MouseMove,
+        drag_pos, drag_pos, drag_pos,
+        Qt.MouseButton.NoButton, Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    viewer.eventFilter(scene, drag)
+    text = viewer.crosshair_label.text()
+    assert "1H" in text and "ppm" in text
+    assert text != "Move mouse to read ppm"
+    viewer.close()

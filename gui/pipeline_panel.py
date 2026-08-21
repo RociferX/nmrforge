@@ -406,7 +406,13 @@ def _step_refs(step_id: str) -> tuple[str, ...]:
     return {
         "import": ("import",),
         "fid": ("convert_to_fid", "manual_fid"),
-        "spectrum": ("process", "reconstruct_nus", "manual_process", "manual_nus"),
+        "spectrum": (
+            "process",
+            "reconstruct_nus",
+            "manual_process",
+            "manual_nus",
+            "phase_optimize_unified",
+        ),
         "smile": ("smile_optimize",),
         "peaks": ("pick_peaks", "manual_peaks"),
         "analysis": ("analyze",),
@@ -547,16 +553,6 @@ class PipelineStepRow(QWidget):
             lambda: self.show_spectrum_requested.emit(self.step_id)
         )
         header.addWidget(self.show_spectrum_button)
-        # 0.2.108:相位优化途径选择(仅生成谱图步骤显示)
-        self.phase_route_combo = QComboBox()
-        self.phase_route_combo.addItem("Auto-optimize", "unified")
-        self.phase_route_combo.addItem("None", "none")
-        self.phase_route_combo.setToolTip(
-            "相位优化途径:Auto-optimize=统一方案(逐维复型预览+内存调相,默认);"
-            "None=跳过相位优化(逃生口)"
-        )
-        self.phase_route_combo.setVisible(False)
-        header.addWidget(self.phase_route_combo)
         self.manual_button = QPushButton("人工")
         self.manual_button.setToolTip("脚本编辑器:自动运行过则展示已有脚本,可直接修改运行")
         self.manual_button.setVisible(False)
@@ -857,9 +853,6 @@ class PipelinePanel(QWidget):
                 step_id == "spectrum" and status == "SUCCESS"
             )
             # 0.2.108:生成谱图步骤提供「相位优化途径」选择
-            self._rows[step_id].phase_route_combo.setVisible(
-                step_id == "spectrum"
-            )
 
     # ------------------------------------------------------------------
     # 运行
@@ -1036,18 +1029,6 @@ class PipelinePanel(QWidget):
                                         f"{step_label} {d}: {msg}"
                                     )
                                 )
-                            if (
-                                step_id == "spectrum"
-                                and "params" in inspect.signature(method).parameters
-                            ):
-                                # 0.2.108:相位优化途径(unified/none)透传后端
-                                kwargs["params"] = {
-                                    "phase_route": (
-                                        self._rows["spectrum"]
-                                        .phase_route_combo.currentData()
-                                        or "unified"
-                                    )
-                                }
                             result = method(node, **kwargs)
                         item["ok"] = True
                         message = (
