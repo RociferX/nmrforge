@@ -1,5 +1,17 @@
 # 修改记录(历史条目)
 
+## 0.2.151(2026-08-21,总管直接处理)
+
+- viewer 3D 轴序修复:load_from_ft2/ft3 按头部 FDDIMORDER 建立数据轴→
+  FDF 块映射(axis i ↔ FDF{FDDIMORDER[ndim-1-i]},与 nmrglue
+  guess_udic/make_uc 同源),不再按位置配 FDF1/FDF2/FDF3;FDDIMORDER
+  缺失/非法时回退旧行为。
+- 背景:真实 NMRPipe 3D 输出 ORDER 2 3 1(存储 F2,F3,F1),nmrglue 读回
+  自然数组 (F1,F3,F2);修复前 28.ft3/61.ft3 轴 1/2 参数块互换且无告警
+  (0.2.122 的 metadata 重排仅在标签恰好不同时触发)。
+- 测试:新增 ORDER 2 3 1 逻辑序映射与无 metadata 参数配对回归;本地全量
+  pytest + ruff 全绿;VM 实测 28.ft3/61.ft3 正确。
+
 ## 0.2.134~0.2.150(2026-08-20~21,总管协调直接并入 master)
 
 - 0.2.133-修:3D F2 维 States 系 FT 自动加 -neg(依据 bruk2pipe ACQ MODE

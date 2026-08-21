@@ -54,6 +54,26 @@ def _storage_nuclei(dic: dict, prefixes: tuple[str, ...]) -> list[str]:
     return nuclei
 
 
+
+def _fdf_prefix_for_axis(dic: dict, ndim: int, axis_idx: int) -> str:
+    """数据轴 axis_idx 对应的 FDF 参数块前缀('FDF1'/'FDF2'/...)。
+
+    nmrglue pipe.read 返回的数据轴序与 NMRPipe 存储序相反,每轴对应的
+    逻辑维号由头部 FDDIMORDER 给出(与 nmrglue make_uc/guess_udic
+    同源:axis i ↔ FDF{FDDIMORDER[ndim-1-i]});FDDIMORDER 缺失/非法时
+    回退旧位置式 FDF{axis_idx+1}(0.2.151 前行为)。
+    """
+    try:
+        order = [int(v) for v in dic.get("FDDIMORDER") or []]
+    except (TypeError, ValueError):
+        order = []
+    if len(order) >= ndim:
+        dim = order[ndim - 1 - axis_idx]
+        if 1 <= dim <= 4:
+            return f"FDF{dim}"
+    return f"FDF{axis_idx + 1}"
+
+
 def _relabel_axes(
     axes: list[SpectrumAxis], labels: tuple[str, ...]
 ) -> list[SpectrumAxis]:
@@ -237,6 +257,8 @@ class Spectrum:
         nuclei 为 metadata 逻辑轴核(F1/F2 序);非空时按存储头
         FDF*LABEL/FDF*OBS 推断存储轴核并重排到逻辑序,并做 ppm 范围
         自检(0.2.122);缺省保持位置序(旧行为)。
+        0.2.151:数据轴→FDF 块映射按头部 FDDIMORDER 建立(与 nmrglue
+        guess_udic 同源),无 FDDIMORDER 时回退旧位置式。
         """
         import nmrglue as ng
 
@@ -255,11 +277,14 @@ class Spectrum:
                 orig_hz=float(dic.get(prefix + "ORIG", 0.0) or 0.0),
             )
 
+        prefixes = tuple(
+            _fdf_prefix_for_axis(dic, data.ndim, i) for i in range(data.ndim)
+        )
         axes = [
-            _axis("FDF1", labels[0], int(data.shape[0])),
-            _axis("FDF2", labels[1], int(data.shape[1])),
+            _axis(prefix, labels[i], int(data.shape[i]))
+            for i, prefix in enumerate(prefixes)
         ]
-        storage = _storage_nuclei(dic, ("FDF1", "FDF2"))
+        storage = _storage_nuclei(dic, prefixes)
         if nuclei:
             data, axes, storage = _reorder_to_logical(
                 data, axes, storage, list(nuclei), path
@@ -318,6 +343,9 @@ class Spectrum3D:
         FDF*LABEL/FDF*OBS 推断存储轴核,不一致则重排 data/axes 到逻辑
         序并告警日志「轴序重排」,并做 ppm 范围自检(0.2.122);缺省
         保持位置序(旧行为)。
+        0.2.151:数据轴→FDF 块映射按头部 FDDIMORDER 建立(与 nmrglue
+        guess_udic 同源;真实 3D 输出 ORDER 2 3 1 = 存储 (F2,F3,F1)),
+        无 FDDIMORDER 时回退旧位置式。
 
         单文件 3D 流(xyz2pipe 产物,FDPIPEFLAG=1)读回形状 (F1, F2, F3),
         其中 F1=FDF3SIZE、F2=FDSPECNUM、F3=FDSIZE;非流文件按同约定重塑。
@@ -349,12 +377,14 @@ class Spectrum3D:
                 orig_hz=float(dic.get(prefix + "ORIG", 0.0) or 0.0),
             )
 
+        prefixes = tuple(
+            _fdf_prefix_for_axis(dic, data.ndim, i) for i in range(data.ndim)
+        )
         axes = [
-            _axis("FDF1", labels[0], int(data.shape[0])),
-            _axis("FDF2", labels[1], int(data.shape[1])),
-            _axis("FDF3", labels[2], int(data.shape[2])),
+            _axis(prefix, labels[i], int(data.shape[i]))
+            for i, prefix in enumerate(prefixes)
         ]
-        storage = _storage_nuclei(dic, ("FDF1", "FDF2", "FDF3"))
+        storage = _storage_nuclei(dic, prefixes)
         if nuclei:
             data, axes, storage = _reorder_to_logical(
                 data, axes, storage, list(nuclei), path
