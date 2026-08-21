@@ -28,6 +28,10 @@ class NMRViewBox(pg.ViewBox):
         if ev.button() == QtCore.Qt.MouseButton.RightButton:
             ev.accept()
             return
+        # 1D mode/PanMode: left button is for crosshair tracking, not panning (0.2.150)
+        if ev.button() == QtCore.Qt.MouseButton.LeftButton and self.state["mouseMode"] == pg.ViewBox.PanMode:
+            ev.accept()
+            return
         if ev.button() == QtCore.Qt.MouseButton.MiddleButton:
             ev.accept()
             pos = ev.pos()
