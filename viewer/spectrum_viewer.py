@@ -113,18 +113,13 @@ class SpectrumViewer(QWidget):
 
         self.reset_button = QPushButton("Full view")
         self.reset_button.clicked.connect(self.reset_view)
+        # 0.2.150:谱图数据边界框随谱出现:不预创建,
+        # 第一张 2D 谱加载时才创建并挂到 ViewBox
+        # (plot.addItem ignoreBounds=True):数据坐标系君与谱一起
+        # 缩放/平移,放大后自然离开视野,看到全谱
+        # 即可见;且不参与自动缩放计算(无启动乱跳)。
+        self._data_bounds_item: QGraphicsRectItem | None = None
 
-        # 0.2.149:谱图数据范围框(真实谱图边界).
-        # 直接入 scene(不经 ViewBox),不参与自动缩放计算,
-        # 避免开启时视图乱跳;不随视图变化,仅根据
-        # layer 数据大小绘制。
-        self._data_bounds_item = QGraphicsRectItem()
-        self._data_bounds_item.setPen(
-            QPen(QColor("#2e7d32"), 1, Qt.PenStyle.DashLine)
-        )
-        self._data_bounds_item.setZValue(25)
-        self._data_bounds_item.setVisible(False)
-        self.plot.scene().addItem(self._data_bounds_item)
 
 
         # 0.2.133: aspect ratio slider(0.2.147 移到控件行 0 并排)
@@ -315,7 +310,9 @@ class SpectrumViewer(QWidget):
         self.layer_spectra.clear()
         self.layer_list.clear()
         self._primary = None
-        self._data_bounds_item.setVisible(False)
+        if self._data_bounds_item is not None:
+            self.plot.removeItem(self._data_bounds_item)
+            self._data_bounds_item = None
         self.phase_panel.set_available(False)
         self.set_peaks([])
 
@@ -730,7 +727,8 @@ class SpectrumViewer(QWidget):
         self._crosshair_v.setVisible(active)
         self._crosshair_h.setVisible(active)
         if active:
-            self._data_bounds_item.setVisible(False)
+            if self._data_bounds_item is not None:
+                self._data_bounds_item.setVisible(False)
             self._setup_strip_axes()
             # 右侧 1D 条带方向与二维谱 Y 轴保持一致(谱+坐标轴一起翻正)
             self.strip_right.getViewBox().invertY(
@@ -855,12 +853,22 @@ class SpectrumViewer(QWidget):
         return max(0.25, min(4.0, value / 100.0))
 
     def _update_data_bounds(self) -> None:
-        """根据当前 layer 数据大小绘制谱图数据范围矩形。"""
+        """根据当前 layer 数据大小绘制谱图数据边界矩形(随谱涉创建)。"""
         sx = max((s.x_axis.size for s in self.layer_spectra), default=0)
         sy = max((s.y_axis.size for s in self.layer_spectra), default=0)
         if not sx or not sy:
-            self._data_bounds_item.setVisible(False)
+            if self._data_bounds_item is not None:
+                self._data_bounds_item.setVisible(False)
             return
+        if self._data_bounds_item is None:
+            item = QGraphicsRectItem()
+            item.setPen(QPen(QColor("#2e7d32"), 1, Qt.PenStyle.DashLine))
+            item.setZValue(25)
+            item.setVisible(False)
+            # 挂到 ViewBox 数据坐标系,与谱同缩放/平移;
+            # 放大后移出视野,全谱可见
+            self.plot.addItem(item)
+            self._data_bounds_item = item
         self._data_bounds_item.setRect(
             QRectF(-0.5, -0.5, float(sx), float(sy))
         )

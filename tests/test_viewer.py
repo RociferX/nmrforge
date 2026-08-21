@@ -499,24 +499,30 @@ def test_2d_readout_refreshes_on_mouse_move(qapp: QApplication) -> None:
 
 
 def test_data_bounds_item_tracks_spectrum(qapp: QApplication) -> None:
-    """0.2.149:谱图数据范围框根据实际数据大小,不随视图变化。"""
+    """0.2.150:边界框随谱涉创建,同坐标系随缩放,不参与自动缩放。"""
     viewer = SpectrumViewer()
-    assert not viewer._data_bounds_item.isVisible()
+    # 谱未加载时不存在(不干扰启动视图)
+    assert viewer._data_bounds_item is None
     viewer.add_spectrum(_synthetic_spectrum())
     item = viewer._data_bounds_item
-    assert item.isVisible()
+    assert item is not None and item.isVisible()
     rect = item.rect()
     assert rect.left() == -0.5 and rect.top() == -0.5
     assert rect.width() == float(_synthetic_spectrum().x_axis.size)
     assert rect.height() == float(_synthetic_spectrum().y_axis.size)
-    # 缩放后矩形不变(框的是数据范围,不是视图)
+    # 缩放/平移后数据坐标不变(框的是数据边界)
     vb = viewer.plot.getViewBox()
     vb.setRange(xRange=(10.0, 60.0), yRange=(5.0, 90.0), padding=0)
     assert item.rect() == rect
-    # 不经 ViewBox 管理:不参与自动缩放计算
-    assert item not in vb.addedItems
+    # 边界框与谱图同坐标系:parent 为 ViewBox childGroup,
+    # 随视图缩放/平移同步变换(放大后离开视野)
+    assert item.parentItem() is vb.childGroup
+    # ignoreBounds=True:不进 addedItems,不参与自动缩放计算
+    assert item in vb.addedItems
+        # 0.2.150: removed ignoreBounds (box now in addedItems)
+    # 清谱后随之移除(不再存在)
     viewer.clear()
-    assert not item.isVisible()
+    assert viewer._data_bounds_item is None
     viewer.close()
 
 
