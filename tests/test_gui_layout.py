@@ -1575,3 +1575,52 @@ def test_context_menu_rename_opens_inline_editor(
     assert panel._rename_editor.isVisible()
     assert panel._rename_target == ("project",)
     panel.close()
+
+
+def test_log_panel_stop_button_emits_signal(qapp: QApplication) -> None:
+    """停止当前任务按钮:点击发出 stop_requested 信号。"""
+    from gui.log_panel import LogPanel
+
+    panel = LogPanel()
+    got: list[int] = []
+    panel.stop_requested.connect(lambda: got.append(1))
+    assert panel.stop_button.text() == "停止当前任务"
+    panel.stop_button.click()
+    assert got == [1]
+    panel.close()
+
+
+def test_main_window_stop_button_logs_termination(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """点击停止:调用进程树终止并记录日志(无残留提示)。"""
+    import backend.runtime as rt
+
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    window = MainWindow(manager=manager, controller=FakeProcessingController())
+    calls: list[int] = []
+
+    def fake_terminate() -> int:
+        calls.append(1)
+        return 2
+
+    monkeypatch.setattr(rt, "terminate_current_tasks", fake_terminate)
+    window.log_panel.stop_button.click()
+    assert calls == [1]
+    assert not window.log_panel.isHidden()
+    assert "已停止当前任务" in window.log_panel.text.toPlainText()
+    assert "2" in window.log_panel.text.toPlainText()
+    window.close()
+
+
+def test_main_window_stop_no_task_notice(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import backend.runtime as rt
+
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    window = MainWindow(manager=manager, controller=FakeProcessingController())
+    monkeypatch.setattr(rt, "terminate_current_tasks", lambda: 0)
+    window.log_panel.stop_button.click()
+    assert "当前没有正在运行的任务" in window.log_panel.text.toPlainText()
+    window.close()

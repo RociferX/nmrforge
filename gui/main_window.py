@@ -247,6 +247,7 @@ class MainWindow(QMainWindow):
         self.main_splitter.addWidget(self.project_tree)
         self.main_splitter.addWidget(self.center_panel)
         self.log_panel = LogPanel()
+        self.log_panel.stop_requested.connect(self._on_stop_requested)
         self.log_panel.setMinimumWidth(200)
         self.log_panel.setMaximumWidth(420)
         self.log_panel.setVisible(False)
@@ -1385,6 +1386,18 @@ class MainWindow(QMainWindow):
         self.center_panel.set_selection(kind, exp_id, data_id)
         self.spectrum_panel.set_context(exp_id, data_id)
         self._update_context_bar()
+
+    def _on_stop_requested(self) -> None:
+        """停止当前任务:终止全部正在运行的后端进程树(不留残留)。"""
+        from backend.runtime import terminate_current_tasks
+
+        killed = terminate_current_tasks()
+        if killed:
+            self._append_log(
+                f"已停止当前任务({killed} 个任务进程树已终止,无残留)"
+            )
+        else:
+            self._append_log("当前没有正在运行的任务")
 
     def _append_log(self, message: str) -> None:
         self.log_panel.append(message)

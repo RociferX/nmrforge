@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -15,7 +16,9 @@ from PyQt6.QtWidgets import (
 
 
 class LogPanel(QWidget):
-    """日志面板:追加消息 + 清空 + 折叠/展开。"""
+    """日志面板:追加消息 + 清空 + 停止当前任务。"""
+
+    stop_requested = pyqtSignal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -29,6 +32,12 @@ class LogPanel(QWidget):
         self.clear_button = QPushButton("清空")
         self.clear_button.clicked.connect(self.clear)
         header.addWidget(self.clear_button)
+        self.stop_button = QPushButton("停止当前任务")
+        self.stop_button.setToolTip(
+            "终止正在运行的处理任务(含 SMILE/nmrPipe 子进程,不留残留)"
+        )
+        self.stop_button.clicked.connect(self.stop_requested.emit)
+        header.addWidget(self.stop_button)
         layout.addLayout(header)
         self.text = QPlainTextEdit()
         self.text.setReadOnly(True)

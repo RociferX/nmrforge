@@ -14,6 +14,8 @@ def test_csh_runtime_on_line_forwards_lines(
     class _FakePopen:
         def __init__(self, argv, **kwargs):
             self.stdout = iter(["line1\n", "line2\n"])
+            self.stderr = None
+            self.pid = 424242
             self._returncode = 0
 
         def wait(self, timeout=None):

@@ -1,16 +1,29 @@
-"""csh 运行时：source ~/.cshrc 后执行 NMRPipe 命令/脚本（Linux）。"""
+"""csh 运行时:source ~/.cshrc 后执行 NMRPipe 命令/脚本(Linux)。
+
+任务终止:所有 run() 开启的进程统一注册到模块级注册表(进程组,
+start_new_session=True),terminate_current_tasks() 可随时终止全部
+当前任务(Windows 用 taskkill /T,Linux 用 killpg SIGKILL),不留下
+csh/nmrPipe/SMILE 残留进程;超时同样先杀进程树再返回。
+"""
 
 from __future__ import annotations
 
+import os
 import shlex
 import shutil
+import signal
 import subprocess
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 
 
 class ToolError(RuntimeError):
     """外部工具执行错误。"""
+
+
+class TaskTerminatedError(RuntimeError):
+    """任务被用户/界面主动终止。"""
 
 
 @dataclass
@@ -25,8 +38,50 @@ class CompletedProcess:
         return self.returncode == 0
 
 
+# 全局活动进程注册表:跨 CshRuntime 实例共享,
+# terminate_current_tasks() 杀掉所有正在运行的后端任务
+_ACTIVE: dict[int, subprocess.Popen] = {}
+_LOCK = threading.Lock()
+_USER_TERMINATED: set[int] = set()
+
+
+def terminate_current_tasks() -> int:
+    """终止所有正在运行的后端任务(进程树),返回被杀数量。
+
+    调用方(如 GUI 停止按钮)可安全地在任意线程调用;
+    run() 中的读取循环会随之退出并抛 TaskTerminatedError。
+    """
+    with _LOCK:
+        procs = list(_ACTIVE.values())
+        _ACTIVE.clear()
+        for proc in procs:
+            _USER_TERMINATED.add(proc.pid)
+    for proc in procs:
+        _kill_process_tree(proc)
+    return len(procs)
+
+
+def _kill_process_tree(proc: subprocess.Popen) -> None:
+    """终止整个进程树,不残留子进程。"""
+    if proc.poll() is not None:
+        return
+    try:
+        if os.name == "nt":
+            subprocess.run(
+                ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        else:
+            # start_new_session=True → pid 即进程组组长
+            os.killpg(proc.pid, signal.SIGKILL)
+            proc.wait()
+    except (OSError, ProcessLookupError):
+        pass
+
+
 class CshRuntime:
-    """通过 csh（source ~/.cshrc）执行 NMRPipe 工具。"""
+    """通过 csh(source ~/.cshrc)执行 NMRPipe 工具。"""
 
     def run(
         self,
@@ -36,52 +91,75 @@ class CshRuntime:
         timeout: float = 3600,
         on_line: Callable[[str], None] | None = None,
     ) -> CompletedProcess:
-        """执行 csh 命令;on_line 非 None 时逐行转发 stdout(阶段日志实时可见)。"""
+        """执行 csh 命令;on_line 非 None 时逐行转发 stdout(阶段日志实时可见)。
+
+        进程以独立会话启动并注册到全局注册表,供停止按钮终止;
+        超时同样先杀进程树再返回(不残留)。
+        """
         shell = shutil_which_csh()
         if shell is None:
             raise ToolError("本机未找到 tcsh/csh（NMRPipe 脚本需要 C-shell）")
         parts = ["if (-e ~/.cshrc) source ~/.cshrc"]
         if cwd:
             parts.append(f"cd '{cwd}'")
-        # 管道符 | 保留为 shell 管道，其余参数转义（受控参数，安全）
+        # 管道符 | 保留为 shell 管道,其余参数转义（受控参数,安全）
         parts.append(" ".join(part if part == "|" else shlex.quote(part) for part in argv))
         command = "; ".join(parts)
         try:
-            if on_line is None:
-                proc = subprocess.run(
-                    [shell, "-c", command],
-                    capture_output=True,
-                    text=True,
-                    timeout=timeout,
-                    check=False,
-                )
-                return CompletedProcess(
-                    command, proc.stdout, proc.stderr, proc.returncode
-                )
             proc = subprocess.Popen(
                 [shell, "-c", command],
                 stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
+                stderr=subprocess.PIPE if on_line is None else subprocess.STDOUT,
                 text=True,
+                start_new_session=True,
             )
+        except OSError as exc:
+            raise ToolError(f"csh 执行失败: {exc}") from exc
+        with _LOCK:
+            _ACTIVE[proc.pid] = proc
+        try:
             assert proc.stdout is not None
             lines: list[str] = []
             for line in proc.stdout:
                 lines.append(line)
-                on_line(line.rstrip("\n"))
-            stdout = "".join(lines)
-            returncode = proc.wait(timeout=timeout)
-            return CompletedProcess(command, stdout, "", returncode)
-        except subprocess.TimeoutExpired as exc:
-            return CompletedProcess(
-                command,
-                exc.stdout or "",
-                f"命令超时（>{timeout:.0f}s）",
-                124,
-            )
-        except OSError as exc:
-            raise ToolError(f"csh 执行失败: {exc}") from exc
+                if on_line is not None:
+                    on_line(line.rstrip("\n"))
+            if proc.stderr is not None:
+                stderr = proc.stderr.read()
+            else:
+                stderr = ""
+            try:
+                returncode = proc.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                if proc.poll() is None:
+                    _kill_process_tree(proc)
+                    proc.wait()
+                return CompletedProcess(
+                    command,
+                    "".join(lines),
+                    f"命令超时（>{timeout:.0f}s）,已终止进程树",
+                    124,
+                )
+            with _LOCK:
+                if proc.pid in _USER_TERMINATED:
+                    _USER_TERMINATED.discard(proc.pid)
+                    raise TaskTerminatedError("任务已被用户停止")
+            return CompletedProcess(command, "".join(lines), stderr, returncode)
+        finally:
+            with _LOCK:
+                _ACTIVE.pop(proc.pid, None)
+                _USER_TERMINATED.discard(proc.pid)
 
 
 def shutil_which_csh() -> str | None:
     return shutil.which("tcsh") or shutil.which("csh")
+
+
+__all__ = [
+    "CompletedProcess",
+    "CshRuntime",
+    "TaskTerminatedError",
+    "ToolError",
+    "shutil_which_csh",
+    "terminate_current_tasks",
+]
