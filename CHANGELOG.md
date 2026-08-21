@@ -1,5 +1,18 @@
 # 修改记录(历史条目)
 
+## 0.2.154(2026-08-21,总管直接处理)
+
+- 移除旧逐维暴力相位优化(optimize_phase_brute_force),新版本不再携带:
+  0.2.146 移除相位途径下拉后,GUI 的 ProcessingController.generate_spectrum
+  在 params 无 phase_route 时仍会走旧「基础谱后逐维暴力相位优化」分支,
+  导致相位优化跑到最终 SMILE 之后重复执行;
+- gui/processing.py:删除该分支,生成谱图即统一自动处理(unified);
+- workflow/stepwise.py:删除 optimize_phase_brute_force 函数与导出;
+- 删除仅服务于旧优化的验证脚本 scripts/vm_validate_optimize_v2.py、
+  scripts/vm_diag_phase_lineshape.py;对应测试移除;
+- VM 复现 sampleC 确认 unified 顺序正确(第一遍 SMILE → 相位搜索 →
+  参数优化 → 终跑含最终 SMILE);本地全量 pytest + ruff 全绿。
+
 ## 0.2.153(2026-08-21,总管直接处理)
 
 - 显示方向规则(用户):3D 切片/投影二维谱横坐标优先级 H > N > C;

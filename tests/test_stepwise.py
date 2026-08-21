@@ -12,7 +12,6 @@ from workflow.stepwise import (
     StepwiseError,
     generate_fid,
     generate_spectrum,
-    optimize_phase_brute_force,
 )
 
 
@@ -346,31 +345,6 @@ def _score_from_path(path: str) -> tuple[float, dict[str, float]]:
     return 100.0 - abs(p1 - 30.0) - 0.02 * abs(p0), {"snr": 0.0}
 
 
-def test_optimize_phase_brute_force(tmp_path: Path, bruker_dir: Path) -> None:
-    """相位优化:先 SMILE 重构(生成谱),再逐候选反复跑后端(暴力)。"""
-    manager, exp_id, data_id, work = _manager_with_data(
-        tmp_path, bruker_dir / "hsqc_2d"
-    )
-    backend = _FakeBackend(work)
-    result = optimize_phase_brute_force(
-        manager,
-        exp_id,
-        data_id,
-        backend,
-        score_fn=_score_from_path,
-    )
-    assert result["method"] == "sequential_brute_force"
-    # 逐维暴力:直接维 F2 → 间接维 F1,各粗 21 候选 + 多尺度细化(默认 5°)
-    assert result["phase"]["F2"][1] == 30.0
-    assert result["phase"]["F1"][1] == 30.0
-    assert result["spectrum_path"].endswith("d_001.ft2")
-    assert backend.calls.count("process") >= 42
-    assert result["optimized"] == ["F1", "F2"]  # 0.2.75:均匀路径间接维先
-    assert result["skipped"] == []
-    data = manager.data(exp_id, data_id)
-    assert data.spectrum_path == result["spectrum_path"]
-    assert any(r.workflow_ref == "phase_optimize" for r in manager.project.workflow_runs)
-
 
 def test_read_experiment_prefers_raw_copy(
     tmp_path: Path, bruker_dir: Path
@@ -387,75 +361,4 @@ def test_read_experiment_prefers_raw_copy(
     assert exp.source_path == manager.root / raw_dir
     assert read_dataset(Path(result.raw_dir)).ndim == 2
 
-def test_optimize_phase_brute_force_embeds_baseline(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
-    """嵌入基线优化:最优谱内存内优化基线(0 次后端),配置变化时重渲 1 次。"""
-    import numpy as np
 
-    manager, exp_id, data_id, work = _manager_with_data(
-        tmp_path, bruker_dir / "hsqc_2d"
-    )
-
-    class _Ft2Backend(_FakeBackend):
-        def _touch(self, path: Path) -> None:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            # 曲率基线:auto(order 1)修不掉,order 2 能修 → 触发基线重渲
-            x = np.linspace(-1.0, 1.0, 64)
-            data = np.zeros((32, 64))
-            data += (x**2) * 120.0
-            from nmrglue.fileio import pipe
-
-            dic = {k: "0" for k in pipe.fdata_dic}
-            dic["FDMAGIC"] = 9.2330230000000007e14
-            dic["FDDIMCOUNT"] = 2
-            dic["FDSIZE"] = 64
-            dic["FDSPECNUM"] = 32
-            dic["FDQUADFLAG"] = 1
-            dic["FDF1QUADFLAG"] = 1
-            dic["FDF2QUADFLAG"] = 1
-            for prefix in ("FDF1", "FDF2"):
-                dic[prefix + "SW"] = "6000.0"
-                dic[prefix + "OBS"] = "600.0"
-                dic[prefix + "CAR"] = "4.7"
-                dic[prefix + "ORIG"] = "1000.0"
-            pipe.write(str(path), dic, data.astype(np.float32), overwrite=True)
-
-    backend = _Ft2Backend(work)
-    result = optimize_phase_brute_force(
-        manager, exp_id, data_id, backend, score_fn=_score_from_path
-    )
-    assert result["baseline"] is not None
-    assert "F2" in result["baseline"]["optimized"]  # 曲率 → order 2 校正
-    assert result["baseline"]["config"]["F2"]["mode"] == "order"
-    # 基线配置变化 → 以「最优相位+最优基线」重渲 1 次
-    assert backend.calls.count("process") >= 42 + 1
-    assert any("基线(嵌入)" in line for line in result["logs"])
-
-
-
-def test_optimize_phase_brute_force_candidates_none_final_auto(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
-    """0.2.87:相位候选零填零(none),最终生产渲染按完整填零计划(auto)。"""
-    manager, exp_id, data_id, work = _manager_with_data(
-        tmp_path, bruker_dir / "hsqc_2d"
-    )
-    backend = _FakeBackend(work)
-    optimize_phase_brute_force(
-        manager, exp_id, data_id, backend, score_fn=_score_from_path
-    )
-    zf_calls = [
-        p for p in backend.process_params if p and p.get("zero_fill")
-    ]
-    assert zf_calls, "应有候选/生产渲染调用"
-    # 候选阶段:至少一次调用全部轴 zero_fill=none(数据最小化)
-    assert any(
-        all(cfg.get("mode") == "none" for cfg in p["zero_fill"].values())
-        for p in zf_calls
-    )
-    # 生产终谱:最后一次带填零的渲染按完整计划(auto)执行(填零在优化最后)
-    assert all(
-        cfg.get("mode") == "auto"
-        for cfg in zf_calls[-1]["zero_fill"].values()
-    )

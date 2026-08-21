@@ -286,11 +286,11 @@ class ProcessingController:
     ) -> str:
         """第 3 步:生成谱图(process/reconstruct_nus,含 NUS SMILE 重构)。
 
-        params["phase_route"] 选择相位优化途径(0.2.108):
-        - "unified"(默认):统一方案(逐维复型预览 + 内存调相 + 完整终跑);
-        - "none":逃生口,直接 process/reconstruct_nus,跳过相位优化。
-        未传 params 时保持旧行为(基础谱 + phase_optimize 的逐维暴力
-        优化);phase_optimize=False 仅生成基础谱(调试/测试用)。
+        0.2.146 起生成谱图即统一自动处理(逐维复型预览 + 内存调相 +
+        参数优化 + 完整终跑,见 workflow/phase_routes.unified_route);
+        params 可选传 phase_route="unified"(默认)/"none"(逃生口)。
+        phase_optimize 参数保留仅为兼容调用方,不再叠加旧逐维暴力优化
+        (0.2.154 移除——该分支曾使相位优化在最终 SMILE 之后重复执行)。
         progress 可选回调:阶段进展。
         """
         import inspect
@@ -335,30 +335,14 @@ class ProcessingController:
             self._backend_instance(),
             **kwargs,
         )
+        # 0.2.154:生成谱图即统一自动处理(0.2.146 移除途径下拉后,params
+        # 无 phase_route 时旧分支曾再次触发逐维暴力相位优化,导致相位优化
+        # 跑到最终 SMILE 之后重复执行)——不再叠加任何后置相位优化。
         route = (params or {}).get("phase_route")
-        if route is not None:
-            # 0.2.108:相位优化途径由后端处理(unified 统一方案 / none
-            # 逃生口),不再叠加旧逐维暴力优化
-            label = {"unified": "Auto-optimize", "none": "None"}.get(
-                str(route), route
-            )
-            emit(f"基础谱图完成,相位优化途径: {label}")
-        elif phase_optimize:
-            emit("基础谱图完成,开始逐维相位优化")
-            from workflow.stepwise import optimize_phase_brute_force
-
-            opt = optimize_phase_brute_force(
-                self._manager,
-                exp_id,
-                data_id,
-                self._backend_instance(),
-            )
-            spectrum_path = str(opt.get("spectrum_path") or spectrum_path)
-            phases = opt.get("phase") or {}
-            state = "已优化" if opt.get("optimized") else "保持/门控回退"
-            emit(f"相位优化完成: {state} 相位 {phases}")
-        else:
-            emit("完成重构/处理,终谱已就位")
+        label = {"unified": "统一自动处理", "none": "None(逃生口)"}.get(
+            str(route), route or "统一自动处理"
+        )
+        emit(f"生成谱图完成,相位途径: {label}")
         if data_id:
             record_step_success(self._manager, exp_id, data_id, "spectrum")
             self._snapshot_step(

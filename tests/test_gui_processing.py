@@ -107,12 +107,6 @@ def test_generate_spectrum_passes_phase_route_params(
         "workflow.stepwise.generate_spectrum", fake_spectrum
     )
 
-    def boom(*args, **kwargs):
-        raise AssertionError("不应调用旧暴力优化")
-
-    monkeypatch.setattr(
-        "workflow.stepwise.optimize_phase_brute_force", boom
-    )
     path = controller.generate_spectrum(
         None,
         exp_id="exp_001",
@@ -140,12 +134,6 @@ def test_generate_spectrum_phase_route_none_skips_optimize(
         "workflow.stepwise.generate_spectrum", fake_spectrum
     )
 
-    def boom(*args, **kwargs):
-        raise AssertionError("不应调用旧暴力优化")
-
-    monkeypatch.setattr(
-        "workflow.stepwise.optimize_phase_brute_force", boom
-    )
     path = controller.generate_spectrum(
         None,
         exp_id="exp_001",
@@ -242,21 +230,14 @@ def test_save_peaks_manual_writes_list_and_registers_run(
 def test_generate_spectrum_reports_progress(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """生成谱图阶段进展经 progress 回调上报,并默认接相位优化。"""
+    """生成谱图阶段进展经 progress 回调上报(0.2.154:统一自动处理,
+    不再叠加旧暴力相位优化)。"""
     manager = _manager_with_experiment(tmp_path)
     data = manager.project.experiment("exp_001").data[0]
     messages: list[str] = []
     monkeypatch.setattr(
         "workflow.stepwise.generate_spectrum",
         lambda *args, **kwargs: "/tmp/x.ft2",
-    )
-    monkeypatch.setattr(
-        "workflow.stepwise.optimize_phase_brute_force",
-        lambda *args, **kwargs: {
-            "spectrum_path": "/tmp/opt.ft2",
-            "phase": {"F2": (0.0, -127.5), "F1": (60.0, 35.0)},
-            "optimized": True,
-        },
     )
     controller = ProcessingController(manager)
     path = controller.generate_spectrum(
@@ -265,17 +246,19 @@ def test_generate_spectrum_reports_progress(
         data_id="d_001",
         progress=messages.append,
     )
-    assert path == "/tmp/opt.ft2"
+    assert path == "/tmp/x.ft2"
     assert messages
     assert any("读取数据" in msg for msg in messages)
-    assert any("基础谱图完成" in msg for msg in messages)
-    assert any("相位优化完成" in msg for msg in messages)
+    assert any("生成谱图完成" in msg for msg in messages)
+    assert any("相位途径" in msg for msg in messages)
+    assert not any("相位优化完成" in msg for msg in messages)
 
 
 def test_generate_spectrum_phase_optimize_disabled(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """phase_optimize=False 只生成基础谱(调试路径)。"""
+    """phase_optimize 参数兼容保留:行为统一(0.2.154,不再有基础谱/
+    暴力优化之分,均走统一自动处理)。"""
     manager = _manager_with_experiment(tmp_path)
     data = manager.project.experiment("exp_001").data[0]
     messages: list[str] = []
@@ -292,7 +275,7 @@ def test_generate_spectrum_phase_optimize_disabled(
         phase_optimize=False,
     )
     assert path == "/tmp/x.ft2"
-    assert any("终谱已就位" in msg for msg in messages)
+    assert any("生成谱图完成" in msg for msg in messages)
     assert not any("相位优化完成" in msg for msg in messages)
 
 
