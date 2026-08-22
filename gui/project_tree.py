@@ -117,7 +117,7 @@ class _InlineRenameEditor(QWidget):
         self._edit.setMinimumWidth(180)
         self._edit.setStyleSheet(
             "QLineEdit { border: 1px solid #2c3e50; border-radius: 3px; "
-            "padding: 2px 6px; background: white; }"
+            "padding: 2px 6px; background: white; color: #222; }"
         )
         self._edit.installEventFilter(self)
         self._edit.editingFinished.connect(self._commit)

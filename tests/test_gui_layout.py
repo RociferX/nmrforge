@@ -1683,3 +1683,34 @@ def test_spectrum_param_report_shows_diagnostics_details() -> None:
     assert "直流偏置: 自动启用 POLY -time" in report
     assert "坏点: 已修复 3 处" in report
     assert "详见运行日志" not in report
+
+
+def test_main_window_topbar_buttons(
+    tmp_path: Path, qapp: QApplication
+) -> None:
+    """0.2.162-补11:主界面顶栏「导入数据」「数据组间分析」按钮与下拉。"""
+    from gui.main_window import MainWindow
+
+    manager = ProjectManager.create_project(tmp_path / "proj", "demo")
+    manager.create_experiment()
+    manager.save()
+    window = MainWindow(manager=manager)
+    assert window.import_button.text() == "导入数据"
+    assert window.group_analysis_button.text() == "数据组间分析"
+    window._open_import_dropdown()
+    assert window._import_dropdown is not None
+    assert window._import_dropdown.isVisible()
+    window._open_group_analysis_dropdown()
+    assert window._group_analysis_dropdown is not None
+    window.close()
+
+
+def test_rename_editor_text_color(qapp: QApplication) -> None:
+    """0.2.162-补11:重命名输入框白底黑字(修复文字不可见)。"""
+    from gui.project_tree import _InlineRenameEditor
+
+    editor = _InlineRenameEditor()
+    stylesheet = editor._edit.styleSheet()
+    assert "background: white" in stylesheet
+    assert "color: #222" in stylesheet
+    editor.close()

@@ -10,8 +10,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QPoint, Qt, pyqtSignal
 from PyQt6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QFileDialog,
     QGroupBox,
@@ -126,8 +127,10 @@ class ProjectDashboard(QWidget):
         self.create_experiment_requested.emit(self.title_edit.text().strip())
 
 
-class ExperimentDashboard(QWidget):
-    """实验类型概览:样品数据列表(状态)+ 导入样品数据表单。"""
+class ExperimentImportPanel(QWidget):
+    """导入数据面板:单个/分段/批量导入 + 链接选项(0.2.162-补11)。
+
+    实验类型页不再内联展示,由主界面「导入数据」按钮下拉弹出。"""
 
     import_options_requested = pyqtSignal(str, str, str, bool)  # (exp_id, name, source, copy)
     segmented_import_requested = pyqtSignal(str, str)  # (exp_id, 分段采集容器目录)
@@ -135,27 +138,9 @@ class ExperimentDashboard(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.manager: ProjectManager | None = None
         self._exp_id = ""
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 16, 16, 16)
-
-        title = QLabel("实验类型")
-        title.setStyleSheet("font-size: 15px; font-weight: bold; color: #2c3e50;")
-        layout.addWidget(title)
-        self.context_label = QLabel("")
-        layout.addWidget(self.context_label)
-        layout.addSpacing(8)
-
-        data_title = QLabel("样品数据")
-        data_title.setStyleSheet("font-weight: bold;")
-        layout.addWidget(data_title)
-        self.data_table = QTableWidget(0, 3)
-        self.data_table.setHorizontalHeaderLabels(["样品数据", "名称", "状态"])
-        self.data_table.horizontalHeader().setStretchLastSection(True)
-        self.data_table.setMaximumHeight(160)
-        layout.addWidget(self.data_table)
-        layout.addSpacing(10)
+        layout.setContentsMargins(0, 0, 0, 0)
 
         self.copy_check = QCheckBox("链接原始数据到项目(只读文件链接,必要时复制)")
         self.copy_check.setChecked(True)
@@ -243,29 +228,8 @@ class ExperimentDashboard(QWidget):
         layout.addWidget(self.batch_group)
         layout.addStretch(1)
 
-    def set_context(self, manager: ProjectManager, exp_id: str, label: str) -> None:
-        self.manager = manager
+    def set_context(self, exp_id: str) -> None:
         self._exp_id = exp_id
-        self.context_label.setText(f"{label} ({exp_id})" if exp_id else "")
-        self.refresh()
-
-    def refresh(self) -> None:
-        self.data_table.setRowCount(0)
-        if self.manager is None or self.manager.project is None or not self._exp_id:
-            return
-        exp = self.manager.project.experiment(self._exp_id)
-        if exp is None:
-            return
-        for data in exp.data:
-            row = self.data_table.rowCount()
-            self.data_table.insertRow(row)
-            self.data_table.setItem(row, 0, QTableWidgetItem(data.id))
-            self.data_table.setItem(
-                row, 1, QTableWidgetItem(getattr(data, "title", "") or "")
-            )
-            self.data_table.setItem(
-                row, 2, QTableWidgetItem(getattr(data, "status", "") or "")
-            )
 
     def _browse(self) -> None:
         path = QFileDialog.getExistingDirectory(
@@ -359,3 +323,202 @@ class ExperimentDashboard(QWidget):
         if not source:
             return
         self.segmented_import_requested.emit(self._exp_id, source)
+
+
+class ImportDataDropdown(QWidget):
+    """「导入数据」下拉面板:向下弹出,内含完整导入表单(0.2.162-补11)。"""
+
+    import_options_requested = pyqtSignal(str, str, str, bool)
+    segmented_import_requested = pyqtSignal(str, str)
+    batch_import_requested = pyqtSignal(str, list)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(
+            parent,
+            Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint,
+        )
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 8, 8, 8)
+        title = QLabel("导入样品数据")
+        title.setStyleSheet("font-size: 14px; font-weight: bold; color: #2c3e50;")
+        layout.addWidget(title)
+        self.panel = ExperimentImportPanel(self)
+        self.panel.import_options_requested.connect(self.import_options_requested.emit)
+        self.panel.segmented_import_requested.connect(
+            self.segmented_import_requested.emit
+        )
+        self.panel.batch_import_requested.connect(self.batch_import_requested.emit)
+        layout.addWidget(self.panel)
+        self.setMinimumWidth(560)
+
+    def open_below(self, anchor: QWidget, exp_id: str) -> None:
+        """在 anchor 按钮正下方弹出,屏幕边缘自动收进。"""
+        self.panel.set_context(exp_id)
+        pos = anchor.mapToGlobal(QPoint(0, anchor.height()))
+        screen = QApplication.screenAt(pos) or QApplication.primaryScreen()
+        if screen is not None:
+            geo = screen.availableGeometry()
+            x = min(
+                max(pos.x(), geo.left()),
+                max(geo.left(), geo.right() - self.width()),
+            )
+            y = min(
+                max(pos.y(), geo.top()),
+                max(geo.top(), geo.bottom() - self.height()),
+            )
+            pos = QPoint(x, y)
+        self.move(pos)
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+
+class GroupAnalysisDropdown(QWidget):
+    """「数据组间分析」下拉面板(占位,0.2.162-补11)。"""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(
+            parent,
+            Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint,
+        )
+        layout = QVBoxLayout(self)
+        label = QLabel("数据组间分析\n\n功能开发中,敬请期待")
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        label.setStyleSheet("padding: 24px 32px; color: #666;")
+        layout.addWidget(label)
+        self.setMinimumWidth(340)
+
+    def open_below(self, anchor: QWidget) -> None:
+        pos = anchor.mapToGlobal(QPoint(0, anchor.height()))
+        screen = QApplication.screenAt(pos) or QApplication.primaryScreen()
+        if screen is not None:
+            geo = screen.availableGeometry()
+            x = min(
+                max(pos.x(), geo.left()),
+                max(geo.left(), geo.right() - self.width()),
+            )
+            y = min(
+                max(pos.y(), geo.top()),
+                max(geo.top(), geo.bottom() - self.height()),
+            )
+            pos = QPoint(x, y)
+        self.move(pos)
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+
+class ExperimentDashboard(QWidget):
+    """实验类型概览:样品数据列表(状态);导入块已移入「导入数据」下拉(0.2.162-补11)。"""
+
+    import_options_requested = pyqtSignal(str, str, str, bool)  # (exp_id, name, source, copy)
+    segmented_import_requested = pyqtSignal(str, str)  # (exp_id, 分段采集容器目录)
+    batch_import_requested = pyqtSignal(str, list)  # (exp_id, folders)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.manager: ProjectManager | None = None
+        self._exp_id = ""
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 16, 16, 16)
+
+        title = QLabel("实验类型")
+        title.setStyleSheet("font-size: 15px; font-weight: bold; color: #2c3e50;")
+        layout.addWidget(title)
+        self.context_label = QLabel("")
+        layout.addWidget(self.context_label)
+        layout.addSpacing(8)
+
+        data_title = QLabel("样品数据")
+        data_title.setStyleSheet("font-weight: bold;")
+        layout.addWidget(data_title)
+        self.data_table = QTableWidget(0, 3)
+        self.data_table.setHorizontalHeaderLabels(["样品数据", "名称", "状态"])
+        self.data_table.horizontalHeader().setStretchLastSection(True)
+        self.data_table.setMaximumHeight(160)
+        layout.addWidget(self.data_table)
+        layout.addSpacing(10)
+
+        # 0.2.162-补11:导入块移入「导入数据」下拉面板,实验类型页不再内联展示
+        self.import_panel = ExperimentImportPanel(self)
+        self.import_panel.hide()
+        self.import_panel.import_options_requested.connect(
+            self.import_options_requested.emit
+        )
+        self.import_panel.segmented_import_requested.connect(
+            self.segmented_import_requested.emit
+        )
+        self.import_panel.batch_import_requested.connect(
+            self.batch_import_requested.emit
+        )
+        # 兼容旧测试/旧调用:表单控件与处理器转发到导入面板
+        self.copy_check = self.import_panel.copy_check
+        self.single_group = self.import_panel.single_group
+        self.name_edit = self.import_panel.name_edit
+        self.source_edit = self.import_panel.source_edit
+        self.import_button = self.import_panel.import_button
+        self.segmented_group = self.import_panel.segmented_group
+        self.segmented_source_edit = self.import_panel.segmented_source_edit
+        self.segmented_import_button = self.import_panel.segmented_import_button
+        self.batch_group = self.import_panel.batch_group
+        self.batch_list = self.import_panel.batch_list
+        self.batch_add_button = self.import_panel.batch_add_button
+        self.batch_clear_button = self.import_panel.batch_clear_button
+        self.batch_import_button = self.import_panel.batch_import_button
+        layout.addStretch(1)
+
+    def set_context(self, manager: ProjectManager, exp_id: str, label: str) -> None:
+        self.manager = manager
+        self._exp_id = exp_id
+        self.import_panel.set_context(exp_id)
+        self.context_label.setText(f"{label} ({exp_id})" if exp_id else "")
+        self.refresh()
+
+    def refresh(self) -> None:
+        self.data_table.setRowCount(0)
+        if self.manager is None or self.manager.project is None or not self._exp_id:
+            return
+        exp = self.manager.project.experiment(self._exp_id)
+        if exp is None:
+            return
+        for data in exp.data:
+            row = self.data_table.rowCount()
+            self.data_table.insertRow(row)
+            self.data_table.setItem(row, 0, QTableWidgetItem(data.id))
+            self.data_table.setItem(
+                row, 1, QTableWidgetItem(getattr(data, "title", "") or "")
+            )
+            self.data_table.setItem(
+                row, 2, QTableWidgetItem(getattr(data, "status", "") or "")
+            )
+
+    def _browse(self) -> None:
+        self.import_panel._browse()
+
+    def _on_batch_add_folder(self) -> None:
+        self.import_panel._on_batch_add_folder()
+
+    @staticmethod
+    def _bruker_datasets_under(root: Path) -> list[Path]:
+        return ExperimentImportPanel._bruker_datasets_under(root)
+
+    def _on_batch_clear(self) -> None:
+        self.import_panel._on_batch_clear()
+
+    def _on_batch_import(self) -> None:
+        self.import_panel.set_context(self._exp_id)
+        self.import_panel._on_batch_import()
+
+    def _on_import(self) -> None:
+        self.import_panel.set_context(self._exp_id)
+        self.import_panel._on_import()
+
+    def clear_import_form(self) -> None:
+        self.import_panel.clear_import_form()
+
+    def _on_segmented_browse(self) -> None:
+        self.import_panel._on_segmented_browse()
+
+    def _on_segmented_import(self) -> None:
+        self.import_panel.set_context(self._exp_id)
+        self.import_panel._on_segmented_import()

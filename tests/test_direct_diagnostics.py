@@ -99,7 +99,7 @@ def test_parse_real_fid_layout(tmp_path: Path, exp_fixture) -> None:
 
 def test_dc_offset_enables_poly_time(tmp_path: Path, exp_fixture) -> None:
     """显著直流偏置:自动启用 POLY -time 并报告。"""
-    fid = _stage(tmp_path, synthetic=True, dc_amp=0.6)
+    _stage(tmp_path, synthetic=True, dc_amp=0.6)
     res = run_direct_diagnostics(tmp_path, exp_fixture)
     assert isinstance(res, DirectDiagnosticsResult)
     assert res.apply_poly_time is True
@@ -109,7 +109,7 @@ def test_dc_offset_enables_poly_time(tmp_path: Path, exp_fixture) -> None:
 
 def test_dc_small_stays_off(tmp_path: Path, exp_fixture) -> None:
     """去直流后的数据:不启用 POLY -time。"""
-    fid = _stage(tmp_path, synthetic=True)
+    _stage(tmp_path, synthetic=True)
     res = run_direct_diagnostics(tmp_path, exp_fixture)
     assert res.apply_poly_time is False
 
@@ -140,7 +140,7 @@ def test_badpoint_repaired_with_backup(tmp_path: Path, exp_fixture) -> None:
 
 
 def test_repair_false_leaves_data(tmp_path: Path, exp_fixture) -> None:
-    fid = _stage(tmp_path, synthetic=True, spike=(-1, 200, 40.0))
+    _stage(tmp_path, synthetic=True, spike=(-1, 200, 40.0))
     res = run_direct_diagnostics(tmp_path, exp_fixture, repair=False)
     assert res.repaired_badpoints == 0
     assert not (tmp_path / "fid_diag_bak").exists()

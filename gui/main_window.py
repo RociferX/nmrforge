@@ -20,9 +20,11 @@ from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (
     QApplication,
     QFileDialog,
+    QHBoxLayout,
     QLabel,
     QMainWindow,
     QMenu,
+    QPushButton,
     QSplitter,
     QTreeWidget,
     QTreeWidgetItem,
@@ -118,9 +120,8 @@ class MainWindow(QMainWindow):
         屏幕比 1920 窄时窗口收窄到可用宽,列由 QSplitter 自动分配
         (用户仍可自由拖拽每列长宽)。
         """
-        from PyQt6.QtGui import QGuiApplication
-
         from PyQt6.QtCore import QRect
+        from PyQt6.QtGui import QGuiApplication
 
         cols = [420, 600, 300, 600]
         screen = self.screen() or QGuiApplication.primaryScreen()
@@ -275,6 +276,22 @@ class MainWindow(QMainWindow):
             "background: #ecf0f1; padding: 4px 10px; "
             "font-weight: bold; color: #2c3e50;"
         )
+        # 0.2.162-补11:主界面顶栏——导入数据(下拉)+ 数据组间分析(占位)
+        action_bar = QWidget()
+        action_layout = QHBoxLayout(action_bar)
+        action_layout.setContentsMargins(8, 4, 8, 2)
+        self.import_button = QPushButton("导入数据")
+        self.import_button.clicked.connect(self._open_import_dropdown)
+        action_layout.addWidget(self.import_button)
+        self.group_analysis_button = QPushButton("数据组间分析")
+        self.group_analysis_button.clicked.connect(
+            self._open_group_analysis_dropdown
+        )
+        action_layout.addWidget(self.group_analysis_button)
+        action_layout.addStretch(1)
+        self._import_dropdown = None
+        self._group_analysis_dropdown = None
+        central_layout.addWidget(action_bar)
         # 0.2.141:日志为中间竖列(水平分隔条内),不再占用底部高度
         central_layout.addWidget(self.context_bar)
         central_layout.addWidget(self.main_splitter, 1)
@@ -653,6 +670,8 @@ class MainWindow(QMainWindow):
                     pass
         # 0.2.112:导入成功后清空导入表单(名称/路径),便于连续导入
         self.center_panel.experiment_page.clear_import_form()
+        if self._import_dropdown is not None:
+            self._import_dropdown.panel.clear_import_form()
         self.refresh()
         if exp_id:
             self.project_tree.select_experiment(exp_id)
@@ -1217,6 +1236,35 @@ class MainWindow(QMainWindow):
         data = dialog.result_data()
         data["experiment_id"] = exp_id
         self._import_experiment_async(data)
+
+    def _open_import_dropdown(self) -> None:
+        """主界面「导入数据」:向下弹出导入表单下拉(0.2.162-补11)。"""
+        if self.manager.project is None:
+            InfoDialog.show_info(self, "提示", "请先新建或打开项目")
+            return
+        from gui.dashboards import ImportDataDropdown
+
+        if self._import_dropdown is None:
+            self._import_dropdown = ImportDataDropdown(self)
+            self._import_dropdown.import_options_requested.connect(
+                self._import_data_with_options
+            )
+            self._import_dropdown.segmented_import_requested.connect(
+                self._segmented_import
+            )
+            self._import_dropdown.batch_import_requested.connect(
+                self._batch_import
+            )
+        exp_id = self.project_tree.current_experiment_id() or ""
+        self._import_dropdown.open_below(self.import_button, exp_id)
+
+    def _open_group_analysis_dropdown(self) -> None:
+        """主界面「数据组间分析」:占位下拉(0.2.162-补11)。"""
+        from gui.dashboards import GroupAnalysisDropdown
+
+        if self._group_analysis_dropdown is None:
+            self._group_analysis_dropdown = GroupAnalysisDropdown(self)
+        self._group_analysis_dropdown.open_below(self.group_analysis_button)
 
     def _on_data_action(self, action: str, data_id: str) -> None:
         """样品数据右键三步操作:生成 FID / 生成谱图 / 删除样品数据。"""

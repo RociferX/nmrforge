@@ -257,7 +257,8 @@ def test_experiment_dashboard_segmented_between_single_and_batch(
     page = ExperimentDashboard()
     assert isinstance(page.segmented_group, QGroupBox)
     assert page.segmented_group.title() == "分段采集导入(合并 FID)"
-    layout = page.layout()
+    # 0.2.162-补11:导入块在 import_panel 内(实验类型页不再内联展示)
+    layout = page.import_panel.layout()
     assert layout.indexOf(page.single_group) < layout.indexOf(page.segmented_group)
     assert layout.indexOf(page.segmented_group) < layout.indexOf(page.batch_group)
     emitted: list[tuple[str, str]] = []
@@ -265,8 +266,8 @@ def test_experiment_dashboard_segmented_between_single_and_batch(
         lambda exp_id, source: emitted.append((exp_id, source))
     )
     page.segmented_source_edit.setText("/data/container")
-    page._exp_id = "exp_003"
-    page._on_segmented_import()
+    page.import_panel._exp_id = "exp_003"
+    page.import_panel._on_segmented_import()
     assert emitted == [("exp_003", "/data/container")]
     page.close()
 
@@ -358,7 +359,7 @@ def test_experiment_dashboard_copy_check_above_groups(
     from gui.dashboards import ExperimentDashboard
 
     page = ExperimentDashboard()
-    layout = page.layout()
+    layout = page.import_panel.layout()
     assert layout.indexOf(page.copy_check) < layout.indexOf(page.single_group)
     assert layout.indexOf(page.single_group) < layout.indexOf(page.segmented_group)
     assert layout.indexOf(page.segmented_group) < layout.indexOf(page.batch_group)
@@ -379,3 +380,32 @@ def test_experiment_dashboard_clear_import_form(qapp: QApplication) -> None:
     assert page.source_edit.text() == ""
     assert page.segmented_source_edit.text() == ""
     page.close()
+
+
+def test_import_data_dropdown_panel(qapp: QApplication) -> None:
+    """0.2.162-补11:「导入数据」下拉含完整导入面板并转发信号。"""
+    from gui.dashboards import ImportDataDropdown
+
+    dd = ImportDataDropdown()
+    assert dd.panel.single_group.title() == "单个导入"
+    assert dd.panel.segmented_group.title() == "分段采集导入(合并 FID)"
+    assert dd.panel.batch_group.title() == "批量处理"
+    emitted: list[tuple] = []
+    dd.import_options_requested.connect(lambda *a: emitted.append(a))
+    dd.panel.set_context("exp_1")
+    dd.panel.source_edit.setText("/data/a")
+    dd.panel._on_import()
+    assert emitted and emitted[0][0] == "exp_1"
+    dd.close()
+
+
+def test_group_analysis_dropdown_placeholder(qapp: QApplication) -> None:
+    """0.2.162-补11:数据组间分析下拉为占位。"""
+    from PyQt6.QtWidgets import QLabel
+
+    from gui.dashboards import GroupAnalysisDropdown
+
+    dd = GroupAnalysisDropdown()
+    labels = dd.findChildren(QLabel)
+    assert any("功能开发中" in label.text() for label in labels)
+    dd.close()

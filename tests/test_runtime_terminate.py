@@ -11,8 +11,6 @@ import subprocess
 import sys
 import time
 
-import pytest
-
 from backend.runtime import (
     _ACTIVE,
     _LOCK,
@@ -21,7 +19,7 @@ from backend.runtime import (
 
 
 def _spawn_sleeper(seconds: int = 120) -> subprocess.Popen:
-    code = "import time; time.sleep(%d)" % seconds
+    code = f"import time; time.sleep({seconds})"
     # start_new_session 与 CshRuntime 保持一致(独立进程组,便于整树终止)
     return subprocess.Popen(
         [sys.executable, "-c", code],

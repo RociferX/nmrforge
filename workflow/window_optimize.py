@@ -163,7 +163,6 @@ def optimize_direct_window(
     order = np.argsort(energy)[::-1]
     keep = min(max(int(np.ceil(order.size * 0.1)), 4), 12)
     picked = traces[order[:keep]]
-    freq = np.arange(n_zf, dtype=int)
     measured: list[WindowChoice] = []
     for cfg in cands:
         win = _window_vector(cfg, n_direct)

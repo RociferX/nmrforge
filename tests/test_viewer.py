@@ -432,6 +432,7 @@ def test_viewer_drag_1d_updates_readout(qapp: QApplication) -> None:
 def test_scene_mouse_event_kind_maps_graphics_types(qapp: QApplication) -> None:
     """0.2.148:pyqtgraph 场景着重事件类型 GraphicsSceneMouse* 必须认为按住/移动。"""
     from PyQt6.QtCore import QEvent
+
     from viewer.spectrum_viewer import SpectrumViewer
 
     viewer = SpectrumViewer()
@@ -530,8 +531,8 @@ def test_slice_point_and_ppm_editable(qapp: QApplication) -> None:
     """0.2.149:切片 point / ppm 可输入,与滑块三向同步。"""
     import numpy as np
 
-    from viewer.spectrum3d_panel import Spectrum3DPanel
     from viewer.spectrum import Spectrum3D, SpectrumAxis
+    from viewer.spectrum3d_panel import Spectrum3DPanel
 
     axes = [
         SpectrumAxis(label="H", size=24, sw_hz=3000.0, obs_mhz=500.0,

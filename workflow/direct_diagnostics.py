@@ -132,13 +132,13 @@ def _trace_metrics(
     pk = int(np.median(p_side))
     peak = avg[pk]
     half = peak / 2
-    l = pk
-    while l > 0 and avg[l] > half:
-        l -= 1
+    left = pk
+    while left > 0 and avg[left] > half:
+        left -= 1
     r = pk
     while r < n_pad - 1 and avg[r] > half:
         r += 1
-    fwhm_pts = max(float(r - l), 1.0)
+    fwhm_pts = max(float(r - left), 1.0)
     broad = fwhm_pts / n_pad > BROAD_PEAK_FRACTION
     med_amp = np.median(np.abs(top), axis=0)
     first_ratio = (
