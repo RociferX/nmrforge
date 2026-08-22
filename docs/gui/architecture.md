@@ -19,8 +19,8 @@
 - GUI 只通过 ProcessingController(gui/processing.py)触达后端,禁止直接
   import backend/workflow 细节;
 - 不使用 QMessageBox(Windows+Qt6 鼠标抓取警告),统一自定义 QDialog;
-- 3D 轴序:终谱存储序 (F2,F3,F1);加载时按 FDF LABEL/OBS + metadata 重排到
-  逻辑序,标签与 ppm 轴必须一一对应(0.2.122);
+- 3D 轴序:终谱存储序 (F2,F3,F1);加载时按 FDDIMORDER 建立数据轴→FDF
+  块映射并重排到逻辑序(0.2.151),标签与 ppm 轴必须一一对应;
 - 谱图面板按数据级 spectra/ 目录扫描 .ft2/.ft3(0.2.112),不假设文件名前缀。
 
 ## 接口
