@@ -1571,6 +1571,8 @@ def test_rename_editor_appears_at_click_position(
 
     manager = _manager_with_experiment(tmp_path, monkeypatch)
     window = MainWindow(manager=manager)
+    window.show()
+    QApplication.processEvents()
     panel = window.project_tree
     exp_item = panel.tree.topLevelItem(0).child(0).child(0)
     anchor = panel.tree.viewport().mapToGlobal(QPoint(30, 10))
@@ -1578,7 +1580,10 @@ def test_rename_editor_appears_at_click_position(
     panel._begin_rename("experiment", exp_item, anchor)
     editor = panel._rename_editor
     assert editor.isVisible()
-    assert editor.pos() == anchor  # 输入框出现在右键位置(未越出屏幕)
+    # 0.2.163-补4:内嵌子部件,位置为相对树面板坐标(面板过窄时右缘收进)
+    expected = panel.mapFromGlobal(anchor)
+    assert editor.pos().y() == expected.y()
+    assert 0 <= editor.pos().x() <= max(0, panel.width() - editor.width())
     editor._edit.setText("HNCACB2")
     editor._commit()
     assert manager.project is not None
@@ -1595,6 +1600,8 @@ def test_context_menu_rename_opens_inline_editor(
 
     manager = _manager_with_experiment(tmp_path, monkeypatch)
     panel = ProjectTreePanel(manager)
+    panel.show()
+    QApplication.processEvents()
     assert not panel._rename_editor.isVisible()  # 默认不显示(0.2.112 回归)
     project_item = panel.tree.topLevelItem(0).child(0)
     menu = QMenu()
@@ -1793,10 +1800,12 @@ def test_experiment_page_dropdown_not_covering_button(
     manager.create_experiment()
     manager.save()
     window = MainWindow(manager=manager)
+    window.show()
+    QApplication.processEvents()
     page = window.center_panel.experiment_page
     btn = page.import_dropdown_button
-    btn_top = btn.mapToGlobal(QPoint(0, 0)).y()
-    btn_bottom = btn.mapToGlobal(QPoint(0, btn.height())).y()
+    btn_top = btn.mapTo(window, QPoint(0, 0)).y()
+    btn_bottom = btn.mapTo(window, QPoint(0, btn.height())).y()
     page._open_import_dropdown()
     drop = page._import_dropdown
     assert drop.isVisible()
@@ -1810,17 +1819,14 @@ def test_experiment_page_dropdown_not_covering_button(
     )
     assert not covering, msg
     # 高度受限:不超过屏幕可用高度,且出现滚动区(内容过长时)
-    from PyQt6.QtWidgets import QApplication as _QApp
-
-    geo = _QApp.primaryScreen().availableGeometry()
-    assert drop.height() <= geo.height()
+    assert drop.height() <= window.height()
     assert hasattr(drop, "_scroll") and drop._scroll.isVisible()
     # 数据组间分析下拉同样不遮按钮
     page._open_group_analysis_dropdown()
     gdrop = page._group_analysis_dropdown
     gbtn = page.group_analysis_button
-    gbtn_top = gbtn.mapToGlobal(QPoint(0, 0)).y()
-    gbtn_bottom = gbtn.mapToGlobal(QPoint(0, gbtn.height())).y()
+    gbtn_top = gbtn.mapTo(window, QPoint(0, 0)).y()
+    gbtn_bottom = gbtn.mapTo(window, QPoint(0, gbtn.height())).y()
     covering_g = gdrop.pos().y() < gbtn_bottom and (
         gdrop.pos().y() + gdrop.height() > gbtn_top
     )
@@ -1838,22 +1844,22 @@ def test_experiment_page_dropdown_switch(
     manager.create_experiment()
     manager.save()
     window = MainWindow(manager=manager)
+    window.show()
+    QApplication.processEvents()
     page = window.center_panel.experiment_page
     page._open_import_dropdown()
     assert page._import_dropdown.isVisible()
     # 0.2.162-补14:下拉应在按钮正下方(先 show 再 move)
     from PyQt6.QtCore import QPoint
 
-    expected = page.import_dropdown_button.mapToGlobal(
-        QPoint(0, page.import_dropdown_button.height())
+    # 0.2.163-补4:下拉为主窗口覆盖子部件,位置相对主窗口(Qt 自己控制)
+    expected = page.import_dropdown_button.mapTo(
+        window, QPoint(0, page.import_dropdown_button.height())
     )
     drop = page._import_dropdown
     assert drop.pos().x() == expected.x()  # 与按钮左缘对齐
-    assert drop.pos().y() <= expected.y()  # 在按钮下方(仅可能因屏幕下缘上收)
-    from PyQt6.QtWidgets import QApplication as _QApp
-
-    geo = _QApp.primaryScreen().availableGeometry()
-    assert drop.pos().y() + drop.height() <= geo.bottom() + 1
+    assert drop.pos().y() >= expected.y() - 1  # 在按钮下方
+    assert drop.pos().y() + drop.height() <= window.height() + 1
     # 点「数据组间分析」:一次调用即切换(导入关闭 + 组间分析打开)
     page._open_group_analysis_dropdown()
     assert not page._import_dropdown.isVisible()
