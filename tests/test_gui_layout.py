@@ -1781,6 +1781,53 @@ def test_rename_editor_text_color(qapp: QApplication) -> None:
     editor.close()
 
 
+def test_experiment_page_dropdown_not_covering_button(
+    tmp_path: Path, qapp: QApplication
+) -> None:
+    """0.2.163-补3:下拉过长时限制高度加滚动条,且不遮住触发按钮。"""
+    from PyQt6.QtCore import QPoint
+
+    from gui.main_window import MainWindow
+
+    manager = ProjectManager.create_project(tmp_path / "proj", "demo")
+    manager.create_experiment()
+    manager.save()
+    window = MainWindow(manager=manager)
+    page = window.center_panel.experiment_page
+    btn = page.import_dropdown_button
+    btn_top = btn.mapToGlobal(QPoint(0, 0)).y()
+    btn_bottom = btn.mapToGlobal(QPoint(0, btn.height())).y()
+    page._open_import_dropdown()
+    drop = page._import_dropdown
+    assert drop.isVisible()
+    # 下拉不遮按钮:要么在按钮下方(顶部 >= 按钮底部),要么完全在按钮上方
+    covering = drop.pos().y() < btn_bottom and (
+        drop.pos().y() + drop.height() > btn_top
+    )
+    msg = (
+        f"下拉 {drop.pos().y()}..{drop.pos().y() + drop.height()}"
+        f" 遮住按钮 {btn_top}..{btn_bottom}"
+    )
+    assert not covering, msg
+    # 高度受限:不超过屏幕可用高度,且出现滚动区(内容过长时)
+    from PyQt6.QtWidgets import QApplication as _QApp
+
+    geo = _QApp.primaryScreen().availableGeometry()
+    assert drop.height() <= geo.height()
+    assert hasattr(drop, "_scroll") and drop._scroll.isVisible()
+    # 数据组间分析下拉同样不遮按钮
+    page._open_group_analysis_dropdown()
+    gdrop = page._group_analysis_dropdown
+    gbtn = page.group_analysis_button
+    gbtn_top = gbtn.mapToGlobal(QPoint(0, 0)).y()
+    gbtn_bottom = gbtn.mapToGlobal(QPoint(0, gbtn.height())).y()
+    covering_g = gdrop.pos().y() < gbtn_bottom and (
+        gdrop.pos().y() + gdrop.height() > gbtn_top
+    )
+    assert not covering_g
+    window.close()
+
+
 def test_experiment_page_dropdown_switch(
     tmp_path: Path, qapp: QApplication
 ) -> None:

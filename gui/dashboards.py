@@ -17,12 +17,14 @@ from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
     QFileDialog,
+    QFrame,
     QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QListWidget,
     QPushButton,
+    QScrollArea,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -345,6 +347,37 @@ def _dropdown_window_flags() -> Qt.WindowType:
     return flags
 
 
+def _dropdown_geometry(
+    anchor: QWidget,
+    natural_h: int,
+    width: int,
+    margin: int = 8,
+) -> tuple[QPoint, int]:
+    """计算下拉位置与最大高度:优先放按钮正下方,下方不够则放上方,
+    保证不遮住触发按钮;高度超过可用空间时截断(由滚动条承载)。
+
+    返回 (pos, max_height)。
+    """
+    anchor_top = anchor.mapToGlobal(QPoint(0, 0)).y()
+    anchor_bottom = anchor.mapToGlobal(QPoint(0, anchor.height())).y()
+    screen = QApplication.screenAt(anchor.mapToGlobal(QPoint(0, 0)))
+    screen = screen or QApplication.primaryScreen()
+    geo = screen.availableGeometry() if screen is not None else None
+    if geo is None:
+        return QPoint(anchor.mapToGlobal(QPoint(0, anchor.height()))), natural_h
+    below = geo.bottom() - anchor_bottom - margin
+    above = anchor_top - geo.top() - margin
+    target_h = min(natural_h, max(below, above, margin))
+    if below >= target_h:
+        y = anchor_bottom
+    else:
+        y = anchor_top - target_h
+    x = anchor.mapToGlobal(QPoint(0, 0)).x()
+    x = min(max(x, geo.left()), max(geo.left(), geo.right() - width))
+    y = min(max(y, geo.top()), max(geo.top(), geo.bottom() - target_h))
+    return QPoint(x, y), target_h
+
+
 class ImportDataDropdown(QWidget):
     """「导入数据」下拉面板:向下弹出,内含完整导入表单(0.2.162-补11)。"""
 
@@ -369,34 +402,32 @@ class ImportDataDropdown(QWidget):
             self.segmented_import_requested.emit
         )
         self.panel.batch_import_requested.connect(self.batch_import_requested.emit)
-        layout.addWidget(self.panel)
+        self._scroll = QScrollArea()
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self._scroll.setWidget(self.panel)
+        layout.addWidget(self._scroll, 1)
         self.setMinimumWidth(560)
 
     def open_below(self, anchor: QWidget, exp_id: str) -> None:
-        """在 anchor 按钮正下方弹出,屏幕边缘自动收进。"""
+        """在 anchor 按钮正下方弹出,过长时加滚动条且不遮按钮。"""
         self._anchor = anchor
         if self._app is not None:
             self._app.installEventFilter(self)
         self.panel.set_context(exp_id)
-        self.show()  # 先 show:隐藏窗口的 move 可能被解释为相对父窗口坐标(0.2.162-补14)
-        self.adjustSize()
-        # Wayland:Popup 必须挂 transientParent(锚点顶层窗口),合成器按
-        # xdg_popup positioner 定位;父窗口需已接收输入(按钮点击即满足)
+        # Wayland:xdg_popup 创建时要求 transientParent 已设置,必须先挂
+        # 再 show(合成器按 positioner 定位);X11/Windows Tool 窗口则
+        # 先 show 再 move(0.2.162-补14:隐藏窗口 move 被解释为相对父窗口)
         if self.windowFlags() & Qt.WindowType.Popup:
             self._set_transient_parent(anchor)
-        pos = anchor.mapToGlobal(QPoint(0, anchor.height()))
-        screen = QApplication.screenAt(pos) or QApplication.primaryScreen()
-        if screen is not None:
-            geo = screen.availableGeometry()
-            x = min(
-                max(pos.x(), geo.left()),
-                max(geo.left(), geo.right() - self.width()),
-            )
-            y = min(
-                max(pos.y(), geo.top()),
-                max(geo.top(), geo.bottom() - self.height()),
-            )
-            pos = QPoint(x, y)
+        self.setMaximumHeight(16777215)  # 重置上次限制,重新取自然高度
+        self.show()  # 先 show:隐藏窗口的 move 可能被解释为相对父窗口坐标(0.2.162-补14)
+        self.adjustSize()
+        pos, max_h = _dropdown_geometry(
+            anchor, self.sizeHint().height(), self.width()
+        )
+        self.setMaximumHeight(max_h)
+        self.adjustSize()
         self.move(pos)
         self.raise_()
         self.activateWindow()
@@ -417,7 +448,10 @@ class ImportDataDropdown(QWidget):
             ):
                 return False  # 锚点按钮:交给按钮处理(开关/切换)
             if not self.geometry().contains(pos):
-                self.close()
+                # Wayland xdg_popup 抓取式,点击外部由合成器原生关闭;
+                # 手动 close 会与 dismiss 竞态导致卡死,仅非 Popup(Tool)关闭
+                if not (self.windowFlags() & Qt.WindowType.Popup):
+                    self.close()
         return False
 
     def hideEvent(self, event) -> None:
@@ -460,6 +494,7 @@ class GroupAnalysisDropdown(QWidget):
         self.setMinimumWidth(340)
 
     def open_below(self, anchor: QWidget) -> None:
+        """在 anchor 按钮正下方弹出,过长时加滚动条且不遮按钮。"""
         self._anchor = anchor
         if self._app is not None:
             self._app.installEventFilter(self)
@@ -468,21 +503,14 @@ class GroupAnalysisDropdown(QWidget):
         # 先 show 再 move(0.2.162-补14:隐藏窗口 move 被解释为相对父窗口)
         if self.windowFlags() & Qt.WindowType.Popup:
             self._set_transient_parent(anchor)
+        self.setMaximumHeight(16777215)  # 重置上次限制,重新取自然高度
         self.show()  # 先 show:隐藏窗口的 move 可能被解释为相对父窗口坐标(0.2.162-补14)
         self.adjustSize()
-        pos = anchor.mapToGlobal(QPoint(0, anchor.height()))
-        screen = QApplication.screenAt(pos) or QApplication.primaryScreen()
-        if screen is not None:
-            geo = screen.availableGeometry()
-            x = min(
-                max(pos.x(), geo.left()),
-                max(geo.left(), geo.right() - self.width()),
-            )
-            y = min(
-                max(pos.y(), geo.top()),
-                max(geo.top(), geo.bottom() - self.height()),
-            )
-            pos = QPoint(x, y)
+        pos, max_h = _dropdown_geometry(
+            anchor, self.sizeHint().height(), self.width()
+        )
+        self.setMaximumHeight(max_h)
+        self.adjustSize()
         self.move(pos)
         self.raise_()
         self.activateWindow()
@@ -503,7 +531,10 @@ class GroupAnalysisDropdown(QWidget):
             ):
                 return False
             if not self.geometry().contains(pos):
-                self.close()
+                # Wayland xdg_popup 抓取式,点击外部由合成器原生关闭;
+                # 手动 close 会与 dismiss 竞态导致卡死,仅非 Popup(Tool)关闭
+                if not (self.windowFlags() & Qt.WindowType.Popup):
+                    self.close()
         return False
 
     def hideEvent(self, event) -> None:
