@@ -192,11 +192,14 @@ class ProcessingController:
             copy=copy,
         )
 
-    def batch_import(self, exp_id: str, folders: list) -> dict:
-        """批量导入多个数据目录到实验类型,同一批样品数据标记同一 batch_id。
+    def batch_import(
+        self, exp_id: str, folders: list, group: bool = True
+    ) -> dict:
+        """批量导入多个数据目录到实验类型;group=True 同一批标记同一 batch_id。
 
-        返回 {"batch_id", "results": [{folder, data_id, ok, error}]};
-        单个目录失败不阻断整批(结果中带 error 信息)。
+        group=False 不成组(相当于多个单次导入,batch_id 为空);返回
+        {"batch_id", "results": [{folder, data_id, ok, error}]};单个目录
+        失败不阻断整批(结果中带 error 信息,0.2.162-补12)。
         """
         from gui.pipeline_state import next_batch_id, set_batch_id
 
@@ -219,14 +222,14 @@ class ProcessingController:
                 result = self.import_data(entry, str(folder))
                 data_id = str(result.get("data_id", "") or "")
                 item["data_id"] = data_id
-                if data_id:
+                if data_id and group:
                     set_batch_id(self._manager, exp_id, data_id, batch)
                 item["ok"] = True
             except Exception as exc:  # noqa: BLE001 - 单个失败不阻断整批
                 item["error"] = f"{type(exc).__name__}: {exc}"
             results.append(item)
         self._manager.save()
-        return {"batch_id": batch, "results": results}
+        return {"batch_id": batch if group else "", "results": results}
 
     def generate_fid(
         self,

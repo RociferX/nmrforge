@@ -57,7 +57,7 @@ def _manager_with_artifacts(tmp_path: Path):
 
 
 def _record_all(manager: ProjectManager, exp_id: str, data_id: str) -> None:
-    for step in ("import", "fid", "spectrum", "smile", "peaks", "analysis"):
+    for step in ("fid", "spectrum", "smile", "peaks", "analysis"):
         record_step_success(manager, exp_id, data_id, step)
 
 
@@ -136,7 +136,7 @@ def test_statuses_success_without_state(
     """旧数据(无指纹状态):产物存在即 SUCCESS,不误判 OUTDATED。"""
     manager, exp_id, _data_id, _artifacts = _manager_with_artifacts(tmp_path)
     statuses = compute_step_statuses(manager, exp_id)
-    for step in ("import", "fid", "spectrum", "peaks", "analysis"):
+    for step in ("fid", "spectrum", "peaks", "analysis"):
         assert statuses[step] == "SUCCESS"
 
 
@@ -152,7 +152,6 @@ def test_upstream_regen_marks_downstream_outdated(
     artifacts["ft2"].write_bytes(b"ft2-v2")
     record_step_success(manager, exp_id, data_id, "spectrum")
     statuses = compute_step_statuses(manager, exp_id)
-    assert statuses["import"] == "SUCCESS"
     assert statuses["fid"] == "SUCCESS"
     assert statuses["spectrum"] == "SUCCESS"
     assert statuses["peaks"] == "OUTDATED"
@@ -170,16 +169,15 @@ def test_upstream_regen_marks_downstream_outdated(
     assert statuses["analysis"] == "OUTDATED"
 
 
-def test_raw_change_marks_import_fid_outdated_and_propagates(
+def test_raw_change_marks_fid_outdated_and_propagates(
     tmp_path: Path, qapp: QApplication
 ) -> None:
-    """原始数据变化 → 导入/FID OUTDATED,并沿依赖传播到下游。"""
+    """原始数据变化 → FID OUTDATED,并沿依赖传播到下游。"""
     manager, exp_id, data_id, _artifacts = _manager_with_artifacts(tmp_path)
     _record_all(manager, exp_id, data_id)
     meta = manager.data_metadata_path(exp_id, data_id)
     meta.write_text("changed", encoding="utf-8")
     statuses = compute_step_statuses(manager, exp_id)
-    assert statuses["import"] == "OUTDATED"
     assert statuses["fid"] == "OUTDATED"
     assert statuses["spectrum"] == "OUTDATED"
     assert statuses["peaks"] == "OUTDATED"

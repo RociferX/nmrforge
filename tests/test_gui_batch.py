@@ -409,3 +409,40 @@ def test_group_analysis_dropdown_placeholder(qapp: QApplication) -> None:
     labels = dd.findChildren(QLabel)
     assert any("功能开发中" in label.text() for label in labels)
     dd.close()
+
+
+def test_batch_import_no_group(tmp_path: Path, bruker_dir: Path) -> None:
+    """0.2.162-补12:批量导入不成组 = 多个单次导入(不绑定 batch_id)。"""
+    manager = ProjectManager.create_project(tmp_path / "proj", "demo")
+    entry = manager.create_experiment("batch")
+    manager.save()
+    folders = [
+        str(bruker_dir / "hsqc_2d"),
+        str(bruker_dir / "nus_2d"),
+    ]
+    controller = ProcessingController(manager)
+    result = controller.batch_import(entry.id, folders, group=False)
+    assert result["batch_id"] == ""
+    data_ids = [item["data_id"] for item in result["results"]]
+    assert len(data_ids) == 2
+    for data_id in data_ids:
+        assert batch_id(manager, entry.id, data_id) == ""
+    assert batch_ids_in_experiment(manager, entry.id) == []
+
+
+def test_batch_import_group_option(qapp: QApplication) -> None:
+    """0.2.162-补12:批量导入面板有成组选项,信号携带 group。"""
+    from gui.dashboards import ExperimentImportPanel
+
+    panel = ExperimentImportPanel()
+    assert panel.batch_group_check.isChecked()  # 默认成组
+    emitted: list[tuple] = []
+    panel.batch_import_requested.connect(lambda *a: emitted.append(a))
+    panel.set_context("exp_1")
+    panel.batch_list.addItem("/data/a")
+    panel._on_batch_import()
+    assert emitted and emitted[0][2] is True
+    panel.batch_group_check.setChecked(False)
+    panel._on_batch_import()
+    assert emitted[-1][2] is False
+    panel.close()

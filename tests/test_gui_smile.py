@@ -38,7 +38,7 @@ def _manager_with_artifacts(tmp_path: Path):
 
 def test_smile_step_position_in_pipeline() -> None:
     ids = [step[0] for step in PIPELINE_STEPS]
-    assert ids.index("smile") == 3  # 生成谱图之后、峰挑选之前
+    assert ids.index("smile") == 2  # 生成谱图之后、峰挑选之前(0.2.162-补12 移除 import)
 
 
 def test_smile_status_optional_and_outdated(tmp_path: Path) -> None:

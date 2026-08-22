@@ -134,7 +134,7 @@ class ExperimentImportPanel(QWidget):
 
     import_options_requested = pyqtSignal(str, str, str, bool)  # (exp_id, name, source, copy)
     segmented_import_requested = pyqtSignal(str, str)  # (exp_id, 分段采集容器目录)
-    batch_import_requested = pyqtSignal(str, list)  # (exp_id, folders)
+    batch_import_requested = pyqtSignal(str, list, bool)  # (exp_id, folders, group)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -213,6 +213,11 @@ class ExperimentImportPanel(QWidget):
         self.batch_list = QListWidget()
         self.batch_list.setMaximumHeight(110)
         batch_layout.addWidget(self.batch_list)
+        self.batch_group_check = QCheckBox(
+            "批量导入并成组(后续处理会一起处理);不勾选则不成组(相当于多个单次导入)"
+        )
+        self.batch_group_check.setChecked(True)
+        batch_layout.addWidget(self.batch_group_check)
         batch_buttons = QHBoxLayout()
         self.batch_add_button = QPushButton("添加数据文件夹...")
         self.batch_add_button.clicked.connect(self._on_batch_add_folder)
@@ -281,14 +286,16 @@ class ExperimentImportPanel(QWidget):
         self.batch_import_button.setEnabled(False)
 
     def _on_batch_import(self) -> None:
-        """把列表中的多个数据目录以同一批量组导入当前实验类型。"""
+        """把列表中的多个数据目录导入当前实验类型;group=True 同一批量组。"""
         if not self._exp_id or self.batch_list.count() == 0:
             return
         folders = [
             self.batch_list.item(index).text()
             for index in range(self.batch_list.count())
         ]
-        self.batch_import_requested.emit(self._exp_id, folders)
+        self.batch_import_requested.emit(
+            self._exp_id, folders, self.batch_group_check.isChecked()
+        )
 
     def _on_import(self) -> None:
         source = self.source_edit.text().strip()
@@ -330,7 +337,7 @@ class ImportDataDropdown(QWidget):
 
     import_options_requested = pyqtSignal(str, str, str, bool)
     segmented_import_requested = pyqtSignal(str, str)
-    batch_import_requested = pyqtSignal(str, list)
+    batch_import_requested = pyqtSignal(str, list, bool)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(
@@ -413,7 +420,7 @@ class ExperimentDashboard(QWidget):
 
     import_options_requested = pyqtSignal(str, str, str, bool)  # (exp_id, name, source, copy)
     segmented_import_requested = pyqtSignal(str, str)  # (exp_id, 分段采集容器目录)
-    batch_import_requested = pyqtSignal(str, list)  # (exp_id, folders)
+    batch_import_requested = pyqtSignal(str, list, bool)  # (exp_id, folders, group)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -465,7 +472,38 @@ class ExperimentDashboard(QWidget):
         self.batch_add_button = self.import_panel.batch_add_button
         self.batch_clear_button = self.import_panel.batch_clear_button
         self.batch_import_button = self.import_panel.batch_import_button
+        # 0.2.162-补12:「导入数据」「数据组间分析」按钮(原导入块位置)
+        action_row = QHBoxLayout()
+        self.import_dropdown_button = QPushButton("导入数据")
+        self.import_dropdown_button.clicked.connect(self._open_import_dropdown)
+        action_row.addWidget(self.import_dropdown_button)
+        self.group_analysis_button = QPushButton("数据组间分析")
+        self.group_analysis_button.clicked.connect(
+            self._open_group_analysis_dropdown
+        )
+        action_row.addWidget(self.group_analysis_button)
+        action_row.addStretch(1)
+        layout.addLayout(action_row)
+        self._import_dropdown = ImportDataDropdown(self)
+        self._import_dropdown.import_options_requested.connect(
+            self.import_options_requested.emit
+        )
+        self._import_dropdown.segmented_import_requested.connect(
+            self.segmented_import_requested.emit
+        )
+        self._import_dropdown.batch_import_requested.connect(
+            self.batch_import_requested.emit
+        )
+        self._group_analysis_dropdown = GroupAnalysisDropdown(self)
         layout.addStretch(1)
+
+    def _open_import_dropdown(self) -> None:
+        """实验类型页「导入数据」:向下弹出导入表单下拉(0.2.162-补12)。"""
+        self._import_dropdown.open_below(self.import_dropdown_button, self._exp_id)
+
+    def _open_group_analysis_dropdown(self) -> None:
+        """实验类型页「数据组间分析」:占位下拉(0.2.162-补12)。"""
+        self._group_analysis_dropdown.open_below(self.group_analysis_button)
 
     def set_context(self, manager: ProjectManager, exp_id: str, label: str) -> None:
         self.manager = manager
@@ -514,7 +552,10 @@ class ExperimentDashboard(QWidget):
         self.import_panel._on_import()
 
     def clear_import_form(self) -> None:
+        """导入成功后清空导入表单(含下拉面板,0.2.162-补12)。"""
         self.import_panel.clear_import_form()
+        if self._import_dropdown is not None:
+            self._import_dropdown.panel.clear_import_form()
 
     def _on_segmented_browse(self) -> None:
         self.import_panel._on_segmented_browse()

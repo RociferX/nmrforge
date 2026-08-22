@@ -86,15 +86,13 @@ def _manager_with_artifacts(tmp_path: Path):
 def test_success_steps_show_reprocess_button(
     tmp_path: Path, qapp: QApplication
 ) -> None:
-    """SUCCESS 步骤显示「重新处理」入口;import 除外。"""
+    """SUCCESS 步骤显示「重新处理」入口。"""
     manager, exp_id, data_id = _manager_with_artifacts(tmp_path)
     panel = PipelinePanel(manager, _FakeController())
     panel.set_selection("data", exp_id, data_id)
     for step_id in ("fid", "spectrum", "peaks", "analysis"):
         assert panel._rows[step_id].run_button.text() == "重新处理"
         assert not panel._rows[step_id].run_button.isHidden()
-    # 导入步骤不提供重新处理(重跑会新建数据而非覆盖)
-    assert panel._rows["import"].run_button.isHidden()
     panel.close()
 
 
@@ -141,7 +139,7 @@ def test_reprocess_downstream_becomes_outdated(
     from gui.pipeline_state import record_step_success
 
     manager, exp_id, data_id = _manager_with_artifacts(tmp_path)
-    for step in ("import", "fid", "spectrum", "peaks", "analysis"):
+    for step in ("fid", "spectrum", "peaks", "analysis"):
         record_step_success(manager, exp_id, data_id, step)
     ft2 = manager.data_dir(exp_id, data_id, "spectra") / f"{exp_id}-{data_id}.ft2"
     ft2.write_bytes(b"ft2-v2")

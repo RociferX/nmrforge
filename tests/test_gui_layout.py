@@ -217,7 +217,7 @@ def test_project_tree_column_widths_readable(qapp: QApplication) -> None:
 def test_pipeline_steps_include_optional_smile() -> None:
     ids = [step[0] for step in PIPELINE_STEPS]
     assert ids == [
-        "import", "fid", "spectrum", "smile", "peaks", "analysis"
+        "fid", "spectrum", "smile", "peaks", "analysis"
     ]
     deps = {step[0]: step[3] for step in PIPELINE_STEPS}
     # SMILE 优化为可选:峰挑选不依赖它
@@ -231,7 +231,6 @@ def test_pipeline_steps_include_optional_smile() -> None:
 def test_pipeline_status_registered(tmp_path: Path, qapp: QApplication) -> None:
     manager = _manager_with_experiment(tmp_path)
     statuses = compute_step_statuses(manager, "exp_001")
-    assert statuses["import"] == "SUCCESS"  # 存在数据节点即导入完成
     assert statuses["fid"] == "READY"
     for step_id in ("spectrum", "peaks", "analysis"):
         assert statuses[step_id] == "LOCKED"
@@ -248,7 +247,6 @@ def test_pipeline_status_after_spectrum(tmp_path: Path, qapp: QApplication) -> N
     spectra = manager.dir_path("spectra")
     _write_ft2(spectra / "exp_001.ft2")
     statuses = compute_step_statuses(manager, "exp_001")
-    assert statuses["import"] == "SUCCESS"
     assert statuses["fid"] == "SUCCESS"
     assert statuses["spectrum"] == "SUCCESS"
     assert statuses["peaks"] == "READY"
@@ -266,7 +264,6 @@ def test_pipeline_fid_unlocks_spectrum(
     fid_file.write_bytes(b"fid")
     manager.set_data_fid("exp_001", "d_001", fid_file)
     statuses = compute_step_statuses(manager, "exp_001")
-    assert statuses["import"] == "SUCCESS"
     assert statuses["fid"] == "SUCCESS"
     assert statuses["spectrum"] == "READY"  # 关键:谱图步骤解锁
     assert statuses["peaks"] == "LOCKED"
@@ -280,8 +277,6 @@ def test_pipeline_panel_refresh_shows_next_step(tmp_path: Path, qapp: QApplicati
     assert "生成 FID" in panel.next_label.text()
     assert not panel._rows["fid"].run_button.isHidden()
     assert panel._rows["spectrum"].run_button.isHidden()
-    # 导入样品数据为自动化步骤,无人工入口
-    assert panel._rows["import"].manual_button.isHidden()
     assert not panel._rows["fid"].manual_button.isHidden()
     panel.close()
 
@@ -387,17 +382,15 @@ def test_main_window_context_updates_on_tree_selection(
     window.close()
 
 
-def test_pipeline_hides_import_step_for_data_selection(
+def test_pipeline_no_import_step(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """0.2.79:点中样品数据时中间不再显示「导入样品数据」步骤(导入属于实验类型层)。"""
+    """0.2.162-补12:导入已移入下拉,pipeline 不再含导入步骤。"""
     manager = _manager_with_experiment(tmp_path, monkeypatch)
     panel = PipelinePanel(manager, FakeProcessingController())
+    assert "import" not in panel._rows
     panel.set_selection("data", "exp_001", "d_001")
-    assert panel._rows["import"].isHidden()
     assert not panel._rows["fid"].isHidden()
-    panel.set_selection("experiment", "exp_001")
-    assert not panel._rows["import"].isHidden()
     panel.close()
 
 
@@ -595,7 +588,7 @@ def test_data_selected_shows_pipeline_page(
     tree.setCurrentItem(data_item)
     assert window.center_panel.stack.currentIndex() == 3  # Pipeline 页
     assert window.pipeline.current_experiment_id() == "exp_001"
-    assert window.pipeline._rows["import"].manual_button.isHidden()  # 导入无人工
+    assert "import" not in window.pipeline._rows  # 0.2.162-补12:pipeline 无导入步骤
     window.close()
 
 def test_import_failure_handled_on_main_thread(
@@ -1685,23 +1678,23 @@ def test_spectrum_param_report_shows_diagnostics_details() -> None:
     assert "详见运行日志" not in report
 
 
-def test_main_window_topbar_buttons(
+def test_experiment_page_import_buttons(
     tmp_path: Path, qapp: QApplication
 ) -> None:
-    """0.2.162-补11:主界面顶栏「导入数据」「数据组间分析」按钮与下拉。"""
+    """0.2.162-补12:实验类型页(原导入块位置)含「导入数据」「数据组间分析」按钮与下拉。"""
     from gui.main_window import MainWindow
 
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     manager.create_experiment()
     manager.save()
     window = MainWindow(manager=manager)
-    assert window.import_button.text() == "导入数据"
-    assert window.group_analysis_button.text() == "数据组间分析"
-    window._open_import_dropdown()
-    assert window._import_dropdown is not None
-    assert window._import_dropdown.isVisible()
-    window._open_group_analysis_dropdown()
-    assert window._group_analysis_dropdown is not None
+    page = window.center_panel.experiment_page
+    assert page.import_dropdown_button.text() == "导入数据"
+    assert page.group_analysis_button.text() == "数据组间分析"
+    page._open_import_dropdown()
+    assert page._import_dropdown is not None
+    page._open_group_analysis_dropdown()
+    assert page._group_analysis_dropdown is not None
     window.close()
 
 

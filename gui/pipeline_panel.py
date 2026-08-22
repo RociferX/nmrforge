@@ -31,15 +31,13 @@ from gui.pipeline_state import (
     batch_id,
     input_fingerprint,
     load_pipeline_state,
-    raw_fingerprint,
     script_fingerprint,
 )
 from gui.processing import ProcessingController
 
 # 步骤定义:id / 名称 / 描述 / 前置步骤 id 列表
 PIPELINE_STEPS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
-    ("import", "导入样品数据", "读 Bruker 参数并复制到项目(raw),不触发处理", ()),
-    ("fid", "生成 FID", "由原始数据转换为 fid(后端 bruker -AUTO/fid.com)", ("import",)),
+    ("fid", "生成 FID", "由原始数据转换为 fid(后端 bruker -AUTO/fid.com)", ()),
     ("spectrum", "生成谱图", "后端处理生成谱(自动包含 NUS SMILE 重构)", ("fid",)),
     ("smile", "SMILE 优化", "可选:重构参数网格优化并采用最优谱(仅 NUS)", ("spectrum",)),
     ("peaks", "峰挑选", "自动峰检测与强度/SNR 评估", ("spectrum",)),
@@ -67,7 +65,6 @@ STATUS_ICON = {
 
 # 步骤 → ProcessingController 方法映射(契约 v1.2 §8.3)
 STEP_METHOD: dict[str, str] = {
-    "import": "import_data",
     "fid": "generate_fid",
     "spectrum": "generate_spectrum",
     "smile": "optimize_smile",
@@ -223,22 +220,10 @@ def _node_step_statuses(
     statuses: dict[str, str] = {}
     for step_id, _, _, deps in PIPELINE_STEPS:
         artifact = (
-            None
-            if step_id in ('import', 'smile')
-            else artifacts.get(step_id)
+            None if step_id == 'smile' else artifacts.get(step_id)
         )
         outdated = False
-        if step_id == 'import':
-            done = True  # 实验下存在数据节点即导入完成
-            entry = state['steps'].get('import')
-            if (
-                entry
-                and entry.get('input_hash')
-                and not simple_mode
-            ):
-                current = raw_fingerprint(manager, exp_id, data_id)
-                outdated = current is not None and current != entry['input_hash']
-        elif step_id == 'smile':
+        if step_id == 'smile':
             # 可选步骤:运行过即完成(产物复用谱图,指纹校验输入变化)
             entry = state['steps'].get('smile')
             done = entry is not None
@@ -403,7 +388,6 @@ def _lock_reasons(statuses: dict[str, str]) -> dict[str, str]:
 def _step_refs(step_id: str) -> tuple[str, ...]:
     """步骤 → 可能的工作流 refs(查最近运行用)。"""
     return {
-        "import": ("import",),
         "fid": ("convert_to_fid", "manual_fid"),
         "spectrum": (
             "process",
@@ -582,7 +566,7 @@ class PipelineStepRow(QWidget):
             self.run_button.setText("重新运行")
             self.run_button.setVisible(True)
             self.run_button.setToolTip("输入/参数已变化,重新运行以更新结果")
-        elif status == "SUCCESS" and self.step_id != "import":
+        elif status == "SUCCESS":
             self.run_button.setText("重新处理")
             self.run_button.setVisible(True)
             self.run_button.setToolTip(
@@ -605,7 +589,6 @@ class PipelinePanel(QWidget):
     manual_open_requested = pyqtSignal(str)  # step_id:打开人工处理对话框
     report_requested = pyqtSignal(str)  # step_id:打开报告页
     show_spectrum_requested = pyqtSignal(str)  # step_id:展示谱图
-    import_data_requested = pyqtSignal(str)  # exp_id:在当前实验类型下导入样品数据
     view_log_requested = pyqtSignal(str)  # step_id:定位日志面板
     progress_updated = pyqtSignal(str)  # 批量进度文本(主线程更新标签)
     batch_summary_requested = pyqtSignal(object)  # 批量汇总 dict
@@ -635,12 +618,6 @@ class PipelinePanel(QWidget):
         self.next_label.setWordWrap(True)
         self.next_label.setStyleSheet("color: #16a085;")
         layout.addWidget(self.next_label)
-        self.import_button = QPushButton("导入样品数据...")
-        self.import_button.setVisible(False)
-        self.import_button.clicked.connect(
-            lambda: self.import_data_requested.emit(self._current_exp_id)
-        )
-        layout.addWidget(self.import_button)
         self.batch_progress_label = QLabel("")
         self.batch_progress_label.setVisible(False)
         self.batch_progress_label.setStyleSheet(
@@ -714,7 +691,6 @@ class PipelinePanel(QWidget):
         if project is None or not self._current_exp_id:
             self.context_label.setText("未打开项目")
             self.next_label.setText("")
-            self.import_button.setVisible(False)
             for row in self._rows.values():
                 row.set_status("LOCKED")
             self._refresh_expanded_details()
@@ -727,13 +703,8 @@ class PipelinePanel(QWidget):
             for row in self._rows.values():
                 row.set_status("LOCKED")
                 row.manual_button.setVisible(False)  # 未选中数据不显示人工
-            self.import_button.setVisible(True)  # 可直接在当前实验类型导入样品数据
-            self._rows["import"].setVisible(True)
             self._refresh_expanded_details()
             return
-        self.import_button.setVisible(False)
-        # 导入样品数据属于实验类型层(点中实验类型时显示),样品数据层不再展示该步骤
-        self._rows["import"].setVisible(False)
         exp = project.experiment(self._current_exp_id)
         exp_title = exp.title if exp is not None else self._current_exp_id
         current_batch = (
@@ -756,7 +727,7 @@ class PipelinePanel(QWidget):
             (
                 sid
                 for sid, st in statuses.items()
-                if st == "OUTDATED" and sid != "import"
+                if st == "OUTDATED"
             ),
             None,
         )
@@ -764,7 +735,7 @@ class PipelinePanel(QWidget):
             (
                 sid
                 for sid, st in statuses.items()
-                if st == "READY" and sid != "import"
+                if st == "READY"
             ),
             None,
         )
@@ -801,7 +772,7 @@ class PipelinePanel(QWidget):
             self._rows[step_id].set_status(status, reason)
             # 导入样品数据为自动化步骤,无人工入口;其余处理步骤保留人工
             self._rows[step_id].manual_button.setVisible(
-                step_id not in ("import", "smile")
+                step_id != "smile"
             )
             # 0.2.88:生成谱图完成后出现「展示谱图」按钮(不再自动显示谱)
             self._rows[step_id].show_spectrum_button.setVisible(
@@ -872,14 +843,13 @@ class PipelinePanel(QWidget):
         lines: list[str] = []
         params: dict | None = None
         failed = False
-        if step_id != "import":
-            try:
-                artifacts = _node_artifacts(self.manager, exp_id, data_id)
-                artifact = artifacts.get(step_id)
-                if artifact is not None:
-                    lines.append(f"产物: {artifact}")
-            except Exception:  # noqa: BLE001 - 产物解析失败忽略
-                pass
+        try:
+            artifacts = _node_artifacts(self.manager, exp_id, data_id)
+            artifact = artifacts.get(step_id)
+            if artifact is not None:
+                lines.append(f"产物: {artifact}")
+        except Exception:  # noqa: BLE001 - 产物解析失败忽略
+            pass
         run = _last_run_for(self.manager, exp_id, data_id, _step_refs(step_id))
         if run is None:
             lines.append("运行记录: 无")
@@ -983,20 +953,16 @@ class PipelinePanel(QWidget):
                         "error": "",
                     }
                     try:
-                        if method_name == "import_data":
-                            source = getattr(node, "source", "") or ""
-                            result = method(entry, source)
-                        else:
-                            import inspect
+                        import inspect
 
-                            kwargs: dict = {"exp_id": exp_id, "data_id": data_id}
-                            if "progress" in inspect.signature(method).parameters:
-                                kwargs["progress"] = (
-                                    lambda msg, d=data_id: self.log_message.emit(
-                                        f"{step_label} {d}: {msg}"
-                                    )
+                        kwargs: dict = {"exp_id": exp_id, "data_id": data_id}
+                        if "progress" in inspect.signature(method).parameters:
+                            kwargs["progress"] = (
+                                lambda msg, d=data_id: self.log_message.emit(
+                                    f"{step_label} {d}: {msg}"
                                 )
-                            result = method(node, **kwargs)
+                            )
+                        result = method(node, **kwargs)
                         item["ok"] = True
                         message = (
                             result if isinstance(result, str) else str(result)
