@@ -227,9 +227,10 @@ def test_pipeline_spectrum_row_ext_range_button_before_run(
     assert not spectrum_row.ext_range_button.isHidden()
     assert panel._rows["fid"].ext_range_button.isHidden()
     assert panel._rows["peaks"].ext_range_button.isHidden()
-    header = spectrum_row.layout().itemAt(0)
-    assert header is not None and hasattr(header, "count")
-    widgets = [header.itemAt(i).widget() for i in range(header.count())]
+    # 0.2.163-补5:按钮移到标题下方独立一行(ext_range 在 run 之前)
+    button_row = spectrum_row.layout().itemAt(1)
+    assert button_row is not None and hasattr(button_row, "count")
+    widgets = [button_row.itemAt(i).widget() for i in range(button_row.count())]
     assert widgets.index(spectrum_row.ext_range_button) < widgets.index(
         spectrum_row.run_button
     )

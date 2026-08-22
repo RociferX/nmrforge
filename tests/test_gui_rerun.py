@@ -90,9 +90,14 @@ def test_success_steps_show_reprocess_button(
     manager, exp_id, data_id = _manager_with_artifacts(tmp_path)
     panel = PipelinePanel(manager, _FakeController())
     panel.set_selection("data", exp_id, data_id)
-    for step_id in ("fid", "spectrum", "peaks", "analysis"):
+    for step_id in ("fid", "peaks", "analysis"):
         assert panel._rows[step_id].run_button.text() == "重新处理"
         assert not panel._rows[step_id].run_button.isHidden()
+    # 0.2.163-补5:spectrum 拆「重新优化」+「重新运行终脚本」
+    spectrum_row = panel._rows["spectrum"]
+    assert spectrum_row.run_button.text() == "重新优化"
+    assert not spectrum_row.run_button.isHidden()
+    assert not spectrum_row.rerun_final_button.isHidden()
     panel.close()
 
 
@@ -107,12 +112,12 @@ def test_reprocess_spectrum_invokes_controller(
     log = LogPanel()
     panel.log_message.connect(log.append)
     panel.set_selection("data", exp_id, data_id)
-    assert panel._rows["spectrum"].run_button.text() == "重新处理"
+    assert panel._rows["spectrum"].run_button.text() == "重新优化"
     panel._on_run_requested("spectrum")
     assert controller.calls == ["generate_spectrum"]
     # 重跑后步骤仍为 SUCCESS(假控制器不写产物,指纹状态无变化)
     assert panel._rows["spectrum"].status_label.text().startswith("✓")
-    assert panel._rows["spectrum"].run_button.text() == "重新处理"
+    assert panel._rows["spectrum"].run_button.text() == "重新优化"
     panel.close()
     log.close()
 
@@ -132,6 +137,48 @@ def test_reprocess_peaks_and_fid_available(
     panel.close()
 
 
+def test_rerun_final_applies_latest_ext(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.2.163-补5:重新运行终脚本应用用户最新直接维范围。"""
+    from gui.pipeline_panel import PipelinePanel
+
+    monkeypatch.setattr("threading.Thread", SyncThread)
+    manager, exp_id, data_id = _manager_with_artifacts(tmp_path)
+    # 模拟最近成功谱图运行(WorkflowRun 含有效参数)
+    run = manager.start_run(
+        exp_id,
+        workflow_ref="process",
+        inputs={"data_id": data_id},
+        params={"baseline": "poly", "window": {"F2": "sp"}},
+    )
+    manager.finish_run(
+        run.run_id, "success", outputs={"spectrum_path": "/tmp/x.ft2"}, message="ok"
+    )
+    manager.save()
+
+    captured: dict = {}
+
+    class _CaptureController(_FakeController):
+        def generate_spectrum(
+            self, data, exp_id=None, data_id=None, params=None
+        ) -> str:
+            captured["params"] = dict(params or {})
+            return "/tmp/x.ft2"
+
+    panel = PipelinePanel(manager, _CaptureController())
+    panel.set_selection("data", exp_id, data_id)
+    # 用户设置终跑直接维范围 8.0-6.0
+    panel._final_ext[(exp_id, data_id)] = ("8.0", "6.0")
+    panel._on_rerun_final_requested("spectrum")
+    params = captured.get("params", {})
+    assert params.get("phase_route") == "none"  # 不重新优化
+    assert params.get("final_ext_lo") == "8.0"
+    assert params.get("final_ext_hi") == "6.0"
+    assert params.get("baseline") == "poly"  # 复用最近成功参数
+    panel.close()
+
+
 def test_reprocess_downstream_becomes_outdated(
     tmp_path: Path, qapp: QApplication
 ) -> None:
@@ -146,7 +193,7 @@ def test_reprocess_downstream_becomes_outdated(
     record_step_success(manager, exp_id, data_id, "spectrum")
     panel = PipelinePanel(manager, _FakeController())
     panel.set_selection("data", exp_id, data_id)
-    assert panel._rows["spectrum"].run_button.text() == "重新处理"
+    assert panel._rows["spectrum"].run_button.text() == "重新优化"
     assert panel._rows["peaks"].status_label.text().startswith("!")
     assert panel._rows["analysis"].status_label.text().startswith("!")
     panel.close()

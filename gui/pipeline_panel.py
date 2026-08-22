@@ -444,6 +444,7 @@ class PipelineStepRow(QWidget):
     """
 
     run_requested = pyqtSignal(str)  # step_id
+    rerun_final_requested = pyqtSignal(str)  # step_id:重新运行已有终跑脚本(不重新优化)
     manual_requested = pyqtSignal(str)  # step_id:打开脚本编辑器(已有脚本优先)
     report_requested = pyqtSignal(str)  # step_id:分析完成后打开报告页
     show_spectrum_requested = pyqtSignal(str)  # step_id:生成谱图完成后展示谱图
@@ -465,16 +466,23 @@ class PipelineStepRow(QWidget):
         self.icon_label.setFixedWidth(24)
         header.addWidget(self.icon_label)
         text_box = QVBoxLayout()
+        title_row = QHBoxLayout()
         self.name_label = QLabel(label)
         self.name_label.setStyleSheet("font-weight: bold;")
+        title_row.addWidget(self.name_label)
+        title_row.addStretch(1)
+        self.status_label = QLabel("")
+        title_row.addWidget(self.status_label)
+        text_box.addLayout(title_row)
         self.desc_label = QLabel(description)
         self.desc_label.setStyleSheet("color: #666;")
         self.desc_label.setWordWrap(True)
-        text_box.addWidget(self.name_label)
         text_box.addWidget(self.desc_label)
         header.addLayout(text_box, 1)
-        self.status_label = QLabel("")
-        header.addWidget(self.status_label)
+        outer.addLayout(header)
+        # 0.2.163-补5:按钮放标题/描述下方独立一行(不再挤在右侧)
+        button_row = QHBoxLayout()
+        button_row.setContentsMargins(24, 0, 0, 0)
         # 0.2.162-补15:生成谱图运行前「直接维范围」按钮(仅终跑生效)
         self.ext_range_button = QPushButton("直接维范围")
         self.ext_range_button.setToolTip(
@@ -485,18 +493,28 @@ class PipelineStepRow(QWidget):
         self.ext_range_button.clicked.connect(
             lambda: self.ext_range_requested.emit(self.step_id)
         )
-        header.addWidget(self.ext_range_button)
+        button_row.addWidget(self.ext_range_button)
         self.run_button = QPushButton("运行")
         self.run_button.setVisible(False)
         self.run_button.clicked.connect(lambda: self.run_requested.emit(self.step_id))
-        header.addWidget(self.run_button)
+        button_row.addWidget(self.run_button)
+        # 0.2.163-补5:spectrum 已完成时「重新运行终脚本」(复用已有脚本,不优化)
+        self.rerun_final_button = QPushButton("重新运行终脚本")
+        self.rerun_final_button.setToolTip(
+            "不重新优化,直接复用上次生成的终跑脚本重跑"
+        )
+        self.rerun_final_button.setVisible(False)
+        self.rerun_final_button.clicked.connect(
+            lambda: self.rerun_final_requested.emit(self.step_id)
+        )
+        button_row.addWidget(self.rerun_final_button)
         self.report_button = QPushButton("报告")
         self.report_button.setToolTip("查看当前数据的报告产物(report/ 目录)")
         self.report_button.setVisible(False)
         self.report_button.clicked.connect(
             lambda: self.report_requested.emit(self.step_id)
         )
-        header.addWidget(self.report_button)
+        button_row.addWidget(self.report_button)
         self.show_spectrum_button = QPushButton("展示谱图")
         self.show_spectrum_button.setToolTip(
             "在右侧谱图面板显示当前数据 spectra 文件夹的最终谱"
@@ -505,15 +523,16 @@ class PipelineStepRow(QWidget):
         self.show_spectrum_button.clicked.connect(
             lambda: self.show_spectrum_requested.emit(self.step_id)
         )
-        header.addWidget(self.show_spectrum_button)
+        button_row.addWidget(self.show_spectrum_button)
         self.manual_button = QPushButton("人工")
         self.manual_button.setToolTip("脚本编辑器:自动运行过则展示已有脚本,可直接修改运行")
         self.manual_button.setVisible(False)
         self.manual_button.clicked.connect(
             lambda: self.manual_requested.emit(self.step_id)
         )
-        header.addWidget(self.manual_button)
-        outer.addLayout(header)
+        button_row.addWidget(self.manual_button)
+        button_row.addStretch(1)
+        outer.addLayout(button_row)
 
         self.reason_label = QLabel("")
         self.reason_label.setStyleSheet("color: #888;")
@@ -587,7 +606,16 @@ class PipelineStepRow(QWidget):
             self.run_button.setVisible(True)
             self.run_button.setToolTip("输入/参数已变化,重新运行以更新结果")
         elif status == "SUCCESS":
-            self.run_button.setText("重新处理")
+            if self.step_id == "spectrum":
+                # 0.2.163-补5:重新处理拆两按钮——重新优化 / 重新运行终脚本
+                self.run_button.setText("重新优化")
+                self.run_button.setToolTip(
+                    "重新执行完整自动处理(相位/参数优化 + 终跑)"
+                )
+                self.rerun_final_button.setVisible(True)
+            else:
+                self.run_button.setText("重新处理")
+                self.rerun_final_button.setVisible(False)
             self.run_button.setVisible(True)
             self.run_button.setToolTip(
                 "已处理完成;点击可强制重新处理(下游步骤将标记为过期)"
@@ -596,6 +624,7 @@ class PipelineStepRow(QWidget):
             self.run_button.setText("运行")
             self.run_button.setVisible(status == "READY")
             self.run_button.setToolTip("运行当前步骤")
+            self.rerun_final_button.setVisible(False)
         # 分析步骤产物就绪后提供「报告」入口
         self.report_button.setVisible(status == "SUCCESS" and self.step_id == "analysis")
 
@@ -661,6 +690,7 @@ class PipelinePanel(QWidget):
         for step_id, label, description, _deps in PIPELINE_STEPS:
             row = PipelineStepRow(step_id, label, description)
             row.run_requested.connect(self._on_run_requested)
+            row.rerun_final_requested.connect(self._on_rerun_final_requested)
             row.manual_requested.connect(self.manual_open_requested.emit)
             row.report_requested.connect(self.report_requested.emit)
             row.show_spectrum_requested.connect(self.show_spectrum_requested.emit)
@@ -1111,6 +1141,69 @@ class PipelinePanel(QWidget):
                 )
                 if "无法处理该谱" in str(exc):
                     self.memory_guard_requested.emit(str(exc))
+            finally:
+                self.refresh()
+                self.run_finished.emit()
+
+        import threading
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_rerun_final_requested(self, step_id: str) -> None:
+        """「重新运行终脚本」:不重新优化,复用最近成功谱图运行的参数
+        (含相位/窗/基线),并应用用户最新设置的直接维范围后重跑一次。
+
+        直接复用 process/ 里旧 .com 会写死旧 EXT 窗口;正确做法是提取
+        最近成功谱图 WorkflowRun 的 effective params,合并当前终跑直接维
+        范围覆盖(final_ext_lo/hi),经 generate_spectrum(phase_route=none)
+        重新渲染脚本并运行——改了直接维范围后重跑即生效。
+        """
+        if step_id != "spectrum":
+            return
+        exp_id = self._current_exp_id
+        if not exp_id:
+            return
+        self._rows[step_id].set_status("RUNNING")
+        self.log_message.emit("开始重新运行终脚本(复用参数,应用最新直接维范围)")
+
+        def worker() -> None:
+            try:
+                nodes = _data_nodes(self.manager, exp_id)
+                if not nodes:
+                    self.log_message.emit("该实验类型还没有样品数据")
+                    return
+                data_node = next(
+                    (n for n in nodes if getattr(n, "id", "") == self._current_data_id),
+                    nodes[0],
+                )
+                data_id = getattr(data_node, "id", exp_id)
+                # 复用最近成功谱图运行的有效参数(相位/窗/基线等)
+                from workflow.batch import _reference_spectrum_params
+
+                ref = _reference_spectrum_params(self.manager, exp_id, data_id)
+                if not ref:
+                    self.log_message.emit(
+                        "没有可复用的谱图参数,请先执行「重新优化」生成"
+                    )
+                    return
+                # 应用用户最新设置的终跑直接维范围
+                ext = self._spectrum_ext_params(data_id) or {}
+                merged = dict(ref)
+                merged.update(ext)
+                merged["phase_route"] = "none"  # 只跑一次,不重新优化
+                result = self.controller.generate_spectrum(
+                    data_node,
+                    exp_id=exp_id,
+                    data_id=data_id,
+                    params=merged,
+                )
+                self.log_message.emit(
+                    f"重新运行终脚本完成 {data_id}: {result}"
+                )
+            except Exception as exc:  # noqa: BLE001 - 错误统一回传 UI
+                self.log_message.emit(
+                    f"重新运行终脚本失败: {type(exc).__name__}: {exc}"
+                )
             finally:
                 self.refresh()
                 self.run_finished.emit()

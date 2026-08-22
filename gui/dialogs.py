@@ -483,6 +483,29 @@ class ScriptEditorDialog(QDialog):
 
     run_requested = pyqtSignal(str)  # 脚本内容:点「运行」时发出
 
+    @staticmethod
+    def _hint_text(script_name: str) -> str:
+        """按脚本类型给出对应提示:fid.com 是 Bruker 转换脚本,
+        处理脚本(process/nus)是 NMRPipe 谱图处理,提示各不相同。"""
+        if script_name == "fid.com":
+            return (
+                "fid.com 是 Bruker 原始数据 → NMRPipe fid 的转换脚本,"
+                "由后端按采集参数自动生成,通常无需修改。\n"
+                "· 转换参数(OBS/CAR/SW 等)来自 Bruker 参数,勿随意改动;\n"
+                "· 如需调整谱图引用/载波,改 -xCAR/-yCAR 等 CAR 项;\n"
+                "· NUS 数据请保留 nuslist 相关处理,勿删采样信息;\n"
+                "· 转换完成后 fid 产物由后端归位 process/,无需手动移动。"
+            )
+        return (
+            "处理脚本由后端按采样模式自动生成,通常无需修改。\n"
+            "· 基线不好(谱图有波浪/伪峰):在对应维 FT 后加 "
+            "`| nmrPipe -fn POLY -auto`,或微调 POLY -ord;\n"
+            "· 峰形/分辨率不佳:调整窗函数 SP 的 -off/-end/-pow/-c,"
+            "或加大 ZF -size;\n"
+            "· 相位不好:调 PS -p0/-p1(自动调相后会自行填入,一般不动);\n"
+            "· FT 的 -alt/-neg/-real 标志按采样模式自动判定,请勿手动改动。"
+        )
+
     def __init__(
         self,
         parent: QWidget | None,
@@ -497,15 +520,7 @@ class ScriptEditorDialog(QDialog):
         self.script_name = script_name
         self.save_dir = save_dir
         layout = QVBoxLayout(self)
-        hint = QLabel(
-            "参数优化建议:脚本由后端按采样模式自动生成,通常无需修改。\n"
-            "· 基线不好(谱图有波浪/伪峰):在对应维 FT 后加 "
-            "`| nmrPipe -fn POLY -auto`,或微调 POLY -ord;\n"
-            "· 峰形/分辨率不佳:调整窗函数 SP 的 -off/-end/-pow/-c,"
-            "或加大 ZF -size;\n"
-            "· 相位不好:调 PS -p0/-p1(自动调相后会自行填入,一般不动);\n"
-            "· FT 的 -alt/-neg/-real 标志按采样模式自动判定,请勿手动改动。"
-        )
+        hint = QLabel(self._hint_text(script_name))
         hint.setWordWrap(True)
         layout.addWidget(hint)
         self.editor = QPlainTextEdit()
