@@ -274,6 +274,17 @@ def test_pipeline_ext_button_text_reflects_override(
         == "直接维范围 11.0/5.5"
     )
     panel.close()
+    assert (
+        panel._rows["spectrum"].ext_range_button.toolTip()
+        == "终跑直接维窗口: 11.0-5.5 ppm(EXT -x1/-xn)\n"
+        "首遍重构/相位搜索保持原窗口;窗口外峰不进入终谱,\n"
+        "p1 按窗口宽度自动重归一化;切换数据后显示各自设置"
+    )
+    # 切换数据:未设置该数据窗口时,提示词回到默认说明
+    panel.set_selection("data", "exp_001", "d_002")
+    assert "未设置时用默认" in panel._rows["spectrum"].ext_range_button.toolTip()
+    panel.close()
+
 
 
 def test_pipeline_steps_include_optional_smile() -> None:

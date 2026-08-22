@@ -827,7 +827,11 @@ class PipelinePanel(QWidget):
         hi_edit.setPlaceholderText("6.5")
         form.addRow("高场端 ppm (EXT -x1):", lo_edit)
         form.addRow("低场端 ppm (EXT -xn):", hi_edit)
-        tip = QLabel("只影响终跑完整脚本;首遍相位搜索保持原窗口。留空=使用默认。")
+        tip = QLabel(
+            "只影响终跑完整脚本,首遍重构/相位搜索保持原窗口。\n"
+            "留空=使用默认(10.5-6.5);窗口外峰不会出现在终谱中,\n"
+            "直接维线性相位 p1 会按窗口宽度自动重归一化。"
+        )
         tip.setWordWrap(True)
         tip.setStyleSheet("color: #666;")
         form.addRow(tip)
@@ -844,22 +848,38 @@ class PipelinePanel(QWidget):
         hi = hi_edit.text().strip()
         if not lo and not hi:
             self._final_ext.pop(key, None)
+            self.log_message.emit(
+                f"直接维范围(终跑): {data_id} 已清除,恢复默认窗口"
+            )
         else:
             self._final_ext[key] = (lo, hi)
+            self.log_message.emit(
+                f"直接维范围(终跑): {data_id} 已设为 "
+                f"{lo or '默认'}-{hi or '默认'} ppm(首遍保持原窗口)"
+            )
         self._update_ext_button()
 
     def _update_ext_button(self) -> None:
-        """按当前数据的终跑直接维范围覆盖更新按钮文案。"""
+        """按当前数据的终跑直接维范围覆盖更新按钮文案与提示词。"""
         row = self._rows.get("spectrum")
         if row is None:
             return
         over = self._final_ext.get((self._current_exp_id, self._current_data_id))
         if over and (over[0] or over[1]):
-            row.set_ext_override(
-                f"直接维范围 {over[0] or '默认'}/{over[1] or '默认'}"
+            lo = over[0] or "默认"
+            hi = over[1] or "默认"
+            row.set_ext_override(f"直接维范围 {lo}/{hi}")
+            row.ext_range_button.setToolTip(
+                f"终跑直接维窗口: {lo}-{hi} ppm(EXT -x1/-xn)\n"
+                "首遍重构/相位搜索保持原窗口;窗口外峰不进入终谱,\n"
+                "p1 按窗口宽度自动重归一化;切换数据后显示各自设置"
             )
         else:
             row.set_ext_override("直接维范围")
+            row.ext_range_button.setToolTip(
+                "指定终跑脚本的直接维提取窗口(EXT -x1/-xn);"
+                "首遍相位搜索保持原窗口;未设置时用默认(10.5-6.5)"
+            )
 
     def _spectrum_ext_params(self, data_id: str) -> dict | None:
         """当前实验某数据的终跑直接维范围 → generate_spectrum params(无则 None)。"""
