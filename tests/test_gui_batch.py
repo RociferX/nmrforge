@@ -446,3 +446,24 @@ def test_batch_import_group_option(qapp: QApplication) -> None:
     panel._on_batch_import()
     assert emitted[-1][2] is False
     panel.close()
+
+
+def test_experiment_dashboard_rename_data_name(
+    tmp_path: Path, qapp: QApplication
+) -> None:
+    """0.2.162-补13:数据表「名称」列编辑触发重命名并落盘。"""
+    from gui.main_window import MainWindow
+
+    manager = ProjectManager.create_project(tmp_path / "proj", "demo")
+    entry = manager.create_experiment()
+    manager.import_data(entry.id, "/fake/1")
+    manager.save()
+    window = MainWindow(manager=manager)
+    page = window.center_panel.experiment_page
+    page.set_context(manager, entry.id, "标签")
+    assert page.data_table.rowCount() >= 1
+    item = page.data_table.item(0, 1)
+    item.setText("新名称")  # itemChanged → data_rename_requested → _rename_data
+    entry2 = manager.project.experiment(entry.id)
+    assert entry2 is not None and entry2.data[0].title == "新名称"
+    window.close()

@@ -1707,3 +1707,27 @@ def test_rename_editor_text_color(qapp: QApplication) -> None:
     assert "background: white" in stylesheet
     assert "color: #222" in stylesheet
     editor.close()
+
+
+def test_experiment_page_dropdown_switch(
+    tmp_path: Path, qapp: QApplication
+) -> None:
+    """0.2.162-补13:导入/组间分析下拉一次点击直接切换。"""
+    from gui.main_window import MainWindow
+
+    manager = ProjectManager.create_project(tmp_path / "proj", "demo")
+    manager.create_experiment()
+    manager.save()
+    window = MainWindow(manager=manager)
+    page = window.center_panel.experiment_page
+    page._open_import_dropdown()
+    assert page._import_dropdown.isVisible()
+    # 点「数据组间分析」:一次调用即切换(导入关闭 + 组间分析打开)
+    page._open_group_analysis_dropdown()
+    assert not page._import_dropdown.isVisible()
+    assert page._group_analysis_dropdown.isVisible()
+    # 再点「导入数据」:切回
+    page._open_import_dropdown()
+    assert page._import_dropdown.isVisible()
+    assert not page._group_analysis_dropdown.isVisible()
+    window.close()

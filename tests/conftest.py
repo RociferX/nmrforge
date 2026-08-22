@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 import pytest
@@ -34,6 +35,12 @@ FIXTURES_BRUKER = Path(__file__).parent / "fixtures" / "bruker"
 
 
 @pytest.fixture
-def bruker_dir() -> Path:
-    """Bruker 测试数据集 fixture 目录。"""
-    return FIXTURES_BRUKER
+def bruker_dir(tmp_path: Path) -> Path:
+    """Bruker 测试数据集 fixture 目录(每次测试给一份副本)。
+
+    直接链接共享 fixture 会让文件硬链接数累积到 NTFS 上限(1024)导致
+    os.link 失败;副本保证链接建在每测试独立 inode 上(0.2.162-补13)。"""
+    copy = tmp_path / "bruker"
+    if not copy.exists():
+        shutil.copytree(FIXTURES_BRUKER, copy)
+    return copy

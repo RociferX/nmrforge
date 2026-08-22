@@ -34,6 +34,7 @@ class CenterPanel(QWidget):
     manual_open_requested = pyqtSignal(str)
     import_data_requested = pyqtSignal(str)  # exp_id(兼容:打开导入表单)
     import_options_requested = pyqtSignal(str, str, str, bool)  # (exp_id, name, source, copy)
+    data_rename_requested = pyqtSignal(str, str, str)  # (exp_id, data_id, new_name)
     batch_import_requested = pyqtSignal(str, list, bool)  # (exp_id, folders, group)
     segmented_import_requested = pyqtSignal(str, str)  # (exp_id, 分段采集容器目录)
     create_experiment_requested = pyqtSignal(str)  # 实验类型标题
@@ -68,6 +69,9 @@ class CenterPanel(QWidget):
         )
 
         self.experiment_page = ExperimentDashboard()
+        self.experiment_page.data_rename_requested.connect(
+            self.data_rename_requested.emit
+        )
         self.experiment_page.import_options_requested.connect(
             self.import_options_requested.emit
         )

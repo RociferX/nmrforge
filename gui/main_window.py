@@ -221,6 +221,7 @@ class MainWindow(QMainWindow):
         self.center_panel.import_options_requested.connect(
             self._import_data_with_options
         )
+        self.center_panel.data_rename_requested.connect(self._rename_data)
         self.center_panel.batch_import_requested.connect(self._batch_import)
         self.center_panel.segmented_import_requested.connect(self._segmented_import)
         self.pipeline.view_log_requested.connect(self._on_view_step_log)

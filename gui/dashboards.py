@@ -10,8 +10,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import QPoint, Qt, pyqtSignal
+from PyQt6.QtCore import QEvent, QPoint, Qt, pyqtSignal
 from PyQt6.QtWidgets import (
+    QAbstractItemView,
     QApplication,
     QCheckBox,
     QFileDialog,
@@ -342,8 +343,12 @@ class ImportDataDropdown(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(
             parent,
-            Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint,
+            Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint,
         )
+        self._anchor: QWidget | None = None
+        self._app = QApplication.instance()
+        if self._app is not None:
+            self.destroyed.connect(self._remove_event_filter)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
         title = QLabel("导入样品数据")
@@ -360,6 +365,9 @@ class ImportDataDropdown(QWidget):
 
     def open_below(self, anchor: QWidget, exp_id: str) -> None:
         """在 anchor 按钮正下方弹出,屏幕边缘自动收进。"""
+        self._anchor = anchor
+        if self._app is not None:
+            self._app.installEventFilter(self)
         self.panel.set_context(exp_id)
         pos = anchor.mapToGlobal(QPoint(0, anchor.height()))
         screen = QApplication.screenAt(pos) or QApplication.primaryScreen()
@@ -379,6 +387,34 @@ class ImportDataDropdown(QWidget):
         self.raise_()
         self.activateWindow()
 
+    def eventFilter(self, obj, event) -> bool:
+        """非抓取窗口:点其它按钮/外部时先关掉本下拉,点击继续落到目标。"""
+        try:
+            visible = self.isVisible()
+        except RuntimeError:  # pragma: no cover - 销毁竞态
+            return False
+        if visible and event.type() == QEvent.Type.MouseButtonPress:
+            if hasattr(event, "globalPosition"):
+                pos = event.globalPosition().toPoint()
+            else:  # pragma: no cover - Qt5 兼容
+                pos = event.globalPos()
+            if self._anchor is not None and self._anchor.rect().contains(
+                self._anchor.mapFromGlobal(pos)
+            ):
+                return False  # 锚点按钮:交给按钮处理(开关/切换)
+            if not self.geometry().contains(pos):
+                self.close()
+        return False
+
+    def hideEvent(self, event) -> None:
+        if self._app is not None:
+            self._app.removeEventFilter(self)
+        super().hideEvent(event)
+
+    def _remove_event_filter(self) -> None:
+        if self._app is not None:
+            self._app.removeEventFilter(self)
+
 
 class GroupAnalysisDropdown(QWidget):
     """「数据组间分析」下拉面板(占位,0.2.162-补11)。"""
@@ -386,8 +422,12 @@ class GroupAnalysisDropdown(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(
             parent,
-            Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint,
+            Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint,
         )
+        self._anchor: QWidget | None = None
+        self._app = QApplication.instance()
+        if self._app is not None:
+            self.destroyed.connect(self._remove_event_filter)
         layout = QVBoxLayout(self)
         label = QLabel("数据组间分析\n\n功能开发中,敬请期待")
         label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -396,6 +436,9 @@ class GroupAnalysisDropdown(QWidget):
         self.setMinimumWidth(340)
 
     def open_below(self, anchor: QWidget) -> None:
+        self._anchor = anchor
+        if self._app is not None:
+            self._app.installEventFilter(self)
         pos = anchor.mapToGlobal(QPoint(0, anchor.height()))
         screen = QApplication.screenAt(pos) or QApplication.primaryScreen()
         if screen is not None:
@@ -414,11 +457,40 @@ class GroupAnalysisDropdown(QWidget):
         self.raise_()
         self.activateWindow()
 
+    def eventFilter(self, obj, event) -> bool:
+        """非抓取窗口:点其它按钮/外部时先关掉本下拉。"""
+        try:
+            visible = self.isVisible()
+        except RuntimeError:  # pragma: no cover - 销毁竞态
+            return False
+        if visible and event.type() == QEvent.Type.MouseButtonPress:
+            if hasattr(event, "globalPosition"):
+                pos = event.globalPosition().toPoint()
+            else:  # pragma: no cover - Qt5 兼容
+                pos = event.globalPos()
+            if self._anchor is not None and self._anchor.rect().contains(
+                self._anchor.mapFromGlobal(pos)
+            ):
+                return False
+            if not self.geometry().contains(pos):
+                self.close()
+        return False
+
+    def hideEvent(self, event) -> None:
+        if self._app is not None:
+            self._app.removeEventFilter(self)
+        super().hideEvent(event)
+
+    def _remove_event_filter(self) -> None:
+        if self._app is not None:
+            self._app.removeEventFilter(self)
+
 
 class ExperimentDashboard(QWidget):
-    """实验类型概览:样品数据列表(状态);导入块已移入「导入数据」下拉(0.2.162-补11)。"""
+    """实验类型概览:样品数据列表(状态,名称可改);导入块已移入「导入数据」下拉。"""
 
     import_options_requested = pyqtSignal(str, str, str, bool)  # (exp_id, name, source, copy)
+    data_rename_requested = pyqtSignal(str, str, str)  # (exp_id, data_id, new_name)
     segmented_import_requested = pyqtSignal(str, str)  # (exp_id, 分段采集容器目录)
     batch_import_requested = pyqtSignal(str, list, bool)  # (exp_id, folders, group)
 
@@ -443,6 +515,14 @@ class ExperimentDashboard(QWidget):
         self.data_table.setHorizontalHeaderLabels(["样品数据", "名称", "状态"])
         self.data_table.horizontalHeader().setStretchLastSection(True)
         self.data_table.setMaximumHeight(160)
+        # 0.2.162-补13:名称列可编辑(双击/选中点击/F2),改名走 manager.rename_data
+        self.data_table.setEditTriggers(
+            QAbstractItemView.EditTrigger.DoubleClicked
+            | QAbstractItemView.EditTrigger.SelectedClicked
+            | QAbstractItemView.EditTrigger.EditKeyPressed
+        )
+        self.data_table.itemChanged.connect(self._on_data_name_edited)
+        self._loading_table = False
         layout.addWidget(self.data_table)
         layout.addSpacing(10)
 
@@ -498,11 +578,19 @@ class ExperimentDashboard(QWidget):
         layout.addStretch(1)
 
     def _open_import_dropdown(self) -> None:
-        """实验类型页「导入数据」:向下弹出导入表单下拉(0.2.162-补12)。"""
+        """实验类型页「导入数据」:弹出/收起导入表单下拉(0.2.162-补13)。"""
+        if self._import_dropdown.isVisible():
+            self._import_dropdown.close()
+            return
+        self._group_analysis_dropdown.close()
         self._import_dropdown.open_below(self.import_dropdown_button, self._exp_id)
 
     def _open_group_analysis_dropdown(self) -> None:
-        """实验类型页「数据组间分析」:占位下拉(0.2.162-补12)。"""
+        """实验类型页「数据组间分析」:占位下拉(0.2.162-补13)。"""
+        if self._group_analysis_dropdown.isVisible():
+            self._group_analysis_dropdown.close()
+            return
+        self._import_dropdown.close()
         self._group_analysis_dropdown.open_below(self.group_analysis_button)
 
     def set_context(self, manager: ProjectManager, exp_id: str, label: str) -> None:
@@ -512,6 +600,26 @@ class ExperimentDashboard(QWidget):
         self.context_label.setText(f"{label} ({exp_id})" if exp_id else "")
         self.refresh()
 
+    def _on_data_name_edited(self, item) -> None:
+        """数据表「名称」列编辑后重命名样品数据(0.2.162-补13)。"""
+        if item.column() != 1 or self._loading_table:
+            return
+        if self.manager is None or self.manager.project is None or not self._exp_id:
+            return
+        data_item = self.data_table.item(item.row(), 0)
+        if data_item is None:
+            return
+        data_id = data_item.text()
+        new_name = item.text().strip()
+        entry = self.manager.project.experiment(self._exp_id)
+        data_entry = (
+            next((d for d in entry.data if d.id == data_id), None) if entry else None
+        )
+        if data_entry is None or new_name == (getattr(data_entry, "title", "") or ""):
+            return
+        self.data_rename_requested.emit(self._exp_id, data_id, new_name)
+        self.refresh()
+
     def refresh(self) -> None:
         self.data_table.setRowCount(0)
         if self.manager is None or self.manager.project is None or not self._exp_id:
@@ -519,16 +627,20 @@ class ExperimentDashboard(QWidget):
         exp = self.manager.project.experiment(self._exp_id)
         if exp is None:
             return
-        for data in exp.data:
-            row = self.data_table.rowCount()
-            self.data_table.insertRow(row)
-            self.data_table.setItem(row, 0, QTableWidgetItem(data.id))
-            self.data_table.setItem(
-                row, 1, QTableWidgetItem(getattr(data, "title", "") or "")
-            )
-            self.data_table.setItem(
-                row, 2, QTableWidgetItem(getattr(data, "status", "") or "")
-            )
+        self._loading_table = True
+        try:
+            for data in exp.data:
+                row = self.data_table.rowCount()
+                self.data_table.insertRow(row)
+                self.data_table.setItem(row, 0, QTableWidgetItem(data.id))
+                self.data_table.setItem(
+                    row, 1, QTableWidgetItem(getattr(data, "title", "") or "")
+                )
+                self.data_table.setItem(
+                    row, 2, QTableWidgetItem(getattr(data, "status", "") or "")
+                )
+        finally:
+            self._loading_table = False
 
     def _browse(self) -> None:
         self.import_panel._browse()
