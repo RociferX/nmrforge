@@ -21,6 +21,7 @@ from PyQt6.QtWidgets import (
 )
 
 from gui.dashboards import ExperimentDashboard, ProjectDashboard
+from gui.group_panel import GroupBatchPanel
 from gui.pipeline_panel import PipelinePanel
 from gui.report_panel import ReportPanel
 from gui.welcome_page import WelcomePage
@@ -39,6 +40,8 @@ class CenterPanel(QWidget):
     segmented_import_requested = pyqtSignal(str, str)  # (exp_id, 分段采集容器目录)
     create_experiment_requested = pyqtSignal(str)  # 实验类型标题
     edit_notes_requested = pyqtSignal(str, str, str)  # (kind, exp_id, data_id)
+    group_run_requested = pyqtSignal(str, str, list, str)
+    # (exp_id, group_id, steps, reference_data_id)
     new_project_requested = pyqtSignal(str)  # 项目名称
     open_project_requested = pyqtSignal(str)  # 项目路径
 
@@ -82,6 +85,13 @@ class CenterPanel(QWidget):
             self.segmented_import_requested.emit
         )
 
+        self.group_page = GroupBatchPanel()
+        self.group_page.log_message.connect(self.log_message.emit)
+        self.group_page.run_group_batch_requested.connect(
+            self.group_run_requested.emit
+        )
+        self.group_page.summary_requested.connect(self._on_group_summary)
+
         self.stack = QStackedWidget()
         self.stack.addWidget(self.welcome_page)  # index 0: Workspace
         self.stack.addWidget(self.project_page)  # index 1: Project
@@ -89,6 +99,7 @@ class CenterPanel(QWidget):
         self.stack.addWidget(self.pipeline)  # index 3: Data / folder
         self.report_page = ReportPanel(manager)
         self.stack.addWidget(self.report_page)  # index 4: 报告
+        self.stack.addWidget(self.group_page)  # index 5: 数据组
 
         # 顶部注释条:项目/实验类型/样品数据三级注释展示 + 后补编辑入口
         self.notes_header = QHBoxLayout()
@@ -110,7 +121,9 @@ class CenterPanel(QWidget):
         layout.addWidget(self.stack)
 
     # ------------------------------------------------------------------
-    def set_selection(self, kind: str, exp_id: str, data_id: str = "") -> None:
+    def set_selection(
+        self, kind: str, exp_id: str, data_id: str = "", group_id: str = ""
+    ) -> None:
         """按树选中层级切换中间页面,并刷新顶部注释条。"""
         self._update_notes(kind, exp_id, data_id)
         if kind == "workspace":
@@ -126,6 +139,9 @@ class CenterPanel(QWidget):
                 exp = self._manager.project.experiment(exp_id)
                 label = exp.title if exp is not None else exp_id
                 self.experiment_page.set_context(self._manager, exp_id, label)
+        elif kind == "group":
+            self.stack.setCurrentIndex(5)
+            self.group_page.set_context(self._manager, exp_id, group_id)
         else:  # data / folder / 其它:显示 Pipeline
             self.stack.setCurrentIndex(3)
             self.pipeline.set_selection(kind, exp_id, data_id)
@@ -154,6 +170,23 @@ class CenterPanel(QWidget):
                 text = data_note(project, exp_id, data_id)
         self.notes_label.setText(f"注释:\n{text}" if text else "注释: (未填写)")
 
+    def _on_group_summary(self, summary: dict) -> None:
+        """组批量处理完成汇总:日志输出 + 面板清进度。"""
+        info = str(summary.get("info", ""))
+        if info:
+            self.log_message.emit(info)
+        for item in summary.get("items") or []:
+            data_id = item.get("data_id", "")
+            if item.get("ok"):
+                self.log_message.emit(
+                    f"  完成 {data_id}: {item.get('message', '')}"
+                )
+            else:
+                self.log_message.emit(
+                    f"  失败 {data_id}: {item.get('error', '')}"
+                )
+        self.group_page.set_progress("")
+
     def _on_edit_notes(self) -> None:
         """点击「编辑注释」:发出编辑请求(主窗口打开注释对话框)。"""
         self.edit_notes_requested.emit(
@@ -165,8 +198,17 @@ class CenterPanel(QWidget):
         self.pipeline.refresh()
         self.project_page.refresh()
         self.experiment_page.refresh()
+        if self._exp_group_context():
+            self.group_page._refresh()
         self.report_page.manager = self._manager
         self.report_page.refresh()
+
+    def _exp_group_context(self) -> bool:
+        """当前是否停留在数据组页面(供 refresh 刷新)。"""
+        return bool(
+            self.stack.currentWidget() is self.group_page
+            and getattr(self.group_page, "_group_id", "")
+        )
 
     def show_report(self, _step_id: str = "", exp_id: str = "", data_id: str = "") -> None:
         """打开报告页(分析产物存在时);缺省用当前选中实验/数据。"""

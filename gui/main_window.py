@@ -212,6 +212,12 @@ class MainWindow(QMainWindow):
         )
         self.project_tree.batch_assign_requested.connect(self._assign_batch)
         self.project_tree.batch_remove_requested.connect(self._remove_batch)
+        self.project_tree.group_add_data_requested.connect(self._group_add_data)
+        self.project_tree.group_remove_data_requested.connect(
+            self._group_remove_data
+        )
+        self.project_tree.group_rename_requested.connect(self._group_rename)
+        self.project_tree.group_delete_requested.connect(self._group_delete)
 
         self.center_panel = CenterPanel(self.manager, self.controller)
         self.pipeline = self.center_panel.pipeline  # 兼容旧引用
@@ -238,6 +244,7 @@ class MainWindow(QMainWindow):
             lambda path: self._open_root(Path(path))
         )
         self.center_panel.edit_notes_requested.connect(self._edit_notes)
+        self.center_panel.group_run_requested.connect(self._run_group_batch)
         self.pipeline.run_finished.connect(self._on_pipeline_run_finished)
         self.pipeline.show_spectrum_requested.connect(
             self._show_spectrum_from_pipeline
@@ -517,6 +524,139 @@ class MainWindow(QMainWindow):
         clear_batch_id(self.manager, exp_id, data_id)
         self._append_log(f"数据 {data_id} 已移出批量组(恢复单一数据)")
         self.refresh()
+
+    # ------------------------------------------------------------------
+    # 数据组(schema 1.4)
+    # ------------------------------------------------------------------
+    def _group_add_data(self, exp_id: str, group_id: str, data_ids: list) -> None:
+        """把多个数据加入数据组(project.json 与 pipeline_state 双写)。"""
+        from gui.pipeline_state import set_batch_id
+
+        if self.manager.project is None:
+            return
+        group = self.manager.group(exp_id, group_id)
+        if group is None:
+            self._append_log(f"数据组不存在: {group_id}")
+            return
+        for data_id in data_ids or []:
+            try:
+                self.manager.add_to_group(exp_id, group_id, str(data_id))
+                set_batch_id(self.manager, exp_id, str(data_id), group_id)
+                self._append_log(f"数据 {data_id} 已加入数据组 {group_id}")
+            except Exception as exc:  # noqa: BLE001 - 单数据失败继续
+                self._append_log(f"加入失败 {data_id}: {exc}")
+        self.manager.save()
+        self.refresh()
+
+    def _group_remove_data(
+        self, exp_id: str, group_id: str, data_id: str
+    ) -> None:
+        """把数据移出数据组(project.json 与 pipeline_state 双写)。"""
+        from gui.pipeline_state import clear_batch_id
+
+        if self.manager.project is None:
+            return
+        self.manager.remove_from_group(exp_id, group_id, data_id)
+        clear_batch_id(self.manager, exp_id, data_id)
+        self.manager.save()
+        self._append_log(f"数据 {data_id} 已移出数据组 {group_id}")
+        self.refresh()
+
+    def _group_rename(self, exp_id: str, group_id: str, title: str) -> None:
+        """重命名数据组。"""
+        if self.manager.project is None:
+            return
+        self.manager.rename_data_group(exp_id, group_id, title)
+        self.manager.save()
+        self._append_log(f"数据组 {group_id} 已重命名为 {title}")
+        self.refresh()
+
+    def _group_delete(self, exp_id: str, group_id: str) -> None:
+        """删除数据组(仅移除组,成员数据保留为单个数据)。"""
+        from gui.pipeline_state import clear_batch_id
+
+        if self.manager.project is None:
+            return
+        group = self.manager.group(exp_id, group_id)
+        if group is None:
+            return
+        ok = ConfirmDialog.confirm(
+            self,
+            "删除数据组",
+            f"删除数据组 {group_id}?组内 {len(group.data_ids)} 个数据"
+            "将恢复为单个数据(数据本身不删除)。",
+        )
+        if not ok:
+            return
+        for data_id in list(group.data_ids):
+            clear_batch_id(self.manager, exp_id, data_id)
+        self.manager.delete_data_group(exp_id, group_id)
+        self.manager.save()
+        self._append_log(f"数据组 {group_id} 已删除(成员恢复单个数据)")
+        self.refresh()
+
+    def _run_group_batch(
+        self,
+        exp_id: str,
+        group_id: str,
+        steps: list,
+        reference_data_id: str = "",
+    ) -> None:
+        """数据组批量处理:后台线程执行,进度经日志输出。"""
+        if self.manager.project is None:
+            return
+        group = self.manager.group(exp_id, group_id)
+        if group is None or not group.data_ids:
+            self._append_log(f"数据组 {group_id} 没有成员数据,无法批量处理")
+            return
+        step_label = " → ".join(steps) if steps else "(空)"
+        ref_text = (
+            f",参考数据 {reference_data_id}" if reference_data_id else ""
+        )
+        self._append_log(
+            f"开始数据组 {group_id} 批量处理: {step_label}{ref_text}"
+        )
+        self.center_panel.group_page.set_progress("批量处理运行中...")
+
+        def worker() -> None:
+            try:
+                self.controller.set_manager(self.manager)
+                result = self.controller.run_group_batch(
+                    exp_id,
+                    group_id,
+                    steps,
+                    reference_data_id=reference_data_id,
+                    progress=lambda msg: self._append_log(msg),
+                )
+                summary = dict(result.get("summary") or {})
+                failed = list(result.get("failed") or [])
+                info = (
+                    f"数据组 {group_id} 批量处理完成: "
+                    f"{summary.get('success', 0)}/{summary.get('total', 0)} 成功"
+                )
+                if failed:
+                    info += " · 失败: " + ",".join(failed)
+                items = [
+                    {
+                        "data_id": data_id,
+                        "ok": per.get("status") == "success",
+                        "message": "",
+                        "error": per.get("error", ""),
+                    }
+                    for data_id, per in (result.get("results") or {}).items()
+                ]
+                self.center_panel.group_page.summary_requested.emit(
+                    {"info": info, "items": items}
+                )
+            except Exception as exc:  # noqa: BLE001 - 错误统一回主线程
+                self.import_failed.emit(f"{type(exc).__name__}: {exc}")
+                self.center_panel.group_page.set_progress("")
+            finally:
+                self.refresh()
+
+        import threading
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def _import_experiment_async(self, data: dict) -> None:
         """后台线程执行导入(三步接口 import_data),避免复制大文件阻塞 UI。"""
@@ -1360,11 +1500,22 @@ class MainWindow(QMainWindow):
             self.context_bar.setText("未打开项目")
             return
         exp_id = self.project_tree.current_experiment_id()
-        data_id = self.project_tree._data_id_of(self.project_tree.tree.currentItem())
+        current = self.project_tree.tree.currentItem()
+        data_id = self.project_tree._data_id_of(current)
         parts = [self.manager.project.name]
         if exp_id:
             exp = self.manager.project.experiment(exp_id)
             parts.append(exp.title if exp is not None else exp_id)
+        current_data = current.data(0, Qt.ItemDataRole.UserRole) if current is not None else None
+        if (
+            isinstance(current_data, dict)
+            and current_data.get("kind") == "group"
+            and exp_id
+        ):
+            group_id = str(current_data.get("group_id", ""))
+            group = self.manager.group(exp_id, group_id)
+            label = getattr(group, "title", "") or f"数据组 {group_id}"
+            parts.append(f"{label} ({len(group.data_ids or [])} 个数据)" if group else label)
         if data_id and exp_id:
             label = data_id
             status_text = ""
@@ -1386,10 +1537,15 @@ class MainWindow(QMainWindow):
         self.project_tree.select_data(exp_id, data_id)
         self.center_panel.set_selection("data", exp_id, data_id)
 
-    def _update_context(self, kind: str, exp_id: str, data_id: str = "") -> None:
+    def _update_context(
+        self, kind: str, exp_id: str, data_id: str = "", group_id: str = ""
+    ) -> None:
         """左侧选择变化 → 中间按选中类型显示,右侧围绕数据刷新。"""
-        self.center_panel.set_selection(kind, exp_id, data_id)
-        self.spectrum_panel.set_context(exp_id, data_id)
+        self.center_panel.set_selection(kind, exp_id, data_id, group_id)
+        if kind == "group":
+            self.spectrum_panel.set_context(exp_id, "")
+        else:
+            self.spectrum_panel.set_context(exp_id, data_id)
         self._update_context_bar()
 
     def _on_stop_requested(self) -> None:

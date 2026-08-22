@@ -10,6 +10,7 @@ from pathlib import Path
 
 from PyQt6.QtCore import QEvent, QObject, Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
+    QAbstractItemView,
     QApplication,
     QCheckBox,
     QComboBox,
@@ -103,6 +104,52 @@ class InfoDialog(QDialog):
     @staticmethod
     def show_info(parent: QWidget | None, title: str, text: str) -> None:
         InfoDialog(parent, title, text).exec()
+
+
+class MultiSelectDataDialog(QDialog):
+    """多选样品数据对话框(把其它数据加入数据组用)。
+
+    items: [(data_id, label), ...];selected_ids() 返回勾选的数据 id 列表。
+    """
+
+    def __init__(
+        self,
+        parent: QWidget | None,
+        title: str,
+        items: list[tuple[str, str]],
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setMinimumWidth(420)
+        layout = QVBoxLayout(self)
+        hint = QLabel("勾选要加入该组的样品数据(可多选):")
+        layout.addWidget(hint)
+        self._list = QListWidget()
+        self._list.setSelectionMode(
+            QAbstractItemView.SelectionMode.MultiSelection
+        )
+        for data_id, label in items:
+            item = QListWidgetItem(f"{label} ({data_id})")
+            item.setData(Qt.ItemDataRole.UserRole, data_id)
+            self._list.addItem(item)
+        layout.addWidget(self._list)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok
+            | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("加入组")
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def selected_ids(self) -> list[str]:
+        """返回勾选的数据 id 列表。"""
+        return [
+            str(self._list.item(index).data(Qt.ItemDataRole.UserRole))
+            for index in range(self._list.count())
+            if self._list.item(index).isSelected()
+        ]
 
 
 class ConfirmDialog(QDialog):

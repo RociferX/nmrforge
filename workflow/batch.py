@@ -2,8 +2,12 @@
 
 入口 ``run_batch(manager, exp_id, targets, steps, backend)``:
 
-- ``targets`` 为 batch_id(如 "B1")时,按 .pipeline_state.json 的 batch 键解析
-  组内数据 id(GUI 批量组语义;Engine 不依赖 Qt,直接读状态文件);
+- ``targets`` 为 batch_id/组 id(如 "B1")时,先按 project.json 数据组
+  (schema 1.4,core/project)解析成员,未命中再按 .pipeline_state.json 的
+  batch 键解析(GUI 旧批量组语义兼容;Engine 不依赖 Qt);
+- ``reference_data_id`` 非空时,取其最近一次成功谱图运行的有效参数
+  (WorkflowRun.params)作为 spectrum 步骤参数基底,实现「按参考数据
+  的处理脚本处理整组」;显式 params 覆盖参考参数;
 - ``targets`` 为 data_id 列表时按显式列表执行;
 - ``steps`` 按序执行 import(幂等确认)→ fid → spectrum → peaks → analysis;
   fid/spectrum 复用 workflow.stepwise.generate_fid/generate_spectrum,peaks
@@ -44,6 +48,15 @@ class BatchError(Exception):
     """批处理引擎错误(参数校验/目标解析/步骤不支持)。"""
 
 
+def _data_exists(manager: ProjectManager, exp_id: str, data_id: str) -> bool:
+    """数据条目是否存在(组内成员可能已删除)。"""
+    try:
+        manager.data(exp_id, data_id)
+        return True
+    except Exception:  # noqa: BLE001 - ProjectError 统一视为不存在
+        return False
+
+
 def _batch_id_of(manager: ProjectManager, exp_id: str, data_id: str) -> str:
     """读 GUI 侧 .pipeline_state.json 的 batch 键(与 gui.pipeline_state.batch_id 同语义)。"""
     path = manager.data_base(exp_id, data_id) / STATE_FILENAME
@@ -67,6 +80,17 @@ def _resolve_data_ids(
         raise BatchError(f"实验不存在: {exp_id}")
     if isinstance(targets, str):
         batch = targets
+        # schema 1.4 数据组优先(project.json);旧批量组标记(pipeline_state)兼容
+        group = manager.group(exp_id, batch)
+        if group is not None:
+            data_ids = [
+                d
+                for d in group.data_ids
+                if _data_exists(manager, exp_id, d)
+            ]
+            if not data_ids:
+                raise BatchError(f"数据组 {batch} 在实验 {exp_id} 中没有数据")
+            return data_ids, batch
         data_ids = [
             data.id
             for data in entry.data
@@ -84,6 +108,38 @@ def _resolve_data_ids(
         except Exception as exc:  # noqa: BLE001 - ProjectError 统一转 BatchError
             raise BatchError(f"数据不存在: {exp_id}/{data_id}") from exc
     return data_ids, ""
+
+
+def _reference_spectrum_params(
+    manager: ProjectManager,
+    exp_id: str,
+    data_id: str,
+) -> dict[str, Any]:
+    """取参考数据最近一次成功谱图运行的有效参数(处理脚本/参数复用)。
+
+    按 WorkflowRun 追加序取最后一个成功且 workflow_ref 属于谱图链的 run;
+    无可用 run 返回空 dict(调用方回退默认统一自动处理)。
+    """
+    if manager.project is None:
+        return {}
+    spectrum_refs = (
+        "process",
+        "reconstruct_nus",
+        "phase_optimize_unified",
+        "finalize_nus",
+        "generate_spectrum",
+    )
+    matches = [
+        run
+        for run in manager.project.workflow_runs
+        if run.experiment_id == exp_id
+        and (run.inputs or {}).get("data_id") == data_id
+        and run.status == "success"
+        and any(ref in str(run.workflow_ref or "") for ref in spectrum_refs)
+    ]
+    if not matches:
+        return {}
+    return dict(matches[-1].params or {})
 
 
 def _run_step(
@@ -134,6 +190,7 @@ def run_batch(
     *,
     params: dict[str, Any] | None = None,
     progress: Callable[[str], None] | None = None,
+    reference_data_id: str | None = None,
 ) -> dict[str, Any]:
     """按序对组内每个数据执行指定步骤,单数据失败不中断整组。
 
@@ -150,6 +207,11 @@ def run_batch(
         raise BatchError(f"不支持的批处理步骤: {unknown}")
     data_ids, batch = _resolve_data_ids(manager, exp_id, targets)
     step_params = dict(params or {})
+    ref_params = (
+        _reference_spectrum_params(manager, exp_id, reference_data_id)
+        if reference_data_id
+        else {}
+    )
     total = len(data_ids)
     results: dict[str, dict[str, Any]] = {}
     for index, data_id in enumerate(data_ids, start=1):
@@ -165,7 +227,9 @@ def run_batch(
             if progress is not None:
                 progress(f"{data_id}: 开始 {step}")
             try:
-                value = _run_step(manager, exp_id, data_id, step, backend, step_params)
+                merged = dict(ref_params) if step == "spectrum" else {}
+                merged.update(step_params)
+                value = _run_step(manager, exp_id, data_id, step, backend, merged)
             except Exception as exc:  # noqa: BLE001 - 单数据失败不中断整组
                 per_data["status"] = "failed"
                 per_data["failed_step"] = step

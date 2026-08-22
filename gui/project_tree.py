@@ -179,7 +179,7 @@ class _InlineRenameEditor(QWidget):
 class ProjectTreePanel(QWidget):
     """项目管理树;selection_changed 在上下文(实验类型)变化时发出。"""
 
-    selection_changed = pyqtSignal(str, str, str)  # (kind, exp_id, data_id)
+    selection_changed = pyqtSignal(str, str, str, str)  # (kind, exp_id, data_id, group_id)
     open_requested = pyqtSignal(str)  # 双击实验:请求打开/聚焦该实验
     open_project_requested = pyqtSignal(str)  # 双击未打开项目:请求打开
     data_rename_requested = pyqtSignal(str, str, str)  # (exp_id, data_id, new_name):重命名数据
@@ -195,6 +195,10 @@ class ProjectTreePanel(QWidget):
     data_action_requested = pyqtSignal(str, str)  # (action, data_id):生成FID/谱/删除
     batch_assign_requested = pyqtSignal(str, str, str)  # (exp_id, data_id, batch_id)
     batch_remove_requested = pyqtSignal(str, str)  # (exp_id, data_id)
+    group_add_data_requested = pyqtSignal(str, str, list)  # (exp_id, group_id, data_ids)
+    group_remove_data_requested = pyqtSignal(str, str, str)  # (exp_id, group_id, data_id)
+    group_rename_requested = pyqtSignal(str, str, str)  # (exp_id, group_id, new_title)
+    group_delete_requested = pyqtSignal(str, str)  # (exp_id, group_id)
     rename_requested = pyqtSignal(str, str)  # (exp_id, new_title):重命名实验类型
     delete_requested = pyqtSignal(str)  # 删除实验类型(exp_id)
 
@@ -331,27 +335,81 @@ class ProjectTreePanel(QWidget):
     def _update_experiment_item(
         self, exp_item: QTreeWidgetItem, exp
     ) -> None:
-        """更新实验类型节点文本并增量刷新样品数据节点。"""
+        """更新实验类型节点文本并增量刷新数据组与未入组样品数据节点。"""
         exp_item.setText(0, exp.title or exp.id)
         exp_item.setText(1, _STATUS_TEXT.get(exp.status, exp.status))
         exp_item.setToolTip(0, f"{exp.id}\n右键: 导入样品数据 / 重命名 / 删除")
-        existing: dict[str, QTreeWidgetItem] = {}
+        existing_data: dict[str, QTreeWidgetItem] = {}
+        existing_groups: dict[str, QTreeWidgetItem] = {}
         for index in range(exp_item.childCount()):
             item = exp_item.child(index)
             data = item.data(0, Qt.ItemDataRole.UserRole)
-            if isinstance(data, dict) and data.get("kind") == "data":
-                existing[str(data.get("data_id"))] = item
-        data_nodes = self._data_of(exp)
+            if not isinstance(data, dict):
+                continue
+            if data.get("kind") == "data":
+                existing_data[str(data.get("data_id"))] = item
+            elif data.get("kind") == "group":
+                existing_groups[str(data.get("group_id"))] = item
+        # 数据组节点
+        groups = self._groups_of(exp)
+        group_ids = {g.id for g in groups}
+        for group_id in list(existing_groups):
+            if group_id not in group_ids:
+                exp_item.removeChild(existing_groups[group_id])
+        for group in groups:
+            group_item = existing_groups.get(group.id)
+            if group_item is None:
+                group_item = self._make_group_item(exp, group)
+                exp_item.insertChild(0, group_item)
+            else:
+                self._update_group_item(group_item, exp, group)
+        # 未入组样品数据节点(与数据组同级)
+        data_nodes = self._ungrouped_data_of(exp)
         ids = {getattr(n, "id", exp.id) for n in data_nodes}
-        for data_id in list(existing):
+        for data_id in list(existing_data):
             if data_id not in ids:
-                exp_item.removeChild(existing[data_id])
+                exp_item.removeChild(existing_data[data_id])
         for data_node in data_nodes:
             data_id = getattr(data_node, "id", exp.id)
-            data_item = existing.get(data_id)
+            data_item = existing_data.get(data_id)
             if data_item is None:
                 data_item = self._make_data_item(exp, data_node)
                 exp_item.addChild(data_item)
+            else:
+                self._update_data_item(data_item, exp, data_node)
+
+    def _update_group_item(
+        self, group_item: QTreeWidgetItem, exp, group
+    ) -> None:
+        """更新数据组节点文本/成员数,并增量刷新组内样品数据节点。"""
+        group_id = getattr(group, "id", "")
+        members = list(getattr(group, "data_ids", None) or [])
+        title = getattr(group, "title", "") or f"数据组 {group_id}"
+        group_item.setText(0, title)
+        group_item.setText(1, f"{len(members)} 个数据")
+        group_item.setToolTip(
+            0,
+            f"{group_id}\n右键: 把其它数据加入该组 / 重命名组 / 删除组",
+        )
+        existing: dict[str, QTreeWidgetItem] = {}
+        for index in range(group_item.childCount()):
+            item = group_item.child(index)
+            data = item.data(0, Qt.ItemDataRole.UserRole)
+            if isinstance(data, dict) and data.get("kind") == "data":
+                existing[str(data.get("data_id"))] = item
+        by_id = {getattr(d, "id", ""): d for d in self._data_of(exp)}
+        member_set = set(members)
+        for data_id in list(existing):
+            if data_id not in member_set:
+                group_item.removeChild(existing[data_id])
+        for data_id in members:
+            data_node = by_id.get(data_id)
+            if data_node is None:
+                continue
+            data_item = existing.get(data_id)
+            if data_item is None:
+                data_item = self._make_data_item(exp, data_node, in_group=True)
+                group_item.addChild(data_item)
             else:
                 self._update_data_item(data_item, exp, data_node)
 
@@ -370,7 +428,15 @@ class ProjectTreePanel(QWidget):
             else ""
         )
         label = title or f"样品数据 {data_id}"
-        if batch:
+        # 组内数据由组节点标识,不再叠加 [batch] 后缀
+        parent_item = data_item.parent()
+        parent_data = (
+            parent_item.data(0, Qt.ItemDataRole.UserRole)
+            if parent_item is not None
+            else None
+        )
+        in_group = isinstance(parent_data, dict) and parent_data.get("kind") == "group"
+        if batch and not in_group:
             label = f"{label} [{batch}]"
         data_item.setText(0, label)
         data_item.setText(1, status)
@@ -469,17 +535,62 @@ class ProjectTreePanel(QWidget):
         exp_item.setIcon(0, self._icon("experiment"))
         exp_item.setToolTip(0, f"{exp.id}\n右键: 导入样品数据 / 重命名 / 删除")
         exp_item.setData(0, Qt.ItemDataRole.UserRole, {"kind": "experiment", "exp_id": exp.id})
-        for data_node in self._data_of(exp):
+        for group in self._groups_of(exp):
+            group_item = self._make_group_item(exp, group)
+            exp_item.addChild(group_item)
+        for data_node in self._ungrouped_data_of(exp):
             data_item = self._make_data_item(exp, data_node)
             exp_item.addChild(data_item)
         exp_item.setExpanded(False)
         return exp_item
 
     def _data_of(self, exp) -> list:
-        """实验类型下的样品数据节点(空白实验类型无样品数据则不显示样品数据子节点)。"""
+        """实验类型下的全部样品数据节点。"""
         return list(getattr(exp, "data", None) or [])
 
-    def _make_data_item(self, exp, data_node) -> QTreeWidgetItem:
+    def _groups_of(self, exp) -> list:
+        """实验类型下的数据组节点(schema 1.4;空返回空列表)。"""
+        return list(getattr(exp, "groups", None) or [])
+
+    @staticmethod
+    def _grouped_ids(exp) -> set[str]:
+        """已入组的数据 id 集合(可能同时属于多个组,均视为组内)。"""
+        grouped: set[str] = set()
+        for group in getattr(exp, "groups", None) or []:
+            grouped.update(getattr(group, "data_ids", None) or [])
+        return grouped
+
+    def _ungrouped_data_of(self, exp) -> list:
+        """未入组样品数据(直接挂实验类型下,与数据组同级)。"""
+        grouped = self._grouped_ids(exp)
+        return [d for d in self._data_of(exp) if getattr(d, "id", "") not in grouped]
+
+    def _make_group_item(self, exp, group) -> QTreeWidgetItem:
+        group_id = getattr(group, "id", "")
+        title = getattr(group, "title", "") or f"数据组 {group_id}"
+        members = list(getattr(group, "data_ids", None) or [])
+        group_item = QTreeWidgetItem([title, f"{len(members)} 个数据"])
+        group_item.setIcon(0, self._icon("group"))
+        group_item.setToolTip(
+            0,
+            f"{group_id}\n右键: 把其它数据加入该组 / 重命名组 / 删除组",
+        )
+        group_item.setData(
+            0,
+            Qt.ItemDataRole.UserRole,
+            {"kind": "group", "exp_id": exp.id, "group_id": group_id},
+        )
+        by_id = {getattr(d, "id", ""): d for d in self._data_of(exp)}
+        for data_id in members:
+            data_node = by_id.get(data_id)
+            if data_node is None:
+                continue
+            data_item = self._make_data_item(exp, data_node, in_group=True)
+            group_item.addChild(data_item)
+        group_item.setExpanded(False)
+        return group_item
+
+    def _make_data_item(self, exp, data_node, in_group: bool = False) -> QTreeWidgetItem:
         data_id = getattr(data_node, "id", exp.id)
         source = getattr(data_node, "source", "") or getattr(exp, "source", "")
         status = self._data_status(exp, data_node)
@@ -492,14 +603,18 @@ class ProjectTreePanel(QWidget):
             else ""
         )
         label = title or f"样品数据 {data_id}"
-        if batch:
+        # 组内数据由组节点标识,不再叠加 [batch] 后缀
+        if batch and not in_group:
             label = f"{label} [{batch}]"
         data_item = QTreeWidgetItem([label, status])
         data_item.setIcon(0, self._icon("data"))
         tooltip = f"{data_id}\n来源: {source}"
-        if batch:
+        if batch and not in_group:
             tooltip += f"\n批量组: {batch}"
-        tooltip += "\n右键: 生成 FID / 生成谱图 / 删除"
+        if in_group:
+            tooltip += "\n右键: 把该数据移出组 / 生成 FID / 生成谱图 / 删除"
+        else:
+            tooltip += "\n右键: 生成 FID / 生成谱图 / 删除"
         data_item.setToolTip(0, tooltip)
         data_item.setData(
             0,
@@ -576,6 +691,7 @@ class ProjectTreePanel(QWidget):
             "project": "P",
             "experiment": "E",
             "data": "D",
+            "group": "G",
             "folder": "▸",
             "file": "•",
         }.get(kind, "•")
@@ -620,12 +736,24 @@ class ProjectTreePanel(QWidget):
         exp_item = self._find_experiment_item(exp_id)
         if exp_item is None:
             return
-        for index in range(exp_item.childCount()):
-            child = exp_item.child(index)
-            if self._data_id_of(child) == data_id:
-                self.tree.expandItem(exp_item)
-                self.tree.setCurrentItem(child)
-                return
+        def _find(target_item: QTreeWidgetItem) -> QTreeWidgetItem | None:
+            for index in range(target_item.childCount()):
+                child = target_item.child(index)
+                if self._data_id_of(child) == data_id:
+                    return child
+                if child.childCount():
+                    found = _find(child)
+                    if found is not None:
+                        return found
+            return None
+
+        target = _find(exp_item)
+        if target is not None:
+            self.tree.expandItem(exp_item)
+            parent = target.parent()
+            if parent is not None and parent is not exp_item:
+                parent.setExpanded(True)
+            self.tree.setCurrentItem(target)
 
     def select_experiment(self, exp_id: str) -> None:
         """按 id 递归定位并选中实验类型节点(Workspace → Project → Experiment)。"""
@@ -665,8 +793,13 @@ class ProjectTreePanel(QWidget):
             return
         data = item.data(0, Qt.ItemDataRole.UserRole)
         kind = data.get("kind") if isinstance(data, dict) else ""
+        group_id = (
+            str(data.get("group_id", ""))
+            if isinstance(data, dict)
+            else ""
+        )
         self.selection_changed.emit(
-            kind, self._experiment_id_of(item), self._data_id_of(item)
+            kind, self._experiment_id_of(item), self._data_id_of(item), group_id
         )
 
     def _on_item_clicked(self, item: QTreeWidgetItem, _column: int) -> None:
@@ -719,6 +852,40 @@ class ProjectTreePanel(QWidget):
         exp_id = self._experiment_id_of(item)
         if exp_id:
             self.open_requested.emit(exp_id)
+
+    def _request_group_add(self, exp_id: str, group_id: str) -> None:
+        """弹出未入组数据多选对话框,把选中数据加入该组。"""
+        if self.manager.project is None:
+            return
+        exp = self.manager.project.experiment(exp_id)
+        if exp is None:
+            return
+        group = self.manager.group(exp_id, group_id)
+        if group is None:
+            return
+        grouped = self._grouped_ids(exp)
+        candidates = [
+            d
+            for d in self._data_of(exp)
+            if getattr(d, "id", "") not in grouped
+        ]
+        if not candidates:
+            from gui.dialogs import InfoDialog
+
+            InfoDialog(self, "没有可加入的数据", "实验类型下没有未入组的样品数据").exec()
+            return
+        from gui.dialogs import MultiSelectDataDialog
+
+        dialog = MultiSelectDataDialog(
+            self,
+            "把其它数据加入该组",
+            [
+                (d.id, getattr(d, "title", "") or f"样品数据 {d.id}")
+                for d in candidates
+            ],
+        )
+        if dialog.exec():
+            self.group_add_data_requested.emit(exp_id, group_id, dialog.selected_ids())
 
     def _request_batch_assign(self, exp_id: str, data_id: str) -> None:
         """弹出批量组选择(可输入新编号,留空自动编号)。"""
@@ -818,7 +985,47 @@ class ProjectTreePanel(QWidget):
                 )
                 menu.addSeparator()
                 menu.addAction("删除实验类型", lambda: self.delete_requested.emit(exp_id))
+            elif kind == "group" and exp_id:
+                group_id = str(data.get("group_id", ""))
+                if group_id:
+                    menu.addAction(
+                        "把其它数据加入该组...",
+                        lambda: self._request_group_add(exp_id, group_id),
+                    )
+                    menu.addAction(
+                        "重命名组...",
+                        lambda _checked=False: self._begin_rename(
+                            "group", item, anchor, exp_id=exp_id, group_id=group_id
+                        ),
+                    )
+                    menu.addSeparator()
+                    menu.addAction(
+                        "删除组",
+                        lambda: self.group_delete_requested.emit(exp_id, group_id),
+                    )
             elif kind == "data" and exp_id and data_id:
+                from gui.pipeline_state import batch_id
+
+                current_batch = batch_id(self.manager, exp_id, data_id)
+                parent_item = item.parent()
+                parent_data = (
+                    parent_item.data(0, Qt.ItemDataRole.UserRole)
+                    if parent_item is not None
+                    else None
+                )
+                parent_group_id = (
+                    str(parent_data.get("group_id", ""))
+                    if isinstance(parent_data, dict) and parent_data.get("kind") == "group"
+                    else ""
+                )
+                if parent_group_id:
+                    menu.addAction(
+                        "把该数据移出组",
+                        lambda: self.group_remove_data_requested.emit(
+                            exp_id, parent_group_id, data_id
+                        ),
+                    )
+                    menu.addSeparator()
                 folder_path = self._folder_path_for_item(item)
                 if folder_path is not None:
                     menu.addAction(
@@ -834,9 +1041,6 @@ class ProjectTreePanel(QWidget):
                     lambda _checked=False: self._begin_rename("data", item, anchor),
                 )
                 menu.addSeparator()
-                from gui.pipeline_state import batch_id
-
-                current_batch = batch_id(self.manager, exp_id, data_id)
                 menu.addAction(
                     "加入批量组...",
                     lambda: self._request_batch_assign(exp_id, data_id),
@@ -996,7 +1200,14 @@ class ProjectTreePanel(QWidget):
         self._rename_target = ("experiment", exp_id)
         self._rename_editor.open_at(anchor, current)
 
-    def _begin_rename(self, kind: str, item: QTreeWidgetItem, anchor) -> None:
+    def _begin_rename(
+        self,
+        kind: str,
+        item: QTreeWidgetItem,
+        anchor,
+        exp_id: str = "",
+        group_id: str = "",
+    ) -> None:
         """右键「重命名」:记录目标并在右键位置打开重命名输入框。"""
         current = ""
         target: tuple | None = None
@@ -1031,6 +1242,20 @@ class ProjectTreePanel(QWidget):
             )
             current = getattr(data_entry, "title", "") or ""
             target = ("data", exp_id, data_id)
+        elif kind == "group":
+            exp_id = exp_id or self._experiment_id_of(item)
+            group_id = group_id or str(
+                (
+                    item.data(0, Qt.ItemDataRole.UserRole) or {}
+                ).get("group_id", "")
+            )
+            group = (
+                self.manager.group(exp_id, group_id)
+                if self.manager.project is not None
+                else None
+            )
+            current = getattr(group, "title", "") or ""
+            target = ("group", exp_id, group_id)
         if target is None or anchor is None:
             return
         self._rename_target = target
@@ -1049,6 +1274,8 @@ class ProjectTreePanel(QWidget):
             self.rename_requested.emit(target[1], text)
         elif kind == "data":
             self.data_rename_requested.emit(target[1], target[2], text)
+        elif kind == "group":
+            self.group_rename_requested.emit(target[1], target[2], text)
 
     def _clear_rename_state(self) -> None:
         """重命名取消(Esc/点击外部):清理目标。"""

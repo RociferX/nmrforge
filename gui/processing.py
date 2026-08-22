@@ -201,7 +201,7 @@ class ProcessingController:
         {"batch_id", "results": [{folder, data_id, ok, error}]};单个目录
         失败不阻断整批(结果中带 error 信息,0.2.162-补12)。
         """
-        from gui.pipeline_state import next_batch_id, set_batch_id
+        from gui.pipeline_state import set_batch_id
 
         self._require_manager()
         if self._manager.project is None:
@@ -209,7 +209,11 @@ class ProcessingController:
         entry = self._manager.project.experiment(exp_id)
         if entry is None:
             raise RuntimeError(f"实验类型不存在: {exp_id}")
-        batch = next_batch_id(self._manager, exp_id)
+        # 0.2.163:成组批量导入先建数据组(schema 1.4),组 id 即 batch,
+        # project.json 与 pipeline_state 双写保持一致
+        batch = ""
+        if group:
+            batch = self._manager.create_data_group(exp_id).id
         results: list[dict] = []
         for folder in folders:
             item: dict = {
@@ -224,12 +228,46 @@ class ProcessingController:
                 item["data_id"] = data_id
                 if data_id and group:
                     set_batch_id(self._manager, exp_id, data_id, batch)
+                    self._manager.add_to_group(exp_id, batch, data_id)
                 item["ok"] = True
             except Exception as exc:  # noqa: BLE001 - 单个失败不阻断整批
                 item["error"] = f"{type(exc).__name__}: {exc}"
             results.append(item)
+        # 全部失败时移除空组,避免残留空数据组节点
+        if group and not any(item.get("ok") for item in results):
+            try:
+                self._manager.delete_data_group(exp_id, batch)
+            except Exception:  # noqa: BLE001 - 组删除失败不阻断
+                pass
         self._manager.save()
         return {"batch_id": batch if group else "", "results": results}
+
+    def run_group_batch(
+        self,
+        exp_id: str,
+        group_id: str,
+        steps: list[str],
+        reference_data_id: str = "",
+        progress: Callable[[str], None] | None = None,
+    ) -> dict:
+        """对数据组执行批量处理(workflow.batch.run_batch)。
+
+        steps: BATCH_STEPS 子集(如 ["fid"] 只处理到生成 FID);
+        reference_data_id 非空时,取其最近一次成功谱图运行的有效参数
+        作为 spectrum 步骤参数基底(「按参考数据处理整组」)。
+        """
+        from workflow.batch import run_batch
+
+        self._require_manager()
+        return run_batch(
+            self._manager,
+            exp_id,
+            group_id,
+            steps,
+            self._backend_instance(),
+            reference_data_id=reference_data_id or None,
+            progress=progress,
+        )
 
     def generate_fid(
         self,

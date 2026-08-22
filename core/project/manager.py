@@ -24,6 +24,7 @@ from core.project.models import (
     DEFAULT_DIRECTORIES,
     SCHEMA_VERSION,
     DataEntry,
+    DataGroupEntry,
     ExperimentEntry,
     ExperimentStatus,
     HistoryEntry,
@@ -389,6 +390,10 @@ class ProjectManager:
                 target.unlink()
                 removed.append(str(target))
         entry.data.remove(data_entry)
+        # 0.2.163:从所有数据组移除该成员引用(组随数据删除同步收缩)
+        for group in entry.groups:
+            if data_id in group.data_ids:
+                group.data_ids.remove(data_id)
         # 0.2.159:清理该数据的样品注释(metadata.data_notes),避免残留
         meta = dict(entry.metadata or {})
         data_notes = meta.get("data_notes")
@@ -408,6 +413,129 @@ class ProjectManager:
                 "removed_files": removed,
             },
         )
+
+    # ------------------------------------------------------------------
+    # 数据组(schema 1.4):批量处理单元,成员 data_ids 有序;删除组不解散数据
+    # ------------------------------------------------------------------
+    def data_groups(self, exp_id: str) -> list[DataGroupEntry]:
+        """实验下全部数据组(空实验返回空列表)。"""
+        entry = self._require_experiment(exp_id)
+        return list(entry.groups)
+
+    def group(self, exp_id: str, group_id: str) -> DataGroupEntry | None:
+        """按 id 取数据组(不存在返回 None)。"""
+        entry = self._require_experiment(exp_id)
+        return next((g for g in entry.groups if g.id == group_id), None)
+
+    def _next_group_id(self, exp_id: str) -> str:
+        """下一个数据组编号(G1, G2, ...;与旧 pipeline_state B 前缀批量组
+        区分,避免同名冲突;编号含历史不复用,删除组后不回收)。"""
+        entry = self._require_experiment(exp_id)
+        used: set[str] = set()
+        used.update(g.id for g in entry.groups)
+        used.update(
+            str(h.fields.get("group_id", ""))
+            for h in (self.project.processing_history or [])
+            if str(h.fields.get("experiment_id", "")) == exp_id
+        )
+        max_n = 0
+        for group_id in used:
+            match = re.fullmatch(r"G(\d+)", group_id)
+            if match:
+                max_n = max(max_n, int(match.group(1)))
+        return f"G{max_n + 1}"
+
+    def create_data_group(
+        self,
+        exp_id: str,
+        title: str = "",
+        data_ids: list[str] | None = None,
+    ) -> DataGroupEntry:
+        """新建数据组(自动编号 B1...);data_ids 必须是该实验已有数据。"""
+        entry = self._require_experiment(exp_id)
+        group_id = self._next_group_id(exp_id)
+        members = [str(x) for x in (data_ids or [])]
+        existing = {d.id for d in entry.data}
+        unknown = [d for d in members if d not in existing]
+        if unknown:
+            raise ProjectError(f"数据不存在: {exp_id}/{unknown[0]}")
+        group = DataGroupEntry(
+            id=group_id,
+            title=title or f"数据组 {group_id}",
+            data_ids=members,
+            created_at=now_iso(),
+        )
+        entry.groups.append(group)
+        self.add_history(
+            "data_group_created",
+            {"experiment_id": exp_id, "group_id": group_id, "data_ids": members},
+        )
+        return group
+
+    def rename_data_group(self, exp_id: str, group_id: str, title: str) -> DataGroupEntry:
+        """重命名数据组(落盘 title,写审计 data_group_renamed)。"""
+        group = self.group(exp_id, group_id)
+        if group is None:
+            raise ProjectError(f"数据组不存在: {exp_id}/{group_id}")
+        old_title = group.title
+        group.title = str(title)
+        self.add_history(
+            "data_group_renamed",
+            {
+                "experiment_id": exp_id,
+                "group_id": group_id,
+                "old_title": old_title,
+                "new_title": str(title),
+            },
+        )
+        return group
+
+    def delete_data_group(self, exp_id: str, group_id: str) -> None:
+        """删除数据组节点(仅移除组,成员数据保留为单个数据)。"""
+        entry = self._require_experiment(exp_id)
+        group = self.group(exp_id, group_id)
+        if group is None:
+            raise ProjectError(f"数据组不存在: {exp_id}/{group_id}")
+        entry.groups.remove(group)
+        self.add_history(
+            "data_group_deleted",
+            {"experiment_id": exp_id, "group_id": group_id},
+        )
+
+    def add_to_group(self, exp_id: str, group_id: str, data_id: str) -> None:
+        """把数据加入组(已在组内幂等;数据必须属于该实验)。"""
+        group = self.group(exp_id, group_id)
+        if group is None:
+            raise ProjectError(f"数据组不存在: {exp_id}/{group_id}")
+        self.data(exp_id, data_id)
+        if data_id not in group.data_ids:
+            group.data_ids.append(data_id)
+            self.add_history(
+                "data_group_add_data",
+                {"experiment_id": exp_id, "group_id": group_id, "data_id": data_id},
+            )
+
+    def remove_from_group(self, exp_id: str, group_id: str, data_id: str) -> None:
+        """把数据移出组(不在组内幂等)。"""
+        group = self.group(exp_id, group_id)
+        if group is None:
+            raise ProjectError(f"数据组不存在: {exp_id}/{group_id}")
+        if data_id in group.data_ids:
+            group.data_ids.remove(data_id)
+            self.add_history(
+                "data_group_remove_data",
+                {"experiment_id": exp_id, "group_id": group_id, "data_id": data_id},
+            )
+
+    def group_of_data(self, exp_id: str, data_id: str) -> DataGroupEntry | None:
+        """数据所属的第一个数据组(未入组返回 None)。"""
+        entry = self._require_experiment(exp_id)
+        return next((g for g in entry.groups if data_id in g.data_ids), None)
+
+    def group_data_ids(self, exp_id: str, group_id: str) -> list[str]:
+        """组内数据 id 列表(组不存在返回空)。"""
+        group = self.group(exp_id, group_id)
+        return list(group.data_ids) if group is not None else []
 
     def add_experiment(
         self,

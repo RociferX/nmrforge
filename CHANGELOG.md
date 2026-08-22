@@ -1,5 +1,29 @@
 # 修改记录(历史条目)
 
+## 0.2.163(2026-08-22,总管直接处理)
+
+数据组成为一等实体 + 批量处理接线:
+- Shared Contract(core/project,schema 1.4 兼容读旧):新增 DataGroupEntry
+  (id/title/data_ids/created_at),ExperimentEntry.groups;ProjectManager
+  组方法 create/rename/delete/add_to_group/remove_from_group/data_groups/
+  group/group_of_data/group_data_ids;组编号 G1/G2(与旧 pipeline_state
+  B 前缀批量组区分,编号含历史不复用);删除数据自动从所有组移除成员;
+- Backend(workflow/batch.py):run_batch 目标解析支持 project.json 数据组
+  (组 id 优先,旧 pipeline_state batch 兼容);新增 reference_data_id——
+  取参考数据最近成功谱图运行的有效参数作为 spectrum 步骤参数基底
+  (「按参考数据处理整组」,显式 params 覆盖);单数据失败不中断整组;
+- GUI:实验类型下数据组与单个样品数据同级显示,组内数据挂组节点下;
+  组右键「把其它数据加入该组...」(未入组数据多选)/重命名组/删除组
+  (删除组不解散数据);组内数据右键「把该数据移出组」;选中组节点 →
+  中间显示数据组批量面板(参考数据下拉 + 截止步骤 + 按参考数据处理
+  整组 / 依次优化组内数据,进度与逐数据汇总入日志);选中组内单个
+  数据仍为原 Pipeline 界面;批量导入勾选成组时自动建数据组
+  (project.json 与 pipeline_state 双写);
+- 测试:test_data_group.py(模型/组方法/run_batch 组解析/参考参数复用/
+  显式覆盖)、test_gui_data_group.py(树组节点/右键/组面板);更新
+  schema 1.4 与批量导入组号 G1 断言;本地全量 pytest 702 项 + ruff 全绿
+  (Windows 下 Qt 收尾偶发 access violation 为已知问题,重跑可过)。
+
 ## 0.2.162-补17(2026-08-22,总管直接处理)
 
 - 切换/设置直接维范围时给出提示:设置或清除后日志面板输出当前窗口

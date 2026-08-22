@@ -29,7 +29,7 @@ def test_create_project_layout(tmp_path: Path) -> None:
     project_file = root / "project.json"
     assert project_file.is_file()
     data = json.loads(project_file.read_text(encoding="utf-8"))
-    assert data["schema_version"] == "1.3"
+    assert data["schema_version"] == "1.4"
     assert data["name"] == "demo"
     assert data["protein"]["name"] == "GB1"
     assert data["created"] == data["updated"]
@@ -413,7 +413,7 @@ def test_schema_1_1_migration_to_1_3(tmp_path: Path) -> None:
 
     migrated = ProjectManager.open_project(root)
     assert migrated.project is not None
-    assert migrated.project.schema_version == "1.3"
+    assert migrated.project.schema_version == "1.4"
     migrated_entry = migrated.project.experiment("exp_001")
     assert migrated_entry is not None
     assert len(migrated_entry.data) == 1
@@ -428,7 +428,7 @@ def test_schema_1_1_migration_to_1_3(tmp_path: Path) -> None:
     # 保存后仍为 1.3
     migrated.save()
     reopened = ProjectManager.open_project(root)
-    assert reopened.project.schema_version == "1.3"
+    assert reopened.project.schema_version == "1.4"
     assert reopened.project.experiment("exp_001").data[0].id == "d_001"
 
 

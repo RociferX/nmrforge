@@ -16,7 +16,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
-SCHEMA_VERSION = "1.3"
+SCHEMA_VERSION = "1.4"
 
 # 项目目录模板(相对路径,创建项目时逐项建目录)
 DEFAULT_DIRECTORIES = [
@@ -129,6 +129,33 @@ class DataEntry:
 
 
 @dataclass
+class DataGroupEntry:
+    """实验下的数据组(批量处理单元,schema 1.4):成员 data_ids 有序。"""
+
+    id: str
+    title: str = ""                  # 组标题(缺省空,GUI 回退 id)
+    data_ids: list[str] = field(default_factory=list)
+    created_at: str = ""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> DataGroupEntry:
+        return cls(
+            id=str(data.get("id", "")),
+            title=str(data.get("title", "")),
+            data_ids=[str(x) for x in (data.get("data_ids") or [])],
+            created_at=str(data.get("created_at", "")),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "title": self.title,
+            "data_ids": list(self.data_ids),
+            "created_at": self.created_at,
+        }
+
+
+@dataclass
 class ExperimentEntry:
     """实验(可空白创建);数据经 data 列表挂载(schema 1.2)。"""
 
@@ -138,6 +165,7 @@ class ExperimentEntry:
     sample_id: str = ""
     notes: str = ""
     data: list[DataEntry] = field(default_factory=list)
+    groups: list[DataGroupEntry] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
     created_at: str = ""
 
@@ -186,6 +214,9 @@ class ExperimentEntry:
             sample_id=str(data.get("sample_id", "")),
             notes=str(data.get("notes", "")),
             data=entries,
+            groups=[
+                DataGroupEntry.from_dict(g) for g in (data.get("groups") or [])
+            ],
             metadata=dict(data.get("metadata") or {}),
             created_at=str(data.get("created_at", "") or data.get("imported_at", "")),
         )
@@ -198,6 +229,7 @@ class ExperimentEntry:
             "sample_id": self.sample_id,
             "notes": self.notes,
             "data": [d.to_dict() for d in self.data],
+            "groups": [g.to_dict() for g in self.groups],
             "metadata": self.metadata,
             "created_at": self.created_at,
         }

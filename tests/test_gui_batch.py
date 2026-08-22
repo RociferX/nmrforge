@@ -70,17 +70,20 @@ def test_batch_import_marks_group(tmp_path: Path, bruker_dir: Path) -> None:
     ]
     controller = ProcessingController(manager)
     result = controller.batch_import(entry.id, folders)
-    assert result["batch_id"] == "B1"
+    assert result["batch_id"] == "G1"
     assert all(item["ok"] for item in result["results"])
     data_ids = [item["data_id"] for item in result["results"]]
     assert len(data_ids) == 2
-    assert batch_data_ids(manager, entry.id, "B1") == data_ids
-    # 再批量导入一次 → B2
+    assert batch_data_ids(manager, entry.id, "G1") == data_ids
+    # 0.2.163:数据组同步落 project.json(schema 1.4)
+    group = manager.group(entry.id, "G1")
+    assert group is not None and group.data_ids == data_ids
+    # 再批量导入一次 → G2
     result2 = controller.batch_import(
         entry.id, [str(bruker_dir / "hsqc_small")]
     )
-    assert result2["batch_id"] == "B2"
-    assert batch_ids_in_experiment(manager, entry.id) == ["B1", "B2"]
+    assert result2["batch_id"] == "G2"
+    assert batch_ids_in_experiment(manager, entry.id) == ["G1", "G2"]
 
 
 class _FakeController:
