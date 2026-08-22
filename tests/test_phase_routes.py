@@ -115,8 +115,11 @@ def test_unified_route_uniform_order_and_phases(
 
     monkeypatch.setattr(routes, "_read_complex_preview", fake_read)
     result = routes.unified_route(experiment, backend, work_dir=work)
-    assert len(backend.process_calls) == 3  # F1 预览 + F2 预览 + 终跑
-    preview1, preview2, final = backend.process_calls
+    # 0.2.163-补6:uniform 处理参数优化先跑 joint 复核谱
+    # (F1 预览 + F2 预览 + joint + 终跑)
+    assert len(backend.process_calls) == 4
+    preview1, preview2, joint, final = backend.process_calls
+    assert joint[2].get("preview_axis") is None  # joint 不是预览
     assert preview1[2].get("preview_axis") == "F1"
     assert preview1[3] == {}  # 首个轴无固定相位
     assert preview2[2].get("preview_axis") == "F2"
@@ -489,6 +492,64 @@ def test_unified_route_nus_final_ext_only_applies_to_final_run(
     assert result["spectrum_path"]
 
 
+def test_unified_route_uniform_runs_processing_optimization(
+    tmp_path: Path, monkeypatch, bruker_dir: Path
+) -> None:
+    """0.2.163-补6:uniform 处理参数优化——基线/直接维窗/填零+间接窗
+    候选评分,终跑参数带优化结果;与 NUS 对称。"""
+    from workflow.baseline_optimize import BaselineOptimizeResult
+    from workflow.window_optimize import WindowOptimizeResult
+
+    experiment = read_dataset(bruker_dir / "hsqc_2d")
+    backend = _FakeBackend(tmp_path / "uni_opt_work")
+    work = backend.work
+    # 提供可评分的合成谱(基线/窗优化读谱文件)
+    for name in ("hsqc_2d_joint.ft2", "hsqc_2d_final.ft2"):
+        path = work / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"x")
+
+    def fake_read(path: str, unpack_axis: int | None = None):
+        name = Path(path).name
+        if "F1" in name:
+            return _synthetic_preview(0, -25.0)
+        if "F2" in name:
+            return _synthetic_preview(1, -35.0)
+        return _synthetic_preview(0, 0.0)
+
+    monkeypatch.setattr(routes, "_read_complex_preview", fake_read)
+    # 基线/窗优化降级为现有配置(假谱不可读),验证流程与终跑参数接线
+    monkeypatch.setattr(
+        "workflow.baseline_optimize.optimize_baseline",
+        lambda experiment, path: BaselineOptimizeResult(
+            baseline={"F1": {"enabled": True, "mode": "order", "order": 2},
+                      "F2": {"enabled": False}},
+            scores={},
+            spectrum_path=str(path),
+            logs=["测试基线"],
+            optimized=["F1"],
+        ),
+    )
+    monkeypatch.setattr(
+        "workflow.window_optimize.optimize_direct_window_from_work",
+        lambda work, experiment, current=None: WindowOptimizeResult(
+            choice={"type": "sine_bell", "off": 0.45, "end": 0.95},
+            changed=True,
+            logs=["测试直接维窗"],
+        ),
+    )
+    result = routes.unified_route(experiment, backend, work_dir=work)
+    # 终跑调用(最后一次)带优化结果
+    final_params = backend.process_calls[-1][2]
+    assert final_params["baseline"]["F1"]["order"] == 2
+    assert final_params["baseline"]["F2"]["enabled"] is False
+    assert final_params["window"]["F2"]["type"] == "sine_bell"
+    assert final_params["direct_poly_time"] is False
+    assert result["baseline"]["F1"]["order"] == 2
+    assert result["window"]["F2"]["type"] == "sine_bell"
+    assert "diagnostics" in result
+
+
 def test_unified_route_uniform_final_ext_only_applies_to_final_run(
     tmp_path: Path, monkeypatch, bruker_dir: Path
 ) -> None:
@@ -512,8 +573,9 @@ def test_unified_route_uniform_final_ext_only_applies_to_final_run(
         work_dir=work,
         base_params={"final_ext_lo": "11.0", "final_ext_hi": "5.5"},
     )
-    assert len(backend.process_calls) == 3  # F1 预览 + F2 预览 + 终跑
-    preview1, preview2, final = backend.process_calls
+    # 0.2.163-补6:uniform 处理参数优化先跑 joint 复核谱
+    assert len(backend.process_calls) == 4  # F1 预览 + F2 预览 + joint + 终跑
+    preview1, preview2, _joint, final = backend.process_calls
     for preview in (preview1, preview2):
         assert preview[2].get("ext_lo") is None
         assert "final_ext_lo" not in preview[2]

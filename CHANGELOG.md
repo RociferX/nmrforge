@@ -1,5 +1,19 @@
 # 修改记录(历史条目)
 
+## 0.2.163-补6(2026-08-23,总管直接处理)
+
+uniform 2D/3D 全采样跟进 NUS 优化项目(处理思路一致,无重构更快):
+- 数据质量诊断门控接入 uniform 分支(直流偏置→POLY -time、坏点替换
+  备份),与 NUS 同源;
+- 新增 _optimize_uniform_processing:基线(内存评分)+ 直接维窗函数
+  (FID 内存评分)+ 填零/间接维窗候选(process 重跑评分,带 fixed 相位
+  覆盖);终跑参数合并 baseline/window/zero_fill/direct_poly_time;
+- window_optimize 支持切片 fid(3D uniform/NUS 流文件 fid/test*.fid),
+  与 direct_diagnostics._collect_fid_paths 同语义;
+- 2D NUS / 3D NUS 本就走 _unified_nus(含全部 NUS 优化),本次统一确认;
+- 测试:uniform 处理参数优化断言(baseline/window/diagnostics 进终跑),
+  更新 uniform 调用次数(joint 谱);本地全量 706 项 + ruff 全绿。
+
 ## 0.2.163-补5(2026-08-22,总管直接处理)
 
 人工脚本提示对应 + Pipeline 按钮布局与重新处理拆分:

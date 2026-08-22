@@ -316,6 +316,30 @@ def unified_route(    experiment: Experiment,
     work = Path(work_dir) if work_dir else backend._work_path(experiment)
     params = dict(base_params or {})
     params.pop("preview_axis", None)
+    # 0.2.163-补6:uniform 与 NUS 同源——先跑直接维数据质量诊断门控
+    # (FID 内存扫描:直流偏置→POLY -time、坏点→替换备份),不重跑后端
+    diagnostics: dict[str, Any] = {}
+    diag_logs: list[str] = []
+    try:
+        from workflow.direct_diagnostics import run_direct_diagnostics
+
+        if progress is not None:
+            progress("数据质量诊断中(直接维 FID 内存扫描)")
+        diag_result = run_direct_diagnostics(work, experiment)
+        diagnostics = {
+            "reports": list(diag_result.reports),
+            "metrics": dict(diag_result.metrics),
+            "apply_poly_time": diag_result.apply_poly_time,
+            "repaired_badpoints": diag_result.repaired_badpoints,
+            "backup_dir": diag_result.backup_dir,
+        }
+        if diag_result.reports:
+            diag_logs = ["== 数据质量诊断 =="] + [
+                f"{i + 1}. {r}"
+                for i, r in enumerate(diag_result.reports)
+            ]
+    except Exception as exc:  # noqa: BLE001 - 诊断失败不阻断谱图生成
+        diag_logs = [f"数据质量诊断失败: {exc}"]
     # 0.2.162-补15:用户指定的终跑直接维范围(final_ext_lo/final_ext_hi)
     # 只进终跑完整脚本,首遍复型预览不改
     params, final_ext_lo, final_ext_hi = _split_final_ext(params)
@@ -393,6 +417,23 @@ def unified_route(    experiment: Experiment,
                 f"vs 联合最优 {best} score={best_score:.2f}),保持顺序固定"
             )
         logs.append(f"联合复核完成,耗时 {time.time() - t_joint:.1f} 秒")
+    # 0.2.163-补6:处理参数优化(基线/直接维窗/填零+间接窗),与 NUS 对称;
+    # uniform 无重构,候选重跑完整 process 更快
+    if progress is not None:
+        progress("联合复核完成,开始处理参数优化(基线/填零/窗函数)")
+    t_opt = time.time()
+    proc = _optimize_uniform_processing(
+        experiment,
+        backend,
+        work,
+        fixed,
+        params,
+        progress=progress,
+    )
+    logs += list(diag_logs) + proc["logs"]
+    logs.append(
+        f"处理参数优化(基线/填零/窗函数)完成,耗时 {time.time() - t_opt:.1f} 秒"
+    )
     if progress is not None:
         progress("终跑(完整重跑)中")
     t_final = time.time()
@@ -409,6 +450,16 @@ def unified_route(    experiment: Experiment,
                 f"p1={fixed[direct_axis][1]:g}° → {renormed[1]:g}°"
             )
         fixed_final[direct_axis] = renormed
+    params_final.update(
+        {
+            "direct_phase_search": False,
+            "display_phase_search": False,
+            "direct_poly_time": bool(diagnostics.get("apply_poly_time")),
+            "baseline": proc["baseline"],
+            "zero_fill": proc["zero_fill"],
+            "window": proc["window"],
+        }
+    )
     resp = backend.process(
         experiment,
         plan,
@@ -439,6 +490,10 @@ def unified_route(    experiment: Experiment,
         "backend_runs": backend_runs,
         "logs": logs,
         "direct_phase": fixed_final.get(direct_axis),
+        "baseline": proc["baseline"],
+        "zero_fill": proc["zero_fill"],
+        "window": proc["window"],
+        "diagnostics": diagnostics,
     }
 
 _DIRECT_PHASE_FP_KEYS = (
@@ -553,7 +608,171 @@ def _load_recon_planes(experiment: Experiment, work: Path) -> np.ndarray:
         raise RuntimeError(f"缺少 2D 重构平面: {recon}")
     return _read_complex_preview(recon)
 
+def _optimize_uniform_processing(
+    experiment: Experiment,
+    backend: Any,
+    work: Path,
+    fixed: dict[str, tuple[float, float]],
+    base_params: dict[str, Any] | None,
+    progress: Callable[[str], None] | None = None,
+) -> dict[str, Any]:
+    """联合复核后的处理参数优化(uniform 2D/3D):基线(内存评分)+ 直接维
+    窗函数(FID 内存评分)+ 填零/间接维窗候选(process 重跑评分)。
+
+    与 NUS 版本对称;uniform 无 SMILE 重构,候选重跑的是完整 process
+    管道(带 fixed 相位覆盖),不做重构反而更快。任何评估失败均降级:
+    保持 base_params 既有配置或默认,不阻断终跑。
+    """
+    axes = [dim.logical_axis for dim in experiment.dimensions]
+    direct_axis = "F3" if experiment.ndim >= 3 else "F2"
+    indirect_axes = [a for a in axes if a != direct_axis]
+    ext = "ft3" if experiment.ndim >= 3 else "ft2"
+    zf_params = {a: {"mode": "auto"} for a in axes}
+    base = dict(base_params or {})
+    out_logs: list[str] = []
+    baseline_cfg = dict(base.get("baseline") or {})
+    window_cfg = base.get("window")
+    # 1) 联合复核谱:最终相位 + 完整填零,作基线/窗评分基底(process 一次)
+    joint_file = f"{experiment.dataset_id}_joint.{ext}"
+    resp = backend.process(
+        experiment,
+        None,
+        direct_phase_override=dict(fixed) if fixed else None,
+        params={"zero_fill": zf_params},
+        out_file=joint_file,
+        script_name=f"{experiment.dataset_id}_joint.com",
+        progress=progress,
+    )
+    if not resp.get("success") or not resp.get("spectrum_path"):
+        out_logs.append(
+            "处理参数优化: 联合复核谱生成失败("
+            + str(resp.get("message"))
+            + "),保持现有基线/填零/窗配置"
+        )
+        return {
+            "baseline": baseline_cfg,
+            "zero_fill": zf_params,
+            "window": window_cfg,
+            "logs": out_logs,
+        }
+    base_path = Path(resp["spectrum_path"])
+    # 2) 基线:每轴内存评分(off/auto/order1-3),写回终跑
+    try:
+        from workflow.baseline_optimize import optimize_baseline
+
+        if progress is not None:
+            progress("基线优化中(内存评分)")
+        opt = optimize_baseline(experiment, base_path)
+        baseline_cfg = dict(opt.baseline)
+        out_logs += opt.logs
+    except Exception as exc:  # noqa: BLE001 - 基线评估失败不影响相位/终跑
+        out_logs.append(f"基线优化(嵌入)失败: {exc}")
+    # 2.5) 直接维窗函数:FID 直接维迹内存评分(不重跑 process),写回终跑
+    try:
+        from workflow.window_optimize import optimize_direct_window_from_work
+
+        if progress is not None:
+            progress("直接维窗函数优化中(FID 内存评分)")
+        wres = optimize_direct_window_from_work(
+            work, experiment, current=(window_cfg or {}).get(direct_axis)
+        )
+        if wres.changed:
+            win = dict(window_cfg or {})
+            win[direct_axis] = wres.choice
+            window_cfg = win
+        out_logs += wres.logs
+    except Exception as exc:  # noqa: BLE001 - 窗优化失败不影响相位/终跑
+        out_logs.append(f"直接维窗优化失败: {exc}")
+    # 3) 填零/间接维窗函数候选:process 重跑 + 谱质量评分(候选有限,无重构)
+    try:
+        import numpy as np
+
+        from backend.script_generator import zero_fill_plan as _zf_plan
+        from core.qc import spectrum_quality
+
+        if progress is not None:
+            progress("填零/窗函数候选评分中")
+        auto_plan = _zf_plan(experiment, zf_params)
+        min_shape = tuple(
+            int(auto_plan.get(a, {}).get("size") or 1) for a in axes
+        )
+
+        def _score_path(path: Path) -> float:
+            import nmrglue as ng
+
+            _dic, data = ng.pipe.read(str(path))
+            q = spectrum_quality.evaluate(
+                np.asarray(data), min_shape=min_shape
+            )
+            return float(q.score.overall)
+
+        base_score = _score_path(base_path)
+        windows: list[dict[str, Any]] = [
+            {"type": "sine_bell"},
+            {"type": "sine_bell_squared"},
+            {"type": "gaussian", "lb": 5.0, "gb": 0.1},
+        ]
+        best_window: dict[str, Any] | None = None
+        best_score = base_score
+        for index, w in enumerate(windows, 1):
+            wname = str(w.get("type"))
+            cand_params = {
+                "zero_fill": zf_params,
+                "window": {a: dict(w) for a in indirect_axes},
+            }
+            resp = backend.process(
+                experiment,
+                None,
+                direct_phase_override=dict(fixed) if fixed else None,
+                params=cand_params,
+                out_file=f"{experiment.dataset_id}_win{index}.{ext}",
+                script_name=f"{experiment.dataset_id}_win{index}.com",
+                progress=progress,
+            )
+            if not resp.get("success") or not resp.get("spectrum_path"):
+                out_logs.append(
+                    f"窗函数/填零(嵌入): {wname} 运行失败,跳过"
+                )
+                continue
+            try:
+                score = _score_path(Path(resp["spectrum_path"]))
+            except Exception as exc:  # noqa: BLE001
+                out_logs.append(
+                    f"窗函数/填零(嵌入): {wname} 评分失败 {exc},跳过"
+                )
+                continue
+            out_logs.append(
+                f"窗函数/填零(嵌入): 间接维 {wname}+填零=auto "
+                f"score={score:.1f}"
+            )
+            if score > best_score:
+                best_score = score
+                best_window = dict(w)
+        if best_window is not None and best_score > base_score + 0.5:
+            window_cfg = {a: dict(best_window) for a in indirect_axes}
+            wtype = str(best_window.get("type", "sine_bell"))
+            out_logs.append(
+                "窗函数/填零(嵌入): 已选 "
+                f"{wtype}+填零=auto "
+                f"(score={base_score:.1f} → {best_score:.1f}),"
+                "终跑完整脚本应用"
+            )
+        elif best_window is not None:
+            out_logs.append("窗函数/填零(嵌入): 候选未优于当前(无窗),保持默认")
+        else:
+            out_logs.append("窗函数/填零(嵌入): 无有效候选,保持默认")
+    except Exception as exc:  # noqa: BLE001
+        out_logs.append(f"填零/窗函数优化(嵌入)失败: {exc}")
+    return {
+        "baseline": baseline_cfg,
+        "zero_fill": zf_params,
+        "window": window_cfg,
+        "logs": out_logs,
+    }
+
+
 def _optimize_nus_processing(
+
     experiment: Experiment,
     backend: Any,
     work: Path,

@@ -227,6 +227,28 @@ def optimize_direct_window(
     )
 
 
+def _fid_paths(work: Path, experiment: Experiment) -> list[Path]:
+    """转换后 fid 路径:切片流(fid/test*.fid)或单文件(dataset.fid),
+    与 workflow.direct_diagnostics._collect_fid_paths 同语义(0.2.163-补6:
+    3D uniform/NUS 为切片流)。"""
+    if experiment.segments:
+        for base in (work / "merged", work):
+            d = base / "fid"
+            if d.is_dir():
+                fs = sorted(d.glob("test*.fid"))
+                if fs:
+                    return fs
+    d2 = work / "fid"
+    if d2.is_dir():
+        fs = sorted(d2.glob("test*.fid"))
+        if fs:
+            return fs
+    single = work / f"{experiment.dataset_id}.fid"
+    if single.is_file():
+        return [single]
+    return sorted(work.glob("test*.fid"))
+
+
 def optimize_direct_window_from_work(
     work_dir: Path | str,
     experiment: Experiment,
@@ -234,12 +256,11 @@ def optimize_direct_window_from_work(
     current: dict[str, Any] | None = None,
     zf_size: int | None = None,
 ) -> WindowOptimizeResult:
-    """从转换后 fid(work 目录)加载并优化直接维窗,不重跑 SMILE。"""
-    from workflow.phase_optimize import _direct_fid_path
-
+    """从转换后 fid(work 目录,支持切片流)加载并优化直接维窗,
+    不重跑 SMILE/process。"""
     work = Path(work_dir)
-    fid_path = _direct_fid_path(work, experiment)
-    if fid_path is None:
+    paths = _fid_paths(work, experiment)
+    if not paths:
         return WindowOptimizeResult(
             choice=dict(current or {}),
             changed=False,
@@ -248,7 +269,13 @@ def optimize_direct_window_from_work(
     try:
         import nmrglue as ng
 
-        _dic, fid = ng.pipe.read(str(fid_path))
+        arrays: list = []
+        for path in paths:
+            _dic, fid = ng.pipe.read(str(path))
+            arrays.append(fid)
+        import numpy as np
+
+        fid = arrays[0] if len(arrays) == 1 else np.concatenate(arrays, axis=0)
     except Exception as exc:  # noqa: BLE001
         return WindowOptimizeResult(
             choice=dict(current or {}),
@@ -257,12 +284,3 @@ def optimize_direct_window_from_work(
         )
     res = optimize_direct_window(fid, zf_size=zf_size, current=current)
     return res
-
-
-__all__ = [
-    "DEFAULT_CANDIDATES",
-    "WindowChoice",
-    "WindowOptimizeResult",
-    "optimize_direct_window",
-    "optimize_direct_window_from_work",
-]
