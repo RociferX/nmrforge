@@ -1,5 +1,18 @@
 # 修改记录(历史条目)
 
+## 0.2.163-补8(2026-08-23,总管直接处理)
+
+全路径端到端回归测试(tests/test_full_paths.py,每次修改必跑):
+- 覆盖全部已有路径:自动 2D/3D uniform + NUS(导入 → FID → 谱图
+  [unified 诊断+优化] → 峰挑选 → 分析)、人工(fid.com/谱图脚本)、
+  批量(数据组);
+- FakeBackend 写真实可读 fid/谱(诊断/直接维窗优化真实执行),谱读取
+  经 monkeypatch 注入合成数组;验证流程完整性、产物归位、
+  WorkflowRun 登记;
+- 约定写入 docs/development.md:修改代码后必须运行
+  `python -m pytest tests/test_full_paths.py`;
+- 本地全量 717 项 + ruff 全绿。
+
 ## 0.2.163-补7(2026-08-23,总管直接处理)
 
 人工路径支持切片 fid(3D uniform/NUS):

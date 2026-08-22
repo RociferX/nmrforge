@@ -428,6 +428,7 @@ def unified_route(    experiment: Experiment,
         work,
         fixed,
         params,
+        plan=plan,
         progress=progress,
     )
     logs += list(diag_logs) + proc["logs"]
@@ -614,6 +615,7 @@ def _optimize_uniform_processing(
     work: Path,
     fixed: dict[str, tuple[float, float]],
     base_params: dict[str, Any] | None,
+    plan: Any = None,
     progress: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     """联合复核后的处理参数优化(uniform 2D/3D):基线(内存评分)+ 直接维
@@ -636,7 +638,7 @@ def _optimize_uniform_processing(
     joint_file = f"{experiment.dataset_id}_joint.{ext}"
     resp = backend.process(
         experiment,
-        None,
+        plan,
         direct_phase_override=dict(fixed) if fixed else None,
         params={"zero_fill": zf_params},
         out_file=joint_file,
@@ -722,7 +724,7 @@ def _optimize_uniform_processing(
             }
             resp = backend.process(
                 experiment,
-                None,
+                plan,
                 direct_phase_override=dict(fixed) if fixed else None,
                 params=cand_params,
                 out_file=f"{experiment.dataset_id}_win{index}.{ext}",

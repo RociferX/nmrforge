@@ -492,6 +492,33 @@ def test_unified_route_nus_final_ext_only_applies_to_final_run(
     assert result["spectrum_path"]
 
 
+def test_unified_route_uniform_optimization_passes_plan(
+    tmp_path: Path, monkeypatch, bruker_dir: Path
+) -> None:
+    """0.2.163-补8:uniform 处理参数优化的 joint/候选 process 调用必须
+    携带 ProcessingPlan(修复 plan=None 导致生成谱图失败)。"""
+    from core.planning.processing_plan import ProcessingPlan
+
+    experiment = read_dataset(bruker_dir / "hsqc_2d")
+    backend = _FakeBackend(tmp_path / "uni_plan_work")
+    work = backend.work
+
+    def fake_read(path: str, unpack_axis: int | None = None):
+        name = Path(path).name
+        if "F1" in name:
+            return _synthetic_preview(0, -25.0)
+        if "F2" in name:
+            return _synthetic_preview(1, -35.0)
+        return _synthetic_preview(0, 0.0)
+
+    monkeypatch.setattr(routes, "_read_complex_preview", fake_read)
+    routes.unified_route(experiment, backend, work_dir=work)
+    # joint 与候选 process 调用(第 3、4、5 次)均带非 None plan
+    for call in backend.process_calls[2:]:
+        assert call[1] is not None
+        assert isinstance(call[1], ProcessingPlan), type(call[1])
+
+
 def test_unified_route_uniform_runs_processing_optimization(
     tmp_path: Path, monkeypatch, bruker_dir: Path
 ) -> None:
