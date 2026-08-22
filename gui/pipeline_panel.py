@@ -1150,13 +1150,12 @@ class PipelinePanel(QWidget):
         threading.Thread(target=worker, daemon=True).start()
 
     def _on_rerun_final_requested(self, step_id: str) -> None:
-        """「重新运行终脚本」:不重新优化,复用最近成功谱图运行的参数
-        (含相位/窗/基线),并应用用户最新设置的直接维范围后重跑一次。
+        """「重新运行终脚本」:直接在已有最终脚本上改直接维范围再运行。
 
-        直接复用 process/ 里旧 .com 会写死旧 EXT 窗口;正确做法是提取
-        最近成功谱图 WorkflowRun 的 effective params,合并当前终跑直接维
-        范围覆盖(final_ext_lo/hi),经 generate_spectrum(phase_route=none)
-        重新渲染脚本并运行——改了直接维范围后重跑即生效。
+        终跑脚本(uniform {data_id}_process.com / NUS {data_id}_nus.com)已含
+        优化后的相位/窗/基线等全部参数;用户改了直接维范围后,只需把脚本
+        里 EXT 行的 -x1/-xn ppm 窗口替换为最新值再运行——其它参数完全
+        不动,谱图不会因重新渲染而改变。
         """
         if step_id != "spectrum":
             return
@@ -1164,7 +1163,9 @@ class PipelinePanel(QWidget):
         if not exp_id:
             return
         self._rows[step_id].set_status("RUNNING")
-        self.log_message.emit("开始重新运行终脚本(复用参数,应用最新直接维范围)")
+        self.log_message.emit("开始重新运行终脚本(仅更新直接维范围,其余参数不变)")
+
+        import re
 
         def worker() -> None:
             try:
@@ -1177,25 +1178,52 @@ class PipelinePanel(QWidget):
                     nodes[0],
                 )
                 data_id = getattr(data_node, "id", exp_id)
-                # 复用最近成功谱图运行的有效参数(相位/窗/基线等)
-                from workflow.batch import _reference_spectrum_params
-
-                ref = _reference_spectrum_params(self.manager, exp_id, data_id)
-                if not ref:
+                # 定位已有终跑脚本(uniform/NUS),找不到则提示先优化生成
+                work = self.manager.data_dir(exp_id, data_id, "process")
+                script_path = None
+                for name in (
+                    f"{data_id}_process.com",
+                    f"{data_id}_nus.com",
+                    "process.com",
+                    "nus.com",
+                ):
+                    candidate = work / name
+                    if candidate.is_file():
+                        script_path = candidate
+                        break
+                if script_path is None:
                     self.log_message.emit(
-                        "没有可复用的谱图参数,请先执行「重新优化」生成"
+                        "没有可复用的终跑脚本,请先执行「重新优化」生成"
                     )
                     return
-                # 应用用户最新设置的终跑直接维范围
+                content = script_path.read_text(encoding="utf-8", errors="replace")
+                # 应用用户最新设置的直接维范围:替换 EXT 行的 -x1/-xn
                 ext = self._spectrum_ext_params(data_id) or {}
-                merged = dict(ref)
-                merged.update(ext)
-                merged["phase_route"] = "none"  # 只跑一次,不重新优化
-                result = self.controller.generate_spectrum(
+                if ext:
+                    lo = str(ext.get("final_ext_lo", ""))
+                    hi = str(ext.get("final_ext_hi", ""))
+                    if lo:
+                        content = re.sub(
+                            r"(-x1 )([0-9.]+)(ppm)?",
+                            lambda m: f"{m.group(1)}{lo}" + (m.group(3) or ""),
+                            content,
+                        )
+                    if hi:
+                        content = re.sub(
+                            r"(-xn )([0-9.]+)(ppm)?",
+                            lambda m: f"{m.group(1)}{hi}" + (m.group(3) or ""),
+                            content,
+                        )
+                    script_path.write_text(content, encoding="utf-8", newline="\n")
+                    self.log_message.emit(
+                        f"直接维范围已更新: {lo or '默认'}-{hi or '默认'} ppm → {script_path.name}"
+                    )
+                # 运行修改后的终跑脚本,谱图归位
+                result = self.controller.run_manual_spectrum(
                     data_node,
+                    {script_path.name: content},
                     exp_id=exp_id,
                     data_id=data_id,
-                    params=merged,
                 )
                 self.log_message.emit(
                     f"重新运行终脚本完成 {data_id}: {result}"

@@ -140,30 +140,34 @@ def test_reprocess_peaks_and_fid_available(
 def test_rerun_final_applies_latest_ext(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """0.2.163-补5:重新运行终脚本应用用户最新直接维范围。"""
+    """0.2.163-补5:重新运行终脚本直接改最终脚本 EXT 窗口,其余参数不变。"""
     from gui.pipeline_panel import PipelinePanel
 
     monkeypatch.setattr("threading.Thread", SyncThread)
     manager, exp_id, data_id = _manager_with_artifacts(tmp_path)
-    # 模拟最近成功谱图运行(WorkflowRun 含有效参数)
-    run = manager.start_run(
-        exp_id,
-        workflow_ref="process",
-        inputs={"data_id": data_id},
-        params={"baseline": "poly", "window": {"F2": "sp"}},
-    )
-    manager.finish_run(
-        run.run_id, "success", outputs={"spectrum_path": "/tmp/x.ft2"}, message="ok"
+    # 生成一份已有终跑脚本(uniform),含相位/窗/基线等其它参数
+    process = manager.data_dir(exp_id, data_id, "process")
+    script = process / f"{data_id}_process.com"
+    script.write_text(
+        "#!/bin/csh\n"
+        "| nmrPipe -fn SP -off 0.5 -end 0.95 -pow 2 -c 0.5 \\\n"
+        "| nmrPipe -fn FT -auto \\\n"
+        "| nmrPipe -fn EXT -x1 10.5ppm -xn 6.5ppm -sw -round 2 \\\n"
+        "| nmrPipe -fn PS -p0 10 -p1 1.5 -di \\\n"
+        "| nmrPipe -fn POLY -auto -time \\\n",
+        encoding="utf-8",
     )
     manager.save()
 
-    captured: dict = {}
+    calls: list[str] = []
+    ran_scripts: dict = {}
 
     class _CaptureController(_FakeController):
-        def generate_spectrum(
-            self, data, exp_id=None, data_id=None, params=None
+        def run_manual_spectrum(
+            self, data, scripts, exp_id=None, data_id=None
         ) -> str:
-            captured["params"] = dict(params or {})
+            calls.append("run_manual_spectrum")
+            ran_scripts.update(scripts)
             return "/tmp/x.ft2"
 
     panel = PipelinePanel(manager, _CaptureController())
@@ -171,12 +175,16 @@ def test_rerun_final_applies_latest_ext(
     # 用户设置终跑直接维范围 8.0-6.0
     panel._final_ext[(exp_id, data_id)] = ("8.0", "6.0")
     panel._on_rerun_final_requested("spectrum")
-    params = captured.get("params", {})
-    assert params.get("phase_route") == "none"  # 不重新优化
-    assert params.get("final_ext_lo") == "8.0"
-    assert params.get("final_ext_hi") == "6.0"
-    assert params.get("baseline") == "poly"  # 复用最近成功参数
+    assert calls == ["run_manual_spectrum"]
+    # 运行的脚本内容:EXT 已更新为 8.0-6.0,其它参数(SP/FT/PS/POLY)原样
+    ran_content = ran_scripts.get(f"{data_id}_process.com", "")
+    assert "-x1 8.0ppm -xn 6.0ppm" in ran_content
+    assert "-x1 10.5ppm -xn 6.5ppm" not in ran_content
+    assert "-p0 10 -p1 1.5" in ran_content  # 相位未动
+    assert "POLY -auto -time" in ran_content  # 基线/诊断未动
+    assert "SP -off 0.5 -end 0.95" in ran_content  # 窗函数未动
     panel.close()
+
 
 
 def test_reprocess_downstream_becomes_outdated(
