@@ -47,10 +47,12 @@ def _fake_backend(
     tmp_path: Path,
     spurious_in: set[int],
     extra_peaks: dict[int, list[tuple[float, float, float]]] | None = None,
+    spurious_pos: tuple[int, int] = (25, 25),
 ):
     """稳定峰固定;伪峰仅出现在指定 seed 的重构;噪声随 nSigma。
 
-    extra_peaks: {seed: [(y, x, height), ...]} 追加到对应 seed 的重构。"""
+    extra_peaks: {seed: [(y, x, height), ...]} 追加到对应 seed 的重构;
+    spurious_pos: 伪峰位置(默认 25,25,可指定避免与噪声峰共享 4 点 bin)。"""
     seen: list[dict] = []
     extras = extra_peaks or {}
 
@@ -64,7 +66,7 @@ def _fake_backend(
             nsigma = float(params.get("nsigma", 5.0))
             peaks = [(10, 20, 30.0), (30, 40, 25.0)]
             if seed in spurious_in:
-                peaks.append((25, 25, 15.0))
+                peaks.append((spurious_pos[0], spurious_pos[1], 15.0))
             peaks.extend(extras.get(seed, []))
             noise_std = 1.0 if nsigma <= 3.0 else 0.1
             path = self.work / f"spec_{seed}.ft2"
@@ -86,24 +88,27 @@ def test_default_smile_grid() -> None:
 def test_optimize_filters_spurious_and_keeps_true(
     tmp_path: Path, bruker_dir: Path
 ) -> None:
-    """0.2.162:最优参数多次重构(注入噪声)后,不稳定的伪峰被剔除,真峰保留。"""
+    """0.2.162-补10:跨组合去伪——只在一个组合出现的伪峰被剔除,真峰保留。"""
     exp = read_dataset(bruker_dir / "nus_3d")
-    # 伪峰只出现在扫描 seed(1000),最终重复(9000-9002)不含 → 被剔除
-    backend, _seen = _fake_backend(tmp_path, spurious_in={1000})
+    # 伪峰(42,42)只出现在扫描组合1(seed 1000),不与其它组合噪声峰共享 bin
+    backend, _seen = _fake_backend(
+        tmp_path, spurious_in={1000}, spurious_pos=(42, 42)
+    )
     results = optimize_smile_parameters(
         exp,
         backend,
-        grid=[{"nsigma": 5.0, "thresh": 0.95}],
-        final_repeats=3,
-        min_stability=2,
+        grid=[
+            {"nsigma": 5.0, "thresh": 0.95},
+            {"nsigma": 6.0, "thresh": 0.99},
+        ],
     )
-    assert len(results) == 1
+    assert len(results) == 2
     best = results[0]
     assert best.decision in ("accept", "warning")
     assert best.spectrum_path
     positions = [tuple(round(v) for v in p["position"]) for p in best.stable_peaks]
     assert (10, 20) in positions and (30, 40) in positions
-    assert (25, 25) not in positions
+    assert (42, 42) not in positions  # 跨组合去伪
     assert best.components["peak_count"] >= 2  # 真峰保留,伪峰剔除
 
 
@@ -122,10 +127,9 @@ def test_optimize_uses_base_params_and_cross_support(
             {"nsigma": 3.0, "thresh": 0.90},
             {"nsigma": 5.0, "thresh": 0.99},
         ],
-        final_repeats=3,
     )
     assert len(results) == 2
-    assert len(seen) == 5  # 扫描 2 次 + 最终 3 次
+    assert len(seen) == 2  # 仅扫描 2 次(无最终去伪重复)
     for run_params in seen:
         assert run_params["ext_lo"] == "10.5"  # 基参数保留
         assert run_params["nthread"] == 4
@@ -197,8 +201,8 @@ def test_on_result_callback(tmp_path: Path, bruker_dir: Path) -> None:
     assert len(received) == 2  # 每组评分后都立即回调
 
 
-def test_progress_reports_scan_and_final(tmp_path: Path, bruker_dir: Path) -> None:
-    """0.2.162-补:进度回调输出扫描(正在优化 x/N)与去伪重复阶段。"""
+def test_progress_reports_scan(tmp_path: Path, bruker_dir: Path) -> None:
+    """0.2.162-补10:进度回调只输出扫描(正在优化 x/N,无去伪重复)。"""
     exp = read_dataset(bruker_dir / "nus_3d")
     backend, _seen = _fake_backend(tmp_path, spurious_in=set())
     progress: list[tuple[int, int, str]] = []
@@ -211,12 +215,10 @@ def test_progress_reports_scan_and_final(tmp_path: Path, bruker_dir: Path) -> No
         ],
         progress=lambda i, t, m: progress.append((i, t, m)),
     )
-    assert len(progress) == 2 + 3  # 扫描 2 条 + 去伪重复 3 条
+    assert len(progress) == 2  # 仅扫描 2 条
     assert progress[0][0] == 1 and progress[0][1] == 2
     assert "正在优化 1/2" in progress[0][2]
     assert "正在优化 2/2" in progress[1][2]
-    assert "去伪重复 1/3" in progress[2][2]
-    assert "去伪重复 3/3" in progress[-1][2]
 
 
 def test_cli_parse_grid() -> None:
@@ -235,12 +237,9 @@ def test_confidence_scored_on_fake(
 ) -> None:
     """0.2.162-补6:四分量可信度(snr+稳定性+峰形+局部噪声,clamp 0~100)。"""
     exp = read_dataset(bruker_dir / "nus_3d")
-    # 伪峰(25,25)只出现在扫描组合1与全部最终重复;低 SNR 峰(35,35)全 seed
-    extras = {seed: [(35, 35, 0.45)] for seed in (1000, 2000, 9000, 9001, 9002)}
+    # 伪峰(42,42)只出现在扫描组合1 → 被跨组合过滤
     backend, _seen = _fake_backend(
-        tmp_path,
-        spurious_in={1000, 9000, 9001, 9002},
-        extra_peaks=extras,
+        tmp_path, spurious_in={1000}, spurious_pos=(42, 42)
     )
     results = optimize_smile_parameters(
         exp,
@@ -249,7 +248,6 @@ def test_confidence_scored_on_fake(
             {"nsigma": 5.0, "thresh": 0.95},
             {"nsigma": 6.0, "thresh": 0.99},
         ],
-        final_repeats=3,
     )
     best = results[0]
     assert best.n_combos == 2
@@ -270,12 +268,7 @@ def test_confidence_scored_on_fake(
             max(0.0, min(100.0, raw * 100.0 / 90.0)), 1
         )
         assert peak["grade"] in ("A", "B", "C", "D", "E")
-    low = by_pos[(35, 35)]
-    assert low["snr_points"] < true["snr_points"]  # 低 SNR → S/N 分低
-    assert low["confidence"] <= true["confidence"]
-    sp = by_pos[(25, 25)]
-    assert sp["support"] >= 1
-    assert sp["existence_points"] in (2.0, 15.0)  # 1/2 或 2/2 档
+    assert (42, 42) not in by_pos  # 跨组合去伪:伪峰只在一个组合
 
 
 def test_write_reliability_file(tmp_path: Path, bruker_dir: Path) -> None:
@@ -286,7 +279,7 @@ def test_write_reliability_file(tmp_path: Path, bruker_dir: Path) -> None:
     from workflow.smile_optimize import write_smile_optimized_output
 
     exp = read_dataset(bruker_dir / "nus_3d")
-    backend, _seen = _fake_backend(tmp_path, spurious_in={1000, 9000, 9001, 9002})
+    backend, _seen = _fake_backend(tmp_path, spurious_in={1000})
     results = optimize_smile_parameters(
         exp,
         backend,
@@ -294,7 +287,6 @@ def test_write_reliability_file(tmp_path: Path, bruker_dir: Path) -> None:
             {"nsigma": 5.0, "thresh": 0.95},
             {"nsigma": 6.0, "thresh": 0.99},
         ],
-        final_repeats=3,
     )
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     entry = manager.create_experiment()
@@ -390,7 +382,6 @@ def test_optimize_sets_rank_and_true_peak_count(
             {"nsigma": 6.0, "thresh": 0.99},
             {"nsigma": 7.0, "thresh": 0.90},
         ],
-        final_repeats=3,
         keep_top=3,
     )
     ranked = [r for r in results if r.rank > 0]
@@ -399,9 +390,9 @@ def test_optimize_sets_rank_and_true_peak_count(
     counts = [r.true_peak_count for r in ranked]
     assert counts == sorted(counts, reverse=True)  # 真峰数降序
     assert all(c > 0 for c in counts)
-    # Top1 经过最终去伪,逐峰含四分量
+    # Top1 为扫描谱,逐峰含四分量
     top1 = ranked[0]
-    assert top1.repeats == 3
+    assert top1.repeats == 1
     for p in top1.stable_peaks:
         assert {"snr_points", "stability_points", "shape_points",
                 "local_noise_points", "confidence", "grade"} <= set(p)

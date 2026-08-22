@@ -1,14 +1,13 @@
 """SMILE 参数优化(可选,用户后选优化项;不进入自动处理流程)。
 
 目标:在已有生成谱图参数(base_params)基础上只调整 SMILE 参数
-(nSigma/thresh),尽可能保留真峰、剔除伪峰。两阶段:
+(nSigma/thresh),尽可能保留真峰、剔除伪峰:
   1) 网格扫描:各参数组合各重构 1 次(SMILE 为确定性算法,同参数同输入
      逐位一致,故扫描不做组内重复),跨组合统计每个峰出现的组合数评估
-     真伪(真峰应在多个参数组合下都出现,伪峰只在个别组合出现);按
-     跨组合支持/信噪比/峰数/伪影 综合评分选出最优参数。
-  2) 重复去伪:对最优参数做多次重构(每次向输入 fid 注入小幅高斯噪声
-     模拟测量噪声),组内稳定峰为最终保留峰,写入与 raw 同级的
-     smile_optimized/ 目录。
+     真伪(真峰应在多个参数组合下都出现,伪峰只在个别组合出现)——即
+     跨组合去伪(0.2.162-补10 起不再做噪声注入重复去伪);
+  2) 最终保留真峰数(可信度≥true_conf_min)最多的前 keep_top 个谱,
+     谱与峰表写入与 raw 同级的 smile_optimized/ 目录。
 逐峰可信度(0.2.162-补6/补8,Peak Confidence Score 规范):
 score = snr_points(0~40) + stability_points(-15~+40)
 + shape_points(-5~+5) + local_noise_points(-5~+5),理论最大 90,
@@ -44,7 +43,7 @@ class SmileParameterResult:
     """一个参数组(SMILE 参数组合)的稳定性/跨组合评分与保留峰。"""
 
     params: dict[str, Any]
-    repeats: int = 3
+    repeats: int = 1
     n_combos: int = 0
     rank: int = 0
     true_peak_count: int = 0
@@ -93,29 +92,6 @@ def _snap_key(position: tuple[float, ...], tol_pts: float) -> tuple[float, ...]:
     if tol_pts > 0:
         return tuple(round(float(v) / tol_pts) * tol_pts for v in position)
     return tuple(round(float(v), 3) for v in position)
-
-
-def _match_stable_peaks(
-    peak_sets: list[list[peak_detection.Peak]],
-    min_stability: int,
-    tol_pts: float,
-) -> tuple[list[peak_detection.Peak], int, dict[tuple[float, ...], int]]:
-    """组内跨重构匹配峰;返回(稳定峰, 去重后总峰数, 键→出现次数)。"""
-    keys: dict[tuple[float, ...], int] = {}
-    best: dict[tuple[float, ...], peak_detection.Peak] = {}
-    for peaks in peak_sets:
-        matched: set[tuple[float, ...]] = set()
-        for peak in peaks:
-            key = _snap_key(peak.position, tol_pts)
-            if key in matched:
-                continue
-            keys[key] = keys.get(key, 0) + 1
-            matched.add(key)
-            if key not in best or peak.height > best[key].height:
-                best[key] = peak
-    stable = [best[k] for k, count in keys.items() if count >= min_stability]
-    stable.sort(key=lambda p: p.height, reverse=True)
-    return stable, len(keys), keys
 
 
 def _score_candidate(
@@ -446,7 +422,7 @@ def _peak_confidence_entry(
     key_positions: dict[tuple[float, ...], list[tuple[float, ...]]],
     peak_tol_pts: float,
 ) -> dict[str, Any]:
-    """逐峰四分量可信度条目(扫描候选/最终去伪共用)。"""
+    """逐峰四分量可信度条目(扫描候选共用)。"""
     key = _snap_key(tuple(peak["position"]), peak_tol_pts)
     support = len(key_to_combos.get(key, set()))
     rate = support / n_combos if n_combos else 0.0
@@ -508,8 +484,6 @@ def optimize_smile_parameters(
     base_params: dict[str, Any] | None = None,
     grid: list[dict[str, Any]] | None = None,
     *,
-    final_repeats: int = 3,
-    min_stability: int = 2,
     cross_min: int = 2,
     peak_tol_pts: float = 4.0,
     keep_top: int = 3,
@@ -518,16 +492,13 @@ def optimize_smile_parameters(
     progress: Callable[[int, int, str], None] | None = None,
     on_result: Callable[[SmileParameterResult], None] | None = None,
 ) -> list[SmileParameterResult]:
-    """两阶段:网格扫描(每组 1 次重构,跨组合评估峰真伪)选优 → 最优参数重复去伪峰。
-
-    SMILE 为确定性算法,同参数同输入逐位一致,故扫描阶段不做组内重复;
-    峰真伪由跨参数组合出现数评估(真峰应在多个组合下都出现)。最终阶段
-    对最优参数多次重构(每次注入小幅 fid 噪声模拟测量噪声),组内稳定峰
-    为保留峰;逐峰可信度按 Peak Confidence Score 规范四分量评分:
-    snr(0~40) + 重构稳定性(-15~+40) + 峰形(-5~+5) + 局部噪声(-5~+5),
-    理论最大 90,×100/90 归一化后 clamp 0~100(0.2.162-补8)。
-    真峰标准 = 可信度 ≥ true_conf_min(默认 55,即 A/B/C 级);最终保留
-    真峰数最多的前 keep_top 个谱(0.2.162-补9)。peak_tol_pts 为同峰
+    """网格扫描选优:每组 1 次重构(SMILE 确定性,不做组内重复),跨组合
+    评估峰真伪(真峰应在多个参数组合下都出现,伪峰只在个别组合出现)。
+    逐峰按 Peak Confidence Score 规范四分量评分:snr(0~40) + 重构稳定性
+    (-15~+40) + 峰形(-5~+5) + 局部噪声(-5~+5),理论最大 90,×100/90
+    归一化后 clamp 0~100(0.2.162-补8)。真峰 = 可信度 ≥ true_conf_min
+    (默认 55,即 A/B/C);最终保留真峰数最多的前 keep_top 个谱
+    (0.2.162-补9/补10:不做噪声注入重复去伪)。peak_tol_pts 为同峰
     判定容差(每轴点数,0.2.162-补5 由 2 放宽到 4)。backend 需提供
     reconstruct_nus(experiment, params);每组保留 base_params 的非
     SMILE 参数,只覆盖 nsigma/thresh 与 fid_noise/seed。"""
@@ -598,7 +569,6 @@ def optimize_smile_parameters(
     def _support(key: tuple[float, ...]) -> int:
         return len(key_to_combos.get(key, set()))
 
-    best_entry: dict[str, Any] | None = None
     for entry in scanned:
         result = entry["result"]
         keys = entry["keys"]
@@ -662,72 +632,6 @@ def optimize_smile_parameters(
     # 0.2.162-补9:真峰 = 可信度 ≥ true_conf_min(默认 55,即 A/B/C);
     # 最终保留真峰数最多的前 keep_top 个谱(并列按 overall)
     _rank_by_true_peaks(scanned, keep_top)
-    best_entry = scanned[0] if scanned else None
-
-    # 第二阶段:对最优参数(真峰数 Top1)多次重复重构(注入噪声)去伪峰
-    if best_entry is not None:
-        best = best_entry["result"]
-        best_params = best.params
-        try:
-            peak_sets: list[list[peak_detection.Peak]] = []
-            last_spec = ""
-            for repeat in range(final_repeats):
-                if progress is not None:
-                    progress(
-                        repeat + 1,
-                        final_repeats,
-                        f"去伪重复 {repeat + 1}/{final_repeats}: {best_params}",
-                    )
-                run_params = {
-                    **base,
-                    **best_params,
-                    "direct_phase_search": False,
-                    "display_phase_search": False,
-                    "fid_noise": float(fid_noise or 0.0),
-                    "fid_noise_seed": 9000 + repeat,
-                }
-                resp = backend.reconstruct_nus(experiment, run_params)
-                if not resp.get("success"):
-                    break
-                last_spec = str(resp["spectrum_path"])
-                peak_sets.append(_detect_peaks(last_spec))
-            if last_spec:
-                stable, _union, _keys = _match_stable_peaks(
-                    peak_sets, min_stability, peak_tol_pts
-                )
-                _dic, _data = _read_spectrum(last_spec)
-                arr = np.asarray(_data)
-                if np.iscomplexobj(arr):
-                    arr = arr.real
-                global_sigma = float(noise.estimate(arr).global_sigma)
-                best.stable_peaks = [
-                    _peak_confidence_entry(
-                        {
-                            "position": [float(v) for v in peak.position],
-                            "height": float(peak.height),
-                            "snr": float(peak.snr),
-                        },
-                        arr,
-                        global_sigma,
-                        n_combos,
-                        key_to_combos,
-                        key_heights,
-                        key_positions,
-                        peak_tol_pts,
-                    )
-                    for peak in stable
-                ]
-                best.true_peak_count = sum(
-                    1 for p in best.stable_peaks if p["confidence"] >= true_conf_min
-                )
-                best.n_combos = n_combos
-                best.spectrum_path = last_spec
-                best.repeats = final_repeats
-                best.overall = min(best.overall, 99.0) if stable else best.overall
-                best.decision = "accept" if stable else "warning"
-                best.components["peak_count"] = len(stable)
-        except Exception as exc:  # noqa: BLE001
-            best.message = f"最终去伪失败: {exc}"
 
     results.sort(key=lambda r: (r.rank if r.rank > 0 else 999, -r.overall))
     return results
