@@ -96,7 +96,10 @@ def _annotate_reliability(
                     ok = False
                     break
             if ok:
-                rel = float(entry.get("reliability", 0.0) or 0.0)
+                rel = float(
+                    entry.get("confidence", entry.get("reliability", 0.0))
+                    or 0.0
+                )
                 if best is None or rel > best:
                     best = rel
         return best

@@ -9,11 +9,12 @@
   2) 重复去伪:对最优参数做多次重构(每次向输入 fid 注入小幅高斯噪声
      模拟测量噪声),组内稳定峰为最终保留峰,写入与 raw 同级的
      smile_optimized/ 目录。
-可信度双重打分(0.2.162-补5):逐峰 Reliability(%) = 50% × 跨组合
-支持分(support/n_combos×100) + 50% × 信噪比评分;SNR≥5 信噪比满分
-(很可靠),SNR<5 按信噪比评分与跨组合出现率双重打分(3-5 真假混杂
-区间线性过渡,<3 记 0——假峰概率高);同峰判定容差每轴 4 点(VM 实测
-真峰位移 p95 约 4 点,2 点偏紧)。
+逐峰可信度(0.2.162-补6,Peak Confidence Score 规范):
+score = snr_points(0~40) + stability_points(-15~+40)
++ shape_points(-5~+5) + local_noise_points(-5~+5),clamp 0~100;
+S/N 与 SMILE 重构稳定性为同等级一级核心证据;稳定性证据(出现率/
+强度 CV/位置漂移)来自 nSigma×thresh 双参数网格(保持现有网格)下
+的多次重构;同峰判定容差每轴 4 点(VM 实测真峰位移 p95 约 4 点)。
 
 用法:
     results = optimize_smile_parameters(experiment, backend, base_params=run_params)
@@ -33,7 +34,7 @@ from typing import Any
 import numpy as np
 
 from core.data.internal_data_model import Experiment
-from core.qc import peak_detection, spectrum_quality
+from core.qc import noise, peak_detection, spectrum_quality
 
 
 @dataclass
@@ -141,25 +142,259 @@ def _score_candidate(
     }
 
 
-def _snr_score(snr: float) -> float:
-    """信噪比评分:SNR≥5 满分(可靠);3-5 线性过渡(真假混杂区间);
-    <3 记 0(假峰概率高)。"""
+# ---------------------------------------------------------------------------
+# Peak Confidence Score(0.2.162-补6,Peak Confidence Score 规范):
+#   score = snr_points(0~40) + stability_points(-15~+40)
+#           + shape_points(-5~+5) + local_noise_points(-5~+5),clamp 0~100
+#   stability = existence(-5~+15) + intensity_cv(-5~+15) + position(-5~+10),
+#   证据来自 nSigma×thresh 双参数网格(保持现有网格)下的多次重构。
+# ---------------------------------------------------------------------------
+
+
+def _snr_points(snr: float) -> float:
+    """S/N 基础分(0~40):按规范分段(1.5/2/2.5/3/3.5/4/5/6/8/10)。"""
+    if snr >= 10.0:
+        return 40.0
+    if snr >= 8.0:
+        return 37.0
+    if snr >= 6.0:
+        return 33.0
     if snr >= 5.0:
-        return 100.0
-    if snr <= 3.0:
+        return 28.0
+    if snr >= 4.0:
+        return 23.0
+    if snr >= 3.5:
+        return 18.0
+    if snr >= 3.0:
+        return 14.0
+    if snr >= 2.5:
+        return 10.0
+    if snr >= 2.0:
+        return 6.0
+    if snr >= 1.5:
+        return 3.0
+    return 0.0
+
+
+def _existence_points(rate: float) -> float:
+    """峰存在性(-5~+15):出现率=support/n_combos,按 5/5 表等比推广。"""
+    if rate >= 0.9:
+        return 15.0
+    if rate >= 0.8:
+        return 12.0
+    if rate >= 0.6:
+        return 7.0
+    if rate >= 0.4:
+        return 2.0
+    if rate >= 0.2:
+        return -2.0
+    return -5.0
+
+
+def _intensity_cv_points(cv: float | None) -> float:
+    """峰强稳定性(-5~+15):CV=std(height)/mean(height);<2 次样本记 0。"""
+    if cv is None:
         return 0.0
-    return (snr - 3.0) / 2.0 * 100.0
+    if cv < 0.05:
+        return 15.0
+    if cv < 0.10:
+        return 13.0
+    if cv < 0.15:
+        return 10.0
+    if cv < 0.20:
+        return 7.0
+    if cv < 0.30:
+        return 4.0
+    if cv < 0.50:
+        return 1.0
+    if cv < 0.75:
+        return -2.0
+    return -5.0
 
 
-def _peak_reliability(snr: float, cross_score: float) -> float:
-    """逐峰可信度双重打分:SNR≥5 信噪比满分(很可靠);SNR<5 时按
-    信噪比评分与跨组合出现率(cross_score)各 50% 平均(3-5 真假混杂
-    区间,<3 假峰概率高)。"""
-    if snr >= 5.0:
-        snr_credit = 100.0
+def _position_shift_points(shift: float | None) -> float:
+    """峰位稳定性(-5~+10):shift=位置极差/线宽;<2 次样本记 0。"""
+    if shift is None:
+        return 0.0
+    if shift < 0.10:
+        return 10.0
+    if shift < 0.25:
+        return 8.0
+    if shift < 0.50:
+        return 5.0
+    if shift < 1.00:
+        return 2.0
+    if shift < 1.50:
+        return -2.0
+    return -5.0
+
+
+def _fwhm_axis(arr: np.ndarray, pos: tuple[int, ...], axis: int) -> float:
+    """沿某轴半高全宽(点);无法测量时回退 2 点(规范 fallback)。"""
+    max_v = float(arr[pos])
+    if max_v <= 0.0:
+        return 2.0
+    half = max_v / 2.0
+    size = arr.shape[axis]
+    lo = pos[axis]
+    while lo > 0 and float(arr[pos[:axis] + (lo - 1,) + pos[axis + 1 :]]) >= half:
+        lo -= 1
+    hi = pos[axis]
+    while hi < size - 1 and float(arr[pos[:axis] + (hi + 1,) + pos[axis + 1 :]]) >= half:
+        hi += 1
+    fwhm = float(hi - lo)
+    return fwhm if fwhm >= 1.0 else 2.0
+
+
+def _position_shift(
+    positions: list[tuple[float, ...]], arr: np.ndarray, pos: tuple[int, ...]
+) -> float | None:
+    """峰位漂移:各轴 position_range/linewidth 的最大值;不足 2 次样本返回 None。"""
+    if len(positions) < 2:
+        return None
+    shifts: list[float] = []
+    for axis in range(arr.ndim):
+        vals = [p[axis] for p in positions if axis < len(p)]
+        if len(vals) < 2:
+            continue
+        rng = float(max(vals) - min(vals))
+        shifts.append(rng / _fwhm_axis(arr, pos, axis))
+    if not shifts:
+        return None
+    return float(max(shifts))
+
+
+def _shape_score(arr: np.ndarray, pos: tuple[int, ...]) -> float:
+    """峰形修正(-5~+5):对称性 + 单峰性 + 异常尖峰 启发式评分(v1)。"""
+    max_v = float(arr[pos])
+    if max_v <= 0.0:
+        return 0.0
+    score = 0.0
+    for axis in range(arr.ndim):
+        size = arr.shape[axis]
+        lo0 = max(0, pos[axis] - 3)
+        trace = [
+            float(arr[pos[:axis] + (p,) + pos[axis + 1 :]])
+            for p in range(lo0, min(size, pos[axis] + 4))
+        ]
+        center = pos[axis] - lo0
+        asym = 0.0
+        n = 0
+        for k in (1, 2, 3):
+            lo_i = center - k
+            hi_i = center + k
+            if 0 <= lo_i < len(trace) and 0 <= hi_i < len(trace):
+                asym += abs(trace[lo_i] - trace[hi_i]) / max(max_v, 1e-12)
+                n += 1
+        if n:
+            asym_norm = asym / n
+            if asym_norm > 0.35:
+                score -= 1.0
+            elif asym_norm > 0.20:
+                score -= 0.5
+        extra = 0
+        for k in (-2, -1, 1, 2):
+            i = center + k
+            if 0 < i < len(trace) - 1 and trace[i] >= trace[center] * 0.3:
+                if trace[i] > trace[i - 1] and trace[i] > trace[i + 1]:
+                    extra += 1
+        if extra >= 2:
+            score -= 1.5
+        elif extra >= 1:
+            score -= 0.5
+        if _fwhm_axis(arr, pos, axis) < 1.5:
+            score -= 1.0
+    return max(-5.0, min(5.0, score))
+
+
+def _local_noise_score(
+    arr: np.ndarray, pos: tuple[int, ...], global_sigma: float
+) -> float:
+    """局部噪声/基线修正(-5~+5):峰旁环带噪声 vs 全谱噪声 + 基线偏移。"""
+    slices = tuple(
+        slice(max(0, p - 6), min(s, p + 7)) for p, s in zip(pos, arr.shape)
+    )
+    region = arr[slices]
+    if region.size == 0:
+        return 0.0
+    flat = region.ravel()
+    local_sigma = float(np.median(np.abs(flat - np.median(flat)))) * 1.4826
+    local_base = float(np.median(flat))
+    base_ratio = abs(local_base) / max(local_sigma, 1e-12)
+    ratio = local_sigma / max(global_sigma, 1e-12)
+    if ratio < 0.7:
+        score = 5.0 if base_ratio < 1.0 else 3.0
+    elif ratio < 0.9:
+        score = 3.0 if base_ratio < 2.0 else 1.0
+    elif ratio <= 1.3:
+        score = 1.0 if base_ratio < 2.0 else -2.0
+    elif ratio <= 1.8:
+        score = -2.0 if base_ratio < 3.0 else -4.0
+    elif ratio <= 2.5:
+        score = -4.0
     else:
-        snr_credit = _snr_score(snr)
-    return round((cross_score + snr_credit) / 2.0, 1)
+        score = -5.0
+    if base_ratio > 5.0:
+        score = min(score, -3.0)
+    return float(max(-5.0, min(5.0, score)))
+
+
+def _grade(confidence: float) -> str:
+    """等级:A≥85,B 70-84,C 55-69,D 40-54,E<40。"""
+    if confidence >= 85.0:
+        return "A"
+    if confidence >= 70.0:
+        return "B"
+    if confidence >= 55.0:
+        return "C"
+    if confidence >= 40.0:
+        return "D"
+    return "E"
+
+
+def _compose_confidence(
+    snr_points: float,
+    stability_points: float,
+    shape_points: float,
+    local_noise_points: float,
+) -> tuple[float, str]:
+    """score = snr + stability + shape + local_noise,clamp 0~100;返回(分, 等级)。"""
+    confidence = round(
+        max(
+            0.0,
+            min(
+                100.0,
+                snr_points + stability_points + shape_points + local_noise_points,
+            ),
+        ),
+        1,
+    )
+    return confidence, _grade(confidence)
+
+
+def _confidence_flags(
+    snr: float,
+    rate: float,
+    intensity_cv: float | None,
+    position_shift: float | None,
+    shape_points: float,
+    local_noise_points: float,
+) -> list[str]:
+    """硬性风险标记(不替代分数,随分数输出)。"""
+    flags: list[str] = []
+    if snr < 2.0:
+        flags.append("very_low_snr")
+    if rate <= 0.2:
+        flags.append("reconstruction_unstable")
+    if intensity_cv is not None and intensity_cv > 0.50:
+        flags.append("intensity_unstable")
+    if position_shift is not None and position_shift > 1.0:
+        flags.append("position_unstable")
+    if shape_points <= -4.0:
+        flags.append("abnormal_peak_shape")
+    if local_noise_points <= -4.0:
+        flags.append("high_local_noise")
+    return flags
 
 
 def optimize_smile_parameters(
@@ -181,16 +416,19 @@ def optimize_smile_parameters(
     SMILE 为确定性算法,同参数同输入逐位一致,故扫描阶段不做组内重复;
     峰真伪由跨参数组合出现数评估(真峰应在多个组合下都出现)。最终阶段
     对最优参数多次重构(每次注入小幅 fid 噪声模拟测量噪声),组内稳定峰
-    为保留峰;逐峰 Reliability(%) 为双重打分:跨组合支持分与信噪比评分
-    各 50% 平均。peak_tol_pts 为同峰判定容差(每轴点数,0.2.162-补5
-    由 2 放宽到 4)。backend 需提供 reconstruct_nus(experiment, params);
-    每组保留 base_params 的非 SMILE 参数,只覆盖 nsigma/thresh 与
-    fid_noise/seed。"""
+    为保留峰;逐峰可信度按 Peak Confidence Score 规范四分量评分:
+    snr(0~40) + 重构稳定性(-15~+40) + 峰形(-5~+5) + 局部噪声(-5~+5),
+    clamp 0~100(0.2.162-补6)。peak_tol_pts 为同峰判定容差(每轴点数,
+    0.2.162-补5 由 2 放宽到 4)。backend 需提供 reconstruct_nus
+    (experiment, params);每组保留 base_params 的非 SMILE 参数,只覆盖
+    nsigma/thresh 与 fid_noise/seed。"""
     grid = grid if grid is not None else default_smile_grid()
     base = dict(base_params or {})
     n_combos = len(grid)
     results: list[SmileParameterResult] = []
     key_to_combos: dict[tuple[float, ...], set[int]] = defaultdict(set)
+    key_heights: dict[tuple[float, ...], list[float]] = defaultdict(list)
+    key_positions: dict[tuple[float, ...], list[tuple[float, ...]]] = defaultdict(list)
     scanned: list[dict[str, Any]] = []
     total = len(grid)
     for index, params in enumerate(grid, start=1):
@@ -220,6 +458,8 @@ def optimize_smile_parameters(
                         continue
                     seen_keys.add(key)
                     key_to_combos[key].add(index)
+                    key_heights[key].append(float(peak.height))
+                    key_positions[key].append(tuple(float(v) for v in peak.position))
                 _dic, data = _read_spectrum(last_spec)
                 quality = spectrum_quality.evaluate(data)
                 result.spectrum_path = last_spec
@@ -334,25 +574,61 @@ def optimize_smile_parameters(
                 stable, _union, _keys = _match_stable_peaks(
                     peak_sets, min_stability, peak_tol_pts
                 )
+                _dic, _data = _read_spectrum(last_spec)
+                arr = np.asarray(_data)
+                if np.iscomplexobj(arr):
+                    arr = arr.real
+                global_sigma = float(noise.estimate(arr).global_sigma)
                 best.stable_peaks = []
                 for peak in stable:
                     key = _snap_key(tuple(peak.position), peak_tol_pts)
                     support = len(key_to_combos.get(key, set()))
-                    cross_score = (
-                        support / n_combos * 100.0 if n_combos else 0.0
+                    rate = support / n_combos if n_combos else 0.0
+                    heights = list(key_heights.get(key, []))
+                    positions = list(key_positions.get(key, []))
+                    snr_pts = _snr_points(float(peak.snr))
+                    existence_pts = _existence_points(rate)
+                    cv = None
+                    if len(heights) >= 2:
+                        mean_h = float(np.mean(heights))
+                        if mean_h > 0:
+                            cv = float(np.std(heights)) / mean_h
+                    intensity_pts = _intensity_cv_points(cv)
+                    pos_i = tuple(int(v) for v in peak.position)
+                    shift = _position_shift(positions, arr, pos_i)
+                    position_pts = _position_shift_points(shift)
+                    stability_pts = existence_pts + intensity_pts + position_pts
+                    shape_pts = _shape_score(arr, pos_i)
+                    local_pts = _local_noise_score(arr, pos_i, global_sigma)
+                    confidence, grade = _compose_confidence(
+                        snr_pts, stability_pts, shape_pts, local_pts
                     )
-                    snr_score = _snr_score(float(peak.snr))
+                    flags = _confidence_flags(
+                        float(peak.snr), rate, cv, shift, shape_pts, local_pts
+                    )
                     best.stable_peaks.append(
                         {
                             "position": [float(v) for v in peak.position],
                             "height": float(peak.height),
                             "snr": float(peak.snr),
                             "support": support,
-                            "cross_score": round(cross_score, 1),
-                            "snr_score": round(snr_score, 1),
-                            "reliability": _peak_reliability(
-                                float(peak.snr), cross_score
+                            "cross_rate": round(rate, 3),
+                            "snr_points": round(snr_pts, 1),
+                            "existence_points": round(existence_pts, 1),
+                            "intensity_cv": (
+                                round(cv, 3) if cv is not None else None
                             ),
+                            "intensity_points": round(intensity_pts, 1),
+                            "position_shift": (
+                                round(shift, 3) if shift is not None else None
+                            ),
+                            "position_points": round(position_pts, 1),
+                            "stability_points": round(stability_pts, 1),
+                            "shape_points": round(shape_pts, 1),
+                            "local_noise_points": round(local_pts, 1),
+                            "confidence": confidence,
+                            "grade": grade,
+                            "flags": flags,
                         }
                     )
                 best.n_combos = n_combos
@@ -412,7 +688,7 @@ def write_smile_optimized_output(
                     if k < len(axes) and k < len(pos)
                     else 0.0
                 )
-        row["Reliability(%)"] = float(peak.get("reliability", 0.0) or 0.0)
+        row["Reliability(%)"] = float(peak.get("confidence", 0.0) or 0.0)
         rows.append(row)
     save_peaks(csv_path, rows, extra_columns=("Reliability(%)",))
     json_path = out_dir / f"{exp_id}-{data_id}_smile_optimized.json"
@@ -459,18 +735,38 @@ def write_smile_optimized_output(
             {
                 "position_pts": pos,
                 "shifts": shifts,
+                "snr": float(peak.get("snr", 0.0) or 0.0),
                 "support": int(peak.get("support", 0) or 0),
                 "n_combos": int(result.n_combos or 0),
-                "snr": float(peak.get("snr", 0.0) or 0.0),
-                "cross_score": float(peak.get("cross_score", 0.0) or 0.0),
-                "snr_score": float(peak.get("snr_score", 0.0) or 0.0),
-                "reliability": float(peak.get("reliability", 0.0) or 0.0),
+                "cross_rate": float(peak.get("cross_rate", 0.0) or 0.0),
+                "snr_points": float(peak.get("snr_points", 0.0) or 0.0),
+                "existence_points": float(
+                    peak.get("existence_points", 0.0) or 0.0
+                ),
+                "intensity_cv": peak.get("intensity_cv"),
+                "intensity_points": float(
+                    peak.get("intensity_points", 0.0) or 0.0
+                ),
+                "position_shift": peak.get("position_shift"),
+                "position_points": float(
+                    peak.get("position_points", 0.0) or 0.0
+                ),
+                "stability_points": float(
+                    peak.get("stability_points", 0.0) or 0.0
+                ),
+                "shape_points": float(peak.get("shape_points", 0.0) or 0.0),
+                "local_noise_points": float(
+                    peak.get("local_noise_points", 0.0) or 0.0
+                ),
+                "confidence": float(peak.get("confidence", 0.0) or 0.0),
+                "grade": str(peak.get("grade", "") or ""),
+                "flags": list(peak.get("flags", []) or []),
             }
         )
     reliability_path.write_text(
         json.dumps(
             {
-                "schema": "smile_reliability_v2",
+                "schema": "smile_reliability_v3",
                 "exp_id": exp_id,
                 "data_id": data_id,
                 "params": result.params,

@@ -1,5 +1,22 @@
 # 修改记录(历史条目)
 
+## 0.2.162-补6(2026-08-22,总管直接处理)
+
+- 逐峰可信度改为 Peak Confidence Score 四分量:
+  score = snr_points(0~40) + stability_points(-15~+40)
+  + shape_points(-5~+5) + local_noise_points(-5~+5),clamp 0~100;
+  S/N 与 SMILE 重构稳定性为同等级一级核心证据;
+- 重构稳定性 = 峰存在性(-5~+15,出现率按 5/5 表等比推广)
+  + 峰强稳定性(-5~+15,高度 CV)+ 峰位稳定性(-5~+10,位置极差/
+  线宽);证据来自 nSigma×thresh 双参数网格(保持现有网格)多次重构;
+- 峰形修正(-5~+5):对称性/单峰性/异常尖峰 启发式;
+  局部噪声修正(-5~+5):峰旁环带噪声 vs 全谱噪声 + 基线偏移;
+- 输出等级 A-E(≥85/70/55/40/<40)与硬性风险 flags(very_low_snr/
+  reconstruction_unstable/intensity_unstable/position_unstable/
+  abnormal_peak_shape/high_local_noise);可靠性文件 schema v3;
+- 测试:S/N 分段表、四分量组合与 clamp/等级、集成评分;
+  本地全量 pytest(664 项)+ ruff 全绿。
+
 ## 0.2.162-补5(2026-08-22,总管直接处理)
 
 - 同峰判定容差 2 → 4 点/轴(扫描支持、去伪匹配、峰表注释三处一致;

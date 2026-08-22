@@ -119,7 +119,7 @@ def test_pick_peaks_annotates_reliability(tmp_path: Path) -> None:
                         },
                         "support": 25,
                         "n_combos": 25,
-                        "reliability": 100.0,
+                        "confidence": 100.0,
                     }
                 ],
             },
