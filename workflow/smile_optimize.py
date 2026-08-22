@@ -9,12 +9,14 @@
   2) 重复去伪:对最优参数做多次重构(每次向输入 fid 注入小幅高斯噪声
      模拟测量噪声),组内稳定峰为最终保留峰,写入与 raw 同级的
      smile_optimized/ 目录。
-逐峰可信度(0.2.162-补6,Peak Confidence Score 规范):
+逐峰可信度(0.2.162-补6/补8,Peak Confidence Score 规范):
 score = snr_points(0~40) + stability_points(-15~+40)
-+ shape_points(-5~+5) + local_noise_points(-5~+5),clamp 0~100;
-S/N 与 SMILE 重构稳定性为同等级一级核心证据;稳定性证据(出现率/
-强度 CV/位置漂移)来自 nSigma×thresh 双参数网格(保持现有网格)下
-的多次重构;同峰判定容差每轴 4 点(VM 实测真峰位移 p95 约 4 点)。
++ shape_points(-5~+5) + local_noise_points(-5~+5),理论最大 90,
+×100/90 归一化后 clamp 0~100(完美峰=100);S/N 与 SMILE 重构稳定性
+为同等级一级核心证据;稳定性证据(出现率/强度 CV/位置漂移)来自
+nSigma×thresh 双参数网格(保持现有网格)下的多次重构;同峰判定容差
+每轴 4 点(VM 实测真峰位移 p95 约 4 点)。等级:A≥85/B 70-84/
+C 55-69/D 40-54/E<40。
 
 用法:
     results = optimize_smile_parameters(experiment, backend, base_params=run_params)
@@ -378,7 +380,7 @@ def _local_noise_score(
 
 
 def _grade(confidence: float) -> str:
-    """等级:A≥85,B 70-84,C 55-69,D 40-54,E<40。"""
+    """等级(0~100 归一化后):A≥85,B 70-84,C 55-69,D 40-54,E<40。"""
     if confidence >= 85.0:
         return "A"
     if confidence >= 70.0:
@@ -396,17 +398,14 @@ def _compose_confidence(
     shape_points: float,
     local_noise_points: float,
 ) -> tuple[float, str]:
-    """score = snr + stability + shape + local_noise,clamp 0~100;返回(分, 等级)。"""
-    confidence = round(
-        max(
-            0.0,
-            min(
-                100.0,
-                snr_points + stability_points + shape_points + local_noise_points,
-            ),
-        ),
-        1,
+    """score = (snr + stability + shape + local_noise) × 100/90,clamp 0~100。
+
+    四分量理论最大 90,归一化到 0~100(完美峰=100),避免 A 档(≥85)苛刻
+    到需拿理论最大值的 94%(0.2.162-补8)。"""
+    raw = (
+        snr_points + stability_points + shape_points + local_noise_points
     )
+    confidence = round(max(0.0, min(100.0, raw * 100.0 / 90.0)), 1)
     return confidence, _grade(confidence)
 
 
@@ -456,10 +455,11 @@ def optimize_smile_parameters(
     对最优参数多次重构(每次注入小幅 fid 噪声模拟测量噪声),组内稳定峰
     为保留峰;逐峰可信度按 Peak Confidence Score 规范四分量评分:
     snr(0~40) + 重构稳定性(-15~+40) + 峰形(-5~+5) + 局部噪声(-5~+5),
-    clamp 0~100(0.2.162-补6)。peak_tol_pts 为同峰判定容差(每轴点数,
-    0.2.162-补5 由 2 放宽到 4)。backend 需提供 reconstruct_nus
-    (experiment, params);每组保留 base_params 的非 SMILE 参数,只覆盖
-    nsigma/thresh 与 fid_noise/seed。"""
+    理论最大 90,×100/90 归一化后 clamp 0~100(0.2.162-补8)。
+    peak_tol_pts 为同峰判定容差(每轴点数,0.2.162-补5 由 2 放宽到 4)。
+    backend 需提供 reconstruct_nus(experiment, params);每组保留
+    base_params 的非 SMILE 参数,只覆盖 nsigma/thresh 与
+    fid_noise/seed。"""
     grid = grid if grid is not None else default_smile_grid()
     base = dict(base_params or {})
     n_combos = len(grid)

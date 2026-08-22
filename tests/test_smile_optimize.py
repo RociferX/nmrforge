@@ -266,7 +266,9 @@ def test_confidence_scored_on_fake(
             + peak["shape_points"]
             + peak["local_noise_points"]
         )
-        assert peak["confidence"] == round(max(0.0, min(100.0, raw)), 1)
+        assert peak["confidence"] == round(
+            max(0.0, min(100.0, raw * 100.0 / 90.0)), 1
+        )
         assert peak["grade"] in ("A", "B", "C", "D", "E")
     low = by_pos[(35, 35)]
     assert low["snr_points"] < true["snr_points"]  # 低 SNR → S/N 分低
@@ -325,14 +327,14 @@ def test_write_reliability_file(tmp_path: Path, bruker_dir: Path) -> None:
 
 
 def test_confidence_composition_and_grade() -> None:
-    """0.2.162-补6:score=snr+stability+shape+local_noise,clamp 0~100,等级 A-E。"""
+    """0.2.162-补8:score=(四分量和)×100/90 归一化 clamp 0~100,等级 A-E。"""
     from workflow.smile_optimize import _compose_confidence
 
-    assert _compose_confidence(40.0, 40.0, 5.0, 5.0) == (90.0, "A")
-    assert _compose_confidence(37.0, 30.0, 2.0, 1.0) == (70.0, "B")
-    assert _compose_confidence(28.0, 25.0, 2.0, 1.0) == (56.0, "C")
-    assert _compose_confidence(23.0, 15.0, 1.0, 1.0) == (40.0, "D")
-    assert _compose_confidence(23.0, 10.0, 1.0, 1.0) == (35.0, "E")
+    assert _compose_confidence(40.0, 40.0, 5.0, 5.0) == (100.0, "A")  # 90→100
+    assert _compose_confidence(37.0, 30.0, 2.0, 1.0) == (77.8, "B")  # 70→77.8
+    assert _compose_confidence(28.0, 25.0, 2.0, 1.0) == (62.2, "C")  # 56→62.2
+    assert _compose_confidence(23.0, 15.0, 1.0, 1.0) == (44.4, "D")  # 40→44.4
+    assert _compose_confidence(23.0, 10.0, 1.0, 1.0) == (38.9, "E")  # 35→38.9
     # clamp 下限:理论最低 -25 → 0
     assert _compose_confidence(0.0, -15.0, -5.0, -5.0) == (0.0, "E")
 
