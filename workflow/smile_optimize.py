@@ -265,11 +265,12 @@ def _position_shift(
 
 
 def _shape_score(arr: np.ndarray, pos: tuple[int, ...]) -> float:
-    """峰形修正(-5~+5):对称性 + 单峰性 + 异常尖峰 启发式评分(v1)。"""
+    """峰形修正(-5~+5):逐轴正向证据(对称/单峰/合理宽度/干净衰减)归一化,
+    异常(不对称/次级峰/异常尖峰/振铃)扣分;干净峰可达 +5(0.2.162-补7)。"""
     max_v = float(arr[pos])
     if max_v <= 0.0:
         return 0.0
-    score = 0.0
+    per_axis: list[float] = []
     for axis in range(arr.ndim):
         size = arr.shape[axis]
         lo0 = max(0, pos[axis] - 3)
@@ -278,6 +279,9 @@ def _shape_score(arr: np.ndarray, pos: tuple[int, ...]) -> float:
             for p in range(lo0, min(size, pos[axis] + 4))
         ]
         center = pos[axis] - lo0
+        if len(trace) < 2:
+            continue
+        axis_score = 0.0
         asym = 0.0
         n = 0
         for k in (1, 2, 3):
@@ -288,49 +292,83 @@ def _shape_score(arr: np.ndarray, pos: tuple[int, ...]) -> float:
                 n += 1
         if n:
             asym_norm = asym / n
-            if asym_norm > 0.35:
-                score -= 1.0
-            elif asym_norm > 0.20:
-                score -= 0.5
+            if asym_norm < 0.10:
+                axis_score += 1.0
+            elif asym_norm < 0.20:
+                axis_score += 0.5
+            elif asym_norm > 0.35:
+                axis_score -= 1.0
         extra = 0
         for k in (-2, -1, 1, 2):
             i = center + k
             if 0 < i < len(trace) - 1 and trace[i] >= trace[center] * 0.3:
                 if trace[i] > trace[i - 1] and trace[i] > trace[i + 1]:
                     extra += 1
-        if extra >= 2:
-            score -= 1.5
-        elif extra >= 1:
-            score -= 0.5
-        if _fwhm_axis(arr, pos, axis) < 1.5:
-            score -= 1.0
-    return max(-5.0, min(5.0, score))
+        if extra == 0:
+            axis_score += 1.0
+        elif extra == 1:
+            axis_score -= 0.5
+        else:
+            axis_score -= 1.5
+        fwhm = _fwhm_axis(arr, pos, axis)
+        if 1.5 <= fwhm <= 6.0:
+            axis_score += 1.0
+        elif fwhm < 1.2:
+            axis_score -= 0.5
+        elif fwhm > 12.0:
+            axis_score -= 0.5
+        eps = 0.05 * max_v
+        mono = True
+        for k in range(1, 3):
+            if center + k < len(trace) and trace[center + k] > trace[center + k - 1] + eps:
+                mono = False
+                break
+            if center - k >= 0 and trace[center - k] > trace[center - k + 1] + eps:
+                mono = False
+                break
+        axis_score += 1.0 if mono else -0.5
+        per_axis.append(axis_score)
+    if not per_axis:
+        return 0.0
+    max_total = float(arr.ndim * 4.0)
+    return round(max(-5.0, min(5.0, sum(per_axis) * 5.0 / max_total)), 1)
 
 
 def _local_noise_score(
     arr: np.ndarray, pos: tuple[int, ...], global_sigma: float
 ) -> float:
-    """局部噪声/基线修正(-5~+5):峰旁环带噪声 vs 全谱噪声 + 基线偏移。"""
-    slices = tuple(
-        slice(max(0, p - 6), min(s, p + 7)) for p, s in zip(pos, arr.shape)
+    """局部噪声/基线修正(-5~+5):排除峰核心的环形区域噪声 vs 全谱噪声;
+    干净区域可达 +5(0.2.162-补7)。"""
+    outer_starts = tuple(max(0, p - 8) for p in pos)
+    outer = tuple(
+        slice(lo, min(s, p + 9))
+        for p, s, lo in zip(pos, arr.shape, outer_starts)
     )
-    region = arr[slices]
+    region = arr[outer]
     if region.size == 0:
         return 0.0
-    flat = region.ravel()
-    local_sigma = float(np.median(np.abs(flat - np.median(flat)))) * 1.4826
-    local_base = float(np.median(flat))
+    core = tuple(
+        slice(max(0, p - 2) - lo, min(s, p + 3) - lo)
+        for p, s, lo in zip(pos, arr.shape, outer_starts)
+    )
+    mask = np.ones(region.shape, dtype=bool)
+    mask[core] = False
+    ring = region[mask]
+    if ring.size == 0:
+        return 0.0
+    local_sigma = float(np.median(np.abs(ring - np.median(ring)))) * 1.4826
+    local_base = float(np.median(ring))
     base_ratio = abs(local_base) / max(local_sigma, 1e-12)
     ratio = local_sigma / max(global_sigma, 1e-12)
-    if ratio < 0.7:
+    if ratio < 0.8:
         score = 5.0 if base_ratio < 1.0 else 3.0
-    elif ratio < 0.9:
+    elif ratio < 1.0:
         score = 3.0 if base_ratio < 2.0 else 1.0
     elif ratio <= 1.3:
         score = 1.0 if base_ratio < 2.0 else -2.0
-    elif ratio <= 1.8:
+    elif ratio <= 1.7:
         score = -2.0 if base_ratio < 3.0 else -4.0
-    elif ratio <= 2.5:
+    elif ratio <= 2.3:
         score = -4.0
     else:
         score = -5.0
