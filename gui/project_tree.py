@@ -20,7 +20,6 @@ from PyQt6.QtWidgets import (
     QApplication,
     QHBoxLayout,
     QHeaderView,
-    QInputDialog,
     QLineEdit,
     QMenu,
     QTreeWidget,
@@ -193,8 +192,6 @@ class ProjectTreePanel(QWidget):
     create_experiment_requested = pyqtSignal()  # 空白处右键:新建空白实验
     import_data_requested = pyqtSignal(str)  # 实验类型 右键:导入样品数据(exp_id)
     data_action_requested = pyqtSignal(str, str)  # (action, data_id):生成FID/谱/删除
-    batch_assign_requested = pyqtSignal(str, str, str)  # (exp_id, data_id, batch_id)
-    batch_remove_requested = pyqtSignal(str, str)  # (exp_id, data_id)
     group_add_data_requested = pyqtSignal(str, str, list)  # (exp_id, group_id, data_ids)
     group_remove_data_requested = pyqtSignal(str, str, str)  # (exp_id, group_id, data_id)
     group_rename_requested = pyqtSignal(str, str, str)  # (exp_id, group_id, new_title)
@@ -887,27 +884,6 @@ class ProjectTreePanel(QWidget):
         if dialog.exec():
             self.group_add_data_requested.emit(exp_id, group_id, dialog.selected_ids())
 
-    def _request_batch_assign(self, exp_id: str, data_id: str) -> None:
-        """弹出批量组选择(可输入新编号,留空自动编号)。"""
-        from gui.pipeline_state import batch_id, batch_ids_in_experiment
-
-        groups = batch_ids_in_experiment(self.manager, exp_id)
-        current = batch_id(self.manager, exp_id, data_id)
-        items = list(groups)
-        if current and current not in items:
-            items.insert(0, current)
-        if not items:
-            items = [""]
-        value, ok = QInputDialog.getItem(
-            self,
-            "加入批量组",
-            "选择或输入批量组编号(留空自动编号):",
-            items,
-            editable=True,
-        )
-        if ok:
-            self.batch_assign_requested.emit(exp_id, data_id, value)
-
     def _folder_path_for_item(self, item: QTreeWidgetItem) -> Path | None:
         """解析 data 或 folder 节点的真实目录(双击打开用)。"""
         data = item.data(0, Qt.ItemDataRole.UserRole)
@@ -1004,9 +980,6 @@ class ProjectTreePanel(QWidget):
                         lambda: self.group_delete_requested.emit(exp_id, group_id),
                     )
             elif kind == "data" and exp_id and data_id:
-                from gui.pipeline_state import batch_id
-
-                current_batch = batch_id(self.manager, exp_id, data_id)
                 parent_item = item.parent()
                 parent_data = (
                     parent_item.data(0, Qt.ItemDataRole.UserRole)
@@ -1041,15 +1014,6 @@ class ProjectTreePanel(QWidget):
                     lambda _checked=False: self._begin_rename("data", item, anchor),
                 )
                 menu.addSeparator()
-                menu.addAction(
-                    "加入批量组...",
-                    lambda: self._request_batch_assign(exp_id, data_id),
-                )
-                if current_batch:
-                    menu.addAction(
-                        "移出批量组",
-                        lambda: self.batch_remove_requested.emit(exp_id, data_id),
-                    )
                 menu.addAction(
                     "删除样品数据",
                     lambda: self.data_action_requested.emit("delete", data_id),

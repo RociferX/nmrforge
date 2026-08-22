@@ -505,7 +505,6 @@ def test_tree_data_node_context_menu_actions(
     panel._on_context_menu_impl(menu, data_item)
     labels = [a.text() for a in menu.actions()]
     assert "生成 FID" not in labels and "生成谱图" not in labels
-    assert "加入批量组..." in labels
     delete_action = next(a for a in menu.actions() if a.text() == "删除样品数据")
     delete_action.trigger()
     assert actions == [("delete", "d_001")]

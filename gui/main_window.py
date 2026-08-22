@@ -210,8 +210,6 @@ class MainWindow(QMainWindow):
         self.project_tree.experiment_create_submitted.connect(
             self._on_experiment_create_submitted
         )
-        self.project_tree.batch_assign_requested.connect(self._assign_batch)
-        self.project_tree.batch_remove_requested.connect(self._remove_batch)
         self.project_tree.group_add_data_requested.connect(self._group_add_data)
         self.project_tree.group_remove_data_requested.connect(
             self._group_remove_data
@@ -501,29 +499,6 @@ class MainWindow(QMainWindow):
         # 0.2.87:批量导入自动填充注释后立即刷新注释条
         self.center_panel._update_notes("experiment", exp_id, "")
         self._maybe_show_first_import_hint()
-
-    def _assign_batch(self, exp_id: str, data_id: str, batch: str) -> None:
-        """把数据加入(已有或新建的)批量组。"""
-        from gui.pipeline_state import next_batch_id, set_batch_id
-
-        if self.manager.project is None:
-            return
-        batch = (batch or "").strip()
-        if not batch:
-            batch = next_batch_id(self.manager, exp_id)
-        set_batch_id(self.manager, exp_id, data_id, batch)
-        self._append_log(f"数据 {data_id} 已加入批量组 {batch}")
-        self.refresh()
-
-    def _remove_batch(self, exp_id: str, data_id: str) -> None:
-        """把数据移出批量组(恢复单一数据)。"""
-        from gui.pipeline_state import clear_batch_id
-
-        if self.manager.project is None:
-            return
-        clear_batch_id(self.manager, exp_id, data_id)
-        self._append_log(f"数据 {data_id} 已移出批量组(恢复单一数据)")
-        self.refresh()
 
     # ------------------------------------------------------------------
     # 数据组(schema 1.4)

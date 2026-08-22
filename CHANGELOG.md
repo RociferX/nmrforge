@@ -19,6 +19,10 @@
   整组 / 依次优化组内数据,进度与逐数据汇总入日志);选中组内单个
   数据仍为原 Pipeline 界面;批量导入勾选成组时自动建数据组
   (project.json 与 pipeline_state 双写);
+- 0.2.163-补:删除旧「加入批量组.../移出批量组」数据右键入口(信号/
+  方法/菜单一并移除,底层 pipeline_state batch 函数保留供引擎兼容);
+  「把该数据移出组」后数据回到实验类型下成为普通单个数据(project.json
+  与 pipeline_state 同步清除组标记);新增回归测试;
 - 测试:test_data_group.py(模型/组方法/run_batch 组解析/参考参数复用/
   显式覆盖)、test_gui_data_group.py(树组节点/右键/组面板);更新
   schema 1.4 与批量导入组号 G1 断言;本地全量 pytest 702 项 + ruff 全绿

@@ -167,6 +167,58 @@ def test_group_batch_panel_context(
     panel.close()
 
 
+def test_remove_from_group_returns_to_ungrouped(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """「把该数据移出组」后,数据回到实验类型下成为普通单个数据。"""
+    from gui.main_window import MainWindow
+    from gui.pipeline_state import batch_id
+
+    manager, exp_id, data_ids, group_id = _manager_with_group(tmp_path)
+    # 模拟成组批量导入:双写 pipeline_state batch 标记
+    from gui.pipeline_state import set_batch_id
+
+    set_batch_id(manager, exp_id, data_ids[0], group_id)
+    manager.save()
+    monkeypatch.setattr(
+        "gui.main_window.WorkspaceManager",
+        lambda: _TempWorkspace(tmp_path / "ws"),
+    )
+    monkeypatch.setattr(
+        "core.workspace.WorkspaceManager",
+        lambda *a, **k: _TempWorkspace(tmp_path / "ws"),
+    )
+    window = MainWindow(manager=manager)
+    tree = window.project_tree.tree
+    experiment = tree.topLevelItem(0).child(0).child(0)
+    group_item = experiment.child(0)
+    assert group_item.data(0, 0x0100).get("kind") == "group"
+    assert group_item.childCount() == 2
+
+    # 组内数据右键移出组(经 main_window 接线)
+    window._group_remove_data(exp_id, group_id, data_ids[0])
+
+    # 组内成员减少,移出数据成为实验类型下的普通单个数据
+    experiment = window.project_tree.tree.topLevelItem(0).child(0).child(0)
+    group_item = experiment.child(0)
+    assert group_item.childCount() == 1
+    kinds = [
+        experiment.child(i).data(0, 0x0100).get("kind")
+        for i in range(experiment.childCount())
+    ]
+    # 组 + 两个普通单个数据(移出的 d1 与原本未入组的 d3)
+    assert kinds == ["group", "data", "data"]
+    ungrouped_ids = [
+        experiment.child(i).data(0, 0x0100).get("data_id")
+        for i in range(1, experiment.childCount())
+    ]
+    assert data_ids[0] in ungrouped_ids
+    # pipeline_state 标记同步清除(恢复普通单个数据)
+    assert batch_id(manager, exp_id, data_ids[0]) == ""
+    assert manager.group(exp_id, group_id).data_ids == [data_ids[1]]
+    window.close()
+
+
 def test_group_batch_stop_steps(tmp_path: Path, qapp: QApplication) -> None:
     """截止步骤下拉:选「生成 FID」→ steps 仅 fid。"""
     panel = GroupBatchPanel()
