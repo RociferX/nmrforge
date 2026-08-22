@@ -11,6 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PyQt6.QtCore import QEvent, QPoint, Qt, pyqtSignal
+from PyQt6.QtGui import QGuiApplication
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -333,6 +334,17 @@ class ExperimentImportPanel(QWidget):
         self.segmented_import_requested.emit(self._exp_id, source)
 
 
+def _dropdown_window_flags() -> Qt.WindowType:
+    """下拉窗口类型:Wayland 用 Popup(xdg_popup 由合成器按锚点定位),
+    其它平台(X11/Windows)用非抓取 Tool 窗口(0.2.162-补13 一次点击切换)。"""
+    flags = Qt.WindowType.FramelessWindowHint
+    if QGuiApplication.platformName() == "wayland":
+        flags |= Qt.WindowType.Popup
+    else:
+        flags |= Qt.WindowType.Tool
+    return flags
+
+
 class ImportDataDropdown(QWidget):
     """「导入数据」下拉面板:向下弹出,内含完整导入表单(0.2.162-补11)。"""
 
@@ -341,10 +353,7 @@ class ImportDataDropdown(QWidget):
     batch_import_requested = pyqtSignal(str, list, bool)
 
     def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(
-            parent,
-            Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint,
-        )
+        super().__init__(parent, _dropdown_window_flags())
         self._anchor: QWidget | None = None
         self._app = QApplication.instance()
         if self._app is not None:
@@ -371,6 +380,10 @@ class ImportDataDropdown(QWidget):
         self.panel.set_context(exp_id)
         self.show()  # 先 show:隐藏窗口的 move 可能被解释为相对父窗口坐标(0.2.162-补14)
         self.adjustSize()
+        # Wayland:Popup 必须挂 transientParent(锚点顶层窗口),合成器按
+        # xdg_popup positioner 定位;父窗口需已接收输入(按钮点击即满足)
+        if self.windowFlags() & Qt.WindowType.Popup:
+            self._set_transient_parent(anchor)
         pos = anchor.mapToGlobal(QPoint(0, anchor.height()))
         screen = QApplication.screenAt(pos) or QApplication.primaryScreen()
         if screen is not None:
@@ -412,6 +425,16 @@ class ImportDataDropdown(QWidget):
             self._app.removeEventFilter(self)
         super().hideEvent(event)
 
+    def _set_transient_parent(self, anchor: QWidget) -> None:
+        """为 Wayland xdg_popup 设置 transientParent(锚点所在顶层窗口)。"""
+        try:
+            parent_window = anchor.window().windowHandle()
+            own_window = self.windowHandle()
+            if own_window is not None and parent_window is not None:
+                own_window.setTransientParent(parent_window)
+        except Exception:  # noqa: BLE001 - 平台差异下降级(位置由 Qt 默认处理)
+            pass
+
     def _remove_event_filter(self) -> None:
         if self._app is not None:
             self._app.removeEventFilter(self)
@@ -421,10 +444,7 @@ class GroupAnalysisDropdown(QWidget):
     """「数据组间分析」下拉面板(占位,0.2.162-补11)。"""
 
     def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(
-            parent,
-            Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint,
-        )
+        super().__init__(parent, _dropdown_window_flags())
         self._anchor: QWidget | None = None
         self._app = QApplication.instance()
         if self._app is not None:
@@ -442,6 +462,10 @@ class GroupAnalysisDropdown(QWidget):
             self._app.installEventFilter(self)
         self.show()  # 先 show:隐藏窗口的 move 可能被解释为相对父窗口坐标(0.2.162-补14)
         self.adjustSize()
+        # Wayland:Popup 必须挂 transientParent(锚点顶层窗口),合成器按
+        # xdg_popup positioner 定位;父窗口需已接收输入(按钮点击即满足)
+        if self.windowFlags() & Qt.WindowType.Popup:
+            self._set_transient_parent(anchor)
         pos = anchor.mapToGlobal(QPoint(0, anchor.height()))
         screen = QApplication.screenAt(pos) or QApplication.primaryScreen()
         if screen is not None:
@@ -482,6 +506,16 @@ class GroupAnalysisDropdown(QWidget):
         if self._app is not None:
             self._app.removeEventFilter(self)
         super().hideEvent(event)
+
+    def _set_transient_parent(self, anchor: QWidget) -> None:
+        """为 Wayland xdg_popup 设置 transientParent(锚点所在顶层窗口)。"""
+        try:
+            parent_window = anchor.window().windowHandle()
+            own_window = self.windowHandle()
+            if own_window is not None and parent_window is not None:
+                own_window.setTransientParent(parent_window)
+        except Exception:  # noqa: BLE001 - 平台差异下降级(位置由 Qt 默认处理)
+            pass
 
     def _remove_event_filter(self) -> None:
         if self._app is not None:
