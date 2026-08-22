@@ -43,14 +43,14 @@ def _axes_ppm(dic: dict[str, Any], data: np.ndarray) -> list[np.ndarray]:
 
 
 def _reliability_tolerance(dic: dict[str, Any], data: np.ndarray) -> list[float]:
-    """每轴 ppm 容差 = 2 点 × ppm/点(与扫描快照容差 2 点对应)。"""
+    """每轴 ppm 容差 = 4 点 × ppm/点(与优化同峰判定容差一致,0.2.162-补5)。"""
     prefixes = ("FDF1", "FDF2", "FDF3")
     tols: list[float] = []
     for i in range(data.ndim):
         obs = float(dic.get(prefixes[i] + "OBS", 0.0) or 0.0)
         sw = float(dic.get(prefixes[i] + "SW", 0.0) or 0.0)
         size = int(data.shape[i]) or 1
-        tols.append(2.0 * (sw / (size * obs)) if obs else 0.0)
+        tols.append(4.0 * (sw / (size * obs)) if obs else 0.0)
     return tols
 
 

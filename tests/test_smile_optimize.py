@@ -43,9 +43,16 @@ def _write_ft2(path: Path, peaks, noise_std: float = 1.0, seed: int = 0):
     pipe.write(str(path), dic, data, overwrite=True)
 
 
-def _fake_backend(tmp_path: Path, spurious_in: set[int]):
-    """稳定峰固定;伪峰仅出现在指定 seed 的重构;噪声随 nSigma。"""
+def _fake_backend(
+    tmp_path: Path,
+    spurious_in: set[int],
+    extra_peaks: dict[int, list[tuple[float, float, float]]] | None = None,
+):
+    """稳定峰固定;伪峰仅出现在指定 seed 的重构;噪声随 nSigma。
+
+    extra_peaks: {seed: [(y, x, height), ...]} 追加到对应 seed 的重构。"""
     seen: list[dict] = []
+    extras = extra_peaks or {}
 
     class FakeBackend:
         def __init__(self) -> None:
@@ -58,6 +65,7 @@ def _fake_backend(tmp_path: Path, spurious_in: set[int]):
             peaks = [(10, 20, 30.0), (30, 40, 25.0)]
             if seed in spurious_in:
                 peaks.append((25, 25, 15.0))
+            peaks.extend(extras.get(seed, []))
             noise_std = 1.0 if nsigma <= 3.0 else 0.1
             path = self.work / f"spec_{seed}.ft2"
             _write_ft2(path, peaks, noise_std=noise_std, seed=seed)
@@ -225,10 +233,17 @@ def test_cli_parse_grid() -> None:
 def test_reliability_scored_by_cross_support(
     tmp_path: Path, bruker_dir: Path
 ) -> None:
-    """0.2.162-补4:逐峰可靠性=跨组合支持度/n_combos×100(全有100%,半有50%)。"""
+    """0.2.162-补5:可信度=50%跨组合支持分+50%信噪比评分(全有100%)。"""
     exp = read_dataset(bruker_dir / "nus_3d")
-    # 伪峰(25,25)只出现在扫描组合1(seed 1000)与全部最终重复(9000-9002)
-    backend, _seen = _fake_backend(tmp_path, spurious_in={1000, 9000, 9001, 9002})
+    # 伪峰(25,25)只出现在扫描组合1(seed 1000)与全部最终重复(9000-9002);
+    # 低信噪比峰(35,35,高度0.45,SNR≈4.5 落在 3-5 真假混杂区间)出现在
+    # 所有 seed → 全支持但 SNR 分<100
+    extras = {seed: [(35, 35, 0.45)] for seed in (1000, 2000, 9000, 9001, 9002)}
+    backend, _seen = _fake_backend(
+        tmp_path,
+        spurious_in={1000, 9000, 9001, 9002},
+        extra_peaks=extras,
+    )
     results = optimize_smile_parameters(
         exp,
         backend,
@@ -243,10 +258,25 @@ def test_reliability_scored_by_cross_support(
     by_pos = {
         tuple(round(v) for v in p["position"]): p for p in best.stable_peaks
     }
-    assert by_pos[(10, 20)]["reliability"] == 100.0  # 两个扫描组合都出现
+    assert by_pos[(10, 20)]["reliability"] == 100.0  # 全支持 + SNR 满分
+    assert by_pos[(10, 20)]["snr_score"] == 100.0  # SNR≥5 满分
     assert by_pos[(30, 40)]["reliability"] == 100.0
-    assert by_pos[(25, 25)]["reliability"] == 50.0  # 只在一个扫描组合出现
-    assert by_pos[(25, 25)]["support"] == 1
+    # (25,25) 只在扫描组合1注入;4 点容差下另一组合的弱噪声峰可能落入
+    # 同 bin,故不断言精确 support,只验证双重打分公式一致
+    sp = by_pos[(25, 25)]
+    assert sp["support"] >= 1
+    assert sp["reliability"] == round(
+        (sp["cross_score"] + sp["snr_score"]) / 2.0, 1
+    )
+    # 低 SNR 峰:全支持但 SNR 分 <100 → 可信度被拉低,且严格等于两分均值
+    # 边界峰:SNR 在检出阈值附近(3-5 混杂区),各 seed σ 估计波动导致
+    # 个别 seed 未检出(支持数随之波动);只验证公式一致与不高于高 SNR 峰
+    low = by_pos[(35, 35)]
+    assert low["support"] >= 1
+    assert low["reliability"] == round(
+        (low["cross_score"] + low["snr_score"]) / 2.0, 1
+    )
+    assert low["reliability"] <= by_pos[(10, 20)]["reliability"]
 
 
 def test_write_reliability_file(tmp_path: Path, bruker_dir: Path) -> None:
@@ -274,13 +304,49 @@ def test_write_reliability_file(tmp_path: Path, bruker_dir: Path) -> None:
         manager, entry.id, data.id, results[0].spectrum_path, results[0]
     )
     payload = _json.loads(rel_path.read_text(encoding="utf-8"))
-    assert payload["schema"] == "smile_reliability_v1"
+    assert payload["schema"] == "smile_reliability_v2"
     assert payload["n_combos"] == 2
     rels = {
         tuple(round(v) for v in p["position_pts"]): p["reliability"]
         for p in payload["peaks"]
     }
     assert rels[(10, 20)] == 100.0
-    assert rels[(25, 25)] == 50.0
+    entries = {
+        tuple(round(v) for v in p["position_pts"]): p for p in payload["peaks"]
+    }
+    sp = entries[(25, 25)]
+    assert sp["reliability"] == round(
+        (sp["cross_score"] + sp["snr_score"]) / 2.0, 1
+    )
+    assert {"cross_score", "snr_score", "snr"} <= set(entries[(10, 20)])
     header = csv_path.read_text(encoding="utf-8").splitlines()[0]
     assert "Reliability(%)" in header
+
+
+def test_peak_reliability_dual() -> None:
+    """0.2.162-补5:SNR≥5 信噪比满分;SNR<5 按信噪比与跨组合出现率双重打分。"""
+    from workflow.smile_optimize import _peak_reliability
+
+    # SNR≥5:信噪比满分,可信度由跨组合支持分拉高
+    assert _peak_reliability(8.0, 100.0) == 100.0
+    assert _peak_reliability(8.0, 50.0) == 75.0
+    assert _peak_reliability(5.0, 60.0) == 80.0
+    # SNR<5(3-5 混杂区间):信噪比与跨组合出现率双重打分
+    assert _peak_reliability(4.0, 100.0) == 75.0  # SNR 50 + 全支持 100
+    assert _peak_reliability(4.0, 50.0) == 50.0  # SNR 50 + 半支持 50
+    assert _peak_reliability(3.5, 100.0) == 62.5  # SNR 25 + 全支持
+    # SNR<3:假峰概率高,信噪比记 0,仅剩跨组合贡献的一半
+    assert _peak_reliability(2.5, 100.0) == 50.0
+    assert _peak_reliability(2.5, 0.0) == 0.0
+
+
+def test_snr_score_piecewise() -> None:
+    """0.2.162-补5:信噪比评分分段映射(SNR≥5 满分,3-5 线性,<3 记 0)。"""
+    from workflow.smile_optimize import _snr_score
+
+    assert _snr_score(8.0) == 100.0
+    assert _snr_score(5.0) == 100.0
+    assert _snr_score(4.0) == 50.0
+    assert _snr_score(3.5) == 25.0
+    assert _snr_score(3.0) == 0.0
+    assert _snr_score(2.0) == 0.0

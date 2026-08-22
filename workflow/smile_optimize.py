@@ -9,6 +9,11 @@
   2) 重复去伪:对最优参数做多次重构(每次向输入 fid 注入小幅高斯噪声
      模拟测量噪声),组内稳定峰为最终保留峰,写入与 raw 同级的
      smile_optimized/ 目录。
+可信度双重打分(0.2.162-补5):逐峰 Reliability(%) = 50% × 跨组合
+支持分(support/n_combos×100) + 50% × 信噪比评分;SNR≥5 信噪比满分
+(很可靠),SNR<5 按信噪比评分与跨组合出现率双重打分(3-5 真假混杂
+区间线性过渡,<3 记 0——假峰概率高);同峰判定容差每轴 4 点(VM 实测
+真峰位移 p95 约 4 点,2 点偏紧)。
 
 用法:
     results = optimize_smile_parameters(experiment, backend, base_params=run_params)
@@ -136,6 +141,27 @@ def _score_candidate(
     }
 
 
+def _snr_score(snr: float) -> float:
+    """信噪比评分:SNR≥5 满分(可靠);3-5 线性过渡(真假混杂区间);
+    <3 记 0(假峰概率高)。"""
+    if snr >= 5.0:
+        return 100.0
+    if snr <= 3.0:
+        return 0.0
+    return (snr - 3.0) / 2.0 * 100.0
+
+
+def _peak_reliability(snr: float, cross_score: float) -> float:
+    """逐峰可信度双重打分:SNR≥5 信噪比满分(很可靠);SNR<5 时按
+    信噪比评分与跨组合出现率(cross_score)各 50% 平均(3-5 真假混杂
+    区间,<3 假峰概率高)。"""
+    if snr >= 5.0:
+        snr_credit = 100.0
+    else:
+        snr_credit = _snr_score(snr)
+    return round((cross_score + snr_credit) / 2.0, 1)
+
+
 def optimize_smile_parameters(
     experiment: Experiment,
     backend: Any,
@@ -145,7 +171,7 @@ def optimize_smile_parameters(
     final_repeats: int = 3,
     min_stability: int = 2,
     cross_min: int = 2,
-    peak_tol_pts: float = 2.0,
+    peak_tol_pts: float = 4.0,
     fid_noise: float = 0.15,
     progress: Callable[[int, int, str], None] | None = None,
     on_result: Callable[[SmileParameterResult], None] | None = None,
@@ -155,8 +181,11 @@ def optimize_smile_parameters(
     SMILE 为确定性算法,同参数同输入逐位一致,故扫描阶段不做组内重复;
     峰真伪由跨参数组合出现数评估(真峰应在多个组合下都出现)。最终阶段
     对最优参数多次重构(每次注入小幅 fid 噪声模拟测量噪声),组内稳定峰
-    为保留峰。backend 需提供 reconstruct_nus(experiment, params);每组保留
-    base_params 的非 SMILE 参数,只覆盖 nsigma/thresh 与 fid_noise/seed。"""
+    为保留峰;逐峰 Reliability(%) 为双重打分:跨组合支持分与信噪比评分
+    各 50% 平均。peak_tol_pts 为同峰判定容差(每轴点数,0.2.162-补5
+    由 2 放宽到 4)。backend 需提供 reconstruct_nus(experiment, params);
+    每组保留 base_params 的非 SMILE 参数,只覆盖 nsigma/thresh 与
+    fid_noise/seed。"""
     grid = grid if grid is not None else default_smile_grid()
     base = dict(base_params or {})
     n_combos = len(grid)
@@ -309,16 +338,20 @@ def optimize_smile_parameters(
                 for peak in stable:
                     key = _snap_key(tuple(peak.position), peak_tol_pts)
                     support = len(key_to_combos.get(key, set()))
+                    cross_score = (
+                        support / n_combos * 100.0 if n_combos else 0.0
+                    )
+                    snr_score = _snr_score(float(peak.snr))
                     best.stable_peaks.append(
                         {
                             "position": [float(v) for v in peak.position],
                             "height": float(peak.height),
                             "snr": float(peak.snr),
                             "support": support,
-                            "reliability": (
-                                round(support / n_combos * 100.0, 1)
-                                if n_combos
-                                else 0.0
+                            "cross_score": round(cross_score, 1),
+                            "snr_score": round(snr_score, 1),
+                            "reliability": _peak_reliability(
+                                float(peak.snr), cross_score
                             ),
                         }
                     )
@@ -428,13 +461,16 @@ def write_smile_optimized_output(
                 "shifts": shifts,
                 "support": int(peak.get("support", 0) or 0),
                 "n_combos": int(result.n_combos or 0),
+                "snr": float(peak.get("snr", 0.0) or 0.0),
+                "cross_score": float(peak.get("cross_score", 0.0) or 0.0),
+                "snr_score": float(peak.get("snr_score", 0.0) or 0.0),
                 "reliability": float(peak.get("reliability", 0.0) or 0.0),
             }
         )
     reliability_path.write_text(
         json.dumps(
             {
-                "schema": "smile_reliability_v1",
+                "schema": "smile_reliability_v2",
                 "exp_id": exp_id,
                 "data_id": data_id,
                 "params": result.params,
