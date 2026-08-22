@@ -247,6 +247,40 @@ def _apply_final_ext(
     return p
 
 
+def _direct_phase_width(params: dict[str, Any]) -> float:
+    """直接维提取窗口宽度(ppm):EXT -x1/-xn 有效值之差,缺失回退配置默认。"""
+    from backend.config import resolve_ext_hi, resolve_ext_lo
+
+    try:
+        lo = float(resolve_ext_lo(params.get("ext_lo")))
+        hi = float(resolve_ext_hi(params.get("ext_hi")))
+    except (TypeError, ValueError):
+        return 0.0
+    return abs(lo - hi)
+
+
+def _renormalize_direct_p1(
+    direct_phase: tuple[float, float],
+    first_params: dict[str, Any],
+    final_params: dict[str, Any],
+) -> tuple[float, float]:
+    """终跑直接维范围与首遍不同时,把 p1 按窗口宽度比例重归一化。
+
+    p1 表示跨整个提取窗口的总线性相位度数;范围变窄/变宽后,同样的
+    p1 度数分布到不同频率范围,物理斜率随之变化。按
+    (最终窗口宽/首遍窗口宽) 缩放保持与内存搜索一致的物理校正。
+    """
+    p0, p1 = direct_phase
+    w_first = _direct_phase_width(first_params)
+    w_final = _direct_phase_width(final_params)
+    if w_first <= 0 or w_final <= 0:
+        return (p0, p1)
+    ratio = w_final / w_first
+    if abs(ratio - 1.0) < 1e-9:
+        return (p0, p1)
+    return (p0, p1 * ratio)
+
+
 def unified_route(    experiment: Experiment,
     backend: Any,
     *,
@@ -363,10 +397,22 @@ def unified_route(    experiment: Experiment,
         progress("终跑(完整重跑)中")
     t_final = time.time()
     params_final = _apply_final_ext(dict(params), final_ext_lo, final_ext_hi)
+    # 0.2.162-补16:终跑直接维范围变化时,直接维 p1 按窗口宽度比例重归一化
+    fixed_final = dict(fixed)
+    if direct_axis in fixed_final:
+        renormed = _renormalize_direct_p1(
+            fixed[direct_axis], params, params_final
+        )
+        if renormed != fixed[direct_axis]:
+            logs.append(
+                f"直接维相位按终跑窗口重归一化: {direct_axis} "
+                f"p1={fixed[direct_axis][1]:g}° → {renormed[1]:g}°"
+            )
+        fixed_final[direct_axis] = renormed
     resp = backend.process(
         experiment,
         plan,
-        direct_phase_override=fixed,
+        direct_phase_override=fixed_final,
         params=params_final,
         progress=progress,
     )
@@ -381,18 +427,18 @@ def unified_route(    experiment: Experiment,
         logs,
         str(resp["spectrum_path"]),
         direct_axis=direct_axis,
-        direct_phase=fixed.get(direct_axis),
-        phases=fixed,
+        direct_phase=fixed_final.get(direct_axis),
+        phases=fixed_final,
         backend_runs=backend_runs,
         progress=progress,
     )
     _cleanup_unified_intermediates(work, experiment.dataset_id)
     return {
-        "phases": fixed,
+        "phases": fixed_final,
         "spectrum_path": str(resp["spectrum_path"]),
         "backend_runs": backend_runs,
         "logs": logs,
-        "direct_phase": fixed.get(direct_axis),
+        "direct_phase": fixed_final.get(direct_axis),
     }
 
 _DIRECT_PHASE_FP_KEYS = (
@@ -956,14 +1002,24 @@ def _unified_nus(
     params_final.pop("final_ext_lo", None)
     params_final.pop("final_ext_hi", None)
     params_final = _apply_final_ext(params_final, final_ext_lo, final_ext_hi)
+    # 0.2.162-补16:终跑直接维范围变化时,p1 按窗口宽度比例重归一化
+    # (p1 表示跨整个提取窗口的总度数,范围变窄后同一 p1 物理斜率会放大)
+    direct_phase_final = _renormalize_direct_p1(
+        direct_phase, params_first, params_final
+    )
+    if direct_phase_final != direct_phase:
+        logs.append(
+            f"直接维相位按终跑窗口重归一化: {direct_axis} "
+            f"p1={direct_phase[1]:g}° → {direct_phase_final[1]:g}°"
+        )
     params_final.update(
         {
             "direct_phase_search": False,
             "display_phase_search": False,
             "direct_poly_time": bool(diagnostics.get("apply_poly_time")),
             "direct_phase_override": [
-                float(direct_phase[0]),
-                float(direct_phase[1]),
+                float(direct_phase_final[0]),
+                float(direct_phase_final[1]),
             ],
             "phases": {
                 axis: [float(p0), float(p1)]
@@ -985,7 +1041,7 @@ def _unified_nus(
         progress("终跑完成")
     logs.append(
         "终跑: 各维最终相位已填入完整脚本 "
-        f"(直接维 {direct_axis}=({direct_phase[0]:g}°, {direct_phase[1]:g}°)"
+        f"(直接维 {direct_axis}=({direct_phase_final[0]:g}°, {direct_phase_final[1]:g}°)"
         + "".join(
             f" {axis}=({p0:g}°, {p1:g}°)"
             for axis, (p0, p1) in fixed.items()
@@ -998,7 +1054,7 @@ def _unified_nus(
         logs,
         str(final["spectrum_path"]),
         direct_axis=direct_axis,
-        direct_phase=direct_phase,
+        direct_phase=direct_phase_final,
         phases=fixed,
         backend_runs=backend_runs,
         baseline=proc["baseline"],
@@ -1010,7 +1066,7 @@ def _unified_nus(
     _cleanup_unified_intermediates(work, experiment.dataset_id)
     return {
         "phases": fixed,
-        "direct_phase": direct_phase,
+        "direct_phase": direct_phase_final,
         "baseline": proc["baseline"],
         "zero_fill": proc["zero_fill"],
         "window": proc["window"],

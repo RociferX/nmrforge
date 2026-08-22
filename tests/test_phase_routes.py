@@ -523,6 +523,85 @@ def test_unified_route_uniform_final_ext_only_applies_to_final_run(
     assert result["spectrum_path"]
 
 
+def test_renormalize_direct_p1_scales_with_window_width() -> None:
+    """0.2.162-补16:p1 按终跑/首遍窗口宽度比例缩放,p0 不变;窗口相同不变。"""
+    first = {"ext_lo": "10.5", "ext_hi": "6.5"}
+    narrow = {"ext_lo": "8.5", "ext_hi": "6.5"}
+    assert routes._renormalize_direct_p1((30.0, 20.0), first, narrow) == (
+        30.0,
+        10.0,
+    )
+    assert routes._renormalize_direct_p1((30.0, 20.0), first, first) == (
+        30.0,
+        20.0,
+    )
+    # 首遍未显式给窗口时回退配置默认(10.5-6.5=4.0),比例同样成立
+    assert routes._renormalize_direct_p1((30.0, 20.0), {}, narrow) == (
+        30.0,
+        10.0,
+    )
+
+
+def test_unified_route_nus_final_ext_renormalizes_p1(
+    tmp_path: Path, monkeypatch, bruker_dir: Path
+) -> None:
+    """0.2.162-补16:终跑窗口变窄时,直接维 p1 按窗口宽度重归一化并进报告。"""
+    from types import SimpleNamespace
+
+    experiment = read_dataset(bruker_dir / "nus_2d")
+    backend = _FakeBackend(tmp_path / "nus_p1_work")
+    work = backend.work
+    monkeypatch.setattr(
+        "workflow.direct_diagnostics.run_direct_diagnostics",
+        lambda wk, exp: SimpleNamespace(
+            reports=[],
+            metrics={},
+            apply_poly_time=False,
+            repaired_badpoints=0,
+            backup_dir="",
+        ),
+    )
+    n_direct, n_t1 = 64, 32
+    k0 = np.arange(n_direct, dtype=float)
+    t1 = np.arange(n_t1, dtype=float)
+    direct = 1.0 / (1.0 + 1j * (k0 - 22) / 1.5)
+    fid1 = np.exp(-t1 / 8.0) * np.cos(2.0 * np.pi * 8.0 * t1 / n_t1)
+    planes = np.outer(direct, fid1)
+    monkeypatch.setattr(routes, "_load_recon_planes", lambda exp, wk: planes)
+    monkeypatch.setattr(
+        "core.optimization.phase_search.search_direct_phase_on_spectrum",
+        lambda arr, axis=0, metric="symmetry", progress=None: (30.0, 15.0, 80.0),
+    )
+    monkeypatch.setattr(
+        routes,
+        "_read_complex_preview",
+        lambda path, unpack_axis=None: _synthetic_preview(0, 0.0),
+    )
+    monkeypatch.setattr(
+        routes,
+        "_optimize_nus_processing",
+        lambda exp, backend, work, fixed, base_params, progress=None: {
+            "baseline": {},
+            "zero_fill": {},
+            "window": None,
+            "logs": [],
+        },
+    )
+    result = routes.unified_route(
+        experiment,
+        backend,
+        work_dir=work,
+        base_params={"final_ext_lo": "8.5", "final_ext_hi": "6.5"},
+    )
+    final_params = backend.reconstruct_params[1]
+    # 首遍窗口 10.5-6.5=4.0,终跑 8.5-6.5=2.0 → p1 15°→7.5°;p0 不变
+    assert final_params["direct_phase_override"] == [30.0, 7.5]
+    assert result["direct_phase"] == (30.0, 7.5)
+    assert any(
+        "窗口重归一化" in line and "7.5" in line for line in result["logs"]
+    )
+
+
 def test_unified_route_uniform_progress_stages(
     tmp_path: Path, monkeypatch, bruker_dir: Path
 ) -> None:
