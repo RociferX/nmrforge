@@ -105,8 +105,12 @@ def run_manual_fid_com(
 
     runtime = CshRuntime()
     result = runtime.run(["csh", str(fid_com)], cwd=str(raw_dir), timeout=timeout)
+    # 转换产物:单文件 test.fid 或切片式 fid/test%03d.fid(3D uniform/NUS)
     src = raw_dir / "test.fid"
-    if result.returncode != 0 or not src.is_file():
+    src_slices = sorted((raw_dir / "fid").glob("test*.fid")) if (
+        raw_dir / "fid"
+    ).is_dir() else []
+    if result.returncode != 0 or (not src.is_file() and not src_slices):
         run = manager.start_run(
             exp_id,
             workflow_ref="manual_fid",
@@ -119,8 +123,15 @@ def run_manual_fid_com(
         raise ManualRunError(f"fid.com 运行失败: {result.stderr}")
 
     experiment = read_dataset(raw_dir)
-    fid_path = work / f"{experiment.dataset_id}.fid"
-    shutil.move(str(src), str(fid_path))
+    if src.is_file():
+        fid_path = work / f"{experiment.dataset_id}.fid"
+        shutil.move(str(src), str(fid_path))
+    else:
+        dest_slice = work / "fid"
+        dest_slice.mkdir(parents=True, exist_ok=True)
+        for sp in src_slices:
+            shutil.move(str(sp), str(dest_slice / sp.name))
+        fid_path = dest_slice
     manager.set_data_fid(exp_id, data_id, fid_path)
     _finish_run(
         manager,
@@ -260,12 +271,20 @@ def _run_manual_spectrum_impl(
 
     谱图步骤只消费已转换 fid(「生成 FID」独立步骤产出),不执行 fid.com。
     """
+    def _fid_ready(candidate: Path) -> bool:
+        """单文件或切片目录(fid/test*.fid)任一存在即视为已转换。"""
+        if candidate.is_file():
+            return True
+        if candidate.is_dir() and list(candidate.glob("test*.fid")):
+            return True
+        return False
+
     fid_candidate = (
         Path(data_entry.fid_path)
         if data_entry.fid_path
         else work / f"{experiment.dataset_id}.fid"
     )
-    if not fid_candidate.is_file():
+    if not _fid_ready(fid_candidate):
         raise ManualRunError(
             f"缺少已转换 fid,请先生成 FID: {exp_id}/{data_id}"
         )

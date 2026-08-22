@@ -175,3 +175,50 @@ def test_run_manual_spectrum_missing_fid(
         if r.workflow_ref == "manual_process"
     )
     assert run.status == "failed"
+
+
+def test_run_manual_spectrum_accepts_slice_fid(
+    tmp_path: Path, bruker_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.2.163-补7:3D uniform/NUS 切片 fid(fid/test*.fid)不被误判为缺 fid。"""
+    manager, exp_id, data_id, raw = _manager_with_raw(tmp_path, bruker_dir)
+    runtime = _FakeRuntime(spectrum_name=f"{raw.name}.ft2")
+    monkeypatch.setattr("workflow.manual.CshRuntime", lambda: runtime)
+    # 模拟切片式转换产物:fid_path 指向 work/fid/ 目录
+    work = manager.data_dir(exp_id, data_id, "process")
+    slice_dir = work / "fid"
+    slice_dir.mkdir(parents=True, exist_ok=True)
+    (slice_dir / "test001.fid").write_bytes(b"fid")
+    (slice_dir / "test002.fid").write_bytes(b"fid")
+    manager.set_data_fid(exp_id, data_id, slice_dir)
+    manager.save()
+    spectrum = run_manual_spectrum(
+        manager, exp_id, data_id, {"process.com": "#!/bin/csh\n# process\n"}
+    )
+    assert Path(spectrum).parent == manager.data_dir(exp_id, data_id, "spectra")
+    assert manager.data(exp_id, data_id).status == "processed"
+
+
+def test_run_manual_fid_com_registers_slice_fid(
+    tmp_path: Path, bruker_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.2.163-补7:fid.com 转换产物为切片式时整体归位 work/fid/。"""
+    manager, exp_id, data_id, raw = _manager_with_raw(tmp_path, bruker_dir)
+
+    class _SliceRuntime:
+        def run(self, argv, *, cwd=None, timeout=3600):
+            src_dir = Path(cwd) / "fid"
+            src_dir.mkdir(parents=True, exist_ok=True)
+            (src_dir / "test001.fid").write_bytes(b"fid")
+            (src_dir / "test002.fid").write_bytes(b"fid")
+            return SimpleNamespace(returncode=0, stderr="", stdout="")
+
+    monkeypatch.setattr("workflow.manual.CshRuntime", lambda: _SliceRuntime())
+    fid_path = run_manual_fid_com(
+        manager, exp_id, data_id, "#!/bin/csh\n# fid\n"
+    )
+    fid_path = Path(fid_path)
+    assert fid_path.is_dir() and list(fid_path.glob("test*.fid"))
+    assert fid_path == manager.data_dir(exp_id, data_id, "process") / "fid"
+    assert manager.data(exp_id, data_id).fid_path == str(fid_path)
+    assert any(r.workflow_ref == "manual_fid" for r in manager.project.workflow_runs)
