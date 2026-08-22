@@ -105,7 +105,7 @@ def test_run_manual_spectrum_uniform(
     tmp_path: Path, bruker_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     manager, exp_id, data_id, raw = _manager_with_raw(tmp_path, bruker_dir)
-    runtime = _FakeRuntime(spectrum_name=f"{raw.name}.ft2")
+    runtime = _FakeRuntime(spectrum_name="d_001.ft2")
     monkeypatch.setattr("workflow.manual.CshRuntime", lambda: runtime)
     # 先生成 FID(独立步骤),谱图步骤只消费已转换 fid
     run_manual_fid_com(manager, exp_id, data_id, "#!/bin/csh\n# fid\n")
@@ -129,7 +129,7 @@ def test_run_manual_spectrum_failure(
     tmp_path: Path, bruker_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     manager, exp_id, data_id, raw = _manager_with_raw(tmp_path, bruker_dir)
-    ok_runtime = _FakeRuntime(spectrum_name=f"{raw.name}.ft2")
+    ok_runtime = _FakeRuntime(spectrum_name="d_001.ft2")
     monkeypatch.setattr("workflow.manual.CshRuntime", lambda: ok_runtime)
     run_manual_fid_com(manager, exp_id, data_id, "#!/bin/csh\n# fid\n")
     fail_runtime = _FakeRuntime(spectrum_name=f"{raw.name}.ft2", fail=True)
@@ -151,7 +151,7 @@ def test_run_manual_spectrum_missing_script(
     tmp_path: Path, bruker_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     manager, exp_id, data_id, raw = _manager_with_raw(tmp_path, bruker_dir)
-    runtime = _FakeRuntime(spectrum_name=f"{raw.name}.ft2")
+    runtime = _FakeRuntime(spectrum_name="d_001.ft2")
     monkeypatch.setattr("workflow.manual.CshRuntime", lambda: runtime)
     run_manual_fid_com(manager, exp_id, data_id, "#!/bin/csh\n# fid\n")
     with pytest.raises(ManualRunError, match="缺少处理脚本"):
@@ -163,7 +163,7 @@ def test_run_manual_spectrum_missing_fid(
 ) -> None:
     """谱图步骤缺 fid 时报错并登记 failed run(不自动执行 fid.com)。"""
     manager, exp_id, data_id, raw = _manager_with_raw(tmp_path, bruker_dir)
-    runtime = _FakeRuntime(spectrum_name=f"{raw.name}.ft2")
+    runtime = _FakeRuntime(spectrum_name="d_001.ft2")
     monkeypatch.setattr("workflow.manual.CshRuntime", lambda: runtime)
     with pytest.raises(ManualRunError, match="请先生成 FID"):
         run_manual_spectrum(
@@ -182,7 +182,7 @@ def test_run_manual_spectrum_accepts_slice_fid(
 ) -> None:
     """0.2.163-补7:3D uniform/NUS 切片 fid(fid/test*.fid)不被误判为缺 fid。"""
     manager, exp_id, data_id, raw = _manager_with_raw(tmp_path, bruker_dir)
-    runtime = _FakeRuntime(spectrum_name=f"{raw.name}.ft2")
+    runtime = _FakeRuntime(spectrum_name="d_001.ft2")
     monkeypatch.setattr("workflow.manual.CshRuntime", lambda: runtime)
     # 模拟切片式转换产物:fid_path 指向 work/fid/ 目录
     work = manager.data_dir(exp_id, data_id, "process")

@@ -449,7 +449,7 @@ def test_manual_full_path_uniform(
                 (work / "test.fid").write_bytes(b"fid")
             elif name in ("process.com", "nus.com"):
                 # 真实脚本输出 {raw 目录名}.ft2(manual 用 read_dataset dataset_id)
-                (work / "src_hsqc_2d.ft2").write_bytes(b"ft2")
+                (work / "d_001.ft2").write_bytes(b"ft2")
             return SimpleNamespace(returncode=0, stderr="", stdout="")
 
     monkeypatch.setattr("workflow.manual.CshRuntime", lambda: Runtime())
@@ -468,6 +468,53 @@ def test_manual_full_path_uniform(
     )
     assert Path(spectrum).parent == manager.data_dir(exp_id, data_id, "spectra")
     assert any(r.workflow_ref == "manual_process" for r in manager.project.workflow_runs)
+
+
+def test_manual_scripts_uses_data_id_for_single_fid(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """0.2.163-补10:2D 人工谱图脚本 in_file 用 data_id(d_001),
+    而非 raw 目录名(src_*),与 generate_fid 产物一致。"""
+    from workflow.manual import manual_scripts
+
+    manager, exp_id, data_id, _raw = _manager_with_data(
+        tmp_path, bruker_dir, "hsqc_2d"
+    )
+    work = manager.data_dir(exp_id, data_id, "process")
+    work.mkdir(parents=True, exist_ok=True)
+    (work / f"{data_id}.fid").write_bytes(b"fid")
+    manager.save()
+    scripts = manual_scripts(manager, exp_id, data_id)
+    content = scripts["process.com"]
+    assert f"-in {data_id}.fid" in content
+    assert "src_hsqc_2d.fid" not in content
+
+
+def test_manual_reads_segmented_container(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """0.2.163-补12:分段采集容器目录(无 acqus)manual 读取不再报错。"""
+    from workflow.manual import manual_scripts
+
+    # 构造分段容器:根目录无 acqus,两个含 acqus 的子段
+    container = tmp_path / "seg_container"
+    container.mkdir()
+    for seg in ("s1", "s2"):
+        shutil.copytree(bruker_dir / "hsqc_2d", container / seg)
+    manager = ProjectManager.create_project(tmp_path / "proj", "demo")
+    entry = manager.create_experiment("HSQC")
+    data = manager.import_data(
+        entry.id, str(container), segments=[str(container / "s1"), str(container / "s2")]
+    )
+    manager.save()
+    work = manager.data_dir(entry.id, data.id, "process")
+    work.mkdir(parents=True, exist_ok=True)
+    (work / f"{data.id}_process.com").write_text(
+        "# existing script\n", encoding="utf-8"
+    )
+    # manual_scripts 优先已有脚本;能读到即不报 acqus 错误
+    scripts = manual_scripts(manager, entry.id, data.id)
+    assert f"{data.id}_process.com" in scripts
 
 
 def test_manual_scripts_slice_in_file(
@@ -501,7 +548,7 @@ def test_manual_spectrum_accepts_slice_fid(
     class Runtime:
         def run(self, argv, *, cwd=None, timeout=3600):
             work = Path(cwd)
-            (work / "src_hnca_3d.ft3").write_bytes(b"ft3")
+            (work / "d_001.ft3").write_bytes(b"ft3")
             return SimpleNamespace(returncode=0, stderr="", stdout="")
 
     monkeypatch.setattr("workflow.manual.CshRuntime", lambda: Runtime())

@@ -19,7 +19,7 @@ from typing import Any
 
 from backend.runtime import CshRuntime
 from backend.script_generator import render_scripts
-from core.data.bruker_reader import read_dataset
+from core.data.bruker_reader import read_dataset, read_dataset_container
 from core.data.internal_data_model import Experiment, SamplingMode
 from core.project import ProjectManager
 from workflow.stepwise import _register_spectrum
@@ -38,6 +38,31 @@ def _resolve_raw_dir(manager: ProjectManager, data_entry: Any) -> Path:
 
 def _work_dir(manager: ProjectManager, exp_id: str, data_id: str) -> Path:
     return manager.data_dir(exp_id, data_id, "process")
+
+
+def _read_experiment_manual(
+    manager: ProjectManager, data_entry: Any, data_id: str
+) -> Experiment:
+    """读 Experiment:分段/容器数据用 read_dataset_container(各段绝对路径),
+    单数据集用 read_dataset;dataset_id 统一为 data_id(与 stepwise 一致)。"""
+    raw_dir = _resolve_raw_dir(manager, data_entry)
+    segments = list(getattr(data_entry, "segments", None) or [])
+    if segments:
+        from core.data.bruker_reader import read_segments
+
+        seg_paths = [
+            Path(s) if Path(s).is_absolute() else manager.root / Path(s)
+            for s in segments
+        ]
+        experiment = read_segments(seg_paths)
+    else:
+        try:
+            experiment = read_dataset_container(raw_dir)[0]
+        except ValueError:
+            # 容器/单数据集均不可解析:回退 read_dataset(报明确错误)
+            experiment = read_dataset(raw_dir)
+    experiment.dataset_id = data_id  # 0.2.163-补10:统一 data_id
+    return experiment
 
 
 def _finish_run(
@@ -74,7 +99,7 @@ def manual_fid_com(
         legacy = raw_dir / "fid.com"
         if legacy.is_file():
             return legacy.read_text(encoding="utf-8", errors="replace")
-        experiment = read_dataset(raw_dir)
+        experiment = _read_experiment_manual(manager, data_entry, data_id)
         if hasattr(backend, "work_dir"):
             backend.work_dir = str(work)
         resp = backend.convert_to_fid(experiment, raw_dir)
@@ -100,6 +125,16 @@ def run_manual_fid_com(
     raw_dir = _resolve_raw_dir(manager, data_entry)
     work = Path(work_dir) if work_dir else _work_dir(manager, exp_id, data_id)
     work.mkdir(parents=True, exist_ok=True)
+    # 0.2.163-补12:分段数据逐段转换+合并是后端权威(每段 bruker -AUTO
+    # 重新生成 fid.com,人工修改单段脚本无法经合并链路生效);明确提示
+    # 走自动路径,避免「运行失败: 」无原因
+    segments = list(getattr(data_entry, "segments", None) or [])
+    if segments:
+        raise ManualRunError(
+            "分段采集数据的人工 fid.com 请使用自动路径「生成 FID」"
+            "(多段合并由后端保证一致);如需手动调整转换,请先"
+            "单独导入单段数据后人工处理"
+        )
     fid_com = work / "fid.com"
     fid_com.write_text(content, encoding="utf-8", newline="\n")
 
@@ -122,7 +157,7 @@ def run_manual_fid_com(
         )
         raise ManualRunError(f"fid.com 运行失败: {result.stderr}")
 
-    experiment = read_dataset(raw_dir)
+    experiment = _read_experiment_manual(manager, data_entry, data_id)
     if src.is_file():
         fid_path = work / f"{experiment.dataset_id}.fid"
         shutil.move(str(src), str(fid_path))
@@ -189,7 +224,7 @@ def manual_scripts(
             except OSError:
                 pass
     try:
-        experiment = read_dataset(raw_dir)
+        experiment = _read_experiment_manual(manager, data_entry, data_id)
         rendered = render_scripts(experiment, params)
     except NotImplementedError as exc:
         raise ManualRunError(f"无法渲染处理脚本(采集模式不支持): {exc}") from exc
@@ -233,7 +268,7 @@ def run_manual_spectrum(
     raw_dir = _resolve_raw_dir(manager, data_entry)
     work = Path(work_dir) if work_dir else _work_dir(manager, exp_id, data_id)
     work.mkdir(parents=True, exist_ok=True)
-    experiment = read_dataset(raw_dir)
+    experiment = _read_experiment_manual(manager, data_entry, data_id)
     workflow_ref = (
         "manual_nus"
         if experiment.sampling.mode is SamplingMode.NUS

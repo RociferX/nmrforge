@@ -7,7 +7,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from core.data.bruker_reader import read_dataset
 from core.project import ProjectManager
 from workflow.manual import (
     ManualRunError,
@@ -95,11 +94,10 @@ def test_run_manual_spectrum_uses_first_script_key(
 ) -> None:
     """主脚本键动态化:自动路径的 d_001_process.com 名称直接可运行。"""
     manager = _manager(bruker_dir / "hsqc_2d", tmp_path)
-    experiment = read_dataset(bruker_dir / "hsqc_2d")
     work = manager.data_dir("exp_001", "d_001", "process")
     work.mkdir(parents=True, exist_ok=True)
-    (work / f"{experiment.dataset_id}.fid").write_bytes(b"FID")
-    runtime = FakeRuntime(Path(f"{experiment.dataset_id}.ft2"))
+    (work / "d_001.fid").write_bytes(b"FID")
+    runtime = FakeRuntime(Path("d_001.ft2"))
     monkeypatch.setattr("workflow.manual.CshRuntime", lambda: runtime)
 
     result = run_manual_spectrum(

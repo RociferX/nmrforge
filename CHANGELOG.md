@@ -1,5 +1,20 @@
 # 修改记录(历史条目)
 
+## 0.2.163-补10~12(2026-08-23,总管直接处理)
+
+人工路径命名与分段数据修复:
+- 补10:manual 各函数(manual_fid_com/run_manual_fid_com/manual_scripts/
+  run_manual_spectrum)读 Experiment 后统一 dataset_id=data_id——此前按
+  raw 目录名导致 fid 产物 d_001.fid 与脚本 -in 引用(raw 名)错位,
+  2D 人工运行失败且报 NMRPipe 空头(无明确原因);
+- 补11:manual 读取改用 read_dataset_container/read_segments(分段容器
+  目录无 acqus 不再报错);分段数据人工 fid.com 明确提示走自动路径
+  (多段合并由后端保证一致),不再无原因失败;
+- 补12:fid.com 编辑器提示说明——输出 test.fid/切片 test001.fid 是
+  bruker 固定行为,运行后由后端归位为 {数据 id}.fid 到 process/;
+- 测试:全路径新增分段容器读取、2D 人工脚本用 data_id 断言;
+  更新旧 manual 测试谱名预期;本地全量 720 项 + ruff 全绿。
+
 ## 0.2.163-补9(2026-08-23,总管直接处理)
 
 人工谱图脚本按切片 fid 改写 in_file:
