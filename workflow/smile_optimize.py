@@ -46,6 +46,8 @@ class SmileParameterResult:
     params: dict[str, Any]
     repeats: int = 3
     n_combos: int = 0
+    rank: int = 0
+    true_peak_count: int = 0
     decision: str = ""
     overall: float = 0.0
     components: dict[str, float] = field(default_factory=dict)
@@ -434,6 +436,72 @@ def _confidence_flags(
     return flags
 
 
+def _peak_confidence_entry(
+    peak: dict[str, Any],
+    arr: np.ndarray,
+    global_sigma: float,
+    n_combos: int,
+    key_to_combos: dict[tuple[float, ...], set[int]],
+    key_heights: dict[tuple[float, ...], list[float]],
+    key_positions: dict[tuple[float, ...], list[tuple[float, ...]]],
+    peak_tol_pts: float,
+) -> dict[str, Any]:
+    """逐峰四分量可信度条目(扫描候选/最终去伪共用)。"""
+    key = _snap_key(tuple(peak["position"]), peak_tol_pts)
+    support = len(key_to_combos.get(key, set()))
+    rate = support / n_combos if n_combos else 0.0
+    heights = list(key_heights.get(key, []))
+    positions = list(key_positions.get(key, []))
+    snr = float(peak["snr"])
+    snr_pts = _snr_points(snr)
+    existence_pts = _existence_points(rate)
+    cv = None
+    if len(heights) >= 2:
+        mean_h = float(np.mean(heights))
+        if mean_h > 0:
+            cv = float(np.std(heights)) / mean_h
+    intensity_pts = _intensity_cv_points(cv)
+    pos_i = tuple(int(v) for v in peak["position"])
+    shift = _position_shift(positions, arr, pos_i)
+    position_pts = _position_shift_points(shift)
+    stability_pts = existence_pts + intensity_pts + position_pts
+    shape_pts = _shape_score(arr, pos_i)
+    local_pts = _local_noise_score(arr, pos_i, global_sigma)
+    confidence, grade = _compose_confidence(
+        snr_pts, stability_pts, shape_pts, local_pts
+    )
+    flags = _confidence_flags(snr, rate, cv, shift, shape_pts, local_pts)
+    return {
+        **dict(peak),
+        "support": support,
+        "cross_rate": round(rate, 3),
+        "snr_points": round(snr_pts, 1),
+        "existence_points": round(existence_pts, 1),
+        "intensity_cv": round(cv, 3) if cv is not None else None,
+        "intensity_points": round(intensity_pts, 1),
+        "position_shift": round(shift, 3) if shift is not None else None,
+        "position_points": round(position_pts, 1),
+        "stability_points": round(stability_pts, 1),
+        "shape_points": round(shape_pts, 1),
+        "local_noise_points": round(local_pts, 1),
+        "confidence": confidence,
+        "grade": grade,
+        "flags": flags,
+    }
+
+
+def _rank_by_true_peaks(scanned: list[dict[str, Any]], keep_top: int) -> None:
+    """按真峰数(trusted true_peak_count)降序取前 keep_top 个候选,赋 rank 1..N。
+
+    真峰数并列时按 overall 排序(0.2.162-补9)。"""
+    scanned.sort(
+        key=lambda e: (e["result"].true_peak_count, e["result"].overall),
+        reverse=True,
+    )
+    for rank, entry in enumerate(scanned[: max(1, int(keep_top))], start=1):
+        entry["result"].rank = rank
+
+
 def optimize_smile_parameters(
     experiment: Experiment,
     backend: Any,
@@ -444,6 +512,8 @@ def optimize_smile_parameters(
     min_stability: int = 2,
     cross_min: int = 2,
     peak_tol_pts: float = 4.0,
+    keep_top: int = 3,
+    true_conf_min: float = 55.0,
     fid_noise: float = 0.15,
     progress: Callable[[int, int, str], None] | None = None,
     on_result: Callable[[SmileParameterResult], None] | None = None,
@@ -456,10 +526,11 @@ def optimize_smile_parameters(
     为保留峰;逐峰可信度按 Peak Confidence Score 规范四分量评分:
     snr(0~40) + 重构稳定性(-15~+40) + 峰形(-5~+5) + 局部噪声(-5~+5),
     理论最大 90,×100/90 归一化后 clamp 0~100(0.2.162-补8)。
-    peak_tol_pts 为同峰判定容差(每轴点数,0.2.162-补5 由 2 放宽到 4)。
-    backend 需提供 reconstruct_nus(experiment, params);每组保留
-    base_params 的非 SMILE 参数,只覆盖 nsigma/thresh 与
-    fid_noise/seed。"""
+    真峰标准 = 可信度 ≥ true_conf_min(默认 55,即 A/B/C 级);最终保留
+    真峰数最多的前 keep_top 个谱(0.2.162-补9)。peak_tol_pts 为同峰
+    判定容差(每轴点数,0.2.162-补5 由 2 放宽到 4)。backend 需提供
+    reconstruct_nus(experiment, params);每组保留 base_params 的非
+    SMILE 参数,只覆盖 nsigma/thresh 与 fid_noise/seed。"""
     grid = grid if grid is not None else default_smile_grid()
     base = dict(base_params or {})
     n_combos = len(grid)
@@ -566,24 +637,36 @@ def optimize_smile_parameters(
         result.components = components
         result.decision = "accept" if overall >= 60.0 and true_peaks else "warning"
         result.n_combos = n_combos
-        result.stable_peaks = []
-        for peak in true_peaks:
-            support = _support(_snap_key(tuple(peak["position"]), peak_tol_pts))
-            result.stable_peaks.append(
-                {
-                    **dict(peak),
-                    "support": support,
-                    "reliability": (
-                        round(support / n_combos * 100.0, 1) if n_combos else 0.0
-                    ),
-                }
+        _dic, _data = _read_spectrum(result.spectrum_path)
+        arr = np.asarray(_data)
+        if np.iscomplexobj(arr):
+            arr = arr.real
+        global_sigma = float(noise.estimate(arr).global_sigma)
+        result.stable_peaks = [
+            _peak_confidence_entry(
+                dict(peak),
+                arr,
+                global_sigma,
+                n_combos,
+                key_to_combos,
+                key_heights,
+                key_positions,
+                peak_tol_pts,
             )
-        if best_entry is None or overall > best_entry["overall"]:
-            best_entry = dict(entry=entry, overall=overall)
+            for peak in true_peaks
+        ]
+        result.true_peak_count = sum(
+            1 for p in result.stable_peaks if p["confidence"] >= true_conf_min
+        )
 
-    # 第二阶段:对最优参数多次重复重构(注入噪声)去伪峰,确定最终保留峰
+    # 0.2.162-补9:真峰 = 可信度 ≥ true_conf_min(默认 55,即 A/B/C);
+    # 最终保留真峰数最多的前 keep_top 个谱(并列按 overall)
+    _rank_by_true_peaks(scanned, keep_top)
+    best_entry = scanned[0] if scanned else None
+
+    # 第二阶段:对最优参数(真峰数 Top1)多次重复重构(注入噪声)去伪峰
     if best_entry is not None:
-        best = best_entry["entry"]["result"]
+        best = best_entry["result"]
         best_params = best.params
         try:
             peak_sets: list[list[peak_detection.Peak]] = []
@@ -617,58 +700,26 @@ def optimize_smile_parameters(
                 if np.iscomplexobj(arr):
                     arr = arr.real
                 global_sigma = float(noise.estimate(arr).global_sigma)
-                best.stable_peaks = []
-                for peak in stable:
-                    key = _snap_key(tuple(peak.position), peak_tol_pts)
-                    support = len(key_to_combos.get(key, set()))
-                    rate = support / n_combos if n_combos else 0.0
-                    heights = list(key_heights.get(key, []))
-                    positions = list(key_positions.get(key, []))
-                    snr_pts = _snr_points(float(peak.snr))
-                    existence_pts = _existence_points(rate)
-                    cv = None
-                    if len(heights) >= 2:
-                        mean_h = float(np.mean(heights))
-                        if mean_h > 0:
-                            cv = float(np.std(heights)) / mean_h
-                    intensity_pts = _intensity_cv_points(cv)
-                    pos_i = tuple(int(v) for v in peak.position)
-                    shift = _position_shift(positions, arr, pos_i)
-                    position_pts = _position_shift_points(shift)
-                    stability_pts = existence_pts + intensity_pts + position_pts
-                    shape_pts = _shape_score(arr, pos_i)
-                    local_pts = _local_noise_score(arr, pos_i, global_sigma)
-                    confidence, grade = _compose_confidence(
-                        snr_pts, stability_pts, shape_pts, local_pts
-                    )
-                    flags = _confidence_flags(
-                        float(peak.snr), rate, cv, shift, shape_pts, local_pts
-                    )
-                    best.stable_peaks.append(
+                best.stable_peaks = [
+                    _peak_confidence_entry(
                         {
                             "position": [float(v) for v in peak.position],
                             "height": float(peak.height),
                             "snr": float(peak.snr),
-                            "support": support,
-                            "cross_rate": round(rate, 3),
-                            "snr_points": round(snr_pts, 1),
-                            "existence_points": round(existence_pts, 1),
-                            "intensity_cv": (
-                                round(cv, 3) if cv is not None else None
-                            ),
-                            "intensity_points": round(intensity_pts, 1),
-                            "position_shift": (
-                                round(shift, 3) if shift is not None else None
-                            ),
-                            "position_points": round(position_pts, 1),
-                            "stability_points": round(stability_pts, 1),
-                            "shape_points": round(shape_pts, 1),
-                            "local_noise_points": round(local_pts, 1),
-                            "confidence": confidence,
-                            "grade": grade,
-                            "flags": flags,
-                        }
+                        },
+                        arr,
+                        global_sigma,
+                        n_combos,
+                        key_to_combos,
+                        key_heights,
+                        key_positions,
+                        peak_tol_pts,
                     )
+                    for peak in stable
+                ]
+                best.true_peak_count = sum(
+                    1 for p in best.stable_peaks if p["confidence"] >= true_conf_min
+                )
                 best.n_combos = n_combos
                 best.spectrum_path = last_spec
                 best.repeats = final_repeats
@@ -678,7 +729,7 @@ def optimize_smile_parameters(
         except Exception as exc:  # noqa: BLE001
             best.message = f"最终去伪失败: {exc}"
 
-    results.sort(key=lambda r: r.overall, reverse=True)
+    results.sort(key=lambda r: (r.rank if r.rank > 0 else 999, -r.overall))
     return results
 
 def write_smile_optimized_output(
@@ -687,9 +738,11 @@ def write_smile_optimized_output(
     data_id: str,
     spectrum_path: str,
     result: SmileParameterResult,
+    rank: int = 1,
 ) -> tuple[Path, Path, Path]:
     """把稳定峰写为契约 §6 峰表 CSV + 参数/评分 JSON + 逐峰可靠性 JSON。
 
+    rank>1 时文件名带 _top{rank} 后缀(0.2.162-补9:保留 Top-N 谱);
     smile_optimized/ 与 raw/ 同级(数据基座下)。返回
     (csv_path, json_path, reliability_path)。"""
     from core.peaks.peak_table import save_peaks
@@ -700,7 +753,8 @@ def write_smile_optimized_output(
     axes = _axes_ppm(dict(dic), arr)
     out_dir = manager.data_dir(exp_id, data_id, "smile_optimized")
     out_dir.mkdir(parents=True, exist_ok=True)
-    csv_path = out_dir / f"{exp_id}-{data_id}_smile_optimized.csv"
+    suffix = "" if rank <= 1 else f"_top{rank}"
+    csv_path = out_dir / f"{exp_id}-{data_id}_smile_optimized{suffix}.csv"
     rows: list[dict[str, Any]] = []
     for i, peak in enumerate(result.stable_peaks, start=1):
         pos = [float(v) for v in peak.get("position", [])]
@@ -729,7 +783,7 @@ def write_smile_optimized_output(
         row["Reliability(%)"] = float(peak.get("confidence", 0.0) or 0.0)
         rows.append(row)
     save_peaks(csv_path, rows, extra_columns=("Reliability(%)",))
-    json_path = out_dir / f"{exp_id}-{data_id}_smile_optimized.json"
+    json_path = out_dir / f"{exp_id}-{data_id}_smile_optimized{suffix}.json"
     json_path.write_text(
         json.dumps(
             {
@@ -748,7 +802,7 @@ def write_smile_optimized_output(
         + "\n",
         encoding="utf-8",
     )
-    reliability_path = out_dir / f"{exp_id}-{data_id}_smile_reliability.json"
+    reliability_path = out_dir / f"{exp_id}-{data_id}_smile_reliability{suffix}.json"
     rel_peaks: list[dict[str, Any]] = []
     for peak in result.stable_peaks:
         pos = [float(v) for v in peak.get("position", [])]

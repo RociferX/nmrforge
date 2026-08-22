@@ -1,5 +1,16 @@
 # 修改记录(历史条目)
 
+## 0.2.162-补9(2026-08-22,总管直接处理)
+
+- 真峰标准 = 逐峰可信度 ≥ true_conf_min(默认 55,即 A/B/C 级);
+- SMILE 优化最终保留「真峰数最多的前 keep_top 个谱」(默认 3):扫描
+  候选逐峰计算四分量可信度与真峰数,按 (真峰数, overall) 排序赋
+  rank 1..3;Top1 仍做噪声注入去伪;
+- 输出:Top2/3 落 spectra/ 与 smile_optimized/ 带 _top{rank} 后缀
+  (谱 + 峰表 CSV + 可靠性 JSON),活动谱仍为 Top1;
+- 测试:Top-N 排名(并列按 overall)、rank/true_peak_count、_top 后缀;
+  本地全量 pytest(667 项)+ ruff 全绿。
+
 ## 0.2.162-补8(2026-08-22,总管直接处理)
 
 - 可信度归一化到真正的 0~100:score = (四分量和) × 100/90,clamp 0~100

@@ -355,3 +355,97 @@ def test_snr_points_table() -> None:
     assert _snr_points(2.2) == 6.0
     assert _snr_points(1.7) == 3.0
     assert _snr_points(1.0) == 0.0
+
+
+def test_rank_by_true_peaks() -> None:
+    """0.2.162-补9:按真峰数降序取前 keep_top,并列按 overall。"""
+    from workflow.smile_optimize import SmileParameterResult, _rank_by_true_peaks
+
+    results = [
+        SmileParameterResult(params={"nsigma": 3.0}, true_peak_count=10, overall=60.0),
+        SmileParameterResult(params={"nsigma": 5.0}, true_peak_count=25, overall=55.0),
+        SmileParameterResult(params={"nsigma": 7.0}, true_peak_count=25, overall=70.0),
+        SmileParameterResult(params={"nsigma": 9.0}, true_peak_count=8, overall=80.0),
+    ]
+    scanned = [{"result": r} for r in results]
+    _rank_by_true_peaks(scanned, keep_top=3)
+    ranks = {r.params["nsigma"]: r.rank for r in results}
+    assert ranks[7.0] == 1  # 真峰 25 + overall 70 > 55
+    assert ranks[5.0] == 2
+    assert ranks[3.0] == 3
+    assert ranks[9.0] == 0  # 未入选
+
+
+def test_optimize_sets_rank_and_true_peak_count(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """0.2.162-补9:扫描候选逐峰可信度 + 真峰数 + rank 赋值。"""
+    exp = read_dataset(bruker_dir / "nus_3d")
+    backend, _seen = _fake_backend(tmp_path, spurious_in=set())
+    results = optimize_smile_parameters(
+        exp,
+        backend,
+        grid=[
+            {"nsigma": 5.0, "thresh": 0.95},
+            {"nsigma": 6.0, "thresh": 0.99},
+            {"nsigma": 7.0, "thresh": 0.90},
+        ],
+        final_repeats=3,
+        keep_top=3,
+    )
+    ranked = [r for r in results if r.rank > 0]
+    assert len(ranked) == 3
+    assert [r.rank for r in ranked] == [1, 2, 3]
+    counts = [r.true_peak_count for r in ranked]
+    assert counts == sorted(counts, reverse=True)  # 真峰数降序
+    assert all(c > 0 for c in counts)
+    # Top1 经过最终去伪,逐峰含四分量
+    top1 = ranked[0]
+    assert top1.repeats == 3
+    for p in top1.stable_peaks:
+        assert {"snr_points", "stability_points", "shape_points",
+                "local_noise_points", "confidence", "grade"} <= set(p)
+
+
+def test_write_ranked_output_suffix(tmp_path: Path, bruker_dir: Path) -> None:
+    """0.2.162-补9:rank>1 时输出文件名带 _top{rank} 后缀。"""
+    from core.project import ProjectManager
+    from workflow.smile_optimize import SmileParameterResult, write_smile_optimized_output
+
+    result = SmileParameterResult(
+        params={"nsigma": 5.0, "thresh": 0.95},
+        spectrum_path="",
+        stable_peaks=[
+            {"position": [10.0, 20.0], "height": 30.0, "snr": 15.0,
+             "confidence": 80.0, "grade": "B", "flags": []}
+        ],
+    )
+    manager = ProjectManager.create_project(tmp_path / "proj", "demo")
+    entry = manager.create_experiment()
+    data = manager.import_data(entry.id, "/sampleD")
+    best_spec = tmp_path / "best.ft2"
+    import numpy as np
+    from nmrglue.fileio import pipe
+
+    arr = np.zeros((64, 64), dtype=np.float32)
+    arr[10, 20] = 30.0
+    dic = {k: "0" for k in pipe.fdata_dic}
+    dic["FDMAGIC"] = 9.2330230000000007e14
+    dic["FDDIMCOUNT"] = 2
+    dic["FDSIZE"] = 64
+    dic["FDSPECNUM"] = 64
+    dic["FDQUADFLAG"] = 1
+    dic["FDF1QUADFLAG"] = 1
+    dic["FDF2QUADFLAG"] = 1
+    for prefix in ("FDF1", "FDF2"):
+        dic[prefix + "SW"] = 6000.0
+        dic[prefix + "OBS"] = 600.0
+        dic[prefix + "CAR"] = 4.7
+        dic[prefix + "ORIG"] = 4.7 * 600.0
+    pipe.write(str(best_spec), dic, arr, overwrite=True)
+    result.spectrum_path = str(best_spec)
+    _csv, _json2, _rel = write_smile_optimized_output(
+        manager, entry.id, data.id, str(best_spec), result, rank=2
+    )
+    assert (_csv.name == f"{entry.id}-{data.id}_smile_optimized_top2.csv")
+    assert (_rel.name == f"{entry.id}-{data.id}_smile_reliability_top2.json")

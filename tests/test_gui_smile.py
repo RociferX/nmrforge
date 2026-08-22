@@ -76,7 +76,8 @@ def test_apply_smile_result(tmp_path: Path) -> None:
         message="ok",
     )
     controller = ProcessingController(manager)
-    target = controller._apply_smile_result(exp_id, data_id, result)
+    applied = controller._apply_smile_result(exp_id, data_id, result, rank=1)
+    target = applied["spectrum_path"]
     spectra = manager.data_dir(exp_id, data_id, "spectra")
     assert Path(target) == spectra / "best.ft2"
     assert Path(target).is_file()
@@ -88,6 +89,14 @@ def test_apply_smile_result(tmp_path: Path) -> None:
     assert csv_path.is_file()
     assert json_path.is_file()
     assert rel_path.is_file()  # 0.2.162-补4:逐峰可靠性文件
+    # 0.2.162-补9:rank=2 仅落盘,文件名带 _top2 后缀,不改活动谱
+    applied2 = controller._apply_smile_result(exp_id, data_id, result, rank=2)
+    assert Path(applied2["spectrum_path"]) == spectra / "best_top2.ft2"
+    assert (opt_dir / f"{exp_id}-{data_id}_smile_optimized_top2.csv").is_file()
+    assert (
+        opt_dir / f"{exp_id}-{data_id}_smile_reliability_top2.json"
+    ).is_file()
+    assert manager.data(exp_id, data_id).spectrum_path == str(target)
     text = csv_path.read_text(encoding="utf-8")
     assert "H_shift" in text and "N_shift" in text
     runs = [
@@ -158,7 +167,20 @@ def test_optimize_smile_progress_and_concise_return(
     monkeypatch.setattr(
         controller, "_last_spectrum_params", lambda *a, **k: {"nthread": 4}
     )
-    monkeypatch.setattr(controller, "_apply_smile_result", lambda *a, **k: "/x.ft2")
+    monkeypatch.setattr(
+        controller,
+        "_apply_smile_result",
+        lambda *a, **k: {
+            "rank": 1,
+            "params": {},
+            "spectrum_path": "/x.ft2",
+            "peaks_path": "/x.csv",
+            "report_path": "/x.json",
+            "reliability_path": "/x_rel.json",
+            "stable_count": 1,
+            "true_peak_count": 1,
+        },
+    )
 
     def fake_optimize(exp, backend, base_params=None, grid=None, progress=None, **kw):
         assert base_params == {"nthread": 4}
@@ -181,4 +203,5 @@ def test_optimize_smile_progress_and_concise_return(
     )
     assert received == ["正在优化 1/25: {'nsigma': 3.0, 'thresh': 0.9}"]
     assert isinstance(out, str)
-    assert "最优" in out and "稳定峰 1 个" in out
+    assert "保留真峰最多前 1 个谱" in out
+    assert "Top1 真峰 1 个" in out

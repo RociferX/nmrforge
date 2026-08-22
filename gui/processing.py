@@ -579,15 +579,30 @@ class ProcessingController:
         ]
         if not valid:
             raise RuntimeError("SMILE 优化未获得可用候选")
-        best = valid[0]
-        self._apply_smile_result(exp_id, data_id, best)
+        # 0.2.162-补9:最终保留真峰数最多的前 3 个谱(rank 1..3)
+        selected = [r for r in valid if getattr(r, "rank", 0) > 0][:3]
+        if not selected:
+            selected = valid[:1]
+        applied = []
+        for rank, result in enumerate(selected, start=1):
+            applied.append(
+                self._apply_smile_result(exp_id, data_id, result, rank=rank)
+            )
         return (
-            f"{len(results)} 组候选,最优 {best.params},"
-            f"稳定峰 {len(getattr(best, 'stable_peaks', []))} 个"
+            f"{len(results)} 组候选,保留真峰最多前 {len(applied)} 个谱:"
+            + ", ".join(
+                f"Top{o['rank']} 真峰 {o['true_peak_count']} 个" for o in applied
+            )
         )
 
-    def _apply_smile_result(self, exp_id: str, data_id: str, result) -> str:
-        """最优谱归位 spectra/;稳定峰与评分写入 smile_optimized/(与 raw 同级)。"""
+    def _apply_smile_result(
+        self, exp_id: str, data_id: str, result, rank: int = 1
+    ) -> dict:
+        """候选谱归位 spectra/ + 稳定峰/评分写 smile_optimized/(与 raw 同级)。
+
+        rank=1 为活动谱(设置 data_spectrum + 运行记录 + 步骤状态);
+        rank>1 仅落盘(Top-N 保留谱,文件名带 _top{rank} 后缀,0.2.162-补9)。
+        返回输出路径 dict。"""
         import shutil
 
         from workflow.smile_optimize import write_smile_optimized_output
@@ -595,41 +610,55 @@ class ProcessingController:
         source = Path(getattr(result, "spectrum_path", ""))
         spectra_dir = self._manager.data_dir(exp_id, data_id, "spectra")
         spectra_dir.mkdir(parents=True, exist_ok=True)
-        target = spectra_dir / source.name
+        if rank <= 1:
+            target = spectra_dir / source.name
+        else:
+            target = spectra_dir / f"{source.stem}_top{rank}{source.suffix}"
         if source.is_file() and source.resolve() != target.resolve():
             shutil.copy2(source, target)
-        self._manager.set_data_spectrum(exp_id, data_id, target)
         peaks_path, report_path, reliability_path = write_smile_optimized_output(
-            self._manager, exp_id, data_id, source, result
+            self._manager, exp_id, data_id, source, result, rank=rank
         )
         result.peaks_path = str(peaks_path)
-        run = self._manager.start_run(
-            exp_id,
-            workflow_ref="smile_optimize",
-            inputs={"data_id": data_id},
-            params=dict(getattr(result, "params", {}) or {}),
-        )
-        self._manager.finish_run(
-            run.run_id,
-            "success",
-            outputs={
-                "spectrum_path": str(target),
-                "peaks_path": str(peaks_path),
-                "report_path": str(report_path),
-                "reliability_path": str(reliability_path),
-            },
-            message=str(getattr(result, "message", "") or "SMILE 优化完成")
-            + f"(稳定峰 {len(getattr(result, 'stable_peaks', []))} 个)",
-        )
-        record_step_success(self._manager, exp_id, data_id, "smile")
-        record_step_success(self._manager, exp_id, data_id, "spectrum")
-        self._snapshot_step(
-            exp_id,
-            data_id,
-            ("smile_optimize",),
-            self._spectrum_scripts(exp_id, data_id),
-        )
-        return str(target)
+        if rank <= 1:
+            self._manager.set_data_spectrum(exp_id, data_id, target)
+            run = self._manager.start_run(
+                exp_id,
+                workflow_ref="smile_optimize",
+                inputs={"data_id": data_id},
+                params=dict(getattr(result, "params", {}) or {}),
+            )
+            self._manager.finish_run(
+                run.run_id,
+                "success",
+                outputs={
+                    "spectrum_path": str(target),
+                    "peaks_path": str(peaks_path),
+                    "report_path": str(report_path),
+                    "reliability_path": str(reliability_path),
+                },
+                message=str(getattr(result, "message", "") or "SMILE 优化完成")
+                + f"(真峰 {getattr(result, 'true_peak_count', 0)} 个,"
+                f"稳定峰 {len(getattr(result, 'stable_peaks', []))} 个)",
+            )
+            record_step_success(self._manager, exp_id, data_id, "smile")
+            record_step_success(self._manager, exp_id, data_id, "spectrum")
+            self._snapshot_step(
+                exp_id,
+                data_id,
+                ("smile_optimize",),
+                self._spectrum_scripts(exp_id, data_id),
+            )
+        return {
+            "rank": rank,
+            "params": dict(getattr(result, "params", {}) or {}),
+            "spectrum_path": str(target),
+            "peaks_path": str(peaks_path),
+            "report_path": str(report_path),
+            "reliability_path": str(reliability_path),
+            "stable_count": len(getattr(result, "stable_peaks", [])),
+            "true_peak_count": getattr(result, "true_peak_count", 0),
+        }
 
     # ------------------------------------------------------------------
     # 脚本快照(GUI 接线):步骤成功后把执行的脚本/参数写入 WorkflowRun
