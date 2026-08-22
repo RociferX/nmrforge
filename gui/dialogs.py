@@ -503,7 +503,8 @@ class ScriptEditorDialog(QDialog):
             "· 峰形/分辨率不佳:调整窗函数 SP 的 -off/-end/-pow/-c,"
             "或加大 ZF -size;\n"
             "· 相位不好:调 PS -p0/-p1(自动调相后会自行填入,一般不动);\n"
-            "· FT 的 -alt/-neg/-real 标志按采样模式自动判定,请勿手动改动。"
+            "· FT 的 -alt/-neg/-real 标志按采样模式自动判定;若认为判断"
+            "错误可修改:-neg 谱颠倒,-alt 谱平移半个谱宽。"
         )
 
     def __init__(
