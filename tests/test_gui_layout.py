@@ -1722,6 +1722,19 @@ def test_experiment_page_dropdown_switch(
     page = window.center_panel.experiment_page
     page._open_import_dropdown()
     assert page._import_dropdown.isVisible()
+    # 0.2.162-补14:下拉应在按钮正下方(先 show 再 move)
+    from PyQt6.QtCore import QPoint
+
+    expected = page.import_dropdown_button.mapToGlobal(
+        QPoint(0, page.import_dropdown_button.height())
+    )
+    drop = page._import_dropdown
+    assert drop.pos().x() == expected.x()  # 与按钮左缘对齐
+    assert drop.pos().y() <= expected.y()  # 在按钮下方(仅可能因屏幕下缘上收)
+    from PyQt6.QtWidgets import QApplication as _QApp
+
+    geo = _QApp.primaryScreen().availableGeometry()
+    assert drop.pos().y() + drop.height() <= geo.bottom() + 1
     # 点「数据组间分析」:一次调用即切换(导入关闭 + 组间分析打开)
     page._open_group_analysis_dropdown()
     assert not page._import_dropdown.isVisible()

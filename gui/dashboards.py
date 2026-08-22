@@ -369,6 +369,8 @@ class ImportDataDropdown(QWidget):
         if self._app is not None:
             self._app.installEventFilter(self)
         self.panel.set_context(exp_id)
+        self.show()  # 先 show:隐藏窗口的 move 可能被解释为相对父窗口坐标(0.2.162-补14)
+        self.adjustSize()
         pos = anchor.mapToGlobal(QPoint(0, anchor.height()))
         screen = QApplication.screenAt(pos) or QApplication.primaryScreen()
         if screen is not None:
@@ -383,7 +385,6 @@ class ImportDataDropdown(QWidget):
             )
             pos = QPoint(x, y)
         self.move(pos)
-        self.show()
         self.raise_()
         self.activateWindow()
 
@@ -439,6 +440,8 @@ class GroupAnalysisDropdown(QWidget):
         self._anchor = anchor
         if self._app is not None:
             self._app.installEventFilter(self)
+        self.show()  # 先 show:隐藏窗口的 move 可能被解释为相对父窗口坐标(0.2.162-补14)
+        self.adjustSize()
         pos = anchor.mapToGlobal(QPoint(0, anchor.height()))
         screen = QApplication.screenAt(pos) or QApplication.primaryScreen()
         if screen is not None:
@@ -453,7 +456,6 @@ class GroupAnalysisDropdown(QWidget):
             )
             pos = QPoint(x, y)
         self.move(pos)
-        self.show()
         self.raise_()
         self.activateWindow()
 
