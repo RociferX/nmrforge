@@ -470,6 +470,28 @@ def test_manual_full_path_uniform(
     assert any(r.workflow_ref == "manual_process" for r in manager.project.workflow_runs)
 
 
+def test_manual_scripts_slice_in_file(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """0.2.163-补9:3D uniform 人工谱图脚本检测切片 fid 后,
+    渲染 in_file 改写为 fid/test%03d.fid(人工运行才不失败)。"""
+    from workflow.manual import manual_scripts
+
+    manager, exp_id, data_id, _raw = _manager_with_data(
+        tmp_path, bruker_dir, "hnca_3d"
+    )
+    work = manager.data_dir(exp_id, data_id, "process")
+    slice_dir = work / "fid"
+    slice_dir.mkdir(parents=True, exist_ok=True)
+    (slice_dir / "test001.fid").write_bytes(b"fid")
+    (slice_dir / "test002.fid").write_bytes(b"fid")
+    manager.save()
+    scripts = manual_scripts(manager, exp_id, data_id)
+    content = scripts["process.com"]
+    assert "-in fid/test%03d.fid" in content
+    assert "-in src_hnca_3d.fid" not in content
+
+
 def test_manual_spectrum_accepts_slice_fid(
     tmp_path: Path, bruker_dir: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -1,5 +1,16 @@
 # 修改记录(历史条目)
 
+## 0.2.163-补9(2026-08-23,总管直接处理)
+
+人工谱图脚本按切片 fid 改写 in_file:
+- 根因:render_scripts 固定 in_file={dataset_id}.fid(单文件);3D uniform/NUS
+  的 fid 是切片目录(fid/test*.fid),人工脚本编辑器打开/运行 process.com/
+  nus.com 找不到单文件而失败(自动路径 backend 内部会切换切片流,故正常);
+- 修复:manual_scripts 渲染后检测 work/fid/ 切片存在时,把脚本 -in 的
+  单文件改写为 fid/test%03d.fid(只改输入,不动输出);
+- 测试:全路径新增 3D uniform 人工脚本 in_file 改写断言;
+  本地全量 718 项 + ruff 全绿。
+
 ## 0.2.163-补8(2026-08-23,总管直接处理)
 
 全路径端到端回归测试(tests/test_full_paths.py,每次修改必跑):

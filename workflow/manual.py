@@ -198,7 +198,23 @@ def manual_scripts(
         if experiment.sampling.mode is SamplingMode.NUS
         else "process.com"
     )
-    return {script_key: rendered[script_key]}
+    content = rendered[script_key]
+    # 0.2.163-补9:3D uniform/NUS 的 fid 为切片目录(fid/test*.fid),
+    # 渲染默认 in_file 是单文件 {dataset_id}.fid——检测到切片时改写为
+    # 切片流,人工运行才不失败(与自动路径 backend 切片切换一致)
+    slice_dir = work / "fid"
+    if slice_dir.is_dir() and list(slice_dir.glob("test*.fid")):
+        single = f"{experiment.dataset_id}.fid"
+        sliced = "fid/test%03d.fid"
+        # 只改 xyz2pipe/nmrPipe 的 -in 输入,不动 -out 输出
+        import re
+
+        content = re.sub(
+            r"(-in )" + re.escape(single),
+            r"\g<1>" + sliced,
+            content,
+        )
+    return {script_key: content}
 
 
 def run_manual_spectrum(
