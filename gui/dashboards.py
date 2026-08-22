@@ -430,6 +430,9 @@ class ImportDataDropdown(QWidget):
         try:
             parent_window = anchor.window().windowHandle()
             own_window = self.windowHandle()
+            if own_window is None:
+                self.winId()  # 强制创建原生窗口句柄(show 前)
+                own_window = self.windowHandle()
             if own_window is not None and parent_window is not None:
                 own_window.setTransientParent(parent_window)
         except Exception:  # noqa: BLE001 - 平台差异下降级(位置由 Qt 默认处理)
@@ -460,12 +463,13 @@ class GroupAnalysisDropdown(QWidget):
         self._anchor = anchor
         if self._app is not None:
             self._app.installEventFilter(self)
-        self.show()  # 先 show:隐藏窗口的 move 可能被解释为相对父窗口坐标(0.2.162-补14)
-        self.adjustSize()
-        # Wayland:Popup 必须挂 transientParent(锚点顶层窗口),合成器按
-        # xdg_popup positioner 定位;父窗口需已接收输入(按钮点击即满足)
+        # Wayland:xdg_popup 创建时要求 transientParent 已设置,必须先挂
+        # 再 show(合成器按 positioner 定位);X11/Windows Tool 窗口则
+        # 先 show 再 move(0.2.162-补14:隐藏窗口 move 被解释为相对父窗口)
         if self.windowFlags() & Qt.WindowType.Popup:
             self._set_transient_parent(anchor)
+        self.show()  # 先 show:隐藏窗口的 move 可能被解释为相对父窗口坐标(0.2.162-补14)
+        self.adjustSize()
         pos = anchor.mapToGlobal(QPoint(0, anchor.height()))
         screen = QApplication.screenAt(pos) or QApplication.primaryScreen()
         if screen is not None:
@@ -512,6 +516,9 @@ class GroupAnalysisDropdown(QWidget):
         try:
             parent_window = anchor.window().windowHandle()
             own_window = self.windowHandle()
+            if own_window is None:
+                self.winId()  # 强制创建原生窗口句柄(show 前)
+                own_window = self.windowHandle()
             if own_window is not None and parent_window is not None:
                 own_window.setTransientParent(parent_window)
         except Exception:  # noqa: BLE001 - 平台差异下降级(位置由 Qt 默认处理)
