@@ -223,6 +223,30 @@ def _append_final_summary(
             progress(line)
 
 
+def _split_final_ext(params: dict[str, Any]) -> tuple[dict[str, Any], Any, Any]:
+    """从参数取出仅终跑生效的直接维范围(final_ext_lo/final_ext_hi)。
+
+    返回 (剩余参数, ext_lo, ext_hi);首遍/复型预览路径使用剩余参数,
+    终跑路径把取出的值映射回 ext_lo/ext_hi(_apply_final_ext)。
+    """
+    p = dict(params)
+    final_lo = p.pop("final_ext_lo", None)
+    final_hi = p.pop("final_ext_hi", None)
+    return p, final_lo, final_hi
+
+
+def _apply_final_ext(
+    params: dict[str, Any], final_lo: Any, final_hi: Any
+) -> dict[str, Any]:
+    """把用户指定的终跑直接维范围写入参数(空值保持原配置)。"""
+    p = dict(params)
+    if final_lo is not None and str(final_lo).strip():
+        p["ext_lo"] = str(final_lo)
+    if final_hi is not None and str(final_hi).strip():
+        p["ext_hi"] = str(final_hi)
+    return p
+
+
 def unified_route(    experiment: Experiment,
     backend: Any,
     *,
@@ -258,6 +282,9 @@ def unified_route(    experiment: Experiment,
     work = Path(work_dir) if work_dir else backend._work_path(experiment)
     params = dict(base_params or {})
     params.pop("preview_axis", None)
+    # 0.2.162-补15:用户指定的终跑直接维范围(final_ext_lo/final_ext_hi)
+    # 只进终跑完整脚本,首遍复型预览不改
+    params, final_ext_lo, final_ext_hi = _split_final_ext(params)
     ext = "ft3" if experiment.ndim >= 3 else "ft2"
     direct_axis = "F2" if experiment.ndim == 2 else "F3"
     sign_mode = _sign_mode(experiment)
@@ -335,7 +362,7 @@ def unified_route(    experiment: Experiment,
     if progress is not None:
         progress("终跑(完整重跑)中")
     t_final = time.time()
-    params_final = dict(params)
+    params_final = _apply_final_ext(dict(params), final_ext_lo, final_ext_hi)
     resp = backend.process(
         experiment,
         plan,
@@ -728,6 +755,9 @@ def _unified_nus(
     except Exception as exc:  # noqa: BLE001 - 诊断失败不阻断谱图生成
         diag_logs = [f"数据质量诊断失败: {exc}"]
     params_first = dict(base_params or {})
+    # 0.2.162-补15:终跑直接维范围(final_ext_lo/final_ext_hi)只进终跑,
+    # 首遍重构/相位搜索保持原窗口
+    params_first, final_ext_lo, final_ext_hi = _split_final_ext(params_first)
     params_first.update(
         {
             "direct_phase_search": False,
@@ -923,6 +953,9 @@ def _unified_nus(
     logs += proc["logs"]
     logs.append(f"处理参数优化(基线/填零/窗函数)完成,耗时 {time.time() - t_opt:.1f} 秒")
     params_final = dict(base_params or {})
+    params_final.pop("final_ext_lo", None)
+    params_final.pop("final_ext_hi", None)
+    params_final = _apply_final_ext(params_final, final_ext_lo, final_ext_hi)
     params_final.update(
         {
             "direct_phase_search": False,

@@ -54,6 +54,13 @@ def format_optimization_report(params: dict) -> list[str]:
     direct = params.get("direct_phase")
     if direct is not None:
         lines.append(f"  直接维相位: {format_phase_pair(direct)}")
+    # 0.2.162-补15:用户指定终跑直接维范围时展示(空端显示默认)
+    final_lo = params.get("final_ext_lo")
+    final_hi = params.get("final_ext_hi")
+    if final_lo is not None or final_hi is not None:
+        lo = str(final_lo) if final_lo not in (None, "") else "默认"
+        hi = str(final_hi) if final_hi not in (None, "") else "默认"
+        lines.append(f"  直接维范围(终跑): {lo} - {hi} ppm")
     phases = params.get("phases") or {}
     if phases:
         lines.append("  逐维相位:")

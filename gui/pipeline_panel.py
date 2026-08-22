@@ -16,9 +16,13 @@ from pathlib import Path
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
+    QDialog,
+    QDialogButtonBox,
+    QFormLayout,
     QFrame,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QPushButton,
     QScrollArea,
     QVBoxLayout,
@@ -443,6 +447,7 @@ class PipelineStepRow(QWidget):
     manual_requested = pyqtSignal(str)  # step_id:打开脚本编辑器(已有脚本优先)
     report_requested = pyqtSignal(str)  # step_id:分析完成后打开报告页
     show_spectrum_requested = pyqtSignal(str)  # step_id:生成谱图完成后展示谱图
+    ext_range_requested = pyqtSignal(str)  # step_id:设置终跑直接维范围
     detail_toggled = pyqtSignal(str)  # step_id:点击行切换详情
     view_log_requested = pyqtSignal(str)  # step_id:定位日志面板
 
@@ -470,6 +475,17 @@ class PipelineStepRow(QWidget):
         header.addLayout(text_box, 1)
         self.status_label = QLabel("")
         header.addWidget(self.status_label)
+        # 0.2.162-补15:生成谱图运行前「直接维范围」按钮(仅终跑生效)
+        self.ext_range_button = QPushButton("直接维范围")
+        self.ext_range_button.setToolTip(
+            "指定终跑脚本的直接维提取窗口(EXT -x1/-xn);"
+            "首遍相位搜索保持原窗口"
+        )
+        self.ext_range_button.setVisible(self.step_id == "spectrum")
+        self.ext_range_button.clicked.connect(
+            lambda: self.ext_range_requested.emit(self.step_id)
+        )
+        header.addWidget(self.ext_range_button)
         self.run_button = QPushButton("运行")
         self.run_button.setVisible(False)
         self.run_button.clicked.connect(lambda: self.run_requested.emit(self.step_id))
@@ -542,6 +558,10 @@ class PipelineStepRow(QWidget):
             self.detail_toggled.emit(self.step_id)
         super().mousePressEvent(event)
 
+    def set_ext_override(self, text: str) -> None:
+        """更新「直接维范围」按钮文案(已设值时显示当前范围)。"""
+        self.ext_range_button.setText(text)
+
     def set_detail(self, text: str, failed: bool = False) -> None:
         """填充详情文本。"""
         self.detail_label.setText(text)
@@ -606,6 +626,8 @@ class PipelinePanel(QWidget):
         self._selection_kind: str = ""  # data/folder 时显示步骤;project/experiment 显示提示
         self._current_data_id: str = ""
         self._rows: dict[str, PipelineStepRow] = {}
+        # 0.2.162-补15:(exp_id, data_id) → (终跑 ext_lo, 终跑 ext_hi)
+        self._final_ext: dict[tuple[str, str], tuple[str, str]] = {}
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
@@ -642,6 +664,7 @@ class PipelinePanel(QWidget):
             row.manual_requested.connect(self.manual_open_requested.emit)
             row.report_requested.connect(self.report_requested.emit)
             row.show_spectrum_requested.connect(self.show_spectrum_requested.emit)
+            row.ext_range_requested.connect(self._on_ext_range_requested)
             row.detail_toggled.connect(self._toggle_step_detail)
             row.view_log_requested.connect(self.view_log_requested.emit)
             steps_box.addWidget(row)
@@ -779,7 +802,76 @@ class PipelinePanel(QWidget):
                 step_id == "spectrum" and status == "SUCCESS"
             )
             # 0.2.108:生成谱图步骤提供「相位优化途径」选择
+        self._update_ext_button()
         self._refresh_expanded_details()
+
+    # ------------------------------------------------------------------
+    # 终跑直接维范围(0.2.162-补15)
+    # ------------------------------------------------------------------
+    def _on_ext_range_requested(self, step_id: str) -> None:
+        """「直接维范围」按钮:弹输入对话框,按数据保存终跑直接维范围覆盖。"""
+        if step_id != "spectrum":
+            return
+        exp_id = self._current_exp_id
+        data_id = self._current_data_id
+        if not (exp_id and data_id):
+            return
+        key = (exp_id, data_id)
+        current = self._final_ext.get(key, ("", ""))
+        dialog = QDialog(self)
+        dialog.setWindowTitle("直接维范围(仅终跑)")
+        form = QFormLayout(dialog)
+        lo_edit = QLineEdit(str(current[0]) if current[0] else "")
+        hi_edit = QLineEdit(str(current[1]) if current[1] else "")
+        lo_edit.setPlaceholderText("10.5")
+        hi_edit.setPlaceholderText("6.5")
+        form.addRow("高场端 ppm (EXT -x1):", lo_edit)
+        form.addRow("低场端 ppm (EXT -xn):", hi_edit)
+        tip = QLabel("只影响终跑完整脚本;首遍相位搜索保持原窗口。留空=使用默认。")
+        tip.setWordWrap(True)
+        tip.setStyleSheet("color: #666;")
+        form.addRow(tip)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok
+            | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        form.addRow(buttons)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        lo = lo_edit.text().strip()
+        hi = hi_edit.text().strip()
+        if not lo and not hi:
+            self._final_ext.pop(key, None)
+        else:
+            self._final_ext[key] = (lo, hi)
+        self._update_ext_button()
+
+    def _update_ext_button(self) -> None:
+        """按当前数据的终跑直接维范围覆盖更新按钮文案。"""
+        row = self._rows.get("spectrum")
+        if row is None:
+            return
+        over = self._final_ext.get((self._current_exp_id, self._current_data_id))
+        if over and (over[0] or over[1]):
+            row.set_ext_override(
+                f"直接维范围 {over[0] or '默认'}/{over[1] or '默认'}"
+            )
+        else:
+            row.set_ext_override("直接维范围")
+
+    def _spectrum_ext_params(self, data_id: str) -> dict | None:
+        """当前实验某数据的终跑直接维范围 → generate_spectrum params(无则 None)。"""
+        over = self._final_ext.get((self._current_exp_id, data_id))
+        if not over:
+            return None
+        ext_params: dict[str, str] = {}
+        if over[0]:
+            ext_params["final_ext_lo"] = over[0]
+        if over[1]:
+            ext_params["final_ext_hi"] = over[1]
+        return ext_params or None
 
     # ------------------------------------------------------------------
     # 运行
@@ -956,6 +1048,10 @@ class PipelinePanel(QWidget):
                         import inspect
 
                         kwargs: dict = {"exp_id": exp_id, "data_id": data_id}
+                        if step_id == "spectrum":
+                            ext_params = self._spectrum_ext_params(data_id)
+                            if ext_params and "params" in inspect.signature(method).parameters:
+                                kwargs["params"] = ext_params
                         if "progress" in inspect.signature(method).parameters:
                             kwargs["progress"] = (
                                 lambda msg, d=data_id: self.log_message.emit(

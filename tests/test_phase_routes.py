@@ -425,6 +425,104 @@ def test_unified_route_nus_progress_stages(
 
 
 
+def test_unified_route_nus_final_ext_only_applies_to_final_run(
+    tmp_path: Path, monkeypatch, bruker_dir: Path
+) -> None:
+    """0.2.162-补15:final_ext_lo/hi 只进终跑完整脚本,首遍重构保持原窗口。"""
+    from types import SimpleNamespace
+
+    experiment = read_dataset(bruker_dir / "nus_2d")
+    backend = _FakeBackend(tmp_path / "nus_ext_work")
+    work = backend.work
+    monkeypatch.setattr(
+        "workflow.direct_diagnostics.run_direct_diagnostics",
+        lambda wk, exp: SimpleNamespace(
+            reports=[],
+            metrics={},
+            apply_poly_time=False,
+            repaired_badpoints=0,
+            backup_dir="",
+        ),
+    )
+    n_direct, n_t1 = 64, 32
+    k0 = np.arange(n_direct, dtype=float)
+    t1 = np.arange(n_t1, dtype=float)
+    direct = 1.0 / (1.0 + 1j * (k0 - 22) / 1.5)
+    fid1 = np.exp(-t1 / 8.0) * np.cos(2.0 * np.pi * 8.0 * t1 / n_t1)
+    planes = np.outer(direct, fid1)
+    monkeypatch.setattr(routes, "_load_recon_planes", lambda exp, wk: planes)
+    monkeypatch.setattr(
+        "core.optimization.phase_search.search_direct_phase_on_spectrum",
+        lambda arr, axis=0, metric="symmetry", progress=None: (30.0, 0.0, 80.0),
+    )
+    monkeypatch.setattr(
+        routes,
+        "_read_complex_preview",
+        lambda path, unpack_axis=None: _synthetic_preview(0, 0.0),
+    )
+    monkeypatch.setattr(
+        routes,
+        "_optimize_nus_processing",
+        lambda exp, backend, work, fixed, base_params, progress=None: {
+            "baseline": {},
+            "zero_fill": {},
+            "window": None,
+            "logs": [],
+        },
+    )
+    result = routes.unified_route(
+        experiment,
+        backend,
+        work_dir=work,
+        base_params={"final_ext_lo": "11.0", "final_ext_hi": "5.5"},
+    )
+    first_params = backend.reconstruct_params[0]
+    final_params = backend.reconstruct_params[1]
+    # 首遍:终跑范围不落入,也不带新 ext(保持原窗口/配置默认)
+    assert "final_ext_lo" not in first_params
+    assert "final_ext_hi" not in first_params
+    assert first_params.get("ext_lo") is None
+    # 终跑:范围已映射为 ext_lo/ext_hi,私有键不残留
+    assert final_params["ext_lo"] == "11.0"
+    assert final_params["ext_hi"] == "5.5"
+    assert "final_ext_lo" not in final_params
+    assert result["spectrum_path"]
+
+
+def test_unified_route_uniform_final_ext_only_applies_to_final_run(
+    tmp_path: Path, monkeypatch, bruker_dir: Path
+) -> None:
+    """0.2.162-补15:uniform 首遍复型预览不改窗口,终跑完整脚本应用范围。"""
+    experiment = read_dataset(bruker_dir / "hsqc_2d")
+    backend = _FakeBackend(tmp_path / "uni_ext_work")
+    work = backend.work
+
+    def fake_read(path: str, unpack_axis: int | None = None):
+        name = Path(path).name
+        if "F1" in name:
+            return _synthetic_preview(0, -25.0)
+        if "F2" in name:
+            return _synthetic_preview(1, -35.0)
+        return _synthetic_preview(0, 0.0)
+
+    monkeypatch.setattr(routes, "_read_complex_preview", fake_read)
+    result = routes.unified_route(
+        experiment,
+        backend,
+        work_dir=work,
+        base_params={"final_ext_lo": "11.0", "final_ext_hi": "5.5"},
+    )
+    assert len(backend.process_calls) == 3  # F1 预览 + F2 预览 + 终跑
+    preview1, preview2, final = backend.process_calls
+    for preview in (preview1, preview2):
+        assert preview[2].get("ext_lo") is None
+        assert "final_ext_lo" not in preview[2]
+    assert final[2]["ext_lo"] == "11.0"
+    assert final[2]["ext_hi"] == "5.5"
+    assert "final_ext_lo" not in final[2]
+    assert result["spectrum_path"]
+
+
 def test_unified_route_uniform_progress_stages(
     tmp_path: Path, monkeypatch, bruker_dir: Path
 ) -> None:

@@ -1,0 +1,71 @@
+"""终谱 → Sparky UCSF 转换测试(0.2.162-补15)。"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from types import SimpleNamespace
+
+from workflow.ucsf_export import export_ucsf
+
+
+def test_export_ucsf_runs_pipe2ucsf_and_writes_target(tmp_path: Path) -> None:
+    """pipe2ucsf 成功:调用参数正确,UCSF 路径返回。"""
+    source = tmp_path / "d_001.ft2"
+    source.write_bytes(b"pipe")
+    target = tmp_path / "d_001.ucsf"
+    calls: list[list[str]] = []
+
+    def fake_run(argv, cwd=None, timeout=None):
+        calls.append(argv)
+        target.write_bytes(b"ucsf-data")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    path, message = export_ucsf(source, target, run=fake_run)
+    assert path == str(target)
+    assert "UCSF 已生成" in message
+    assert calls[0][0] == "pipe2ucsf"
+    assert str(source) in calls[0][1]
+    assert str(target) in calls[0][2]
+
+
+def test_export_ucsf_failure_returns_none_and_cleans_partial(tmp_path: Path) -> None:
+    """pipe2ucsf 失败:返回 None,残留的半成品文件被清理。"""
+    source = tmp_path / "d_001.ft3"
+    source.write_bytes(b"pipe")
+    target = tmp_path / "d_001.ucsf"
+
+    def fake_run(argv, cwd=None, timeout=None):
+        target.write_bytes(b"partial")
+        return SimpleNamespace(returncode=1, stdout="", stderr="boom")
+
+    path, message = export_ucsf(source, target, run=fake_run)
+    assert path is None
+    assert "转换失败" in message and "boom" in message
+    assert not target.exists()
+
+
+def test_export_ucsf_missing_source_skips(tmp_path: Path) -> None:
+    """源谱不存在:跳过,不调用工具。"""
+    path, message = export_ucsf(
+        tmp_path / "missing.ft2", tmp_path / "missing.ucsf"
+    )
+    assert path is None
+    assert "源谱不存在" in message
+
+
+def test_export_ucsf_missing_tool_degrades_gracefully(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """本机无 csh/pipe2ucsf(如 Windows 开发机):降级返回 None,不抛异常。"""
+    source = tmp_path / "d_001.ft2"
+    source.write_bytes(b"pipe")
+    target = tmp_path / "d_001.ucsf"
+
+    class _MissingCsh:
+        def run(self, *args, **kwargs):
+            raise RuntimeError("本机未找到 tcsh/csh")
+
+    monkeypatch.setattr("backend.runtime.CshRuntime", _MissingCsh)
+    path, message = export_ucsf(source, target)
+    assert path is None
+    assert "跳过 UCSF 转换" in message

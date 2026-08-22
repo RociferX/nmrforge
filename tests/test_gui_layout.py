@@ -214,6 +214,68 @@ def test_project_tree_column_widths_readable(qapp: QApplication) -> None:
 # ----------------------------------------------------------------------
 # Pipeline 五步状态
 # ----------------------------------------------------------------------
+def test_pipeline_spectrum_row_ext_range_button_before_run(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.2.162-补15:生成谱图行运行按钮前有「直接维范围」按钮(其它步骤隐藏)。"""
+    from gui.pipeline_panel import PipelinePanel
+
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    panel = PipelinePanel(manager, FakeProcessingController())
+    panel.set_selection("data", "exp_001", "d_001")
+    spectrum_row = panel._rows["spectrum"]
+    assert not spectrum_row.ext_range_button.isHidden()
+    assert panel._rows["fid"].ext_range_button.isHidden()
+    assert panel._rows["peaks"].ext_range_button.isHidden()
+    header = spectrum_row.layout().itemAt(0)
+    assert header is not None and hasattr(header, "count")
+    widgets = [header.itemAt(i).widget() for i in range(header.count())]
+    assert widgets.index(spectrum_row.ext_range_button) < widgets.index(
+        spectrum_row.run_button
+    )
+    panel.close()
+
+
+def test_pipeline_final_ext_override_params(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.2.162-补15:每数据终跑直接维范围覆盖 → generate_spectrum params。"""
+    from gui.pipeline_panel import PipelinePanel
+
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    panel = PipelinePanel(manager, FakeProcessingController())
+    panel.set_selection("data", "exp_001", "d_001")
+    assert panel._spectrum_ext_params("d_001") is None
+    panel._final_ext[("exp_001", "d_001")] = ("11.0", "5.5")
+    assert panel._spectrum_ext_params("d_001") == {
+        "final_ext_lo": "11.0",
+        "final_ext_hi": "5.5",
+    }
+    # 只设一端:另一端不注入
+    panel._final_ext[("exp_001", "d_001")] = ("11.0", "")
+    assert panel._spectrum_ext_params("d_001") == {"final_ext_lo": "11.0"}
+    panel.close()
+
+
+def test_pipeline_ext_button_text_reflects_override(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.2.162-补15:按钮文案随当前数据的终跑范围刷新。"""
+    from gui.pipeline_panel import PipelinePanel
+
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    panel = PipelinePanel(manager, FakeProcessingController())
+    panel.set_selection("data", "exp_001", "d_001")
+    assert panel._rows["spectrum"].ext_range_button.text() == "直接维范围"
+    panel._final_ext[("exp_001", "d_001")] = ("11.0", "5.5")
+    panel.refresh()
+    assert (
+        panel._rows["spectrum"].ext_range_button.text()
+        == "直接维范围 11.0/5.5"
+    )
+    panel.close()
+
+
 def test_pipeline_steps_include_optional_smile() -> None:
     ids = [step[0] for step in PIPELINE_STEPS]
     assert ids == [

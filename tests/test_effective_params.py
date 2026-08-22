@@ -164,6 +164,89 @@ def test_legacy_backend_params_unchanged(tmp_path: Path, bruker_dir: Path) -> No
     assert run.params == {"extract": False}
 
 
+def test_generate_spectrum_records_ucsf_output(
+    tmp_path: Path, bruker_dir: Path, monkeypatch
+) -> None:
+    """0.2.162-补15:生成谱图后顺带产出 UCSF 并登记到运行 outputs。"""
+    import workflow.stepwise as stepwise_mod
+
+    manager, exp_id, data_id = _manager_with_data(
+        tmp_path, bruker_dir / "hsqc_2d"
+    )
+    backend = _EffectiveBackend(tmp_path / "work")
+    spectra = manager.data_dir(exp_id, data_id, "spectra")
+    fake_ucsf = spectra / f"{data_id}.ucsf"
+    monkeypatch.setattr(
+        stepwise_mod,
+        "_export_ucsf",
+        lambda mgr, e, d, spec: (str(fake_ucsf), f"UCSF 已生成: {fake_ucsf}"),
+    )
+    generate_fid(manager, exp_id, data_id, backend)
+    generate_spectrum(
+        manager,
+        exp_id,
+        data_id,
+        backend,
+        params={"phase_route": "none"},
+    )
+    run = _last_run(manager, exp_id, "process")
+    assert run.outputs.get("ucsf_path") == str(fake_ucsf)
+
+
+def test_generate_spectrum_none_route_maps_final_ext(
+    tmp_path: Path, bruker_dir: Path, monkeypatch
+) -> None:
+    """0.2.162-补15:逃生口只有一次运行,final_ext 直接映射为 ext。"""
+    import workflow.stepwise as stepwise_mod
+
+    captured: dict = {}
+
+    class _CaptureBackend(_EffectiveBackend):
+        def process(
+            self,
+            experiment,
+            plan,
+            direct_phase_override=None,
+            params=None,
+            progress=None,
+        ) -> dict:
+            captured["params"] = dict(params or {})
+            return super().process(
+                experiment,
+                plan,
+                direct_phase_override=direct_phase_override,
+                params=params,
+                progress=progress,
+            )
+
+    manager, exp_id, data_id = _manager_with_data(
+        tmp_path, bruker_dir / "hsqc_2d"
+    )
+    backend = _CaptureBackend(tmp_path / "work")
+    monkeypatch.setattr(
+        stepwise_mod,
+        "_export_ucsf",
+        lambda mgr, e, d, spec: (None, "跳过 UCSF 转换"),
+    )
+    generate_fid(manager, exp_id, data_id, backend)
+    generate_spectrum(
+        manager,
+        exp_id,
+        data_id,
+        backend,
+        params={
+            "phase_route": "none",
+            "final_ext_lo": "11.0",
+            "final_ext_hi": "5.5",
+        },
+    )
+    assert captured["params"]["ext_lo"] == "11.0"
+    assert captured["params"]["ext_hi"] == "5.5"
+    assert "final_ext_lo" not in captured["params"]
+    run = _last_run(manager, exp_id, "process")
+    assert "final_ext_lo" not in run.params
+
+
 def test_zf_summary_compact() -> None:
     """填零计划摘要只保留 mode/size(供 WorkflowRun params)。"""
     from backend.nmrpipe_backend import zf_summary

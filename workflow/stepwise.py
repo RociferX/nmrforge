@@ -22,6 +22,7 @@ from core.data.internal_data_model import Experiment, SamplingMode
 from core.planning.method_selector import select_method
 from core.project import ProjectManager
 from workflow.import_workflow import ImportResult, import_data
+from workflow.ucsf_export import export_ucsf
 
 
 class StepwiseError(Exception):
@@ -78,6 +79,19 @@ def _register_spectrum(
         shutil.move(str(source), str(target))
     manager.set_data_spectrum(exp_id, data_id, target)
     return str(target)
+
+
+def _export_ucsf(
+    manager: ProjectManager,
+    exp_id: str,
+    data_id: str,
+    spectrum_path: str,
+) -> tuple[str | None, str]:
+    """终谱归位后顺带生成 Sparky UCSF 文件(spectra/<data_id>.ucsf)。"""
+    spectra_dir = manager.data_dir(exp_id, data_id, "spectra")
+    spectra_dir.mkdir(parents=True, exist_ok=True)
+    target = spectra_dir / f"{Path(spectrum_path).stem}.ucsf"
+    return export_ucsf(spectrum_path, target)
 
 
 def _ensure_work_dir(backend: Any, work: Path) -> None:
@@ -169,6 +183,11 @@ def generate_spectrum(
     route = str(params.pop("phase_route", "unified"))
     plan = select_method(experiment)
     if route == "none":
+        # 0.2.162-补15:逃生口只有一次运行,直接把终跑直接维范围映射到 ext
+        for key, target_key in (("final_ext_lo", "ext_lo"), ("final_ext_hi", "ext_hi")):
+            if key in params and str(params[key]).strip():
+                params[target_key] = str(params[key])
+            params.pop(key, None)
         if experiment.sampling.mode is SamplingMode.NUS:
             workflow_ref = "reconstruct_nus"
             resp = backend.reconstruct_nus(experiment, params, progress=progress)
@@ -185,14 +204,22 @@ def generate_spectrum(
         spectrum_path = _register_spectrum(
             manager, exp_id, data_id, str(resp.get("spectrum_path", ""))
         )
+        ucsf_path, ucsf_msg = _export_ucsf(
+            manager, exp_id, data_id, spectrum_path
+        )
+        if progress is not None:
+            progress(ucsf_msg)
         merged_params = dict(resp.get("effective_params") or {})
         merged_params.update(params)
+        outputs: dict[str, str] = {"spectrum_path": spectrum_path}
+        if ucsf_path:
+            outputs["ucsf_path"] = ucsf_path
         _finish_step(
             manager,
             exp_id,
             data_id,
             workflow_ref,
-            outputs={"spectrum_path": spectrum_path},
+            outputs=outputs,
             message="生成谱图",
             params=merged_params,
         )
@@ -218,6 +245,9 @@ def generate_spectrum(
     spectrum_path = _register_spectrum(
         manager, exp_id, data_id, str(result.get("spectrum_path"))
     )
+    ucsf_path, ucsf_msg = _export_ucsf(manager, exp_id, data_id, spectrum_path)
+    if progress is not None:
+        progress(ucsf_msg)
     merged_params = dict(params)
     merged_params["phase_route"] = route
     for key in (
@@ -237,7 +267,11 @@ def generate_spectrum(
         exp_id,
         data_id,
         workflow_ref,
-        outputs={"spectrum_path": spectrum_path},
+        outputs=(
+            {"spectrum_path": spectrum_path, "ucsf_path": ucsf_path}
+            if ucsf_path
+            else {"spectrum_path": spectrum_path}
+        ),
         message="生成谱图",
         params=merged_params,
     )
