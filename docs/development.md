@@ -23,6 +23,16 @@
 - Windows 沙箱默认 basetemp 被 ACL 锁死：pytest 必须带
   `--basetemp=<新临时目录>`（如 `$env:TEMP\pytest_nmrforge`）。
 
+## 处理流程改动覆盖原则(强制,0.2.163-补15)
+
+用户对处理流程(生成 FID/生成谱图/人工/批量等)提出的改动,默认必须
+同时应用到全部四种路径:**2D uniform / 3D uniform / 2D NUS / 3D NUS**
+(自动与人工两条入口亦然);只有改动确实只属于某一个或某几个路径特有
+(如 NUS 的 SMILE 重构、3D 的切片流、uniform 无重构)时,才允许只改
+对应路径,并须在改动说明/CHANGELOG 中写明例外原因。
+执行检查:`tests/test_full_paths.py` 已覆盖四种路径(自动 2D/3D uniform
++ NUS、人工、批量),每次改动后必须全绿。
+
 ## 静态检查
 
 - `ruff check .` 应全仓通过。
