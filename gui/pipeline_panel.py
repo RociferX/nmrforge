@@ -823,9 +823,11 @@ class PipelinePanel(QWidget):
                 if run is not None and run.message:
                     reason = run.message
             self._rows[step_id].set_status(status, reason)
-            # 导入样品数据为自动化步骤,无人工入口;其余处理步骤保留人工
+            # 导入样品数据为自动化步骤,无人工入口;其余处理步骤保留人工;
+            # 0.2.163-补14:前置步骤未完成(LOCKED)时不提供人工按钮——
+            # 上一步没完成就不给下一步的运行入口(与自动「运行」按钮一致)
             self._rows[step_id].manual_button.setVisible(
-                step_id != "smile"
+                step_id != "smile" and status != "LOCKED"
             )
             # 0.2.88:生成谱图完成后出现「展示谱图」按钮(不再自动显示谱)
             self._rows[step_id].show_spectrum_button.setVisible(
@@ -1043,6 +1045,22 @@ class PipelinePanel(QWidget):
                 f"{STEP_LABEL.get(step_id, step_id)}: 后端接口待实现,暂不可运行"
             )
             return
+        # 0.2.163-补14:前置步骤未完成(LOCKED)时拒绝运行(峰挑选/分析等
+        # 全部后续步骤一致;按钮已隐藏,此处是程序化入口的防御校验)
+        if self._current_data_id:
+            try:
+                statuses = compute_data_step_statuses(
+                    self.manager, self._current_exp_id, self._current_data_id
+                )
+                if statuses.get(step_id) == "LOCKED":
+                    reasons = _lock_reasons(statuses)
+                    self.log_message.emit(
+                        f"{STEP_LABEL.get(step_id, step_id)}: 前置步骤未完成,"
+                        f"请先完成 {reasons.get(step_id, '上一步')}"
+                    )
+                    return
+            except Exception:  # noqa: BLE001 - 状态判定失败不阻断原流程
+                pass
         self._rows[step_id].set_status("RUNNING")
         self.log_message.emit(f"开始 {STEP_LABEL.get(step_id, step_id)}: {entry.id}")
 
@@ -1094,6 +1112,24 @@ class PipelinePanel(QWidget):
                         "ok": False,
                         "error": "",
                     }
+                    try:
+                        # 0.2.163-补14:批量组内单个数据前置未完成时跳过
+                        per_statuses = compute_data_step_statuses(
+                            self.manager, exp_id, data_id
+                        )
+                        if per_statuses.get(step_id) == "LOCKED":
+                            reasons = _lock_reasons(per_statuses)
+                            item["error"] = (
+                                "前置步骤未完成: "
+                                + reasons.get(step_id, "上一步")
+                            )
+                            self.log_message.emit(
+                                f"跳过 {step_label} {data_id}: {item['error']}"
+                            )
+                            results.append(item)
+                            continue
+                    except Exception:  # noqa: BLE001 - 判定失败不阻断
+                        pass
                     try:
                         import inspect
 

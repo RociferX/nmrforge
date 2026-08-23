@@ -27,7 +27,11 @@ from typing import Any
 import numpy as np
 
 from backend.base import BackendCapabilities
-from backend.bruker_workflow import patch_fid_com, patch_nus_expand_count
+from backend.bruker_workflow import (
+    apply_fid_com_overrides,
+    patch_fid_com,
+    patch_nus_expand_count,
+)
 from backend.config import (
     resolve_ext_hi,
     resolve_ext_lo,
@@ -59,6 +63,25 @@ from core.optimization.phase_search import (
     search_direct_spectrum_phase,
 )
 from core.planning.processing_plan import ProcessingPlan
+
+
+def _slice_candidates(directory: Path, dataset_id: str) -> list[Path]:
+    """目录内切片 fid 候选:新命名 {dataset_id}*.fid 优先,兼容旧 test*.fid。"""
+    if not directory.is_dir():
+        return []
+    new_style = sorted(directory.glob(f"{dataset_id}*.fid"))
+    legacy = sorted(directory.glob("test*.fid"))
+    seen = {p.name for p in new_style}
+    return new_style + [p for p in legacy if p.name not in seen]
+
+
+def _slice_in_file(directory: Path, dataset_id: str) -> str | None:
+    """目录内切片流的 in_file 模式(fid/test%03d.fid 或 fid/{dataset_id}%03d.fid)。"""
+    slices = _slice_candidates(directory, dataset_id)
+    if not slices:
+        return None
+    new_style = any(p.name.startswith(dataset_id) for p in slices)
+    return f"fid/{dataset_id}%03d.fid" if new_style else "fid/test%03d.fid"
 
 
 def _nus_grid_bounds(experiment: Experiment) -> list[int] | None:
@@ -243,9 +266,10 @@ class NMRPipeBackend:
                 # process 同样走切片流(与 NUS 一致)
                 if not (work / in_file).is_file():
                     slice_dir = work / "fid"
-                    if slice_dir.is_dir() and list(slice_dir.glob("test*.fid")):
-                        in_file = "fid/test%03d.fid"
-                        logs.append("使用 bruker 切片式 fid（fid/test%03d.fid,流式处理）")
+                    slice_in = _slice_in_file(slice_dir, experiment.dataset_id)
+                    if slice_in:
+                        in_file = slice_in
+                        logs.append(f"使用 bruker 切片式 fid（{slice_in},流式处理）")
         if not converted:
             return {"success": False, "message": "Bruker→NMRPipe 转换失败", "logs": logs}
         proc_params = dict(params or {})
@@ -364,9 +388,12 @@ class NMRPipeBackend:
         experiment: Experiment,
         data_dir: Path | str,
         progress: Callable[[str], None] | None = None,
+        fid_com_overrides: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """独立阶段:bruker -AUTO/fid.com 把原始数据转换为 NMRPipe fid(不生成谱)。
 
+        fid_com_overrides:人工途径参数覆盖(0.2.163-补13),分段数据逐段应用,
+        转换/切片/合并/坏点清理仍按自动路径执行。
         返回稳定键 {success, fid_path, message, logs}(API_CONTRACT §8.3);
         供步骤化流程「生成 FID」调用,process/reconstruct_nus 会复用其结果。
         """
@@ -386,7 +413,7 @@ class NMRPipeBackend:
             progress("开始转换 fid")
         if experiment.segments:
             converted, convert_logs = self._convert_segments(
-                runtime, experiment, work, []
+                runtime, experiment, work, [], fid_com_overrides=fid_com_overrides
             )
             logs += convert_logs
             fid_path = work / "merged" / "fid"
@@ -396,9 +423,13 @@ class NMRPipeBackend:
                 )
                 if bad_points:
                     # 源头删除不可行时回退到生成 FID 清零
-                    self._zero_bad_point_fid(work, bad_points, logs)
+                    self._zero_bad_point_fid(
+                        work, bad_points, logs, dataset_id=experiment.dataset_id
+                    )
         else:
-            converted, convert_logs = self._convert(runtime, experiment, raw, work)
+            converted, convert_logs = self._convert(
+                runtime, experiment, raw, work, fid_com_overrides=fid_com_overrides
+            )
             logs += convert_logs
             fid_path = self._converted_fid_path(work, experiment.dataset_id)
         if not converted:
@@ -479,7 +510,9 @@ class NMRPipeBackend:
                 )
                 if bad_points:
                     # 源头删除不可行时回退到生成 FID 清零
-                    self._zero_bad_point_fid(work, bad_points, logs)
+                    self._zero_bad_point_fid(
+                        work, bad_points, logs, dataset_id=experiment.dataset_id
+                    )
             else:
                 logs.append("复用已合并切片（跳过转换/合并）")
                 nuslist_count = len(
@@ -514,16 +547,20 @@ class NMRPipeBackend:
             shutil.copy2(raw_nuslist, work / "nuslist")
             # 安全网:工作 nuslist 再校验(源头已清理时应为 0 坏点)
             nuslist_count, _leftover = self._clean_work_nuslist(work, experiment, logs)
-            # 0.2.80:bruker 切片式输出(fid/test%03d.fid)优先,否则单文件
+            # 0.2.80:bruker 切片式输出优先,否则单文件
             slice_dir = work / "fid"
-            if slice_dir.is_dir() and list(slice_dir.glob("test*.fid")):
-                in_file = "fid/test%03d.fid"
-                logs.append("使用 bruker 切片式 fid（fid/test%03d.fid,流式处理）")
+            slice_in = _slice_in_file(slice_dir, experiment.dataset_id)
+            if slice_in:
+                in_file = slice_in
+                logs.append(f"使用 bruker 切片式 fid（{slice_in},流式处理）")
             else:
                 in_file = fid_file.name
             if bad_points and not source_removed:
                 # 源头删除不可行(ser 缺失/大小不符)时回退到生成 FID 清零
-                self._zero_bad_point_fid(work, bad_points, logs, in_file=in_file)
+                self._zero_bad_point_fid(
+                    work, bad_points, logs, in_file=in_file,
+                    dataset_id=experiment.dataset_id,
+                )
 
         direct_p0, direct_p1 = 0.0, 0.0
         override = params.get("direct_phase_override")
@@ -1115,9 +1152,9 @@ class NMRPipeBackend:
 
     @staticmethod
     def _converted_fid_path(work: Path, dataset_id: str) -> Path:
-        """转换产物 fid 路径:切片式 fid/test%03d.fid → work/fid/,否则单文件。"""
+        """转换产物 fid 路径:切片式 → work/fid/,否则单文件。"""
         slice_dir = work / "fid"
-        if slice_dir.is_dir() and list(slice_dir.glob("test*.fid")):
+        if _slice_candidates(slice_dir, dataset_id):
             return slice_dir
         return work / f"{dataset_id}.fid"
 
@@ -1192,18 +1229,22 @@ class NMRPipeBackend:
         dataset_id: str,
         logs: list[str],
     ) -> bool:
-        """把 bruker 转换产物归位:单文件 test.fid 或切片式 fid/test%03d.fid。
+        """把 bruker 转换产物归位:单文件 {dataset_id}.fid 或切片式 fid/*.fid。
 
+        fid.com 输出名已被 patch_fid_com 改写为 {dataset_id}.fid
+        （0.2.163-补13）;test.fid/test*.fid 仅作旧数据/人工改名的兼容。
         acqu3s TD 修正后 bruker 输出切片式(每 F1 一个 fid 切片);
         0.2.80 起两种形式都接受,切片式保留为 work/fid/ 供流式处理。
         """
-        source = raw_dir / "test.fid"
+        source = raw_dir / f"{dataset_id}.fid"
+        if not source.is_file():
+            source = raw_dir / "test.fid"  # 旧命名兼容(fid.com 手动改回)
         if source.is_file():
             shutil.move(str(source), dest_work / f"{dataset_id}.fid")
             logs.append(f"{dataset_id}.fid 已就位（{raw_dir.name}）")
             return True
         slice_dir = raw_dir / "fid"
-        slices = sorted(slice_dir.glob("test*.fid")) if slice_dir.is_dir() else []
+        slices = _slice_candidates(slice_dir, dataset_id)
         if not slices:
             return False
         dest_slice = dest_work / "fid"
@@ -1221,11 +1262,14 @@ class NMRPipeBackend:
         dest_work: Path,
         is_nus: bool,
         logs: list[str],
+        fid_com_overrides: dict[str, str] | None = None,
     ) -> bool:
         """在 raw_dir（或 NUS 3D 的 TD 修正暂存副本）中 bruker -AUTO → fid.com
         归位 dest_work → patch → 执行（脚本在 work 目录,相对路径以转换目录为
-        cwd 解析）→ 产物（单文件 test.fid 或切片式 fid/test%03d.fid）归位 dest_work。
+        cwd 解析）→ 产物（单文件 {dataset_id}.fid 或切片式 fid/*.fid）归位 dest_work。
 
+        fid_com_overrides:人工途径的参数覆盖(0.2.163-补13)——分段数据
+        用户在参考段 fid.com 上改的参数逐段应用,转换/切片/合并仍由本层保证。
         NUS 3D 的 acqu3s TD=1 时先在 dest_work/conv_stage 修正 TD=NusTD 再跑
         bruker（输出切片式 fid,与实验室手工流程一致;raw 原件不改动,暂存用完即删）。
         多段路径（experiment.segments）保持原流程:每段单文件 + xyz2pipe 拆切片。
@@ -1253,6 +1297,12 @@ class NMRPipeBackend:
                         shutil.move(str(raw_fid), str(fid_com))
                     text = fid_com.read_text(encoding="utf-8", errors="replace")
                     patched, corrections = patch_fid_com(text, experiment)
+                    if fid_com_overrides:
+                        # 人工调参只覆盖参数;输出名/结构仍由后端保证
+                        patched, override_corrections = apply_fid_com_overrides(
+                            patched, fid_com_overrides
+                        )
+                        corrections += override_corrections
                     if is_nus:
                         nuslist_path = convert_dir / "nuslist"
                         if nuslist_path.is_file():
@@ -1758,10 +1808,14 @@ class NMRPipeBackend:
         experiment: Experiment,
         raw: Path,
         work: Path,
+        fid_com_overrides: dict[str, str] | None = None,
     ) -> tuple[bool, list[str]]:
         logs: list[str] = []
         is_nus = experiment.sampling.mode is SamplingMode.NUS
-        ok = self._convert_dir(runtime, experiment, raw, work, is_nus, logs)
+        ok = self._convert_dir(
+            runtime, experiment, raw, work, is_nus, logs,
+            fid_com_overrides=fid_com_overrides,
+        )
         if not ok and is_nus:
             logs.append("NUS 转换需要 bruker 原生识别（不做 bruk2pipe 回退）")
         return ok, logs
@@ -1830,6 +1884,7 @@ class NMRPipeBackend:
         experiment: Experiment,
         work: Path,
         shifts: list[float],
+        fid_com_overrides: dict[str, str] | None = None,
     ) -> tuple[bool, list[str]]:
         """多段实验：每段 bruker 转换 → 拆切片 → addNMR 合并。
 
@@ -1849,7 +1904,8 @@ class NMRPipeBackend:
             seg_work = work / f"seg_{index:03d}"
             seg_work.mkdir(parents=True, exist_ok=True)
             if not self._convert_dir(
-                runtime, experiment, Path(seg_dir), seg_work, is_nus, logs
+                runtime, experiment, Path(seg_dir), seg_work, is_nus, logs,
+                fid_com_overrides=fid_com_overrides,
             ):
                 return False, logs + [f"数据段 {index}（{Path(seg_dir).name}）转换失败"]
             shift_hz = shifts[index - 1] if index - 1 < len(shifts) else 0.0
@@ -2004,12 +2060,13 @@ class NMRPipeBackend:
         bad_points: list[tuple[int, ...]],
         logs: list[str],
         in_file: str | None = None,
+        dataset_id: str | None = None,
     ) -> None:
         """清理坏点对应的 FID 数据(0.2.124 起仅作源头删除不可行时的回退)。
 
         有效网格内的坏点(越界重复等)对应 States 双实行(2y, 2y+1):
-        3D 在切片 test{z:03d}.fid、2D 在单 fid 文件的这些行清零;
-        越界点无对应槽位,记录即可。
+        3D 在切片 test{z:03d}.fid / {dataset_id}{z:03d}.fid、2D 在单 fid
+        文件的这些行清零;越界点无对应槽位,记录即可。
         """
         if not bad_points:
             return
@@ -2030,6 +2087,8 @@ class NMRPipeBackend:
             target: Path | None = None
             if z is not None and slice_dir.is_dir():
                 target = slice_dir / f"test{z:03d}.fid"
+                if not target.is_file() and dataset_id:
+                    target = slice_dir / f"{dataset_id}{z:03d}.fid"
                 if not target.is_file():
                     logs.append(
                         f"⚠ 坏点 {point}:越界,无对应切片,合并 FID 无需清理"

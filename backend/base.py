@@ -54,9 +54,12 @@ class ProcessingBackend(Protocol):
         experiment: Experiment,
         data_dir: Any,
         progress: Callable[[str], None] | None = None,
+        fid_com_overrides: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """把 Bruker 数据目录转换为 NMRPipe fid(独立阶段,不生成谱)。
 
+        fid_com_overrides:人工途径的参数覆盖(0.2.163-补13),分段数据
+        逐段应用到 fid.com,转换/切片/合并/坏点清理仍按自动路径执行。
         返回稳定键:{success, fid_path, message, logs}(API_CONTRACT §8.3)。
         """
         ...

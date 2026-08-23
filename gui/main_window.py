@@ -1062,9 +1062,16 @@ class MainWindow(QMainWindow):
                 data_node, params=None, exp_id=exp_id, data_id=data_id
             )
         except Exception as exc:  # noqa: BLE001 - 后端缺失统一提示
-            InfoDialog.show_info(
-                self, "加载脚本失败", f"{type(exc).__name__}: {exc}"
-            )
+            from workflow.manual import ManualRunError
+
+            if isinstance(exc, ManualRunError) and "请先执行「生成 FID」步骤" in str(
+                exc
+            ):
+                InfoDialog.show_info(self, "请先生成 FID", str(exc))
+            else:
+                InfoDialog.show_info(
+                    self, "加载脚本失败", f"{type(exc).__name__}: {exc}"
+                )
             return
         script_key = _pick_script_key(scripts, data_id)
         save_dir = None

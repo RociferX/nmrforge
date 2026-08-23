@@ -123,6 +123,79 @@ def test_context_bar_follows_selection(
     window.close()
 
 
+def test_pipeline_buttons_gated_by_prerequisites(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.2.163-补14:前置步骤未完成(LOCKED)时,后续步骤(生成谱图/
+    峰挑选/分析)不提供运行/人工按钮,程序化运行入口也被拒绝。"""
+    from gui.main_window import MainWindow
+    from gui.pipeline_state import record_step_success
+
+    manager, ws, exp_id, data_id = _manager_with_ws(tmp_path)
+    monkeypatch.setattr(
+        "gui.main_window.WorkspaceManager", lambda: _TempWorkspace(ws)
+    )
+    monkeypatch.setattr(
+        "core.workspace.WorkspaceManager",
+        lambda *a, **k: _TempWorkspace(ws),
+    )
+    window = MainWindow(manager=manager)
+    pipeline = window.center_panel.pipeline
+    pipeline.set_selection("data", exp_id, data_id)
+    rows = pipeline._rows
+    # 窗口未 show,用 isHidden 反映 setVisible 的显隐状态
+    # fid 未生成:spectrum/peaks/analysis 全部 LOCKED → 无运行/人工按钮
+    for sid in ("spectrum", "peaks", "analysis"):
+        assert rows[sid].manual_button.isHidden(), sid
+        assert rows[sid].run_button.isHidden(), sid
+
+    # 程序化运行入口同样被前置守卫拒绝(不进入 RUNNING/后端)
+    messages: list[str] = []
+    pipeline.log_message.connect(messages.append)
+    pipeline._on_run_requested("peaks")
+    assert any("前置步骤未完成" in m for m in messages)
+    assert "RUNNING" not in rows["peaks"].status_label.text()
+
+    def _ready(sid: str, product: Path) -> None:
+        product.parent.mkdir(parents=True, exist_ok=True)
+        product.write_bytes(b"x")
+        manager.save()
+        pipeline.refresh()
+        assert not rows[sid].manual_button.isHidden(), sid
+        assert not rows[sid].run_button.isHidden(), sid
+
+    # 生成 FID → spectrum READY;peaks/analysis 仍 LOCKED
+    fid = manager.data_dir(exp_id, data_id, "process") / f"{data_id}.fid"
+    fid.parent.mkdir(parents=True, exist_ok=True)
+    fid.write_bytes(b"fid")
+    manager.set_data_fid(exp_id, data_id, fid)
+    record_step_success(manager, exp_id, data_id, "fid")
+    manager.save()
+    pipeline.refresh()
+    assert not rows["spectrum"].manual_button.isHidden()
+    assert not rows["spectrum"].run_button.isHidden()
+    assert rows["peaks"].manual_button.isHidden()
+    assert rows["analysis"].manual_button.isHidden()
+
+    # 生成谱图 → peaks READY;analysis 仍 LOCKED
+    spectra = manager.data_dir(exp_id, data_id, "spectra")
+    spectra.mkdir(parents=True, exist_ok=True)
+    spec = spectra / f"{data_id}.ft2"
+    spec.write_bytes(b"ft2")
+    manager.set_data_spectrum(exp_id, data_id, spec)
+    record_step_success(manager, exp_id, data_id, "spectrum")
+    _ready("peaks", spec)
+
+    # 峰表 → analysis READY
+    peaks = manager.data_dir(exp_id, data_id, "peaks")
+    peaks.mkdir(parents=True, exist_ok=True)
+    peaks_list = peaks / f"{exp_id}-{data_id}.list"
+    peaks_list.write_text("", encoding="utf-8")
+    record_step_success(manager, exp_id, data_id, "peaks")
+    _ready("analysis", peaks_list)
+    window.close()
+
+
 def test_spectrum_panel_no_locator_bar(tmp_path: Path, qapp: QApplication) -> None:
     """谱图面板不再显示「在 Pipeline 中定位 / 数据摘要」条(用户反馈无用)。"""
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")

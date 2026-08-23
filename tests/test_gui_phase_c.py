@@ -78,6 +78,16 @@ def test_batch_progress_and_summary(
     manager.save()
     set_batch_id(manager, entry.id, data1.id, "B1")
     set_batch_id(manager, entry.id, data2.id, "B1")
+    # 0.2.163-补14:前置未完成不运行下一步——先让两组 fid 就绪
+    from gui.pipeline_state import record_step_success
+
+    for data in (data1, data2):
+        fid = manager.data_dir(entry.id, data.id, "process") / f"{data.id}.fid"
+        fid.parent.mkdir(parents=True, exist_ok=True)
+        fid.write_bytes(b"fid")
+        manager.set_data_fid(entry.id, data.id, fid)
+        record_step_success(manager, entry.id, data.id, "fid")
+    manager.save()
     controller = _BatchController()
     panel = PipelinePanel(manager, controller)
     panel.set_selection("data", entry.id, data1.id)

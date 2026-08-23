@@ -1,5 +1,44 @@
 # 修改记录(历史条目)
 
+## 0.2.163-补14(2026-08-23,总管直接处理)
+
+上一步未完成不提供下一步运行入口(修正补13-3 的自动转换):
+- Pipeline 面板人工按钮与自动「运行」按钮同规则:步骤 LOCKED
+  (前置未完成)时不显示——生成谱图/峰挑选/分析全部后续步骤一致,
+  fid 未生成就不会出现「生成谱图」的人工入口,用户先完成自动路径
+  「生成 FID」步骤(数据转换/合并/坏点清理都在该步骤完成,人工只负责
+  改 fid.com 与处理脚本参数);批量组内单个数据前置未完成时跳过并提示;
+- 运行入口加防御校验:_on_run_requested 对 LOCKED 步骤拒绝执行并提示
+  缺哪个前置步骤(程序化入口/批量也走同一规则);
+- manual_scripts 去掉自动 convert_to_fid 分支,并保留兜底:直接经
+  菜单等入口打开时若 fid 缺失,抛 ManualRunError 并弹
+  「请先生成 FID」提示(不偷跑转换);
+- 测试:新增 GUI 回归(spectrum LOCKED 时人工/运行按钮隐藏,
+  生成 FID 后出现);自动转换用例改为缺失提示用例,渲染用例先造 fid;
+  全量 + ruff 全绿。
+
+## 0.2.163-补13(2026-08-23,总管直接处理)
+
+人工途径对齐自动化(fid 命名 / 分段合并 / 谱图准备):
+- 补13-1:patch_fid_com 顺带改写 fid.com 单文件输出名
+  (bruker 默认 test.fid → {dataset_id}.fid),fid.com 输出即最终名,
+  自动/人工不再「fid.com 写 test.fid、归位才改成 d_001.fid」;
+  generate_convert_script 缺省 out_file 同步改;归位/切片检测兼容
+  旧 test.fid/test*.fid(旧数据与用户手改回退);
+- 补13-2:分段采集数据人工 fid.com 不再报错——人工只调参数
+  (parse_fid_com 覆盖,apply_fid_com_overrides 逐段应用),数据转换/
+  切片/合并/坏点清理仍由后端 convert_to_fid 按自动路径执行,合并 fid
+  落 process/merged/fid;manual_fid_com 返回参考段(seg_001)并加提示头;
+- 补13-3:人工生成谱图自动准备——点按钮即处理到生成初脚本为止
+  (fid 缺失自动 convert_to_fid);已运行过自动优化(终跑脚本
+  {data_id}_process.com/{data_id}_nus.com 存在)时再跑一次质量诊断
+  (run_direct_diagnostics,结果落 process/manual_quality.log),直接给
+  终脚本;用户点运行仍只执行 fid.com 与处理脚本;
+- 补13-4:fid.com 编辑器提示改为「输出名已是 {数据 id}.fid」;
+- 测试:test_full_paths.py 全绿(自动 2D/3D uniform+NUS/人工/批量),
+  新增 patch_fid_out_name/apply_fid_com_overrides/分段人工合并/
+  人工谱图自动准备+质量检测用例;本地全量 750+ 项全绿。
+
 ## 0.2.163-补10~12(2026-08-23,总管直接处理)
 
 人工路径命名与分段数据修复:

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from typing import Any
 
 from core.data.internal_data_model import Experiment, SamplingMode
@@ -15,6 +16,8 @@ _KEY_RE = re.compile(
     r"-(xN|yN|zN|xT|yT|zT|xSW|ySW|zSW|xOBS|yOBS|zOBS|xCAR|yCAR|zCAR|"
     r"xLAB|yLAB|zLAB|xMODE|yMODE|zMODE|decim|dspfvs|grpdly)\s+(\S+)"
 )
+
+_OUT_RE = re.compile(r"(-out\s+)(\S+)")
 
 
 def _fnmode(experiment: Experiment, logical_axis: str) -> int:
@@ -186,7 +189,9 @@ def patch_fid_com(
     text: str,
     experiment: Experiment,
 ) -> tuple[str, list[str]]:
-    """把 fid.com 中与 acqus/acqu2s 不一致的参数修正为 acqus 值。
+    """把 fid.com 中与 acqus/acqu2s 不一致的参数修正为 acqus 值，
+    并顺带把单文件输出名从 bruker 默认 test.fid 改为 {dataset_id}.fid
+    （0.2.163-补13：自动/人工路径 fid 命名对齐，fid.com 输出即最终名）。
 
     返回 (修正后的文本, 修正项列表)。
     """
@@ -205,4 +210,66 @@ def patch_fid_com(
         return match.group(0)
 
     patched = _KEY_RE.sub(replace, text)
+    patched, out_warnings = patch_fid_out_name(patched, experiment.dataset_id)
+    warnings += out_warnings
+    return patched, warnings
+
+
+def patch_fid_out_name(text: str, dataset_id: str) -> tuple[str, list[str]]:
+    """把 fid.com 的 -out 单文件输出名改写为 {dataset_id}.fid。
+
+    bruker -AUTO 生成的 fid.com 固定输出 ./test.fid；改写后 fid.com
+    直接产出最终名，自动/人工路径无需再在归位时改名。切片式输出
+    （fid/test%03d.fid，3D uniform/NUS）保持 bruker 固定行为——
+    切片名在自动/人工链路中本就一致（test%03d.fid），不在此改写。
+    返回 (文本, 修正项列表)。
+    """
+    warnings: list[str] = []
+
+    def replace(match: re.Match) -> str:
+        current = match.group(2)
+        if "%" in current:
+            return match.group(0)  # 切片式：保持 bruker 固定命名
+        name = Path(current).name
+        if name != "test.fid":
+            return match.group(0)
+        prefix = current[: -len(name)]
+        desired = f"{prefix}{dataset_id}.fid"
+        warnings.append(f"out: {current} → {desired}（已修正）")
+        return f"{match.group(1)}{desired}"
+
+    patched = _OUT_RE.sub(replace, text)
+    return patched, warnings
+
+
+def apply_fid_com_overrides(
+    text: str,
+    overrides: dict[str, str],
+) -> tuple[str, list[str]]:
+    """把人工修改的 fid.com 参数覆盖应用到脚本（分段数据逐段使用）。
+
+    人工途径只是给人调参：用户在参考段 fid.com 上改的参数
+    （parse_fid_com 的键，如 ySW/-yCAR），逐段 fid.com 应用相同值，
+    数据转换/切片/合并仍由后端统一保证。只替换已有参数、不新增。
+    返回 (文本, 修正项列表)。
+    """
+    seen: set[str] = set()
+    warnings: list[str] = []
+
+    def replace(match: re.Match) -> str:
+        key = match.group(1)
+        seen.add(key)
+        desired = overrides.get(key)
+        if desired is None:
+            return match.group(0)
+        current = match.group(2)
+        if current != desired:
+            warnings.append(f"{key}: fid.com={current} → 人工={desired}（已应用）")
+            return f"-{key} {desired}"
+        return match.group(0)
+
+    patched = _KEY_RE.sub(replace, text)
+    for key in overrides:
+        if key not in seen:
+            warnings.append(f"{key}: fid.com 中未找到对应参数,已跳过")
     return patched, warnings

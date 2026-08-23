@@ -5,10 +5,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from backend.bruker_workflow import (
+    apply_fid_com_overrides,
     cross_check_fid_com,
     expected_values,
     parse_fid_com,
     patch_fid_com,
+    patch_fid_out_name,
 )
 from core.data.bruker_reader import read_dataset
 
@@ -69,6 +71,40 @@ def test_patch_fid_com(bruker_dir: Path) -> None:
     assert "-xN 2048" in patched
     assert "-yN 256" in patched
     assert "-xT 1024" in patched
+
+
+def test_patch_fid_out_name_single(bruker_dir: Path) -> None:
+    """0.2.163-补13:单文件输出名 test.fid → {dataset_id}.fid(自动/人工对齐)。"""
+    exp = read_dataset(bruker_dir / "hsqc_2d")
+    text = "bruk2pipe -in ./ser \\n  -out ./test.fid\n"
+    patched, warnings = patch_fid_com(text, exp)
+    assert f"-out ./{exp.dataset_id}.fid" in patched
+    assert any("out" in w and "test.fid" in w for w in warnings)
+
+
+def test_patch_fid_out_name_slice_kept() -> None:
+    """切片式输出(fid/test%03d.fid)保持 bruker 命名,不做改写。"""
+    text = "bruk2pipe -in ./ser \\n  -out fid/test%03d.fid\n"
+    patched, warnings = patch_fid_out_name(text, "d_001")
+    assert "-out fid/test%03d.fid" in patched
+    assert warnings == []
+
+
+def test_apply_fid_com_overrides() -> None:
+    """人工参数覆盖:只替换已有参数,输出名/结构不动,未知键提示跳过。"""
+    text = (
+        "bruk2pipe -in ./ser \\n"
+        "  -ySW 2834.467 -yCAR 118.500 \\n"
+        "  -out ./d_001.fid\n"
+    )
+    patched, warnings = apply_fid_com_overrides(
+        text, {"ySW": "2800.000", "nope": "1"}
+    )
+    assert "-ySW 2800.000" in patched
+    assert "-yCAR 118.500" in patched
+    assert "-out ./d_001.fid" in patched
+    assert any("ySW" in w and "已应用" in w for w in warnings)
+    assert any("nope" in w and "未找到" in w for w in warnings)
 
 
 def test_patch_nus_expand_count() -> None:

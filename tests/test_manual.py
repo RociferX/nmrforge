@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -95,6 +96,9 @@ def test_manual_scripts_renders(
     tmp_path: Path, bruker_dir: Path
 ) -> None:
     manager, exp_id, data_id, _raw = _manager_with_raw(tmp_path, bruker_dir)
+    work = manager.data_dir(exp_id, data_id, "process")
+    work.mkdir(parents=True, exist_ok=True)
+    (work / f"{data_id}.fid").write_bytes(b"fid")
     scripts = manual_scripts(manager, exp_id, data_id)
     # 谱图步骤只渲染谱图脚本(process.com),不包含 fid.com
     assert sorted(scripts) == ["process.com"]
@@ -222,3 +226,153 @@ def test_run_manual_fid_com_registers_slice_fid(
     assert fid_path == manager.data_dir(exp_id, data_id, "process") / "fid"
     assert manager.data(exp_id, data_id).fid_path == str(fid_path)
     assert any(r.workflow_ref == "manual_fid" for r in manager.project.workflow_runs)
+
+
+def test_run_manual_fid_com_accepts_data_id_output(
+    tmp_path: Path, bruker_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.2.163-补13:fid.com 直接输出 {data_id}.fid(自动/人工命名对齐,
+    不再只在归位时改名)。"""
+    from workflow.manual import run_manual_fid_com
+
+    manager, exp_id, data_id, _raw = _manager_with_raw(tmp_path, bruker_dir)
+
+    class _NamedRuntime:
+        def run(self, argv, *, cwd=None, timeout=3600):
+            work = Path(cwd)
+            (work / f"{data_id}.fid").write_bytes(b"fid")
+            return SimpleNamespace(returncode=0, stderr="", stdout="")
+
+    monkeypatch.setattr("workflow.manual.CshRuntime", lambda: _NamedRuntime())
+    fid_path = run_manual_fid_com(manager, exp_id, data_id, "#!/bin/csh\n# fid\n")
+    assert Path(fid_path).name == f"{data_id}.fid"
+    assert Path(fid_path).parent == manager.data_dir(exp_id, data_id, "process")
+
+
+def _segmented_manager(tmp_path: Path, bruker_dir: Path):
+    """构造分段容器:根目录无 acqus,两个含 acqus 的子段。"""
+    container = tmp_path / "seg_container"
+    container.mkdir()
+    for seg in ("s1", "s2"):
+        shutil.copytree(bruker_dir / "hsqc_2d", container / seg)
+    manager = ProjectManager.create_project(tmp_path / "proj", "demo")
+    entry = manager.create_experiment("HSQC")
+    data = manager.import_data(
+        entry.id,
+        str(container),
+        segments=[str(container / "s1"), str(container / "s2")],
+    )
+    manager.save()
+    return manager, entry.id, data.id
+
+
+class _SegFakeBackend:
+    """分段人工假后端:记录参数覆盖,产出合并切片 fid(模拟自动链路)。"""
+
+    work_dir: str | None = None
+    last_overrides: dict | None = None
+
+    def convert_to_fid(
+        self, experiment, data_dir, progress=None, fid_com_overrides=None
+    ):
+        work = Path(self.work_dir)
+        seg = work / "seg_001"
+        seg.mkdir(parents=True, exist_ok=True)
+        (seg / "fid.com").write_text(
+            "#!/bin/csh\n# seg fid.com\n", encoding="utf-8"
+        )
+        merged = work / "merged" / "fid"
+        merged.mkdir(parents=True, exist_ok=True)
+        (merged / "test001.fid").write_bytes(b"fid")
+        (merged / "test002.fid").write_bytes(b"fid")
+        self.last_overrides = dict(fid_com_overrides or {})
+        return {
+            "success": True,
+            "fid_path": str(merged),
+            "message": "ok",
+            "logs": [],
+        }
+
+
+def test_manual_fid_com_segmented_returns_reference(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """分段人工 fid.com 返回参考段(seg_001)内容,提示头说明参数应用到所有段。"""
+    from workflow.manual import manual_fid_com
+
+    manager, exp_id, data_id = _segmented_manager(tmp_path, bruker_dir)
+    backend = _SegFakeBackend()
+    content = manual_fid_com(manager, exp_id, data_id, backend)
+    assert "# 分段采集" in content
+    assert "# seg fid.com" in content
+
+
+def test_run_manual_fid_com_segmented_merges(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """0.2.163-补13:分段数据人工 fid.com 由后端转换/合并(不再报错),
+    人工参数以覆盖形式传给逐段脚本。"""
+    from workflow.manual import run_manual_fid_com
+
+    manager, exp_id, data_id = _segmented_manager(tmp_path, bruker_dir)
+    backend = _SegFakeBackend()
+    fid_path = run_manual_fid_com(
+        manager,
+        exp_id,
+        data_id,
+        "#!/bin/csh\n# 用户改参数\n-ySW 2800.000\n",
+        backend=backend,
+    )
+    fid_path = Path(fid_path)
+    assert fid_path == manager.data_dir(exp_id, data_id, "process") / "merged" / "fid"
+    assert list(fid_path.glob("test*.fid"))
+    data = manager.data(exp_id, data_id)
+    assert data.fid_path == str(fid_path)
+    assert data.status == "fid_ready"
+    assert any(r.workflow_ref == "manual_fid" for r in manager.project.workflow_runs)
+    assert backend.last_overrides == {"ySW": "2800.000"}
+
+
+def test_manual_scripts_missing_fid_requires_generate_fid(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """0.2.163-补14:人工生成谱图时 fid 缺失 → 提示先执行「生成 FID」步骤,
+    不在谱图入口偷跑转换。"""
+    from workflow.manual import ManualRunError, manual_scripts
+
+    manager, exp_id, data_id, _raw = _manager_with_raw(tmp_path, bruker_dir)
+    with pytest.raises(ManualRunError, match="请先执行「生成 FID」步骤"):
+        manual_scripts(manager, exp_id, data_id)
+
+
+def test_manual_scripts_quality_check_on_final_script(
+    tmp_path: Path, bruker_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.2.163-补13:已运行自动优化(终跑脚本存在)时,人工谱图准备
+    再跑一次质量检测,然后把终脚本直接给人。"""
+    from workflow.manual import manual_scripts
+
+    manager, exp_id, data_id, _raw = _manager_with_raw(tmp_path, bruker_dir)
+    work = manager.data_dir(exp_id, data_id, "process")
+    work.mkdir(parents=True, exist_ok=True)
+    (work / f"{data_id}_process.com").write_text(
+        "#!/bin/csh\n# final\n", encoding="utf-8"
+    )
+    (work / f"{data_id}.fid").write_bytes(b"fid")
+    manager.set_data_fid(exp_id, data_id, work / f"{data_id}.fid")
+    manager.save()
+
+    called: dict = {}
+
+    def fake_diagnostics(work_dir, experiment):
+        called["work"] = str(work_dir)
+        return SimpleNamespace(reports=["测试报告"], metrics={"snr": 10})
+
+    monkeypatch.setattr(
+        "workflow.direct_diagnostics.run_direct_diagnostics", fake_diagnostics
+    )
+    scripts = manual_scripts(manager, exp_id, data_id)
+    assert f"{data_id}_process.com" in scripts
+    assert called.get("work") == str(work)
+    log = (work / "manual_quality.log").read_text(encoding="utf-8")
+    assert "测试报告" in log

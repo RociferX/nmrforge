@@ -134,6 +134,16 @@ def test_pipeline_group_run_applies_to_all(
     manager.save()
     set_batch_id(manager, entry.id, data1.id, "B1")
     set_batch_id(manager, entry.id, data2.id, "B1")
+    # 0.2.163-补14:前置未完成不运行下一步——先让两组 fid 就绪
+    from gui.pipeline_state import record_step_success
+
+    for data in (data1, data2):
+        fid = manager.data_dir(entry.id, data.id, "process") / f"{data.id}.fid"
+        fid.parent.mkdir(parents=True, exist_ok=True)
+        fid.write_bytes(b"fid")
+        manager.set_data_fid(entry.id, data.id, fid)
+        record_step_success(manager, entry.id, data.id, "fid")
+    manager.save()
     controller = _FakeController()
     panel = PipelinePanel(manager, controller)
     panel.set_selection("data", entry.id, data1.id)
@@ -321,6 +331,15 @@ def test_pipeline_progress_logs_to_panel(
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     entry = manager.create_experiment("prog")
     data = manager.import_data(entry.id, "/fake/1")
+    manager.save()
+    # 0.2.163-补14:前置未完成不运行下一步——先让 fid 就绪
+    from gui.pipeline_state import record_step_success
+
+    fid = manager.data_dir(entry.id, data.id, "process") / f"{data.id}.fid"
+    fid.parent.mkdir(parents=True, exist_ok=True)
+    fid.write_bytes(b"fid")
+    manager.set_data_fid(entry.id, data.id, fid)
+    record_step_success(manager, entry.id, data.id, "fid")
     manager.save()
     controller = _ProgressController()
     panel = PipelinePanel(manager, controller)

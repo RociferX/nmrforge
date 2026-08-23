@@ -25,8 +25,12 @@ def _manager(bruker_dir: Path, tmp_path: Path) -> ProjectManager:
 def test_manual_scripts_renders_default_when_no_existing(
     bruker_dir: Path, tmp_path: Path
 ) -> None:
-    """process/ 无脚本时渲染默认 process.com(uniform 2D)。"""
+    """process/ 无脚本时渲染默认 process.com(uniform 2D);fid 须先就绪
+    (0.2.163-补14:前置未完成不提供下一步)。"""
     manager = _manager(bruker_dir / "hsqc_2d", tmp_path)
+    work = manager.data_dir("exp_001", "d_001", "process")
+    work.mkdir(parents=True, exist_ok=True)
+    (work / "d_001.fid").write_bytes(b"fid")
     scripts = manual_scripts(manager, "exp_001", "d_001")
     assert list(scripts) == ["process.com"]
     assert "nmrPipe" in scripts["process.com"]
@@ -55,6 +59,9 @@ def test_manual_scripts_nus_renders_latest_and_prefers_existing(
     """3D NUS:无已有脚本时渲染最新 nus.com(SMILE 无窗/调相、方向按
     采样模式);已有 d_001_nus.com 时直接展示。"""
     manager = _manager(bruker_dir / "nus_3d", tmp_path)
+    work = manager.data_dir("exp_001", "d_001", "process")
+    work.mkdir(parents=True, exist_ok=True)
+    (work / "d_001.fid").write_bytes(b"fid")
     scripts = manual_scripts(manager, "exp_001", "d_001")
     assert list(scripts) == ["nus.com"]
     content = scripts["nus.com"]

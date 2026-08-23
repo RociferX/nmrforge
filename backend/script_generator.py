@@ -514,9 +514,15 @@ def generate_convert_script(
     experiment: Experiment,
     *,
     in_file: str = "./ser",
-    out_file: str = "./test.fid",
+    out_file: str | None = None,
 ) -> str:
-    """生成 bruk2pipe 转换脚本（LF 行尾，csh 语法；仅均匀采样回退用）。"""
+    """生成 bruk2pipe 转换脚本（LF 行尾，csh 语法；仅均匀采样回退用）。
+
+    out_file 缺省为 ./{dataset_id}.fid（0.2.163-补13：与 bruker -AUTO
+    修补后的 fid.com 命名一致，不再输出默认 test.fid）。
+    """
+    if out_file is None:
+        out_file = f"./{experiment.dataset_id}.fid"
     ctx = build_context(experiment)
     tokens = _bruk2pipe_tokens(experiment, ctx)
     tokens[tokens.index("-in") + 1] = in_file

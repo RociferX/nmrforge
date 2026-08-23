@@ -1320,6 +1320,15 @@ def test_run_step_uses_selected_data_id(
     manager = _manager_with_experiment(tmp_path, monkeypatch)
     manager.import_data("exp_001", "/sampleE")
     manager.save()
+    # 0.2.163-补14:前置未完成不运行下一步——先让 d_002 的 fid 就绪
+    from gui.pipeline_state import record_step_success
+
+    fid = manager.data_dir("exp_001", "d_002", "process") / "d_002.fid"
+    fid.parent.mkdir(parents=True, exist_ok=True)
+    fid.write_bytes(b"fid")
+    manager.set_data_fid("exp_001", "d_002", fid)
+    record_step_success(manager, "exp_001", "d_002", "fid")
+    manager.save()
     seen: list[str] = []
 
     class ScopedController(FakeProcessingController):

@@ -17,6 +17,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from backend.bruker_workflow import parse_fid_com
 from backend.runtime import CshRuntime
 from backend.script_generator import render_scripts
 from core.data.bruker_reader import read_dataset, read_dataset_container
@@ -38,6 +39,67 @@ def _resolve_raw_dir(manager: ProjectManager, data_entry: Any) -> Path:
 
 def _work_dir(manager: ProjectManager, exp_id: str, data_id: str) -> Path:
     return manager.data_dir(exp_id, data_id, "process")
+
+
+def _slice_files(directory: Path, dataset_id: str) -> list[Path]:
+    """切片 fid 候选:新命名 {dataset_id}*.fid 优先,兼容旧 test*.fid。"""
+    if not directory.is_dir():
+        return []
+    new_style = sorted(directory.glob(f"{dataset_id}*.fid"))
+    legacy = sorted(directory.glob("test*.fid"))
+    seen = {p.name for p in new_style}
+    return new_style + [p for p in legacy if p.name not in seen]
+
+
+def _fid_ready(candidate: Path | None) -> bool:
+    """单文件或切片目录(任一命名)存在即视为已转换。"""
+    if candidate is None:
+        return False
+    if candidate.is_file():
+        return True
+    if candidate.is_dir() and list(candidate.glob("*.fid")):
+        return True
+    return False
+
+
+def _run_quality_check(
+    manager: ProjectManager,
+    data_entry: Any,
+    raw_dir: Path,
+    work: Path,
+    data_id: str,
+) -> None:
+    """已运行自动优化后,人工谱图准备再跑一次质量诊断(不重跑优化)。
+
+    结果写入 process/manual_quality.log;诊断会顺带修复坏点(备份),
+    与自动路径「生成谱图」开端的质量检测一致(0.2.163-补13)。
+    """
+    fid_candidate = (
+        Path(data_entry.fid_path)
+        if data_entry.fid_path
+        else work / f"{data_id}.fid"
+    )
+    if not _fid_ready(fid_candidate):
+        return  # fid 未就位时诊断无意义,不阻断编辑
+    try:
+        from workflow.direct_diagnostics import run_direct_diagnostics
+
+        experiment = _read_experiment_manual(manager, data_entry, data_id)
+        result = run_direct_diagnostics(work, experiment)
+        lines = ["== 质量检测(人工谱图准备,复用自动优化终脚本) =="]
+        lines += [f"{i + 1}. {report}" for i, report in enumerate(result.reports)]
+        lines.append(f"指标: {result.metrics}")
+        (work / "manual_quality.log").write_text(
+            (chr(10).join(lines) + chr(10)), encoding="utf-8"
+        )
+    except Exception as exc:  # noqa: BLE001 - 质量检测失败不阻断编辑
+        try:
+            (work / "manual_quality.log").write_text(
+                f"质量检测失败: {type(exc).__name__}: {exc}" + chr(10),
+                encoding="utf-8",
+            )
+        except OSError:
+            pass
 
 
 def _read_experiment_manual(
@@ -89,11 +151,17 @@ def manual_fid_com(
     data_id: str,
     backend: Any,
 ) -> str:
-    """获取当前 fid.com 内容(供人工查看/修改);未生成时先自动生成。"""
+    """获取当前 fid.com 内容(供人工查看/修改);未生成时先自动生成。
+
+    分段采集:合并链路逐段生成 fid.com(seg_001 参数一致,作参考段),
+    返回参考段内容并加提示头;人工改参数后由 run_manual_fid_com
+    逐段应用并合并(0.2.163-补13)。
+    """
     data_entry = manager.data(exp_id, data_id)
     raw_dir = _resolve_raw_dir(manager, data_entry)
     work = _work_dir(manager, exp_id, data_id)
     work.mkdir(parents=True, exist_ok=True)
+    segments = list(getattr(data_entry, "segments", None) or [])
     fid_com = work / "fid.com"
     if not fid_com.is_file():
         legacy = raw_dir / "fid.com"
@@ -107,6 +175,15 @@ def manual_fid_com(
             raise ManualRunError(
                 f"自动生成 fid.com 失败: {resp.get('message')}"
             )
+        if segments:
+            seg_fid = work / "seg_001" / "fid.com"
+            if seg_fid.is_file():
+                content = seg_fid.read_text(encoding="utf-8", errors="replace")
+                header = (
+                    "# 分段采集:此为参考段 fid.com,修改参数将应用到所有段\n"
+                    "# (数据转换/切片/合并由后端统一执行,勿改输出名)\n"
+                )
+                return header + content
         fid_com = work / "fid.com"
     return fid_com.read_text(encoding="utf-8", errors="replace")
 
@@ -119,32 +196,69 @@ def run_manual_fid_com(
     *,
     work_dir: Path | str | None = None,
     timeout: float = 900.0,
+    backend: Any | None = None,
 ) -> str:
-    """写入修改后的 fid.com 并运行,产物归位 process/ 并登记 fid。"""
+    """运行人工 fid.com 并登记 fid。
+
+    单数据集:写入修改后的 fid.com 并直接运行(只运行 fid.com 一个脚本),
+    产物归位 process/;输出名已由后端补丁统一为 {dataset_id}.fid,
+    旧 test.fid 命名兼容。分段采集:人工只调参数(parse_fid_com 覆盖),
+    数据转换/切片/合并/坏点清理由后端按自动路径执行,合并 fid 落
+    process/merged/fid(0.2.163-补13)。
+    """
     data_entry = manager.data(exp_id, data_id)
     raw_dir = _resolve_raw_dir(manager, data_entry)
     work = Path(work_dir) if work_dir else _work_dir(manager, exp_id, data_id)
     work.mkdir(parents=True, exist_ok=True)
-    # 0.2.163-补12:分段数据逐段转换+合并是后端权威(每段 bruker -AUTO
-    # 重新生成 fid.com,人工修改单段脚本无法经合并链路生效);明确提示
-    # 走自动路径,避免「运行失败: 」无原因
+    experiment = _read_experiment_manual(manager, data_entry, data_id)
     segments = list(getattr(data_entry, "segments", None) or [])
     if segments:
-        raise ManualRunError(
-            "分段采集数据的人工 fid.com 请使用自动路径「生成 FID」"
-            "(多段合并由后端保证一致);如需手动调整转换,请先"
-            "单独导入单段数据后人工处理"
+        if backend is None:
+            raise ManualRunError(
+                "分段采集数据的人工 fid.com 需要后端执行转换/合并,请从界面运行"
+            )
+        overrides = parse_fid_com(content)
+        if hasattr(backend, "work_dir"):
+            backend.work_dir = str(work)
+        resp = backend.convert_to_fid(
+            experiment, raw_dir, fid_com_overrides=overrides
         )
+        if not resp.get("success"):
+            logs = list(resp.get("logs", []))
+            message = (
+                f"分段 fid.com 转换/合并失败: {resp.get('message')}"
+                + (" | " + " | ".join(logs) if logs else "")
+            )
+            run = manager.start_run(
+                exp_id,
+                workflow_ref="manual_fid",
+                inputs={"data_id": data_id},
+                params={"mode": "manual", "segments": len(segments)},
+            )
+            manager.finish_run(run.run_id, "failed", message=message)
+            raise ManualRunError(message)
+        fid_path = Path(str(resp.get("fid_path") or (work / "merged" / "fid")))
+        manager.set_data_fid(exp_id, data_id, fid_path)
+        _finish_run(
+            manager,
+            exp_id,
+            data_id,
+            "manual_fid",
+            {"fid_path": str(fid_path), "segments": len(segments)},
+            "人工 FID 完成(分段合并)",
+        )
+        return str(fid_path)
+
     fid_com = work / "fid.com"
     fid_com.write_text(content, encoding="utf-8", newline="\n")
 
     runtime = CshRuntime()
     result = runtime.run(["csh", str(fid_com)], cwd=str(raw_dir), timeout=timeout)
-    # 转换产物:单文件 test.fid 或切片式 fid/test%03d.fid(3D uniform/NUS)
-    src = raw_dir / "test.fid"
-    src_slices = sorted((raw_dir / "fid").glob("test*.fid")) if (
-        raw_dir / "fid"
-    ).is_dir() else []
+    # 转换产物:单文件 {dataset_id}.fid(旧命名 test.fid)或切片式 fid/*.fid
+    src = raw_dir / f"{experiment.dataset_id}.fid"
+    if not src.is_file():
+        src = raw_dir / "test.fid"
+    src_slices = _slice_files(raw_dir / "fid", experiment.dataset_id)
     if result.returncode != 0 or (not src.is_file() and not src_slices):
         run = manager.start_run(
             exp_id,
@@ -157,7 +271,6 @@ def run_manual_fid_com(
         )
         raise ManualRunError(f"fid.com 运行失败: {result.stderr}")
 
-    experiment = _read_experiment_manual(manager, data_entry, data_id)
     if src.is_file():
         fid_path = work / f"{experiment.dataset_id}.fid"
         shutil.move(str(src), str(fid_path))
@@ -187,9 +300,14 @@ def manual_scripts(
 ) -> dict[str, str]:
     """谱图步骤脚本(process.com / nus*.com,供脚本编辑器展示)。
 
-    优先返回 process/ 目录下的已有脚本(自动处理运行过或上次人工保存的
-    版本,与自动生成的保持一致);没有时才重新渲染默认脚本。只返回谱图
-    脚本——fid 由「生成 FID」步骤产出。
+    人工生成谱图不是完全人工,数据转换/合并/坏点清理与自动路径对齐
+    (0.2.163-补13):fid 缺失时提示用户先执行「生成 FID」步骤
+    (0.2.163-补14,不在谱图入口偷跑转换);随后
+    - 未运行过自动优化:渲染初始脚本(默认参数)交给人改;
+    - 运行过自动优化(process/ 有终跑脚本 {data_id}_process.com /
+      {data_id}_nus.com):再跑一次质量诊断,直接把终脚本给人改。
+    优先返回 process/ 目录下的已有脚本;没有时才重新渲染默认脚本。
+    只返回谱图脚本——fid 由「生成 FID」步骤产出。
     """
     data_entry = manager.data(exp_id, data_id)
     raw_dir = _resolve_raw_dir(manager, data_entry)
@@ -203,7 +321,25 @@ def manual_scripts(
                 encoding="utf-8", errors="replace"
             )
     if existing:
+        # 已运行过自动优化(终跑脚本存在)→ 质量诊断一次,终脚本直接给人
+        if any(
+            name in existing
+            for name in (f"{data_id}_process.com", f"{data_id}_nus.com")
+        ):
+            _run_quality_check(manager, data_entry, raw_dir, work, data_id)
         return existing
+    # fid 缺失:提示先执行「生成 FID」步骤(转换/合并由自动路径完成),
+    # 人工途径只是给人调参,不在谱图入口偷跑转换(0.2.163-补14)
+    experiment = _read_experiment_manual(manager, data_entry, data_id)
+    fid_candidate = (
+        Path(data_entry.fid_path)
+        if data_entry.fid_path
+        else work / f"{experiment.dataset_id}.fid"
+    )
+    if not _fid_ready(fid_candidate) and not _slice_files(
+        work / "fid", experiment.dataset_id
+    ):
+        raise ManualRunError("缺少已转换 fid,请先执行「生成 FID」步骤")
     if params is None:
         params = {}
     nus = dict(params.get("nus") or {})
@@ -238,9 +374,17 @@ def manual_scripts(
     # 渲染默认 in_file 是单文件 {dataset_id}.fid——检测到切片时改写为
     # 切片流,人工运行才不失败(与自动路径 backend 切片切换一致)
     slice_dir = work / "fid"
-    if slice_dir.is_dir() and list(slice_dir.glob("test*.fid")):
+    slices = _slice_files(slice_dir, experiment.dataset_id)
+    if slices:
         single = f"{experiment.dataset_id}.fid"
-        sliced = "fid/test%03d.fid"
+        new_style = any(
+            p.name.startswith(experiment.dataset_id) for p in slices
+        )
+        sliced = (
+            f"fid/{experiment.dataset_id}%03d.fid"
+            if new_style
+            else "fid/test%03d.fid"
+        )
         # 只改 xyz2pipe/nmrPipe 的 -in 输入,不动 -out 输出
         import re
 
@@ -322,14 +466,6 @@ def _run_manual_spectrum_impl(
 
     谱图步骤只消费已转换 fid(「生成 FID」独立步骤产出),不执行 fid.com。
     """
-    def _fid_ready(candidate: Path) -> bool:
-        """单文件或切片目录(fid/test*.fid)任一存在即视为已转换。"""
-        if candidate.is_file():
-            return True
-        if candidate.is_dir() and list(candidate.glob("test*.fid")):
-            return True
-        return False
-
     fid_candidate = (
         Path(data_entry.fid_path)
         if data_entry.fid_path

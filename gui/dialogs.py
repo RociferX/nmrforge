@@ -494,8 +494,9 @@ class ScriptEditorDialog(QDialog):
                 "· 转换参数(OBS/CAR/SW 等)来自 Bruker 参数,勿随意改动;\n"
                 "· 如需调整谱图引用/载波,改 -xCAR/-yCAR 等 CAR 项;\n"
                 "· NUS 数据请保留 nuslist 相关处理,勿删采样信息;\n"
-                "· 输出名 test.fid(或切片 test001.fid)是 bruker 固定行为,\n"
-                "  运行后由后端归位为 {数据 id}.fid 到 process/,无需手动移动。"
+                "· 输出名已是 {数据 id}.fid(bruker 默认 test.fid 已由\n"
+                "  后端自动改写;3D 切片保持 test%03d.fid),运行后由后端\n"
+                "  归位到 process/,无需手动移动或改名。"
             )
         return (
             "处理脚本由后端按采样模式自动生成,通常无需修改。\n"

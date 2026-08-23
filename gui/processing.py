@@ -453,7 +453,13 @@ class ProcessingController:
         self._require_manager()
         exp_id = exp_id or getattr(data, "exp_id", "")
         data_id = data_id or getattr(data, "id", "")
-        result = backend_run_fid(self._manager, exp_id, data_id, content)
+        result = backend_run_fid(
+            self._manager,
+            exp_id,
+            data_id,
+            content,
+            backend=self._backend_instance(),
+        )
         if data_id:
             record_step_success(self._manager, exp_id, data_id, "fid")
             self._snapshot_step(
