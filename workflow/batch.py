@@ -4,7 +4,7 @@
 
 - ``targets`` 为 batch_id/组 id(如 "B1")时,先按 project.json 数据组
   (schema 1.4,core/project)解析成员,未命中再按 .pipeline_state.json 的
-  batch 键解析(GUI 旧批量组语义兼容;Engine 不依赖 Qt);
+  batch 键解析(旧批量组标记兼容读取;0.2.164-补1 起 GUI 只写数据组);
 - ``reference_data_id`` 非空时,取其最近一次成功谱图运行的有效参数
   (WorkflowRun.params)作为 spectrum 步骤参数基底,实现「按参考数据
   的处理脚本处理整组」;显式 params 覆盖参考参数;

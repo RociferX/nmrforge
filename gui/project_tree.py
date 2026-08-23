@@ -415,24 +415,9 @@ class ProjectTreePanel(QWidget):
         data_id = getattr(data_node, "id", exp.id)
         status = self._data_status(exp, data_node)
         title = getattr(data_node, "title", "") or ""
-        from gui.pipeline_state import batch_id
-
-        batch = (
-            batch_id(self.manager, exp.id, data_id)
-            if self.manager is not None
-            else ""
-        )
         label = title or f"样品数据 {data_id}"
-        # 组内数据由组节点标识,不再叠加 [batch] 后缀
-        parent_item = data_item.parent()
-        parent_data = (
-            parent_item.data(0, Qt.ItemDataRole.UserRole)
-            if parent_item is not None
-            else None
-        )
-        in_group = isinstance(parent_data, dict) and parent_data.get("kind") == "group"
-        if batch and not in_group:
-            label = f"{label} [{batch}]"
+        # 组内数据由组节点标识;0.2.164-补1 起批量组即数据组,
+        # 不再有 pipeline_state 独立标记后缀
         data_item.setText(0, label)
         data_item.setText(1, status)
 
@@ -590,22 +575,11 @@ class ProjectTreePanel(QWidget):
         source = getattr(data_node, "source", "") or getattr(exp, "source", "")
         status = self._data_status(exp, data_node)
         title = getattr(data_node, "title", "") or ""
-        from gui.pipeline_state import batch_id
-
-        batch = (
-            batch_id(self.manager, exp.id, data_id)
-            if self.manager is not None
-            else ""
-        )
         label = title or f"样品数据 {data_id}"
-        # 组内数据由组节点标识,不再叠加 [batch] 后缀
-        if batch and not in_group:
-            label = f"{label} [{batch}]"
+        # 组内数据由组节点标识;批量组即数据组,无独立标记后缀(0.2.164-补1)
         data_item = QTreeWidgetItem([label, status])
         data_item.setIcon(0, self._icon("data"))
         tooltip = f"{data_id}\n来源: {source}"
-        if batch and not in_group:
-            tooltip += f"\n批量组: {batch}"
         if in_group:
             tooltip += "\n右键: 把该数据移出组 / 生成 FID / 生成谱图 / 删除"
         else:

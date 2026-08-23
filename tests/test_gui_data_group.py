@@ -172,13 +172,8 @@ def test_remove_from_group_returns_to_ungrouped(
 ) -> None:
     """「把该数据移出组」后,数据回到实验类型下成为普通单个数据。"""
     from gui.main_window import MainWindow
-    from gui.pipeline_state import batch_id
 
     manager, exp_id, data_ids, group_id = _manager_with_group(tmp_path)
-    # 模拟成组批量导入:双写 pipeline_state batch 标记
-    from gui.pipeline_state import set_batch_id
-
-    set_batch_id(manager, exp_id, data_ids[0], group_id)
     manager.save()
     monkeypatch.setattr(
         "gui.main_window.WorkspaceManager",
@@ -213,8 +208,7 @@ def test_remove_from_group_returns_to_ungrouped(
         for i in range(1, experiment.childCount())
     ]
     assert data_ids[0] in ungrouped_ids
-    # pipeline_state 标记同步清除(恢复普通单个数据)
-    assert batch_id(manager, exp_id, data_ids[0]) == ""
+    # 组内成员同步减少(恢复普通单个数据)
     assert manager.group(exp_id, group_id).data_ids == [data_ids[1]]
     window.close()
 

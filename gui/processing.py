@@ -155,22 +155,21 @@ class ProcessingController:
     def batch_import(
         self, exp_id: str, folders: list, group: bool = True
     ) -> dict:
-        """批量导入多个数据目录到实验类型;group=True 同一批标记同一 batch_id。
+        """批量导入多个数据目录到实验类型;group=True 归入同一数据组(组 id 即 batch)。
 
         group=False 不成组(相当于多个单次导入,batch_id 为空);返回
         {"batch_id", "results": [{folder, data_id, ok, error}]};单个目录
         失败不阻断整批(结果中带 error 信息,0.2.162-补12)。
+        0.2.164-补1:数据组为唯一来源,不再双写 pipeline_state 标记。
         """
-        from gui.pipeline_state import set_batch_id
-
         self._require_manager()
         if self._manager.project is None:
             raise RuntimeError("ProcessingController 未绑定项目(ProjectManager)")
         entry = self._manager.project.experiment(exp_id)
         if entry is None:
             raise RuntimeError(f"实验类型不存在: {exp_id}")
-        # 0.2.163:成组批量导入先建数据组(schema 1.4),组 id 即 batch,
-        # project.json 与 pipeline_state 双写保持一致
+        # 0.2.163:成组批量导入建数据组(schema 1.4,组 id 即 batch);
+        # 0.2.164-补1:数据组为唯一来源,不再双写 pipeline_state batch 标记
         batch = ""
         if group:
             batch = self._manager.create_data_group(exp_id).id
@@ -187,7 +186,6 @@ class ProcessingController:
                 data_id = str(result.get("data_id", "") or "")
                 item["data_id"] = data_id
                 if data_id and group:
-                    set_batch_id(self._manager, exp_id, data_id, batch)
                     self._manager.add_to_group(exp_id, batch, data_id)
                 item["ok"] = True
             except Exception as exc:  # noqa: BLE001 - 单个失败不阻断整批
@@ -209,12 +207,13 @@ class ProcessingController:
         steps: list[str],
         reference_data_id: str = "",
         progress: Callable[[str], None] | None = None,
+        params: dict | None = None,
     ) -> dict:
         """对数据组执行批量处理(workflow.batch.run_batch)。
 
         steps: BATCH_STEPS 子集(如 ["fid"] 只处理到生成 FID);
         reference_data_id 非空时,取其最近一次成功谱图运行的有效参数
-        作为 spectrum 步骤参数基底(「按参考数据处理整组」)。
+        作为 spectrum 步骤参数基底;显式 params 覆盖参考参数。
         """
         from workflow.batch import run_batch
 
@@ -227,6 +226,7 @@ class ProcessingController:
             self._backend_instance(),
             reference_data_id=reference_data_id or None,
             progress=progress,
+            params=params,
         )
 
     def generate_fid(

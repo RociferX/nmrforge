@@ -31,8 +31,6 @@ from PyQt6.QtWidgets import (
 
 from core.project import ProjectManager
 from gui.pipeline_state import (
-    batch_data_ids,
-    batch_id,
     input_fingerprint,
     load_pipeline_state,
     script_fingerprint,
@@ -760,19 +758,18 @@ class PipelinePanel(QWidget):
             return
         exp = project.experiment(self._current_exp_id)
         exp_title = exp.title if exp is not None else self._current_exp_id
-        current_batch = (
-            batch_id(self.manager, self._current_exp_id, self._current_data_id)
+        group = (
+            self.manager.group_of_data(self._current_exp_id, self._current_data_id)
             if self._current_data_id
-            else ""
+            and self.manager is not None
+            and self.manager.project is not None
+            else None
         )
         context_text = (
             f"{project.name} / {exp_title} ({self._current_exp_id})"
         )
-        if current_batch:
-            group_count = len(
-                batch_data_ids(self.manager, self._current_exp_id, current_batch)
-            )
-            context_text += f" [批量 {current_batch}: {group_count} 数据]"
+        if group is not None:
+            context_text += f" [数据组 {group.id}: {len(group.data_ids)} 数据]"
         self.context_label.setText(context_text)
         statuses = self._current_statuses()
         # 样品数据层不提示/展示导入步骤(导入属于实验类型层动作)
@@ -1079,98 +1076,38 @@ class PipelinePanel(QWidget):
                 )
                 exp_id = self._current_exp_id
                 target_data_id = getattr(data_node, "id", exp_id)
-                # 批量组:同一标记的数据绑定,整组依次执行
-                current_batch = batch_id(self.manager, exp_id, target_data_id)
-                data_ids = (
-                    batch_data_ids(self.manager, exp_id, current_batch)
-                    if current_batch
-                    else [target_data_id]
+                # 批量组:统一委托新引擎(controller.run_group_batch ->
+                # workflow.batch.run_batch);0.2.164-补1 删除旧内联逐数据循环
+                group = (
+                    self.manager.group_of_data(exp_id, target_data_id)
+                    if self.manager is not None and self.manager.project is not None
+                    else None
                 )
-                total = len(data_ids)
-                results: list[dict] = []
-                if total > 1:
-                    self.log_message.emit(
-                        f"批量组 {current_batch}: 对 {total} 个数据依次"
-                        f" {STEP_LABEL.get(step_id, step_id)}"
-                    )
-                for index, data_id in enumerate(data_ids, start=1):
-                    node = next(
-                        (n for n in nodes if getattr(n, "id", "") == data_id),
-                        None,
-                    )
-                    if node is None:
-                        continue
-                    step_label = STEP_LABEL.get(step_id, step_id)
-                    if total > 1:
-                        self.progress_updated.emit(
-                            f"批量 {current_batch}: {index - 1}/{total} 完成 · "
-                            f"当前: {data_id} {step_label}"
-                        )
-                    item: dict = {
-                        "data_id": data_id,
-                        "step": step_label,
-                        "ok": False,
-                        "error": "",
-                    }
-                    try:
-                        # 0.2.163-补14:批量组内单个数据前置未完成时跳过
-                        per_statuses = compute_data_step_statuses(
-                            self.manager, exp_id, data_id
-                        )
-                        if per_statuses.get(step_id) == "LOCKED":
-                            reasons = _lock_reasons(per_statuses)
-                            item["error"] = (
-                                "前置步骤未完成: "
-                                + reasons.get(step_id, "上一步")
-                            )
-                            self.log_message.emit(
-                                f"跳过 {step_label} {data_id}: {item['error']}"
-                            )
-                            results.append(item)
-                            continue
-                    except Exception:  # noqa: BLE001 - 判定失败不阻断
-                        pass
-                    try:
-                        import inspect
+                if group is not None:
+                    self._run_group_step(exp_id, group.id, step_id, target_data_id)
+                    return
+                step_label = STEP_LABEL.get(step_id, step_id)
+                try:
+                    import inspect
 
-                        kwargs: dict = {"exp_id": exp_id, "data_id": data_id}
-                        if step_id == "spectrum":
-                            ext_params = self._spectrum_ext_params(data_id)
-                            if ext_params and "params" in inspect.signature(method).parameters:
-                                kwargs["params"] = ext_params
-                        if "progress" in inspect.signature(method).parameters:
-                            kwargs["progress"] = (
-                                lambda msg, d=data_id: self.log_message.emit(
-                                    f"{step_label} {d}: {msg}"
-                                )
-                            )
-                        result = method(node, **kwargs)
-                        item["ok"] = True
-                        message = (
-                            result if isinstance(result, str) else str(result)
+                    kwargs: dict = {"exp_id": exp_id, "data_id": target_data_id}
+                    if step_id == "spectrum":
+                        ext_params = self._spectrum_ext_params(target_data_id)
+                        if ext_params and "params" in inspect.signature(method).parameters:
+                            kwargs["params"] = ext_params
+                    if "progress" in inspect.signature(method).parameters:
+                        kwargs["progress"] = lambda msg: self.log_message.emit(
+                            f"{step_label}: {msg}"
                         )
-                        self.log_message.emit(
-                            f"完成 {step_label} {data_id}: {message}"
-                        )
-                    except Exception as exc:  # noqa: BLE001 - 单数据失败不中断整组
-                        item["error"] = f"{type(exc).__name__}: {exc}"
-                        self.log_message.emit(
-                            f"失败 {step_label} {data_id}: {item['error']}"
-                        )
-                        if "无法处理该谱" in str(exc):
-                            self.memory_guard_requested.emit(str(exc))
-                    results.append(item)
-                self.progress_updated.emit("")
-                if total > 1:
-                    ok_count = sum(1 for r in results if r.get("ok"))
-                    self.batch_summary_requested.emit(
-                        {
-                            "info": (
-                                f"批量组 {current_batch}: {ok_count}/{total} 成功"
-                            ),
-                            "items": results,
-                        }
+                    result = method(data_node, **kwargs)
+                    message = result if isinstance(result, str) else str(result)
+                    self.log_message.emit(f"完成 {step_label}: {message}")
+                except Exception as exc:  # noqa: BLE001 - 单数据失败
+                    self.log_message.emit(
+                        f"失败 {step_label}: {type(exc).__name__}: {exc}"
                     )
+                    if "无法处理该谱" in str(exc):
+                        self.memory_guard_requested.emit(str(exc))
             except Exception as exc:  # noqa: BLE001 - 错误统一回传 UI
                 self.log_message.emit(
                     f"失败 {STEP_LABEL.get(step_id, step_id)}: {exc}"
@@ -1184,6 +1121,65 @@ class PipelinePanel(QWidget):
         import threading
 
         threading.Thread(target=worker, daemon=True).start()
+
+    def _run_group_step(
+        self,
+        exp_id: str,
+        group_id: str,
+        step_id: str,
+        target_data_id: str,
+    ) -> None:
+        """批量组执行:统一委托新引擎(controller.run_group_batch -> workflow.batch)。
+
+        0.2.164-补1:删除面板内联逐数据循环;失败汇总由引擎按数据记录,
+        单数据失败不中断整组。
+        """
+        step_label = STEP_LABEL.get(step_id, step_id)
+        group_count = len(self.manager.group_data_ids(exp_id, group_id))
+        self.log_message.emit(
+            f"数据组 {group_id}: 对 {group_count} 个数据执行 {step_label}"
+        )
+        if step_id == "smile":
+            self.log_message.emit("SMILE 优化不支持批量组,请在单个数据上执行")
+            return
+        try:
+            kwargs: dict = {}
+            if step_id == "spectrum":
+                ext_params = self._spectrum_ext_params(target_data_id)
+                if ext_params:
+                    kwargs["params"] = ext_params
+            result = self.controller.run_group_batch(
+                exp_id,
+                group_id,
+                [step_id],
+                reference_data_id="",
+                progress=lambda msg: self.log_message.emit(f"{step_label}: {msg}"),
+                **kwargs,
+            )
+        except Exception as exc:  # noqa: BLE001 - 引擎级失败
+            self.log_message.emit(
+                f"失败 {step_label}: {type(exc).__name__}: {exc}"
+            )
+            if "无法处理该谱" in str(exc):
+                self.memory_guard_requested.emit(str(exc))
+            return
+        summary = dict(result.get("summary") or {})
+        failed = list(result.get("failed") or [])
+        ok_count = int(summary.get("success", 0))
+        total = int(summary.get("total", 0))
+        info = f"数据组 {group_id}: {ok_count}/{total} 成功"
+        if failed:
+            info += " · 失败: " + ",".join(failed)
+        items = [
+            {
+                "data_id": data_id,
+                "step": step_label,
+                "ok": per.get("status") == "success",
+                "error": per.get("error", ""),
+            }
+            for data_id, per in (result.get("results") or {}).items()
+        ]
+        self.batch_summary_requested.emit({"info": info, "items": items})
 
     def _on_rerun_final_requested(self, step_id: str) -> None:
         """「重新运行终脚本」:直接在已有最终脚本上改直接维范围再运行。

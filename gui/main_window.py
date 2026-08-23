@@ -504,9 +504,7 @@ class MainWindow(QMainWindow):
     # 数据组(schema 1.4)
     # ------------------------------------------------------------------
     def _group_add_data(self, exp_id: str, group_id: str, data_ids: list) -> None:
-        """把多个数据加入数据组(project.json 与 pipeline_state 双写)。"""
-        from gui.pipeline_state import set_batch_id
-
+        """把多个数据加入数据组(project.json 为唯一来源,0.2.164-补1)。"""
         if self.manager.project is None:
             return
         group = self.manager.group(exp_id, group_id)
@@ -516,7 +514,6 @@ class MainWindow(QMainWindow):
         for data_id in data_ids or []:
             try:
                 self.manager.add_to_group(exp_id, group_id, str(data_id))
-                set_batch_id(self.manager, exp_id, str(data_id), group_id)
                 self._append_log(f"数据 {data_id} 已加入数据组 {group_id}")
             except Exception as exc:  # noqa: BLE001 - 单数据失败继续
                 self._append_log(f"加入失败 {data_id}: {exc}")
@@ -526,13 +523,10 @@ class MainWindow(QMainWindow):
     def _group_remove_data(
         self, exp_id: str, group_id: str, data_id: str
     ) -> None:
-        """把数据移出数据组(project.json 与 pipeline_state 双写)。"""
-        from gui.pipeline_state import clear_batch_id
-
+        """把数据移出数据组(project.json 为唯一来源,0.2.164-补1)。"""
         if self.manager.project is None:
             return
         self.manager.remove_from_group(exp_id, group_id, data_id)
-        clear_batch_id(self.manager, exp_id, data_id)
         self.manager.save()
         self._append_log(f"数据 {data_id} 已移出数据组 {group_id}")
         self.refresh()
@@ -548,8 +542,6 @@ class MainWindow(QMainWindow):
 
     def _group_delete(self, exp_id: str, group_id: str) -> None:
         """删除数据组(仅移除组,成员数据保留为单个数据)。"""
-        from gui.pipeline_state import clear_batch_id
-
         if self.manager.project is None:
             return
         group = self.manager.group(exp_id, group_id)
@@ -563,8 +555,6 @@ class MainWindow(QMainWindow):
         )
         if not ok:
             return
-        for data_id in list(group.data_ids):
-            clear_batch_id(self.manager, exp_id, data_id)
         self.manager.delete_data_group(exp_id, group_id)
         self.manager.save()
         self._append_log(f"数据组 {group_id} 已删除(成员恢复单个数据)")

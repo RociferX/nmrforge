@@ -1,5 +1,24 @@
 # 修改记录(历史条目)
 
+## 0.2.164-补1(2026-08-23,批量执行只保留新版本)
+
+用户要求:批量执行留下新版本——数据组(schema 1.4)+ workflow.batch.run_batch
+为唯一执行路径,删除旧版 pipeline_state batch 标记与面板内联逐数据循环。
+
+- Pipeline 面板:批量组执行统一委托 controller.run_group_batch → workflow.batch
+  (删除 _on_run_requested 内联循环);上下文显示「数据组 {id}: N 数据」;
+  新增 _run_group_step 汇总(单数据失败不中断整组);SMILE 优化不支持批量组
+  (请单个数据执行);
+- 删除旧标记双写:processing.batch_import 只建数据组;
+  main_window 组增删/删除组不再写 pipeline_state;gui/pipeline_state 删除
+  batch_id/set_batch_id/clear_batch_id/batch_ids_in_experiment/
+  next_batch_id/batch_data_ids(旧项目 .pipeline_state.json 的 batch 键仍由
+  workflow.batch 兼容读取);
+- project_tree 不再显示 [batch] 后缀(组内数据由组节点标识);
+- controller.run_group_batch 增加 params 透传(面板 spectrum 直接维范围覆盖);
+- 测试:test_gui_batch/test_gui_data_group/test_gui_phase_c 同步为数据组语义,
+  test_batch 保留旧标记兼容读取用例;全量 pytest + ruff 全绿。
+
 ## 0.2.164(2026-08-23,清理:新 git 只含活跃代码)
 
 用户要求:重复/不用的代码不再推送到新 git,并从工作目录删除;旧 git

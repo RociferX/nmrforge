@@ -13,7 +13,6 @@ from PyQt6.QtWidgets import QApplication
 from core.project import ProjectManager
 from gui.main_window import MainWindow
 from gui.pipeline_panel import PipelinePanel
-from gui.pipeline_state import set_batch_id
 
 
 @pytest.fixture(scope="module")
@@ -54,6 +53,7 @@ class _BatchController:
 
     def __init__(self) -> None:
         self.calls: list[str] = []
+        self.group_calls: list[tuple] = []
 
     def set_manager(self, manager) -> None:
         pass
@@ -66,18 +66,51 @@ class _BatchController:
             raise RuntimeError("模拟失败")
         return "/tmp/x.ft2"
 
+    def run_group_batch(
+        self,
+        exp_id,
+        group_id,
+        steps,
+        reference_data_id="",
+        progress=None,
+        params=None,
+    ) -> dict:
+        """新引擎入口假实现:末位成员失败,汇总 1/2 成功。"""
+        self.group_calls.append((group_id, list(steps)))
+        if progress:
+            progress(f"{group_id}: 1/2 完成")
+        ids = list(self.member_ids)
+        results = {
+            d: {"data_id": d, "status": "success", "steps": {}, "error": ""}
+            for d in ids
+        }
+        results[ids[-1]] = {
+            "data_id": ids[-1],
+            "status": "failed",
+            "steps": {},
+            "error": "模拟失败",
+        }
+        return {
+            "batch_id": group_id,
+            "data_ids": ids,
+            "steps": list(steps),
+            "results": results,
+            "failed": [ids[-1]],
+            "summary": {"total": len(ids), "success": len(ids) - 1, "failed": 1},
+        }
+
 
 def test_batch_progress_and_summary(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """数据组整组执行:统一委托新引擎,进度与汇总经面板日志/信号输出。"""
     monkeypatch.setattr("threading.Thread", _SyncThread)
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     entry = manager.create_experiment("batch")
     data1 = manager.import_data(entry.id, "/fake/1")
     data2 = manager.import_data(entry.id, "/fake/2")
+    group = manager.create_data_group(entry.id, data_ids=[data1.id, data2.id])
     manager.save()
-    set_batch_id(manager, entry.id, data1.id, "B1")
-    set_batch_id(manager, entry.id, data2.id, "B1")
     # 0.2.163-补14:前置未完成不运行下一步——先让两组 fid 就绪
     from gui.pipeline_state import record_step_success
 
@@ -89,17 +122,19 @@ def test_batch_progress_and_summary(
         record_step_success(manager, entry.id, data.id, "fid")
     manager.save()
     controller = _BatchController()
+    controller.member_ids = [data1.id, data2.id]
     panel = PipelinePanel(manager, controller)
     panel.set_selection("data", entry.id, data1.id)
     summaries: list[dict] = []
-    progress_msgs: list[str] = []
+    logs: list[str] = []
     panel.batch_summary_requested.connect(summaries.append)
-    panel.progress_updated.connect(progress_msgs.append)
+    panel.log_message.connect(logs.append)
     panel._on_run_requested("spectrum")
-    assert controller.calls == [data1.id, data2.id]
-    assert summaries and summaries[0]["info"].startswith("批量组 B1: 1/2 成功")
-    assert any("1/2 完成" in msg for msg in progress_msgs)
-    assert any("当前:" in msg for msg in progress_msgs)
+    assert controller.group_calls == [(group.id, ["spectrum"])]
+    assert summaries and summaries[0]["info"].startswith(
+        f"数据组 {group.id}: 1/2 成功"
+    )
+    assert any(f"数据组 {group.id}" in msg for msg in logs)
     panel.close()
 
 

@@ -1,4 +1,4 @@
-"""批量处理测试:批量组标记、批量导入、组内整组运行、树标记显示。"""
+"""批量处理测试:数据组导入、组内整组运行(新引擎)、树显示。"""
 
 from __future__ import annotations
 
@@ -12,14 +12,6 @@ from PyQt6.QtWidgets import QApplication
 
 from core.project import ProjectManager
 from gui.pipeline_panel import PipelinePanel
-from gui.pipeline_state import (
-    batch_data_ids,
-    batch_id,
-    batch_ids_in_experiment,
-    clear_batch_id,
-    next_batch_id,
-    set_batch_id,
-)
 from gui.processing import ProcessingController
 
 
@@ -37,30 +29,24 @@ def _manager_with_experiment(tmp_path: Path) -> tuple[ProjectManager, str]:
     return manager, entry.id
 
 
-def test_batch_helpers(tmp_path: Path) -> None:
+def test_batch_group_is_data_group(tmp_path: Path) -> None:
+    """0.2.164-补1:批量组即数据组(schema 1.4,唯一来源)。"""
     manager, exp_id = _manager_with_experiment(tmp_path)
     manager.import_data(exp_id, "/fake/2")
     manager.save()
     data_ids = [d.id for d in manager.project.experiment(exp_id).data]
-    for data_id in data_ids:
-        assert batch_id(manager, exp_id, data_id) == ""
-    # 第一次批量导入 → B1,绑定两组数据
-    assert next_batch_id(manager, exp_id) == "B1"
-    set_batch_id(manager, exp_id, data_ids[0], "B1")
-    set_batch_id(manager, exp_id, data_ids[1], "B1")
-    assert batch_id(manager, exp_id, data_ids[0]) == "B1"
-    assert batch_data_ids(manager, exp_id, "B1") == data_ids
-    # 第二次批量导入 → B2
-    assert next_batch_id(manager, exp_id) == "B2"
-    assert batch_ids_in_experiment(manager, exp_id) == ["B1"]
+    group = manager.create_data_group(exp_id, data_ids=data_ids)
+    assert manager.group_data_ids(exp_id, group.id) == data_ids
+    assert manager.group_of_data(exp_id, data_ids[0]) is not None
     # 移出组:恢复单一数据
-    clear_batch_id(manager, exp_id, data_ids[1])
-    assert batch_data_ids(manager, exp_id, "B1") == [data_ids[0]]
-    assert batch_id(manager, exp_id, data_ids[1]) == ""
+    manager.remove_from_group(exp_id, group.id, data_ids[1])
+    assert manager.group_data_ids(exp_id, group.id) == [data_ids[0]]
+    assert manager.group_of_data(exp_id, data_ids[1]) is None
+
 
 
 def test_batch_import_marks_group(tmp_path: Path, bruker_dir: Path) -> None:
-    """批量导入:多个目录导入同一实验类型,标记同一 batch_id,多次导入序号递增。"""
+    """批量导入:多个目录导入同一实验类型,归入同一数据组,多次导入组号递增。"""
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     entry = manager.create_experiment("batch")
     manager.save()
@@ -74,7 +60,7 @@ def test_batch_import_marks_group(tmp_path: Path, bruker_dir: Path) -> None:
     assert all(item["ok"] for item in result["results"])
     data_ids = [item["data_id"] for item in result["results"]]
     assert len(data_ids) == 2
-    assert batch_data_ids(manager, entry.id, "G1") == data_ids
+    assert manager.group_data_ids(entry.id, "G1") == data_ids
     # 0.2.163:数据组同步落 project.json(schema 1.4)
     group = manager.group(entry.id, "G1")
     assert group is not None and group.data_ids == data_ids
@@ -83,7 +69,7 @@ def test_batch_import_marks_group(tmp_path: Path, bruker_dir: Path) -> None:
         entry.id, [str(bruker_dir / "hsqc_small")]
     )
     assert result2["batch_id"] == "G2"
-    assert batch_ids_in_experiment(manager, entry.id) == ["G1", "G2"]
+    assert [g.id for g in manager.data_groups(entry.id)] == ["G1", "G2"]
 
 
 class _FakeController:
@@ -112,6 +98,39 @@ class _ProgressController(_FakeController):
         return "/tmp/x.ft2"
 
 
+class _GroupFakeController(_FakeController):
+    """新引擎入口假实现:记录 run_group_batch 委托调用。"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.group_calls: list[tuple] = []
+
+    def run_group_batch(
+        self,
+        exp_id,
+        group_id,
+        steps,
+        reference_data_id="",
+        progress=None,
+        params=None,
+    ) -> dict:
+        self.group_calls.append((group_id, list(steps), dict(params or {})))
+        if progress:
+            progress(f"{group_id}: 完成")
+        ids = list(self.member_ids)
+        return {
+            "batch_id": group_id,
+            "data_ids": ids,
+            "steps": list(steps),
+            "results": {
+                d: {"data_id": d, "status": "success", "steps": {}, "error": ""}
+                for d in ids
+            },
+            "failed": [],
+            "summary": {"total": len(ids), "success": len(ids), "failed": 0},
+        }
+
+
 class _SyncThread:
     def __init__(self, target=None, daemon=None) -> None:
         self._target = target
@@ -125,15 +144,14 @@ def test_pipeline_group_run_applies_to_all(
     qapp: QApplication,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """中间处理页操作:批量组内所有数据依次执行,上下文显示批量标记。"""
+    """中间处理页操作:数据组整组执行统一委托新引擎 run_group_batch。"""
     monkeypatch.setattr("threading.Thread", _SyncThread)
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     entry = manager.create_experiment("batch")
     data1 = manager.import_data(entry.id, "/fake/1")
     data2 = manager.import_data(entry.id, "/fake/2")
+    group = manager.create_data_group(entry.id, data_ids=[data1.id, data2.id])
     manager.save()
-    set_batch_id(manager, entry.id, data1.id, "B1")
-    set_batch_id(manager, entry.id, data2.id, "B1")
     # 0.2.163-补14:前置未完成不运行下一步——先让两组 fid 就绪
     from gui.pipeline_state import record_step_success
 
@@ -144,12 +162,18 @@ def test_pipeline_group_run_applies_to_all(
         manager.set_data_fid(entry.id, data.id, fid)
         record_step_success(manager, entry.id, data.id, "fid")
     manager.save()
-    controller = _FakeController()
+    controller = _GroupFakeController()
+    controller.member_ids = [data1.id, data2.id]
     panel = PipelinePanel(manager, controller)
     panel.set_selection("data", entry.id, data1.id)
-    assert "批量 B1" in panel.context_label.text()
+    assert f"数据组 {group.id}" in panel.context_label.text()
+    summaries: list[dict] = []
+    panel.batch_summary_requested.connect(summaries.append)
     panel._on_run_requested("spectrum")
-    assert controller.calls == [data1.id, data2.id]
+    assert controller.group_calls == [(group.id, ["spectrum"], {})]
+    assert summaries and summaries[0]["info"].startswith(
+        f"数据组 {group.id}: 2/2 成功"
+    )
     panel.close()
 
 
@@ -171,22 +195,21 @@ class _TempWorkspace:
         return self.root
 
 
-def test_tree_data_label_shows_batch_marker(
+def test_tree_data_label_shows_no_batch_suffix(
     tmp_path: Path, qapp: QApplication
 ) -> None:
-    """批量导入的数据在树中带批量标记显示。"""
+    """0.2.164-补1:批量组即数据组;未入组数据标签不再带 [batch] 后缀。"""
     from gui.project_tree import ProjectTreePanel
 
     ws = tmp_path / "ws"
     ws.mkdir()
     manager = ProjectManager.create_project(ws / "proj", "demo")
     entry = manager.create_experiment("HSQC")
-    data = manager.import_data(entry.id, "/fake/1")
+    manager.import_data(entry.id, "/fake/1")
     manager.save()
-    set_batch_id(manager, entry.id, data.id, "B1")
     panel = ProjectTreePanel(manager, workspace=_TempWorkspace(ws))
     data_item = panel.tree.topLevelItem(0).child(0).child(0).child(0)
-    assert "[B1]" in data_item.text(0)
+    assert "[" not in data_item.text(0)
     panel.close()
 
 
@@ -431,7 +454,7 @@ def test_group_analysis_dropdown_placeholder(qapp: QApplication) -> None:
 
 
 def test_batch_import_no_group(tmp_path: Path, bruker_dir: Path) -> None:
-    """0.2.162-补12:批量导入不成组 = 多个单次导入(不绑定 batch_id)。"""
+    """0.2.162-补12:批量导入不成组 = 多个单次导入(不建数据组)。"""
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     entry = manager.create_experiment("batch")
     manager.save()
@@ -445,8 +468,8 @@ def test_batch_import_no_group(tmp_path: Path, bruker_dir: Path) -> None:
     data_ids = [item["data_id"] for item in result["results"]]
     assert len(data_ids) == 2
     for data_id in data_ids:
-        assert batch_id(manager, entry.id, data_id) == ""
-    assert batch_ids_in_experiment(manager, entry.id) == []
+        assert manager.group_of_data(entry.id, data_id) is None
+    assert manager.data_groups(entry.id) == []
 
 
 def test_batch_import_group_option(qapp: QApplication) -> None:
