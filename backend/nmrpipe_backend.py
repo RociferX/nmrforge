@@ -215,7 +215,7 @@ class NMRPipeBackend:
         """均匀采样：转换（含多段合并）+ NMRPipe 处理管道（NUS 请用 reconstruct_nus）。
 
         direct_phase_override 非空时跳过相位搜索,直接以给定相位写 PS
-        (暴力参考/选中相位写回生产用,准确性验证见 workflow.phase_optimize)。
+        (参考/选中相位写回生产用;统一内存搜索见 workflow.memory_phase_search)。
         """
         if experiment.sampling.mode is SamplingMode.NUS:
             return {

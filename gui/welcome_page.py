@@ -1,19 +1,15 @@
 """首次启动工作区欢迎页(G2B-003 / 契约 v1.3 §9.4)。
 
 显示工作区路径、最近项目列表与新建项目入口。
-``WorkspaceManager``(core/workspace.py)由 Backend 按 G2B-003 落地;在落地前
-提供兼容层:优先使用 core.workspace.WorkspaceManager,缺失时回退到
-``~/NMRForgeWorkspace``(幂等创建),保证 GUI 先行可用。
+工作区统一使用 core/workspace.WorkspaceManager(0.2.164 起删除
+兼容层 _FallbackWorkspaceManager 与重复的 workspace_manager 工厂)。
 """
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from PyQt6.QtCore import QEvent, Qt, pyqtSignal
 from PyQt6.QtGui import QKeyEvent
 from PyQt6.QtWidgets import (
-    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -25,57 +21,21 @@ from PyQt6.QtWidgets import (
 )
 
 
-def workspace_manager():
-    """返回 WorkspaceManager 兼容实例(Backend 落地后为 core.workspace 实现)。"""
-    try:
-        from core.workspace import WorkspaceManager  # type: ignore[import-not-found]
-
-        return WorkspaceManager()
-    except ImportError:
-        return _FallbackWorkspaceManager()
-
-
-def default_workspace_path() -> Path:
-    """默认工作区目录(Backend 契约:~/NMRForgeWorkspace)。"""
-    return Path.home() / "NMRForgeWorkspace"
-
-
-class _FallbackWorkspaceManager:
-    """core/workspace.py 落地前的兼容实现(幂等 ensure + 目录即项目)。"""
-
-    def __init__(self, root: Path | str | None = None) -> None:
-        self.root = Path(root) if root else default_workspace_path()
-
-    def ensure(self) -> Path:
-        """确保工作区目录存在(幂等),返回路径。"""
-        self.root.mkdir(parents=True, exist_ok=True)
-        return self.root
-
-    def list_projects(self) -> list[Path]:
-        """列出工作区下含 project.json 的项目目录。"""
-        if not self.root.is_dir():
-            return []
-        return sorted(
-            p
-            for p in self.root.iterdir()
-            if p.is_dir() and (p / "project.json").is_file()
-        )
-
-    def create_project(self, name: str) -> Path:
-        """在工作区下创建项目目录(实际项目初始化由 ProjectManager 完成)。"""
-        self.ensure()
-        return self.root / name
-
-
 class WelcomePage(QWidget):
     """首次启动/未打开项目时的欢迎页。"""
 
     new_project_requested = pyqtSignal(str)  # 项目名称
     open_project_requested = pyqtSignal(str)  # 项目路径
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(
+        self, parent: QWidget | None = None, workspace=None
+    ) -> None:
         super().__init__(parent)
-        self.ws = workspace_manager()
+        if workspace is None:
+            from core.workspace import WorkspaceManager
+
+            workspace = WorkspaceManager()
+        self.ws = workspace
         self._name_committing = False
         layout = QVBoxLayout(self)
         layout.setContentsMargins(32, 32, 32, 32)
@@ -195,14 +155,3 @@ class WelcomePage(QWidget):
             for item in self.recent_list
             if item.data(0x0100)
         ]
-
-
-def make_welcome_card(text: str) -> QFrame:
-    """欢迎页提示卡片(通用小组件)。"""
-    frame = QFrame()
-    frame.setFrameShape(QFrame.Shape.StyledPanel)
-    label = QLabel(text)
-    label.setWordWrap(True)
-    layout = QVBoxLayout(frame)
-    layout.addWidget(label)
-    return frame

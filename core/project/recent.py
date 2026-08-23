@@ -6,7 +6,6 @@ import json
 import os
 import tempfile
 from pathlib import Path
-from typing import Protocol
 
 MAX_RECENT_ENTRIES = 8
 
@@ -18,16 +17,6 @@ def default_config_dir() -> Path:
         if base:
             return Path(base) / "NMRForge"
     return Path.home() / ".config" / "NMRForge"
-
-
-class RecentProjectsStore(Protocol):
-    """最近项目协议:list / push / remove。GUI 可注入其它实现(如 QSettings 适配)。"""
-
-    def list(self) -> list[str]: ...
-
-    def push(self, path: str) -> None: ...
-
-    def remove(self, path: str) -> None: ...
 
 
 class JsonRecentProjectsStore:

@@ -20,11 +20,6 @@ from core.data.internal_data_model import Experiment, SamplingMode
 from core.planning.method_selector import select_method
 
 
-def axis_to_logical(experiment: Experiment, axis: int) -> str:
-    """把谱数组轴索引映射为逻辑轴名(F1/F2/F3)。"""
-    dims = [dim.logical_axis for dim in reversed(experiment.dimensions)]
-    return dims[axis]
-
 def _axis_index(axis: str, ndim: int = 2) -> int:
     """逻辑轴名 → 生产布局谱数组下标。
 
@@ -298,10 +293,10 @@ def unified_route(    experiment: Experiment,
     完整脚本重跑出良谱(不写旋转平面副本)。
     """
     from workflow.memory_phase_search import (
+        PHASE_SCORE_FLAT_MARGIN,
         joint_recheck_memory,
         search_axis_memory,
     )
-    from workflow.phase_optimize import PHASE_SCORE_FLAT_MARGIN
 
     plan = plan or select_method(experiment)
     if experiment.sampling.mode is SamplingMode.NUS:
@@ -990,10 +985,10 @@ def _unified_nus(
     不再写 nus3d_rc_ph 旋转副本。"""
     from core.data.internal_data_model import AxisRole
     from workflow.memory_phase_search import (
+        PHASE_SCORE_FLAT_MARGIN,
         joint_recheck_memory,
         search_axis_memory,
     )
-    from workflow.phase_optimize import PHASE_SCORE_FLAT_MARGIN
 
     work = Path(work_dir) if work_dir else backend._work_path(experiment)
     # 0.2.140:生成谱图最开端先跑直接维数据质量诊断(FID 内存扫描,

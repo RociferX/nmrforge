@@ -58,10 +58,6 @@ class ExperimentTemplate:
 REGISTRY: dict[str, ExperimentTemplate] = {}
 
 
-def register(template: ExperimentTemplate) -> None:
-    REGISTRY[template.name] = template
-
-
 def get(name: str) -> ExperimentTemplate | None:
     return REGISTRY.get(name)
 

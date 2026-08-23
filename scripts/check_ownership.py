@@ -31,7 +31,6 @@ BACKEND_PREFIXES = (
     "core/reporting/",
     "scripts/smile_optimize.py",
     "scripts/param_optimize.py",
-    "scripts/recon_phase_search.py",
 )
 
 # Shared Contract / Architect 基础设施:任何 Agent 不得随意修改

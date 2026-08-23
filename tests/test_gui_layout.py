@@ -136,18 +136,6 @@ class FakeProcessingController:
         self.calls: list[str] = []
         self.last_entry = None
 
-    def auto_run_async(self, entry, on_done, on_error) -> None:
-        self.calls.append("auto_run")
-        self.last_entry = entry
-        on_done(
-            {
-                "status": "success",
-                "message": "QC: accept",
-                "logs": ["步骤 1", "步骤 2"],
-                "experiment_id": entry.id,
-            }
-        )
-
     def import_data(self, entry, source) -> dict:
         self.calls.append("import_data")
         self.last_entry = entry
@@ -628,13 +616,10 @@ def test_welcome_page_shows_workspace_and_recent(
     ProjectManager.create_project(workspace / "projA", "projA")
     ProjectManager.create_project(workspace / "projB", "projB")
 
-    from gui.welcome_page import WelcomePage, _FallbackWorkspaceManager
+    from core.workspace import WorkspaceManager
+    from gui.welcome_page import WelcomePage
 
-    monkeypatch.setattr(
-        "gui.welcome_page.workspace_manager",
-        lambda: _FallbackWorkspaceManager(workspace),
-    )
-    page = WelcomePage()
+    page = WelcomePage(workspace=WorkspaceManager(workspace))
     assert str(workspace) in page.workspace_label.text()
     assert page.recent_list.count() == 2
     names = {page.recent_list.item(i).text() for i in range(page.recent_list.count())}
@@ -1368,8 +1353,6 @@ def test_rename_project_to_sample_wording(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """文件结构三级名称:项目 → 实验类型 → 样品数据(菜单/欢迎页/上下文条)。"""
-    from gui.welcome_page import _FallbackWorkspaceManager
-
     workspace = tmp_path / "ws2"
     monkeypatch.setattr(
         "gui.main_window.WorkspaceManager", lambda: _TempWorkspace(workspace)
@@ -1377,10 +1360,6 @@ def test_rename_project_to_sample_wording(
     monkeypatch.setattr(
         "core.workspace.WorkspaceManager",
         lambda *a, **k: _TempWorkspace(workspace),
-    )
-    monkeypatch.setattr(
-        "gui.welcome_page.workspace_manager",
-        lambda: _FallbackWorkspaceManager(workspace),
     )
     window = MainWindow()
     # 未打开项目:上下文条与欢迎页入口文案
@@ -1406,15 +1385,12 @@ def test_welcome_page_new_project_inline_input(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """欢迎页「新建项目」:页内内联命名(不弹窗),回车提交发信号 / Esc 取消。"""
-    from gui.welcome_page import WelcomePage, _FallbackWorkspaceManager
+    from core.workspace import WorkspaceManager
+    from gui.welcome_page import WelcomePage
 
     workspace = tmp_path / "ws"
     workspace.mkdir()
-    monkeypatch.setattr(
-        "gui.welcome_page.workspace_manager",
-        lambda: _FallbackWorkspaceManager(workspace),
-    )
-    page = WelcomePage()
+    page = WelcomePage(workspace=WorkspaceManager(workspace))
     page.show()
     names: list[str] = []
     page.new_project_requested.connect(names.append)

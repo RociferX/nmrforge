@@ -8,9 +8,10 @@
   base.py(ProcessingBackend Protocol,Shared)、config.py(默认参数)、
   native_backend.py、nmrpipe_finder.py;
 - workflow/:stepwise.py(三步接口)、phase_routes.py(unified_route)、
-  phase_optimize.py、memory_phase_search.py、import_workflow.py、
-  pick_peaks.py、analyze.py、batch.py、engine.py、smile_optimize.py、
-  param_optimize.py、baseline_optimize.py、manual.py;
+  memory_phase_search.py、import_workflow.py、pick_peaks.py、analyze.py、
+  batch.py、smile_optimize.py、param_optimize.py、baseline_optimize.py、
+  window_optimize.py、direct_diagnostics.py、manual.py、ucsf_export.py、
+  optimization_report.py;
 - core/:data(bruker_reader/nus_reader/pipe_io/internal_data_model[Shared])、
   experiment(分类器)、experiments(registry + presets 加载)、processing、
   planning、optimization、qc、reporting、peaks、project[Shared]、

@@ -81,19 +81,20 @@ class Spectrum:
 
 ```python
 class ProcessingController:
-    def auto_run_sync(self, entry: ExperimentEntry) -> dict:
-        # {"status", "message", "logs", "experiment_id"}
-    def auto_run_async(self, entry, on_done: Callable[[dict], None],
-                       on_error: Callable[[str], None]) -> None
-    def manual_param_table(self, entry=None) -> NotImplementedError(占位)
-    def manual_script_editor(self, entry=None) -> NotImplementedError(占位)
+    def generate_fid(self, data, exp_id=None, data_id=None, progress=None) -> str
+        # 经 workflow.stepwise.generate_fid → backend.convert_to_fid
+    def generate_spectrum(self, data, exp_id=None, data_id=None, progress=None,
+                          params=None) -> str
+        # 经 stepwise.generate_spectrum → phase_routes.unified_route(统一相位优化)
+    def manual_fid_com(...) / run_manual_fid_com(...) / manual_scripts(...) /
+        run_manual_spectrum(...)   # 人工路径(workflow/manual,已实现)
     def optimize_smile(self, data, exp_id=None, data_id=None) -> dict
         # 可选 SMILE 优化(仅 NUS):网格搜索重构参数并采用最优谱,
         # 归位 spectra/ 并登记 smile_optimize 运行
 ```
 
-自动化内部固定走 `read_dataset → create_backend(config) → AutoProcessor.run`,
-GUI 页面不得绕过本控制器直接调 Backend。
+自动化固定走 `stepwise.generate_fid/generate_spectrum`(内部 create_backend +
+unified 相位路线),GUI 页面不得绕过本控制器直接调 Backend。
 
 ## 6. 参数/结果约定
 

@@ -100,24 +100,3 @@ def ft_neg_for(experiment: Experiment, fnmode: int, logical_axis: str) -> bool:
     if experiment.ndim < 3 or logical_axis != "F2":
         return False
     return fnmode in _FNMODE_FT_NEG_F2_3D
-
-
-def detect_modes(experiment: Experiment) -> dict[str, str]:
-    """返回 {logical_axis: acquisition_mode}。"""
-    params = experiment.acquisition_parameters
-    if experiment.ndim >= 3:
-        mapping = {"F3": "acqus", "F2": "acqu2s", "F1": "acqu3s"}
-    else:
-        mapping = {"F2": "acqus", "F1": "acqu2s"}
-    modes: dict[str, str] = {}
-    for logical, filename in mapping.items():
-        block = params.get(filename)
-        if not block:
-            continue
-        fnmode = block.get("FnMODE", 0)
-        try:
-            fnmode_int = int(fnmode)
-        except (TypeError, ValueError):
-            fnmode_int = 0
-        modes[logical] = _FNMODE_TO_MODE.get(fnmode_int, f"unknown({fnmode_int})")
-    return modes

@@ -170,13 +170,6 @@ def sample_note(project) -> str:
     return str(getattr(protein, "notes", "") or "")
 
 
-def set_sample_note(project, text: str) -> None:
-    """兼容旧调用:覆盖为纯文本(清除结构化字段)。"""
-    protein = getattr(project, "protein", None)
-    if protein is not None:
-        protein.notes = str(text or "")
-
-
 # ---------------------------------------------------------------- 实验类型
 def experiment_note_fields(project, exp_id: str) -> dict:
     entry = project.experiment(exp_id) if project is not None else None
@@ -202,17 +195,6 @@ def experiment_note(project, exp_id: str) -> str:
         return format_fields(fields)
     entry = project.experiment(exp_id) if project is not None else None
     return str(getattr(entry, "notes", "") or "") if entry is not None else ""
-
-
-def set_experiment_note(project, exp_id: str, text: str) -> None:
-    """兼容旧调用:覆盖为纯文本并清除结构化字段。"""
-    entry = project.experiment(exp_id) if project is not None else None
-    if entry is None:
-        return
-    entry.notes = str(text or "")
-    meta = dict(entry.metadata or {})
-    meta.pop("note_fields", None)
-    entry.metadata = meta
 
 
 # ---------------------------------------------------------------- 数据
@@ -251,11 +233,6 @@ def data_note(project, exp_id: str, data_id: str) -> str:
         return ""
     raw = ((entry.metadata or {}).get("data_notes") or {}).get(data_id)
     return str(raw or "") if isinstance(raw, str) else ""
-
-
-def set_data_note(project, exp_id: str, data_id: str, text: str) -> None:
-    """兼容旧调用:写入 备注 字段。"""
-    set_data_note_fields(project, exp_id, data_id, {"notes": text})
 
 
 # ---------------------------------------------------------------- 导入自动填充

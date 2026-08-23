@@ -30,13 +30,13 @@ Backend 不依赖 Qt。
 | `main.py` | GUI | 程序入口(venv 引导 + Qt 启动) |
 | `scripts/make_icon.py` | GUI | 图标 |
 | `backend/` | Backend | NMRPipe/SMILE 后端与运行时 |
-| `workflow/` | Backend | AutoProcessor/管线/优化 |
+| `workflow/` | Backend | stepwise 步骤化 / phase_routes 统一相位 / manual 人工 / batch / 优化 |
 | `core/data/`(除 internal_data_model) | Backend | Bruker 读取/nus/pipe_io |
 | `core/experiment/`、`core/experiments/` | Backend | 解析/分类/模板 |
 | `core/processing/`、`core/planning/` | Backend | 处理原语/DAG |
 | `core/optimization/` | Backend | 参数空间/搜索/相位 |
-| `core/qc/`、`core/reporting/` | Backend | QC/报告 |
-| `scripts/{smile_optimize,param_optimize,recon_phase_search}.py` | Backend | 命令行工具 |
+| `core/qc/` | Backend | QC(core/reporting 已于 0.2.164 清理删除) |
+| `scripts/{smile_optimize,param_optimize}.py` | Backend | 命令行工具(可选) |
 | `core/project/` | Shared | 项目管理模型(GUI 地基 + Backend 运行登记) |
 | `core/workspace.py` | Shared | 工作区容器(默认 ~/NMRForgeWorkspace,首次启动创建) |
 | `core/data/internal_data_model.py` | Shared | Experiment/Dimension/Sampling |
@@ -63,10 +63,11 @@ Bruker 目录 → core/data/bruker_reader.read_dataset → Experiment(Shared)
 
 `gui/processing.py::ProcessingController`:
 
-- `auto_run_sync(entry)`:entry(source 目录)→ `read_dataset`(Backend)→
-  `create_backend(config)`(Backend)→ `AutoProcessor(backend).run`(Backend)
-  → `{status, message, logs}` 回 GUI;
-- `auto_run_async(...)`:后台线程包装;
+- `generate_fid(data, exp_id, data_id, progress)` → `workflow.stepwise.generate_fid`
+  → `backend.convert_to_fid`(Backend),返回 fid 路径;
+- `generate_spectrum(data, exp_id, data_id, params, progress)` →
+  `workflow.stepwise.generate_spectrum` → `phase_routes.unified_route`
+  (Backend,统一相位优化),返回谱图路径;
 - `manual_param_table()` / `manual_script_editor()`:人工路径占位接口。
 
 除此外,`gui/` 与 `viewer/` 只依赖 Shared Contract,无其它 Backend import。
@@ -74,11 +75,10 @@ Bruker 目录 → core/data/bruker_reader.read_dataset → Experiment(Shared)
 
 ## 5. 处理双路径
 
-- **自动化**:ProcessingController → AutoProcessor(理解→规划→处理→QC→报告),
-  后端可用时走 NMRPipe/SMILE;
-- **人工(待实现)**:参数表格逐阶段改参数生成确定性 .com 脚本;或
-  脚本编辑器(模仿 VSCode)直接编辑 fid.com/process.com/nus*.com。
-  两条入口接口已在 `gui/processing.py` 占位。
+- **自动化**:ProcessingController → workflow.stepwise → phase_routes.unified_route
+  (理解→处理→优化→QC),后端走 NMRPipe/SMILE;
+- **人工(已实现)**:workflow/manual——fid.com 查看/修改/运行,谱图脚本
+  编辑/运行,产物归位并登记 WorkflowRun。
 
 ## 6. 测试分层
 

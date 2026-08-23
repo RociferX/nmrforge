@@ -5,18 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 
-def merge_nuslists(paths: list[Path]) -> list[tuple[int, ...]]:
-    """合并多段 nuslist（各段采样点并集，保持稳定顺序，去重）。"""
-    merged: list[tuple[int, ...]] = []
-    seen: set[tuple[int, ...]] = set()
-    for path in paths:
-        for point in read_nuslist(path):
-            if point not in seen:
-                seen.add(point)
-                merged.append(point)
-    return merged
-
-
 def read_nuslist(path: Path) -> list[tuple[int, ...]]:
     """读取 nuslist 采样点（每行若干整数索引，跳过注释/空行）。"""
     points: list[tuple[int, ...]] = []

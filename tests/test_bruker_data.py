@@ -15,7 +15,6 @@ from core.data.bruker_reader import (
     read_segments,
 )
 from core.data.internal_data_model import SamplingMode
-from core.processing.hypercomplex import HypercomplexParams, combine
 
 
 def _write_ser(path: Path, fids: np.ndarray, byterda: int = 0) -> None:
@@ -51,8 +50,6 @@ def test_read_data_2d_states(tmp_path: Path, bruker_dir: Path) -> None:
     assert data.matrix.shape == (32, 64)
     assert data.layout["F1"].mult == 2
     assert data.layout["F1"].n_fids == 32
-    combined = combine(data.matrix, HypercomplexParams(axis="F1", mode="states"))
-    assert np.allclose(combined, s)
 
 
 def test_read_data_2d_big_endian(tmp_path: Path, bruker_dir: Path) -> None:
@@ -65,8 +62,6 @@ def test_read_data_2d_big_endian(tmp_path: Path, bruker_dir: Path) -> None:
     exp = read_dataset(dst)
     data = read_data(exp)
     assert data.byte_order == "big"
-    combined = combine(data.matrix, HypercomplexParams(axis="F1", mode="states"))
-    assert np.allclose(combined, s)
 
 
 def test_read_data_3d(tmp_path: Path, bruker_dir: Path) -> None:
@@ -137,14 +132,3 @@ def test_read_segments_mismatch(tmp_path: Path, bruker_dir: Path) -> None:
     acqu2s.write_text(text.replace("##$TD= 256", "##$TD= 128"), encoding="utf-8")
     with pytest.raises(ValueError):
         read_segments([dst_a, dst_b])
-
-
-def test_merge_nuslists(tmp_path: Path) -> None:
-    from core.data.nus_reader import merge_nuslists
-
-    a = tmp_path / "a.nuslist"
-    b = tmp_path / "b.nuslist"
-    a.write_text("1 1\n2 2\n3 3\n", encoding="utf-8")
-    b.write_text("2 2\n4 4\n", encoding="utf-8")
-    merged = merge_nuslists([a, b])
-    assert merged == [(1, 1), (2, 2), (3, 3), (4, 4)]

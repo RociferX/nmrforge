@@ -127,7 +127,7 @@ def test_lock_discrete_traces_excludes_clump() -> None:
 def test_joint_recheck_tie_keeps_fixed() -> None:
     """联合复核 p1 平坦(±5° 同分)时,不应显著优于顺序固定(调用方按
     PHASE_SCORE_FLAT_MARGIN 门控,不再整体回退)。"""
-    from workflow.phase_optimize import PHASE_SCORE_FLAT_MARGIN
+    from workflow.memory_phase_search import PHASE_SCORE_FLAT_MARGIN
 
     size = (96, 80)
     arr0 = _complex_axis_2d(size, axis=0, p0=-30.0)

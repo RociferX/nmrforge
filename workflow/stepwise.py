@@ -6,7 +6,7 @@
 3. generate_spectrum —— backend.process / reconstruct_nus(含 NUS SMILE 重构)。
 
 相位优化:先用 SMILE 重构生成谱,再逐候选反复跑后端(暴力)优化,
-最终谱由真实管线产出(workflow.phase_optimize 的暴力搜索 + 相位写回)。
+最终谱由真实管线产出(内存相位搜索 + 终跑脚本写回,0.2.164 起统一)。
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from core.data.bruker_reader import read_dataset
+from core.data.bruker_reader import read_dataset, read_dataset_container
 from core.data.internal_data_model import Experiment, SamplingMode
 from core.planning.method_selector import select_method
 from core.project import ProjectManager
@@ -51,7 +51,11 @@ def _read_experiment(manager: ProjectManager, exp_id: str, data_id: str) -> Expe
         source = Path(data_entry.raw_dir) if data_entry.raw_dir else Path(data_entry.source)
         if not source.is_absolute():
             source = manager.root / source
-        experiment = read_dataset(source)
+        try:
+            experiment = read_dataset(source)
+        except ValueError:
+            # 容器目录(旧数据/分段残留)回退容器读取(0.2.164 与 manual 统一)
+            experiment = read_dataset_container(source)[0]
     # 2026-08-19:中间产物/终谱前缀统一用数据 id(d_001),不随重命名变化;
     # read_dataset 的 dataset_id 取自 raw 目录名(常为 raw),必须覆盖
     experiment.dataset_id = data_id

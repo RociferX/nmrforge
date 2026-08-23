@@ -85,8 +85,4 @@ def save_settings(settings: dict) -> Path:
     return path
 
 
-__all__ = ["DEFAULTS", "load_settings", "save_settings", "settings_path"]
-
-
-def settings_path() -> Path:
-    return _settings_path()
+__all__ = ["DEFAULTS", "load_settings", "save_settings"]

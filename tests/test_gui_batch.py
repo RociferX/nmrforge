@@ -356,16 +356,13 @@ def test_welcome_single_click_opens(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """欢迎页最近项目单击打开。"""
-    from gui.welcome_page import WelcomePage, _FallbackWorkspaceManager
+    from core.workspace import WorkspaceManager
+    from gui.welcome_page import WelcomePage
 
     ws = tmp_path / "ws"
     ws.mkdir()
     ProjectManager.create_project(ws / "projA", "projA")
-    monkeypatch.setattr(
-        "gui.welcome_page.workspace_manager",
-        lambda: _FallbackWorkspaceManager(ws),
-    )
-    page = WelcomePage()
+    page = WelcomePage(workspace=WorkspaceManager(ws))
     opened: list[str] = []
     page.open_project_requested.connect(lambda p: opened.append(p))
     item = page.recent_list.item(0)

@@ -16,7 +16,6 @@ from core.project.models import (
 )
 from core.project.recent import (
     JsonRecentProjectsStore,
-    RecentProjectsStore,
     default_config_dir,
 )
 
@@ -33,7 +32,6 @@ __all__ = [
     "ProjectInfo",
     "ProjectManager",
     "ProteinInfo",
-    "RecentProjectsStore",
     "SampleEntry",
     "WorkflowRun",
     "default_config_dir",

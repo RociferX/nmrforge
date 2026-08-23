@@ -1,6 +1,6 @@
 """内存相位搜索引擎(统一方案,2026-08-17)。
 
-把 workflow.phase_optimize.optimize_phase_sequential 的逐轴搜索/门控/联合
+把旧 optimize_phase_sequential 的逐轴搜索/门控/联合
 复核原样搬到内存:候选谱不再由后端生成,而是对第一遍复型预览数据做频域
 旋转取实部,再用同一套「固定迹线中位数净吸收」评分判断。
 
@@ -13,20 +13,70 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 
 import numpy as np
 
-from workflow.phase_optimize import (
-    PHASE_PLATEAU_TOL,
-    PHASE_REPRODUCIBILITY_TOL,
-    PHASE_SCORE_FLAT_MARGIN,
-    PHASE_SYMMETRY_TOL,
-    _grid_step,
-    _refine_steps,
-    _refine_window,
-    _trace_indices_fixed,
-)
+# 相位评分常量与网格辅助函数(0.2.164 从 workflow.phase_optimize 迁入;
+# 旧暴力优化模块已删除,内存搜索为唯一实现)。
+PHASE_SCORE_FLAT_MARGIN = 0.05
+PHASE_REPRODUCIBILITY_TOL = 10.0
+PHASE_PLATEAU_TOL = 1.0
+PHASE_SYMMETRY_TOL = 2.5
+
+
+def _axis_traces(real: np.ndarray, axis: int) -> np.ndarray:
+    """把谱沿 axis 展开为 (n_trace, axis_len),任意维度通用。"""
+    moved = np.moveaxis(np.asarray(real, dtype=float), axis, -1)
+    return moved.reshape(-1, moved.shape[-1])
+
+
+def _trace_indices_fixed(
+    real: np.ndarray, axis: int, threshold: float = 0.0
+) -> tuple[list[int], list[int]]:
+    """返回沿 axis 的信号迹线下标及每条迹线最强点位置(阈值过滤)。"""
+    traces = _axis_traces(real, axis)
+    indices: list[int] = []
+    positions: list[int] = []
+    for index in range(traces.shape[0]):
+        trace = traces[index]
+        if float(np.max(np.abs(trace))) <= threshold:
+            continue
+        indices.append(index)
+        positions.append(int(np.argmax(np.abs(trace))))
+    return indices, positions
+
+
+def _grid_step(values: tuple[float, ...]) -> float:
+    """等距网格的步长(相邻差的中位数);不足 2 点返回 0。"""
+    if len(values) < 2:
+        return 0.0
+    diffs = sorted(
+        float(values[i + 1]) - float(values[i]) for i in range(len(values) - 1)
+    )
+    return float(diffs[len(diffs) // 2])
+
+
+def _refine_steps(coarse_step: float, final_step: float) -> list[float]:
+    """从粗步长到目标步长的细化序列(约 1/3 递减,最后一级为目标步长)。"""
+    steps: list[float] = []
+    s = float(coarse_step)
+    while True:
+        nxt = s / 3.0
+        if nxt <= final_step:
+            steps.append(float(final_step))
+            break
+        steps.append(nxt)
+        s = nxt
+    return steps
+
+
+def _refine_window(center: float, prev_step: float, new_step: float) -> list[float]:
+    """围绕 center 的细化窗口:覆盖 ±prev_step/2,按 new_step 取点。"""
+    half = prev_step / 2.0
+    n = int(math.ceil(half / new_step))
+    return [center + k * new_step for k in range(-n, n + 1)]
 
 
 def rotate_real(

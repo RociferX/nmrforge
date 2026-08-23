@@ -2,6 +2,9 @@
 
 更新时间：2026-08-11
 
+> 注:本文件为 2026-08-11 快照;0.2.164 起部分模块已清理删除
+> (旧 git 历史保留),以 CHANGELOG / docs/development.md 为准。
+
 ## 一句话定位
 
 面向 Bruker 2D/3D NMR 数据的自动化处理、参数优化与质量控制平台：
@@ -20,9 +23,9 @@
 | core/optimization | 骨架（EarlyStopping/评分已实现） | 参数空间、候选生成、搜索算法、预算 |
 | core/qc | 实现中（Phase 1） | 噪声/SNR/峰检测/相位/基线/伪影/综合质量（峰稳定待 Phase 4） |
 | core/experiments | 模板占位 | 实验模板注册表 + HSQC/HNCA 等先验 |
-| core/reporting | 骨架 | 处理报告、QC 报告、参数溯源 |
+| core/reporting | 已删除(0.2.164) | 处理报告/QC/溯源未接入产品,已清理(旧 git 保留) |
 | backend | 实现中（Phase 1-3） | NMRPipe 后端（bruker -AUTO + 管道 + SMILE + 多段 addNMR 合并）、查找器、csh 运行时 |
-| workflow | 实现中（Phase 1-3） | PipelineRunner + AutoProcessor.run + smile_optimize + param_optimize（后处理参数选优，可选） |
+| workflow | 已实现(0.2.163) | stepwise + phase_routes(unified) + manual + batch + smile/baseline/window 优化 |
 | viewer | 已实现（0.2.6） | 独立谱图查看：Spectrum/SpectrumAxis(ppm 轴)、ContourLayer(Poky 风格多级数/抗锯齿插值)、交互(框选缩放/中键平移/滚轮缩放/长宽比)、独立窗口 |
 | gui | 已重构（0.2.8） | 简洁流程化布局（CryoSPARC 风格）：导入/处理/查看/报告四步；处理分自动化与人工两条路径（人工占位） | 主窗口与五大面板（Dataset/Experiment/Plan/Viewer/Quality） |
 | packaging | 规划 | AppImage 打包：desktop/icon/PyInstaller spec/构建脚本（docs/packaging.md） |
@@ -45,7 +48,7 @@
 ## 已知问题 / 未实现
 
 - 所有 processing / optimization / qc 算法为占位，等待 Phase 1-4 实现。
-- GUI 已重构为流程化布局；自动化处理已接 AutoProcessor；人工处理（参数表格/脚本编辑器）为接口占位，待实现。
+- GUI 已重构为流程化布局；自动化处理走 stepwise/unified；人工路径(fid.com/脚本编辑)已实现(0.2.163-补13/14)。
 - config/nmrforge.local.yaml 不应提交（可能含敏感信息）。
 - SMILE 大网格（>5000 间接点）必须限线程（护栏已内置）；data/12 为 2D NUS 但缺 nuslist，需补采样表后才能处理。
 - numpy 限制 <2.5（nmrglue 0.11 的 dtype 别名问题）。

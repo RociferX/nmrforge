@@ -1,7 +1,7 @@
 """处理流程控制:自动化与人工两条路径。
 
 - 步骤化(契约 v1.2 / G2B-002):``import_data`` → ``generate_fid`` →
-  ``generate_spectrum``,每步独立按钮与状态;旧 ``auto_run`` 保留兼容;
+  ``generate_spectrum``,每步独立按钮与状态;
 - 人工:``manual_fid_com`` / ``run_manual_fid_com`` / ``manual_scripts`` /
   ``run_manual_spectrum`` 对接 workflow/manual(fid.com 与谱图脚本)。
 """
@@ -12,10 +12,8 @@ from collections.abc import Callable
 from pathlib import Path
 
 from core.app_paths import resource_path
-from core.data.bruker_reader import read_dataset
 from core.project import ExperimentEntry, ProjectManager
 from gui.pipeline_state import record_step_success
-from workflow.engine import AutoProcessor
 
 
 def _load_config() -> dict:
@@ -93,52 +91,14 @@ class ProcessingController:
         self._manager = manager
 
     def _backend_instance(self):
-        """惰性创建 ProcessingBackend(与旧 auto_run 共用同一后端)。"""
+        """惰性创建 ProcessingBackend(配置读取统一走 backend.config,0.2.164)。"""
         if self._backend is None:
+            from backend.config import load_config
             from backend.factory import create_backend
 
-            self._backend = create_backend(_load_config())
+            self._backend = create_backend(load_config())
         return self._backend
 
-    # ------------------------------------------------------------------
-    # 自动化路径
-    # ------------------------------------------------------------------
-    def auto_run_sync(self, entry: ExperimentEntry) -> dict:
-        """同步执行自动化处理(供后台线程调用):返回状态/报告/日志。"""
-        from backend.factory import create_backend
-
-        experiment = read_dataset(Path(entry.source))
-        backend = self._backend or create_backend(_load_config())
-        result = AutoProcessor(backend).run(experiment)
-        logs = list(result.logs or [])
-        message = ""
-        if result.quality is not None:
-            message = f"QC: {result.quality.decision.value}"
-        elif result.report is not None:
-            message = f"谱图: {result.report}"
-        return {
-            "status": result.status,
-            "message": message,
-            "logs": logs,
-            "experiment_id": entry.id,
-        }
-
-    def auto_run_async(
-        self,
-        entry: ExperimentEntry,
-        on_done: Callable[[dict], None],
-        on_error: Callable[[str], None],
-    ) -> None:
-        """后台线程运行自动化处理(避免阻塞 UI)。"""
-        import threading
-
-        def worker() -> None:
-            try:
-                on_done(self.auto_run_sync(entry))
-            except Exception as exc:  # noqa: BLE001 - 错误统一回传 UI
-                on_error(f"{type(exc).__name__}: {exc}")
-
-        threading.Thread(target=worker, daemon=True).start()
 
     # ------------------------------------------------------------------
     # 步骤化处理(G2B-002 / 契约 v1.2):导入样品数据 → 生成 FID → 生成谱图
@@ -539,18 +499,10 @@ class ProcessingController:
         return str(list_path)
 
     def _read_experiment(self, exp_id: str, data_id: str):
-        """读取数据对应 Experiment(优先项目内 raw 副本)。"""
-        from core.data.bruker_reader import read_dataset
+        """读取数据对应 Experiment(复用 workflow.stepwise 统一实现,0.2.164)。"""
+        from workflow.stepwise import _read_experiment as _read
 
-        entry = self._manager.data(exp_id, data_id)
-        raw = (
-            Path(entry.raw_dir)
-            if getattr(entry, "raw_dir", "")
-            else Path(entry.source)
-        )
-        if not raw.is_absolute():
-            raw = self._manager.root / raw
-        return read_dataset(raw)
+        return _read(self._manager, exp_id, data_id)
 
     def _linewidth_by_axis(self, experiment) -> dict[str, float]:
         """软件设置「线宽」(核素 → Hz)→ 轴映射(生成谱图 params,0.2.112)。

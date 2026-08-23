@@ -112,6 +112,16 @@ def load_peaks(path: Path | str) -> list[dict[str, Any]]:
     return rows
 
 
+def _poky_num(value: Any) -> float:
+    """Poky 导出数值宽容解析:空串/None/非法值回退 0.0(峰表单元格可留空)。"""
+    if value in (None, ""):
+        return 0.0
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def export_peaks_poky(
     path: Path | str,
     peaks: list[dict[str, Any]],
@@ -137,16 +147,16 @@ def export_peaks_poky(
             label = "?-?-?" if is_3d else "?-?"
         if is_3d:
             shifts = [
-                float(peak.get("F1_shift", 0.0)),
-                float(peak.get("F2_shift", 0.0)),
-                float(peak.get("F3_shift", 0.0)),
+                _poky_num(peak.get("F1_shift", 0.0)),
+                _poky_num(peak.get("F2_shift", 0.0)),
+                _poky_num(peak.get("F3_shift", 0.0)),
             ]
         else:
             shifts = [
-                float(peak.get("N_shift", 0.0)),
-                float(peak.get("H_shift", 0.0)),
+                _poky_num(peak.get("N_shift", 0.0)),
+                _poky_num(peak.get("H_shift", 0.0)),
             ]
-        height = float(peak.get("Intensity", 0.0))
+        height = _poky_num(peak.get("Intensity", 0.0))
         row = [label] + [f"{s:.3f}" for s in shifts] + ["0", f"{height:.3g}", "0"]
         lines.append("  ".join(row))
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")

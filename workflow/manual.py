@@ -20,10 +20,9 @@ from typing import Any
 from backend.bruker_workflow import parse_fid_com
 from backend.runtime import CshRuntime
 from backend.script_generator import render_scripts
-from core.data.bruker_reader import read_dataset, read_dataset_container
 from core.data.internal_data_model import Experiment, SamplingMode
 from core.project import ProjectManager
-from workflow.stepwise import _register_spectrum
+from workflow.stepwise import _read_experiment, _register_spectrum
 
 
 class ManualRunError(Exception):
@@ -64,8 +63,8 @@ def _fid_ready(candidate: Path | None) -> bool:
 
 def _run_quality_check(
     manager: ProjectManager,
+    exp_id: str,
     data_entry: Any,
-    raw_dir: Path,
     work: Path,
     data_id: str,
 ) -> None:
@@ -84,7 +83,7 @@ def _run_quality_check(
     try:
         from workflow.direct_diagnostics import run_direct_diagnostics
 
-        experiment = _read_experiment_manual(manager, data_entry, data_id)
+        experiment = _read_experiment(manager, exp_id, data_id)
         result = run_direct_diagnostics(work, experiment)
         lines = ["== 质量检测(人工谱图准备,复用自动优化终脚本) =="]
         lines += [f"{i + 1}. {report}" for i, report in enumerate(result.reports)]
@@ -100,31 +99,6 @@ def _run_quality_check(
             )
         except OSError:
             pass
-
-
-def _read_experiment_manual(
-    manager: ProjectManager, data_entry: Any, data_id: str
-) -> Experiment:
-    """读 Experiment:分段/容器数据用 read_dataset_container(各段绝对路径),
-    单数据集用 read_dataset;dataset_id 统一为 data_id(与 stepwise 一致)。"""
-    raw_dir = _resolve_raw_dir(manager, data_entry)
-    segments = list(getattr(data_entry, "segments", None) or [])
-    if segments:
-        from core.data.bruker_reader import read_segments
-
-        seg_paths = [
-            Path(s) if Path(s).is_absolute() else manager.root / Path(s)
-            for s in segments
-        ]
-        experiment = read_segments(seg_paths)
-    else:
-        try:
-            experiment = read_dataset_container(raw_dir)[0]
-        except ValueError:
-            # 容器/单数据集均不可解析:回退 read_dataset(报明确错误)
-            experiment = read_dataset(raw_dir)
-    experiment.dataset_id = data_id  # 0.2.163-补10:统一 data_id
-    return experiment
 
 
 def _finish_run(
@@ -167,7 +141,7 @@ def manual_fid_com(
         legacy = raw_dir / "fid.com"
         if legacy.is_file():
             return legacy.read_text(encoding="utf-8", errors="replace")
-        experiment = _read_experiment_manual(manager, data_entry, data_id)
+        experiment = _read_experiment(manager, exp_id, data_id)
         if hasattr(backend, "work_dir"):
             backend.work_dir = str(work)
         resp = backend.convert_to_fid(experiment, raw_dir)
@@ -210,7 +184,7 @@ def run_manual_fid_com(
     raw_dir = _resolve_raw_dir(manager, data_entry)
     work = Path(work_dir) if work_dir else _work_dir(manager, exp_id, data_id)
     work.mkdir(parents=True, exist_ok=True)
-    experiment = _read_experiment_manual(manager, data_entry, data_id)
+    experiment = _read_experiment(manager, exp_id, data_id)
     segments = list(getattr(data_entry, "segments", None) or [])
     if segments:
         if backend is None:
@@ -326,11 +300,11 @@ def manual_scripts(
             name in existing
             for name in (f"{data_id}_process.com", f"{data_id}_nus.com")
         ):
-            _run_quality_check(manager, data_entry, raw_dir, work, data_id)
+            _run_quality_check(manager, exp_id, data_entry, work, data_id)
         return existing
     # fid 缺失:提示先执行「生成 FID」步骤(转换/合并由自动路径完成),
     # 人工途径只是给人调参,不在谱图入口偷跑转换(0.2.163-补14)
-    experiment = _read_experiment_manual(manager, data_entry, data_id)
+    experiment = _read_experiment(manager, exp_id, data_id)
     fid_candidate = (
         Path(data_entry.fid_path)
         if data_entry.fid_path
@@ -360,7 +334,7 @@ def manual_scripts(
             except OSError:
                 pass
     try:
-        experiment = _read_experiment_manual(manager, data_entry, data_id)
+        experiment = _read_experiment(manager, exp_id, data_id)
         rendered = render_scripts(experiment, params)
     except NotImplementedError as exc:
         raise ManualRunError(f"无法渲染处理脚本(采集模式不支持): {exc}") from exc
@@ -412,7 +386,7 @@ def run_manual_spectrum(
     raw_dir = _resolve_raw_dir(manager, data_entry)
     work = Path(work_dir) if work_dir else _work_dir(manager, exp_id, data_id)
     work.mkdir(parents=True, exist_ok=True)
-    experiment = _read_experiment_manual(manager, data_entry, data_id)
+    experiment = _read_experiment(manager, exp_id, data_id)
     workflow_ref = (
         "manual_nus"
         if experiment.sampling.mode is SamplingMode.NUS

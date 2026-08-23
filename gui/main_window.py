@@ -35,6 +35,7 @@ from core.project import (
     ProjectError,
     ProjectManager,
 )
+from core.workspace import WorkspaceManager
 from gui.center_panel import CenterPanel
 from gui.dialogs import (
     ConfirmDialog,
@@ -52,7 +53,6 @@ from gui.pipeline_panel import (
 from gui.processing import ProcessingController
 from gui.project_tree import ProjectTreePanel
 from gui.spectrum_panel import SpectrumPanel
-from gui.workspace import WorkspaceManager
 from workflow.import_workflow import ImportResult
 
 

@@ -100,15 +100,6 @@ def load_processing_defaults(config: dict[str, Any] | None = None) -> dict[str, 
     }
 
 
-def linewidth_hz_for(nucleus: str, config: dict[str, Any] | None = None) -> float:
-    """核素默认估计线宽(Hz);配置覆盖核素默认表。"""
-    key = str(nucleus or "").strip()
-    defaults = load_processing_defaults(config)["linewidth_hz"]
-    return float(
-        defaults.get(key, DEFAULT_LINEWIDTH_HZ.get(key, DEFAULT_LINEWIDTH_HZ[""]))
-    )
-
-
 def resolve_points_per_line(value: Any, config: dict[str, Any] | None = None) -> float:
     """显式值优先,否则配置默认;无效/非正回退 2.0。"""
     if value is not None:
@@ -161,7 +152,6 @@ __all__ = [
     "DEFAULT_POINTS_PER_LINE",
     "DEFAULT_EXT_LO",
     "DEFAULT_EXT_HI",
-    "linewidth_hz_for",
     "load_config",
     "load_processing_defaults",
     "nmrpipe_path",

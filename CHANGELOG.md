@@ -1,6 +1,34 @@
 # 修改记录(历史条目)
 
-## 0.2.163-补15(2026-08-23,总管直接处理)
+## 0.2.164(2026-08-23,清理:新 git 只含活跃代码)
+
+用户要求:重复/不用的代码不再推送到新 git,并从工作目录删除;旧 git
+(当前仓库完整历史 + vm 远端)保留兜底。详见 docs/DECISIONS.md D015。
+
+- 删除完全死代码/未接线骨架:core/reporting、core/optimization
+  {bayesian,candidate,grid,local,parameter_space,early_stopping}、
+  core/processing 原语(保留 axes.py)、calibration、nus_reconstruction、
+  dimension_mapper、axis_plan、peak_stability、format_converter、gui/panels;
+- 合并部分使用实现到新路径:相位常量/辅助迁入 memory_phase_search(删除
+  workflow/phase_optimize、recon_phase_search);配置加载统一
+  backend.config.load_config;Experiment 读取统一 workflow.stepwise
+  (manual/gui 复用);工作区统一 core.workspace(删除 gui/workspace.py 与
+  welcome 兼容层);峰表 IO 统一 core.peaks(gui/peaks_io 去掉回退分支);
+- 删除被取代的旧实现:workflow/engine(AutoProcessor)与 controller
+  auto_run_sync/async、workflow/pipeline+operations 原生 DAG 管线,
+  及专属测试/VM 脚本(recon_phase_search、vm_validate_optimize、
+  vm_validate_recon_phase_equiv);
+- 删除死函数:detect_modes、merge_nuslists、registry.register、
+  linewidth_hz_for、axis_to_logical、RecentProjectsStore、
+  gui.notes.set_*_note、settings.settings_path、dialogs._ext_default、
+  welcome_page.make_welcome_card、phase_search 的 search_phase/
+  search_spectrum_phase/apply_phase_axis/_search_axis;
+- 同步文档:development.md 新增「旧项清理原则」(强制)、DECISIONS D015、
+  scripts/README、README/PROJECT_STATE/architecture/API_CONTRACT/
+  AGENT_PROMPTS/backend-architecture/tasks/current;
+- 测试:全量 pytest + ruff 全绿。
+
+## 0.2.163-补15(2026-08-23,总管直接处理)(2026-08-23,总管直接处理)
 
 开发原则:处理流程改动默认覆盖四种路径:
 - 用户对处理流程提出一个改动时,默认必须同时应用到 2D uniform /

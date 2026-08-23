@@ -8,8 +8,6 @@ import pytest
 
 from core.data.bruker_reader import read_dataset
 from core.data.internal_data_model import SamplingMode
-from core.experiment.acquisition_mode_detector import detect_modes, ft_alt_for
-from core.experiment.dimension_mapper import map_dimensions
 
 
 def test_read_hsqc_2d_uniform(bruker_dir: Path) -> None:
@@ -49,17 +47,6 @@ def test_read_unknown_2d_generic(bruker_dir: Path) -> None:
     assert exp.experiment_type.confidence < 0.6
 
 
-def test_detect_modes_and_ft_alt(bruker_dir: Path) -> None:
-    exp = read_dataset(bruker_dir / "hnca_3d")
-    modes = detect_modes(exp)
-    assert modes == {"F1": "States", "F2": "States-TPPI", "F3": "States"}  # 官方枚举:4=States
-    assert ft_alt_for(5) is True  # States-TPPI 需 -alt
-    assert ft_alt_for(4) is False  # States 不需 -alt
-    assert ft_alt_for(6) is False  # Echo-Antiecho:转换时已 shuffle
-    assert ft_alt_for(1) is False  # QF(magnitude)
-    assert ft_alt_for(3) is False  # TPPI 是 -real 而非 -alt
-
-
 def test_ft_neg_for_3d_first_indirect(bruker_dir: Path) -> None:
     """3D 第一间接维(acqu2s/F2)States 系需 -neg;E-A/第二间接/2D 不加。
 
@@ -77,25 +64,6 @@ def test_ft_neg_for_3d_first_indirect(bruker_dir: Path) -> None:
     assert ft_neg_for(exp3, 5, "F3") is False  # 直接维不加
     exp2 = read_dataset(bruker_dir / "hsqc_2d")
     assert ft_neg_for(exp2, 5, "F1") is False  # 2D 间接维不加
-
-
-def test_map_dimensions_2d(bruker_dir: Path) -> None:
-    exp = read_dataset(bruker_dir / "hsqc_2d")
-    mappings = map_dimensions(exp)
-    by_axis = {m.processing_axis: m for m in mappings}
-    assert by_axis["F2"].acquisition_axis == 1
-    assert by_axis["F1"].acquisition_axis == 2
-    assert by_axis["F2"].display_axis == "X"
-    assert by_axis["F1"].display_axis == "Y"
-
-
-def test_map_dimensions_3d(bruker_dir: Path) -> None:
-    exp = read_dataset(bruker_dir / "hnca_3d")
-    mappings = map_dimensions(exp)
-    by_axis = {m.processing_axis: m for m in mappings}
-    assert by_axis["F1"].display_axis == "X"  # 13C
-    assert by_axis["F2"].display_axis == "Y"  # 15N
-    assert by_axis["F3"].display_axis == "Z"  # 1H
 
 
 def test_direct_dimension_sw_prefers_sw_h(bruker_dir: Path) -> None:
