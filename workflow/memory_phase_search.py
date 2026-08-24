@@ -97,14 +97,32 @@ def rotate_real(
 def _window_nets(
     real: np.ndarray, axis: int, indices: list[int], positions: list[int]
 ) -> list[float]:
-    """每窗签名净吸收 (pos+neg)/total(与旧 _window_metric 同公式)。"""
+    """每窗签名净吸收 (pos+neg)/total(与旧 _window_metric 同公式)。
+
+    正负判定先拉平基线——以峰两侧基线区中位数均值(±6..18 点)为基线
+    水平,窗口减基线后再分正负;基线整体偏移(正或负)不再污染净吸收
+    (0.2.175 用户方案)。
+    """
     moved = np.moveaxis(real, axis, -1)
     traces = moved.reshape(-1, moved.shape[-1])
     nets: list[float] = []
     for index, peak in zip(indices, positions):
         if index < 0 or index >= traces.shape[0]:
             continue
+        n = traces.shape[1]
+        left_base = traces[index, max(0, peak - 18) : max(0, peak - 6)]
+        right_base = traces[index, min(n, peak + 7) : min(n, peak + 19)]
+        if left_base.size >= 4 and right_base.size >= 4:
+            baseline = 0.5 * (
+                float(np.median(left_base)) + float(np.median(right_base))
+            )
+        else:
+            baseline = float(np.median(traces[index]))
         profile = traces[index, max(0, peak - 5) : peak + 6]
+        peak_h = float(np.max(np.abs(profile)))
+        # 基线偏移相对峰高显著(≥1%)才拉平;基线平的谱保持零界
+        if peak_h > 1e-12 and abs(baseline) / peak_h >= 0.01:
+            profile = profile - baseline
         positive = float(np.clip(profile, 0.0, None).sum())
         negative = float(np.clip(profile, None, 0.0).sum())
         total = float(np.abs(profile).sum())

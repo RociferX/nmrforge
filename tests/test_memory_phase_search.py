@@ -97,6 +97,32 @@ def test_score_axis_memory_matches_formula() -> None:
     assert s > 95.0  # 纯吸收谱应接近满分
 
 
+def test_window_nets_flattens_baseline_before_sign_split() -> None:
+    """基线整体偏移(正/负)不再污染净吸收:拉平后吸收峰净吸收≈+1,
+    色散峰≈0;偏移谱与零基线谱评分一致(0.2.175 用户方案恢复)。"""
+    from workflow.memory_phase_search import _window_nets
+
+    base = _complex_axis_2d((64, 48), axis=0)
+    real0 = np.real(base)
+    indices = [
+        i
+        for i in range(real0.shape[0])
+        if float(np.max(np.abs(real0[i, :]))) > 0
+    ]
+    positions = [int(np.argmax(np.abs(real0[i, :]))) for i in indices]
+
+    nets_flat = _window_nets(real0, 0, indices, positions)
+    # 整体抬升基线(峰高约 400,偏移 30 相对显著):拉平后净吸收应接近
+    # 零基线结果;不拉平则整体正偏使 net 虚高
+    shifted = real0 + 30.0
+    nets_shifted = _window_nets(shifted, 0, indices, positions)
+    assert len(nets_flat) == len(nets_shifted) >= 2
+    med_flat = float(np.median(nets_flat))
+    med_shifted = float(np.median(nets_shifted))
+    assert med_flat > 0.5, med_flat
+    assert abs(med_shifted - med_flat) < 0.15, (med_flat, med_shifted)
+
+
 def test_lock_discrete_traces_excludes_clump() -> None:
     """离散尖峰迹线入选,中央混杂大团(宽平台)被排除(用户反馈:混杂峰团
     会带偏相位,只调离散峰)。"""

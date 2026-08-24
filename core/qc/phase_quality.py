@@ -231,22 +231,61 @@ def _peak_window_nets(real: Any, radius: int = 8) -> list[float]:
         # 未校正候选在 F1 方向仍吸收,此前误判高分)
         best: tuple[float, float] | None = None
         for axis in range(arr.ndim):
+            n_axis = arr.shape[axis]
+            center = int(pos[axis])
+            lo = max(0, center - radius)
+            hi = min(n_axis, center + radius + 1)
             sl = tuple(
-                slice(max(0, i - radius), min(s, i + radius + 1))
-                if a == axis
-                else slice(i, i + 1)
+                slice(lo, hi) if a == axis else slice(i, i + 1)
                 for a, (i, s) in enumerate(zip(pos, arr.shape))
             )
             profile = arr[sl].ravel()
             total = float(np.abs(profile).sum())
             if total <= 1e-12:
                 continue
+            # 基线拉平(与优化 _window_nets 同方案):峰窗两侧基线区中位数
+            # 均值作基线水平,剖面减基线后再分正负——基线整体偏移不再
+            # 污染净吸收。1D 合成谱峰选择/基线估计不可靠,保持零界
+            # (0.2.175 注释);2D+ 才拉平,且基线区紧贴峰窗外侧避免重叠
+            prof = profile
+            if arr.ndim >= 2:
+                left_base = arr[
+                    tuple(
+                        slice(
+                            max(0, center - radius - 12),
+                            max(0, center - radius - 1),
+                        )
+                        if a == axis
+                        else slice(i, i + 1)
+                        for a, (i, s) in enumerate(zip(pos, arr.shape))
+                    )
+                ].ravel()
+                right_base = arr[
+                    tuple(
+                        slice(
+                            min(n_axis, center + radius + 2),
+                            min(n_axis, center + radius + 14),
+                        )
+                        if a == axis
+                        else slice(i, i + 1)
+                        for a, (i, s) in enumerate(zip(pos, arr.shape))
+                    )
+                ].ravel()
+                if left_base.size >= 4 and right_base.size >= 4:
+                    baseline = 0.5 * (
+                        float(np.median(left_base)) + float(np.median(right_base))
+                    )
+                else:
+                    baseline = float(np.median(profile))
+                peak_h = float(np.max(np.abs(profile)))
+                if peak_h > 1e-12 and abs(baseline) / peak_h >= 0.01:
+                    prof = profile - baseline
             net = float(
                 (
-                    np.clip(profile, 0.0, None).sum()
-                    + np.clip(profile, None, 0.0).sum()
+                    np.clip(prof, 0.0, None).sum()
+                    + np.clip(prof, None, 0.0).sum()
                 )
-                / total
+                / float(np.abs(prof).sum() + 1e-12)
             )
             if best is None or abs(net) < best[1]:
                 best = (net, abs(net))
