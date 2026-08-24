@@ -572,8 +572,10 @@ def _stage_lines(
                 cfg.update(window[axis] or {})
             wtype = str(cfg.get("type", "sine_bell"))
             if wtype == "gaussian":
+                # NMRPipe:GM 只接受 -g1/-g2/-g3,-lb/-gb 是 GMB(Bruker
+                # 风格高斯窗)参数;GM 会忽略/告警(实测 GM 静默不生效)
                 lines.append(
-                    f"| nmrPipe -fn GM -lb {_fmt(cfg.get('lb', 5.0))} "
+                    f"| nmrPipe -fn GMB -lb {_fmt(cfg.get('lb', 5.0))} "
                     f"-gb {_fmt(cfg.get('gb', 0.1))} \\"
                 )
             elif wtype == "exp":
@@ -675,6 +677,7 @@ def generate_process_script(
     keep_direct_complex: bool = False,
     complex_axes: frozenset[str] | None = None,
     skip_baseline_axes: frozenset[str] | None = None,
+    direct_poly_time: bool = False,
 ) -> str:
     """把处理计划（DAG）翻译为 NMRPipe 管道脚本（直接维 → EXT → TP → 间接维）。
 
@@ -695,6 +698,10 @@ def generate_process_script(
         f"xyz2pipe -in {in_file} -x \\",
     ]
     for index, axis in enumerate(axes):
+        # 直流偏置纠正(POLY -time)作用于直接维时域 FID,必须在窗/FT 之前,
+        # 与 NUS 脚本 step1 一致(0.2.155/0.2.160:只进终跑完整脚本)
+        if direct_poly_time and index == 0:
+            lines.append("| nmrPipe -fn POLY -time " + "\\")
         lines += _stage_lines(
             _axis_stages(plan, axis),
             direct_phase,
@@ -862,8 +869,8 @@ def _window_line(cfg: dict[str, Any] | None) -> str | None:
     """NUS 窗函数行(与 uniform _stage_lines apodization 同映射);None=不插窗。
 
     直接维在 step1 SP(FT 前),间接维在 step3 SP(ZF/FT 前);缺省不插窗
-    (保持历史脚本结构),显式配置才生成。gaussian→GM、exp→EM,其余按
-    sine_bell(off/end/pow/c)。
+    (保持历史脚本结构),显式配置才生成。gaussian→GMB(-lb/-gb,GM 不
+    接受这两个参数)、exp→EM,其余按 sine_bell(off/end/pow/c)。
     """
     if not cfg:
         return None
@@ -871,8 +878,9 @@ def _window_line(cfg: dict[str, Any] | None) -> str | None:
     if wtype in ("none", "off"):
         return None  # 显式无窗(窗优化候选之一),直接维不插 SP
     if wtype == "gaussian":
+        # GMB 接受 -lb/-gb;GM 只认 -g1/-g2/-g3,传 -lb/-gb 会被忽略并告警
         return (
-            f"| nmrPipe -fn GM -lb {_fmt(cfg.get('lb', 5.0))} "
+            f"| nmrPipe -fn GMB -lb {_fmt(cfg.get('lb', 5.0))} "
             f"-gb {_fmt(cfg.get('gb', 0.1))} \\"
         )
     if wtype == "exp":
@@ -1365,8 +1373,9 @@ def render_scripts(
     if experiment.sampling.mode is SamplingMode.NUS:
         nus = dict(params.get("nus", {}) or {})
         direct = (0.0, 0.0)
+        direct_axis = "F3" if experiment.ndim >= 3 else "F2"
         if direct_phase:
-            direct = tuple(direct_phase.get("F2", (0.0, 0.0)))
+            direct = tuple(direct_phase.get(direct_axis, (0.0, 0.0)))
         kwargs: dict[str, Any] = {
             "in_file": f"{experiment.dataset_id}.fid",
             "baseline": expand_baseline(experiment, params.get("baseline")),
@@ -1379,6 +1388,13 @@ def render_scripts(
             "smile_scaling": _as_bool(nus.get("smile_scaling", True)),
             "smile_report": int(nus.get("smile_report", 1)),
             "direct_phase": direct,
+            "phases": params.get("phases"),
+            "window": params.get("window"),
+            "sampling": params.get("sampling"),
+            "extract": _as_bool(params.get("extract", True)),
+            "ext_lo": str(params.get("ext_lo", "10.5")),
+            "ext_hi": str(params.get("ext_hi", "6.5")),
+            "direct_poly_time": _as_bool(params.get("direct_poly_time", False)),
             "zero_fill": params.get("zero_fill"),
             "linewidth_hz": params.get("linewidth_hz"),
             "points_per_line": float(params.get("points_per_line", 4.0)),
@@ -1407,6 +1423,9 @@ def render_scripts(
             ext_lo=str(params.get("ext_lo", "10.5")),
             ext_hi=str(params.get("ext_hi", "6.5")),
             extract=_as_bool(params.get("extract", True)),
+            window=params.get("window"),
+            sampling=params.get("sampling"),
+            direct_poly_time=_as_bool(params.get("direct_poly_time", False)),
         )
     return scripts
 

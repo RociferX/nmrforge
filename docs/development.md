@@ -33,6 +33,22 @@
 执行检查:`tests/test_full_paths.py` 已覆盖四种路径(自动 2D/3D uniform
 + NUS、人工、批量),每次改动后必须全绿。
 
+## 脚本生成约定(强制,0.2.165)
+
+所有 nmrPipe 宏参数必须以目标版本宏定义为准,不允许「看起来对」的写法:
+
+- 高斯窗(gaussian,lb/gb)一律渲染为 `nmrPipe -fn GMB -lb X -gb Y`;
+  GM 只接受 -g1/-g2/-g3,传 -lb/-gb 会被忽略(VM 实测输出与无参 GM
+  字节一致,即高斯窗不生效)或告警
+  (`Arguments 3 to 6 may be unknown or unused:' -lb 5 -gb 0.1 '`);
+- 直流偏置纠正 POLY -time 只进终跑完整脚本(direct_poly_time),首遍
+  复型预览不加(避免带偏直接维相位搜索);uniform 由
+  generate_process_script 的 direct_poly_time 控制,NUS 由
+  generate_2d/3d_nus_script 控制,四条路径必须一致;
+- process() 只有在真正执行 bruker→NMRPipe 转换时才发「开始转换 fid」,
+  复用已转换 fid 时发「复用已转换 fid(跳过转换)」;不得无条件发转换
+  进度(unified 的 preview/joint/候选会多次调用 process)。
+
 ## 旧项清理原则(强制,0.2.164)
 
 改动/新增一个功能时,必须同时清理被其取代或重复的旧实现:

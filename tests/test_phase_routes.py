@@ -97,6 +97,45 @@ class _FakeBackend:
         return True
 
 
+def test_unified_route_uniform_dc_offset_poly_time_into_final(
+    tmp_path: Path, monkeypatch, bruker_dir: Path
+) -> None:
+    """0.2.165:uniform 诊断检测到直流偏置时,终跑参数携带 direct_poly_time
+    (POLY -time),首遍复型预览不加——与 NUS 路径对齐。"""
+    from types import SimpleNamespace
+
+    experiment = read_dataset(bruker_dir / "hsqc_2d")
+    backend = _FakeBackend(tmp_path / "uni_poly_work")
+    work = backend.work
+    monkeypatch.setattr(
+        "workflow.direct_diagnostics.run_direct_diagnostics",
+        lambda wk, exp: SimpleNamespace(
+            reports=["直流偏置: 自动启用 POLY -time"],
+            metrics={},
+            apply_poly_time=True,
+            repaired_badpoints=0,
+            backup_dir="",
+        ),
+    )
+
+    def fake_read(path: str, unpack_axis: int | None = None):
+        name = Path(path).name
+        if "F1" in name:
+            return _synthetic_preview(0, -25.0)
+        if "F2" in name:
+            return _synthetic_preview(1, -35.0)
+        return _synthetic_preview(0, 0.0)
+
+    monkeypatch.setattr(routes, "_read_complex_preview", fake_read)
+    result = routes.unified_route(experiment, backend, work_dir=work)
+    preview1, preview2, _joint, final = backend.process_calls
+    for preview in (preview1, preview2):
+        assert preview[2].get("direct_poly_time") in (None, False)
+    assert final[2]["direct_poly_time"] is True
+    assert result["diagnostics"]["apply_poly_time"] is True
+    assert any("POLY -time" in r for r in result["diagnostics"]["reports"])
+
+
 def test_unified_route_uniform_order_and_phases(
     tmp_path: Path, monkeypatch, bruker_dir: Path
 ) -> None:

@@ -241,7 +241,9 @@ class NMRPipeBackend:
                 progress(msg)
 
         converted = True
-        _progress("开始转换 fid")
+        # 0.2.165:只有真正执行转换才发「开始转换 fid」;复用已转换产物时
+        # 发「复用已转换 fid」,避免 preview/joint/候选等多次 process 调用
+        # 反复显示误导性的转换进度
         if experiment.segments:
             merged_ready = (
                 (work / "merged" / "fid").is_dir()
@@ -250,7 +252,9 @@ class NMRPipeBackend:
             in_file = "merged/fid/test%03d.fid"
             if merged_ready:
                 logs.append("复用已转换 fid(跳过转换)")
+                _progress("复用已转换 fid(跳过转换)")
             else:
+                _progress("开始转换 fid")
                 converted, convert_logs = self._convert_segments(
                     runtime, experiment, work, []
                 )
@@ -259,7 +263,9 @@ class NMRPipeBackend:
             in_file = f"{experiment.dataset_id}.fid"
             if (work / in_file).is_file():
                 logs.append("复用已转换 fid(跳过转换)")
+                _progress("复用已转换 fid(跳过转换)")
             else:
+                _progress("开始转换 fid")
                 converted, convert_logs = self._convert(runtime, experiment, raw, work)
                 logs += convert_logs
                 # 0.2.81:bruker 切片式输出(fid/test%03d.fid,三维 TD 正确时),
@@ -285,6 +291,11 @@ class NMRPipeBackend:
         preview_axis = proc_params.get("preview_axis")
         if preview_axis:
             direct_phase_search = False
+        # 0.2.160:首遍复型预览不加 POLY -time(避免带偏直接维相位搜索);
+        # POLY -time 只进终跑完整脚本(params_final 的 direct_poly_time)
+        direct_poly_time = _as_bool(proc_params.get("direct_poly_time", False))
+        if preview_axis:
+            direct_poly_time = False
         if direct_phase_override:
             direct_phase = dict(direct_phase_override)
             logs.append(f"直接维相位覆盖: {direct_phase}")
@@ -357,6 +368,7 @@ class NMRPipeBackend:
             script_name=script_name,
             keep_direct_complex=_as_bool(proc_params.get("keep_direct_complex", False)),
             preview_axis=preview_axis,
+            direct_poly_time=direct_poly_time,
         )
         logs += process_logs
         if not processed:
@@ -380,6 +392,7 @@ class NMRPipeBackend:
                 ),
                 "window": window,
                 "direct_phase": direct_phase,
+                "direct_poly_time": direct_poly_time,
             },
         }
 
@@ -2163,6 +2176,7 @@ class NMRPipeBackend:
         script_name: str | None = None,
         keep_direct_complex: bool = False,
         preview_axis: str | None = None,
+        direct_poly_time: bool = False,
     ) -> tuple[bool, list[str], Path]:
         """生成并执行 NMRPipe 处理管道（输出 ft2/ft3）。"""
         logs: list[str] = []
@@ -2201,6 +2215,7 @@ class NMRPipeBackend:
                 ext_hi=ext_hi,
                 sampling=sampling,
                 keep_direct_complex=keep_direct_complex,
+                direct_poly_time=direct_poly_time,
             )
         process_com = work / (
             script_name or f"{experiment.dataset_id}_process.com"

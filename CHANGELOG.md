@@ -1,5 +1,33 @@
 # 修改记录(历史条目)
 
+## 0.2.165(2026-08-24,uniform/NUS 流程对齐 + GMB 高斯窗修复)
+
+用户报告:2D uniform 检测到直流偏置后终跑脚本未加 POLY -time;运行日志
+出现 `Arguments 3 to 6 may be unknown or unused:' -lb 5 -gb 0.1 '`;
+生成谱图过程反复出现误导性的「开始转换 fid」。
+
+- uniform 2D/3D 终跑 POLY -time 接线:generate_process_script 新增
+  direct_poly_time(直接维时域 FID 最前插入 `POLY -time`,与 NUS step1
+  同构),nmrpipe_backend.process/_process 从 params 透传;首遍复型预览
+  保持不加(0.2.160 设计,避免带偏直接维相位搜索);effective_params
+  回写 direct_poly_time;
+- GMB 高斯窗修复(NMRPipe 宏语义):gaussian 窗此前渲染成 `GM -lb/-gb`
+  ——GM 只接受 -g1/-g2/-g3,-lb/-gb 是 GMB(Bruker 风格高斯窗)参数;
+  VM 实测 GM 静默忽略该参数(输出与无参 GM 字节一致),即高斯窗实际
+  从未生效,部分版本报 `Arguments 3 to 6 may be unknown or unused:
+  ' -lb 5 -gb 0.1 '`。现 _stage_lines/_window_line 统一渲染
+  `GMB -lb X -gb Y`;
+- process() 转换进度语义:只有真正执行 bruker 转换才发「开始转换 fid」,
+  复用已转换产物发「复用已转换 fid(跳过转换)」——unified 流程的
+  preview/joint/窗候选多次 process 调用不再反复显示误导性转换进度;
+- render_scripts 手动渲染路径补齐透传:uniform/NUS 补 window、sampling、
+  direct_poly_time、extract/ext_lo/ext_hi(3D NUS 直接维相位取 F3 而非
+  固定 F2),NUS 补 phases;与自动终跑脚本对齐;
+- 测试:test_direct_diagnostics 增加 uniform 2D/3D POLY -time 渲染断言;
+  test_script_schema 增加 render_scripts window/direct_poly_time 透传;
+  test_phase_routes 增加 uniform 直流偏置→终跑 direct_poly_time 路由;
+  GM→GMB 断言更新;全量 pytest 661 passed + ruff 全绿。
+
 ## 0.2.164-补1(2026-08-23,批量执行只保留新版本)
 
 用户要求:批量执行留下新版本——数据组(schema 1.4)+ workflow.batch.run_batch

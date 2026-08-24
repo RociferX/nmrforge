@@ -157,8 +157,10 @@ def test_render_poly_time_inserted_before_sp(bruker_dir: Path) -> None:
     from backend.script_generator import (
         generate_2d_nus_script,
         generate_3d_nus_script,
+        generate_process_script,
     )
     from core.data.bruker_reader import read_dataset
+    from core.planning.method_selector import select_method
 
     exp2 = read_dataset(bruker_dir / "nus_2d")
     exp3 = read_dataset(bruker_dir / "nus_3d")
@@ -170,3 +172,21 @@ def test_render_poly_time_inserted_before_sp(bruker_dir: Path) -> None:
     assert s.index("| nmrPipe -fn POLY -time") < s.index("| nmrPipe -fn SP")
     s = generate_3d_nus_script(exp3, direct_poly_time=True, **b3)
     assert s.index("| nmrPipe -fn POLY -time") < s.index("| nmrPipe -fn SP")
+    # 0.2.165:uniform 2D/3D 终跑完整脚本同样在直接维 SP 前插入 POLY -time
+    # (与 NUS step1 对齐);默认不插(首遍预览面,0.2.160 设计)
+    u2 = dict(in_file="e.fid", out_file="e.ft2")
+    u3 = dict(in_file="e.fid", out_file="e.ft3")
+    assert "POLY -time" not in generate_process_script(
+        exp2, select_method(exp2), **u2
+    )
+    assert "POLY -time" not in generate_process_script(
+        exp3, select_method(exp3), **u3
+    )
+    s2 = generate_process_script(
+        exp2, select_method(exp2), direct_poly_time=True, **u2
+    )
+    assert s2.index("| nmrPipe -fn POLY -time") < s2.index("| nmrPipe -fn SP")
+    s3 = generate_process_script(
+        exp3, select_method(exp3), direct_poly_time=True, **u3
+    )
+    assert s3.index("| nmrPipe -fn POLY -time") < s3.index("| nmrPipe -fn SP")
