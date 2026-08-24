@@ -726,15 +726,15 @@ def test_finalize_nus_window_param_passthrough(
     resp = backend.finalize_nus(
         experiment,
         work_dir=work,
-        params={"window": {"F1": {"type": "gaussian", "lb": 3.0}}},
+        params={"window": {"F1": {"type": "gaussian", "g1": 3.0}}},
     )
     assert resp["success"] is True, resp
     script = (work / f"{experiment.dataset_id}_finalize.com").read_text(
         encoding="utf-8"
     )
-    assert "| nmrPipe -fn GMB -lb 3 -gb 0.1 \\" in script
+    assert "| nmrPipe -fn GM -g1 3 -g2 15 \\" in script
     lines = script.splitlines()
-    gm = next(i for i, line in enumerate(lines) if "GMB -lb 3" in line)
+    gm = next(i for i, line in enumerate(lines) if "GM -g1 3" in line)
     zf = next(
         i for i, line in enumerate(lines)
         if "| nmrPipe -fn ZF" in line and i > gm

@@ -583,7 +583,7 @@ def test_effective_td_2d_nus_complex_grid(bruker_dir: Path) -> None:
 def test_process_script_window_and_zero_fill_overrides(
     bruker_dir: Path,
 ) -> None:
-    """窗函数/填零覆盖:GMB 窗替换 SP;F1 不填零时省略 ZF 行。"""
+    """窗函数/填零覆盖:GM(g1/g2)窗替换 SP;F1 不填零时省略 ZF 行。"""
     exp = read_dataset(bruker_dir / "hsqc_2d")
     plan = select_method(exp)
     from backend.script_generator import generate_process_script
@@ -593,10 +593,10 @@ def test_process_script_window_and_zero_fill_overrides(
         plan,
         in_file="a.fid",
         out_file="a.ft2",
-        window={"F2": {"type": "gaussian", "lb": 4.0, "gb": 0.2}},
+        window={"F2": {"type": "gaussian", "g1": 4.0, "g2": 0.2}},
         zero_fill={"F1": {"mode": "none"}},
     )
-    assert "| nmrPipe -fn GMB -lb 4 -gb 0.2 \\" in script
+    assert "| nmrPipe -fn GM -g1 4 -g2 0.2 \\" in script
     assert script.count("| nmrPipe -fn SP") == 1  # F1 仍是默认 SP
     # F1 不填零:FT 后无 ZF 行(F2 仍保留默认 2×TD 填零)
     assert script.count("| nmrPipe -fn ZF") == 1
@@ -741,12 +741,12 @@ def test_3d_nus_script_window(bruker_dir: Path) -> None:
     script = generate_3d_nus_script(
         exp, in_file="e.fid", nuslist="nuslist", out_file="e.ft3",
         window={
-            "F3": {"type": "gaussian", "lb": 3.0, "gb": 0.2},
+            "F3": {"type": "gaussian", "g1": 3.0, "g2": 0.2},
             "F2": {"type": "sine_bell_squared"},
             "F1": {"type": "sine_bell", "off": 0.3, "end": 0.9},
         },
     )
-    assert "| nmrPipe -fn GMB -lb 3 -gb 0.2 \\" in script
+    assert "| nmrPipe -fn GM -g1 3 -g2 0.2 \\" in script
     assert "| nmrPipe -fn SP -off 0.45 -end 0.95 -pow 2 -c 0.5 \\" in script
     assert "| nmrPipe -fn SP -off 0.3 -end 0.9 -pow 1 -c 0.5 \\" in script
     lines = script.splitlines()
@@ -763,7 +763,7 @@ def test_3d_nus_script_window(bruker_dir: Path) -> None:
     plain = generate_3d_nus_script(
         exp, in_file="e.fid", nuslist="nuslist", out_file="e.ft3"
     )
-    assert "| nmrPipe -fn GMB" not in plain
+    assert "| nmrPipe -fn GM" not in plain
     assert plain.count("| nmrPipe -fn SP") == 1  # 仅 step1 直接维默认窗
 
 
@@ -776,11 +776,11 @@ def test_nus_finalize_script_3d_window(bruker_dir: Path) -> None:
         phases={"F2": (10.0, -5.0), "F1": (20.0, 3.0)},
         window={
             "F2": {"type": "sine_bell"},
-            "F1": {"type": "gaussian", "lb": 4.0},
+            "F1": {"type": "gaussian", "g1": 4.0},
         },
     )
     assert "| nmrPipe -fn SP -off 0.45 -end 0.95 -pow 1 -c 0.5 \\" in script
-    assert "| nmrPipe -fn GMB -lb 4 -gb 0.1 \\" in script
+    assert "| nmrPipe -fn GM -g1 4 -g2 15 \\" in script
     lines = script.splitlines()
     sp_idx = next(i for i, line in enumerate(lines) if "pow 1 -c 0.5" in line)
     zf_idx = next(
@@ -792,7 +792,7 @@ def test_nus_finalize_script_3d_window(bruker_dir: Path) -> None:
         if "| nmrPipe -fn FT" in line and i > zf_idx
     )
     assert sp_idx < zf_idx < ft_idx
-    gm_idx = next(i for i, line in enumerate(lines) if "GMB -lb 4" in line)
+    gm_idx = next(i for i, line in enumerate(lines) if "GM -g1 4" in line)
     zf2_idx = next(
         i for i, line in enumerate(lines)
         if "| nmrPipe -fn ZF" in line and i > gm_idx

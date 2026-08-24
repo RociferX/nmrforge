@@ -43,6 +43,77 @@ def format_opt_mode_map(cfg: Any) -> str:
     return " ".join(parts) or "默认"
 
 
+def spectrum_quality_report_lines(
+    spectrum_path: str,
+    *,
+    optimization_logs: list[str] | None = None,
+    axis_names: list[str] | None = None,
+) -> list[str]:
+    """◆ 最终谱图质量 分节(0.2.169-补):综合判定 + 分项等级分数 +
+    基线指标(最差存储轴)+ 检查说明 + 基线不平原因。日志末尾汇总与
+    pipeline 参数报告共用;谱不可读/评估失败返回单行说明。"""
+    import numpy as np
+
+    def _grade(score: float) -> str:
+        return "良好" if score >= 75.0 else ("需注意" if score >= 50.0 else "较差")
+
+    try:
+        import nmrglue as ng
+
+        from core.qc import baseline_quality, spectrum_quality
+
+        _dic, data = ng.pipe.read(str(spectrum_path))
+        arr = np.asarray(data)
+        q = spectrum_quality.evaluate(arr)
+        comps = q.score.components
+        decision_label = {
+            "accept": "✓ 接受",
+            "warning": "⚠ 警告",
+            "rollback": "✗ 不合格",
+        }.get(str(q.decision.value), str(q.decision.value))
+        lines = ["◆ 最终谱图质量(处理完成后的评价)"]
+        lines.append(f"   综合判定: {decision_label}(综合分 {q.score.overall:.1f})")
+        for label, key in (
+            ("信噪比", "snr"),
+            ("相位", "phase"),
+            ("基线", "baseline"),
+            ("伪影", "artifact"),
+        ):
+            score = float(getattr(comps, key))
+            lines.append(f"   - {label}: {_grade(score)}({score:.0f} 分)")
+        worst_idx, bm = baseline_quality.worst_axis(arr)
+        axis_label = ""
+        if axis_names and 0 <= worst_idx < len(axis_names):
+            axis_label = f"(最差轴 {axis_names[worst_idx]})"
+        elif worst_idx >= 0:
+            axis_label = f"(最差存储轴 #{worst_idx + 1})"
+        lines.append(
+            f"       基线指标{axis_label}: 斜率 {bm.slope * 100:.1f}%  "
+            f"偏移 {bm.offset * 100:.1f}%  弯曲 {bm.curvature * 100:.1f}%  "
+            f"条纹 {bm.stripe:.2f}"
+        )
+        if q.reasons:
+            lines.append("   检查说明:")
+            for reason in q.reasons:
+                lines.append(f"     · {reason}")
+        if bm.needs_correction:
+            opt_lines = [
+                line
+                for line in (optimization_logs or [])
+                if "基线" in line or line[:3] in ("F1:", "F2:", "F3:")
+            ]
+            opt_summary = "；".join(opt_lines) if opt_lines else "无基线优化记录"
+            lines.append(
+                "   基线不平原因: " + opt_summary
+                + "；质量评估基于终跑谱,基线优化基于 joint 谱逐维内存评分,"
+                "两基准不同;窗函数/填零会改变基线形态,且优化候选增益≤0.5 "
+                "或条纹否决时保持 off(不校正)。"
+            )
+        return lines
+    except Exception as exc:  # noqa: BLE001 - 质量评估失败不阻断报告
+        return [f"◆ 最终谱图质量: 评估跳过({exc})"]
+
+
 def format_optimization_report(params: dict) -> list[str]:
     """统一优化结果报告行(带两空格缩进,0.2.157)。"""
     lines: list[str] = []

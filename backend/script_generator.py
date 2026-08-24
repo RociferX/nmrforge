@@ -572,11 +572,14 @@ def _stage_lines(
                 cfg.update(window[axis] or {})
             wtype = str(cfg.get("type", "sine_bell"))
             if wtype == "gaussian":
-                # NMRPipe:GM 只接受 -g1/-g2/-g3,-lb/-gb 是 GMB(Bruker
-                # 风格高斯窗)参数;GM 会忽略/告警(实测 GM 静默不生效)
+                # NMRPipe:GM 只接受 -g1/-g2/-g3(0.2.170)。历史问题:
+                # GM -lb/-gb 被静默忽略(窗不生效);GMB -lb/-gb 实测窗在
+                # FID 尾部爆炸放大(0.2.165 用户反馈谱图完全不对)。统一用
+                # NMRPipe 原生 g1/g2(缺省 8/15,实测窗温和:峰值约 1.2,
+                # 尾部平滑衰减);lb/gb(Bruker 语义)不再直接映射。
                 lines.append(
-                    f"| nmrPipe -fn GMB -lb {_fmt(cfg.get('lb', 5.0))} "
-                    f"-gb {_fmt(cfg.get('gb', 0.1))} \\"
+                    f"| nmrPipe -fn GM -g1 {_fmt(cfg.get('g1', 8.0))} "
+                    f"-g2 {_fmt(cfg.get('g2', 15.0))} \\"
                 )
             elif wtype == "exp":
                 lines.append(f"| nmrPipe -fn EM -lb {_fmt(cfg.get('lb', 5.0))} \\")
@@ -869,8 +872,8 @@ def _window_line(cfg: dict[str, Any] | None) -> str | None:
     """NUS 窗函数行(与 uniform _stage_lines apodization 同映射);None=不插窗。
 
     直接维在 step1 SP(FT 前),间接维在 step3 SP(ZF/FT 前);缺省不插窗
-    (保持历史脚本结构),显式配置才生成。gaussian→GMB(-lb/-gb,GM 不
-    接受这两个参数)、exp→EM,其余按 sine_bell(off/end/pow/c)。
+    (保持历史脚本结构),显式配置才生成。gaussian→GM(-g1/-g2,0.2.170)、
+    exp→EM,其余按 sine_bell(off/end/pow/c)。
     """
     if not cfg:
         return None
@@ -878,10 +881,11 @@ def _window_line(cfg: dict[str, Any] | None) -> str | None:
     if wtype in ("none", "off"):
         return None  # 显式无窗(窗优化候选之一),直接维不插 SP
     if wtype == "gaussian":
-        # GMB 接受 -lb/-gb;GM 只认 -g1/-g2/-g3,传 -lb/-gb 会被忽略并告警
+        # 0.2.170:GM -g1/-g2 为 NMRPipe 原生高斯窗参数;GMB -lb/-gb 实测
+        # 尾部爆炸,GM -lb/-gb 被忽略,均不可用
         return (
-            f"| nmrPipe -fn GMB -lb {_fmt(cfg.get('lb', 5.0))} "
-            f"-gb {_fmt(cfg.get('gb', 0.1))} \\"
+            f"| nmrPipe -fn GM -g1 {_fmt(cfg.get('g1', 8.0))} "
+            f"-g2 {_fmt(cfg.get('g2', 15.0))} \\"
         )
     if wtype == "exp":
         return f"| nmrPipe -fn EM -lb {_fmt(cfg.get('lb', 5.0))} \\"

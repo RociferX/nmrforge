@@ -64,10 +64,10 @@
 
 所有 nmrPipe 宏参数必须以目标版本宏定义为准,不允许「看起来对」的写法:
 
-- 高斯窗(gaussian,lb/gb)一律渲染为 `nmrPipe -fn GMB -lb X -gb Y`;
-  GM 只接受 -g1/-g2/-g3,传 -lb/-gb 会被忽略(VM 实测输出与无参 GM
-  字节一致,即高斯窗不生效)或告警
-  (`Arguments 3 to 6 may be unknown or unused:' -lb 5 -gb 0.1 '`);
+- 高斯窗(gaussian)一律渲染为 `nmrPipe -fn GM -g1 X -g2 Y`(0.2.170,
+  NMRPipe 原生参数,缺省 g1=8/g2=15)。禁止 GMB -lb/-gb(实测窗在 FID
+  尾部爆炸放大,谱图完全不对)与 GM -lb/-gb(被静默忽略,窗不生效);
+  lb/gb(Bruker 语义)不再直接映射;
 - 直流偏置纠正 POLY -time 只进终跑完整脚本(direct_poly_time),首遍
   复型预览不加(避免带偏直接维相位搜索);uniform 由
   generate_process_script 的 direct_poly_time 控制,NUS 由
@@ -101,7 +101,8 @@
 - 数据质量诊断(处理前)的日志必须排在流程最开头(uniform 与 NUS 一致),
   不得延后到优化之后;
 - 质量评估报基线不平时必须对照基线优化结果输出原因(评估基准差异/
-  保持 off 门槛),不得只报「建议基线校正」;
+  保持 off 门槛),不得只报「建议基线校正」;基线评估逐存储轴取最差并
+  标注最差轴(0.2.170),不得只检最后一个轴;
 - 报告内容面向最终用户:用 ✓/⚠/✗、良好/需注意/较差、明确建议,避免
   只有技术指标没有结论。
 

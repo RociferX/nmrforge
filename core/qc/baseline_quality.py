@@ -58,14 +58,21 @@ def stripe_penalty(data: Any, axis: int | None = None) -> float:
     return float(np.clip((ratio - 8.0) / 48.0, 0.0, 0.5))
 
 
-def evaluate(data: Any) -> BaselineQuality:
-    """评估基线质量（沿最后一个轴取两端与中部均值,并含条纹罚）。"""
+def evaluate(data: Any, axis: int | None = None) -> BaselineQuality:
+    """评估基线质量(沿指定轴,缺省最后一个轴;取两端与中部均值,含条纹罚)。
+
+    0.2.170:支持指定轴——谱图质量评估对每个存储轴分别评估取最差,
+    不再只检最后一个轴(2D 间接维/3D F2、F3 的基线不平此前会漏报)。
+    """
     arr = np.asarray(data)
     real = np.real(arr)
     max_abs = float(np.max(np.abs(real))) + 1e-12
-    axis = real.ndim - 1
+    axis = real.ndim - 1 if axis is None else int(axis)
     n = real.shape[axis]
     edge = max(int(n * 0.08), 2)
+    if n < 2 * edge:
+        # 轴太短无法取两端/中部带,视为无基线问题
+        return BaselineQuality(score=100.0)
     left = float(np.mean(np.take(real, np.arange(edge), axis=axis)))
     right = float(np.mean(np.take(real, np.arange(n - edge, n), axis=axis)))
     center = slice(n // 2 - edge, n // 2 + edge)
@@ -101,3 +108,20 @@ def evaluate(data: Any) -> BaselineQuality:
         score=score,
         needs_correction=bool(needs),
     )
+
+
+def worst_axis(data: Any) -> tuple[int, BaselineQuality]:
+    """逐存储轴评估基线取最差(score 最低),返回 (轴号, 质量)。
+
+    0.2.170:谱图质量评估用最差轴代表整谱基线水平,避免单轴漏报。
+    """
+    arr = np.asarray(data)
+    real = np.real(arr)
+    worst_idx, worst = -1, None
+    for axis in range(real.ndim):
+        m = evaluate(arr, axis=axis)
+        if worst is None or m.score < worst.score:
+            worst, worst_idx = m, axis
+    if worst is None:
+        worst = evaluate(arr)
+    return worst_idx, worst

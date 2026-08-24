@@ -971,7 +971,7 @@ def test_append_final_summary_readable_report(tmp_path: Path) -> None:
     assert "◆ 最终谱图质量" in text
     assert "综合判定:" in text
     assert "- 基线: 需注意" in text or "- 基线: 较差" in text
-    assert "基线指标:" in text
+    assert "基线指标" in text
     assert "基线不平原因:" in text
     assert "保持 off" in text
     assert "◆ 数据质量诊断" in text

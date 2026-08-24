@@ -425,12 +425,42 @@ def _format_params(params: dict) -> str:
     return ", ".join(f"{key}={value}" for key, value in sorted(params.items()))
 
 
-def _spectrum_param_report(params: dict) -> str:
-    """生成谱图参数报告(0.2.157):与日志末尾汇总共用统一格式,
-    数据质量诊断直接显示详情。"""
-    from workflow.optimization_report import format_optimization_report
+def _spectrum_param_report(
+    params: dict, spectrum_path: str | None = None
+) -> str:
+    """生成谱图参数报告(0.2.169-补 可读化):◆ 数据质量诊断 + ◆ 处理
+    参数与优化;spectrum_path 可读时附加 ◆ 最终谱图质量(与日志末尾
+    汇总共用 spectrum_quality_report_lines)。"""
+    from workflow.optimization_report import (
+        format_optimization_report,
+        spectrum_quality_report_lines,
+    )
 
-    lines = format_optimization_report(params)
+    lines: list[str] = []
+    reports = list((params.get("diagnostics") or {}).get("reports") or [])
+    lines.append("◆ 数据质量诊断(处理前的数据监测,FID 检查)")
+    if reports:
+        auto_count = int(
+            bool((params.get("diagnostics") or {}).get("apply_poly_time"))
+        )
+        auto_count += int(
+            int(
+                (params.get("diagnostics") or {}).get("repaired_badpoints") or 0
+            )
+            > 0
+        )
+        suffix = f"(已自动处理 {auto_count} 项)" if auto_count else "(未自动处理)"
+        lines.append(f"   ⚠ 检出 {len(reports)} 项问题 {suffix}")
+        for i, report in enumerate(reports, 1):
+            lines.append(f"     {i}. {report}")
+    else:
+        lines.append("   ✓ 未检出直流偏置、尖峰坏点、首点异常、宽带峰或漂移")
+    if spectrum_path:
+        lines += spectrum_quality_report_lines(spectrum_path)
+    lines.append("◆ 处理参数与优化")
+    lines += format_optimization_report(
+        {k: v for k, v in params.items() if k != "diagnostics"}
+    )
     return "\n".join(lines) if lines else "  (无参数记录)"
 
 
@@ -1005,7 +1035,12 @@ class PipelinePanel(QWidget):
                 if run.params:
                     params = dict(run.params)
                     lines.append("参数报告(生成谱图实际生效参数):")
-                    lines.append(_spectrum_param_report(run.params))
+                    lines.append(
+                        _spectrum_param_report(
+                            run.params,
+                            str((run.outputs or {}).get("spectrum_path") or ""),
+                        )
+                    )
             else:
                 if run.outputs:
                     outs = " | ".join(f"{k}={v}" for k, v in run.outputs.items())

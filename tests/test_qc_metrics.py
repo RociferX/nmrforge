@@ -118,6 +118,17 @@ def test_baseline_quality_flags_ramp() -> None:
     assert quality.needs_correction is True
 
 
+def test_baseline_quality_worst_axis_flags_other_dimension() -> None:
+    """0.2.170:谱图质量基线按全轴取最差——斜坡在非最后存储轴也检出。"""
+    ramp = np.zeros((96, 64), dtype=np.complex128)
+    ramp[:, :] = np.linspace(0.0, 10.0, 96)[:, None]  # 斜坡沿轴 0(F1)
+    quality = baseline_quality.evaluate(ramp, axis=0)
+    assert quality.needs_correction is True
+    worst_idx, worst = baseline_quality.worst_axis(ramp)
+    assert worst_idx == 0
+    assert worst.needs_correction is True
+
+
 def test_artifact_detection_isolated_peaks() -> None:
     spec = _synthetic_spectrum() + 0j
     report = artifact_detection.detect(spec)

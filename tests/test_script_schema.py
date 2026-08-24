@@ -51,17 +51,17 @@ def test_render_scripts_nus(bruker_dir: Path) -> None:
 
 def test_render_scripts_uniform_window_poly_time(bruker_dir: Path) -> None:
     """0.2.165:render_scripts 手动路径透传 window/direct_poly_time(uniform),
-    与自动终跑脚本一致(GMB 高斯窗 + POLY -time 在 SP 前)。"""
+    与自动终跑脚本一致(GM g1/g2 高斯窗 + POLY -time 在 SP 前)。"""
     experiment = read_dataset(bruker_dir / "hsqc_2d")
     scripts = render_scripts(
         experiment,
         {
-            "window": {"F2": {"type": "gaussian", "lb": 4.0, "gb": 0.2}},
+            "window": {"F2": {"type": "gaussian", "g1": 4.0, "g2": 0.2}},
             "direct_poly_time": True,
         },
     )
     proc = scripts["process.com"]
-    assert "| nmrPipe -fn GMB -lb 4 -gb 0.2 \\" in proc
+    assert "| nmrPipe -fn GM -g1 4 -g2 0.2 \\" in proc
     assert proc.index("| nmrPipe -fn POLY -time") < proc.index("| nmrPipe -fn SP")
 
 
@@ -72,14 +72,14 @@ def test_render_scripts_nus_window_poly_time(bruker_dir: Path) -> None:
         experiment,
         {
             "nus": {"nsigma": 5.0, "thresh": 0.95},
-            "window": {"F2": {"type": "gaussian", "lb": 3.0, "gb": 0.2}},
+            "window": {"F2": {"type": "gaussian", "g1": 3.0, "g2": 0.2}},
             "direct_poly_time": True,
         },
     )
     nus = scripts["nus.com"]
-    assert "| nmrPipe -fn GMB -lb 3 -gb 0.2 \\" in nus
+    assert "| nmrPipe -fn GM -g1 3 -g2 0.2 \\" in nus
     # 2D NUS 高斯窗替换默认 SP:POLY -time 应位于窗(时域最前)之前
-    assert nus.index("| nmrPipe -fn POLY -time") < nus.index("| nmrPipe -fn GMB")
+    assert nus.index("| nmrPipe -fn POLY -time") < nus.index("| nmrPipe -fn GM")
 
 
 

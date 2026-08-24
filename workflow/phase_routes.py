@@ -191,61 +191,21 @@ def _append_final_summary(
       ◆ 数据质量诊断 —— 处理前 FID 监测结论(检出 N 项/已自动处理 M 项)。
       ◆ 处理参数与优化 —— 与 pipeline 参数报告共用 format_optimization_report。
     全部行同时经 progress 进入 GUI 日志面板。"""
-    from workflow.optimization_report import format_optimization_report
-
-    def _grade(score: float) -> str:
-        return "良好" if score >= 75.0 else ("需注意" if score >= 50.0 else "较差")
+    from workflow.optimization_report import (
+        format_optimization_report,
+        spectrum_quality_report_lines,
+    )
 
     lines: list[str] = ["== 谱图质量与数据质量报告 =="]
-    try:
-        import nmrglue as ng
-
-        from core.qc import baseline_quality, spectrum_quality
-
-        _dic, data = ng.pipe.read(str(spectrum_path))
-        arr = np.asarray(data)
-        q = spectrum_quality.evaluate(arr)
-        comps = q.score.components
-        decision_label = {
-            "accept": "✓ 接受",
-            "warning": "⚠ 警告",
-            "rollback": "✗ 不合格",
-        }.get(str(q.decision.value), str(q.decision.value))
-        lines.append("◆ 最终谱图质量(处理完成后的评价)")
-        lines.append(f"   综合判定: {decision_label}(综合分 {q.score.overall:.1f})")
-        for label, key in (
-            ("信噪比", "snr"),
-            ("相位", "phase"),
-            ("基线", "baseline"),
-            ("伪影", "artifact"),
-        ):
-            score = float(getattr(comps, key))
-            lines.append(f"   - {label}: {_grade(score)}({score:.0f} 分)")
-        bm = baseline_quality.evaluate(arr)
-        lines.append(
-            f"       基线指标: 斜率 {bm.slope * 100:.1f}%  偏移 "
-            f"{bm.offset * 100:.1f}%  弯曲 {bm.curvature * 100:.1f}%  "
-            f"条纹 {bm.stripe:.2f}"
-        )
-        if q.reasons:
-            lines.append("   检查说明:")
-            for reason in q.reasons:
-                lines.append(f"     · {reason}")
-        if bm.needs_correction:
-            opt_lines = [
-                line
-                for line in (optimization_logs or [])
-                if "基线" in line or line[:3] in ("F1:", "F2:", "F3:")
-            ]
-            opt_summary = "；".join(opt_lines) if opt_lines else "无基线优化记录"
-            lines.append(
-                "   基线不平原因: " + opt_summary
-                + "；质量评估基于终跑谱最后存储轴,基线优化基于 joint 谱"
-                "逐维内存评分,两基准不同;窗函数/填零会改变基线形态,且"
-                "优化候选增益≤0.5 或条纹否决时保持 off(不校正)。"
-            )
-    except Exception as exc:  # noqa: BLE001 - 质量评估失败不阻断报告
-        lines.append(f"◆ 最终谱图质量: 评估跳过({exc})")
+    # 存储轴序(与 nmrglue 读取一致):2D (F1,F2);3D (F2,F3,F1)
+    storage_axes = (
+        ["F1", "F2"] if direct_axis == "F2" else ["F2", "F3", "F1"]
+    )
+    lines += spectrum_quality_report_lines(
+        str(spectrum_path),
+        optimization_logs=optimization_logs,
+        axis_names=storage_axes,
+    )
     reports = list((diagnostics or {}).get("reports") or [])
     lines.append("◆ 数据质量诊断(处理前的数据监测,FID 检查)")
     if reports:
@@ -849,7 +809,9 @@ def _optimize_uniform_processing(
         windows: list[dict[str, Any]] = [
             {"type": "sine_bell"},
             {"type": "sine_bell_squared"},
-            {"type": "gaussian", "lb": 5.0, "gb": 0.1},
+            # 0.2.170:gaussian 用 NMRPipe 原生 g1/g2(GM),不用 lb/gb——
+            # GMB -lb/-gb 实测窗尾部爆炸,GM -lb/-gb 被忽略
+            {"type": "gaussian", "g1": 8.0, "g2": 15.0},
         ]
         best_window: dict[str, Any] | None = None
         best_score = base_score
@@ -1055,7 +1017,8 @@ def _optimize_nus_processing(
         windows: list[dict[str, Any]] = [
             {"type": "sine_bell"},
             {"type": "sine_bell_squared"},
-            {"type": "gaussian", "lb": 5.0, "gb": 0.1},
+            # 0.2.170:gaussian 用 NMRPipe 原生 g1/g2(GM),不用 lb/gb
+            {"type": "gaussian", "g1": 8.0, "g2": 15.0},
         ]
         best_window: dict[str, Any] | None = None
         best_score = base_score

@@ -61,7 +61,7 @@ def evaluate(
     peaks = peak_detection.detect(arr)
     snr_metrics = snr.compute(arr, peaks, sigma)
     phase_metrics = phase_quality.evaluate(arr)
-    baseline_metrics = baseline_quality.evaluate(arr)
+    _worst_axis, baseline_metrics = baseline_quality.worst_axis(arr)
     artifact_report = artifact_detection.detect(arr)
 
     components = ScoreComponents(
@@ -94,7 +94,7 @@ def evaluate(
     if phase_metrics.negative_peak_fraction > 0.15:
         reasons.append(f"负峰比例偏高（{phase_metrics.negative_peak_fraction:.2f}）")
     if baseline_metrics.needs_correction:
-        reasons.append("检测到基线倾斜/偏移，建议基线校正")
+        reasons.append("检测到基线倾斜/偏移(最差存储轴),建议基线校正")
     if artifact_report.isolated_peak_clusters > 0:
         reasons.append(f"检测到 {artifact_report.isolated_peak_clusters} 个孤立峰簇")
 
