@@ -180,26 +180,86 @@ def _append_final_summary(
     zero_fill: Any = None,
     window: Any = None,
     diagnostics: dict[str, Any] | None = None,
+    optimization_logs: list[str] | None = None,
     progress: Callable[[str], None] | None = None,
 ) -> None:
-    """日志末尾质量与优化汇总(0.2.155/0.2.157):与 pipeline 参数报告
-    共用统一格式(诊断显示详情),并同步经 progress 进入日志面板。"""
+    """末尾报告:谱图质量与数据质量诊断(0.2.169-补,用户可读)。
+
+    结构:
+      ◆ 最终谱图质量 —— 综合判定 + 信噪比/相位/基线/伪影分项等级与分数;
+        基线不平且基线优化存在时输出原因(优化基准/保持 off 的门槛)。
+      ◆ 数据质量诊断 —— 处理前 FID 监测结论(检出 N 项/已自动处理 M 项)。
+      ◆ 处理参数与优化 —— 与 pipeline 参数报告共用 format_optimization_report。
+    全部行同时经 progress 进入 GUI 日志面板。"""
     from workflow.optimization_report import format_optimization_report
 
-    lines: list[str] = ["== 质量与优化汇总 =="]
+    def _grade(score: float) -> str:
+        return "良好" if score >= 75.0 else ("需注意" if score >= 50.0 else "较差")
+
+    lines: list[str] = ["== 谱图质量与数据质量报告 =="]
     try:
         import nmrglue as ng
 
-        from core.qc import spectrum_quality
+        from core.qc import baseline_quality, spectrum_quality
 
         _dic, data = ng.pipe.read(str(spectrum_path))
-        q = spectrum_quality.evaluate(np.asarray(data))
-        text = f"谱图质量: {q.decision.value}(综合分 {q.score.overall:.1f})"
+        arr = np.asarray(data)
+        q = spectrum_quality.evaluate(arr)
+        comps = q.score.components
+        decision_label = {
+            "accept": "✓ 接受",
+            "warning": "⚠ 警告",
+            "rollback": "✗ 不合格",
+        }.get(str(q.decision.value), str(q.decision.value))
+        lines.append("◆ 最终谱图质量(处理完成后的评价)")
+        lines.append(f"   综合判定: {decision_label}(综合分 {q.score.overall:.1f})")
+        for label, key in (
+            ("信噪比", "snr"),
+            ("相位", "phase"),
+            ("基线", "baseline"),
+            ("伪影", "artifact"),
+        ):
+            score = float(getattr(comps, key))
+            lines.append(f"   - {label}: {_grade(score)}({score:.0f} 分)")
+        bm = baseline_quality.evaluate(arr)
+        lines.append(
+            f"       基线指标: 斜率 {bm.slope * 100:.1f}%  偏移 "
+            f"{bm.offset * 100:.1f}%  弯曲 {bm.curvature * 100:.1f}%  "
+            f"条纹 {bm.stripe:.2f}"
+        )
         if q.reasons:
-            text += " | " + "、".join(q.reasons[:3])
-        lines.append(text)
+            lines.append("   检查说明:")
+            for reason in q.reasons:
+                lines.append(f"     · {reason}")
+        if bm.needs_correction:
+            opt_lines = [
+                line
+                for line in (optimization_logs or [])
+                if "基线" in line or line[:3] in ("F1:", "F2:", "F3:")
+            ]
+            opt_summary = "；".join(opt_lines) if opt_lines else "无基线优化记录"
+            lines.append(
+                "   基线不平原因: " + opt_summary
+                + "；质量评估基于终跑谱最后存储轴,基线优化基于 joint 谱"
+                "逐维内存评分,两基准不同;窗函数/填零会改变基线形态,且"
+                "优化候选增益≤0.5 或条纹否决时保持 off(不校正)。"
+            )
     except Exception as exc:  # noqa: BLE001 - 质量评估失败不阻断报告
-        lines.append(f"谱图质量: 评估跳过({exc})")
+        lines.append(f"◆ 最终谱图质量: 评估跳过({exc})")
+    reports = list((diagnostics or {}).get("reports") or [])
+    lines.append("◆ 数据质量诊断(处理前的数据监测,FID 检查)")
+    if reports:
+        auto_count = int(bool((diagnostics or {}).get("apply_poly_time")))
+        auto_count += int(
+            int((diagnostics or {}).get("repaired_badpoints") or 0) > 0
+        )
+        suffix = f"(已自动处理 {auto_count} 项)" if auto_count else "(未自动处理)"
+        lines.append(f"   ⚠ 检出 {len(reports)} 项问题 {suffix}")
+        for i, report in enumerate(reports, 1):
+            lines.append(f"     {i}. {report}")
+    else:
+        lines.append("   ✓ 未检出直流偏置、尖峰坏点、首点异常、宽带峰或漂移")
+    lines.append("◆ 处理参数与优化")
     lines += format_optimization_report(
         {
             "phase_route": "unified",
@@ -208,7 +268,6 @@ def _append_final_summary(
             "baseline": baseline,
             "window": window,
             "zero_fill": zero_fill,
-            "diagnostics": diagnostics,
             "backend_runs": backend_runs,
         }
     )
@@ -366,7 +425,9 @@ def unified_route(    experiment: Experiment,
     axis_arrays: dict[str, np.ndarray] = {}
     axis_index: dict[str, int] = {}
     axis_traces: dict[str, tuple[list[int], list[int]]] = {}
-    logs: list[str] = []
+    # 0.2.169:数据质量诊断在流程最开头执行,日志必须排在预览/优化之前
+    # (此前 diag_logs 延后到优化后拼接,时序错乱;NUS 分支本就在开头)
+    logs: list[str] = list(diag_logs)
     # 0.2.167:实验类型级 auto_phase(presets processing_hints)——幅度谱
     # (HMBC 等)全轴跳过相位搜索保持 (0,0);相位敏感实验按 plan 相位
     # 节点过滤 magnitude 间接维(QF 无 PS 概念),只搜索真正有相位步骤的轴
@@ -460,7 +521,7 @@ def unified_route(    experiment: Experiment,
         plan=plan,
         progress=progress,
     )
-    logs += list(diag_logs) + proc["logs"]
+    logs += proc["logs"]
     logs.append(
         f"处理参数优化(基线/填零/窗函数)完成,耗时 {time.time() - t_opt:.1f} 秒"
     )
@@ -530,6 +591,7 @@ def unified_route(    experiment: Experiment,
         zero_fill=proc["zero_fill"],
         window=proc["window"],
         diagnostics=diagnostics,
+        optimization_logs=proc["logs"],
         progress=progress,
     )
     _cleanup_unified_intermediates(work, experiment.dataset_id)
@@ -1379,6 +1441,7 @@ def _unified_nus(
         zero_fill=proc["zero_fill"],
         window=proc["window"],
         diagnostics=diagnostics,
+        optimization_logs=proc["logs"],
         progress=progress,
     )
     _cleanup_unified_intermediates(work, experiment.dataset_id)

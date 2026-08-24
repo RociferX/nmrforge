@@ -349,8 +349,8 @@ def test_unified_route_nus_reconstruct_then_finalize(
     assert "direct_poly_time" in final_params
     assert backend.reconstruct_params[0].get("direct_poly_time") is None
     assert final_params.get("direct_poly_time") is True
-    assert "== 质量与优化汇总 ==" in result["logs"]
-    assert any("谱图质量" in line for line in result["logs"])
+    assert "== 谱图质量与数据质量报告 ==" in result["logs"]
+    assert any("◆ 最终谱图质量" in line for line in result["logs"])
     assert any("相位搜索完成,耗时" in line for line in result["logs"])
     assert any("终跑完成,耗时" in line for line in result["logs"])
     # 0.2.156:初跑脚本保留为 {dataset_id}_before_optimize.com(内容=第一遍脚本)
@@ -666,12 +666,14 @@ def test_unified_route_uniform_runs_processing_optimization(
     assert result["baseline"]["F1"]["order"] == 2
     assert result["window"]["F2"]["type"] == "sine_bell"
     assert "diagnostics" in result
-    # 0.2.166:uniform 汇总与 NUS 对称——基线/窗/填零/诊断进「质量与优化汇总」
-    assert "== 质量与优化汇总 ==" in result["logs"]
+    # 0.2.166:uniform 汇总与 NUS 对称——基线/窗/填零/诊断进「谱图质量与
+    # 数据质量报告」(0.2.169-补 可读化:◆ 分节 + 综合判定 + 分项等级)
+    assert "== 谱图质量与数据质量报告 ==" in result["logs"]
+    assert any("◆ 最终谱图质量" in line for line in result["logs"])
     assert any("  基线:" in line for line in result["logs"])
     assert any("  窗函数:" in line for line in result["logs"])
     assert any("  填零:" in line for line in result["logs"])
-    assert any("  数据质量诊断:" in line for line in result["logs"])
+    assert any("◆ 数据质量诊断" in line for line in result["logs"])
     # 0.2.166:uniform 初跑脚本保留(joint 脚本拷贝,cleanup 不清它)
     no_opt = work / "hsqc_2d_before_optimize.com"
     assert no_opt.is_file()
@@ -911,6 +913,70 @@ def test_direct_phase_cache_roundtrip(tmp_path: Path) -> None:
         is None
     )
 
+
+
+def test_append_final_summary_readable_report(tmp_path: Path) -> None:
+    """0.2.169-补:末尾报告可读化——◆ 分节、综合判定、分项等级、基线
+    不平原因、数据质量诊断结论(检出/已自动处理)。"""
+    import nmrglue as ng
+    import numpy as np
+
+    from workflow.phase_routes import _append_final_summary
+
+    path = tmp_path / "r.ft2"
+    n1, n2 = 128, 64
+    data = np.zeros((n2, n1), dtype=np.float32)
+    data += (100.0 * np.linspace(0.0, 1.0, n1)).astype(np.float32)[None, :]
+    data[30, 60] = 1000.0
+    dic = {k: "0" for k in ng.fileio.pipe.fdata_dic}
+    dic["FDMAGIC"] = 9.2330230000000007e14
+    dic["FDDIMCOUNT"] = 2
+    dic["FDSIZE"] = n1
+    dic["FDSPECNUM"] = n2
+    dic["FDQUADFLAG"] = 1
+    dic["FDF1QUADFLAG"] = 1
+    dic["FDF2QUADFLAG"] = 1
+    dic["FDTRANSPOSED"] = 0
+    for prefix, size in (("FDF1", n2), ("FDF2", n1)):
+        dic[prefix + "T"] = size
+        dic[prefix + "SW"] = 6000.0
+        dic[prefix + "OBS"] = 600.0
+        dic[prefix + "CAR"] = 4.7
+        dic[prefix + "ORIG"] = 4.7 * 600.0
+    ng.pipe.write(str(path), dic, data, overwrite=True)
+    logs: list[str] = []
+    _append_final_summary(
+        logs,
+        str(path),
+        direct_axis="F2",
+        phases={"F1": (0.0, 0.0), "F2": (0.0, 0.0)},
+        baseline={"F1": {"enabled": False}, "F2": {"enabled": False}},
+        zero_fill={"F1": {"mode": "auto"}, "F2": {"mode": "auto"}},
+        window=None,
+        diagnostics={
+            "reports": [
+                "直接维存在直流偏置(DC 峰为最强信号的 1.20 倍),已启用 POLY -time 自动纠正",
+                "检测到 2 处尖峰坏点,已自动替换",
+            ],
+            "apply_poly_time": True,
+            "repaired_badpoints": 2,
+        },
+        optimization_logs=[
+            "F1: 候选未优于当前配置,保持 off (score=72.3)",
+            "基线优化总结: F1/F2 均保持 off",
+        ],
+    )
+    text = "\n".join(logs)
+    assert "== 谱图质量与数据质量报告 ==" in text
+    assert "◆ 最终谱图质量" in text
+    assert "综合判定:" in text
+    assert "- 基线: 需注意" in text or "- 基线: 较差" in text
+    assert "基线指标:" in text
+    assert "基线不平原因:" in text
+    assert "保持 off" in text
+    assert "◆ 数据质量诊断" in text
+    assert "⚠ 检出 2 项问题 (已自动处理 2 项)" in text
+    assert "◆ 处理参数与优化" in text
 
 
 def test_cleanup_unified_intermediates(tmp_path: Path) -> None:
