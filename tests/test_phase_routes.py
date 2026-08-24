@@ -300,10 +300,8 @@ def test_unified_route_nus_reconstruct_then_finalize(
     planes = np.outer(direct, fid1)
     monkeypatch.setattr(routes, "_load_recon_planes", lambda exp, wk: planes)
     monkeypatch.setattr(
-        "workflow.memory_phase_search.search_axis_memory",
-        lambda arr, axis, **kw: SimpleNamespace(
-            phase=(30.0, 0.0), score=80.0, traces=([], []), logs=[]
-        ),
+        "core.optimization.phase_search.search_direct_phase_on_spectrum",
+        lambda arr, axis=0, metric="symmetry", progress=None: (30.0, 0.0, 80.0),
     )
 
     def fake_read(path: str, unpack_axis: int | None = None):
@@ -477,8 +475,6 @@ def test_unified_route_nus_progress_stages(
     tmp_path: Path, monkeypatch, bruker_dir: Path
 ) -> None:
     """NUS:progress 覆盖 第一遍 SMILE/处理参数优化/完整脚本终跑 各阶段。"""
-    from types import SimpleNamespace
-
     experiment = read_dataset(bruker_dir / "nus_2d")
     backend = _FakeBackend(tmp_path / "nus_prog_work")
     work = backend.work
@@ -490,10 +486,8 @@ def test_unified_route_nus_progress_stages(
     planes = np.outer(direct, fid1)
     monkeypatch.setattr(routes, "_load_recon_planes", lambda exp, wk: planes)
     monkeypatch.setattr(
-        "workflow.memory_phase_search.search_axis_memory",
-        lambda arr, axis, **kw: SimpleNamespace(
-            phase=(30.0, 0.0), score=80.0, traces=([], []), logs=[]
-        ),
+        "core.optimization.phase_search.search_direct_phase_on_spectrum",
+        lambda arr, axis=0, metric="symmetry", progress=None: (30.0, 0.0, 80.0),
     )
     monkeypatch.setattr(
         routes, "_read_complex_preview",
@@ -552,10 +546,8 @@ def test_unified_route_nus_final_ext_only_applies_to_final_run(
     planes = np.outer(direct, fid1)
     monkeypatch.setattr(routes, "_load_recon_planes", lambda exp, wk: planes)
     monkeypatch.setattr(
-        "workflow.memory_phase_search.search_axis_memory",
-        lambda arr, axis, **kw: SimpleNamespace(
-            phase=(30.0, 0.0), score=80.0, traces=([], []), logs=[]
-        ),
+        "core.optimization.phase_search.search_direct_phase_on_spectrum",
+        lambda arr, axis=0, metric="symmetry", progress=None: (30.0, 0.0, 80.0),
     )
     monkeypatch.setattr(
         routes,
@@ -770,10 +762,8 @@ def test_unified_route_nus_final_ext_renormalizes_p1(
     planes = np.outer(direct, fid1)
     monkeypatch.setattr(routes, "_load_recon_planes", lambda exp, wk: planes)
     monkeypatch.setattr(
-        "workflow.memory_phase_search.search_axis_memory",
-        lambda arr, axis, **kw: SimpleNamespace(
-            phase=(30.0, 15.0), score=80.0, traces=([], []), logs=[]
-        ),
+        "core.optimization.phase_search.search_direct_phase_on_spectrum",
+        lambda arr, axis=0, metric="symmetry", progress=None: (30.0, 15.0, 80.0),
     )
     monkeypatch.setattr(
         routes,

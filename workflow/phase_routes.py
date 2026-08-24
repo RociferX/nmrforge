@@ -1203,10 +1203,14 @@ def _unified_nus(
     if not auto_phase:
         indirect_axes = []
         logs.append("间接维: 幅度谱不自动调相,跳过 finalize 复型预览与搜索")
-    # 直接维:recon 平面 axis 0 复型 → 与 uniform 直接维同源的净吸收搜索
-    # (search_axis_memory,峰窗签名净吸收+基线拉平),四条路径统一评分。
-    # score<30 时保持 (0,0)。
+    # 直接维:recon 平面 axis 0 复型 → 旧权威的显示层对称性搜索
+    # (0.2.96/0.2.98 机制;0.2.95 为 recon 平面校准:信号行峰选择排除
+    # 边缘伪影 + 对称性评分 + 正峰约束,能正确消歧 ±180°)。净吸收评分
+    # 在 recon 平面直接维上区分度差(sampleB 直接维被带偏 180°,0.2.185
+    # 统一试验,0.2.187 改回)。score<30 时保持 (0,0)。
     import time as _time
+
+    from core.optimization.phase_search import search_direct_phase_on_spectrum
 
     if not auto_phase:
         direct_phase = (0.0, 0.0)
@@ -1234,34 +1238,33 @@ def _unified_nus(
                 else:
                     progress("直接维相位搜索中(首次运行,通常数十秒),请稍候")
             t0 = _time.time()
-            direct_res = search_axis_memory(planes, 0, sign_mode=sign_mode)
+            direct_est = search_direct_phase_on_spectrum(
+                planes, axis=0, metric="symmetry", progress=progress
+            )
             elapsed = _time.time() - t0
             if progress is not None:
                 progress(f"直接维相位搜索完成,耗时 {elapsed:.1f} 秒")
             logs.append(f"直接维相位搜索完成,耗时 {elapsed:.1f} 秒")
             direct_phase = (0.0, 0.0)
-            if direct_res is not None and direct_res.score >= 30.0:
-                direct_phase = (
-                    float(direct_res.phase[0]),
-                    float(direct_res.phase[1]),
-                )
+            if direct_est is not None and direct_est[2] >= 30.0:
+                direct_phase = (float(direct_est[0]), float(direct_est[1]))
                 if abs(direct_phase[1]) > 20.0:
                     logs.append(
-                        f"直接维净吸收搜索 p1={direct_phase[1]:g}° 幅值异常(>20°),归零"
+                        f"直接维对称性搜索 p1={direct_phase[1]:g}° 幅值异常(>20°),归零"
                     )
                     direct_phase = (direct_phase[0], 0.0)
                 logs.append(
-                    f"直接维净吸收搜索: {direct_axis}=({direct_phase[0]:g}°, "
-                    f"{direct_phase[1]:g}°) score={direct_res.score:.2f}"
+                    f"直接维对称性搜索: {direct_axis}=({direct_phase[0]:g}°, "
+                    f"{direct_phase[1]:g}°) score={direct_est[2]:.2f}"
                 )
                 _save_direct_phase_cache(
                     work, experiment, params_first, planes.shape,
-                    direct_phase[0], direct_phase[1], float(direct_res.score),
+                    direct_phase[0], direct_phase[1], float(direct_est[2]),
                     elapsed,
                 )
             else:
                 logs.append(
-                    "直接维净吸收搜索无干净信号或置信度不足,保持 (0,0)"
+                    "直接维对称性搜索无干净信号峰或置信度不足,保持 (0,0)"
                 )
     logs.append(
         f"直接维内存相位: {direct_axis}=({direct_phase[0]:g}°, {direct_phase[1]:g}°)"
