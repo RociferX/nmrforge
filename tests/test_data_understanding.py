@@ -345,18 +345,35 @@ def test_classify_liquid_edited_and_other_nuclei() -> None:
         # 1H/15N/13C 补充
         (3, ["1H", "15N", "13C"], "hncaco", "HN(CA)CO"),
         (3, ["1H", "15N", "13C"], "hcconh", "H(CCO)NH"),
-        # 2D 编辑/其它核
-        (2, ["13C", "1H"], "hsqctocsy", "HSQC-TOCSY-13C"),
-        (2, ["15N", "1H"], "hsqctocsy", "HSQC-TOCSY-15N"),
-        (2, ["31P", "1H"], "hmqc31", "HMQC-31P"),
-        (2, ["31P", "1H"], "hmbc31", "HMBC-31P"),
-        (2, ["19F", "1H"], "hsqc19", "HSQC-19F"),
+        # 2D 编辑/其它核(1H 检测:直接维为 1H,13C/15N/31P/19F 在间接维)
+        (2, ["1H", "13C"], "hsqctocsy", "HSQC-TOCSY-13C"),
+        (2, ["1H", "15N"], "hsqctocsy", "HSQC-TOCSY-15N"),
+        (2, ["1H", "31P"], "hmqc31", "HMQC-31P"),
+        (2, ["1H", "31P"], "hmbc31", "HMBC-31P"),
+        (2, ["1H", "19F"], "hsqc19", "HSQC-19F"),
         # 固体补充
         (2, ["13C", "15N"], "redor", "REDOR"),
     ]
     for ndim, nuclei, pulprog, expected in cases:
         result = classify(_experiment_with_nuclei(ndim, nuclei, pulprog))
         assert result.name == expected, (pulprog, result.name)
+
+def test_classify_same_nucleus_position_sensitive() -> None:
+    """0.2.168:同一核按维度位置(x/y/z 下标)区分——HETCOR(13C 直接维)
+    与 HSQC-13C(13C 间接维)、HNHETCOR(15N 直接维)与 HSQC(15N 间接维)
+    不再因无序计数相同而撞核,直接唯一候选命中。"""
+    from core.experiment.experiment_classifier import classify
+
+    # 13C 在直接维(F2)→ 核序列 (13C, 1H),唯一候选 HETCOR
+    r = classify(_experiment_with_nuclei(2, ["13C", "1H"], "hsqc"))
+    assert r.name == "HETCOR"
+    assert any("核组合唯一匹配" in e for e in r.evidence)
+    # 15N 在直接维(F2)→ 核序列 (15N, 1H),唯一候选 HNHETCOR
+    r = classify(_experiment_with_nuclei(2, ["15N", "1H"], "hsqc"))
+    assert r.name == "HNHETCOR"
+    # 13C 在间接维(F1)→ 核序列 (1H, 13C),多候选仍靠 PULPROG
+    r = classify(_experiment_with_nuclei(2, ["1H", "13C"], "hsqctocsy"))
+    assert r.name == "HSQC-TOCSY-13C"
 
 def test_is_data_directory(tmp_path: Path) -> None:
     '''含任一 Bruker 关键文件视为数据目录,全无则非数据(忽略用,Task F)。'''

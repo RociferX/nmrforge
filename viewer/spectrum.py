@@ -177,7 +177,11 @@ def _relabel_axes(
 def _permutation_to_logical(
     storage_nuclei: list[str], logical_nuclei: list[str]
 ) -> list[int] | None:
-    """storage 轴 → logical 位置排列;无法构成排列(长度/未知核/不匹配)返回 None。"""
+    """storage 轴 → logical 位置排列;无法构成排列(长度/未知核/不匹配)返回 None。
+
+    0.2.168:同核(如 1H/13C/1H 的两个 1H)按维度位置语义匹配——核种类
+    相同的位置可互换,重排结果在显示层面等价(Hx/Hy 由位置决定)。
+    """
     n = len(storage_nuclei)
     if n != len(logical_nuclei) or n == 0:
         return None

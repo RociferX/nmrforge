@@ -2,7 +2,10 @@
 
 识别顺序(用户方案):
 1. 先识别正确核(各维度核素);
-2. 按核组合(含同核重复计数,如 15N/15N)排除不匹配的模板;
+2. 按维度位置核指纹(直接维 x 下标精确 + 间接维 y/z 核计数,0.2.168)
+   排除不匹配的模板——同核在直接维 vs 间接维不视为同一指纹(如
+   HETCOR 13C@直接维 vs HSQC-13C 13C@间接维),间接维按核种类计数
+   匹配、内部顺序不强制;
 3. 在剩余候选中用 PULPROG 关键词精排;无候选时 PULPROG 兜底(降置信)。
 固体核磁类型(如 NNH/CCH/NCA/NCACB/DARR,液体核磁没有)通过核组合规则
 自动入选,同一核组合(如 15N/13C/13C 的 NCACX/NCOCX/NCACB/NCOCACB)由
@@ -98,29 +101,49 @@ _PULPROG_TYPES: list[tuple[str, str]] = [
 ]
 
 
-def _data_nuclei(experiment: Experiment) -> Counter[str]:
-    """数据各维度核组合(含同核重复计数)。"""
-    return Counter(d.nucleus for d in experiment.dimensions if d.nucleus)
+def _data_nuclei(experiment: Experiment) -> tuple[str, ...]:
+    """数据各维度核序列(按维度位置 x/y/z 序)。
+
+    0.2.168:同核不同位置视为不同指纹——如 HETCOR 的 13C 在直接维、
+    HSQC-13C 的 13C 在间接维,不再因无序计数相同而撞核。
+    """
+    return tuple(d.nucleus for d in experiment.dimensions)
 
 
-def _template_nuclei(template) -> Counter[str] | None:
-    """模板核组合;generic 模板(direct 为空)不参与核匹配。"""
+def _template_nuclei(template) -> tuple[str, Counter[str]] | None:
+    """模板核指纹:(直接维核, 间接维核计数);generic 模板(direct 为空)
+    不参与核匹配。间接维按核种类计数、不计顺序(presets 历史顺序约定
+    不统一,且同核位置可互换,如 1H/13C/1H 的两个 1H;计数保留同核
+    出现次数,如 NNH 两个 15N 与 HSQC 一个 15N 可区分)。"""
     if not template.direct_nucleus:
         return None
-    return Counter([template.direct_nucleus] + list(template.indirect_nuclei))
+    return (template.direct_nucleus, Counter(template.indirect_nuclei))
 
 
 def _nuclei_candidates(experiment: Experiment) -> list[str]:
-    """按核组合过滤模板:核组合(含同核计数)一致才入选。
+    """按核指纹过滤模板:直接维核相同且间接维核集合一致才入选。
 
+    0.2.168:直接维(x 下标)精确匹配——同核在直接维 vs 间接维视为不同
+    指纹(如 HETCOR 13C@直接维 vs HSQC-13C 13C@间接维);间接维(y/z
+    下标)按核集合匹配,不强制内部顺序。
     REGISTRY 按显示名 + stem 双注册(0.2.111 起),同一模板会重复出现,
     按模板对象去重后再返回,保证「唯一候选」语义成立。
     """
     data = _data_nuclei(experiment)
+    if not data:
+        return []
     seen: set[int] = set()
     out: list[str] = []
     for name, template in REGISTRY.items():
-        if _template_nuclei(template) == data and id(template) not in seen:
+        t = _template_nuclei(template)
+        if t is None:
+            continue
+        direct, indirect = t
+        if (
+            data[0] == direct
+            and Counter(data[1:]) == indirect
+            and id(template) not in seen
+        ):
             seen.add(id(template))
             out.append(name)
     return out
@@ -130,7 +153,7 @@ def classify(experiment: Experiment) -> ExperimentType:
     """核组合优先:排除不匹配模板 → 候选中 PULPROG 精排 → 兜底。"""
     acqus = experiment.acquisition_parameters.get("acqus", {})
     pulprog = str(acqus.get("PULPROG", "")).lower()
-    evidence: list[str] = [f"核组合 {dict(sorted(_data_nuclei(experiment).items()))}"]
+    evidence: list[str] = [f"核组合 {'/'.join(_data_nuclei(experiment))}"]
 
     candidates = _nuclei_candidates(experiment)
 

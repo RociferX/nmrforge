@@ -478,6 +478,7 @@ class SpectrumPanel(QWidget):
         if data.ndim != 2:
             return None
         na, nb = _norm(a), _norm(b)
+        same_nucleus = na == nb
         fixed_axis = -1
         if len(nuclei) == 3:
             for i, nuc in enumerate(nuclei):
@@ -487,7 +488,9 @@ class SpectrumPanel(QWidget):
         s3d = getattr(self._spectrum3d_panel, "_spectrum3d", None)
         s3d_axes = list(getattr(s3d, "axes", []) or []) if s3d is not None else []
         x_params = y_params = None
-        if len(s3d_axes) == 3:
+        # 0.2.168:同核投影(如 15N 编辑 3D 的 H-H 平面)按核种类匹配会把
+        # 两个 1H 轴取错(无法区分下标),直接走文件头槽位 + x/y 下标标签
+        if not same_nucleus and len(s3d_axes) == 3:
             for i, nuc in enumerate(nuclei):
                 if _norm(nuc) == na:
                     x_params = s3d_axes[i]
@@ -518,8 +521,16 @@ class SpectrumPanel(QWidget):
             x_params, y_params = y_params, x_params
             a, b = b, a
             na, nb = nb, na
+        # 0.2.168:同核投影用 Hx/Hy 下标标签(与 axis_labels_from_nuclei 一致)
+        if same_nucleus:
+            from viewer.axis_labels import axis_labels_from_nuclei as _alfn
+
+            _proj_labels = _alfn([a, b])
+            x_label, y_label = str(_proj_labels[0]), str(_proj_labels[1])
+        else:
+            x_label, y_label = nucleus_symbol(a), nucleus_symbol(b)
         x_axis = SpectrumAxis(
-            label=nucleus_symbol(a),
+            label=x_label,
             size=int(data.shape[1]),
             sw_hz=x_params.sw_hz,
             obs_mhz=x_params.obs_mhz,
@@ -527,7 +538,7 @@ class SpectrumPanel(QWidget):
             orig_hz=x_params.orig_hz,
         )
         y_axis = SpectrumAxis(
-            label=nucleus_symbol(b),
+            label=y_label,
             size=int(data.shape[0]),
             sw_hz=y_params.sw_hz,
             obs_mhz=y_params.obs_mhz,

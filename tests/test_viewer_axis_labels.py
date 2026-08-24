@@ -161,6 +161,49 @@ def test_spectrum_panel_fallback_labels(
     panel.close()
 
 
+def test_projection_same_nucleus_uses_header_and_subscript(
+    tmp_path: Path, qapp: QApplication
+) -> None:
+    """0.2.168:同核投影(H-H 平面)用文件头槽位构建轴参数,标签为
+    Hx/Hy 下标(不再按核种类从 3D 谱取错轴)。"""
+    from gui.spectrum_panel import SpectrumPanel
+
+    manager = ProjectManager.create_project(tmp_path / "proj3", "demo")
+    entry = manager.create_experiment("NOESY-HSQC-15N")
+    data = manager.import_data(entry.id, "/fake/1")
+    exp_id, data_id = entry.id, data.id
+    spectra = manager.data_dir(exp_id, data_id, "spectra")
+    spectra.mkdir(parents=True, exist_ok=True)
+    proj = spectra / f"{data_id}_H-H.ft2"
+    _write_ft2(proj)
+    meta_path = manager.data_metadata_path(exp_id, data_id)
+    meta_path.parent.mkdir(parents=True, exist_ok=True)
+    meta_path.write_text(
+        json.dumps(
+            {
+                "dataset": {
+                    "dimensions": [
+                        {"logical_axis": "F3", "nucleus": "1H", "role": "direct"},
+                        {"logical_axis": "F2", "nucleus": "15N", "role": "indirect"},
+                        {"logical_axis": "F1", "nucleus": "1H", "role": "indirect"},
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    manager.save()
+    panel = SpectrumPanel(manager)
+    panel.set_context(exp_id, data_id)
+    spec = panel._load_projection_ft2(proj)
+    assert spec is not None
+    assert spec.x_axis.label == "Hx"
+    assert spec.y_axis.label == "Hy"
+    assert spec.x_axis.obs_mhz == pytest.approx(600.0)
+    assert spec.y_axis.obs_mhz == pytest.approx(600.0)
+    panel.close()
+
+
 def test_viewer_app_axis_labels_from_path(
     tmp_path: Path, qapp: QApplication
 ) -> None:

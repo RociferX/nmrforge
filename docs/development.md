@@ -51,6 +51,11 @@
   同步补 `_PULPROG_TYPES` 关键词(长/具体关键词排前,防子串抢先匹配)
   并跑 test_data_understanding 分类精排回归;幅度谱(phase_sensitive:
   false)模板必须标 processing_hints.auto_phase=false;
+- 核组合匹配约定(0.2.168):直接维核精确匹配、间接维按核种类计数
+  (不计顺序)——同一核在直接维 vs 间接维视为不同指纹(HETCOR 13C@直接
+  维 vs HSQC-13C 13C@间接维);间接维模板顺序可任意(历史不统一),
+  但同核出现次数必须准确(如 NNH 两个 15N);viewer 同核投影走文件头
+  槽位 + Hx/Hy 下标标签,不得按核种类从 3D 谱取轴;
 - NUS/SMILE 特有功能(fid_noise、内存护栏、nuslist 清理、轻量/显示层
   相位搜索、直接维相位缓存)允许保留差异,但必须在代码注释/CHANGELOG
   写明例外原因。
