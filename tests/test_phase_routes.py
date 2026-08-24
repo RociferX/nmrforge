@@ -140,35 +140,51 @@ def test_unified_route_uniform_dc_offset_poly_time_into_final(
     assert any("POLY -time" in r for r in result["diagnostics"]["reports"])
 
 
-def test_unified_route_uniform_auto_phase_false_keeps_direct_zero(
+def test_unified_route_uniform_magnitude_skips_phase_search(
     tmp_path: Path, monkeypatch, bruker_dir: Path
 ) -> None:
-    """0.2.166:uniform sampling.auto_phase=False 时直接维相位保持 (0,0),
-    不生成直接维预览、不搜索(与 NUS 一致);终跑直接维覆盖为 (0,0)。"""
+    """0.2.167:magnitude(QF)间接维无相位节点——unified uniform 只搜索
+    有 PS 的轴(F2),不生成 F1 复型预览(此前对 QF 轴白搜相位)。"""
     experiment = read_dataset(bruker_dir / "hsqc_2d")
-    backend = _FakeBackend(tmp_path / "uni_aphase_work")
+    experiment.acquisition_parameters["acqu2s"]["FnMODE"] = 1  # QF/magnitude
+    backend = _FakeBackend(tmp_path / "uni_qf_work")
     work = backend.work
 
     def fake_read(path: str, unpack_axis: int | None = None):
         name = Path(path).name
-        if "F1" in name:
-            return _synthetic_preview(0, -25.0)
+        if "F2" in name:
+            return _synthetic_preview(1, -35.0)
         return _synthetic_preview(0, 0.0)
 
     monkeypatch.setattr(routes, "_read_complex_preview", fake_read)
-    result = routes.unified_route(
-        experiment,
-        backend,
-        work_dir=work,
-        base_params={"sampling": {"auto_phase": False}},
-    )
-    # F1 预览 + joint + 终跑(无 F2 预览)
+    result = routes.unified_route(experiment, backend, work_dir=work)
+    # F2 预览 + joint + 终跑(无 F1 预览)
     assert len(backend.process_calls) == 3
-    preview, _joint, final = backend.process_calls
-    assert preview[2].get("preview_axis") == "F1"
+    assert all(
+        call[2].get("preview_axis") != "F1" for call in backend.process_calls
+    )
+    assert set(result["phases"]) == {"F2"}
+    assert result["spectrum_path"]
+
+
+def test_unified_route_uniform_hmbc_skips_all_phase_search(
+    tmp_path: Path, monkeypatch, bruker_dir: Path
+) -> None:
+    """0.2.167:HMBC(幅度谱,模板 auto_phase=false)全轴跳过相位搜索——
+    不生成任何复型预览,相位保持 (0,0)(与 NUS 分支一致)。"""
+    experiment = read_dataset(bruker_dir / "hsqc_2d")
+    experiment.experiment_type.name = "HMBC"
+    experiment.acquisition_parameters["acqu2s"]["FnMODE"] = 1  # QF
+    backend = _FakeBackend(tmp_path / "uni_hmbc_work")
+    work = backend.work
+    result = routes.unified_route(experiment, backend, work_dir=work)
+    # 无预览:joint + 终跑
+    assert len(backend.process_calls) == 2
+    assert all(
+        call[2].get("preview_axis") is None for call in backend.process_calls
+    )
     assert result["phases"]["F2"] == (0.0, 0.0)
-    assert final[3]["F2"] == (0.0, 0.0)
-    assert any("auto_phase=False" in line for line in result["logs"])
+    assert any("幅度谱不自动调相" in line for line in result["logs"])
     assert result["spectrum_path"]
 
 

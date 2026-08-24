@@ -322,6 +322,42 @@ def test_classify_liquid_not_shadowed_by_solid() -> None:
         result = classify(_experiment_with_nuclei(ndim, nuclei, pulprog))
         assert result.name == expected, (pulprog, result)
 
+def test_classify_liquid_edited_and_other_nuclei() -> None:
+    """0.2.167:补充模板按 PULPROG 精排(同核组合靠关键词区分,不落 Generic)。"""
+    from core.experiment.experiment_classifier import classify
+
+    cases = [
+        # 1H/15N/1H 族
+        (3, ["1H", "15N", "1H"], "tocsyhsqc", "TOCSY-HSQC-15N"),
+        (3, ["1H", "15N", "1H"], "noesyhsqc", "NOESY-HSQC-15N"),
+        (3, ["1H", "15N", "1H"], "hbhaconh", "HBHA(CO)NH"),
+        (3, ["1H", "15N", "1H"], "hcaconh", "H(CA)NH"),
+        (3, ["1H", "15N", "1H"], "hnha", "HNHA"),
+        # 1H/13C/1H 族
+        (3, ["1H", "13C", "1H"], "hcchco", "HCCH-COSY"),
+        (3, ["1H", "13C", "1H"], "hcch", "HCCH-TOCSY"),
+        (3, ["1H", "13C", "1H"], "noesyhsqc", "NOESY-HSQC-13C"),
+        # 1H/13C/13C 族
+        (3, ["1H", "13C", "13C"], "hcaco", "HCACO"),
+        (3, ["1H", "13C", "13C"], "cchtocsy", "CCH-TOCSY"),
+        (3, ["1H", "13C", "13C"], "cch", "CCH"),
+        (3, ["1H", "13C", "13C"], "ccconh", "C(CCO)NH"),
+        # 1H/15N/13C 补充
+        (3, ["1H", "15N", "13C"], "hncaco", "HN(CA)CO"),
+        (3, ["1H", "15N", "13C"], "hcconh", "H(CCO)NH"),
+        # 2D 编辑/其它核
+        (2, ["13C", "1H"], "hsqctocsy", "HSQC-TOCSY-13C"),
+        (2, ["15N", "1H"], "hsqctocsy", "HSQC-TOCSY-15N"),
+        (2, ["31P", "1H"], "hmqc31", "HMQC-31P"),
+        (2, ["31P", "1H"], "hmbc31", "HMBC-31P"),
+        (2, ["19F", "1H"], "hsqc19", "HSQC-19F"),
+        # 固体补充
+        (2, ["13C", "15N"], "redor", "REDOR"),
+    ]
+    for ndim, nuclei, pulprog, expected in cases:
+        result = classify(_experiment_with_nuclei(ndim, nuclei, pulprog))
+        assert result.name == expected, (pulprog, result.name)
+
 def test_is_data_directory(tmp_path: Path) -> None:
     '''含任一 Bruker 关键文件视为数据目录,全无则非数据(忽略用,Task F)。'''
     from core.data.bruker_reader import is_data_directory

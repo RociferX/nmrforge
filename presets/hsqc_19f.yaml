@@ -1,0 +1,15 @@
+name: HSQC-19F
+description: 19F-1H 2D HSQC(1H-19F,氟标记)
+phase_sensitive: true
+direct_nucleus: 1H
+indirect_nuclei: [19F]
+expected_peak_mode: absorption
+peak_sign: uniform
+display_orientation: "19F/1H"
+priors:
+  "1H": [0.0, 11.0]
+  "19F": [-300.0, -50.0]
+constraints:
+  ndim: 2
+processing_hints:
+  auto_phase: true

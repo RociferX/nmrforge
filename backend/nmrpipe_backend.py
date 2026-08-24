@@ -287,6 +287,8 @@ class NMRPipeBackend:
         sampling = proc_params.get("sampling") or {}
         # sampling.auto_phase=False → 关闭直接维自动相位(PS 保持 plan 默认 0/0)
         # 0.2.88:检查移到搜索前(此前在搜索之后才置位,实际关不掉自动相位)
+        # 0.2.167:仅 route=none 逃生口直连时有效;unified 自动路径按实验
+        # 类型 presets processing_hints.auto_phase 决定(见 phase_routes)
         if sampling.get("auto_phase") is False:
             direct_phase_search = False
         direct_phase: dict[str, tuple[float, float]] | None = None

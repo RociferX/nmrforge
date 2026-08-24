@@ -56,5 +56,14 @@ def test_common_types_present() -> None:
         "CBCA(CO)NH",
         "HNCO",
         "HNHA",
+        "HSQC-TOCSY-13C",
+        "HSQC-TOCSY-15N",
+        "HCCH-COSY",
+        "TOCSY-HSQC-15N",
+        "HCACO",
+        "HMQC-31P",
+        "HMBC-31P",
+        "HSQC-19F",
+        "REDOR",
     ):
         assert expected in names, f"缺少常用预设 {expected}"

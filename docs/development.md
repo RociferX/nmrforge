@@ -38,13 +38,19 @@
 新增/改动任何处理功能时,对照以下清单确认四条路径(2D/3D × uniform/NUS,
 自动/人工)没有「一条有、其它没有」的差异:
 
-- 参数开关透传:sampling.auto_phase、direct_poly_time、window/baseline/
-  zero_fill/extract/ext 窗口、segment_shift_hz、phases;
+- 参数开关透传:direct_poly_time、window/baseline/zero_fill/extract/ext
+  窗口、segment_shift_hz、phases;自动相位为实验类型级回退
+  (presets processing_hints.auto_phase,幅度谱如 HMBC 全轴跳过搜索),
+  sampling.auto_phase 仅 route=none 逃生口直连后端时有效;
 - 流程能力:数据质量诊断、直接维窗/基线/填零/间接窗优化、初跑脚本保留
   (before_optimize.com)、终跑质量与优化汇总、直接维相位缓存指纹
   (必须包含影响谱面的所有参数,如 window);
 - 宏语义:以目标 NMRPipe 版本宏定义为准(如 gaussian→GMB),禁止
   「看起来对」的写法;
+- 实验类型模板:presets/*.yaml 是唯一数据源(0.2.111);新增模板必须
+  同步补 `_PULPROG_TYPES` 关键词(长/具体关键词排前,防子串抢先匹配)
+  并跑 test_data_understanding 分类精排回归;幅度谱(phase_sensitive:
+  false)模板必须标 processing_hints.auto_phase=false;
 - NUS/SMILE 特有功能(fid_noise、内存护栏、nuslist 清理、轻量/显示层
   相位搜索、直接维相位缓存)允许保留差异,但必须在代码注释/CHANGELOG
   写明例外原因。

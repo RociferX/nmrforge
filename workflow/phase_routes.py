@@ -218,6 +218,24 @@ def _append_final_summary(
             progress(line)
 
 
+def _template_auto_phase(experiment: Experiment) -> bool:
+    """实验类型级自动相位开关(presets processing_hints.auto_phase)。
+
+    False(如 HMBC 幅度谱)时统一路径全轴跳过相位搜索,相位保持 (0,0);
+    默认 True(相位敏感实验自动优化直接维/间接维相位)。模板缺失/解析
+    失败时回退 True,不阻断处理。
+    """
+    try:
+        from core.experiments.registry import REGISTRY
+
+        tpl = REGISTRY.get(experiment.experiment_type.name)
+        if tpl is not None:
+            return bool(tpl.processing_hints.get("auto_phase", True))
+    except Exception:  # noqa: BLE001 - 模板查询失败不阻断处理
+        pass
+    return True
+
+
 def _split_final_ext(params: dict[str, Any]) -> tuple[dict[str, Any], Any, Any]:
     """从参数取出仅终跑生效的直接维范围(final_ext_lo/final_ext_hi)。
 
@@ -349,11 +367,20 @@ def unified_route(    experiment: Experiment,
     axis_index: dict[str, int] = {}
     axis_traces: dict[str, tuple[list[int], list[int]]] = {}
     logs: list[str] = []
-    # 0.2.166:sampling.auto_phase=False 时直接维相位保持 (0,0)(与 NUS
-    # 一致),跳过直接维搜索与预览;间接维联合复核不受影响
-    if (params.get("sampling") or {}).get("auto_phase") is False:
-        search_axes = [a for a in axes if a != direct_axis]
-        logs.append("sampling.auto_phase=False,直接维相位保持 (0,0)(跳过搜索)")
+    # 0.2.167:实验类型级 auto_phase(presets processing_hints)——幅度谱
+    # (HMBC 等)全轴跳过相位搜索保持 (0,0);相位敏感实验按 plan 相位
+    # 节点过滤 magnitude 间接维(QF 无 PS 概念),只搜索真正有相位步骤的轴
+    auto_phase = _template_auto_phase(experiment)
+    if not auto_phase:
+        search_axes = []
+        logs.append(
+            f"实验类型 {experiment.experiment_type.name}: 幅度谱不自动调相,"
+            "跳过全轴相位搜索(保持 0,0)"
+        )
+    else:
+        search_axes = [
+            a for a in search_axes if f"phase_{a}" in plan.dag.nodes
+        ]
     backend_runs = 0
     for axis in search_axes:
         out_file = f"{experiment.dataset_id}_preview_{axis}.{ext}"
@@ -1128,6 +1155,12 @@ def _unified_nus(
         for dim in experiment.dimensions
         if dim.role is not AxisRole.DIRECT
     ]
+    # 0.2.167:幅度谱(HMBC 等)间接维同样不搜索——finalize 复型预览跳过,
+    # 相位保持 (0,0)(plan 无相位节点,搜索无意义且会污染日志)
+    auto_phase = _template_auto_phase(experiment)
+    if not auto_phase:
+        indirect_axes = []
+        logs.append("间接维: 幅度谱不自动调相,跳过 finalize 复型预览与搜索")
     # 直接维:recon 平面 axis 0 复型 → 沿用旧权威的显示层对称性搜索
     # (0.2.96/0.2.98 机制;旧几十次后端方案从不把固定迹线净吸收用于 NUS
     # 直接维,直接维随 SMILE 固化)。score<30 时保持 (0,0)。
@@ -1135,10 +1168,12 @@ def _unified_nus(
 
     from core.optimization.phase_search import search_direct_phase_on_spectrum
 
-    sampling_block = dict((base_params or {}).get("sampling") or {})
-    if sampling_block.get("auto_phase") is False:
+    if not auto_phase:
         direct_phase = (0.0, 0.0)
-        logs.append("sampling.auto_phase=False,直接维相位保持 (0,0)(跳过搜索)")
+        logs.append(
+            f"实验类型 {experiment.experiment_type.name}: 幅度谱不自动调相,"
+            "直接维相位保持 (0,0)(跳过搜索)"
+        )
     else:
         cache = _load_direct_phase_cache(
             work, experiment, params_first, planes.shape

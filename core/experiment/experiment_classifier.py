@@ -32,6 +32,8 @@ _PULPROG_TYPES: list[tuple[str, str]] = [
     ("nnh", "NNH"),
     ("nhhc", "NHHC"),
     ("chhc", "CHHC"),
+    # 0.2.167:cchtocsy 必须排在 cch 之前(子串前缀抢先匹配问题)
+    ("cchtocsy", "CCH-TOCSY"),
     ("cch", "CCH"),
     ("cbcanco", "CBCANCO"),
     ("cancoca", "CAN(CO)CA"),
@@ -52,6 +54,7 @@ _PULPROG_TYPES: list[tuple[str, str]] = [
     ("rfdr", "RFDR"),
     ("cord", "CORD"),
     ("tedor", "TEDOR"),
+    ("redor", "REDOR"),
     ("pain", "PAIN-CP"),
     ("fslg", "HNHETCOR"),
     ("fslg", "HETCOR"),
@@ -59,6 +62,25 @@ _PULPROG_TYPES: list[tuple[str, str]] = [
     ("hetcor", "HETCOR"),
     ("nn", "NN"),
     # —— 液体核磁 ——
+    # 0.2.167:补充模板关键词——具体/长关键词必须排在同前缀通用词之前
+    # (hsqctocsy 在 hsqc 前、noesyhsqc/tocsyhsqc 在 noesy/tocsy 前、
+    # hcchco 在 hcch 前、hncaco/hncacb 在 hnca 前),否则被子串抢先匹配
+    ("hsqc19", "HSQC-19F"),
+    ("hmqc31", "HMQC-31P"),
+    ("hmbc31", "HMBC-31P"),
+    ("hsqctocsy", "HSQC-TOCSY-15N"),
+    ("hsqctocsy", "HSQC-TOCSY-13C"),
+    ("tocsyhsqc", "TOCSY-HSQC-15N"),
+    ("noesyhsqc", "NOESY-HSQC-15N"),
+    ("noesyhsqc", "NOESY-HSQC-13C"),
+    ("hcchco", "HCCH-COSY"),
+    ("hcch", "HCCH-TOCSY"),
+    ("hcaco", "HCACO"),
+    ("hbhaconh", "HBHA(CO)NH"),
+    ("hcaconh", "H(CA)NH"),
+    ("hcconh", "H(CCO)NH"),
+    ("ccconh", "C(CCO)NH"),
+    ("hncaco", "HN(CA)CO"),
     ("hncacb", "HNCACB"),
     ("cbcaconh", "CBCA(CO)NH"),
     ("cbcanh", "CBCANH"),

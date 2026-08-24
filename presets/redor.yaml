@@ -1,0 +1,15 @@
+name: REDOR
+description: 固体核磁:2D 15N-13C REDOR 距离测量
+phase_sensitive: true
+direct_nucleus: 13C
+indirect_nuclei: [15N]
+expected_peak_mode: absorption
+peak_sign: uniform
+display_orientation: "15N/13C"
+priors:
+  "15N": [90.0, 140.0]
+  "13C": [10.0, 190.0]
+constraints:
+  ndim: 2
+processing_hints:
+  auto_phase: true

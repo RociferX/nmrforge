@@ -1,5 +1,27 @@
 # 修改记录(历史条目)
 
+## 0.2.167(2026-08-24,预设补全 + magnitude/HMBC 自动相位回退)
+
+用户要求:预设实验类型无遗漏(1D 暂不处理);把缺失类型补上;修复当前
+流程处理不了/处理错误的类型。
+
+- 新增 9 个 2D/3D 模板:HSQC-TOCSY-13C、HSQC-TOCSY-15N、HCCH-COSY、
+  TOCSY-HSQC-15N、HCACO、HMQC-31P、HMBC-31P、HSQC-19F、REDOR;
+- 分类器 PULPROG 关键词补全:14 个已有模板此前缺关键词(HBHA(CO)NH、
+  H(CA)NH、H(CCO)NH、C(CCO)NH、HCCH-TOCSY、CCH-TOCSY、NOESY-HSQC、
+  HN(CA)CO、HSQC-13C 等),同核组合多候选时落 Generic——已按"长/具体
+  关键词排前"原则补全,并覆盖全部新模板;新增分类精排测试;
+- magnitude/HMBC 处理修复(此前"搜了也白搜"):unified 统一路径按
+  plan 相位节点过滤——magnitude(QF)间接维无 PS 概念,不再生成复型
+  预览/搜索;模板 processing_hints.auto_phase=false(如 HMBC)时全轴
+  跳过相位搜索保持 (0,0);sampling.auto_phase 参数级语义撤出 unified
+  自动路径(0.2.166 的 uniform 检查撤销),仅 route=none 逃生口直连
+  后端时有效;NUS magnitude 间接维仍显式报错(SMILE 不支持 real 重构);
+- 预设审计记录:54→63 模板;1D 谱、DOSY/弛豫等伪维实验暂不补(不适合
+  现有"生成谱图"标准流程,需单独设计);
+- 测试:新增 HMBC/magnitude 不搜相位路由测试、分类精排测试、预设覆盖
+  断言;全量 pytest 664 passed + ruff 全绿。
+
 ## 0.2.166(2026-08-24,uniform/NUS 四路径功能对齐审计)
 
 用户要求:继续检查 2D/3D × uniform/NUS 四种路径,是否有某条路径有新功能
