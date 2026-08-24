@@ -29,7 +29,9 @@ class PhaseQuality:
     score: float = 0.0
 
 
-def negative_area_fraction(real: Any, radius: int = 8) -> float:
+def negative_area_fraction(
+    real: Any, radius: int = 8, *, symmetry_gated: bool = True
+) -> float:
     """峰窗负面积比例：检测峰后在峰窗口内统计负值面积占比（峰高加权）。
 
     0.2.63 起从全谱统计改为峰窗统计（VM 真实数据校准）：全谱负面积被
@@ -40,9 +42,12 @@ def negative_area_fraction(real: Any, radius: int = 8) -> float:
     """
     arr = np.asarray(np.real(real), dtype=float)
     # 正峰 + 负峰(180° 反相谱 detect 找不到正峰,必须分别检测)
-    peaks = list(peak_detection.detect(arr)) + list(
-        peak_detection.detect(-arr)
-    )
+    _pos = peak_detection.detect(arr)
+    _neg = peak_detection.detect(-arr)
+    _total = len(_pos) + len(_neg)
+    # 0.2.171:反相谱(负峰占绝对多数)不 gate,照常惩罚
+    neg_majority = _total > 0 and len(_neg) > 0.6 * _total
+    peaks = list(_pos) + list(_neg)
     if not peaks:
         return 0.0  # 无峰：无负面积信息，不惩罚
     # 只统计强峰：噪声峰无数目性负瓣，会稀释相位敏感信号（实测 501 个
@@ -75,6 +80,18 @@ def negative_area_fraction(real: Any, radius: int = 8) -> float:
             for i, s in zip(pos, arr.shape)
         )
         win = arr[slices]
+        if symmetry_gated and not neg_majority:
+            # 0.2.171:吸收型(峰窗对称)负成分——真实负峰(mixed 谱 Cβ)、
+            # 噪声负瓣——不算相位错误;仅不对称的色散负瓣计罚
+            flipped = np.flip(win)
+            denom = float(np.sum(win * win) * np.sum(flipped * flipped))
+            corr = (
+                float(np.sum(win * flipped) / np.sqrt(denom))
+                if denom > 1e-12
+                else 0.0
+            )
+            if corr >= 0.0:
+                continue
         total_abs += float(np.sum(np.abs(win)))
         total_neg += float(-np.sum(np.minimum(win, 0.0)))
     return float(total_neg / (total_abs + 1e-12))
@@ -174,6 +191,68 @@ def profile_symmetry_axis(real: Any, axis: int, radius: int = 6) -> float:
     return float(np.median(corrs)) if corrs else 0.0
 
 
+def _peak_window_nets(real: Any, radius: int = 8) -> list[float]:
+    """强峰窗签名净吸收列表(与优化 score_axis_memory 同公式,0.2.172)。
+
+    检测正/负峰,取峰高 top-5 强峰(避开边缘),在 ±radius 峰窗内统计
+    净吸收 (正+负)/|总|。吸收峰(无论正负)净吸收约 ±1,色散峰约 0。
+    """
+    arr = np.asarray(np.real(real), dtype=float)
+    peaks = list(peak_detection.detect(arr)) + list(
+        peak_detection.detect(-arr)
+    )
+    if not peaks:
+        return []
+    heights = np.asarray([float(p.height) for p in peaks])
+    # 阈值降级(0.2.172):FFT 边缘伪影常占 99.5 分位且被边缘过滤剔除,
+    # 导致无有效强峰——逐级降阈值(95/75)让真实信号峰入选,与优化
+    # _lock_discrete_traces 的降级策略一致
+    strong: list[Any] = []
+    for pct in (99.5, 95.0, 75.0):
+        threshold = max(float(np.percentile(np.abs(arr), pct)), 0.0)
+        strong = [p for p, h in zip(peaks, heights) if h >= threshold]
+        strong = [
+            p
+            for p in strong
+            if all(
+                radius <= int(round(float(v))) < s - radius
+                for v, s in zip(np.atleast_1d(p.position), arr.shape)
+            )
+        ]
+        if strong:
+            break
+    strong.sort(key=lambda p: p.height, reverse=True)
+    nets: list[float] = []
+    for peak in strong[:5]:
+        pos = np.round(np.asarray(peak.position)).astype(int)
+        # 沿各轴取一维峰剖面(与优化迹线窗口一致,±radius),取吸收最强
+        # (|净吸收| 最大)的剖面——2D 全窗会把噪声区域纳入稀释净吸收
+        best: tuple[float, float] | None = None
+        for axis in range(arr.ndim):
+            sl = tuple(
+                slice(max(0, i - radius), min(s, i + radius + 1))
+                if a == axis
+                else slice(i, i + 1)
+                for a, (i, s) in enumerate(zip(pos, arr.shape))
+            )
+            profile = arr[sl].ravel()
+            total = float(np.abs(profile).sum())
+            if total <= 1e-12:
+                continue
+            net = float(
+                (
+                    np.clip(profile, 0.0, None).sum()
+                    + np.clip(profile, None, 0.0).sum()
+                )
+                / total
+            )
+            if best is None or abs(net) > abs(best[1]):
+                best = (net, net)
+        if best is not None:
+            nets.append(best[0])
+    return nets
+
+
 def spectral_entropy(real: Any) -> float:
     """正部谱熵（Ernst 最小熵，归一化到 [0, 1]）。
 
@@ -193,7 +272,7 @@ def spectral_entropy(real: Any) -> float:
     return float(-np.sum(p * np.log(p)) / np.log(n))
 
 
-def evaluate(data: Any) -> PhaseQuality:
+def evaluate(data: Any, *, sign_mode: str = "uniform") -> PhaseQuality:
     """评估相位质量（吸收度 + 连续负面积 + 谱熵 + 负峰 + 对称性）。
 
     评分 = 100 × (0.25×吸收度 + 0.40×(1−负面积) + 0.20×(1−熵)
@@ -212,9 +291,12 @@ def evaluate(data: Any) -> PhaseQuality:
     negative = peak_detection.detect(-real)
     total = len(positive) + len(negative)
     neg_fraction = len(negative) / total if total else 0.0
-
     na = negative_area_fraction(real)
     ent = spectral_entropy(real)
+    # 0.2.172:相位主评分与优化同源——峰窗签名净吸收
+    # (memory_phase_search.score_axis_memory 同公式);修复"谱图看着
+    # 相位正常但相位分低"的误报
+    nets = _peak_window_nets(real)
 
     symmetry = 0.5
     if real.size > 1 and float(np.std(real)) > 1e-12:
@@ -223,19 +305,24 @@ def evaluate(data: Any) -> PhaseQuality:
         if not np.isnan(corr):
             symmetry = max(0.0, min(1.0, (corr + 1.0) / 2.0))
 
-    score = float(
-        np.clip(
-            100.0
-            * (
-                0.25 * absorption
-                + 0.40 * (1.0 - na)
-                + 0.20 * (1.0 - ent)
-                + 0.15 * (1.0 - neg_fraction)
-            ),
-            0.0,
-            100.0,
-        )
-    )
+    # 0.2.172:与优化同源(峰窗签名净吸收,0-100)为主,叠加 10% 谱熵
+    # 微调保证弱峰窗/1D 谱也随相位误差单调;无有效峰窗时中性 50
+    # (与优化 score_axis_memory 无迹线时返回 50 一致)
+    if nets:
+        if sign_mode == "mixed":
+            net_score = 50.0 * (float(np.median(np.abs(nets))) + 1.0)
+            strong = [n for n in nets if abs(n) > 0.35]
+            if strong:
+                has_pos = any(n > 0 for n in strong)
+                has_neg = any(n < 0 for n in strong)
+                if not (has_pos and has_neg):
+                    net_score *= 0.7
+        else:
+            net_score = 50.0 * (float(np.median(nets)) + 1.0)
+        phase_score = 0.9 * net_score + 0.1 * (100.0 * (1.0 - ent))
+    else:
+        phase_score = 50.0
+    score = float(np.clip(phase_score, 0.0, 100.0))
     return PhaseQuality(
         absorption_fraction=float(absorption),
         negative_peak_fraction=float(neg_fraction),

@@ -48,6 +48,7 @@ def spectrum_quality_report_lines(
     *,
     optimization_logs: list[str] | None = None,
     axis_names: list[str] | None = None,
+    sign_mode: str = "uniform",
 ) -> list[str]:
     """◆ 最终谱图质量 分节(0.2.169-补):综合判定 + 分项等级分数 +
     基线指标(最差存储轴)+ 检查说明 + 基线不平原因。日志末尾汇总与
@@ -64,7 +65,7 @@ def spectrum_quality_report_lines(
 
         _dic, data = ng.pipe.read(str(spectrum_path))
         arr = np.asarray(data)
-        q = spectrum_quality.evaluate(arr)
+        q = spectrum_quality.evaluate(arr, sign_mode=sign_mode)
         comps = q.score.components
         decision_label = {
             "accept": "✓ 接受",

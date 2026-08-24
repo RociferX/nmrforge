@@ -181,6 +181,7 @@ def _append_final_summary(
     window: Any = None,
     diagnostics: dict[str, Any] | None = None,
     optimization_logs: list[str] | None = None,
+    peak_sign: str = "uniform",
     progress: Callable[[str], None] | None = None,
 ) -> None:
     """末尾报告:谱图质量与数据质量诊断(0.2.169-补,用户可读)。
@@ -205,6 +206,7 @@ def _append_final_summary(
         str(spectrum_path),
         optimization_logs=optimization_logs,
         axis_names=storage_axes,
+        sign_mode=peak_sign,
     )
     reports = list((diagnostics or {}).get("reports") or [])
     lines.append("◆ 数据质量诊断(处理前的数据监测,FID 检查)")
@@ -253,6 +255,20 @@ def _template_auto_phase(experiment: Experiment) -> bool:
     except Exception:  # noqa: BLE001 - 模板查询失败不阻断处理
         pass
     return True
+
+
+def _template_peak_sign(experiment: Experiment) -> str:
+    """实验类型峰符号(presets peak_sign):uniform 同号 / mixed 正负共存。
+    与 _template_auto_phase 同源;模板缺失/解析失败回退 uniform。"""
+    try:
+        from core.experiments.registry import REGISTRY
+
+        tpl = REGISTRY.get(experiment.experiment_type.name)
+        if tpl is not None:
+            return str(getattr(tpl, "peak_sign", "uniform") or "uniform")
+    except Exception:  # noqa: BLE001 - 模板查询失败不阻断处理
+        pass
+    return "uniform"
 
 
 def _split_final_ext(params: dict[str, Any]) -> tuple[dict[str, Any], Any, Any]:
@@ -552,6 +568,7 @@ def unified_route(    experiment: Experiment,
         window=proc["window"],
         diagnostics=diagnostics,
         optimization_logs=proc["logs"],
+        peak_sign=_template_peak_sign(experiment),
         progress=progress,
     )
     _cleanup_unified_intermediates(work, experiment.dataset_id)
@@ -1405,6 +1422,7 @@ def _unified_nus(
         window=proc["window"],
         diagnostics=diagnostics,
         optimization_logs=proc["logs"],
+        peak_sign=_template_peak_sign(experiment),
         progress=progress,
     )
     _cleanup_unified_intermediates(work, experiment.dataset_id)

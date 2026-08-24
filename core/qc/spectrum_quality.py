@@ -51,8 +51,13 @@ def evaluate(
     data: Any,
     *,
     min_shape: tuple[int, ...] | None = None,
+    sign_mode: str = "uniform",
 ) -> QualityResult:
     """评估综合谱质量（SNR/相位/基线/伪影加权）。
+
+    sign_mode: "uniform"(同号峰,HSQC 等)或 "mixed"(正负峰共存,
+    HNCACB 等)——相位评分与相位优化同源(0.2.172),mixed 时负峰视为
+    正常,不再误报。
 
     min_shape 非 None 时按各维最低点数施加分辨率惩罚(如填零后 SI 下限)。
     """
@@ -60,7 +65,7 @@ def evaluate(
     sigma = noise.estimate(arr).global_sigma
     peaks = peak_detection.detect(arr)
     snr_metrics = snr.compute(arr, peaks, sigma)
-    phase_metrics = phase_quality.evaluate(arr)
+    phase_metrics = phase_quality.evaluate(arr, sign_mode=sign_mode)
     _worst_axis, baseline_metrics = baseline_quality.worst_axis(arr)
     artifact_report = artifact_detection.detect(arr)
 
