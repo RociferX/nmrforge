@@ -1,5 +1,32 @@
 # 修改记录(历史条目)
 
+## 0.2.166(2026-08-24,uniform/NUS 四路径功能对齐审计)
+
+用户要求:继续检查 2D/3D × uniform/NUS 四种路径,是否有某条路径有新功能
+而其它路径没有。审计结论与修复:
+
+- uniform 补齐 NUS 已有功能:
+  - sampling.auto_phase=False 生效:直接维相位保持 (0,0),不再生成直接维
+    预览与内存搜索(此前 uniform 忽略该开关);
+  - 初跑脚本保留:优化前完整脚本(joint,含最终相位与自动填零,未含优化
+    基线/窗)存为 {dataset_id}_before_optimize.com,与 NUS 初跑脚本保留对称;
+  - 终跑「质量与优化汇总」补 baseline/zero_fill/window/diagnostics
+    (此前 uniform 汇总缺这些段落,与 NUS 汇总不对称);
+  - 优化流程间接维基线变化后重渲基底谱(与 NUS 评分基准一致);
+  - process() 分段转换透传 segment_shift_hz 频移(有频移强制重转),
+    与 reconstruct_nus 一致;
+- 两条路径共有的窗函数优化缺陷修复:间接维窗候选获胜时原先整表替换
+  window、丢掉直接维已优化窗——现只覆盖间接维;uniform 候选评分同时
+  携带已优化直接维窗,保证评分面与终跑配置一致;
+- NUS 直接维相位缓存指纹补 window:直接维窗进 SMILE step1 重构平面,
+  此前改窗后缓存仍命中旧相位(潜在脏缓存),现改窗即失效重搜;
+- 按设计保留的差异(NUS/SMILE 特有,已在代码注释与开发文档说明):
+  直接维相位缓存与搜索 ETA、fid_noise 去伪、轻量/显示层相位搜索、
+  SMILE 内存护栏、nuslist 坏点清理;uniform 的 keep_direct_complex
+  (NUS 由 finalize 复型预览承担)。
+- 测试:新增 uniform auto_phase=False 路由、uniform 汇总/初跑脚本保留
+  断言、缓存指纹含 window 失效断言;全量 pytest 662 passed + ruff 全绿。
+
 ## 0.2.165(2026-08-24,uniform/NUS 流程对齐 + GMB 高斯窗修复)
 
 用户报告:2D uniform 检测到直流偏置后终跑脚本未加 POLY -time;运行日志

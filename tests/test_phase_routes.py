@@ -55,6 +55,10 @@ class _FakeBackend:
     ):
         params = dict(params or {})
         self.process_calls.append((experiment, plan, params, dict(direct_phase_override or {})))
+        if script_name:
+            (self.work / script_name).write_text(
+                f"# fake script {script_name}\n", encoding="utf-8"
+            )
         path = str(self.work / (out_file or "final.ft2"))
         Path(path).write_bytes(b"x")
         return {"success": True, "spectrum_path": path, "logs": []}
@@ -134,6 +138,38 @@ def test_unified_route_uniform_dc_offset_poly_time_into_final(
     assert final[2]["direct_poly_time"] is True
     assert result["diagnostics"]["apply_poly_time"] is True
     assert any("POLY -time" in r for r in result["diagnostics"]["reports"])
+
+
+def test_unified_route_uniform_auto_phase_false_keeps_direct_zero(
+    tmp_path: Path, monkeypatch, bruker_dir: Path
+) -> None:
+    """0.2.166:uniform sampling.auto_phase=False 时直接维相位保持 (0,0),
+    不生成直接维预览、不搜索(与 NUS 一致);终跑直接维覆盖为 (0,0)。"""
+    experiment = read_dataset(bruker_dir / "hsqc_2d")
+    backend = _FakeBackend(tmp_path / "uni_aphase_work")
+    work = backend.work
+
+    def fake_read(path: str, unpack_axis: int | None = None):
+        name = Path(path).name
+        if "F1" in name:
+            return _synthetic_preview(0, -25.0)
+        return _synthetic_preview(0, 0.0)
+
+    monkeypatch.setattr(routes, "_read_complex_preview", fake_read)
+    result = routes.unified_route(
+        experiment,
+        backend,
+        work_dir=work,
+        base_params={"sampling": {"auto_phase": False}},
+    )
+    # F1 预览 + joint + 终跑(无 F2 预览)
+    assert len(backend.process_calls) == 3
+    preview, _joint, final = backend.process_calls
+    assert preview[2].get("preview_axis") == "F1"
+    assert result["phases"]["F2"] == (0.0, 0.0)
+    assert final[3]["F2"] == (0.0, 0.0)
+    assert any("auto_phase=False" in line for line in result["logs"])
+    assert result["spectrum_path"]
 
 
 def test_unified_route_uniform_order_and_phases(
@@ -614,6 +650,17 @@ def test_unified_route_uniform_runs_processing_optimization(
     assert result["baseline"]["F1"]["order"] == 2
     assert result["window"]["F2"]["type"] == "sine_bell"
     assert "diagnostics" in result
+    # 0.2.166:uniform 汇总与 NUS 对称——基线/窗/填零/诊断进「质量与优化汇总」
+    assert "== 质量与优化汇总 ==" in result["logs"]
+    assert any("  基线:" in line for line in result["logs"])
+    assert any("  窗函数:" in line for line in result["logs"])
+    assert any("  填零:" in line for line in result["logs"])
+    assert any("  数据质量诊断:" in line for line in result["logs"])
+    # 0.2.166:uniform 初跑脚本保留(joint 脚本拷贝,cleanup 不清它)
+    no_opt = work / "hsqc_2d_before_optimize.com"
+    assert no_opt.is_file()
+    assert "# fake script hsqc_2d_joint.com" in no_opt.read_text(encoding="utf-8")
+    assert any("初跑脚本保留" in line for line in result["logs"])
 
 
 def test_unified_route_uniform_final_ext_only_applies_to_final_run(
@@ -829,6 +876,21 @@ def test_direct_phase_cache_roundtrip(tmp_path: Path) -> None:
     assert (
         _load_direct_phase_cache(
             tmp_path, exp, {"ext_lo": 9.0, "ext_hi": 7.0}, shape
+        )
+        is None
+    )
+    # 0.2.166:直接维窗影响重构平面,缓存指纹必须包含 window
+    assert (
+        _load_direct_phase_cache(
+            tmp_path,
+            exp,
+            {
+                "ext_lo": 10.5,
+                "ext_hi": 6.5,
+                "extract": True,
+                "window": {"F3": {"type": "sine_bell"}},
+            },
+            shape,
         )
         is None
     )

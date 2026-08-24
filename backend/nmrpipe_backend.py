@@ -250,13 +250,18 @@ class NMRPipeBackend:
                 and list((work / "merged" / "fid").glob("test*.fid"))
             )
             in_file = "merged/fid/test%03d.fid"
-            if merged_ready:
+            if merged_ready and not (params or {}).get("segment_shift_hz"):
                 logs.append("复用已转换 fid(跳过转换)")
                 _progress("复用已转换 fid(跳过转换)")
             else:
                 _progress("开始转换 fid")
+                # 0.2.166:分段频移与 NUS 对齐(有 segment_shift_hz 必须重转)
+                shifts = [
+                    float(v)
+                    for v in (params or {}).get("segment_shift_hz", [])
+                ]
                 converted, convert_logs = self._convert_segments(
-                    runtime, experiment, work, []
+                    runtime, experiment, work, shifts
                 )
                 logs += convert_logs
         else:

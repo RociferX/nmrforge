@@ -349,6 +349,11 @@ def unified_route(    experiment: Experiment,
     axis_index: dict[str, int] = {}
     axis_traces: dict[str, tuple[list[int], list[int]]] = {}
     logs: list[str] = []
+    # 0.2.166:sampling.auto_phase=False 时直接维相位保持 (0,0)(与 NUS
+    # 一致),跳过直接维搜索与预览;间接维联合复核不受影响
+    if (params.get("sampling") or {}).get("auto_phase") is False:
+        search_axes = [a for a in axes if a != direct_axis]
+        logs.append("sampling.auto_phase=False,直接维相位保持 (0,0)(跳过搜索)")
     backend_runs = 0
     for axis in search_axes:
         out_file = f"{experiment.dataset_id}_preview_{axis}.{ext}"
@@ -412,6 +417,8 @@ def unified_route(    experiment: Experiment,
                 f"vs 联合最优 {best} score={best_score:.2f}),保持顺序固定"
             )
         logs.append(f"联合复核完成,耗时 {time.time() - t_joint:.1f} 秒")
+    # 0.2.166:auto_phase=False 时直接维未参与搜索与联合复核,保持 (0,0)
+    fixed.setdefault(direct_axis, (0.0, 0.0))
     # 0.2.163-补6:处理参数优化(基线/直接维窗/填零+间接窗),与 NUS 对称;
     # uniform 无重构,候选重跑完整 process 更快
     if progress is not None:
@@ -430,6 +437,21 @@ def unified_route(    experiment: Experiment,
     logs.append(
         f"处理参数优化(基线/填零/窗函数)完成,耗时 {time.time() - t_opt:.1f} 秒"
     )
+    # 0.2.166:uniform 保留优化前完整脚本(joint 脚本,含最终相位与自动
+    # 填零,未含优化基线/窗)为 {dataset_id}_before_optimize.com,与 NUS
+    # 初跑脚本保留对称,便于对照优化前后脚本
+    joint_script = work / f"{experiment.dataset_id}_joint.com"
+    no_opt_script = work / f"{experiment.dataset_id}_before_optimize.com"
+    try:
+        if joint_script.is_file():
+            no_opt_script.write_text(
+                joint_script.read_text(encoding="utf-8"),
+                encoding="utf-8",
+                newline="\n",
+            )
+            logs.append(f"初跑脚本保留: {no_opt_script.name}")
+    except OSError as exc:
+        logs.append(f"初跑脚本保留失败: {exc}")
     if progress is not None:
         progress("终跑(完整重跑)中")
     t_final = time.time()
@@ -477,6 +499,10 @@ def unified_route(    experiment: Experiment,
         direct_phase=fixed_final.get(direct_axis),
         phases=fixed_final,
         backend_runs=backend_runs,
+        baseline=proc["baseline"],
+        zero_fill=proc["zero_fill"],
+        window=proc["window"],
+        diagnostics=diagnostics,
         progress=progress,
     )
     _cleanup_unified_intermediates(work, experiment.dataset_id)
@@ -496,6 +522,7 @@ _DIRECT_PHASE_FP_KEYS = (
     "extract", "ext_lo", "ext_hi", "nsigma", "thresh",
     "smile_xq3", "smile_scaling", "zero_fill", "linewidth_hz",
     "points_per_line", "segment_shift_hz", "sampling",
+    "window",  # 0.2.166:直接维窗进 SMILE step1 重构平面,缓存指纹必须含窗
     "direct_poly_time",  # 0.2.160:首遍脚本不再含 POLY -time,搜索基于原始平面
 )
 
@@ -664,6 +691,32 @@ def _optimize_uniform_processing(
         out_logs += opt.logs
     except Exception as exc:  # noqa: BLE001 - 基线评估失败不影响相位/终跑
         out_logs.append(f"基线优化(嵌入)失败: {exc}")
+    # 2.1) 间接维基线变化 → 用新基线重渲基底谱(与 NUS 对称),供窗/填零
+    #      候选评分;直接维基线随终跑完整脚本统一应用
+    default_cfg: dict[str, Any] = {"enabled": True, "mode": "auto", "order": 0}
+    changed_indirect = [
+        a for a in indirect_axes if baseline_cfg.get(a) not in (None, default_cfg)
+    ]
+    if changed_indirect:
+        apply_baseline = {a: baseline_cfg[a] for a in changed_indirect}
+        resp = backend.process(
+            experiment,
+            plan,
+            direct_phase_override=dict(fixed) if fixed else None,
+            params={"zero_fill": zf_params, "baseline": apply_baseline},
+            out_file=joint_file,
+            script_name=f"{experiment.dataset_id}_joint.com",
+            progress=progress,
+        )
+        if resp.get("success") and resp.get("spectrum_path"):
+            base_path = Path(resp["spectrum_path"])
+            out_logs.append("基线(嵌入): 间接维已用最优基线重渲基底谱")
+        else:
+            out_logs.append(
+                "基线(嵌入): 间接维基线重渲失败("
+                + str(resp.get("message"))
+                + "),评分沿用默认基线"
+            )
     # 2.5) 直接维窗函数:FID 直接维迹内存评分(不重跑 process),写回终跑
     try:
         from workflow.window_optimize import optimize_direct_window_from_work
@@ -713,9 +766,15 @@ def _optimize_uniform_processing(
         best_score = base_score
         for index, w in enumerate(windows, 1):
             wname = str(w.get("type"))
+            # 0.2.166:候选评分含已优化直接维窗——与终跑窗口一致,避免
+            # 评分面与终跑配置脱节(uniform 可重跑 process,NUS 受 SMILE
+            # 重构限制仍为间接维候选)
+            cand_window = dict(window_cfg or {})
+            for a in indirect_axes:
+                cand_window[a] = dict(w)
             cand_params = {
                 "zero_fill": zf_params,
-                "window": {a: dict(w) for a in indirect_axes},
+                "window": cand_window,
             }
             resp = backend.process(
                 experiment,
@@ -746,7 +805,11 @@ def _optimize_uniform_processing(
                 best_score = score
                 best_window = dict(w)
         if best_window is not None and best_score > base_score + 0.5:
-            window_cfg = {a: dict(best_window) for a in indirect_axes}
+            # 0.2.166:只覆盖间接维,保留直接维已优化窗(此前整表替换会丢窗)
+            final_window = dict(window_cfg or {})
+            for a in indirect_axes:
+                final_window[a] = dict(best_window)
+            window_cfg = final_window
             wtype = str(best_window.get("type", "sine_bell"))
             out_logs.append(
                 "窗函数/填零(嵌入): 已选 "
@@ -942,7 +1005,11 @@ def _optimize_nus_processing(
                 best_score = score
                 best_window = dict(w)
         if best_window is not None and best_score > base_score + 0.5:
-            window_cfg = {a: dict(best_window) for a in indirect_axes}
+            # 0.2.166:只覆盖间接维,保留直接维已优化窗(此前整表替换会丢窗)
+            final_window = dict(window_cfg or {})
+            for a in indirect_axes:
+                final_window[a] = dict(best_window)
+            window_cfg = final_window
             out_logs.append(
                 "窗函数/填零(嵌入): 已选 "
                 f"{best_window.get('type')}+填零=auto "

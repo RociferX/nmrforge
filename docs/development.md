@@ -33,6 +33,22 @@
 执行检查:`tests/test_full_paths.py` 已覆盖四种路径(自动 2D/3D uniform
 + NUS、人工、批量),每次改动后必须全绿。
 
+### 四路径功能对齐检查(强制,0.2.166)
+
+新增/改动任何处理功能时,对照以下清单确认四条路径(2D/3D × uniform/NUS,
+自动/人工)没有「一条有、其它没有」的差异:
+
+- 参数开关透传:sampling.auto_phase、direct_poly_time、window/baseline/
+  zero_fill/extract/ext 窗口、segment_shift_hz、phases;
+- 流程能力:数据质量诊断、直接维窗/基线/填零/间接窗优化、初跑脚本保留
+  (before_optimize.com)、终跑质量与优化汇总、直接维相位缓存指纹
+  (必须包含影响谱面的所有参数,如 window);
+- 宏语义:以目标 NMRPipe 版本宏定义为准(如 gaussian→GMB),禁止
+  「看起来对」的写法;
+- NUS/SMILE 特有功能(fid_noise、内存护栏、nuslist 清理、轻量/显示层
+  相位搜索、直接维相位缓存)允许保留差异,但必须在代码注释/CHANGELOG
+  写明例外原因。
+
 ## 脚本生成约定(强制,0.2.165)
 
 所有 nmrPipe 宏参数必须以目标版本宏定义为准,不允许「看起来对」的写法:
