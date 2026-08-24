@@ -322,6 +322,10 @@ def evaluate(data: Any, *, sign_mode: str = "uniform") -> PhaseQuality:
         else:
             net_score = 50.0 * (float(np.median(nets)) + 1.0)
         phase_score = 0.9 * net_score + 0.1 * (100.0 * (1.0 - ent))
+        # 实部能量占比(吸收度)因子:相位校正后实部能量最大——打破
+        # 0°/±45° 净吸收相同的 tie(实谱×e^{iφ} 场景,VM numpy 2.4
+        # 浮点下排序不稳定);正常吸收谱 absorption≈1 不降分
+        phase_score *= 0.5 + 0.5 * absorption
     else:
         phase_score = 50.0
     score = float(np.clip(phase_score, 0.0, 100.0))
