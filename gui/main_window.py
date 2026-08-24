@@ -100,6 +100,11 @@ class MainWindow(QMainWindow):
         self._pending_data_names: dict[str, str] = {}
         self._last_auto_fill: dict = {}
         self._last_raw_quality: dict | None = None
+        # 日志作用域:当前选中上下文(由 _update_context 维护)
+        self._log_kind = ""
+        self._log_exp_id = ""
+        self._log_data_id = ""
+        self._log_group_id = ""
         self.setWindowTitle("NMRForge")
         self.setAcceptDrops(True)  # 拖拽 Bruker 数据目录导入
         self._build_menus()
@@ -578,8 +583,10 @@ class MainWindow(QMainWindow):
         ref_text = (
             f",参考数据 {reference_data_id}" if reference_data_id else ""
         )
+        group_scope = self.log_panel.scope_key("group", exp_id, "", group_id)
         self._append_log(
-            f"开始数据组 {group_id} 批量处理: {step_label}{ref_text}"
+            f"开始数据组 {group_id} 批量处理: {step_label}{ref_text}",
+            scope=group_scope,
         )
         self.center_panel.group_page.set_progress("批量处理运行中...")
 
@@ -591,7 +598,7 @@ class MainWindow(QMainWindow):
                     group_id,
                     steps,
                     reference_data_id=reference_data_id,
-                    progress=lambda msg: self._append_log(msg),
+                    progress=lambda msg: self._append_log(msg, scope=group_scope),
                 )
                 summary = dict(result.get("summary") or {})
                 failed = list(result.get("failed") or [])
@@ -1512,12 +1519,17 @@ class MainWindow(QMainWindow):
     def _update_context(
         self, kind: str, exp_id: str, data_id: str = "", group_id: str = ""
     ) -> None:
-        """左侧选择变化 → 中间按选中类型显示,右侧围绕数据刷新。"""
+        """左侧选择变化 → 中间按选中类型显示,右侧围绕数据刷新,日志切换作用域。"""
         self.center_panel.set_selection(kind, exp_id, data_id, group_id)
         if kind == "group":
             self.spectrum_panel.set_context(exp_id, "")
         else:
             self.spectrum_panel.set_context(exp_id, data_id)
+        self._log_kind = kind or ""
+        self._log_exp_id = exp_id or ""
+        self._log_data_id = data_id or ""
+        self._log_group_id = group_id or ""
+        self.log_panel.set_scope(kind, exp_id, data_id, group_id)
         self._update_context_bar()
 
     def _on_stop_requested(self) -> None:
@@ -1532,9 +1544,18 @@ class MainWindow(QMainWindow):
         else:
             self._append_log("当前没有正在运行的任务")
 
-    def _append_log(self, message: str) -> None:
-        self.log_panel.append(message)
+    def _append_log(self, message: str, scope: str | None = None) -> None:
+        self.log_panel.append(message, scope=scope)
         self.log_panel.setVisible(True)
+
+    def _log_scope(self) -> str:
+        """当前选中上下文对应的日志作用域键。"""
+        return self.log_panel.scope_key(
+            self._log_kind,
+            self._log_exp_id,
+            self._log_data_id,
+            self._log_group_id,
+        )
 
     # ------------------------------------------------------------------
     # 刷新

@@ -471,6 +471,53 @@ def test_main_window_log_panel_expands_on_message(
     window.close()
 
 
+def test_log_panel_scopes_isolate_data_and_group(
+    qapp: QApplication,
+) -> None:
+    """单个数据日志互相独立;数据组内共用同一日志;切换选中即切换显示。"""
+    from gui.log_panel import LogPanel
+
+    panel = LogPanel()
+    # 数据 A 与数据 B 独立
+    panel.set_scope("data", "exp_001", "d_001")
+    panel.append("A 的日志")
+    panel.set_scope("data", "exp_001", "d_002")
+    panel.append("B 的日志")
+    panel.set_scope("data", "exp_001", "d_001")
+    assert "A 的日志" in panel.text.toPlainText()
+    assert "B 的日志" not in panel.text.toPlainText()
+    # 数据组共用
+    panel.set_scope("group", "exp_001", "", "g_1")
+    panel.append("组的日志")
+    panel.set_scope("group", "exp_001", "", "g_1")
+    assert "组的日志" in panel.text.toPlainText()
+    # 实验类型与全局互不污染
+    panel.set_scope("experiment", "exp_001")
+    assert "A 的日志" not in panel.text.toPlainText()
+    panel.set_scope("", "", "")
+    assert panel.text.toPlainText() == ""
+    panel.close()
+
+
+def test_log_panel_explicit_scope_routes_group_batch(
+    qapp: QApplication,
+) -> None:
+    """组批量日志显式落到组作用域,不受当前选中数据影响。"""
+    from gui.log_panel import LogPanel
+
+    panel = LogPanel()
+    panel.set_scope("data", "exp_001", "d_001")
+    panel.append("单数据日志")
+    group_scope = panel.scope_key("group", "exp_001", "", "g_1")
+    panel.append("批量进度 1/3", scope=group_scope)
+    # 当前仍显示数据日志,组日志在组作用域
+    assert "批量进度 1/3" not in panel.text.toPlainText()
+    panel.set_scope("group", "exp_001", "", "g_1")
+    assert "批量进度 1/3" in panel.text.toPlainText()
+    assert "单数据日志" not in panel.text.toPlainText()
+    panel.close()
+
+
 def test_main_window_empty_state(qapp: QApplication) -> None:
     window = MainWindow()
     assert window.project_tree.tree.topLevelItemCount() == 1  # Workspace 根

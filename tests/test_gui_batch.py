@@ -490,6 +490,36 @@ def test_batch_import_group_option(qapp: QApplication) -> None:
     panel.close()
 
 
+def test_import_button_no_source_gives_hint(qapp: QApplication) -> None:
+    """导入按钮无路径时给出提示而不是静默无反应(用户反馈)。"""
+    from gui.dashboards import ExperimentImportPanel
+
+    hints: list[str] = []
+    from gui.dashboards import InfoDialog
+
+    orig_show = InfoDialog.show_info
+    InfoDialog.show_info = staticmethod(
+        lambda parent, title, text: hints.append(f"{title}: {text}")
+    )
+    try:
+        panel = ExperimentImportPanel()
+        emitted: list[tuple] = []
+        panel.import_options_requested.connect(lambda *a: emitted.append(a))
+        panel.set_context("exp_1")
+        panel._on_import()
+        assert emitted == [], "无路径不应发导入请求"
+        assert hints and "请先选择" in hints[-1]
+        # 有路径 + 空 exp_id:照常发请求(主窗口自动创建实验类型)
+        hints.clear()
+        panel.set_context("")
+        panel.source_edit.setText("/data/foo")
+        panel._on_import()
+        assert emitted and emitted[0][0] == ""
+    finally:
+        InfoDialog.show_info = orig_show
+        panel.close()
+
+
 def test_experiment_dashboard_rename_data_name(
     tmp_path: Path, qapp: QApplication
 ) -> None:

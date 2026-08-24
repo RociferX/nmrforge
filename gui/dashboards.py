@@ -302,8 +302,13 @@ class ExperimentImportPanel(QWidget):
 
     def _on_import(self) -> None:
         source = self.source_edit.text().strip()
-        if not source or not self._exp_id:
+        if not source:
+            InfoDialog.show_info(
+                self, "导入样品数据", "请先选择 Bruker 数据集目录(含 acqus)"
+            )
             return
+        # exp_id 为空(未选中实验类型)时交由主窗口自动创建实验类型,
+        # 不静默无反应
         self.import_options_requested.emit(
             self._exp_id,
             self.name_edit.text().strip(),
@@ -331,6 +336,9 @@ class ExperimentImportPanel(QWidget):
         """分段采集导入:容器目录(合并 FID)直接发请求(带当前实验类型,0.2.122)。"""
         source = self.segmented_source_edit.text().strip()
         if not source:
+            InfoDialog.show_info(
+                self, "分段采集导入", "请先选择分段采集容器目录"
+            )
             return
         self.segmented_import_requested.emit(self._exp_id, source)
 
@@ -605,11 +613,16 @@ class ExperimentDashboard(QWidget):
         layout.addStretch(1)
 
     def _open_import_dropdown(self) -> None:
-        """实验类型页「导入数据」:弹出/收起导入表单下拉(0.2.162-补13)。"""
-        if self._import_dropdown.isVisible():
-            self._import_dropdown.close()
-            return
+        """实验类型页「导入数据」:点击总是有明确反馈。
+
+        下拉未打开 → 在按钮下方弹出;已打开 → 置顶聚焦(不重复 setParent,
+        避免重复安装事件过滤器)。关闭通过点击外部(EventFilter)触发。
+        """
         self._group_analysis_dropdown.close()
+        if self._import_dropdown.isVisible():
+            self._import_dropdown.raise_()
+            self._import_dropdown.activateWindow()
+            return
         self._import_dropdown.open_below(self.import_dropdown_button, self._exp_id)
 
     def _open_group_analysis_dropdown(self) -> None:
