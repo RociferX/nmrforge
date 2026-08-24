@@ -225,8 +225,10 @@ def _peak_window_nets(real: Any, radius: int = 8) -> list[float]:
     nets: list[float] = []
     for peak in strong[:5]:
         pos = np.round(np.asarray(peak.position)).astype(int)
-        # 沿各轴取一维峰剖面(与优化迹线窗口一致,±radius),取吸收最强
-        # (|净吸收| 最大)的剖面——2D 全窗会把噪声区域纳入稀释净吸收
+        # 沿各轴取一维峰剖面(与优化迹线窗口一致,±radius)。相位误差沿
+        # 被调轴展开,其它轴保持吸收——取 |净吸收| 最小的剖面(最差方向)
+        # 代表该峰相位状态,避免取最强剖面时漏掉被调轴的色散(2D 谱 45°
+        # 未校正候选在 F1 方向仍吸收,此前误判高分)
         best: tuple[float, float] | None = None
         for axis in range(arr.ndim):
             sl = tuple(
@@ -246,8 +248,8 @@ def _peak_window_nets(real: Any, radius: int = 8) -> list[float]:
                 )
                 / total
             )
-            if best is None or abs(net) > abs(best[1]):
-                best = (net, net)
+            if best is None or abs(net) < best[1]:
+                best = (net, abs(net))
         if best is not None:
             nets.append(best[0])
     return nets
