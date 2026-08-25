@@ -45,12 +45,20 @@ class _FakeBackend:
     """自动生成 fid.com 的假后端(manual_fid_com 未生成时调用)。"""
 
     work_dir: str | None = None
+    last_overrides: dict | None = None
 
-    def convert_to_fid(self, experiment, data_dir):
+    def convert_to_fid(self, experiment, data_dir, progress=None, fid_com_overrides=None):
         work = Path(self.work_dir) if self.work_dir else Path(data_dir)
         (work / "fid.com").write_text("#!/bin/csh\n# auto fid.com\n", encoding="utf-8")
-        (work / "test.fid").write_bytes(b"fid")
-        return {"success": True, "fid_path": "x.fid", "message": "ok", "logs": []}
+        fid = work / f"{experiment.dataset_id}.fid"
+        fid.write_bytes(b"fid")
+        self.last_overrides = dict(fid_com_overrides or {})
+        return {
+            "success": True,
+            "fid_path": str(fid),
+            "message": "ok",
+            "logs": [],
+        }
 
 
 def _manager_with_raw(tmp_path: Path, bruker_dir: Path):
@@ -77,16 +85,21 @@ def test_manual_fid_com_generates_and_reads(
 
 
 def test_run_manual_fid_com_registers(
-    tmp_path: Path, bruker_dir: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, bruker_dir: Path
 ) -> None:
+    """0.2.199-补2:单数据集人工 fid.com 与分段一致,参数作为覆盖交给后端。"""
     manager, exp_id, data_id, _raw = _manager_with_raw(tmp_path, bruker_dir)
-    runtime = _FakeRuntime(spectrum_name="x.ft2")
-    monkeypatch.setattr("workflow.manual.CshRuntime", lambda: runtime)
+    backend = _FakeBackend()
 
     fid_path = run_manual_fid_com(
-        manager, exp_id, data_id, "#!/bin/csh\n# edited\n"
+        manager,
+        exp_id,
+        data_id,
+        "#!/bin/csh\n# edited\n-ySW 2800.000\n",
+        backend=backend,
     )
     assert fid_path.endswith(".fid")
+    assert backend.last_overrides == {"ySW": "2800.000"}
     assert Path(fid_path).parent == manager.data_dir(exp_id, data_id, "process")
     data = manager.data(exp_id, data_id)
     assert data.fid_path == fid_path
@@ -114,7 +127,13 @@ def test_run_manual_spectrum_uniform(
     runtime = _FakeRuntime(spectrum_name="d_001.ft2")
     monkeypatch.setattr("workflow.manual.CshRuntime", lambda: runtime)
     # 先生成 FID(独立步骤),谱图步骤只消费已转换 fid
-    run_manual_fid_com(manager, exp_id, data_id, "#!/bin/csh\n# fid\n")
+    run_manual_fid_com(
+        manager,
+        exp_id,
+        data_id,
+        "#!/bin/csh\n# fid\n",
+        backend=_FakeBackend(),
+    )
     runtime.calls.clear()
     spectrum = run_manual_spectrum(
         manager, exp_id, data_id, {"process.com": "#!/bin/csh\n# process\n"}
@@ -137,7 +156,13 @@ def test_run_manual_spectrum_failure(
     manager, exp_id, data_id, raw = _manager_with_raw(tmp_path, bruker_dir)
     ok_runtime = _FakeRuntime(spectrum_name="d_001.ft2")
     monkeypatch.setattr("workflow.manual.CshRuntime", lambda: ok_runtime)
-    run_manual_fid_com(manager, exp_id, data_id, "#!/bin/csh\n# fid\n")
+    run_manual_fid_com(
+        manager,
+        exp_id,
+        data_id,
+        "#!/bin/csh\n# fid\n",
+        backend=_FakeBackend(),
+    )
     fail_runtime = _FakeRuntime(spectrum_name=f"{raw.name}.ft2", fail=True)
     monkeypatch.setattr("workflow.manual.CshRuntime", lambda: fail_runtime)
     with pytest.raises(ManualRunError, match="运行失败"):
@@ -159,7 +184,13 @@ def test_run_manual_spectrum_missing_script(
     manager, exp_id, data_id, raw = _manager_with_raw(tmp_path, bruker_dir)
     runtime = _FakeRuntime(spectrum_name="d_001.ft2")
     monkeypatch.setattr("workflow.manual.CshRuntime", lambda: runtime)
-    run_manual_fid_com(manager, exp_id, data_id, "#!/bin/csh\n# fid\n")
+    run_manual_fid_com(
+        manager,
+        exp_id,
+        data_id,
+        "#!/bin/csh\n# fid\n",
+        backend=_FakeBackend(),
+    )
     with pytest.raises(ManualRunError, match="缺少处理脚本"):
         run_manual_spectrum(manager, exp_id, data_id, {})
 
@@ -206,22 +237,34 @@ def test_run_manual_spectrum_accepts_slice_fid(
 
 
 def test_run_manual_fid_com_registers_slice_fid(
-    tmp_path: Path, bruker_dir: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, bruker_dir: Path
 ) -> None:
-    """0.2.163-补7:fid.com 转换产物为切片式时整体归位 work/fid/。"""
+    """0.2.163-补7/0.2.199-补2:单数据集切片式产物经后端归位 work/fid/。"""
     manager, exp_id, data_id, raw = _manager_with_raw(tmp_path, bruker_dir)
 
-    class _SliceRuntime:
-        def run(self, argv, *, cwd=None, timeout=3600, on_line=None):
-            src_dir = Path(cwd) / "fid"
-            src_dir.mkdir(parents=True, exist_ok=True)
-            (src_dir / "test001.fid").write_bytes(b"fid")
-            (src_dir / "test002.fid").write_bytes(b"fid")
-            return SimpleNamespace(returncode=0, stderr="", stdout="")
+    class _SliceBackend:
+        work_dir: str | None = None
 
-    monkeypatch.setattr("workflow.manual.CshRuntime", lambda: _SliceRuntime())
+        def convert_to_fid(
+            self, experiment, data_dir, progress=None, fid_com_overrides=None
+        ):
+            slice_dir = Path(self.work_dir) / "fid"
+            slice_dir.mkdir(parents=True, exist_ok=True)
+            (slice_dir / "test001.fid").write_bytes(b"fid")
+            (slice_dir / "test002.fid").write_bytes(b"fid")
+            return {
+                "success": True,
+                "fid_path": str(slice_dir),
+                "message": "ok",
+                "logs": [],
+            }
+
     fid_path = run_manual_fid_com(
-        manager, exp_id, data_id, "#!/bin/csh\n# fid\n"
+        manager,
+        exp_id,
+        data_id,
+        "#!/bin/csh\n# fid\n",
+        backend=_SliceBackend(),
     )
     fid_path = Path(fid_path)
     assert fid_path.is_dir() and list(fid_path.glob("test*.fid"))
@@ -231,22 +274,35 @@ def test_run_manual_fid_com_registers_slice_fid(
 
 
 def test_run_manual_fid_com_accepts_data_id_output(
-    tmp_path: Path, bruker_dir: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, bruker_dir: Path
 ) -> None:
-    """0.2.163-补13:fid.com 直接输出 {data_id}.fid(自动/人工命名对齐,
-    不再只在归位时改名)。"""
+    """0.2.163-补13/0.2.199-补2:fid 命名统一为 {data_id}.fid,经后端归位。"""
     from workflow.manual import run_manual_fid_com
 
     manager, exp_id, data_id, _raw = _manager_with_raw(tmp_path, bruker_dir)
 
-    class _NamedRuntime:
-        def run(self, argv, *, cwd=None, timeout=3600, on_line=None):
-            work = Path(cwd)
-            (work / f"{data_id}.fid").write_bytes(b"fid")
-            return SimpleNamespace(returncode=0, stderr="", stdout="")
+    class _NamedBackend:
+        work_dir: str | None = None
 
-    monkeypatch.setattr("workflow.manual.CshRuntime", lambda: _NamedRuntime())
-    fid_path = run_manual_fid_com(manager, exp_id, data_id, "#!/bin/csh\n# fid\n")
+        def convert_to_fid(
+            self, experiment, data_dir, progress=None, fid_com_overrides=None
+        ):
+            fid = Path(self.work_dir) / f"{experiment.dataset_id}.fid"
+            fid.write_bytes(b"fid")
+            return {
+                "success": True,
+                "fid_path": str(fid),
+                "message": "ok",
+                "logs": [],
+            }
+
+    fid_path = run_manual_fid_com(
+        manager,
+        exp_id,
+        data_id,
+        "#!/bin/csh\n# fid\n",
+        backend=_NamedBackend(),
+    )
     assert Path(fid_path).name == f"{data_id}.fid"
     assert Path(fid_path).parent == manager.data_dir(exp_id, data_id, "process")
 

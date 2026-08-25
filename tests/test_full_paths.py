@@ -68,7 +68,7 @@ class FakeBackend:
         return path
 
     def convert_to_fid(
-        self, experiment, data_dir, progress=None
+        self, experiment, data_dir, progress=None, fid_com_overrides=None
     ) -> dict:
         """写真实可读 fid(诊断/直接维窗优化可读)与 fid.com(人工读取)。"""
         work = self.work
@@ -470,7 +470,7 @@ def test_manual_full_path_uniform(
     backend = FakeBackend(manager.data_dir(exp_id, data_id, "process"))
     content = manual_fid_com(manager, exp_id, data_id, backend)
     assert "fid.com" in content
-    fid_path = run_manual_fid_com(manager, exp_id, data_id, content)
+    fid_path = run_manual_fid_com(manager, exp_id, data_id, content, backend=backend)
     assert Path(fid_path).is_file()
     scripts = manual_scripts(manager, exp_id, data_id)
     assert "process.com" in scripts

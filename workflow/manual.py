@@ -2,7 +2,7 @@
 
 与自动处理对应,集合了此前命令行人工处理的流程:
 - 生成 FID:自动阶段先产出 fid.com(backend.convert_to_fid)→ 人工查看内容
-  (manual_fid_com)→ 修改 → 运行(csh fid.com,run_manual_fid_com)→ 登记 fid;
+  (manual_fid_com)→ 修改 → 运行(run_manual_fid_com,人工参数作为覆盖交给后端)→ 登记 fid;
 - 生成谱图:脚本编辑(manual_scripts 渲染,process/ 已有脚本优先展示
   → 修改)→ 运行(process.com / nus*.com,run_manual_spectrum)→
   终谱归位 spectra/ 并登记。
@@ -131,8 +131,9 @@ def manual_fid_com(
     """获取当前 fid.com 内容(供人工查看/修改);未生成时先自动生成。
 
     分段采集:合并链路逐段生成 fid.com(seg_001 参数一致,作参考段),
-    返回参考段内容并加提示头;人工改参数后由 run_manual_fid_com
-    逐段应用并合并(0.2.163-补13)。
+    返回参考段内容并加提示头;单数据集同样加提示头——人工改参数后由
+    run_manual_fid_com 作为覆盖交给后端统一执行(0.2.163-补13/
+    0.2.199-补2)。
     """
     data_entry = manager.data(exp_id, data_id)
     raw_dir = _resolve_raw_dir(manager, data_entry)
@@ -161,7 +162,12 @@ def manual_fid_com(
                     "# (数据转换/切片/合并由后端统一执行,勿改输出名)\n"
                 )
                 return header + content
-        fid_com = work / "fid.com"
+        content = (work / "fid.com").read_text(encoding="utf-8", errors="replace")
+        header = (
+            "# 人工只调参数:修改的 bruk2pipe 参数会作为覆盖应用\n"
+            "# (数据转换/坏点清理/输出命名由后端统一执行,勿改输出名)\n"
+        )
+        return header + content
     return fid_com.read_text(encoding="utf-8", errors="replace")
 
 
@@ -178,11 +184,11 @@ def run_manual_fid_com(
 ) -> str:
     """运行人工 fid.com 并登记 fid。
 
-    单数据集:写入修改后的 fid.com 并直接运行(只运行 fid.com 一个脚本),
-    产物归位 process/;输出名已由后端补丁统一为 {dataset_id}.fid,
-    旧 test.fid 命名兼容。分段采集:人工只调参数(parse_fid_com 覆盖),
-    数据转换/切片/合并/坏点清理由后端按自动路径执行,合并 fid 落
-    process/merged/fid(0.2.163-补13)。
+    单数据集与分段一致(0.2.199-补2):人工改的参数经 parse_fid_com 提取
+    为 overrides,由后端 convert_to_fid 统一执行 bruker 生成/参数修正/
+    坏点清理/切片归位——人工只调参数,转换结构由后端保证,不再直接 csh
+    运行用户脚本(结构性改动不保留,与分段语义一致)。单数据集产物归位
+    process/(单文件或切片),分段产物落 process/merged/fid。
     """
     data_entry = manager.data(exp_id, data_id)
     raw_dir = _resolve_raw_dir(manager, data_entry)
@@ -190,88 +196,42 @@ def run_manual_fid_com(
     work.mkdir(parents=True, exist_ok=True)
     experiment = _read_experiment(manager, exp_id, data_id)
     segments = list(getattr(data_entry, "segments", None) or [])
-    if segments:
-        if backend is None:
-            raise ManualRunError(
-                "分段采集数据的人工 fid.com 需要后端执行转换/合并,请从界面运行"
-            )
-        overrides = parse_fid_com(content)
-        if hasattr(backend, "work_dir"):
-            backend.work_dir = str(work)
-        resp = backend.convert_to_fid(
-            experiment, raw_dir, fid_com_overrides=overrides
+    if backend is None:
+        raise ManualRunError(
+            "人工 fid.com 需要后端执行转换/合并,请从界面运行"
         )
-        if not resp.get("success"):
-            logs = list(resp.get("logs", []))
-            message = (
-                f"分段 fid.com 转换/合并失败: {resp.get('message')}"
-                + (" | " + " | ".join(logs) if logs else "")
-            )
-            run = manager.start_run(
-                exp_id,
-                workflow_ref="manual_fid",
-                inputs={"data_id": data_id},
-                params={"mode": "manual", "segments": len(segments)},
-            )
-            manager.finish_run(run.run_id, "failed", message=message)
-            raise ManualRunError(message)
-        fid_path = Path(str(resp.get("fid_path") or (work / "merged" / "fid")))
-        manager.set_data_fid(exp_id, data_id, fid_path)
-        _finish_run(
-            manager,
-            exp_id,
-            data_id,
-            "manual_fid",
-            {"fid_path": str(fid_path), "segments": len(segments)},
-            "人工 FID 完成(分段合并)",
-        )
-        return str(fid_path)
-
-    fid_com = work / "fid.com"
-    fid_com.write_text(content, encoding="utf-8", newline="\n")
-
-    runtime = CshRuntime()
-    result = runtime.run(
-        ["csh", str(fid_com)],
-        cwd=str(raw_dir),
-        timeout=timeout,
-        on_line=progress,
+    overrides = parse_fid_com(content)
+    if hasattr(backend, "work_dir"):
+        backend.work_dir = str(work)
+    resp = backend.convert_to_fid(
+        experiment, raw_dir, fid_com_overrides=overrides, progress=progress
     )
-    # 转换产物:单文件 {dataset_id}.fid(旧命名 test.fid)或切片式 fid/*.fid
-    src = raw_dir / f"{experiment.dataset_id}.fid"
-    if not src.is_file():
-        src = raw_dir / "test.fid"
-    src_slices = _slice_files(raw_dir / "fid", experiment.dataset_id)
-    if result.returncode != 0 or (not src.is_file() and not src_slices):
+    if not resp.get("success"):
+        logs = list(resp.get("logs", []))
+        message = (
+            f"fid.com 转换失败: {resp.get('message')}"
+            + (" | " + " | ".join(logs) if logs else "")
+        )
         run = manager.start_run(
             exp_id,
             workflow_ref="manual_fid",
             inputs={"data_id": data_id},
-            params={"mode": "manual"},
+            params={"mode": "manual", "segments": len(segments)},
         )
-        manager.finish_run(
-            run.run_id, "failed", message=f"fid.com 运行失败: {result.stderr}"
-        )
-        raise ManualRunError(f"fid.com 运行失败: {result.stderr}")
-
-    if src.is_file():
-        fid_path = work / f"{experiment.dataset_id}.fid"
-        shutil.move(str(src), str(fid_path))
+        manager.finish_run(run.run_id, "failed", message=message)
+        raise ManualRunError(message)
+    if segments:
+        fid_path = Path(str(resp.get("fid_path") or (work / "merged" / "fid")))
+        run_params = {"fid_path": str(fid_path), "segments": len(segments)}
+        message = "人工 FID 完成(分段合并)"
     else:
-        dest_slice = work / "fid"
-        dest_slice.mkdir(parents=True, exist_ok=True)
-        for sp in src_slices:
-            shutil.move(str(sp), str(dest_slice / sp.name))
-        fid_path = dest_slice
+        fid_path = Path(
+            str(resp.get("fid_path") or (work / f"{experiment.dataset_id}.fid"))
+        )
+        run_params = {"fid_path": str(fid_path)}
+        message = "人工 FID 完成"
     manager.set_data_fid(exp_id, data_id, fid_path)
-    _finish_run(
-        manager,
-        exp_id,
-        data_id,
-        "manual_fid",
-        {"fid_path": str(fid_path)},
-        "人工 FID 完成",
-    )
+    _finish_run(manager, exp_id, data_id, "manual_fid", run_params, message)
     return str(fid_path)
 
 
