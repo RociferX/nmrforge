@@ -441,6 +441,19 @@ def test_optimize_nus_processing_baseline_and_window(
         "workflow.baseline_optimize.optimize_baseline",
         lambda experiment, spectrum_path, **kw: fake_opt,
     )
+    from workflow.window_optimize import MultiWindowOptimizeResult
+
+    monkeypatch.setattr(
+        "workflow.window_optimize.optimize_indirect_windows_from_recon",
+        lambda work, experiment, current=None: MultiWindowOptimizeResult(
+            choice={
+                "F2": {"type": "sine_bell", "off": 0.45, "end": 0.95},
+                "F1": {"type": "none"},
+            },
+            changed=True,
+            logs=["间接维窗(测试): F2 SP 0.45-0.95,F1 无窗"],
+        ),
+    )
     proc = routes._optimize_nus_processing(
         experiment,
         type("B", (), {"finalize_nus": staticmethod(fake_finalize)})(),
@@ -449,13 +462,14 @@ def test_optimize_nus_processing_baseline_and_window(
         None,
     )
     assert proc["baseline"]["F1"]["order"] == 2
-    # 0.2.189:indirect windows fixed none (best), no auto selection
+    # 0.2.190:间接维窗真实优化(候选含无窗),不再硬编码固定无窗
     assert proc["window"] == {
-        "F2": {"type": "none"},
+        "F2": {"type": "sine_bell", "off": 0.45, "end": 0.95},
         "F1": {"type": "none"},
     }
     assert "F1: 基线已优化" in " ".join(proc["logs"])
-    assert "固定无窗" in " ".join(proc["logs"])
+    assert "间接维窗(测试)" in " ".join(proc["logs"])
+    assert "固定无窗" not in " ".join(proc["logs"])
     assert len(calls) == 2
     assert calls[1]["baseline"]["F1"]["order"] == 2
 
@@ -645,12 +659,23 @@ def test_unified_route_uniform_runs_processing_optimization(
             logs=["测试直接维窗"],
         ),
     )
+    from workflow.window_optimize import MultiWindowOptimizeResult
+
+    monkeypatch.setattr(
+        "workflow.window_optimize.optimize_indirect_windows_from_work",
+        lambda work, experiment, current=None: MultiWindowOptimizeResult(
+            choice={"F1": {"type": "none"}},
+            changed=True,
+            logs=["间接维窗(测试): F1 无窗"],
+        ),
+    )
     result = routes.unified_route(experiment, backend, work_dir=work)
     # 终跑调用(最后一次)带优化结果
     final_params = backend.process_calls[-1][2]
     assert final_params["baseline"]["F1"]["order"] == 2
     assert final_params["baseline"]["F2"]["enabled"] is False
     assert final_params["window"]["F2"]["type"] == "sine_bell"
+    assert final_params["window"]["F1"]["type"] == "none"
     assert final_params["direct_poly_time"] is False
     assert result["baseline"]["F1"]["order"] == 2
     assert result["window"]["F2"]["type"] == "sine_bell"

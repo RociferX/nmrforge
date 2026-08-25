@@ -707,10 +707,12 @@ def _optimize_uniform_processing(
     progress: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     """联合复核后的处理参数优化(uniform 2D/3D):基线(内存评分)+ 直接维
-    窗函数(FID 内存评分)+ 填零/间接维窗候选(process 重跑评分)。
+    窗函数(FID 内存评分)+ 间接维窗函数(FID 内存评分,候选含无窗)。
 
-    与 NUS 版本对称;uniform 无 SMILE 重构,候选重跑的是完整 process
-    管道(带 fixed 相位覆盖),不做重构反而更快。任何评估失败均降级:
+    顺序约束(用户要求,0.2.190):基线校正先于窗函数优化——2) 基线 →
+    2.1) 间接维基线重渲评分基底 → 2.5) 直接维窗 → 3) 间接维窗;窗候选
+    不反过来影响基线选择(0.2.189 曾因 spectrum_quality 相位/基线联动
+    把间接维从无窗带偏)。uniform 无 SMILE 重构,任何评估失败均降级:
     保持 base_params 既有配置或默认,不阻断终跑。
     """
     axes = [dim.logical_axis for dim in experiment.dimensions]
@@ -799,15 +801,24 @@ def _optimize_uniform_processing(
         out_logs += wres.logs
     except Exception as exc:  # noqa: BLE001 - 窗优化失败不影响相位/终跑
         out_logs.append(f"直接维窗优化失败: {exc}")
-    # 3) 间接维窗:固定无窗(0.2.189,用户规则:最佳参数为无窗;不再做自动
-    #    选窗——spectrum_quality 评分会因相位/基线等联动改变选窗结果,
-    #    sampleB 曾从无窗带偏到加窗)。直接维窗由 window_optimize 单独优化
-    #    (0.5-0.98 优先);填零仍按 auto 优化。
-    final_window = dict(window_cfg or {})
-    for a in indirect_axes:
-        final_window[a] = {"type": "none"}
-    window_cfg = final_window
-    out_logs.append("窗函数(间接维): 固定无窗(最佳参数,不做自动选窗)")
+    # 3) 间接维窗函数:FID 间接维时间轴内存评分(候选含无窗,分辨率受限
+    #    间接维加分辨率保留因子),写回每轴最优;直接维窗已由 2.5 单独
+    #    优化。0.2.190:恢复真实选窗(0.2.189 硬编码固定无窗是对需求的误读)。
+    try:
+        from workflow.window_optimize import optimize_indirect_windows_from_work
+
+        if progress is not None:
+            progress("间接维窗函数优化中(FID 内存评分,不重跑 process)")
+        ires = optimize_indirect_windows_from_work(
+            work, experiment, current=window_cfg
+        )
+        if ires.changed:
+            win = dict(window_cfg or {})
+            win.update(ires.choice)
+            window_cfg = win
+        out_logs += ires.logs
+    except Exception as exc:  # noqa: BLE001 - 窗优化失败不影响相位/终跑
+        out_logs.append(f"间接维窗优化失败: {exc}")
     return {
         "baseline": baseline_cfg,
         "zero_fill": zf_params,
@@ -825,13 +836,14 @@ def _optimize_nus_processing(
     base_params: dict[str, Any] | None,
     progress: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
-    """联合复核后的处理参数优化(NUS):基线(内存评分)+ 间接维窗函数/填零
-    (候选 finalize 重渲评分,不重跑 SMILE)。
+    """联合复核后的处理参数优化(NUS):基线(内存评分)+ 直接维窗(FID 内存
+    评分)+ 间接维窗函数(重构平面内存评分,候选含无窗,不重跑 SMILE)。
 
-    返回 {"baseline", "zero_fill", "window", "logs"},优化结果写回终跑
-    完整脚本。直接维基线仍逐轴评分后写回(终跑 step1 POLY 应用);直接维
-    窗/SMILE 内部 apod 在重构内,候选评估需重跑 SMILE,保持默认并日志说明。
-    任何评估失败均降级:保持 base_params 既有配置或默认,不阻断终跑。
+    顺序约束(用户要求,0.2.190):基线校正先于窗函数优化——2) 基线 →
+    2.1) 间接维基线重渲评分基底 → 2.5) 直接维窗 → 3) 间接维窗。返回
+    {"baseline", "zero_fill", "window", "logs"},优化结果写回终跑完整
+    脚本;直接维基线仍逐轴评分后写回(终跑 step1 POLY 应用)。任何评估
+    失败均降级:保持 base_params 既有配置或默认,不阻断终跑。
     """
     axes = [dim.logical_axis for dim in experiment.dimensions]
     direct_axis = "F3" if experiment.ndim >= 3 else "F2"
@@ -923,19 +935,24 @@ def _optimize_nus_processing(
         out_logs += wres.logs
     except Exception as exc:  # noqa: BLE001 - 窗优化失败不影响相位/终跑
         out_logs.append(f"直接维窗优化失败: {exc}")
-    # 3) 间接维窗:固定无窗(0.2.189,用户规则:最佳参数为无窗;不再做自动
-    #    选窗——spectrum_quality 评分会因相位/基线等联动改变选窗结果,
-    #    sampleB 曾从无窗带偏到加窗)。直接维窗由 window_optimize 单独优化
-    #    (0.5-0.98 优先);填零仍按 auto 优化。
-    final_window = dict(window_cfg or {})
-    for a in indirect_axes:
-        final_window[a] = {"type": "none"}
-    window_cfg = final_window
-    out_logs.append("窗函数(间接维): 固定无窗(最佳参数,不做自动选窗)")
-    out_logs.append(
-        "窗函数(嵌入): 直接维窗/SMILE 内部 apod 保持默认"
-        "(调整需重跑 SMILE,未纳入候选)"
-    )
+    # 3) 间接维窗函数:SMILE 重构平面(F1/F2 时间域)内存评分,候选含无窗,
+    #    不重跑 SMILE;直接维窗已由 2.5 单独优化。0.2.190:恢复真实选窗
+    #    (0.2.189 硬编码固定无窗是对需求的误读)。
+    try:
+        from workflow.window_optimize import optimize_indirect_windows_from_recon
+
+        if progress is not None:
+            progress("间接维窗函数优化中(重构平面内存评分,不重跑 SMILE)")
+        ires = optimize_indirect_windows_from_recon(
+            work, experiment, current=window_cfg
+        )
+        if ires.changed:
+            win = dict(window_cfg or {})
+            win.update(ires.choice)
+            window_cfg = win
+        out_logs += ires.logs
+    except Exception as exc:  # noqa: BLE001 - 窗优化失败不影响相位/终跑
+        out_logs.append(f"间接维窗优化失败: {exc}")
     return {
         "baseline": baseline_cfg,
         "zero_fill": zf_params,

@@ -1,8 +1,8 @@
-"""基线条纹伪影回归测试(0.2.132)。
+"""基线条纹伪影回归测试(0.2.132)+ 稳健校正(0.2.190)。
 
 复现:逐迹多项式拟合被强峰拉偏 → 相邻迹拟合系数跳变 → 竖线条纹;
-旧评分只测两端/中部均值,对条纹不敏感,导致 0.2.130 全轴写回把
-POLY 写进终谱出现竖线。
+0.2.190 起 baseline.apply 使用迭代峰值屏蔽的稳健拟合,强峰不再拉偏,
+校正后无条纹且真实基线被安全校正。
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ import numpy as np
 
 from core.data.bruker_reader import read_dataset
 from core.processing import baseline as baseline_proc
+from core.qc import baseline_quality as bq
 from core.qc.baseline_quality import stripe_penalty
 from workflow.baseline_optimize import optimize_baseline
 
@@ -49,8 +50,12 @@ def _strong_peak_spectrum() -> np.ndarray:
     return spec
 
 
-def test_stripe_penalty_flags_peak_pulled_correction() -> None:
-    """条纹罚项:被强峰拉偏的逐迹校正显著增大,平滑漂移校正不增大。"""
+def test_robust_correction_removes_slope_without_stripes() -> None:
+    """稳健校正:强峰+漂移谱校正后斜率归零且不引入条纹(0.2.190)。
+
+    旧 plain polyfit 会被稀疏强峰拉偏 → 相邻迹拟合系数跳变 → 竖线条纹
+    (0.2.132 回归);稳健拟合迭代屏蔽峰区,只基于基线点估计多项式。
+    """
     spec = _strong_peak_spectrum()
     base = float(stripe_penalty(spec))
     corrected = baseline_proc.apply(
@@ -58,9 +63,14 @@ def test_stripe_penalty_flags_peak_pulled_correction() -> None:
         baseline_proc.BaselineParams(method="polynomial", axis="F2", order=2),
     )
     after = float(stripe_penalty(corrected))
-    # 稀疏强峰拉偏 → 端部均值跳变 >> 中位(条纹),罚项显著
-    assert after > 0.2
-    assert after > base + 0.2
+    # 稳健校正不引入条纹(旧 plain polyfit 校正后 after > 0.2)
+    assert after <= base + 0.05
+    assert after < 0.1
+    # 斜率被校正(两端均值差明显减小),基线分提高
+    before = bq.evaluate(spec, axis=1)
+    after_q = bq.evaluate(corrected, axis=1)
+    assert abs(after_q.slope) < abs(before.slope) * 0.2
+    assert after_q.score > before.score + 1.0
 
     # 对照:无强峰时同样校正不引入条纹
     rng = np.random.default_rng(11)
@@ -75,28 +85,39 @@ def test_stripe_penalty_flags_peak_pulled_correction() -> None:
     assert float(stripe_penalty(corrected_clean)) < 0.2
 
 
-def test_optimize_baseline_keeps_off_for_peak_stripes(
+def test_optimize_baseline_corrects_peak_spectrum_safely(
     tmp_path: Path, bruker_dir: Path
 ) -> None:
-    """强峰+漂移谱:逐迹校正候选被硬性条纹否决,该轴保持 off。"""
+    """强峰+漂移谱:稳健校正候选通过(不产生条纹),该轴写回校正。
+
+    0.2.190:稳健拟合屏蔽峰区后不再被强峰拉偏,硬性条纹否决不再把
+    校正全部打成 off——真实基线被安全校正。
+    """
     spec = _strong_peak_spectrum()
     ft2 = tmp_path / "spec.ft2"
     _write_ft2(ft2, spec)
     experiment = read_dataset(bruker_dir / "hsqc_2d")
 
     result = optimize_baseline(experiment, ft2)
-    # 两个轴的校正候选都因条纹被否决 → off(不写 POLY,终谱无竖线)
-    assert result.baseline["F2"]["enabled"] is False
-    assert result.baseline["F1"]["enabled"] is False
-    # 应用选择后的配置(off)不改变谱,条纹水平与原始一致
+    # F2 检出漂移并被安全校正(旧 plain polyfit 保持 off)
+    assert result.baseline["F2"]["enabled"] is True
+    # 应用选择后的配置不引入条纹,基线分提高
     chosen = result.baseline["F2"]
     applied = spec.copy()
     if chosen["enabled"]:
         applied = baseline_proc.apply(
             applied,
-            baseline_proc.BaselineParams(method="polynomial", axis="F2", order=2),
+            baseline_proc.BaselineParams(
+                method="polynomial",
+                axis="F2",
+                order=max(int(chosen.get("order", 0) or 0), 1),
+            ),
         )
     assert stripe_penalty(applied) <= stripe_penalty(spec) + 0.2
+    assert (
+        bq.evaluate(applied, axis=1).score
+        > bq.evaluate(spec, axis=1).score + 1.0
+    )
 
 
 def test_optimize_baseline_axis_mapping(

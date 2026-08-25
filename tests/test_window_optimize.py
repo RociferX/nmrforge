@@ -8,9 +8,13 @@ import numpy as np
 
 from workflow.window_optimize import (
     DEFAULT_CANDIDATES,
+    INDIRECT_CANDIDATES,
     WindowOptimizeResult,
     optimize_direct_window,
     optimize_direct_window_from_work,
+    optimize_indirect_windows,
+    optimize_indirect_windows_from_recon,
+    optimize_indirect_windows_from_work,
 )
 
 
@@ -109,3 +113,73 @@ def test_window_line_explicit_none_and_render(
         **base,
     )
     assert "| nmrPipe -fn SP -off 0.3 -end 0.98 -pow 2 -c 0.5" in custom
+
+
+def test_window_candidates_include_none() -> None:
+    """直接/间接维候选池都必须含无窗(无窗是可正确优化的目标,0.2.190)。"""
+    assert {"type": "none"} in DEFAULT_CANDIDATES
+    assert {"type": "none"} in INDIRECT_CANDIDATES
+    # 直接维候选保留用户偏好的 0.5-0.98 组合(0.2.189)
+    assert (
+        {"type": "sine_bell", "off": 0.50, "end": 0.98, "pow": 2, "c": 0.5}
+        in DEFAULT_CANDIDATES
+    )
+
+
+def test_indirect_windows_selects_none_for_decayed_fid() -> None:
+    """间接维自然衰减 FID:优化器应能正确选出无窗(0.2.190)。
+
+    分辨率受限的间接维评分带分辨率保留因子——加窗只展宽时无窗胜出,
+    截断伪影明显时仍会选温和窗。
+    """
+    rng = np.random.default_rng(3)
+    n_f1, n_f2 = 64, 256
+    k0 = np.arange(n_f2, dtype=float)
+    t1 = np.arange(n_f1, dtype=float)
+    direct = 1.0 / (1.0 + 1j * (k0 - n_f2 * 0.35) / 1.5)
+    fid1 = np.exp(-t1 / 25.0) * np.exp(2j * np.pi * 0.13 * t1)
+    planes = np.outer(direct, fid1)
+    planes += rng.normal(0.0, 0.02, planes.shape)
+    planes += 1j * rng.normal(0.0, 0.02, planes.shape)
+    res = optimize_indirect_windows(planes, {"F1": 1})
+    assert res.per_axis["F1"].choice.get("type") == "none"
+    assert res.changed is True
+
+
+def test_indirect_windows_picks_window_for_truncated_fid() -> None:
+    """间接维截断 FID:无窗主瓣最窄但有振铃,评分应选温和窗而非无窗。"""
+    rng = np.random.default_rng(4)
+    n_f1, n_f2 = 64, 256
+    k0 = np.arange(n_f2, dtype=float)
+    t1 = np.arange(n_f1, dtype=float)
+    direct = 1.0 / (1.0 + 1j * (k0 - n_f2 * 0.35) / 1.5)
+    fid1 = np.exp(-t1 / 1000.0) * np.exp(2j * np.pi * 0.13 * t1)
+    planes = np.outer(direct, fid1)
+    planes += rng.normal(0.0, 0.02, planes.shape)
+    planes += 1j * rng.normal(0.0, 0.02, planes.shape)
+    res = optimize_indirect_windows(planes, {"F1": 1})
+    assert res.per_axis["F1"].choice.get("type") != "none"
+
+
+def test_indirect_windows_missing_recon_skips(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """work 无 SMILE 重构平面时间接维窗优化跳过,不阻断。"""
+    from core.data.bruker_reader import read_dataset
+
+    exp = read_dataset(bruker_dir / "nus_3d")
+    res = optimize_indirect_windows_from_recon(tmp_path, exp)
+    assert res.changed is False
+    assert any("跳过" in log for log in res.logs)
+
+
+def test_indirect_windows_missing_fid_skips(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """work 无转换后 fid 时 uniform 间接维窗优化跳过,不阻断。"""
+    from core.data.bruker_reader import read_dataset
+
+    exp = read_dataset(bruker_dir / "hsqc_2d")
+    res = optimize_indirect_windows_from_work(tmp_path, exp)
+    assert res.changed is False
+    assert any("跳过" in log for log in res.logs)

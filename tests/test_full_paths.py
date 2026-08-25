@@ -390,7 +390,10 @@ def test_auto_uniform_runs_processing_optimization(
     """uniform 处理参数优化:诊断 + 基线 + 直接维窗 + 填零/间接窗进终跑。"""
     from workflow.baseline_optimize import BaselineOptimizeResult
     from workflow.stepwise import generate_fid, generate_spectrum
-    from workflow.window_optimize import WindowOptimizeResult
+    from workflow.window_optimize import (
+        MultiWindowOptimizeResult,
+        WindowOptimizeResult,
+    )
 
     _install_spectrum_mocks(monkeypatch)
     manager, exp_id, data_id, _raw = _manager_with_data(
@@ -417,6 +420,14 @@ def test_auto_uniform_runs_processing_optimization(
             choice={"type": "sine_bell", "off": 0.45, "end": 0.95},
             changed=True,
             logs=["测试直接维窗"],
+        ),
+    )
+    monkeypatch.setattr(
+        "workflow.window_optimize.optimize_indirect_windows_from_work",
+        lambda work, experiment, current=None: MultiWindowOptimizeResult(
+            choice={"F1": {"type": "none"}},
+            changed=True,
+            logs=["测试间接维窗"],
         ),
     )
     spec = generate_spectrum(manager, exp_id, data_id, backend)
