@@ -424,6 +424,10 @@ class ImportDataDropdown(QWidget):
         self.panel.set_context(exp_id)
         self.setParent(self._host_window)
         self.setMaximumHeight(16777215)  # 重置上次限制,重新取自然高度
+        # 先 show 再 move:隐藏状态 move 在 Windows 上位置解释不可靠
+        # (0.2.162-补14),否则首次打开会跑到页面顶部附近、只露出滚动条
+        # 一半,且 isVisible 后重复点击只置顶不重定位(0.2.194-补1)
+        self.show()
         self.adjustSize()
         pos, max_h = _dropdown_geometry(
             anchor, self._host_window, self.sizeHint().height(), self.width()
@@ -431,7 +435,6 @@ class ImportDataDropdown(QWidget):
         self.setMaximumHeight(max_h)
         self.adjustSize()
         self.move(pos)
-        self.show()
         self.raise_()
         self.activateWindow()
 
@@ -442,7 +445,7 @@ class ImportDataDropdown(QWidget):
         except RuntimeError:  # pragma: no cover - 销毁竞态
             return False
         # 宿主顶层窗口关闭时同步收起下拉并移除应用过滤器,避免残留过滤器
-        # 在进程收尾时悬挂(0.2.194 顶层窗口方案)
+        # 在进程收尾时悬挂(0.2.194 生命周期加固)
         if (
             visible
             and getattr(self, "_host_window", None) is obj
@@ -508,6 +511,10 @@ class GroupAnalysisDropdown(QWidget):
             self._app.installEventFilter(self)
         self.setParent(self._host_window)
         self.setMaximumHeight(16777215)  # 重置上次限制,重新取自然高度
+        # 先 show 再 move:隐藏状态 move 在 Windows 上位置解释不可靠
+        # (0.2.162-补14),否则首次打开会跑到页面顶部附近、只露出滚动条
+        # 一半,且 isVisible 后重复点击只置顶不重定位(0.2.194-补1)
+        self.show()
         self.adjustSize()
         pos, max_h = _dropdown_geometry(
             anchor, self._host_window, self.sizeHint().height(), self.width()
@@ -515,7 +522,6 @@ class GroupAnalysisDropdown(QWidget):
         self.setMaximumHeight(max_h)
         self.adjustSize()
         self.move(pos)
-        self.show()
         self.raise_()
         self.activateWindow()
 
@@ -526,7 +532,7 @@ class GroupAnalysisDropdown(QWidget):
         except RuntimeError:  # pragma: no cover - 销毁竞态
             return False
         # 宿主顶层窗口关闭时同步收起下拉并移除应用过滤器,避免残留过滤器
-        # 在进程收尾时悬挂(0.2.194 顶层窗口方案)
+        # 在进程收尾时悬挂(0.2.194 生命周期加固)
         if (
             visible
             and getattr(self, "_host_window", None) is obj
