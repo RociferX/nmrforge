@@ -44,3 +44,25 @@ def bruker_dir(tmp_path: Path) -> Path:
     if not copy.exists():
         shutil.copytree(FIXTURES_BRUKER, copy)
     return copy
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _close_gui_windows_at_session_end() -> None:
+    """会话结束前关闭所有残留顶层窗口并处理事件。
+
+    offscreen 平台下,残留的顶层窗口(含 0.2.194 恢复的导入/组间分析
+    下拉 Tool 窗口)在解释器退出时销毁顺序不定,会间歇触发 Qt 访问冲突
+    (0xC0000005);显式收尾关闭可消除该抖动。
+    """
+    yield
+    from PyQt6.QtWidgets import QApplication
+
+    app = QApplication.instance()
+    if app is None:
+        return
+    for widget in list(app.topLevelWidgets()):
+        try:
+            widget.close()
+        except RuntimeError:  # pragma: no cover - 已销毁
+            pass
+    app.processEvents()

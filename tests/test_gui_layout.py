@@ -1838,32 +1838,36 @@ def test_experiment_page_dropdown_not_covering_button(
     QApplication.processEvents()
     page = window.center_panel.experiment_page
     btn = page.import_dropdown_button
-    btn_top = btn.mapTo(window, QPoint(0, 0)).y()
-    btn_bottom = btn.mapTo(window, QPoint(0, btn.height())).y()
+    btn_top = btn.mapToGlobal(QPoint(0, 0)).y()
+    btn_bottom = btn.mapToGlobal(QPoint(0, btn.height())).y()
     page._open_import_dropdown()
     drop = page._import_dropdown
     assert drop.isVisible()
     # 下拉不遮按钮:要么在按钮下方(顶部 >= 按钮底部),要么完全在按钮上方
-    covering = drop.pos().y() < btn_bottom and (
-        drop.pos().y() + drop.height() > btn_top
-    )
+    # 0.2.194:下拉为独立顶层窗口,用全局坐标比较
+    drop_top = drop.mapToGlobal(QPoint(0, 0)).y()
+    drop_bottom = drop_top + drop.height()
+    covering = drop_top < btn_bottom and drop_bottom > btn_top
     msg = (
-        f"下拉 {drop.pos().y()}..{drop.pos().y() + drop.height()}"
+        f"下拉 {drop_top}..{drop_bottom}"
         f" 遮住按钮 {btn_top}..{btn_bottom}"
     )
     assert not covering, msg
     # 高度受限:不超过屏幕可用高度,且出现滚动区(内容过长时)
-    assert drop.height() <= window.height()
+    screen = QApplication.screenAt(btn.mapToGlobal(QPoint(0, 0)))
+    screen = screen or QApplication.primaryScreen()
+    max_h = screen.availableGeometry().height() if screen is not None else 10**6
+    assert drop.height() <= max_h
     assert hasattr(drop, "_scroll") and drop._scroll.isVisible()
     # 数据组间分析下拉同样不遮按钮
     page._open_group_analysis_dropdown()
     gdrop = page._group_analysis_dropdown
     gbtn = page.group_analysis_button
-    gbtn_top = gbtn.mapTo(window, QPoint(0, 0)).y()
-    gbtn_bottom = gbtn.mapTo(window, QPoint(0, gbtn.height())).y()
-    covering_g = gdrop.pos().y() < gbtn_bottom and (
-        gdrop.pos().y() + gdrop.height() > gbtn_top
-    )
+    gbtn_top = gbtn.mapToGlobal(QPoint(0, 0)).y()
+    gbtn_bottom = gbtn.mapToGlobal(QPoint(0, gbtn.height())).y()
+    gdrop_top = gdrop.mapToGlobal(QPoint(0, 0)).y()
+    gdrop_bottom = gdrop_top + gdrop.height()
+    covering_g = gdrop_top < gbtn_bottom and gdrop_bottom > gbtn_top
     assert not covering_g
     window.close()
 
@@ -1886,14 +1890,16 @@ def test_experiment_page_dropdown_switch(
     # 0.2.162-补14:下拉应在按钮正下方(先 show 再 move)
     from PyQt6.QtCore import QPoint
 
-    # 0.2.163-补4:下拉为主窗口覆盖子部件,位置相对主窗口(Qt 自己控制)
-    expected = page.import_dropdown_button.mapTo(
-        window, QPoint(0, page.import_dropdown_button.height())
+    # 0.2.194:下拉为独立顶层窗口,pos() 为全局坐标,与按钮全局位置对齐
+    expected = page.import_dropdown_button.mapToGlobal(
+        QPoint(0, page.import_dropdown_button.height())
     )
     drop = page._import_dropdown
     assert drop.pos().x() == expected.x()  # 与按钮左缘对齐
     assert drop.pos().y() >= expected.y() - 1  # 在按钮下方
-    assert drop.pos().y() + drop.height() <= window.height() + 1
+    screen = QApplication.screenAt(expected) or QApplication.primaryScreen()
+    bottom = screen.availableGeometry().bottom() + 1 if screen is not None else 10**6
+    assert drop.pos().y() + drop.height() <= bottom
     # 点「数据组间分析」:一次调用即切换(导入关闭 + 组间分析打开)
     page._open_group_analysis_dropdown()
     assert not page._import_dropdown.isVisible()

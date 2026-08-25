@@ -11,6 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PyQt6.QtCore import QEvent, QPoint, Qt, pyqtSignal
+from PyQt6.QtGui import QGuiApplication
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -343,33 +344,49 @@ class ExperimentImportPanel(QWidget):
         self.segmented_import_requested.emit(self._exp_id, source)
 
 
+def _dropdown_window_flags() -> Qt.WindowType:
+    """下拉窗口类型:Wayland 用 Popup(xdg_popup 由合成器按锚点定位),
+    其它平台(X11/Windows)用非抓取 Tool 窗口(0.2.162-补13 一次点击切换)。
+    0.2.194:恢复独立顶层窗口——0.2.163-补4 的主窗口子部件方案在 Windows
+    上首次弹出会被中央部件盖住(点过右边按钮才正常),顶层窗口保证置顶。
+    """
+    flags = Qt.WindowType.FramelessWindowHint
+    if QGuiApplication.platformName() == "wayland":
+        flags |= Qt.WindowType.Popup
+    else:
+        flags |= Qt.WindowType.Tool
+    return flags
+
+
 def _dropdown_geometry(
     anchor: QWidget,
-    host: QWidget,
     natural_h: int,
     width: int,
     margin: int = 8,
 ) -> tuple[QPoint, int]:
-    """计算下拉在 host(父窗口)内的位置与最大高度:优先放按钮正下方,
-    下方不够则放上方,保证不遮住触发按钮;高度超过可用空间时截断
-    (由滚动条承载)。全部使用相对坐标,任何平台一致。
+    """计算下拉位置与最大高度:优先放按钮正下方,下方不够则放上方,
+    保证不遮住触发按钮;高度超过可用空间时截断(由滚动条承载)。
+    使用全局坐标(独立顶层窗口),按屏幕可用区域定位。
 
     返回 (pos, max_height)。
     """
-    anchor_top = anchor.mapTo(host, QPoint(0, 0)).y()
-    anchor_bottom = anchor.mapTo(host, QPoint(0, anchor.height())).y()
-    host_w = max(host.width(), 1)
-    host_h = max(host.height(), 1)
-    below = host_h - anchor_bottom - margin
-    above = anchor_top - margin
+    anchor_top = anchor.mapToGlobal(QPoint(0, 0)).y()
+    anchor_bottom = anchor.mapToGlobal(QPoint(0, anchor.height())).y()
+    screen = QApplication.screenAt(anchor.mapToGlobal(QPoint(0, 0)))
+    screen = screen or QApplication.primaryScreen()
+    geo = screen.availableGeometry() if screen is not None else None
+    if geo is None:
+        return QPoint(anchor.mapToGlobal(QPoint(0, anchor.height()))), natural_h
+    below = geo.bottom() - anchor_bottom - margin
+    above = anchor_top - geo.top() - margin
     target_h = min(natural_h, max(below, above, margin))
     if below >= target_h:
         y = anchor_bottom
     else:
         y = anchor_top - target_h
-    x = anchor.mapTo(host, QPoint(0, 0)).x()
-    x = min(max(x, 0), max(0, host_w - width))
-    y = min(max(y, 0), max(0, host_h - target_h))
+    x = anchor.mapToGlobal(QPoint(0, 0)).x()
+    x = min(max(x, geo.left()), max(geo.left(), geo.right() - width))
+    y = min(max(y, geo.top()), max(geo.top(), geo.bottom() - target_h))
     return QPoint(x, y), target_h
 
 
@@ -381,8 +398,9 @@ class ImportDataDropdown(QWidget):
     batch_import_requested = pyqtSignal(str, list, bool)
 
     def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
+        super().__init__(parent, _dropdown_window_flags())
         self._anchor: QWidget | None = None
+        self._host_window: QWidget | None = None
         self._app = QApplication.instance()
         if self._app is not None:
             self.destroyed.connect(self._remove_event_filter)
@@ -405,24 +423,29 @@ class ImportDataDropdown(QWidget):
         self.setMinimumWidth(560)
 
     def open_below(self, anchor: QWidget, exp_id: str) -> None:
-        """在 anchor 按钮正下方弹出(主窗口覆盖子部件),过长加滚动条。"""
+        """在 anchor 按钮正下方弹出(独立顶层 Tool/Popup 窗口),过长加滚动条。
+
+        Wayland 用 xdg_popup(合成器按锚点定位,先设 transientParent 再
+        show);Windows/X11 用非抓取 Tool 窗口,先 show 再 move(0.2.162-
+        补14:隐藏窗口 move 被解释为相对父窗口)。0.2.194:恢复顶层窗口,
+        修复 0.2.163-补4 子部件方案在 Windows 上首次弹出被中央部件盖住。
+        """
         self._anchor = anchor
+        self._host_window = anchor.window()
         if self._app is not None:
             self._app.installEventFilter(self)
         self.panel.set_context(exp_id)
-        # 挂到 anchor 所在顶层窗口,用相对坐标定位(Qt 自己控制,
-        # 不依赖 Wayland 合成器/窗口协议,任何平台一致)
-        host = anchor.window()
-        self.setParent(host)
+        if self.windowFlags() & Qt.WindowType.Popup:
+            self._set_transient_parent(anchor)
         self.setMaximumHeight(16777215)  # 重置上次限制,重新取自然高度
+        self.show()
         self.adjustSize()
         pos, max_h = _dropdown_geometry(
-            anchor, host, self.sizeHint().height(), self.width()
+            anchor, self.sizeHint().height(), self.width()
         )
         self.setMaximumHeight(max_h)
         self.adjustSize()
         self.move(pos)
-        self.show()
         self.raise_()
         self.activateWindow()
 
@@ -431,6 +454,15 @@ class ImportDataDropdown(QWidget):
         try:
             visible = self.isVisible()
         except RuntimeError:  # pragma: no cover - 销毁竞态
+            return False
+        # 宿主顶层窗口关闭时同步收起下拉并移除应用过滤器,避免残留过滤器
+        # 在进程收尾时悬挂(0.2.194 顶层窗口方案)
+        if (
+            visible
+            and getattr(self, "_host_window", None) is obj
+            and event.type() == QEvent.Type.Close
+        ):
+            self.close()
             return False
         if visible and event.type() == QEvent.Type.MouseButtonPress:
             if hasattr(event, "globalPosition"):
@@ -442,7 +474,10 @@ class ImportDataDropdown(QWidget):
             ):
                 return False  # 锚点按钮:交给按钮处理(开关/切换)
             if not self.rect().contains(self.mapFromGlobal(pos)):
-                self.close()
+                # Wayland xdg_popup 抓取式,点击外部由合成器原生关闭;
+                # 手动 close 会与 dismiss 竞态导致卡死,仅非 Popup(Tool)关闭
+                if not (self.windowFlags() & Qt.WindowType.Popup):
+                    self.close()
         return False
 
     def hideEvent(self, event) -> None:
@@ -452,15 +487,32 @@ class ImportDataDropdown(QWidget):
 
     def _remove_event_filter(self) -> None:
         if self._app is not None:
-            self._app.removeEventFilter(self)
+            try:
+                self._app.removeEventFilter(self)
+            except RuntimeError:  # pragma: no cover - 应用已销毁
+                pass
+
+    def _set_transient_parent(self, anchor: QWidget) -> None:
+        """为 Wayland xdg_popup 设置 transientParent(锚点所在顶层窗口)。"""
+        try:
+            parent_window = anchor.window().windowHandle()
+            own_window = self.windowHandle()
+            if own_window is None:
+                self.winId()  # 强制创建原生窗口句柄(show 前)
+                own_window = self.windowHandle()
+            if own_window is not None and parent_window is not None:
+                own_window.setTransientParent(parent_window)
+        except Exception:  # noqa: BLE001 - 平台差异下降级(位置由 Qt 默认处理)
+            pass
 
 
 class GroupAnalysisDropdown(QWidget):
     """「数据组间分析」下拉面板(占位,0.2.162-补11)。"""
 
     def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
+        super().__init__(parent, _dropdown_window_flags())
         self._anchor: QWidget | None = None
+        self._host_window: QWidget | None = None
         self._app = QApplication.instance()
         if self._app is not None:
             self.destroyed.connect(self._remove_event_filter)
@@ -472,23 +524,27 @@ class GroupAnalysisDropdown(QWidget):
         self.setMinimumWidth(340)
 
     def open_below(self, anchor: QWidget) -> None:
-        """在 anchor 按钮正下方弹出(主窗口覆盖子部件),过长加滚动条。"""
+        """在 anchor 按钮正下方弹出(独立顶层 Tool/Popup 窗口),过长加滚动条。
+
+        Wayland 用 xdg_popup(合成器按锚点定位,先设 transientParent 再
+        show);Windows/X11 用非抓取 Tool 窗口,先 show 再 move(0.2.162-
+        补14)。0.2.194:恢复顶层窗口,修复子部件方案被中央部件盖住。
+        """
         self._anchor = anchor
+        self._host_window = anchor.window()
         if self._app is not None:
             self._app.installEventFilter(self)
-        # 挂到 anchor 所在顶层窗口,用相对坐标定位(Qt 自己控制,
-        # 不依赖 Wayland 合成器/窗口协议,任何平台一致)
-        host = anchor.window()
-        self.setParent(host)
+        if self.windowFlags() & Qt.WindowType.Popup:
+            self._set_transient_parent(anchor)
         self.setMaximumHeight(16777215)  # 重置上次限制,重新取自然高度
+        self.show()
         self.adjustSize()
         pos, max_h = _dropdown_geometry(
-            anchor, host, self.sizeHint().height(), self.width()
+            anchor, self.sizeHint().height(), self.width()
         )
         self.setMaximumHeight(max_h)
         self.adjustSize()
         self.move(pos)
-        self.show()
         self.raise_()
         self.activateWindow()
 
@@ -497,6 +553,15 @@ class GroupAnalysisDropdown(QWidget):
         try:
             visible = self.isVisible()
         except RuntimeError:  # pragma: no cover - 销毁竞态
+            return False
+        # 宿主顶层窗口关闭时同步收起下拉并移除应用过滤器,避免残留过滤器
+        # 在进程收尾时悬挂(0.2.194 顶层窗口方案)
+        if (
+            visible
+            and getattr(self, "_host_window", None) is obj
+            and event.type() == QEvent.Type.Close
+        ):
+            self.close()
             return False
         if visible and event.type() == QEvent.Type.MouseButtonPress:
             if hasattr(event, "globalPosition"):
@@ -508,7 +573,10 @@ class GroupAnalysisDropdown(QWidget):
             ):
                 return False
             if not self.rect().contains(self.mapFromGlobal(pos)):
-                self.close()
+                # Wayland xdg_popup 抓取式,点击外部由合成器原生关闭;
+                # 手动 close 会与 dismiss 竞态导致卡死,仅非 Popup(Tool)关闭
+                if not (self.windowFlags() & Qt.WindowType.Popup):
+                    self.close()
         return False
 
     def hideEvent(self, event) -> None:
@@ -518,7 +586,23 @@ class GroupAnalysisDropdown(QWidget):
 
     def _remove_event_filter(self) -> None:
         if self._app is not None:
-            self._app.removeEventFilter(self)
+            try:
+                self._app.removeEventFilter(self)
+            except RuntimeError:  # pragma: no cover - 应用已销毁
+                pass
+
+    def _set_transient_parent(self, anchor: QWidget) -> None:
+        """为 Wayland xdg_popup 设置 transientParent(锚点所在顶层窗口)。"""
+        try:
+            parent_window = anchor.window().windowHandle()
+            own_window = self.windowHandle()
+            if own_window is None:
+                self.winId()  # 强制创建原生窗口句柄(show 前)
+                own_window = self.windowHandle()
+            if own_window is not None and parent_window is not None:
+                own_window.setTransientParent(parent_window)
+        except Exception:  # noqa: BLE001 - 平台差异下降级(位置由 Qt 默认处理)
+            pass
 
 
 class ExperimentDashboard(QWidget):
