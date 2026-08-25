@@ -162,6 +162,56 @@ def _ser_point_layout(
     return None
 
 
+def _nus_grid_from_points(
+    points: list[tuple[int, ...]],
+) -> list[int] | None:
+    """坏点移除后按 nuslist 实际采样范围推导网格(每维 max+1)。
+
+    2D 单列 → [f1_grid];3D 两列 → [f2_grid, f1_grid]。
+    """
+    if not points:
+        return None
+    n_cols = len(points[0])
+    if n_cols == 1:
+        return [max(p[0] for p in points) + 1]
+    if n_cols == 2:
+        return [max(p[0] for p in points) + 1, max(p[1] for p in points) + 1]
+    return None
+
+
+def _apply_nus_grid_after_clean(
+    experiment: Experiment, points: list[tuple[int, ...]]
+) -> list[str]:
+    """坏点移除后按实际采样范围更新 NusTD(0.2.197)。
+
+    此前交叉验证(参数修正)用静态 NusTD 把坏点清理后调整的网格改回,
+    导致 fid.com 网格与清理后数据不一致;这里把 acqu2s/acqu3s 的 NusTD
+    缩到实际范围(只缩小),使 _effective_td、fid.com 参数修正、nusExpand
+    网格、重构全部一致。返回日志行。
+    """
+    grid = _nus_grid_from_points(points)
+    if not grid:
+        return []
+    logs: list[str] = []
+    params = experiment.acquisition_parameters
+    if len(grid) == 1:
+        block = params.setdefault("acqu2s", {})
+        old = int(block.get("NusTD", 0) or 0)
+        new = grid[0]
+        if old and 0 < new < old:
+            block["NusTD"] = new
+            logs.append(f"采样坏点移除后网格调整: acqu2s NusTD {old}→{new}")
+    elif len(grid) == 2:
+        for key, g in (("acqu2s", grid[0]), ("acqu3s", grid[1])):
+            block = params.setdefault(key, {})
+            old = int(block.get("NusTD", 0) or 0)
+            new = 2 * g
+            if old and 0 < new < old:
+                block["NusTD"] = new
+                logs.append(f"采样坏点移除后网格调整: {key} NusTD {old}→{new}")
+    return logs
+
+
 def zf_summary(plan: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
     """填零计划摘要(WorkflowRun params 用):{轴: {"mode", "size"}}。"""
     return {
@@ -528,6 +578,15 @@ class NMRPipeBackend:
             _count, _bad, source_removed = self._clean_source_nus(
                 experiment, [Path(s) for s in experiment.segments], logs
             )
+            if _bad and source_removed:
+                # 0.2.197:坏点移除后按清理后 nuslist 实际范围调整 NusTD,
+                # 交叉验证(参数修正)使用调整后的值,不再改回
+                merged_points: list[tuple[int, ...]] = []
+                for seg in experiment.segments:
+                    merged_points += [
+                        tuple(p) for p in read_nuslist(Path(seg) / "nuslist")
+                    ]
+                logs += _apply_nus_grid_after_clean(experiment, merged_points)
             merged_fid = work / "merged" / "fid"
             merged_ready = (
                 merged_fid.is_dir()
@@ -571,6 +630,11 @@ class NMRPipeBackend:
             nuslist_count, bad_points, source_removed = self._clean_source_nus(
                 experiment, [raw], logs
             )
+            if bad_points and source_removed:
+                # 0.2.197:坏点移除后按清理后 nuslist 实际范围调整 NusTD,
+                # 交叉验证(参数修正)使用调整后的值,不再改回
+                cleaned = [tuple(p) for p in read_nuslist(raw / "nuslist")]
+                logs += _apply_nus_grid_after_clean(experiment, cleaned)
             fid_file = work / f"{experiment.dataset_id}.fid"
             if source_removed:
                 # 源头已变:旧的已转换 fid 失效,强制重转

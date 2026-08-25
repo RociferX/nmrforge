@@ -367,6 +367,58 @@ def test_zero_bad_point_fid_states_slices(
     assert "test003.fid" not in joined
 
 
+def test_nus_grid_from_points_and_apply(tmp_path: Path) -> None:
+    """0.2.197:坏点移除后按实际采样范围推导并缩小 NusTD。"""
+    from backend.nmrpipe_backend import (
+        _apply_nus_grid_after_clean,
+        _nus_grid_from_points,
+    )
+    from core.data.internal_data_model import (
+        AxisRole,
+        Dimension,
+        Experiment,
+        Sampling,
+        SamplingMode,
+    )
+
+    assert _nus_grid_from_points([]) is None
+    assert _nus_grid_from_points([(10,), (63,)]) == [64]
+    assert _nus_grid_from_points([(5, 3), (82, 25)]) == [83, 26]
+
+    exp3 = Experiment(
+        dataset_id="x",
+        source_path=tmp_path,
+        ndim=3,
+        dimensions=[
+            Dimension(logical_axis="F3", nucleus="1H", td=908, role=AxisRole.DIRECT),
+            Dimension(logical_axis="F2", nucleus="15N", td=170, role=AxisRole.INDIRECT),
+            Dimension(logical_axis="F1", nucleus="13C", td=52, role=AxisRole.INDIRECT),
+        ],
+        sampling=Sampling(mode=SamplingMode.NUS),
+        acquisition_parameters={"acqu2s": {"NusTD": 170}, "acqu3s": {"NusTD": 52}},
+    )
+    logs = _apply_nus_grid_after_clean(exp3, [(5, 3), (82, 25)])
+    assert exp3.acquisition_parameters["acqu2s"]["NusTD"] == 166
+    # F1 实际范围 26 → 26×2=52,不变
+    assert exp3.acquisition_parameters["acqu3s"]["NusTD"] == 52
+    assert any("170→166" in line for line in logs)
+
+    exp2 = Experiment(
+        dataset_id="y",
+        source_path=tmp_path,
+        ndim=2,
+        dimensions=[
+            Dimension(logical_axis="F2", nucleus="1H", td=2048, role=AxisRole.DIRECT),
+            Dimension(logical_axis="F1", nucleus="15N", td=64, role=AxisRole.INDIRECT),
+        ],
+        sampling=Sampling(mode=SamplingMode.NUS),
+        acquisition_parameters={"acqu2s": {"NusTD": 64}},
+    )
+    logs2 = _apply_nus_grid_after_clean(exp2, [(10,), (20,)])
+    assert exp2.acquisition_parameters["acqu2s"]["NusTD"] == 21
+    assert any("64→21" in line for line in logs2)
+
+
 def test_clean_work_nuslist_single_dataset(
     tmp_path: Path, bruker_dir: Path
 ) -> None:

@@ -1,5 +1,25 @@
 # 修改记录(历史条目)
 
+## 0.2.197(2026-08-26,坏点移除后网格按实际范围调整,交叉验证不再改回)
+
+用户反馈:处理逻辑乱了——有坏点时 NusTD 等值会被改,但后面的交叉验证
+(参数修正)又改回原值,导致 fid 网格与清理后数据不一致。
+
+- 根因:坏点移除后实际采样范围变小(nuslist 每维 max+1),但 patch_fid_com
+  的「参数修正」仍按静态 NusTD(如 cc/63 的 170→85)把 fid.com 网格改回,
+  与清理后数据不一致;
+- 修复:坏点从源头删除(source_removed)后,按清理后 nuslist 实际范围推导
+  网格(_nus_grid_from_points:每维 max+1),更新 acqu2s/acqu3s 的 NusTD
+  (_apply_nus_grid_after_clean,只缩小),使 _effective_td、fid.com 参数
+  修正、nusExpand 网格、重构全部一致——交叉验证使用调整后的 NusTD,不再
+  改回;
+- 验证(VM 真实 cc/63):坏点 (27,2350) 删除后,日志出现「采样坏点移除后
+  网格调整: acqu2s NusTD 170→166」,nusExpand 强制 -yT 83 -zT 26,
+  yN/yT 不再被改回 170/85,重构成功出谱;nuslist 推导网格转换 States
+  命中 99/99;
+- 测试:新增 _nus_grid_from_points/_apply_nus_grid_after_clean 单测
+  (2D/3D 缩小与不变);全量 pytest 全绿 + ruff 全绿。
+
 ## 0.2.196(2026-08-26,坏点潜在问题只报告不自动处理)
 
 用户要求:除越界/重复/尖峰外,其它潜在坏点类型只报告不处理。
