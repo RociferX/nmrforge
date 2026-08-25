@@ -1836,14 +1836,21 @@ def test_experiment_page_dropdown_not_covering_button(
     window = MainWindow(manager=manager)
     window.show()
     QApplication.processEvents()
+    # 0.2.194-补2:下拉为实验类型页子部件,需先选中该页(与真实操作一致);
+    # 窗口加宽保证中栏能放下 560 宽的下拉(避免 x 钳位)
+    window.center_panel.set_selection("experiment", "exp_001")
+    window.resize(1400, 900)
+    window.main_splitter.setSizes([300, 720, 180, 200])
+    QApplication.processEvents()
     page = window.center_panel.experiment_page
     btn = page.import_dropdown_button
-    btn_top = btn.mapTo(window, QPoint(0, 0)).y()
-    btn_bottom = btn.mapTo(window, QPoint(0, btn.height())).y()
+    btn_top = btn.mapTo(page, QPoint(0, 0)).y()
+    btn_bottom = btn.mapTo(page, QPoint(0, btn.height())).y()
     page._open_import_dropdown()
     drop = page._import_dropdown
     assert drop.isVisible()
     # 下拉不遮按钮:要么在按钮下方(顶部 >= 按钮底部),要么完全在按钮上方
+    # 0.2.194-补2:下拉为实验类型页子部件,pos() 相对本页
     covering = drop.pos().y() < btn_bottom and (
         drop.pos().y() + drop.height() > btn_top
     )
@@ -1852,15 +1859,15 @@ def test_experiment_page_dropdown_not_covering_button(
         f" 遮住按钮 {btn_top}..{btn_bottom}"
     )
     assert not covering, msg
-    # 高度受限:不超过屏幕可用高度,且出现滚动区(内容过长时)
-    assert drop.height() <= window.height()
+    # 高度受限:不超过本页高度,且出现滚动区(内容过长时)
+    assert drop.height() <= page.height()
     assert hasattr(drop, "_scroll") and drop._scroll.isVisible()
     # 数据组间分析下拉同样不遮按钮
     page._open_group_analysis_dropdown()
     gdrop = page._group_analysis_dropdown
     gbtn = page.group_analysis_button
-    gbtn_top = gbtn.mapTo(window, QPoint(0, 0)).y()
-    gbtn_bottom = gbtn.mapTo(window, QPoint(0, gbtn.height())).y()
+    gbtn_top = gbtn.mapTo(page, QPoint(0, 0)).y()
+    gbtn_bottom = gbtn.mapTo(page, QPoint(0, gbtn.height())).y()
     covering_g = gdrop.pos().y() < gbtn_bottom and (
         gdrop.pos().y() + gdrop.height() > gbtn_top
     )
@@ -1880,20 +1887,29 @@ def test_experiment_page_dropdown_switch(
     window = MainWindow(manager=manager)
     window.show()
     QApplication.processEvents()
+    # 0.2.194-补2:下拉为实验类型页子部件,需先选中该页(与真实操作一致);
+    # 窗口加宽保证中栏能放下 560 宽的下拉(避免 x 钳位)
+    window.center_panel.set_selection("experiment", "exp_001")
+    window.resize(1400, 900)
+    window.main_splitter.setSizes([300, 720, 180, 200])
+    QApplication.processEvents()
     page = window.center_panel.experiment_page
     page._open_import_dropdown()
     assert page._import_dropdown.isVisible()
     # 0.2.162-补14:下拉应在按钮正下方(先 show 再 move)
     from PyQt6.QtCore import QPoint
 
-    # 0.2.163-补4:下拉为主窗口覆盖子部件,位置相对主窗口(Qt 自己控制)
+    # 0.2.194-补2:下拉为实验类型页子部件,位置相对本页
     expected = page.import_dropdown_button.mapTo(
-        window, QPoint(0, page.import_dropdown_button.height())
+        page, QPoint(0, page.import_dropdown_button.height())
     )
     drop = page._import_dropdown
-    assert drop.pos().x() == expected.x()  # 与按钮左缘对齐
+    # 与按钮左缘对齐;中栏比下拉最小宽(560)窄时钳到左缘(offscreen 测试环境)
+    assert drop.pos().x() == expected.x() or (
+        drop.pos().x() == 0 and page.width() < drop.width()
+    )
     assert drop.pos().y() >= expected.y() - 1  # 在按钮下方
-    assert drop.pos().y() + drop.height() <= window.height() + 1
+    assert drop.pos().y() + drop.height() <= page.height() + 1
     # 点「数据组间分析」:一次调用即切换(导入关闭 + 组间分析打开)
     page._open_group_analysis_dropdown()
     assert not page._import_dropdown.isVisible()

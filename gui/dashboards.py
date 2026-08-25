@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import QEvent, QPoint, Qt, pyqtSignal
+from PyQt6.QtCore import QEvent, QPoint, Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -408,6 +408,10 @@ class ImportDataDropdown(QWidget):
         self._scroll.setWidget(self.panel)
         layout.addWidget(self._scroll, 1)
         self.setMinimumWidth(560)
+        # 构造即隐藏:子部件方案下父页面显示会连带显示子部件,不隐藏会以
+        # (0,0) 残影出现在页面顶部(0.2.194-补2 实测),且 isVisible 为真
+        # 导致 open_below 从不执行
+        self.hide()
 
     def open_below(self, anchor: QWidget, exp_id: str) -> None:
         """在 anchor 按钮正下方弹出(主窗口覆盖子部件),过长加滚动条。
@@ -422,21 +426,37 @@ class ImportDataDropdown(QWidget):
         if self._app is not None:
             self._app.installEventFilter(self)
         self.panel.set_context(exp_id)
-        self.setParent(self._host_window)
+        # 保持为实验类型页子部件、相对本页定位,不 reparent 到主窗口——
+        # 首次打开 reparent 会触发位置重算,下拉跑到页面顶部只露滚动条
+        # (0.2.194-补2 实测;子部件方案任何平台一致,无顶层窗口位置问题)
+        host = self.parentWidget() or anchor.parentWidget()
         self.setMaximumHeight(16777215)  # 重置上次限制,重新取自然高度
-        # 先 show 再 move:隐藏状态 move 在 Windows 上位置解释不可靠
-        # (0.2.162-补14),否则首次打开会跑到页面顶部附近、只露出滚动条
-        # 一半,且 isVisible 后重复点击只置顶不重定位(0.2.194-补1)
+        # 隐藏状态先放好位置(子部件 move 相对父窗口,正是所需语义);
+        # show 在事件循环才真正生效,紧随的同步 move 会被丢——首个事件
+        # 循环后再校正一次,保证首次打开也在按钮正下方(0.2.194-补2)
+        self._place_below(anchor, host)
         self.show()
+        QTimer.singleShot(0, self._deferred_place)
+        self.activateWindow()
+
+    def _place_below(self, anchor: QWidget, host: QWidget) -> None:
+        """计算并应用按钮正下方的几何(隐藏/显示状态均可,0.2.194-补2)。"""
         self.adjustSize()
         pos, max_h = _dropdown_geometry(
-            anchor, self._host_window, self.sizeHint().height(), self.width()
+            anchor, host, self.sizeHint().height(), self.width()
         )
         self.setMaximumHeight(max_h)
         self.adjustSize()
         self.move(pos)
         self.raise_()
-        self.activateWindow()
+
+    def _deferred_place(self) -> None:
+        """show 生效后的位置校正:按当前锚点重放一次(0.2.194-补2)。"""
+        if self._anchor is None or not self.isVisible():
+            return
+        host = self.parentWidget()
+        if host is not None:
+            self._place_below(self._anchor, host)
 
     def eventFilter(self, obj, event) -> bool:
         """非抓取窗口:点其它按钮/外部时先关掉本下拉,点击继续落到目标。"""
@@ -498,6 +518,8 @@ class GroupAnalysisDropdown(QWidget):
         label.setStyleSheet("padding: 24px 32px; color: #666;")
         layout.addWidget(label)
         self.setMinimumWidth(340)
+        # 构造即隐藏:见 ImportDataDropdown 注释(0.2.194-补2)
+        self.hide()
 
     def open_below(self, anchor: QWidget) -> None:
         """在 anchor 按钮正下方弹出(主窗口覆盖子部件),过长加滚动条。
@@ -509,21 +531,37 @@ class GroupAnalysisDropdown(QWidget):
         self._host_window = anchor.window()
         if self._app is not None:
             self._app.installEventFilter(self)
-        self.setParent(self._host_window)
+        # 保持为实验类型页子部件、相对本页定位,不 reparent 到主窗口——
+        # 首次打开 reparent 会触发位置重算,下拉跑到页面顶部只露滚动条
+        # (0.2.194-补2 实测;子部件方案任何平台一致,无顶层窗口位置问题)
+        host = self.parentWidget() or anchor.parentWidget()
         self.setMaximumHeight(16777215)  # 重置上次限制,重新取自然高度
-        # 先 show 再 move:隐藏状态 move 在 Windows 上位置解释不可靠
-        # (0.2.162-补14),否则首次打开会跑到页面顶部附近、只露出滚动条
-        # 一半,且 isVisible 后重复点击只置顶不重定位(0.2.194-补1)
+        # 隐藏状态先放好位置(子部件 move 相对父窗口,正是所需语义);
+        # show 在事件循环才真正生效,紧随的同步 move 会被丢——首个事件
+        # 循环后再校正一次,保证首次打开也在按钮正下方(0.2.194-补2)
+        self._place_below(anchor, host)
         self.show()
+        QTimer.singleShot(0, self._deferred_place)
+        self.activateWindow()
+
+    def _place_below(self, anchor: QWidget, host: QWidget) -> None:
+        """计算并应用按钮正下方的几何(隐藏/显示状态均可,0.2.194-补2)。"""
         self.adjustSize()
         pos, max_h = _dropdown_geometry(
-            anchor, self._host_window, self.sizeHint().height(), self.width()
+            anchor, host, self.sizeHint().height(), self.width()
         )
         self.setMaximumHeight(max_h)
         self.adjustSize()
         self.move(pos)
         self.raise_()
-        self.activateWindow()
+
+    def _deferred_place(self) -> None:
+        """show 生效后的位置校正:按当前锚点重放一次(0.2.194-补2)。"""
+        if self._anchor is None or not self.isVisible():
+            return
+        host = self.parentWidget()
+        if host is not None:
+            self._place_below(self._anchor, host)
 
     def eventFilter(self, obj, event) -> bool:
         """非抓取窗口:点其它按钮/外部时先关掉本下拉。"""
