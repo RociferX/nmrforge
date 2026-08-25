@@ -34,7 +34,9 @@ class _FakeRuntime:
         work = Path(cwd)
         if name == "fid.com":
             (work / "test.fid").write_bytes(b"fid")
-        elif name in ("process.com", "nus.com"):
+        elif name in ("process.com", "nus.com") or name.endswith(
+            ("_process.com", "_nus.com")
+        ):
             (work / self.spectrum_name).write_bytes(b"ft2")
         return SimpleNamespace(returncode=0, stderr="", stdout="")
 
@@ -345,19 +347,18 @@ def test_manual_scripts_missing_fid_requires_generate_fid(
         manual_scripts(manager, exp_id, data_id)
 
 
-def test_manual_scripts_quality_check_on_final_script(
+def test_quality_check_runs_on_manual_run_not_open(
     tmp_path: Path, bruker_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """0.2.163-补13:已运行自动优化(终跑脚本存在)时,人工谱图准备
-    再跑一次质量检测,然后把终脚本直接给人。"""
-    from workflow.manual import manual_scripts
+    """0.2.193:打开编辑器(manual_scripts)不再跑质量诊断,点「运行」
+    (run_manual_spectrum)才执行——打开大数据脚本编辑器不卡顿。"""
+    from workflow.manual import manual_scripts, run_manual_spectrum
 
     manager, exp_id, data_id, _raw = _manager_with_raw(tmp_path, bruker_dir)
     work = manager.data_dir(exp_id, data_id, "process")
     work.mkdir(parents=True, exist_ok=True)
-    (work / f"{data_id}_process.com").write_text(
-        "#!/bin/csh\n# final\n", encoding="utf-8"
-    )
+    final = f"{data_id}_process.com"
+    (work / final).write_text("#!/bin/csh\n# final\n", encoding="utf-8")
     (work / f"{data_id}.fid").write_bytes(b"fid")
     manager.set_data_fid(exp_id, data_id, work / f"{data_id}.fid")
     manager.save()
@@ -371,8 +372,18 @@ def test_manual_scripts_quality_check_on_final_script(
     monkeypatch.setattr(
         "workflow.direct_diagnostics.run_direct_diagnostics", fake_diagnostics
     )
+    # 打开:只读已有脚本,不跑诊断、不写质量日志
     scripts = manual_scripts(manager, exp_id, data_id)
-    assert f"{data_id}_process.com" in scripts
+    assert final in scripts
+    assert "work" not in called
+    assert not (work / "manual_quality.log").exists()
+
+    # 运行:先跑质量诊断再执行脚本
+    runtime = _FakeRuntime(spectrum_name=f"{data_id}.ft2")
+    monkeypatch.setattr("workflow.manual.CshRuntime", lambda: runtime)
+    run_manual_spectrum(
+        manager, exp_id, data_id, {final: "#!/bin/csh\n# process\n"}
+    )
     assert called.get("work") == str(work)
     log = (work / "manual_quality.log").read_text(encoding="utf-8")
     assert "测试报告" in log

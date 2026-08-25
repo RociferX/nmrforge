@@ -98,8 +98,9 @@ class MainWindow(QMainWindow):
         self.manual_run_log.connect(self._append_log)
         self.manual_run_done.connect(self._on_manual_run_done)
         self._pending_data_names: dict[str, str] = {}
-        # 非模态脚本编辑器持有引用,避免被回收(0.2.192)
-        self._script_editors: list[ScriptEditorDialog] = []
+        # 非模态脚本编辑器持有引用(0.2.192);0.2.193 起按 (data_id, step)
+        # 去重——同数据同步骤只允许一个编辑器
+        self._script_editors: dict[tuple[str, str], ScriptEditorDialog] = {}
         self._last_auto_fill: dict = {}
         self._last_raw_quality: dict | None = None
         # 日志作用域:当前选中上下文(由 _update_context 维护)
@@ -1033,6 +1034,10 @@ class MainWindow(QMainWindow):
 
     def _open_fid_editor(self, data_node, exp_id: str, data_id: str, label: str) -> None:
         """fid.com 查看/修改/运行(manual_fid_com / run_manual_fid_com)。"""
+        existing = self._existing_script_editor(data_id, "fid")
+        if existing is not None:
+            self._focus_script_editor(existing)
+            return
         try:
             content = self.controller.manual_fid_com(
                 data_node, exp_id=exp_id, data_id=data_id
@@ -1051,11 +1056,15 @@ class MainWindow(QMainWindow):
             self, label, script_name="fid.com", content=content, save_dir=save_dir
         )
         self._wire_script_run(dialog, data_node, exp_id, data_id, "fid.com")
-        self._keep_script_dialog(dialog)
+        self._keep_script_dialog(dialog, data_id, "fid")
         dialog.show()
 
     def _open_script_editor(self, data_node, exp_id: str, data_id: str, label: str) -> None:
         """脚本编辑器:已有脚本优先(自动运行过的直接展示),无则渲染默认 → 编辑/保存/运行。"""
+        existing = self._existing_script_editor(data_id, "spectrum")
+        if existing is not None:
+            self._focus_script_editor(existing)
+            return
         try:
             scripts = self.controller.manual_scripts(
                 data_node, params=None, exp_id=exp_id, data_id=data_id
@@ -1086,7 +1095,7 @@ class MainWindow(QMainWindow):
             save_dir=save_dir,
         )
         self._wire_script_run(dialog, data_node, exp_id, data_id, script_key)
-        self._keep_script_dialog(dialog)
+        self._keep_script_dialog(dialog, data_id, "spectrum")
         dialog.show()
 
     def _wire_script_run(
@@ -1099,18 +1108,39 @@ class MainWindow(QMainWindow):
             )
         )
 
-    def _keep_script_dialog(self, dialog: ScriptEditorDialog) -> None:
-        """持有非模态脚本编辑器引用,关闭后释放(0.2.192 非模态)。
+    def _existing_script_editor(
+        self, data_id: str, step: str
+    ) -> ScriptEditorDialog | None:
+        """同数据同步骤已打开的编辑器:存在且可见时复用,不重复弹出(0.2.193)。"""
+        dialog = self._script_editors.get((data_id, step))
+        if dialog is None:
+            return None
+        if dialog.isVisible():
+            return dialog
+        self._script_editors.pop((data_id, step), None)
+        return None
+
+    def _focus_script_editor(self, dialog: ScriptEditorDialog) -> None:
+        """把已打开的编辑器带到前台(重复打开时复用,0.2.193)。"""
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
+    def _keep_script_dialog(
+        self, dialog: ScriptEditorDialog, data_id: str, step: str
+    ) -> None:
+        """持有非模态脚本编辑器引用,关闭后释放(0.2.192/0.2.193)。
 
         打开时不锁定主界面(show 而非 exec);WA_DeleteOnClose + destroyed
-        保证关闭即释放,多次打开不泄漏。
+        保证关闭即释放;按 (data_id, step) 去重,同数据同步骤不重复弹窗。
         """
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        self._script_editors.append(dialog)
+        self._script_editors[(data_id, step)] = dialog
 
         def _drop() -> None:
-            if dialog in self._script_editors:
-                self._script_editors.remove(dialog)
+            key = (data_id, step)
+            if self._script_editors.get(key) is dialog:
+                self._script_editors.pop(key, None)
 
         dialog.destroyed.connect(_drop)
 

@@ -151,6 +151,39 @@ def test_main_window_manual_flows(
     window.close()
 
 
+def test_script_editor_single_instance_per_data_step(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """同数据同步骤只允许一个脚本编辑器;不同步骤可并存(0.2.193)。"""
+    manager = _manager(tmp_path, monkeypatch)
+    controller = FakeManualController()
+    window = MainWindow(manager=manager, controller=controller)
+    window.project_tree.select_experiment("exp_001")
+
+    window._open_manual_dialog("spectrum")
+    assert len(window._script_editors) == 1
+    assert controller.calls.count(("manual_scripts", "exp_001", "d_001", None)) == 1
+
+    # 再开同一数据同一步骤:复用,不新建
+    window._open_manual_dialog("spectrum")
+    assert len(window._script_editors) == 1
+    assert controller.calls.count(("manual_scripts", "exp_001", "d_001", None)) == 1
+
+    # fid 与 spectrum 是不同步骤,可并存
+    window._open_manual_dialog("fid")
+    assert len(window._script_editors) == 2
+    assert ("manual_fid_com", "exp_001", "d_001") in controller.calls
+
+    # 关闭 spectrum 编辑器后去重键释放,可重新打开
+    dialog = window._script_editors[("d_001", "spectrum")]
+    dialog.close()
+    qapp.processEvents()
+    assert ("d_001", "spectrum") not in window._script_editors
+    window._open_manual_dialog("spectrum")
+    assert len(window._script_editors) == 2
+    window.close()
+
+
 def test_script_run_wires_controller(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:

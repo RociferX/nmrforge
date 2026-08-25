@@ -69,10 +69,12 @@ def _run_quality_check(
     work: Path,
     data_id: str,
 ) -> None:
-    """已运行自动优化后,人工谱图准备再跑一次质量诊断(不重跑优化)。
+    """人工「运行」谱图前的质量诊断(不重跑优化)。
 
     结果写入 process/manual_quality.log;诊断会顺带修复坏点(备份),
-    与自动路径「生成谱图」开端的质量检测一致(0.2.163-补13)。
+    与自动路径「生成谱图」开端的质量检测一致(0.2.163-补13)。0.2.193:
+    由脚本编辑器打开时改为点「运行」后执行(run_manual_spectrum),打开
+    编辑器不再卡顿。
     """
     fid_candidate = (
         Path(data_entry.fid_path)
@@ -283,12 +285,11 @@ def manual_scripts(
 
     人工生成谱图不是完全人工,数据转换/合并/坏点清理与自动路径对齐
     (0.2.163-补13):fid 缺失时提示用户先执行「生成 FID」步骤
-    (0.2.163-补14,不在谱图入口偷跑转换);随后
-    - 未运行过自动优化:渲染初始脚本(默认参数)交给人改;
-    - 运行过自动优化(process/ 有终跑脚本 {data_id}_process.com /
-      {data_id}_nus.com):再跑一次质量诊断,直接把终脚本给人改。
-    优先返回 process/ 目录下的已有脚本;没有时才重新渲染默认脚本。
-    只返回谱图脚本——fid 由「生成 FID」步骤产出。
+    (0.2.163-补14,不在谱图入口偷跑转换);打开编辑器只读已有脚本,
+    不跑质量诊断——诊断改到点「运行」时执行(run_manual_spectrum,
+    0.2.193),打开大数据脚本编辑器不再卡顿。优先返回 process/ 目录下
+    的已有脚本;没有时才重新渲染默认脚本。只返回谱图脚本——fid 由
+    「生成 FID」步骤产出。
     """
     data_entry = manager.data(exp_id, data_id)
     raw_dir = _resolve_raw_dir(manager, data_entry)
@@ -302,12 +303,8 @@ def manual_scripts(
                 encoding="utf-8", errors="replace"
             )
     if existing:
-        # 已运行过自动优化(终跑脚本存在)→ 质量诊断一次,终脚本直接给人
-        if any(
-            name in existing
-            for name in (f"{data_id}_process.com", f"{data_id}_nus.com")
-        ):
-            _run_quality_check(manager, exp_id, data_entry, work, data_id)
+        # 已有脚本直接给人(0.2.193:质量诊断改到「运行」时执行,打开
+        # 编辑器不再重跑,避免大数据每次打开卡顿)
         return existing
     # fid 缺失:提示先执行「生成 FID」步骤(转换/合并由自动路径完成),
     # 人工途径只是给人调参,不在谱图入口偷跑转换(0.2.163-补14)
@@ -465,6 +462,10 @@ def _run_manual_spectrum_impl(
         nuslist_dst = work / "nuslist"
         if nuslist_src.is_file() and not nuslist_dst.is_file():
             shutil.copy2(nuslist_src, nuslist_dst)
+
+    # 0.2.193:人工「运行」时先跑一次质量诊断(坏点修复/报告),与自动
+    # 路径生成谱图开端一致;打开脚本编辑器不再执行(打开变快)
+    _run_quality_check(manager, exp_id, data_entry, work, data_id)
 
     script = scripts.get(script_key)
     if script is None:
