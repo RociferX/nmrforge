@@ -1,5 +1,35 @@
 # 修改记录(历史条目)
 
+## 0.2.195(2026-08-26,坏点删除布局参数化 + NUS fid 网格一致性修复)
+
+用户反馈:坏点删除应在 ser/fid 中直接删除原始数据,现在似乎没删对,导致
+谱图重构不对或合并不对;并指出 ser/fid 字节随采样参数变化,脚本要按参数
+判断。
+
+- 根因(VM 真实 cc/63 逐步实证):
+  - fid 网格不一致:bruker -AUTO 的 fid.com 中 nusExpand 缺省按 nuslist
+    推导网格(yTNUS=83),而按 NusTD 打补丁的 bruk2pipe 用 85,两段网格
+    不一致导致 fid 错位放置,重构错误;同时 xN 被按 acqus TD 覆盖
+    (1024→908),破坏 nusExpand 按 serPadSize 补齐后的 ser 行对齐
+    (908→1024),进一步错位;
+  - 清零切片映射错误:坏点清零把 (f2,f1) 映射到 test{f1},而 States 布局
+    实际在切片 2*f1+1/2*f1+2 的行 2*f2/2*f2+1,清零打在错误切片(合并
+    不对);
+  - ser 布局假设固定:源头删除用 ser_size/n_rows 当每点字节块,未按采样
+    参数(直接维 TD 补齐 + 字长 + 冗余数)校验。
+- 修复:
+  - patch_fid_com:NUS 下 xN/xT 不再按 acqus TD 覆盖(保持 fid.com 的
+    补齐值);yN/yT/zN/zT 按 NusTD 网格修正;并强制 nusExpand 传入
+    -yT/-zT 与 bruk2pipe 同一网格;
+  - _zero_bad_point_fid:清零切片修正为 States 布局 2*f1+1/2*f1+2;
+  - _clean_source_nus:新增 _ser_point_layout 按采样参数推导每点字节块
+    (nusExpand serPadSize:字长 8→128 对齐、4→256 对齐;冗余数=ser 大小/
+    点数/每向量字节),与 ser 不符时跳过源头删除、回退生成 FID 清理。
+- 验证(VM 真实 cc/63):源头删除坏点 (27,2350) 后转换,States 放置
+  99/99 命中(修复前杂乱),SMILE 重构成功出谱;
+- 测试:新增 NUS 网格强制、ser 布局推导、States 清零切片测试;更新
+  _clean_source_nus 测试按参数构造 ser;全量 pytest 全绿 + ruff 全绿。
+
 ## 0.2.194(2026-08-26,导入数据下拉保持子部件方案,修复首次弹出不可见)
 
 用户反馈:「导入数据」按钮点击不出现下拉内容;点右边的「数据组间分析」

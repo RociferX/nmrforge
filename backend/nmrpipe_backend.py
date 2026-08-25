@@ -135,6 +135,33 @@ def _validate_nus_points(
     return valid, bad, reasons
 
 
+def _ser_point_layout(
+    experiment: Experiment, data_size: int, n_rows: int
+) -> tuple[int, int, int] | None:
+    """按采样参数推导 ser 布局,返回 (每点字节块, 每向量字节, 冗余数)。
+
+    ser 字节随采样参数变化(0.2.195):每向量 = serPadSize 补齐后的直接维
+    复点数 × 2 × 字长(nusExpand:字长 8 → 128 对齐、字长 4 → 256 对齐);
+    每采样点含冗余向量数(NS 重复,-avg 平均)= ser 大小/点数/每向量字节,
+    要求整除。无法确定(参数缺失/不整除)返回 None——调用方回退生成 FID
+    清理,不做可能错位的整块删除。
+    """
+    td = effective_td(experiment)
+    if not td:
+        return None
+    direct_td = int(td[0])
+    per_point = data_size // n_rows if n_rows else 0
+    for word_bytes, ser_pad in ((8, 128), (4, 256)):
+        padded = ((direct_td + ser_pad - 1) // ser_pad) * ser_pad
+        vec_bytes = (padded // 2) * 2 * word_bytes
+        if vec_bytes <= 0 or per_point % vec_bytes != 0:
+            continue
+        redundancy = per_point // vec_bytes
+        if redundancy >= 1 and per_point * n_rows == data_size:
+            return per_point, vec_bytes, redundancy
+    return None
+
+
 def zf_summary(plan: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
     """填零计划摘要(WorkflowRun params 用):{轴: {"mode", "size"}}。"""
     return {
@@ -2003,7 +2030,18 @@ class NMRPipeBackend:
                     f"{n_rows} 行整除,回退为生成 FID 清理"
                 )
                 continue
-            row_bytes = data_size // n_rows
+            # 0.2.195:ser 字节随采样参数变化(直接维 TD 补齐 + 字长 + 冗余
+            # 数),按参数推导并校验,避免按错误块大小删除造成重构错位
+            layout = _ser_point_layout(experiment, data_size, n_rows)
+            if layout is None:
+                td0 = effective_td(experiment)[0] if effective_td(experiment) else "?"
+                logs.append(
+                    f"⚠ {raw_dir.name}/ser 布局无法按采样参数确定"
+                    f"(直接维 TD={td0}, 每点 {data_size // n_rows} 字节),"
+                    "回退为生成 FID 清理"
+                )
+                continue
+            row_bytes, _vec_bytes, _redundancy = layout
             try:
                 backup = raw_dir / "ser.bak"
                 if not backup.exists():
@@ -2102,40 +2140,47 @@ class NMRPipeBackend:
         for point in bad_points:
             if not point:
                 continue
-            y = int(point[0])
-            z = int(point[1]) if len(point) > 1 else None
-            target: Path | None = None
-            if z is not None and slice_dir.is_dir():
-                target = slice_dir / f"test{z:03d}.fid"
-                if not target.is_file() and dataset_id:
-                    target = slice_dir / f"{dataset_id}{z:03d}.fid"
-                if not target.is_file():
+            f2 = int(point[0])
+            f1 = int(point[1]) if len(point) > 1 else None
+            targets: list[Path] = []
+            if f1 is not None and slice_dir.is_dir():
+                # States 布局:复点 (f2, f1) 落在切片 2*f1+1 / 2*f1+2 的
+                # 行 2*f2 / 2*f2+1(0.2.195 修正:此前误用 test{f1},清零
+                # 会打在错误切片上造成合并/重构错误)
+                for zz in (2 * f1 + 1, 2 * f1 + 2):
+                    t = slice_dir / f"test{zz:03d}.fid"
+                    if not t.is_file() and dataset_id:
+                        t = slice_dir / f"{dataset_id}{zz:03d}.fid"
+                    if t.is_file():
+                        targets.append(t)
+                if not targets:
                     logs.append(
                         f"⚠ 坏点 {point}:越界,无对应切片,合并 FID 无需清理"
                     )
                     continue
-            elif z is None and base is not None and base.is_file():
-                target = base
-            if target is None:
+            elif f1 is None and base is not None and base.is_file():
+                targets = [base]
+            if not targets:
                 logs.append(f"⚠ 坏点 {point}:无对应 FID 文件,无需清理")
                 continue
-            try:
-                dic, data = ng.pipe.read(str(target))
-                arr = np.asarray(data)
-                if arr.ndim < 2:
-                    continue
-                rows = [r for r in (2 * y, 2 * y + 1) if r < arr.shape[0]]
-                if not rows:
-                    logs.append(f"⚠ 坏点 {point}:行越界,无需清理")
-                    continue
-                arr[rows, :] = 0
-                ng.pipe.write(str(target), dic, arr, overwrite=True)
-                logs.append(
-                    f"⚠ 坏点 {point}:对应 FID 增量已清零"
-                    f"({target.name} 行 {rows})"
-                )
-            except Exception as exc:  # noqa: BLE001 - 清理失败不阻断
-                logs.append(f"⚠ 坏点 {point}:FID 清理失败 {exc}")
+            for target in targets:
+                try:
+                    dic, data = ng.pipe.read(str(target))
+                    arr = np.asarray(data)
+                    if arr.ndim < 2:
+                        continue
+                    rows = [r for r in (2 * f2, 2 * f2 + 1) if r < arr.shape[0]]
+                    if not rows:
+                        logs.append(f"⚠ 坏点 {point}:行越界,无需清理")
+                        continue
+                    arr[rows, :] = 0
+                    ng.pipe.write(str(target), dic, arr, overwrite=True)
+                    logs.append(
+                        f"⚠ 坏点 {point}:对应 FID 增量已清零"
+                        f"({target.name} 行 {rows})"
+                    )
+                except Exception as exc:  # noqa: BLE001 - 清理失败不阻断
+                    logs.append(f"⚠ 坏点 {point}:FID 清理失败 {exc}")
 
     def _clean_work_nuslist(
         self, work: Path, experiment: Experiment, logs: list[str]

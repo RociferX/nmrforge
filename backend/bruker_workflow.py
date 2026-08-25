@@ -182,6 +182,12 @@ def _acqus_values(experiment: Experiment) -> dict[str, str]:
             values[key] = f"{desired:g}"
         else:
             values[key] = str(int(desired))
+    if experiment.sampling.mode is SamplingMode.NUS:
+        # NUS:xN/xT 是 nusExpand 按 serPadSize 补齐后的 ser 行大小(如
+        # 908→1024),不是 acqus TD,不能覆盖(0.2.195);yN/yT/zN/zT 仍按
+        # NusTD 网格修正,并与 nusExpand 强制一致
+        values.pop("xN", None)
+        values.pop("xT", None)
     return values
 
 
@@ -210,8 +216,47 @@ def patch_fid_com(
         return match.group(0)
 
     patched = _KEY_RE.sub(replace, text)
+    if experiment.sampling.mode is SamplingMode.NUS:
+        patched, grid_warnings = _force_nus_expand_grid(patched, experiment)
+        warnings += grid_warnings
     patched, out_warnings = patch_fid_out_name(patched, experiment.dataset_id)
     warnings += out_warnings
+    return patched, warnings
+
+
+_NUS_EXPAND_RE = re.compile(r"(nusExpand\.tcl[^\n]*?)\\\n")
+
+
+def _force_nus_expand_grid(
+    text: str, experiment: Experiment
+) -> tuple[str, list[str]]:
+    """强制 nusExpand 与 bruk2pipe 使用同一 NusTD 网格(0.2.195)。
+
+    nusExpand 缺省按 nuslist 推导网格(yTNUS/zTNUS),与按 NusTD 打补丁的
+    bruk2pipe 不一致时(如 cc/63:83 vs 85)会把 fid 错位放置,重构错误;
+    显式传入 -yT/-zT 后两段使用同一网格。只改第一条(展开)调用,mask
+    调用不动。
+    """
+    td = _effective_td(experiment)
+    grid: list[str] = []
+    if len(td) > 1:
+        grid.append(f"-yT {int(td[1] // 2)}")
+    if len(td) > 2:
+        grid.append(f"-zT {int(td[2] // 2)}")
+    if not grid:
+        return text, []
+    warnings: list[str] = []
+
+    def replace(match: re.Match) -> str:
+        line = match.group(1)
+        if "-yT" in line or "-zT" in line:
+            return match.group(0)
+        warnings.append(
+            "nusExpand 网格: 强制 " + " ".join(grid) + "(与 bruk2pipe 一致)"
+        )
+        return line[:-1] + " " + " ".join(grid) + " \\\n"
+
+    patched, _count = _NUS_EXPAND_RE.subn(replace, text, count=1)
     return patched, warnings
 
 

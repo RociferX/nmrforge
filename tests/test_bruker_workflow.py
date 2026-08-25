@@ -107,6 +107,38 @@ def test_apply_fid_com_overrides() -> None:
     assert any("nope" in w and "未找到" in w for w in warnings)
 
 
+def test_patch_fid_com_nus_keeps_x_force_grid(
+    bruker_dir: Path,
+) -> None:
+    """0.2.195:NUS 下 xN/xT 保持 fid.com 原值(补齐后 ser 行大小),
+    yN/zN 按 NusTD 网格修正,并强制 nusExpand 使用同一网格。"""
+    from core.data.bruker_reader import read_dataset
+
+    exp = read_dataset(bruker_dir / "nus_3d")
+    text = (
+        "nusExpand.tcl -mode bruker -sampleCount 2 -off 0 \\\n"
+        " -in ./ser -out ./ser_full -sample ./nuslist\n\n"
+        "bruk2pipe -in ./ser_full \\\n"
+        "  -xN 1024 -yN 166 -zN 4702 -xT 454 -yT 83 -zT 2351 \\\n"
+        "  -out fid\n"
+    )
+    patched, warnings = patch_fid_com(text, exp)
+    # xN/xT 不被 acqus TD 覆盖
+    assert "-xN 1024" in patched
+    assert "-xT 454" in patched
+    # yN/zN 修正为 NusTD 网格(effective_td)
+    from backend.bruker_workflow import _effective_td
+
+    td = _effective_td(exp)
+    assert f"-yN {td[1]}" in patched
+    assert f"-zN {td[2]}" in patched
+    # nusExpand 强制同一网格(第一条调用)
+    first = patched.splitlines()[0]
+    assert f"-yT {td[1] // 2}" in first
+    assert f"-zT {td[2] // 2}" in first
+    assert any("nusExpand 网格" in w for w in warnings)
+
+
 def test_patch_nus_expand_count() -> None:
     from backend.bruker_workflow import patch_nus_expand_count
 

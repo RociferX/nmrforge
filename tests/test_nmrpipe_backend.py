@@ -300,6 +300,73 @@ def test_write_merged_nuslist_detects_bad_points(
     assert all(tuple(int(v) for v in line.split()) not in bad for line in written)
     assert count == len(written)
 
+def test_ser_point_layout_derives_bytes(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """0.2.195:ser 布局按采样参数推导(直接维 TD 补齐 + 字长 + 冗余)。"""
+    import shutil
+
+    from backend.nmrpipe_backend import _ser_point_layout
+
+    src = tmp_path / "nus"
+    shutil.copytree(bruker_dir / "nus_2d", src)
+    exp = read_dataset(src)
+    # nus_2d 直接 TD=2048 → 补齐 2048 → 1024 复点 × 2 × 8 字节 = 16384
+    layout = _ser_point_layout(exp, 4 * 16384, 4)
+    assert layout == (16384, 16384, 1)
+    # 冗余 4 个向量/点
+    layout2 = _ser_point_layout(exp, 4 * 4 * 16384, 4)
+    assert layout2 == (4 * 16384, 16384, 4)
+    # 不整除/无法确定 → None
+    assert _ser_point_layout(exp, 4 * 100, 4) is None
+
+
+def test_zero_bad_point_fid_states_slices(
+    tmp_path: Path, bruker_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.2.195:坏点清零按 States 布局落在切片 2*f1+1/2*f1+2 行 2*f2/2*f2+1,
+    不再误用 test{f1}。"""
+    import shutil
+
+    from backend.nmrpipe_backend import NMRPipeBackend
+    from core.data.bruker_reader import read_dataset
+
+    src = tmp_path / "nus"
+    shutil.copytree(bruker_dir / "nus_3d", src)
+    exp = read_dataset(src)
+    work = tmp_path / "work"
+    slice_dir = work / "merged" / "fid"
+    slice_dir.mkdir(parents=True)
+    for z in (3, 7, 8):
+        (slice_dir / f"test{z:03d}.fid").write_bytes(b"x")
+
+    read_targets: list[str] = []
+    write_targets: list[str] = []
+
+    def fake_read(path):
+        read_targets.append(Path(path).name)
+        return {"FDSIZE": 454, "FDSPECNUM": 170}, np.ones(
+            (170, 454), dtype=np.complex64
+        )
+
+    def fake_write(path, dic, arr, overwrite=False):
+        write_targets.append(Path(path).name)
+
+    monkeypatch.setattr("nmrglue.pipe.read", fake_read)
+    monkeypatch.setattr("nmrglue.pipe.write", fake_write)
+
+    backend = NMRPipeBackend()
+    logs: list[str] = []
+    backend._zero_bad_point_fid(
+        work, [(5, 3)], logs, dataset_id=exp.dataset_id
+    )
+    joined = "\n".join(logs)
+    # States:复点 (f2=5, f1=3) → 切片 7/8 行 10/11
+    assert sorted(write_targets) == ["test007.fid", "test008.fid"]
+    assert "test007.fid" in joined and "test008.fid" in joined
+    assert "test003.fid" not in joined
+
+
 def test_clean_work_nuslist_single_dataset(
     tmp_path: Path, bruker_dir: Path
 ) -> None:
@@ -342,7 +409,9 @@ def test_clean_source_nus_single_removes_with_backup(
     lines = (raw / "nuslist").read_text(encoding="utf-8").splitlines()
     (raw / "nuslist").write_text("\n".join(lines) + "\n1000\n", encoding="utf-8")
     n = len(lines) + 1
-    row_bytes = 100
+    # 0.2.195:ser 字节随采样参数变化(直接维 TD 补齐 + 字长),按 nus_2d
+    # fixture(直接 TD=2048,双精度字长 8)构造:2048//2×2×8 = 16384 字节/点
+    row_bytes = 16384
     ser = b"".join(bytes([i % 256]) * row_bytes for i in range(n))
     (raw / "ser").write_bytes(ser)
     exp = read_dataset(raw)
@@ -378,7 +447,7 @@ def test_clean_source_nus_breaks_link_external_untouched(
     lines = (raw / "nuslist").read_text(encoding="utf-8").splitlines()
     (raw / "nuslist").write_text("\n".join(lines) + "\n1000\n", encoding="utf-8")
     n = len(lines) + 1
-    row_bytes = 64
+    row_bytes = 16384
     ser = b"".join(bytes([i % 256]) * row_bytes for i in range(n))
     external = tmp_path / "external_ser"
     external.write_bytes(ser)
@@ -412,7 +481,7 @@ def test_clean_source_nus_segments_drops_bad_and_dups(
     seg2_pts = [dup_x, "9 10", "11 12", "13 14", "15 16", "1000 1000"]
     (seg2 / "nuslist").write_text("\n".join(seg2_pts) + "\n", encoding="utf-8")
     n1, n2 = len(nl1) + 1, len(seg2_pts)
-    row_bytes = 64
+    row_bytes = 16384
     (seg1 / "ser").write_bytes(b"".join(bytes([i % 256]) * row_bytes for i in range(n1)))
     (seg2 / "ser").write_bytes(b"".join(bytes([j % 256]) * row_bytes for j in range(n2)))
     exp = read_segments([seg1, seg2])
