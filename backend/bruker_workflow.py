@@ -284,6 +284,13 @@ def patch_fid_out_name(text: str, dataset_id: str) -> tuple[str, list[str]]:
         return f"{match.group(1)}{desired}"
 
     patched = _OUT_RE.sub(replace, text)
+    # 0.2.199:主输出 test.fid 改名后,mask 阶段的 `-in ./test.fid` 同步
+    # 改名,否则单文件输出(如部分分段)会在 mask 阶段找不到输入而失败
+    patched = re.sub(
+        r"(-in\s+)(?:\./)?test\.fid\b",
+        r"\g<1>" + f"{dataset_id}.fid",
+        patched,
+    )
     return patched, warnings
 
 

@@ -91,6 +91,20 @@ def check_raw_quality(project, exp_id: str, data_id: str) -> dict:
     raw = _raw_dir(project, exp_id, data_id)
     if raw is None:
         return {"ok": False, "issues": ["找不到原始数据目录(raw/)"], "info": {}}
+    # 0.2.199:分段采集数据 raw/ 是容器根目录(无 acqus/ser),质量检查按
+    # 首段目录评估(同一实验各段采集参数一致),不误报缺 acqus/ser
+    try:
+        data_entry = project.data(exp_id, data_id)
+        segments = list(getattr(data_entry, "segments", None) or [])
+        if segments:
+            seg0 = Path(segments[0])
+            if not seg0.is_absolute():
+                seg0 = Path(project.root) / seg0
+            if seg0.is_dir():
+                raw = seg0
+                info["分段"] = f"按首段评估({seg0.name})"
+    except Exception:  # noqa: BLE001 - 读不到 segments 按普通数据评估
+        pass
 
     acqus = raw / "acqus"
     if not acqus.is_file():

@@ -509,6 +509,19 @@ class NMRPipeBackend:
         if progress is not None:
             progress("开始转换 fid")
         if experiment.segments:
+            # 0.2.124:坏点在源头 ser/nuslist 删除并备份(用户要求)
+            _count, _bad, source_removed = self._clean_source_nus(
+                experiment, [Path(s) for s in experiment.segments], logs
+            )
+            if _bad and source_removed:
+                # 0.2.197/0.2.199:分段也按清理后合并 nuslist 实际范围调整
+                # 网格,交叉验证(参数修正)不再把各段网格改回静态 NusTD
+                merged_points: list[tuple[int, ...]] = []
+                for seg in experiment.segments:
+                    merged_points += [
+                        tuple(p) for p in read_nuslist(Path(seg) / "nuslist")
+                    ]
+                logs += _apply_nus_grid_after_clean(experiment, merged_points)
             converted, convert_logs = self._convert_segments(
                 runtime, experiment, work, [], fid_com_overrides=fid_com_overrides
             )
@@ -1270,7 +1283,11 @@ class NMRPipeBackend:
         return work / f"{dataset_id}.fid"
 
     def _needs_acqu3s_td_fix(self, experiment: Experiment) -> bool:
-        """NUS 3D 单数据集:acqu3s TD 被写成 1 而 NusTD 正确时,需暂存修正。"""
+        """NUS 3D 单数据集:acqu3s TD 被写成 1 而 NusTD 正确时,需暂存修正。
+
+        分段各段保持单文件输出,由 _convert_segments 的 _split_slices 归位
+        切片(0.2.199 不放开 segments 守卫;单文件的 mask 输入改名由
+        patch_fid_out_name 处理)。"""
         if experiment.ndim != 3 or experiment.segments:
             return False
         if experiment.sampling.mode is not SamplingMode.NUS:

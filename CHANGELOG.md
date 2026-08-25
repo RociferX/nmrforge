@@ -1,5 +1,28 @@
 # 修改记录(历史条目)
 
+## 0.2.199(2026-08-26,分段 3D NUS 导入后处理修复 + 分段质量检查)
+
+用户反馈:分段导入后 raw/ 是容器根目录(无 acqus/ser),后续处理报错。
+
+- 根因(VM 真实 cc 分段复现):
+  - fid.com 单文件输出的 mask 阶段读 ./test.fid,而 patch_fid_out_name 把
+    主输出改名成 {dataset_id}.fid 后未同步改 mask 输入 → mask 找不到输入,
+    fid.com rc=1,分段转换失败(3D NUS 分段各段按单文件输出 + _split_slices
+    切片归位;acqu3s 暂存修正只用于单数据集);
+  - convert_to_fid 分段分支未应用坏点移除后的网格调整(0.2.197 只在
+    reconstruct_nus),各段按基础实验 NusTD 强制网格,与清理后数据不一致;
+  - check_raw_quality 对分段数据检查容器根目录 → 误报「缺少 acqus/ser」。
+- 修复:
+  - patch_fid_out_name:主输出改名时同步改 mask 阶段的 `-in test.fid`;
+  - convert_to_fid 分段分支:先 _clean_source_nus 再按合并 nuslist 实际
+    范围调整 NusTD(与 reconstruct_nus 一致);
+  - check_raw_quality:分段数据按首段目录评估(同一实验各段参数一致),
+    info 标注「按首段评估」;
+- 验证(VM 真实 cc):导入 → generate_fid → generate_spectrum 全通,终谱
+  d_002.ft3 产出;质量检查 ok=True 不再误报缺 acqus/ser;
+- 测试:mask 改名、分段网格调整、分段质量检查;全量 pytest 全绿 + ruff
+  全绿。
+
 ## 0.2.198(2026-08-26,分段导入容器判定 + 非数据子目录忽略 + 原始参数备份)
 
 用户反馈:分段导入选总文件夹时出现「缺失 acqus」提示——容器顶层本来就不

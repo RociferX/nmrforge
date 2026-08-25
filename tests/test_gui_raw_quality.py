@@ -31,3 +31,23 @@ def test_raw_quality_reports_missing_fid(tmp_path: Path) -> None:
     assert report["info"]["温度"] == "298.0 K"  # TE=2980 → 298.0 K(开尔文)
     text = format_quality_report(report)
     assert "警告" in text
+
+
+def test_raw_quality_segmented_checks_first_segment(tmp_path: Path) -> None:
+    """0.2.199:分段采集按首段评估,不因容器根目录缺 acqus/ser 误报。"""
+    manager = ProjectManager.create_project(tmp_path / "proj", "demo")
+    entry = manager.create_experiment("cc")
+    data = manager.import_data(entry.id, "/fake/cc")
+    raw = manager.data_dir(entry.id, data.id, "raw")
+    seg0 = raw / "segments" / "01"
+    seg0.mkdir(parents=True)
+    (seg0 / "acqus").write_text(
+        "##$NUC1= 1H\n##$TD= 908\n", encoding="latin-1"
+    )
+    (seg0 / "ser").write_bytes(b"x")
+    data.segments = [str(seg0)]
+    manager.save()
+    report = check_raw_quality(manager, entry.id, data.id)
+    assert not any("acqus" in issue for issue in report["issues"])
+    assert report["info"].get("分段")
+    assert report["info"]["维度"] == "1D"
