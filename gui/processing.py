@@ -23,6 +23,21 @@ def _load_config() -> dict:
     return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
 
 
+_DATA_KEY_FILES = ('acqus', 'acqu2s', 'acqu3s', 'ser', 'fid', 'nuslist')
+
+
+def _segment_dirs(root: Path) -> list[Path]:
+    """直接含 acqus 的数据段子目录(分段导入用)。
+
+    只认含 acqus 的子目录为数据段;只有 ser/fid 等数据文件但缺 acqus、
+    或什么文件都没有的子目录一律忽略(0.2.198 用户规则)——选中的总文件夹
+    顶层没有 acqus 是容器正常形态,不应报缺失。
+    """
+    return sorted(
+        p for p in root.iterdir() if p.is_dir() and (p / "acqus").is_file()
+    )
+
+
 def is_segmented_container(path) -> bool:
     """容器目录判定:本身不是 Bruker 数据集(顶层无 acqus),
     但含 ≥2 个直接带 acqus 的分段子目录(分段采集导入用)。
@@ -31,11 +46,7 @@ def is_segmented_container(path) -> bool:
         root = Path(path)
         if not root.is_dir() or (root / "acqus").is_file():
             return False
-        segments = [
-            p for p in root.iterdir()
-            if p.is_dir() and (p / "acqus").is_file()
-        ]
-        return len(segments) >= 2
+        return len(_segment_dirs(root)) >= 2
     except OSError:
         return False
 
@@ -45,33 +56,34 @@ def resolve_import_source(path) -> tuple[str, bool]:
 
     返回 (data_source, is_segmented):
     - 本身是 Bruker 数据集(含 acqus) → (path, False);
-    - 容器含 ≥2 个数据子目录 → (path, True),走分段采集导入;
-    - 恰好 1 个数据子目录(其余非数据,忽略)→ (该子目录, False),按单个导入;
+    - 容器含 ≥2 个含 acqus 的数据段子目录 → (path, True),走分段采集导入;
+    - 恰好 1 个含 acqus 的数据段(其余非数据/缺 acqus,忽略)→ (该子目录, False);
     - 0 个 → 抛 ImportWorkflowError。
     """
     from workflow.import_workflow import ImportWorkflowError
-
-    _data_key_files = ('acqus', 'acqu2s', 'acqu3s', 'ser', 'fid', 'nuslist')
 
     root = Path(path)
     if (root / 'acqus').is_file():
         return str(root), False
     if not root.is_dir():
         raise ImportWorkflowError(f'目录不存在: {root}')
+    segments = _segment_dirs(root)
+    if len(segments) >= 2:
+        return str(root), True
+    if len(segments) == 1:
+        return str(segments[0]), False
     data_subdirs = sorted(
         p
         for p in root.iterdir()
-        if p.is_dir() and any((p / name).is_file() for name in _data_key_files)
+        if p.is_dir() and any((p / name).is_file() for name in _DATA_KEY_FILES)
     )
-    if len(data_subdirs) >= 2:
-        return str(root), True
-    if len(data_subdirs) == 1:
-        single = data_subdirs[0]
-        if not (single / 'acqus').is_file():
-            raise ImportWorkflowError(
-                f'子目录 {single.name} 含数据文件但缺少 acqus,无法导入'
-            )
-        return str(single), False
+    if data_subdirs:
+        # 子目录只有数据文件但缺 acqus:按非数据文件夹忽略,但全部如此时
+        # 无法导入,给出明确提示(不把顶层缺 acqus 当作问题,0.2.198)
+        raise ImportWorkflowError(
+            '所选目录的子目录含数据文件但均缺少 acqus,无法作为数据集导入'
+            '(含 acqus 的子目录才算数据段);非数据子目录已忽略'
+        )
     raise ImportWorkflowError(
         '所选目录既不是 Bruker 数据集,也没有含数据文件的子目录'
         '(acqus/acqu2s/acqu3s/ser/fid/nuslist);非数据子目录已忽略'

@@ -435,3 +435,25 @@ def test_read_dataset_container_non_data_errors(tmp_path: Path) -> None:
     (one / "notes" / "readme.txt").write_text("x", encoding="utf-8")
     with pytest.raises(ValueError, match="仅找到 1 个含数据文件的子目录"):
         read_dataset_container(one)
+
+
+def test_read_dataset_container_not_segmented_experiment(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """0.2.198:子目录参数不一致(独立数据集)时明确告知不是分段实验。"""
+    import shutil
+
+    from core.data.bruker_reader import read_dataset_container
+
+    container = tmp_path / "container"
+    container.mkdir()
+    a = container / "a"
+    b = container / "b"
+    shutil.copytree(bruker_dir / "nus_2d", a)
+    shutil.copytree(bruker_dir / "nus_2d", b)
+    # 改 b 的 TD 使两段参数不一致
+    acqu2s = b / "acqu2s"
+    text = acqu2s.read_text(encoding="utf-8")
+    acqu2s.write_text(text.replace("##$TD= 256", "##$TD= 128"), encoding="utf-8")
+    with pytest.raises(ValueError, match="不是分段实验"):
+        read_dataset_container(container)

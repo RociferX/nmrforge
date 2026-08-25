@@ -366,3 +366,37 @@ def test_resolve_import_source(tmp_path: Path) -> None:
         raise AssertionError("应抛 ImportWorkflowError")
     except ImportWorkflowError:
         pass
+
+
+def test_resolve_import_source_ignores_no_acqus_subdirs(
+    tmp_path: Path,
+) -> None:
+    """0.2.198:子目录只有数据文件但缺 acqus 视为非数据文件夹忽略;
+    恰好 1 个含 acqus 段时按单个导入,不因杂目录报缺 acqus。"""
+    from gui.processing import resolve_import_source
+    from workflow.import_workflow import ImportWorkflowError
+
+    # 恰好 1 个含 acqus 段 + 1 个只有 ser 的杂目录 → 忽略杂目录,单导 acqus 段
+    one = tmp_path / "one"
+    one.mkdir()
+    seg = one / "segA"
+    seg.mkdir()
+    (seg / "acqus").write_text("x", encoding="utf-8")
+    junk = one / "junk"
+    junk.mkdir()
+    (junk / "ser").write_text("x", encoding="utf-8")
+    src, seg_flag = resolve_import_source(one)
+    assert seg_flag is False
+    assert Path(src).name == "segA"
+
+    # 全部子目录只有数据文件但缺 acqus → 明确报缺 acqus,不怪顶层
+    bad = tmp_path / "bad"
+    bad.mkdir()
+    d1 = bad / "d1"
+    d1.mkdir()
+    (d1 / "ser").write_text("x", encoding="utf-8")
+    try:
+        resolve_import_source(bad)
+        raise AssertionError("应抛 ImportWorkflowError")
+    except ImportWorkflowError as exc:
+        assert "缺少 acqus" in str(exc)

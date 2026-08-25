@@ -1,5 +1,32 @@
 # 修改记录(历史条目)
 
+## 0.2.198(2026-08-26,分段导入容器判定 + 非数据子目录忽略 + 原始参数备份)
+
+用户反馈:分段导入选总文件夹时出现「缺失 acqus」提示——容器顶层本来就不
+含 acqus;应忽略找不到任何数据的子文件夹;sample 这类子目录是独立数据集的
+文件夹应失败并告知「不是分段实验」;修改 acqus 等链接原始文件的程序必须
+先备份原始文件。
+
+- 分段容器判定(gui/processing):_segment_dirs 只认含 acqus 的子目录为
+  数据段;只有 ser/fid 等数据文件但缺 acqus、或什么文件都没有的子目录
+  一律忽略;resolve_import_source 改为 acqus 权威判定——恰好 1 个含 acqus
+  段时忽略杂目录按单个导入,全部子目录缺 acqus 时明确报「均缺少 acqus」,
+  不再把顶层缺 acqus 当问题;
+- 提示措辞:分段按钮与导入对话框不再把「顶层无 acqus」作为失败原因,统一
+  为「需至少 2 个子目录各含 acqus 数据段;非数据子目录已忽略」;
+- 非分段实验明确失败(core/data/bruker_reader):read_dataset_container 捕获
+  read_segments 的「参数不一致」,改为「所选目录不是分段实验(子目录参数
+  不一致,可能是多个独立数据集,请逐个导入)」——cc(61/63/65/67 一致)正常
+  导入,sample(20/28/30 不一致)明确失败;
+- 原始参数备份(backend/nmrpipe_backend._stage_acqu3s_td_fix):修改
+  acqus/acqu2s/acqu3s/nuslist 前先备份原始文件为 .bak(仅首次,幂等),并
+  复制进暂存目录而非硬链接,避免暂存内任何原地写入穿透链接污染 raw 原件;
+  _clean_source_nus 对 ser/nuslist 的 .bak 备份保持不变;
+- 验证(VM):cc 容器读取正常(4 段),sample 报「不是分段实验」;stage 备份生成
+  acqus.bak/acqu2s.bak/acqu3s.bak 且内容为原件;
+- 测试:resolve_import_source 忽略缺 acqus 子目录、read_dataset_container
+  非分段实验报错、stage 备份断言;全量 pytest 全绿 + ruff 全绿。
+
 ## 0.2.197(2026-08-26,坏点移除后网格按实际范围调整,交叉验证不再改回)
 
 用户反馈:处理逻辑乱了——有坏点时 NusTD 等值会被改,但后面的交叉验证

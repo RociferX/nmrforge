@@ -628,6 +628,12 @@ def test_convert_dir_nus3d_stages_acqu3s_td_fix(
     assert stage != raw
     assert fake.acqu3s_td == 128  # 暂存副本 TD=NusTD
     assert parse_param_file(raw / "acqu3s")["TD"] == 1  # 原件未动
+    # 0.2.198:修改前备份原始参数文件(.bak,内容为原件)
+    assert (raw / "acqu3s.bak").is_file()
+    assert parse_param_file(raw / "acqu3s.bak")["TD"] == 1
+    assert (raw / "acqus.bak").is_file()
+    assert (raw / "acqu2s.bak").is_file()
+    assert any("原始参数已备份" in line for line in logs)
     assert len(list((work / "fid").glob("test*.fid"))) == 128
     assert not (work / f"{exp.dataset_id}.fid").exists()
     assert any("acqu3s TD" in line for line in logs)

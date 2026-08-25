@@ -412,7 +412,8 @@ class MainWindow(QMainWindow):
             InfoDialog.show_info(
                 self,
                 "分段采集导入",
-                "所选目录不是分段采集容器(顶层无 acqus 且至少 2 个子目录含 acqus)",
+                "所选目录不是分段采集容器(需至少 2 个子目录各含 acqus 数据段;"
+                "非数据子目录已忽略;容器顶层本身不含 acqus 属正常)",
             )
             return
         self._import_experiment_async(

@@ -1302,14 +1302,20 @@ class NMRPipeBackend:
         if stage.exists():
             shutil.rmtree(stage)
         stage.mkdir(parents=True, exist_ok=True)
-        linked = copied = 0
+        # 0.2.198:处理可能修改的参数文件(acqus/acqu2s/acqu3s/nuslist)前
+        # 先备份原始文件(.bak,仅首次,幂等),并复制进暂存目录而非硬链接,
+        # 避免暂存内任何原地写入穿透链接污染 raw 原件
+        param_names = ("acqus", "acqu2s", "acqu3s", "nuslist")
+        linked = copied = backed = 0
         for src in sorted(raw_dir.iterdir()):
             if not src.is_file():
                 continue
             dst = stage / src.name
-            # acqu3s 会被改写(TD=NusTD),必须复制而非硬链接,否则会穿透
-            # 链接污染 raw 原件
-            if src.name == "acqu3s":
+            if src.name in param_names:
+                backup = raw_dir / f"{src.name}.bak"
+                if not backup.exists():
+                    shutil.copy2(src, backup)
+                    backed += 1
                 shutil.copy2(src, dst)
                 copied += 1
                 continue
@@ -1319,6 +1325,10 @@ class NMRPipeBackend:
             except OSError:
                 shutil.copy2(src, dst)
                 copied += 1
+        if backed:
+            logs.append(
+                f"原始参数已备份(.bak {backed} 个:acqus/acqu2s/acqu3s/nuslist)"
+            )
         acqu3s = stage / "acqu3s"
         text = acqu3s.read_text(encoding="utf-8", errors="replace")
         patched, count = re.subn(

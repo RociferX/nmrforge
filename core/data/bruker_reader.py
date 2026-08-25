@@ -321,7 +321,17 @@ def read_dataset_container(path: Path | str) -> tuple[Experiment, list[Path]]:
             f"仅找到 1 个含数据文件的子目录({segments[0].name}),分段导入至少"
             f"需要 2 个;非数据子目录已忽略: {p}"
         )
-    return read_segments(segments), segments
+    try:
+        return read_segments(segments), segments
+    except ValueError as exc:
+        if "参数不一致" in str(exc):
+            # 0.2.198:子目录参数不一致 = 各子目录是独立数据集,不是同一
+            # 实验的分段,明确告知而非含糊报错
+            raise ValueError(
+                "所选目录不是分段实验(子目录参数不一致,可能是多个独立"
+                f"数据集,请逐个导入): {exc}"
+            ) from exc
+        raise
 
 
 def read_dataset(path: Path) -> Experiment:

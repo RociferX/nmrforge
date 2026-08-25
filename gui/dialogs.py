@@ -265,11 +265,14 @@ class ImportExperimentDialog(QDialog):
             from gui.processing import is_segmented_container
 
             if not is_segmented_container(source_path):
+                # 0.2.198:容器顶层不含 acqus 属正常,提示聚焦「数据段」,
+                # 不再把「顶层缺少 acqus」当作问题
                 InfoDialog.show_info(
                     self,
                     "提示",
-                    "所选目录既不是 Bruker 数据集(缺少 acqus),\n"
-                    "也不是分段采集容器目录(≥2 个含 acqus 的子目录)",
+                    "所选目录既不是 Bruker 数据集,也不是分段采集容器\n"
+                    "(分段容器需至少 2 个子目录各含 acqus 数据段;"
+                    "非数据子目录已忽略)",
                 )
                 return
         self.accept()
