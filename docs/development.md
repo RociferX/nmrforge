@@ -148,11 +148,14 @@
   报「不是分段实验」。任何会修改 acqus/acqu2s/acqu3s/nuslist/ser 等原始
   文件的程序必须先备份 .bak(仅首次),暂存目录用复制而非硬链接,防止原地
   写入穿透链接污染原件。
-- 分段 3D NUS 处理(0.2.199):分段各段按单文件输出 + _split_slices 切片
-  归位;patch_fid_out_name 改名主输出时必须同步改 mask 阶段的 `-in`;
-  convert_to_fid 分段分支要像 reconstruct_nus 一样先清理坏点再按合并
-  nuslist 实际范围调整 NusTD;分段数据的质量检查按首段评估(raw/ 容器根
-  目录无 acqus/ser,不得误报)。
+- 分段 3D NUS 处理(0.2.199):patch_fid_out_name 改名主输出时必须同步改
+  mask 阶段的 `-in`;convert_to_fid 分段分支要像 reconstruct_nus 一样先
+  清理坏点再按合并 nuslist 实际范围调整 NusTD;分段数据的质量检查按首段
+  评估(raw/ 容器根目录无 acqus/ser,不得误报)。
+- 分段与普通 NUS 一致走切片流(0.2.199-补1):分段各段同样应用 acqu3s TD
+  修正暂存(先 .bak 备份,副本内修改),bruker 直接输出 fid/test%03d.fid
+  切片;_split_slices 在输出目录已有切片时跳过拆分(只处理单文件输出),
+  多段合并仍由 _merge_slices 完成。
 - 质量评估报基线不平时必须对照基线优化结果输出原因(评估基准差异/
   保持 off 门槛),不得只报「建议基线校正」;基线评估逐存储轴取最差并
   标注最差轴(0.2.170),不得只检最后一个轴;

@@ -687,7 +687,7 @@ def test_converted_fid_path_slices_and_single(tmp_path: Path) -> None:
 def test_needs_acqu3s_td_fix_gates(
     tmp_path: Path, bruker_dir: Path
 ) -> None:
-    """修正仅用于 NUS 3D 单数据集(acqu3s TD=1);均匀/2D/多段不触发。"""
+    """修正用于 NUS 3D(含分段,acqu3s TD=1);均匀/2D 不触发。"""
     import shutil
 
     from backend.nmrpipe_backend import NMRPipeBackend
@@ -697,12 +697,12 @@ def test_needs_acqu3s_td_fix_gates(
     raw3d = tmp_path / "raw3d"
     shutil.copytree(bruker_dir / "nus_3d", raw3d)
     assert backend._needs_acqu3s_td_fix(read_dataset(raw3d))
-    # 多段:experiment.segments 非空 → 不触发(保持每段单文件 + 拆切片)
+    # 多段:与普通 NUS 一致,同样触发 acqu3s TD 修正(切片流输出)
     seg_a = tmp_path / "seg_a"
     seg_b = tmp_path / "seg_b"
     shutil.copytree(bruker_dir / "nus_3d", seg_a)
     shutil.copytree(bruker_dir / "nus_3d", seg_b)
-    assert not backend._needs_acqu3s_td_fix(read_segments([seg_a, seg_b]))
+    assert backend._needs_acqu3s_td_fix(read_segments([seg_a, seg_b]))
     # 2D NUS 与均匀 3D 不触发
     raw2d = tmp_path / "raw2d"
     shutil.copytree(bruker_dir / "nus_2d", raw2d)

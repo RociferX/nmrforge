@@ -1283,12 +1283,12 @@ class NMRPipeBackend:
         return work / f"{dataset_id}.fid"
 
     def _needs_acqu3s_td_fix(self, experiment: Experiment) -> bool:
-        """NUS 3D 单数据集:acqu3s TD 被写成 1 而 NusTD 正确时,需暂存修正。
+        """NUS 3D 数据集:acqu3s TD 被写成 1 而 NusTD 正确时,需暂存修正。
 
-        分段各段保持单文件输出,由 _convert_segments 的 _split_slices 归位
-        切片(0.2.199 不放开 segments 守卫;单文件的 mask 输入改名由
-        patch_fid_out_name 处理)。"""
-        if experiment.ndim != 3 or experiment.segments:
+        分段各段与普通 NUS 一致,同样走 acqu3s TD 修正暂存,bruker 直接
+        输出切片流 fid/test%03d.fid;_split_slices 检测到已有切片即跳过
+        (0.2.199-补1 放开 segments 守卫)。"""
+        if experiment.ndim != 3:
             return False
         if experiment.sampling.mode is not SamplingMode.NUS:
             return False
@@ -1967,8 +1967,17 @@ class NMRPipeBackend:
         shift_hz: float,
         logs: list[str],
     ) -> bool:
-        """把单文件 test.fid 拆成 3D 平面切片（合并前必需，参考实验室 1stfid.com）。"""
+        """把单文件 test.fid 拆成 3D 平面切片（合并前必需，参考实验室 1stfid.com）。
+
+        0.2.199-补1:分段 NUS 3D 已与普通 NUS 一致走 acqu3s TD 修正,bruker
+        直接输出切片流;out_dir 已有切片时跳过拆分(避免重复/失败)。"""
         out_dir.mkdir(parents=True, exist_ok=True)
+        if _slice_candidates(out_dir, Path(in_file).stem):
+            existing = _slice_candidates(out_dir, Path(in_file).stem)
+            logs.append(
+                f"切片 {out_dir.name}: 已有切片式输出({len(existing)} 个),跳过拆分"
+            )
+            return True
         pattern = f"{out_dir.relative_to(work)}/test%03d.fid"
         cmd = ["xyz2pipe", "-in", in_file, "-x"]
         if shift_hz:

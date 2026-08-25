@@ -1,5 +1,21 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补1(2026-08-26,分段 3D NUS 与普通 NUS 一致走切片流)
+
+用户反馈:分段 NUS 应该和普通 NUS 保持一致,用切片流。
+
+- 放开 _needs_acqu3s_td_fix 的 segments 守卫:分段各段与普通 NUS 3D 一样,
+  在 conv_stage 暂存副本修正 acqu3s TD=NusTD 后跑 bruker,直接输出切片流
+  fid/test%03d.fid(不再每段单文件 + xyz2pipe 拆分);
+- _split_slices 增加「已有切片即跳过」:bruker 已输出切片流时不重复拆分,
+  单文件输出(均匀/旧数据)仍走原拆分逻辑;
+- 分段暂存修正同样先备份 raw 参数(.bak),只在暂存副本修改,原件不动;
+- 验证(VM 真实 cc 分段):导入 → generate_fid → generate_spectrum 全通,
+  各段直接产出切片、_split_slices 日志显示「已有切片式输出…跳过拆分」,
+  终谱产出;
+- 测试:test_needs_acqu3s_td_fix_gates 改断言(分段同样触发修正);
+  全量 pytest 696 全绿 + ruff 全绿。
+
 ## 0.2.199(2026-08-26,分段 3D NUS 导入后处理修复 + 分段质量检查)
 
 用户反馈:分段导入后 raw/ 是容器根目录(无 acqus/ser),后续处理报错。
