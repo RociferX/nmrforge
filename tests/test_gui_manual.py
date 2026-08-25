@@ -125,7 +125,11 @@ def test_main_window_manual_flows(
         "gui.main_window.InfoDialog.show_info",
         staticmethod(lambda parent, title, text_: messages.append(text_)),
     )
-    monkeypatch.setattr("gui.main_window.ScriptEditorDialog.exec", lambda self: 0)
+    shown: list[str] = []
+    monkeypatch.setattr(
+        "gui.main_window.ScriptEditorDialog.show",
+        lambda self: shown.append(self.script_name),
+    )
     manager = _manager(tmp_path, monkeypatch)
     controller = FakeManualController()
     window = MainWindow(manager=manager, controller=controller)
@@ -133,9 +137,11 @@ def test_main_window_manual_flows(
 
     window._open_manual_dialog("fid")
     assert ("manual_fid_com", "exp_001", "d_001") in controller.calls
+    assert "fid.com" in shown  # 0.2.192:非模态 show 打开,不 exec 锁定主界面
 
     window._open_manual_dialog("spectrum")
     assert ("manual_scripts", "exp_001", "d_001", None) in controller.calls  # 打开脚本编辑器
+    assert "process.com" in shown
 
     window._open_manual_dialog("peaks")
     assert any("峰表" in message for message in messages)
@@ -160,6 +166,45 @@ def test_script_run_wires_controller(
     dialog.run_requested.emit("new content")
     assert ("run_manual_spectrum", {"process.com": "new content"}) in controller.calls
     window.close()
+    dialog.close()
+
+
+def test_script_editor_save_writes_script_file(
+    tmp_path: Path, qapp: QApplication
+) -> None:
+    """「保存」立即写回数据目录并关闭(0.2.192:之前保存不落盘)。"""
+    from PyQt6.QtWidgets import QDialog
+
+    dialog = ScriptEditorDialog(
+        None, "x", script_name="process.com", content="old", save_dir=tmp_path
+    )
+    dialog.editor.setPlainText("#!/bin/csh\nxyz2pipe -in x.fid\n")
+    dialog.save_btn.click()
+    assert (tmp_path / "process.com").read_text(encoding="utf-8") == (
+        "#!/bin/csh\nxyz2pipe -in x.fid\n"
+    )
+    assert dialog.result() == QDialog.DialogCode.Accepted
+    dialog.close()
+
+
+def test_script_editor_run_saves_emits_and_closes(
+    tmp_path: Path, qapp: QApplication
+) -> None:
+    """「运行」先保存,发出内容并自动关闭(0.2.192)。"""
+    dialog = ScriptEditorDialog(
+        None, "x", script_name="process.com", content="old", save_dir=tmp_path
+    )
+    emitted: list[str] = []
+    dialog.run_requested.connect(emitted.append)
+    dialog.show()
+    assert dialog.isVisible()
+    dialog.editor.setPlainText("#!/bin/csh\nxyz2pipe -in x.fid\n")
+    dialog.run_btn.click()
+    assert emitted == ["#!/bin/csh\nxyz2pipe -in x.fid\n"]
+    assert (tmp_path / "process.com").read_text(encoding="utf-8") == (
+        "#!/bin/csh\nxyz2pipe -in x.fid\n"
+    )
+    assert not dialog.isVisible()  # 运行后自动关闭
     dialog.close()
 
 

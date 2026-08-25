@@ -98,6 +98,8 @@ class MainWindow(QMainWindow):
         self.manual_run_log.connect(self._append_log)
         self.manual_run_done.connect(self._on_manual_run_done)
         self._pending_data_names: dict[str, str] = {}
+        # 非模态脚本编辑器持有引用,避免被回收(0.2.192)
+        self._script_editors: list[ScriptEditorDialog] = []
         self._last_auto_fill: dict = {}
         self._last_raw_quality: dict | None = None
         # 日志作用域:当前选中上下文(由 _update_context 维护)
@@ -1049,8 +1051,8 @@ class MainWindow(QMainWindow):
             self, label, script_name="fid.com", content=content, save_dir=save_dir
         )
         self._wire_script_run(dialog, data_node, exp_id, data_id, "fid.com")
-        if dialog.exec() == ScriptEditorDialog.DialogCode.Accepted:
-            dialog.save_script()
+        self._keep_script_dialog(dialog)
+        dialog.show()
 
     def _open_script_editor(self, data_node, exp_id: str, data_id: str, label: str) -> None:
         """脚本编辑器:已有脚本优先(自动运行过的直接展示),无则渲染默认 → 编辑/保存/运行。"""
@@ -1084,7 +1086,8 @@ class MainWindow(QMainWindow):
             save_dir=save_dir,
         )
         self._wire_script_run(dialog, data_node, exp_id, data_id, script_key)
-        dialog.exec()
+        self._keep_script_dialog(dialog)
+        dialog.show()
 
     def _wire_script_run(
         self, dialog, data_node, exp_id: str, data_id: str, script_name: str
@@ -1095,6 +1098,21 @@ class MainWindow(QMainWindow):
                 content, data_node, exp_id, data_id, script_name
             )
         )
+
+    def _keep_script_dialog(self, dialog: ScriptEditorDialog) -> None:
+        """持有非模态脚本编辑器引用,关闭后释放(0.2.192 非模态)。
+
+        打开时不锁定主界面(show 而非 exec);WA_DeleteOnClose + destroyed
+        保证关闭即释放,多次打开不泄漏。
+        """
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self._script_editors.append(dialog)
+
+        def _drop() -> None:
+            if dialog in self._script_editors:
+                self._script_editors.remove(dialog)
+
+        dialog.destroyed.connect(_drop)
 
     def _run_script_async(
         self, content: str, data_node, exp_id: str, data_id: str, script_name: str

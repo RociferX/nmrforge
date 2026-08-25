@@ -525,21 +525,31 @@ class ScriptEditorDialog(QDialog):
             QDialogButtonBox.StandardButton.Ok
             | QDialogButtonBox.StandardButton.Cancel
         )
-        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("保存")
+        self.save_btn = buttons.button(QDialogButtonBox.StandardButton.Ok)
+        self.save_btn.setText("保存")
         buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
-        run_btn = buttons.addButton(
+        self.run_btn = buttons.addButton(
             "运行", QDialogButtonBox.ButtonRole.ActionRole
         )
-        run_btn.setToolTip("保存当前脚本到数据目录并运行(登记 WorkflowRun)")
-        run_btn.clicked.connect(
-            lambda: self.run_requested.emit(self.editor.toPlainText())
-        )
-        buttons.accepted.connect(self.accept)
+        self.run_btn.setToolTip("保存当前脚本到数据目录并运行(登记 WorkflowRun)")
+        self.run_btn.clicked.connect(self._on_run)
+        buttons.accepted.connect(self._on_save)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
         self.save_message = QLabel("")
         self.save_message.setWordWrap(True)
         layout.addWidget(self.save_message)
+
+    def _on_save(self) -> None:
+        """「保存」:写回数据目录后关闭(0.2.192 修复:之前保存不落盘)。"""
+        self.save_script()
+        self.accept()
+
+    def _on_run(self) -> None:
+        """「运行」:先保存当前脚本,发出内容后自动关闭(0.2.192)。"""
+        self.save_script()
+        self.run_requested.emit(self.editor.toPlainText())
+        self.close()
 
     def result_data(self) -> dict:
         return {"content": self.editor.toPlainText()}

@@ -32,7 +32,7 @@ def _synth_fid(n_traces: int = 16, n: int = 512) -> np.ndarray:
 
 def test_optimize_direct_window_picks_best_candidate() -> None:
     """候选全部评分,最优为最高分;返回结构与配置一致。"""
-    res = optimize_direct_window(_synth_fid())
+    res = optimize_direct_window(_synth_fid(), sw=20000.0)
     assert isinstance(res, WindowOptimizeResult)
     assert res.choice in DEFAULT_CANDIDATES
     assert len(res.scores) == len(DEFAULT_CANDIDATES)
@@ -183,3 +183,22 @@ def test_indirect_windows_missing_fid_skips(
     res = optimize_indirect_windows_from_work(tmp_path, exp)
     assert res.changed is False
     assert any("跳过" in log for log in res.logs)
+
+
+def test_gm_in_direct_pool_requires_sw() -> None:
+    """GM 加入直接维缺省候选(0.2.192);无 SW 时跳过,有 SW 时参与评分。
+
+    间接维候选池不加 GM:分辨率受限的间接维加窗信噪比虚高会翻盘自然
+    衰减轴的无窗选择(0.2.190 要求保留)。
+    """
+    gm = {"type": "gaussian", "g1": 8.0, "g2": 15.0, "g3": 0.0, "c": 1.0}
+    assert gm in DEFAULT_CANDIDATES
+    assert not any(c.get("type") == "gaussian" for c in INDIRECT_CANDIDATES)
+
+    fid = _synth_fid()
+    no_sw = optimize_direct_window(fid)
+    assert not any("GM" in s["label"] for s in no_sw.scores)
+    with_sw = optimize_direct_window(fid, sw=20000.0)
+    gm_scores = [s for s in with_sw.scores if "GM" in s["label"]]
+    assert len(gm_scores) == 1
+    assert gm_scores[0]["fwhm"] < 200.0  # 数值正常(未按 sw=1.0 产生垃圾)

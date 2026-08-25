@@ -12,6 +12,12 @@
 最优时(自然衰减、加窗仅展宽)正确选出;直接维同样恢复 0.5-0.98 等候选
 参与评分(分辨率过滤放宽到 1.25x,避免把用户偏好的温和窗提前排除)。
 
+0.2.192(加入 GM):GM(Lorentz-to-Gauss)公式已与 NMRPipe 实测逐点对齐
+(0.2.191,k=1/(2*sqrt(ln2))),重新加入直接维缺省候选池(GM g1=8 g2=15)。
+GM/EM 依赖谱宽 SW,评分未提供 SW 时跳过这些候选(避免 sw=1.0 的数值
+垃圾虚高);间接维候选池不加 GM——分辨率受限的间接维加窗信噪比虚高会
+翻盘自然衰减轴的无窗选择(0.2.190 要求保留)。
+
 选出的配置写回 window[axis](type=none/sine_bell/gaussian/exp 等),由终跑
 完整脚本应用;任何失败降级返回当前配置,不阻断自动处理。
 """
@@ -63,8 +69,9 @@ class MultiWindowOptimizeResult:
 
 # 直接维候选:用户规则(0.2.189)0.5-0.98 列为首选,其余常用组合对比;
 # c 保持 0.5(NMRPipe SP -c,内存窗模型与 direct_ft_traces 一致只建模
-# sin 项);gaussian(GM)缺省候选不参与评分(GM 模型未经源确认,噪声
-# 抑制会虚高胜出,0.2.190 移除),渲染/手工配置仍支持
+# sin 项);gaussian(GM)0.2.192 重新加入(0.2.191 已与 NMRPipe 实测逐点
+# 对齐,k=1/(2*sqrt(ln2))),GM/EM 依赖谱宽 SW,评分时未提供 SW 自动跳过;
+# 间接维候选池不加 GM(分辨率受限间接维会因 GM 信噪比虚高翻盘无窗)
 DEFAULT_CANDIDATES: list[dict[str, Any]] = [
     {"type": "sine_bell", "off": 0.50, "end": 0.98, "pow": 2, "c": 0.5},
     {"type": "none"},
@@ -72,6 +79,7 @@ DEFAULT_CANDIDATES: list[dict[str, Any]] = [
     {"type": "sine_bell", "off": 0.45, "end": 0.98, "pow": 1, "c": 0.5},
     {"type": "sine_bell", "off": 0.45, "end": 0.90, "pow": 1, "c": 0.5},
     {"type": "sine_bell", "off": 0.45, "end": 0.98, "pow": 2, "c": 0.5},
+    {"type": "gaussian", "g1": 8.0, "g2": 15.0, "g3": 0.0, "c": 1.0},
 ]
 
 # 间接维候选:无窗列为首选(自然衰减间接维应能正确选出无窗),其余同族
@@ -235,8 +243,18 @@ def _score_axis(
     keep = min(max(int(np.ceil(order.size * 0.1)), 4), 12)
     picked = flat[order[:keep]]
     n_zf = zf_size or n
-    measured: list[WindowChoice] = []
+    # GM/EM 依赖谱宽 SW;未提供 SW 时跳过,避免 sw=1.0 数值垃圾虚高
+    # (0.2.192 加入 GM 后必需)
+    sw_dependent = {"gaussian", "exp"}
+    skipped_sw = 0
+    scorable: list[dict[str, Any]] = []
     for cfg in candidates:
+        if str(cfg.get("type", "sine_bell")) in sw_dependent and sw <= 0.0:
+            skipped_sw += 1
+            continue
+        scorable.append(cfg)
+    measured: list[WindowChoice] = []
+    for cfg in scorable:
         win = _window_vector(cfg, n, sw=sw)
         work = picked * win
         if n_zf > n:
@@ -280,6 +298,8 @@ def _score_axis(
         f"达标池 {len(pool)}/{len(measured)} 候选(分辨率 >= "
         f"{min_fwhm * res_tol:.2f}点)"
     )
+    if skipped_sw:
+        log += f"; {skipped_sw} 个依赖谱宽的候选(GM/EM)未提供 SW 跳过"
     return measured, best, log
 
 
