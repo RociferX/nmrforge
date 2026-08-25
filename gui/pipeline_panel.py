@@ -1285,12 +1285,15 @@ class PipelinePanel(QWidget):
                     self.log_message.emit(
                         f"直接维范围已更新: {lo or '默认'}-{hi or '默认'} ppm → {script_path.name}"
                     )
-                # 运行修改后的终跑脚本,谱图归位
+                # 运行修改后的终跑脚本,谱图归位;实时转发脚本输出
                 result = self.controller.run_manual_spectrum(
                     data_node,
                     {script_path.name: content},
                     exp_id=exp_id,
                     data_id=data_id,
+                    progress=lambda line: self.log_message.emit(
+                        f"[{script_path.name}] {line}"
+                    ),
                 )
                 self.log_message.emit(
                     f"重新运行终脚本完成 {data_id}: {result}"

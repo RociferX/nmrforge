@@ -442,7 +442,7 @@ def test_manual_full_path_uniform(
     )
 
     class Runtime:
-        def run(self, argv, *, cwd=None, timeout=3600):
+        def run(self, argv, *, cwd=None, timeout=3600, on_line=None):
             name = Path(argv[-1]).name
             work = Path(cwd)
             if name == "fid.com":
@@ -546,7 +546,7 @@ def test_manual_spectrum_accepts_slice_fid(
     from workflow.manual import run_manual_spectrum
 
     class Runtime:
-        def run(self, argv, *, cwd=None, timeout=3600):
+        def run(self, argv, *, cwd=None, timeout=3600, on_line=None):
             work = Path(cwd)
             (work / "d_001.ft3").write_bytes(b"ft3")
             return SimpleNamespace(returncode=0, stderr="", stdout="")

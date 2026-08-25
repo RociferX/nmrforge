@@ -14,6 +14,7 @@ set_data_spectrum + WorkflowRun(审计)。
 from __future__ import annotations
 
 import shutil
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -171,6 +172,7 @@ def run_manual_fid_com(
     work_dir: Path | str | None = None,
     timeout: float = 900.0,
     backend: Any | None = None,
+    progress: Callable[[str], None] | None = None,
 ) -> str:
     """运行人工 fid.com 并登记 fid。
 
@@ -227,7 +229,12 @@ def run_manual_fid_com(
     fid_com.write_text(content, encoding="utf-8", newline="\n")
 
     runtime = CshRuntime()
-    result = runtime.run(["csh", str(fid_com)], cwd=str(raw_dir), timeout=timeout)
+    result = runtime.run(
+        ["csh", str(fid_com)],
+        cwd=str(raw_dir),
+        timeout=timeout,
+        on_line=progress,
+    )
     # 转换产物:单文件 {dataset_id}.fid(旧命名 test.fid)或切片式 fid/*.fid
     src = raw_dir / f"{experiment.dataset_id}.fid"
     if not src.is_file():
@@ -378,6 +385,7 @@ def run_manual_spectrum(
     *,
     work_dir: Path | str | None = None,
     timeout: float = 7200.0,
+    progress: Callable[[str], None] | None = None,
 ) -> str:
     """运行谱图脚本(process.com/nus*.com 在 process/,消费已转换 fid),
     终谱归位 spectra/ 并登记;不执行 fid.com(生成 FID 是独立步骤)。
@@ -410,6 +418,7 @@ def run_manual_spectrum(
             script_key,
             workflow_ref,
             timeout,
+            progress,
         )
     except ManualRunError as exc:
         run = manager.start_run(
@@ -435,6 +444,7 @@ def _run_manual_spectrum_impl(
     script_key: str,
     workflow_ref: str,
     timeout: float,
+    progress: Callable[[str], None] | None = None,
 ) -> str:
     """run_manual_spectrum 的实际执行(成功路径;失败抛 ManualRunError)。
 
@@ -460,7 +470,12 @@ def _run_manual_spectrum_impl(
     if script is None:
         raise ManualRunError(f"缺少脚本: {script_key}")
     (work / script_key).write_text(script, encoding="utf-8", newline="\n")
-    result = runtime.run(["csh", script_key], cwd=str(work), timeout=timeout)
+    result = runtime.run(
+        ["csh", script_key],
+        cwd=str(work),
+        timeout=timeout,
+        on_line=progress,
+    )
     out_ext = "ft3" if experiment.ndim >= 3 else "ft2"
     spectrum_src = work / f"{experiment.dataset_id}.{out_ext}"
     if result.returncode != 0 or not spectrum_src.is_file():

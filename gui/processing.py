@@ -405,7 +405,12 @@ class ProcessingController:
         )
 
     def run_manual_fid_com(
-        self, data, content: str, exp_id: str | None = None, data_id: str | None = None
+        self,
+        data,
+        content: str,
+        exp_id: str | None = None,
+        data_id: str | None = None,
+        progress: Callable[[str], None] | None = None,
     ) -> str:
         """写入并运行修改后的 fid.com。"""
         from workflow.manual import run_manual_fid_com as backend_run_fid
@@ -419,6 +424,7 @@ class ProcessingController:
             data_id,
             content,
             backend=self._backend_instance(),
+            progress=progress,
         )
         if data_id:
             record_step_success(self._manager, exp_id, data_id, "fid")
@@ -446,7 +452,12 @@ class ProcessingController:
         )
 
     def run_manual_spectrum(
-        self, data, scripts: dict, exp_id: str | None = None, data_id: str | None = None
+        self,
+        data,
+        scripts: dict,
+        exp_id: str | None = None,
+        data_id: str | None = None,
+        progress: Callable[[str], None] | None = None,
     ) -> str:
         """运行谱图脚本(消费已转换 fid)。"""
         from workflow.manual import run_manual_spectrum as backend_run_spectrum
@@ -455,7 +466,7 @@ class ProcessingController:
         exp_id = exp_id or getattr(data, "exp_id", "")
         data_id = data_id or getattr(data, "id", "")
         result = backend_run_spectrum(
-            self._manager, exp_id, data_id, scripts
+            self._manager, exp_id, data_id, scripts, progress=progress
         )
         if data_id:
             record_step_success(self._manager, exp_id, data_id, "spectrum")

@@ -87,11 +87,15 @@ class FakeManualController:
         self.calls.append(("manual_scripts", exp_id, data_id, params))
         return dict(self.scripts)
 
-    def run_manual_fid_com(self, data, content, exp_id=None, data_id=None) -> str:
+    def run_manual_fid_com(
+        self, data, content, exp_id=None, data_id=None, progress=None
+    ) -> str:
         self.calls.append(("run_manual_fid_com", content))
         return "/tmp/test.fid"
 
-    def run_manual_spectrum(self, data, scripts, exp_id=None, data_id=None) -> str:
+    def run_manual_spectrum(
+        self, data, scripts, exp_id=None, data_id=None, progress=None
+    ) -> str:
         self.calls.append(("run_manual_spectrum", scripts))
         return "/tmp/x.ft2"
 

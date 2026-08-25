@@ -26,7 +26,7 @@ class _FakeRuntime:
         self.fail = fail
         self.calls: list[tuple[str, str]] = []
 
-    def run(self, argv, *, cwd=None, timeout=3600):
+    def run(self, argv, *, cwd=None, timeout=3600, on_line=None):
         name = Path(argv[-1]).name
         self.calls.append((name, str(cwd)))
         if self.fail:
@@ -210,7 +210,7 @@ def test_run_manual_fid_com_registers_slice_fid(
     manager, exp_id, data_id, raw = _manager_with_raw(tmp_path, bruker_dir)
 
     class _SliceRuntime:
-        def run(self, argv, *, cwd=None, timeout=3600):
+        def run(self, argv, *, cwd=None, timeout=3600, on_line=None):
             src_dir = Path(cwd) / "fid"
             src_dir.mkdir(parents=True, exist_ok=True)
             (src_dir / "test001.fid").write_bytes(b"fid")
@@ -238,7 +238,7 @@ def test_run_manual_fid_com_accepts_data_id_output(
     manager, exp_id, data_id, _raw = _manager_with_raw(tmp_path, bruker_dir)
 
     class _NamedRuntime:
-        def run(self, argv, *, cwd=None, timeout=3600):
+        def run(self, argv, *, cwd=None, timeout=3600, on_line=None):
             work = Path(cwd)
             (work / f"{data_id}.fid").write_bytes(b"fid")
             return SimpleNamespace(returncode=0, stderr="", stdout="")

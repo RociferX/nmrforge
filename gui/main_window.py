@@ -1099,19 +1099,35 @@ class MainWindow(QMainWindow):
     def _run_script_async(
         self, content: str, data_node, exp_id: str, data_id: str, script_name: str
     ) -> None:
-        """后台运行人工脚本;完成后主线程刷新 Pipeline 与运行历史。"""
+        """后台运行人工脚本;实时转发脚本输出,完成后主线程刷新。"""
         import threading
 
+        self.manual_run_log.emit(
+            f"开始人工运行: {script_name} (数据 {data_id})"
+        )
+
         def worker() -> None:
+            def forward(line: str) -> None:
+                if line:
+                    self.manual_run_log.emit(f"[{script_name}] {line}")
+
             try:
                 if script_name == "fid.com":
                     result = self.controller.run_manual_fid_com(
-                        data_node, content, exp_id=exp_id, data_id=data_id
+                        data_node,
+                        content,
+                        exp_id=exp_id,
+                        data_id=data_id,
+                        progress=forward,
                     )
                     message = f"fid.com 运行完成: {result}"
                 else:
                     result = self.controller.run_manual_spectrum(
-                        data_node, {script_name: content}, exp_id=exp_id, data_id=data_id
+                        data_node,
+                        {script_name: content},
+                        exp_id=exp_id,
+                        data_id=data_id,
+                        progress=forward,
                     )
                     message = f"{script_name} 运行完成: {result}"
             except Exception as exc:  # noqa: BLE001 - 错误统一回主线程

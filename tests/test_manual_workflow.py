@@ -88,7 +88,7 @@ class FakeRuntime:
         self.calls: list[tuple] = []
         self.spectrum_rel = spectrum_rel
 
-    def run(self, cmd, cwd=None, timeout=None) -> SimpleNamespace:
+    def run(self, cmd, cwd=None, timeout=None, on_line=None) -> SimpleNamespace:
         self.calls.append((cmd, cwd, timeout))
         target = Path(cwd) / self.spectrum_rel
         target.parent.mkdir(parents=True, exist_ok=True)

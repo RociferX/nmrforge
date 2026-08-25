@@ -1,5 +1,19 @@
 # 修改记录(历史条目)
 
+## 0.2.188(2026-08-25,人工运行实时日志 + 修复无响应)
+
+用户反馈:人工途径运行有时没反应;重新运行终脚本时 log 无中间输出。
+
+- workflow/manual:run_manual_fid_com / run_manual_spectrum 新增 progress
+  参数,透传 CshRuntime.run(on_line=...) 逐行转发脚本 stdout——人工运行
+  不再只有最终一行,进度实时可见;
+- main_window._run_script_async:点击「运行」立即输出「开始人工运行」,
+  脚本每行输出带 [脚本名] 前缀转发到日志;失败/完成仍回主线程提示;
+- pipeline 重新运行终脚本(_on_rerun_final_requested):脚本输出逐行转发,
+  EXT 窗口更新与完成/失败日志保留;
+- 测试:更新各 FakeRuntime.run 支持 on_line 参数;
+  全量 pytest 677 passed + ruff 全绿。
+
 ## 0.2.187(2026-08-24,NUS 直接维恢复对称性搜索,修复 mixed 谱直接维带偏)
 
 用户反馈:sampleB(HNCACB 3D NUS)直接维相位优化不正确;并指出直接维

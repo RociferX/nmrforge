@@ -164,7 +164,7 @@ def test_rerun_final_applies_latest_ext(
 
     class _CaptureController(_FakeController):
         def run_manual_spectrum(
-            self, data, scripts, exp_id=None, data_id=None
+            self, data, scripts, exp_id=None, data_id=None, progress=None
         ) -> str:
             calls.append("run_manual_spectrum")
             ran_scripts.update(scripts)
