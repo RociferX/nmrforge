@@ -2027,7 +2027,8 @@ class NMRPipeBackend:
             if n_rows <= 0 or data_size % n_rows != 0:
                 logs.append(
                     f"⚠ {raw_dir.name}/ser 大小 {data_size} 不能按 nuslist "
-                    f"{n_rows} 行整除,回退为生成 FID 清理"
+                    f"{n_rows} 行整除(ser 行数与 nuslist 点数可能不一致),"
+                    "回退为生成 FID 清理,未自动处理"
                 )
                 continue
             # 0.2.195:ser 字节随采样参数变化(直接维 TD 补齐 + 字长 + 冗余
@@ -2037,8 +2038,8 @@ class NMRPipeBackend:
                 td0 = effective_td(experiment)[0] if effective_td(experiment) else "?"
                 logs.append(
                     f"⚠ {raw_dir.name}/ser 布局无法按采样参数确定"
-                    f"(直接维 TD={td0}, 每点 {data_size // n_rows} 字节),"
-                    "回退为生成 FID 清理"
+                    f"(直接维 TD={td0}, 每点 {data_size // n_rows} 字节;"
+                    "冗余数不一致或字长未知),回退为生成 FID 清理,未自动处理"
                 )
                 continue
             row_bytes, _vec_bytes, _redundancy = layout

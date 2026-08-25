@@ -53,6 +53,9 @@ def _stage(
     synthetic: bool = False,
     dc_amp: float = 0.0,
     spike: tuple[int, int, float] | None = None,
+    nan_point: tuple[int, int] | None = None,
+    zero_rows: list[int] | None = None,
+    high_energy_row: int | None = None,
 ) -> Path:
     """从真实模板导出 fid 副本;synthetic=True 时数据区替换为合成数据。"""
     dst = tmp_path / "nus_2d.fid"
@@ -83,6 +86,36 @@ def _stage(
         re_off = header + target * fdsize * 8 + col * 4
         np.frombuffer(raw, dtype="<f4", offset=re_off, count=1)[0] = val.real
         np.frombuffer(raw, dtype="<f4", offset=re_off + fdsize * 4, count=1)[0] = val.imag
+        dst.write_bytes(bytes(raw))
+    if nan_point:
+        row, col = nan_point
+        got = _read_fid_raw(dst)
+        assert got is not None
+        data, fdsize, specnum, header = got
+        target = row if row >= 0 else int(np.argmax(np.sum(np.abs(data) ** 2, axis=1)))
+        raw = bytearray(dst.read_bytes())
+        re_off = header + target * fdsize * 8 + col * 4
+        np.frombuffer(raw, dtype="<f4", offset=re_off, count=1)[0] = np.nan
+        np.frombuffer(raw, dtype="<f4", offset=re_off + fdsize * 4, count=1)[0] = np.nan
+        dst.write_bytes(bytes(raw))
+    if zero_rows:
+        got = _read_fid_raw(dst)
+        assert got is not None
+        _data, fdsize, specnum, header = got
+        raw = bytearray(dst.read_bytes())
+        for row in zero_rows:
+            re_off = header + row * fdsize * 8
+            np.frombuffer(raw, dtype="<f4", offset=re_off, count=fdsize * 2)[:] = 0.0
+        dst.write_bytes(bytes(raw))
+    if high_energy_row is not None:
+        got = _read_fid_raw(dst)
+        assert got is not None
+        _data, fdsize, specnum, header = got
+        raw = bytearray(dst.read_bytes())
+        re_off = header + high_energy_row * fdsize * 8
+        block = np.frombuffer(raw, dtype="<f4", offset=re_off, count=fdsize * 2).copy()
+        block *= 200.0
+        np.frombuffer(raw, dtype="<f4", offset=re_off, count=fdsize * 2)[:] = block
         dst.write_bytes(bytes(raw))
     return dst
 
@@ -137,6 +170,36 @@ def test_badpoint_repaired_with_backup(tmp_path: Path, exp_fixture) -> None:
     orig = _read_fid_raw(backup / "nus_2d.fid")
     assert orig is not None
     assert np.isclose(np.asarray(orig[0])[row, 128], orig_val)
+
+
+def test_nan_inf_reported_not_fixed(tmp_path: Path, exp_fixture) -> None:
+    """0.2.196:NaN/Inf 值只报告不自动处理。"""
+    fid = _stage(tmp_path, synthetic=True, nan_point=(-1, 64))
+    got = _read_fid_raw(fid)
+    assert got is not None  # NaN 不再导致布局解析失败
+    res = run_direct_diagnostics(tmp_path, exp_fixture)
+    assert any("NaN/Inf" in r and "未自动处理" in r for r in res.reports)
+    assert res.metrics.get("nan_inf_count", 0) >= 1
+
+
+def test_uniform_zero_trace_reported(tmp_path: Path, bruker_dir) -> None:
+    """0.2.196:均匀采样全零迹线只报告不自动处理。"""
+    from core.data.bruker_reader import read_dataset
+
+    exp = read_dataset(bruker_dir / "hsqc_2d")
+    fid = _stage(tmp_path, synthetic=True, zero_rows=[0])
+    fid.rename(tmp_path / f"{exp.dataset_id}.fid")
+    res = run_direct_diagnostics(tmp_path, exp)
+    assert any("全零迹线" in r and "未自动处理" in r for r in res.reports)
+    assert res.metrics.get("zero_traces", 0) >= 1
+
+
+def test_high_energy_reported_not_fixed(tmp_path: Path, exp_fixture) -> None:
+    """0.2.196:持续异常高能量迹线只报告不自动处理。"""
+    _stage(tmp_path, synthetic=True, high_energy_row=1)
+    res = run_direct_diagnostics(tmp_path, exp_fixture)
+    assert any("能量异常偏高" in r and "未自动处理" in r for r in res.reports)
+    assert res.metrics.get("high_energy_traces", 0) >= 1
 
 
 def test_repair_false_leaves_data(tmp_path: Path, exp_fixture) -> None:

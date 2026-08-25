@@ -26,7 +26,7 @@ from typing import Any
 
 import numpy as np
 
-from core.data.internal_data_model import Experiment
+from core.data.internal_data_model import Experiment, SamplingMode
 
 # 阈值(初版,经验值)
 DC_RATIO_THRESHOLD = 0.03          # DC 峰高于最强信号的 3% 即启用 POLY -time
@@ -106,7 +106,7 @@ def _read_fid_raw(
         ).astype(np.float32)
         rows = flat.reshape(specnum, fdsize * 2)
         cand = rows[:, :fdsize] + 1j * rows[:, fdsize:]
-        if cand.shape == target.shape and np.array_equal(cand, target):
+        if cand.shape == target.shape and np.array_equal(cand, target, equal_nan=True):
             return cand, fdsize, specnum, header
     return None
 
@@ -306,6 +306,33 @@ def run_direct_diagnostics(
         reports.append(
             f"采样点能量分布不均(前 20% 迹占 {frac * 100:.0f}% 能量),"
             "可能是增益步长/脉冲不稳定;不影响重构时可继续,否则建议核查采集"
+        )
+    # 0.2.196:潜在问题只报告不自动处理——NaN/Inf、全零迹、持续异常能量
+    n_nan_inf = int(np.isnan(traces).sum()) + int(np.isinf(traces).sum())
+    res.metrics["nan_inf_count"] = n_nan_inf
+    if n_nan_inf:
+        reports.append(
+            f"检测到 {n_nan_inf} 处 NaN/Inf 值,未自动处理"
+            "(建议核查采集端与转换参数)"
+        )
+    zero_traces = int(np.sum(energy == 0))
+    res.metrics["zero_traces"] = zero_traces
+    if experiment.sampling.mode is SamplingMode.UNIFORM and zero_traces:
+        reports.append(
+            f"检测到 {zero_traces} 条全零迹线,未自动处理"
+            "(均匀采样不应存在全零迹,采集可能缺失)"
+        )
+    nz_energy = energy[energy > 0]
+    high_energy = 0
+    if nz_energy.size >= 4:
+        med_nz = float(np.median(nz_energy))
+        if med_nz > 0:
+            high_energy = int(np.sum(nz_energy > 100.0 * med_nz))
+            res.metrics["high_energy_traces"] = high_energy
+    if high_energy:
+        reports.append(
+            f"{high_energy} 条迹线能量异常偏高(>100×中位),非孤立尖峰,"
+            "未自动处理(建议核查增益/脉冲稳定性)"
         )
     if not reports:
         reports = ["数据质量诊断:未检出直流偏置、尖峰坏点、首点异常、宽带峰或漂移"]
