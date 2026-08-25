@@ -799,98 +799,15 @@ def _optimize_uniform_processing(
         out_logs += wres.logs
     except Exception as exc:  # noqa: BLE001 - 窗优化失败不影响相位/终跑
         out_logs.append(f"直接维窗优化失败: {exc}")
-    # 3) 填零/间接维窗函数候选:process 重跑 + 谱质量评分(候选有限,无重构)
-    try:
-        import numpy as np
-
-        from backend.script_generator import zero_fill_plan as _zf_plan
-        from core.qc import spectrum_quality
-
-        if progress is not None:
-            progress("填零/窗函数候选评分中")
-        auto_plan = _zf_plan(experiment, zf_params)
-        min_shape = tuple(
-            int(auto_plan.get(a, {}).get("size") or 1) for a in axes
-        )
-
-        def _score_path(path: Path) -> float:
-            import nmrglue as ng
-
-            _dic, data = ng.pipe.read(str(path))
-            q = spectrum_quality.evaluate(
-                np.asarray(data), min_shape=min_shape
-            )
-            return float(q.score.overall)
-
-        base_score = _score_path(base_path)
-        windows: list[dict[str, Any]] = [
-            {"type": "sine_bell"},
-            {"type": "sine_bell_squared"},
-            # 0.2.170:gaussian 用 NMRPipe 原生 g1/g2(GM),不用 lb/gb——
-            # GMB -lb/-gb 实测窗尾部爆炸,GM -lb/-gb 被忽略
-            {"type": "gaussian", "g1": 8.0, "g2": 15.0},
-        ]
-        best_window: dict[str, Any] | None = None
-        best_score = base_score
-        for index, w in enumerate(windows, 1):
-            wname = str(w.get("type"))
-            # 0.2.166:候选评分含已优化直接维窗——与终跑窗口一致,避免
-            # 评分面与终跑配置脱节(uniform 可重跑 process,NUS 受 SMILE
-            # 重构限制仍为间接维候选)
-            cand_window = dict(window_cfg or {})
-            for a in indirect_axes:
-                cand_window[a] = dict(w)
-            cand_params = {
-                "zero_fill": zf_params,
-                "window": cand_window,
-            }
-            resp = backend.process(
-                experiment,
-                plan,
-                direct_phase_override=dict(fixed) if fixed else None,
-                params=cand_params,
-                out_file=f"{experiment.dataset_id}_win{index}.{ext}",
-                script_name=f"{experiment.dataset_id}_win{index}.com",
-                progress=progress,
-            )
-            if not resp.get("success") or not resp.get("spectrum_path"):
-                out_logs.append(
-                    f"窗函数/填零(嵌入): {wname} 运行失败,跳过"
-                )
-                continue
-            try:
-                score = _score_path(Path(resp["spectrum_path"]))
-            except Exception as exc:  # noqa: BLE001
-                out_logs.append(
-                    f"窗函数/填零(嵌入): {wname} 评分失败 {exc},跳过"
-                )
-                continue
-            out_logs.append(
-                f"窗函数/填零(嵌入): 间接维 {wname}+填零=auto "
-                f"score={score:.1f}"
-            )
-            if score > best_score:
-                best_score = score
-                best_window = dict(w)
-        if best_window is not None and best_score > base_score + 0.5:
-            # 0.2.166:只覆盖间接维,保留直接维已优化窗(此前整表替换会丢窗)
-            final_window = dict(window_cfg or {})
-            for a in indirect_axes:
-                final_window[a] = dict(best_window)
-            window_cfg = final_window
-            wtype = str(best_window.get("type", "sine_bell"))
-            out_logs.append(
-                "窗函数/填零(嵌入): 已选 "
-                f"{wtype}+填零=auto "
-                f"(score={base_score:.1f} → {best_score:.1f}),"
-                "终跑完整脚本应用"
-            )
-        elif best_window is not None:
-            out_logs.append("窗函数/填零(嵌入): 候选未优于当前(无窗),保持默认")
-        else:
-            out_logs.append("窗函数/填零(嵌入): 无有效候选,保持默认")
-    except Exception as exc:  # noqa: BLE001
-        out_logs.append(f"填零/窗函数优化(嵌入)失败: {exc}")
+    # 3) 间接维窗:固定无窗(0.2.189,用户规则:最佳参数为无窗;不再做自动
+    #    选窗——spectrum_quality 评分会因相位/基线等联动改变选窗结果,
+    #    sampleB 曾从无窗带偏到加窗)。直接维窗由 window_optimize 单独优化
+    #    (0.5-0.98 优先);填零仍按 auto 优化。
+    final_window = dict(window_cfg or {})
+    for a in indirect_axes:
+        final_window[a] = {"type": "none"}
+    window_cfg = final_window
+    out_logs.append("窗函数(间接维): 固定无窗(最佳参数,不做自动选窗)")
     return {
         "baseline": baseline_cfg,
         "zero_fill": zf_params,
@@ -1006,93 +923,15 @@ def _optimize_nus_processing(
         out_logs += wres.logs
     except Exception as exc:  # noqa: BLE001 - 窗优化失败不影响相位/终跑
         out_logs.append(f"直接维窗优化失败: {exc}")
-    # 3) 间接维窗函数/填零候选:finalize 重渲 + 谱质量评分;直接维窗已由
-    #    2.5 FID 内存评分(不重跑 SMILE);间接 apod 保持默认(日志说明)
-    try:
-        import numpy as np
-
-        from backend.script_generator import zero_fill_plan as _zf_plan
-        from core.qc import spectrum_quality
-
-        if progress is not None:
-            progress("填零/窗函数候选评分中")
-        auto_plan = _zf_plan(experiment, zf_params)
-        min_shape = tuple(
-            int(auto_plan.get(a, {}).get("size") or 1) for a in axes
-        )
-
-        def _score_path(path: Path) -> float:
-            import nmrglue as ng
-
-            _dic, data = ng.pipe.read(str(path))
-            q = spectrum_quality.evaluate(
-                np.asarray(data), min_shape=min_shape
-            )
-            return float(q.score.overall)
-
-        base_score = _score_path(base_path)
-        windows: list[dict[str, Any]] = [
-            {"type": "sine_bell"},
-            {"type": "sine_bell_squared"},
-            # 0.2.170:gaussian 用 NMRPipe 原生 g1/g2(GM),不用 lb/gb
-            {"type": "gaussian", "g1": 8.0, "g2": 15.0},
-        ]
-        best_window: dict[str, Any] | None = None
-        best_score = base_score
-        for index, w in enumerate(windows, 1):
-            wname = str(w.get("type"))
-            resp = backend.finalize_nus(
-                experiment,
-                phases=fixed,
-                work_dir=work,
-                baseline=apply_baseline or None,
-                params={
-                    "zero_fill": zf_params,
-                    "window": {a: dict(w) for a in indirect_axes},
-                },
-                out_file=f"{experiment.dataset_id}_win{index}.{ext}",
-                script_name=f"{experiment.dataset_id}_win{index}_finalize.com",
-                progress=progress,
-            )
-            if not resp.get("success") or not resp.get("spectrum_path"):
-                out_logs.append(
-                    f"窗函数/填零(嵌入): {wname} 运行失败,跳过"
-                )
-                continue
-            try:
-                score = _score_path(Path(resp["spectrum_path"]))
-            except Exception as exc:  # noqa: BLE001
-                out_logs.append(
-                    f"窗函数/填零(嵌入): {wname} 评分失败 {exc},跳过"
-                )
-                continue
-            out_logs.append(
-                f"窗函数/填零(嵌入): 间接维 {wname}+填零=auto "
-                f"score={score:.1f}"
-            )
-            if score > best_score:
-                best_score = score
-                best_window = dict(w)
-        if best_window is not None and best_score > base_score + 0.5:
-            # 0.2.166:只覆盖间接维,保留直接维已优化窗(此前整表替换会丢窗)
-            final_window = dict(window_cfg or {})
-            for a in indirect_axes:
-                final_window[a] = dict(best_window)
-            window_cfg = final_window
-            out_logs.append(
-                "窗函数/填零(嵌入): 已选 "
-                f"{best_window.get('type')}+填零=auto "
-                f"(score={base_score:.1f} → {best_score:.1f}),"
-                "终跑完整脚本应用"
-            )
-        elif best_window is not None:
-            out_logs.append(
-                "窗函数/填零(嵌入): 候选未优于当前(无窗),保持默认"
-            )
-        else:
-            out_logs.append("窗函数/填零(嵌入): 无有效候选,保持默认")
-    except Exception as exc:  # noqa: BLE001
-        out_logs.append(f"填零/窗函数优化(嵌入)失败: {exc}")
+    # 3) 间接维窗:固定无窗(0.2.189,用户规则:最佳参数为无窗;不再做自动
+    #    选窗——spectrum_quality 评分会因相位/基线等联动改变选窗结果,
+    #    sampleB 曾从无窗带偏到加窗)。直接维窗由 window_optimize 单独优化
+    #    (0.5-0.98 优先);填零仍按 auto 优化。
+    final_window = dict(window_cfg or {})
+    for a in indirect_axes:
+        final_window[a] = {"type": "none"}
+    window_cfg = final_window
+    out_logs.append("窗函数(间接维): 固定无窗(最佳参数,不做自动选窗)")
     out_logs.append(
         "窗函数(嵌入): 直接维窗/SMILE 内部 apod 保持默认"
         "(调整需重跑 SMILE,未纳入候选)"

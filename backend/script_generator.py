@@ -571,6 +571,10 @@ def _stage_lines(
             if window and axis in window:
                 cfg.update(window[axis] or {})
             wtype = str(cfg.get("type", "sine_bell"))
+            # 0.2.189:window[axis] 显式 type=none 时该轴不加窗(不插 SP);
+            # 间接维固定无窗由此生效(uniform 也走此分支)
+            if wtype in ("none", "off"):
+                continue
             if wtype == "gaussian":
                 # NMRPipe:GM 只接受 -g1/-g2/-g3(0.2.170)。历史问题:
                 # GM -lb/-gb 被静默忽略(窗不生效);GMB -lb/-gb 实测窗在

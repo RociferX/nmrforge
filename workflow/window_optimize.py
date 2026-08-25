@@ -46,14 +46,15 @@ class WindowOptimizeResult:
     optimal_label: str = ""
 
 
-# 候选窗(初版):无窗 + SP 常见组合(off/end/pow/c)
+# 候选窗:用户规则(0.2.189)——直接维 0.5-0.98 更好,列为首选;
+# 其余保留常用组合(off/end/pow/c)作对比
 DEFAULT_CANDIDATES: list[dict[str, Any]] = [
+    {"type": "sine_bell", "off": 0.50, "end": 0.98, "pow": 2, "c": 0.5},
     {"type": "none"},
     {"type": "sine_bell", "off": 0.30, "end": 0.98, "pow": 1, "c": 0.5},
     {"type": "sine_bell", "off": 0.45, "end": 0.98, "pow": 1, "c": 0.5},
     {"type": "sine_bell", "off": 0.45, "end": 0.90, "pow": 1, "c": 0.5},
     {"type": "sine_bell", "off": 0.45, "end": 0.98, "pow": 2, "c": 0.5},
-    {"type": "sine_bell", "off": 0.60, "end": 0.98, "pow": 2, "c": 0.5},
     {"type": "sine_bell", "off": 0.45, "end": 0.95, "pow": 1, "c": 1.0},
 ]
 

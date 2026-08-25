@@ -441,13 +441,6 @@ def test_optimize_nus_processing_baseline_and_window(
         "workflow.baseline_optimize.optimize_baseline",
         lambda experiment, spectrum_path, **kw: fake_opt,
     )
-    scores = iter([40.0, 55.0, 48.0, 50.0])  # 基底/正弦钟/正弦钟²/高斯
-    monkeypatch.setattr(
-        "core.qc.spectrum_quality.evaluate",
-        lambda data, min_shape=None: type(
-            "Q", (), {"score": type("S", (), {"overall": next(scores)})()}
-        )(),
-    )
     proc = routes._optimize_nus_processing(
         experiment,
         type("B", (), {"finalize_nus": staticmethod(fake_finalize)})(),
@@ -456,19 +449,15 @@ def test_optimize_nus_processing_baseline_and_window(
         None,
     )
     assert proc["baseline"]["F1"]["order"] == 2
-    # 55 最优且 > 基底 40 + 0.5 → 选中正弦钟,填入间接维
+    # 0.2.189:indirect windows fixed none (best), no auto selection
     assert proc["window"] == {
-        "F2": {"type": "sine_bell"},
-        "F1": {"type": "sine_bell"},
+        "F2": {"type": "none"},
+        "F1": {"type": "none"},
     }
-    assert "F1: 基线已优化" in proc["logs"]
-    # 联合复核谱(1) + 间接维基线重渲(1) + 3 个窗候选
-    assert len(calls) == 5
+    assert "F1: 基线已优化" in " ".join(proc["logs"])
+    assert "固定无窗" in " ".join(proc["logs"])
+    assert len(calls) == 2
     assert calls[1]["baseline"]["F1"]["order"] == 2
-    assert calls[2]["params"]["window"] == {
-        "F2": {"type": "sine_bell"},
-        "F1": {"type": "sine_bell"},
-    }
 
 
 def test_unified_route_nus_progress_stages(
