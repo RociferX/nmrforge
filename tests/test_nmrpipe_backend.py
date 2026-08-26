@@ -593,6 +593,11 @@ class _FakeConvertRuntime:
                     (slice_dir / f"test{i:03d}.fid").write_bytes(b"x")
             elif self.single:
                 (base / "test.fid").write_bytes(b"x")
+            # fid.com 的 nusExpand.tcl -mask 输出采样掩码(1=采样点),测试清理
+            mask_dir = base / "mask"
+            mask_dir.mkdir(exist_ok=True)
+            for i in range(1, 5):
+                (mask_dir / f"test{i:03d}.fid").write_bytes(b"\x00")
         return CompletedProcess("", "", "", 0)
 
 
@@ -643,6 +648,7 @@ def test_convert_dir_nus3d_stages_acqu3s_td_fix(
     assert not (raw / "test.fid").exists()
     assert not (raw / "fid.com").exists()
     assert not (raw / "ser_full").exists()
+    assert not (raw / "mask").exists()  # fid.com 的 mask 输出留在暂存,随暂存清理
 
 
 def test_convert_dir_nus2d_no_stage(
@@ -669,6 +675,7 @@ def test_convert_dir_nus2d_no_stage(
     assert Path(bruker_cwd) == raw
     assert (work / f"{exp.dataset_id}.fid").is_file()
     assert not (work / "fid").exists()
+    assert not (raw / "mask").exists()  # 0.2.199-补13:raw 内 fid.com 输出的 mask/ 已清理
 
 
 def test_converted_fid_path_slices_and_single(tmp_path: Path) -> None:

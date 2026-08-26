@@ -1492,11 +1492,15 @@ class NMRPipeBackend:
                 convert_dir, dest_work, experiment.dataset_id, logs
             ):
                 return False
-            # SMILE 只需 nuslist;ser_full/mask.fid 等中间产物删除省空间
+            # SMILE 只需 nuslist;ser_full/mask.fid/mask/ 等中间产物删除省空间
+            # (mask/ 是 fid.com 中 nusExpand.tcl -mask 输出的采样掩码,可再生成)
             for stale in ("ser_full", "mask.fid"):
                 stale_path = convert_dir / stale
                 if stale_path.is_file():
                     stale_path.unlink()
+            mask_dir = convert_dir / "mask"
+            if mask_dir.is_dir():
+                shutil.rmtree(mask_dir, ignore_errors=True)
             return True
         finally:
             if stage is not None and stage.is_dir():
