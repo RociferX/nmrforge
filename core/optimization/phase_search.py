@@ -465,6 +465,7 @@ def search_direct_phase_on_spectrum(
     min_windows: int = 5,
     prefer_p1_zero: bool = True,
     progress: Callable[[str], None] | None = None,
+    cancel: Callable[[], bool] | None = None,
 ) -> tuple[float, float, float] | None:
     """谱上直接维相位评分搜索 (p0, p1)。
 
@@ -486,6 +487,11 @@ def search_direct_phase_on_spectrum(
         windows = _signal_peak_windows(real, axis=axis)
         if len(windows) < min_windows:
             return None
+        # 0.2.199-补6:窗数过多(3D 平面可达数千窗)会拖慢每轮评分;评分取均值,
+        # 均布子采样到 ≤200 窗近似不变,搜索从数十秒降到秒级
+        if len(windows) > 200:
+            index = np.linspace(0, len(windows) - 1, 200).astype(int)
+            windows = [windows[i] for i in index]
         window_metric = _symmetry_sign_metric
     else:
         traces = np.moveaxis(real, axis, -1).reshape(-1, n)
@@ -498,22 +504,49 @@ def search_direct_phase_on_spectrum(
             return None
         pos = np.argmax(np.abs(traces[idx]), axis=-1)
         windows = list(zip(idx.tolist(), pos.tolist()))
+        # 0.2.199-补6:同对称性分支,均布子采样控制评分成本
+        if len(windows) > 200:
+            index = np.linspace(0, len(windows) - 1, 200).astype(int)
+            windows = [windows[i] for i in index]
         window_metric = _net_window_metric
     comp = np.asarray(arr, dtype=np.complex128)
-    ramp_shape = [1] * comp.ndim
-    ramp_shape[axis] = n
+    # 0.2.199-补6:评分只依赖信号窗行——先取行后旋转(逐元素运算可交换,
+    # 结果与全平面旋转一致),计算量从「全平面点数×~2000 次」降到
+    # 「窗行数×直接维点数×~2000 次」;同时支持取消与阶段进度
+    rows_flat = np.moveaxis(comp, axis, -1).reshape(-1, n)
+    sel_idx = np.asarray([i for i, _peak in windows], dtype=np.intp)
+    selected = rows_flat[sel_idx]
+    window_slices = [
+        (j, max(0, peak - radius), min(n, peak + radius + 1))
+        for j, (_i, peak) in enumerate(windows)
+    ]
+    k = np.arange(n, dtype=float)
+    _n_p0_coarse = int(np.ceil(360.0 / max(coarse_p0_step, 1.0)))
+    total_scores = _n_p0_coarse * 7 + 2 * 25
+    if prefer_p1_zero:
+        total_scores += 1
+    if metric == "symmetry":
+        total_scores += 73 * 25
+    _evaluated = 0
+
+    def _check_cancel() -> None:
+        if cancel is not None and cancel():
+            raise RuntimeError("任务已取消:直接维相位搜索被用户终止")
 
     def _score(p0: float, p1: float) -> float:
-        k = np.arange(n, dtype=float)
-        ramp = np.exp(
-            1j * np.deg2rad(p0 + p1 * k / max(n - 1, 1))
-        ).reshape(ramp_shape)
-        rot = comp * ramp
-        rot_real = np.moveaxis(np.real(rot), axis, -1).reshape(-1, n)
+        nonlocal _evaluated
+        ramp = np.exp(1j * np.deg2rad(p0 + p1 * k / max(n - 1, 1)))
+        rot = selected * ramp
+        rot_real = np.real(rot)
         vals = []
-        for i, peak in windows:
-            lo, hi = max(0, peak - radius), min(n, peak + radius + 1)
-            vals.append(window_metric(rot_real[i, lo:hi]))
+        for j, lo, hi in window_slices:
+            vals.append(window_metric(rot_real[j, lo:hi]))
+        _evaluated += 1
+        _check_cancel()
+        if progress is not None and _evaluated % 100 == 0:
+            progress(
+                f"直接维相位搜索中: 已评估 {_evaluated}/{total_scores} 网格点"
+            )
         if metric == "symmetry":
             return 100.0 * float(np.mean(vals))
         return 50.0 * (float(np.median(vals)) + 1.0)

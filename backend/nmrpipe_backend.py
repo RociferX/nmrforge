@@ -39,7 +39,7 @@ from backend.config import (
     resolve_points_per_line,
 )
 from backend.nmrpipe_finder import find_nmrpipe_bin, find_tool
-from backend.runtime import CshRuntime
+from backend.runtime import CshRuntime, cancel_requested
 from backend.script_generator import (
     DEFAULT_POINTS_PER_LINE,
     _as_bool,
@@ -1608,7 +1608,9 @@ class NMRPipeBackend:
             import nmrglue as ng
 
             _dic, data = ng.pipe.read(str(light_ft))
-            est = search_direct_phase_on_spectrum(np.asarray(data))
+            est = search_direct_phase_on_spectrum(
+                np.asarray(data), cancel=cancel_requested
+            )
         except Exception as exc:  # noqa: BLE001
             logs.append(f"轻量谱评分失败(回退): {exc}")
             return None
@@ -1684,7 +1686,7 @@ class NMRPipeBackend:
                 _dic, data = ng.pipe.read(str(recon))
                 arr = np.asarray(data)
             est = search_direct_phase_on_spectrum(
-                arr, axis=0, metric="symmetry"
+                arr, axis=0, metric="symmetry", cancel=cancel_requested
             )
             if est is None:
                 logs.append("显示层相位搜索:无干净信号峰")

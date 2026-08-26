@@ -17,6 +17,7 @@ import threading
 import time as _time
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 
 class ToolError(RuntimeError):
@@ -44,6 +45,24 @@ class CompletedProcess:
 _ACTIVE: dict[int, subprocess.Popen] = {}
 _LOCK = threading.Lock()
 _USER_TERMINATED: set[int] = set()
+# 0.2.199-补6:内存计算(直接维相位搜索等)取消标志——terminate_current_tasks()
+# 置位,相位搜索循环检查后抛异常退出;新任务开始前 clear_cancel()
+_CANCEL = threading.Event()
+
+
+def request_cancel() -> None:
+    """请求取消当前任务(内存计算阶段同样响应)。"""
+    _CANCEL.set()
+
+
+def clear_cancel() -> None:
+    """清除取消标志(新任务开始前调用,避免上一次取消污染新任务)。"""
+    _CANCEL.clear()
+
+
+def cancel_requested() -> bool:
+    """当前任务是否已被请求取消。"""
+    return _CANCEL.is_set()
 
 
 def terminate_current_tasks() -> int:
@@ -131,6 +150,128 @@ def _kill_process_tree(proc: subprocess.Popen) -> None:
             proc.wait()
     except (OSError, ProcessLookupError):
         pass
+
+
+_NMRPIPE_TOOL_NAMES = (
+    "nmrpipe",
+    "xyz2pipe",
+    "pipe2xyz",
+    "nmrdraw",
+    "nmrft",
+    "nmrtrans",
+    "nmrzz",
+    "bruk2pipe",
+    "addnmr",
+    "smile",
+    "nmrwish",
+    "bruker",
+)
+
+
+def _scan_processes() -> list[dict[str, Any]]:
+    """全表进程扫描(尽力而为):[{pid, ppid, name, args}]。"""
+    procs: list[dict[str, Any]] = []
+    if os.name == "nt":
+        try:
+            script = (
+                "Get-CimInstance Win32_Process | ForEach-Object { "
+                "'{0}|{1}|{2}|{3}' -f $_.ProcessId, $_.ParentProcessId, "
+                "$_.Name, ($_.CommandLine -replace '\\|','_') }"
+            )
+            out = subprocess.run(
+                ["powershell", "-NoProfile", "-Command", script],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            ).stdout
+        except (OSError, subprocess.TimeoutExpired):
+            return procs
+        for line in out.splitlines():
+            parts = line.split("|", 3)
+            if len(parts) == 4:
+                try:
+                    procs.append(
+                        {
+                            "pid": int(parts[0]),
+                            "ppid": int(parts[1]),
+                            "name": (parts[2] or "").lower(),
+                            "args": parts[3] or "",
+                        }
+                    )
+                except ValueError:
+                    pass
+        return procs
+    try:
+        out = subprocess.run(
+            ["ps", "-eo", "pid=,ppid=,comm=,args="],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        ).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return procs
+    for line in out.splitlines():
+        parts = line.split(None, 3)
+        if len(parts) >= 3:
+            try:
+                procs.append(
+                    {
+                        "pid": int(parts[0]),
+                        "ppid": int(parts[1]),
+                        "name": (parts[2] or "").lower(),
+                        "args": parts[3] if len(parts) > 3 else "",
+                    }
+                )
+            except ValueError:
+                pass
+    return procs
+
+
+def _orphan_match(
+    proc: dict[str, Any], bin_dir: str | None, workspace: str | None
+) -> bool:
+    """判定进程是否属于本工作区遗留的 NMRPipe 工具链。
+
+    工具可执行文件(nmrPipe/xyz2pipe/pipe2xyz/SMILE 等)按名字匹配;
+    csh/tcsh 包装进程必须命令行含工作区路径(避免误杀无关 shell)。
+    """
+    name = proc["name"]
+    args = proc["args"] or ""
+    base = name.split(".")[0].lower()
+    if base in _NMRPIPE_TOOL_NAMES:
+        return True
+    if base in ("csh", "tcsh") and workspace and workspace in args:
+        return True
+    return False
+
+
+def cleanup_orphan_tasks(
+    bin_dir: str | None = None, workspace: str | None = None
+) -> int:
+    """清理不在注册表里的遗留 NMRPipe 进程(异常退出/关闭应用留下的孤儿)。
+
+    terminate_current_tasks() 只杀注册树;孤儿进程(父进程已退出、PPID=1)
+    按进程名/命令行匹配后整树强制结束。Windows taskkill /T /F,
+    Linux SIGKILL。返回清理数量(尽力而为,失败忽略)。
+    """
+    procs = _scan_processes()
+    targets = [p for p in procs if _orphan_match(p, bin_dir, workspace)]
+    killed = 0
+    for proc in targets:
+        pid = proc["pid"]
+        try:
+            if os.name == "nt":
+                subprocess.run(
+                    ["taskkill", "/PID", str(pid), "/T", "/F"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            else:
+                os.kill(pid, signal.SIGKILL)
+            killed += 1
+        except (OSError, ProcessLookupError):
+            pass
+    return killed
 
 
 class CshRuntime:

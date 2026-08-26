@@ -1259,6 +1259,10 @@ class PipelinePanel(QWidget):
 
         import threading
 
+        # 0.2.199-补6:新任务开始前清除上次的取消标志
+        from backend.runtime import clear_cancel
+
+        clear_cancel()
         threading.Thread(target=worker, daemon=True).start()
 
     def _run_group_step(

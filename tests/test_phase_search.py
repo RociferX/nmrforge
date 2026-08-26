@@ -136,3 +136,19 @@ def test_direct_phase_search_progress_and_result() -> None:
         assert "直接维相位搜索中" in messages[0]
         assert "完成" in messages[-1]
 
+
+def test_direct_phase_search_cancelled_raises() -> None:
+    """0.2.199-补6:取消标志置位时相位搜索立即抛异常退出。"""
+    import numpy as np
+    import pytest
+
+    from core.optimization.phase_search import search_direct_phase_on_spectrum
+
+    rng = np.random.default_rng(11)
+    arr = rng.normal(size=(24, 18, 14)).astype(np.complex128)
+    arr[10, 8, :] = np.exp(1j * np.deg2rad(20.0)) * 10.0
+    with pytest.raises(RuntimeError, match="任务已取消"):
+        search_direct_phase_on_spectrum(
+            arr, axis=0, metric="symmetry", cancel=lambda: True
+        )
+

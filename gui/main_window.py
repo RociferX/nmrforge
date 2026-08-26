@@ -639,6 +639,10 @@ class MainWindow(QMainWindow):
 
         import threading
 
+        # 0.2.199-补6:新任务开始前清除上次的取消标志
+        from backend.runtime import clear_cancel
+
+        clear_cancel()
         threading.Thread(target=worker, daemon=True).start()
 
     def _import_experiment_async(self, data: dict) -> None:
@@ -1197,6 +1201,10 @@ class MainWindow(QMainWindow):
 
         # 0.2.199-补5:人工运行开始,左侧树该数据显示「运行中」
         self.project_tree.mark_running(exp_id, data_id)
+        # 0.2.199-补6:新任务开始前清除上次的取消标志
+        from backend.runtime import clear_cancel
+
+        clear_cancel()
         threading.Thread(target=worker, daemon=True).start()
 
     def _on_pipeline_run_started(self, exp_id: str, data_id: str) -> None:
@@ -1616,17 +1624,64 @@ class MainWindow(QMainWindow):
         self.log_panel.set_scope(kind, exp_id, data_id, group_id)
         self._update_context_bar()
 
+    def closeEvent(self, event) -> None:
+        """关闭应用前终止全部后端任务并清理孤儿进程,避免下次遗留。"""
+        try:
+            from backend.runtime import (
+                cleanup_orphan_tasks,
+                request_cancel,
+                terminate_current_tasks,
+            )
+
+            terminate_current_tasks()
+            request_cancel()
+            try:
+                from backend.config import load_config, nmrpipe_path
+
+                bin_dir = str(nmrpipe_path(load_config()) or "")
+            except Exception:  # noqa: BLE001 - 配置读取失败不阻断清理
+                bin_dir = ""
+            cleanup_orphan_tasks(
+                bin_dir=bin_dir or None,
+                workspace=str(self.manager.root or ""),
+            )
+        except Exception:  # noqa: BLE001 - 关闭清理失败不阻断退出
+            pass
+        super().closeEvent(event)
+
     def _on_stop_requested(self) -> None:
-        """停止当前任务:终止全部正在运行的后端进程树(不留残留)。"""
-        from backend.runtime import terminate_current_tasks
+        """停止当前任务:终止进程树 + 请求取消内存计算 + 清理孤儿进程。"""
+        from backend.runtime import (
+            cleanup_orphan_tasks,
+            request_cancel,
+            terminate_current_tasks,
+        )
 
         killed = terminate_current_tasks()
-        if killed:
+        # 0.2.199-补6:内存相位搜索无子进程可杀,需显式请求取消,内存计算
+        # 会在检查点退出;再清扫上次异常退出遗留的孤儿进程
+        request_cancel()
+        orphan_count = 0
+        try:
+            from backend.config import load_config, nmrpipe_path
+
+            bin_dir = str(nmrpipe_path(load_config()) or "")
+        except Exception:  # noqa: BLE001 - 配置读取失败不阻断清理
+            bin_dir = ""
+        try:
+            orphan_count = cleanup_orphan_tasks(
+                bin_dir=bin_dir or None,
+                workspace=str(self.manager.root or ""),
+            )
+        except Exception:  # noqa: BLE001 - 清理失败不阻断
+            orphan_count = 0
+        if killed or orphan_count:
             self._append_log(
-                f"已停止当前任务({killed} 个任务进程树已终止,无残留)"
+                f"已停止当前任务({killed} 个进程树,清理残留 {orphan_count} 个;"
+                "内存计算已请求取消,稍候自动退出)"
             )
         else:
-            self._append_log("当前没有正在运行的任务")
+            self._append_log("当前没有正在运行的任务(已请求取消内存计算)")
 
     def _append_log(self, message: str, scope: str | None = None) -> None:
         self.log_panel.append(message, scope=scope)

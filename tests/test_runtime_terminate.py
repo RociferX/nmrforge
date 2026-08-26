@@ -18,6 +18,36 @@ from backend.runtime import (
 )
 
 
+def test_cancel_flag_lifecycle() -> None:
+    """0.2.199-补6:取消标志置位/清除/查询。"""
+    from backend.runtime import cancel_requested, clear_cancel, request_cancel
+
+    clear_cancel()
+    assert not cancel_requested()
+    request_cancel()
+    assert cancel_requested()
+    clear_cancel()
+    assert not cancel_requested()
+
+
+def test_orphan_match_scopes_by_name_and_workspace() -> None:
+    """0.2.199-补6:孤儿进程匹配只认 NMRPipe 工具与工作区内 csh。"""
+    from backend.runtime import _orphan_match
+
+    assert _orphan_match({"name": "nmrPipe.exe", "args": ""}, None, None)
+    assert _orphan_match({"name": "pipe2xyz", "args": ""}, None, None)
+    assert not _orphan_match({"name": "python", "args": ""}, None, None)
+    assert _orphan_match(
+        {
+            "name": "csh",
+            "args": "cd /x/ws/exp_001/d_001/process && csh x.com",
+        },
+        None,
+        "/x/ws",
+    )
+    assert not _orphan_match({"name": "csh", "args": "/bin/sh"}, None, "/x/ws")
+
+
 def _spawn_sleeper(seconds: int = 120) -> subprocess.Popen:
     code = f"import time; time.sleep({seconds})"
     # start_new_session 与 CshRuntime 保持一致(独立进程组,便于整树终止)

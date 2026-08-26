@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -276,6 +277,7 @@ def search_axis_memory(
     refine: bool = True,
     sign_mode: str = "uniform",
     discrete: bool | None = None,
+    cancel: Callable[[], bool] | None = None,
 ) -> MemoryAxisResult | None:
     """在复型数据的指定轴上做内存相位搜索(旧算法判断标准,零后端)。"""
     arr = np.asarray(complex_arr, dtype=np.complex128)
@@ -306,6 +308,8 @@ def search_axis_memory(
 
     def _run_batch(phases: list[tuple[float, float]]) -> None:
         for raw in phases:
+            if cancel is not None and cancel():
+                raise RuntimeError("任务已取消:内存相位搜索被用户终止")
             phase = (float(raw[0]) % 360.0, float(raw[1]))
             if phase in scored:
                 continue

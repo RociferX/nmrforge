@@ -301,7 +301,7 @@ def test_unified_route_nus_reconstruct_then_finalize(
     monkeypatch.setattr(routes, "_load_recon_planes", lambda exp, wk: planes)
     monkeypatch.setattr(
         "core.optimization.phase_search.search_direct_phase_on_spectrum",
-        lambda arr, axis=0, metric="symmetry", progress=None: (30.0, 0.0, 80.0),
+        lambda arr, axis=0, metric="symmetry", progress=None, cancel=None: (30.0, 0.0, 80.0),
     )
 
     def fake_read(path: str, unpack_axis: int | None = None):
@@ -490,7 +490,7 @@ def test_unified_route_nus_progress_stages(
     monkeypatch.setattr(routes, "_load_recon_planes", lambda exp, wk: planes)
     monkeypatch.setattr(
         "core.optimization.phase_search.search_direct_phase_on_spectrum",
-        lambda arr, axis=0, metric="symmetry", progress=None: (30.0, 0.0, 80.0),
+        lambda arr, axis=0, metric="symmetry", progress=None, cancel=None: (30.0, 0.0, 80.0),
     )
     monkeypatch.setattr(
         routes, "_read_complex_preview",
@@ -551,7 +551,7 @@ def test_unified_route_nus_final_ext_apply_to_opt(
     monkeypatch.setattr(routes, "_load_recon_planes", lambda exp, wk: planes)
     monkeypatch.setattr(
         "core.optimization.phase_search.search_direct_phase_on_spectrum",
-        lambda arr, axis=0, metric="symmetry", progress=None: (30.0, 0.0, 80.0),
+        lambda arr, axis=0, metric="symmetry", progress=None, cancel=None: (30.0, 0.0, 80.0),
     )
     monkeypatch.setattr(
         routes,
@@ -817,7 +817,7 @@ def test_unified_route_nus_final_ext_renormalizes_p1(
     monkeypatch.setattr(routes, "_load_recon_planes", lambda exp, wk: planes)
     monkeypatch.setattr(
         "core.optimization.phase_search.search_direct_phase_on_spectrum",
-        lambda arr, axis=0, metric="symmetry", progress=None: (30.0, 15.0, 80.0),
+        lambda arr, axis=0, metric="symmetry", progress=None, cancel=None: (30.0, 15.0, 80.0),
     )
     monkeypatch.setattr(
         routes,

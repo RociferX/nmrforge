@@ -16,6 +16,7 @@ from typing import Any
 
 import numpy as np
 
+from backend.runtime import cancel_requested
 from core.data.internal_data_model import Experiment, SamplingMode
 from core.planning.method_selector import select_method
 
@@ -459,7 +460,9 @@ def unified_route(    experiment: Experiment,
             progress(f"{axis} 复型预览完成")
         ax = _axis_index(axis, experiment.ndim)
         arr = _read_complex_preview(str(resp["spectrum_path"]), unpack_axis=ax)
-        est = search_axis_memory(arr, ax, sign_mode=sign_mode)
+        est = search_axis_memory(
+            arr, ax, sign_mode=sign_mode, cancel=cancel_requested
+        )
         if est is None:
             raise RuntimeError(f"内存相位搜索({axis})无可用迹线")
         if sign_mode == "mixed":
@@ -1125,7 +1128,11 @@ def _unified_nus(
                     progress("直接维相位搜索中(首次运行,通常数十秒),请稍候")
             t0 = _time.time()
             direct_est = search_direct_phase_on_spectrum(
-                planes, axis=0, metric="symmetry", progress=progress
+                planes,
+                axis=0,
+                metric="symmetry",
+                progress=progress,
+                cancel=cancel_requested,
             )
             elapsed = _time.time() - t0
             if progress is not None:
@@ -1188,7 +1195,9 @@ def _unified_nus(
             progress(f"{axis} 复型预览完成")
         ax = _axis_index(axis, experiment.ndim)
         arr = _read_complex_preview(str(resp["spectrum_path"]), unpack_axis=ax)
-        est = search_axis_memory(arr, ax, sign_mode=sign_mode)
+        est = search_axis_memory(
+            arr, ax, sign_mode=sign_mode, cancel=cancel_requested
+        )
         if est is None:
             raise RuntimeError(f"内存相位搜索({axis})无可用迹线")
         if sign_mode == "mixed":
