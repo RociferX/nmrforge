@@ -77,9 +77,13 @@ def test_render_scripts_nus_window_poly_time(bruker_dir: Path) -> None:
         },
     )
     nus = scripts["nus.com"]
-    assert "| nmrPipe -fn GM -g1 3 -g2 0.2 \\" in nus
-    # 2D NUS 高斯窗替换默认 SP:POLY -time 应位于窗(时域最前)之前
-    assert nus.index("| nmrPipe -fn POLY -time") < nus.index("| nmrPipe -fn GM")
+    # 0.2.199-补11:直接维(F2)固定 SP,gaussian 不用于 SMILE step1
+    assert "GM" not in nus
+    assert "| nmrPipe -fn SP -off 0.45 -end 0.98 -pow 1 -c 0.5 \\" in nus
+    # 2D NUS:POLY -time 应位于窗(时域最前)之前
+    assert nus.index("| nmrPipe -fn POLY -time") < nus.index(
+        "| nmrPipe -fn SP -off 0.45"
+    )
 
 
 

@@ -197,6 +197,11 @@
   不得使用不存在的 scenePosition;QGraphicsSceneMouseEvent 取 scenePos(),
   普通 QMouseEvent 取 position(),按类型分支;3D slice 拖动条保持足够长
   (最小宽度 ≥220)。
+- NUS 直接维窗必须固定 SP(0.2.199-补11):SMILE 要求直接维输入已加窗且
+  尾部衰减到零(实验室 smile.com 同款),直接维窗优化候选(none/gaussian/
+  exp)不得覆盖直接维;generate_2d/3d_nus_script 对直接维一律生成 SP 行
+  (sine_bell 系按配置,其余回退默认 SP);SMILE 内部错误("SMILE Error" 在
+  输出中)必须显式判为失败,禁止把失败重构当成功出谱。
 - 质量评估报基线不平时必须对照基线优化结果输出原因(评估基准差异/
   保持 off 门槛),不得只报「建议基线校正」;基线评估逐存储轴取最差并
   标注最差轴(0.2.170),不得只检最后一个轴;

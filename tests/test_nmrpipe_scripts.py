@@ -57,6 +57,23 @@ def test_convert_script_echo_antiecho_mode(bruker_dir: Path) -> None:
     assert "-aq2D 3" in script  # FnMODE 6 → 3
 
 
+def test_nus_direct_window_always_sp() -> None:
+    """0.2.199-补11:直接维窗固定 SP(SMILE 要求直接维加窗且尾部衰减)。"""
+    from backend.script_generator import _nus_direct_window_line
+
+    assert "SP" in _nus_direct_window_line(None, 2)
+    assert "SP" in _nus_direct_window_line({"type": "none"}, 2)
+    assert "SP" in _nus_direct_window_line(
+        {"type": "gaussian", "g1": 8.0, "g2": 15.0}, 2
+    )
+    assert "SP" in _nus_direct_window_line({"type": "exp", "lb": 5.0}, 1)
+    sb = _nus_direct_window_line(
+        {"type": "sine_bell", "off": 0.5, "end": 0.98, "pow": 2, "c": 0.5},
+        2,
+    )
+    assert "SP -off 0.5" in sb
+
+
 def test_real_modes_nus_rejected(bruker_dir: Path) -> None:
     """SMILE(NUS) 路径对 real 间接维显式拒绝(重构仅支持 complex 编码)。
 
@@ -746,7 +763,9 @@ def test_3d_nus_script_window(bruker_dir: Path) -> None:
             "F1": {"type": "sine_bell", "off": 0.3, "end": 0.9},
         },
     )
-    assert "| nmrPipe -fn GM -g1 3 -g2 0.2 \\" in script
+    # 0.2.199-补11:直接维固定 SP(SMILE 要求),gaussian 不用于 step1
+    assert "GM" not in script
+    assert "| nmrPipe -fn SP -off 0.45 -end 0.98 -pow 2 -c 0.5 \\" in script
     assert "| nmrPipe -fn SP -off 0.45 -end 0.95 -pow 2 -c 0.5 \\" in script
     assert "| nmrPipe -fn SP -off 0.3 -end 0.9 -pow 1 -c 0.5 \\" in script
     lines = script.splitlines()

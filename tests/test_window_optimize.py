@@ -89,7 +89,7 @@ def test_optimize_direct_window_from_work_missing_fid(
 def test_window_line_explicit_none_and_render(
     bruker_dir: Path,
 ) -> None:
-    """显式 type=none 不插 SP;显式 SP 参数生效;未配置保持默认。"""
+    """type=none 直接维仍固定 SP(SMILE 要求);显式 SP 参数生效。"""
     from backend.script_generator import (
         _window_line,
         generate_3d_nus_script,
@@ -105,7 +105,8 @@ def test_window_line_explicit_none_and_render(
     none_script = generate_3d_nus_script(
         exp, window={"F3": {"type": "none"}}, **base
     )
-    assert "| nmrPipe -fn SP -off 0.45" not in none_script
+    # 0.2.199-补11:直接维固定 SP,type=none 不再使 step1 无窗
+    assert "| nmrPipe -fn SP -off 0.45 -end 0.98 -pow 2 -c 0.5" in none_script
     custom = generate_3d_nus_script(
         exp,
         window={"F3": {"type": "sine_bell", "off": 0.30, "end": 0.98,

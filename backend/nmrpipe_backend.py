@@ -930,6 +930,20 @@ class NMRPipeBackend:
         logs.append(f"nus.com: rc={run_result.returncode}")
         if fid_noise > 0:
             shutil.rmtree(work / f".smile_noise_{noise_seed}", ignore_errors=True)
+        # 0.2.199-补11:SMILE 内部错误(如直接维未加窗)在 csh 管道里可能
+        # rc=0,显式检测输出,避免把失败重构当成功出谱
+        smile_err = "SMILE Error" in (
+            (run_result.stdout or "") + (run_result.stderr or "")
+        )
+        if smile_err:
+            logs.append(
+                "检测到 SMILE 内部错误(直接维未加窗/输入状态错误),重构失败"
+            )
+            return {
+                "success": False,
+                "message": "SMILE 重构失败(内部错误:直接维需加窗)",
+                "logs": logs,
+            }
         spectrum = work / out_file
         if (
             run_result.returncode != 0

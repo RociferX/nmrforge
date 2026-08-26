@@ -1,5 +1,26 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补11(2026-08-26,3D NUS 终跑 SMILE 直接维窗固定 SP)
+
+用户反馈:3D NUS 优化过程不对劲——终跑脚本看着没问题,但谱始终不对。
+
+- 根因(VM cc/30 多次复现):终跑 SMILE 每次报
+  `SMILE Error: input data in direct dim not apodized!`,但代码仍报
+  「完成 SMILE 重构;终谱已就位」——终谱其实是失败重构的产物,故谱不对;
+- 原因链:直接维窗函数优化把 F3 选成 none(cc,无窗)或 gaussian(sampleC,
+  GM 顶替 SP),而 SMILE 要求直接维必须加窗且尾部衰减到零(实验室
+  smile.com 直接维固定 `SP -off 0.5 -end 0.98 -pow 2 -c 0.5`);首遍重构
+  用默认 SP 所以正常,终跑用优化窗所以失败;
+- 修复:
+  - 脚本生成(generate_2d/3d_nus_script):直接维窗固定 SP——sine_bell 系
+    按配置,其余(none/gaussian/exp)一律回退默认 SP,保证 SMILE 输入始终
+    已加窗;
+  - NUS 路径(phase_routes):直接维窗优化结果不再覆盖直接维(保持默认 SP),
+    日志注明原因;uniform 路径不受影响;
+  - 失败检测(nmrpipe_backend):SMILE 内部错误("SMILE Error" 出现在输出)
+    显式判为失败,不再把失败重构当成功出谱;
+- 测试:直接维窗固定 SP 的单元测试;全量 pytest + ruff 全绿。
+
 ## 0.2.199-补10(2026-08-26,3D 谱拖动报错修复 + slice 拖动条加长)
 
 用户反馈:viewer 3D 谱查看一直报

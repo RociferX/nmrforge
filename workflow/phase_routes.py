@@ -966,11 +966,14 @@ def _optimize_nus_processing(
         wres = optimize_direct_window_from_work(
             work, experiment, current=(window_cfg or {}).get(direct_axis)
         )
-        if wres.changed:
-            win = dict(window_cfg or {})
-            win[direct_axis] = wres.choice
-            window_cfg = win
         out_logs += wres.logs
+        if wres.changed:
+            # 0.2.199-补11:NUS 直接维窗固定 SP(SMILE 要求直接维加窗且尾部
+            # 衰减),窗候选不覆盖直接维;结果仅 uniform 路径使用
+            out_logs.append(
+                "直接维窗: NUS SMILE 要求直接维加窗(SP),候选不覆盖直接维,"
+                "保持默认 SP"
+            )
     except Exception as exc:  # noqa: BLE001 - 窗优化失败不影响相位/终跑
         out_logs.append(f"直接维窗优化失败: {exc}")
     # 3) 间接维窗函数:SMILE 重构平面(F1/F2 时间域)内存评分,候选含无窗,

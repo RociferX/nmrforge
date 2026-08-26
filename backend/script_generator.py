@@ -872,6 +872,24 @@ def _ps_line(phases: dict[str, tuple[float, float]] | None, axis: str) -> str:
     return f"| nmrPipe -fn PS -p0 {p0:g} -p1 {p1:g} -di \\"
 
 
+def _nus_direct_window_line(
+    cfg: dict[str, Any] | None, default_pow: int = 2
+) -> str:
+    """NUS 直接维窗:SMILE 输入要求直接维已加窗且尾部衰减到零,固定用 SP
+    (实验室 smile.com 同款)。sine_bell 系按配置生成,其余(none/gaussian/exp)
+    一律回退默认 SP——否则 SMILE 报「direct dim not apodized」且终谱错误
+    (0.2.199-补11)。"""
+    wtype = str((cfg or {}).get("type", ""))
+    if wtype in ("sine_bell", "sine_bell_squared", "sp"):
+        line = _window_line(cfg)
+        if line:
+            return line
+    return (
+        f"| nmrPipe -fn SP -off 0.45 -end 0.98 "
+        f"-pow {default_pow} -c 0.5 \\"
+    )
+
+
 def _window_line(cfg: dict[str, Any] | None) -> str | None:
     """NUS 窗函数行(与 uniform _stage_lines apodization 同映射);None=不插窗。
 
@@ -964,16 +982,11 @@ def generate_2d_nus_script(
     direct_poly = _baseline_line(expanded, "F2")
     indirect_poly = _baseline_line(expanded, "F1")
     direct_window_cfg = (window or {}).get("F2")
-    direct_window = _window_line(direct_window_cfg)
     direct_stages = []
     if direct_poly_time:
         direct_stages.append("| nmrPipe -fn POLY -time " + "\\")
-    if direct_window_cfg is None:
-        direct_stages.append(
-            "| nmrPipe -fn SP -off 0.45 -end 0.98 -pow 1 -c 0.5 " + "\\",
-        )
-    elif direct_window:
-        direct_stages.append(direct_window)
+    # 0.2.199-补11:直接维窗固定 SP(SMILE 要求直接维加窗且尾部衰减)
+    direct_stages.append(_nus_direct_window_line(direct_window_cfg, 1))
     if f2_zf.get("mode") != "none":
         direct_stages.append(f"| nmrPipe -fn ZF -zf -size {direct_zf} \\")
     direct_stages.append("| nmrPipe -fn FT \\")
@@ -1110,18 +1123,13 @@ def generate_3d_nus_script(
     f1_zf_size = _nus_zf_size(f1_zf, ctx["meta.td.z"])
     f2_fnmode = _fnmode(experiment, "F2")
     f1_fnmode = _fnmode(experiment, "F1")
-    f3_window = _window_line((window or {}).get("F3"))
     f2_window = _window_line((window or {}).get("F2"))
     f1_window = _window_line((window or {}).get("F1"))
     step1_direct: list[str] = []
     if direct_poly_time:
         step1_direct.append("| nmrPipe -fn POLY -time " + "\\")
-    if (window or {}).get("F3") is None:
-        step1_direct.append(
-            "| nmrPipe -fn SP -off 0.45 -end 0.98 -pow 2 -c 0.5 " + "\\",
-        )
-    elif f3_window:
-        step1_direct.append(f3_window)
+    # 0.2.199-补11:直接维窗固定 SP(SMILE 要求直接维加窗且尾部衰减)
+    step1_direct.append(_nus_direct_window_line((window or {}).get("F3"), 2))
     # SMILE 内部方向标志与 step3 同源:同一 _FT_FLAGS 推导 + sampling
     # 覆盖;F2 叠加 force_neg(3D 第一间接维 States 系,见 ft_neg_for)
     x_dir_flags = _ft_flags(
