@@ -1,5 +1,20 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补16(2026-08-26,转换单文件化:四种途径 fid.com 统一单文件)
+
+四种途径(自动/人工 × 单数据集/分段)的 fid.com 一律生成单文件
+{dataset_id}.fid(bruker -AUTO 按 NusTD 网格 + -aq2D Complex 输出,与实验室
+fid.com 一致);3D NUS 的切片改由 SMILE 脚本 step1 直接维处理后产生
+(nus3d_1/test%04d.ft1),不再依赖转换期切片。
+
+- 移除 NUS 3D 的 acqu3s TD 修正暂存(bruker 在 raw 内直接转换,不再
+  修改/备份 acqu3s;已实测 sampleK acqu3s TD=1 输出单文件全网格 fid);
+- 多段合并改为 addNMR 逐对合并单文件(merged/{dataset_id}.fid),段频移
+  在单文件上用 PS -rs 完成,不再拆切片合并;
+- _converted_fid_path/_finalize_converted_fid 单文件优先,旧切片式仅兼容;
+- 更新测试:3D NUS 转换断言 raw 内转换 + 单文件归位 + 无 .bak;
+- 后续评估数据传递读取(平面布局/相位搜索轴)并修复显示层相位搜索。
+
 ## 0.2.199-补15(2026-08-26,SMILE 内存估计口径对齐自报 + 测试上限约束)
 
 SMILE 启动横幅会自报 Memory Used(sampleK 填零1024:2.8GB,网格

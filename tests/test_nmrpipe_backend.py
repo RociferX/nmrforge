@@ -610,45 +610,29 @@ def _fake_bruker(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-def test_convert_dir_nus3d_stages_acqu3s_td_fix(
+def test_convert_dir_nus3d_single_file_no_stage(
     tmp_path: Path, bruker_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """3D NUS(acqu3s TD=1):bruker 在 TD 修正暂存副本中运行,切片归位 work/fid。"""
+    """0.2.199-补16:3D NUS 在 raw 内转换,单文件输出,不再修正 acqu3s。"""
     import shutil
 
     from backend.nmrpipe_backend import NMRPipeBackend
-    from core.experiment.bruker_parser import parse_param_file
 
     raw = tmp_path / "raw"
     shutil.copytree(bruker_dir / "nus_3d", raw)
     work = tmp_path / "work"
     work.mkdir()
     exp = read_dataset(raw)
-    fake = _FakeConvertRuntime(slices=128)
+    fake = _FakeConvertRuntime(single=True)
     backend = NMRPipeBackend(nmrpipe_bin="")
     _fake_bruker(monkeypatch)
     logs: list[str] = []
     assert backend._convert_dir(fake, exp, raw, work, True, logs)
-    stage = Path(fake.bruker_cwd)
-    assert stage != raw
-    assert fake.acqu3s_td == 128  # 暂存副本 TD=NusTD
-    assert parse_param_file(raw / "acqu3s")["TD"] == 1  # 原件未动
-    # 0.2.198:修改前备份原始参数文件(.bak,内容为原件)
-    assert (raw / "acqu3s.bak").is_file()
-    assert parse_param_file(raw / "acqu3s.bak")["TD"] == 1
-    assert (raw / "acqus.bak").is_file()
-    assert (raw / "acqu2s.bak").is_file()
-    assert any("原始参数已备份" in line for line in logs)
-    assert len(list((work / "fid").glob("test*.fid"))) == 128
-    assert not (work / f"{exp.dataset_id}.fid").exists()
-    assert any("acqu3s TD" in line for line in logs)
-    assert any("切片式" in line for line in logs)
-    # 暂存已清理,raw 未产生 test.fid/fid.com/ser_full
-    assert not stage.exists()
-    assert not (raw / "test.fid").exists()
-    assert not (raw / "fid.com").exists()
-    assert not (raw / "ser_full").exists()
-    assert not (raw / "mask").exists()  # fid.com 的 mask 输出留在暂存,随暂存清理
+    assert Path(fake.bruker_cwd) == raw  # 直接在 raw 内转换,无暂存
+    assert (work / f"{exp.dataset_id}.fid").is_file()  # 单文件归位
+    assert not (work / "fid").exists()
+    assert not (raw / "acqu3s.bak").exists()  # 不再修改/备份 acqu3s
+    assert not (raw / "mask").exists()  # mask 中间产物已清理
 
 
 def test_convert_dir_nus2d_no_stage(
@@ -678,45 +662,22 @@ def test_convert_dir_nus2d_no_stage(
     assert not (raw / "mask").exists()  # 0.2.199-补13:raw 内 fid.com 输出的 mask/ 已清理
 
 
-def test_converted_fid_path_slices_and_single(tmp_path: Path) -> None:
-    """convert_to_fid 产物路径:切片式 → work/fid/,单文件 → work/<id>.fid。"""
+def test_converted_fid_path_single_first(tmp_path: Path) -> None:
+    """0.2.199-补16:转换产物路径单文件优先,旧切片式仅兼容。"""
     from backend.nmrpipe_backend import NMRPipeBackend
 
     work = tmp_path / "work"
     work.mkdir()
     assert NMRPipeBackend._converted_fid_path(work, "exp") == work / "exp.fid"
+    single = work / "exp.fid"
+    single.write_bytes(b"x")
     slice_dir = work / "fid"
     slice_dir.mkdir()
     (slice_dir / "test001.fid").write_bytes(b"x")
+    # 单文件与切片同时存在时单文件优先
+    assert NMRPipeBackend._converted_fid_path(work, "exp") == single
+    single.unlink()
     assert NMRPipeBackend._converted_fid_path(work, "exp") == slice_dir
-
-
-def test_needs_acqu3s_td_fix_gates(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
-    """修正用于 NUS 3D(含分段,acqu3s TD=1);均匀/2D 不触发。"""
-    import shutil
-
-    from backend.nmrpipe_backend import NMRPipeBackend
-    from core.data.bruker_reader import read_segments
-
-    backend = NMRPipeBackend(nmrpipe_bin="")
-    raw3d = tmp_path / "raw3d"
-    shutil.copytree(bruker_dir / "nus_3d", raw3d)
-    assert backend._needs_acqu3s_td_fix(read_dataset(raw3d))
-    # 多段:与普通 NUS 一致,同样触发 acqu3s TD 修正(切片流输出)
-    seg_a = tmp_path / "seg_a"
-    seg_b = tmp_path / "seg_b"
-    shutil.copytree(bruker_dir / "nus_3d", seg_a)
-    shutil.copytree(bruker_dir / "nus_3d", seg_b)
-    assert backend._needs_acqu3s_td_fix(read_segments([seg_a, seg_b]))
-    # 2D NUS 与均匀 3D 不触发
-    raw2d = tmp_path / "raw2d"
-    shutil.copytree(bruker_dir / "nus_2d", raw2d)
-    assert not backend._needs_acqu3s_td_fix(read_dataset(raw2d))
-    rawu = tmp_path / "rawu"
-    shutil.copytree(bruker_dir / "hsqc_small", rawu)
-    assert not backend._needs_acqu3s_td_fix(read_dataset(rawu))
 
 def _write_3d_stream_ft3(path: Path) -> None:
     """写单流 3D 终谱头(FDSIZE=1H 直接维,尺寸与 sampleB.ft3 实测一致)。"""

@@ -215,6 +215,13 @@
   点数 × 间接维迭代 FT 尺寸乘积 × 16B(复 double)× 1.06,迭代 FT =
   next_pow2(3×NusTD);改常量前先用 SMILE 启动横幅 Memory Used 实测点
   校验(sampleK 填零1024 = 2.8GB,网格 146×145→219×217→FT 1024²)。
+- 转换必须单文件化(0.2.199-补16):四种途径(自动/人工 × 单数据集/分段)
+  fid.com 一律生成单文件 {dataset_id}.fid(bruker -AUTO 按 NusTD 网格 +
+  -aq2D Complex,与实验室 fid.com 一致);不得再用 acqu3s TD 修正暂存
+  (TD=1 时 bruker 同样输出单文件全网格 fid);3D NUS 切片只在 SMILE 脚本
+  step1 直接维处理后产生(nus3d_1/test%04d.ft1);多段合并用 addNMR 合并
+  单文件(merged/{dataset_id}.fid),段频移用 PS -rs。转换期切片是历史产物,
+  新代码不得生成;_zero_bad_point_fid 的切片回退仅兼容旧工作目录。
 - 开发环境 SMILE 测试内存上限(0.2.199-补15):开发 VM(16GB,宿主 32GB,
   电源/散热不稳)已验证安全的 SMILE 峰值 ≤ 2.8GB(填零1024,sampleK);
   ≥5.6GB(填零2048 直接维翻倍)会触发宿主意外断电。测试数据/复跑必须
