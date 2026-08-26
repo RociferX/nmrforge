@@ -215,6 +215,12 @@
   点数 × 间接维迭代 FT 尺寸乘积 × 16B(复 double)× 1.06,迭代 FT =
   next_pow2(3×NusTD);改常量前先用 SMILE 启动横幅 Memory Used 实测点
   校验(sampleK 填零1024 = 2.8GB,网格 146×145→219×217→FT 1024²)。
+- NUS 直接维相位必须在复型频域终谱上搜(0.2.199-补18):recon 平面是间接维
+  时域,单点时域迹线被 t1 混叠,直接维搜索不得在 recon 平面上做;finalize
+  keep_complex(全部 PS 不加 -di)输出复型频域终谱,直接维=最后一轴
+  (3D),在此轴上评分;2D 保持 recon.ft1 轴 0。布局约定:nus3d_rc 平面
+  为「每直接维点一个平面」(0.2.85 切片流起),平面内是间接维——任何
+  按「直接维在平面内轴」的假设都是过时错误。
 - 转换必须单文件化(0.2.199-补16):四种途径(自动/人工 × 单数据集/分段)
   fid.com 一律生成单文件 {dataset_id}.fid(bruker -AUTO 按 NusTD 网格 +
   -aq2D Complex,与实验室 fid.com 一致);不得再用 acqu3s TD 修正暂存
