@@ -778,7 +778,12 @@ def _optimize_uniform_processing(
 
         if progress is not None:
             progress("基线优化中(内存评分)")
-        opt = optimize_baseline(experiment, base_path)
+        opt = optimize_baseline(
+            experiment,
+            base_path,
+            progress=progress,
+            cancel=cancel_requested,
+        )
         baseline_cfg = dict(opt.baseline)
         out_logs += opt.logs
     except Exception as exc:  # noqa: BLE001 - 基线评估失败不影响相位/终跑
@@ -912,7 +917,12 @@ def _optimize_nus_processing(
 
         if progress is not None:
             progress("基线优化中(内存评分)")
-        opt = optimize_baseline(experiment, base_path)
+        opt = optimize_baseline(
+            experiment,
+            base_path,
+            progress=progress,
+            cancel=cancel_requested,
+        )
         baseline_cfg = dict(opt.baseline)
         out_logs += opt.logs
     except Exception as exc:  # noqa: BLE001 - 基线评估失败不影响相位/终跑

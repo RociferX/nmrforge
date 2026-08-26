@@ -63,3 +63,31 @@ def test_optimize_baseline_grid_contains_off_and_orders(
     assert result.scores["F2"]["off:0"] >= max(result.scores["F2"].values()) - 1e-9
     assert "auto:1" in result.scores["F2"]
     assert "order:3" in result.scores["F2"]
+
+
+def test_optimize_baseline_reports_progress(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """0.2.199-补7:基线优化逐轴/候选输出进度。"""
+    spec = np.zeros((32, 64))
+    ft2 = tmp_path / "spec.ft2"
+    _write_ft2(ft2, spec)
+    experiment = read_dataset(bruker_dir / "hsqc_2d")
+    messages: list[str] = []
+    optimize_baseline(experiment, ft2, progress=messages.append)
+    assert any("轴 F1" in m for m in messages)
+    assert any("score=" in m for m in messages)
+
+
+def test_optimize_baseline_cancelled_raises(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """0.2.199-补7:取消标志置位时基线优化立即抛异常退出。"""
+    import pytest
+
+    spec = np.zeros((32, 64))
+    ft2 = tmp_path / "spec.ft2"
+    _write_ft2(ft2, spec)
+    experiment = read_dataset(bruker_dir / "hsqc_2d")
+    with pytest.raises(RuntimeError, match="任务已取消"):
+        optimize_baseline(experiment, ft2, cancel=lambda: True)

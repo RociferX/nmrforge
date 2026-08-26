@@ -660,7 +660,7 @@ def test_unified_route_uniform_runs_processing_optimization(
     # 基线/窗优化降级为现有配置(假谱不可读),验证流程与终跑参数接线
     monkeypatch.setattr(
         "workflow.baseline_optimize.optimize_baseline",
-        lambda experiment, path: BaselineOptimizeResult(
+        lambda experiment, path, **kwargs: BaselineOptimizeResult(
             baseline={"F1": {"enabled": True, "mode": "order", "order": 2},
                       "F2": {"enabled": False}},
             scores={},

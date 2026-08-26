@@ -179,6 +179,10 @@
   (terminate_current_tasks + request_cancel)并清扫不在注册表的孤儿 NMRPipe
   进程(cleanup_orphan_tasks,按工具名/工作区路径匹配);主窗口 closeEvent 同样
   先 terminate + request_cancel 再 cleanup,防止关闭应用遗留后台进程。
+- 基线优化必须带进度且可取消(0.2.199-补7):optimize_baseline 逐轴/逐候选
+  输出评分进度,cancel 置位时在候选间检查并抛「任务已取消」;调用方
+  (phase_routes uniform/NUS)必须透传 progress 与 cancel_requested。任何
+  逐迹稳健拟合/全谱评分类内存优化同样适用此约束。
 - 质量评估报基线不平时必须对照基线优化结果输出原因(评估基准差异/
   保持 off 门槛),不得只报「建议基线校正」;基线评估逐存储轴取最差并
   标注最差轴(0.2.170),不得只检最后一个轴;

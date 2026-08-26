@@ -403,7 +403,7 @@ def test_auto_uniform_runs_processing_optimization(
     generate_fid(manager, exp_id, data_id, backend)
     monkeypatch.setattr(
         "workflow.baseline_optimize.optimize_baseline",
-        lambda experiment, path: BaselineOptimizeResult(
+        lambda experiment, path, **kwargs: BaselineOptimizeResult(
             baseline={
                 "F1": {"enabled": True, "mode": "order", "order": 2},
                 "F2": {"enabled": False},

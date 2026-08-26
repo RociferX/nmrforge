@@ -95,13 +95,16 @@ def optimize_baseline(
     *,
     grid: list[tuple[str, int]] | None = None,
     score_fn: Callable[[np.ndarray, int], float] | None = None,
+    progress: Callable[[str], None] | None = None,
+    cancel: Callable[[], bool] | None = None,
 ) -> BaselineOptimizeResult:
     """逐维基线优化:每维网格 mode∈{off,auto}×order∈{1,2,3},内存内评分,
-    选每维最优写回 baseline 配置。直接全网格优化(内存内毫秒级,无需前置
-    过滤);无实质增益(≤0.5)或候选引入明显条纹时保持 off 配置。日志逐轴
-    说明配置变化与分数增益。score_fn(data, np_axis) 返回该轴基线质量分
-    (默认 baseline_quality);off=不校正。返回 {"baseline", "scores",
-    "logs", "optimized", "skipped"}。
+    选每维最优写回 baseline 配置。直接全网格优化;无实质增益(≤0.5)或候选
+    引入明显条纹时保持 off 配置。日志逐轴说明配置变化与分数增益。
+    score_fn(data, np_axis) 返回该轴基线质量分(默认 baseline_quality);
+    off=不校正。progress 逐轴/候选输出进度,cancel 置位时在候选间检查并抛
+    「任务已取消」(0.2.199-补7:3D 稳健逐迹拟合可达数万迹,需进度与可取消)。
+    返回 {"baseline", "scores", "logs", "optimized", "skipped"}。
     """
     import nmrglue as ng
 
@@ -126,14 +129,23 @@ def optimize_baseline(
     logs: list[str] = []
     optimized: list[str] = []
     unchanged: list[str] = []
-    for axis in axes:
+    for index, axis in enumerate(axes, start=1):
+        if progress is not None:
+            progress(
+                f"基线优化中(内存评分): 轴 {axis}({index}/{len(axes)}),"
+                "逐候选评分中"
+            )
         np_axis = axis_index(axis, arr.ndim)
         current_score = float(score_fn(arr, np_axis))
         axis_scores: dict[str, float] = {}
         best: tuple[float, str, int] | None = None
         for mode, order in grid:
-            work = arr.copy()
-            if mode != "off":
+            if cancel is not None and cancel():
+                raise RuntimeError("任务已取消:基线优化被用户终止")
+            if mode == "off":
+                work = arr  # 不校正直接评分,无需复制
+            else:
+                work = arr.copy()
                 work = baseline_proc.apply(
                     work,
                     baseline_proc.BaselineParams(
@@ -149,6 +161,11 @@ def optimize_baseline(
             axis_scores[f"{mode}:{order}"] = value
             if best is None or value > best[0]:
                 best = (value, mode, order)
+            if progress is not None:
+                progress(
+                    f"基线优化中(内存评分): {axis} {mode}:{order} "
+                    f"score={value:.1f}"
+                )
         if best is None:
             best = (float(current_score), "off", 0)
             axis_scores["off:0"] = float(current_score)
