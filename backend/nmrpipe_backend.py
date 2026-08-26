@@ -1177,6 +1177,7 @@ class NMRPipeBackend:
             sampling=sampling,
             preview_axis=zf_params.get("preview_axis"),
             window=zf_params.get("window"),
+            keep_complex=bool(zf_params.get("keep_complex")),
         )
         finalize_com = work / (
             script_name or f"{experiment.dataset_id}_finalize.com"

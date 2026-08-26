@@ -138,6 +138,24 @@ def _read_complex_preview(
     return read_pipe_complex(path)
 
 
+def _read_complex_ft3(path: Path | str) -> np.ndarray:
+    """读全复型 3D 终谱(0.2.199-补18 keep_complex 模式)。
+
+    finalize 全部 PS 不加 -di 时,间接维(F2/F1)实虚交错存轴 0/1,
+    直接维=最后一轴(平面流,不复交)。返回 (F2, F1, F3) 复型数组。
+    """
+    import nmrglue as ng
+
+    _dic, data = ng.pipe.read(str(path))
+    arr = np.asarray(data)
+    if np.iscomplexobj(arr):
+        return arr.astype(np.complex128)
+    cplx = arr[0::2] + 1j * arr[1::2]
+    if cplx.ndim >= 2:
+        cplx = cplx[:, 0::2] + 1j * cplx[:, 1::2]
+    return cplx.astype(np.complex128)
+
+
 def _cleanup_unified_intermediates(
     work: Path,
     dataset_id: str,
@@ -1105,11 +1123,11 @@ def _unified_nus(
     if not auto_phase:
         indirect_axes = []
         logs.append("间接维: 幅度谱不自动调相,跳过 finalize 复型预览与搜索")
-    # 直接维:recon 平面 axis 0 复型 → 旧权威的显示层对称性搜索
-    # (0.2.96/0.2.98 机制;0.2.95 为 recon 平面校准:信号行峰选择排除
-    # 边缘伪影 + 对称性评分 + 正峰约束,能正确消歧 ±180°)。净吸收评分
-    # 在 recon 平面直接维上区分度差(sampleB 直接维被带偏 180°,0.2.185
-    # 统一试验,0.2.187 改回)。score<30 时保持 (0,0)。
+    # 直接维:0.2.199-补18 改到复型频域终谱上搜——recon 平面是间接维时域,
+    # 单点时域迹线被 t1 混叠(所有信号叠加),对称性评分面平(sample 假高分
+    # 侥幸过门槛,sampleK 28 分被拒);间接维 FT 后(keep_complex 保留虚部)
+    # 在终谱直接轴(3D=最后一轴;2D recon.ft1=轴 0)上搜,频域峰分离。
+    # score<30 时保持 (0,0)。
     import time as _time
 
     from core.optimization.phase_search import search_direct_phase_on_spectrum
@@ -1121,8 +1139,39 @@ def _unified_nus(
             "直接维相位保持 (0,0)(跳过搜索)"
         )
     else:
+        if experiment.ndim >= 3:
+            preview_out = f"{experiment.dataset_id}_direct_preview.ft3"
+            resp_preview = backend.finalize_nus(
+                experiment,
+                phases={},
+                work_dir=work,
+                params={**params_first, "keep_complex": True},
+                out_file=preview_out,
+                script_name=(
+                    f"{experiment.dataset_id}_direct_preview_finalize.com"
+                ),
+                progress=progress,
+            )
+            if (
+                not resp_preview.get("success")
+                or not resp_preview.get("spectrum_path")
+            ):
+                raise RuntimeError(
+                    f"直接维复型终谱预览失败: {resp_preview.get('message')}"
+                )
+            search_arr = _read_complex_ft3(
+                str(resp_preview["spectrum_path"])
+            )
+            direct_axis_idx = -1
+            logs.append(
+                f"直接维相位搜索基底: 复型频域终谱 {search_arr.shape}"
+                "(keep_complex,直接维=最后一轴)"
+            )
+        else:
+            search_arr = planes
+            direct_axis_idx = 0
         cache = _load_direct_phase_cache(
-            work, experiment, params_first, planes.shape
+            work, experiment, params_first, search_arr.shape
         )
         if cache is not None:
             direct_phase = (float(cache["p0"]), float(cache["p1"]))
@@ -1141,8 +1190,8 @@ def _unified_nus(
                     progress("直接维相位搜索中(首次运行,通常数十秒),请稍候")
             t0 = _time.time()
             direct_est = search_direct_phase_on_spectrum(
-                planes,
-                axis=0,
+                search_arr,
+                axis=direct_axis_idx,
                 metric="symmetry",
                 progress=progress,
                 cancel=cancel_requested,
@@ -1164,7 +1213,7 @@ def _unified_nus(
                     f"{direct_phase[1]:g}°) score={direct_est[2]:.2f}"
                 )
                 _save_direct_phase_cache(
-                    work, experiment, params_first, planes.shape,
+                    work, experiment, params_first, search_arr.shape,
                     direct_phase[0], direct_phase[1], float(direct_est[2]),
                     elapsed,
                 )

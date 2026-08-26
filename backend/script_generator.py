@@ -1477,11 +1477,16 @@ def generate_nus_finalize_script(
     sampling: dict[str, Any] | None = None,
     preview_axis: str | None = None,
     window: dict[str, dict[str, Any]] | None = None,
+    keep_complex: bool = False,
 ) -> str:
     """NUS 重构平面(复型)的间接维 FT 定稿脚本(逐维 PS 可配)。
 
     preview_axis 非空时为复型预览模式:该轴 PS 不加 -di(保留真实
     虚部供内存调相),其它轴按 phases 加 -di;与 uniform 预览同构。
+
+    keep_complex(0.2.199-补18):全部 PS 不加 -di,输出全复型终谱
+    (间接维 FT 后保留虚部)——供「在终谱上调相」的直接维相位搜索
+    (频域峰分离,规避 recon 平面间接时域的 t1 混叠)。
 
     planes:重构平面输入(2D nus2d/recon.ft1;3D nus3d_rc/test%04d.ft1);
     phases:{轴 -> (p0, p1)},缺省 0——供逐维相位候选运行,不重跑 SMILE;
@@ -1501,8 +1506,8 @@ def generate_nus_finalize_script(
         f2_fnmode = _fnmode(experiment, "F2")
         f2_p0, f2_p1 = phases.get("F2", (0.0, 0.0))
         f1_p0, f1_p1 = phases.get("F1", (0.0, 0.0))
-        f2_di = "" if preview_axis == "F2" else " -di"
-        f1_di = "" if preview_axis == "F1" else " -di"
+        f2_di = "" if keep_complex or preview_axis == "F2" else " -di"
+        f1_di = "" if keep_complex or preview_axis == "F1" else " -di"
         f2_size = _nus_zf_size(zf_plan.get("F2", {}), td[1])
         f1_size = _nus_zf_size(zf_plan.get("F1", {}), td[2])
         f2_window = _window_line((window or {}).get("F2"))
@@ -1544,7 +1549,7 @@ def generate_nus_finalize_script(
         ]
     else:
         f1_p0, f1_p1 = phases.get("F1", (0.0, 0.0))
-        f1_di = "" if preview_axis == "F1" else " -di"
+        f1_di = "" if keep_complex or preview_axis == "F1" else " -di"
         f1_size = _nus_zf_size(zf_plan.get("F1", {}), td[1])
         f1_window = _window_line((window or {}).get("F1"))
         expanded = expand_baseline(experiment, baseline)
