@@ -576,15 +576,17 @@ def search_direct_phase_on_spectrum(
         p1 = 0.0
         s0 = _score(p0, 0.0)
     if metric == "symmetry":
-        # 全圆近最优平台取「最小修正」(人工习惯:谱已接近好相位不乱加修正;
-        # 真值远离 0 时平台中心在真值处,近最优集合不含 (0,0))
+        # 全圆近最优平台取「最小修正」(人工习惯:谱已接近好相位不乱加修正)。
+        # 0.2.199-补19:纯对称性指标下平台较宽(±180 周期),容差从 5 收紧到
+        # 1——(0,0) 若比最优低超过 1 分(如 sampleK:41.7 vs 45.3)不再被
+        # 拽回,真正最优(如 p0≈80°,p1≈55°)胜出。
         near = []
         for dp0 in np.arange(-180.0, 181.0, 5.0):
             for dp1 in np.arange(-60.0, 61.0, 5.0):
                 pc = (p0 + dp0) % 360.0
                 qc = p1 + dp1
                 sc = _score(pc, qc)
-                if sc >= s0 - 5.0:
+                if sc >= s0 - 1.0:
                     near.append((sc, pc, qc))
         if near:
             near.sort(
