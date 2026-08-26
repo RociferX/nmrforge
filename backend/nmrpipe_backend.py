@@ -776,7 +776,6 @@ class NMRPipeBackend:
         nthread = resolve_nthread(params.get("nthread"))
         # 0.2.113:不再按网格限线程——sampleM 事故根因是直接维内存
         # (非切片流/直接维填零过多),由 0.2.112 内存护栏兜底
-        grid_points = int(td[1]) * (int(td[2]) if len(td) > 2 else 1)
         ext_lo = resolve_ext_lo(params.get("ext_lo"))
         ext_hi = resolve_ext_hi(params.get("ext_hi"))
         extract = _as_bool(params.get("extract", True))
@@ -791,8 +790,9 @@ class NMRPipeBackend:
             points_per_line=points_per_line,
         )
         logs += zero_fill_report(zf_plan)
-        # 0.2.112:内存护栏——SMILE 峰值估计(VM 实测:3D ∝ 直接维点数,
-        # ≈1.15MB/点,与采样点数无关);超限先降直接维填零 1×TD,仍超则报错
+        # 0.2.112:内存护栏——SMILE 峰值估计(0.2.199-补15 对齐 SMILE 自报:
+        # 直接维点数 × 间接维迭代 FT 尺寸积 × 16B);超限先降直接维填零
+        # 1×TD,仍超则报错
         from backend.memory_guard import (
             MEM_SAFETY,
             available_memory_mb,
@@ -808,7 +808,7 @@ class NMRPipeBackend:
         zf_direct = int((zf_plan.get(direct_axis) or {}).get("size") or td[0])
         direct_pts = direct_points_after_ext(experiment, zf_direct, ext_lo, ext_hi)
         peak_mb = estimate_smile_peak_mb(
-            experiment.ndim, direct_pts, grid_points
+            experiment.ndim, direct_pts, td[1:]
         )
         avail_mb = available_memory_mb()
         if peak_mb > avail_mb * MEM_SAFETY:
@@ -830,7 +830,7 @@ class NMRPipeBackend:
                     experiment, one_x, ext_lo, ext_hi
                 )
                 peak_mb = estimate_smile_peak_mb(
-                    experiment.ndim, direct_pts, grid_points
+                    experiment.ndim, direct_pts, td[1:]
                 )
             if peak_mb > avail_mb * MEM_SAFETY:
                 import math

@@ -47,13 +47,35 @@ def test_direct_points_after_ext() -> None:
 
 
 def test_estimate_smile_peak_mb_calibrated() -> None:
-    # 3D 网格 4000:600 点 → ~690MB(实测 665);2048 点 → ~2355MB(实测 2284)
-    m600 = estimate_smile_peak_mb(3, 600, 4000)
-    assert 650 <= m600 <= 730, m600
-    m2048 = estimate_smile_peak_mb(3, 2048, 4000)
-    assert 2200 <= m2048 <= 2450, m2048
+    # 0.2.199-补15:模型 = 直接维点数 × 间接维迭代 FT 尺寸乘积 × 16B × 1.06,
+    # 口径对齐 SMILE 启动自报 Memory Used。
+    # HNCACB(NusTD 积 4000,FT 256×256):600 点 → ~636MB(实测 665)
+    m600 = estimate_smile_peak_mb(3, 600, [80, 50])
+    assert 600 <= m600 <= 680, m600
+    m2048 = estimate_smile_peak_mb(3, 2048, [80, 50])
+    assert 2100 <= m2048 <= 2350, m2048
+    # sampleK 参考点:168 点、NusTD(292,290)→ 对齐 SMILE 自报 2.8GB
+    ref = estimate_smile_peak_mb(3, 168, [292, 290])
+    assert 2700 <= ref <= 3000, ref
     # 2D 保守下限
     assert estimate_smile_peak_mb(2, 640, 256) == 128.0
+
+
+def test_dev_smile_memory_ceiling() -> None:
+    """0.2.199-补15:开发环境 SMILE 测试内存上限 2.8GB(文档约束)。
+
+    开发 VM(16GB,宿主 32GB 不稳)已验证安全峰值 ≈2.8GB(填零1024,
+    sampleK,SMILE 自报 Memory Used);≥5.6GB(填零2048 直接维翻倍)会
+    触发宿主意外断电。测试数据/复跑必须保证估计峰值 ≤ 2.8GB。
+    """
+    ref = estimate_smile_peak_mb(3, 168, [292, 290])
+    assert 2700 <= ref <= 2800 * 1.03  # 对齐 SMILE 自报,不逼近崩溃量级
+    # 测试夹具 nus_3d(NusTD 48/128)远低于上限
+    fixture = estimate_smile_peak_mb(3, 200, [48, 128])
+    assert fixture < 2800
+    # 崩溃量级(填零2048 直接维翻倍)必须显著高于上限(文档警示)
+    crash = estimate_smile_peak_mb(3, 336, [292, 290])
+    assert crash >= 2 * ref
 
 
 def test_memory_guard_ok() -> None:
