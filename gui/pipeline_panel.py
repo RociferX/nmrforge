@@ -12,6 +12,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from pathlib import Path
 
 from PyQt6.QtCore import QPoint, QRect, QSize, Qt, pyqtSignal
@@ -763,6 +765,10 @@ class PipelinePanel(QWidget):
         self._rows: dict[str, PipelineStepRow] = {}
         # 0.2.162-补15:(exp_id, data_id) → (终跑 ext_lo, 终跑 ext_hi)
         self._final_ext: dict[tuple[str, str], tuple[str, str, bool]] = {}
+        # 0.2.199-补12:生成谱图参数报告按谱文件指纹缓存,避免每次刷新主线程
+        # 重读大 ft3 算质量导致卡顿;运行中标志防连续点击重复启动
+        self._spectrum_report_cache: dict[str, str] = {}
+        self._run_active: bool = False
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
@@ -1107,6 +1113,65 @@ class PipelinePanel(QWidget):
         row.set_detail(text, failed=failed)
         row.detail_frame.setVisible(row.detail_frame.isHidden())
 
+    def _cached_spectrum_report(
+        self, params: dict, spectrum_path: str
+    ) -> str:
+        """生成谱图参数报告(0.2.199-补12):按谱文件指纹缓存(内存+磁盘记录)。
+
+        spectrum_quality_report_lines 会读取整张 ft3 并全谱评估质量,每次
+        刷新都在主线程执行会很卡;谱文件未变化时直接读记录,不重读谱。
+        记录文件:{spectrum_path}.quality.json,指纹 = mtime_ns+size+参数。
+        """
+        params_fp = hashlib.sha256(
+            json.dumps(params, sort_keys=True, ensure_ascii=False).encode(
+                "utf-8"
+            )
+        ).hexdigest()[:16]
+        try:
+            p = Path(spectrum_path)
+            if p.is_file():
+                st = p.stat()
+                fp = f"{st.st_mtime_ns}|{st.st_size}"
+                rec = Path(f"{spectrum_path}.quality.json")
+            else:
+                fp = "missing"
+                rec = None
+        except OSError:
+            fp = "err"
+            rec = None
+        key = f"{spectrum_path}|{fp}|{params_fp}"
+        cached = self._spectrum_report_cache.get(key)
+        if cached is not None:
+            return cached
+        if rec is not None and rec.is_file():
+            try:
+                data = json.loads(rec.read_text(encoding="utf-8"))
+                if (
+                    data.get("fp") == fp
+                    and data.get("params_fp") == params_fp
+                    and isinstance(data.get("text"), str)
+                ):
+                    self._spectrum_report_cache[key] = data["text"]
+                    return data["text"]
+            except (OSError, ValueError):
+                pass
+        text = _spectrum_param_report(params, spectrum_path)
+        if len(self._spectrum_report_cache) >= 32:
+            self._spectrum_report_cache.clear()
+        self._spectrum_report_cache[key] = text
+        if rec is not None:
+            try:
+                rec.write_text(
+                    json.dumps(
+                        {"fp": fp, "params_fp": params_fp, "text": text},
+                        ensure_ascii=False,
+                    ),
+                    encoding="utf-8",
+                )
+            except OSError:
+                pass
+        return text
+
     def _step_detail(self, step_id: str) -> tuple[str, dict | None, bool]:
         """构建步骤详情(输入/产物/最近运行/参数/脚本快照);返回(文本, params, failed)。"""
         exp_id = self._current_exp_id
@@ -1138,7 +1203,7 @@ class PipelinePanel(QWidget):
                     params = dict(run.params)
                     lines.append("参数报告(生成谱图实际生效参数):")
                     lines.append(
-                        _spectrum_param_report(
+                        self._cached_spectrum_report(
                             run.params,
                             str((run.outputs or {}).get("spectrum_path") or ""),
                         )
@@ -1171,6 +1236,11 @@ class PipelinePanel(QWidget):
             else None
         )
         if entry is None:
+            return
+        if self._run_active:
+            self.log_message.emit(
+                "已有任务正在运行,请等待完成后再试"
+            )
             return
         method_name = STEP_METHOD.get(step_id)
         method = getattr(self.controller, method_name, None) if method_name else None
@@ -1254,6 +1324,7 @@ class PipelinePanel(QWidget):
                 if "无法处理该谱" in str(exc):
                     self.memory_guard_requested.emit(str(exc))
             finally:
+                self._run_active = False
                 self.refresh()
                 self.run_finished.emit()
 
@@ -1263,6 +1334,7 @@ class PipelinePanel(QWidget):
         from backend.runtime import clear_cancel
 
         clear_cancel()
+        self._run_active = True
         threading.Thread(target=worker, daemon=True).start()
 
     def _run_group_step(
@@ -1336,6 +1408,11 @@ class PipelinePanel(QWidget):
         不动,谱图不会因重新渲染而改变。
         """
         if step_id != "spectrum":
+            return
+        if self._run_active:
+            self.log_message.emit(
+                "已有任务正在运行,请等待完成后再试"
+            )
             return
         exp_id = self._current_exp_id
         if not exp_id:
@@ -1416,9 +1493,11 @@ class PipelinePanel(QWidget):
                     f"重新运行终脚本失败: {type(exc).__name__}: {exc}"
                 )
             finally:
+                self._run_active = False
                 self.refresh()
                 self.run_finished.emit()
 
         import threading
 
+        self._run_active = True
         threading.Thread(target=worker, daemon=True).start()

@@ -245,6 +245,45 @@ def test_pipeline_spectrum_row_ext_range_button_before_run(
     panel.close()
 
 
+def test_pipeline_run_guard_blocks_repeat(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.2.199-补12:运行中再次点击被拒绝,不重复启动。"""
+    from gui.pipeline_panel import PipelinePanel
+
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    panel = PipelinePanel(manager, FakeProcessingController())
+    panel.set_selection("data", "exp_001", "d_001")
+    messages: list[str] = []
+    panel.log_message.connect(messages.append)
+    panel._run_active = True
+    panel._on_run_requested("spectrum")
+    assert any("已有任务正在运行" in m for m in messages)
+    panel._run_active = False
+    panel.close()
+
+
+def test_spectrum_report_cache_by_fingerprint(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.2.199-补12:生成谱图参数报告按谱文件指纹缓存复用。"""
+    from gui.pipeline_panel import PipelinePanel
+
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    panel = PipelinePanel(manager, FakeProcessingController())
+    panel.set_selection("data", "exp_001", "d_001")
+    missing = str(tmp_path / "no.ft3")
+    text1 = panel._cached_spectrum_report(
+        {"diagnostics": {"reports": []}}, missing
+    )
+    text2 = panel._cached_spectrum_report(
+        {"diagnostics": {"reports": []}}, missing
+    )
+    assert text1 == text2
+    assert panel._spectrum_report_cache
+    panel.close()
+
+
 def test_pipeline_button_row_wraps_when_narrow(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
