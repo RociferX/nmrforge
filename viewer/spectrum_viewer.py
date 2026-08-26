@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
     QCheckBox,
     QDoubleSpinBox,
     QGraphicsRectItem,
+    QGraphicsSceneMouseEvent,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -659,7 +660,13 @@ class SpectrumViewer(QWidget):
                 and self._mouse_left_pressed
                 and (self._strips_active or self._mode_1d)
             ):
-                self._follow_drag(event.scenePosition())
+                # 0.2.199-补10:场景事件可能是 QGraphicsSceneMouseEvent
+                # (取 scenePos)或普通 QMouseEvent(取 position);PyQt6 无
+                # scenePosition 属性
+                if isinstance(event, QGraphicsSceneMouseEvent):
+                    self._follow_drag(event.scenePos())
+                else:
+                    self._follow_drag(event.position())
         return super().eventFilter(obj, event)
 
 

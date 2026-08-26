@@ -52,6 +52,8 @@ class Spectrum3DPanel(QWidget):
         row.addWidget(self.plane_combo)
         self.slice_slider = QSlider(Qt.Orientation.Horizontal)
         self.slice_slider.setToolTip("第三轴切片位置(拖动后松开刷新)")
+        # 0.2.199-补10:拖动条加长(最小宽度,细调切片更顺手)
+        self.slice_slider.setMinimumWidth(220)
         self.slice_slider.valueChanged.connect(self._on_slider_value)
         self.slice_slider.sliderReleased.connect(self._emit)
         self.slice_slider.setEnabled(False)

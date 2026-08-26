@@ -1,5 +1,20 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补10(2026-08-26,3D 谱拖动报错修复 + slice 拖动条加长)
+
+用户反馈:viewer 3D 谱查看一直报
+`eventFilter: self._follow_drag(event.scenePosition())` 的 Traceback;顺便把
+查看不同 slice 的拖动条弄长一点。
+
+- 修复(scenePosition):本环境 PyQt6 的 QGraphicsSceneMouseEvent 只有
+  `scenePos`、没有 `scenePosition`;且事件过滤器可能收到普通 QMouseEvent
+  (无 scenePos 只有 position),拖动 3D 切片/1D 十字线时反复 AttributeError;
+  按事件类型分别取 `scenePos()`(QGraphicsSceneMouseEvent)或
+  `position()`(QMouseEvent);
+- 加长(viewer/spectrum3d_panel):slice 横向滑块 setMinimumWidth(220),
+  拖动条更长、细调切片更顺手;
+- 测试:viewer/3D 面板相关用例;全量 pytest + ruff 全绿。
+
 ## 0.2.199-补9(2026-08-26,基线优化条纹否决改相对语义 + 诚实日志)
 
 用户反馈:谱图明显有竖条纹但基线校正没加 POLY。
