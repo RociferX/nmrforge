@@ -933,6 +933,7 @@ def generate_2d_nus_script(
     thresh: float = 0.95,
     smile_scaling: bool = True,
     smile_report: int = 1,
+    max_mem: float | None = None,
     direct_phase: tuple[float, float] = (0.0, 0.0),
     phases: dict[str, tuple[float, float]] | None = None,
     window: dict[str, dict[str, Any]] | None = None,
@@ -1024,6 +1025,11 @@ def generate_2d_nus_script(
             f"           -sample {nuslist} -nThread {nthread} \\",
             f"           -sampleCount {nuslist_count} -nSigma {nsigma:g} "
             f"-off 0 0 -report {smile_report} \\",
+            *(
+                []
+                if max_mem is None
+                else [f"           -maxMem {max_mem:g} \\"]
+            ),
             *(["           -scaling 1 \\"] if smile_scaling else []),
             *smile_tail,
         ]
@@ -1041,6 +1047,11 @@ def generate_2d_nus_script(
             f"           -sample None -nThread {nthread} \\",
             f"           -sampleCount {nuslist_count} -nSigma {nsigma:g} "
             f"-off 0 0 -report {smile_report} \\",
+            *(
+                []
+                if max_mem is None
+                else [f"           -maxMem {max_mem:g} \\"]
+            ),
             *(["           -scaling 1 \\"] if smile_scaling else []),
             *smile_tail,
         ]
@@ -1095,6 +1106,7 @@ def generate_3d_nus_script(
     thresh: float = 0.95,
     smile_scaling: bool = True,
     smile_report: int = 1,
+    max_mem: float | None = None,
     direct_phase: tuple[float, float] = (0.0, 0.0),
     phases: dict[str, tuple[float, float]] | None = None,
     window: dict[str, dict[str, Any]] | None = None,
@@ -1174,6 +1186,11 @@ def generate_3d_nus_script(
         f"           -sample {nuslist} -nThread {nthread} \\",
         f"           -sampleCount {nuslist_count} -nSigma {nsigma:g} -off 0 0 "
         f"-report {smile_report} \\",
+        *(
+            []
+            if max_mem is None
+            else [f"           -maxMem {max_mem:g} \\"]
+        ),
         *(["           -scaling 1 \\"] if smile_scaling else []),
         f"           -maxIter {max_iter} \\",
         # SMILE 不带窗/调相(0.2.134):窗/相位由 step3 后处理承担;

@@ -846,6 +846,13 @@ class NMRPipeBackend:
                     ),
                     "logs": logs,
                 }
+        # 0.2.199-补14:按当前可用内存实时设置 SMILE -maxMem(与护栏同一预算,
+        # 防预估偏差/并发占用导致峰值超限硬扛)
+        max_mem_gb = max(avail_mb * MEM_SAFETY / 1024.0, 1.0)
+        logs.append(
+            f"SMILE 内存上限(-maxMem): {max_mem_gb:.1f} GB"
+            f"(可用 {avail_mb} MB)"
+        )
         # 0.2.96:显示层相位搜索(1× SMILE,无额外后端)——主重构用 PS(0,0)
         # (或缓存相位);重构后在复型 recon 平面上对称性评分,最后一步把相位
         # 旋转应用到 recon 并便宜重渲 stage-2(非 SMILE)
@@ -900,6 +907,7 @@ class NMRPipeBackend:
             thresh=thresh,
             smile_scaling=smile_scaling,
             smile_report=smile_report,
+            max_mem=max_mem_gb,
             direct_phase=smile_phase,
             phases=params.get("phases"),
             window=params.get("window"),
@@ -1584,6 +1592,9 @@ class NMRPipeBackend:
         else:
             script_fn = generate_2d_nus_script
             ext = "ft2"
+        from backend.memory_guard import MEM_SAFETY, available_memory_mb
+
+        max_mem_gb = max(available_memory_mb() * MEM_SAFETY / 1024.0, 1.0)
         out_light = f"{experiment.dataset_id}_light.{ext}"
         script = script_fn(
             experiment,
@@ -1598,6 +1609,7 @@ class NMRPipeBackend:
             thresh=0.95,
             smile_scaling=True,
             smile_report=1,
+            max_mem=max_mem_gb,
             direct_phase=(0.0, 0.0),
             extract=extract,
             baseline=baseline,

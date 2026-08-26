@@ -321,6 +321,25 @@ def test_3d_nus_script_max_iter_by_sampling(bruker_dir: Path) -> None:
     assert "-xCT 1 -yCT 1 -thresh" in ct  # CT 实验高采样也关闭交叉项
 
 
+def test_smile_max_mem_optional(bruker_dir: Path) -> None:
+    """0.2.199-补14:-maxMem 由调用方按可用内存传入;缺省不生成该行。"""
+    exp2 = read_dataset(bruker_dir / "nus_2d")
+    exp3 = read_dataset(bruker_dir / "nus_3d")
+    from backend.script_generator import (
+        generate_2d_nus_script,
+        generate_3d_nus_script,
+    )
+
+    base2 = dict(in_file="e.fid", nuslist="nuslist", out_file="e.ft2")
+    base3 = dict(in_file="e.fid", nuslist="nuslist", out_file="e.ft3")
+    assert "-maxMem" not in generate_2d_nus_script(exp2, **base2)
+    assert "-maxMem" not in generate_3d_nus_script(exp3, **base3)
+    s2 = generate_2d_nus_script(exp2, max_mem=12.0, **base2)
+    s3 = generate_3d_nus_script(exp3, max_mem=12.0, **base3)
+    assert "-maxMem 12" in s2
+    assert "-maxMem 12" in s3
+
+
 def test_nus_finalize_script_2d(bruker_dir: Path) -> None:
     """重构平面定稿(2D):nmrPipe -in + FT -alt + POLY + -out -ov,逐维 PS 可配。"""
     exp = read_dataset(bruker_dir / "nus_2d")
