@@ -740,6 +740,7 @@ class PipelinePanel(QWidget):
     log_message = pyqtSignal(str)
     memory_guard_requested = pyqtSignal(str)  # 0.2.112:SMILE 内存不足弹窗
     run_finished = pyqtSignal()
+    run_started = pyqtSignal(str, str)  # (exp_id, data_id):某数据开始处理,左侧状态显示运行中
     manual_open_requested = pyqtSignal(str)  # step_id:打开人工处理对话框
     report_requested = pyqtSignal(str)  # step_id:打开报告页
     show_spectrum_requested = pyqtSignal(str)  # step_id:展示谱图
@@ -1212,6 +1213,8 @@ class PipelinePanel(QWidget):
                 )
                 exp_id = self._current_exp_id
                 target_data_id = getattr(data_node, "id", exp_id)
+                # 0.2.199-补5:处理开始,左侧树该数据显示「运行中」
+                self.run_started.emit(exp_id, target_data_id)
                 # 批量组:统一委托新引擎(controller.run_group_batch ->
                 # workflow.batch.run_batch);0.2.164-补1 删除旧内联逐数据循环
                 group = (
@@ -1278,6 +1281,9 @@ class PipelinePanel(QWidget):
         if step_id == "smile":
             self.log_message.emit("SMILE 优化不支持批量组,请在单个数据上执行")
             return
+        # 0.2.199-补5:组内各数据开始处理,左侧树显示「运行中」
+        for data_id in self.manager.group_data_ids(exp_id, group_id):
+            self.run_started.emit(exp_id, data_id)
         try:
             kwargs: dict = {}
             if step_id == "spectrum":
@@ -1346,6 +1352,8 @@ class PipelinePanel(QWidget):
                     nodes[0],
                 )
                 data_id = getattr(data_node, "id", exp_id)
+                # 0.2.199-补5:处理开始,左侧树该数据显示「运行中」
+                self.run_started.emit(exp_id, data_id)
                 # 定位已有终跑脚本(uniform/NUS),找不到则提示先优化生成
                 work = self.manager.data_dir(exp_id, data_id, "process")
                 script_path = None

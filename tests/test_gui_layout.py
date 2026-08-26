@@ -177,6 +177,26 @@ def test_project_tree_structure(
     panel.close()
 
 
+def test_project_tree_data_status_shows_running(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.2.199-补5:运行中的数据显示「运行中」,结束后恢复推断状态。"""
+    from gui.project_tree import ProjectTreePanel
+
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    panel = ProjectTreePanel(manager)
+
+    def _data_item():
+        return panel.tree.topLevelItem(0).child(0).child(0).child(0)
+
+    assert _data_item().text(1) == "已导入"
+    panel.mark_running("exp_001", "d_001")
+    assert _data_item().text(1) == "运行中"
+    panel.clear_running("exp_001", "d_001")
+    assert _data_item().text(1) == "已导入"
+    panel.close()
+
+
 def test_project_tree_current_experiment_from_data(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:

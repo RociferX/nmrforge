@@ -78,6 +78,7 @@ class MainWindow(QMainWindow):
     batch_import_finished = pyqtSignal(str, str, int, object)  # (exp_id, batch_id, count, results)
     manual_run_log = pyqtSignal(str)  # 人工脚本运行日志(后台线程 → 主线程)
     manual_run_done = pyqtSignal()  # 人工脚本运行完成(主线程刷新 UI)
+    batch_run_done = pyqtSignal()  # 数据组批量处理完成(后台线程 → 主线程清运行标记)
 
     def __init__(
         self,
@@ -97,6 +98,7 @@ class MainWindow(QMainWindow):
         self.batch_import_finished.connect(self._on_batch_import_done)
         self.manual_run_log.connect(self._append_log)
         self.manual_run_done.connect(self._on_manual_run_done)
+        self.batch_run_done.connect(self._on_batch_run_done)
         self._pending_data_names: dict[str, str] = {}
         # 非模态脚本编辑器持有引用(0.2.192);0.2.193 起按 (data_id, step)
         # 去重——同数据同步骤只允许一个编辑器
@@ -252,6 +254,7 @@ class MainWindow(QMainWindow):
         self.center_panel.edit_notes_requested.connect(self._edit_notes)
         self.center_panel.group_run_requested.connect(self._run_group_batch)
         self.pipeline.run_finished.connect(self._on_pipeline_run_finished)
+        self.pipeline.run_started.connect(self._on_pipeline_run_started)
         self.pipeline.show_spectrum_requested.connect(
             self._show_spectrum_from_pipeline
         )
@@ -593,6 +596,9 @@ class MainWindow(QMainWindow):
             scope=group_scope,
         )
         self.center_panel.group_page.set_progress("批量处理运行中...")
+        # 0.2.199-补5:组批量开始,左侧树组内各数据显示「运行中」
+        for data_id in group.data_ids:
+            self.project_tree.mark_running(exp_id, data_id)
 
         def worker() -> None:
             try:
@@ -628,6 +634,7 @@ class MainWindow(QMainWindow):
                 self.import_failed.emit(f"{type(exc).__name__}: {exc}")
                 self.center_panel.group_page.set_progress("")
             finally:
+                self.batch_run_done.emit()
                 self.refresh()
 
         import threading
@@ -1188,10 +1195,17 @@ class MainWindow(QMainWindow):
             self.manual_run_log.emit(message)
             self.manual_run_done.emit()
 
+        # 0.2.199-补5:人工运行开始,左侧树该数据显示「运行中」
+        self.project_tree.mark_running(exp_id, data_id)
         threading.Thread(target=worker, daemon=True).start()
+
+    def _on_pipeline_run_started(self, exp_id: str, data_id: str) -> None:
+        """处理开始:左侧树该数据显示「运行中」(主线程)。"""
+        self.project_tree.mark_running(exp_id, data_id)
 
     def _on_pipeline_run_finished(self) -> None:
         """Pipeline 处理步骤完成后刷新左侧树/中间/谱图面板(主线程)。"""
+        self.project_tree.clear_running()
         self.refresh()
         self.center_panel.refresh()
         # 0.2.88:不自动显示谱,刷新文件列表即可(「展示谱图」按钮已出现)
@@ -1207,8 +1221,13 @@ class MainWindow(QMainWindow):
         if not self.spectrum_panel.load_current_spectrum():
             InfoDialog.show_info(self, "提示", "该样品数据还没有谱图文件")
 
+    def _on_batch_run_done(self) -> None:
+        """数据组批量处理完成:清除左侧树运行中标记(主线程)。"""
+        self.project_tree.clear_running()
+
     def _on_manual_run_done(self) -> None:
         """人工脚本运行完成后刷新 Pipeline/报告页(主线程)。"""
+        self.project_tree.clear_running()
         self.refresh()
         self.center_panel.refresh()
 

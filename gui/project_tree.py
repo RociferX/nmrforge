@@ -206,6 +206,8 @@ class ProjectTreePanel(QWidget):
         super().__init__(parent)
         self.manager = manager or ProjectManager()
         self.workspace = workspace
+        # 0.2.199-补5:正在运行处理的数据节点状态覆盖为「运行中」
+        self._running: set[tuple[str, str]] = set()
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -635,12 +637,36 @@ class ProjectTreePanel(QWidget):
             )
             folder_item.addChild(file_item)
 
+    def mark_running(self, exp_id: str, data_id: str) -> None:
+        """标记某数据正在处理(左侧状态显示「运行中」)。"""
+        if not (exp_id and data_id):
+            return
+        self._running.add((exp_id, data_id))
+        self.refresh()
+
+    def clear_running(
+        self, exp_id: str | None = None, data_id: str | None = None
+    ) -> None:
+        """清除运行中标记(缺省清全部)。"""
+        if exp_id is None and data_id is None:
+            self._running.clear()
+        else:
+            self._running = {
+                (e, d)
+                for (e, d) in self._running
+                if (exp_id is not None and e != exp_id)
+                or (data_id is not None and d != data_id)
+            }
+        self.refresh()
+
     def _data_status(self, exp, data_node) -> str:
-        """按产物文件推断样品数据状态。"""
+        """按产物文件推断样品数据状态(运行中的数据显示「运行中」)。"""
         try:
             spectra = self.manager.dir_path("spectra")
             exp_id = exp.id
             data_id = getattr(data_node, "id", exp_id)
+            if (exp_id, data_id) in self._running:
+                return "运行中"
             for ext in ("ft2", "ft3"):
                 if spectra.joinpath(f"{exp_id}-{data_id}.{ext}").is_file():
                     return "已处理"
