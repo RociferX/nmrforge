@@ -17,6 +17,7 @@ uniform 与 NUS 均支持)。score 可注入。
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -89,6 +90,31 @@ def _has_stripe_artifact(data: np.ndarray, axis: int, threshold: float = 8.0) ->
     return _stripe_ratio(data, axis) > threshold
 
 
+def _decimated(data: np.ndarray, axis: int, max_traces: int) -> np.ndarray:
+    """非 axis 维度按步长抽样(迹线子采样),控制逐候选评分开销。
+
+    评分指标为全局均值/条纹比,对迹线子采样近似不变(0.2.199-补8);
+    3D 最大轴数万条迹,全量稳健拟合开销大,子采样到 ≤max_traces 条。
+    """
+    n = max(data.shape[axis], 1)
+    n_traces = max(data.size // n, 1)
+    if data.ndim < 2 or n_traces <= max_traces:
+        return data
+    per = max(
+        1,
+        int(math.ceil((n_traces / max_traces) ** (1.0 / (data.ndim - 1)))),
+    )
+    slices = [
+        (
+            slice(None, None, per)
+            if (a != axis and data.shape[a] >= 2 * per)
+            else slice(None)
+        )
+        for a in range(data.ndim)
+    ]
+    return data[tuple(slices)]
+
+
 def optimize_baseline(
     experiment: Experiment,
     spectrum_path: Path | str,
@@ -97,13 +123,16 @@ def optimize_baseline(
     score_fn: Callable[[np.ndarray, int], float] | None = None,
     progress: Callable[[str], None] | None = None,
     cancel: Callable[[], bool] | None = None,
+    max_traces: int = 4096,
 ) -> BaselineOptimizeResult:
     """逐维基线优化:每维网格 mode∈{off,auto}×order∈{1,2,3},内存内评分,
     选每维最优写回 baseline 配置。直接全网格优化;无实质增益(≤0.5)或候选
     引入明显条纹时保持 off 配置。日志逐轴说明配置变化与分数增益。
     score_fn(data, np_axis) 返回该轴基线质量分(默认 baseline_quality);
     off=不校正。progress 逐轴/候选输出进度,cancel 置位时在候选间检查并抛
-    「任务已取消」(0.2.199-补7:3D 稳健逐迹拟合可达数万迹,需进度与可取消)。
+    「任务已取消」(0.2.199-补7:3D 稳健逐迹拟合可达数万迹,需进度与可取消);
+    max_traces:候选评分的迹线子采样上限(0.2.199-补8,默认 4096,越小越快,
+    评分近似不变;off 评分≥95 的轴跳过候选直接保持 off)。
     返回 {"baseline", "scores", "logs", "optimized", "skipped"}。
     """
     import nmrglue as ng
@@ -136,16 +165,29 @@ def optimize_baseline(
                 "逐候选评分中"
             )
         np_axis = axis_index(axis, arr.ndim)
-        current_score = float(score_fn(arr, np_axis))
+        # 0.2.199-补8:候选评分的稳健逐迹拟合在迹线子采样副本上进行
+        # (评分指标为全局均值/条纹比,子采样近似不变),3D 开销降约 10 倍
+        base = _decimated(arr, np_axis, max_traces)
+        current_score = float(score_fn(base, np_axis))
+        # 基线已良好(≥95)时跳过整轴候选,直接保持 off(省去全网格拟合)
+        if current_score >= 95.0:
+            baseline_cfg[axis] = dict(off_cfg)
+            scores[axis] = {"off:0": current_score}
+            logs.append(
+                f"{axis}: 基线已良好(score={current_score:.1f}≥95),"
+                "保持 off(跳过候选)"
+            )
+            unchanged.append(axis)
+            continue
         axis_scores: dict[str, float] = {}
         best: tuple[float, str, int] | None = None
         for mode, order in grid:
             if cancel is not None and cancel():
                 raise RuntimeError("任务已取消:基线优化被用户终止")
             if mode == "off":
-                work = arr  # 不校正直接评分,无需复制
+                work = base  # 不校正直接评分,无需复制
             else:
-                work = arr.copy()
+                work = base.copy()
                 work = baseline_proc.apply(
                     work,
                     baseline_proc.BaselineParams(

@@ -54,22 +54,39 @@ def test_optimize_baseline_grid_contains_off_and_orders(
     tmp_path: Path, bruker_dir: Path
 ) -> None:
     experiment = read_dataset(bruker_dir / "hsqc_2d")
-    spec = np.zeros((32, 64))
-    ft2 = tmp_path / "flat.ft2"
+    # 中等质量谱(off 分 <95):候选网格需真正运行
+    spec = np.full((32, 64), 100.0)
+    spec += np.linspace(-1.0, 1.0, 64)[np.newaxis, :]
+    ft2 = tmp_path / "mid.ft2"
     _write_ft2(ft2, spec)
-    # 平谱:直接全网格,off 应最优(校正无增益)
     result = optimize_baseline(experiment, ft2)
-    # 平谱:off 应最优(校正无增益)
+    assert result.scores["F2"]["off:0"] < 95.0
     assert result.scores["F2"]["off:0"] >= max(result.scores["F2"].values()) - 1e-9
     assert "auto:1" in result.scores["F2"]
     assert "order:3" in result.scores["F2"]
 
 
+def test_optimize_baseline_good_baseline_skips_grid(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """0.2.199-补8:off 评分≥95 的轴跳过候选网格,直接保持 off。"""
+    experiment = read_dataset(bruker_dir / "hsqc_2d")
+    spec = np.zeros((32, 64))
+    ft2 = tmp_path / "flat.ft2"
+    _write_ft2(ft2, spec)
+    result = optimize_baseline(experiment, ft2)
+    assert set(result.scores["F2"]) == {"off:0"}
+    assert result.scores["F2"]["off:0"] == 100.0
+    assert result.baseline["F2"]["enabled"] is False
+    assert any("基线已良好" in line for line in result.logs)
+
+
 def test_optimize_baseline_reports_progress(
     tmp_path: Path, bruker_dir: Path
 ) -> None:
-    """0.2.199-补7:基线优化逐轴/候选输出进度。"""
-    spec = np.zeros((32, 64))
+    """0.2.199-补7:基线优化逐轴/候选输出进度(off 分 <95 才跑候选)。"""
+    spec = np.full((32, 64), 100.0)
+    spec += np.linspace(-1.0, 1.0, 64)[np.newaxis, :]
     ft2 = tmp_path / "spec.ft2"
     _write_ft2(ft2, spec)
     experiment = read_dataset(bruker_dir / "hsqc_2d")
@@ -82,12 +99,38 @@ def test_optimize_baseline_reports_progress(
 def test_optimize_baseline_cancelled_raises(
     tmp_path: Path, bruker_dir: Path
 ) -> None:
-    """0.2.199-补7:取消标志置位时基线优化立即抛异常退出。"""
+    """0.2.199-补7:取消标志置位时基线优化立即抛异常退出(off 分 <95)。"""
     import pytest
 
-    spec = np.zeros((32, 64))
+    spec = np.full((32, 64), 100.0)
+    spec += np.linspace(-1.0, 1.0, 64)[np.newaxis, :]
     ft2 = tmp_path / "spec.ft2"
     _write_ft2(ft2, spec)
     experiment = read_dataset(bruker_dir / "hsqc_2d")
     with pytest.raises(RuntimeError, match="任务已取消"):
         optimize_baseline(experiment, ft2, cancel=lambda: True)
+
+
+def test_decimated_reduces_traces() -> None:
+    """0.2.199-补8:迹线子采样把候选评分迹数压到上限内。"""
+    from workflow.baseline_optimize import _decimated
+
+    arr = np.zeros((120, 80, 200))
+    for axis in range(3):
+        dec = _decimated(arr, axis, max_traces=4096)
+        n = dec.shape[axis]
+        assert dec.size // n <= 4096
+        assert dec.ndim == 3
+
+
+def test_optimize_baseline_small_max_traces_works(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """0.2.199-补8:小 max_traces 下基线优化仍返回有效配置。"""
+    spec = np.zeros((32, 64))
+    ft2 = tmp_path / "spec.ft2"
+    _write_ft2(ft2, spec)
+    experiment = read_dataset(bruker_dir / "hsqc_2d")
+    result = optimize_baseline(experiment, ft2, max_traces=8)
+    assert "F2" in result.baseline and "F1" in result.baseline
+    assert "off:0" in result.scores["F2"]
