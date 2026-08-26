@@ -1193,6 +1193,7 @@ def _unified_nus(
                 search_arr,
                 axis=direct_axis_idx,
                 metric="symmetry",
+                sign_mode=sign_mode,
                 progress=progress,
                 cancel=cancel_requested,
             )

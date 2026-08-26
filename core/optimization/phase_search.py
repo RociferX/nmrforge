@@ -390,14 +390,20 @@ def _net_window_metric(profile: np.ndarray) -> float:
     return (positive + negative) / total if total else 0.0
 
 
-def _symmetry_sign_metric(profile: np.ndarray) -> float:
-    """峰窗口对称性(0..1)——模仿 nmrDraw 显示层人工调相。
+def _symmetry_sign_metric(
+    profile: np.ndarray, sign_mode: str = "uniform"
+) -> float:
+    """峰窗口对称性 + 形状感知符号惩罚(0..1)——模仿 nmrDraw 显示层调相。
 
-    吸收峰实部偶对称(左=右,负旁瓣在正峰两侧)→ 1;色散峰奇对称 → 0。
-    0.2.199-补19:取消「净 Re 为负 ×0.05」正峰惩罚——部分峰天然为负
-    (如 sampleK 最强峰 -1.1e11),正确相位下负吸收峰同样左右对称,
-    惩罚会把它们压到 5% 拖垮评分面;±180 全局符号由搜索的「近最优平台
-    最小修正」启发式消歧。
+    sym = 左-右对称性:吸收峰实部偶对称(左=右,负旁瓣在正峰两侧)→ 1;
+    色散峰奇对称 → 0。
+
+    符号惩罚(0.2.199-补20,形状感知,用户方案):
+    - sign_mode="mixed"(正负峰共存谱,如 HNCACB 13C):返回纯 sym——
+      全局对称性最佳,负吸收峰不惩罚;
+    - sign_mode="uniform"(同号谱):负窗按 sym×0.2 轻罚——对称负吸收
+      (倒置吸收峰,正峰两侧对称负旁瓣)只降到 0.2(惩罚小,单侧色散负峰
+      sym≈0 已被天然压掉);异常反号峰被降权,不主导评分,±180 消歧保留。
     """
     f = np.asarray(profile, dtype=float)
     n = f.size
@@ -417,7 +423,9 @@ def _symmetry_sign_metric(profile: np.ndarray) -> float:
                 )
             )
         )
-    return sym
+    if sign_mode == "mixed":
+        return sym
+    return sym if float(np.sum(f)) >= 0.0 else sym * 0.2
 
 
 def _signal_peak_windows(
@@ -467,6 +475,7 @@ def search_direct_phase_on_spectrum(
     radius: int = 12,
     min_windows: int = 5,
     prefer_p1_zero: bool = True,
+    sign_mode: str = "uniform",
     progress: Callable[[str], None] | None = None,
     cancel: Callable[[], bool] | None = None,
 ) -> tuple[float, float, float] | None:
@@ -477,8 +486,10 @@ def search_direct_phase_on_spectrum(
 
     0.2.95(nmrDraw 显示层调相思路,默认 metric="symmetry"):先用信号行峰
     选择排除噪音/伪影区域(每行少数高耸峰),再对锁定峰窗做频域旋转对称性
-    评分(±180 正峰约束),近最优平台取最小修正。metric="net" 保留旧净吸收
-    指标(±90° 平台)。返回 (p0, p1, score);无干净信号峰返回 None。
+    评分,近最优平台取最小修正。sign_mode(0.2.199-补20):mixed=正负峰共存
+    谱全局对称性最佳;uniform=同号谱,形状感知负窗轻罚(异常反号峰降权)。
+    metric="net" 保留旧净吸收指标(±90° 平台)。返回 (p0, p1, score);
+    无干净信号峰返回 None。
     """
     arr = np.asarray(spectrum)
     axis = axis if axis >= 0 else arr.ndim - 1
@@ -495,7 +506,11 @@ def search_direct_phase_on_spectrum(
         if len(windows) > 200:
             index = np.linspace(0, len(windows) - 1, 200).astype(int)
             windows = [windows[i] for i in index]
-        window_metric = _symmetry_sign_metric
+
+        def _sym_window(profile: np.ndarray) -> float:
+            return _symmetry_sign_metric(profile, sign_mode=sign_mode)
+
+        window_metric = _sym_window
     else:
         traces = np.moveaxis(real, axis, -1).reshape(-1, n)
         peak_mag = np.max(np.abs(traces), axis=-1)
