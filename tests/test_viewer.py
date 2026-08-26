@@ -192,6 +192,35 @@ def test_viewer_add_spectrum_and_levels(qapp: QApplication) -> None:
     viewer.close()
 
 
+def test_viewer_update_spectrum_data_in_place(qapp: QApplication) -> None:
+    """0.2.199-补10:3D 切片切换原位更新主谱数据(不重建层,避免闪烁)。"""
+    viewer = SpectrumViewer()
+    first = _synthetic_spectrum()
+    viewer.add_spectrum(first, name="slice 0")
+    second = _synthetic_spectrum()
+    second.data = second.data + 1.0
+    ok = viewer.update_spectrum_data(second, name="slice 1")
+    assert ok is True
+    assert len(viewer.layers) == 1  # 原位更新,未新增/重建层
+    assert viewer._primary is second
+    assert viewer.layer_names == ["slice 1"]
+    assert viewer.layer_list.count() == 1
+    assert viewer.layer_list.item(0).text() == "slice 1"
+    assert np.array_equal(viewer.layers[0]._data, second.data)
+    viewer.close()
+
+
+def test_viewer_update_spectrum_data_falls_back(qapp: QApplication) -> None:
+    """0.2.199-补10:多层视图时原位更新回退 clear+add。"""
+    viewer = SpectrumViewer()
+    viewer.add_spectrum(_synthetic_spectrum())
+    viewer.add_spectrum(_synthetic_spectrum())  # 第二层
+    ok = viewer.update_spectrum_data(_synthetic_spectrum())
+    assert ok is False
+    assert len(viewer.layers) == 1  # 已 clear 后只剩一张
+    viewer.close()
+
+
 def test_viewer_contour_defaults_and_english_labels(
     qapp: QApplication,
 ) -> None:

@@ -13,7 +13,12 @@
   `position()`(QMouseEvent);
 - 加长(viewer/spectrum3d_panel):slice 横向滑块 setMinimumWidth(220),
   拖动条更长、细调切片更顺手;
-- 测试:viewer/3D 面板相关用例;全量 pytest + ruff 全绿。
+- 切片切换原位更新(gui/spectrum_panel._render_3d_view):不再 clear()+
+  add_spectrum() 全量重建,而是 SpectrumViewer.update_spectrum_data 原位
+  layer.setData(单层 2D 主谱时),消除拖动切片时的闪烁并显著提速;换谱/
+  换平面时自动回退 clear+add;
+- 测试:update_spectrum_data 原位/回退用例,viewer/3D 面板相关用例;
+  全量 pytest + ruff 全绿。
 
 ## 0.2.199-补9(2026-08-26,基线优化条纹否决改相对语义 + 诚实日志)
 

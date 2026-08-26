@@ -363,6 +363,35 @@ class SpectrumViewer(QWidget):
         self._refresh_phase_availability()
         return name
 
+    def update_spectrum_data(
+        self, spectrum: Spectrum, name: str | None = None
+    ) -> bool:
+        """原位更新主谱数据(3D 切片切换):不 clear/重建,避免闪烁与慢。
+
+        仅当视图只有一张二维主谱(3D 切片场景)时生效;其它情况回退
+        clear+add。返回 True 表示已原位更新。
+        """
+        if (
+            spectrum.data.ndim != 2
+            or len(self.layers) != 1
+            or self._primary is None
+        ):
+            self.clear()
+            self.add_spectrum(spectrum, name=name)
+            return False
+        layer = self.layers[0]
+        layer.setData(spectrum.data, self._levels_for(spectrum))
+        self._primary = spectrum
+        self.layer_spectra[0] = spectrum
+        if name is not None and self.layer_names:
+            self.layer_names[0] = name
+            if self.layer_list.count():
+                self.layer_list.item(0).setText(name)
+        self._setup_axes(spectrum)
+        self._update_data_bounds()
+        self._refresh_phase_availability()
+        return True
+
     def _level_fraction(self) -> float:
         """滑块值 → 起点百分比(立方映射:前 10% 阈值占拖动条大部分,低阈值精细可调)。"""
         value = max(1, self.level_slider.value())

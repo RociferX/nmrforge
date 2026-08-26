@@ -594,8 +594,9 @@ class SpectrumPanel(QWidget):
         if spectrum is None:
             return
         base = self._current_spectrum.stem if self._current_spectrum else "3D"
-        self.viewer.clear()
-        self.viewer.add_spectrum(
+        # 0.2.199-补10:切片切换原位更新轮廓(不 clear/重建),避免闪烁与慢;
+        # 换谱/换平面时 update_spectrum_data 自动回退 clear+add
+        self.viewer.update_spectrum_data(
             spectrum,
             name=self._spectrum3d_panel.current_name(base),
         )
