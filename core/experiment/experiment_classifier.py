@@ -29,9 +29,11 @@ from core.experiments.registry import REGISTRY
 # C13_1D)暂无 presets YAML(test_gui_presets 仅允许 ndim=2/3),关键词待
 # GUI 侧放开 ndim=1 后补。
 _PULPROG_TYPES: list[tuple[str, str]] = [
+    # —— 溶液核磁:HNN(hncannh/hncocannh 为溶液梯度脉冲程序;须排在
+    # "nnh" 之前,否则 hncocannh 的子串 nnh 抢先匹配固体 NNH)——
+    ("hncocannh", "HNN"),
+    ("hncannh", "HNN"),
     # —— 固体核磁:15N/13C 主链与 1H 检测同核 ——
-    ("hncocannh", "NNH"),
-    ("hncannh", "NNH"),
     ("nnh", "NNH"),
     ("nhhc", "NHHC"),
     ("chhc", "CHHC"),
