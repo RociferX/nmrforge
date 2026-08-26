@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QPoint, QRect, QSize, Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QCheckBox,
     QDialog,
@@ -23,6 +23,8 @@ from PyQt6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QLayout,
+    QLayoutItem,
     QLineEdit,
     QPushButton,
     QScrollArea,
@@ -465,6 +467,80 @@ def _spectrum_param_report(
     return "\n".join(lines) if lines else "  (无参数记录)"
 
 
+class _FlowLayout(QLayout):
+    """简单流式布局:子项超过可用宽度时自动换行(0.2.199-补4)。
+
+    用于步骤行按钮区——生成谱图完成后最多 5 个按钮(直接维范围/重新优化/
+    重新运行终脚本/展示谱图/人工),单行过宽时自动折行,不撑破面板。
+    """
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._items: list[QLayoutItem] = []
+        self.setSpacing(6)
+
+    def addItem(self, item: QLayoutItem) -> None:
+        self._items.append(item)
+
+    def count(self) -> int:
+        return len(self._items)
+
+    def itemAt(self, index: int) -> QLayoutItem | None:
+        if 0 <= index < len(self._items):
+            return self._items[index]
+        return None
+
+    def takeAt(self, index: int) -> QLayoutItem | None:
+        if 0 <= index < len(self._items):
+            return self._items.pop(index)
+        return None
+
+    def expandingDirections(self) -> Qt.Orientation:
+        return Qt.Orientation(0)
+
+    def hasHeightForWidth(self) -> bool:
+        return True
+
+    def heightForWidth(self, width: int) -> int:
+        return self._do_layout(QRect(0, 0, width, 0), test_only=True)
+
+    def setGeometry(self, rect: QRect) -> None:
+        super().setGeometry(rect)
+        self._do_layout(rect, test_only=False)
+
+    def sizeHint(self) -> QSize:
+        return self.minimumSize()
+
+    def minimumSize(self) -> QSize:
+        size = QSize()
+        for item in self._items:
+            size = size.expandedTo(item.minimumSize())
+        m = self.contentsMargins()
+        return size + QSize(m.left() + m.right(), m.top() + m.bottom())
+
+    def _do_layout(self, rect: QRect, test_only: bool = False) -> int:
+        m = self.contentsMargins()
+        x = rect.x() + m.left()
+        y = rect.y() + m.top()
+        line_height = 0
+        for item in self._items:
+            widget = item.widget()
+            if widget is not None and widget.isHidden():
+                continue  # 隐藏按钮不占位(如非 spectrum 行的「直接维范围」)
+            hint = item.sizeHint()
+            next_x = x + hint.width()
+            if line_height > 0 and next_x > rect.right() - m.right():
+                x = rect.x() + m.left()
+                y += line_height + self.spacing()
+                next_x = x + hint.width()
+                line_height = 0
+            if not test_only:
+                item.setGeometry(QRect(QPoint(x, y), hint))
+            x = next_x
+            line_height = max(line_height, hint.height())
+        return y + line_height + m.bottom() - rect.y()
+
+
 class PipelineStepRow(QWidget):
     """单个步骤行:状态图标 + 名称 + 描述 + 运行/人工入口 + 内嵌详情。
 
@@ -509,8 +585,9 @@ class PipelineStepRow(QWidget):
         text_box.addWidget(self.desc_label)
         header.addLayout(text_box, 1)
         outer.addLayout(header)
-        # 0.2.163-补5:按钮放标题/描述下方独立一行(不再挤在右侧)
-        button_row = QHBoxLayout()
+        # 0.2.163-补5:按钮放标题/描述下方独立一行(不再挤在右侧);
+        # 0.2.199-补4:按钮多时(如谱图步骤 5 个)自动换行,避免行过宽
+        button_row = _FlowLayout()
         button_row.setContentsMargins(24, 0, 0, 0)
         # 0.2.162-补15:生成谱图运行前「直接维范围」按钮(仅终跑生效)
         self.ext_range_button = QPushButton("直接维范围")
@@ -560,7 +637,6 @@ class PipelineStepRow(QWidget):
             lambda: self.manual_requested.emit(self.step_id)
         )
         button_row.addWidget(self.manual_button)
-        button_row.addStretch(1)
         outer.addLayout(button_row)
 
         self.reason_label = QLabel("")

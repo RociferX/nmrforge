@@ -225,6 +225,44 @@ def test_pipeline_spectrum_row_ext_range_button_before_run(
     panel.close()
 
 
+def test_pipeline_button_row_wraps_when_narrow(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.2.199-补4:步骤行按钮区为流式布局,宽度不足时按钮自动折行。"""
+    from gui.pipeline_panel import PipelinePanel
+
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    panel = PipelinePanel(manager, FakeProcessingController())
+    panel.set_selection("data", "exp_001", "d_001")
+    row = panel._rows["spectrum"]
+    buttons = [
+        row.ext_range_button,
+        row.run_button,
+        row.rerun_final_button,
+        row.show_spectrum_button,
+        row.manual_button,
+    ]
+    for button in buttons:
+        button.setVisible(True)  # 模拟谱图步骤完成后的 5 个可见按钮
+    row.show()
+    qapp.processEvents()
+    button_row = row.layout().itemAt(1)
+
+    def _row_ys() -> set[int]:
+        return {
+            button_row.itemAt(i).widget().y()
+            for i in range(button_row.count())
+            if button_row.itemAt(i).widget() is not None
+        }
+
+    # 窄宽度下 5 个按钮必须折成多行(y 坐标至少两行)
+    row.setFixedWidth(180)
+    qapp.processEvents()
+    ys = _row_ys()
+    assert len(ys) >= 2, f"窄宽度下按钮未折行: y={sorted(ys)}"
+    panel.close()
+
+
 def test_pipeline_final_ext_override_params(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
