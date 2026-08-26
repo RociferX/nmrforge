@@ -391,10 +391,13 @@ def _net_window_metric(profile: np.ndarray) -> float:
 
 
 def _symmetry_sign_metric(profile: np.ndarray) -> float:
-    """峰窗口对称性 + 正峰约束(0..1)——模仿 nmrDraw 显示层人工调相。
+    """峰窗口对称性(0..1)——模仿 nmrDraw 显示层人工调相。
 
-    吸收峰实部偶对称(左=右)→ 1;色散峰奇对称 → 0;±180 反转峰同样对称,
-    用净 Re 为负重罚(与现有方法正峰语义一致)。
+    吸收峰实部偶对称(左=右,负旁瓣在正峰两侧)→ 1;色散峰奇对称 → 0。
+    0.2.199-补19:取消「净 Re 为负 ×0.05」正峰惩罚——部分峰天然为负
+    (如 sampleK 最强峰 -1.1e11),正确相位下负吸收峰同样左右对称,
+    惩罚会把它们压到 5% 拖垮评分面;±180 全局符号由搜索的「近最优平台
+    最小修正」启发式消歧。
     """
     f = np.asarray(profile, dtype=float)
     n = f.size
@@ -414,7 +417,7 @@ def _symmetry_sign_metric(profile: np.ndarray) -> float:
                 )
             )
         )
-    return sym if float(np.sum(f)) >= 0.0 else sym * 0.05
+    return sym
 
 
 def _signal_peak_windows(
