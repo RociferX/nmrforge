@@ -172,8 +172,8 @@ def test_rerun_final_applies_latest_ext(
 
     panel = PipelinePanel(manager, _CaptureController())
     panel.set_selection("data", exp_id, data_id)
-    # 用户设置终跑直接维范围 8.0-6.0
-    panel._final_ext[(exp_id, data_id)] = ("8.0", "6.0")
+    # 用户设置终跑直接维范围 8.0-6.0(应用此范围到优化过程默认开启)
+    panel._final_ext[(exp_id, data_id)] = ("8.0", "6.0", True)
     panel._on_rerun_final_requested("spectrum")
     assert calls == ["run_manual_spectrum"]
     # 运行的脚本内容:EXT 已更新为 8.0-6.0,其它参数(SP/FT/PS/POLY)原样

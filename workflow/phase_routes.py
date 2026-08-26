@@ -271,16 +271,32 @@ def _template_peak_sign(experiment: Experiment) -> str:
     return "uniform"
 
 
-def _split_final_ext(params: dict[str, Any]) -> tuple[dict[str, Any], Any, Any]:
-    """从参数取出仅终跑生效的直接维范围(final_ext_lo/final_ext_hi)。
+def _apply_ext_opt_enabled(params: dict[str, Any]) -> bool:
+    """「应用此范围到优化过程」开关(0.2.199-补3):默认开启。"""
+    return str(params.get("apply_ext_to_opt", "1")).strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
 
-    返回 (剩余参数, ext_lo, ext_hi);首遍/复型预览路径使用剩余参数,
-    终跑路径把取出的值映射回 ext_lo/ext_hi(_apply_final_ext)。
+
+def _split_final_ext(
+    params: dict[str, Any],
+) -> tuple[dict[str, Any], Any, Any, bool]:
+    """从参数取出直接维范围(final_ext_lo/final_ext_hi)与优化应用开关。
+
+    返回 (剩余参数, ext_lo, ext_hi, apply_to_opt);首遍/复型预览路径使用
+    剩余参数(默认 6.5-10.5 大窗口),终跑路径把取出的值映射回
+    ext_lo/ext_hi(_apply_final_ext);apply_to_opt 开启时调用方把范围
+    同时写入优化过程(首遍重构/相位搜索与基线/填零/窗函数评估)。
     """
     p = dict(params)
     final_lo = p.pop("final_ext_lo", None)
     final_hi = p.pop("final_ext_hi", None)
-    return p, final_lo, final_hi
+    apply_to_opt = _apply_ext_opt_enabled(p)
+    p.pop("apply_ext_to_opt", None)
+    return p, final_lo, final_hi, apply_to_opt
 
 
 def _apply_final_ext(
@@ -388,9 +404,12 @@ def unified_route(    experiment: Experiment,
             ]
     except Exception as exc:  # noqa: BLE001 - 诊断失败不阻断谱图生成
         diag_logs = [f"数据质量诊断失败: {exc}"]
-    # 0.2.162-补15:用户指定的终跑直接维范围(final_ext_lo/final_ext_hi)
-    # 只进终跑完整脚本,首遍复型预览不改
-    params, final_ext_lo, final_ext_hi = _split_final_ext(params)
+    # 0.2.162-补15:用户指定的终跑直接维范围(final_ext_lo/final_ext_hi);
+    # 0.2.199-补3:开启「应用此范围到优化过程」时同时进入复型预览/优化评估,
+    # 否则首遍复型预览保持默认大范围,仅终跑用该范围
+    params, final_ext_lo, final_ext_hi, apply_ext_opt = _split_final_ext(params)
+    if apply_ext_opt:
+        params = _apply_final_ext(params, final_ext_lo, final_ext_hi)
     ext = "ft3" if experiment.ndim >= 3 else "ft2"
     direct_axis = "F2" if experiment.ndim == 2 else "F3"
     sign_mode = _sign_mode(experiment)
@@ -724,13 +743,15 @@ def _optimize_uniform_processing(
     out_logs: list[str] = []
     baseline_cfg = dict(base.get("baseline") or {})
     window_cfg = base.get("window")
-    # 1) 联合复核谱:最终相位 + 完整填零,作基线/窗评分基底(process 一次)
+    # 1) 联合复核谱:最终相位 + 完整填零,作基线/窗评分基底(process 一次);
+    #    开启「应用此范围到优化过程」时(0.2.199-补3)评估谱用用户直接维范围
+    opt_ext = {k: base[k] for k in ("ext_lo", "ext_hi") if k in base}
     joint_file = f"{experiment.dataset_id}_joint.{ext}"
     resp = backend.process(
         experiment,
         plan,
         direct_phase_override=dict(fixed) if fixed else None,
-        params={"zero_fill": zf_params},
+        params={"zero_fill": zf_params, **opt_ext},
         out_file=joint_file,
         script_name=f"{experiment.dataset_id}_joint.com",
         progress=progress,
@@ -771,7 +792,11 @@ def _optimize_uniform_processing(
             experiment,
             plan,
             direct_phase_override=dict(fixed) if fixed else None,
-            params={"zero_fill": zf_params, "baseline": apply_baseline},
+            params={
+                "zero_fill": zf_params,
+                "baseline": apply_baseline,
+                **opt_ext,
+            },
             out_file=joint_file,
             script_name=f"{experiment.dataset_id}_joint.com",
             progress=progress,
@@ -1009,9 +1034,14 @@ def _unified_nus(
     except Exception as exc:  # noqa: BLE001 - 诊断失败不阻断谱图生成
         diag_logs = [f"数据质量诊断失败: {exc}"]
     params_first = dict(base_params or {})
-    # 0.2.162-补15:终跑直接维范围(final_ext_lo/final_ext_hi)只进终跑,
-    # 首遍重构/相位搜索保持原窗口
-    params_first, final_ext_lo, final_ext_hi = _split_final_ext(params_first)
+    # 0.2.162-补15:终跑直接维范围(final_ext_lo/final_ext_hi)默认只进终跑;
+    # 0.2.199-补3:开启「应用此范围到优化过程」时同时进入首遍重构/相位搜索
+    # 与优化评估(重构平面窗口即评估窗口,且直接维窗口越窄 SMILE 内存越低)
+    params_first, final_ext_lo, final_ext_hi, apply_ext_opt = _split_final_ext(
+        params_first
+    )
+    if apply_ext_opt:
+        params_first = _apply_final_ext(params_first, final_ext_lo, final_ext_hi)
     params_first.update(
         {
             "direct_phase_search": False,

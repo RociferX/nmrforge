@@ -16,6 +16,7 @@ from pathlib import Path
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
+    QCheckBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
@@ -684,7 +685,7 @@ class PipelinePanel(QWidget):
         self._current_data_id: str = ""
         self._rows: dict[str, PipelineStepRow] = {}
         # 0.2.162-补15:(exp_id, data_id) → (终跑 ext_lo, 终跑 ext_hi)
-        self._final_ext: dict[tuple[str, str], tuple[str, str]] = {}
+        self._final_ext: dict[tuple[str, str], tuple[str, str, bool]] = {}
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
@@ -868,7 +869,7 @@ class PipelinePanel(QWidget):
     # 终跑直接维范围(0.2.162-补15)
     # ------------------------------------------------------------------
     def _on_ext_range_requested(self, step_id: str) -> None:
-        """「直接维范围」按钮:弹输入对话框,按数据保存终跑直接维范围覆盖。"""
+        """「直接维范围」按钮:弹输入对话框,按数据保存直接维范围覆盖。"""
         if step_id != "spectrum":
             return
         exp_id = self._current_exp_id
@@ -876,9 +877,9 @@ class PipelinePanel(QWidget):
         if not (exp_id and data_id):
             return
         key = (exp_id, data_id)
-        current = self._final_ext.get(key, ("", ""))
+        current = self._final_ext.get(key, ("", "", True))
         dialog = QDialog(self)
-        dialog.setWindowTitle("直接维范围(仅终跑)")
+        dialog.setWindowTitle("直接维范围")
         form = QFormLayout(dialog)
         lo_edit = QLineEdit(str(current[0]) if current[0] else "")
         hi_edit = QLineEdit(str(current[1]) if current[1] else "")
@@ -887,13 +888,23 @@ class PipelinePanel(QWidget):
         form.addRow("高场端 ppm (EXT -x1):", lo_edit)
         form.addRow("低场端 ppm (EXT -xn):", hi_edit)
         tip = QLabel(
-            "只影响终跑完整脚本,首遍重构/相位搜索保持原窗口。\n"
             "留空=使用默认(10.5-6.5);窗口外峰不会出现在终谱中,\n"
             "直接维线性相位 p1 会按窗口宽度自动重归一化。"
         )
         tip.setWordWrap(True)
         tip.setStyleSheet("color: #666;")
         form.addRow(tip)
+        apply_check = QCheckBox("应用此范围到优化过程")
+        apply_check.setChecked(bool(current[2]))
+        form.addRow(apply_check)
+        apply_tip = QLabel(
+            "默认开启:优化过程(首遍重构/相位搜索与基线/填零/窗函数评估)\n"
+            "使用指定范围,与终谱一致,且可降低 SMILE 内存;\n"
+            "若优化效果不佳可尝试关闭,用默认 6.5-10.5 大范围优化。"
+        )
+        apply_tip.setWordWrap(True)
+        apply_tip.setStyleSheet("color: #666;")
+        form.addRow(apply_tip)
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok
             | QDialogButtonBox.StandardButton.Cancel
@@ -905,21 +916,23 @@ class PipelinePanel(QWidget):
             return
         lo = lo_edit.text().strip()
         hi = hi_edit.text().strip()
+        apply_opt = apply_check.isChecked()
         if not lo and not hi:
             self._final_ext.pop(key, None)
             self.log_message.emit(
-                f"直接维范围(终跑): {data_id} 已清除,恢复默认窗口"
+                f"直接维范围: {data_id} 已清除,恢复默认窗口"
             )
         else:
-            self._final_ext[key] = (lo, hi)
+            self._final_ext[key] = (lo, hi, apply_opt)
+            scope = "含优化" if apply_opt else "仅终跑"
             self.log_message.emit(
-                f"直接维范围(终跑): {data_id} 已设为 "
-                f"{lo or '默认'}-{hi or '默认'} ppm(首遍保持原窗口)"
+                f"直接维范围: {data_id} 已设为 "
+                f"{lo or '默认'}-{hi or '默认'} ppm({scope})"
             )
         self._update_ext_button()
 
     def _update_ext_button(self) -> None:
-        """按当前数据的终跑直接维范围覆盖更新按钮文案与提示词。"""
+        """按当前数据的直接维范围覆盖更新按钮文案与提示词。"""
         row = self._rows.get("spectrum")
         if row is None:
             return
@@ -927,30 +940,42 @@ class PipelinePanel(QWidget):
         if over and (over[0] or over[1]):
             lo = over[0] or "默认"
             hi = over[1] or "默认"
-            row.set_ext_override(f"直接维范围 {lo}/{hi}")
+            scope = "含优化" if over[2] else "仅终跑"
+            first_note = (
+                "首遍重构/相位搜索与优化评估同窗口"
+                if over[2]
+                else "首遍重构/相位搜索保持原窗口"
+            )
+            row.set_ext_override(f"直接维范围 {lo}/{hi} · {scope}")
             row.ext_range_button.setToolTip(
-                f"终跑直接维窗口: {lo}-{hi} ppm(EXT -x1/-xn)\n"
-                "首遍重构/相位搜索保持原窗口;窗口外峰不进入终谱,\n"
+                f"直接维窗口: {lo}-{hi} ppm(EXT -x1/-xn,{scope})\n"
+                f"{first_note};窗口外峰不进入终谱,\n"
                 "p1 按窗口宽度自动重归一化;切换数据后显示各自设置"
             )
         else:
             row.set_ext_override("直接维范围")
             row.ext_range_button.setToolTip(
-                "指定终跑脚本的直接维提取窗口(EXT -x1/-xn);"
-                "首遍相位搜索保持原窗口;未设置时用默认(10.5-6.5)"
+                "指定直接维提取窗口(EXT -x1/-xn);默认开启「应用此范围到\n"
+                "优化过程」,可关闭改用默认 6.5-10.5 大范围优化;\n"
+                "未设置时用默认(10.5-6.5)"
             )
 
     def _spectrum_ext_params(self, data_id: str) -> dict | None:
-        """当前实验某数据的终跑直接维范围 → generate_spectrum params(无则 None)。"""
+        """当前实验某数据的直接维范围 → generate_spectrum params(无则 None)。
+
+        apply_ext_to_opt:默认开启,范围同时用于优化过程(首遍重构/相位搜索
+        与基线/填零/窗函数评估);关闭时优化用默认 6.5-10.5 大范围,仅终跑
+        用该范围。
+        """
         over = self._final_ext.get((self._current_exp_id, data_id))
         if not over:
             return None
-        ext_params: dict[str, str] = {}
+        ext_params: dict[str, str] = {"apply_ext_to_opt": "1" if over[2] else "0"}
         if over[0]:
             ext_params["final_ext_lo"] = over[0]
         if over[1]:
             ext_params["final_ext_hi"] = over[1]
-        return ext_params or None
+        return ext_params
 
     # ------------------------------------------------------------------
     # 运行

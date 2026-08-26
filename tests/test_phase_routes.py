@@ -522,10 +522,11 @@ def test_unified_route_nus_progress_stages(
 
 
 
-def test_unified_route_nus_final_ext_only_applies_to_final_run(
+def test_unified_route_nus_final_ext_apply_to_opt(
     tmp_path: Path, monkeypatch, bruker_dir: Path
 ) -> None:
-    """0.2.162-补15:final_ext_lo/hi 只进终跑完整脚本,首遍重构保持原窗口。"""
+    """0.2.162-补15/0.2.199-补3:final_ext 默认开启「应用此范围到优化过程」,
+    首遍重构同窗口;关闭时仅终跑应用范围。"""
     from types import SimpleNamespace
 
     experiment = read_dataset(bruker_dir / "nus_2d")
@@ -567,23 +568,40 @@ def test_unified_route_nus_final_ext_only_applies_to_final_run(
             "logs": [],
         },
     )
+    # 关闭「应用此范围到优化过程」:首遍保持默认窗口,仅终跑用该范围
     result = routes.unified_route(
         experiment,
         backend,
         work_dir=work,
-        base_params={"final_ext_lo": "11.0", "final_ext_hi": "5.5"},
+        base_params={
+            "final_ext_lo": "11.0",
+            "final_ext_hi": "5.5",
+            "apply_ext_to_opt": "0",
+        },
     )
     first_params = backend.reconstruct_params[0]
     final_params = backend.reconstruct_params[1]
-    # 首遍:终跑范围不落入,也不带新 ext(保持原窗口/配置默认)
     assert "final_ext_lo" not in first_params
-    assert "final_ext_hi" not in first_params
     assert first_params.get("ext_lo") is None
-    # 终跑:范围已映射为 ext_lo/ext_hi,私有键不残留
     assert final_params["ext_lo"] == "11.0"
     assert final_params["ext_hi"] == "5.5"
     assert "final_ext_lo" not in final_params
     assert result["spectrum_path"]
+    # 默认开启:范围同时进入首遍重构/相位搜索(重构平面即优化评估窗口)
+    backend2 = _FakeBackend(tmp_path / "nus_ext_work_on")
+    result2 = routes.unified_route(
+        experiment,
+        backend2,
+        work_dir=backend2.work,
+        base_params={"final_ext_lo": "11.0", "final_ext_hi": "5.5"},
+    )
+    first2 = backend2.reconstruct_params[0]
+    final2 = backend2.reconstruct_params[1]
+    assert first2.get("ext_lo") == "11.0"
+    assert first2.get("ext_hi") == "5.5"
+    assert "final_ext_lo" not in first2
+    assert final2["ext_lo"] == "11.0"
+    assert result2["spectrum_path"]
 
 
 def test_unified_route_uniform_optimization_passes_plan(
@@ -695,10 +713,11 @@ def test_unified_route_uniform_runs_processing_optimization(
     assert any("初跑脚本保留" in line for line in result["logs"])
 
 
-def test_unified_route_uniform_final_ext_only_applies_to_final_run(
+def test_unified_route_uniform_final_ext_apply_to_opt(
     tmp_path: Path, monkeypatch, bruker_dir: Path
 ) -> None:
-    """0.2.162-补15:uniform 首遍复型预览不改窗口,终跑完整脚本应用范围。"""
+    """0.2.162-补15/0.2.199-补3:uniform 默认开启时复型预览/优化/终跑同窗口,
+    关闭时仅终跑应用范围。"""
     experiment = read_dataset(bruker_dir / "hsqc_2d")
     backend = _FakeBackend(tmp_path / "uni_ext_work")
     work = backend.work
@@ -712,11 +731,16 @@ def test_unified_route_uniform_final_ext_only_applies_to_final_run(
         return _synthetic_preview(0, 0.0)
 
     monkeypatch.setattr(routes, "_read_complex_preview", fake_read)
+    # 关闭「应用此范围到优化过程」:首遍复型预览保持默认窗口,仅终跑用该范围
     result = routes.unified_route(
         experiment,
         backend,
         work_dir=work,
-        base_params={"final_ext_lo": "11.0", "final_ext_hi": "5.5"},
+        base_params={
+            "final_ext_lo": "11.0",
+            "final_ext_hi": "5.5",
+            "apply_ext_to_opt": "0",
+        },
     )
     # 0.2.163-补6:uniform 处理参数优化先跑 joint 复核谱
     assert len(backend.process_calls) == 4  # F1 预览 + F2 预览 + joint + 终跑
@@ -728,6 +752,21 @@ def test_unified_route_uniform_final_ext_only_applies_to_final_run(
     assert final[2]["ext_hi"] == "5.5"
     assert "final_ext_lo" not in final[2]
     assert result["spectrum_path"]
+    # 默认开启:复型预览/优化评估/终跑同窗口
+    backend2 = _FakeBackend(tmp_path / "uni_ext_work_on")
+    result2 = routes.unified_route(
+        experiment,
+        backend2,
+        work_dir=backend2.work,
+        base_params={"final_ext_lo": "11.0", "final_ext_hi": "5.5"},
+    )
+    assert len(backend2.process_calls) == 4
+    p1b, p2b, jointb, finalb = backend2.process_calls
+    for call in (p1b, p2b, jointb, finalb):
+        assert call[2].get("ext_lo") == "11.0"
+        assert call[2].get("ext_hi") == "5.5"
+    assert "final_ext_lo" not in p1b[2]
+    assert result2["spectrum_path"]
 
 
 def test_renormalize_direct_p1_scales_with_window_width() -> None:
@@ -752,7 +791,8 @@ def test_renormalize_direct_p1_scales_with_window_width() -> None:
 def test_unified_route_nus_final_ext_renormalizes_p1(
     tmp_path: Path, monkeypatch, bruker_dir: Path
 ) -> None:
-    """0.2.162-补16:终跑窗口变窄时,直接维 p1 按窗口宽度重归一化并进报告。"""
+    """0.2.162-补16:关闭「应用此范围到优化过程」时,终跑窗口变窄,
+    直接维 p1 按窗口宽度重归一化并进报告;开启(默认)时首遍同窗口不缩放。"""
     from types import SimpleNamespace
 
     experiment = read_dataset(bruker_dir / "nus_2d")
@@ -798,7 +838,11 @@ def test_unified_route_nus_final_ext_renormalizes_p1(
         experiment,
         backend,
         work_dir=work,
-        base_params={"final_ext_lo": "8.5", "final_ext_hi": "6.5"},
+        base_params={
+            "final_ext_lo": "8.5",
+            "final_ext_hi": "6.5",
+            "apply_ext_to_opt": "0",
+        },
     )
     final_params = backend.reconstruct_params[1]
     # 首遍窗口 10.5-6.5=4.0,终跑 8.5-6.5=2.0 → p1 15°→7.5°;p0 不变
@@ -806,6 +850,20 @@ def test_unified_route_nus_final_ext_renormalizes_p1(
     assert result["direct_phase"] == (30.0, 7.5)
     assert any(
         "窗口重归一化" in line and "7.5" in line for line in result["logs"]
+    )
+    # 默认开启:首遍重构与终跑同窗口(8.5-6.5),p1 不重归一化
+    backend2 = _FakeBackend(tmp_path / "nus_p1_work_on")
+    result2 = routes.unified_route(
+        experiment,
+        backend2,
+        work_dir=backend2.work,
+        base_params={"final_ext_lo": "8.5", "final_ext_hi": "6.5"},
+    )
+    final2 = backend2.reconstruct_params[1]
+    assert final2["direct_phase_override"] == [30.0, 15.0]
+    assert result2["direct_phase"] == (30.0, 15.0)
+    assert not any(
+        "窗口重归一化" in line for line in result2["logs"]
     )
 
 
@@ -860,6 +918,24 @@ def test_finalize_nus_progress_callback(tmp_path: Path, monkeypatch, bruker_dir:
     assert resp["success"] is True, resp
     assert "开始 finalize(复型预览/终跑)" in messages, messages
     assert "finalize 完成" in messages, messages
+
+def test_split_final_ext_apply_to_opt_default_on() -> None:
+    """0.2.199-补3:「应用此范围到优化过程」默认开启,参数透传解析。"""
+    from workflow.phase_routes import _split_final_ext
+
+    p, lo, hi, apply = _split_final_ext(
+        {"final_ext_lo": "8.0", "final_ext_hi": "6.0"}
+    )
+    assert (lo, hi, apply) == ("8.0", "6.0", True)
+    assert "apply_ext_to_opt" not in p
+    assert "final_ext_lo" not in p
+    p, lo, hi, apply = _split_final_ext(
+        {"final_ext_lo": "8.0", "apply_ext_to_opt": "0"}
+    )
+    assert (lo, hi, apply) == ("8.0", None, False)
+    p, lo, hi, apply = _split_final_ext({"apply_ext_to_opt": "off"})
+    assert (lo, hi, apply) == (None, None, False)
+
 
 def test_direct_phase_cache_roundtrip(tmp_path: Path) -> None:
     '''直接维相位缓存:保存→加载命中;shape/参数变化则失效。'''

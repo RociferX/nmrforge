@@ -840,7 +840,9 @@ class NMRPipeBackend:
                     "success": False,
                     "message": (
                         f"当前内存无法处理该谱(可用约 {avail_mb} MB,SMILE "
-                        f"峰值约 {peak_mb:.0f} MB),请至少提供 {needed_gb} GB 内存"
+                        f"峰值约 {peak_mb:.0f} MB),请至少提供 {needed_gb} GB 内存。"
+                        "也可以尽可能变窄直接维范围并开启「应用此范围到优化过程」"
+                        "(直接维窗口越窄,SMILE 峰值内存越低)"
                     ),
                     "logs": logs,
                 }

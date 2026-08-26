@@ -235,14 +235,18 @@ def test_pipeline_final_ext_override_params(
     panel = PipelinePanel(manager, FakeProcessingController())
     panel.set_selection("data", "exp_001", "d_001")
     assert panel._spectrum_ext_params("d_001") is None
-    panel._final_ext[("exp_001", "d_001")] = ("11.0", "5.5")
+    panel._final_ext[("exp_001", "d_001")] = ("11.0", "5.5", True)
     assert panel._spectrum_ext_params("d_001") == {
+        "apply_ext_to_opt": "1",
         "final_ext_lo": "11.0",
         "final_ext_hi": "5.5",
     }
-    # 只设一端:另一端不注入
-    panel._final_ext[("exp_001", "d_001")] = ("11.0", "")
-    assert panel._spectrum_ext_params("d_001") == {"final_ext_lo": "11.0"}
+    # 只设一端:另一端不注入;关闭「应用此范围到优化过程」
+    panel._final_ext[("exp_001", "d_001")] = ("11.0", "", False)
+    assert panel._spectrum_ext_params("d_001") == {
+        "apply_ext_to_opt": "0",
+        "final_ext_lo": "11.0",
+    }
     panel.close()
 
 
@@ -256,17 +260,17 @@ def test_pipeline_ext_button_text_reflects_override(
     panel = PipelinePanel(manager, FakeProcessingController())
     panel.set_selection("data", "exp_001", "d_001")
     assert panel._rows["spectrum"].ext_range_button.text() == "直接维范围"
-    panel._final_ext[("exp_001", "d_001")] = ("11.0", "5.5")
+    panel._final_ext[("exp_001", "d_001")] = ("11.0", "5.5", True)
     panel.refresh()
     assert (
         panel._rows["spectrum"].ext_range_button.text()
-        == "直接维范围 11.0/5.5"
+        == "直接维范围 11.0/5.5 · 含优化"
     )
     panel.close()
     assert (
         panel._rows["spectrum"].ext_range_button.toolTip()
-        == "终跑直接维窗口: 11.0-5.5 ppm(EXT -x1/-xn)\n"
-        "首遍重构/相位搜索保持原窗口;窗口外峰不进入终谱,\n"
+        == "直接维窗口: 11.0-5.5 ppm(EXT -x1/-xn,含优化)\n"
+        "首遍重构/相位搜索与优化评估同窗口;窗口外峰不进入终谱,\n"
         "p1 按窗口宽度自动重归一化;切换数据后显示各自设置"
     )
     # 切换数据:未设置该数据窗口时,提示词回到默认说明
