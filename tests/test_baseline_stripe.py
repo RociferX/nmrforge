@@ -85,6 +85,34 @@ def test_robust_correction_removes_slope_without_stripes() -> None:
     assert float(stripe_penalty(corrected_clean)) < 0.2
 
 
+def test_has_stripe_artifact_relative_veto() -> None:
+    """0.2.199-补9:相对否决只拦比原谱明显更差的候选。"""
+    from workflow.baseline_optimize import _has_stripe_artifact, _stripe_ratio
+
+    rng = np.random.default_rng(0)
+
+    def striped(offset: float) -> np.ndarray:
+        arr = rng.normal(0.0, 1.0, size=(24, 40))
+        arr[1, :] += offset
+        return arr
+
+    clean = rng.normal(0.0, 1.0, size=(24, 40))
+    orig = striped(50.0)   # 原谱强条纹
+    improved = striped(20.0)  # 改善但仍超阈值
+    worse = striped(200.0)  # 明显更差
+    clean_r = _stripe_ratio(clean, 1)
+    orig_r = _stripe_ratio(orig, 1)
+    improved_r = _stripe_ratio(improved, 1)
+    assert orig_r > 8.0 and improved_r > 8.0
+    # 相对:改善的候选不拦,更差的候选拦
+    assert not _has_stripe_artifact(improved, 1, baseline_ratio=orig_r)
+    assert _has_stripe_artifact(worse, 1, baseline_ratio=orig_r)
+    # 干净原谱 + 候选引入条纹 → 拦(相对否决也拦)
+    assert _has_stripe_artifact(worse, 1, baseline_ratio=clean_r)
+    # 缺省绝对阈值行为保持
+    assert _has_stripe_artifact(worse, 1)
+
+
 def test_optimize_baseline_corrects_peak_spectrum_safely(
     tmp_path: Path, bruker_dir: Path
 ) -> None:

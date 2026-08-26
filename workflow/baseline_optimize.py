@@ -85,9 +85,22 @@ def _stripe_ratio(data: np.ndarray, axis: int) -> float:
     return float(np.max(jumps)) / max(med, floor)
 
 
-def _has_stripe_artifact(data: np.ndarray, axis: int, threshold: float = 8.0) -> bool:
-    """校正候选存在明显条纹(稀疏强峰拉偏逐迹拟合)时返回 True。"""
-    return _stripe_ratio(data, axis) > threshold
+def _has_stripe_artifact(
+    data: np.ndarray,
+    axis: int,
+    threshold: float = 8.0,
+    baseline_ratio: float | None = None,
+) -> bool:
+    """校正候选存在明显条纹(稀疏强峰拉偏逐迹拟合)时返回 True。
+
+    0.2.199-补9:缺省为绝对阈值;传 baseline_ratio(原谱条纹比)时改为相对
+    否决——只否决比原谱明显更差(>原谱+4)且仍超阈值(>8)的候选,原谱已有
+    条纹时允许改善性校正(结果可能仍 >8 但优于原谱,也算有效)。
+    """
+    ratio = _stripe_ratio(data, axis)
+    if baseline_ratio is not None:
+        return ratio > threshold and ratio > baseline_ratio + 4.0
+    return ratio > threshold
 
 
 def _decimated(data: np.ndarray, axis: int, max_traces: int) -> np.ndarray:
@@ -164,10 +177,17 @@ def optimize_baseline(
                 f"基线优化中(内存评分): 轴 {axis}({index}/{len(axes)}),"
                 "逐候选评分中"
             )
+        _vetoed_count = 0
+        _non_off = sum(1 for m, _o in grid if m != "off")
         np_axis = axis_index(axis, arr.ndim)
-        # 0.2.199-补8:候选评分的稳健逐迹拟合在迹线子采样副本上进行
-        # (评分指标为全局均值/条纹比,子采样近似不变),3D 开销降约 10 倍
-        base = _decimated(arr, np_axis, max_traces)
+        # 0.2.199-补9:原谱已有明显条纹(>8)时不做子采样——细条纹可能被
+        # 子采样漏检,且条纹否决/评分必须全量评估才正确;干净谱才子采样
+        orig_ratio = _stripe_ratio(arr, np_axis)
+        base = (
+            arr
+            if orig_ratio > 8.0
+            else _decimated(arr, np_axis, max_traces)
+        )
         current_score = float(score_fn(base, np_axis))
         # 基线已良好(≥95)时跳过整轴候选,直接保持 off(省去全网格拟合)
         if current_score >= 95.0:
@@ -196,8 +216,12 @@ def optimize_baseline(
                 )
                 # 硬性条纹否决:plain polyfit 与真实脚本 POLY 一致,校正后
                 # 若出现明显迹间断层则该候选不可写回(否则终谱出现竖线)
-                if _has_stripe_artifact(work, np_axis):
+                # 0.2.199-补9:相对否决——只否决比原谱明显更差的候选
+                if _has_stripe_artifact(
+                    work, np_axis, baseline_ratio=orig_ratio
+                ):
                     axis_scores[f"{mode}:{order}"] = _VETOED_SCORE
+                    _vetoed_count += 1
                     continue
             value = float(score_fn(work, np_axis))
             axis_scores[f"{mode}:{order}"] = value
@@ -223,8 +247,14 @@ def optimize_baseline(
             # 逐迹校正无实质增益 → 保持 off(0.2.132:不再写 POLY -auto,
             # 避免无基线问题时逐迹均值校正引入条纹)
             baseline_cfg[axis] = dict(off_cfg)
+            if _vetoed_count == _non_off:
+                reason = "全部候选被条纹否决"
+            elif _vetoed_count > 0:
+                reason = "部分候选被条纹否决,其余增益不足"
+            else:
+                reason = "候选未优于当前配置"
             logs.append(
-                f"{axis}: 候选未优于当前配置,保持 off "
+                f"{axis}: {reason},保持 off "
                 f"(score={score:.1f})"
             )
             unchanged.append(axis)
