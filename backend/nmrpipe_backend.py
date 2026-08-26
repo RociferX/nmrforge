@@ -1587,14 +1587,20 @@ class NMRPipeBackend:
         work: Path,
         logs: list[str],
     ) -> tuple[float, float, float] | None:
-        """显示层相位搜索(0.2.96,nmrDraw 思路):在复型重构平面上做对称性
-        评分(直接维在 axis 0),无需 Hilbert/额外后端。返回 (p0, p1, score);
-        无干净信号峰返回 None。
+        """显示层相位搜索(0.2.96,nmrDraw 思路):在复型重构数据上做对称性
+        评分,无需 Hilbert/额外后端。返回 (p0, p1, score);无干净信号峰
+        返回 None。
 
         0.2.98:3D 平面文件为「第一轴实/虚交错」实型存储(nmrglue 读成翻倍
         实型),此前直接当复型旋转/评分是错误约定——现用 read_pipe_complex
-        拆包复型后再搜索;2D recon.ft1 为 nmrglue 直接可读的复型。3D 按
-        间接维增量均布子采样(≤8 个平面,直接维 1×TD),控制搜索成本。
+        拆包复型后再搜索;2D recon.ft1 为 nmrglue 直接可读的复型(直接维
+        在 axis 0)。
+
+        0.2.199-补17:3D 的 nus3d_rc 平面为「每直接维点一个平面」(168 个,
+        平面内是 (F1,F2) 间接轴)——直接维是**平面序号**,不是平面内轴;
+        此前沿 axis 0(F1 相关,434 点)评分导致评分面平、相位搜索结果
+        无意义(实测 sampleK:返回 (0,25) score=28.3 被门槛拒绝)。现改
+        为把平面堆叠后沿 axis=-1(直接维平面轴)评分。
         """
         try:
             import nmrglue as ng
@@ -1609,9 +1615,8 @@ class NMRPipeBackend:
                 paths = sorted(plane_dir.glob("test*.ft1"))
                 if not paths:
                     return None
-                if len(paths) > 8:
-                    index = np.linspace(0, len(paths) - 1, 8).astype(int)
-                    paths = [paths[i] for i in index]
+                # 0.2.199-补17:平面 = 直接维点,不得子采样(直接维分辨率
+                # 必须完整;168 平面 × 434×219 × 8B ≈ 127MB,可接受)
                 arrays = [read_pipe_complex(path) for path in paths]
                 arr = (
                     np.stack(arrays, axis=-1)
@@ -1619,17 +1624,22 @@ class NMRPipeBackend:
                     else arrays[0]
                 )
                 logs.append(
-                    f"显示层相位搜索: 3D 复型平面 {len(arrays)} 个"
-                    f"(增量子采样,直接维 axis 0)"
+                    f"显示层相位搜索: 3D 复型平面 {len(arrays)} 个全部参与"
+                    f"(直接维=平面序号,axis=-1)"
                 )
+                search_axis = -1
             else:
                 recon = work / "nus2d" / "recon.ft1"
                 if not recon.is_file():
                     return None
                 _dic, data = ng.pipe.read(str(recon))
                 arr = np.asarray(data)
+                search_axis = 0
             est = search_direct_phase_on_spectrum(
-                arr, axis=0, metric="symmetry", cancel=cancel_requested
+                arr,
+                axis=search_axis,
+                metric="symmetry",
+                cancel=cancel_requested,
             )
             if est is None:
                 logs.append("显示层相位搜索:无干净信号峰")
@@ -1652,12 +1662,15 @@ class NMRPipeBackend:
         logs: list[str],
         progress: Callable[[str], None] | None = None,
     ) -> bool:
-        """最后一步填相位:旋转复型重构平面直接维(axis 0)后重跑 stage-2
+        """最后一步填相位:对复型重构数据施加直接维相位后重跑 stage-2
         finalize(便宜,非 SMILE),终谱带正确直接维相位。
 
         0.2.98:旋转结果写入副本(nus3d_rc_ph/ 或 recon_ph.ft1)而不是原地
         改写源平面——源平面保持 PS(0,0) 复型供后续复用/重搜;3D 平面为
-        第一轴实/虚交错实型存储,旋转前必须 read_pipe_complex 拆包复型。
+        第一轴实/虚交错实型存储,读取前必须 read_pipe_complex 拆包复型。
+
+        0.2.199-补17:3D 直接维 = 平面序号(每直接维点一个平面),相位斜坡
+        按平面序号逐元素乘(p0 + p1·k/(n-1)),不再旋转平面内轴。
         """
         try:
             if progress is not None:
@@ -1675,19 +1688,21 @@ class NMRPipeBackend:
                 if out_dir.exists():
                     shutil.rmtree(out_dir)
                 out_dir.mkdir()
-                for path in paths:
+                # 0.2.199-补17:直接维 = 平面序号,逐平面元素乘相位斜坡
+                arrays = [read_pipe_complex(path) for path in paths]
+                stack = np.stack(arrays, axis=-1)  # (i0, i1, k=直接维)
+                n = stack.shape[-1]
+                k = np.arange(n, dtype=float)
+                ramp = np.exp(
+                    1j * np.deg2rad(p0 + p1 * k / max(n - 1, 1))
+                ).reshape(*([1] * (stack.ndim - 1)), n)
+                rotated = stack * ramp
+                for path, plane in zip(paths, np.moveaxis(rotated, -1, 0)):
                     dic, _data = ng.pipe.read(str(path))
-                    arr = read_pipe_complex(path)
-                    n = arr.shape[0]  # 直接维在 axis 0
-                    k = np.arange(n, dtype=float)
-                    ramp = np.exp(
-                        1j * np.deg2rad(p0 + p1 * k / max(n - 1, 1))
-                    ).reshape(n, *([1] * (arr.ndim - 1)))
-                    rot = arr * ramp
                     ng.pipe.write(
                         str(out_dir / path.name),
                         dic,
-                        rot.astype(np.complex64),
+                        plane.astype(np.complex64),
                         overwrite=True,
                     )
                 planes = "nus3d_rc_ph/test%04d.ft1"

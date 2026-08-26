@@ -149,44 +149,48 @@ def _write_plane(
 
 
 def _synthetic_3d_planes(
-    work: Path, n_planes: int = 4, *, theta: float = 0.0
+    work: Path, n_dir: int = 64, *, theta: float = 0.0
 ) -> Path:
-    """合成 3D 复型平面:直接维 axis 0,干净信号峰,可带已知相位旋转。"""
+    """合成 3D 复型平面:每直接维点一个平面,直接维=平面序号(0.2.199-补17)。
+
+    平面为复型 (n_i0, n_i1) 实/虚交错存储;信号在若干 (i0, i1) 位置的
+    直接迹线(沿平面序号)为干净吸收 Lorentzian,可带已知相位旋转 theta。
+    """
     import nmrglue as ng
 
     rng = np.random.default_rng(7)
-    n_dir, n_f1 = 64, 12
+    n_i0, n_i1 = 16, 16
     plane_dir = work / "nus3d_rc"
     plane_dir.mkdir(parents=True, exist_ok=True)
     k = np.arange(n_dir, dtype=float)
-    for p in range(n_planes):
-        base = np.zeros((n_dir, n_f1), dtype=np.complex128)
-        for j in range(0, n_f1, 4):
-            center = 16 + p * 2
-            for jj in range(j, j + 4):
-                base[:, jj] = 400.0 / (1.0 + ((k - center) / 4.0) ** 2)
-        if theta:
-            ramp = np.exp(
-                1j * np.deg2rad(theta + 12.0 * k / (n_dir - 1))
-            )
-            base = base * ramp[:, None]
-        base = base + rng.normal(0, 0.05, size=base.shape)
-        base = base + 1j * rng.normal(0, 0.05, size=base.shape)
-        _write_plane(plane_dir / f"test{p + 1:04d}.ft1", base, f3_size=n_planes)
-    dic, data = ng.pipe.read(str(plane_dir / "test0001.ft1"))
-    assert np.asarray(data).dtype == np.float32, "平面应为实型交错存储"
-    assert np.asarray(data).shape == (2 * n_dir, n_f1), "交错复型布局错误"
+    signals = np.zeros((n_i0, n_i1, n_dir), dtype=np.complex128)
+    for i0, i1 in ((3, 3), (3, 11), (8, 8), (11, 3), (11, 11), (6, 13)):
+        peak = 16 + i0 + i1  # 峰位落在 margin(8)..n-margin(56) 内
+        signals[i0, i1, :] = 400.0 / (1.0 + ((k - peak) / 4.0) ** 2)
+    if theta:
+        ramp = np.exp(1j * np.deg2rad(theta + 12.0 * k / (n_dir - 1)))
+        signals = signals * ramp[None, None, :]
+    noise = rng.normal(0, 0.05, size=(n_i0, n_i1, n_dir))
+    noise = noise + 1j * rng.normal(0, 0.05, size=noise.shape)
+    data = signals + noise
+    for p in range(n_dir):
+        _write_plane(
+            plane_dir / f"test{p + 1:04d}.ft1", data[:, :, p], f3_size=n_dir
+        )
+    dic, data0 = ng.pipe.read(str(plane_dir / "test0001.ft1"))
+    assert np.asarray(data0).dtype == np.float32, "平面应为实型交错存储"
+    assert np.asarray(data0).shape == (2 * n_i0, n_i1), "交错复型布局错误"
     return plane_dir
 
 
 def test_display_phase_search_3d_unpacks_interleaved(
     tmp_path: Path,
 ) -> None:
-    """0.2.98:3D 显示层相位搜索必须先把实型交错平面拆包为复型。
+    """0.2.98 + 0.2.199-补17:3D 显示层相位搜索先拆包复型,再沿平面序号
+    (直接维,axis=-1)评分。
 
-    主重构按 PS(0,0) 输出,干净峰近零相位时最小修正应返回 (0,0)
-    (与 2D sampleA 100% 实测一致);拆包失败/交错数据直接评分会报错或
-    返回无意义结果。
+    主重构按 PS(0,0) 输出,干净峰近零相位时最小修正应返回 (0,0);
+    拆包失败/交错数据直接评分会报错或返回无意义结果。
     """
     from backend.nmrpipe_backend import NMRPipeBackend
 
