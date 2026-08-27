@@ -750,7 +750,6 @@ class PipelinePanel(QWidget):
     view_log_requested = pyqtSignal(str)  # step_id:定位日志面板
     progress_updated = pyqtSignal(str)  # 批量进度文本(主线程更新标签)
     batch_summary_requested = pyqtSignal(object)  # 批量汇总 dict
-    report_ready = pyqtSignal(str)  # step_id:后台报告计算完成,刷新该行详情(0.2.199-补29d)
 
     def __init__(
         self,
@@ -770,7 +769,6 @@ class PipelinePanel(QWidget):
         # 0.2.199-补12:生成谱图参数报告按谱文件指纹缓存,避免每次刷新主线程
         # 重读大 ft3 算质量导致卡顿;运行中标志防连续点击重复启动
         self._spectrum_report_cache: dict[str, str] = {}
-        self._pending_reports: set[str] = set()
         self._run_active: bool = False
 
         layout = QVBoxLayout(self)
@@ -792,7 +790,6 @@ class PipelinePanel(QWidget):
         self.batch_progress_label.setWordWrap(True)
         layout.addWidget(self.batch_progress_label)
         self.progress_updated.connect(self._on_progress_updated)
-        self.report_ready.connect(self._on_report_ready)
         # 0.2.199-补29c:run_finished 由工作线程 emit,经队列连接回到主线程
         # 刷新——旧代码在工作线程 finally 里直接 self.refresh() 跨线程碰
         # 控件,触发 QBasicTimer::start 错误并卡死
@@ -1186,71 +1183,10 @@ class PipelinePanel(QWidget):
                     return data["text"]
             except (OSError, ValueError):
                 pass
-        if key in self._pending_reports:
-            return "报告生成中(后台计算,请稍候)…"
-        spectrum_exists = bool(spectrum_path) and Path(spectrum_path).is_file()
-        if not spectrum_exists:
-            # 无谱文件时直接算(只读参数,不会卡)
-            text = _spectrum_param_report(params, spectrum_path)
-            self._remember_report(key, fp, params_fp, text, rec)
-            return text
-        # 0.2.199-补29d:大谱文件无缓存/记录(旧运行、人工脚本等)——后台
-        # 线程读谱计算,避免主线程重读整张 ft3 卡死;小谱(<32MB)同步算
-        # (读得快,且 2D 报告即时显示)。完成后信号刷新详情
-        try:
-            large = Path(spectrum_path).stat().st_size >= 32 * 1024 * 1024
-        except OSError:
-            large = False
-        if not large:
-            text = _spectrum_param_report(params, spectrum_path)
-            self._remember_report(key, fp, params_fp, text, rec)
-            return text
-        self._pending_reports.add(key)
-
-        def compute() -> None:
-            try:
-                text = _spectrum_param_report(params, spectrum_path)
-            except Exception as exc:  # noqa: BLE001 - 报告计算失败不阻断
-                text = f"报告生成失败: {exc}"
-            self._remember_report(key, fp, params_fp, text, rec)
-            self.report_ready.emit("spectrum")
-
-        import threading
-
-        threading.Thread(target=compute, daemon=True).start()
-        return "报告生成中(后台计算,请稍候)…"
-
-    def _remember_report(
-        self,
-        key: str,
-        fp: str,
-        params_fp: str,
-        text: str,
-        rec: Path | None,
-    ) -> None:
-        """报告文本入内存缓存并写盘记录(供缓存未命中后续用)。"""
-        if len(self._spectrum_report_cache) >= 32:
-            self._spectrum_report_cache.clear()
-        self._spectrum_report_cache[key] = text
-        if rec is not None:
-            try:
-                rec.write_text(
-                    json.dumps(
-                        {"fp": fp, "params_fp": params_fp, "text": text},
-                        ensure_ascii=False,
-                    ),
-                    encoding="utf-8",
-                )
-            except OSError:
-                pass
-
-    def _on_report_ready(self, step_id: str) -> None:
-        """后台报告计算完成(主线程):已展开的该行详情刷新为新报告。"""
-        row = self._rows.get(step_id)
-        if row is None or row.detail_frame.isHidden():
-            return
-        text, _params, failed = self._step_detail(step_id)
-        row.set_detail(text, failed=failed)
+        # 0.2.199-补29e:报告只显示上次生成时记录的内容(工作线程写入
+        # {谱}.quality.json);无记录不现场生成(读整张谱既卡又非真实处理
+        # 报告),提示重新运行「生成谱图」
+        return "（无报告记录;重新运行「生成谱图」后生成报告）"
 
     def _step_detail(self, step_id: str) -> tuple[str, dict | None, bool]:
         """构建步骤详情(输入/产物/最近运行/参数/脚本快照);返回(文本, params, failed)。"""

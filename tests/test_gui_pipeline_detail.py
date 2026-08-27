@@ -112,41 +112,22 @@ def test_step_detail_uses_quality_record_not_recompute(
     panel.close()
 
 
-def test_large_spectrum_report_computes_in_background(
+def test_spectrum_report_without_record_shows_note(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """0.2.199-补29d:大谱无记录时后台算报告,主线程先显示占位,完成刷新。"""
-    import hashlib
-    import json
-
-    from PyQt6.QtCore import QEventLoop, QTimer
-
+    """0.2.199-补29e:无质量记录时不现场生成报告(不读谱),提示重新运行。"""
     manager, exp_id, data_id = _manager_with_spectrum(tmp_path)
-    runs = [
-        r for r in manager.project.workflow_runs
-        if r.experiment_id == exp_id and r.workflow_ref == "process"
-    ]
-    run = runs[-1]
-    ft2 = Path(run.outputs["spectrum_path"])
-    with open(ft2, "wb") as f:
-        f.truncate(32 * 1024 * 1024 + 1024)  # 稀疏大文件触发后台路径
-    manager.save()
-
+    called = []
     monkeypatch.setattr(
         "gui.pipeline_panel._spectrum_param_report",
-        lambda params, path: "后台算出的报告内容 OK",
+        lambda *a, **k: called.append(1) or "不应现场生成",
     )
     panel = PipelinePanel(manager, _FakeController())
     panel.set_selection("data", exp_id, data_id)
     panel._toggle_step_detail("spectrum")
-    first = panel._rows["spectrum"].detail_label.text()
-    if "后台算出的报告内容" not in first:
-        # 占位已显示;等 report_ready 后刷新
-        loop = QEventLoop()
-        QTimer.singleShot(3000, loop.quit)
-        panel.report_ready.connect(lambda _sid: loop.quit())
-        loop.exec()
-    assert "后台算出的报告内容" in panel._rows["spectrum"].detail_label.text()
+    text = panel._rows["spectrum"].detail_label.text()
+    assert "无报告记录" in text
+    assert not called, "无记录时不应现场生成报告"
     panel.close()
 
 
@@ -162,7 +143,8 @@ def test_step_detail_expands_with_params(tmp_path: Path, qapp: QApplication) -> 
     assert "产物" in text and "参数" in text
     # 0.2.155:精简——只保留可读参数报告,不再显示 ext_lo 等内部参数
     assert "ext_lo" not in text
-    assert "填零: 2" in text
+    # 0.2.199-补29e:无质量记录时不现场生成,提示重新运行
+    assert "无报告记录" in text
     assert not hasattr(row, "manual_with_params_button")
     panel._toggle_step_detail("spectrum")
     assert row.detail_frame.isHidden()
@@ -243,10 +225,11 @@ def test_step_detail_refreshes_on_data_switch(
     panel._toggle_step_detail("spectrum")
     row = panel._rows["spectrum"]
     assert not row.detail_frame.isHidden()
-    assert "填零: 2" in row.detail_label.text()
+    first_text = row.detail_label.text()
+    assert "无报告记录" in first_text  # 0.2.199-补29e:无记录不现场生成
     # 切换到 d_002:已展开详情应立即刷新(无需重新点击展开)
     panel.set_selection("data", entry.id, d2.id)
     text2 = row.detail_label.text()
-    assert "填零: 3" in text2
-    assert "填零: 2" not in text2
+    assert text2 != first_text  # 已刷成新数据的运行记录
+    assert "无报告记录" in text2
     panel.close()

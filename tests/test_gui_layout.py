@@ -280,7 +280,9 @@ def test_spectrum_report_cache_by_fingerprint(
         {"diagnostics": {"reports": []}}, missing
     )
     assert text1 == text2
-    assert panel._spectrum_report_cache
+    # 0.2.199-补29e:无记录不现场生成(提示重新运行),因此不写入缓存
+    assert "无报告记录" in text1
+    assert not panel._spectrum_report_cache
     panel.close()
 
 
