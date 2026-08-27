@@ -173,6 +173,26 @@ def _read_real_ft3(path: Path | str) -> np.ndarray:
     return np.asarray(arr, dtype=float)
 
 
+def _zf_min_indirect(experiment: Experiment) -> dict[str, dict[str, Any]]:
+    """最低填零(0.2.199-补29s):间接维相位优化预览 SI = next_pow2(TD)。
+
+    用户方案:优化前先默认最低填零(如 120→128),比完全无填零的峰位/
+    数字点距更好,又不引入完整填零的过度插值;直接维不改(均匀路径
+    保持计划直接维填零,NUS finalize 不填直接维)。
+    """
+    from backend.script_generator import _next_pow2, effective_td
+
+    from core.data.internal_data_model import AxisRole
+
+    td = effective_td(experiment)
+    axes = [dim.logical_axis for dim in experiment.dimensions]
+    return {
+        axis: {"mode": "size", "size": _next_pow2(max(int(td[i]), 1))}
+        for i, axis in enumerate(axes)
+        if experiment.dimensions[i].role is not AxisRole.DIRECT
+    }
+
+
 def _cleanup_unified_intermediates(
     work: Path,
     dataset_id: str,
@@ -475,6 +495,7 @@ def unified_route(    experiment: Experiment,
         search_axes = [
             a for a in search_axes if f"phase_{a}" in plan.dag.nodes
         ]
+    zf_min = {"zero_fill": _zf_min_indirect(experiment)}
     backend_runs = 0
     for axis in search_axes:
         out_file = f"{experiment.dataset_id}_preview_{axis}.{ext}"
@@ -485,7 +506,7 @@ def unified_route(    experiment: Experiment,
             experiment,
             plan,
             direct_phase_override=dict(fixed) if fixed else None,
-            params={**params, "preview_axis": axis},
+            params={**params, **zf_min, "preview_axis": axis},
             out_file=out_file,
             script_name=f"{experiment.dataset_id}_preview_{axis}.com",
             progress=progress,
@@ -1147,11 +1168,9 @@ def _unified_nus(
     axis_index: dict[str, int] = {}
     axis_traces: dict[str, tuple[list[int], list[int]]] = {}
     ext = "ft3" if experiment.ndim >= 3 else "ft2"
-    zf_none = {
-        "zero_fill": {
-            dim.logical_axis: {"mode": "none"} for dim in experiment.dimensions
-        }
-    }
+    # 0.2.199-补29s:优化预览用最低填零(next_pow2(TD),如 120→128),
+    # 替代完全无填零——峰位/数字点距更好且不过度插值
+    zf_min = {"zero_fill": _zf_min_indirect(experiment)}
     for axis in indirect_axes:
         out_file = f"{experiment.dataset_id}_preview_{axis}.{ext}"
         t_axis = time.time()
@@ -1161,7 +1180,7 @@ def _unified_nus(
             experiment,
             phases=fixed,
             work_dir=work,
-            params={**zf_none, "preview_axis": axis},
+            params={**zf_min, "preview_axis": axis},
             out_file=out_file,
             script_name=f"{experiment.dataset_id}_preview_{axis}_finalize.com",
             progress=progress,
@@ -1245,7 +1264,7 @@ def _unified_nus(
             # 0.2.199-补29r:直接维搜索用无填零终谱(与间接维预览
             # zf_none 一致)——填零只进终跑,不进优化;此前带计划填零
             # 使预览变 (512,512,…),与设计(优化用没填零的谱)不符。
-            params={**params_first, **zf_none},
+            params={**params_first, **zf_min},
             out_file=preview_out,
             script_name=(
                 f"{experiment.dataset_id}_direct_final_finalize.com"
