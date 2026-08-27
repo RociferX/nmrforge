@@ -20,6 +20,11 @@ class BaselineParams:
     method: str = "polynomial"
     axis: str = "F3"
     order: int = 1
+    # 0.2.199-补29:显式 numpy 轴(生产布局谱文件读取时用,绕开内部约定
+    # axis_index——内部约定 3D=(F1,F2,F3),而 NMRPipe 单文件 3D 输出为
+    # (F2,F1,F3),F1/F2 互换会评错轴/校错轴)
+    np_axis: int | None = None
+
 
 
 def _edge_values(arr: np.ndarray, axis: int, edge_fraction: float = 0.08):
@@ -92,7 +97,10 @@ def apply(data: Any, params: BaselineParams) -> np.ndarray:
     -auto 的稳健基线估计同思路）。
     """
     arr = np.asarray(data)
-    axis = axis_index(params.axis, arr.ndim)
+    axis = params.np_axis if params.np_axis is not None else axis_index(
+        params.axis, arr.ndim
+    )
+
     n = arr.shape[axis]
     if n <= params.order + 1:
         return arr

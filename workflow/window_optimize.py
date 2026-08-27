@@ -473,8 +473,17 @@ def _load_fid(work: Path, experiment: Experiment) -> tuple[np.ndarray, dict] | N
 def _load_recon_planes(
     work: Path, experiment: Experiment
 ) -> tuple[np.ndarray, dict] | None:
-    """加载 SMILE 重构平面(间接维时间域)+ 头部:2D nus2d/recon.ft1
-    (F2 频,F1 时);3D nus3d_rc/test*.ft1 堆叠 (F3 频, F2 时, F1 时)。"""
+    """加载 SMILE 重构平面(间接维时间域)+ 头部。
+
+    0.2.199-补29(实测 sampleB + sampleJ 手工切片):
+    3D nus3d_rc/test%04d.ft1 每个文件=一个直接维(F3 频)点,平面数组为
+    (F1 时, F2 时):13C 轴为 hypercomplex 4×TD(300 real),15N 轴为
+    States 实型(TD)。窗函数评分须与后端一致地作用在原始实型轴
+    (SP 直接作用于该轴),故**不**做简单轴 0 交错拆包(会拆错
+    hypercomplex 数据);堆叠后 (F1 时, F2 时, F3)。只读首平面头部
+    FDFILECOUNT 个平面,避免陈旧 test*.ft1 混入(补29)。
+    2D nus2d/recon.ft1 单文件 (F2 频, F1 时),复型拆包。
+    """
     import nmrglue as ng
 
     from core.data.pipe_io import read_pipe_complex
@@ -484,13 +493,22 @@ def _load_recon_planes(
         paths = sorted(plane_dir.glob("test*.ft1"))
         if not paths:
             return None
-        arrays: list[np.ndarray] = []
         dic: dict = {}
+        arrays: list[np.ndarray] = []
+        count: int | None = None
         for index, path in enumerate(paths):
-            d, _ = ng.pipe.read(str(path))
+            d, raw = ng.pipe.read(str(path))
             if index == 0:
                 dic = d
-            arrays.append(read_pipe_complex(path))
+                try:
+                    count = int(float(dic.get("FDFILECOUNT") or 0))
+                except (TypeError, ValueError):
+                    count = None
+            if count is not None and len(arrays) >= count:
+                break
+            arrays.append(np.asarray(raw))
+        if not arrays:
+            return None
         return np.stack(arrays, axis=-1), dic
     recon = work / "nus2d" / "recon.ft1"
     if not recon.is_file():
@@ -513,19 +531,37 @@ def _uniform_axis_map(experiment: Experiment) -> dict[str, int]:
 
 
 def _nus_axis_map(experiment: Experiment) -> dict[str, int]:
-    """NUS 重构平面布局:2D (F2 频, F1 时) → F1=1;3D (F3 频, F2 时, F1 时)
-    → F2=1, F1=2。"""
+    """NUS 重构平面布局(0.2.199-补29 修正):2D (F2 频, F1 时) → F1=1;
+    3D 堆叠 (F1 时, F2 时, F3) → F1=0, F2=1。旧代码 F1=2 指向直接维轴。"""
     if experiment.ndim >= 3:
-        return {"F2": 1, "F1": 2}
+        return {"F1": 0, "F2": 1}
     return {"F1": 1}
 
 
-def _axis_sw(dic: dict[str, Any], axis: str) -> float:
-    """从 fid/平面头部取逻辑轴谱宽(SW Hz,FDF1SW/FDF2SW/FDF3SW)。
+def _axis_sw(
+    dic: dict[str, Any], axis: str, experiment: Experiment | None = None
+) -> float:
+    """从 fid/平面头部取逻辑轴谱宽(SW Hz)。
 
-    轴标签 F1/F2/F3 对应头部键 FDF1SW/FDF2SW/FDF3SW,取标签数字后缀
-    (0.2.191 修正:f"FDF{axis}SW" 会多出一个 F 而取不到值)。
+    0.2.199-补29:优先按头部核标签(FDF{n}LABEL)匹配逻辑轴核(3D 头部
+    FDF1=15N/FDF2=1H/FDF3=13C,与逻辑 F2/F3/F1 不同号,按数字后缀取会
+    拿错轴的 SW);实验未知时回退数字后缀(2D uniform 头部与逻辑同号)。
     """
+    if experiment is not None:
+        dim = next(
+            (d for d in experiment.dimensions if d.logical_axis == axis), None
+        )
+        nucleus = (dim.nucleus or "").strip() if dim is not None else ""
+        # 头部 LABEL 为 "15N",Bruker NUC1 为 "<15N>",只留字母数字比较
+        norm = lambda v: "".join(ch for ch in v if ch.isalnum())  # noqa: E731
+        if nucleus:
+            for i in (1, 2, 3):
+                label = str(dic.get(f"FDF{i}LABEL") or "").strip()
+                if norm(label) == norm(nucleus):
+                    try:
+                        return float(dic.get(f"FDF{i}SW") or 0.0)
+                    except (TypeError, ValueError):
+                        return 0.0
     suffix = axis[1:] if axis.startswith("F") else axis
     try:
         return float(dic.get(f"FDF{suffix}SW") or 0.0)
@@ -563,7 +599,7 @@ def optimize_direct_window_from_work(
         fid,
         zf_size=zf_size,
         current=current,
-        sw=_axis_sw(dic, direct_axis),
+        sw=_axis_sw(dic, direct_axis, experiment),
     )
 
 
@@ -593,7 +629,7 @@ def optimize_indirect_windows_from_work(
         )
     fid, dic = loaded
     axis_map = _uniform_axis_map(experiment)
-    sw_map = {axis: _axis_sw(dic, axis) for axis in axis_map}
+    sw_map = {axis: _axis_sw(dic, axis, experiment) for axis in axis_map}
     return optimize_indirect_windows(
         fid, axis_map, current=current, sw_map=sw_map
     )
@@ -625,7 +661,7 @@ def optimize_indirect_windows_from_recon(
         )
     planes, dic = loaded
     axis_map = _nus_axis_map(experiment)
-    sw_map = {axis: _axis_sw(dic, axis) for axis in axis_map}
+    sw_map = {axis: _axis_sw(dic, axis, experiment) for axis in axis_map}
     return optimize_indirect_windows(
         planes, axis_map, current=current, sw_map=sw_map
     )

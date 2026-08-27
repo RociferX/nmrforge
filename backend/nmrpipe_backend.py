@@ -1656,6 +1656,15 @@ class NMRPipeBackend:
                     return None
                 # 0.2.199-补17:平面 = 直接维点,不得子采样(直接维分辨率
                 # 必须完整;168 平面 × 434×219 × 8B ≈ 127MB,可接受)
+                # 0.2.199-补29:按首平面 FDFILECOUNT 截断,陈旧 test*.ft1
+                # (旧运行残留)不参与,避免直接维轴混入垃圾平面
+                try:
+                    first_dic = ng.pipe.read(str(paths[0]))[0]
+                    count = int(float(first_dic.get("FDFILECOUNT") or 0))
+                except (TypeError, ValueError):
+                    count = 0
+                if count > 0:
+                    paths = paths[:count]
                 arrays = [read_pipe_complex(path) for path in paths]
                 arr = (
                     np.stack(arrays, axis=-1)

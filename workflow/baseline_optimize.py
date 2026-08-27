@@ -27,7 +27,8 @@ import numpy as np
 
 from core.data.internal_data_model import Experiment
 from core.processing import baseline as baseline_proc
-from core.processing.axes import axis_index
+from core.processing.axes import file_axis_index
+
 
 
 @dataclass
@@ -179,7 +180,8 @@ def optimize_baseline(
             )
         _vetoed_count = 0
         _non_off = sum(1 for m, _o in grid if m != "off")
-        np_axis = axis_index(axis, arr.ndim)
+        np_axis = file_axis_index(axis, arr.ndim)
+
         # 0.2.199-补9:原谱已有明显条纹(>8)时不做子采样——细条纹可能被
         # 子采样漏检,且条纹否决/评分必须全量评估才正确;干净谱才子采样
         orig_ratio = _stripe_ratio(arr, np_axis)
@@ -211,8 +213,12 @@ def optimize_baseline(
                 work = baseline_proc.apply(
                     work,
                     baseline_proc.BaselineParams(
-                        method="polynomial", axis=axis, order=max(order, 1)
+                        method="polynomial",
+                        axis=axis,
+                        order=max(order, 1),
+                        np_axis=np_axis,
                     ),
+
                 )
                 # 硬性条纹否决:plain polyfit 与真实脚本 POLY 一致,校正后
                 # 若出现明显迹间断层则该候选不可写回(否则终谱出现竖线)

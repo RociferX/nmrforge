@@ -217,9 +217,10 @@ def _append_final_summary(
     )
 
     lines: list[str] = ["== 谱图质量与数据质量报告 =="]
-    # 存储轴序(与 nmrglue 读取一致):2D (F1,F2);3D (F2,F3,F1)
+    # 存储轴序(与 nmrglue 读取一致,0.2.199-补29 修正 3D 标签):
+    # 2D (F1,F2);3D (F2,F1,F3)
     storage_axes = (
-        ["F1", "F2"] if direct_axis == "F2" else ["F2", "F3", "F1"]
+        ["F1", "F2"] if direct_axis == "F2" else ["F2", "F1", "F3"]
     )
     lines += spectrum_quality_report_lines(
         str(spectrum_path),
@@ -721,17 +722,15 @@ def _save_direct_phase_cache(
 
 
 def _load_recon_planes(experiment: Experiment, work: Path) -> np.ndarray:
-    """读 SMILE 重构复型平面:2D recon.ft1(直接维, F1 时间);
-    3D nus3d_rc/test%04d.ft1 交错拆包后按 F1 增量堆叠(直接维, F2 时间, F1 时间)。"""
-    from core.data.pipe_io import read_pipe_complex
+    """读 2D SMILE 重构平面 recon.ft1(布局 (F2 频, F1 时),直接维在轴 0)。
 
+    0.2.199-补29:仅 2D 使用(直接维相位搜索基底);3D 直接维搜索已改用
+    keep_complex 复型终谱(补18),不再加载 3D 平面——旧代码无条件加载
+    全部 test*.ft1 且用简单轴 0 交错拆包,对真实 SMILE 输出(13C 轴
+    hypercomplex 4×75 存储)拆错,又白占内存(数百 MB)。
+    """
     if experiment.ndim >= 3:
-        plane_dir = work / "nus3d_rc"
-        paths = sorted(plane_dir.glob("test*.ft1"))
-        if not paths:
-            raise RuntimeError(f"缺少 3D 重构平面: {plane_dir}")
-        arrays = [read_pipe_complex(path) for path in paths]
-        return np.stack(arrays, axis=-1)
+        raise RuntimeError("3D 直接维搜索不再使用重构平面(_load_recon_planes)")
     recon = work / "nus2d" / "recon.ft1"
     if not recon.is_file():
         raise RuntimeError(f"缺少 2D 重构平面: {recon}")

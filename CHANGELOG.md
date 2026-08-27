@@ -1,5 +1,47 @@
 # 修改记录(历史条目)
 
+# 修改记录(历史条目)
+
+## 0.2.199-补29(2026-08-27,相位优化维度解析审计:TP/ZTP 流布局实证 + 轴映射修正)
+
+审计目标:单文件/切片 fid 全兼容后,复核相位优化各路径的维度解析。在 VM
+上以 sampleB(HNCACB,单文件 fid + 切片式 recon)与 sampleJ(手工 3D NUS
+smile3.com)、sampleF(手工 2D uniform 3_process.com)为基准实证:
+
+- NMRPipe 流 x=最快;单文件谱 nmrglue 数组 = 流逆序。2D 输出 (F1, F2);
+  3D NUS finalize 输出 (F2, F1, F3)(28.ft3 (128,256,600)=(15N,13C,1H));
+- TP=平面 XY→YX;ZTP=XYZ→ZYX(x↔z 互换)。当前 finalize 链
+  F2 FT→TP→F1 FT→TP→ZTP→pipe2xyz 与手工 smile3.com 结构一致;
+- 3D 重构平面 = 每直接维点一个平面,平面内 (13C hypercomplex 4×TD,
+  15N States 实型);`read_pipe_complex` 的简单轴 0 交错拆包对真实平面
+  是错的(旧测试模型与真实 SMILE 输出不符),但当前相位搜索已不用平面
+  (补18 改复型终谱),仅窗函数优化/旧显示层搜索用到;
+- 相位优化搜索路径(`_axis_index`/`_read_complex_ft3`/`_read_complex_preview`/
+  `search_direct_phase_on_spectrum(axis=-1)`/`search_axis_memory`)实证正确:
+  vm_verify_axes 对 sampleB 直接维/F2/F1 搜索分别得 (350,30,76.8)、
+  (80,-22.5,73.9)、(355,0,96.2),与 28_nus.com 记录终相位 (86,-27.5)/(355,0)
+  一致。
+
+修复(审计发现的三处解析错误):
+- `optimize_baseline` 读的是 NMRPipe 输出谱文件,却用内部约定 axis_index
+  (3D=(F1,F2,F3));生产布局 3D=(F2,F1,F3),F1/F2 互换会拿 F2 数据给 F1
+  选基线配置。新增 `file_axis_index`(core/processing/axes.py),
+  BaselineParams 支持显式 np_axis,baseline_optimize 改用之;
+- `window_optimize._nus_axis_map` 3D F1=2 错(指向直接维轴):重构平面堆叠
+  实为 (F1 时, F2 时, F3),改 F1=0,F2=1;`_load_recon_planes` 3D 改回原始
+  实型堆叠(不拆包 hypercomplex,与后端 SP 直接作用于该轴一致),并按首平面
+  FDFILECOUNT 截断陈旧 test*.ft1;
+- `_axis_sw` 按头部核标签(FDF{n}LABEL)匹配取 SW,不再按逻辑轴数字后缀
+  (3D 头部 FDF1=15N/FDF2=1H/FDF3=13C,与逻辑 F2/F3/F1 不同号);
+- `_append_final_summary` 3D 存储轴标签 ["F2","F3","F1"] → ["F2","F1","F3"];
+- `phase_routes._load_recon_planes` 3D 不再加载(补18 起 3D 直接维搜索用
+  keep_complex 终谱,旧代码白读数百 MB 且拆错);2D 行为不变;
+- 后端 `_display_phase_search`(直连逃生口)同样按 FDFILECOUNT 截断陈旧平面。
+
+测试:新增 tests/test_axis_layout_audit.py(file_axis_index 映射、3D 基线
+轴映射、_nus_axis_map、_axis_sw 核标签、_load_recon_planes 原始堆叠+截断);
+相关批次全部通过。
+
 ## 0.2.199-补19~21(2026-08-26,直接维相位评分:纯对称 + 形状感知符号 + HNN 模板)
 
 用户指出:部分峰天然为负(sampleK 最强峰 -1.1e11),正确相位下负吸收峰
