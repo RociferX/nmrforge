@@ -58,14 +58,35 @@ def stripe_penalty(data: Any, axis: int | None = None) -> float:
     return float(np.clip((ratio - 8.0) / 48.0, 0.0, 0.5))
 
 
-def evaluate(data: Any, axis: int | None = None) -> BaselineQuality:
+def evaluate(
+    data: Any, axis: int | None = None, *, max_traces: int = 8192
+) -> BaselineQuality:
     """评估基线质量(沿指定轴,缺省最后一个轴;取两端与中部均值,含条纹罚)。
 
     0.2.170:支持指定轴——谱图质量评估对每个存储轴分别评估取最差,
     不再只检最后一个轴(2D 间接维/3D F2、F3 的基线不平此前会漏报)。
+    0.2.199-补29z:迹线子采样(非目标轴)加速——3D 数十万条迹的全量
+    边缘均值/条纹计算使质量评估卡数分钟;指标为全局均值/条纹,
+    对迹线子采样近似不变(与基线优化 _decimated 同思路)。
     """
     arr = np.asarray(data)
     real = np.real(arr)
+    if real.ndim >= 2:
+        axis0 = real.ndim - 1 if axis is None else int(axis)
+        n = real.shape[axis0]
+        n_traces = max(real.size // n, 1)
+        if n_traces > max_traces:
+            moved = np.moveaxis(real, axis0, -1)
+            per = int(np.ceil(n_traces / max_traces))
+            slices = [
+                (
+                    slice(None, None, per)
+                    if (a != moved.ndim - 1 and moved.shape[a] >= 2 * per)
+                    else slice(None)
+                )
+                for a in range(moved.ndim)
+            ]
+            real = np.moveaxis(moved[tuple(slices)], -1, axis0)
     max_abs = float(np.max(np.abs(real))) + 1e-12
     axis = real.ndim - 1 if axis is None else int(axis)
     n = real.shape[axis]

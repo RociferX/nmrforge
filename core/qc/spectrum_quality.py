@@ -96,7 +96,12 @@ def evaluate(
         )
     if snr_metrics.global_snr < 10:
         reasons.append(f"全局 SNR 偏低（{snr_metrics.global_snr:.1f}）")
-    if phase_metrics.negative_peak_fraction > 0.15:
+    # 0.2.199-补29z:正负峰共存谱(mixed,如 CBCA(CO)NH/HNN)负峰比例
+    # 天然约一半,不报告「负峰比例偏高」
+    if (
+        sign_mode != "mixed"
+        and phase_metrics.negative_peak_fraction > 0.15
+    ):
         reasons.append(f"负峰比例偏高（{phase_metrics.negative_peak_fraction:.2f}）")
     if baseline_metrics.needs_correction:
         reasons.append("检测到基线倾斜/偏移(最差存储轴),建议基线校正")

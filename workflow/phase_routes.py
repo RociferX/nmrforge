@@ -234,6 +234,7 @@ def _append_final_summary(
     phases: dict[str, tuple[float, float]] | None = None,
     backend_runs: int = 0,
     baseline: Any = None,
+    baseline_scores: dict[str, float] | None = None,
     zero_fill: Any = None,
     window: Any = None,
     diagnostics: dict[str, Any] | None = None,
@@ -265,6 +266,8 @@ def _append_final_summary(
         optimization_logs=optimization_logs,
         axis_names=storage_axes,
         sign_mode=peak_sign,
+        baseline_scores=baseline_scores,
+        progress=progress,
     )
     reports = list((diagnostics or {}).get("reports") or [])
     lines.append("◆ 数据质量诊断(处理前的数据监测,FID 检查)")
@@ -644,6 +647,7 @@ def unified_route(    experiment: Experiment,
         phases=fixed_final,
         backend_runs=backend_runs,
         baseline=proc["baseline"],
+        baseline_scores=proc.get("baseline_scores"),
         zero_fill=proc["zero_fill"],
         window=proc["window"],
         diagnostics=diagnostics,
@@ -776,6 +780,32 @@ def _load_recon_planes(experiment: Experiment, work: Path) -> np.ndarray:
         raise RuntimeError(f"缺少 2D 重构平面: {recon}")
     return _read_complex_preview(recon)
 
+def _chosen_baseline_scores(
+    baseline_cfg: dict[str, dict[str, Any]],
+    scores: dict[str, dict[str, float]],
+) -> dict[str, float]:
+    """各轴基线优化选中配置的评分(0.2.199-补29z):
+
+    最终谱图质量报告的基线分与优化时一致——直接采用优化网格里选中
+    配置(mode/order)的分数,不再对终谱另行评估(两基准不同会造成
+    优化 66.8 而报告 50 的困惑)。
+    """
+    out: dict[str, float] = {}
+    for axis, cfg in baseline_cfg.items():
+        mode = str(cfg.get("mode", "auto"))
+        order = int(cfg.get("order", 0) or 0)
+        axis_scores = scores.get(axis) or {}
+        if mode == "off":
+            key = "off:0"
+        elif mode == "order":
+            key = f"order:{max(order, 1)}"
+        else:
+            key = "auto:1"
+        val = axis_scores.get(key)
+        out[axis] = float(val) if val is not None else 0.0
+    return out
+
+
 def _optimize_uniform_processing(
     experiment: Experiment,
     backend: Any,
@@ -830,6 +860,7 @@ def _optimize_uniform_processing(
         }
     base_path = Path(resp["spectrum_path"])
     # 2) 基线:每轴内存评分(off/auto/order1-3),写回终跑
+    opt = None
     try:
         from workflow.baseline_optimize import optimize_baseline
 
@@ -911,6 +942,11 @@ def _optimize_uniform_processing(
         out_logs.append(f"间接维窗优化失败: {exc}")
     return {
         "baseline": baseline_cfg,
+        # 0.2.199-补29z:各轴基线优化选中配置的评分——最终谱图质量报告
+        # 的基线分与优化时一致(不再对终谱另行评估造成两套数)
+        "baseline_scores": _chosen_baseline_scores(
+            baseline_cfg, opt.scores if opt is not None else {}
+        ),
         "zero_fill": zf_params,
         "window": window_cfg,
         "logs": out_logs,
@@ -969,6 +1005,7 @@ def _optimize_nus_processing(
         }
     base_path = Path(resp["spectrum_path"])
     # 2) 基线:每轴内存评分(off/auto/order1-3),写回终跑完整脚本
+    opt = None
     try:
         from workflow.baseline_optimize import optimize_baseline
 
@@ -1053,6 +1090,11 @@ def _optimize_nus_processing(
         out_logs.append(f"间接维窗优化失败: {exc}")
     return {
         "baseline": baseline_cfg,
+        # 0.2.199-补29z:各轴基线优化选中配置的评分——最终谱图质量报告
+        # 的基线分与优化时一致(不再对终谱另行评估造成两套数)
+        "baseline_scores": _chosen_baseline_scores(
+            baseline_cfg, opt.scores if opt is not None else {}
+        ),
         "zero_fill": zf_params,
         "window": window_cfg,
         "logs": out_logs,
@@ -1441,6 +1483,7 @@ def _unified_nus(
         phases=fixed,
         backend_runs=backend_runs,
         baseline=proc["baseline"],
+        baseline_scores=proc.get("baseline_scores"),
         zero_fill=proc["zero_fill"],
         window=proc["window"],
         diagnostics=diagnostics,

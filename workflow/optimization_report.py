@@ -100,6 +100,8 @@ def spectrum_quality_report_lines(
     optimization_logs: list[str] | None = None,
     axis_names: list[str] | None = None,
     sign_mode: str = "uniform",
+    baseline_scores: dict[str, float] | None = None,
+    progress: Callable[[str], None] | None = None,
 ) -> list[str]:
     """◆ 最终谱图质量 分节(0.2.169-补):综合判定 + 分项等级分数 +
     基线指标(最差存储轴)+ 检查说明 + 基线不平原因。日志末尾汇总与
@@ -114,10 +116,30 @@ def spectrum_quality_report_lines(
 
         from core.qc import baseline_quality, spectrum_quality
 
+        # 0.2.199-补29z:质量评估各阶段输出进度(终跑完成后用户能看到
+        # 当前在评估什么,而非长时间无日志)
+        if progress is not None:
+            progress("谱图质量评估: 读取终谱中")
         _dic, data = ng.pipe.read(str(spectrum_path))
         arr = np.asarray(data)
+        if progress is not None:
+            progress("谱图质量评估: 信噪比/相位/基线/伪影评分中")
         q = spectrum_quality.evaluate(arr, sign_mode=sign_mode)
+        if progress is not None:
+            progress("谱图质量评估: 基线最差轴分析中")
         comps = q.score.components
+        # 0.2.199-补29z:基线分与优化一致——直接用优化网格里选中配置的
+        # 各轴评分(最差轴代表),不再对终谱另行评估(两基准不同会造成
+        # 优化 66.8 而报告 50 的困惑)
+        if baseline_scores and baseline_scores.values():
+            opt_worst = min(baseline_scores.values())
+            if 0.0 < opt_worst <= 100.0:
+                comps = comps.__class__(
+                    snr=comps.snr,
+                    phase=comps.phase,
+                    baseline=float(opt_worst),
+                    artifact=comps.artifact,
+                )
         decision_label = {
             "accept": "✓ 接受",
             "warning": "⚠ 警告",

@@ -331,13 +331,18 @@ def run_direct_diagnostics(
             "数据处理无法完全消除,建议检查温控/锁场并考虑重新采谱"
         )
     energy = np.sum(np.abs(traces) ** 2, axis=-1)
-    order = np.argsort(energy)[::-1]
-    top20 = max(int(np.ceil(len(order) * 0.2)), 1)
-    frac = float(np.sum(energy[order[:top20]]) / max(np.sum(energy), 1e-12))
+    # 0.2.199-补29z:NUS 大部分迹为空(未采集),前 20% 全迹必然占 100%
+    # 能量导致每个谱都误报——只统计非空迹的能量分布
+    nz = energy[energy > 0]
+    frac = 0.0
+    if nz.size >= 8:
+        order = np.argsort(nz)[::-1]
+        top20 = max(int(np.ceil(nz.size * 0.2)), 1)
+        frac = float(np.sum(nz[order[:top20]]) / max(np.sum(nz), 1e-12))
     res.metrics["energy_top20_frac"] = frac
     if frac > ENERGY_TOP20_THRESHOLD:
         reports.append(
-            f"采样点能量分布不均(前 20% 迹占 {frac * 100:.0f}% 能量),"
+            f"采样点能量分布不均(非空迹前 20% 占 {frac * 100:.0f}% 能量),"
             "可能是增益步长/脉冲不稳定;不影响重构时可继续,否则建议核查采集"
         )
     # 0.2.196:潜在问题只报告不自动处理——NaN/Inf、全零迹、持续异常能量
