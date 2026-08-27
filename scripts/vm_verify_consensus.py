@@ -17,11 +17,14 @@ def main() -> int:
     backend = NMRPipeBackend(work_dir=str(work))
     axes = [d.logical_axis for d in exp.dimensions]
     zf_none = {"zero_fill": {a: {"mode": "none"} for a in axes}}
+    zf_real = {"zero_fill": {"F2": {"mode": "size", "size": 128},
+                              "F1": {"mode": "size", "size": 256},
+                              "F3": {"mode": "none"}}}
     resp = backend.finalize_nus(
         exp,
         phases={},
         work_dir=str(work),
-        params={**zf_none, "keep_complex": True},
+        params={**zf_real, "keep_complex": True},
         out_file="28_consensus.ft3",
         script_name="28_consensus_finalize.com",
     )

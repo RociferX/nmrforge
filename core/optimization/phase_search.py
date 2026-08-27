@@ -171,6 +171,8 @@ def _row_p1_fit(
             conc = _concentration(best_p1 + offset)
             if conc > best_conc:
                 best_conc, best_p1 = conc, best_p1 + offset
+    # 0.2.199-补29i:细化会漂出粗搜范围(短轴上伪峰,实测 ±220),钳回
+    best_p1 = float(np.clip(best_p1, -90.0, 90.0))
     return best_p1, best_conc
 
 
