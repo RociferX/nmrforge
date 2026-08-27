@@ -670,8 +670,19 @@ class NMRPipeBackend:
             shutil.copy2(raw_nuslist, work / "nuslist")
             # 安全网:工作 nuslist 再校验(源头已清理时应为 0 坏点)
             nuslist_count, _leftover = self._clean_work_nuslist(work, experiment, logs)
-            # 0.2.199-补16:转换产物统一单文件 {dataset_id}.fid
-            in_file = fid_file.name
+            # 0.2.199-补27:兼容 bruker 自动输出——单文件优先,找不到单文件
+            # 回退切片流(fid/test%03d.fid 或 fid/{dataset_id}%03d.fid);
+            # nus 脚本 xyz2pipe 两种输入都支持
+            slice_dir = work / "fid"
+            slice_in = _slice_in_file(slice_dir, experiment.dataset_id)
+            if fid_file.is_file():
+                in_file = fid_file.name
+            elif slice_in:
+                in_file = slice_in
+                logs.append(f"使用 bruker 切片式 fid（{slice_in},流式处理）")
+            else:
+                in_file = fid_file.name  # 兜底:转换应已产出其一
+                logs.append("fid 未找到(单文件/切片均无),终跑将失败")
             if bad_points and not source_removed:
                 # 源头删除不可行(ser 缺失/大小不符)时回退到生成 FID 清零
                 self._zero_bad_point_fid(

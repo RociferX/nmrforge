@@ -225,6 +225,8 @@ def patch_fid_com(
     if experiment.sampling.mode is SamplingMode.NUS:
         patched, grid_warnings = _force_nus_expand_grid(patched, experiment)
         warnings += grid_warnings
+        # 0.2.199-补27:不强制单文件——bruker 自动判断输出形态(TD=1 单
+        # 文件、TD>1 切片),程序兼容两种输入(见 reconstruct_nus 切片回退)
     patched, out_warnings = patch_fid_out_name(patched, experiment.dataset_id)
     warnings += out_warnings
     return patched, warnings
