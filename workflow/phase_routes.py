@@ -1416,6 +1416,23 @@ def _unified_nus(
     )
     logs += list(final.get("logs", []))
     logs.append(f"终跑完成,耗时 {time.time() - t_final:.1f} 秒")
+    # 0.2.199-补29u:终脚本基线交叉核对——报告说选了 order3 时,
+    # 终脚本应有对应 POLY(排查「报告/脚本不一致」)
+    try:
+        final_script = work / f"{experiment.dataset_id}_nus.com"
+        if final_script.is_file():
+            _text = final_script.read_text(
+                encoding="utf-8", errors="replace"
+            )
+            _polys = [
+                ln.strip() for ln in _text.splitlines() if "POLY" in ln
+            ]
+            logs.append(
+                "终脚本基线核对: "
+                + ("; ".join(_polys) if _polys else "无 POLY")
+            )
+    except OSError:
+        pass
     _append_final_summary(
         logs,
         str(final["spectrum_path"]),

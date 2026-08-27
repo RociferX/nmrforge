@@ -279,19 +279,6 @@ def generate_spectrum(
         message="生成谱图",
         params=merged_params,
     )
-    # 0.2.199-补29d:报告缓存落盘(工作线程已算好报告文本)——GUI 展开详情
-    # 时缓存未命中直接读记录,不再在主线程重读整张 ft3 卡死
-    try:
-        from workflow.optimization_report import (
-            report_text_from_logs,
-            write_quality_record,
-        )
-
-        report_text = report_text_from_logs(list(result.get("logs", [])))
-        if report_text:
-            write_quality_record(spectrum_path, merged_params, report_text)
-    except Exception:  # noqa: BLE001 - 缓存记录失败不影响谱图生成
-        pass
     # Task E(0.2.133):3D 终谱用 NMRPipe proj3D.tcl 生成三个投影,落
     # spectra/<id>_<核A>-<核B>.ft2(文件名含平面实际两核,GUI 以
     # <data_id>_*.ft2 通配扫描,旧 *_proj_*.ft2 亦兼容)。
@@ -331,6 +318,20 @@ def generate_spectrum(
         if _run is not None and "projections" in merged_params:
             # 0.2.133:投影注册写回运行参数(供 GUI/汇报读取)
             _run.params["projections"] = merged_params["projections"]
+    # 0.2.199-补29t:报告缓存落盘必须放在投影注册之后——run.params 会
+    # 追加 projections,记录若提前写入则指纹与 GUI 读取的 run.params 不
+    # 匹配,报告永远显示「无报告记录」(此前 3D 谱全部中招)。
+    try:
+        from workflow.optimization_report import (
+            report_text_from_logs,
+            write_quality_record,
+        )
+
+        report_text = report_text_from_logs(list(result.get("logs", [])))
+        if report_text:
+            write_quality_record(spectrum_path, merged_params, report_text)
+    except Exception:  # noqa: BLE001 - 缓存记录失败不影响谱图生成
+        pass
     return spectrum_path
 
 

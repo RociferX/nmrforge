@@ -129,6 +129,38 @@ def _decimated(data: np.ndarray, axis: int, max_traces: int) -> np.ndarray:
     return data[tuple(slices)]
 
 
+def _peak_free_traces(
+    real: np.ndarray,
+    axis: int,
+    *,
+    max_traces: int,
+    min_traces: int = 64,
+) -> tuple[np.ndarray | None, np.ndarray]:
+    """沿 axis 取无强峰迹线(顺序保留)作为基线评分基底。
+
+    用户方案(0.2.199-补29u):基线优化先找没有峰的位置再抽样——强峰
+    会拉偏基线估计,只在无峰迹线上拟合/评分才反映真实基线;顺带
+    大幅减少拟合量(密集谱无峰迹线数远小于全谱)。迹线含峰判定:
+    |迹线| 最大值 ≥ max(全局 99 分位×0.5, 全局最大×0.02)。
+    返回 (2D 数组(n_traces, n), 原扁平迹线索引);无峰迹线不足
+    返回 (None, []) 由调用方回退全迹降采样。
+    """
+    moved = np.moveaxis(np.real(real), axis, -1)
+    flat = moved.reshape(-1, moved.shape[-1])
+    amp = np.abs(flat)
+    thr = max(
+        float(np.percentile(amp, 99.0)) * 0.5,
+        float(np.max(amp)) * 0.02,
+    )
+    keep = np.where(np.max(amp, axis=1) < thr)[0]
+    if keep.size < min_traces:
+        return None, keep
+    if keep.size > max_traces:
+        idx = np.linspace(0, keep.size - 1, max_traces).astype(int)
+        keep = keep[idx]
+    return flat[keep], keep
+
+
 def optimize_baseline(
     experiment: Experiment,
     spectrum_path: Path | str,
@@ -185,12 +217,24 @@ def optimize_baseline(
         # 0.2.199-补9:原谱已有明显条纹(>8)时不做子采样——细条纹可能被
         # 子采样漏检,且条纹否决/评分必须全量评估才正确;干净谱才子采样
         orig_ratio = _stripe_ratio(arr, np_axis)
-        base = (
-            arr
-            if orig_ratio > 8.0
-            else _decimated(arr, np_axis, max_traces)
+        # 0.2.199-补29u:先找无峰迹线再抽样作评分基底(用户方案),
+        # 避免强峰拉偏基线估计;无峰迹线不足回退全迹降采样
+        base2d, _keep_idx = _peak_free_traces(
+            arr, np_axis, max_traces=max_traces
         )
-        current_score = float(score_fn(base, np_axis))
+        if base2d is None:
+            base = (
+                arr
+                if orig_ratio > 8.0
+                else _decimated(arr, np_axis, max_traces)
+            )
+            score_axis = np_axis
+            base_ratio = orig_ratio
+        else:
+            base = base2d
+            score_axis = -1
+            base_ratio = _stripe_ratio(base, -1)
+        current_score = float(score_fn(base, score_axis))
         # 基线已良好(≥95)时跳过整轴候选,直接保持 off(省去全网格拟合)
         if current_score >= 95.0:
             baseline_cfg[axis] = dict(off_cfg)
@@ -216,20 +260,20 @@ def optimize_baseline(
                         method="polynomial",
                         axis=axis,
                         order=max(order, 1),
-                        np_axis=np_axis,
+                        np_axis=score_axis,
                     ),
 
                 )
-                # 硬性条纹否决:plain polyfit 与真实脚本 POLY 一致,校正后
-                # 若出现明显迹间断层则该候选不可写回(否则终谱出现竖线)
-                # 0.2.199-补9:相对否决——只否决比原谱明显更差的候选
+                # 硬性条纹否决:校正后若出现明显迹间断层则该候选不可
+                # 写回(否则终谱出现竖线);相对否决——只否决比基底
+                # 明显更差的候选(0.2.199-补9)
                 if _has_stripe_artifact(
-                    work, np_axis, baseline_ratio=orig_ratio
+                    work, score_axis, baseline_ratio=base_ratio
                 ):
                     axis_scores[f"{mode}:{order}"] = _VETOED_SCORE
                     _vetoed_count += 1
                     continue
-            value = float(score_fn(work, np_axis))
+            value = float(score_fn(work, score_axis))
             axis_scores[f"{mode}:{order}"] = value
             if best is None or value > best[0]:
                 best = (value, mode, order)

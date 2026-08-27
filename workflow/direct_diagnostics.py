@@ -195,20 +195,27 @@ def _trace_metrics(
 
 
 def _find_bad_points(row: np.ndarray) -> np.ndarray:
-    """孤立尖峰掩码:幅度 >> 邻域中值且两侧同时陡降。"""
+    """孤立尖峰掩码:幅度 >> 邻域中值且两侧同时陡降。
+
+    0.2.199-补29u:逐点 Python 循环向量化——3D NUS 数千条迹 × 2048 点
+    的原实现是数据质量诊断的主要耗时。
+    """
     amp = np.abs(row)
     med = float(np.median(amp))
     mad = float(np.median(np.abs(amp - med)))
-    if mad <= 0:
-        return np.zeros(amp.size, dtype=bool)
+    n = amp.size
+    cand = np.zeros(n, dtype=bool)
+    if mad <= 0 or n < 5:
+        return cand
     thr = med + BADPOINT_MAD * 1.4826 * mad
-    cand = np.zeros(amp.size, dtype=bool)
-    for i in range(2, amp.size - 2):
-        if amp[i] > thr:
-            left = max(amp[i - 1], amp[i - 2], 1e-12)
-            right = max(amp[i + 1], amp[i + 2], 1e-12)
-            if amp[i] > 3.0 * left and amp[i] > 3.0 * right:
-                cand[i] = True
+    center = amp[2:-2]
+    left = np.maximum(amp[1:-3], amp[0:-4])
+    right = np.maximum(amp[3:-1], amp[4:])
+    cand[2:-2] = (
+        (center > thr)
+        & (center > 3.0 * np.maximum(left, 1e-12))
+        & (center > 3.0 * np.maximum(right, 1e-12))
+    )
     return cand
 
 

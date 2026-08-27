@@ -351,14 +351,13 @@ def evaluate(data: Any, *, sign_mode: str = "uniform") -> PhaseQuality:
     # (与优化 score_axis_memory 无迹线时返回 50 一致)
     if nets:
         if sign_mode == "mixed":
+            # 0.2.199-补29u:混合谱不再做 top-5 同号 0.7 惩罚——正确调相的
+            # CBCA(CO)NH/HNN 若最强 5 峰恰好同号(如全是 CA)会被误罚,
+            # 造成「相位看着正常但分低」;|nets| 中位数已反映线形质量,
+            # ±180 符号歧义对混合谱本来就不可分(用户确认正负不影响选峰)。
             net_score = 50.0 * (float(np.median(np.abs(nets))) + 1.0)
-            strong = [n for n in nets if abs(n) > 0.35]
-            if strong:
-                has_pos = any(n > 0 for n in strong)
-                has_neg = any(n < 0 for n in strong)
-                if not (has_pos and has_neg):
-                    net_score *= 0.7
         else:
+            # uniform 保留带符号中位数:180° 反相谱 nets≈-1 被正确惩罚
             net_score = 50.0 * (float(np.median(nets)) + 1.0)
         phase_score = 0.9 * net_score + 0.1 * (100.0 * (1.0 - ent))
         # 实部能量占比(吸收度)因子:相位校正后实部能量最大——打破
