@@ -35,8 +35,8 @@ DATA_SUBFOLDERS = ("raw", "process", "spectra", "peaks", "figures", "report")
 _STATUS_TEXT = {
     "registered": "已登记",
     "imported": "已导入",
-    "fid_ready": "FID 就绪",
-    "processed": "已处理",
+    "fid_ready": "已生成 FID",
+    "processed": "已生成谱图",
     "picked": "已选峰",
     "analyzed": "已分析",
 }
@@ -660,18 +660,29 @@ class ProjectTreePanel(QWidget):
         self.refresh()
 
     def _data_status(self, exp, data_node) -> str:
-        """按产物文件推断样品数据状态(运行中的数据显示「运行中」)。"""
+        """按产物文件推断样品数据状态(0.2.199-补29aa):
+
+        运行中 → 已生成谱图 → 已生成 FID → 已导入;直接读 data_entry
+        登记的 spectrum_path/fid_path(比按文件名扫描可靠)。
+        """
         try:
-            spectra = self.manager.dir_path("spectra")
             exp_id = exp.id
             data_id = getattr(data_node, "id", exp_id)
             if (exp_id, data_id) in self._running:
                 return "运行中"
-            for ext in ("ft2", "ft3"):
-                if spectra.joinpath(f"{exp_id}-{data_id}.{ext}").is_file():
-                    return "已处理"
-                if spectra.joinpath(f"{exp_id}.{ext}").is_file():
-                    return "已处理"
+            entry = self.manager.data(exp_id, data_id)
+            spec = str(getattr(entry, "spectrum_path", "") or "")
+            if spec and Path(spec).is_file():
+                return "已生成谱图"
+            fid = str(getattr(entry, "fid_path", "") or "")
+            if fid and Path(fid).is_file():
+                return "已生成 FID"
+            work = self.manager.data_dir(exp_id, data_id, "process")
+            if work.is_dir():
+                if list(work.glob("*.ft2")) or list(work.glob("*.ft3")):
+                    return "已生成谱图"
+                if list(work.glob("*.fid")) or (work / "fid").is_dir():
+                    return "已生成 FID"
         except Exception:  # noqa: BLE001 - 目录缺失时保守显示
             pass
         return "已导入"
