@@ -228,7 +228,8 @@ def test_direct_phase_real_ht_projected_traces() -> None:
     )
     est = search_direct_phase_real_ht(real, axis=-1)
     assert est is not None, "投影迹线应有干净峰"
-    assert _close(est[0], (-40.0) % 360.0, 20.0), est
+    # 0.2.199-补29p:直接维返回 0-180° 折叠值(不强制正峰)
+    assert _close(est[0], (-40.0) % 180.0, 20.0), est
     assert abs(est[1]) <= 15.0, est
     assert est[2] > 50.0, est
 

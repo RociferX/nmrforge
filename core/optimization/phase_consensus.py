@@ -126,7 +126,7 @@ def search_axis_phase_consensus(
     min_peaks: int = 2,
     margin: int = 8,
     max_peaks: int = 8,
-    sign_mode: str = "uniform",
+    sign_mode: str = "uniform",  # noqa: ARG001 - 0.2.199-补29p 起直接维不做 ±180 翻转
     progress: Callable[[str], None] | None = None,
     cancel: Callable[[], bool] | None = None,
 ) -> tuple[float, float, float] | None:
@@ -287,15 +287,19 @@ def search_direct_phase_real_ht(
     cancel: Callable[[], bool] | None = None,
 ) -> tuple[float, float, float] | None:
     """直接维相位优化:纯实数终谱抽直接维投影迹线,逐条 HT 补虚部,
-    逐条最佳相位,统计最优(用户方案 0.2.199-补29l)。
+    逐条最佳相位,统计最优(用户方案 0.2.199-补29l/补29p)。
 
     1D 谱 = 直接维投影迹线(3D:沿 F1 投影每条 F2 一条 + 沿 F2 投影每条
     F1 一条,共 间接维1点数 + 间接维2点数 条;2D:每条间接点一条),与
     NMRPipe proj3D.tcl -sum 的 XZ/YZ 平面一致(沿第三轴求和);每条实谱
-    经 Hilbert 变换补虚部(nmrPipe HT 符号约定:Im = -H_scipy);逐条用
+    经 Hilbert 变换补虚部(显示层 scipy 约定,Im = +H_scipy);逐条用
     相位集中度拟合 p1(多峰,与簇中心/迹线常数解耦)再取该 p1 下 p0;
-    跨迹线统计:p1 = 中位数,p0 = 半圆折叠圆均值,±180 按正峰符号定;
-    score = 共识相位下各迹线峰吸收度中位数 ×100。
+    跨迹线统计:p1 = 中位数,p0 = 半圆折叠圆均值。
+
+    ±180 不做强制翻转:正负只影响峰上下、不影响选峰与谱形(用户确认),
+    且投影迹线混合 13C CA+/CB− 使符号统计不可靠(uniform 翻转曾把
+    100/30 带到手调值的 180° 外)。统一返回 0-180° 折叠值,与手调一致
+    (102/100/101≈150、30≈2)。score = 共识相位下峰吸收度中位数 ×100。
     """
     if cancel is not None and cancel():
         raise RuntimeError("任务已取消:直接维 HT 逐条相位搜索被用户终止")
@@ -362,24 +366,13 @@ def search_direct_phase_real_ht(
         )
     ) % 180.0
 
-    def _median_abs_and_sign(phase: float) -> tuple[float, float]:
-        abs_vals: list[float] = []
-        sign_vals: list[float] = []
-        for cplx, pos, heights in infos:
-            a, sgn = _row_absorption(cplx, pos, heights, phase, p1, radius=1)
-            abs_vals.append(a)
-            sign_vals.append(sgn)
-        return float(np.median(abs_vals)), float(np.median(sign_vals))
-
-    if sign_mode != "mixed":
-        a0, s0 = _median_abs_and_sign(p0)
-        a180, s180 = _median_abs_and_sign((p0 + 180.0) % 360.0)
-        if s180 > s0:
-            p0 = (p0 + 180.0) % 360.0
-            a0 = a180
-    else:
-        a0, _s0 = _median_abs_and_sign(p0)
-    score = 100.0 * a0
+    # 0.2.199-补29p:直接维不强制正峰——±180 只影响峰正负,不影响
+    # 选峰/谱形;折叠值即最终 p0(0-180°)。score 用折叠值吸收度。
+    abs_vals: list[float] = []
+    for cplx, pos, heights in infos:
+        a, _sgn = _row_absorption(cplx, pos, heights, p0, p1, radius=1)
+        abs_vals.append(a)
+    score = 100.0 * float(np.median(abs_vals))
     if cancel is not None and cancel():
         raise RuntimeError("任务已取消:直接维 HT 逐条相位搜索被用户终止")
     return p0, p1, score
