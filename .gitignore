@@ -42,3 +42,4 @@ Thumbs.db
 
 # GUI/Backend 独立工作区(git worktree),总管合并时排除
 workspaces/
+.pytest_tmp/

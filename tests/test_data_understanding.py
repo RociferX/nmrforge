@@ -193,14 +193,28 @@ def _experiment_with_nuclei(
 
 
 def test_classify_nnh_by_nuclei() -> None:
-    """固体核磁 NNH:核组合 1H/15N/15N 唯一匹配,不再被 PULPROG 误配 HN(CO)CA。"""
+    """固体核磁 NNH:纯 nnh 脉冲程序 + 核组合 1H/15N/15N 唯一匹配。
+
+    0.2.199-补21:hncocannh/hncannh 是溶液 HNN 梯度脉冲程序,映射 HNN
+    (排在 nnh 前);固体 NNH 用例改用不冲突的 "cphNnh" 脉冲程序名。
+    """
+    from core.experiment.experiment_classifier import classify
+
+    exp = _experiment_with_nuclei(3, ["1H", "15N", "15N"], "cphNnh")
+    result = classify(exp)
+    assert result.name == "NNH"
+    assert result.confidence >= 0.9
+    assert any("PULPROG 含 'nnh'" in e for e in result.evidence)
+
+
+def test_classify_hnn_by_solution_pulprog() -> None:
+    """溶液核磁 HNN(0.2.199-补21):hncocannhgpwg3d + 1H/15N/15N → HNN。"""
     from core.experiment.experiment_classifier import classify
 
     exp = _experiment_with_nuclei(3, ["1H", "15N", "15N"], "hncocannhgpwg3d")
     result = classify(exp)
-    assert result.name == "NNH"
+    assert result.name == "HNN"
     assert result.confidence >= 0.9
-    assert any("核组合唯一匹配" in e for e in result.evidence)
 
 
 def test_classify_hncoca_only_with_13c() -> None:

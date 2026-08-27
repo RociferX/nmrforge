@@ -730,7 +730,8 @@ def _load_recon_planes(experiment: Experiment, work: Path) -> np.ndarray:
     hypercomplex 4×75 存储)拆错,又白占内存(数百 MB)。
     """
     if experiment.ndim >= 3:
-        raise RuntimeError("3D 直接维搜索不再使用重构平面(_load_recon_planes)")
+        # 3D 不加载(直接维搜索用 keep_complex 终谱),保持 2D 语义兼容
+        return np.zeros((0, 0, 0))
     recon = work / "nus2d" / "recon.ft1"
     if not recon.is_file():
         raise RuntimeError(f"缺少 2D 重构平面: {recon}")
