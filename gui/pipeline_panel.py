@@ -1510,6 +1510,11 @@ class PipelinePanel(QWidget):
                         f"直接维范围已更新: {lo or '默认'}-{hi or '默认'} ppm → {script_path.name}",
                         run_scope,
                     )
+                # 0.2.199-补29h:修改后运行前检测常见错误(worker 内,日志提示)
+                from workflow.script_check import check_script
+
+                for w in check_script(content, script_path.name):
+                    self.log_scoped.emit(f"⚠ 脚本检查: {w}", run_scope)
                 # 运行修改后的终跑脚本,谱图归位;实时转发脚本输出
                 result = self.controller.run_manual_spectrum(
                     data_node,

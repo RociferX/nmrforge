@@ -1173,6 +1173,24 @@ class MainWindow(QMainWindow):
 
         # 0.2.199-补29d:人工运行日志按数据作用域,切换选中不串
         manual_scope = self.log_panel.scope_key("data", exp_id, data_id)
+        # 0.2.199-补29h:运行前脚本检测(续行符/CRLF/BOM/缺输出等常见错误)
+        from workflow.script_check import check_script
+
+        check_warnings = check_script(content, script_name)
+        if check_warnings:
+            for w in check_warnings:
+                self.log_append_requested.emit(f"⚠ 脚本检查: {w}", manual_scope)
+            if not ConfirmDialog.confirm(
+                self,
+                "脚本检查发现警告",
+                f"{script_name} 运行前检查发现 {len(check_warnings)} 项问题:\n\n"
+                + "\n".join(f"· {w}" for w in check_warnings)
+                + "\n\n仍要继续运行吗?",
+            ):
+                self.log_append_requested.emit(
+                    "已取消运行(脚本检查警告)", manual_scope
+                )
+                return
         self.log_append_requested.emit(
             f"开始人工运行: {script_name} (数据 {data_id})", manual_scope
         )
