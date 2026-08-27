@@ -80,7 +80,10 @@ def _read_fid_raw(
     """按字节布局读取 fid → (complex64 (nrows, fdsize), nrows, fdsize, header)。
 
     以 nmrglue read 的复型数组为基准,试候选头长度(512/1024/2048),
-    逐元素全等者即为该文件的真实布局(2D/3D 流文件头不同)。
+    逐元素全等者即为该文件的真实布局。支持:
+    - 旧切片式 2D 复型平面:(specnum, fdsize),实虚交错沿第二轴;
+    - 0.2.199-补16 单文件 aq2D 伪 3D:(a, b, c) 3D 复型,直接维在最后
+      一轴,reshape 为 (a*b, c)(0.2.199-补25)。
     """
     raw = path.read_bytes()
     if len(raw) <= 2048:
@@ -94,7 +97,30 @@ def _read_fid_raw(
         specnum = int(float(dic["FDSPECNUM"]))
     except Exception:  # noqa: BLE001
         return None
-    if arr.shape != (specnum, fdsize):
+    # 单文件 aq2D:nmrglue 读为 3D 复型(a, b, c),直接维 = 最后一轴
+    if arr.ndim == 3:
+        nrows = int(arr.shape[0] * arr.shape[1])
+        fdsize3 = int(arr.shape[2])
+        target = arr.reshape(nrows, fdsize3).astype(np.complex64)
+        for header in HEADER_CANDIDATES + (0,):
+            expect = header + nrows * fdsize3 * COMPLEX_BYTES
+            if len(raw) != expect:
+                continue
+            flat = np.frombuffer(
+                raw, dtype="<f4", count=nrows * fdsize3 * 2, offset=header
+            ).astype(np.float32)
+            rows = flat.reshape(nrows, fdsize3 * 2)
+            cand = rows[:, :fdsize3] + 1j * rows[:, fdsize3:]
+            if cand.shape == target.shape and np.array_equal(
+                cand, target, equal_nan=True
+            ):
+                return target, fdsize3, nrows, header
+        # 头长度不在候选内:按文件尺寸反推,仍返回 nmrglue 读值
+        for header in HEADER_CANDIDATES:
+            if len(raw) >= header + nrows * fdsize3 * COMPLEX_BYTES:
+                return target, fdsize3, nrows, header
+        return target, fdsize3, nrows, 0
+    if arr.ndim != 2 or arr.shape != (specnum, fdsize):
         return None
     target = arr.astype(np.complex64)
     for header in HEADER_CANDIDATES:
