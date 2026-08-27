@@ -1242,7 +1242,10 @@ def _unified_nus(
             experiment,
             phases=fixed,
             work_dir=work,
-            params=dict(params_first),
+            # 0.2.199-补29r:直接维搜索用无填零终谱(与间接维预览
+            # zf_none 一致)——填零只进终跑,不进优化;此前带计划填零
+            # 使预览变 (512,512,…),与设计(优化用没填零的谱)不符。
+            params={**params_first, **zf_none},
             out_file=preview_out,
             script_name=(
                 f"{experiment.dataset_id}_direct_final_finalize.com"
