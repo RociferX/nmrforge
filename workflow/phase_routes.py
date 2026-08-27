@@ -1204,9 +1204,13 @@ def _unified_nus(
             direct_phase = (0.0, 0.0)
             if direct_est is not None and direct_est[2] >= 30.0:
                 direct_phase = (float(direct_est[0]), float(direct_est[1]))
-                if abs(direct_phase[1]) > 20.0:
+                # 0.2.199-补22:放宽 p1 归零护栏(20→170)——高场(1200MHz)
+                # 采集延迟使真实 p1 可达 100°+;仅 >170°(近全幅翻转,
+                # 疑似包装伪影)才归零;终跑窗口变化时 p1 由 0.2.162-补16
+                # 按窗口宽度重归一化。
+                if abs(direct_phase[1]) > 170.0:
                     logs.append(
-                        f"直接维对称性搜索 p1={direct_phase[1]:g}° 幅值异常(>20°),归零"
+                        f"直接维对称性搜索 p1={direct_phase[1]:g}° 幅值异常(>170°),归零"
                     )
                     direct_phase = (direct_phase[0], 0.0)
                 logs.append(

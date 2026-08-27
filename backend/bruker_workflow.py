@@ -216,6 +216,12 @@ def patch_fid_com(
         return match.group(0)
 
     patched = _KEY_RE.sub(replace, text)
+    # 0.2.199-补23:移除 fid.com 的 nusExpand -mask 阶段——SMILE 只读
+    # nuslist,不需要 mask;直接不生成(而非转换后再删产物)。ser_full
+    # 保留(bruk2pipe 输入)。
+    patched, mask_removed = _MASK_STAGE_RE.subn("", patched)
+    if mask_removed:
+        warnings.append("已移除 fid.com 的 nusExpand -mask 阶段(SMILE 不需要 mask)")
     if experiment.sampling.mode is SamplingMode.NUS:
         patched, grid_warnings = _force_nus_expand_grid(patched, experiment)
         warnings += grid_warnings
@@ -223,6 +229,13 @@ def patch_fid_com(
     warnings += out_warnings
     return patched, warnings
 
+
+# 0.2.199-补23:fid.com 的 mask 阶段(nusExpand.tcl -mask,含其 xyz2pipe 喂入
+# 行)整块移除;支持单文件(-out ./mask.fid)与旧切片式(-out ./mask/test%03d.fid)
+_MASK_STAGE_RE = re.compile(
+    r"\n(?:xyz2pipe -in [^\n]*? -noWr \\\n)?"
+    r"nusExpand\.tcl -mask[^\n]*(?:\\\n[^\n]*)*"
+)
 
 _NUS_EXPAND_RE = re.compile(r"(nusExpand\.tcl[^\n]*?)\\\n")
 

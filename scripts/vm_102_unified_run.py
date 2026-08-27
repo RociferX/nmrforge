@@ -23,11 +23,11 @@ def main() -> int:
         if p.is_file():
             p.unlink()
     exp = read_dataset(raw)
+    # 0.2.199-补22:不强制填零,保持原有默认逻辑(NUS 直接维 1×TD)
     params = {
         "ext_lo": "9.0",
         "ext_hi": "7.0",
         "nthread": 6,
-        "zero_fill": {"F3": {"mode": "size", "size": 1024}},
     }
     backend = NMRPipeBackend(work_dir=str(work))
     t0 = time.time()

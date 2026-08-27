@@ -972,9 +972,10 @@ class NMRPipeBackend:
                 logs.append(
                     f"显示层相位: F2=({p0:g}, {p1:g}) score={score:.2f}"
                 )
-                if abs(p1) > 20.0:
+                # 0.2.199-补22:放宽 p1 归零护栏(20→170,高场真实大 p1)
+                if abs(p1) > 170.0:
                     logs.append(
-                        f"显示层相位 p1={p1:g}° 幅值异常(>20°),归零"
+                        f"显示层相位 p1={p1:g}° 幅值异常(>170°),归零"
                     )
                     p1 = 0.0
                 (work / "phase.json").write_text(
