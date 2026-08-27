@@ -305,7 +305,7 @@ def test_unified_route_nus_reconstruct_then_finalize(
         lambda arr, axis=-1, sign_mode="uniform", **kwargs: (30.0, 0.0, 80.0),
     )
     monkeypatch.setattr(
-        routes, "_read_complex_ft3",
+        routes, "_read_real_ft3",
         lambda path: np.zeros((32, 64), dtype=float),
     )
 
@@ -498,7 +498,7 @@ def test_unified_route_nus_progress_stages(
         lambda arr, axis=-1, sign_mode="uniform", **kwargs: (30.0, 0.0, 80.0),
     )
     monkeypatch.setattr(
-        routes, "_read_complex_ft3",
+        routes, "_read_real_ft3",
         lambda path: np.zeros((32, 64), dtype=float),
     )
     monkeypatch.setattr(
@@ -563,7 +563,7 @@ def test_unified_route_nus_final_ext_apply_to_opt(
         lambda arr, axis=-1, sign_mode="uniform", **kwargs: (30.0, 0.0, 80.0),
     )
     monkeypatch.setattr(
-        routes, "_read_complex_ft3",
+        routes, "_read_real_ft3",
         lambda path: np.zeros((32, 64), dtype=float),
     )
     monkeypatch.setattr(
@@ -833,7 +833,7 @@ def test_unified_route_nus_final_ext_renormalizes_p1(
         lambda arr, axis=-1, sign_mode="uniform", **kwargs: (30.0, 15.0, 80.0),
     )
     monkeypatch.setattr(
-        routes, "_read_complex_ft3",
+        routes, "_read_real_ft3",
         lambda path: np.zeros((32, 64), dtype=float),
     )
     monkeypatch.setattr(

@@ -156,6 +156,23 @@ def _read_complex_ft3(path: Path | str) -> np.ndarray:
     return cplx.astype(np.complex128)
 
 
+def _read_real_ft3(path: Path | str) -> np.ndarray:
+    """读实型 3D/2D 终谱(0.2.199-补29q)。
+
+    直接维搜索的实型 finalize 预览(全轴 PS 带 -di)不是复型交错布局,
+    不能用 _read_complex_ft3(会把相邻实点错配成实虚对,100/101 实测
+    形状 (512,512,670) 被错读成 (256,256,670) 导致结果偏 ~6-9°)。
+    直接维 = 最后一轴。
+    """
+    import nmrglue as ng
+
+    _dic, data = ng.pipe.read(str(path))
+    arr = np.asarray(data)
+    if np.iscomplexobj(arr):
+        arr = arr.real
+    return np.asarray(arr, dtype=float)
+
+
 def _cleanup_unified_intermediates(
     work: Path,
     dataset_id: str,
@@ -1240,8 +1257,8 @@ def _unified_nus(
             raise RuntimeError(
                 f"直接维实型终谱预览失败: {resp_direct.get('message')}"
             )
-        search_arr = np.real(
-            _read_complex_ft3(str(resp_direct["spectrum_path"]))
+        search_arr = _read_real_ft3(
+            str(resp_direct["spectrum_path"])
         )
         logs.append(
             f"直接维相位搜索基底: 实型终谱 {search_arr.shape}"
