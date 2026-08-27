@@ -740,6 +740,7 @@ class PipelinePanel(QWidget):
     """Pipeline 功能区:上下文面包屑 + 下一步提示 + 步骤列表。"""
 
     log_message = pyqtSignal(str)
+    log_scoped = pyqtSignal(str, str)  # (message, scope):运行日志按数据/组作用域(0.2.199-补29d)
     memory_guard_requested = pyqtSignal(str)  # 0.2.112:SMILE 内存不足弹窗
     run_finished = pyqtSignal()
     run_started = pyqtSignal(str, str)  # (exp_id, data_id):某数据开始处理,左侧状态显示运行中
@@ -749,6 +750,7 @@ class PipelinePanel(QWidget):
     view_log_requested = pyqtSignal(str)  # step_id:定位日志面板
     progress_updated = pyqtSignal(str)  # 批量进度文本(主线程更新标签)
     batch_summary_requested = pyqtSignal(object)  # 批量汇总 dict
+    report_ready = pyqtSignal(str)  # step_id:后台报告计算完成,刷新该行详情(0.2.199-补29d)
 
     def __init__(
         self,
@@ -768,6 +770,7 @@ class PipelinePanel(QWidget):
         # 0.2.199-补12:生成谱图参数报告按谱文件指纹缓存,避免每次刷新主线程
         # 重读大 ft3 算质量导致卡顿;运行中标志防连续点击重复启动
         self._spectrum_report_cache: dict[str, str] = {}
+        self._pending_reports: set[str] = set()
         self._run_active: bool = False
 
         layout = QVBoxLayout(self)
@@ -789,6 +792,7 @@ class PipelinePanel(QWidget):
         self.batch_progress_label.setWordWrap(True)
         layout.addWidget(self.batch_progress_label)
         self.progress_updated.connect(self._on_progress_updated)
+        self.report_ready.connect(self._on_report_ready)
         # 0.2.199-补29c:run_finished 由工作线程 emit,经队列连接回到主线程
         # 刷新——旧代码在工作线程 finally 里直接 self.refresh() 跨线程碰
         # 控件,触发 QBasicTimer::start 错误并卡死
@@ -1103,6 +1107,20 @@ class PipelinePanel(QWidget):
         for row in self._rows.values():
             row.name_label.setStyleSheet("font-weight: bold;")
 
+    @staticmethod
+    def _run_log_scope(
+        exp_id: str, data_id: str, group_id: str = ""
+    ) -> str:
+        """运行日志作用域键:组内共用一个组日志,单个数据各自独立。"""
+        from gui.log_panel import LogPanel
+
+        return LogPanel.scope_key(
+            "group" if group_id else "data",
+            exp_id,
+            data_id,
+            group_id,
+        )
+
     def _refresh_after_run(self) -> None:
         """运行结束后的面板刷新(经队列信号,主线程执行)。
 
@@ -1168,7 +1186,49 @@ class PipelinePanel(QWidget):
                     return data["text"]
             except (OSError, ValueError):
                 pass
-        text = _spectrum_param_report(params, spectrum_path)
+        if key in self._pending_reports:
+            return "报告生成中(后台计算,请稍候)…"
+        spectrum_exists = bool(spectrum_path) and Path(spectrum_path).is_file()
+        if not spectrum_exists:
+            # 无谱文件时直接算(只读参数,不会卡)
+            text = _spectrum_param_report(params, spectrum_path)
+            self._remember_report(key, fp, params_fp, text, rec)
+            return text
+        # 0.2.199-补29d:大谱文件无缓存/记录(旧运行、人工脚本等)——后台
+        # 线程读谱计算,避免主线程重读整张 ft3 卡死;小谱(<32MB)同步算
+        # (读得快,且 2D 报告即时显示)。完成后信号刷新详情
+        try:
+            large = Path(spectrum_path).stat().st_size >= 32 * 1024 * 1024
+        except OSError:
+            large = False
+        if not large:
+            text = _spectrum_param_report(params, spectrum_path)
+            self._remember_report(key, fp, params_fp, text, rec)
+            return text
+        self._pending_reports.add(key)
+
+        def compute() -> None:
+            try:
+                text = _spectrum_param_report(params, spectrum_path)
+            except Exception as exc:  # noqa: BLE001 - 报告计算失败不阻断
+                text = f"报告生成失败: {exc}"
+            self._remember_report(key, fp, params_fp, text, rec)
+            self.report_ready.emit("spectrum")
+
+        import threading
+
+        threading.Thread(target=compute, daemon=True).start()
+        return "报告生成中(后台计算,请稍候)…"
+
+    def _remember_report(
+        self,
+        key: str,
+        fp: str,
+        params_fp: str,
+        text: str,
+        rec: Path | None,
+    ) -> None:
+        """报告文本入内存缓存并写盘记录(供缓存未命中后续用)。"""
         if len(self._spectrum_report_cache) >= 32:
             self._spectrum_report_cache.clear()
         self._spectrum_report_cache[key] = text
@@ -1183,7 +1243,14 @@ class PipelinePanel(QWidget):
                 )
             except OSError:
                 pass
-        return text
+
+    def _on_report_ready(self, step_id: str) -> None:
+        """后台报告计算完成(主线程):已展开的该行详情刷新为新报告。"""
+        row = self._rows.get(step_id)
+        if row is None or row.detail_frame.isHidden():
+            return
+        text, _params, failed = self._step_detail(step_id)
+        row.set_detail(text, failed=failed)
 
     def _step_detail(self, step_id: str) -> tuple[str, dict | None, bool]:
         """构建步骤详情(输入/产物/最近运行/参数/脚本快照);返回(文本, params, failed)。"""
@@ -1285,9 +1352,10 @@ class PipelinePanel(QWidget):
             try:
                 nodes = _data_nodes(self.manager, self._current_exp_id)
                 if not nodes:
-                    self.log_message.emit(
+                    self.log_scoped.emit(
                         f"{STEP_LABEL.get(step_id, step_id)}: "
-                        "该实验类型还没有样品数据,请先导入样品数据"
+                        "该实验类型还没有样品数据,请先导入样品数据",
+                        self._run_log_scope(self._current_exp_id, ""),
                     )
                     return
                 data_node = next(
@@ -1305,6 +1373,11 @@ class PipelinePanel(QWidget):
                     if self.manager is not None and self.manager.project is not None
                     else None
                 )
+                # 0.2.199-补29d:运行日志按目标数据/组作用域落地,切换选中
+                # 不再串——旧代码 emit log_message 落当前选中作用域
+                run_scope = self._run_log_scope(
+                    exp_id, target_data_id, group.id if group is not None else ""
+                )
                 if group is not None:
                     self._run_group_step(exp_id, group.id, step_id, target_data_id)
                     return
@@ -1318,21 +1391,23 @@ class PipelinePanel(QWidget):
                         if ext_params and "params" in inspect.signature(method).parameters:
                             kwargs["params"] = ext_params
                     if "progress" in inspect.signature(method).parameters:
-                        kwargs["progress"] = lambda msg: self.log_message.emit(
-                            f"{step_label}: {msg}"
+                        kwargs["progress"] = lambda msg: self.log_scoped.emit(
+                            f"{step_label}: {msg}", run_scope
                         )
                     result = method(data_node, **kwargs)
                     message = result if isinstance(result, str) else str(result)
-                    self.log_message.emit(f"完成 {step_label}: {message}")
+                    self.log_scoped.emit(f"完成 {step_label}: {message}", run_scope)
                 except Exception as exc:  # noqa: BLE001 - 单数据失败
-                    self.log_message.emit(
-                        f"失败 {step_label}: {type(exc).__name__}: {exc}"
+                    self.log_scoped.emit(
+                        f"失败 {step_label}: {type(exc).__name__}: {exc}",
+                        run_scope,
                     )
                     if "无法处理该谱" in str(exc):
                         self.memory_guard_requested.emit(str(exc))
             except Exception as exc:  # noqa: BLE001 - 错误统一回传 UI
-                self.log_message.emit(
-                    f"失败 {STEP_LABEL.get(step_id, step_id)}: {exc}"
+                self.log_scoped.emit(
+                    f"失败 {STEP_LABEL.get(step_id, step_id)}: {exc}",
+                    run_scope,
                 )
                 if "无法处理该谱" in str(exc):
                     self.memory_guard_requested.emit(str(exc))
@@ -1363,11 +1438,15 @@ class PipelinePanel(QWidget):
         """
         step_label = STEP_LABEL.get(step_id, step_id)
         group_count = len(self.manager.group_data_ids(exp_id, group_id))
-        self.log_message.emit(
-            f"数据组 {group_id}: 对 {group_count} 个数据执行 {step_label}"
+        group_scope = self._run_log_scope(exp_id, "", group_id)
+        self.log_scoped.emit(
+            f"数据组 {group_id}: 对 {group_count} 个数据执行 {step_label}",
+            group_scope,
         )
         if step_id == "smile":
-            self.log_message.emit("SMILE 优化不支持批量组,请在单个数据上执行")
+            self.log_scoped.emit(
+                "SMILE 优化不支持批量组,请在单个数据上执行", group_scope
+            )
             return
         # 0.2.199-补5:组内各数据开始处理,左侧树显示「运行中」
         for data_id in self.manager.group_data_ids(exp_id, group_id):
@@ -1383,12 +1462,15 @@ class PipelinePanel(QWidget):
                 group_id,
                 [step_id],
                 reference_data_id="",
-                progress=lambda msg: self.log_message.emit(f"{step_label}: {msg}"),
+                progress=lambda msg: self.log_scoped.emit(
+                    f"{step_label}: {msg}", group_scope
+                ),
                 **kwargs,
             )
         except Exception as exc:  # noqa: BLE001 - 引擎级失败
-            self.log_message.emit(
-                f"失败 {step_label}: {type(exc).__name__}: {exc}"
+            self.log_scoped.emit(
+                f"失败 {step_label}: {type(exc).__name__}: {exc}",
+                group_scope,
             )
             if "无法处理该谱" in str(exc):
                 self.memory_guard_requested.emit(str(exc))
@@ -1438,13 +1520,16 @@ class PipelinePanel(QWidget):
             try:
                 nodes = _data_nodes(self.manager, exp_id)
                 if not nodes:
-                    self.log_message.emit("该实验类型还没有样品数据")
+                    self.log_scoped.emit(
+                        "该实验类型还没有样品数据", self._run_log_scope(exp_id, "")
+                    )
                     return
                 data_node = next(
                     (n for n in nodes if getattr(n, "id", "") == self._current_data_id),
                     nodes[0],
                 )
                 data_id = getattr(data_node, "id", exp_id)
+                run_scope = self._run_log_scope(exp_id, data_id)
                 # 0.2.199-补5:处理开始,左侧树该数据显示「运行中」
                 self.run_started.emit(exp_id, data_id)
                 # 定位已有终跑脚本(uniform/NUS),找不到则提示先优化生成
@@ -1461,8 +1546,9 @@ class PipelinePanel(QWidget):
                         script_path = candidate
                         break
                 if script_path is None:
-                    self.log_message.emit(
-                        "没有可复用的终跑脚本,请先执行「重新优化」生成"
+                    self.log_scoped.emit(
+                        "没有可复用的终跑脚本,请先执行「重新优化」生成",
+                        run_scope,
                     )
                     return
                 content = script_path.read_text(encoding="utf-8", errors="replace")
@@ -1484,8 +1570,9 @@ class PipelinePanel(QWidget):
                             content,
                         )
                     script_path.write_text(content, encoding="utf-8", newline="\n")
-                    self.log_message.emit(
-                        f"直接维范围已更新: {lo or '默认'}-{hi or '默认'} ppm → {script_path.name}"
+                    self.log_scoped.emit(
+                        f"直接维范围已更新: {lo or '默认'}-{hi or '默认'} ppm → {script_path.name}",
+                        run_scope,
                     )
                 # 运行修改后的终跑脚本,谱图归位;实时转发脚本输出
                 result = self.controller.run_manual_spectrum(
@@ -1493,16 +1580,17 @@ class PipelinePanel(QWidget):
                     {script_path.name: content},
                     exp_id=exp_id,
                     data_id=data_id,
-                    progress=lambda line: self.log_message.emit(
-                        f"[{script_path.name}] {line}"
+                    progress=lambda line: self.log_scoped.emit(
+                        f"[{script_path.name}] {line}", run_scope
                     ),
                 )
-                self.log_message.emit(
-                    f"重新运行终脚本完成 {data_id}: {result}"
+                self.log_scoped.emit(
+                    f"重新运行终脚本完成 {data_id}: {result}", run_scope
                 )
             except Exception as exc:  # noqa: BLE001 - 错误统一回传 UI
-                self.log_message.emit(
-                    f"重新运行终脚本失败: {type(exc).__name__}: {exc}"
+                self.log_scoped.emit(
+                    f"重新运行终脚本失败: {type(exc).__name__}: {exc}",
+                    run_scope,
                 )
             finally:
                 self._run_active = False

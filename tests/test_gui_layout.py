@@ -453,7 +453,10 @@ def test_pipeline_panel_run_generate_fid(
     panel = PipelinePanel(manager, controller)
     log = LogPanel()
     panel.log_message.connect(log.append)
+    panel.log_scoped.connect(log.append)  # 0.2.199-补29d:运行日志按作用域
     panel.set_selection("data", "exp_001", "d_001")
+    # 0.2.199-补29d:日志按数据作用域落地,面板切到该数据作用域才显示
+    log.set_scope("data", "exp_001", "d_001")
     panel._on_run_requested("fid")
     assert controller.calls == ["generate_fid"]
     assert "完成 生成 FID" in log.text.toPlainText()

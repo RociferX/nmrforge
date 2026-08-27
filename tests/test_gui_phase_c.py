@@ -129,6 +129,7 @@ def test_batch_progress_and_summary(
     logs: list[str] = []
     panel.batch_summary_requested.connect(summaries.append)
     panel.log_message.connect(logs.append)
+    panel.log_scoped.connect(lambda msg, _scope: logs.append(msg))  # 0.2.199-补29d
     panel._on_run_requested("spectrum")
     assert controller.group_calls == [(group.id, ["spectrum"])]
     assert summaries and summaries[0]["info"].startswith(

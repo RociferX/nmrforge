@@ -43,6 +43,57 @@ def format_opt_mode_map(cfg: Any) -> str:
     return " ".join(parts) or "默认"
 
 
+REPORT_MARK = "== 谱图质量与数据质量报告 =="
+
+
+def report_text_from_logs(logs: list[str]) -> str | None:
+    """从统一流程日志里抽取报告文本(0.2.199-补29d)。
+
+    phase_routes._append_final_summary 会把「== 谱图质量与数据质量报告 ==」
+    起的全部行追加进 logs;工作线程生成谱图后据此写 {谱}.quality.json,
+    GUI 缓存未命中时直接读记录,不再在主线程重读整张 ft3。
+    """
+    for i, line in enumerate(logs):
+        if line.strip().startswith(REPORT_MARK):
+            return "\n".join(logs[i:])
+    return None
+
+
+def write_quality_record(
+    spectrum_path: str,
+    params: dict,
+    text: str,
+) -> None:
+    """写 {谱}.quality.json 报告缓存记录(与 GUI _cached_spectrum_report 同指纹)。
+
+    fp = mtime_ns|size,params_fp = sha256(params)[:16];GUI 读取时校验一致
+    才复用,谱或参数变化自动失效。写盘失败静默(仅缓存)。
+    """
+    import hashlib
+    import json
+
+    from pathlib import Path
+
+    p = Path(spectrum_path)
+    try:
+        if not p.is_file():
+            return
+        st = p.stat()
+        fp = f"{st.st_mtime_ns}|{st.st_size}"
+        params_fp = hashlib.sha256(
+            json.dumps(params, sort_keys=True, ensure_ascii=False).encode("utf-8")
+        ).hexdigest()[:16]
+        Path(f"{spectrum_path}.quality.json").write_text(
+            json.dumps(
+                {"fp": fp, "params_fp": params_fp, "text": text},
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
+
+
 def spectrum_quality_report_lines(
     spectrum_path: str,
     *,

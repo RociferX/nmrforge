@@ -101,6 +101,41 @@ def test_success_steps_show_reprocess_button(
     panel.close()
 
 
+def test_run_logs_go_to_data_scope(tmp_path: Path, qapp: QApplication) -> None:
+    """0.2.199-补29d:运行日志按目标数据作用域落地(不随选中切换串)。"""
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr("threading.Thread", SyncThread)
+    try:
+        manager, exp_id, data_id = _manager_with_artifacts(tmp_path)
+        controller = _FakeController()
+        panel = PipelinePanel(manager, controller)
+        log = LogPanel()
+        panel.log_message.connect(log.append)
+        panel.log_scoped.connect(log.append)
+        panel.set_selection("data", exp_id, data_id)
+
+        scoped: list[tuple[str, str]] = []
+        panel.log_scoped.connect(
+            lambda msg, scope: scoped.append((msg, scope))
+        )
+        panel._on_run_requested("spectrum")
+        assert scoped, "应有作用域日志"
+        expected_scope = f"data:{exp_id}:{data_id}"
+        for _msg, scope in scoped:
+            assert scope == expected_scope, (scope, expected_scope)
+        # 组作用域辅助
+        assert (
+            panel._run_log_scope(exp_id, data_id) == expected_scope
+        )
+        assert (
+            panel._run_log_scope(exp_id, "", "g1") == f"group:{exp_id}:g1"
+        )
+        panel.close()
+        log.close()
+    finally:
+        monkeypatch.undo()
+
+
 def test_run_worker_thread_refreshes_via_queued_signal(
     tmp_path: Path, qapp: QApplication
 ) -> None:

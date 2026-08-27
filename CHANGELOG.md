@@ -86,6 +86,35 @@ FT+EXT+PS -di+TP,全采样恒等,不跑 SMILE),实证:
 测试:新增真实线程回归(非 SyncThread):跑完经队列信号刷新、状态不再
 RUNNING;全套 pytest 通过。
 
+## 0.2.199-补29d(2026-08-27,生成谱图报告卡死 + 日志按数据作用域隔离)
+
+用户反馈:点「生成谱图」后弹出的报告仍会卡死;日志在不同数据之间会串。
+
+报告卡死根因:生成谱图完成后刷新时,若 spectrum 步骤详情已展开,
+`_cached_spectrum_report` 缓存未命中(新谱文件指纹变了)会在**主线程**
+重读整张 ft3 并做全谱质量评估(3D 大谱可达数十秒),界面假死。
+
+修复:
+- 工作线程生成谱图时已算好报告文本(phase_routes._append_final_summary),
+  新增 `write_quality_record`/`report_text_from_logs`
+  (workflow/optimization_report.py),在 stepwise.generate_spectrum 里把报告
+  按 GUI 同指纹写 `{谱}.quality.json`;GUI 缓存未命中直接读记录,不再
+  主线程重读谱;
+- 兜底:无记录的大谱(≥32MB,旧运行/人工脚本)改为后台线程计算,
+  详情先显示「报告生成中…」,完成后经 report_ready 信号刷新;
+  小谱仍同步算(即时显示,不影响测试)。
+
+日志串根因:运行日志经 log_message(无作用域)落**当前选中**作用域,
+选中切换/组运行时 A 的日志会写进 B 的缓冲。修复:
+- PipelinePanel 新增 `log_scoped(str, str)` 队列信号,单数据运行日志落
+  `data:{exp}:{data}`,组运行落 `group:{exp}:{group}`(按目标数据/组,
+  不随选中切换);重新运行终脚本、人工脚本(经 log_append_requested)
+  同样带数据作用域;
+- center_panel/main_window 转发接线;组批量进度已在补29c 走队列。
+
+测试:新增日志作用域、质量记录读取(不重算)、大谱后台计算回归;更新
+受影响测试接 log_scoped/切日志作用域;全套 pytest 通过。
+
 ## 0.2.199-补19~21(2026-08-26,直接维相位评分:纯对称 + 形状感知符号 + HNN 模板)
 
 用户指出:部分峰天然为负(sampleK 最强峰 -1.1e11),正确相位下负吸收峰

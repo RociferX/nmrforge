@@ -235,6 +235,8 @@ class MainWindow(QMainWindow):
         self.center_panel = CenterPanel(self.manager, self.controller)
         self.pipeline = self.center_panel.pipeline  # 兼容旧引用
         self.center_panel.log_message.connect(self._append_log)
+        # 0.2.199-补29d:作用域日志(按数据/组)直接落对应缓冲,不随选中切换
+        self.center_panel.log_scoped.connect(self._append_log)
         self.center_panel.manual_open_requested.connect(self._open_manual_dialog)
         self.center_panel.import_data_requested.connect(self._import_data_for)
         self.center_panel.import_options_requested.connect(
@@ -1169,14 +1171,18 @@ class MainWindow(QMainWindow):
         """后台运行人工脚本;实时转发脚本输出,完成后主线程刷新。"""
         import threading
 
-        self.manual_run_log.emit(
-            f"开始人工运行: {script_name} (数据 {data_id})"
+        # 0.2.199-补29d:人工运行日志按数据作用域,切换选中不串
+        manual_scope = self.log_panel.scope_key("data", exp_id, data_id)
+        self.log_append_requested.emit(
+            f"开始人工运行: {script_name} (数据 {data_id})", manual_scope
         )
 
         def worker() -> None:
             def forward(line: str) -> None:
                 if line:
-                    self.manual_run_log.emit(f"[{script_name}] {line}")
+                    self.log_append_requested.emit(
+                        f"[{script_name}] {line}", manual_scope
+                    )
 
             try:
                 if script_name == "fid.com":
@@ -1198,12 +1204,12 @@ class MainWindow(QMainWindow):
                     )
                     message = f"{script_name} 运行完成: {result}"
             except Exception as exc:  # noqa: BLE001 - 错误统一回主线程
-                self.manual_run_log.emit(
-                    f"人工运行失败: {type(exc).__name__}: {exc}"
+                self.log_append_requested.emit(
+                    f"人工运行失败: {type(exc).__name__}: {exc}", manual_scope
                 )
                 self.manual_run_done.emit()
                 return
-            self.manual_run_log.emit(message)
+            self.log_append_requested.emit(message, manual_scope)
             self.manual_run_done.emit()
 
         # 0.2.199-补5:人工运行开始,左侧树该数据显示「运行中」

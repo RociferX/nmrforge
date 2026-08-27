@@ -368,7 +368,9 @@ def test_pipeline_progress_logs_to_panel(
     panel = PipelinePanel(manager, controller)
     log = LogPanel()
     panel.log_message.connect(log.append)
+    panel.log_scoped.connect(log.append)  # 0.2.199-补29d:运行日志按作用域
     panel.set_selection("data", entry.id, data.id)
+    log.set_scope("data", entry.id, data.id)
     panel._on_run_requested("spectrum")
     assert "SMILE 重构" in log.text.toPlainText()
     panel.close()
