@@ -441,6 +441,10 @@ class SpectrumPanel(QWidget):
         data_id = self._current_data_id or ""
         nuclei = self._axis_nuclei(3) or []
         a = b = None
+        # 0.2.199-补29x:仅 _proj_F{n} 命名能确定平面两轴与固定轴的
+        # 逻辑映射(数据取向 (b,a)=(remaining[0],remaining[1]));
+        # 核名命名的投影无法区分重复核,沿用旧同核/符号标签
+        logical_mapped = False
         if data_id and name.startswith(f"{data_id}_") and name.endswith(".ft2"):
             body = name[len(data_id) + 1:-4]
             if "-" in body:
@@ -453,6 +457,7 @@ class SpectrumPanel(QWidget):
                 remaining = [i for i in range(3) if i != fixed_axis]
                 a = nuclei[remaining[1]]
                 b = nuclei[remaining[0]]
+                logical_mapped = True
             else:
                 # 旧名 _proj_NH 之类:按后缀符号对尝试
                 m2 = _re.search(r"_proj_([A-Za-z0-9]{2,6})\.ft2$", name)
@@ -530,7 +535,7 @@ class SpectrumPanel(QWidget):
             from viewer.axis_labels import axis_labels_from_nuclei as _alfn
 
             labels3 = _alfn(nuclei)
-        if fixed_axis >= 0 and labels3 is not None:
+        if logical_mapped and labels3 is not None:
             remaining = [i for i in range(3) if i != fixed_axis]
             x_label = str(labels3[remaining[1]])
             y_label = str(labels3[remaining[0]])
@@ -541,6 +546,21 @@ class SpectrumPanel(QWidget):
             x_label, y_label = str(_proj_labels[0]), str(_proj_labels[1])
         else:
             x_label, y_label = nucleus_symbol(a), nucleus_symbol(b)
+        # 0.2.199-补29x:HNN 等重复核投影——X 轴对应 HSQC 的 N(15N),
+        # 15N-15N 平面把逻辑序较小的 Nx(F1)放 X;普通谱保持 H>N>C
+        if logical_mapped and labels3 is not None:
+            _remaining = [i for i in range(3) if i != fixed_axis]
+            _dup = len({_norm(n) for n in nuclei}) < len(nuclei)
+            if _dup and all(_norm(n) == "15N" for n in (a, b)):
+                if not _norm(x_label).startswith("NX"):
+                    data = data.T
+                    x_label, y_label = y_label, x_label
+                    x_params, y_params = y_params, x_params
+            elif _dup and "15N" in (_norm(a), _norm(b)):
+                if not _norm(x_label).startswith("N"):
+                    data = data.T
+                    x_label, y_label = y_label, x_label
+                    x_params, y_params = y_params, x_params
         x_axis = SpectrumAxis(
             label=x_label,
             size=int(data.shape[1]),
