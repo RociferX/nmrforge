@@ -252,6 +252,10 @@ def _direct_projected_traces(
     3D+ 谱:沿其它各轴分别实求和(纯实谱的复求和即实部求和)得到
     投影平面,每张平面按另一维每点抽一条沿 axis 的迹线拼接——对应
     proj3D 含直接维的两个输出(对间接维求和);2D 谱直接用各行。
+
+    注意:HNN 等实验合法含两个同名间接核(15N/15N),头标签重复,
+    proj3D.tcl 按标签选轴无法消歧(实测 sampleK 报 bad axis name Y),
+    因此这里按直接维轴角色/尺寸选平面,不依赖标签。
     """
     arr = np.asarray(real_spectrum, dtype=float)
     axis = axis if axis >= 0 else arr.ndim - 1

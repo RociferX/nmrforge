@@ -1201,6 +1201,8 @@ def _unified_nus(
         logs.append(f"联合复核完成,耗时 {time.time() - t_joint:.1f} 秒")
     # 直接维:0.2.199-补29l 改到「纯实终谱 + 投影迹线 + HT」上搜。
     # 间接维已按上述搜索校正(phases=fixed),生成真实(实型)finalize 终谱
+    # (HNN 等含两个同名 15N 间接核时头标签重复,proj3D 无法按标签选轴,
+    # 必须用 numpy 投影路径,按直接维轴角色/尺寸选平面)
     # ——即用户人工调相看到的最终谱(直接维仍未校正);等价 proj3D.tcl -sum
     # 的含直接维两平面(XZ/YZ,对间接维求和)抽直接维投影迹线,逐条实谱
     # Hilbert 补虚部(nmrPipe 符号约定:Im=-H_scipy)调相后统计最优
