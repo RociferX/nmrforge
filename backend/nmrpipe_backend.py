@@ -647,9 +647,7 @@ class NMRPipeBackend:
             else:
                 logs.append(f"复用已合并 fid（{merged_in},跳过转换/合并）")
                 nuslist_count = len(
-                    (work / "nuslist")
-                    .read_text(encoding="utf-8", errors="replace")
-                    .splitlines()
+                    (work / "nuslist").read_text(encoding="utf-8").splitlines()
                 )
             in_file = self._merged_fid_in(
                 work, experiment.dataset_id
