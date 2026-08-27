@@ -323,10 +323,11 @@ class NMRPipeBackend:
         # 发「复用已转换 fid」,避免 preview/joint/候选等多次 process 调用
         # 反复显示误导性的转换进度
         if experiment.segments:
-            merged_ready = (
-                work / "merged" / f"{experiment.dataset_id}.fid"
-            ).is_file()
-            in_file = f"merged/{experiment.dataset_id}.fid"
+            merged_in = self._merged_fid_in(
+                work, experiment.dataset_id
+            )
+            merged_ready = merged_in is not None
+            in_file = merged_in or f"merged/{experiment.dataset_id}.fid"
             if merged_ready and not (params or {}).get("segment_shift_hz"):
                 logs.append("复用已转换 fid(跳过转换)")
                 _progress("复用已转换 fid(跳过转换)")
@@ -526,7 +527,15 @@ class NMRPipeBackend:
                 runtime, experiment, work, [], fid_com_overrides=fid_com_overrides
             )
             logs += convert_logs
-            fid_path = work / "merged" / f"{experiment.dataset_id}.fid"
+            merged_in = self._merged_fid_in(
+                work, experiment.dataset_id
+            )
+            if merged_in and merged_in.endswith(".fid"):
+                fid_path = work / merged_in
+            elif merged_in:
+                fid_path = work / "merged" / "fid"
+            else:
+                fid_path = work / "merged"
             if converted:
                 _count, bad_points = self._write_merged_nuslist(
                     work, experiment.segments, experiment, logs
@@ -600,16 +609,20 @@ class NMRPipeBackend:
                         tuple(p) for p in read_nuslist(Path(seg) / "nuslist")
                     ]
                 logs += _apply_nus_grid_after_clean(experiment, merged_points)
-            merged_fid = work / "merged" / f"{experiment.dataset_id}.fid"
+            merged_in = self._merged_fid_in(
+                work, experiment.dataset_id
+            )
             merged_ready = (
-                merged_fid.is_file()
+                merged_in is not None
                 and (work / "nuslist").is_file()
                 and not params.get("segment_shift_hz")  # 有频移必须重转
             )
             if source_removed:
                 # 源头已变:旧合并产物失效,强制重转
-                if merged_fid.is_file():
-                    merged_fid.unlink()
+                if merged_in is not None:
+                    merged_path = work / merged_in.replace("%03d", "000")
+                    if merged_path.is_file():
+                        merged_path.unlink()
                 merged_ready = False
             if not merged_ready:
                 shifts = [float(v) for v in params.get("segment_shift_hz", [])]
@@ -632,11 +645,13 @@ class NMRPipeBackend:
                         work, bad_points, logs, dataset_id=experiment.dataset_id
                     )
             else:
-                logs.append("复用已合并单文件（跳过转换/合并）")
+                logs.append(f"复用已合并 fid（{merged_in},跳过转换/合并）")
                 nuslist_count = len(
                     (work / "nuslist").read_text(encoding="utf-8").splitlines()
                 )
-            in_file = f"merged/{experiment.dataset_id}.fid"
+            in_file = self._merged_fid_in(
+                work, experiment.dataset_id
+            ) or f"merged/{experiment.dataset_id}.fid"
         else:
             # 0.2.124:坏点在源头 ser/nuslist 删除并备份(用户要求),转换前执行
             nuslist_count, bad_points, source_removed = self._clean_source_nus(
@@ -1306,7 +1321,7 @@ class NMRPipeBackend:
 
     @staticmethod
     def _converted_fid_path(work: Path, dataset_id: str) -> Path:
-        """转换产物 fid 路径:单文件优先;旧切片式 work/fid/ 仅兼容。"""
+        """转换产物 fid 路径:单文件优先;切片式 work/fid/ 兼容。"""
         single = work / f"{dataset_id}.fid"
         if single.is_file():
             return single
@@ -1314,6 +1329,17 @@ class NMRPipeBackend:
         if _slice_candidates(slice_dir, dataset_id):
             return slice_dir
         return single
+
+    @staticmethod
+    def _merged_fid_in(work: Path, dataset_id: str) -> str | None:
+        """分段合并产物 in_file:单文件优先,否则切片流(0.2.199-补28)。"""
+        if (work / "merged" / f"{dataset_id}.fid").is_file():
+            return f"merged/{dataset_id}.fid"
+        slice_dir = work / "merged" / "fid"
+        slice_in = _slice_in_file(slice_dir, dataset_id)
+        if slice_in:
+            return f"merged/{slice_in}"
+        return None
 
     def _finalize_converted_fid(
         self,
@@ -2018,12 +2044,15 @@ class NMRPipeBackend:
         shifts: list[float],
         fid_com_overrides: dict[str, str] | None = None,
     ) -> tuple[bool, list[str]]:
-        """多段实验：每段 bruker 转换(单文件) → 频移(可选) → addNMR 合并。
+        """多段实验：每段 bruker 转换 → 频移(可选) → 合并。
 
         参考实验室 1stfid.com/2ndAdd.com 流程：分段实验是同一实验按采样时间拆
         段,各段 bruker -AUTO 生成的 fid.com 参数一致(均用 NusTD 网格;acqu2s
-        TD 只反映各自采样点数),逐段独立转换为单文件全网格 fid 后 addNMR
-        逐对时域合并(0.2.199-补16:不再拆切片合并);每段可带 -rs 频移。
+        TD 只反映各自采样点数),逐段独立转换后 addNMR 逐对时域合并。
+        0.2.199-补28:兼容 bruker 自动输出——各段全为单文件时合并单文件
+        (merged/{dataset_id}.fid);任一段为切片时全部归一为切片再合并
+        (merged/fid/test%03d.fid)。每段可带 -rs 频移(单文件直接 PS -rs;
+        切片式经 xyz2pipe 流 PS -rs)。
         """
         logs: list[str] = []
         is_nus = experiment.sampling.mode is SamplingMode.NUS
@@ -2032,6 +2061,7 @@ class NMRPipeBackend:
             self._clean_source_nus(
                 experiment, [Path(seg) for seg in experiment.segments], logs
             )
+        slice_mode = False
         for index, seg_dir in enumerate(experiment.segments, start=1):
             seg_work = work / f"seg_{index:03d}"
             seg_work.mkdir(parents=True, exist_ok=True)
@@ -2040,8 +2070,16 @@ class NMRPipeBackend:
                 fid_com_overrides=fid_com_overrides,
             ):
                 return False, logs + [f"数据段 {index}（{Path(seg_dir).name}）转换失败"]
+            seg_single = (
+                seg_work / f"{experiment.dataset_id}.fid"
+            ).is_file()
+            if not seg_single:
+                slice_mode = True
+                logs.append(f"段 {index}: bruker 输出切片式 fid(兼容合并)")
             shift_hz = shifts[index - 1] if index - 1 < len(shifts) else 0.0
-            if shift_hz:
+            if not shift_hz:
+                continue
+            if seg_single:
                 fid_name = f"{experiment.dataset_id}.fid"
                 shifted = seg_work / f"{experiment.dataset_id}_shifted.fid"
                 result = runtime.run(
@@ -2067,11 +2105,66 @@ class NMRPipeBackend:
                 )
                 if result.returncode == 0 and shifted.is_file():
                     shifted.replace(seg_work / fid_name)
-        if not self._merge_single_fid(
-            runtime, work, len(experiment.segments),
-            experiment.dataset_id, logs,
-        ):
-            return False, logs + ["多段单文件合并失败"]
+            else:
+                # 切片式:xyz2pipe 流上 PS -rs,整批重写
+                fid_dir = seg_work / "fid"
+                shifted_dir = seg_work / "fid_shifted"
+                if shifted_dir.exists():
+                    shutil.rmtree(shifted_dir)
+                result = runtime.run(
+                    [
+                        "xyz2pipe",
+                        "-in",
+                        "fid/test%03d.fid",
+                        "-x",
+                        "|",
+                        "nmrPipe",
+                        "-fn",
+                        "PS",
+                        "-rs",
+                        f"{shift_hz}Hz",
+                        "|",
+                        "pipe2xyz",
+                        "-out",
+                        "fid_shifted/test%03d.fid",
+                        "-x",
+                    ],
+                    cwd=str(seg_work),
+                    timeout=600,
+                )
+                logs.append(
+                    f"段 {index} 切片式频移 -rs {shift_hz}Hz: "
+                    f"rc={result.returncode}"
+                )
+                if result.returncode == 0 and list(
+                    shifted_dir.glob("test*.fid")
+                ):
+                    shutil.rmtree(fid_dir)
+                    shifted_dir.replace(fid_dir)
+        if not slice_mode:
+            if not self._merge_single_fid(
+                runtime, work, len(experiment.segments),
+                experiment.dataset_id, logs,
+            ):
+                return False, logs + ["多段单文件合并失败"]
+        else:
+            # 单文件段拆成切片,统一切片合并
+            for index in range(1, len(experiment.segments) + 1):
+                seg_work = work / f"seg_{index:03d}"
+                if (seg_work / f"{experiment.dataset_id}.fid").is_file():
+                    if not self._split_slices(
+                        runtime,
+                        seg_work,
+                        f"{experiment.dataset_id}.fid",
+                        seg_work / "fid",
+                        0.0,
+                        logs,
+                    ):
+                        return False, logs + [f"数据段 {index} 切片失败"]
+            if not self._merge_slices(
+                runtime, work, len(experiment.segments), logs
+            ):
+                return False, logs + ["多段切片合并失败"]
         return True, logs
 
     def _clean_source_nus(
