@@ -224,22 +224,23 @@ def search_axis_phase_consensus(
 
 
 def _hilbert(x: np.ndarray) -> np.ndarray:
-    """一维 Hilbert 补虚部,与 nmrPipe HT 约定一致(docs/backend/state.md 0.2.101)。
+    """一维 Hilbert 补虚部,与显示层(scipy.signal.hilbert)约定一致。
 
-    nmrPipe 普通 HT 的虚部 = -H_scipy(标准 Hilbert 反号,镜像选项 -ps90-180
-    才给出 +H_scipy);直接用 scipy/numpy 标准解析信号会把相位搜成共轭
-    (曾致 sampleI 误选 140°)。实现:FFT 后保留负频分量翻倍(等价
-    conj(标准解析信号))。
+    0.2.199-补29o 修正:直接维搜索的虚部用标准解析信号(正频半翻倍),
+    与 viewer 的 _display_phase / nmrDraw 肉眼看相一致——用户手调
+    sampleK 直接维 p0≈150,scipy 约定逐条 p0 中位数 146.7 重合,而
+    nmrPipe HT 函数本身的虚部(-H_scipy,state.md 0.2.101)在该应用里
+    会返回共轭相位(17.6/197.6,差 ~48°)。搜索输出即脚本 PS 应填的 p0。
     """
     n = x.size
     X = np.fft.fft(np.asarray(x, dtype=float))
     h = np.zeros(n)
     if n % 2 == 0:
         h[0] = h[n // 2] = 1.0
-        h[n // 2 + 1:] = 2.0
+        h[1:n // 2] = 2.0
     else:
         h[0] = 1.0
-        h[(n + 1) // 2:] = 2.0
+        h[1:(n + 1) // 2] = 2.0
     return np.fft.ifft(X * h)
 
 
@@ -316,18 +317,71 @@ def search_direct_phase_real_ht(
             ht_rows.append(cplx)
     if not ht_rows:
         return None
+    if len(ht_rows) > 16:
+        # 0.2.199-补29o:排除最强 2% 迹线(超大峰/强重叠峰相位与常规峰
+        # 不一致;实测 102 排除后 153.7 vs 用户手调 150,28 不受影响)
+        row_max = np.max(np.abs(np.asarray(ht_rows)), axis=-1)
+        cutoff = float(np.percentile(row_max, 98))
+        keep = [i for i, m in enumerate(row_max) if m <= cutoff]
+        if keep:
+            ht_rows = [ht_rows[i] for i in keep]
     if progress is not None:
         progress(f"直接维 HT 逐条相位: 锁定 {len(ht_rows)} 条投影迹线")
-    # 复用逐条共识搜索(集中度拟合 p1 + p0 圆均值 + 跨迹线统计)
-    return search_axis_phase_consensus(
-        np.asarray(ht_rows),
-        -1,
-        max_rows=max_traces,
-        margin=margin,
-        max_peaks=max_peaks,
-        sign_mode=sign_mode,
-        progress=progress,
-        cancel=cancel,
+    # 内联逐条共识(避免 search_axis_phase_consensus 二次锁峰带来的
+    # gmax 不一致):逐条集中度拟合 p1,该全局 p1 下逐条 p0,折叠圆均值,
+    # ±180 按正峰符号消歧;score = 共识相位下吸收度中位数 ×100。
+    infos: list[tuple[np.ndarray, np.ndarray, np.ndarray]] = []
+    for cplx in ht_rows:
+        peaks = _lock_trace_peaks(
+            np.abs(cplx), margin=margin, max_peaks=max_peaks,
+            global_max=global_max,
+        )
+        if peaks is not None and peaks[0].size >= 1:
+            infos.append((cplx, peaks[0], peaks[1]))
+    if not infos:
+        return None
+    p1_rows: list[float] = []
+    for cplx, pos, heights in infos:
+        fit = _row_p1_fit(cplx, pos, heights)
+        if fit is not None:
+            p1_rows.append(fit[0])
+    p1_signal = float(np.median(p1_rows)) if p1_rows else 0.0
+    p1 = -p1_signal
+    raw_p0 = np.array(
+        [_row_p0_raw(c, p, h, p1_signal) for c, p, h in infos],
+        dtype=float,
     )
+    folded = raw_p0 % 180.0
+    p0 = (
+        0.5
+        * np.rad2deg(
+            np.arctan2(
+                np.mean(np.sin(2.0 * np.deg2rad(folded))),
+                np.mean(np.cos(2.0 * np.deg2rad(folded))),
+            )
+        )
+    ) % 180.0
+
+    def _median_abs_and_sign(phase: float) -> tuple[float, float]:
+        abs_vals: list[float] = []
+        sign_vals: list[float] = []
+        for cplx, pos, heights in infos:
+            a, sgn = _row_absorption(cplx, pos, heights, phase, p1, radius=1)
+            abs_vals.append(a)
+            sign_vals.append(sgn)
+        return float(np.median(abs_vals)), float(np.median(sign_vals))
+
+    if sign_mode != "mixed":
+        a0, s0 = _median_abs_and_sign(p0)
+        a180, s180 = _median_abs_and_sign((p0 + 180.0) % 360.0)
+        if s180 > s0:
+            p0 = (p0 + 180.0) % 360.0
+            a0 = a180
+    else:
+        a0, _s0 = _median_abs_and_sign(p0)
+    score = 100.0 * a0
+    if cancel is not None and cancel():
+        raise RuntimeError("任务已取消:直接维 HT 逐条相位搜索被用户终止")
+    return p0, p1, score
 
 __all__ = ["search_axis_phase_consensus", "search_direct_phase_real_ht"]

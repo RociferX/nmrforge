@@ -158,48 +158,6 @@ def test_mixed_sign_mode_keeps_negative_peaks() -> None:
 
 
 
-def _make_real_direct_3d(
-    n1: int = 24,
-    n2: int = 20,
-    n_dir: int = 160,
-    psi0: float = 40.0,
-    psi1: float = 0.0,
-    seed: int = 7,
-) -> np.ndarray:
-    """纯实 3D 直接维谱:每条 (i,j) 由复 FID 构造(衰减指数 + 常数相位
-    psi0),FFT 得谱峰;取实部丢弃虚部。间接维已校正,t1=0;迹线稀疏
-    (约 2/3 无峰),峰散布在正频半,HT(nmrPipe 约定)可重建虚部。
-    """
-    rng = np.random.default_rng(seed)
-    spec = np.zeros((n1, n2, n_dir), dtype=complex)
-    t = np.arange(n_dir, dtype=float)
-    ramp = np.exp(1j * np.deg2rad(psi1 * np.arange(n_dir) / (n_dir - 1)))
-    for i in range(2, n1 - 2):
-        for j in range(2, n2 - 2):
-            if rng.random() < 0.35:
-                continue
-            f0 = int(rng.integers(12, n_dir // 2 - 12))
-            amp = float(rng.uniform(20.0, 60.0))
-            t2 = float(rng.uniform(40.0, 80.0))
-            fid = amp * np.exp(-t / t2) * np.exp(
-                1j * (2 * np.pi * f0 * t / n_dir + np.deg2rad(psi0))
-            )
-            spec[i, j] += np.fft.fft(fid) * ramp
-    spec += rng.normal(0.0, 0.05, spec.shape) + 1j * rng.normal(
-        0.0, 0.05, spec.shape
-    )
-    return np.real(spec)
-
-
-def test_direct_phase_real_ht_projected_traces() -> None:
-    """投影迹线 + HT(负频半/nmrPipe 约定)恢复直接维 p0,
-    p1 无信号时保持 0(平缓面保护,不再乱选边界)。
-    """
-    real = _make_real_direct_3d()
-    est = search_direct_phase_real_ht(real, axis=-1)
-    assert est is not None, "投影迹线应有干净峰"
-    assert _close(est[0], (-40.0) % 360.0, 25.0), est
-    assert abs(est[1]) <= 15.0, est
     assert est[2] > 50.0, est
 
 
@@ -223,3 +181,63 @@ def test_direct_phase_real_ht_2d_rows() -> None:
     assert est is not None
     assert _close(est[0], 70.0, 25.0), est
     assert abs(est[1]) <= 15.0, est
+
+
+
+def _exact_direct_spectrum(
+    shape: tuple[int, ...],
+    psi0: float,
+    *,
+    seed: int,
+    occ: float = 1.0,
+    t2: tuple[float, float] = (6.0, 15.0),
+) -> np.ndarray:
+    """精确重建的纯实直接维谱:时域 Ŝ 只保留正半(t<n/2),X=IFFT(Ŝ),
+    则 z_std(_hilbert 正频半)数学上精确还原 X,峰相位 = psi0(常数),
+    搜索应返回 (-psi0, 0)。取实部丢弃虚部;迹线稀疏可调。
+    """
+    rng = np.random.default_rng(seed)
+    n_dir = shape[-1]
+    half = n_dir // 2
+    t = np.arange(n_dir, dtype=float)
+    mask = t < half
+    spec = np.zeros(shape, dtype=complex)
+    n_other = int(np.prod(shape[:-1]))
+    for flat_idx in range(n_other):
+        if rng.random() < (1.0 - occ):
+            continue
+        f0 = int(rng.integers(12, half - 12))
+        amp = float(rng.uniform(80.0, 200.0))
+        t2v = float(rng.uniform(*t2))
+        shat = np.where(
+            mask,
+            amp * np.exp(-t / t2v) * np.exp(
+                1j * (2 * np.pi * f0 * t / n_dir + np.deg2rad(psi0))
+            ),
+            0.0,
+        )
+        idx = np.unravel_index(flat_idx, shape[:-1])
+        spec[idx] += np.fft.ifft(shat)
+    return np.real(spec) + rng.normal(0.0, 0.05, spec.shape)
+
+
+def test_direct_phase_real_ht_projected_traces() -> None:
+    """3D 投影迹线 + HT(正频半/scipy 约定)恢复直接维 p0。"""
+    real = _exact_direct_spectrum(
+        (20, 16, 160), 40.0, seed=7, occ=0.15, t2=(4.0, 10.0)
+    )
+    est = search_direct_phase_real_ht(real, axis=-1)
+    assert est is not None, "投影迹线应有干净峰"
+    assert _close(est[0], (-40.0) % 360.0, 20.0), est
+    assert abs(est[1]) <= 15.0, est
+    assert est[2] > 50.0, est
+
+
+def test_direct_phase_real_ht_2d_rows() -> None:
+    """2D 谱:各行即直接维迹线(无投影),同样恢复校正。"""
+    real = _exact_direct_spectrum((24, 120), -70.0, seed=11)
+    est = search_direct_phase_real_ht(real, axis=-1)
+    assert est is not None
+    assert _close(est[0], 70.0, 20.0), est
+    assert abs(est[1]) <= 15.0, est
+    assert est[2] > 50.0, est
