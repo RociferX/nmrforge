@@ -42,6 +42,25 @@ smile3.com)、sampleF(手工 2D uniform 3_process.com)为基准实证:
 轴映射、_nus_axis_map、_axis_sw 核标签、_load_recon_planes 原始堆叠+截断);
 相关批次全部通过。
 
+## 0.2.199-补29b(2D NUS 布局实证:用 uniform 制造 2D NUS 测试)
+
+用户建议:2D NUS 没有现成工作目录,可用 uniform 2D 制造来实证。用
+sampleF(uniform 1H-15N)按 2D NUS stage-1 链生成 recon.ft1(直接维
+FT+EXT+PS -di+TP,全采样恒等,不跑 SMILE),实证:
+
+- 2D recon.ft1 布局 = (F2 频, F1 时) 复型,F1 复型在**最后轴**;文件实型
+  存 (F2, 2×F1)(实部块+虚部块),nmrglue 读回 (F2, F1) complex
+  (FDTRANSPOSED=1, FDF2QUADFLAG=1);
+- 修复 `window_optimize._load_recon_planes` 2D 分支:旧代码用
+  `read_pipe_complex` 无条件拆轴 0,把已复型的 2D recon 直接维砍半
+  ((514,64)→(257,64)),间接维窗优化在坏数组上评分;现改为
+  iscomplexobj 检查,复型直接用、实型才拆包;
+- `phase_routes._load_recon_planes` 2D 本就正确(_read_complex_preview);
+- 2D finalize 链(FT -alt → PS → TP → -out)输出 (F1, F2),F1 预览
+  unpack_axis=0 正确。
+
+测试:新增 2D recon 读取回归(两个读取器都不砍直接维、内容一致)。
+
 ## 0.2.199-补19~21(2026-08-26,直接维相位评分:纯对称 + 形状感知符号 + HNN 模板)
 
 用户指出:部分峰天然为负(sampleK 最强峰 -1.1e11),正确相位下负吸收峰

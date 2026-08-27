@@ -482,7 +482,9 @@ def _load_recon_planes(
     (SP 直接作用于该轴),故**不**做简单轴 0 交错拆包(会拆错
     hypercomplex 数据);堆叠后 (F1 时, F2 时, F3)。只读首平面头部
     FDFILECOUNT 个平面,避免陈旧 test*.ft1 混入(补29)。
-    2D nus2d/recon.ft1 单文件 (F2 频, F1 时),复型拆包。
+    2D nus2d/recon.ft1 单文件 (F2 频, F1 时),F1 复型在最后轴——nmrglue
+    已直接读为复型 (F2, F1) complex,不能再用 read_pipe_complex 拆轴 0
+    (会把直接维砍半;0.2.199-补29b 实证 sampleF 制造的 2D recon)。
     """
     import nmrglue as ng
 
@@ -513,8 +515,13 @@ def _load_recon_planes(
     recon = work / "nus2d" / "recon.ft1"
     if not recon.is_file():
         return None
-    dic, _ = ng.pipe.read(str(recon))
-    return read_pipe_complex(recon), dic
+    dic, raw = ng.pipe.read(str(recon))
+    arr = np.asarray(raw)
+    if np.iscomplexobj(arr):
+        planes: np.ndarray = arr.astype(np.complex128)
+    else:
+        planes = read_pipe_complex(recon)
+    return planes, dic
 
 
 

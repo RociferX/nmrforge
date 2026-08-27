@@ -120,6 +120,60 @@ def test_axis_sw_matches_header_label(tmp_path: Path) -> None:
     assert abs(_axis_sw(dic, "F3", exp) - 8196.72) < 1e-2  # 1H
 
 
+def _write_2d_recon(path: Path, data: np.ndarray) -> None:
+    """写真实 2D recon.ft1 布局文件(F2 频, F1 时复型在最后轴)。
+
+    与 VM 实测(sampleF 制造的 recon.ft1)一致:FDF2QUADFLAG=1、
+    FDTRANSPOSED=1、FDQUADFLAG=0,实型存储为 (F2, 2×F1)
+    (实部块+虚部块),nmrglue 读回 (F2, F1) complex。
+    """
+    import nmrglue as ng
+
+    dic = ng.pipe.create_empty_dic()
+    dic.update(
+        {
+            "FDDIMCOUNT": 2.0,
+            "FDPIPEFLAG": 0.0,
+            "FDSIZE": float(data.shape[1]),
+            "FDSPECNUM": float(data.shape[0]),
+            "FDQUADFLAG": 0.0,
+            "FDF1QUADFLAG": 0.0,
+            "FDF2QUADFLAG": 1.0,
+            "FDTRANSPOSED": 1.0,
+            "FDF1LABEL": "15N",
+            "FDF1SW": 2920.0,
+            "FDF2LABEL": "1H",
+            "FDF2SW": 19230.77,
+        }
+    )
+    ng.pipe.write(str(path), dic, data.astype(np.complex64), overwrite=True)
+
+
+def test_load_recon_planes_2d_keeps_complex_shape(tmp_path: Path) -> None:
+    """2D recon.ft1 布局 (F2 频, F1 时) 复型:两个读取器都不砍直接维。
+
+    0.2.199-补29b 实证:nmrglue 对真实 2D recon 直接返回复型,
+    read_pipe_complex 无条件拆轴 0 会把直接维砍半(旧 bug)。
+    """
+    rng = np.random.default_rng(9)
+    data = rng.normal(size=(16, 8)) + 1j * rng.normal(size=(16, 8))
+    recon = tmp_path / "nus2d"
+    recon.mkdir()
+    _write_2d_recon(recon / "recon.ft1", data)
+    exp = _exp_3d()
+    exp.ndim = 2
+    exp.dimensions = exp.dimensions[1:]
+    planes_w, _dic = _load_recon_planes(tmp_path, exp)
+    assert planes_w.shape == (16, 8)
+    assert np.iscomplexobj(planes_w)
+    from workflow.phase_routes import _load_recon_planes as routes_load
+
+    planes_r = routes_load(exp, tmp_path)
+    assert planes_r.shape == (16, 8)
+    # 内容与写出的复型数据一致(不是被拆错的 (8, 8))
+    assert np.allclose(np.abs(planes_w), np.abs(data), atol=1e-5)
+
+
 def test_load_recon_planes_3d_raw_and_count(tmp_path: Path) -> None:
     """3D 平面:原样实型堆叠(不拆包 hypercomplex)+ 按 FDFILECOUNT 截断陈旧文件。"""
     import nmrglue as ng
