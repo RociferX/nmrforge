@@ -61,6 +61,31 @@ FT+EXT+PS -di+TP,全采样恒等,不跑 SMILE),实证:
 
 测试:新增 2D recon 读取回归(两个读取器都不砍直接维、内容一致)。
 
+## 0.2.199-补29c(2026-08-27,生成谱图卡死:工作线程跨线程碰控件修复)
+
+用户反馈:点击 pipeline 的「生成谱图」仍会卡死,并报
+`QBasicTimer::start: Timers cannot be started from another thread`。
+
+根因(工作线程直接调用 GUI):
+- `PipelinePanel` worker finally 里直接 `self.refresh()`——跨线程对行
+  控件 setStatus/setVisible,显示/隐藏会启动 Qt 内部计时器(工具提示/
+  滚动条等),触发 QBasicTimer 错误并与 GUI 线程竞争导致卡死;
+- `MainWindow._run_group_batch` worker 的 progress 回调直接调
+  `_append_log` → `LogPanel.append` → `QTextEdit.appendPlainText`
+  (光标闪烁计时器)+ 滚动条;worker finally 里还直接 `refresh()` 和
+  `group_page.set_progress()`。
+
+修复(全部改为经队列信号回主线程):
+- pipeline:worker finally 只 `run_finished.emit()`;新增
+  `_refresh_after_run`(run_finished 队列连接)在主线程复位 _run_active
+  并 refresh(单数据/重跑终脚本两个 worker 同样处理);
+- main_window:新增 `log_append_requested(str, object)` 队列信号,组批量
+  progress 经它回主线程 `_append_log`;worker 不再 set_progress/refresh,
+  统一移到 `_on_batch_run_done`(batch_run_done 队列槽,清进度+刷新)。
+
+测试:新增真实线程回归(非 SyncThread):跑完经队列信号刷新、状态不再
+RUNNING;全套 pytest 通过。
+
 ## 0.2.199-补19~21(2026-08-26,直接维相位评分:纯对称 + 形状感知符号 + HNN 模板)
 
 用户指出:部分峰天然为负(sampleK 最强峰 -1.1e11),正确相位下负吸收峰

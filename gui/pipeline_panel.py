@@ -789,6 +789,10 @@ class PipelinePanel(QWidget):
         self.batch_progress_label.setWordWrap(True)
         layout.addWidget(self.batch_progress_label)
         self.progress_updated.connect(self._on_progress_updated)
+        # 0.2.199-补29c:run_finished 由工作线程 emit,经队列连接回到主线程
+        # 刷新——旧代码在工作线程 finally 里直接 self.refresh() 跨线程碰
+        # 控件,触发 QBasicTimer::start 错误并卡死
+        self.run_finished.connect(self._refresh_after_run)
         self.hint_bubble = QLabel("")
         self.hint_bubble.setVisible(False)
         self.hint_bubble.setWordWrap(True)
@@ -1099,6 +1103,15 @@ class PipelinePanel(QWidget):
         for row in self._rows.values():
             row.name_label.setStyleSheet("font-weight: bold;")
 
+    def _refresh_after_run(self) -> None:
+        """运行结束后的面板刷新(经队列信号,主线程执行)。
+
+        工作线程 finally 只 emit run_finished,不再直接调用 refresh();
+        SyncThread 测试下 emit 为直连,行为不变。
+        """
+        self._run_active = False
+        self.refresh()
+
     def _on_progress_updated(self, text: str) -> None:
         """批量进度标签(主线程):空文本隐藏。"""
         self.batch_progress_label.setText(text)
@@ -1325,7 +1338,6 @@ class PipelinePanel(QWidget):
                     self.memory_guard_requested.emit(str(exc))
             finally:
                 self._run_active = False
-                self.refresh()
                 self.run_finished.emit()
 
         import threading
@@ -1494,7 +1506,6 @@ class PipelinePanel(QWidget):
                 )
             finally:
                 self._run_active = False
-                self.refresh()
                 self.run_finished.emit()
 
         import threading

@@ -79,6 +79,7 @@ class MainWindow(QMainWindow):
     manual_run_log = pyqtSignal(str)  # 人工脚本运行日志(后台线程 → 主线程)
     manual_run_done = pyqtSignal()  # 人工脚本运行完成(主线程刷新 UI)
     batch_run_done = pyqtSignal()  # 数据组批量处理完成(后台线程 → 主线程清运行标记)
+    log_append_requested = pyqtSignal(str, object)  # 工作线程日志经队列信号(0.2.199-补29c)
 
     def __init__(
         self,
@@ -99,6 +100,10 @@ class MainWindow(QMainWindow):
         self.manual_run_log.connect(self._append_log)
         self.manual_run_done.connect(self._on_manual_run_done)
         self.batch_run_done.connect(self._on_batch_run_done)
+        # 0.2.199-补29c:工作线程进度日志经队列信号;旧代码在 worker 里直接
+        # 调 _append_log → LogPanel.append → QTextEdit(光标闪烁计时器)触发
+        # QBasicTimer::start 错误并卡死
+        self.log_append_requested.connect(self._append_log)
         self._pending_data_names: dict[str, str] = {}
         # 非模态脚本编辑器持有引用(0.2.192);0.2.193 起按 (data_id, step)
         # 去重——同数据同步骤只允许一个编辑器
@@ -608,7 +613,9 @@ class MainWindow(QMainWindow):
                     group_id,
                     steps,
                     reference_data_id=reference_data_id,
-                    progress=lambda msg: self._append_log(msg, scope=group_scope),
+                    progress=lambda msg: self.log_append_requested.emit(
+                        msg, group_scope
+                    ),
                 )
                 summary = dict(result.get("summary") or {})
                 failed = list(result.get("failed") or [])
@@ -632,10 +639,10 @@ class MainWindow(QMainWindow):
                 )
             except Exception as exc:  # noqa: BLE001 - 错误统一回主线程
                 self.import_failed.emit(f"{type(exc).__name__}: {exc}")
-                self.center_panel.group_page.set_progress("")
             finally:
+                # 0.2.199-补29c:不再在 worker 里 set_progress/refresh(跨线程
+                # 碰控件);全部移到 _on_batch_run_done(队列信号,主线程)
                 self.batch_run_done.emit()
-                self.refresh()
 
         import threading
 
@@ -1230,8 +1237,15 @@ class MainWindow(QMainWindow):
             InfoDialog.show_info(self, "提示", "该样品数据还没有谱图文件")
 
     def _on_batch_run_done(self) -> None:
-        """数据组批量处理完成:清除左侧树运行中标记(主线程)。"""
+        """数据组批量处理完成:清除运行中标记、进度并刷新(主线程)。
+
+        0.2.199-补29c:批量进度清理与刷新从 worker finally 移到这里
+        (batch_run_done 为队列信号,槽在主线程执行)。
+        """
         self.project_tree.clear_running()
+        self.center_panel.group_page.set_progress("")
+        self.refresh()
+        self.center_panel.refresh()
 
     def _on_manual_run_done(self) -> None:
         """人工脚本运行完成后刷新 Pipeline/报告页(主线程)。"""

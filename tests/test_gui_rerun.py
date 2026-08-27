@@ -101,6 +101,49 @@ def test_success_steps_show_reprocess_button(
     panel.close()
 
 
+def test_run_worker_thread_refreshes_via_queued_signal(
+    tmp_path: Path, qapp: QApplication
+) -> None:
+    """0.2.199-补29c:真实线程跑完经队列信号回主线程刷新(不再跨线程碰控件)。
+
+    旧代码 worker finally 里直接 self.refresh()/LogPanel.append,触发
+    QBasicTimer::start: Timers cannot be started from another thread 并卡死。
+    """
+    import threading
+    import time
+
+    from PyQt6.QtCore import QEventLoop, QTimer
+
+    manager, exp_id, data_id = _manager_with_artifacts(tmp_path)
+    controller = _FakeController()
+    panel = PipelinePanel(manager, controller)
+    log = LogPanel()
+    panel.log_message.connect(log.append)
+    panel.set_selection("data", exp_id, data_id)
+
+    done = []
+    panel.run_finished.connect(lambda: done.append(True))
+
+    class _SlowController(_FakeController):
+        def generate_spectrum(self, data, exp_id=None, data_id=None) -> str:
+            self.calls.append("generate_spectrum")
+            time.sleep(0.05)  # 让线程真正异步
+            return "/tmp/x.ft2"
+
+    panel.controller = _SlowController()
+    panel._on_run_requested("spectrum")
+
+    loop = QEventLoop()
+    QTimer.singleShot(2000, loop.quit)
+    while not done:
+        loop.exec()
+    # 队列信号已处理:主线程刷新完成,状态不再是 RUNNING
+    assert panel._run_active is False
+    assert panel._rows["spectrum"].status_label.text().startswith("✓")
+    panel.close()
+    log.close()
+
+
 def test_reprocess_spectrum_invokes_controller(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
