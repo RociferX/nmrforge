@@ -535,6 +535,14 @@ class SpectrumPanel(QWidget):
             from viewer.axis_labels import axis_labels_from_nuclei as _alfn
 
             labels3 = _alfn(nuclei)
+            # 0.2.199-补29y:HNN 双 15N——Nx 对应 HSQC 的 N(酰胺 N(i),
+            # 直接连 1H),按 HNN 惯例为 F2(t2);F1=N(i-1) 顺序 N 标 Ny
+            if (
+                len({_norm(n) for n in nuclei}) < len(nuclei)
+                and _norm(nuclei[0]) == "15N"
+                and _norm(nuclei[1]) == "15N"
+            ):
+                labels3 = ("Ny", "Nx", str(labels3[2]))
         if logical_mapped and labels3 is not None:
             remaining = [i for i in range(3) if i != fixed_axis]
             x_label = str(labels3[remaining[1]])
