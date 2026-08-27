@@ -19,7 +19,8 @@ processing:
   ext_hi: "6.5"                  # 直接维提取窗口低端(EXT -xn),默认 6.5 ppm
 
 smile:
-  nthread: 0                   # 0=自动(机器线程数-2);正整数=固定;大网格仍护栏强制 ≤2
+  nthread: 0                   # 0=自动(机器线程数-offset);正整数=固定;大网格仍护栏强制 ≤2
+  thread_offset: 2             # 自动线程预留数(机器线程数 - thread_offset,0.2.199-补24)
 
 optimization:
   budget:

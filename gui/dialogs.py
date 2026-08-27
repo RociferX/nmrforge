@@ -26,6 +26,7 @@ from PyQt6.QtWidgets import (
     QListWidgetItem,
     QPlainTextEdit,
     QPushButton,
+    QSpinBox,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -726,6 +727,17 @@ class SettingsDialog(QDialog):
             spin.setValue(float(settings["linewidth_hz"].get(nucleus, default)))
             form.addRow(f"{nucleus} 默认线宽 (Hz)", spin)
             self.linewidth_spins[nucleus] = spin
+        # 0.2.199-补24:SMILE 自动线程预留数(机器线程数 - thread_offset)
+        self.thread_offset_spin = QSpinBox()
+        self.thread_offset_spin.setRange(0, 16)
+        self.thread_offset_spin.setValue(
+            int((settings.get("smile") or {}).get("thread_offset", 2))
+        )
+        self.thread_offset_spin.setToolTip(
+            "SMILE 自动线程 = 机器线程数 - 该值(默认 2,给系统留线程);"
+            "改小可提升速度,改大可降低 CPU/功耗占用"
+        )
+        form.addRow("SMILE 线程预留数", self.thread_offset_spin)
         layout.addLayout(form)
         pipeline = settings.get("pipeline") or {}
         self.simple_mode_check = QCheckBox(
@@ -764,6 +776,9 @@ class SettingsDialog(QDialog):
             },
             "pipeline": {
                 "simple_mode": self.simple_mode_check.isChecked(),
+            },
+            "smile": {
+                "thread_offset": self.thread_offset_spin.value(),
             },
         }
         save_settings(settings)

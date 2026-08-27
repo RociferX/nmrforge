@@ -231,10 +231,13 @@ def patch_fid_com(
 
 
 # 0.2.199-补23:fid.com 的 mask 阶段(nusExpand.tcl -mask,含其 xyz2pipe 喂入
-# 行)整块移除;支持单文件(-out ./mask.fid)与旧切片式(-out ./mask/test%03d.fid)
+# 行)整块移除;支持单文件(-out ./mask.fid)与旧切片式(-out ./mask/test%03d.fid)。
+# 注意:nusExpand 行尾的反斜杠续行后的缩进行也必须一并移除(不能用
+# [^\n]* 贪婪吞掉行尾反斜杠,否则续行组匹配失败)。
 _MASK_STAGE_RE = re.compile(
     r"\n(?:xyz2pipe -in [^\n]*? -noWr \\\n)?"
-    r"nusExpand\.tcl -mask[^\n]*(?:\\\n[^\n]*)*"
+    r"nusExpand\.tcl -mask[^\n]*"
+    r"(?:\n[ \t][^\n]*)*"
 )
 
 _NUS_EXPAND_RE = re.compile(r"(nusExpand\.tcl[^\n]*?)\\\n")

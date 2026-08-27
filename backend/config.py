@@ -23,15 +23,22 @@ DEFAULT_LINEWIDTH_HZ: dict[str, float] = {
 DEFAULT_POINTS_PER_LINE = 2.0
 DEFAULT_EXT_LO = "10.5"
 DEFAULT_EXT_HI = "6.5"
+# 0.2.199-补24:SMILE 自动线程 = 机器线程数 - thread_offset(可在设置改)
+DEFAULT_THREAD_OFFSET = 2
 
 
-def _auto_nthread() -> int:
-    """SMILE 默认线程 = 机器线程数 - 2(给系统留 2),最小 1。"""
-    return max(1, (os.cpu_count() or 4) - 2)
+def _auto_nthread(config: dict[str, Any] | None = None) -> int:
+    """SMILE 默认线程 = 机器线程数 - offset(smile.thread_offset,缺省 2),
+    最小 1(0.2.199-补24:offset 可在设置里改)。"""
+    smile = load_config(config).get("smile") or {}
+    offset = _as_int(smile.get("thread_offset"), DEFAULT_THREAD_OFFSET)
+    return max(1, (os.cpu_count() or 4) - offset)
 
 
 def load_config(config: dict[str, Any] | None = None) -> dict[str, Any]:
-    """读取 config/nmrforge.yaml;config 非空时直接返回(测试/本地覆盖注入)。"""
+    """读取 config/nmrforge.yaml,再用 config/nmrforge.local.yaml 覆盖
+    (0.2.199-补24:设置对话框写入的本地项对后端生效);config 非空时
+    直接返回(测试/本地覆盖注入)。"""
     if config is not None:
         return config
     try:
@@ -41,8 +48,24 @@ def load_config(config: dict[str, Any] | None = None) -> dict[str, Any]:
             resource_path("config/nmrforge.yaml").read_text(encoding="utf-8")
         )
     except Exception:  # noqa: BLE001 - 配置缺失/损坏按空配置处理(内置默认兜底)
-        return {}
-    return raw if isinstance(raw, dict) else {}
+        raw = {}
+    if not isinstance(raw, dict):
+        raw = {}
+    try:
+        local_path = resource_path("config") / "nmrforge.local.yaml"
+        if local_path.is_file():
+            local = yaml.safe_load(
+                local_path.read_text(encoding="utf-8")
+            ) or {}
+            if isinstance(local, dict):
+                for key, value in local.items():
+                    if isinstance(value, dict) and isinstance(raw.get(key), dict):
+                        raw[key] = {**raw[key], **value}
+                    else:
+                        raw[key] = value
+    except Exception:  # noqa: BLE001 - 本地配置损坏不影响内置默认
+        pass
+    return raw
 
 
 def _as_float(value: Any, default: float) -> float:
@@ -72,7 +95,8 @@ def load_processing_defaults(config: dict[str, Any] | None = None) -> dict[str, 
     {
         "linewidth_hz": {核素: Hz},   # 无效值回退核素默认
         "points_per_line": float,     # 无效/非正回退 2.0
-        "nthread": int,               # SMILE 线程,缺省/0=自动(机器线程数-2)
+        "nthread": int,               # SMILE 线程,缺省/0=自动(机器线程数-offset)
+        "thread_offset": int,         # 自动线程预留数(机器线程数 - offset)
         "nmrpipe_path": str,          # 显式 NMRPipe bin 目录/可执行文件,可空
     }
     """
@@ -93,7 +117,10 @@ def load_processing_defaults(config: dict[str, Any] | None = None) -> dict[str, 
         "points_per_line": _as_float(
             processing.get("points_per_line"), DEFAULT_POINTS_PER_LINE
         ),
-        "nthread": _as_int(smile.get("nthread"), 0) or _auto_nthread(),
+        "nthread": _as_int(smile.get("nthread"), 0) or _auto_nthread(cfg),
+        "thread_offset": _as_int(
+            smile.get("thread_offset"), DEFAULT_THREAD_OFFSET
+        ),
         "nmrpipe_path": _as_str(nmrpipe.get("path") or nmrpipe.get("nmrpipe_bin")),
         "ext_lo": _as_str(processing.get("ext_lo"), DEFAULT_EXT_LO),
         "ext_hi": _as_str(processing.get("ext_hi"), DEFAULT_EXT_HI),
@@ -152,6 +179,7 @@ __all__ = [
     "DEFAULT_POINTS_PER_LINE",
     "DEFAULT_EXT_LO",
     "DEFAULT_EXT_HI",
+    "DEFAULT_THREAD_OFFSET",
     "load_config",
     "load_processing_defaults",
     "nmrpipe_path",

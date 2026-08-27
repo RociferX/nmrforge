@@ -18,6 +18,7 @@ DEFAULTS: dict = {
     "linewidth_hz": {"1H": 8, "15N": 15, "13C": 20},
     "guide": {"first_import_hint_shown": False},
     "pipeline": {"simple_mode": False},
+    "smile": {"thread_offset": 2},
 }
 
 
