@@ -130,6 +130,26 @@ RUNNING;全套 pytest 通过。
 
 测试:无记录用例改为断言提示且不触发计算;缓存指纹用例同步;全套通过。
 
+## 0.2.199-补29f(2026-08-27,人工脚本运行 UnicodeDecodeError 修复)
+
+用户反馈:修改脚本后人工运行报
+`UnicodeDecodeError: 'utf-8' codec can't decode byte 0xef ... invalid
+continuation byte`。
+
+根因:子进程输出用严格编码解码——`CshRuntime.run` 及 ps/powershell 扫描
+的 `subprocess(text=True)` 按 locale 严格解码,脚本/工具输出里出现非
+UTF-8 字节(GBK 中文等)时,逐行迭代直接抛 UnicodeDecodeError,整个
+人工运行中断(表现为「人工运行失败: UnicodeDecodeError…」)。
+
+修复:所有子进程文本解码统一 `encoding="utf-8", errors="replace"`
+(坏字节变 U+FFFD,运行继续,不中断):
+- backend/runtime.py:`CshRuntime.run` 的 Popen + 3 处 ps/powershell 扫描;
+- backend/nmrpipe_finder.py:`which` 探测;
+- backend/nmrpipe_backend.py:nuslist 行数读取容错(errors="replace")。
+
+测试:新增 CshRuntime Popen 解码参数回归(encoding/errors 断言);全套
+pytest 通过。
+
 ## 0.2.199-补19~21(2026-08-26,直接维相位评分:纯对称 + 形状感知符号 + HNN 模板)
 
 用户指出:部分峰天然为负(sampleK 最强峰 -1.1e11),正确相位下负吸收峰

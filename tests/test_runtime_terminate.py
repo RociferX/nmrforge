@@ -18,6 +18,42 @@ from backend.runtime import (
 )
 
 
+def test_csh_runtime_decodes_output_leniently(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """0.2.199-补29f:子进程输出解码必须 UTF-8 + errors=replace。
+
+    人工脚本输出含非 UTF-8 字节(GBK 中文/坏字节)时,严格解码会抛
+    UnicodeDecodeError 中断运行;replace 保证坏字节成 U+FFFD 继续跑。
+    """
+    from backend.runtime import CshRuntime
+
+    captured: dict = {}
+
+    class FakeProc:
+        pid = 4242
+        stdout = iter([])
+        stderr = None
+
+        def poll(self) -> int:
+            return 0
+
+        def wait(self, timeout: float | None = None) -> int:
+            return 0
+
+    def fake_popen(*_args, **_kwargs):
+        captured.update(_kwargs)
+        return FakeProc()
+
+    monkeypatch.setattr("backend.runtime.subprocess.Popen", fake_popen)
+    monkeypatch.setattr("backend.runtime.shutil_which_csh", lambda: "/bin/csh")
+    rt = CshRuntime()
+    rt.run(["csh", "x.com"])
+    assert captured.get("text") is True
+    assert captured.get("encoding") == "utf-8"
+    assert captured.get("errors") == "replace"
+
+
 def test_cancel_flag_lifecycle() -> None:
     """0.2.199-补6:取消标志置位/清除/查询。"""
     from backend.runtime import cancel_requested, clear_cancel, request_cancel

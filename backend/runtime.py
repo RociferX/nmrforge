@@ -96,6 +96,8 @@ def _children_map(timeout: float = 5.0) -> dict[int, list[int]]:
             ["ps", "-eo", "pid=,ppid="],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
         ).stdout
     except (OSError, subprocess.TimeoutExpired):
@@ -182,6 +184,8 @@ def _scan_processes() -> list[dict[str, Any]]:
                 ["powershell", "-NoProfile", "-Command", script],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=30,
             ).stdout
         except (OSError, subprocess.TimeoutExpired):
@@ -206,6 +210,8 @@ def _scan_processes() -> list[dict[str, Any]]:
             ["ps", "-eo", "pid=,ppid=,comm=,args="],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=15,
         ).stdout
     except (OSError, subprocess.TimeoutExpired):
@@ -305,6 +311,8 @@ class CshRuntime:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE if on_line is None else subprocess.STDOUT,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 start_new_session=True,
             )
         except OSError as exc:
