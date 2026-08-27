@@ -1295,7 +1295,11 @@ class NMRPipeBackend:
             timeout=timeout,
         )
         if run.returncode != 0:
-            raise ToolError(f"proj3D 投影失败: rc={run.returncode}")
+            # 0.2.199-补29w:重复标签(HNN 两个 15N)proj3D 无法按标签
+            # 选轴(实测 bad axis name Y),回退 numpy 内存投影
+            return self._project_3d_numpy(
+                str(src), dest, prefix=prefix, labels=labels
+            )
         dat_files = sorted(dest.glob("*.dat"))
         outputs: dict[str, str] = {}
         nuclei: dict[str, list[str]] = {}
@@ -1318,6 +1322,84 @@ class NMRPipeBackend:
                 f"{[p.name for p in dat_files]}"
             )
         return {"paths": outputs, "labels": fixed, "nuclei": nuclei}
+
+    def _project_3d_numpy(
+        self,
+        spectrum_path: str,
+        out_dir: Path,
+        *,
+        prefix: str = "proj",
+        labels: list[str] | None = None,
+    ) -> dict[str, dict[str, object]]:
+        """numpy 内存投影回退(0.2.199-补29w):HNN 等重复核标签。
+
+        proj3D.tcl 按轴标签选轴,两个 15N 无法消歧(实测 bad axis name Y);
+        这里读终谱按存储轴(axis0=F2, axis1=F1, axis2=F3)分别求和生成
+        三个 2D 投影 FDF,命名 {prefix}_F{n}.ft2(固定逻辑轴),GUI 的
+        _proj_F{n} 兼容解析;数据取向 (b,a) 与 GUI _load_projection_ft2
+        的 _proj_F{n} 约定一致(axis0=b, axis1=a)。轴参数从源头 FDF 块
+        复制(GUI 优先取已加载 3D 谱对应核的轴,文件头仅兜底)。
+        """
+        import nmrglue as ng
+        from nmrglue.fileio import pipe as ngpipe
+
+        dic, data = ng.pipe.read(spectrum_path)
+        data = np.asarray(data)
+        if np.iscomplexobj(data):
+            data = data.real
+        if data.ndim != 3:
+            raise ToolError(
+                f"投影需要 3D 谱: {spectrum_path} shape={data.shape}"
+            )
+
+        def _src_fdf(axis_idx: int) -> str:
+            order = [int(v) for v in dic.get("FDDIMORDER") or []]
+            if len(order) >= 3:
+                dim = order[2 - axis_idx]
+                if 1 <= dim <= 4:
+                    return f"FDF{dim}"
+            return f"FDF{axis_idx + 1}"
+
+        def _write(path: Path, plane: np.ndarray, fdf0: str, fdf1: str) -> None:
+            # 保留源头全部 FDF1/2/3 键(nmrglue dic2fdata 需完整 512 字头),
+            # 仅把 FDF1/FDF2 覆盖为平面两轴;FDDIMCOUNT=2 时读取端忽略 FDF3
+            out: dict[str, object] = dict(dic)
+            out["FDDIMCOUNT"] = 2
+            out["FDSIZE"] = float(plane.shape[1])
+            out["FDSPECNUM"] = float(plane.shape[0])
+            out["FDQUADFLAG"] = 1
+            out["FDF1QUADFLAG"] = 1
+            out["FDF2QUADFLAG"] = 1
+            out["FDDIMORDER"] = [2.0, 1.0]
+            for out_pref, src_pref, size in (
+                ("FDF1", fdf1, plane.shape[1]),
+                ("FDF2", fdf0, plane.shape[0]),
+            ):
+                for k, v in dic.items():
+                    if str(k).startswith(src_pref):
+                        out[out_pref + str(k)[len(src_pref):]] = v
+                out[out_pref + "SIZE"] = float(size)
+            ngpipe.write(
+                str(path),
+                out,
+                np.ascontiguousarray(plane, dtype=np.float32),
+                overwrite=True,
+            )
+
+        out_dir.mkdir(parents=True, exist_ok=True)
+        # 存储轴序 (F2, F1, F3):三投影分别固定 F1/F2/F3
+        p23 = out_dir / f"{prefix}_F1.ft2"  # F2-F3 平面,固定 F1
+        p13 = out_dir / f"{prefix}_F2.ft2"  # F1-F3 平面,固定 F2
+        p12 = out_dir / f"{prefix}_F3.ft2"  # F1-F2 平面,固定 F3
+        _write(p23, data.sum(axis=1), _src_fdf(0), _src_fdf(2))
+        _write(p13, data.sum(axis=0), _src_fdf(1), _src_fdf(2))
+        _write(p12, data.sum(axis=2).T, _src_fdf(1), _src_fdf(0))
+        return {
+            "paths": {"F1": str(p23), "F2": str(p13), "F3": str(p12)},
+            "labels": {"F1": "", "F2": "", "F3": ""},
+            "nuclei": {"F1": None, "F2": None, "F3": None},
+            "numpy_fallback": True,
+        }
 
 
     @staticmethod

@@ -445,6 +445,37 @@ def _run_manual_spectrum_impl(
     spectrum_path = _register_spectrum(
         manager, exp_id, data_id, str(spectrum_src)
     )
+    # 0.2.199-补29v:人工途径同样生成谱图质量报告(数据质量诊断 +
+    # 终谱质量评分),写 {谱}.quality.json 供 GUI 报告页显示——与自动
+    # 途径一致,避免人工谱图「无报告记录」。
+    try:
+        from workflow.optimization_report import (
+            spectrum_quality_report_lines,
+            write_quality_record,
+        )
+        from workflow.phase_routes import _sign_mode
+
+        lines = ["== 谱图质量与数据质量报告 =="]
+        lines += spectrum_quality_report_lines(
+            spectrum_path, sign_mode=_sign_mode(experiment)
+        )
+        qlog = work / "manual_quality.log"
+        if qlog.is_file():
+            diag = [
+                ln
+                for ln in qlog.read_text(
+                    encoding="utf-8", errors="replace"
+                ).splitlines()
+                if ln.strip()
+            ]
+            if diag:
+                lines += ["◆ 数据质量诊断(人工途径)"] + diag
+        lines.append("◆ 处理参数: 人工途径(mode=manual)")
+        write_quality_record(
+            spectrum_path, {"mode": "manual"}, "\n".join(lines)
+        )
+    except Exception:  # noqa: BLE001 - 报告失败不影响谱图生成
+        pass
     _finish_run(
         manager,
         exp_id,

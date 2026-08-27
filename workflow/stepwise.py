@@ -293,18 +293,25 @@ def generate_spectrum(
             labels = proj.get("labels", {})
             nuclei = proj.get("nuclei", {})
             for tag, path in proj.get("paths", {}).items():
-                fixed_nucleus = str(labels.get(tag, "") or "")
-                logical = next(
-                    (
-                        dim.logical_axis
-                        for dim in experiment.dimensions
-                        if dim.nucleus == fixed_nucleus
-                    ),
-                    "",
-                )
-                target = spectra_dir / projection_filename(
-                    data_id, nuclei.get(tag), logical, tag
-                )
+                if proj.get("numpy_fallback"):
+                    # 0.2.199-补29w:HNN 等重复核标签——核名投影会冲突
+                    # (两个 15N-1H 平面),用固定逻辑轴命名 {data_id}_proj_F{n},
+                    # GUI _proj_F{n} 兼容解析;后端已按同名写出,无需重命名
+                    logical = str(tag)
+                    target = spectra_dir / f"{data_id}_proj_{logical}.ft2"
+                else:
+                    fixed_nucleus = str(labels.get(tag, "") or "")
+                    logical = next(
+                        (
+                            dim.logical_axis
+                            for dim in experiment.dimensions
+                            if dim.nucleus == fixed_nucleus
+                        ),
+                        "",
+                    )
+                    target = spectra_dir / projection_filename(
+                        data_id, nuclei.get(tag), logical, tag
+                    )
                 if Path(path) != target:
                     if target.exists():
                         target.unlink()

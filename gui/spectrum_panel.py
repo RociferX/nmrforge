@@ -522,7 +522,19 @@ class SpectrumPanel(QWidget):
             a, b = b, a
             na, nb = nb, na
         # 0.2.168:同核投影用 Hx/Hy 下标标签(与 axis_labels_from_nuclei 一致)
-        if same_nucleus:
+        # 0.2.199-补29w:重复核(HNN 双 15N)按逻辑轴下标区分——投影的核
+        # 无法单靠核名区分是 F1 还是 F2 的 15N,用固定轴推导剩余两轴
+        # 的逻辑下标(15Nx/15Ny)。
+        labels3 = None
+        if len(nuclei) == 3:
+            from viewer.axis_labels import axis_labels_from_nuclei as _alfn
+
+            labels3 = _alfn(nuclei)
+        if fixed_axis >= 0 and labels3 is not None:
+            remaining = [i for i in range(3) if i != fixed_axis]
+            x_label = str(labels3[remaining[1]])
+            y_label = str(labels3[remaining[0]])
+        elif same_nucleus:
             from viewer.axis_labels import axis_labels_from_nuclei as _alfn
 
             _proj_labels = _alfn([a, b])
