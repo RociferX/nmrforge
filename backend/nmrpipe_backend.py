@@ -452,6 +452,7 @@ class NMRPipeBackend:
             out_file=out_file,
             script_name=script_name,
             keep_direct_complex=_as_bool(proc_params.get("keep_direct_complex", False)),
+            keep_complex_all=_as_bool(proc_params.get("keep_complex_all", False)),
             preview_axis=preview_axis,
             direct_poly_time=direct_poly_time,
         )
@@ -2435,6 +2436,7 @@ class NMRPipeBackend:
         out_file: str | None = None,
         script_name: str | None = None,
         keep_direct_complex: bool = False,
+        keep_complex_all: bool = False,
         preview_axis: str | None = None,
         direct_poly_time: bool = False,
     ) -> tuple[bool, list[str], Path]:
@@ -2474,7 +2476,9 @@ class NMRPipeBackend:
                 ext_lo=ext_lo,
                 ext_hi=ext_hi,
                 sampling=sampling,
-                keep_direct_complex=keep_direct_complex,
+                keep_direct_complex=keep_complex_all or keep_direct_complex,
+                complex_axes=(frozenset(dim.logical_axis for dim in experiment.dimensions)
+                              if keep_complex_all else None),
                 direct_poly_time=direct_poly_time,
             )
         process_com = work / (
