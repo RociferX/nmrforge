@@ -1,7 +1,7 @@
-"""人工脚本运行前检测器(0.2.199-补29h):检测常见错误并提示。
+r"""人工脚本运行前检测器(0.2.199-补29h):检测常见错误并提示。
 
-动机:用户人工修改脚本后运行报 UnicodeDecodeError——行尾续行符 `\\` 后
-误输字符(如 `\\h`),csh 管道断裂,二进制谱数据漏到 stdout,被当文本
+动机:用户人工修改脚本后运行报 UnicodeDecodeError——行尾续行符 `\` 后
+误输字符(如 `\h`),csh 管道断裂,二进制谱数据漏到 stdout,被当文本
 解码。检测器在运行前扫描常见问题,给出明确提示而非运行时诡异报错。
 """
 
@@ -50,41 +50,49 @@ def check_script(content: str, script_name: str = "") -> list[str]:
 
 
 def _check_continuations(lines: list[str], warnings: list[str]) -> None:
-    """续行符检查:管道行须以 `\\` 结尾;`\\` 后不得有多余字符。"""
-    non_empty = [i for i, line in enumerate(lines) if line.strip()]
-    for pos, idx in enumerate(non_empty):
-        line = lines[idx].rstrip("\r")
-        stripped = line.rstrip()
-        n = pos + 1
-        if not stripped:
+    r"""续行符检查:管道行须以 `\` 结尾;`\` 后不得有多余字符。
+
+    注释行(`#` 开头)透明跳过:生成脚本里常见 `#| nmrPipe ... \` 注释,
+    不影响 csh 续行流。悬空续行只对脚本最后一行报。
+    """
+    pipeline_lines: list[tuple[int, str]] = []
+    for idx, line in enumerate(lines):
+        stripped = line.rstrip("\r").rstrip()
+        if not stripped or stripped.lstrip().startswith("#"):
             continue
-        is_pipeline = "|" in stripped
-        # 续行符后有多余字符(如 `\h`):只看管道行尾部 token
+        pipeline_lines.append((idx, stripped))
+    for pos, (idx, stripped) in enumerate(pipeline_lines):
+        n = idx + 1
+        is_pipeline = any(
+            token in stripped for token in ("|", "xyz2pipe", "pipe2xyz")
+        )
         if is_pipeline and stripped:
             token = stripped.split()[-1]
             bs = token.rfind("\\")
             if 0 <= bs < len(token) - 1:
                 tail = token[bs + 1:]
                 warnings.append(
-                    f"第 {idx + 1} 行:续行符 `\\` 后有多余字符 "
+                    f"第 {n} 行:续行符 `\\` 后有多余字符 "
                     f"{tail!r}(应为行尾 `\\` 直接换行),管道会断裂"
                 )
-        next_is_pipe = pos + 1 < len(non_empty) and lines[
-            non_empty[pos + 1]
-        ].lstrip().startswith("|")
+        next_is_pipe = pos + 1 < len(pipeline_lines) and pipeline_lines[
+            pos + 1
+        ][1].lstrip().startswith("|")
         if next_is_pipe and not stripped.endswith("\\"):
             last = stripped[-1]
             warnings.append(
-                f"第 {idx + 1} 行:下一行以 `|` 开头但本行行尾是 "
+                f"第 {n} 行:下一行以 `|` 开头但本行行尾是 "
                 f"{last!r} 而非 `\\`(缺续行符),管道会在此断开"
             )
-        if not next_is_pipe and stripped.endswith("\\"):
-            # 管道最后一行不应以 `\\` 结尾(悬空续行)
-            if any(c in stripped for c in ("|", "xyz2pipe", "pipe2xyz")):
-                warnings.append(
-                    f"第 {idx + 1} 行:管道末尾以 `\\` 结尾(悬空续行),"
-                    "csh 会等待后续输入"
-                )
+        if (
+            pos == len(pipeline_lines) - 1
+            and stripped.endswith("\\")
+            and is_pipeline
+        ):
+            warnings.append(
+                f"第 {n} 行:脚本最后一行以 `\\` 结尾(悬空续行),"
+                "csh 会等待后续输入"
+            )
 
 
 def _check_output_write(content: str, warnings: list[str]) -> None:
