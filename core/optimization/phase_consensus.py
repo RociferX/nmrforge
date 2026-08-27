@@ -59,12 +59,20 @@ def _lock_trace_peaks(
     snr: float = 10.0,
     global_frac: float = 0.005,
     global_max: float = 0.0,
+    separation: int = 0,
+    coherent: bool = True,
 ) -> tuple[np.ndarray, np.ndarray] | None:
     """迹线局部极大锁峰(自定义,适配短迹线)。
 
     99 分位阈值对短迹线(如 48 点)会砍到只剩最强峰;这里用局部 MAD
     噪音 × snr 与全局最大 × global_frac 的较大者做门槛,多峰迹线能
     全部锁定,纯噪声迹线(峰值 ~3-4×MAD < 8×MAD)返回 None。
+
+    0.2.199-补29m:排除强峰振铃旁瓣——真实峰相位在 ±1 窗内平滑
+    (洛伦兹 w~2 点:相位变化 ~±27°),振铃旁瓣逐点相位交替 ~180°
+    (真实数据实测把逐条 p1 集中度拟合系统性带偏到 ±90 边界)。
+    coherent=True 时丢弃 ±1 窗相位变化过大的候选;separation>0 时
+    按贪心保留最大峰、相邻 ±separation 内只留最高者。
     """
     mag = np.abs(row)
     n = mag.size
@@ -82,8 +90,32 @@ def _lock_trace_peaks(
     idx = np.where(local & (mag > thr))[0]
     if not idx.size:
         return None
-    order = np.argsort(mag[idx])[::-1][:max_peaks]
-    return idx[order], mag[idx[order]]
+    keep = []
+    for p in idx:
+        if coherent and 1 <= p <= n - 2:
+            # 峰两侧相位变化:真实峰平滑,振铃旁瓣大幅跳变
+            d1 = float(np.angle(row[p + 1] / (row[p] + 1e-30)))
+            d2 = float(np.angle(row[p] / (row[p - 1] + 1e-30)))
+            if abs(d1) + abs(d2) > 2.0:  # ~115°
+                continue
+        keep.append(int(p))
+    if not keep:
+        return None
+    if separation <= 0:
+        separation = max(3, n // 48)  # 自适应 3~n/48(短轴更紧)
+    order = np.argsort(mag[keep])[::-1]
+    selected: list[int] = []
+    for i in order:
+        p = keep[i]
+        if any(abs(p - q) <= separation for q in selected):
+            continue
+        selected.append(p)
+        if len(selected) >= max_peaks:
+            break
+    if not selected:
+        return None
+    sel = np.asarray(selected, dtype=np.intp)
+    return sel, mag[sel]
 
 
 def search_axis_phase_consensus(
@@ -191,4 +223,107 @@ def search_axis_phase_consensus(
     return p0, p1, score
 
 
-__all__ = ["search_axis_phase_consensus"]
+def _hilbert(x: np.ndarray) -> np.ndarray:
+    """一维 Hilbert 补虚部,与 nmrPipe HT 约定一致(docs/backend/state.md 0.2.101)。
+
+    nmrPipe 普通 HT 的虚部 = -H_scipy(标准 Hilbert 反号,镜像选项 -ps90-180
+    才给出 +H_scipy);直接用 scipy/numpy 标准解析信号会把相位搜成共轭
+    (曾致 sampleI 误选 140°)。实现:FFT 后保留负频分量翻倍(等价
+    conj(标准解析信号))。
+    """
+    n = x.size
+    X = np.fft.fft(np.asarray(x, dtype=float))
+    h = np.zeros(n)
+    if n % 2 == 0:
+        h[0] = h[n // 2] = 1.0
+        h[n // 2 + 1:] = 2.0
+    else:
+        h[0] = 1.0
+        h[(n + 1) // 2:] = 2.0
+    return np.fft.ifft(X * h)
+
+
+def _direct_projected_traces(
+    real_spectrum: np.ndarray,
+    axis: int,
+) -> np.ndarray | None:
+    """直接维投影迹线(与 proj3D.tcl -sum 的 XZ/YZ 平面一致)。
+
+    3D+ 谱:沿其它各轴分别实求和(纯实谱的复求和即实部求和)得到
+    投影平面,每张平面按另一维每点抽一条沿 axis 的迹线拼接——对应
+    proj3D 含直接维的两个输出(对间接维求和);2D 谱直接用各行。
+    """
+    arr = np.asarray(real_spectrum, dtype=float)
+    axis = axis if axis >= 0 else arr.ndim - 1
+    if arr.ndim < 2 or arr.shape[axis] < 8:
+        return None
+    if arr.ndim == 2:
+        moved = np.moveaxis(arr, axis, -1)
+        return moved.reshape(-1, moved.shape[-1])
+    other = [a for a in range(arr.ndim) if a != axis]
+    traces: list[np.ndarray] = []
+    for keep in other:
+        proj = arr.sum(axis=keep)
+        proj_axis = axis if axis < keep else axis - 1
+        moved = np.moveaxis(proj, proj_axis, -1)
+        traces.append(moved.reshape(-1, moved.shape[-1]))
+    return np.concatenate(traces, axis=0)
+
+
+def search_direct_phase_real_ht(
+    real_spectrum: np.ndarray,
+    axis: int = -1,
+    *,
+    max_traces: int = 512,
+    margin: int = 8,
+    max_peaks: int = 8,
+    sign_mode: str = "uniform",
+    progress: Callable[[str], None] | None = None,
+    cancel: Callable[[], bool] | None = None,
+) -> tuple[float, float, float] | None:
+    """直接维相位优化:纯实数终谱抽直接维投影迹线,逐条 HT 补虚部,
+    逐条最佳相位,统计最优(用户方案 0.2.199-补29l)。
+
+    1D 谱 = 直接维投影迹线(3D:沿 F1 投影每条 F2 一条 + 沿 F2 投影每条
+    F1 一条,共 间接维1点数 + 间接维2点数 条;2D:每条间接点一条),与
+    NMRPipe proj3D.tcl -sum 的 XZ/YZ 平面一致(沿第三轴求和);每条实谱
+    经 Hilbert 变换补虚部(nmrPipe HT 符号约定:Im = -H_scipy);逐条用
+    相位集中度拟合 p1(多峰,与簇中心/迹线常数解耦)再取该 p1 下 p0;
+    跨迹线统计:p1 = 中位数,p0 = 半圆折叠圆均值,±180 按正峰符号定;
+    score = 共识相位下各迹线峰吸收度中位数 ×100。
+    """
+    if cancel is not None and cancel():
+        raise RuntimeError("任务已取消:直接维 HT 逐条相位搜索被用户终止")
+    flat = _direct_projected_traces(real_spectrum, axis)
+    if flat is None:
+        return None
+    if flat.shape[0] > max_traces:
+        index = np.linspace(0, flat.shape[0] - 1, max_traces).astype(int)
+        flat = flat[index]
+    global_max = float(np.max(np.abs(flat))) if flat.size else 0.0
+    ht_rows: list[np.ndarray] = []
+    for row in flat:
+        cplx = _hilbert(row)
+        peaks = _lock_trace_peaks(
+            np.abs(cplx), margin=margin, max_peaks=max_peaks,
+            global_max=global_max,
+        )
+        if peaks is not None and peaks[0].size >= 1:
+            ht_rows.append(cplx)
+    if not ht_rows:
+        return None
+    if progress is not None:
+        progress(f"直接维 HT 逐条相位: 锁定 {len(ht_rows)} 条投影迹线")
+    # 复用逐条共识搜索(集中度拟合 p1 + p0 圆均值 + 跨迹线统计)
+    return search_axis_phase_consensus(
+        np.asarray(ht_rows),
+        -1,
+        max_rows=max_traces,
+        margin=margin,
+        max_peaks=max_peaks,
+        sign_mode=sign_mode,
+        progress=progress,
+        cancel=cancel,
+    )
+
+__all__ = ["search_axis_phase_consensus", "search_direct_phase_real_ht"]

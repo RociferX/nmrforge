@@ -1,0 +1,66 @@
+"""VM 调试:投影迹线上逐条 p1 拟合分布(sampleB 直接维)。"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import numpy as np
+
+from backend.nmrpipe_backend import NMRPipeBackend
+from core.data.bruker_reader import read_dataset
+from core.optimization.phase_consensus import _lock_trace_peaks
+from core.optimization.phase_search import _row_p1_fit
+from core.optimization.projection_phase import projected_traces
+from workflow.phase_routes import _read_complex_ft3
+
+
+def _rotate(arr, axis, p0, p1):
+    n = arr.shape[axis]
+    k = np.arange(n, dtype=float)
+    ramp = np.exp(1j * np.deg2rad(p0 + p1 * k / max(n - 1, 1)))
+    shape = [1] * arr.ndim
+    shape[axis] = n
+    return arr * ramp.reshape(shape)
+
+
+def main() -> int:
+    raw = Path("/home/<lab-user>/Desktop/data/sampleB")
+    work = Path("/home/<lab-user>/Desktop/data/sampleB.nmrpipe")
+    exp = read_dataset(raw)
+    backend = NMRPipeBackend(work_dir=str(work))
+    zf = {"zero_fill": {"F2": {"mode": "size", "size": 128},
+                        "F1": {"mode": "size", "size": 256},
+                        "F3": {"mode": "none"}}}
+    resp = backend.finalize_nus(
+        exp, phases={}, work_dir=str(work),
+        params={**zf, "keep_complex": True},
+        out_file="28_projp1.ft3", script_name="28_projp1_finalize.com",
+    )
+    arr = _read_complex_ft3(str(resp["spectrum_path"]))
+    arr = _rotate(arr, 0, 86.0, -27.5)
+    arr = _rotate(arr, 1, 355.0, 0.0)
+    tr = projected_traces(arr, 2)
+    print("traces:", tr.shape)
+    gm = float(np.max(np.abs(tr)))
+    p1s = []
+    n_infos = 0
+    for row in tr:
+        pk = _lock_trace_peaks(row, margin=8, max_peaks=8, global_max=gm)
+        if pk is None:
+            continue
+        n_infos += 1
+        fit = _row_p1_fit(row, pk[0], pk[1])
+        if fit is not None:
+            p1s.append(fit[0])
+    print("infos:", n_infos, "p1 fits:", len(p1s))
+    if p1s:
+        p1a = np.array(p1s)
+        print("p1 quantiles:", np.percentile(p1a, [10, 25, 50, 75, 90]))
+        hist, edges = np.histogram(p1a, bins=9, range=(-90, 90))
+        print("hist:", list(zip(np.round(edges[:-1]).astype(int), hist)))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

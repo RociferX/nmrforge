@@ -219,6 +219,7 @@ def test_unified_route_uniform_order_and_phases(
     phases = result["phases"]
     assert abs((phases["F1"][0] - 25.0 + 180.0) % 360.0 - 180.0) <= 8.0, phases
     assert abs((phases["F2"][0] - 35.0 + 180.0) % 360.0 - 180.0) <= 8.0, phases
+    # 联合复核/处理参数优化为内存评分(不增后端运行计数):2 预览 + 1 终跑
     assert result["backend_runs"] == 3
     assert "spectrum_path" in result
 
@@ -300,8 +301,12 @@ def test_unified_route_nus_reconstruct_then_finalize(
     planes = np.outer(direct, fid1)
     monkeypatch.setattr(routes, "_load_recon_planes", lambda exp, wk: planes)
     monkeypatch.setattr(
-        "core.optimization.phase_search.search_direct_phase_on_spectrum",
-        lambda arr, axis=0, metric="symmetry", **kwargs: (30.0, 0.0, 80.0),
+        "core.optimization.phase_consensus.search_direct_phase_real_ht",
+        lambda arr, axis=-1, sign_mode="uniform", **kwargs: (30.0, 0.0, 80.0),
+    )
+    monkeypatch.setattr(
+        routes, "_read_complex_ft3",
+        lambda path: np.zeros((32, 64), dtype=float),
     )
 
     def fake_read(path: str, unpack_axis: int | None = None):
@@ -342,7 +347,7 @@ def test_unified_route_nus_reconstruct_then_finalize(
     assert not backend.apply_direct_calls
     assert all(call["planes"] is None for call in backend.finalize_calls)
     assert "处理参数优化(测试): 固定配置" in result["logs"]
-    assert result["backend_runs"] == 3  # SMILE 首遍 + F1 预览 + 终跑
+    assert result["backend_runs"] == 4  # SMILE 首遍 + F1 预览 + 直接维实型终谱预览 + 终跑
     # 0.2.155/0.2.160:诊断检测到直流偏置时,终跑脚本携带
     # direct_poly_time(POLY -time);首遍脚本不加(避免带偏直接维相位搜索);
     # 日志含分步耗时与末尾汇总
@@ -489,8 +494,12 @@ def test_unified_route_nus_progress_stages(
     planes = np.outer(direct, fid1)
     monkeypatch.setattr(routes, "_load_recon_planes", lambda exp, wk: planes)
     monkeypatch.setattr(
-        "core.optimization.phase_search.search_direct_phase_on_spectrum",
-        lambda arr, axis=0, metric="symmetry", **kwargs: (30.0, 0.0, 80.0),
+        "core.optimization.phase_consensus.search_direct_phase_real_ht",
+        lambda arr, axis=-1, sign_mode="uniform", **kwargs: (30.0, 0.0, 80.0),
+    )
+    monkeypatch.setattr(
+        routes, "_read_complex_ft3",
+        lambda path: np.zeros((32, 64), dtype=float),
     )
     monkeypatch.setattr(
         routes, "_read_complex_preview",
@@ -518,7 +527,7 @@ def test_unified_route_nus_progress_stages(
     assert "终跑(完整脚本,含各维最终相位)中" in joined, messages
     assert "终跑完成" in joined, messages
     assert all(call["progress"] is not None for call in backend.finalize_calls)
-    assert result["backend_runs"] == 3
+    assert result["backend_runs"] == 4
 
 
 
@@ -550,8 +559,12 @@ def test_unified_route_nus_final_ext_apply_to_opt(
     planes = np.outer(direct, fid1)
     monkeypatch.setattr(routes, "_load_recon_planes", lambda exp, wk: planes)
     monkeypatch.setattr(
-        "core.optimization.phase_search.search_direct_phase_on_spectrum",
-        lambda arr, axis=0, metric="symmetry", **kwargs: (30.0, 0.0, 80.0),
+        "core.optimization.phase_consensus.search_direct_phase_real_ht",
+        lambda arr, axis=-1, sign_mode="uniform", **kwargs: (30.0, 0.0, 80.0),
+    )
+    monkeypatch.setattr(
+        routes, "_read_complex_ft3",
+        lambda path: np.zeros((32, 64), dtype=float),
     )
     monkeypatch.setattr(
         routes,
@@ -816,8 +829,12 @@ def test_unified_route_nus_final_ext_renormalizes_p1(
     planes = np.outer(direct, fid1)
     monkeypatch.setattr(routes, "_load_recon_planes", lambda exp, wk: planes)
     monkeypatch.setattr(
-        "core.optimization.phase_search.search_direct_phase_on_spectrum",
-        lambda arr, axis=0, metric="symmetry", **kwargs: (30.0, 15.0, 80.0),
+        "core.optimization.phase_consensus.search_direct_phase_real_ht",
+        lambda arr, axis=-1, sign_mode="uniform", **kwargs: (30.0, 15.0, 80.0),
+    )
+    monkeypatch.setattr(
+        routes, "_read_complex_ft3",
+        lambda path: np.zeros((32, 64), dtype=float),
     )
     monkeypatch.setattr(
         routes,

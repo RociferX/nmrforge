@@ -174,6 +174,7 @@ def _cleanup_unified_intermediates(
     exts = (".com", ".ft2", ".ft3", ".fdf")
     for base_pattern in (
         f"{dataset_id}_preview_*",
+        f"{dataset_id}_direct_*",
         f"{dataset_id}_joint*",
         f"{dataset_id}_win1*",
         f"{dataset_id}_win2*",
@@ -1109,7 +1110,6 @@ def _unified_nus(
     except OSError as exc:  # noqa: BLE001 - 保留失败不影响流程
         logs.append(f"初跑脚本保留失败: {exc}")
     backend_runs = 1
-    planes = _load_recon_planes(experiment, work)
     direct_axis = "F3" if experiment.ndim >= 3 else "F2"
     sign_mode = _sign_mode(experiment)
     indirect_axes = [
@@ -1123,112 +1123,6 @@ def _unified_nus(
     if not auto_phase:
         indirect_axes = []
         logs.append("间接维: 幅度谱不自动调相,跳过 finalize 复型预览与搜索")
-    # 直接维:0.2.199-补18 改到复型频域终谱上搜——recon 平面是间接维时域,
-    # 单点时域迹线被 t1 混叠(所有信号叠加),对称性评分面平(sample 假高分
-    # 侥幸过门槛,sampleK 28 分被拒);间接维 FT 后(keep_complex 保留虚部)
-    # 在终谱直接轴(3D=最后一轴;2D recon.ft1=轴 0)上搜,频域峰分离。
-    # score<30 时保持 (0,0)。
-    import time as _time
-
-    from core.optimization.phase_search import search_direct_phase_on_spectrum
-
-    if not auto_phase:
-        direct_phase = (0.0, 0.0)
-        logs.append(
-            f"实验类型 {experiment.experiment_type.name}: 幅度谱不自动调相,"
-            "直接维相位保持 (0,0)(跳过搜索)"
-        )
-    else:
-        if experiment.ndim >= 3:
-            preview_out = f"{experiment.dataset_id}_direct_preview.ft3"
-            resp_preview = backend.finalize_nus(
-                experiment,
-                phases={},
-                work_dir=work,
-                params={**params_first, "keep_complex": True},
-                out_file=preview_out,
-                script_name=(
-                    f"{experiment.dataset_id}_direct_preview_finalize.com"
-                ),
-                progress=progress,
-            )
-            if (
-                not resp_preview.get("success")
-                or not resp_preview.get("spectrum_path")
-            ):
-                raise RuntimeError(
-                    f"直接维复型终谱预览失败: {resp_preview.get('message')}"
-                )
-            search_arr = _read_complex_ft3(
-                str(resp_preview["spectrum_path"])
-            )
-            direct_axis_idx = -1
-            logs.append(
-                f"直接维相位搜索基底: 复型频域终谱 {search_arr.shape}"
-                "(keep_complex,直接维=最后一轴)"
-            )
-        else:
-            search_arr = planes
-            direct_axis_idx = 0
-        cache = _load_direct_phase_cache(
-            work, experiment, params_first, search_arr.shape
-        )
-        if cache is not None:
-            direct_phase = (float(cache["p0"]), float(cache["p1"]))
-            logs.append(
-                f"直接维相位复用缓存 phase.json: {direct_axis}="
-                f"({direct_phase[0]:g}°, {direct_phase[1]:g}°)"
-            )
-        else:
-            last_s = _estimate_direct_phase_seconds(work)
-            if progress is not None:
-                if last_s:
-                    progress(
-                        f"直接维相位搜索中(上次约 {last_s:.0f} 秒),请稍候"
-                    )
-                else:
-                    progress("直接维相位搜索中(首次运行,通常数十秒),请稍候")
-            t0 = _time.time()
-            direct_est = search_direct_phase_on_spectrum(
-                search_arr,
-                axis=direct_axis_idx,
-                metric="symmetry",
-                sign_mode=sign_mode,
-                progress=progress,
-                cancel=cancel_requested,
-            )
-            elapsed = _time.time() - t0
-            if progress is not None:
-                progress(f"直接维相位搜索完成,耗时 {elapsed:.1f} 秒")
-            logs.append(f"直接维相位搜索完成,耗时 {elapsed:.1f} 秒")
-            direct_phase = (0.0, 0.0)
-            if direct_est is not None and direct_est[2] >= 30.0:
-                direct_phase = (float(direct_est[0]), float(direct_est[1]))
-                # 0.2.199-补22:放宽 p1 归零护栏(20→170)——高场(1200MHz)
-                # 采集延迟使真实 p1 可达 100°+;仅 >170°(近全幅翻转,
-                # 疑似包装伪影)才归零;终跑窗口变化时 p1 由 0.2.162-补16
-                # 按窗口宽度重归一化。
-                if abs(direct_phase[1]) > 170.0:
-                    logs.append(
-                        f"直接维对称性搜索 p1={direct_phase[1]:g}° 幅值异常(>170°),归零"
-                    )
-                    direct_phase = (direct_phase[0], 0.0)
-                logs.append(
-                    f"直接维对称性搜索: {direct_axis}=({direct_phase[0]:g}°, "
-                    f"{direct_phase[1]:g}°) score={direct_est[2]:.2f}"
-                )
-                _save_direct_phase_cache(
-                    work, experiment, params_first, search_arr.shape,
-                    direct_phase[0], direct_phase[1], float(direct_est[2]),
-                    elapsed,
-                )
-            else:
-                logs.append(
-                    "直接维对称性搜索无干净信号峰或置信度不足,保持 (0,0)"
-                )
-    logs.append(
-        f"直接维内存相位: {direct_axis}=({direct_phase[0]:g}°, {direct_phase[1]:g}°)"
-    )
     # 间接维:finalize 复型预览(该轴 PS 不加 -di,其它轴按已固定相位 -di,
     # 零填零)提供基底,内存完整逐维搜索——FT/-alt/ZTP 约定由真实后端保证
     fixed: dict[str, tuple[float, float]] = {}
@@ -1305,6 +1199,113 @@ def _unified_nus(
                 f"vs 联合最优 {best} score={best_score:.2f}),保持顺序固定"
             )
         logs.append(f"联合复核完成,耗时 {time.time() - t_joint:.1f} 秒")
+    # 直接维:0.2.199-补29l 改到「纯实终谱 + 投影迹线 + HT」上搜。
+    # 间接维已按上述搜索校正(phases=fixed),生成真实(实型)finalize 终谱
+    # ——即用户人工调相看到的最终谱(直接维仍未校正);等价 proj3D.tcl -sum
+    # 的含直接维两平面(XZ/YZ,对间接维求和)抽直接维投影迹线,逐条实谱
+    # Hilbert 补虚部(nmrPipe 符号约定:Im=-H_scipy)调相后统计最优
+    # (0.2.199-补29l/补29m:投影迹线逐条+共识;振铃旁瓣过滤+p1 平缓保护)。
+    # score<30 时保持 (0,0)。
+    import time as _time
+
+    from core.optimization.phase_consensus import search_direct_phase_real_ht
+
+    if not auto_phase:
+        direct_phase = (0.0, 0.0)
+        logs.append(
+            f"实验类型 {experiment.experiment_type.name}: 幅度谱不自动调相,"
+            "直接维相位保持 (0,0)(跳过搜索)"
+        )
+    else:
+        ext = "ft3" if experiment.ndim >= 3 else "ft2"
+        preview_out = f"{experiment.dataset_id}_direct_final.{ext}"
+        resp_direct = backend.finalize_nus(
+            experiment,
+            phases=fixed,
+            work_dir=work,
+            params=dict(params_first),
+            out_file=preview_out,
+            script_name=(
+                f"{experiment.dataset_id}_direct_final_finalize.com"
+            ),
+            progress=progress,
+        )
+        backend_runs += 1
+        if (
+            not resp_direct.get("success")
+            or not resp_direct.get("spectrum_path")
+        ):
+            raise RuntimeError(
+                f"直接维实型终谱预览失败: {resp_direct.get('message')}"
+            )
+        search_arr = np.real(
+            _read_complex_ft3(str(resp_direct["spectrum_path"]))
+        )
+        logs.append(
+            f"直接维相位搜索基底: 实型终谱 {search_arr.shape}"
+            f"(间接维已校正,直接维=最后一轴,投影迹线=间接维点数之和)"
+        )
+        cache = _load_direct_phase_cache(
+            work, experiment, params_first, search_arr.shape
+        )
+        if cache is not None:
+            direct_phase = (float(cache["p0"]), float(cache["p1"]))
+            logs.append(
+                f"直接维相位复用缓存 phase.json: {direct_axis}="
+                f"({direct_phase[0]:g}°, {direct_phase[1]:g}°)"
+            )
+        else:
+            last_s = _estimate_direct_phase_seconds(work)
+            if progress is not None:
+                if last_s:
+                    progress(
+                        f"直接维相位搜索中(上次约 {last_s:.0f} 秒),请稍候"
+                    )
+                else:
+                    progress("直接维相位搜索中(首次运行,通常数十秒),请稍候")
+            t0 = _time.time()
+            direct_est = search_direct_phase_real_ht(
+                search_arr,
+                axis=-1,
+                sign_mode=sign_mode,
+                progress=progress,
+                cancel=cancel_requested,
+            )
+            elapsed = _time.time() - t0
+            if progress is not None:
+                progress(f"直接维相位搜索完成,耗时 {elapsed:.1f} 秒")
+            logs.append(f"直接维相位搜索完成,耗时 {elapsed:.1f} 秒")
+            direct_phase = (0.0, 0.0)
+            if direct_est is not None and direct_est[2] >= 30.0:
+                direct_phase = (float(direct_est[0]), float(direct_est[1]))
+                # 0.2.199-补22:放宽 p1 归零护栏(20→170)——高场(1200MHz)
+                # 采集延迟使真实 p1 可达 100°+;仅 >170°(近全幅翻转,
+                # 疑似包装伪影)才归零;终跑窗口变化时 p1 由 0.2.162-补16
+                # 按窗口宽度重归一化。
+                if abs(direct_phase[1]) > 170.0:
+                    logs.append(
+                        f"直接维 HT 搜索 p1={direct_phase[1]:g}° 幅值异常"
+                        "(>170°),归零"
+                    )
+                    direct_phase = (direct_phase[0], 0.0)
+                logs.append(
+                    f"直接维投影 HT 搜索: {direct_axis}="
+                    f"({direct_phase[0]:g}°, {direct_phase[1]:g}°) "
+                    f"score={direct_est[2]:.2f}"
+                )
+                _save_direct_phase_cache(
+                    work, experiment, params_first, search_arr.shape,
+                    direct_phase[0], direct_phase[1], float(direct_est[2]),
+                    elapsed,
+                )
+            else:
+                logs.append(
+                    "直接维投影 HT 搜索无干净信号峰或置信度不足,保持 (0,0)"
+                )
+    logs.append(
+        f"直接维内存相位: {direct_axis}=({direct_phase[0]:g}°, "
+        f"{direct_phase[1]:g}°)"
+    )
     # 处理参数优化(基线/填零/窗函数):联合复核后、终跑前;各维最终相位
     # 与优化后的处理参数一起填入初始脚本,生成新的完整脚本做终跑——
     # 直接维相位进 step1 PS(EXT 后,与 recon 平面内存旋转同归一化),

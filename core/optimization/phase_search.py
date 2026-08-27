@@ -166,6 +166,11 @@ def _row_p1_fit(
         conc = _concentration(float(p1))
         if conc > best_conc:
             best_conc, best_p1 = conc, float(p1)
+    # 0.2.199-补29m:振铃/峰簇窄时集中度面单调下降,粗搜最优常落在
+    # ±90 边界(真实数据曾系统性选到 -90);此时若比 p1=0 提升不足 0.05
+    # 判定为边界假解,返回 p1=0。内点最优(真实 p1)不受影响。
+    if abs(best_p1) >= 85.0 and _concentration(0.0) + 0.05 >= best_conc:
+        return 0.0, float(_concentration(0.0))
     for span, step in ((30.0, 5.0), (10.0, 2.5)):
         for offset in np.arange(-span, span + 1e-9, step):
             conc = _concentration(best_p1 + offset)

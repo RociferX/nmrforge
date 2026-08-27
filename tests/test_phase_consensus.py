@@ -13,7 +13,10 @@ from __future__ import annotations
 
 import numpy as np
 
-from core.optimization.phase_consensus import search_axis_phase_consensus
+from core.optimization.phase_consensus import (
+    search_axis_phase_consensus,
+    search_direct_phase_real_ht,
+)
 
 
 def _make_3d(
@@ -148,3 +151,75 @@ def test_mixed_sign_mode_keeps_negative_peaks() -> None:
     est = search_axis_phase_consensus(spec, axis=2, sign_mode="mixed")
     assert est is not None
     assert _close(est[0], 40.0, 12.0), est
+
+
+
+
+
+
+
+def _make_real_direct_3d(
+    n1: int = 24,
+    n2: int = 20,
+    n_dir: int = 160,
+    psi0: float = 40.0,
+    psi1: float = 0.0,
+    seed: int = 7,
+) -> np.ndarray:
+    """纯实 3D 直接维谱:每条 (i,j) 由复 FID 构造(衰减指数 + 常数相位
+    psi0),FFT 得谱峰;取实部丢弃虚部。间接维已校正,t1=0;迹线稀疏
+    (约 2/3 无峰),峰散布在正频半,HT(nmrPipe 约定)可重建虚部。
+    """
+    rng = np.random.default_rng(seed)
+    spec = np.zeros((n1, n2, n_dir), dtype=complex)
+    t = np.arange(n_dir, dtype=float)
+    ramp = np.exp(1j * np.deg2rad(psi1 * np.arange(n_dir) / (n_dir - 1)))
+    for i in range(2, n1 - 2):
+        for j in range(2, n2 - 2):
+            if rng.random() < 0.35:
+                continue
+            f0 = int(rng.integers(12, n_dir // 2 - 12))
+            amp = float(rng.uniform(20.0, 60.0))
+            t2 = float(rng.uniform(40.0, 80.0))
+            fid = amp * np.exp(-t / t2) * np.exp(
+                1j * (2 * np.pi * f0 * t / n_dir + np.deg2rad(psi0))
+            )
+            spec[i, j] += np.fft.fft(fid) * ramp
+    spec += rng.normal(0.0, 0.05, spec.shape) + 1j * rng.normal(
+        0.0, 0.05, spec.shape
+    )
+    return np.real(spec)
+
+
+def test_direct_phase_real_ht_projected_traces() -> None:
+    """投影迹线 + HT(负频半/nmrPipe 约定)恢复直接维 p0,
+    p1 无信号时保持 0(平缓面保护,不再乱选边界)。
+    """
+    real = _make_real_direct_3d()
+    est = search_direct_phase_real_ht(real, axis=-1)
+    assert est is not None, "投影迹线应有干净峰"
+    assert _close(est[0], (-40.0) % 360.0, 25.0), est
+    assert abs(est[1]) <= 15.0, est
+    assert est[2] > 50.0, est
+
+
+def test_direct_phase_real_ht_2d_rows() -> None:
+    """2D 谱:各行即直接维迹线(无投影),同样恢复校正。"""
+    rng = np.random.default_rng(11)
+    n1, n_dir = 24, 120
+    spec = np.zeros((n1, n_dir), dtype=complex)
+    t = np.arange(n_dir, dtype=float)
+    for i in range(4, n1 - 4):
+        for _ in range(3):
+            f0 = int(rng.integers(12, n_dir // 2 - 12))
+            amp = float(rng.uniform(20.0, 60.0))
+            t2 = float(rng.uniform(40.0, 80.0))
+            fid = amp * np.exp(-t / t2) * np.exp(
+                1j * (2 * np.pi * f0 * t / n_dir + np.deg2rad(-70.0))
+            )
+            spec[i] += np.fft.fft(fid)
+    real = np.real(spec) + rng.normal(0.0, 0.05, spec.shape)
+    est = search_direct_phase_real_ht(real, axis=-1)
+    assert est is not None
+    assert _close(est[0], 70.0, 25.0), est
+    assert abs(est[1]) <= 15.0, est
