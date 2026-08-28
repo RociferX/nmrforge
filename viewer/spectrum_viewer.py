@@ -16,6 +16,7 @@ from PyQt6.QtGui import QColor, QFont, QPainter, QPen, QTransform
 from PyQt6.QtWidgets import (
     QCheckBox,
     QDoubleSpinBox,
+    QGraphicsEllipseItem,
     QGraphicsRectItem,
     QGraphicsSceneMouseEvent,
     QGraphicsTextItem,
@@ -141,6 +142,7 @@ class SpectrumViewer(QWidget):
         self._peak_size = 1.5
         self._show_peak_labels = True  # 0.2.199-补29bf:Assignment 表头开关
         self._label_font_size = -1.0  # 0.2.199-补29bg:标签字号缓存(随标记)
+        self._flash_item: QGraphicsEllipseItem | None = None  # 0.2.199-补29bk
         self.peak_item = pg.ScatterPlotItem(
             pen=pg.mkPen("#8b0000", width=1.5),
             brush=pg.mkBrush(255, 70, 70, 150),
@@ -1114,6 +1116,41 @@ class SpectrumViewer(QWidget):
     def highlight_peak(self, row: int) -> None:
         self._selected_peak = row if 0 <= row < len(self._peaks) else None
         self._apply_peak_items()
+        # 0.2.199-补29bk:单点选中时在峰位置短暂放大闪烁,帮助定位
+        if 0 <= row < len(self._peak_data_xy):
+            xi, yi = self._peak_data_xy[row]
+            self._flash_at(xi, yi)
+
+    def _flash_at(self, xi: float, yi: float) -> None:
+        """在峰位置画一个大号闪烁环,约 400ms 后消失(0.2.199-补29bk)。"""
+        if self._primary is None:
+            return
+        radius = max(3.0, self._peak_size * 5.0)
+        if self._flash_item is not None:
+            try:
+                self.plot.removeItem(self._flash_item)
+            except Exception:  # noqa: BLE001
+                pass
+            self._flash_item = None
+        ring = QGraphicsEllipseItem(
+            xi - radius, yi - radius, radius * 2.0, radius * 2.0
+        )
+        ring.setPen(pg.mkPen("#0e639c", width=2))
+        ring.setZValue(22)
+        self.plot.addItem(ring)
+        self._flash_item = ring
+        from PyQt6.QtCore import QTimer
+
+        QTimer.singleShot(400, self._clear_flash)
+
+    def _clear_flash(self) -> None:
+        """移除闪烁环(定时触发或外部清理)。"""
+        if self._flash_item is not None:
+            try:
+                self.plot.removeItem(self._flash_item)
+            except Exception:  # noqa: BLE001
+                pass
+            self._flash_item = None
 
     def set_peak_size(self, size: float) -> None:
         """峰标记大小(数据坐标单位,随谱图缩放);0.2.199-补29az。"""

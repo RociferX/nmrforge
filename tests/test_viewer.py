@@ -259,6 +259,9 @@ def test_viewer_peaks_poky_style(qapp: QApplication) -> None:
     assert len(viewer.peak_label_items) == 2  # 有标签峰 + 选中峰
     viewer.highlight_peak(0)
     assert float(viewer.peak_item.data["size"][0]) == pytest.approx(1.5 * 3.0)
+    assert viewer._flash_item is not None  # 0.2.199-补29bk:单点选中闪烁定位
+    viewer._clear_flash()
+    assert viewer._flash_item is None
     viewer.set_peak_size(12.0)
     assert float(viewer.peak_item.data["size"][0]) == pytest.approx(12.0 * 3.0)
     assert float(viewer.peak_item.data["size"][1]) == pytest.approx(12.0)
