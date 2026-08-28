@@ -12,12 +12,13 @@ from __future__ import annotations
 import numpy as np
 import pyqtgraph as pg
 from PyQt6.QtCore import QEvent, QPointF, QRect, QRectF, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QPainter, QPen
+from PyQt6.QtGui import QColor, QFont, QPainter, QPen
 from PyQt6.QtWidgets import (
     QCheckBox,
     QDoubleSpinBox,
     QGraphicsRectItem,
     QGraphicsSceneMouseEvent,
+    QGraphicsTextItem,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -138,6 +139,8 @@ class SpectrumViewer(QWidget):
 
         # 0.2.199-补29az:峰标记 Poky 风格 ×,数据坐标尺寸随谱图缩放
         self._peak_size = 8.0
+        self._show_peak_labels = True  # 0.2.199-补29bf:Assignment 表头开关
+        self._label_font_size = -1.0  # 0.2.199-补29bg:标签字号缓存(随标记)
         self.peak_item = pg.ScatterPlotItem(
             pen=pg.mkPen("#8b0000", width=1.5),
             brush=pg.mkBrush(255, 70, 70, 150),
@@ -822,12 +825,22 @@ class SpectrumViewer(QWidget):
             v1 = self.plot.getViewBox().mapSceneToView(rect.bottomRight())
         except Exception:  # noqa: BLE001
             return
-        xi0, yi0 = self._view_to_data(v0)
-        xi1, yi1 = self._view_to_data(v1)
-        if xi0 < 0 or xi1 < 0:
+        if self._primary is None:
             return
-        lo_x, hi_x = sorted((xi0, xi1))
-        lo_y, hi_y = sorted((yi0, yi1))
+        x_size = self._primary.x_axis.size
+        y_size = self._primary.y_axis.size
+
+        def _clamp(point) -> tuple[int, int]:
+            # 0.2.199-补29bf:框选超过谱图区域时截止到谱图边缘
+            return (
+                max(0, min(int(round(point.x())), x_size - 1)),
+                max(0, min(int(round(point.y())), y_size - 1)),
+            )
+
+        ax0, ay0 = _clamp(v0)
+        ax1, ay1 = _clamp(v1)
+        lo_x, hi_x = sorted((ax0, ax1))
+        lo_y, hi_y = sorted((ay0, ay1))
         # 0.2.199-补29ay:只比对框范围与已缓存峰坐标,不做其它运算
         rows: list[int] = [
             row
@@ -1107,6 +1120,14 @@ class SpectrumViewer(QWidget):
         self._peak_size = max(0.5, float(size))
         self._apply_peak_items()
 
+    def set_peak_labels_visible(self, visible: bool) -> None:
+        """开关图上峰指认标签(Assignment 列标题点击联动,0.2.199-补29bf)。"""
+        visible = bool(visible)
+        if visible == self._show_peak_labels:
+            return
+        self._show_peak_labels = visible
+        self._apply_peak_items()
+
     def set_peak_click_mode(self, mode: str) -> None:
         """左键单击行为:select=选中峰 / add=加峰 / delete=删峰。"""
         self._click_mode = mode if mode in ("select", "add", "delete") else "select"
@@ -1193,10 +1214,11 @@ class SpectrumViewer(QWidget):
         self._peak_data_xy = list(zip(xs, ys))
         self.peak_item.setData(x=xs, y=ys, size=sizes)
 
-        for text_item in self.peak_label_items:
-            self.plot.removeItem(text_item)
-        self.peak_label_items.clear()
-        if show_labels:
+        # 0.2.199-补29bg:Assignment 标签用 QGraphicsTextItem(随谱图缩放,
+        # 不抵消视图变换),字体像素尺寸=峰标记大小(数据坐标单位,二者绑定);
+        # 复用 TextItem 避免选择/删除时反复重建卡顿
+        wanted: list[tuple[float, float, str]] = []
+        if show_labels and self._show_peak_labels:
             for row, (peak, xi, yi) in enumerate(zip(self._peaks, xs, ys)):
                 label = str(peak.get("label") or "").strip()
                 if not label and row != self._selected_peak:
@@ -1204,13 +1226,31 @@ class SpectrumViewer(QWidget):
                 text = label or str(peak.get("Peak_ID", ""))
                 if not text:
                     continue
-                label_item = pg.TextItem(
-                    text, color="#c0392b", anchor=(0.0, 0.5)
-                )
-                label_item.setPos(xi + 4.0, yi)
-                label_item.setZValue(21)
-                self.plot.addItem(label_item)
-                self.peak_label_items.append(label_item)
+                wanted.append((xi, yi, text))
+        font_size = max(1, int(round(self._peak_size)))
+        if self._label_font_size != font_size:
+            self._label_font_size = font_size
+            font = QFont()
+            font.setPixelSize(font_size)
+            for item in self.peak_label_items:
+                item.setFont(font)
+        while len(self.peak_label_items) < len(wanted):
+            item = QGraphicsTextItem()
+            item.setDefaultTextColor(QColor("#c0392b"))
+            font = QFont()
+            font.setPixelSize(font_size)
+            item.setFont(font)
+            item.setZValue(21)
+            self.plot.addItem(item)
+            self.peak_label_items.append(item)
+        for idx, (xi, yi, text) in enumerate(wanted):
+            item = self.peak_label_items[idx]
+            if item.toPlainText() != text:
+                item.setPlainText(text)
+            item.setPos(xi + 4.0, yi)
+            item.setVisible(True)
+        for item in self.peak_label_items[len(wanted):]:
+            item.setVisible(False)
 
     def _on_peak_clicked(self, _plot, points) -> None:
         if not points:

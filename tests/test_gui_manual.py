@@ -352,7 +352,7 @@ def test_spectrum_panel_3d_columns_auto(
     panel._load_peaks(spectra / "exp_001-d_001.ft3")  # 0.2.88:显式加载峰表
     assert panel.peak_table.rowCount() == 1
     assert "F1_shift" in panel._peak_keys
-    assert panel.peak_table.horizontalHeaderItem(1).text() == "Assignment"
+    assert panel.peak_table.horizontalHeaderItem(1).text() == "Assignment ✓"
     assert panel.peak_table.horizontalHeaderItem(2).text() == "F1_shift"
     panel.close()
 
@@ -373,7 +373,7 @@ def test_peak_table_assignment_column(tmp_path, qapp, monkeypatch) -> None:
     panel = SpectrumPanel(manager)
     panel.set_context('exp_001', 'd_001')
     panel._load_peaks(spectra / 'exp_001-d_001.ft2')
-    assert panel.peak_table.horizontalHeaderItem(1).text() == 'Assignment'
+    assert panel.peak_table.horizontalHeaderItem(1).text() == 'Assignment ✓'
     assert panel.peak_table.item(0, 1).text() == 'G1'
     panel.close()
 
@@ -465,4 +465,44 @@ def test_1d_mode_hides_peak_ui(tmp_path, qapp, monkeypatch) -> None:
     assert not panel._viewer_1d_active
     assert panel.peak_toolbar_widget.isVisibleTo(panel)
     assert panel.peak_table.isVisibleTo(panel)
+    panel.close()
+
+
+
+def test_assignment_header_toggles_labels(tmp_path, qapp, monkeypatch) -> None:
+    # 0.2.199-补29bf:点击 Assignment 列标题开关图上指认标签
+    import numpy as np
+
+    from viewer.spectrum import Spectrum, SpectrumAxis
+
+    manager = _manager(tmp_path, monkeypatch)
+    spectra = manager.data_dir('exp_001', 'd_001', 'spectra')
+    spectra.mkdir(parents=True, exist_ok=True)
+    (spectra / 'exp_001-d_001.ft2').write_bytes(b'x')
+    peaks = manager.data_dir('exp_001', 'd_001', 'peaks')
+    peaks.mkdir(parents=True, exist_ok=True)
+    (peaks / 'exp_001-d_001.list').write_text(
+        'Assignment w1 w2 Data Height Volume\nG1  115.000  8.000  0  100  0\n',
+        encoding='utf-8',
+    )
+    panel = SpectrumPanel(manager)
+    axis_x = SpectrumAxis(
+        label='H', size=64, sw_hz=6000.0, obs_mhz=600.0,
+        carrier_ppm=4.7, orig_hz=0.0,
+    )
+    axis_y = SpectrumAxis(
+        label='N', size=64, sw_hz=2189.0, obs_mhz=60.8,
+        carrier_ppm=118.0, orig_hz=0.0,
+    )
+    panel.viewer.add_spectrum(Spectrum(np.zeros((64, 64)), [axis_y, axis_x]))
+    panel.set_context('exp_001', 'd_001')
+    panel._load_peaks(spectra / 'exp_001-d_001.ft2')
+    assert panel.viewer._show_peak_labels
+    assert len(panel.viewer.peak_label_items) == 1
+    panel._on_peak_header_clicked(1)
+    assert not panel.viewer._show_peak_labels
+    assert sum(1 for i in panel.viewer.peak_label_items if i.isVisible()) == 0
+    panel._on_peak_header_clicked(1)
+    assert panel.viewer._show_peak_labels
+    assert sum(1 for i in panel.viewer.peak_label_items if i.isVisible()) == 1
     panel.close()

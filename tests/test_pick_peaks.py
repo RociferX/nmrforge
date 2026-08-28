@@ -244,7 +244,7 @@ def test_pick_peaks_mixed_type_picks_both_signs(tmp_path: Path) -> None:
 def test_pick_peaks_ft3_shifts_follow_logical_axes(tmp_path: Path) -> None:
     """3D ORDER 2 3 1:F1/F2/F3_shift 按逻辑维取对应数据轴 ppm(0.2.199-补29ap 修)。"""
     data = np.zeros((16, 16, 16))  # (FDF3SIZE=15N, FDSPECNUM=13C, FDSIZE=1H)
-    data[3, 5, 8] = 500.0
+    data[8, 5, 8] = 500.0  # F1=8 避开上下边缘(补29bf 轴峰排除 5 点)
     data = gaussian_filter(data, sigma=1.0)
     ft3 = tmp_path / "out.ft3"
     _write_ft3_ordered(ft3, data, [2.0, 3.0, 1.0])
@@ -255,7 +255,7 @@ def test_pick_peaks_ft3_shifts_follow_logical_axes(tmp_path: Path) -> None:
     assert len(rows) >= 1
     row = rows[0]
     # 逻辑维:F1=15N(FDF1)、F2=1H(FDF2)、F3=13C(FDF3)
-    f1 = 100.0 + (16 - 1 - 3) * 2189.0 / (16 * 60.8)
+    f1 = 100.0 + (16 - 1 - 8) * 2189.0 / (16 * 60.8)
     f2 = 6.0 + (16 - 1 - 8) * 3000.0 / (16 * 600.0)
     f3 = 40.0 + (16 - 1 - 5) * 11300.0 / (16 * 150.9)
     assert abs(float(row["F1_shift"]) - f1) < 0.05

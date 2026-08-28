@@ -152,6 +152,10 @@ class SpectrumPanel(QWidget):
         self.peak_table.setMaximumHeight(150)
         self.peak_table.itemSelectionChanged.connect(self._on_peak_row_selected)
         self.peak_table.itemChanged.connect(self._on_peak_cell_edited)
+        # 0.2.199-补29bf:点击 Assignment 列标题开关图上指认标签
+        self.peak_table.horizontalHeader().sectionClicked.connect(
+            self._on_peak_header_clicked
+        )
         self._peaks: list[dict] = []
         self._current_spectrum: Path | None = None
         self._viewer_1d_active = False  # 0.2.199-补29bd:1D 开启隐藏峰控件
@@ -782,7 +786,16 @@ class SpectrumPanel(QWidget):
         self._peak_keys = tuple_keys
         self.peak_table.setColumnCount(len(tuple_keys))
         self.peak_table.setHorizontalHeaderLabels(
-            ["Assignment" if k == "label" else k for k in tuple_keys]
+            [
+                (
+                    "Assignment ✓"
+                    if self.viewer._show_peak_labels
+                    else "Assignment ✗"
+                )
+                if k == "label"
+                else k
+                for k in tuple_keys
+            ]
         )
 
     def _populate_peak_table(self) -> None:
@@ -903,15 +916,20 @@ class SpectrumPanel(QWidget):
         )
         if not rows:
             return
+        remove = set(rows)
         self._loading_peaks = True
         try:
             for row in rows:
                 self.peak_table.removeRow(row)
         finally:
             self._loading_peaks = False
-        self._sync_peaks_in_memory()
+        # 0.2.199-补29bg:直接从内存峰列表删除,避免全表重读导致选择/删除卡顿
+        self._peaks = [
+            peak for i, peak in enumerate(self._peaks) if i not in remove
+        ]
         self.viewer.set_peaks(self._peaks)
         self.save_peaks_button.setEnabled(bool(self._peaks))
+        self._update_delete_button()
 
     def _on_import_poky(self) -> None:
         if self.manager.project is None or not self._current_exp_id:
@@ -1031,6 +1049,18 @@ class SpectrumPanel(QWidget):
     def _on_viewer_peak_clicked(self, row: int) -> None:
         if 0 <= row < self.peak_table.rowCount():
             self.peak_table.selectRow(row)
+
+    def _on_peak_header_clicked(self, section: int) -> None:
+        """点击 Assignment 列标题:开关图上峰指认标签(0.2.199-补29bf)。"""
+        if section != 1:
+            return
+        new_state = not self.viewer._show_peak_labels
+        self.viewer.set_peak_labels_visible(new_state)
+        header_item = self.peak_table.horizontalHeaderItem(1)
+        if header_item is not None:
+            header_item.setText(
+                "Assignment ✓" if new_state else "Assignment ✗"
+            )
 
     def _on_peak_row_selected(self) -> None:
         rows = self.peak_table.selectionModel().selectedRows()

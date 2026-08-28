@@ -455,3 +455,23 @@ def test_box_select_uses_peak_coords_only(qapp: QApplication) -> None:
     viewer._finish_box_select(vb.mapViewToScene(QPointF(110.0, 55.0)))
     assert viewer._box_selected_rows == {0, 1}
     viewer.close()
+
+
+
+def test_box_select_clamps_to_spectrum_edges(qapp: QApplication) -> None:
+    # 0.2.199-补29bf:框选超出谱图区域时截止到谱图边缘仍能选中
+    spectrum = _synthetic_spectrum()
+    viewer = SpectrumViewer()
+    viewer.add_spectrum(spectrum)
+    viewer.set_peaks(
+        [
+            {'H_shift': spectrum.x_axis.ppm_at(30), 'N_shift': spectrum.y_axis.ppm_at(20)},
+            {'H_shift': spectrum.x_axis.ppm_at(100), 'N_shift': spectrum.y_axis.ppm_at(50)},
+        ]
+    )
+    vb = viewer.plot.getViewBox()
+    viewer._box_press_scene = vb.mapViewToScene(QPointF(10.0, 10.0))
+    # 释放点远超谱图范围(右上),应截止到谱图边缘
+    viewer._finish_box_select(vb.mapViewToScene(QPointF(1e6, 1e6)))
+    assert viewer._box_selected_rows == {0, 1}
+    viewer.close()
