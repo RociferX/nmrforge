@@ -261,14 +261,6 @@ def _append_final_summary(
     storage_axes = (
         ["F1", "F2"] if direct_axis == "F2" else ["F2", "F1", "F3"]
     )
-    lines += spectrum_quality_report_lines(
-        str(spectrum_path),
-        optimization_logs=optimization_logs,
-        axis_names=storage_axes,
-        sign_mode=peak_sign,
-        baseline_scores=baseline_scores,
-        progress=progress,
-    )
     reports = list((diagnostics or {}).get("reports") or [])
     lines.append("◆ 数据质量诊断(处理前的数据监测,FID 检查)")
     if reports:
@@ -293,6 +285,15 @@ def _append_final_summary(
             "zero_fill": zero_fill,
             "backend_runs": backend_runs,
         }
+    )
+    # 0.2.199-补29ab:报告顺序 = 数据质量 → 处理参数与优化 → 最终谱图质量
+    lines += spectrum_quality_report_lines(
+        str(spectrum_path),
+        optimization_logs=optimization_logs,
+        axis_names=storage_axes,
+        sign_mode=peak_sign,
+        baseline_scores=baseline_scores,
+        progress=progress,
     )
     logs += lines
     if progress is not None:
@@ -463,6 +464,10 @@ def unified_route(    experiment: Experiment,
                 f"{i + 1}. {r}"
                 for i, r in enumerate(diag_result.reports)
             ]
+        # 0.2.199-补29ab:诊断结果实时输出在进度消息之后
+        for _line in diag_logs:
+            if progress is not None:
+                progress(_line)
     except Exception as exc:  # noqa: BLE001 - 诊断失败不阻断谱图生成
         diag_logs = [f"数据质量诊断失败: {exc}"]
     # 0.2.162-补15:用户指定的终跑直接维范围(final_ext_lo/final_ext_hi);
@@ -1146,6 +1151,10 @@ def _unified_nus(
                 f"{i + 1}. {r}"
                 for i, r in enumerate(diag_result.reports)
             ]
+        # 0.2.199-补29ab:诊断结果实时输出在进度消息之后
+        for _line in diag_logs:
+            if progress is not None:
+                progress(_line)
     except Exception as exc:  # noqa: BLE001 - 诊断失败不阻断谱图生成
         diag_logs = [f"数据质量诊断失败: {exc}"]
     params_first = dict(base_params or {})

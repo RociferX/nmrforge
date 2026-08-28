@@ -460,12 +460,13 @@ def _spectrum_param_report(
             lines.append(f"     {i}. {report}")
     else:
         lines.append("   ✓ 未检出直流偏置、尖峰坏点、首点异常、宽带峰或漂移")
-    if spectrum_path:
-        lines += spectrum_quality_report_lines(spectrum_path)
+    # 0.2.199-补29ab:报告顺序 = 数据质量 → 处理参数与优化 → 最终谱图质量
     lines.append("◆ 处理参数与优化")
     lines += format_optimization_report(
         {k: v for k, v in params.items() if k != "diagnostics"}
     )
+    if spectrum_path:
+        lines += spectrum_quality_report_lines(spectrum_path)
     return "\n".join(lines) if lines else "  (无参数记录)"
 
 
