@@ -2,6 +2,25 @@
 
 # 修改记录(历史条目)
 
+## 0.2.199-补29ap(2026-08-28,峰挑选符号规则 + 3D 轴映射修复)
+
+峰挑选改进(用户规则,总管直接实现):
+- 峰符号规则:presets peak_sign 驱动——uniform(单符号,HSQC/COSY 等)只
+  保留占多数的符号峰(候选峰计数,平局按绝对强度总和;主符号为负时同样
+  适用);mixed(正负共存,HNCACB 等)正负都选;类型未知回退 uniform;
+- core/qc/peak_detection.py 新增 sign_mode(positive/negative/both/
+  dominant),Peak.height 保留真实符号(CSV Intensity 带符号),snr 取绝对值;
+- workflow.pick_peaks 按数据 metadata(experiment_type.name)解析模板
+  peak_sign 自动选符号模式,日志注明符号模式;CSV 列兼容契约 §6;
+- bug 修复:pick_peaks 3D ppm 轴映射按 FDDIMORDER 定位 FDF 块(与 viewer
+  0.2.151 同源),峰表 F1/F2/F3_shift 按逻辑维取对应数据轴 ppm——修复
+  ORDER 2 3 1 时 F2/F3 ppm 互换;可靠性容差同源修正;
+- 测试:+6(检测 both/dominant、2D 主符号正/负、mixed 正负、3D 逻辑轴
+  映射);全量 pytest 753 项全绿,ruff 通过。
+
+流程变更:2026-08-28 起所有任务由总管直接实现(不再派发 GUI/Backend
+窗口,人工通道停用),见 docs/manager/decisions.md D-2026-08-28。
+
 ## 0.2.199-补29i~补29am(2026-08-27~28,直接维相位路线定型 + 同核谱显示链 + UI/文档)
 
 直接维相位优化路线(补29i~补29s):按用户「人工投影调相」思路定型——

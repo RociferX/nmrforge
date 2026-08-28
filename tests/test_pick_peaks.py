@@ -138,3 +138,157 @@ def test_pick_peaks_annotates_reliability(tmp_path: Path) -> None:
         if r.workflow_ref == "pick_peaks"
     ]
     assert "可靠性注释" in runs[-1].message
+
+
+def _write_metadata(
+    manager: ProjectManager, exp_id: str, data_id: str, name: str
+) -> None:
+    """写数据 metadata(experiment_type.name),驱动峰符号模式。"""
+    import json
+
+    path = manager.data_metadata_path(exp_id, data_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({"experiment_type": {"name": name, "confidence": 1.0}}),
+        encoding="utf-8",
+    )
+
+
+def _write_ft3_ordered(
+    path: Path, data: np.ndarray, fddimorder: list[float]
+) -> None:
+    """写带 FDDIMORDER 的 3D 流文件(与 test_viewer3d 同构)。"""
+    from nmrglue.fileio import pipe
+
+    nz, ny, nx = data.shape
+    dic = {k: "0" for k in pipe.fdata_dic}
+    dic["FDMAGIC"] = 9.2330230000000007e14
+    dic["FDDIMCOUNT"] = 3
+    dic["FDPIPEFLAG"] = 1
+    dic["FDSIZE"] = nx
+    dic["FDSPECNUM"] = ny
+    dic["FDF3SIZE"] = nz
+    dic["FDQUADFLAG"] = 1
+    dic["FDF1QUADFLAG"] = 1
+    dic["FDF2QUADFLAG"] = 1
+    dic["FDF3QUADFLAG"] = 1
+    dic["FDTRANSPOSED"] = 0
+    dic["FDDIMORDER"] = [float(v) for v in fddimorder] + [4.0]
+    for i, v in enumerate(fddimorder, start=1):
+        dic[f"FDDIMORDER{i}"] = float(v)
+    blocks = {
+        1: ("15N", nz, 2189.0, 60.8, 118.0, 100.0 * 60.8),
+        2: ("1H", nx, 3000.0, 600.0, 4.7, 6.0 * 600.0),
+        3: ("13C", ny, 11300.0, 150.9, 45.0, 40.0 * 150.9),
+    }
+    for dim in (1, 2, 3):
+        prefix = f"FDF{dim}"
+        lab, size, sw, obs, car, orig = blocks[dim]
+        dic[prefix + "T"] = size
+        dic[prefix + "SW"] = sw
+        dic[prefix + "OBS"] = obs
+        dic[prefix + "CAR"] = car
+        dic[prefix + "ORIG"] = orig
+        dic[prefix + "LABEL"] = lab
+    pipe.write(str(path), dic, data.astype(np.float32), overwrite=True)
+
+
+def _spectrum_with_peaks(
+    shape: tuple[int, ...], peaks: list[tuple[tuple[int, ...], float]]
+) -> np.ndarray:
+    """峰值点叠加高斯核的谱(正值/负值峰均可)。"""
+    spec = np.zeros(shape)
+    for pos, height in peaks:
+        spec[pos] = height
+    return gaussian_filter(spec, sigma=1.5)
+
+
+def test_pick_peaks_uniform_type_keeps_dominant_sign_only(tmp_path: Path) -> None:
+    """uniform(单符号)实验:只保留主符号峰,少数反号峰视为伪峰剔除。"""
+    spec = _spectrum_with_peaks(
+        (64, 128),
+        [
+            ((20, 40), 500.0),
+            ((25, 90), 350.0),
+            ((40, 60), 280.0),
+            ((10, 100), -300.0),
+        ],
+    )
+    ft2 = tmp_path / "out.ft2"
+    _write_ft2(ft2, spec)
+    manager, exp_id, data_id = _manager_with_spectrum(tmp_path, ft2)
+    _write_metadata(manager, exp_id, data_id, "HSQC")  # peak_sign: uniform
+
+    result = pick_peaks(manager, exp_id, data_id)
+    rows = list(csv.DictReader(Path(result["peak_path"]).open(encoding="utf-8")))
+    assert len(rows) == 3
+    assert all(float(r["Intensity"]) > 0 for r in rows)
+    assert "仅主符号峰" in result["logs"][0]
+
+
+def test_pick_peaks_uniform_type_negative_dominant(tmp_path: Path) -> None:
+    """uniform 实验主符号为负时,同样只选主符号(负峰)。"""
+    spec = _spectrum_with_peaks(
+        (64, 128),
+        [
+            ((20, 40), -500.0),
+            ((25, 90), -350.0),
+            ((40, 60), -280.0),
+            ((10, 100), 300.0),
+        ],
+    )
+    ft2 = tmp_path / "out.ft2"
+    _write_ft2(ft2, spec)
+    manager, exp_id, data_id = _manager_with_spectrum(tmp_path, ft2)
+    _write_metadata(manager, exp_id, data_id, "HSQC")
+
+    result = pick_peaks(manager, exp_id, data_id)
+    rows = list(csv.DictReader(Path(result["peak_path"]).open(encoding="utf-8")))
+    assert len(rows) == 3
+    assert all(float(r["Intensity"]) < 0 for r in rows)
+
+
+def test_pick_peaks_mixed_type_picks_both_signs(tmp_path: Path) -> None:
+    """mixed 实验(如 HNCACB 13Cα/13Cβ 反相):正负峰都选。"""
+    spec = _spectrum_with_peaks(
+        (64, 128),
+        [
+            ((20, 40), 500.0),
+            ((25, 90), 350.0),
+            ((10, 100), -300.0),
+            ((45, 20), -280.0),
+        ],
+    )
+    ft2 = tmp_path / "out.ft2"
+    _write_ft2(ft2, spec)
+    manager, exp_id, data_id = _manager_with_spectrum(tmp_path, ft2)
+    _write_metadata(manager, exp_id, data_id, "HNCACB")  # peak_sign: mixed
+
+    result = pick_peaks(manager, exp_id, data_id)
+    rows = list(csv.DictReader(Path(result["peak_path"]).open(encoding="utf-8")))
+    assert len(rows) == 4
+    signs = {float(r["Intensity"]) > 0 for r in rows}
+    assert signs == {True, False}
+    assert "正负峰都选" in result["logs"][0]
+
+
+def test_pick_peaks_ft3_shifts_follow_logical_axes(tmp_path: Path) -> None:
+    """3D ORDER 2 3 1:F1/F2/F3_shift 按逻辑维取对应数据轴 ppm(0.2.199-补29ap 修)。"""
+    data = np.zeros((16, 16, 16))  # (FDF3SIZE=15N, FDSPECNUM=13C, FDSIZE=1H)
+    data[3, 5, 8] = 500.0
+    data = gaussian_filter(data, sigma=1.0)
+    ft3 = tmp_path / "out.ft3"
+    _write_ft3_ordered(ft3, data, [2.0, 3.0, 1.0])
+    manager, exp_id, data_id = _manager_with_spectrum(tmp_path, ft3)
+
+    result = pick_peaks(manager, exp_id, data_id)
+    rows = list(csv.DictReader(Path(result["peak_path"]).open(encoding="utf-8")))
+    assert len(rows) >= 1
+    row = rows[0]
+    # 逻辑维:F1=15N(FDF1)、F2=1H(FDF2)、F3=13C(FDF3)
+    f1 = 100.0 + (16 - 1 - 3) * 2189.0 / (16 * 60.8)
+    f2 = 6.0 + (16 - 1 - 8) * 3000.0 / (16 * 600.0)
+    f3 = 40.0 + (16 - 1 - 5) * 11300.0 / (16 * 150.9)
+    assert abs(float(row["F1_shift"]) - f1) < 0.05
+    assert abs(float(row["F2_shift"]) - f2) < 0.05
+    assert abs(float(row["F3_shift"]) - f3) < 0.05
