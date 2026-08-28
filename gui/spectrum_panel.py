@@ -89,7 +89,7 @@ class SpectrumPanel(QWidget):
         self.peak_toolbar.setSpacing(12)
         self.peak_toolbar.addWidget(self.viewer.show_peaks_checkbox)
         # 0.2.199-补29at:选择模式(左键拖动框选峰),与 1D/Add peak 互斥
-        self.select_peaks_button = QPushButton("选择")
+        self.select_peaks_button = QPushButton("Select mode")
         self.select_peaks_button.setCheckable(True)
         self.select_peaks_button.setEnabled(False)
         self.select_peaks_button.setToolTip(
@@ -98,7 +98,7 @@ class SpectrumPanel(QWidget):
         self.select_peaks_button.toggled.connect(self._on_select_mode_toggled)
         self.peak_toolbar.addWidget(self.select_peaks_button)
         # 0.2.199-补29ar:Add peak 改为开关——开启后点击谱图加峰(吸附峰顶)
-        self.add_peak_button = QPushButton("Add peak")
+        self.add_peak_button = QPushButton("Add peak mode")
         self.add_peak_button.setCheckable(True)
         self.add_peak_button.setEnabled(False)
         self.add_peak_button.setToolTip(
@@ -154,6 +154,7 @@ class SpectrumPanel(QWidget):
         self.peak_table.itemChanged.connect(self._on_peak_cell_edited)
         self._peaks: list[dict] = []
         self._current_spectrum: Path | None = None
+        self._viewer_1d_active = False  # 0.2.199-补29bd:1D 开启隐藏峰控件
         self.placeholder = QLabel(
             "未打开项目\n\n从左侧选择项目下的实验,或点击谱图文件查看结果。"
         )
@@ -244,8 +245,9 @@ class SpectrumPanel(QWidget):
         for path in paths:
             self.file_list.addItem(path.name)
         self.file_list.setVisible(bool(paths))
-        self.peak_table.setVisible(bool(paths))
-        self.peak_toolbar_widget.setVisible(bool(paths))
+        peaks_ui_visible = bool(paths) and not self._viewer_1d_active
+        self.peak_table.setVisible(peaks_ui_visible)
+        self.peak_toolbar_widget.setVisible(peaks_ui_visible)
         self.export_poky_button.setEnabled(False)
         self.save_peaks_button.setEnabled(False)
         if not paths:
@@ -844,7 +846,7 @@ class SpectrumPanel(QWidget):
             self.viewer.show_1d_button.setChecked(False)
             self.viewer.set_box_select_mode(False)
         self.viewer.set_peak_click_mode("add" if checked else "select")
-        self.add_peak_button.setText("Add peak: ON" if checked else "Add peak")
+        self.add_peak_button.setText("Add peak mode: ON" if checked else "Add peak mode")
 
     def _on_select_mode_toggled(self, checked: bool) -> None:
         """选择模式:左键拖动框选峰;与 1D/Add peak 互斥。"""
@@ -853,15 +855,18 @@ class SpectrumPanel(QWidget):
             self.viewer.show_1d_button.setChecked(False)
             self.viewer.set_peak_click_mode("select")
         self.viewer.set_box_select_mode(checked)
-        self.select_peaks_button.setText("选择: ON" if checked else "选择")
+        self.select_peaks_button.setText("Select mode: ON" if checked else "Select mode")
 
     def _on_viewer_1d_toggled(self, checked: bool) -> None:
-        """1D 查看开启时关闭选择/加峰模式(互斥)。"""
+        """1D 查看开启时关闭选择/加峰模式,并隐藏峰相关控件(0.2.199-补29bd)。"""
         if checked:
             self.select_peaks_button.setChecked(False)
             self.add_peak_button.setChecked(False)
             self.viewer.set_box_select_mode(False)
             self.viewer.set_peak_click_mode("select")
+        self._viewer_1d_active = bool(checked)
+        self.viewer.peak_label.setVisible(not checked)
+        self.refresh()
 
     def _on_peaks_box_selected(self, rows: list[int]) -> None:
         """框选峰:联动峰表多选。"""

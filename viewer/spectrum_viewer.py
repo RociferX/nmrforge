@@ -341,6 +341,7 @@ class SpectrumViewer(QWidget):
         splitter.addWidget(controls)
         splitter.setStretchFactor(0, 1)
         splitter.setSizes([620, 210])
+        self.view_splitter = splitter  # 0.2.199-补29bd:1D 切换时贴合内容
         self.plot.setMinimumHeight(300)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -903,6 +904,15 @@ class SpectrumViewer(QWidget):
         self.strip_right.setVisible(active)
         self._crosshair_v.setVisible(active)
         self._crosshair_h.setVisible(active)
+        # 0.2.199-补29bd:控制区贴合内容,去掉 ppm 显示行上下的空白
+        if getattr(self, "view_splitter", None) is not None:
+            controls = self.controls_layout.parentWidget()
+            hint = max(1, controls.sizeHint().height())
+            total = self.view_splitter.height()
+            if total > 0:
+                self.view_splitter.setSizes(
+                    [max(1, total - hint), hint]
+                )
         if active:
             if self._data_bounds_item is not None:
                 self._data_bounds_item.setVisible(False)

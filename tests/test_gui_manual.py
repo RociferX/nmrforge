@@ -429,3 +429,40 @@ def test_delete_button_enabled_when_peaks_exist(tmp_path, qapp, monkeypatch) -> 
     panel._on_manual_peak_added({'H_shift': 8.5, 'N_shift': 117.0, 'label': ''})
     assert panel.delete_peak_button.isEnabled()  # 手动峰可删
     panel.close()
+
+
+
+def test_1d_mode_hides_peak_ui(tmp_path, qapp, monkeypatch) -> None:
+    # 0.2.199-补29bd:开启 1D 隐藏峰工具栏/峰表/峰信息;关闭恢复
+    import numpy as np
+
+    from viewer.spectrum import Spectrum, SpectrumAxis
+
+    manager = _manager(tmp_path, monkeypatch)
+    spectra = manager.data_dir('exp_001', 'd_001', 'spectra')
+    spectra.mkdir(parents=True, exist_ok=True)
+    (spectra / 'exp_001-d_001.ft2').write_bytes(b'x')
+    panel = SpectrumPanel(manager)
+    axis_x = SpectrumAxis(
+        label='H', size=64, sw_hz=6000.0, obs_mhz=600.0,
+        carrier_ppm=4.7, orig_hz=0.0,
+    )
+    axis_y = SpectrumAxis(
+        label='N', size=64, sw_hz=2189.0, obs_mhz=60.8,
+        carrier_ppm=118.0, orig_hz=0.0,
+    )
+    panel.viewer.add_spectrum(Spectrum(np.zeros((64, 64)), [axis_y, axis_x]))
+    panel.set_context('exp_001', 'd_001')
+    panel.refresh()
+    assert panel.peak_toolbar_widget.isVisibleTo(panel)
+    assert panel.peak_table.isVisibleTo(panel)
+    panel.viewer.show_1d_button.setChecked(True)
+    assert panel._viewer_1d_active
+    assert not panel.peak_toolbar_widget.isVisibleTo(panel)
+    assert not panel.peak_table.isVisibleTo(panel)
+    assert not panel.viewer.peak_label.isVisibleTo(panel)
+    panel.viewer.show_1d_button.setChecked(False)
+    assert not panel._viewer_1d_active
+    assert panel.peak_toolbar_widget.isVisibleTo(panel)
+    assert panel.peak_table.isVisibleTo(panel)
+    panel.close()
