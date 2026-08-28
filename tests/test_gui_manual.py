@@ -394,3 +394,38 @@ def test_peak_modes_mutually_exclusive(tmp_path, qapp, monkeypatch) -> None:
     assert not panel.add_peak_button.isChecked()
     assert not panel.select_peaks_button.isChecked()
     panel.close()
+
+
+
+def test_peak_size_spin_controls_marker(tmp_path, qapp, monkeypatch) -> None:
+    # 0.2.199-补29az:峰标记输入框调节 viewer 峰标记大小
+    manager = _manager(tmp_path, monkeypatch)
+    panel = SpectrumPanel(manager)
+    panel.set_context('exp_001', 'd_001')
+    assert panel.peak_size_spin.isEnabled()
+    panel.peak_size_spin.setValue(15.0)
+    assert panel.viewer._peak_size == 15.0
+    panel.close()
+
+
+
+def test_delete_button_enabled_when_peaks_exist(tmp_path, qapp, monkeypatch) -> None:
+    # 0.2.199-补29ba:自动/手动峰均可删除——有峰表即启用删除按钮
+    manager = _manager(tmp_path, monkeypatch)
+    spectra = manager.data_dir('exp_001', 'd_001', 'spectra')
+    spectra.mkdir(parents=True, exist_ok=True)
+    (spectra / 'exp_001-d_001.ft2').write_bytes(b'x')
+    peaks = manager.data_dir('exp_001', 'd_001', 'peaks')
+    peaks.mkdir(parents=True, exist_ok=True)
+    (peaks / 'exp_001-d_001.list').write_text(
+        'Assignment w1 w2 Data Height Volume\nG1  115.000  8.000  0  100  0\n',
+        encoding='utf-8',
+    )
+    panel = SpectrumPanel(manager)
+    panel.set_context('exp_001', 'd_001')
+    assert not panel.delete_peak_button.isEnabled()  # 无峰表时禁用
+    panel._load_peaks(spectra / 'exp_001-d_001.ft2')
+    assert panel.delete_peak_button.isEnabled()  # 自动峰可删
+    panel._on_manual_peak_added({'H_shift': 8.5, 'N_shift': 117.0, 'label': ''})
+    assert panel.delete_peak_button.isEnabled()  # 手动峰可删
+    panel.close()

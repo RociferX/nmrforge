@@ -13,6 +13,7 @@ from pathlib import Path
 from PyQt6.QtCore import QItemSelectionModel, Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QAbstractItemView,
+    QDoubleSpinBox,
     QFileDialog,
     QHBoxLayout,
     QLabel,
@@ -107,7 +108,7 @@ class SpectrumPanel(QWidget):
         self.peak_toolbar.addWidget(self.add_peak_button)
         self.delete_peak_button = QPushButton("Delete selected")
         self.delete_peak_button.setEnabled(False)
-        self.delete_peak_button.setToolTip("删除峰表中选中的行")
+        self.delete_peak_button.setToolTip("删除峰表中选中的行(自动/手动峰均可)")
         self.delete_peak_button.clicked.connect(self._on_delete_peak)
         self.peak_toolbar.addWidget(self.delete_peak_button)
         self.import_poky_button = QPushButton("Import peaks")
@@ -125,6 +126,18 @@ class SpectrumPanel(QWidget):
         self.save_peaks_button.setToolTip("把峰表写回 data/peaks/<exp>-<data>.list 并登记")
         self.save_peaks_button.clicked.connect(self._on_save_peaks)
         self.peak_toolbar.addWidget(self.save_peaks_button)
+        # 0.2.199-补29az:峰标记大小(数据坐标,随谱图缩放)
+        self.peak_size_label = QLabel("峰标记")
+        self.peak_size_spin = QDoubleSpinBox()
+        self.peak_size_spin.setRange(0.5, 50.0)
+        self.peak_size_spin.setSingleStep(0.5)
+        self.peak_size_spin.setDecimals(1)
+        self.peak_size_spin.setValue(8.0)
+        self.peak_size_spin.setToolTip("峰标记大小(数据坐标单位,随谱图缩放)")
+        self.peak_size_spin.setEnabled(False)
+        self.peak_size_spin.valueChanged.connect(self.viewer.set_peak_size)
+        self.peak_toolbar.addWidget(self.peak_size_label)
+        self.peak_toolbar.addWidget(self.peak_size_spin)
         self.peak_toolbar.addStretch(1)
 
         self.peak_table = QTableWidget(0, 5)
@@ -211,7 +224,8 @@ class SpectrumPanel(QWidget):
         )
         self.add_peak_button.setEnabled(has_context)
         self.select_peaks_button.setEnabled(has_context)
-        self.delete_peak_button.setEnabled(has_context and self.peak_table.rowCount() > 0)
+        self.peak_size_spin.setEnabled(has_context)
+        self._update_delete_button()
         self.import_poky_button.setEnabled(has_context)
         if self.manager.project is None or not self._current_exp_id:
             self.file_list.setVisible(False)
@@ -740,6 +754,7 @@ class SpectrumPanel(QWidget):
         self.viewer.set_peaks(self._peaks)
         self.export_poky_button.setEnabled(True)
         self.save_peaks_button.setEnabled(True)
+        self._update_delete_button()
 
     def _set_peak_columns(self, is_3d: bool) -> None:
         keys: list[str] = (
@@ -794,12 +809,23 @@ class SpectrumPanel(QWidget):
             peaks.append(peak)
         return peaks
 
+    def _update_delete_button(self) -> None:
+        """删除峰按钮:有峰表(自动/手动)且选中数据时可用(0.2.199-补29ba)。"""
+        has_context = bool(
+            self.manager.project is not None
+            and self._current_exp_id
+            and self._current_data_id
+        )
+        self.delete_peak_button.setEnabled(
+            has_context and self.peak_table.rowCount() > 0
+        )
+
     def _sync_peaks_in_memory(self) -> None:
         """表格编辑后同步内存 _peaks(不立即重建 viewer,避免卡顿)。"""
         if self._loading_peaks:
             return
         self._peaks = self._table_peaks()
-        self.delete_peak_button.setEnabled(self.peak_table.rowCount() > 0)
+        self._update_delete_button()
 
     def _on_peak_cell_edited(self, _item) -> None:
         self._sync_peaks_in_memory()
@@ -855,7 +881,7 @@ class SpectrumPanel(QWidget):
         self._peaks.append(peak)
         self._populate_peak_table()
         self.viewer.set_peaks(self._peaks)
-        self.delete_peak_button.setEnabled(True)
+        self._update_delete_button()
         self.save_peaks_button.setEnabled(True)
 
     def _on_delete_peak(self) -> None:
@@ -905,6 +931,7 @@ class SpectrumPanel(QWidget):
         self.viewer.set_peaks(peaks)
         self.export_poky_button.setEnabled(True)
         self.save_peaks_button.setEnabled(True)
+        self._update_delete_button()
         # 替换峰表关联关系(不覆盖文件):导入仅更新内存峰表,
         # 点「保存峰表」时以 Poky .list 写盘
         InfoDialog.show_info(

@@ -136,11 +136,14 @@ class SpectrumViewer(QWidget):
         self._level_count = max(5, int(level_count))
         self._contour_zoom = max(1.0, float(contour_zoom))
 
+        # 0.2.199-补29az:峰标记 Poky 风格 ×,数据坐标尺寸随谱图缩放
+        self._peak_size = 8.0
         self.peak_item = pg.ScatterPlotItem(
-            pen=pg.mkPen("#8b0000", width=1),
+            pen=pg.mkPen("#8b0000", width=1.5),
             brush=pg.mkBrush(255, 70, 70, 150),
-            size=10,
-            symbol="o",
+            size=self._peak_size,
+            symbol="x",
+            pxMode=False,
         )
         self.peak_item.setZValue(20)
         self.peak_item.sigClicked.connect(self._on_peak_clicked)
@@ -1089,6 +1092,11 @@ class SpectrumViewer(QWidget):
         self._selected_peak = row if 0 <= row < len(self._peaks) else None
         self._apply_peak_items()
 
+    def set_peak_size(self, size: float) -> None:
+        """峰标记大小(数据坐标单位,随谱图缩放);0.2.199-补29az。"""
+        self._peak_size = max(0.5, float(size))
+        self._apply_peak_items()
+
     def set_peak_click_mode(self, mode: str) -> None:
         """左键单击行为:select=选中峰 / add=加峰 / delete=删峰。"""
         self._click_mode = mode if mode in ("select", "add", "delete") else "select"
@@ -1161,15 +1169,16 @@ class SpectrumViewer(QWidget):
         xs: list[float] = []
         ys: list[float] = []
         sizes: list[float] = []
+        base = self._peak_size
         for row, peak in enumerate(self._peaks):
             x_ppm, y_ppm = self._peak_xy(peak)
             xs.append(float(x_axis.index_at(x_ppm)))
             # view y 即数据行:峰标记按 y 轴数据行放置,与 contour 对齐
             ys.append(float(y_axis.index_at(y_ppm)))
             sizes.append(
-                16.0
+                base * 1.6
                 if (row == self._selected_peak or row in self._box_selected_rows)
-                else 10.0
+                else base
             )
         self._peak_data_xy = list(zip(xs, ys))
         self.peak_item.setData(x=xs, y=ys, size=sizes)

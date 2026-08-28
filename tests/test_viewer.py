@@ -254,9 +254,14 @@ def test_viewer_peaks_poky_style(qapp: QApplication) -> None:
     )
     data = viewer.peak_item.data
     assert data["size"].shape == (2,)
+    assert viewer.peak_item.opts["symbol"] == "x"  # Poky 风格 ×
+    assert viewer.peak_item.opts["pxMode"] is False  # 随谱图缩放
     assert len(viewer.peak_label_items) == 2  # 有标签峰 + 选中峰
     viewer.highlight_peak(0)
-    assert float(viewer.peak_item.data["size"][0]) == 16  # 选中放大
+    assert float(viewer.peak_item.data["size"][0]) == pytest.approx(8.0 * 1.6)
+    viewer.set_peak_size(12.0)
+    assert float(viewer.peak_item.data["size"][0]) == pytest.approx(12.0 * 1.6)
+    assert float(viewer.peak_item.data["size"][1]) == pytest.approx(12.0)
     viewer.close()
 
 
