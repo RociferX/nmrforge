@@ -933,11 +933,13 @@ class PipelinePanel(QWidget):
         self.context_label.setText(context_text)
         statuses = self._current_statuses()
         # 样品数据层不提示/展示导入步骤(导入属于实验类型层动作)
+        # 0.2.199-补29as:SMILE 优化为可选步骤——未做/过期不占「下一步」,
+        # 单独显示「可选做」;「下一步」永远指向真实必做步骤
         outdated_next = next(
             (
                 sid
                 for sid, st in statuses.items()
-                if st == "OUTDATED"
+                if sid != "smile" and st == "OUTDATED"
             ),
             None,
         )
@@ -945,22 +947,30 @@ class PipelinePanel(QWidget):
             (
                 sid
                 for sid, st in statuses.items()
-                if st == "READY"
+                if sid != "smile" and st == "READY"
             ),
             None,
         )
-        if outdated_next:
-            self.next_label.setText(
-                f"下一步: 重新运行 {STEP_LABEL[outdated_next]}"
-            )
-        elif next_step:
-            self.next_label.setText(f"下一步: {STEP_LABEL[next_step]}")
+        smile_status = statuses.get("smile")
+        if smile_status == "OUTDATED":
+            optional_text = "SMILE 优化(重新运行)"
+        elif smile_status == "READY":
+            optional_text = "SMILE 优化"
         else:
-            self.next_label.setText(
+            optional_text = ""
+        if outdated_next:
+            text = f"下一步: 重新运行 {STEP_LABEL[outdated_next]}"
+        elif next_step:
+            text = f"下一步: {STEP_LABEL[next_step]}"
+        else:
+            text = (
                 "全部步骤已完成"
                 if any(st == "SUCCESS" for st in statuses.values())
                 else "等待导入样品数据"
             )
+        if optional_text:
+            text = f"可选做: {optional_text}　|　{text}"
+        self.next_label.setText(text)
         reasons = _lock_reasons(statuses)
         outdated = _outdated_reasons(
             statuses,
@@ -1122,8 +1132,13 @@ class PipelinePanel(QWidget):
     def show_first_import_hint(self) -> None:
         """首次导入后的下一步提示:高亮下一个可运行步骤 + 气泡,8 秒后消失。"""
         statuses = self._current_statuses()
+        # 0.2.199-补29as:可选 SMILE 优化不占「下一步」气泡
         next_step = next(
-            (sid for sid, st in statuses.items() if st in ("READY", "OUTDATED")),
+            (
+                sid
+                for sid, st in statuses.items()
+                if sid != "smile" and st in ("READY", "OUTDATED")
+            ),
             None,
         )
         if next_step is None:

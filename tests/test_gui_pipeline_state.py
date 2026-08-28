@@ -283,3 +283,31 @@ def test_save_peaks_manual_records_state(tmp_path: Path) -> None:
 class _FakeController:
     """PipelinePanel 构造用最小假控制器(测试只刷新状态,不运行步骤)。"""
 
+
+
+
+def test_next_label_skips_optional_smile(tmp_path: Path, qapp: QApplication) -> None:
+    """0.2.199-补29as:SMILE 未做时下一步指向峰挑选,并单独显示「可选做」。"""
+    from gui.pipeline_panel import PipelinePanel
+    from gui.pipeline_state import record_step_success
+
+    manager, exp_id, data_id, _ft2 = _manager_with_artifacts(tmp_path)
+    # 移除峰表/报告,使 peaks/analysis 保持 READY/LOCKED(夹具默认全套产物)
+    for f in manager.data_dir(exp_id, data_id, "peaks").glob("*"):
+        f.unlink()
+    for f in manager.data_dir(exp_id, data_id, "report").glob("*"):
+        f.unlink()
+    record_step_success(manager, exp_id, data_id, "spectrum")
+    panel = PipelinePanel(manager, _FakeController())
+    panel.set_selection("data", exp_id, data_id)
+    text = panel.next_label.text()
+    assert "峰挑选" in text
+    assert "SMILE" in text
+    assert "可选做" in text
+    # SMILE 已完成后不再出现「可选做」,下一步为峰挑选
+    record_step_success(manager, exp_id, data_id, "smile")
+    panel.refresh()
+    text = panel.next_label.text()
+    assert "可选做" not in text
+    assert "峰挑选" in text
+    panel.close()
