@@ -230,7 +230,7 @@ def _reorder_to_logical(
     reordered = np.transpose(data, inv)
     reordered_axes = [axes[spos] for spos in inv]
     reordered_nuclei = [storage_nuclei[spos] for spos in inv]
-    logger.warning(
+    logger.info(
         "轴序重排: 存储 (%s) → 逻辑 (%s): %s",
         " ".join(storage_nuclei), " ".join(logical_nuclei), path,
     )

@@ -464,7 +464,7 @@ def test_load_from_ft3_reorders_axes_to_logical(
     """0.2.122:存储轴序 (15N,1H,13C) 重排到逻辑序 (13C,15N,1H)。"""
     dic, data = _misordered_dic_and_data()
     monkeypatch.setattr("nmrglue.pipe.read", lambda path: (dic, data))
-    with caplog.at_level(logging.WARNING, logger="nmrforge.viewer.spectrum"):
+    with caplog.at_level(logging.INFO, logger="nmrforge.viewer.spectrum"):
         spec = Spectrum3D.load_from_ft3(
             tmp_path / "61.ft3", labels=("C", "N", "H"),
             nuclei=["13C", "15N", "1H"],
@@ -510,7 +510,7 @@ def test_load_from_ft2_reorders_axes_to_logical(
         "FDF2ORIG": 117.0 * 60.8, "FDF2LABEL": "N15",
     }
     monkeypatch.setattr("nmrglue.pipe.read", lambda path: (dic, data))
-    with caplog.at_level(logging.WARNING, logger="nmrforge.viewer.spectrum"):
+    with caplog.at_level(logging.INFO, logger="nmrforge.viewer.spectrum"):
         spec = Spectrum.load_from_ft2(
             tmp_path / "x.ft2", labels=("N", "H"), nuclei=["15N", "1H"]
         )
