@@ -9,7 +9,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import numpy as np
 import pytest
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QGraphicsItem
 
 from viewer.app import SpectrumWindow
 from viewer.contour_layer import ContourLayer
@@ -260,6 +260,7 @@ def test_viewer_peaks_poky_style(qapp: QApplication) -> None:
     viewer.highlight_peak(0)
     assert float(viewer.peak_item.data["size"][0]) == pytest.approx(1.5 * 3.0)
     assert viewer._flash_item is not None  # 0.2.199-补29bk:单点选中闪烁定位
+    assert viewer._flash_item.flags() & QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations
     viewer._clear_flash()
     assert viewer._flash_item is None
     viewer.set_peak_size(12.0)
@@ -609,3 +610,24 @@ def test_slice_point_and_ppm_editable(qapp: QApplication) -> None:
     assert not panel.ppm_spin.isEnabled()
     panel.close()
 
+
+
+
+def test_highlight_pans_view_to_peak(qapp: QApplication) -> None:
+    # 0.2.199-补29bl:选中峰不在视野时平移视图到中心(谱边缘 clamp 移入)
+    spectrum = _synthetic_spectrum()
+    viewer = SpectrumViewer()
+    viewer.add_spectrum(spectrum)
+    viewer.set_peaks(
+        [
+            {'H_shift': spectrum.x_axis.ppm_at(30), 'N_shift': spectrum.y_axis.ppm_at(20)},
+        ]
+    )
+    vb = viewer.plot.getViewBox()
+    vb.setRange(xRange=(50.0, 63.0), yRange=(50.0, 63.0), padding=0)
+    xr, yr = vb.viewRange()
+    assert not (xr[0] <= 30 <= xr[1] and yr[0] <= 20 <= yr[1])
+    viewer.highlight_peak(0)
+    xr, yr = vb.viewRange()
+    assert xr[0] <= 30 <= xr[1] and yr[0] <= 20 <= yr[1]
+    viewer.close()

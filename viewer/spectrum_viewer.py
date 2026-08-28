@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
     QCheckBox,
     QDoubleSpinBox,
     QGraphicsEllipseItem,
+    QGraphicsItem,
     QGraphicsRectItem,
     QGraphicsSceneMouseEvent,
     QGraphicsTextItem,
@@ -1121,11 +1122,30 @@ class SpectrumViewer(QWidget):
             xi, yi = self._peak_data_xy[row]
             self._flash_at(xi, yi)
 
-    def _flash_at(self, xi: float, yi: float) -> None:
-        """在峰位置画一个大号闪烁环,约 400ms 后消失(0.2.199-补29bk)。"""
+    def _ensure_peak_visible(self, xi: float, yi: float) -> None:
+        """选中峰不在视野时平移视图:尽量到中心,谱边缘则移入视野
+        (NMRViewBox 会 clamp 到数据边界,0.2.199-补29bl)。"""
         if self._primary is None:
             return
-        radius = max(3.0, self._peak_size * 5.0)
+        vb = self.plot.getViewBox()
+        xr, yr = vb.viewRange()
+        if xr[0] <= xi <= xr[1] and yr[0] <= yi <= yr[1]:
+            return
+        span_x = max(xr[1] - xr[0], 1.0)
+        span_y = max(yr[1] - yr[0], 1.0)
+        vb.setRange(
+            xRange=(xi - span_x / 2.0, xi + span_x / 2.0),
+            yRange=(yi - span_y / 2.0, yi + span_y / 2.0),
+            padding=0,
+        )
+
+    def _flash_at(self, xi: float, yi: float) -> None:
+        """在峰位置画固定屏幕大小的闪烁环,约 400ms 后消失
+        (0.2.199-补29bk/bl:不随谱图缩放;视野外先平移定位)。"""
+        if self._primary is None:
+            return
+        self._ensure_peak_visible(xi, yi)
+        radius = 24.0  # 固定像素大小,不随谱图缩放
         if self._flash_item is not None:
             try:
                 self.plot.removeItem(self._flash_item)
@@ -1133,9 +1153,13 @@ class SpectrumViewer(QWidget):
                 pass
             self._flash_item = None
         ring = QGraphicsEllipseItem(
-            xi - radius, yi - radius, radius * 2.0, radius * 2.0
+            -radius, -radius, radius * 2.0, radius * 2.0
         )
         ring.setPen(pg.mkPen("#0e639c", width=2))
+        ring.setFlag(
+            QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations
+        )
+        ring.setPos(xi, yi)
         ring.setZValue(22)
         self.plot.addItem(ring)
         self._flash_item = ring
