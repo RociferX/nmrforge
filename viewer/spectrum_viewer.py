@@ -12,16 +12,14 @@ from __future__ import annotations
 import numpy as np
 import pyqtgraph as pg
 from PyQt6.QtCore import QEvent, QPointF, QRect, QRectF, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QPainter, QPen, QTransform
+from PyQt6.QtGui import QColor, QFont, QPainter, QPen
 from PyQt6.QtWidgets import (
     QCheckBox,
     QDoubleSpinBox,
     QGraphicsEllipseItem,
     QGraphicsItem,
-    QGraphicsLineItem,
     QGraphicsRectItem,
     QGraphicsSceneMouseEvent,
-    QGraphicsTextItem,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -92,6 +90,225 @@ class _BoxSelectOverlay(QWidget):
             painter.end()
 
 
+def _point_on_perimeter(rect: QRectF, length: float) -> QPointF:
+    """沿矩形周长(左上角起顺时针)取 length 处坐标,供标签外周分布。"""
+    w = float(rect.width())
+    h = float(rect.height())
+    peri = max(2.0 * (w + h), 1e-9)
+    d = length % peri
+    x0, y0 = float(rect.x()), float(rect.y())
+    if d <= w:
+        return QPointF(x0 + d, y0)
+    d -= w
+    if d <= h:
+        return QPointF(x0 + w, y0 + d)
+    d -= h
+    if d <= w:
+        return QPointF(x0 + w - d, y0 + h)
+    return QPointF(x0, y0 + h - (d - w))
+
+
+def _perimeter_arc(point: QPointF, rect: QRectF) -> float:
+    """矩形周长上一点(径向投影落点)→弧长(左上角起顺时针),供滑动避让。"""
+    w = float(rect.width())
+    h = float(rect.height())
+    x0, y0 = rect.left(), rect.top()
+    x, y = point.x(), point.y()
+    tol = 2.0
+    if abs(y - y0) <= tol:
+        return max(0.0, x - x0)
+    if abs(x - (x0 + w)) <= tol:
+        return w + max(0.0, y - y0)
+    if abs(y - (y0 + h)) <= tol:
+        return w + h + max(0.0, x0 + w - x)
+    return w + h + w + max(0.0, y0 + h - y)
+
+
+def _layout_periphery_labels(
+    entries: list[tuple[QPointF, str, float]],
+    rect: QRectF,
+    font_px: float,
+) -> list[tuple[QPointF, QPointF, QPointF, str]]:
+    """外周标签布局:峰沿中心射线径向投影到矩形外周(引导线在各自角楔内,
+    互不交叉),标签按文本宽度沿周长贪心前滑避让重叠;返回 (标签位, 锚点,
+    峰点, 文本) 列表,标签位与锚点不一致时用沿边短连接线接回。"""
+    center = rect.center()
+    hw = rect.width() / 2.0
+    hh = rect.height() / 2.0
+    items: list[tuple[float, QPointF, QPointF, str, float]] = []
+    for pt, text, tw in entries:
+        dx = pt.x() - center.x()
+        dy = pt.y() - center.y()
+        dist = float(np.hypot(dx, dy))
+        if dist < 1e-6:
+            continue
+        ux, uy = dx / dist, dy / dist
+        t = min(
+            hw / max(abs(ux), 1e-9),
+            hh / max(abs(uy), 1e-9),
+        )
+        anchor = QPointF(center.x() + ux * t, center.y() + uy * t)
+        items.append(
+            (
+                _perimeter_arc(anchor, rect),
+                anchor,
+                QPointF(pt),
+                text,
+                float(tw),
+            )
+        )
+    items.sort(key=lambda it: it[0])
+    n = len(items)
+    if n == 0:
+        return []
+    # 沿外周贪心滑动:相邻标签间距 ≥ 半宽之和 + 间隔
+    pad = max(4.0, font_px * 0.4)
+    for i in range(1, n):
+        needed = (items[i - 1][4] + items[i][4]) / 2.0 + pad
+        gap = items[i][0] - items[i - 1][0]
+        if gap < needed:
+            items[i] = (
+                items[i - 1][0] + needed,
+                items[i][1],
+                items[i][2],
+                items[i][3],
+                items[i][4],
+            )
+    peri = 2.0 * (rect.width() + rect.height())
+    wrap_needed = (items[0][4] + items[-1][4]) / 2.0 + pad
+    wrap_gap = (items[0][0] + peri) - items[-1][0]
+    if wrap_gap < wrap_needed:
+        shift = (wrap_needed - wrap_gap) / 2.0
+        items = [
+            (arc + shift, anchor, pt, text, tw)
+            for arc, anchor, pt, text, tw in items
+        ]
+    return [
+        (_point_on_perimeter(rect, arc), anchor, pt, text)
+        for arc, anchor, pt, text, _tw in items
+    ]
+
+
+def _draw_periphery_label(
+    painter: QPainter, text: str, pos: QPointF, rect: QRectF, font_px: float
+) -> None:
+    """在外周位置朝外绘制标签文本(按所在边选择锚点)。"""
+    fm = painter.fontMetrics()
+    tw = float(fm.horizontalAdvance(text))
+    th = float(fm.height())
+    tol = 2.0
+    x, y = pos.x(), pos.y()
+    if abs(y - rect.top()) <= tol:
+        box = QRectF(x - tw / 2.0, y - th, tw, th)
+    elif abs(y - rect.bottom()) <= tol:
+        box = QRectF(x - tw / 2.0, y, tw, th)
+    elif abs(x - rect.left()) <= tol:
+        box = QRectF(x, y - th / 2.0, tw, th)
+    else:
+        box = QRectF(x - tw, y - th / 2.0, tw, th)
+    painter.drawText(box, int(Qt.AlignmentFlag.AlignCenter), text)
+
+
+class _LabelOverlay(QWidget):
+    """峰指认标签覆盖层:标签画在谱图外周(径向投影 + 滑动避让,
+    引导线不交叉),文字在 widget 坐标下始终直立;字号绑定标记尺寸
+    (随谱图缩放)。"""
+
+    def __init__(self, parent: QWidget, viewer: SpectrumViewer) -> None:
+        super().__init__(parent)
+        self._viewer = viewer
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+
+    def visible_label_count(self) -> int:
+        """当前应显示的标签数(测试/状态用)。"""
+        return len(self._collect_labels())
+
+    def _collect_labels(self) -> list[tuple[float, float, str]]:
+        """收集应显示的标签(数据坐标 xi, yi, text)。"""
+        viewer = self._viewer
+        if (
+            viewer._primary is None
+            or viewer._mode_1d
+            or not viewer._peaks_visible
+            or not viewer._show_peak_labels
+        ):
+            return []
+        out: list[tuple[float, float, str]] = []
+        for row, (xi, yi) in enumerate(viewer._peak_data_xy):
+            peak = viewer._peaks[row]
+            label = str(peak.get("label") or "").strip()
+            if not label and row != viewer._selected_peak:
+                continue
+            text = label or str(peak.get("Peak_ID", ""))
+            if not text:
+                continue
+            out.append((xi, yi, text))
+        return out
+
+    def paintEvent(self, event) -> None:
+        entries = self._collect_labels()
+        if not entries:
+            return
+        viewer = self._viewer
+        vb = viewer.plot.getViewBox()
+        painter = QPainter(self)
+        try:
+            pts: list[tuple[QPointF, str]] = []
+            for xi, yi, text in entries:
+                try:
+                    p = viewer.plot.mapFromScene(
+                        vb.mapViewToScene(QPointF(xi, yi))
+                    )
+                except Exception:  # noqa: BLE001
+                    continue
+                if not self.rect().contains(p):
+                    continue
+                pts.append((QPointF(p), text))
+            if not pts:
+                return
+            try:
+                ppu = 1.0 / max(vb.viewPixelSize()[0], 1e-9)
+            except Exception:  # noqa: BLE001
+                ppu = 1.0
+            font_px = max(6.0, min(60.0, viewer._peak_size * ppu))
+            font = QFont()
+            font.setPixelSize(int(round(font_px)))
+            painter.setFont(font)
+            margin = max(8.0, font_px * 1.1)
+            rect = QRectF(self.rect()).adjusted(
+                margin, margin, -margin, -margin
+            )
+            if rect.width() < 2.0 or rect.height() < 2.0:
+                return
+            # 0.2.199-补29bn:峰沿中心射线径向投影到矩形外周(同角楔内引导线
+            # 天然不交叉);标签沿外周按文本宽度滑动避让重叠,滑离投影点时用
+            # 沿边短连接线接回径向线。文字在 widget 坐标下始终直立。
+            fm = painter.fontMetrics()
+            entries = [
+                (pt, text, float(fm.horizontalAdvance(text)))
+                for pt, text in pts
+            ]
+            layout = _layout_periphery_labels(entries, rect, font_px)
+            gap_peak = 6.0 + font_px * 0.25  # 峰端留缝,不接死
+            leader_pen = QPen(QColor("#888888"), 1)
+            label_pen = QPen(QColor("#c0392b"), 1)
+            for pos, anchor, pt, text in layout:
+                painter.setPen(leader_pen)
+                if (pos - anchor).manhattanLength() > 2.0:
+                    painter.drawLine(pos, anchor)  # 沿边短连接线
+                dx = pt.x() - anchor.x()
+                dy = pt.y() - anchor.y()
+                d = max(float(np.hypot(dx, dy)), 1e-6)
+                ex = pt.x() - dx / d * gap_peak
+                ey = pt.y() - dy / d * gap_peak
+                painter.drawLine(anchor, QPointF(ex, ey))
+                painter.setPen(label_pen)
+                _draw_periphery_label(painter, text, pos, rect, font_px)
+        finally:
+            painter.end()
+
+
 class SpectrumViewer(QWidget):
     """支持多谱叠加的二维谱查看器。"""
 
@@ -143,10 +360,7 @@ class SpectrumViewer(QWidget):
         # 0.2.199-补29az:峰标记 Poky 风格 ×,数据坐标尺寸随谱图缩放
         self._peak_size = 1.5
         self._show_peak_labels = True  # 0.2.199-补29bf:Assignment 表头开关
-        self._label_font_size = -1.0  # 0.2.199-补29bg:标签字号缓存(随标记)
         self._flash_item: QGraphicsEllipseItem | None = None  # 0.2.199-补29bk
-        # 0.2.199-补29bm:标签-峰标记连接线池(与标签同开关,隐藏 Assignment 一起隐藏)
-        self._peak_leader_items: list[QGraphicsLineItem] = []
         self.peak_item = pg.ScatterPlotItem(
             pen=pg.mkPen("#8b0000", width=1.5),
             brush=pg.mkBrush(255, 70, 70, 150),
@@ -157,7 +371,6 @@ class SpectrumViewer(QWidget):
         self.peak_item.setZValue(20)
         self.peak_item.sigClicked.connect(self._on_peak_clicked)
         self.plot.addItem(self.peak_item)
-        self.peak_label_items: list[pg.TextItem] = []
 
         self.layer_list = QListWidget()
         self.layer_list.setMaximumHeight(90)
@@ -360,6 +573,13 @@ class SpectrumViewer(QWidget):
         self._box_overlay = _BoxSelectOverlay(self.plot.viewport(), self)
         self._box_overlay.setGeometry(self.plot.viewport().rect())
         self.plot.viewport().installEventFilter(self)
+        # 0.2.199-补29bn:峰指认标签画在 viewport 覆盖层(widget 坐标,文字
+        # 直立;外周分布引导线不交叉);视图变化时重绘
+        self._label_overlay = _LabelOverlay(self.plot.viewport(), self)
+        self._label_overlay.setGeometry(self.plot.viewport().rect())
+        self.plot.getViewBox().sigRangeChanged.connect(
+            lambda *_: self._label_overlay.update()
+        )
         self.plot.scene().sigMouseMoved.connect(self._on_mouse_moved)
         self.plot.scene().sigMouseClicked.connect(self._on_plot_clicked)
         self.set_aspect_ratio(1.0)  # 默认正方形(1:1 数据长宽比)
@@ -379,6 +599,7 @@ class SpectrumViewer(QWidget):
         self.set_1d_mode(False)
         # 统一 2D 显示方向:行 0(高 ppm)在底部,1D 视图后不泄漏到后续 2D/3D
         self.plot.getViewBox().invertY(False)
+        self._label_overlay.update()
         for layer in self.layers:
             self.plot.removeItem(layer)
         self.layers.clear()
@@ -754,6 +975,8 @@ class SpectrumViewer(QWidget):
         if obj is self.plot.viewport() and event.type() == QEvent.Type.Resize:
             if self._box_overlay is not None:
                 self._box_overlay.setGeometry(self.plot.viewport().rect())
+            if self._label_overlay is not None:
+                self._label_overlay.setGeometry(self.plot.viewport().rect())
             return super().eventFilter(obj, event)
         if obj is self.plot.scene():
             kind = self._mouse_event_kind(event.type())
@@ -932,6 +1155,7 @@ class SpectrumViewer(QWidget):
                 self.view_splitter.setSizes(
                     [max(1, total - hint), hint]
                 )
+        self._label_overlay.update()
         if active:
             if self._data_bounds_item is not None:
                 self._data_bounds_item.setVisible(False)
@@ -1255,12 +1479,7 @@ class SpectrumViewer(QWidget):
         if not self._peaks_visible or self._mode_1d or self._primary is None:
             self.peak_item.setData(x=[], y=[])
             self._peak_data_xy = []
-            for text_item in self.peak_label_items:
-                self.plot.removeItem(text_item)
-            self.peak_label_items.clear()
-            for leader in self._peak_leader_items:
-                self.plot.removeItem(leader)
-            self._peak_leader_items.clear()
+            self._label_overlay.update()
             return
         x_axis = self._primary.x_axis
         y_axis = self._primary.y_axis
@@ -1287,59 +1506,9 @@ class SpectrumViewer(QWidget):
         self._peak_data_xy = list(zip(xs, ys))
         self.peak_item.setData(x=xs, y=ys, size=sizes, pen=pens)
 
-        # 0.2.199-补29bg:Assignment 标签用 QGraphicsTextItem(随谱图缩放,
-        # 不抵消视图变换),字体像素尺寸=峰标记大小(数据坐标单位,二者绑定);
-        # 复用 TextItem 避免选择/删除时反复重建卡顿
-        wanted: list[tuple[float, float, str]] = []
-        if show_labels and self._show_peak_labels:
-            for row, (peak, xi, yi) in enumerate(zip(self._peaks, xs, ys)):
-                label = str(peak.get("label") or "").strip()
-                if not label and row != self._selected_peak:
-                    continue
-                text = label or str(peak.get("Peak_ID", ""))
-                if not text:
-                    continue
-                wanted.append((xi, yi, text))
-        font_size = max(1, int(round(self._peak_size)))
-        if self._label_font_size != font_size:
-            self._label_font_size = font_size
-            font = QFont()
-            font.setPixelSize(font_size)
-            for item in self.peak_label_items:
-                item.setFont(font)
-        # 0.2.199-补29bm:标签与峰标记水平连接线(留缝不接死;水平线互不交叉)
-        offset = max(4.0, self._peak_size * 6.0)
-        gap = max(2.0, self._peak_size * 1.5)
-        while len(self.peak_label_items) < len(wanted):
-            item = QGraphicsTextItem()
-            item.setDefaultTextColor(QColor("#c0392b"))
-            font = QFont()
-            font.setPixelSize(font_size)
-            item.setFont(font)
-            # 0.2.199-补29bj:谱图视图 y 翻转,抵消镜像让文字直立(仍随缩放)
-            item.setTransform(QTransform().scale(1.0, -1.0))
-            item.setZValue(21)
-            self.plot.addItem(item)
-            self.peak_label_items.append(item)
-            leader = QGraphicsLineItem()
-            leader.setPen(pg.mkPen("#888888", width=1))
-            leader.setZValue(20)
-            self.plot.addItem(leader)
-            self._peak_leader_items.append(leader)
-        for idx, (xi, yi, text) in enumerate(wanted):
-            item = self.peak_label_items[idx]
-            leader = self._peak_leader_items[idx]
-            if item.toPlainText() != text:
-                item.setPlainText(text)
-            # 文字翻转后实际纵向居中:pos.y 取 yi + 字号/2
-            item.setPos(xi + offset, yi + font_size / 2.0)
-            item.setVisible(True)
-            leader.setLine(xi + gap, yi, xi + offset, yi)
-            leader.setVisible(True)
-        for leader in self._peak_leader_items[len(wanted):]:
-            leader.setVisible(False)
-        for item in self.peak_label_items[len(wanted):]:
-            item.setVisible(False)
+        # 0.2.199-补29bn:峰指认标签与引导线由 _LabelOverlay 在 widget
+        # 坐标绘制(文字直立、外周分布、引导线不交叉),此处仅触发重绘
+        self._label_overlay.update()
 
     def _on_peak_clicked(self, _plot, points) -> None:
         if not points:

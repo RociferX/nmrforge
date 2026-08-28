@@ -498,11 +498,11 @@ def test_assignment_header_toggles_labels(tmp_path, qapp, monkeypatch) -> None:
     panel.set_context('exp_001', 'd_001')
     panel._load_peaks(spectra / 'exp_001-d_001.ft2')
     assert panel.viewer._show_peak_labels
-    assert len(panel.viewer.peak_label_items) == 1
+    assert panel.viewer._label_overlay.visible_label_count() == 1
     panel._on_peak_header_clicked(1)
     assert not panel.viewer._show_peak_labels
-    assert sum(1 for i in panel.viewer.peak_label_items if i.isVisible()) == 0
+    assert panel.viewer._label_overlay.visible_label_count() == 0
     panel._on_peak_header_clicked(1)
     assert panel.viewer._show_peak_labels
-    assert sum(1 for i in panel.viewer.peak_label_items if i.isVisible()) == 1
+    assert panel.viewer._label_overlay.visible_label_count() == 1
     panel.close()

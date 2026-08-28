@@ -9,12 +9,13 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import numpy as np
 import pytest
+from PyQt6.QtCore import QPointF, QRectF
 from PyQt6.QtWidgets import QApplication, QGraphicsItem
 
 from viewer.app import SpectrumWindow
 from viewer.contour_layer import ContourLayer
 from viewer.spectrum import Spectrum, SpectrumAxis
-from viewer.spectrum_viewer import SpectrumViewer
+from viewer.spectrum_viewer import SpectrumViewer, _layout_periphery_labels
 
 
 def _axis(label: str, size: int = 128, sw: float = 6000.0) -> SpectrumAxis:
@@ -256,7 +257,7 @@ def test_viewer_peaks_poky_style(qapp: QApplication) -> None:
     assert data["size"].shape == (2,)
     assert viewer.peak_item.opts["symbol"] == "x"  # Poky 风格 ×
     assert viewer.peak_item.opts["pxMode"] is False  # 随谱图缩放
-    assert len(viewer.peak_label_items) == 2  # 有标签峰 + 选中峰
+    assert viewer._label_overlay.visible_label_count() == 2  # 有标签峰 + 选中峰
     viewer.highlight_peak(0)
     assert float(viewer.peak_item.data["size"][0]) == pytest.approx(1.5 * 3.0)
     assert viewer._flash_item is not None  # 0.2.199-补29bk:单点选中闪烁定位
@@ -648,14 +649,57 @@ def test_peak_label_leader_line(qapp: QApplication) -> None:
             }
         ]
     )
-    assert len(viewer._peak_leader_items) == 1
-    leader = viewer._peak_leader_items[0]
-    assert leader.isVisible()
-    line = leader.line()
-    assert line.y1() == line.y2()  # 水平,不与其他线交叉
-    assert line.x1() < line.x2()  # 从峰右侧延伸到标签
-    viewer.set_peak_labels_visible(False)  # 隐藏 Assignment 线一起隐藏
-    assert not leader.isVisible()
+    assert viewer._label_overlay.visible_label_count() == 1
+    viewer.set_peak_labels_visible(False)  # 隐藏 Assignment:标签与线一起隐藏
+    assert viewer._label_overlay.visible_label_count() == 0
     viewer.set_peak_labels_visible(True)
-    assert leader.isVisible()
+    assert viewer._label_overlay.visible_label_count() == 1
     viewer.close()
+
+def test_periphery_label_layout(qapp: QApplication) -> None:
+    """0.2.199-补29bn:外周标签布局——标签落在矩形外周、径向引导线不交叉、
+    密集聚集峰滑动后不重叠。"""
+
+    def _segments_cross(a1, a2, b1, b2) -> bool:
+        def cross(o, p, q):
+            return (p[0] - o[0]) * (q[1] - o[1]) - (p[1] - o[1]) * (q[0] - o[0])
+
+        d1 = cross(a1, a2, b1)
+        d2 = cross(a1, a2, b2)
+        d3 = cross(b1, b2, a1)
+        d4 = cross(b1, b2, a2)
+        return ((d1 > 0) != (d2 > 0)) and ((d3 > 0) != (d4 > 0))
+
+    rect = QRectF(50.0, 50.0, 400.0, 300.0)
+    cx, cy = rect.center().x(), rect.center().y()
+    outer = [
+        (cx + 180.0 * np.cos(a), cy + 130.0 * np.sin(a))
+        for a in np.linspace(0.0, 2.0 * np.pi, 8, endpoint=False)
+    ]
+    inner = [(cx + i * 8.0 - 20.0, cy + i * 6.0 - 15.0) for i in range(6)]
+    entries = [
+        (QPointF(x, y), f"P{i}", 30.0)
+        for i, (x, y) in enumerate(outer + inner)
+    ]
+    layout = _layout_periphery_labels(entries, rect, 12.0)
+    assert len(layout) == len(entries)
+    tol = 2.0
+    for pos, anchor, pt, text in layout:
+        on_edge = (
+            abs(pos.y() - rect.top()) <= tol
+            or abs(pos.y() - rect.bottom()) <= tol
+            or abs(pos.x() - rect.left()) <= tol
+            or abs(pos.x() - rect.right()) <= tol
+        )
+        assert on_edge, f"label {text} not on perimeter"
+    for i in range(len(layout)):
+        for j in range(i + 1, len(layout)):
+            a1 = (layout[i][1].x(), layout[i][1].y())
+            a2 = (layout[i][2].x(), layout[i][2].y())
+            b1 = (layout[j][1].x(), layout[j][1].y())
+            b2 = (layout[j][2].x(), layout[j][2].y())
+            assert not _segments_cross(a1, a2, b1, b2), (
+                f"leader cross {layout[i][3]} {layout[j][3]}"
+            )
+    positions = [(p.x(), p.y()) for p, _a, _pt, _t in layout]
+    assert len(set(positions)) == len(positions), "labels overlap at same position"
