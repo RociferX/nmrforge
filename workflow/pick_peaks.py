@@ -27,6 +27,11 @@ class PickPeaksError(Exception):
     """峰挑选错误(谱缺失/读取失败/检出失败)。"""
 
 
+# 选峰默认阈值(0.2.199-补29aq,用户反馈选太多):5σ 噪声水平。检测算法默认
+# 3σ 供 QC 使用,选峰步骤用更严的 5σ,配合严格局部极大排除平坦区/脊线伪峰。
+_PICK_THRESHOLD_SIGMA = 5.0
+
+
 def _ppm_axis(dic: dict[str, Any], prefix: str, size: int) -> np.ndarray:
     """NMRPipe 头部构造 ppm 轴(ORIG 优先回退 CAR,与 viewer/spectrum 契约一致)。"""
     obs = float(dic.get(prefix + "OBS", 0.0) or 0.0)
@@ -284,7 +289,12 @@ def pick_peaks(
             arr = arr.real
         sign_mode = _sign_mode_for(manager, exp_id, data_id)
         peaks = peak_detection.detect(
-            arr, peak_detection.PeakDetectionParams(sign_mode=sign_mode)
+            arr,
+            peak_detection.PeakDetectionParams(
+                sign_mode=sign_mode,
+                sigma_multiplier=_PICK_THRESHOLD_SIGMA,
+                min_snr=_PICK_THRESHOLD_SIGMA,
+            ),
         )
         peak_path, rel_matched = _write_peaks_csv(
             manager, exp_id, data_id, arr, dict(dic), peaks

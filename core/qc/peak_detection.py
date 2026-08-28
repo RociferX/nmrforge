@@ -39,11 +39,21 @@ class PeakDetectionParams:
 def _candidates(
     real: np.ndarray, sigma: float, params: PeakDetectionParams, sign: int
 ) -> list[Peak]:
-    """提取 sign(+1/-1) 方向的候选峰:局部极大 + 强度>噪声×sigma + S/N 阈值。"""
+    """提取 sign(+1/-1) 方向的候选峰。
+
+    严格局部极大(中心须大于环邻域最大,排除平坦区/脊线上「等于窗口最大」
+    的伪峰,0.2.199-补29aq 修)+ 强度>噪声×sigma + S/N 阈值。
+    """
     value = sign * real
     footprint = np.ones([params.neighborhood] * real.ndim, dtype=bool)
-    maxima = maximum_filter(value, footprint=footprint, mode="constant")
-    mask = (value == maxima) & (value > sigma * params.sigma_multiplier)
+    ring = footprint.copy()
+    ring[tuple(s // 2 for s in footprint.shape)] = False
+    if ring.any():
+        neighbor_max = maximum_filter(value, footprint=ring, mode="constant")
+        mask = (value > neighbor_max) & (value > sigma * params.sigma_multiplier)
+    else:
+        maxima = maximum_filter(value, footprint=footprint, mode="constant")
+        mask = (value == maxima) & (value > sigma * params.sigma_multiplier)
     peaks: list[Peak] = []
     for idx in np.argwhere(mask):
         val = float(real[tuple(idx)])

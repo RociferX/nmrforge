@@ -292,3 +292,19 @@ def test_pick_peaks_ft3_shifts_follow_logical_axes(tmp_path: Path) -> None:
     assert abs(float(row["F1_shift"]) - f1) < 0.05
     assert abs(float(row["F2_shift"]) - f2) < 0.05
     assert abs(float(row["F3_shift"]) - f3) < 0.05
+
+
+
+def test_pick_peaks_flat_plateau_not_picked(tmp_path: Path) -> None:
+    """平坦基线不作为峰(严格局部极大 + 选峰 5σ,0.2.199-补29aq 修)。"""
+    spec = np.full((64, 128), 100.0)
+    spec[20, 40] = 500.0
+    spec[25, 90] = 500.0
+    spec = gaussian_filter(spec, sigma=1.0)
+    ft2 = tmp_path / "out.ft2"
+    _write_ft2(ft2, spec)
+    manager, exp_id, data_id = _manager_with_spectrum(tmp_path, ft2)
+
+    result = pick_peaks(manager, exp_id, data_id)
+    rows = list(csv.DictReader(Path(result["peak_path"]).open(encoding="utf-8")))
+    assert len(rows) == 2

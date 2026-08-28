@@ -55,3 +55,36 @@ def test_peak_detection_dominant_keeps_majority_sign() -> None:
     peaks = detect(spec, PeakDetectionParams(sign_mode="dominant"))
     assert len(peaks) == 2
     assert all(p.height < 0 for p in peaks)
+
+
+
+def test_peak_detection_ignores_flat_plateau() -> None:
+    """平坦基线不产生伪峰(严格局部极大,0.2.199-补29aq 修)。"""
+    import numpy as np
+    from scipy.ndimage import gaussian_filter
+
+    from core.qc.peak_detection import detect
+
+    spec = np.full((64, 128), 100.0)
+    spec[20, 40] = 500.0
+    spec[25, 90] = 500.0
+    peaks = detect(gaussian_filter(spec, sigma=1.0))
+    assert len(peaks) == 2
+
+
+def test_peak_detection_threshold_5sigma_filters_noise() -> None:
+    """5σ 阈值剔除 <5σ 的噪声局部极大(选峰默认阈值,0.2.199-补29aq)。"""
+    import numpy as np
+    from scipy.ndimage import gaussian_filter
+
+    from core.qc.peak_detection import PeakDetectionParams, detect
+
+    rng = np.random.default_rng(1)
+    spec = rng.uniform(-4.0, 4.0, (64, 128))
+    spec[20, 40] = 100.0
+    spec[25, 90] = 90.0
+    spec = gaussian_filter(spec, sigma=1.0)
+    peaks = detect(
+        spec, PeakDetectionParams(sigma_multiplier=5.0, min_snr=5.0)
+    )
+    assert len(peaks) == 2
