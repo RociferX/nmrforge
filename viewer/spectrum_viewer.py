@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import numpy as np
 import pyqtgraph as pg
-from PyQt6.QtCore import QEvent, QPointF, QRectF, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QPen
+from PyQt6.QtCore import QEvent, QPointF, QRect, QRectF, Qt, pyqtSignal
+from PyQt6.QtGui import QColor, QPainter, QPen
 from PyQt6.QtWidgets import (
     QCheckBox,
     QDoubleSpinBox,
@@ -41,6 +41,53 @@ _COLORS = ("#1f77b4", "#d62728", "#2ca02c", "#9467bd", "#ff7f0e", "#17becf")
 _DEFAULT_LEVELS = 8
 
 
+class _BoxSelectOverlay(QWidget):
+    """框选虚线覆盖层:绘在 plot viewport 之上,拖动时只重绘本层。
+
+    0.2.199-补29ax:不在场景内加/移 item(避免大谱等高线整场景重绘卡死,
+    以及场景事件处理中途增删 item 的不稳定)。
+    """
+
+    def __init__(self, parent: QWidget, viewer: SpectrumViewer) -> None:
+        super().__init__(parent)
+        self._viewer = viewer
+        self._scene_p0: QPointF | None = None
+        self._scene_p1: QPointF | None = None
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+
+    def set_rect(self, p0: QPointF, p1: QPointF) -> None:
+        self._scene_p0 = p0
+        self._scene_p1 = p1
+        self.update()
+
+    def has_rect(self) -> bool:
+        return self._scene_p0 is not None and self._scene_p1 is not None
+
+    def clear(self) -> None:
+        self._scene_p0 = None
+        self._scene_p1 = None
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        if not self.has_rect():
+            return
+        plot = self._viewer.plot
+        try:
+            p0 = plot.mapFromScene(self._scene_p0)
+            p1 = plot.mapFromScene(self._scene_p1)
+        except Exception:  # noqa: BLE001
+            return
+        rect = QRect(p0, p1).normalized()
+        painter = QPainter(self)
+        try:
+            painter.fillRect(rect, QColor(14, 99, 156, 40))
+            painter.setPen(QPen(QColor("#0e639c"), 1, Qt.PenStyle.DashLine))
+            painter.drawRect(rect)
+        finally:
+            painter.end()
+
+
 class SpectrumViewer(QWidget):
     """支持多谱叠加的二维谱查看器。"""
 
@@ -63,8 +110,10 @@ class SpectrumViewer(QWidget):
         self._box_select_enabled = False
         self._box_selecting = False
         self._box_press_scene: QPointF | None = None
-        self._box_rect: QGraphicsRectItem | None = None
+        self._box_overlay: _BoxSelectOverlay | None = None
         self._box_selected_rows: set[int] = set()
+        # 0.2.199-补29ay:峰数据坐标缓存(框选只做范围比对,不再逐峰换算)
+        self._peak_data_xy: list[tuple[float, float]] = []
         self._suppress_click = False  # 框选释放不当作单击
         self._mode_1d = False
         self._primary_1d: Spectrum1D | None = None
@@ -294,6 +343,10 @@ class SpectrumViewer(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(splitter)
 
+        # 0.2.199-补29ax:框选虚线画在 viewport 覆盖层(拖动不触发场景重绘)
+        self._box_overlay = _BoxSelectOverlay(self.plot.viewport(), self)
+        self._box_overlay.setGeometry(self.plot.viewport().rect())
+        self.plot.viewport().installEventFilter(self)
         self.plot.scene().sigMouseMoved.connect(self._on_mouse_moved)
         self.plot.scene().sigMouseClicked.connect(self._on_plot_clicked)
         self.set_aspect_ratio(1.0)  # 默认正方形(1:1 数据长宽比)
@@ -685,6 +738,10 @@ class SpectrumViewer(QWidget):
         return ""
 
     def eventFilter(self, obj, event) -> bool:
+        if obj is self.plot.viewport() and event.type() == QEvent.Type.Resize:
+            if self._box_overlay is not None:
+                self._box_overlay.setGeometry(self.plot.viewport().rect())
+            return super().eventFilter(obj, event)
         if obj is self.plot.scene():
             kind = self._mouse_event_kind(event.type())
             if kind == "press":
@@ -701,7 +758,11 @@ class SpectrumViewer(QWidget):
                         and self._box_selecting
                     ):
                         pos = self._box_scene_pos(event)
-                        if self._box_rect is not None and pos is not None:
+                        if (
+                            self._box_overlay is not None
+                            and self._box_overlay.has_rect()
+                            and pos is not None
+                        ):
                             self._finish_box_select(pos)
                         else:
                             self._cancel_box_select()
@@ -723,22 +784,10 @@ class SpectrumViewer(QWidget):
                     pos = self._box_scene_pos(event)
                     if pos is not None:
                         if (pos - self._box_press_scene).manhattanLength() > 6:
-                            if self._box_rect is None:
-                                self._box_rect = QGraphicsRectItem()
-                                self._box_rect.setPen(
-                                    pg.mkPen(
-                                        "#0e639c", width=1,
-                                        style=Qt.PenStyle.DashLine,
-                                    )
+                            if self._box_overlay is not None:
+                                self._box_overlay.set_rect(
+                                    self._box_press_scene, pos
                                 )
-                                self._box_rect.setBrush(
-                                    pg.mkBrush(14, 99, 156, 40)
-                                )
-                                self._box_rect.setZValue(30)
-                                self.plot.scene().addItem(self._box_rect)
-                            self._box_rect.setRect(
-                                QRectF(self._box_press_scene, pos).normalized()
-                            )
         return super().eventFilter(obj, event)
 
     def _box_scene_pos(self, event) -> QPointF | None:
@@ -753,12 +802,8 @@ class SpectrumViewer(QWidget):
     def _cancel_box_select(self) -> None:
         self._box_selecting = False
         self._box_press_scene = None
-        if self._box_rect is not None:
-            try:
-                self.plot.scene().removeItem(self._box_rect)
-            except Exception:  # noqa: BLE001
-                pass
-            self._box_rect = None
+        if self._box_overlay is not None:
+            self._box_overlay.clear()
 
     def _finish_box_select(self, scene_pos) -> None:
         """框选结束:选中矩形内全部峰并联动峰表。"""
@@ -779,15 +824,12 @@ class SpectrumViewer(QWidget):
             return
         lo_x, hi_x = sorted((xi0, xi1))
         lo_y, hi_y = sorted((yi0, yi1))
-        x_axis = self._primary.x_axis
-        y_axis = self._primary.y_axis
-        rows: list[int] = []
-        for row, peak in enumerate(self._peaks):
-            x_ppm, y_ppm = self._peak_xy(peak)
-            xi = int(round(x_axis.index_at(x_ppm)))
-            yi = int(round(y_axis.index_at(y_ppm)))
-            if lo_x <= xi <= hi_x and lo_y <= yi <= hi_y:
-                rows.append(row)
+        # 0.2.199-补29ay:只比对框范围与已缓存峰坐标,不做其它运算
+        rows: list[int] = [
+            row
+            for row, (xi, yi) in enumerate(self._peak_data_xy)
+            if lo_x <= xi <= hi_x and lo_y <= yi <= hi_y
+        ]
         self._box_selected_rows = set(rows)
         self._selected_peak = None
         self._apply_peak_items()
@@ -1109,6 +1151,7 @@ class SpectrumViewer(QWidget):
     def _apply_peak_items(self, show_labels: bool = True) -> None:
         if not self._peaks_visible or self._mode_1d or self._primary is None:
             self.peak_item.setData(x=[], y=[])
+            self._peak_data_xy = []
             for text_item in self.peak_label_items:
                 self.plot.removeItem(text_item)
             self.peak_label_items.clear()
@@ -1128,6 +1171,7 @@ class SpectrumViewer(QWidget):
                 if (row == self._selected_peak or row in self._box_selected_rows)
                 else 10.0
             )
+        self._peak_data_xy = list(zip(xs, ys))
         self.peak_item.setData(x=xs, y=ys, size=sizes)
 
         for text_item in self.peak_label_items:

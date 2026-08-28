@@ -433,3 +433,25 @@ def test_viewer_plot_click_without_button_down_pos(qapp: QApplication) -> None:
     viewer._on_plot_clicked(_FakeClickEventNoPress(scene_pt))
     assert viewer._selected_peak == 0
     viewer.close()
+
+
+
+def test_box_select_uses_peak_coords_only(qapp: QApplication) -> None:
+    # 0.2.199-补29ay:框选只比对框范围与缓存峰坐标,不做其它运算
+    spectrum = _synthetic_spectrum()
+    viewer = SpectrumViewer()
+    viewer.add_spectrum(spectrum)
+    viewer.set_peaks(
+        [
+            {'H_shift': spectrum.x_axis.ppm_at(30), 'N_shift': spectrum.y_axis.ppm_at(20)},
+            {'H_shift': spectrum.x_axis.ppm_at(100), 'N_shift': spectrum.y_axis.ppm_at(50)},
+            {'H_shift': spectrum.x_axis.ppm_at(80), 'N_shift': spectrum.y_axis.ppm_at(10)},
+        ]
+    )
+    viewer._apply_peak_items()
+    assert len(viewer._peak_data_xy) == 3
+    vb = viewer.plot.getViewBox()
+    viewer._box_press_scene = vb.mapViewToScene(QPointF(25.0, 15.0))
+    viewer._finish_box_select(vb.mapViewToScene(QPointF(110.0, 55.0)))
+    assert viewer._box_selected_rows == {0, 1}
+    viewer.close()

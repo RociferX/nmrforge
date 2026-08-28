@@ -2,6 +2,16 @@
 
 # 修改记录(历史条目)
 
+## 0.2.199-补29ax(2026-08-28,选择模式框选卡死修复)
+
+用户反馈:选择模式一拖动框选就卡死。修复两点:
+- 框选虚线不再加在谱图场景里(拖动时场景含等高线,每帧全场景重绘导致
+  卡死;且场景事件处理中途增删 item 不稳定)——改画在 plot viewport 的
+  轻量覆盖层(_BoxSelectOverlay),拖动只重绘本层;
+- 框选判定只比对「框范围 × 缓存峰坐标」:峰标记绘制时缓存数据坐标
+  (_peak_data_xy),框选结束直接范围比较,不再逐峰做轴/ppm 换算等其它运算;
+- 回归测试 +1(框选只比对缓存峰坐标);全量 pytest 全绿,ruff 通过。
+
 ## 0.2.199-补29aw(2026-08-28,修复点击谱图报错 MouseClickEvent 无 buttonDownScenePos)
 
 VM 实测点击谱图报 `AttributeError: 'MouseClickEvent' object has no attribute
