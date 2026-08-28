@@ -138,7 +138,7 @@ class SpectrumViewer(QWidget):
         self._contour_zoom = max(1.0, float(contour_zoom))
 
         # 0.2.199-补29az:峰标记 Poky 风格 ×,数据坐标尺寸随谱图缩放
-        self._peak_size = 8.0
+        self._peak_size = 1.5
         self._show_peak_labels = True  # 0.2.199-补29bf:Assignment 表头开关
         self._label_font_size = -1.0  # 0.2.199-补29bg:标签字号缓存(随标记)
         self.peak_item = pg.ScatterPlotItem(

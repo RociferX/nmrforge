@@ -25,6 +25,16 @@ from viewer.spectrum import Spectrum, Spectrum3D
 
 # (显示名, 被固定/切片的轴下标);查看平面为该轴之外的另两轴
 _PLANES = (("F1-F2", 2), ("F1-F3", 1), ("F2-F3", 0))
+# 切片轴下标 → 平面下拉项下标
+_PLANE_INDEX_BY_SLICE_AXIS = {0: 2, 1: 1, 2: 0}
+
+
+def _nucleus_of(label: str) -> str:
+    """轴标签 → 核名(兼容 1H/15N/13C 与 H/N/C,去 x/y/z 下标)。"""
+    text = str(label or "").strip()
+    if text[-1:] in ("x", "y", "z") and len(text) > 1:
+        text = text[:-1]
+    return {"H": "1H", "N": "15N", "C": "13C"}.get(text, text)
 
 
 class Spectrum3DPanel(QWidget):
@@ -79,10 +89,27 @@ class Spectrum3DPanel(QWidget):
         layout.addLayout(row)
 
     # ------------------------------------------------------------- API
+    def _preferred_slice_axis(self) -> int | None:
+        """优先切片轴:固定非 1H/13C 的轴(如 15N),剩余两轴即 CH 平面。
+
+        0.2.199-补29bh(用户):三维谱优先显示 CH 平面。轴标签无法构成
+        CH(如 HNN 双 15N、泛型 F1/F2/F3)时返回 None 走默认。
+        """
+        if self._spectrum3d is None:
+            return None
+        nuclei = [_nucleus_of(a.label) for a in self._spectrum3d.axes]
+        fixed = [i for i, n in enumerate(nuclei) if n not in ("1H", "13C")]
+        remaining = {n for i, n in enumerate(nuclei) if i not in fixed}
+        if len(fixed) == 1 and remaining == {"1H", "13C"}:
+            return fixed[0]
+        return None
+
     def set_spectrum3d(self, spectrum3d: Spectrum3D) -> None:
-        """绑定 3D 谱并重置到默认平面(F1-F2, 切片);自动发出重绘。"""
+        """绑定 3D 谱并重置默认平面(优先 CH,回退 F1-F2);自动发出重绘。"""
         self._spectrum3d = spectrum3d
-        self._slice_axis = 2
+        self._slice_axis = self._preferred_slice_axis()
+        if self._slice_axis is None:
+            self._slice_axis = 2  # 回退默认 F1-F2 平面(固定 F3)
         self._mode = "slice"
         noise = spectrum3d.estimate_noise()
         self._proj_thresh = (
@@ -95,7 +122,10 @@ class Spectrum3DPanel(QWidget):
             remaining = [i for i in range(3) if i != axis]
             name = "-".join(self._spectrum3d.axes[i].label for i in remaining)
             self.plane_combo.setItemText(index, name)
-        self.plane_combo.setCurrentIndex(0)
+        # 0.2.199-补29bh:CH 平面优先(固定非 1H/13C 轴)
+        self.plane_combo.setCurrentIndex(
+            _PLANE_INDEX_BY_SLICE_AXIS.get(self._slice_axis, 0)
+        )
         self._update_slider_range()
         self._update_position_controls()
         self._emit()

@@ -135,7 +135,7 @@ class SpectrumPanel(QWidget):
         self.peak_size_spin.setRange(0.5, 50.0)
         self.peak_size_spin.setSingleStep(0.5)
         self.peak_size_spin.setDecimals(1)
-        self.peak_size_spin.setValue(8.0)
+        self.peak_size_spin.setValue(1.5)
         self.peak_size_spin.setToolTip("标记尺寸(数据坐标单位,随谱图缩放)")
         self.peak_size_spin.setEnabled(False)
         self.peak_size_spin.valueChanged.connect(self.viewer.set_peak_size)

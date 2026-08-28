@@ -258,7 +258,7 @@ def test_viewer_peaks_poky_style(qapp: QApplication) -> None:
     assert viewer.peak_item.opts["pxMode"] is False  # 随谱图缩放
     assert len(viewer.peak_label_items) == 2  # 有标签峰 + 选中峰
     viewer.highlight_peak(0)
-    assert float(viewer.peak_item.data["size"][0]) == pytest.approx(8.0 * 1.6)
+    assert float(viewer.peak_item.data["size"][0]) == pytest.approx(1.5 * 1.6)
     viewer.set_peak_size(12.0)
     assert float(viewer.peak_item.data["size"][0]) == pytest.approx(12.0 * 1.6)
     assert float(viewer.peak_item.data["size"][1]) == pytest.approx(12.0)
@@ -581,8 +581,10 @@ def test_slice_point_and_ppm_editable(qapp: QApplication) -> None:
     fired: list[int] = []
     panel.slice_changed.connect(lambda: fired.append(1))
     panel.set_spectrum3d(spec)
-    axis = axes[2]  # 默认 F1-F2 平面,固定 F3
-    mid = 12 // 2
+    # 0.2.199-补29bh:CH 平面优先(H/N/C 标签 → 固定 N),回退断言用 axes[2]
+    assert panel._slice_axis == 1
+    axis = axes[1]  # 默认 CH 平面,固定 N
+    mid = axis.size // 2
     assert panel.slice_slider.value() == mid
     assert panel.point_spin.value() == mid
     assert abs(panel.ppm_spin.value() - axis.ppm_at(mid)) < 1e-2
