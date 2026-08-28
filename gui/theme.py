@@ -7,8 +7,22 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from PyQt6.QtGui import QColor, QPalette
 from PyQt6.QtWidgets import QApplication
+
+
+def _theme_assets_dir() -> Path | None:
+    """主题箭头图片目录(gui/assets/,开发/冻结通用);缺失返回 None。"""
+    try:
+        from core.app_paths import resource_path
+        assets = Path(resource_path("gui")) / "assets"
+    except Exception:  # noqa: BLE001
+        assets = Path(__file__).resolve().parent / "assets"
+    if (assets / "spin_up.png").is_file() and (assets / "spin_down.png").is_file():
+        return assets
+    return None
 
 
 def apply_dark_theme(app: QApplication) -> None:
@@ -39,6 +53,17 @@ def apply_dark_theme(app: QApplication) -> None:
         QColor("#6e6e6e"),
     )
     app.setPalette(palette)
+    _arrow_qss = ""
+    _assets = _theme_assets_dir()
+    if _assets is not None:
+        _up = (_assets / "spin_up.png").as_posix()
+        _down = (_assets / "spin_down.png").as_posix()
+        _arrow_qss = (
+            f'QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{'
+            f' image: url("{_up}"); width: 12px; height: 12px; }}\n'
+            f'QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{'
+            f' image: url("{_down}"); width: 12px; height: 12px; }}\n'
+        )
     app.setStyleSheet(
         """
         QToolTip { color: #e8e8e8; background-color: #2d2d30;
@@ -84,4 +109,5 @@ def apply_dark_theme(app: QApplication) -> None:
         QListWidget { background-color: #252526; color: #e8e8e8; }
         QStackedWidget { background-color: #1e1e1e; }
         """
+        + _arrow_qss
     )

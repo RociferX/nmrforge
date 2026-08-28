@@ -2,6 +2,14 @@
 
 # 修改记录(历史条目)
 
+## 0.2.199-补29ay(2026-08-28,spinbox 上下箭头改白色图片)
+
+用户反馈箭头仍不可见。Fusion 箭头字形颜色不随 QSS 按钮背景变化,改用
+白色三角 PNG 图片(gui/assets/spin_up.png / spin_down.png,纯 stdlib 生成)
+经 QSS `::up-arrow/::down-arrow { image: url(...) }` 指定,箭头按钮保持
+深色底;资源路径开发/冻结通用(resource_path)。offscreen 渲染验证按钮区
+白色像素 >20;全量 pytest 全绿,ruff 通过。
+
 ## 0.2.199-补29ax(2026-08-28,选择模式框选卡死修复)
 
 用户反馈:选择模式一拖动框选就卡死。修复两点:
