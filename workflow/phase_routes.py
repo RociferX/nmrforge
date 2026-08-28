@@ -480,7 +480,9 @@ def unified_route(    experiment: Experiment,
     direct_axis = "F2" if experiment.ndim == 2 else "F3"
     sign_mode = _sign_mode(experiment)
     axes = [dim.logical_axis for dim in experiment.dimensions]
-    # 0.2.75:均匀路径先间接后直接(旧算法顺序,直接维在间接维校正后的谱上锁点)
+    # 0.2.75:均匀路径先间接后直接(旧算法顺序,直接维在间接维校正后的谱上锁点);
+    # 0.2.199-补29ad:uniform 直接维复型数据有真实虚部,直接在复型预览上搜
+    # (不套用 NUS 的 SMILE 强制实型 + HT 方案)
     search_axes = [a for a in axes if a != direct_axis] + [direct_axis]
     fixed: dict[str, tuple[float, float]] = {}
     axis_arrays: dict[str, np.ndarray] = {}
