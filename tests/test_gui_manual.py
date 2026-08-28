@@ -284,8 +284,8 @@ def test_spectrum_panel_peak_add_edit_delete_save(
     # 0.2.199-补29ar:加峰走点击谱图入口(吸附后回调),不再直接追加空行
     panel._on_manual_peak_added({"H_shift": 8.5, "N_shift": 117.0, "label": ""})
     assert panel.peak_table.rowCount() == 2
-    panel.peak_table.item(1, 1).setText("7.5")
-    panel.peak_table.item(1, 2).setText("118.0")
+    panel.peak_table.item(1, 2).setText("7.5")  # Assignment 列后 H_shift 在 2
+    panel.peak_table.item(1, 3).setText("118.0")  # N_shift 在 3
     panel._on_save_peaks()
 
     list_path = peaks / "exp_001-d_001.list"
@@ -352,5 +352,45 @@ def test_spectrum_panel_3d_columns_auto(
     panel._load_peaks(spectra / "exp_001-d_001.ft3")  # 0.2.88:显式加载峰表
     assert panel.peak_table.rowCount() == 1
     assert "F1_shift" in panel._peak_keys
-    assert panel.peak_table.horizontalHeaderItem(1).text() == "F1_shift"
+    assert panel.peak_table.horizontalHeaderItem(1).text() == "Assignment"
+    assert panel.peak_table.horizontalHeaderItem(2).text() == "F1_shift"
+    panel.close()
+
+
+
+def test_peak_table_assignment_column(tmp_path, qapp, monkeypatch) -> None:
+    # 0.2.199-补29at:峰表含 Assignment 列(label)
+    manager = _manager(tmp_path, monkeypatch)
+    spectra = manager.data_dir('exp_001', 'd_001', 'spectra')
+    spectra.mkdir(parents=True, exist_ok=True)
+    (spectra / 'exp_001-d_001.ft2').write_bytes(b'x')
+    peaks = manager.data_dir('exp_001', 'd_001', 'peaks')
+    peaks.mkdir(parents=True, exist_ok=True)
+    (peaks / 'exp_001-d_001.list').write_text(
+        'Assignment w1 w2 Data Height Volume\nG1  115.000  8.000  0  100  0\n',
+        encoding='utf-8',
+    )
+    panel = SpectrumPanel(manager)
+    panel.set_context('exp_001', 'd_001')
+    panel._load_peaks(spectra / 'exp_001-d_001.ft2')
+    assert panel.peak_table.horizontalHeaderItem(1).text() == 'Assignment'
+    assert panel.peak_table.item(0, 1).text() == 'G1'
+    panel.close()
+
+
+def test_peak_modes_mutually_exclusive(tmp_path, qapp, monkeypatch) -> None:
+    # 0.2.199-补29at:选择/Add peak/1D 互斥
+    manager = _manager(tmp_path, monkeypatch)
+    panel = SpectrumPanel(manager)
+    panel.set_context('exp_001', 'd_001')
+    panel.select_peaks_button.setChecked(True)
+    assert not panel.add_peak_button.isChecked()
+    assert not panel.viewer.show_1d_button.isChecked()
+    assert panel.viewer._box_select_enabled
+    panel.add_peak_button.setChecked(True)
+    assert not panel.select_peaks_button.isChecked()
+    assert not panel.viewer._box_select_enabled
+    panel.viewer.show_1d_button.setChecked(True)
+    assert not panel.add_peak_button.isChecked()
+    assert not panel.select_peaks_button.isChecked()
     panel.close()

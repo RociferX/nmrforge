@@ -57,6 +57,13 @@ def apply_dark_theme(app: QApplication) -> None:
         QTextEdit, QDateEdit, QTimeEdit {
             background-color: #1e1e1e; color: #e8e8e8;
             border: 1px solid #3c3c3c; }
+        /* 0.2.199-补29at:spinbox 上下箭头按钮深底,白色箭头可见 */
+        QSpinBox::up-button, QDoubleSpinBox::up-button,
+        QSpinBox::down-button, QDoubleSpinBox::down-button {
+            background-color: #3c3c3c; border: none; width: 16px; }
+        QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover,
+        QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {
+            background-color: #4a4a4a; }
         QPushButton { background-color: #3c3c3c; color: #e8e8e8;
                       border: 1px solid #555555; padding: 4px 8px; }
         QPushButton:hover { background-color: #4a4a4a; }

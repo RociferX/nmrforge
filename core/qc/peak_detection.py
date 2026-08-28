@@ -34,6 +34,9 @@ class PeakDetectionParams:
     #             决定,平局按绝对强度总和,再平局取正——用户:「不用管
     #             正负,肯定是多的那些」)。
     sign_mode: str = "positive"
+    # 轴峰排除(0.2.199-补29at,用户):排除第 0 轴(上下)边缘 edge_margin
+    # 点内的峰——轴峰是最上下横着的一条(未演化间接维信号落在 F1 边缘)。
+    edge_margin: int = 0
 
 
 def _candidates(
@@ -55,7 +58,10 @@ def _candidates(
         maxima = maximum_filter(value, footprint=footprint, mode="constant")
         mask = (value == maxima) & (value > sigma * params.sigma_multiplier)
     peaks: list[Peak] = []
+    margin = max(0, int(params.edge_margin))
     for idx in np.argwhere(mask):
+        if margin and (idx[0] < margin or idx[0] >= real.shape[0] - margin):
+            continue  # 轴峰:上下边缘横条
         val = float(real[tuple(idx)])
         snr_value = abs(val) / sigma if sigma > 0 else 0.0
         if snr_value >= params.min_snr:

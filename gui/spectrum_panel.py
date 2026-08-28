@@ -10,8 +10,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QItemSelectionModel, Qt, pyqtSignal
 from PyQt6.QtWidgets import (
+    QAbstractItemView,
     QFileDialog,
     QHBoxLayout,
     QLabel,
@@ -86,6 +87,15 @@ class SpectrumPanel(QWidget):
         # 0.2.147:峰操作一行,列间间隔显明;Show peaks 位于 Add peak 前
         self.peak_toolbar.setSpacing(12)
         self.peak_toolbar.addWidget(self.viewer.show_peaks_checkbox)
+        # 0.2.199-补29at:选择模式(左键拖动框选峰),与 1D/Add peak 互斥
+        self.select_peaks_button = QPushButton("选择")
+        self.select_peaks_button.setCheckable(True)
+        self.select_peaks_button.setEnabled(False)
+        self.select_peaks_button.setToolTip(
+            "选择模式:按住左键拖动框选多个峰;与 1D 查看、Add peak 互斥"
+        )
+        self.select_peaks_button.toggled.connect(self._on_select_mode_toggled)
+        self.peak_toolbar.addWidget(self.select_peaks_button)
         # 0.2.199-补29ar:Add peak 改为开关——开启后点击谱图加峰(吸附峰顶)
         self.add_peak_button = QPushButton("Add peak")
         self.add_peak_button.setCheckable(True)
@@ -118,6 +128,9 @@ class SpectrumPanel(QWidget):
         self.peak_toolbar.addStretch(1)
 
         self.peak_table = QTableWidget(0, 5)
+        self.peak_table.setSelectionMode(
+            QAbstractItemView.SelectionMode.ExtendedSelection
+        )
         self.peak_table.setHorizontalHeaderLabels(list(self._peak_keys))
         self.peak_table.horizontalHeader().setStretchLastSection(True)
         self.peak_table.setMaximumHeight(150)
@@ -164,6 +177,8 @@ class SpectrumPanel(QWidget):
         splitter.setSizes([90, 480, 40, 160])
         self.viewer.peak_clicked.connect(self._on_viewer_peak_clicked)
         self.viewer.manual_peak_requested.connect(self._on_manual_peak_added)
+        self.viewer.peaks_box_selected.connect(self._on_peaks_box_selected)
+        self.viewer.show_1d_button.toggled.connect(self._on_viewer_1d_toggled)
         self.file_list.setMaximumWidth(16777215)  # 取消横向宽度限制
         layout.addWidget(splitter)
         self.refresh()
@@ -195,6 +210,7 @@ class SpectrumPanel(QWidget):
             and bool(self._current_data_id)
         )
         self.add_peak_button.setEnabled(has_context)
+        self.select_peaks_button.setEnabled(has_context)
         self.delete_peak_button.setEnabled(has_context and self.peak_table.rowCount() > 0)
         self.import_poky_button.setEnabled(has_context)
         if self.manager.project is None or not self._current_exp_id:
@@ -727,9 +743,9 @@ class SpectrumPanel(QWidget):
 
     def _set_peak_columns(self, is_3d: bool) -> None:
         keys: list[str] = (
-            ["Peak_ID", "F1_shift", "F2_shift", "F3_shift", "Intensity", "SN"]
+            ["Peak_ID", "label", "F1_shift", "F2_shift", "F3_shift", "Intensity", "SN"]
             if is_3d
-            else ["Peak_ID", "H_shift", "N_shift", "Intensity", "SN"]
+            else ["Peak_ID", "label", "H_shift", "N_shift", "Intensity", "SN"]
         )
         # 0.2.162-补4:峰带可靠性注释时追加显示列
         if any(
@@ -741,7 +757,9 @@ class SpectrumPanel(QWidget):
             return
         self._peak_keys = tuple_keys
         self.peak_table.setColumnCount(len(tuple_keys))
-        self.peak_table.setHorizontalHeaderLabels(list(tuple_keys))
+        self.peak_table.setHorizontalHeaderLabels(
+            ["Assignment" if k == "label" else k for k in tuple_keys]
+        )
 
     def _populate_peak_table(self) -> None:
         """把 self._peaks 写入表格(2D/3D 列自动切换)。"""
@@ -787,9 +805,44 @@ class SpectrumPanel(QWidget):
         self._sync_peaks_in_memory()
 
     def _on_add_peak_toggled(self, checked: bool) -> None:
-        """Add peak 开关:开启后点击谱图加峰(吸附峰顶);关闭恢复选中模式。"""
+        """Add peak 开关:开启后点击谱图加峰(吸附峰顶);与 1D/选择互斥。"""
+        if checked:
+            self.select_peaks_button.setChecked(False)
+            self.viewer.show_1d_button.setChecked(False)
+            self.viewer.set_box_select_mode(False)
         self.viewer.set_peak_click_mode("add" if checked else "select")
         self.add_peak_button.setText("Add peak: ON" if checked else "Add peak")
+
+    def _on_select_mode_toggled(self, checked: bool) -> None:
+        """选择模式:左键拖动框选峰;与 1D/Add peak 互斥。"""
+        if checked:
+            self.add_peak_button.setChecked(False)
+            self.viewer.show_1d_button.setChecked(False)
+            self.viewer.set_peak_click_mode("select")
+        self.viewer.set_box_select_mode(checked)
+        self.select_peaks_button.setText("选择: ON" if checked else "选择")
+
+    def _on_viewer_1d_toggled(self, checked: bool) -> None:
+        """1D 查看开启时关闭选择/加峰模式(互斥)。"""
+        if checked:
+            self.select_peaks_button.setChecked(False)
+            self.add_peak_button.setChecked(False)
+            self.viewer.set_box_select_mode(False)
+            self.viewer.set_peak_click_mode("select")
+
+    def _on_peaks_box_selected(self, rows: list[int]) -> None:
+        """框选峰:联动峰表多选。"""
+        model = self.peak_table.selectionModel()
+        if model is None:
+            return
+        model.clearSelection()
+        for row in rows:
+            if 0 <= row < self.peak_table.rowCount():
+                model.select(
+                    self.peak_table.model().index(row, 0),
+                    QItemSelectionModel.SelectionFlag.Select
+                    | QItemSelectionModel.SelectionFlag.Rows,
+                )
 
     def _on_manual_peak_added(self, peak: dict) -> None:
         """点击谱图加峰:吸附后追加到峰表(自动编号)并立即显示。"""
@@ -923,6 +976,9 @@ class SpectrumPanel(QWidget):
         self.delete_peak_button.setEnabled(False)
         if self.add_peak_button.isChecked():
             self.add_peak_button.setChecked(False)
+        if self.select_peaks_button.isChecked():
+            self.select_peaks_button.setChecked(False)
+        self.viewer.set_box_select_mode(False)
         self.viewer.set_peak_click_mode("select")
 
     @staticmethod

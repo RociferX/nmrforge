@@ -2,6 +2,24 @@
 
 # 修改记录(历史条目)
 
+## 0.2.199-补29at(2026-08-28,暗色箭头 + 选择模式框选 + Assignment 列 + 轴峰排除)
+
+用户四项需求:
+- 暗色主题:QSpinBox/QDoubleSpinBox 上下箭头按钮深色底(3c3c3c/hover 4a4a4a),
+  白色箭头可见性修复;
+- 选择模式:峰操作行新增「选择」开关——开启后左键拖动框选峰(虚线框+半透明
+  填充),松开选中框内全部峰并联动峰表多选;「选择」「Add peak」「1D 查看」
+  三者互斥(开一个自动关另外两个);选择/加峰开启时 ViewBox 切 PanMode,
+  关闭恢复 RectMode 框选缩放;
+- 峰表新增 Assignment 列(label,2D/3D 均在 Peak_ID 后),可编辑,导入/导出
+  Poky .list 保持;
+- 自动选峰排除轴峰:core/qc/peak_detection 新增 edge_margin(排除第 0 轴
+  上下边缘 N 点内候选峰),pick_peaks 默认 2 点——最上下横着的一条(轴峰)
+  不再入选。
+
+测试:+4(轴峰排除、Assignment 列、模式互斥、列偏移修正);全量 pytest
+全绿,ruff 通过。
+
 ## 0.2.199-补29as(2026-08-28,下一步提示:可选 SMILE 不再卡住)
 
 用户反馈:pipeline 上方「下一步」被可选的 SMILE 优化卡住(未做 SMILE 优化

@@ -33,6 +33,8 @@ class PickPeaksError(Exception):
 # 选峰默认阈值(0.2.199-补29aq 5σ 仍选多 → 补29ar 再拉高到 6σ)。
 # 检测算法默认 3σ 供 QC 使用,选峰步骤用更严阈值。
 _PICK_THRESHOLD_SIGMA = 6.0
+# 轴峰排除边缘点数(0.2.199-补29at,用户):上下边缘横条内的峰不选。
+_PICK_EDGE_MARGIN = 2
 
 
 def _ppm_axis(dic: dict[str, Any], prefix: str, size: int) -> np.ndarray:
@@ -219,6 +221,7 @@ def pick_peaks(
                 sign_mode=sign_mode,
                 sigma_multiplier=threshold,
                 min_snr=threshold,
+                edge_margin=_PICK_EDGE_MARGIN,
             ),
         )
         peak_path = _write_peaks_list(

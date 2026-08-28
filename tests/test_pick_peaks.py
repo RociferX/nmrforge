@@ -295,3 +295,21 @@ def test_pick_peaks_sigma_multiplier_param(tmp_path: Path) -> None:
     assert high["peak_count"] <= low["peak_count"]
     assert "4.0σ" in low["logs"][0]
     assert "8.0σ" in high["logs"][0]
+
+
+
+def test_pick_peaks_excludes_axial_edges(tmp_path: Path) -> None:
+    # 0.2.199-补29at:上下边缘轴峰(横条)不选,谱内峰保留
+    spec = np.zeros((64, 128))
+    spec[0, 60] = 800.0  # 顶部轴峰(横条)
+    spec[63, 60] = 700.0  # 底部轴峰(横条)
+    spec[20, 40] = 500.0
+    spec[40, 90] = 450.0
+    spec = gaussian_filter(spec, sigma=1.0)
+    ft2 = tmp_path / 'out.ft2'
+    _write_ft2(ft2, spec)
+    manager, exp_id, data_id = _manager_with_spectrum(tmp_path, ft2)
+
+    result = pick_peaks(manager, exp_id, data_id)
+    rows = _read_rows(Path(result['peak_path']))
+    assert len(rows) == 2  # 两个谱内峰,轴峰被排除

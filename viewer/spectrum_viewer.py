@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import numpy as np
 import pyqtgraph as pg
-from PyQt6.QtCore import QEvent, QRectF, Qt, pyqtSignal
+from PyQt6.QtCore import QEvent, QPointF, QRectF, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QPen
 from PyQt6.QtWidgets import (
     QCheckBox,
@@ -47,6 +47,7 @@ class SpectrumViewer(QWidget):
     peak_clicked = pyqtSignal(int)  # 峰行号
     manual_peak_requested = pyqtSignal(dict)  # 点击加峰:峰行 dict(已吸附峰顶)
     delete_peak_requested = pyqtSignal(float, float)
+    peaks_box_selected = pyqtSignal(list)  # 框选峰:行号列表(选择模式)
 
     def __init__(
         self,
@@ -58,6 +59,12 @@ class SpectrumViewer(QWidget):
         self._peaks: list[dict] = []
         self._selected_peak: int | None = None
         self._click_mode = "select"  # select / add / delete
+        # 0.2.199-补29at:选择模式(左键拖动框选峰)
+        self._box_select_enabled = False
+        self._box_selecting = False
+        self._box_press_scene: QPointF | None = None
+        self._box_rect: QGraphicsRectItem | None = None
+        self._box_selected_rows: set[int] = set()
         self._mode_1d = False
         self._primary_1d: Spectrum1D | None = None
         self._plot_1d: pg.PlotDataItem | None = None
@@ -682,22 +689,108 @@ class SpectrumViewer(QWidget):
             if kind == "press":
                 if event.button() == Qt.MouseButton.LeftButton:
                     self._mouse_left_pressed = True
+                    self._box_press_scene = self._box_scene_pos(event)
+                    self._box_selecting = True
             elif kind == "release":
                 if event.button() == Qt.MouseButton.LeftButton:
                     self._mouse_left_pressed = False
-            elif (
-                kind == "move"
-                and self._mouse_left_pressed
-                and (self._strips_active or self._mode_1d)
-            ):
-                # 0.2.199-补10:场景事件可能是 QGraphicsSceneMouseEvent
-                # (取 scenePos)或普通 QMouseEvent(取 position);PyQt6 无
-                # scenePosition 属性
-                if isinstance(event, QGraphicsSceneMouseEvent):
-                    self._follow_drag(event.scenePos())
-                else:
-                    self._follow_drag(event.position())
+                    if (
+                        self._box_select_enabled
+                        and self._click_mode == "select"
+                        and self._box_selecting
+                    ):
+                        pos = self._box_scene_pos(event)
+                        if self._box_rect is not None and pos is not None:
+                            self._finish_box_select(pos)
+                        else:
+                            self._cancel_box_select()
+            elif kind == "move" and self._mouse_left_pressed:
+                if self._strips_active or self._mode_1d:
+                    # 0.2.199-补10:场景事件可能是 QGraphicsSceneMouseEvent
+                    # (取 scenePos)或普通 QMouseEvent(取 position);PyQt6 无
+                    # scenePosition 属性
+                    if isinstance(event, QGraphicsSceneMouseEvent):
+                        self._follow_drag(event.scenePos())
+                    else:
+                        self._follow_drag(event.position())
+                elif (
+                    self._box_select_enabled
+                    and self._click_mode == "select"
+                    and self._box_selecting
+                    and self._box_press_scene is not None
+                ):
+                    pos = self._box_scene_pos(event)
+                    if pos is not None:
+                        if (pos - self._box_press_scene).manhattanLength() > 6:
+                            if self._box_rect is None:
+                                self._box_rect = QGraphicsRectItem()
+                                self._box_rect.setPen(
+                                    pg.mkPen(
+                                        "#0e639c", width=1,
+                                        style=Qt.PenStyle.DashLine,
+                                    )
+                                )
+                                self._box_rect.setBrush(
+                                    pg.mkBrush(14, 99, 156, 40)
+                                )
+                                self._box_rect.setZValue(30)
+                                self.plot.scene().addItem(self._box_rect)
+                            self._box_rect.setRect(
+                                QRectF(self._box_press_scene, pos).normalized()
+                            )
         return super().eventFilter(obj, event)
+
+    def _box_scene_pos(self, event) -> QPointF | None:
+        """场景事件取 scenePos;普通 QMouseEvent 由 plot 映射到场景坐标。"""
+        if isinstance(event, QGraphicsSceneMouseEvent):
+            return event.scenePos()
+        try:
+            return self.plot.mapToScene(event.position().toPoint())
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _cancel_box_select(self) -> None:
+        self._box_selecting = False
+        self._box_press_scene = None
+        if self._box_rect is not None:
+            try:
+                self.plot.scene().removeItem(self._box_rect)
+            except Exception:  # noqa: BLE001
+                pass
+            self._box_rect = None
+
+    def _finish_box_select(self, scene_pos) -> None:
+        """框选结束:选中矩形内全部峰并联动峰表。"""
+        if self._box_press_scene is None or self._primary is None:
+            self._cancel_box_select()
+            return
+        rect = QRectF(self._box_press_scene, scene_pos).normalized()
+        self._cancel_box_select()
+        try:
+            v0 = self.plot.getViewBox().mapSceneToView(rect.topLeft())
+            v1 = self.plot.getViewBox().mapSceneToView(rect.bottomRight())
+        except Exception:  # noqa: BLE001
+            return
+        xi0, yi0 = self._view_to_data(v0)
+        xi1, yi1 = self._view_to_data(v1)
+        if xi0 < 0 or xi1 < 0:
+            return
+        lo_x, hi_x = sorted((xi0, xi1))
+        lo_y, hi_y = sorted((yi0, yi1))
+        x_axis = self._primary.x_axis
+        y_axis = self._primary.y_axis
+        rows: list[int] = []
+        for row, peak in enumerate(self._peaks):
+            x_ppm, y_ppm = self._peak_xy(peak)
+            xi = int(round(x_axis.index_at(x_ppm)))
+            yi = int(round(y_axis.index_at(y_ppm)))
+            if lo_x <= xi <= hi_x and lo_y <= yi <= hi_y:
+                rows.append(row)
+        self._box_selected_rows = set(rows)
+        self._selected_peak = None
+        self._apply_peak_items()
+        if rows:
+            self.peaks_box_selected.emit(sorted(rows))
 
 
     def _follow_drag(self, scene_pos) -> None:
@@ -945,6 +1038,7 @@ class SpectrumViewer(QWidget):
         """叠加峰标记:dict 支持 H_shift/N_shift 或 x_ppm/y_ppm,可选 label。"""
         self._peaks = list(peaks)
         self._selected_peak = None
+        self._box_selected_rows.clear()
         self._apply_peak_items(show_labels=show_labels)
 
     def highlight_peak(self, row: int) -> None:
@@ -954,6 +1048,24 @@ class SpectrumViewer(QWidget):
     def set_peak_click_mode(self, mode: str) -> None:
         """左键单击行为:select=选中峰 / add=加峰 / delete=删峰。"""
         self._click_mode = mode if mode in ("select", "add", "delete") else "select"
+        if mode != "select":
+            self._cancel_box_select()
+            self._box_selected_rows.clear()
+            self._apply_peak_items()
+
+    def set_box_select_mode(self, enabled: bool) -> None:
+        """选择模式开关:开启后左键拖动框选峰(不缩放);关闭恢复框选缩放。"""
+        enabled = bool(enabled)
+        if enabled == self._box_select_enabled:
+            return
+        self._box_select_enabled = enabled
+        self.plot.getViewBox().setMouseMode(
+            pg.ViewBox.PanMode if enabled else pg.ViewBox.RectMode
+        )
+        if not enabled:
+            self._cancel_box_select()
+            self._box_selected_rows.clear()
+            self._apply_peak_items()
 
     def _peak_xy(self, peak: dict) -> tuple[float, float]:
         """把峰行映射到当前显示平面的 x/y ppm(按轴维序 F1/F2/F3)。
@@ -1007,7 +1119,11 @@ class SpectrumViewer(QWidget):
             xs.append(float(x_axis.index_at(x_ppm)))
             # view y 即数据行:峰标记按 y 轴数据行放置,与 contour 对齐
             ys.append(float(y_axis.index_at(y_ppm)))
-            sizes.append(16.0 if row == self._selected_peak else 10.0)
+            sizes.append(
+                16.0
+                if (row == self._selected_peak or row in self._box_selected_rows)
+                else 10.0
+            )
         self.peak_item.setData(x=xs, y=ys, size=sizes)
 
         for text_item in self.peak_label_items:
