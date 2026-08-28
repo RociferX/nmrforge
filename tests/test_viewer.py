@@ -631,3 +631,31 @@ def test_highlight_pans_view_to_peak(qapp: QApplication) -> None:
     xr, yr = vb.viewRange()
     assert xr[0] <= 30 <= xr[1] and yr[0] <= 20 <= yr[1]
     viewer.close()
+
+
+
+def test_peak_label_leader_line(qapp: QApplication) -> None:
+    # 0.2.199-补29bm:标签-峰标记水平连接线,留缝;隐藏标签线一起隐藏
+    spectrum = _synthetic_spectrum()
+    viewer = SpectrumViewer()
+    viewer.add_spectrum(spectrum)
+    viewer.set_peaks(
+        [
+            {
+                'H_shift': spectrum.x_axis.ppm_at(30),
+                'N_shift': spectrum.y_axis.ppm_at(20),
+                'label': 'G1',
+            }
+        ]
+    )
+    assert len(viewer._peak_leader_items) == 1
+    leader = viewer._peak_leader_items[0]
+    assert leader.isVisible()
+    line = leader.line()
+    assert line.y1() == line.y2()  # 水平,不与其他线交叉
+    assert line.x1() < line.x2()  # 从峰右侧延伸到标签
+    viewer.set_peak_labels_visible(False)  # 隐藏 Assignment 线一起隐藏
+    assert not leader.isVisible()
+    viewer.set_peak_labels_visible(True)
+    assert leader.isVisible()
+    viewer.close()

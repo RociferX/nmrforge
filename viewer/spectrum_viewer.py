@@ -18,6 +18,7 @@ from PyQt6.QtWidgets import (
     QDoubleSpinBox,
     QGraphicsEllipseItem,
     QGraphicsItem,
+    QGraphicsLineItem,
     QGraphicsRectItem,
     QGraphicsSceneMouseEvent,
     QGraphicsTextItem,
@@ -144,6 +145,8 @@ class SpectrumViewer(QWidget):
         self._show_peak_labels = True  # 0.2.199-补29bf:Assignment 表头开关
         self._label_font_size = -1.0  # 0.2.199-补29bg:标签字号缓存(随标记)
         self._flash_item: QGraphicsEllipseItem | None = None  # 0.2.199-补29bk
+        # 0.2.199-补29bm:标签-峰标记连接线池(与标签同开关,隐藏 Assignment 一起隐藏)
+        self._peak_leader_items: list[QGraphicsLineItem] = []
         self.peak_item = pg.ScatterPlotItem(
             pen=pg.mkPen("#8b0000", width=1.5),
             brush=pg.mkBrush(255, 70, 70, 150),
@@ -1255,6 +1258,9 @@ class SpectrumViewer(QWidget):
             for text_item in self.peak_label_items:
                 self.plot.removeItem(text_item)
             self.peak_label_items.clear()
+            for leader in self._peak_leader_items:
+                self.plot.removeItem(leader)
+            self._peak_leader_items.clear()
             return
         x_axis = self._primary.x_axis
         y_axis = self._primary.y_axis
@@ -1301,6 +1307,9 @@ class SpectrumViewer(QWidget):
             font.setPixelSize(font_size)
             for item in self.peak_label_items:
                 item.setFont(font)
+        # 0.2.199-补29bm:标签与峰标记水平连接线(留缝不接死;水平线互不交叉)
+        offset = max(4.0, self._peak_size * 6.0)
+        gap = max(2.0, self._peak_size * 1.5)
         while len(self.peak_label_items) < len(wanted):
             item = QGraphicsTextItem()
             item.setDefaultTextColor(QColor("#c0392b"))
@@ -1312,12 +1321,23 @@ class SpectrumViewer(QWidget):
             item.setZValue(21)
             self.plot.addItem(item)
             self.peak_label_items.append(item)
+            leader = QGraphicsLineItem()
+            leader.setPen(pg.mkPen("#888888", width=1))
+            leader.setZValue(20)
+            self.plot.addItem(leader)
+            self._peak_leader_items.append(leader)
         for idx, (xi, yi, text) in enumerate(wanted):
             item = self.peak_label_items[idx]
+            leader = self._peak_leader_items[idx]
             if item.toPlainText() != text:
                 item.setPlainText(text)
-            item.setPos(xi + 4.0, yi)
+            # 文字翻转后实际纵向居中:pos.y 取 yi + 字号/2
+            item.setPos(xi + offset, yi + font_size / 2.0)
             item.setVisible(True)
+            leader.setLine(xi + gap, yi, xi + offset, yi)
+            leader.setVisible(True)
+        for leader in self._peak_leader_items[len(wanted):]:
+            leader.setVisible(False)
         for item in self.peak_label_items[len(wanted):]:
             item.setVisible(False)
 
