@@ -466,3 +466,58 @@ def test_rewrite_duplicate_nucleus_labels_2d(tmp_path: Path) -> None:
     rdic, _ = ng.pipe.read(str(path))
     assert rdic.get("FDF1LABEL") == "1Hy"  # 间接维 F1 → Hy(显示层去 1)
     assert rdic.get("FDF2LABEL") == "1Hx"  # 直接维 F2 → Hx(显示层去 1)
+
+def test_rewrite_duplicate_nucleus_labels_3d_triple(tmp_path: Path) -> None:
+    """0.2.199-补29ah:3D 三同核(1H-1H-1H)标签唯一化——直接维 F3→1Hx、
+    F2(acqu2)→1Hy、F1(acqu3)→1Hz。"""
+    import numpy as np
+    import nmrglue as ng
+    from nmrglue.fileio import pipe as ngpipe
+
+    from core.data.internal_data_model import (
+        AxisRole,
+        Dimension,
+        Experiment,
+        ExperimentType,
+        Sampling,
+        SamplingMode,
+    )
+    from workflow.stepwise import _rewrite_duplicate_nucleus_labels
+
+    data = np.zeros((8, 8, 16), dtype=np.float32)
+    dic = {k: "0" for k in ngpipe.fdata_dic}
+    dic["FDMAGIC"] = 9.2330230000000007e14
+    dic["FDDIMCOUNT"] = 3
+    dic["FDPIPEFLAG"] = 1
+    dic["FDSIZE"] = 16
+    dic["FDSPECNUM"] = 8
+    dic["FDF3SIZE"] = 8
+    dic["FDQUADFLAG"] = 1
+    dic["FDF1QUADFLAG"] = 1
+    dic["FDF2QUADFLAG"] = 1
+    dic["FDF3QUADFLAG"] = 1
+    dic["FDF1LABEL"] = "1H"
+    dic["FDF2LABEL"] = "1H"
+    dic["FDF3LABEL"] = "1H"
+    path = tmp_path / "dup3.ft3"
+    ngpipe.write(str(path), dic, data, overwrite=True)
+
+    dims = [
+        Dimension(logical_axis="F3", role=AxisRole.DIRECT, nucleus="1H"),
+        Dimension(logical_axis="F2", role=AxisRole.INDIRECT, nucleus="1H"),
+        Dimension(logical_axis="F1", role=AxisRole.INDIRECT, nucleus="1H"),
+    ]
+    exp = Experiment(
+        dataset_id="x",
+        source_path=str(tmp_path),
+        dimensions=dims,
+        acquisition_order=["F3", "F2", "F1"],
+        sampling=Sampling(mode=SamplingMode.UNIFORM),
+        experiment_type=ExperimentType(name="NOESY", confidence=1.0),
+        ndim=3,
+    )
+    assert _rewrite_duplicate_nucleus_labels(str(path), exp) is True
+    rdic, _ = ng.pipe.read(str(path))
+    assert rdic.get("FDF1LABEL") == "1Hy"  # F2(acqu2)→1Hy
+    assert rdic.get("FDF2LABEL") == "1Hz"  # F1(acqu3)→1Hz
+    assert rdic.get("FDF3LABEL") == "1Hx"  # 直接维 F3→1Hx

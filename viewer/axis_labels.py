@@ -68,22 +68,24 @@ def nucleus_symbol(nucleus: str) -> str:
 
 def axis_labels_from_nuclei(nuclei: list[str]) -> tuple[str, ...]:
     """nuclei[i] 为第 i 维(F1/F2/F3)的核;同核出现多次时全部加 x/y/z 下标。
-    例:["15N","1H"]→("N","H");["1H","1H"]→("Hx","Hy");
-    ["13C","15N","1H"]→("C","N","H");["1H","1H","15N"]→("Hx","Hy","N")。
+
+    下标优先级按逻辑轴角色:直接维(编号最大的 F 轴)> acqu2 > acqu3,
+    即逻辑序中位置越靠后的重复核得越靠前的下标:
+    2D 双 1H:F2→Hx、F1→Hy;3D 三同核:F3→Hx、F2→Hy、F1→Hz;
+    HNN 双 15N:F2→Nx、F1→Ny。
     """
     symbols = [nucleus_symbol(n) for n in nuclei]
     counts = {s: symbols.count(s) for s in set(symbols)}
-    seen: dict[str, int] = {}
-    labels: list[str] = []
-    for symbol in symbols:
-        index = seen.get(symbol, 0)
-        seen[symbol] = index + 1
-        if counts[symbol] <= 1:
-            labels.append(symbol)
-        elif index < len(_SUBSCRIPT):
-            labels.append(f"{symbol}{_SUBSCRIPT[index]}")
-        else:
-            labels.append(f"{symbol}{index + 1}")
+    labels = list(symbols)
+    for symbol, cnt in counts.items():
+        if cnt <= 1:
+            continue
+        positions = [i for i, s in enumerate(symbols) if s == symbol]
+        for rank, pos in enumerate(sorted(positions, reverse=True)):
+            if rank < len(_SUBSCRIPT):
+                labels[pos] = f"{symbol}{_SUBSCRIPT[rank]}"
+            else:
+                labels[pos] = f"{symbol}{rank + 1}"
     return tuple(labels)
 
 

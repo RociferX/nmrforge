@@ -206,8 +206,9 @@ def test_load_from_ft3_roundtrip(tmp_path: Path) -> None:
     assert loaded.data.shape == spectrum3d.data.shape
     np.testing.assert_allclose(loaded.data, spectrum3d.data)
     assert loaded.source == path
-    # 0.2.152:无 metadata 时按头部核推导标签(合成文件 OBS 全 1H → Hx/Hy/Hz)
-    assert [axis.label for axis in loaded.axes] == ["Hx", "Hy", "Hz"]
+    # 0.2.152:无 metadata 时按头部核推导标签(合成文件 OBS 全 1H → 同核下标;
+    # 0.2.199-补29ah:直接维 F3→Hx、F2→Hy、F1→Hz)
+    assert [axis.label for axis in loaded.axes] == ["Hz", "Hy", "Hx"]
     assert loaded.max_intensity > 0
 
 

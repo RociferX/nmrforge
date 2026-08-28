@@ -548,10 +548,11 @@ class SpectrumPanel(QWidget):
             x_label = str(labels3[remaining[1]])
             y_label = str(labels3[remaining[0]])
         elif same_nucleus:
-            from viewer.axis_labels import axis_labels_from_nuclei as _alfn
+            # 同核投影平面无直接维语义:按显示轴取 x/y(x 轴得 x),
+            # 不参与逻辑序的直接维优先级(0.2.199-补29ah)
+            from viewer.axis_labels import nucleus_symbol as _nsym
 
-            _proj_labels = _alfn([a, b])
-            x_label, y_label = str(_proj_labels[0]), str(_proj_labels[1])
+            x_label, y_label = f"{_nsym(a)}x", f"{_nsym(b)}y"
         else:
             x_label, y_label = nucleus_symbol(a), nucleus_symbol(b)
         # 0.2.199-补29x:HNN 等重复核投影——X 轴对应 HSQC 的 N(15N),

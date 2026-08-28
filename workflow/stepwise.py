@@ -71,11 +71,12 @@ def _rewrite_duplicate_nucleus_labels(
     spectrum_path: str,
     experiment: Any,
 ) -> bool:
-    """同核谱重复标签唯一化(0.2.199-补29af/补29ag)。
+    """同核谱重复标签唯一化(0.2.199-补29af/补29ag/补29ah)。
 
-    proj3D 按 FDF 标签选轴,重复核标签即歧义;处理时就改:按逻辑轴
-    加下标 F2→x、F1→y、F3→z(如 2D 1H-1H:直接维 F2→Hx、间接维
-    F1→Hy;3D 双 15N(HNN/NNH):F2=HSQC 的 N→15Nx、F1→15Ny)。
+    proj3D 按 FDF 标签选轴,重复核标签即歧义;处理时就改:重复核
+    按下标优先级「直接维 > acqu2 > acqu3」依次加 x/y/z(2D 双 1H:
+    F2(直接)→1Hx、F1→1Hy;3D 三同核:F3(直接)→1Hx、F2→1Hy、
+    F1→1Hz;HNN 双 15N:F2(acqu2,HSQC 的 N)→15Nx、F1→15Ny)。
     GUI 的 nucleus_symbol 会把 15Nx 显示为 Nx。返回是否改写。
     """
     import nmrglue as ng
@@ -98,7 +99,9 @@ def _rewrite_duplicate_nucleus_labels(
 
         # numpy 存储轴逻辑名:2D (F1,F2);3D (F2,F1,F3)
         logical = ["F1", "F2"] if ndim == 2 else ["F2", "F1", "F3"]
-        subscript = {"F1": "y", "F2": "x", "F3": "z"}
+        # 重复核下标优先级:直接维 > acqu2 > acqu3
+        # (2D:F2 直接维、F1=acqu2;3D:F3 直接维、F2=acqu2、F1=acqu3)
+        priority = ["F2", "F1"] if ndim == 2 else ["F3", "F2", "F1"]
         labels = [
             str(dic.get(f"{_fdf(i)}LABEL", "") or "") for i in range(ndim)
         ]
@@ -109,12 +112,14 @@ def _rewrite_duplicate_nucleus_labels(
         if not dups:
             return False
         changed = False
-        for axis_idx, lbl in enumerate(labels):
-            if lbl not in dups:
-                continue
-            suf = subscript.get(logical[axis_idx], "")
-            if suf:
-                dic[f"{_fdf(axis_idx)}LABEL"] = lbl + suf
+        for dup in sorted(dups):
+            dup_axes = sorted(
+                (i for i, lbl in enumerate(labels) if lbl == dup),
+                key=lambda i: priority.index(logical[i]),
+            )
+            for rank, axis_idx in enumerate(dup_axes):
+                suf = "xyz"[rank] if rank < 3 else str(rank + 1)
+                dic[f"{_fdf(axis_idx)}LABEL"] = dup + suf
                 changed = True
         if changed:
             ng.pipe.write(str(spectrum_path), dic, data, overwrite=True)

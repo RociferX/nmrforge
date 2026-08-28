@@ -55,10 +55,13 @@ def test_nucleus_symbol() -> None:
 
 
 def test_axis_labels_from_nuclei() -> None:
+    """下标优先级:直接维 > acqu2 > acqu3(逻辑序位置越靠后越优先)。"""
     assert axis_labels_from_nuclei(["15N", "1H"]) == ("N", "H")
-    assert axis_labels_from_nuclei(["1H", "1H"]) == ("Hx", "Hy")
+    assert axis_labels_from_nuclei(["1H", "1H"]) == ("Hy", "Hx")  # 2D:F2(直接)→Hx、F1→Hy
     assert axis_labels_from_nuclei(["13C", "15N", "1H"]) == ("C", "N", "H")
-    assert axis_labels_from_nuclei(["1H", "1H", "15N"]) == ("Hx", "Hy", "N")
+    assert axis_labels_from_nuclei(["1H", "1H", "15N"]) == ("Hy", "Hx", "N")
+    assert axis_labels_from_nuclei(["1H", "1H", "1H"]) == ("Hz", "Hy", "Hx")  # 3D 三同核
+    assert axis_labels_from_nuclei(["15N", "15N", "1H"]) == ("Ny", "Nx", "H")  # HNN
 
 
 def test_nuclei_from_metadata() -> None:
@@ -155,9 +158,10 @@ def test_spectrum_panel_fallback_labels(
     panel.set_context(exp_id, data_id)
     assert panel.load_current_spectrum() is True  # 0.2.88:显式加载
     assert panel.viewer._primary is not None
-    # 合成文件两轴 OBS 均 600 MHz → 推断为 1H,同核加下标
-    assert panel.viewer._primary.x_axis.label == "Hy"
-    assert panel.viewer._primary.y_axis.label == "Hx"
+    # 合成文件两轴 OBS 均 600 MHz → 推断为 1H,同核加下标;
+    # 直接维 F2 在 x 轴 → Hx、间接维 F1 → Hy(0.2.199-补29ah)
+    assert panel.viewer._primary.x_axis.label == "Hx"
+    assert panel.viewer._primary.y_axis.label == "Hy"
     panel.close()
 
 
