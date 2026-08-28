@@ -67,6 +67,59 @@ def _work_dir(manager: ProjectManager, exp_id: str, data_id: str) -> Path:
     return manager.data_dir(exp_id, data_id, "process")
 
 
+def _rewrite_duplicate_nucleus_labels(
+    spectrum_path: str,
+    experiment: Any,
+) -> bool:
+    """同核谱(HNN/NNH 双 15N)把重复标签唯一化(0.2.199-补29af)。
+
+    proj3D 按 FDF 标签选轴,两个 15N 重名即歧义;处理时就改:按
+    FDDIMORDER 把 F2(HSQC 的 N,直接连 1H)标签写成 {核}x、F1 写成
+    {核}y(如 15Nx/15Ny)。GUI 的 nucleus_symbol 会把 15Nx 显示为 Nx。
+    返回是否改写。
+    """
+    import nmrglue as ng
+    import numpy as np
+
+    try:
+        dic, data = ng.pipe.read(str(spectrum_path))
+        if np.asarray(data).ndim != 3:
+            return False
+        order = [int(v) for v in dic.get("FDDIMORDER") or []]
+
+        def _fdf(axis_idx: int) -> str:
+            if len(order) >= 3:
+                dim = order[2 - axis_idx]
+                if 1 <= dim <= 4:
+                    return f"FDF{dim}"
+            return f"FDF{axis_idx + 1}"
+
+        # numpy 存储轴:(F2, F1, F3);找重复标签
+        labels = [
+            str(dic.get(f"{_fdf(i)}LABEL", "") or "") for i in range(3)
+        ]
+        counts: dict[str, int] = {}
+        for lbl in labels:
+            counts[lbl] = counts.get(lbl, 0) + 1
+        dups = {lbl for lbl, c in counts.items() if c > 1 and lbl}
+        if not dups:
+            return False
+        changed = False
+        for axis_idx, lbl in enumerate(labels):
+            if lbl not in dups:
+                continue
+            if axis_idx == 0:  # F2 = HSQC 的 N → Nx
+                dic[f"{_fdf(axis_idx)}LABEL"] = lbl + "x"
+            elif axis_idx == 1:  # F1 → Ny
+                dic[f"{_fdf(axis_idx)}LABEL"] = lbl + "y"
+            changed = True
+        if changed:
+            ng.pipe.write(str(spectrum_path), dic, data, overwrite=True)
+        return changed
+    except Exception:  # noqa: BLE001 - 标签改写失败不影响谱图
+        return False
+
+
 def _register_spectrum(
     manager: ProjectManager,
     exp_id: str,
@@ -81,6 +134,13 @@ def _register_spectrum(
     target = spectra_dir / f"{data_id}{source.suffix}"
     if source.is_file() and source.resolve() != target.resolve():
         shutil.move(str(source), str(target))
+    # 0.2.199-补29af:同核谱(HNN/NNH 双 15N)唯一化标签(15Nx/15Ny),
+    # 使 proj3D 按标签选轴可用;改写后投影与 GUI 均显示 Nx/Ny
+    try:
+        experiment = _read_experiment(manager, exp_id, data_id)
+        _rewrite_duplicate_nucleus_labels(str(target), experiment)
+    except Exception:  # noqa: BLE001 - 改写失败不影响谱图登记
+        pass
     manager.set_data_spectrum(exp_id, data_id, target)
     return str(target)
 

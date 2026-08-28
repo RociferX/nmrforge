@@ -361,4 +361,60 @@ def test_read_experiment_prefers_raw_copy(
     assert exp.source_path == manager.root / raw_dir
     assert read_dataset(Path(result.raw_dir)).ndim == 2
 
+def test_rewrite_duplicate_nucleus_labels(tmp_path: Path) -> None:
+    """0.2.199-补29af:双 15N(HNN/NNH)标签唯一化——F2→15Nx、F1→15Ny。"""
+    import numpy as np
+    import nmrglue as ng
+    from nmrglue.fileio import pipe as ngpipe
+
+    from core.data.internal_data_model import (
+        AxisRole,
+        Dimension,
+        Experiment,
+        ExperimentType,
+        Sampling,
+        SamplingMode,
+    )
+    from workflow.stepwise import _rewrite_duplicate_nucleus_labels
+
+    data = np.zeros((16, 16, 32), dtype=np.float32)
+    dic = {k: "0" for k in ngpipe.fdata_dic}
+    dic["FDMAGIC"] = 9.2330230000000007e14
+    dic["FDDIMCOUNT"] = 3
+    dic["FDPIPEFLAG"] = 1  # 3D 单文件流
+    dic["FDSIZE"] = 32
+    dic["FDSPECNUM"] = 16
+    dic["FDF3SIZE"] = 16
+    dic["FDQUADFLAG"] = 1
+    dic["FDF1QUADFLAG"] = 1
+    dic["FDF2QUADFLAG"] = 1
+    dic["FDF3QUADFLAG"] = 1
+    dic["FDDIMORDER"] = [2.0, 3.0, 1.0]
+    # 位置式:FDF1=轴0(F2)、FDF2=轴1(F1)、FDF3=轴2(F3);
+    # FDDIMORDER 写盘后会被清零,读取端回退位置式,故直接位置一致
+    dic["FDF1LABEL"] = "15N"
+    dic["FDF2LABEL"] = "15N"
+    dic["FDF3LABEL"] = "1H"
+    path = tmp_path / "dup.ft3"
+    ngpipe.write(str(path), dic, data, overwrite=True)
+
+    dims = [
+        Dimension(logical_axis="F3", role=AxisRole.DIRECT, nucleus="1H"),
+        Dimension(logical_axis="F2", role=AxisRole.INDIRECT, nucleus="15N"),
+        Dimension(logical_axis="F1", role=AxisRole.INDIRECT, nucleus="15N"),
+    ]
+    exp = Experiment(
+        dataset_id="x",
+        source_path=str(tmp_path),
+        dimensions=dims,
+        acquisition_order=["F3", "F2", "F1"],
+        sampling=Sampling(mode=SamplingMode.NUS),
+        experiment_type=ExperimentType(name="HNN", confidence=1.0),
+        ndim=3,
+    )
+    assert _rewrite_duplicate_nucleus_labels(str(path), exp) is True
+    rdic, _ = ng.pipe.read(str(path))
+    assert rdic.get("FDF1LABEL") == "15Nx"  # F2 → Nx(HSQC 的 N)
+    assert rdic.get("FDF2LABEL") == "15Ny"  # F1 → Ny
+    assert rdic.get("FDF3LABEL") == "1H"
 
