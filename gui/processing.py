@@ -370,7 +370,13 @@ class ProcessingController:
     # ------------------------------------------------------------------
     # 峰挑选 / 分析(G2B-004)
     # ------------------------------------------------------------------
-    def pick_peaks(self, data, exp_id: str | None = None, data_id: str | None = None) -> dict:
+    def pick_peaks(
+        self,
+        data,
+        exp_id: str | None = None,
+        data_id: str | None = None,
+        sigma_multiplier: float | None = None,
+    ) -> dict:
         """峰挑选:调 workflow.pick_peaks,返回 {status, peak_path, peak_count, logs}。"""
         try:
             from workflow.pick_peaks import pick_peaks as backend_pick_peaks
@@ -380,7 +386,9 @@ class ProcessingController:
             raise RuntimeError("ProcessingController 未绑定项目(ProjectManager)")
         exp_id = exp_id or getattr(data, "exp_id", "")
         data_id = data_id or getattr(data, "id", "")
-        result = backend_pick_peaks(self._manager, exp_id, data_id)
+        result = backend_pick_peaks(
+            self._manager, exp_id, data_id, sigma_multiplier=sigma_multiplier
+        )
         if data_id and result.get("status") == "success":
             record_step_success(self._manager, exp_id, data_id, "peaks")
         self._manager.save()

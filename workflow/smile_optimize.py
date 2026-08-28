@@ -649,7 +649,6 @@ def write_smile_optimized_output(
     rank>1 时文件名带 _top{rank} 后缀(0.2.162-补9:保留 Top-N 谱);
     smile_optimized/ 与 raw/ 同级(数据基座下)。返回
     (csv_path, json_path, reliability_path)。"""
-    from core.peaks.peak_table import save_peaks
     from workflow.pick_peaks import _axes_ppm
 
     dic, data = _read_spectrum(spectrum_path)
@@ -686,7 +685,25 @@ def write_smile_optimized_output(
                 )
         row["Reliability(%)"] = float(peak.get("confidence", 0.0) or 0.0)
         rows.append(row)
-    save_peaks(csv_path, rows, extra_columns=("Reliability(%)",))
+    # 0.2.199-补29ar:save_peaks 已改 Poky .list(用户峰表);SMILE 优化
+    # 内部产物(含 Reliability 列,非用户峰表)仍写 CSV
+    import csv as _csv
+
+    if arr.ndim != 2:
+        columns = [
+            "Peak_ID", "F1_shift", "F2_shift", "F3_shift",
+            "Intensity", "SN", "label", "Reliability(%)",
+        ]
+    else:
+        columns = [
+            "Peak_ID", "H_shift", "N_shift",
+            "Intensity", "SN", "label", "Reliability(%)",
+        ]
+    with csv_path.open("w", encoding="utf-8", newline="") as fh:
+        writer = _csv.DictWriter(fh, fieldnames=columns, extrasaction="ignore")
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({key: row.get(key, "") for key in columns})
     json_path = out_dir / f"{exp_id}-{data_id}_smile_optimized{suffix}.json"
     json_path.write_text(
         json.dumps(

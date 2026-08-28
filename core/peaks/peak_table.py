@@ -1,9 +1,10 @@
 """峰表模型与持久化(Shared,契约 §6 / G2B-005;移植自旧项目 NMRFlow)。
 
-- CSV:内部峰表(数字 Peak_ID,缺列补空),2D/3D 按 F1_shift 自动判别;
-- Poky/Sparky .list 导出/导入:"Assignment w1 w2 [w3] Data Height Volume",
+- `.list`:内部峰文件即 Poky/Sparky 格式(0.2.199-补29ar,用户:峰文件全程
+  Poky,不要 CSV);"Assignment w1 w2 [w3] Data Height Volume",
   2D w1=15N(N_shift) w2=1H(H_shift),3D w1/w2/w3=F1/F2/F3_shift,
-  未命名峰 ?-?(2D)/?-?-?(3D),Height=Intensity %.3g,Data/Volume=0,双空格。
+  未命名峰 ?-?(2D)/?-?-?(3D),Height=Intensity %.3g,Data/Volume=0,双空格;
+- 旧 CSV 仅兼容读取(load_peaks 自动判别),不再写入。
 """
 
 from __future__ import annotations
@@ -65,32 +66,20 @@ def save_peaks(
     peaks: list[dict[str, Any]],
     extra_columns: tuple[str, ...] = (),
 ) -> Path:
-    """把峰列表写为 CSV(数字 Peak_ID,缺列补空,2D/3D 自动判别),返回路径。
+    """把峰列表写为 Poky/Sparky `.list`(契约 §6:峰文件即 .list)。
 
-    extra_columns 追加到标准列之后(如 "Reliability(%)",0.2.162-补4)。"""
+    Poky 格式无附加列,extra_columns 仅兼容旧调用方(忽略);
+    返回实际写入路径(自动 .list 后缀)。
+    """
     path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    columns = list(
-        PEAK_3D_COLUMNS
-        if peaks and "F1_shift" in peaks[0]
-        else PEAK_COLUMNS
-    )
-    for extra in extra_columns:
-        if extra not in columns:
-            columns.append(extra)
-    with path.open("w", encoding="utf-8", newline="") as fh:
-        writer = csv.DictWriter(fh, fieldnames=columns, extrasaction="ignore")
-        writer.writeheader()
-        for peak in peaks:
-            writer.writerow({key: peak.get(key, "") for key in columns})
-    return path
+    if path.suffix.lower() != ".list":
+        path = path.with_suffix(".list")
+    is_3d = bool(peaks) and "F1_shift" in peaks[0]
+    return export_peaks_poky(path, peaks, ndim=3 if is_3d else 2)
 
 
-def load_peaks(path: Path | str) -> list[dict[str, Any]]:
-    """读取峰 CSV;文件不存在或为空时返回空列表。数值列还原为 float/int。"""
-    path = Path(path)
-    if not path.is_file():
-        return []
+def _load_csv_rows(path: Path) -> list[dict[str, Any]]:
+    """旧 CSV 峰表兼容读取(0.2.199-补29ar 前产物)。"""
     rows: list[dict[str, Any]] = []
     with path.open(encoding="utf-8", newline="") as fh:
         for raw in csv.DictReader(fh):
@@ -109,6 +98,34 @@ def load_peaks(path: Path | str) -> list[dict[str, Any]]:
                 else:
                     row[key] = value
             rows.append(row)
+    return rows
+
+
+def load_peaks(path: Path | str) -> list[dict[str, Any]]:
+    """读取峰表:`.list`(Poky)解析,旧 CSV 兼容读取。
+
+    返回行含数字 Peak_ID(按行序 1..n)、label、N_shift/H_shift 或
+    F1/F2/F3_shift、Intensity(Height)、Data/Volume;数值列还原为 float。
+    """
+    path = Path(path)
+    if not path.is_file():
+        return []
+    text = path.read_text(encoding="utf-8")
+    rows = (
+        import_peaks_poky(path)
+        if text.lstrip().startswith("Assignment")
+        else _load_csv_rows(path)
+    )
+    for i, row in enumerate(rows, start=1):
+        if not (row.get("Peak_ID") or ""):
+            row["Peak_ID"] = i
+        for key in _NUMERIC_KEYS:
+            if key not in row:
+                continue
+            try:
+                row[key] = int(row[key]) if key == "Peak_ID" else float(row[key])
+            except (TypeError, ValueError):
+                pass
     return rows
 
 

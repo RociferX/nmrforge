@@ -45,7 +45,9 @@ class _FakeController:
         self.calls.append("generate_spectrum")
         return "/tmp/x.ft2"
 
-    def pick_peaks(self, data, exp_id=None, data_id=None) -> dict:
+    def pick_peaks(
+        self, data, exp_id=None, data_id=None, sigma_multiplier=None
+    ) -> dict:
         self.calls.append("pick_peaks")
         return {"status": "success", "peak_count": 1}
 
@@ -144,7 +146,6 @@ def test_run_worker_thread_refreshes_via_queued_signal(
     旧代码 worker finally 里直接 self.refresh()/LogPanel.append,触发
     QBasicTimer::start: Timers cannot be started from another thread 并卡死。
     """
-    import threading
     import time
 
     from PyQt6.QtCore import QEventLoop, QTimer

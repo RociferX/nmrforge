@@ -270,9 +270,9 @@ def test_spectrum_panel_peak_add_edit_delete_save(
     (spectra / "exp_001-d_001.ft2").write_bytes(b"x")
     peaks = manager.data_dir("exp_001", "d_001", "peaks")
     peaks.mkdir(parents=True, exist_ok=True)
-    (peaks / "exp_001-d_001.csv").write_text(
-        "Peak_ID,H_shift,N_shift,Intensity,SN,label\n"
-        "1,8.0,115.0,100,20,G1\n",
+    (peaks / "exp_001-d_001.list").write_text(
+        "Assignment w1 w2 Data Height Volume\n"
+        "G1  115.000  8.000  0  100  0\n",
         encoding="utf-8",
     )
     controller = ProcessingController(manager)
@@ -281,7 +281,8 @@ def test_spectrum_panel_peak_add_edit_delete_save(
     panel._load_peaks(spectra / "exp_001-d_001.ft2")  # 0.2.88:显式加载峰表
     assert panel.peak_table.rowCount() == 1
 
-    panel._on_add_peak()
+    # 0.2.199-补29ar:加峰走点击谱图入口(吸附后回调),不再直接追加空行
+    panel._on_manual_peak_added({"H_shift": 8.5, "N_shift": 117.0, "label": ""})
     assert panel.peak_table.rowCount() == 2
     panel.peak_table.item(1, 1).setText("7.5")
     panel.peak_table.item(1, 2).setText("118.0")

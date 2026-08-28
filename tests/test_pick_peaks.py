@@ -1,14 +1,14 @@
-"""峰挑选测试:合成 2D 谱检测 ≥1 峰 + CSV 落盘 + WorkflowRun 登记。"""
+"""峰挑选测试:合成谱检测 + Poky .list 落盘 + WorkflowRun 登记。"""
 
 from __future__ import annotations
 
-import csv
 from pathlib import Path
 
 import numpy as np
 import pytest
 from scipy.ndimage import gaussian_filter
 
+from core.peaks.peak_table import import_peaks_poky
 from core.project import ProjectManager
 from workflow.pick_peaks import PickPeaksError, pick_peaks
 
@@ -58,13 +58,13 @@ def test_pick_peaks_detects_and_writes(tmp_path: Path) -> None:
     assert result["peak_count"] >= 1
     peak_path = Path(result["peak_path"])
     assert peak_path.is_file()
-    assert peak_path.name == f"{exp_id}-{data_id}.csv"
+    assert peak_path.name == f"{exp_id}-{data_id}.list"
     assert peak_path.parent == manager.data_dir(exp_id, data_id, "peaks")
 
-    rows = list(csv.DictReader(peak_path.open(encoding="utf-8")))
-    assert rows[0]["Peak_ID"] == "1"  # 数字 Peak_ID(G2B-005)
+    rows = import_peaks_poky(peak_path)
+    assert len(rows) >= 1
     assert "H_shift" in rows[0] and "N_shift" in rows[0]
-    assert float(rows[0]["SN"]) >= 3.0
+    assert float(rows[0]["Intensity"]) > 0
 
     runs = [r for r in manager.project.workflow_runs if r.workflow_ref == "pick_peaks"]
     assert len(runs) == 1
@@ -86,14 +86,8 @@ def test_pick_peaks_missing_spectrum_fails(tmp_path: Path) -> None:
     assert runs[0].status == "failed"
 
 
-def test_pick_peaks_annotates_reliability(tmp_path: Path) -> None:
-    """0.2.162-补4:检测到 smile_reliability 文件时峰列表自动注释可靠性列。"""
-    import json
-
-    from nmrglue.fileio import pipe
-
-    from workflow.pick_peaks import _axes_ppm
-
+def test_pick_peaks_writes_poky_list(tmp_path: Path) -> None:
+    """0.2.199-补29ar:选峰输出 Poky .list(峰文件即 .list,无 CSV/可靠性列)。"""
     spec = np.zeros((64, 128))
     spec[20, 40] = 500.0
     spec = gaussian_filter(spec, sigma=1.5)
@@ -101,43 +95,14 @@ def test_pick_peaks_annotates_reliability(tmp_path: Path) -> None:
     _write_ft2(ft2, spec)
     manager, exp_id, data_id = _manager_with_spectrum(tmp_path, ft2)
 
-    _dic, data = pipe.read(str(ft2))
-    axes = _axes_ppm(dict(_dic), np.asarray(data))
-    rel_dir = manager.data_dir(exp_id, data_id, "smile_optimized")
-    rel_dir.mkdir(parents=True, exist_ok=True)
-    (rel_dir / f"{exp_id}-{data_id}_smile_reliability.json").write_text(
-        json.dumps(
-            {
-                "schema": "smile_reliability_v1",
-                "n_combos": 25,
-                "peaks": [
-                    {
-                        "position_pts": [20.0, 40.0],
-                        "shifts": {
-                            "N_shift": float(axes[0][20]),
-                            "H_shift": float(axes[1][40]),
-                        },
-                        "support": 25,
-                        "n_combos": 25,
-                        "confidence": 100.0,
-                    }
-                ],
-            },
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
-    )
-
     result = pick_peaks(manager, exp_id, data_id)
-    rows = list(csv.DictReader(Path(result["peak_path"]).open(encoding="utf-8")))
-    assert rows and rows[0]["Reliability(%)"] == "100.0"
-    assert any("可靠性注释" in line for line in result["logs"])
-    runs = [
-        r
-        for r in manager.project.workflow_runs
-        if r.workflow_ref == "pick_peaks"
-    ]
-    assert "可靠性注释" in runs[-1].message
+    path = Path(result["peak_path"])
+    assert path.suffix == ".list"
+    lines = path.read_text(encoding="utf-8").splitlines()
+    assert lines[0] == "Assignment w1 w2 Data Height Volume"
+    assert len(lines) >= 2
+    assert "Reliability" not in "\n".join(lines)
+    assert "阈值" in result["logs"][0]
 
 
 def _write_metadata(
@@ -203,6 +168,10 @@ def _spectrum_with_peaks(
     return gaussian_filter(spec, sigma=1.5)
 
 
+def _read_rows(path: Path) -> list[dict]:
+    return import_peaks_poky(path)
+
+
 def test_pick_peaks_uniform_type_keeps_dominant_sign_only(tmp_path: Path) -> None:
     """uniform(单符号)实验:只保留主符号峰,少数反号峰视为伪峰剔除。"""
     spec = _spectrum_with_peaks(
@@ -220,7 +189,7 @@ def test_pick_peaks_uniform_type_keeps_dominant_sign_only(tmp_path: Path) -> Non
     _write_metadata(manager, exp_id, data_id, "HSQC")  # peak_sign: uniform
 
     result = pick_peaks(manager, exp_id, data_id)
-    rows = list(csv.DictReader(Path(result["peak_path"]).open(encoding="utf-8")))
+    rows = _read_rows(Path(result["peak_path"]))
     assert len(rows) == 3
     assert all(float(r["Intensity"]) > 0 for r in rows)
     assert "仅主符号峰" in result["logs"][0]
@@ -243,7 +212,7 @@ def test_pick_peaks_uniform_type_negative_dominant(tmp_path: Path) -> None:
     _write_metadata(manager, exp_id, data_id, "HSQC")
 
     result = pick_peaks(manager, exp_id, data_id)
-    rows = list(csv.DictReader(Path(result["peak_path"]).open(encoding="utf-8")))
+    rows = _read_rows(Path(result["peak_path"]))
     assert len(rows) == 3
     assert all(float(r["Intensity"]) < 0 for r in rows)
 
@@ -265,7 +234,7 @@ def test_pick_peaks_mixed_type_picks_both_signs(tmp_path: Path) -> None:
     _write_metadata(manager, exp_id, data_id, "HNCACB")  # peak_sign: mixed
 
     result = pick_peaks(manager, exp_id, data_id)
-    rows = list(csv.DictReader(Path(result["peak_path"]).open(encoding="utf-8")))
+    rows = _read_rows(Path(result["peak_path"]))
     assert len(rows) == 4
     signs = {float(r["Intensity"]) > 0 for r in rows}
     assert signs == {True, False}
@@ -282,7 +251,7 @@ def test_pick_peaks_ft3_shifts_follow_logical_axes(tmp_path: Path) -> None:
     manager, exp_id, data_id = _manager_with_spectrum(tmp_path, ft3)
 
     result = pick_peaks(manager, exp_id, data_id)
-    rows = list(csv.DictReader(Path(result["peak_path"]).open(encoding="utf-8")))
+    rows = _read_rows(Path(result["peak_path"]))
     assert len(rows) >= 1
     row = rows[0]
     # 逻辑维:F1=15N(FDF1)、F2=1H(FDF2)、F3=13C(FDF3)
@@ -294,9 +263,8 @@ def test_pick_peaks_ft3_shifts_follow_logical_axes(tmp_path: Path) -> None:
     assert abs(float(row["F3_shift"]) - f3) < 0.05
 
 
-
 def test_pick_peaks_flat_plateau_not_picked(tmp_path: Path) -> None:
-    """平坦基线不作为峰(严格局部极大 + 选峰 5σ,0.2.199-补29aq 修)。"""
+    """平坦基线不作为峰(严格局部极大 + 选峰 6σ,0.2.199-补29aq/ar 修)。"""
     spec = np.full((64, 128), 100.0)
     spec[20, 40] = 500.0
     spec[25, 90] = 500.0
@@ -306,5 +274,24 @@ def test_pick_peaks_flat_plateau_not_picked(tmp_path: Path) -> None:
     manager, exp_id, data_id = _manager_with_spectrum(tmp_path, ft2)
 
     result = pick_peaks(manager, exp_id, data_id)
-    rows = list(csv.DictReader(Path(result["peak_path"]).open(encoding="utf-8")))
+    rows = _read_rows(Path(result["peak_path"]))
     assert len(rows) == 2
+
+
+def test_pick_peaks_sigma_multiplier_param(tmp_path: Path) -> None:
+    """sigma_multiplier 参数可调阈值:更高阈值选出更少峰(0.2.199-补29ar)。"""
+    rng = np.random.default_rng(3)
+    spec = rng.normal(0, 1.0, (64, 128))
+    spec[20, 40] += 30.0
+    spec[25, 90] += 12.0
+    spec[45, 60] += 6.0
+    spec = gaussian_filter(spec, sigma=1.0)
+    ft2 = tmp_path / "out.ft2"
+    _write_ft2(ft2, spec)
+    manager, exp_id, data_id = _manager_with_spectrum(tmp_path, ft2)
+
+    low = pick_peaks(manager, exp_id, data_id, sigma_multiplier=4.0)
+    high = pick_peaks(manager, exp_id, data_id, sigma_multiplier=8.0)
+    assert high["peak_count"] <= low["peak_count"]
+    assert "4.0σ" in low["logs"][0]
+    assert "8.0σ" in high["logs"][0]

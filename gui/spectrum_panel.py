@@ -2,8 +2,8 @@
 
 复用 viewer.SpectrumViewer(不重复实现谱图功能);列表扫描项目 spectra 目录,
 点击 .ft2/.ft3 即在右侧打开。峰表支持添加/删除/编辑行并写回
-data_dir(..., "peaks")/<exp>-<data>.csv(经 ProcessingController,登记
-manual_peaks WorkflowRun);Poky .list 可导入/导出。GUI 不直接接触处理逻辑。
+data_dir(..., "peaks")/<exp>-<data>.list(契约 §6:峰文件即 Poky .list,
+经 ProcessingController,登记 manual_peaks WorkflowRun)。GUI 不直接接触处理逻辑。
 """
 
 from __future__ import annotations
@@ -86,10 +86,14 @@ class SpectrumPanel(QWidget):
         # 0.2.147:峰操作一行,列间间隔显明;Show peaks 位于 Add peak 前
         self.peak_toolbar.setSpacing(12)
         self.peak_toolbar.addWidget(self.viewer.show_peaks_checkbox)
+        # 0.2.199-补29ar:Add peak 改为开关——开启后点击谱图加峰(吸附峰顶)
         self.add_peak_button = QPushButton("Add peak")
+        self.add_peak_button.setCheckable(True)
         self.add_peak_button.setEnabled(False)
-        self.add_peak_button.setToolTip("在峰表追加一行(保存后写回 CSV)")
-        self.add_peak_button.clicked.connect(self._on_add_peak)
+        self.add_peak_button.setToolTip(
+            "开关:开启后点击谱图加峰(自动吸附到峰顶;找不到显著峰顶则用点击位置)"
+        )
+        self.add_peak_button.toggled.connect(self._on_add_peak_toggled)
         self.peak_toolbar.addWidget(self.add_peak_button)
         self.delete_peak_button = QPushButton("Delete selected")
         self.delete_peak_button.setEnabled(False)
@@ -108,7 +112,7 @@ class SpectrumPanel(QWidget):
         self.peak_toolbar.addWidget(self.export_poky_button)
         self.save_peaks_button = QPushButton("Save peaks")
         self.save_peaks_button.setEnabled(False)
-        self.save_peaks_button.setToolTip("把峰表写回 data/peaks/<exp>-<data>.csv 并登记")
+        self.save_peaks_button.setToolTip("把峰表写回 data/peaks/<exp>-<data>.list 并登记")
         self.save_peaks_button.clicked.connect(self._on_save_peaks)
         self.peak_toolbar.addWidget(self.save_peaks_button)
         self.peak_toolbar.addStretch(1)
@@ -159,6 +163,7 @@ class SpectrumPanel(QWidget):
         splitter.setStretchFactor(3, 0)
         splitter.setSizes([90, 480, 40, 160])
         self.viewer.peak_clicked.connect(self._on_viewer_peak_clicked)
+        self.viewer.manual_peak_requested.connect(self._on_manual_peak_added)
         self.file_list.setMaximumWidth(16777215)  # 取消横向宽度限制
         layout.addWidget(splitter)
         self.refresh()
@@ -714,9 +719,9 @@ class SpectrumPanel(QWidget):
             peaks = load_peaks(peak_path)
         if not peaks:
             return
-        self._peaks = peaks
+        self._peaks = self._assign_peak_ids(peaks)
         self._populate_peak_table()
-        self.viewer.set_peaks(peaks)
+        self.viewer.set_peaks(self._peaks)
         self.export_poky_button.setEnabled(True)
         self.save_peaks_button.setEnabled(True)
 
@@ -781,24 +786,23 @@ class SpectrumPanel(QWidget):
     def _on_peak_cell_edited(self, _item) -> None:
         self._sync_peaks_in_memory()
 
-    def _on_add_peak(self) -> None:
+    def _on_add_peak_toggled(self, checked: bool) -> None:
+        """Add peak 开关:开启后点击谱图加峰(吸附峰顶);关闭恢复选中模式。"""
+        self.viewer.set_peak_click_mode("add" if checked else "select")
+        self.add_peak_button.setText("Add peak: ON" if checked else "Add peak")
+
+    def _on_manual_peak_added(self, peak: dict) -> None:
+        """点击谱图加峰:吸附后追加到峰表(自动编号)并立即显示。"""
         if not (self.manager.project is not None and self._current_exp_id):
             return
         next_id = (
             max((int(p.get("Peak_ID", 0) or 0) for p in self._peaks), default=0) + 1
         )
-        row = self.peak_table.rowCount()
-        self.peak_table.insertRow(row)
-        self._loading_peaks = True
-        try:
-            for col, key in enumerate(self._peak_keys):
-                value = str(next_id) if key == "Peak_ID" else ""
-                self.peak_table.setItem(row, col, QTableWidgetItem(value))
-            self.peak_table.item(row, 0).setData(0x0100, {})
-        finally:
-            self._loading_peaks = False
-        self._sync_peaks_in_memory()
+        peak["Peak_ID"] = next_id
+        self._peaks.append(peak)
+        self._populate_peak_table()
         self.viewer.set_peaks(self._peaks)
+        self.delete_peak_button.setEnabled(True)
         self.save_peaks_button.setEnabled(True)
 
     def _on_delete_peak(self) -> None:
@@ -843,7 +847,7 @@ class SpectrumPanel(QWidget):
         if not peaks:
             InfoDialog.show_info(self, "导入结果", "文件中没有可解析的峰行")
             return
-        self._peaks = peaks
+        self._peaks = self._assign_peak_ids(peaks)
         self._populate_peak_table()
         self.viewer.set_peaks(peaks)
         self.export_poky_button.setEnabled(True)
@@ -858,7 +862,7 @@ class SpectrumPanel(QWidget):
         )
 
     def _on_save_peaks(self) -> None:
-        """峰表写回 data/peaks/<exp>-<data>.csv 并登记 manual_peaks 运行。"""
+        """峰表写回 data/peaks/<exp>-<data>.list 并登记 manual_peaks 运行。"""
         if self.manager.project is None or not self._current_exp_id:
             InfoDialog.show_info(self, "提示", "请先选中样品数据")
             return
@@ -868,7 +872,7 @@ class SpectrumPanel(QWidget):
         peaks = self._table_peaks()
         try:
             self.controller.set_manager(self.manager)
-            csv_path = self.controller.save_peaks_manual(
+            list_path = self.controller.save_peaks_manual(
                 None,
                 peaks,
                 exp_id=self._current_exp_id,
@@ -881,7 +885,7 @@ class SpectrumPanel(QWidget):
         self.viewer.set_peaks(peaks)
         self.save_peaks_button.setEnabled(True)
         self.peaks_saved.emit()
-        InfoDialog.show_info(self, "保存完成", f"峰表已写入:\n{csv_path}")
+        InfoDialog.show_info(self, "保存完成", f"峰表已写入:\n{list_path}")
 
     def _export_peaks_poky(self) -> None:
         """导出当前峰表为 Poky .list;无峰表/谱图时禁用。"""
@@ -917,6 +921,17 @@ class SpectrumPanel(QWidget):
         self.export_poky_button.setEnabled(False)
         self.save_peaks_button.setEnabled(False)
         self.delete_peak_button.setEnabled(False)
+        if self.add_peak_button.isChecked():
+            self.add_peak_button.setChecked(False)
+        self.viewer.set_peak_click_mode("select")
+
+    @staticmethod
+    def _assign_peak_ids(peaks: list[dict]) -> list[dict]:
+        """给缺少 Peak_ID 的行按行序编号(Poky .list 无 ID 列)。"""
+        for i, peak in enumerate(peaks, start=1):
+            if not (peak.get("Peak_ID") or ""):
+                peak["Peak_ID"] = i
+        return peaks
 
     def _on_viewer_peak_clicked(self, row: int) -> None:
         if 0 <= row < self.peak_table.rowCount():

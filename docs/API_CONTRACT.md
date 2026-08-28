@@ -239,7 +239,7 @@ figures, report, metadata.json}
 - raw/        导入的数据(G2B-009:链接式,默认硬链接→符号链接→复制回退)
 - process/    fid 与处理中间产物
 - spectra/    终谱(ft2/ft3)
-- peaks/      峰表 CSV
+- peaks/      峰表 Poky/Sparky .list(旧 CSV 仅兼容读取,0.2.199-补29ar)
 - figures/    图
 - report/     报告
 - metadata.json  数据元数据

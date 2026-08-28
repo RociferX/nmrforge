@@ -2,6 +2,34 @@
 
 # 修改记录(历史条目)
 
+## 0.2.199-补29ar(2026-08-28,峰文件 Poky 化 + 加峰开关 + 阈值条 + 自动展示)
+
+峰文件格式(用户:全程 Poky,不要 CSV):
+- 峰文件即 Poky/Sparky `.list`(契约 §6 对齐):workflow.pick_peaks 输出
+  peaks/<exp>-<data>.list("Assignment w1 w2 [w3] Data Height Volume"),
+  不再写 CSV;core.peaks.peak_table.save_peaks 统一写 .list,load_peaks
+  自动判别 .list/旧 CSV(旧 CSV 仅兼容读取);
+- SMILE 优化内部产物(smile_optimized/*.csv,含 Reliability 列,非用户
+  峰表)保留 CSV 不动;
+- GUI 峰表加载/保存/导入/导出全部走 .list(旧 CSV 可读),行自动编号。
+
+加峰交互(用户:Add peak 开关 + 吸附峰顶):
+- gui/spectrum_panel「Add peak」改开关:开启后点击谱图加峰,程序自动把
+  点击点吸附到附近峰顶(±6 点窗口内 |值| 最大,core/qc/peak_detection.
+  snap_to_peak_top);找不到显著峰顶则直接用点击位置;关闭恢复选中模式;
+- viewer 点击加峰按当前谱维序映射峰表列(3D 切片 dim_indices → F1/F2/F3,
+  2D → H/N),Intensity 取该点数据值。
+
+阈值条(用户:拖动条 + 输入框,调整即重选):
+- 峰挑选步骤新增「阈值(σ)」滑块(3.0–15.0)+ 数值输入,双向同步;
+  调整完成(松开滑块/回车)立即重选峰;
+- workflow.pick_peaks 新增 sigma_multiplier 参数,min_snr 同步;
+  默认阈值再拉高:5σ → 6σ(0.2.199-补29aq 后仍选多)。
+
+自动展示(用户):峰挑选成功后立即在右侧谱图面板展示谱图并显示峰。
+
+测试:+2(吸附、阈值参数);全量 pytest 全绿,ruff 通过。
+
 ## 0.2.199-补29aq(2026-08-28,选峰阈值修复:选太多)
 
 用户反馈选峰过多,复现定位两个根因并修复:

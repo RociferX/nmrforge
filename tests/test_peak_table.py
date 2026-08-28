@@ -5,8 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 from core.peaks import (
-    PEAK_3D_COLUMNS,
-    PEAK_COLUMNS,
     PeakTable,
     export_peaks_poky,
     import_peaks_poky,
@@ -16,38 +14,40 @@ from core.peaks import (
 
 
 def test_save_load_roundtrip(tmp_path: Path) -> None:
-    path = tmp_path / "peaks.csv"
+    """0.2.199-补29ar:峰文件即 Poky .list(无 SN/CSV 列)。"""
+    path = tmp_path / "peaks.list"
     peaks = [
         {
             "Peak_ID": 1, "H_shift": 8.464, "N_shift": 118.5,
-            "Intensity": 500.0, "SN": 27.98, "label": "H1",
+            "Intensity": 500.0, "label": "H1",
         },
         {
             "Peak_ID": 2, "H_shift": 7.2, "N_shift": 120.1,
-            "Intensity": 350.0, "SN": 18.0, "label": "",
+            "Intensity": 350.0, "label": "",
         },
     ]
     save_peaks(path, peaks)
     loaded = load_peaks(path)
     assert len(loaded) == 2
-    assert loaded[0]["Peak_ID"] == 1  # 数字 ID
+    assert loaded[0]["Peak_ID"] == 1  # 数字 ID(行序)
     assert loaded[1]["Peak_ID"] == 2
     assert loaded[0]["H_shift"] == 8.464
     assert loaded[0]["N_shift"] == 118.5
-    assert loaded[0]["SN"] == 27.98
-    assert loaded[1]["label"] == ""
+    assert loaded[0]["Intensity"] == 500.0
+    assert loaded[1]["label"] == "?-?"
 
 
 def test_save_peaks_missing_columns_filled(tmp_path: Path) -> None:
-    path = tmp_path / "peaks.csv"
+    path = tmp_path / "peaks.list"
     save_peaks(path, [{"Peak_ID": 1, "H_shift": 8.0, "N_shift": 118.0}])
     loaded = load_peaks(path)
-    assert loaded[0]["SN"] == 0.0  # 缺列补空→数值列还原 0.0
-    assert loaded[0]["label"] == ""
+    assert loaded[0]["Peak_ID"] == 1
+    assert loaded[0]["H_shift"] == 8.0
+    assert loaded[0]["Intensity"] == 0.0  # 缺强度 → 0.0
 
 
 def test_save_peaks_auto_detect_3d(tmp_path: Path) -> None:
-    path = tmp_path / "peaks3d.csv"
+    path = tmp_path / "peaks3d.list"
     save_peaks(
         path,
         [
@@ -57,12 +57,11 @@ def test_save_peaks_auto_detect_3d(tmp_path: Path) -> None:
                 "F2_shift": 30.0,
                 "F3_shift": 8.5,
                 "Intensity": 100.0,
-                "SN": 10.0,
             }
         ],
     )
     first = path.read_text(encoding="utf-8").splitlines()[0]
-    assert first.split(",") == list(PEAK_3D_COLUMNS)
+    assert first == "Assignment w1 w2 w3 Data Height Volume"
     loaded = load_peaks(path)
     assert loaded[0]["F3_shift"] == 8.5
 
@@ -140,8 +139,8 @@ def test_peak_table_add_remove() -> None:
     assert table.rows[0]["Peak_ID"] == 2
 
 
-def test_pick_peaks_columns_match_old_project(tmp_path: Path) -> None:
-    """pick_peaks 输出 CSV 列与旧项目 PEAK_COLUMNS 一致(经 G2B-005 改用)。"""
+def test_pick_peaks_columns_match_poky(tmp_path: Path) -> None:
+    """0.2.199-补29ar:pick_peaks 输出 Poky .list(契约 §6:峰文件即 .list)。"""
     import numpy as np
     from scipy.ndimage import gaussian_filter
 
@@ -176,13 +175,14 @@ def test_pick_peaks_columns_match_old_project(tmp_path: Path) -> None:
     data = manager.import_data(entry.id, "/sampleD")
     manager.set_data_spectrum(entry.id, data.id, str(ft2))
     result = pick_peaks(manager, entry.id, data.id)
+    assert Path(result["peak_path"]).suffix == ".list"
     first = Path(result["peak_path"]).read_text(encoding="utf-8").splitlines()[0]
-    assert first.split(",") == list(PEAK_COLUMNS)
+    assert first == "Assignment w1 w2 Data Height Volume"
 
 
-def test_save_peaks_extra_columns(tmp_path: Path) -> None:
-    """0.2.162-补4:附加列保存与数值往返(Reliability(%))。"""
-    path = tmp_path / "peaks_rel.csv"
+def test_save_peaks_extra_columns_ignored_in_list(tmp_path: Path) -> None:
+    """0.2.199-补29ar:Poky .list 无附加列(extra_columns 兼容忽略)。"""
+    path = tmp_path / "peaks_rel.list"
     save_peaks(
         path,
         [
@@ -195,5 +195,6 @@ def test_save_peaks_extra_columns(tmp_path: Path) -> None:
         ],
         extra_columns=("Reliability(%)",),
     )
-    loaded = load_peaks(path)
-    assert loaded[0]["Reliability(%)"] == 100.0
+    lines = path.read_text(encoding="utf-8").splitlines()
+    assert lines[0] == "Assignment w1 w2 Data Height Volume"
+    assert "Reliability" not in "\n".join(lines)

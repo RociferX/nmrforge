@@ -32,6 +32,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from core.qc.peak_detection import snap_to_peak_top
 from viewer.contour_layer import ContourLayer
 from viewer.nmr_viewbox import NMRViewBox
 from viewer.spectrum import Spectrum, Spectrum1D, SpectrumAxis
@@ -44,7 +45,7 @@ class SpectrumViewer(QWidget):
     """支持多谱叠加的二维谱查看器。"""
 
     peak_clicked = pyqtSignal(int)  # 峰行号
-    manual_peak_requested = pyqtSignal(float, float)  # (x ppm, y ppm)
+    manual_peak_requested = pyqtSignal(dict)  # 点击加峰:峰行 dict(已吸附峰顶)
     delete_peak_requested = pyqtSignal(float, float)
 
     def __init__(
@@ -1084,13 +1085,51 @@ class SpectrumViewer(QWidget):
         if self._click_mode == "delete":
             self.delete_peak_requested.emit(x_ppm, y_ppm)
         elif self._click_mode == "add":
-            self.manual_peak_requested.emit(x_ppm, y_ppm)
+            # 0.2.199-补29ar:点击自动吸附到附近峰顶;找不到显著峰顶则用点击点
+            snapped_row, snapped_col = snap_to_peak_top(
+                self._primary.data, yi, xi
+            )
+            self.manual_peak_requested.emit(
+                self._peak_from_data_point(snapped_col, snapped_row)
+            )
         else:
             # select:选中距点击位置最近的峰(像素距离)
             row = self._nearest_peak(xi, yi)
             if row is not None:
                 self.highlight_peak(row)
                 self.peak_clicked.emit(row)
+
+    def _peak_from_data_point(self, xi: int, yi: int) -> dict:
+        """点击数据点 (col,row) → 峰行 dict。
+
+        3D 切片平面按 dim_indices 映射到逻辑维(F1/F2/F3_shift),2D 用
+        H_shift/N_shift(契约 §6);Intensity 取该点数据值。
+        """
+        if self._primary is None:
+            return {"label": ""}
+        x_axis = self._primary.x_axis
+        y_axis = self._primary.y_axis
+        x_ppm = float(x_axis.ppm_at(xi))
+        y_ppm = float(y_axis.ppm_at(yi))
+        peak: dict = {"label": ""}
+        dims = getattr(self._primary, "dim_indices", None)
+        if dims is not None:
+            for axis, ppm in ((x_axis, x_ppm), (y_axis, y_ppm)):
+                try:
+                    local = self._primary.axes.index(axis)
+                except ValueError:
+                    continue
+                dim = int(dims[local]) if local < len(dims) else local
+                if 0 <= dim <= 2:
+                    peak[f"F{dim + 1}_shift"] = ppm
+        else:
+            peak["H_shift"] = x_ppm
+            peak["N_shift"] = y_ppm
+        try:
+            peak["Intensity"] = float(self._primary.data[yi, xi])
+        except Exception:  # noqa: BLE001 - 强度缺失不阻断加峰
+            pass
+        return peak
 
     def _nearest_peak(self, xi: int, yi: int) -> int | None:
         if self._primary is None or not self._peaks:

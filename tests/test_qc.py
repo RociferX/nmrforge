@@ -88,3 +88,19 @@ def test_peak_detection_threshold_5sigma_filters_noise() -> None:
         spec, PeakDetectionParams(sigma_multiplier=5.0, min_snr=5.0)
     )
     assert len(peaks) == 2
+
+
+
+def test_snap_to_peak_top_finds_peak() -> None:
+    """点击峰附近吸附到峰顶;平地点击保持原样(0.2.199-补29ar)。"""
+    import numpy as np
+    from scipy.ndimage import gaussian_filter
+
+    from core.qc.peak_detection import snap_to_peak_top
+
+    spec = np.zeros((32, 32))
+    spec[10, 12] = 500.0
+    spec = gaussian_filter(spec, sigma=1.0)
+    assert snap_to_peak_top(spec, 9, 11) == (10, 12)
+    flat = np.full((32, 32), 5.0)
+    assert snap_to_peak_top(flat, 5, 5) == (5, 5)

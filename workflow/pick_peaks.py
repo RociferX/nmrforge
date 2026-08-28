@@ -1,13 +1,16 @@
 """峰挑选步骤(契约 §6 峰表格式 / G2B-004)。
 
 输入谱图(spectra/<exp_id>-<data_id>.ft2|ft3)→ core/qc/peak_detection 检测
-→ 写峰表 CSV(data_dir(..., "peaks")/<exp_id>-<data_id>.csv)→ WorkflowRun
-(workflow_ref="pick_peaks") 登记;失败 finish_run("failed") 并抛带信息异常。
+→ 写峰表 Poky .list(data_dir(..., "peaks")/<exp_id>-<data_id>.list)→
+WorkflowRun(workflow_ref="pick_peaks") 登记;失败 finish_run("failed") 并抛
+带信息异常。
 
 峰符号规则(0.2.199-补29ap,用户):实验类型单符号(uniform,presets
 peak_sign=uniform)只选占据主符号的峰(不关心正负,以候选峰计数多的符号
 为准);实验类型正负共存(mixed)正负都选。实验类型名取自已导入 metadata
 的 experiment_type.name,模板缺失回退 uniform。
+阈值(0.2.199-补29aq/补29ar,用户):默认 6σ(补29aq 5σ 仍多→再拉高),
+可经 sigma_multiplier 参数由 GUI 阈值条调整。
 """
 
 from __future__ import annotations
@@ -27,9 +30,9 @@ class PickPeaksError(Exception):
     """峰挑选错误(谱缺失/读取失败/检出失败)。"""
 
 
-# 选峰默认阈值(0.2.199-补29aq,用户反馈选太多):5σ 噪声水平。检测算法默认
-# 3σ 供 QC 使用,选峰步骤用更严的 5σ,配合严格局部极大排除平坦区/脊线伪峰。
-_PICK_THRESHOLD_SIGMA = 5.0
+# 选峰默认阈值(0.2.199-补29aq 5σ 仍选多 → 补29ar 再拉高到 6σ)。
+# 检测算法默认 3σ 供 QC 使用,选峰步骤用更严阈值。
+_PICK_THRESHOLD_SIGMA = 6.0
 
 
 def _ppm_axis(dic: dict[str, Any], prefix: str, size: int) -> np.ndarray:
@@ -91,92 +94,18 @@ def _axes_ppm(dic: dict[str, Any], data: np.ndarray) -> list[np.ndarray]:
     ]
 
 
-def _reliability_tolerance(dic: dict[str, Any], data: np.ndarray) -> list[float]:
-    """每逻辑轴(F1/F2/F3)ppm 容差 = 4 点 × ppm/点(0.2.162-补5)。"""
-    logical_axes = _logical_axis_indices(dic, data.ndim)
-    tols: list[float] = []
-    for logical_idx in range(data.ndim):
-        axis = logical_axes[logical_idx]
-        prefix = _fdf_prefix(dic, data.ndim, axis)
-        obs = float(dic.get(prefix + "OBS", 0.0) or 0.0)
-        sw = float(dic.get(prefix + "SW", 0.0) or 0.0)
-        size = int(data.shape[axis]) or 1
-        tols.append(4.0 * (sw / (size * obs)) if obs else 0.0)
-    return tols
-
-
-def _annotate_reliability(
-    rows: list[dict[str, Any]],
-    data: np.ndarray,
-    dic: dict[str, Any],
-    reliability_path: Path,
-) -> int:
-    """按 ppm 容差匹配 SMILE 可靠性文件,给峰行注释 Reliability(%);返回匹配数。
-
-    同一峰在扫描(跨组合)与去伪(注入噪声)两种方式下的化学位移可能略有
-    偏差,容差按每轴 2 点 × ppm/点 判定(0.2.162-补4)。"""
-    if not reliability_path.is_file():
-        return 0
-    try:
-        payload = json.loads(reliability_path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return 0
-    entries = payload.get("peaks") or []
-    if not entries or not rows:
-        return 0
-    is_3d = "F1_shift" in rows[0]
-    keys = ("F1_shift", "F2_shift", "F3_shift") if is_3d else ("N_shift", "H_shift")
-    tols = _reliability_tolerance(dic, data)[: len(keys)]
-
-    def _match(row: dict[str, Any]) -> float | None:
-        best: float | None = None
-        for entry in entries:
-            shifts = entry.get("shifts") or {}
-            ok = True
-            for k, key in enumerate(keys):
-                if key not in shifts or key not in row:
-                    ok = False
-                    break
-                try:
-                    diff = abs(float(shifts[key]) - float(row[key]))
-                except (TypeError, ValueError):
-                    ok = False
-                    break
-                if diff > tols[k]:
-                    ok = False
-                    break
-            if ok:
-                rel = float(
-                    entry.get("confidence", entry.get("reliability", 0.0))
-                    or 0.0
-                )
-                if best is None or rel > best:
-                    best = rel
-        return best
-
-    matched = 0
-    for row in rows:
-        rel = _match(row)
-        if rel is not None:
-            row["Reliability(%)"] = round(rel, 1)
-            matched += 1
-    return matched
-
-
-def _write_peaks_csv(
+def _write_peaks_list(
     manager: ProjectManager,
     exp_id: str,
     data_id: str,
     data: np.ndarray,
     dic: dict[str, Any],
     peaks: list[peak_detection.Peak],
-) -> tuple[Path, int]:
-    """把检测峰写为契约 §6 峰表 CSV(数字 Peak_ID,经 PeakTable.save_peaks)。
-
-    检测到 SMILE 可靠性文件时自动注释 Reliability(%) 列;返回 (path, 匹配数)。"""
+) -> Path:
+    """把检测峰写为 Poky/Sparky `.list`(契约 §6,峰文件即 .list)。"""
     peaks_dir = manager.data_dir(exp_id, data_id, "peaks")
     peaks_dir.mkdir(parents=True, exist_ok=True)
-    path = peaks_dir / f"{exp_id}-{data_id}.csv"
+    path = peaks_dir / f"{exp_id}-{data_id}.list"
     axes = _axes_ppm(dic, data)
     logical_axes = _logical_axis_indices(dic, data.ndim)
     rows: list[dict[str, Any]] = []
@@ -202,15 +131,8 @@ def _write_peaks_csv(
                         axes[ax][int(peak.position[ax])]
                     )
         rows.append(row)
-    # 0.2.162-补4:检测到 SMILE 可靠性文件则自动给峰注释可靠性列
-    rel_path = (
-        manager.data_dir(exp_id, data_id, "smile_optimized")
-        / f"{exp_id}-{data_id}_smile_reliability.json"
-    )
-    matched = _annotate_reliability(rows, data, dic, rel_path)
-    extra = ("Reliability(%)",) if matched else ()
-    path = save_peaks(path, rows, extra_columns=extra)
-    return path, matched
+    save_peaks(path, rows)
+    return path
 
 
 def _experiment_type_name(
@@ -242,11 +164,7 @@ def _experiment_type_name(
 def _sign_mode_for(
     manager: ProjectManager, exp_id: str, data_id: str
 ) -> str:
-    """峰符号模式:presets peak_sign=mixed → both;uniform/未知 → dominant。
-
-    用户规则(0.2.199-补29ap):单符号实验只选主符号峰(不关心正负,以候选
-    峰计数多的符号为准);确实正负共存的实验正负都选。
-    """
+    """峰符号模式:presets peak_sign=mixed → both;uniform/未知 → dominant。"""
     from core.experiments.registry import get as get_template
 
     name = _experiment_type_name(manager, exp_id, data_id)
@@ -260,11 +178,13 @@ def pick_peaks(
     exp_id: str,
     data_id: str,
     backend: Any | None = None,
+    *,
+    sigma_multiplier: float | None = None,
 ) -> dict[str, Any]:
-    """峰挑选:检测谱峰并写 CSV,登记 WorkflowRun。
+    """峰挑选:检测谱峰并写 Poky .list,登记 WorkflowRun。
 
-    backend 保留为接口占位(generate_* 系列签名统一);返回
-    {"status", "peak_path", "peak_count", "logs"}。
+    backend 保留为接口占位;sigma_multiplier 为噪声倍数阈值(默认 6σ,
+    min_snr 同步);返回 {"status", "peak_path", "peak_count", "logs"}。
     """
     data_entry = manager.data(exp_id, data_id)
     spectrum_path = data_entry.spectrum_path
@@ -288,15 +208,20 @@ def pick_peaks(
         if np.iscomplexobj(arr):
             arr = arr.real
         sign_mode = _sign_mode_for(manager, exp_id, data_id)
+        threshold = (
+            float(sigma_multiplier)
+            if sigma_multiplier and float(sigma_multiplier) > 0
+            else _PICK_THRESHOLD_SIGMA
+        )
         peaks = peak_detection.detect(
             arr,
             peak_detection.PeakDetectionParams(
                 sign_mode=sign_mode,
-                sigma_multiplier=_PICK_THRESHOLD_SIGMA,
-                min_snr=_PICK_THRESHOLD_SIGMA,
+                sigma_multiplier=threshold,
+                min_snr=threshold,
             ),
         )
-        peak_path, rel_matched = _write_peaks_csv(
+        peak_path = _write_peaks_list(
             manager, exp_id, data_id, arr, dict(dic), peaks
         )
     except Exception as exc:  # noqa: BLE001 - 统一失败登记
@@ -307,11 +232,7 @@ def pick_peaks(
         run.run_id,
         "success",
         outputs={"peak_path": str(peak_path)},
-        message=(
-            f"峰挑选完成({rel_matched} 峰含可靠性注释)"
-            if rel_matched
-            else "峰挑选完成"
-        ),
+        message=f"峰挑选完成({len(peaks)} 峰)",
     )
     sign_label = {
         "both": "正负峰都选(mixed)",
@@ -320,12 +241,9 @@ def pick_peaks(
         "negative": "仅负峰",
     }.get(sign_mode, sign_mode)
     logs = [
-        f"峰挑选: {len(peaks)} 个峰 → {peak_path}(符号模式: {sign_label})"
+        f"峰挑选: {len(peaks)} 个峰 → {peak_path}"
+        f"(符号模式: {sign_label},阈值: {threshold:.1f}σ)"
     ]
-    if rel_matched:
-        logs.append(
-            f"可靠性注释: {rel_matched}/{len(peaks)} 个峰匹配到 SMILE 可靠性文件"
-        )
     return {
         "status": "success",
         "peak_path": str(peak_path),

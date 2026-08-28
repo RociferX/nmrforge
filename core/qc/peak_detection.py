@@ -91,6 +91,35 @@ def _keep_dominant(candidates: list[Peak]) -> list[Peak]:
     ]
 
 
+def snap_to_peak_top(
+    data: Any, row: int, col: int, radius: int = 6
+) -> tuple[int, int]:
+    """把点击点吸附到附近峰顶(局部 |值| 最大点)。
+
+    在 (row, col) 周围 radius 窗口内找 |值| 最大的点;若该点显著强于
+    点击点(存在峰顶)返回吸附点,否则原样返回点击点(用户点击即峰)。
+    2D 数据专用(点击加峰场景)。
+    """
+    real = np.real(np.asarray(data))
+    if real.ndim != 2 or real.size == 0:
+        return int(row), int(col)
+    radius = max(1, int(radius))
+    row, col = int(row), int(col)
+    r0 = max(0, row - radius)
+    r1 = min(real.shape[0], row + radius + 1)
+    c0 = max(0, col - radius)
+    c1 = min(real.shape[1], col + radius + 1)
+    if r1 <= r0 or c1 <= c0:
+        return row, col
+    window = real[r0:r1, c0:c1]
+    pr, pc = np.unravel_index(int(np.argmax(np.abs(window))), window.shape)
+    pr += r0
+    pc += c0
+    if abs(float(real[pr, pc])) > abs(float(real[row, col])):
+        return int(pr), int(pc)
+    return row, col
+
+
 def detect(data: Any, params: PeakDetectionParams | None = None) -> list[Peak]:
     """局部极大值 + 强度>噪声×sigma + S/N 阈值(2D/3D 通用)。
 

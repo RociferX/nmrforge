@@ -21,6 +21,7 @@ from PyQt6.QtWidgets import (
     QCheckBox,
     QDialog,
     QDialogButtonBox,
+    QDoubleSpinBox,
     QFormLayout,
     QFrame,
     QHBoxLayout,
@@ -30,6 +31,7 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QPushButton,
     QScrollArea,
+    QSlider,
     QVBoxLayout,
     QWidget,
 )
@@ -603,6 +605,31 @@ class PipelineStepRow(QWidget):
             lambda: self.ext_range_requested.emit(self.step_id)
         )
         button_row.addWidget(self.ext_range_button)
+        # 0.2.199-补29ar:峰挑选阈值条(3.0–15.0 σ,调整即重选)
+        self.threshold_label = QLabel("阈值(σ)")
+        self.threshold_label.setVisible(self.step_id == "peaks")
+        self.threshold_slider = QSlider(Qt.Orientation.Horizontal)
+        self.threshold_slider.setRange(30, 150)
+        self.threshold_slider.setValue(60)
+        self.threshold_slider.setFixedWidth(120)
+        self.threshold_slider.setVisible(self.step_id == "peaks")
+        self.threshold_spin = QDoubleSpinBox()
+        self.threshold_spin.setRange(3.0, 15.0)
+        self.threshold_spin.setSingleStep(0.5)
+        self.threshold_spin.setDecimals(1)
+        self.threshold_spin.setValue(6.0)
+        self.threshold_spin.setVisible(self.step_id == "peaks")
+        self.threshold_slider.valueChanged.connect(
+            lambda v: self.threshold_spin.setValue(v / 10.0)
+        )
+        self.threshold_spin.valueChanged.connect(
+            lambda v: self.threshold_slider.setValue(int(round(v * 10.0)))
+        )
+        self.threshold_slider.sliderReleased.connect(self._on_threshold_commit)
+        self.threshold_spin.editingFinished.connect(self._on_threshold_commit)
+        button_row.addWidget(self.threshold_label)
+        button_row.addWidget(self.threshold_slider)
+        button_row.addWidget(self.threshold_spin)
         self.run_button = QPushButton("运行")
         self.run_button.setVisible(False)
         self.run_button.clicked.connect(lambda: self.run_requested.emit(self.step_id))
@@ -689,6 +716,15 @@ class PipelineStepRow(QWidget):
         """更新「直接维范围」按钮文案(已设值时显示当前范围)。"""
         self.ext_range_button.setText(text)
 
+    def _on_threshold_commit(self) -> None:
+        """阈值条调整完成:立即重选峰(复用运行入口)。"""
+        if self.step_id == "peaks":
+            self.run_requested.emit(self.step_id)
+
+    def get_threshold(self) -> float:
+        """峰挑选阈值(σ);非 peaks 步骤返回默认 6.0。"""
+        return self.threshold_spin.value() if self.step_id == "peaks" else 6.0
+
     def set_detail(self, text: str, failed: bool = False) -> None:
         """填充详情文本。"""
         self.detail_label.setText(text)
@@ -709,6 +745,10 @@ class PipelineStepRow(QWidget):
             self.reason_label.setVisible(True)
         else:
             self.reason_label.setVisible(False)
+        threshold_ok = status in ("READY", "SUCCESS", "OUTDATED", "FAILED")
+        if self.step_id == "peaks":
+            self.threshold_slider.setEnabled(threshold_ok)
+            self.threshold_spin.setEnabled(threshold_ok)
         if status == "OUTDATED":
             self.run_button.setText("重新运行")
             self.run_button.setVisible(True)
@@ -1327,11 +1367,22 @@ class PipelinePanel(QWidget):
                         ext_params = self._spectrum_ext_params(target_data_id)
                         if ext_params and "params" in inspect.signature(method).parameters:
                             kwargs["params"] = ext_params
+                    if step_id == "peaks":
+                        kwargs["sigma_multiplier"] = self._rows[
+                            step_id
+                        ].get_threshold()
                     if "progress" in inspect.signature(method).parameters:
                         kwargs["progress"] = lambda msg: self.log_scoped.emit(
                             f"{step_label}: {msg}", run_scope
                         )
                     result = method(data_node, **kwargs)
+                    if (
+                        step_id == "peaks"
+                        and isinstance(result, dict)
+                        and result.get("status") == "success"
+                    ):
+                        # 0.2.199-补29ar:选峰完成立即展示谱图并显示峰
+                        self.show_spectrum_requested.emit(step_id)
                     message = result if isinstance(result, str) else str(result)
                     self.log_scoped.emit(f"完成 {step_label}: {message}", run_scope)
                 except Exception as exc:  # noqa: BLE001 - 单数据失败

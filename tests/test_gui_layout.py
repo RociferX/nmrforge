@@ -986,15 +986,15 @@ def test_import_done_clears_import_form(
 def test_pipeline_status_peaks_from_data_dir(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """peaks 状态检查 data_dir(...,"peaks")/<exp>-<data>.csv。"""
+    """peaks 状态检查 data_dir(...,"peaks")/<exp>-<data>.list。"""
     manager = _manager_with_experiment(tmp_path, monkeypatch)
     spectra_dir = manager.data_dir("exp_001", "d_001", "spectra")
     spectra_dir.mkdir(parents=True, exist_ok=True)
     _write_ft2(spectra_dir / "exp_001-d_001.ft2")
     peaks_dir = manager.data_dir("exp_001", "d_001", "peaks")
     peaks_dir.mkdir(parents=True, exist_ok=True)
-    (peaks_dir / "exp_001-d_001.csv").write_text(
-        "Peak_ID,H_shift,N_shift,Intensity,SN,label\n1,8.0,115.0,100,20,G1\n",
+    (peaks_dir / "exp_001-d_001.list").write_text(
+        "Assignment w1 w2 Data Height Volume\nG1  115.000  8.000  0  100  0\n",
         encoding="utf-8",
     )
     statuses = compute_step_statuses(manager, "exp_001")
@@ -1014,12 +1014,14 @@ def test_pipeline_peaks_step_runs_pick_peaks(
     _write_ft2(spectra_dir / "exp_001-d_001.ft2")
 
     class PeaksController(FakeProcessingController):
-        def pick_peaks(self, data, exp_id=None, data_id=None) -> dict:
+        def pick_peaks(
+            self, data, exp_id=None, data_id=None, sigma_multiplier=None
+        ) -> dict:
             self.calls.append("pick_peaks")
             peaks_dir = manager.data_dir(exp_id, data_id, "peaks")
             peaks_dir.mkdir(parents=True, exist_ok=True)
-            (peaks_dir / f"{exp_id}-{data_id}.csv").write_text(
-                "Peak_ID,H_shift,N_shift,Intensity,SN,label\n1,8.0,115.0,100,20,G1\n",
+            (peaks_dir / f"{exp_id}-{data_id}.list").write_text(
+                "Assignment w1 w2 Data Height Volume\nG1  115.000  8.000  0  100  0\n",
                 encoding="utf-8",
             )
             return {"status": "success", "peak_count": 1}
@@ -1235,19 +1237,18 @@ def test_spectrum_peak_linkage(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """谱图-峰表联动:峰表加载 + 双向高亮/选中。"""
-    import csv
-
     manager = _manager_with_experiment(tmp_path, monkeypatch)
     spectra = manager.data_dir("exp_001", "d_001", "spectra")
     spectra.mkdir(parents=True, exist_ok=True)
     (spectra / "exp_001-d_001.ft2").write_bytes(b"x")
     peaks = manager.data_dir("exp_001", "d_001", "peaks")
     peaks.mkdir(parents=True, exist_ok=True)
-    with (peaks / "exp_001-d_001.csv").open("w", encoding="utf-8", newline="") as fh:
-        writer = csv.writer(fh)
-        writer.writerow(["Peak_ID", "H_shift", "N_shift", "Intensity", "SN", "label"])
-        writer.writerow(["1", "8.0", "115.0", "100", "20", "G1"])
-        writer.writerow(["2", "7.5", "118.0", "80", "15", "A2"])
+    (peaks / "exp_001-d_001.list").write_text(
+        "Assignment w1 w2 Data Height Volume\n"
+        "G1  115.000  8.000  0  100  0\n"
+        "A2  118.000  7.500  0  80  0\n",
+        encoding="utf-8",
+    )
     panel = SpectrumPanel(manager)
     panel.set_context("exp_001", "d_001")
     panel._load_peaks(spectra / "exp_001-d_001.ft2")  # 0.2.88:显式加载峰表
@@ -1263,18 +1264,16 @@ def test_export_poky_button_generates_list(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """有峰表时「导出 Poky」可用,生成 .list 且含 header/峰行。"""
-    import csv
-
     manager = _manager_with_experiment(tmp_path, monkeypatch)
     spectra = manager.data_dir("exp_001", "d_001", "spectra")
     spectra.mkdir(parents=True, exist_ok=True)
     (spectra / "exp_001-d_001.ft2").write_bytes(b"x")
     peaks = manager.data_dir("exp_001", "d_001", "peaks")
     peaks.mkdir(parents=True, exist_ok=True)
-    with (peaks / "exp_001-d_001.csv").open("w", encoding="utf-8", newline="") as fh:
-        writer = csv.writer(fh)
-        writer.writerow(["Peak_ID", "H_shift", "N_shift", "Intensity", "SN", "label"])
-        writer.writerow(["1", "8.0", "115.0", "100", "20", "G1"])
+    (peaks / "exp_001-d_001.list").write_text(
+        "Assignment w1 w2 Data Height Volume\nG1  115.000  8.000  0  100  0\n",
+        encoding="utf-8",
+    )
     panel = SpectrumPanel(manager)
     panel.set_context("exp_001", "d_001")
     panel._load_peaks(spectra / "exp_001-d_001.ft2")  # 0.2.88:显式加载峰表
@@ -1283,7 +1282,7 @@ def test_export_poky_button_generates_list(
     out = tmp_path / "out.list"
     from gui.peaks_io import export_peaks_poky, load_peaks
 
-    export_peaks_poky(out, load_peaks(peaks / "exp_001-d_001.csv"))
+    export_peaks_poky(out, load_peaks(peaks / "exp_001-d_001.list"))
     content = out.read_text(encoding="utf-8")
     assert "G1" in content and "115.0" in content and "8.0" in content
     panel.close()
