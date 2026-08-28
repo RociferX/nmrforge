@@ -246,3 +246,98 @@ def test_parse_nmrpipe_label_suffix() -> None:
     assert _parse_nmrpipe_label("C13") == "13C"
     assert _parse_nmrpipe_label("") == ""
     assert _parse_nmrpipe_label("未知") == ""
+
+def test_projection_nn_uses_subscript_labels(
+    tmp_path: Path, qapp: QApplication
+) -> None:
+    """0.2.199-补29aj:HNN NN 投影面(15Ny-15Nx.ft2)x=Ny、y=Nx,
+    fixed_axis 正确固定 1H(F3),维度映射为剩余两轴。"""
+    from gui.spectrum_panel import SpectrumPanel
+
+    manager = ProjectManager.create_project(tmp_path / "proj4", "demo")
+    entry = manager.create_experiment("HNN")
+    data = manager.import_data(entry.id, "/fake/1")
+    exp_id, data_id = entry.id, data.id
+    spectra = manager.data_dir(exp_id, data_id, "spectra")
+    spectra.mkdir(parents=True, exist_ok=True)
+    proj = spectra / f"{data_id}_15Ny-15Nx.ft2"
+    _write_ft2(proj)
+    meta_path = manager.data_metadata_path(exp_id, data_id)
+    meta_path.parent.mkdir(parents=True, exist_ok=True)
+    meta_path.write_text(
+        json.dumps(
+            {
+                "dataset": {
+                    "dimensions": [
+                        {"logical_axis": "F3", "nucleus": "1H", "role": "direct"},
+                        {"logical_axis": "F2", "nucleus": "15N", "role": "indirect"},
+                        {"logical_axis": "F1", "nucleus": "15N", "role": "indirect"},
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    manager.save()
+    panel = SpectrumPanel(manager)
+    panel.set_context(exp_id, data_id)
+    spec = panel._load_projection_ft2(proj)
+    assert spec is not None
+    assert spec.x_axis.label == "Ny"  # 顺序 N(F1)
+    assert spec.y_axis.label == "Nx"  # HSQC 的 N(F2)
+    assert spec.dim_indices == (0, 1)  # fixed_axis=F3(1H)
+    panel.close()
+
+
+def test_projection_nn_axis_params_from_3d(
+    tmp_path: Path, qapp: QApplication
+) -> None:
+    """0.2.199-补29aj:NN 投影轴参数按逻辑下标从 3D 谱定位
+    (x=15Ny→F1、y=15Nx→F2),不再依赖不可靠的投影文件头。"""
+    import numpy as np
+
+    from gui.spectrum_panel import SpectrumPanel
+    from viewer.spectrum import Spectrum3D, SpectrumAxis
+
+    manager = ProjectManager.create_project(tmp_path / "proj5", "demo")
+    entry = manager.create_experiment("HNN")
+    data = manager.import_data(entry.id, "/fake/1")
+    exp_id, data_id = entry.id, data.id
+    spectra = manager.data_dir(exp_id, data_id, "spectra")
+    spectra.mkdir(parents=True, exist_ok=True)
+    proj = spectra / f"{data_id}_15Ny-15Nx.ft2"
+    _write_ft2(proj)
+    meta_path = manager.data_metadata_path(exp_id, data_id)
+    meta_path.parent.mkdir(parents=True, exist_ok=True)
+    meta_path.write_text(
+        json.dumps(
+            {
+                "dataset": {
+                    "dimensions": [
+                        {"logical_axis": "F3", "nucleus": "1H", "role": "direct"},
+                        {"logical_axis": "F2", "nucleus": "15N", "role": "indirect"},
+                        {"logical_axis": "F1", "nucleus": "15N", "role": "indirect"},
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    manager.save()
+    panel = SpectrumPanel(manager)
+    panel.set_context(exp_id, data_id)
+    axes3 = [
+        SpectrumAxis("Ny", 8, 2000.0, 60.0, 118.0, 118.0 * 60.0),
+        SpectrumAxis("Nx", 8, 2000.0, 90.0, 118.0, 118.0 * 90.0),
+        SpectrumAxis("H", 16, 6000.0, 600.0, 4.7, 4.7 * 600.0),
+    ]
+    panel._spectrum3d_panel._spectrum3d = Spectrum3D(
+        np.zeros((8, 8, 16), dtype=np.float32), axes3
+    )
+    spec = panel._load_projection_ft2(proj)
+    assert spec is not None
+    assert spec.x_axis.obs_mhz == pytest.approx(60.0)  # F1(15Ny)
+    assert spec.y_axis.obs_mhz == pytest.approx(90.0)  # F2(15Nx)
+    assert spec.x_axis.label == "Ny"
+    assert spec.y_axis.label == "Nx"
+    panel.close()

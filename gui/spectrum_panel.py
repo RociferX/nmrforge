@@ -437,6 +437,13 @@ class SpectrumPanel(QWidget):
         def _norm(nuc: str) -> str:
             return _re.sub(r"[^A-Za-z0-9]", "", str(nuc or "")).upper()
 
+        def _base_norm(nuc: str) -> str:
+            """投影核名归一:去掉尾部 x/y/z 下标再比较(15Ny→15N)。"""
+            t = _norm(nuc)
+            if t and t[-1] in "XYZ":
+                t = t[:-1]
+            return t
+
         name = path.name
         data_id = self._current_data_id or ""
         nuclei = self._axis_nuclei(3) or []
@@ -482,25 +489,49 @@ class SpectrumPanel(QWidget):
         data = np.asarray(data, dtype=float)
         if data.ndim != 2:
             return None
-        na, nb = _norm(a), _norm(b)
+        na, nb = _base_norm(a), _base_norm(b)
         same_nucleus = na == nb
         fixed_axis = -1
         if len(nuclei) == 3:
             for i, nuc in enumerate(nuclei):
-                if _norm(nuc) not in (na, nb):
+                if _base_norm(nuc) not in (na, nb):
                     fixed_axis = i
                     break
         s3d = getattr(self._spectrum3d_panel, "_spectrum3d", None)
         s3d_axes = list(getattr(s3d, "axes", []) or []) if s3d is not None else []
+        # 0.2.199-补29w:重复核(HNN 双 15N)按逻辑轴下标区分——投影的核
+        # 无法单靠核名区分是 F1 还是 F2 的 15N,用固定轴推导剩余两轴
+        # 的逻辑下标(15Nx/15Ny)。
+        labels3 = None
+        if len(nuclei) == 3:
+            from viewer.axis_labels import axis_labels_from_nuclei as _alfn
+
+            labels3 = _alfn(nuclei)
+            # 0.2.199-补29y:HNN 双 15N——Nx 对应 HSQC 的 N(酰胺 N(i),
+            # 直接连 1H),按 HNN 惯例为 F2(t2);F1=N(i-1) 顺序 N 标 Ny
+            if (
+                len({_base_norm(n) for n in nuclei}) < len(nuclei)
+                and _base_norm(nuclei[0]) == "15N"
+                and _base_norm(nuclei[1]) == "15N"
+            ):
+                labels3 = ("Ny", "Nx", str(labels3[2]))
         x_params = y_params = None
-        # 0.2.168:同核投影(如 15N 编辑 3D 的 H-H 平面)按核种类匹配会把
-        # 两个 1H 轴取错(无法区分下标),直接走文件头槽位 + x/y 下标标签
-        if not same_nucleus and len(s3d_axes) == 3:
-            for i, nuc in enumerate(nuclei):
-                if _norm(nuc) == na:
+        # 0.2.199-补29aj:参数优先按逻辑下标符号定位(15Ny→F1、15Nx→F2,
+        # 同核轴也能区分),再按基础核名兜底;proj3D 同核平面文件头
+        # FDF*LABEL 不可靠,最后才用文件头槽位。
+        if len(s3d_axes) == 3:
+            sym_a, sym_b = nucleus_symbol(a), nucleus_symbol(b)
+            for i, sym in enumerate(labels3 or ()):
+                if str(sym) == sym_a and x_params is None:
                     x_params = s3d_axes[i]
-                if _norm(nuc) == nb:
+                if str(sym) == sym_b and y_params is None:
                     y_params = s3d_axes[i]
+            if x_params is None or y_params is None:
+                for i, nuc in enumerate(nuclei):
+                    if _base_norm(nuc) == na and x_params is None:
+                        x_params = s3d_axes[i]
+                    if _base_norm(nuc) == nb and y_params is None:
+                        y_params = s3d_axes[i]
         if x_params is None or y_params is None:
             # 轴参数缺失:用文件头槽位兜底(与 0.2.126 一致)
             x_params = _Sn(
@@ -521,55 +552,41 @@ class SpectrumPanel(QWidget):
             )
         # 0.2.153:横坐标优先级 H > N > C(必要时转置数据矩阵)
         _X_PRIORITY = {"1H": 0, "15N": 1, "13C": 2}
-        if _X_PRIORITY.get(_norm(a), 100) > _X_PRIORITY.get(_norm(b), 100):
+        if _X_PRIORITY.get(_base_norm(a), 100) > _X_PRIORITY.get(_base_norm(b), 100):
             data = data.T
             x_params, y_params = y_params, x_params
             a, b = b, a
             na, nb = nb, na
-        # 0.2.168:同核投影用 Hx/Hy 下标标签(与 axis_labels_from_nuclei 一致)
-        # 0.2.199-补29w:重复核(HNN 双 15N)按逻辑轴下标区分——投影的核
-        # 无法单靠核名区分是 F1 还是 F2 的 15N,用固定轴推导剩余两轴
-        # 的逻辑下标(15Nx/15Ny)。
-        labels3 = None
-        if len(nuclei) == 3:
-            from viewer.axis_labels import axis_labels_from_nuclei as _alfn
-
-            labels3 = _alfn(nuclei)
-            # 0.2.199-补29y:HNN 双 15N——Nx 对应 HSQC 的 N(酰胺 N(i),
-            # 直接连 1H),按 HNN 惯例为 F2(t2);F1=N(i-1) 顺序 N 标 Ny
-            if (
-                len({_norm(n) for n in nuclei}) < len(nuclei)
-                and _norm(nuclei[0]) == "15N"
-                and _norm(nuclei[1]) == "15N"
-            ):
-                labels3 = ("Ny", "Nx", str(labels3[2]))
         if logical_mapped and labels3 is not None:
             remaining = [i for i in range(3) if i != fixed_axis]
             x_label = str(labels3[remaining[1]])
             y_label = str(labels3[remaining[0]])
         elif same_nucleus:
-            # 同核投影平面无直接维语义:按显示轴取 x/y(x 轴得 x),
-            # 不参与逻辑序的直接维优先级(0.2.199-补29ah)
+            # 同核投影平面无直接维语义:按显示轴取 x/y(x 轴得 x);
+            # 已带下标(15Ny→Ny)直接显示,纯核名补下标(0.2.199-补29aj)
             from viewer.axis_labels import nucleus_symbol as _nsym
 
-            x_label, y_label = f"{_nsym(a)}x", f"{_nsym(b)}y"
+            sx, sy = _nsym(a), _nsym(b)
+            x_label = sx if sx[-1:].upper() in ("X", "Y", "Z") else sx + "x"
+            y_label = sy if sy[-1:].upper() in ("X", "Y", "Z") else sy + "y"
         else:
             x_label, y_label = nucleus_symbol(a), nucleus_symbol(b)
         # 0.2.199-补29x:HNN 等重复核投影——X 轴对应 HSQC 的 N(15N),
         # 15N-15N 平面把逻辑序较小的 Nx(F1)放 X;普通谱保持 H>N>C
         if logical_mapped and labels3 is not None:
             _remaining = [i for i in range(3) if i != fixed_axis]
-            _dup = len({_norm(n) for n in nuclei}) < len(nuclei)
-            if _dup and all(_norm(n) == "15N" for n in (a, b)):
+            _dup = len({_base_norm(n) for n in nuclei}) < len(nuclei)
+            if _dup and all(_base_norm(n) == "15N" for n in (a, b)):
                 if not _norm(x_label).startswith("NX"):
                     data = data.T
                     x_label, y_label = y_label, x_label
                     x_params, y_params = y_params, x_params
-            elif _dup and "15N" in (_norm(a), _norm(b)):
+            elif _dup and "15N" in (_base_norm(a), _base_norm(b)):
                 if not _norm(x_label).startswith("N"):
                     data = data.T
                     x_label, y_label = y_label, x_label
                     x_params, y_params = y_params, x_params
+
         x_axis = SpectrumAxis(
             label=x_label,
             size=int(data.shape[1]),
