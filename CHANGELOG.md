@@ -2,6 +2,16 @@
 
 # 修改记录(历史条目)
 
+## 0.2.199-补29bb(2026-08-28,峰操作栏拆两行)
+
+峰操作栏由一行拆为两行:第一行 Show peaks / 选择 / Add peak / 标记尺寸;
+第二行 Delete selected / Import peaks / Export peaks / Save peaks。测试更新;
+全量 pytest 全绿,ruff 通过。
+
+## 0.2.199-补29bc(2026-08-28,「峰标记」改名为「标记尺寸」)
+
+峰操作栏大小输入框标签「峰标记」→「标记尺寸」(tooltip 同步)。
+
 ## 0.2.199-补29az(2026-08-28,峰标记改 × + 随谱图缩放 + Peak size 输入框)
 
 - viewer 峰标记由圆点改 Poky 风格 ×(ScatterPlotItem symbol="x"),

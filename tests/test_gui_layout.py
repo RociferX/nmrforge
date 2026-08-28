@@ -1849,12 +1849,21 @@ def test_spectrum_panel_new_layout_constraints(
     panel = SpectrumPanel()
     assert panel.file_list.parent() is panel.lists_row_widget
     assert panel.viewer.layer_list.parent() is panel.lists_row_widget
-    first = panel.peak_toolbar_widget.layout().itemAt(0).widget()
+    rows = panel.peak_toolbar_widget.layout()
+    first = rows.itemAt(0).layout().itemAt(0).widget()
     assert first is panel.viewer.show_peaks_checkbox
     assert panel.import_poky_button.text() == "Import peaks"
     assert panel.export_poky_button.text() == "Export peaks"
+    # 0.2.199-补29bb:第二行放 Delete/Import/Export/Save
+    row2 = rows.itemAt(1).layout()
+    row2_widgets = [row2.itemAt(i).widget() for i in range(row2.count())]
+    assert panel.delete_peak_button in row2_widgets
+    assert panel.import_poky_button in row2_widgets
+    assert panel.export_poky_button in row2_widgets
+    assert panel.save_peaks_button in row2_widgets
     # 峰操作行间距显明
     assert panel.peak_toolbar.spacing() >= 10
+    assert panel.peak_toolbar2.spacing() >= 10
     panel.close()
 
 
