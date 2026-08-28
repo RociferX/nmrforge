@@ -285,8 +285,8 @@ class MainWindow(QMainWindow):
         self.context_bar = QLabel("未打开项目")
         self.context_bar.setWordWrap(True)
         self.context_bar.setStyleSheet(
-            "background: #ecf0f1; padding: 4px 10px; "
-            "font-weight: bold; color: #2c3e50;"
+            "background: #1e1e1e; padding: 4px 10px; "
+            "font-weight: bold; color: #ffffff;"
         )
         # 0.2.141:日志为中间竖列(水平分隔条内),不再占用底部高度
         central_layout.addWidget(self.context_bar)
@@ -1610,7 +1610,7 @@ class MainWindow(QMainWindow):
         parts = [self.manager.project.name]
         if exp_id:
             exp = self.manager.project.experiment(exp_id)
-            parts.append(exp.title if exp is not None else exp_id)
+            parts.append((exp.title or exp_id) if exp is not None else exp_id)
         current_data = current.data(0, Qt.ItemDataRole.UserRole) if current is not None else None
         if (
             isinstance(current_data, dict)
@@ -1772,8 +1772,10 @@ class MainWindow(QMainWindow):
 
         app = QApplication(sys.argv)
         from gui.dialogs import install_dialog_centering
+        from gui.theme import apply_dark_theme
 
         install_dialog_centering(app)
+        apply_dark_theme(app)
         window = MainWindow()
         window.show()
         return app.exec()

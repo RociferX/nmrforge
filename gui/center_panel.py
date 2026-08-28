@@ -108,8 +108,8 @@ class CenterPanel(QWidget):
         self.notes_label = QLabel("")
         self.notes_label.setWordWrap(True)
         self.notes_label.setStyleSheet(
-            "background: #f0f4f8; border: 1px solid #d5d8dc; "
-            "color: #333; padding: 4px 8px;"
+            "background: #1e1e1e; border: 1px solid #3c3c3c; "
+            "color: #ffffff; padding: 4px 8px;"
         )
         self.notes_header.addWidget(self.notes_label, 1)
         self.edit_notes_button = QPushButton("编辑注释")

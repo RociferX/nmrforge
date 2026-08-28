@@ -315,6 +315,9 @@ def main(argv: list[str] | None = None) -> int:
     paths = [Path(a) for a in args if Path(a).suffix in (".ft2", ".ft3", ".ft1", ".fid")]
     app = QApplication(sys.argv[:1] + args)
     _install_dialog_centering(app)
+    from gui.theme import apply_dark_theme
+
+    apply_dark_theme(app)
     window = SpectrumWindow()
     window.show()
     for path in paths:
