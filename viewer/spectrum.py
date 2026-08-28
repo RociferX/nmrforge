@@ -30,12 +30,19 @@ _NUCLEUS_X_PRIORITY: dict[str, int] = {"1H": 0, "15N": 1, "13C": 2}
 
 
 def _parse_nmrpipe_label(label: str) -> str:
-    """NMRPipe FDF*LABEL('N15'/'H1'/'C13') → 核名('15N'/'1H'/'13C');失败返回 ''。"""
+    """NMRPipe FDF*LABEL('N15'/'H1'/'C13',同核下标'15Nx'/'1Hy') →
+    核名('15N'/'1H'/'13C');失败返回 ''。
+
+    0.2.199-补29ai:同核唯一化标签(15Nx/1Hy/1Hz)先去尾部 x/y/z 再
+    匹配核名,避免 LABEL 解析失败后全靠 OBS 兜底。
+    """
     text = str(label or "").strip().upper()
     if not text:
         return ""
     if text in _NUCLEI:
         return text
+    if text[-1:] in ("X", "Y", "Z") and text[:-1] in _NUCLEI:
+        return text[:-1]
     digits = "".join(ch for ch in text if ch.isdigit())
     letters = "".join(ch for ch in text if ch.isalpha())
     candidate = f"{digits}{letters}" if digits and letters else ""

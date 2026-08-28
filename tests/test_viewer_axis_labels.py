@@ -228,3 +228,21 @@ def test_viewer_app_axis_labels_from_path(
     assert window.viewer._primary.x_axis.label == "H"
     assert window.viewer._primary.y_axis.label == "N"
     window.close()
+
+def test_parse_nmrpipe_label_suffix() -> None:
+    """0.2.199-补29ai:同核下标标签(15Nx/1Hy/1Hz)可直接解析为核名。"""
+    from viewer.spectrum import _parse_nmrpipe_label
+
+    assert _parse_nmrpipe_label("1Hx") == "1H"
+    assert _parse_nmrpipe_label("1Hy") == "1H"
+    assert _parse_nmrpipe_label("1Hz") == "1H"
+    assert _parse_nmrpipe_label("15Nx") == "15N"
+    assert _parse_nmrpipe_label("15Ny") == "15N"
+    assert _parse_nmrpipe_label("13Cz") == "13C"
+    # 原有格式兼容
+    assert _parse_nmrpipe_label("1H") == "1H"
+    assert _parse_nmrpipe_label("N15") == "15N"
+    assert _parse_nmrpipe_label("H1") == "1H"
+    assert _parse_nmrpipe_label("C13") == "13C"
+    assert _parse_nmrpipe_label("") == ""
+    assert _parse_nmrpipe_label("未知") == ""
