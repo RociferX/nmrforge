@@ -2024,3 +2024,43 @@ def test_experiment_page_dropdown_switch(
     assert page._import_dropdown.isVisible()
     assert not page._group_analysis_dropdown.isVisible()
     window.close()
+
+
+
+def test_peaks_threshold_change_does_not_auto_run(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 0.2.199-补29au:调阈值不自动选峰,点「运行/重新处理」才执行
+    monkeypatch.setattr('threading.Thread', SyncThread)
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    spectra_dir = manager.data_dir('exp_001', 'd_001', 'spectra')
+    spectra_dir.mkdir(parents=True, exist_ok=True)
+    _write_ft2(spectra_dir / 'exp_001-d_001.ft2')
+
+    class PeaksController(FakeProcessingController):
+        def pick_peaks(
+            self, data, exp_id=None, data_id=None, sigma_multiplier=None
+        ) -> dict:
+            self.calls.append(('pick_peaks', sigma_multiplier))
+            peaks_dir = manager.data_dir(exp_id, data_id, 'peaks')
+            peaks_dir.mkdir(parents=True, exist_ok=True)
+            (peaks_dir / f'{exp_id}-{data_id}.list').write_text(
+                'Assignment w1 w2 Data Height Volume\n'
+                'G1  115.000  8.000  0  100  0\n',
+                encoding='utf-8',
+            )
+            return {'status': 'success', 'peak_count': 1}
+
+    controller = PeaksController()
+    panel = PipelinePanel(manager, controller)
+    log = LogPanel()
+    panel.log_message.connect(log.append)
+    panel.set_selection('data', 'exp_001', 'd_001')
+    row = panel._rows['peaks']
+    row.threshold_spin.setValue(8.0)
+    row.threshold_slider.sliderReleased.emit()
+    assert controller.calls == []  # 调阈值不自动运行
+    panel._on_run_requested('peaks')
+    assert controller.calls == [('pick_peaks', 8.0)]  # 点运行按新阈值执行
+    panel.close()
+    log.close()

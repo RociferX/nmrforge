@@ -605,7 +605,8 @@ class PipelineStepRow(QWidget):
             lambda: self.ext_range_requested.emit(self.step_id)
         )
         button_row.addWidget(self.ext_range_button)
-        # 0.2.199-补29ar:峰挑选阈值条(3.0–15.0 σ,调整即重选)
+        # 0.2.199-补29ar/补29au:峰挑选阈值条(3.0–15.0 σ);
+        # 补29au:调整只更新数值,点「运行/重新处理」才重新选峰
         self.threshold_label = QLabel("阈值(σ)")
         self.threshold_label.setVisible(self.step_id == "peaks")
         self.threshold_slider = QSlider(Qt.Orientation.Horizontal)
@@ -625,8 +626,9 @@ class PipelineStepRow(QWidget):
         self.threshold_spin.valueChanged.connect(
             lambda v: self.threshold_slider.setValue(int(round(v * 10.0)))
         )
-        self.threshold_slider.sliderReleased.connect(self._on_threshold_commit)
-        self.threshold_spin.editingFinished.connect(self._on_threshold_commit)
+        tip = "调整选峰阈值(σ);点「运行/重新处理」后按新阈值重新选峰"
+        self.threshold_slider.setToolTip(tip)
+        self.threshold_spin.setToolTip(tip)
         button_row.addWidget(self.threshold_label)
         button_row.addWidget(self.threshold_slider)
         button_row.addWidget(self.threshold_spin)
@@ -715,11 +717,6 @@ class PipelineStepRow(QWidget):
     def set_ext_override(self, text: str) -> None:
         """更新「直接维范围」按钮文案(已设值时显示当前范围)。"""
         self.ext_range_button.setText(text)
-
-    def _on_threshold_commit(self) -> None:
-        """阈值条调整完成:立即重选峰(复用运行入口)。"""
-        if self.step_id == "peaks":
-            self.run_requested.emit(self.step_id)
 
     def get_threshold(self) -> float:
         """峰挑选阈值(σ);非 peaks 步骤返回默认 6.0。"""
