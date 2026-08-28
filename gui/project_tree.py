@@ -1,12 +1,12 @@
-"""左侧项目管理树:项目 → 实验类型 → 样品数据。
+"""左侧项目管理树:项目 → 实验 → 样品数据。
 
 层级(契约 v1.2 §8.5):
 - 项目节点:右键删除项目(强确认);
-- 实验类型节点:可空白创建,右键导入样品数据/重命名/删除;
-- 样品数据节点:实验类型下的样品数据条目(可多组),右键生成 FID/生成谱图/打开目录/删除。
+- 实验节点:可空白创建,右键导入样品数据/重命名/删除;
+- 样品数据节点:实验下的样品数据条目(可多组),右键生成 FID/生成谱图/打开目录/删除。
 
 Backend 落地 DataEntry 层级后直接使用 entry.data;当前兼容阶段
-(schema 1.1)以实验类型自身作为单样品数据节点。
+(schema 1.1)以实验自身作为单样品数据节点。
 """
 
 from __future__ import annotations
@@ -174,7 +174,7 @@ class _InlineRenameEditor(QWidget):
 
 
 class ProjectTreePanel(QWidget):
-    """项目管理树;selection_changed 在上下文(实验类型)变化时发出。"""
+    """项目管理树;selection_changed 在上下文(实验)变化时发出。"""
 
     selection_changed = pyqtSignal(str, str, str, str)  # (kind, exp_id, data_id, group_id)
     open_requested = pyqtSignal(str)  # 双击实验:请求打开/聚焦该实验
@@ -182,20 +182,20 @@ class ProjectTreePanel(QWidget):
     data_rename_requested = pyqtSignal(str, str, str)  # (exp_id, data_id, new_name):重命名数据
     rename_project_requested = pyqtSignal(str)  # (new_name):重命名当前项目
     project_create_submitted = pyqtSignal(str)  # 内联命名提交:项目名称
-    experiment_create_submitted = pyqtSignal(str)  # 内联命名提交:实验类型标题
+    experiment_create_submitted = pyqtSignal(str)  # 内联命名提交:实验标题
     open_path_requested = pyqtSignal(str)  # 打开所在目录(子文件夹右键)
     open_terminal_requested = pyqtSignal(str)  # 在终端中打开(子文件夹右键)
     open_spectrum_requested = pyqtSignal(str)  # 双击谱图文件:右侧直接显示
     delete_project_requested = pyqtSignal()  # Project 右键:删除项目
     create_experiment_requested = pyqtSignal()  # 空白处右键:新建空白实验
-    import_data_requested = pyqtSignal(str)  # 实验类型 右键:导入样品数据(exp_id)
+    import_data_requested = pyqtSignal(str)  # 实验 右键:导入样品数据(exp_id)
     data_action_requested = pyqtSignal(str, str)  # (action, data_id):生成FID/谱/删除
     group_add_data_requested = pyqtSignal(str, str, list)  # (exp_id, group_id, data_ids)
     group_remove_data_requested = pyqtSignal(str, str, str)  # (exp_id, group_id, data_id)
     group_rename_requested = pyqtSignal(str, str, str)  # (exp_id, group_id, new_title)
     group_delete_requested = pyqtSignal(str, str)  # (exp_id, group_id)
-    rename_requested = pyqtSignal(str, str)  # (exp_id, new_title):重命名实验类型
-    delete_requested = pyqtSignal(str)  # 删除实验类型(exp_id)
+    rename_requested = pyqtSignal(str, str)  # (exp_id, new_title):重命名实验
+    delete_requested = pyqtSignal(str)  # 删除实验(exp_id)
 
     def __init__(
         self,
@@ -229,7 +229,7 @@ class ProjectTreePanel(QWidget):
         self.tree.itemClicked.connect(self._on_item_clicked)
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._on_context_menu)
-        # 内联命名(新建项目/实验类型):监听树内编辑器提交/取消
+        # 内联命名(新建项目/实验):监听树内编辑器提交/取消
         delegate = self.tree.itemDelegate()
         delegate.commitData.connect(self._on_editor_commit_data)
         delegate.closeEditor.connect(self._on_editor_closed)
@@ -307,7 +307,7 @@ class ProjectTreePanel(QWidget):
         workspace_item.setExpanded(True)
 
     def _refresh_experiments(self, project_item: QTreeWidgetItem) -> None:
-        """增量刷新实验类型节点(按 exp_id 复用未变化实例)。"""
+        """增量刷新实验节点(按 exp_id 复用未变化实例)。"""
         existing: dict[str, QTreeWidgetItem] = {}
         for index in range(project_item.childCount()):
             item = project_item.child(index)
@@ -332,7 +332,7 @@ class ProjectTreePanel(QWidget):
     def _update_experiment_item(
         self, exp_item: QTreeWidgetItem, exp
     ) -> None:
-        """更新实验类型节点文本并增量刷新数据组与未入组样品数据节点。"""
+        """更新实验节点文本并增量刷新数据组与未入组样品数据节点。"""
         exp_item.setText(0, exp.title or exp.id)
         exp_item.setText(1, _STATUS_TEXT.get(exp.status, exp.status))
         exp_item.setToolTip(0, f"{exp.id}\n右键: 导入样品数据 / 重命名 / 删除")
@@ -527,11 +527,11 @@ class ProjectTreePanel(QWidget):
         return exp_item
 
     def _data_of(self, exp) -> list:
-        """实验类型下的全部样品数据节点。"""
+        """实验下的全部样品数据节点。"""
         return list(getattr(exp, "data", None) or [])
 
     def _groups_of(self, exp) -> list:
-        """实验类型下的数据组节点(schema 1.4;空返回空列表)。"""
+        """实验下的数据组节点(schema 1.4;空返回空列表)。"""
         return list(getattr(exp, "groups", None) or [])
 
     @staticmethod
@@ -543,7 +543,7 @@ class ProjectTreePanel(QWidget):
         return grouped
 
     def _ungrouped_data_of(self, exp) -> list:
-        """未入组样品数据(直接挂实验类型下,与数据组同级)。"""
+        """未入组样品数据(直接挂实验下,与数据组同级)。"""
         grouped = self._grouped_ids(exp)
         return [d for d in self._data_of(exp) if getattr(d, "id", "") not in grouped]
 
@@ -717,7 +717,7 @@ class ProjectTreePanel(QWidget):
     # 选择与上下文
     # ------------------------------------------------------------------
     def current_experiment_id(self) -> str:
-        """返回当前选中节点所属实验类型 id(选择样品数据节点时归一化到实验类型)。"""
+        """返回当前选中节点所属实验 id(选择样品数据节点时归一化到实验)。"""
         item = self.tree.currentItem()
         return self._experiment_id_of(item) if item is not None else ""
 
@@ -738,7 +738,7 @@ class ProjectTreePanel(QWidget):
         return ""
 
     def select_data(self, exp_id: str, data_id: str) -> None:
-        """选中实验类型下的样品数据节点(展开实验类型;找不到时静默)。"""
+        """选中实验下的样品数据节点(展开实验;找不到时静默)。"""
         exp_item = self._find_experiment_item(exp_id)
         if exp_item is None:
             return
@@ -762,7 +762,7 @@ class ProjectTreePanel(QWidget):
             self.tree.setCurrentItem(target)
 
     def select_experiment(self, exp_id: str) -> None:
-        """按 id 递归定位并选中实验类型节点(Workspace → Project → Experiment)。"""
+        """按 id 递归定位并选中实验节点(Workspace → Project → Experiment)。"""
         target = self._find_experiment_item(exp_id)
         if target is None:
             return
@@ -776,7 +776,7 @@ class ProjectTreePanel(QWidget):
     def _find_experiment_item(
         self, exp_id: str, item: QTreeWidgetItem | None = None
     ) -> QTreeWidgetItem | None:
-        """深度优先查找实验类型节点。"""
+        """深度优先查找实验节点。"""
         if item is None:
             for i in range(self.tree.topLevelItemCount()):
                 found = self._find_experiment_item(exp_id, self.tree.topLevelItem(i))
@@ -878,7 +878,7 @@ class ProjectTreePanel(QWidget):
         if not candidates:
             from gui.dialogs import InfoDialog
 
-            InfoDialog(self, "没有可加入的数据", "实验类型下没有未入组的样品数据").exec()
+            InfoDialog(self, "没有可加入的数据", "实验下没有未入组的样品数据").exec()
             return
         from gui.dialogs import MultiSelectDataDialog
 
@@ -935,9 +935,9 @@ class ProjectTreePanel(QWidget):
         """构建右键菜单(独立方法便于测试触发动作);pos 为视口内坐标,用于弹窗定位。"""
         anchor = self.tree.viewport().mapToGlobal(pos) if pos is not None else None
         if item is None:
-            # 空白处:新建空白实验类型(项目已打开时)
+            # 空白处:新建空白实验(项目已打开时)
             if self.manager.project is not None:
-                menu.addAction("新建空白实验类型...", self.create_experiment_requested.emit)
+                menu.addAction("新建空白实验...", self.create_experiment_requested.emit)
         else:
             data = item.data(0, Qt.ItemDataRole.UserRole)
             kind = data.get("kind") if isinstance(data, dict) else None
@@ -955,7 +955,7 @@ class ProjectTreePanel(QWidget):
                         lambda p=str(data["path"]): self.open_project_requested.emit(p),
                     )
                 else:
-                    menu.addAction("新建空白实验类型...", self.create_experiment_requested.emit)
+                    menu.addAction("新建空白实验...", self.create_experiment_requested.emit)
                     menu.addAction(
                         "重命名项目...",
                         lambda _checked=False: self._begin_rename("project", item, anchor),
@@ -969,7 +969,7 @@ class ProjectTreePanel(QWidget):
                     lambda _checked=False: self._begin_rename("experiment", item, anchor),
                 )
                 menu.addSeparator()
-                menu.addAction("删除实验类型", lambda: self.delete_requested.emit(exp_id))
+                menu.addAction("删除实验", lambda: self.delete_requested.emit(exp_id))
             elif kind == "group" and exp_id:
                 group_id = str(data.get("group_id", ""))
                 if group_id:
@@ -1053,7 +1053,7 @@ class ProjectTreePanel(QWidget):
         return path.parent if path.exists() else None
 
     # ------------------------------------------------------------------
-    # 内联命名(新建项目/实验类型,不弹窗)
+    # 内联命名(新建项目/实验,不弹窗)
     # ------------------------------------------------------------------
     def begin_create_project(self, initial: str = "unnamed") -> None:
         """新建项目:项目树内内联命名(不弹窗),回车提交 / Esc 取消。"""
@@ -1076,18 +1076,18 @@ class ProjectTreePanel(QWidget):
         self._start_editing(item)
 
     def begin_create_experiment(self, initial: str = "") -> None:
-        """新建空白实验类型:项目树内内联命名(不弹窗),回车提交 / Esc 取消。"""
+        """新建空白实验:项目树内内联命名(不弹窗),回车提交 / Esc 取消。"""
         if self.manager.project is None:
             return
         project_item = self._current_project_item()
         if project_item is None:
             return
         self._cancel_pending_create()
-        item = QTreeWidgetItem([initial or "新实验类型", ""])
+        item = QTreeWidgetItem([initial or "新实验", ""])
         item.setIcon(0, self._icon("experiment"))
         item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
         item.setData(0, Qt.ItemDataRole.UserRole, {"kind": "pending_experiment"})
-        item.setToolTip(0, "输入实验类型标题后回车创建,Esc 取消")
+        item.setToolTip(0, "输入实验标题后回车创建,Esc 取消")
         project_item.addChild(item)
         project_item.setExpanded(True)
         self.tree.setCurrentItem(item)
@@ -1163,7 +1163,7 @@ class ProjectTreePanel(QWidget):
     # 重命名:右键菜单原地变成重命名输入框(回车提交/Esc 取消)
     # ------------------------------------------------------------------
     def begin_rename_experiment(self, exp_id: str) -> None:
-        """菜单「重命名实验类型」:在树节点附近显示重命名输入框。"""
+        """菜单「重命名实验」:在树节点附近显示重命名输入框。"""
         item = self._find_experiment_item(exp_id)
         if item is None:
             return

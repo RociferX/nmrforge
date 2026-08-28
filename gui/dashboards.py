@@ -1,6 +1,6 @@
-"""Dashboard 面板:项目/实验类型概览(GUI_ARCHITECTURE_VISION §11-12)。
+"""Dashboard 面板:项目/实验概览(GUI_ARCHITECTURE_VISION §11-12)。
 
-- ProjectDashboard:项目统计(实验类型/样品数据/处理完成度)+ 最近运行 + 新建实验类型表单;
+- ProjectDashboard:项目统计(实验/样品数据/处理完成度)+ 最近运行 + 新建实验表单;
 - ExperimentDashboard:样品数据列表(每样品数据状态)+ 导入样品数据表单。
 
 数据来源:core.project(ProjectManager);运行历史来自 workflow_runs。
@@ -49,9 +49,9 @@ def _data_processed(project) -> int:
 
 
 class ProjectDashboard(QWidget):
-    """项目概览:统计 + 处理完成度 + 最近运行 + 新建实验类型。"""
+    """项目概览:统计 + 处理完成度 + 最近运行 + 新建实验。"""
 
-    create_experiment_requested = pyqtSignal(str)  # 实验类型标题
+    create_experiment_requested = pyqtSignal(str)  # 实验标题
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -85,9 +85,9 @@ class ProjectDashboard(QWidget):
 
         form = QHBoxLayout()
         self.title_edit = QLineEdit()
-        self.title_edit.setPlaceholderText("实验类型标题(可留空)")
+        self.title_edit.setPlaceholderText("实验标题(可留空)")
         form.addWidget(self.title_edit, 1)
-        self.create_button = QPushButton("新建实验类型")
+        self.create_button = QPushButton("新建实验")
         self.create_button.clicked.connect(self._on_create)
         form.addWidget(self.create_button)
         layout.addLayout(form)
@@ -106,7 +106,7 @@ class ProjectDashboard(QWidget):
         data_count = _data_count(project)
         processed = _data_processed(project)
         self.stats_label.setText(
-            f"实验类型: {exp_count}  |  样品数据: {data_count}  |  已处理: {processed}"
+            f"实验: {exp_count}  |  样品数据: {data_count}  |  已处理: {processed}"
         )
         if data_count:
             pct = round(processed * 100 / data_count)
@@ -133,7 +133,7 @@ class ProjectDashboard(QWidget):
 class ExperimentImportPanel(QWidget):
     """导入数据面板:单个/分段/批量导入 + 链接选项(0.2.162-补11)。
 
-    实验类型页不再内联展示,由主界面「导入数据」按钮下拉弹出。"""
+    实验页不再内联展示,由主界面「导入数据」按钮下拉弹出。"""
 
     import_options_requested = pyqtSignal(str, str, str, bool)  # (exp_id, name, source, copy)
     segmented_import_requested = pyqtSignal(str, str)  # (exp_id, 分段采集容器目录)
@@ -289,7 +289,7 @@ class ExperimentImportPanel(QWidget):
         self.batch_import_button.setEnabled(False)
 
     def _on_batch_import(self) -> None:
-        """把列表中的多个数据目录导入当前实验类型;group=True 同一批量组。"""
+        """把列表中的多个数据目录导入当前实验;group=True 同一批量组。"""
         if not self._exp_id or self.batch_list.count() == 0:
             return
         folders = [
@@ -307,7 +307,7 @@ class ExperimentImportPanel(QWidget):
                 self, "导入样品数据", "请先选择 Bruker 数据集目录(含 acqus)"
             )
             return
-        # exp_id 为空(未选中实验类型)时交由主窗口自动创建实验类型,
+        # exp_id 为空(未选中实验)时交由主窗口自动创建实验,
         # 不静默无反应
         self.import_options_requested.emit(
             self._exp_id,
@@ -333,7 +333,7 @@ class ExperimentImportPanel(QWidget):
             self.segmented_source_edit.setText(path)
 
     def _on_segmented_import(self) -> None:
-        """分段采集导入:容器目录(合并 FID)直接发请求(带当前实验类型,0.2.122)。"""
+        """分段采集导入:容器目录(合并 FID)直接发请求(带当前实验,0.2.122)。"""
         source = self.segmented_source_edit.text().strip()
         if not source:
             InfoDialog.show_info(
@@ -426,7 +426,7 @@ class ImportDataDropdown(QWidget):
         if self._app is not None:
             self._app.installEventFilter(self)
         self.panel.set_context(exp_id)
-        # 保持为实验类型页子部件、相对本页定位,不 reparent 到主窗口——
+        # 保持为实验页子部件、相对本页定位,不 reparent 到主窗口——
         # 首次打开 reparent 会触发位置重算,下拉跑到页面顶部只露滚动条
         # (0.2.194-补2 实测;子部件方案任何平台一致,无顶层窗口位置问题)
         host = self.parentWidget() or anchor.parentWidget()
@@ -531,7 +531,7 @@ class GroupAnalysisDropdown(QWidget):
         self._host_window = anchor.window()
         if self._app is not None:
             self._app.installEventFilter(self)
-        # 保持为实验类型页子部件、相对本页定位,不 reparent 到主窗口——
+        # 保持为实验页子部件、相对本页定位,不 reparent 到主窗口——
         # 首次打开 reparent 会触发位置重算,下拉跑到页面顶部只露滚动条
         # (0.2.194-补2 实测;子部件方案任何平台一致,无顶层窗口位置问题)
         host = self.parentWidget() or anchor.parentWidget()
@@ -605,7 +605,7 @@ class GroupAnalysisDropdown(QWidget):
 
 
 class ExperimentDashboard(QWidget):
-    """实验类型概览:样品数据列表(状态,名称可改);导入块已移入「导入数据」下拉。"""
+    """实验概览:样品数据列表(状态,名称可改);导入块已移入「导入数据」下拉。"""
 
     import_options_requested = pyqtSignal(str, str, str, bool)  # (exp_id, name, source, copy)
     data_rename_requested = pyqtSignal(str, str, str)  # (exp_id, data_id, new_name)
@@ -619,7 +619,7 @@ class ExperimentDashboard(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
 
-        title = QLabel("实验类型")
+        title = QLabel("实验")
         title.setStyleSheet("font-size: 15px; font-weight: bold; color: #2c3e50;")
         layout.addWidget(title)
         self.context_label = QLabel("")
@@ -644,7 +644,7 @@ class ExperimentDashboard(QWidget):
         layout.addWidget(self.data_table)
         layout.addSpacing(10)
 
-        # 0.2.162-补11:导入块移入「导入数据」下拉面板,实验类型页不再内联展示
+        # 0.2.162-补11:导入块移入「导入数据」下拉面板,实验页不再内联展示
         self.import_panel = ExperimentImportPanel(self)
         self.import_panel.hide()
         self.import_panel.import_options_requested.connect(
@@ -696,7 +696,7 @@ class ExperimentDashboard(QWidget):
         layout.addStretch(1)
 
     def _open_import_dropdown(self) -> None:
-        """实验类型页「导入数据」:点击总是有明确反馈。
+        """实验页「导入数据」:点击总是有明确反馈。
 
         下拉未打开 → 在按钮下方弹出;已打开 → 置顶聚焦(不重复 setParent,
         避免重复安装事件过滤器)。关闭通过点击外部(EventFilter)触发。
@@ -709,7 +709,7 @@ class ExperimentDashboard(QWidget):
         self._import_dropdown.open_below(self.import_dropdown_button, self._exp_id)
 
     def _open_group_analysis_dropdown(self) -> None:
-        """实验类型页「数据组间分析」:占位下拉(0.2.162-补13)。"""
+        """实验页「数据组间分析」:占位下拉(0.2.162-补13)。"""
         if self._group_analysis_dropdown.isVisible():
             self._group_analysis_dropdown.close()
             return

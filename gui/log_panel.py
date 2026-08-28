@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
 
 
 class LogPanel(QWidget):
-    """日志面板:按作用域(单个数据/数据组/实验类型/全局)隔离 + 追加 + 清空。
+    """日志面板:按作用域(单个数据/数据组/实验/全局)隔离 + 追加 + 清空。
 
     用户要求:单个数据的日志各自独立,点击哪个数据显示哪个的日志;
     数据组内的成员共用同一个数据组日志。选中变化时主窗口调用
@@ -62,7 +62,7 @@ class LogPanel(QWidget):
 
         - 数据组:组内共用同一个组日志(group:{exp}:{group});
         - 单个数据:每个数据独立(data:{exp}:{data});
-        - 实验类型:实验级日志(exp:{exp});
+        - 实验:实验级日志(exp:{exp});
         - 其它(项目/工作区/未选中):全局(global)。
         """
         if kind == "group" and group_id:

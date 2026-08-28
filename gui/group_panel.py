@@ -68,7 +68,7 @@ class GroupBatchPanel(QWidget):
         ref_box = QGroupBox("按参考数据处理整组")
         ref_layout = QVBoxLayout(ref_box)
         ref_hint = QLabel(
-            "选择本实验类型下已经运行过谱图的数据,程序把该数据的处理参数"
+            "选择本实验下已经运行过谱图的数据,程序把该数据的处理参数"
             "应用到组内每个数据;可只处理到指定步骤(如仅生成 FID)。"
         )
         ref_hint.setWordWrap(True)
@@ -143,7 +143,7 @@ class GroupBatchPanel(QWidget):
             self.run_optimize_button.setEnabled(False)
             return
         title = group.title or f"数据组 {group_id}"
-        self.context_label.setText(f"实验类型: {exp.title or exp_id}  ·  组: {title}")
+        self.context_label.setText(f"实验: {exp.title or exp_id}  ·  组: {title}")
         members = [
             d
             for d in exp.data

@@ -1197,7 +1197,7 @@ def test_project_dashboard_stats_and_runs(
     proj_item = tree.topLevelItem(0).child(0)
     tree.setCurrentItem(proj_item)
     assert window.center_panel.stack.currentIndex() == 1  # Project Dashboard
-    assert "实验类型:" in window.center_panel.project_page.stats_label.text()
+    assert "实验:" in window.center_panel.project_page.stats_label.text()
     assert window.center_panel.project_page.runs_table.rowCount() >= 1
     window.close()
 
@@ -1506,7 +1506,7 @@ def test_reset_view_union_of_all_layers(qapp: QApplication) -> None:
 def test_rename_project_to_sample_wording(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """文件结构三级名称:项目 → 实验类型 → 样品数据(菜单/欢迎页/上下文条)。"""
+    """文件结构三级名称:项目 → 实验 → 样品数据(菜单/欢迎页/上下文条)。"""
     workspace = tmp_path / "ws2"
     monkeypatch.setattr(
         "gui.main_window.WorkspaceManager", lambda: _TempWorkspace(workspace)
@@ -1519,16 +1519,16 @@ def test_rename_project_to_sample_wording(
     # 未打开项目:上下文条与欢迎页入口文案
     assert window.context_bar.text() == "未打开项目"
     assert window.center_panel.welcome_page.new_button.text() == "新建项目..."
-    # 菜单栏:「实验类型(&E)」菜单,不含「项目管理/添加/删除项目」
+    # 菜单栏:「实验(&E)」菜单,不含「项目管理/添加/删除项目」
     menus = [action.text() for action in window.menuBar().actions()]
-    assert "实验类型(&E)" in menus
+    assert "实验(&E)" in menus
     experiment_menu = next(
         action.menu()
         for action in window.menuBar().actions()
-        if action.text() == "实验类型(&E)"
+        if action.text() == "实验(&E)"
     )
     labels = [action.text() for action in experiment_menu.actions()]
-    assert "新建实验类型..." in labels
+    assert "新建实验..." in labels
     assert "项目管理" not in labels
     assert "添加项目..." not in labels
     assert "删除项目..." not in labels

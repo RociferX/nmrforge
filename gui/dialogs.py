@@ -1,4 +1,4 @@
-"""GUI 对话框组件:信息/确认/导入实验类型/项目表单。
+"""GUI 对话框组件:信息/确认/导入实验/项目表单。
 
 不使用 QMessageBox(在 Windows + Qt6 下从菜单触发模态 QMessageBox 会打印
 "This plugin supports grabbing the mouse only for popup windows"),统一用普通 QDialog。
@@ -168,7 +168,7 @@ class ConfirmDialog(QDialog):
 
 
 class ImportExperimentDialog(QDialog):
-    """导入实验类型:选择 Bruker 数据集目录 + 标题 + 关联项目。"""
+    """导入实验:选择 Bruker 数据集目录 + 标题 + 关联项目。"""
 
     def __init__(
         self,
@@ -351,7 +351,7 @@ class NotesDialog(QDialog):
     """三级注释表单:按层级字段列表逐行填写;仅有几种取值的字段用下拉。
 
     样品数据注释先选维度,再按 presets 过滤给出数据类型选项;
-    实验类型注释「实验类型」为指认实验/动力学实验;核(组合)同样给常用选项。
+    实验注释:「实验类型」为指认实验/动力学实验;核(组合)同样给常用选项。
     其余字段保持文本输入。
     """
 
@@ -389,7 +389,7 @@ class NotesDialog(QDialog):
                 combo = QComboBox()
                 combo.setEditable(True)
                 if kind == "experiment":
-                    # 实验类型注释:实验类型仅指认实验 / 动力学实验
+                    # 实验注释:实验类型仅指认实验 / 动力学实验
                     combo.addItems(EXPERIMENT_CATEGORY_OPTIONS)
                 else:
                     self._type_combo = combo
@@ -593,7 +593,7 @@ class RunHistoryDialog(QDialog):
 
         self.table = QTableWidget(len(runs), 6)
         self.table.setHorizontalHeaderLabels(
-            ["运行", "实验类型", "流程", "状态", "开始", "结束"]
+            ["运行", "实验", "流程", "状态", "开始", "结束"]
         )
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -642,7 +642,7 @@ class RunHistoryDialog(QDialog):
         self.snapshot_button.setEnabled(bool(self._current_snapshot))
         self.detail_label.setText(
             f"运行: {run.run_id}  [{run.status}]\n"
-            f"流程: {run.workflow_ref}  实验类型: {run.experiment_id}\n"
+            f"流程: {run.workflow_ref}  实验: {run.experiment_id}\n"
             f"消息: {run.message or '-'}\n"
             f"快照: {snapshot or '(无)'}  脚本: {scripts}\n"
             f"产物:\n{outputs}"

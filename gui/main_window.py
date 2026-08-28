@@ -163,23 +163,13 @@ class MainWindow(QMainWindow):
         file_menu.addSeparator()
         file_menu.addAction("退出", self.close)
 
-        experiment_menu = bar.addMenu("实验类型(&E)")
-        experiment_menu.addAction("新建实验类型...", self._create_experiment)
-        experiment_menu.addAction("重命名实验类型...", self.rename_experiment)
-        experiment_menu.addAction("删除实验类型", self.delete_experiment)
-
-        process_menu = bar.addMenu("处理(&R)")
-        process_menu.addAction("运行自动化处理", self.run_auto)
-        process_menu.addAction("人工脚本编辑器...", self._manual_script_editor_menu)
-        process_menu.addAction("人工 FID 脚本...", self._manual_fid_menu)
-        process_menu.addSeparator()
-        process_menu.addAction("运行历史...", self._show_run_history)
-
+        experiment_menu = bar.addMenu("实验(&E)")
+        experiment_menu.addAction("新建实验...", self._create_experiment)
+        experiment_menu.addAction("重命名实验...", self.rename_experiment)
+        experiment_menu.addAction("删除实验", self.delete_experiment)
 
         view_menu = bar.addMenu("查看(&V)")
         view_menu.addAction("谱图查看器", self._show_viewer)
-        view_menu.addAction("Task / Log", self._show_log)
-        view_menu.addAction("报告...", self._show_report)
         view_menu.addSeparator()
         self.view_left_action = QAction("左侧项目管理", self, checkable=True)
         self.view_left_action.setChecked(True)
@@ -392,10 +382,10 @@ class MainWindow(QMainWindow):
             )
 
     # ------------------------------------------------------------------
-    # 实验类型/项目动作
+    # 实验/项目动作
     # ------------------------------------------------------------------
     def add_experiment(self) -> None:
-        """兼容入口:等同新建空白实验类型(导入样品数据走实验类型右键「导入样品数据」)。"""
+        """兼容入口:等同新建空白实验(导入样品数据走实验右键「导入样品数据」)。"""
         self._create_experiment()
 
     def add_experiment_via_import(self, source: str, title: str = "") -> None:
@@ -407,7 +397,7 @@ class MainWindow(QMainWindow):
     def _segmented_import(self, exp_id: str, source: str) -> None:
         """分段采集导入:容器目录(≥2 个含 acqus 的子目录)合并为一条样品数据。
 
-        exp_id 为当前实验类型;为空时后端新建实验(G2B-011)。
+        exp_id 为当前实验;为空时后端新建实验(G2B-011)。
         """
         if self.manager.project is None:
             InfoDialog.show_info(self, "提示", "请先新建或打开项目")
@@ -444,7 +434,7 @@ class MainWindow(QMainWindow):
         if self.manager.project is None or not exp_id or not folders:
             return
         self._append_log(
-            f"开始批量导入: {len(folders)} 个目录 → 实验类型 {exp_id}"
+            f"开始批量导入: {len(folders)} 个目录 → 实验 {exp_id}"
         )
 
         def worker() -> None:
@@ -473,7 +463,7 @@ class MainWindow(QMainWindow):
     def _on_batch_import_done(
         self, exp_id: str, batch_id_value: str, count: int, results
     ) -> None:
-        """批量导入完成(主线程):逐项日志 + 刷新并选中实验类型。"""
+        """批量导入完成(主线程):逐项日志 + 刷新并选中实验。"""
         for item in results or []:
             if item.get("ok"):
                 self._append_log(
@@ -510,7 +500,7 @@ class MainWindow(QMainWindow):
         except ProjectError:
             pass
         self._append_log(
-            f"批量导入完成: 实验类型 {exp_id} 组 {batch_id_value},共 {count} 个样品数据"
+            f"批量导入完成: 实验 {exp_id} 组 {batch_id_value},共 {count} 个样品数据"
         )
         self.refresh()
         self.project_tree.select_experiment(exp_id)
@@ -660,7 +650,7 @@ class MainWindow(QMainWindow):
 
         source = data.get("source", "")
         exp_id = data.get("experiment_id", "")
-        self._append_log(f"开始导入: {source} (实验类型 {exp_id or '自动创建'})")
+        self._append_log(f"开始导入: {source} (实验 {exp_id or '自动创建'})")
 
         def worker() -> None:
             try:
@@ -676,7 +666,7 @@ class MainWindow(QMainWindow):
                     resolved_source, segmented = resolve_import_source(source)
                 if segmented:
                     # 0.2.108/G2B-011:分段采集导入(容器目录合并为一条数据,
-                    # 导入到当前实验类型;exp_id 为空时后端新建)
+                    # 导入到当前实验;exp_id 为空时后端新建)
                     result = self.controller.import_segmented_dataset(
                         resolved_source,
                         exp_id=exp_id or "",
@@ -756,7 +746,7 @@ class MainWindow(QMainWindow):
         InfoDialog.show_info(self, "导入失败", message)
 
     def _on_import_done(self, result: ImportResult) -> None:
-        """导入成功后刷新并选中新实验类型;展示 warnings。"""
+        """导入成功后刷新并选中新实验;展示 warnings。"""
         data_id = getattr(result, "data_id", "") or ""
         self._append_log(
             f"导入完成: {result.experiment_id}/{data_id or '-'} "
@@ -846,8 +836,8 @@ class MainWindow(QMainWindow):
             return
         confirmed = ConfirmDialog.confirm(
             self,
-            "删除实验类型",
-            f"删除实验类型 {exp_id} 及其产物文件?\n(WorkflowRun 审计记录将保留)",
+            "删除实验",
+            f"删除实验 {exp_id} 及其产物文件?\n(WorkflowRun 审计记录将保留)",
         )
         if not confirmed:
             return
@@ -855,7 +845,7 @@ class MainWindow(QMainWindow):
             self.manager.delete_experiment(exp_id)
             self.manager.save()
         except ProjectError as exc:
-            InfoDialog.show_info(self, "删除实验类型失败", str(exc))
+            InfoDialog.show_info(self, "删除实验失败", str(exc))
             return
         self.refresh()
 
@@ -886,7 +876,7 @@ class MainWindow(QMainWindow):
     def run_auto(self) -> None:
         exp_id = self.project_tree.current_experiment_id()
         if not exp_id:
-            InfoDialog.show_info(self, "提示", "请先在左侧选择一个实验类型")
+            InfoDialog.show_info(self, "提示", "请先在左侧选择一个实验")
             return
         if self.manager.project is None:
             return
@@ -985,7 +975,7 @@ class MainWindow(QMainWindow):
         self._handle_dropped_import_paths(paths)
 
     def _handle_dropped_import_paths(self, paths: list) -> None:
-        """拖拽导入:目录含 acqus 视为 Bruker 数据集,导入当前实验类型或新建实验类型。"""
+        """拖拽导入:目录含 acqus 视为 Bruker 数据集,导入当前实验或新建实验。"""
         imported = 0
         for path in paths:
             if not path.is_dir():
@@ -1019,7 +1009,7 @@ class MainWindow(QMainWindow):
         """人工处理入口:按步骤打开脚本编辑器/fid 编辑器。"""
         exp_id = self.project_tree.current_experiment_id()
         if not exp_id:
-            InfoDialog.show_info(self, "提示", "请先在左侧选择一个实验类型")
+            InfoDialog.show_info(self, "提示", "请先在左侧选择一个实验")
             return
         entry = self.manager.project.experiment(exp_id) if self.manager.project else None
         if entry is None:
@@ -1027,7 +1017,7 @@ class MainWindow(QMainWindow):
         label = f"{entry.title or entry.id} ({exp_id})"
         data_node = self._current_data_node(entry)
         if data_node is None:
-            InfoDialog.show_info(self, "提示", "该实验类型还没有样品数据,请先导入样品数据")
+            InfoDialog.show_info(self, "提示", "该实验还没有样品数据,请先导入样品数据")
             return
         data_id = getattr(data_node, "id", exp_id)
         if step_id == "fid":
@@ -1050,7 +1040,7 @@ class MainWindow(QMainWindow):
             InfoDialog.show_info(self, "人工处理", f"暂不支持该步骤的人工入口: {step_id}")
 
     def _current_data_node(self, entry):
-        """当前选中样品数据节点(未选中时回退首个;空白实验类型返回 None)。"""
+        """当前选中样品数据节点(未选中时回退首个;空白实验返回 None)。"""
         nodes = list(getattr(entry, "data", None) or [])
         if not nodes:
             return None
@@ -1289,7 +1279,7 @@ class MainWindow(QMainWindow):
         self.center_panel.refresh()
 
     def _show_report(self) -> None:
-        """查看菜单:打开报告页(当前选中实验类型/样品数据)。"""
+        """查看菜单:打开报告页(当前选中实验/样品数据)。"""
         if self.manager.project is None:
             InfoDialog.show_info(self, "提示", "请先打开项目")
             return
@@ -1356,23 +1346,23 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("项目已关闭")
 
     def _create_experiment(self) -> None:
-        """新建空白实验类型(菜单/Project/空白处右键):项目树内内联命名(不弹窗)。"""
+        """新建空白实验(菜单/Project/空白处右键):项目树内内联命名(不弹窗)。"""
         if self.manager.project is None:
             InfoDialog.show_info(self, "提示", "请先新建或打开项目")
             return
         self.project_tree.begin_create_experiment()
 
     def _on_experiment_create_submitted(self, title: str) -> None:
-        """项目树内联命名提交:填常规信息后创建空白实验类型。"""
+        """项目树内联命名提交:填常规信息后创建空白实验。"""
         if self.manager.project is None:
             return
-        fields = self._ask_note_fields("新建实验类型 - 常规信息(可选)", "experiment")
+        fields = self._ask_note_fields("新建实验 - 常规信息(可选)", "experiment")
         self._create_experiment_with_title_and_fields(title.strip(), fields)
 
     def _import_data_with_options(
         self, exp_id: str, name: str, source: str, copy: bool
     ) -> None:
-        """中间面板内嵌导入表单:按指定实验类型导入样品数据(可命名)。"""
+        """中间面板内嵌导入表单:按指定实验导入样品数据(可命名)。"""
         self._pending_data_names[exp_id] = name
         self._import_experiment_async(
             {
@@ -1411,7 +1401,7 @@ class MainWindow(QMainWindow):
         self.project_tree.refresh()
 
     def _delete_data(self, exp_id: str, data_id: str) -> None:
-        """删除样品数据(不删实验类型);确认 + manager.delete_data + save + refresh。"""
+        """删除样品数据(不删实验);确认 + manager.delete_data + save + refresh。"""
         if self.manager.project is None:
             return
         confirmed = ConfirmDialog.confirm(
@@ -1433,13 +1423,13 @@ class MainWindow(QMainWindow):
         self.refresh()
 
     def _create_experiment_with_title(self, title: str) -> None:
-        """中间面板内嵌表单:新建空白实验类型。"""
+        """中间面板内嵌表单:新建空白实验。"""
         self._create_experiment_with_title_and_fields(title.strip())
 
     def _create_experiment_with_title_and_fields(
         self, title: str, fields: dict | None = None
     ) -> None:
-        """按标题(可带常规信息字段)创建空白实验类型。"""
+        """按标题(可带常规信息字段)创建空白实验。"""
         if self.manager.project is None:
             InfoDialog.show_info(self, "提示", "请先新建或打开项目")
             return
@@ -1455,13 +1445,13 @@ class MainWindow(QMainWindow):
                 set_experiment_note_fields(self.manager.project, entry.id, fields)
             self.manager.save()
         except ProjectError as exc:
-            InfoDialog.show_info(self, "新建实验类型失败", str(exc))
+            InfoDialog.show_info(self, "新建实验失败", str(exc))
             return
         self.refresh()
         self.project_tree.select_experiment(entry.id)
 
     def _import_data_for(self, exp_id: str) -> None:
-        """在指定实验类型下导入样品数据。"""
+        """在指定实验下导入样品数据。"""
         if self.manager.project is None:
             InfoDialog.show_info(self, "提示", "请先新建或打开项目")
             return
@@ -1488,7 +1478,7 @@ class MainWindow(QMainWindow):
         self.center_panel.run_step(step, data_id=data_id)
 
     def _edit_notes(self, kind: str, exp_id: str, data_id: str) -> None:
-        """编辑项目/实验类型/样品数据注释(中间顶部注释条「编辑注释」)。"""
+        """编辑项目/实验/样品数据注释(中间顶部注释条「编辑注释」)。"""
         if self.manager.project is None or not kind:
             return
         from gui.notes import (
@@ -1502,7 +1492,7 @@ class MainWindow(QMainWindow):
 
         title = {
             "project": "项目注释",
-            "experiment": "实验类型注释",
+            "experiment": "实验注释",
             "data": "样品数据注释",
         }.get(kind, "注释")
         if kind == "project":
@@ -1586,7 +1576,7 @@ class MainWindow(QMainWindow):
         if not target.is_dir():
             target.mkdir(parents=True, exist_ok=True)
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(target)))
-        # 保持中间 Pipeline 上下文(当前选中实验类型时切回样品数据页)
+        # 保持中间 Pipeline 上下文(当前选中实验时切回样品数据页)
         exp_id = self.project_tree.current_experiment_id()
         data_id = self.project_tree._data_id_of(self.project_tree.tree.currentItem())
         if exp_id:
@@ -1597,7 +1587,7 @@ class MainWindow(QMainWindow):
         self.center_panel.set_selection("experiment", exp_id, "")
         self.spectrum_panel.set_context(exp_id, "")
         self.statusBar().showMessage(
-            f"实验类型 {exp_id}: 双击查看谱图文件,中间 Pipeline 显示处理步骤"
+            f"实验 {exp_id}: 双击查看谱图文件,中间 Pipeline 显示处理步骤"
         )
 
     _DATA_STATUS_TEXT = {
@@ -1748,7 +1738,7 @@ class MainWindow(QMainWindow):
         return exp_id or None
 
     def refresh(self) -> None:
-        """刷新窗口标题、最近项目菜单、左侧树与兼容实验类型表。"""
+        """刷新窗口标题、最近项目菜单、左侧树与兼容实验表。"""
         self._refresh_recent_menu()
         self.project_tree.refresh()
         tree = self.experiment_tree
@@ -1770,7 +1760,7 @@ class MainWindow(QMainWindow):
             tree.addTopLevelItem(item)
         self.setWindowTitle(f"NMRForge - {project.name}")
         self.statusBar().showMessage(f"项目: {self.manager.root}")
-        # 打开/新建项目后默认聚焦第一个实验类型
+        # 打开/新建项目后默认聚焦第一个实验
         if project.experiments and not self.center_panel.current_experiment_id():
             self.project_tree.select_experiment(project.experiments[0].id)
         self._update_context_bar()

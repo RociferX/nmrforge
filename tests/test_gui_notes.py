@@ -55,6 +55,10 @@ def test_note_fields_schemas_differ_per_level() -> None:
     ]
     assert [key for key, _ in EXPERIMENT_FIELDS] == [
         "experiment_type",
+        "sample_name",
+        "instrument",
+        "temperature",
+        "notes",
     ]
     assert [key for key, _ in DATA_FIELDS] == [
         "repeat",
@@ -187,15 +191,15 @@ def test_main_window_menu_experiment(
     )
     window = MainWindow()
     menus = [action.text() for action in window.menuBar().actions()]
-    assert "实验类型(&E)" in menus
+    assert "实验(&E)" in menus
     assert "样本(&S)" not in menus
     experiment_menu = next(
         action.menu()
         for action in window.menuBar().actions()
-        if action.text() == "实验类型(&E)"
+        if action.text() == "实验(&E)"
     )
     labels = [action.text() for action in experiment_menu.actions()]
-    assert "新建实验类型..." in labels
+    assert "新建实验..." in labels
     assert "项目管理" not in labels
     assert "添加项目..." not in labels
     assert "删除项目..." not in labels

@@ -1,7 +1,7 @@
-"""项目/实验类型/样品数据三级注释读写 helper(GUI 侧约定)。
+"""项目/实验/样品数据三级注释读写 helper(GUI 侧约定)。
 
 - 项目注释:ProjectInfo.protein.notes(JSON 字段串,兼容旧纯文本);
-- 实验类型注释:ExperimentEntry.metadata["note_fields"](dict,约定键);
+- 实验注释:ExperimentEntry.metadata["note_fields"](dict,约定键);
 - 样品数据注释:ExperimentEntry.metadata["data_notes"][data_id](dict,约定键)。
 各级字段为「常规信息列表」,由用户按表单逐行填写;写操作由调用方在
 manager.save() 前调用。
@@ -27,6 +27,10 @@ SAMPLE_FIELDS: tuple[tuple[str, str], ...] = (
 )
 EXPERIMENT_FIELDS: tuple[tuple[str, str], ...] = (
     ("experiment_type", "实验类型"),
+    ("sample_name", "样品名称"),
+    ("instrument", "仪器"),
+    ("temperature", "温度(°C)"),
+    ("notes", "备注"),
 )
 DATA_FIELDS: tuple[tuple[str, str], ...] = (
     ("repeat", "重复号"),
@@ -57,7 +61,7 @@ NUCLEI_OPTIONS: tuple[str, ...] = (
     "1H-15N-1H",
     "13C-13C-1H",
 )
-# 实验类型注释「实验类型」仅两种取值:指认实验 / 动力学实验
+# 实验注释:「实验类型」仅两种取值:指认实验 / 动力学实验
 EXPERIMENT_CATEGORY_OPTIONS: tuple[str, ...] = ("指认实验", "动力学实验")
 _GENERIC_PRESET_NAMES = {"Generic2D", "Generic3D"}
 _PRESET_OPTIONS: list[tuple[str, int]] | None = None
@@ -189,7 +193,7 @@ def set_experiment_note_fields(project, exp_id: str, fields: dict) -> None:
 
 
 def experiment_note(project, exp_id: str) -> str:
-    """实验类型注释展示文本(结构化字段优先,兼容 entry.notes 纯文本)。"""
+    """实验注释展示文本(结构化字段优先,兼容 entry.notes 纯文本)。"""
     fields = experiment_note_fields(project, exp_id)
     if fields:
         return format_fields(fields)
