@@ -2064,3 +2064,34 @@ def test_peaks_threshold_change_does_not_auto_run(
     assert controller.calls == [('pick_peaks', 8.0)]  # 点运行按新阈值执行
     panel.close()
     log.close()
+
+
+
+def test_project_tree_data_status_shows_picked(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 0.2.199-补29av:有峰表时数据显示「已选峰」
+    from gui.project_tree import ProjectTreePanel
+
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    spectra = manager.data_dir('exp_001', 'd_001', 'spectra')
+    spectra.mkdir(parents=True, exist_ok=True)
+    _write_ft2(spectra / 'exp_001-d_001.ft2')
+    manager.set_data_spectrum(
+        'exp_001', 'd_001', str(spectra / 'exp_001-d_001.ft2')
+    )
+    peaks = manager.data_dir('exp_001', 'd_001', 'peaks')
+    peaks.mkdir(parents=True, exist_ok=True)
+    (peaks / 'exp_001-d_001.list').write_text(
+        'Assignment w1 w2 Data Height Volume\n'
+        'G1  115.000  8.000  0  100  0\n',
+        encoding='utf-8',
+    )
+    manager.save()
+    panel = ProjectTreePanel(manager)
+
+    def _data_item():
+        return panel.tree.topLevelItem(0).child(0).child(0).child(0)
+
+    assert _data_item().text(1) == '已选峰'
+    panel.close()

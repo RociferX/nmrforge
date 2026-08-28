@@ -660,10 +660,10 @@ class ProjectTreePanel(QWidget):
         self.refresh()
 
     def _data_status(self, exp, data_node) -> str:
-        """按产物文件推断样品数据状态(0.2.199-补29aa):
+        """按产物文件推断样品数据状态(0.2.199-补29aa/补29av):
 
-        运行中 → 已生成谱图 → 已生成 FID → 已导入;直接读 data_entry
-        登记的 spectrum_path/fid_path(比按文件名扫描可靠)。
+        运行中 → 已选峰 → 已生成谱图 → 已生成 FID → 已导入;直接读
+        data_entry 登记的 spectrum_path/fid_path(比按文件名扫描可靠)。
         """
         try:
             exp_id = exp.id
@@ -671,6 +671,15 @@ class ProjectTreePanel(QWidget):
             if (exp_id, data_id) in self._running:
                 return "运行中"
             entry = self.manager.data(exp_id, data_id)
+            # 0.2.199-补29av:峰表存在 → 已选峰(优先于谱图)
+            peaks_dir = self.manager.data_dir(exp_id, data_id, "peaks")
+            for suffix in (".list", ".csv"):
+                if (peaks_dir / f"{exp_id}-{data_id}{suffix}").is_file():
+                    return "已选峰"
+            flat_peaks = self.manager.dir_path("peaks")
+            for suffix in (".list", ".csv"):
+                if (flat_peaks / f"{exp_id}{suffix}").is_file():
+                    return "已选峰"
             spec = str(getattr(entry, "spectrum_path", "") or "")
             if spec and Path(spec).is_file():
                 return "已生成谱图"
