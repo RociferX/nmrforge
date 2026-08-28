@@ -71,32 +71,36 @@ def _rewrite_duplicate_nucleus_labels(
     spectrum_path: str,
     experiment: Any,
 ) -> bool:
-    """同核谱(HNN/NNH 双 15N)把重复标签唯一化(0.2.199-补29af)。
+    """同核谱重复标签唯一化(0.2.199-补29af/补29ag)。
 
-    proj3D 按 FDF 标签选轴,两个 15N 重名即歧义;处理时就改:按
-    FDDIMORDER 把 F2(HSQC 的 N,直接连 1H)标签写成 {核}x、F1 写成
-    {核}y(如 15Nx/15Ny)。GUI 的 nucleus_symbol 会把 15Nx 显示为 Nx。
-    返回是否改写。
+    proj3D 按 FDF 标签选轴,重复核标签即歧义;处理时就改:按逻辑轴
+    加下标 F2→x、F1→y、F3→z(如 2D 1H-1H:直接维 F2→Hx、间接维
+    F1→Hy;3D 双 15N(HNN/NNH):F2=HSQC 的 N→15Nx、F1→15Ny)。
+    GUI 的 nucleus_symbol 会把 15Nx 显示为 Nx。返回是否改写。
     """
     import nmrglue as ng
     import numpy as np
 
     try:
         dic, data = ng.pipe.read(str(spectrum_path))
-        if np.asarray(data).ndim != 3:
+        data = np.asarray(data)
+        ndim = data.ndim
+        if ndim not in (2, 3):
             return False
         order = [int(v) for v in dic.get("FDDIMORDER") or []]
 
         def _fdf(axis_idx: int) -> str:
-            if len(order) >= 3:
-                dim = order[2 - axis_idx]
+            if len(order) >= ndim:
+                dim = order[ndim - 1 - axis_idx]
                 if 1 <= dim <= 4:
                     return f"FDF{dim}"
             return f"FDF{axis_idx + 1}"
 
-        # numpy 存储轴:(F2, F1, F3);找重复标签
+        # numpy 存储轴逻辑名:2D (F1,F2);3D (F2,F1,F3)
+        logical = ["F1", "F2"] if ndim == 2 else ["F2", "F1", "F3"]
+        subscript = {"F1": "y", "F2": "x", "F3": "z"}
         labels = [
-            str(dic.get(f"{_fdf(i)}LABEL", "") or "") for i in range(3)
+            str(dic.get(f"{_fdf(i)}LABEL", "") or "") for i in range(ndim)
         ]
         counts: dict[str, int] = {}
         for lbl in labels:
@@ -108,11 +112,10 @@ def _rewrite_duplicate_nucleus_labels(
         for axis_idx, lbl in enumerate(labels):
             if lbl not in dups:
                 continue
-            if axis_idx == 0:  # F2 = HSQC 的 N → Nx
-                dic[f"{_fdf(axis_idx)}LABEL"] = lbl + "x"
-            elif axis_idx == 1:  # F1 → Ny
-                dic[f"{_fdf(axis_idx)}LABEL"] = lbl + "y"
-            changed = True
+            suf = subscript.get(logical[axis_idx], "")
+            if suf:
+                dic[f"{_fdf(axis_idx)}LABEL"] = lbl + suf
+                changed = True
         if changed:
             ng.pipe.write(str(spectrum_path), dic, data, overwrite=True)
         return changed
