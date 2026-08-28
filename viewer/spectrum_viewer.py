@@ -65,6 +65,7 @@ class SpectrumViewer(QWidget):
         self._box_press_scene: QPointF | None = None
         self._box_rect: QGraphicsRectItem | None = None
         self._box_selected_rows: set[int] = set()
+        self._suppress_click = False  # 框选释放不当作单击
         self._mode_1d = False
         self._primary_1d: Spectrum1D | None = None
         self._plot_1d: pg.PlotDataItem | None = None
@@ -765,6 +766,7 @@ class SpectrumViewer(QWidget):
             self._cancel_box_select()
             return
         rect = QRectF(self._box_press_scene, scene_pos).normalized()
+        self._suppress_click = True  # 框选结束,释放不当作单击
         self._cancel_box_select()
         try:
             v0 = self.plot.getViewBox().mapSceneToView(rect.topLeft())
@@ -1051,6 +1053,7 @@ class SpectrumViewer(QWidget):
         if mode != "select":
             self._cancel_box_select()
             self._box_selected_rows.clear()
+            self._suppress_click = False
             self._apply_peak_items()
 
     def set_box_select_mode(self, enabled: bool) -> None:
@@ -1065,6 +1068,7 @@ class SpectrumViewer(QWidget):
         if not enabled:
             self._cancel_box_select()
             self._box_selected_rows.clear()
+            self._suppress_click = False
             self._apply_peak_items()
 
     def _peak_xy(self, peak: dict) -> tuple[float, float]:
@@ -1176,7 +1180,17 @@ class SpectrumViewer(QWidget):
     def _on_plot_clicked(self, event) -> None:
         if event.button() != Qt.MouseButton.LeftButton:
             return
-        press = event.buttonDownScenePos(Qt.MouseButton.LeftButton)
+        if getattr(self, "_suppress_click", False):
+            # 刚完成框选:该次释放不当作单击
+            self._suppress_click = False
+            return
+        try:
+            press = event.buttonDownScenePos(Qt.MouseButton.LeftButton)
+        except AttributeError:
+            # 0.2.199-补29aw:pyqtgraph MouseClickEvent 无 buttonDownScenePos
+            # (那是 MouseDragEvent 的 API);用 eventFilter 记录的左键按下
+            # 场景坐标判断是否拖拽
+            press = getattr(self, "_box_press_scene", None)
         release = event.scenePos()
         if press is not None and (release - press).manhattanLength() > 6:
             return  # 拖拽是框选缩放,不当作单击

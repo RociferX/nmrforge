@@ -406,3 +406,30 @@ def test_viewer_peaks_toggle(qapp: QApplication) -> None:
     viewer.set_peaks_visible(True)
     assert viewer.peak_item.data["x"].shape == (2,)
     viewer.close()
+
+
+
+class _FakeClickEventNoPress(_FakeClickEvent):
+    """模拟 pyqtgraph MouseClickEvent:无 buttonDownScenePos(0.2.199-补29aw)。"""
+
+    def buttonDownScenePos(self, _button):
+        raise AttributeError("MouseClickEvent has no attribute 'buttonDownScenePos'")
+
+
+def test_viewer_plot_click_without_button_down_pos(qapp: QApplication) -> None:
+    # 0.2.199-补29aw:真实 MouseClickEvent 无 buttonDownScenePos 不再报错
+    spectrum = _synthetic_spectrum()
+    viewer = SpectrumViewer()
+    viewer.add_spectrum(spectrum)
+    viewer.set_peaks(
+        [
+            {
+                'H_shift': spectrum.x_axis.ppm_at(60),
+                'N_shift': spectrum.y_axis.ppm_at(30),
+            }
+        ]
+    )
+    scene_pt = viewer.plot.getViewBox().mapViewToScene(QPointF(60.0, 30))
+    viewer._on_plot_clicked(_FakeClickEventNoPress(scene_pt))
+    assert viewer._selected_peak == 0
+    viewer.close()

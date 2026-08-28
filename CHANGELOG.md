@@ -2,6 +2,17 @@
 
 # 修改记录(历史条目)
 
+## 0.2.199-补29aw(2026-08-28,修复点击谱图报错 MouseClickEvent 无 buttonDownScenePos)
+
+VM 实测点击谱图报 `AttributeError: 'MouseClickEvent' object has no attribute
+'buttonDownScenePos'`——pyqtgraph sigMouseClicked 发的是 MouseClickEvent,
+buttonDownScenePos 是 MouseDragEvent 的 API。修复:
+- _on_plot_clicked 用 try/except 兼容:无该属性时改用 eventFilter 记录的
+  左键按下场景坐标判断拖拽;
+- 新增 _suppress_click:框选结束的释放不当作单击,切出选择模式时复位;
+- 回归测试 +1(模拟无 buttonDownScenePos 的 MouseClickEvent 不再报错);
+  全量 pytest 全绿,ruff 通过。
+
 ## 0.2.199-补29av(2026-08-28,数据状态加入「已选峰」)
 
 左侧项目树样品数据状态链补全:运行中 → 已选峰 → 已生成谱图 → 已生成 FID →
