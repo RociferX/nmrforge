@@ -12,7 +12,7 @@ from __future__ import annotations
 import numpy as np
 import pyqtgraph as pg
 from PyQt6.QtCore import QEvent, QPointF, QRect, QRectF, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QPainter, QPen
+from PyQt6.QtGui import QColor, QFont, QPainter, QPen, QTransform
 from PyQt6.QtWidgets import (
     QCheckBox,
     QDoubleSpinBox,
@@ -1201,18 +1201,24 @@ class SpectrumViewer(QWidget):
         ys: list[float] = []
         sizes: list[float] = []
         base = self._peak_size
+        pens: list = []
         for row, peak in enumerate(self._peaks):
             x_ppm, y_ppm = self._peak_xy(peak)
             xs.append(float(x_axis.index_at(x_ppm)))
             # view y 即数据行:峰标记按 y 轴数据行放置,与 contour 对齐
             ys.append(float(y_axis.index_at(y_ppm)))
-            sizes.append(
-                base * 1.6
-                if (row == self._selected_peak or row in self._box_selected_rows)
-                else base
+            selected = (
+                row == self._selected_peak or row in self._box_selected_rows
+            )
+            # 0.2.199-补29bj:选中峰 3× 尺寸 + 蓝色,峰表点选有清晰谱图指示
+            sizes.append(base * 3.0 if selected else base)
+            pens.append(
+                pg.mkPen("#0e639c", width=1.5)
+                if selected
+                else pg.mkPen("#8b0000", width=1.5)
             )
         self._peak_data_xy = list(zip(xs, ys))
-        self.peak_item.setData(x=xs, y=ys, size=sizes)
+        self.peak_item.setData(x=xs, y=ys, size=sizes, pen=pens)
 
         # 0.2.199-补29bg:Assignment 标签用 QGraphicsTextItem(随谱图缩放,
         # 不抵消视图变换),字体像素尺寸=峰标记大小(数据坐标单位,二者绑定);
@@ -1240,6 +1246,8 @@ class SpectrumViewer(QWidget):
             font = QFont()
             font.setPixelSize(font_size)
             item.setFont(font)
+            # 0.2.199-补29bj:谱图视图 y 翻转,抵消镜像让文字直立(仍随缩放)
+            item.setTransform(QTransform().scale(1.0, -1.0))
             item.setZValue(21)
             self.plot.addItem(item)
             self.peak_label_items.append(item)
