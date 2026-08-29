@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import numpy as np
 import pyqtgraph as pg
-from PyQt6.QtCore import QEvent, QPointF, QRect, QRectF, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QPainter, QPen
+from PyQt6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, Qt, pyqtSignal
+from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
 from PyQt6.QtWidgets import (
     QCheckBox,
     QDoubleSpinBox,
@@ -90,303 +90,18 @@ class _BoxSelectOverlay(QWidget):
             painter.end()
 
 
-def _convex_hull(points: list[QPointF]) -> list[QPointF]:
-    """单调链凸包(CCW);点数不足或共线时退化为包围盒角点。"""
-    pts = sorted(
-        {(round(float(p.x()), 3), round(float(p.y()), 3)) for p in points}
-    )
-    if not pts:
-        return []
-
-    def cross(o: tuple[float, float], a: tuple[float, float], b: tuple[float, float]) -> float:
-        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
-
-    def bbox() -> list[QPointF]:
-        xs = [p[0] for p in pts]
-        ys = [p[1] for p in pts]
-        x0, x1 = min(xs), max(xs)
-        y0, y1 = min(ys), max(ys)
-        return [
-            QPointF(x0, y0),
-            QPointF(x1, y0),
-            QPointF(x1, y1),
-            QPointF(x0, y1),
-        ]
-
-    lower: list[tuple[float, float]] = []
-    for p in pts:
-        while len(lower) >= 2 and cross(lower[-2], lower[-1], p) <= 0:
-            lower.pop()
-        lower.append(p)
-    upper: list[tuple[float, float]] = []
-    for p in reversed(pts):
-        while len(upper) >= 2 and cross(upper[-2], upper[-1], p) <= 0:
-            upper.pop()
-        upper.append(p)
-    hull = lower[:-1] + upper[:-1]
-    if len(hull) < 3:
-        return bbox()
-    return [QPointF(x, y) for x, y in hull]
-
-
-def _box_radius(cx: float, cy: float, ang: float, box: QRectF) -> float:
-    """质心沿角度到绿框边缘的距离(标签可用的最大半径)。"""
-    ux, uy = np.cos(ang), np.sin(ang)
-    ts: list[float] = []
-    if abs(ux) > 1e-9:
-        ts.append((box.right() - cx) / ux if ux > 0 else (box.left() - cx) / ux)
-    if abs(uy) > 1e-9:
-        ts.append((box.bottom() - cy) / uy if uy > 0 else (box.top() - cy) / uy)
-    t = min(t for t in ts if t > 0)
-    return max(float(t), 20.0)
-
-
-def _box_arc_point(box: QRectF, arc: float) -> QPointF:
-    """绿框周长上(左上角起顺时针)取弧长处坐标。"""
-    w = float(box.width())
-    h = float(box.height())
-    peri = max(2.0 * (w + h), 1e-9)
-    d = arc % peri
-    if d <= w:
-        return QPointF(box.left() + d, box.top())
-    d -= w
-    if d <= h:
-        return QPointF(box.right(), box.top() + d)
-    d -= h
-    if d <= w:
-        return QPointF(box.right() - d, box.bottom())
-    return QPointF(box.left(), box.bottom() - (d - w))
-
-
-def _box_arc_of_point(point: QPointF, box: QRectF) -> float:
-    """绿框周长上一点→弧长(左上角起顺时针),供切向滑动。"""
-    w = float(box.width())
-    h = float(box.height())
-    tol = 2.0
-    if abs(point.y() - box.top()) <= tol:
-        return max(0.0, point.x() - box.left())
-    if abs(point.x() - box.right()) <= tol:
-        return w + max(0.0, point.y() - box.top())
-    if abs(point.y() - box.bottom()) <= tol:
-        return w + h + max(0.0, box.right() - point.x())
-    return w + h + w + max(0.0, box.bottom() - point.y())
-
-
-def _draw_outward_label(
-    painter: QPainter,
-    text: str,
-    pos: QPointF,
-    outward: QPointF,
-    font_px: float,
-) -> None:
-    """在环绕位置朝外绘制标签文本(文字始终直立,按外向主轴选锚点)。"""
-    fm = painter.fontMetrics()
-    tw = float(fm.horizontalAdvance(text))
-    th = float(fm.height())
-    x, y = pos.x(), pos.y()
-    if abs(outward.x()) >= abs(outward.y()):
-        if outward.x() < 0:
-            box = QRectF(x - tw, y - th / 2.0, tw, th)
-        else:
-            box = QRectF(x, y - th / 2.0, tw, th)
-    else:
-        if outward.y() < 0:
-            box = QRectF(x - tw / 2.0, y - th, tw, th)
-        else:
-            box = QRectF(x - tw / 2.0, y, tw, th)
-    painter.drawText(box, int(Qt.AlignmentFlag.AlignCenter), text)
-
-
-def _segments_cross(a1, a2, b1, b2) -> bool:
-    """两条线段是否相交(引导线交叉判定)。"""
-
-    def cross(o, p, q):
-        return (p[0] - o[0]) * (q[1] - o[1]) - (p[1] - o[1]) * (q[0] - o[0])
-
-    d1 = cross(a1, a2, b1)
-    d2 = cross(a1, a2, b2)
-    d3 = cross(b1, b2, a1)
-    d4 = cross(b1, b2, a2)
-    return ((d1 > 0) != (d2 > 0)) and ((d3 > 0) != (d4 > 0))
-
-
-def _assign_blank_cells(
-    entries: list[tuple[QPointF, str, float]],
-    cells: list[QPointF],
-    font_px: float,
-) -> list[tuple[QPointF, QPointF, QPointF, str]]:
-    """分区域独立规划(0.2.199-补29ca):按标签数量把谱图拆成若干区域(2×2/
-    3×3/4×4),每个区域的标签只用**本区域**空白格独立安排(避让已放标签:
-    不重叠、不交叉)——标签绝不超出所在区域的范围,相当于拆成多个小谱各自
-    规划。返回 (标签位, 锚点=标签位, 峰点, 文本)。"""
-    peaks: list[tuple[QPointF, str]] = [
-        (QPointF(pt), text) for pt, text, _tw in entries
-    ]
-    if not peaks or not cells:
-        return []
-    min_sep = max(20.0, font_px * 1.6)
-    # 0.2.199-补29by:性能上限——每峰最多检查 64 个最近候选、避让回看最近 40 个
-    max_cand = 64
-    max_placed = 40
-    cell_arr = np.array([(c.x(), c.y()) for c in cells])
-    peak_arr = np.array([(p.x(), p.y()) for p, _t in peaks])
-    dists = np.hypot(
-        cell_arr[None, :, 0] - peak_arr[:, None, 0],
-        cell_arr[None, :, 1] - peak_arr[:, None, 1],
-    )
-    # 自适应区域数:标签少→少区域(格子大),标签多→多区域(格子小)
-    n_peaks = len(peaks)
-    if n_peaks <= 12:
-        grid_n = 2
-    elif n_peaks <= 60:
-        grid_n = 3
-    else:
-        grid_n = 4
-    xs = np.concatenate([peak_arr[:, 0], cell_arr[:, 0]])
-    ys = np.concatenate([peak_arr[:, 1], cell_arr[:, 1]])
-    x0, x1 = float(xs.min()), float(xs.max())
-    y0, y1 = float(ys.min()), float(ys.max())
-    xw = max((x1 - x0) / grid_n, 1e-6)
-    yh = max((y1 - y0) / grid_n, 1e-6)
-
-    def _region(arr, coord, span, lo):
-        return np.clip(((arr[:, coord] - lo) // span).astype(int), 0, grid_n - 1)
-
-    peak_region = _region(peak_arr, 0, xw, x0) * grid_n + _region(peak_arr, 1, yh, y0)
-    cell_region = _region(cell_arr, 0, xw, x0) * grid_n + _region(cell_arr, 1, yh, y0)
-    total = grid_n * grid_n
-    region_cells: dict[int, np.ndarray] = {
-        r: np.nonzero(cell_region == r)[0] for r in range(total)
-    }
-
-    def _seg_cross(seg, pp, pc) -> bool:
-        # 包围盒预筛:不相交则必不交叉
-        if (
-            min(seg[0][0], seg[1][0]) > max(pp.x(), pc.x())
-            or max(seg[0][0], seg[1][0]) < min(pp.x(), pc.x())
-            or min(seg[0][1], seg[1][1]) > max(pp.y(), pc.y())
-            or max(seg[0][1], seg[1][1]) < min(pp.y(), pc.y())
-        ):
-            return False
-        return _segments_cross(
-            seg[0], seg[1], (pp.x(), pp.y()), (pc.x(), pc.y())
-        )
-
-    def _pick(cand_sub: np.ndarray, allow_cross: bool, allow_overlap: bool) -> int:
-        for k in cand_sub[:max_cand]:
-            k = int(k)
-            if used[k]:
-                continue
-            c = cells[k]
-            recent = placed[-max_placed:]
-            if not allow_overlap and any(
-                float(np.hypot(c.x() - pos.x(), c.y() - pos.y())) < min_sep
-                for pos, _p, _t in recent
-            ):
-                continue
-            if not allow_cross:
-                seg = ((peaks[pidx][0].x(), peaks[pidx][0].y()), (c.x(), c.y()))
-                if any(_seg_cross(seg, pp, pc) for pp, pc, _t in recent):
-                    continue
-            return k
-        return -1
-
-    order = np.argsort(dists.min(axis=1))  # 最近空白格稀缺的先放
-    used = [False] * len(cells)
-    placed: list[tuple[QPointF, QPointF, str]] = []
-    for oi in order:
-        pidx = int(oi)
-        home = int(peak_region[pidx])
-        sub = region_cells[home]
-        chosen = -1
-        if len(sub):
-            sub_sorted = sub[np.argsort(dists[pidx][sub])]
-            chosen = _pick(sub_sorted, False, False)
-            if chosen < 0:
-                chosen = _pick(sub_sorted, True, False)
-            if chosen < 0:
-                chosen = _pick(sub_sorted, True, True)
-        if chosen >= 0:
-            used[chosen] = True
-            placed.append(
-                (QPointF(cells[chosen]), QPointF(peaks[pidx][0]), peaks[pidx][1])
-            )
-        else:
-            # 本区域无空白格(整块都是信号):标签放峰位置,保证可读
-            placed.append(
-                (QPointF(peaks[pidx][0]), QPointF(peaks[pidx][0]), peaks[pidx][1])
-            )
-    out: list[tuple[QPointF, QPointF, QPointF, str]] = []
-    for pos, pt, text in placed:
-        out.append((QPointF(pos), QPointF(pos), pt, text))
-    return out
-
-
-def _layout_signal_labels(
-    entries: list[tuple[QPointF, str, float]],
-    hull_points: list[QPointF],
-    clamp_rect: QRectF,
-    font_px: float,
-    blank_points: list[QPointF] | None = None,
-) -> list[tuple[QPointF, QPointF, QPointF, str]]:
-    """标签布局(0.2.199-补29bw):优先把标签放到当前 contour 起点阈值下看不见
-    信号的空白格(含峰间空当),按角度保序就近分配并保持最小间距(尽量不交叉、
-    不叠字);无空白格时回退绿框边缘散布。返回 (标签位, 锚点=标签位, 峰点,
-    文本)。"""
-    hull = _convex_hull(hull_points)
-    if not hull:
-        return []
-    cx = sum(p.x() for p in hull) / len(hull)
-    cy = sum(p.y() for p in hull) / len(hull)
-    if blank_points:
-        out = _assign_blank_cells(entries, blank_points, font_px)
-        if out:
-            return out
-    inset = font_px * 0.8
-    box = QRectF(clamp_rect).adjusted(inset, inset, -inset, -inset)
-    items: list[tuple[float, QPointF, str, float]] = []
-    for pt, text, tw in entries:
-        dx = pt.x() - cx
-        dy = pt.y() - cy
-        if float(np.hypot(dx, dy)) < 1e-6:
-            continue
-        ang = float(np.arctan2(dy, dx))
-        r0 = _box_radius(cx, cy, ang, box)
-        base = QPointF(cx + r0 * np.cos(ang), cy + r0 * np.sin(ang))
-        arc = _box_arc_of_point(base, box)
-        items.append((arc, QPointF(pt), text, float(tw)))
-    if not items:
-        return []
-    items.sort(key=lambda it: it[0])
-    n = len(items)
-    peri = 2.0 * (box.width() + box.height())
-    pad = max(4.0, font_px * 0.4)
-    doubled: list[tuple[float, QPointF, str, float]] = []
-    for k in range(2 * n):
-        arc, pt, text, tw = items[k % n]
-        doubled.append((arc + peri * (k // n), pt, text, tw))
-    placed: list[tuple[float, QPointF, str, float]] = []
-    for arc, pt, text, tw in doubled:
-        if placed:
-            need = (placed[-1][3] + tw) / 2.0 + pad
-            arc = max(arc, placed[-1][0] + need)
-        placed.append((arc, pt, text, tw))
-    out: list[tuple[QPointF, QPointF, QPointF, str]] = []
-    for arc, pt, text, _tw in placed[n : 2 * n]:
-        pos = _box_arc_point(box, arc)
-        out.append((QPointF(pos), QPointF(pos), pt, text))
-    return out
+def _label_text_box(pos: QPointF, tw: float, th: float) -> QRectF:
+    """标签文字框(以标签位置为中心;绘制与命中检测共用)。"""
+    return QRectF(pos.x() - tw / 2.0, pos.y() - th / 2.0, tw, th)
 
 
 class _LabelOverlay(QWidget):
-    """峰指认标签覆盖层:标签放进当前 contour 起点下看不见信号的空白区
-    (含峰间空当,保序就近分配,直接连线尽量不交叉),文字始终直立。"""
+    """峰指认标签覆盖层:标签固定在数据坐标(峰右上方偏移,Poky 式),
+    缩放/平移不重排,选择模式可拖动微调;引导线从标签连到峰。"""
 
     def __init__(self, parent: QWidget, viewer: SpectrumViewer) -> None:
         super().__init__(parent)
         self._viewer = viewer
-        self._blank_grid_cache: dict = {}  # (id(data), thr) -> 空白格网格(0.2.199-补29bx)
-        self._layout_cache: dict = {}  # (谱/阈值/视野/峰) -> 标签布局(0.2.199-补29by)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
@@ -416,118 +131,20 @@ class _LabelOverlay(QWidget):
             out.append((xi, yi, text))
         return out
 
-    def _blank_points(self, viewer, vb) -> list[QPointF] | None:
-        """当前 contour 起点阈值下看不见信号的位置(降采样空白格中心,
-        widget 坐标;0.2.199-补29bw,补29bx 起缓存+仿射向量化)。"""
-        primary = viewer._primary
-        if primary is None or getattr(primary, "data", None) is None:
-            return None
-        data = primary.data
-        if getattr(data, "ndim", 0) != 2 or data.size == 0:
-            return None
-        maximum = float(
-            getattr(primary, "robust_max", 0.0) or primary.max_intensity
-        )
-        if maximum <= 0:
-            return None
-        thr = maximum * viewer._level_fraction()
-        key = (id(data), round(thr, 6))
-        cached = self._blank_grid_cache.get(key)
-        if cached is None:
-            grid = 48
-            sy = max(1, data.shape[0] // grid)
-            sx = max(1, data.shape[1] // grid)
-            h = (data.shape[0] // sy) * sy
-            w = (data.shape[1] // sx) * sx
-            try:
-                block = (
-                    np.abs(data[:h, :w])
-                    .reshape(h // sy, sy, w // sx, sx)
-                    .max(axis=(1, 3))
-                )
-            except Exception:  # noqa: BLE001
-                return None
-            blank = block < thr
-            cell_x = (np.arange(blank.shape[1]) + 0.5) * sx
-            cell_y = (np.arange(blank.shape[0]) + 0.5) * sy
-            cached = (blank, cell_x, cell_y)
-            self._blank_grid_cache = {key: cached}
-        blank, cell_x, cell_y = cached
-        try:
-            p00 = viewer.plot.mapFromScene(vb.mapViewToScene(QPointF(0.0, 0.0)))
-            p10 = viewer.plot.mapFromScene(vb.mapViewToScene(QPointF(1.0, 0.0)))
-            p01 = viewer.plot.mapFromScene(vb.mapViewToScene(QPointF(0.0, 1.0)))
-        except Exception:  # noqa: BLE001
-            return None
-        ax = p10.x() - p00.x()
-        bx = p01.x() - p00.x()
-        cx0 = p00.x()
-        ay = p10.y() - p00.y()
-        by = p01.y() - p00.y()
-        cy0 = p00.y()
-        gx = np.outer(np.ones(blank.shape[0]), cell_x)
-        gy = np.outer(cell_y, np.ones(blank.shape[1]))
-        wx = cx0 + ax * gx + bx * gy
-        wy = cy0 + ay * gx + by * gy
-        r = self.rect()
-        mask = (
-            blank
-            & (wx >= r.left())
-            & (wx <= r.right())
-            & (wy >= r.top())
-            & (wy <= r.bottom())
-        )
-        rows, cols = np.nonzero(mask)
-        return [
-            QPointF(float(wx[row, col]), float(wy[row, col]))
-            for row, col in zip(rows, cols)
-        ]
-
-    def _clamp_rect(self, viewer, vb) -> QRectF | None:
-        """谱图数据边界(绿框)在 widget 坐标的矩形 ∩ 视口(标签活动范围)。"""
-        primary = viewer._primary
-        if primary is None:
-            return None
-        sx = primary.x_axis.size
-        sy = primary.y_axis.size
-        corners = [
-            QPointF(-0.5, -0.5),
-            QPointF(sx - 0.5, -0.5),
-            QPointF(sx - 0.5, sy - 0.5),
-            QPointF(-0.5, sy - 0.5),
-        ]
-        try:
-            ws = [
-                viewer.plot.mapFromScene(vb.mapViewToScene(c)) for c in corners
-            ]
-        except Exception:  # noqa: BLE001
-            return None
-        xs = [p.x() for p in ws]
-        ys = [p.y() for p in ws]
-        green = QRectF(min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys))
-        return green.intersected(QRectF(self.rect()))
-
     def paintEvent(self, event) -> None:
-        entries = self._collect_labels()
-        if not entries:
-            return
+        """绘制峰指认标签(0.2.199-补29cb):位置固定在数据坐标(峰右上方偏移),
+        缩放/平移不重排;引导线从标签连到峰(峰端留缝),文字以标签为中心直立。"""
         viewer = self._viewer
-        vb = viewer.plot.getViewBox()
+        if (
+            viewer._primary is None
+            or viewer._mode_1d
+            or not viewer._peaks_visible
+            or not viewer._show_peak_labels
+        ):
+            return
         painter = QPainter(self)
         try:
-            pts: list[tuple[QPointF, str]] = []
-            for xi, yi, text in entries:
-                try:
-                    p = viewer.plot.mapFromScene(
-                        vb.mapViewToScene(QPointF(xi, yi))
-                    )
-                except Exception:  # noqa: BLE001
-                    continue
-                if not self.rect().contains(p):
-                    continue
-                pts.append((QPointF(p), text))
-            if not pts:
-                return
+            vb = viewer.plot.getViewBox()
             try:
                 ppu = 1.0 / max(vb.viewPixelSize()[0], 1e-9)
             except Exception:  # noqa: BLE001
@@ -537,72 +154,48 @@ class _LabelOverlay(QWidget):
             font = QFont()
             font.setPixelSize(int(round(font_px)))
             painter.setFont(font)
-            # 0.2.199-补29ca:空白格 = 当前 contour 起点下看不见信号的位置;
-            # 分区域独立规划:每部分标签只用本部分空白格,绝不超出区域范围。
-            hull_points: list[QPointF] = []
-            for xi, yi in viewer._peak_data_xy:
-                try:
-                    p = viewer.plot.mapFromScene(
-                        vb.mapViewToScene(QPointF(xi, yi))
-                    )
-                except Exception:  # noqa: BLE001
-                    continue
-                if self.rect().contains(p):
-                    hull_points.append(QPointF(p))
-            if not hull_points:
-                hull_points = [p for p, _t in pts]
-            clamp_rect = self._clamp_rect(viewer, vb)
-            if clamp_rect is None:
-                clamp_rect = QRectF(self.rect())
-            fm = painter.fontMetrics()
-            entries = [
-                (pt, text, float(fm.horizontalAdvance(text)))
-                for pt, text in pts
-            ]
-            # 0.2.199-补29by:布局缓存(谱/阈值/视野/峰不变则复用),避免重绘卡顿
-            try:
-                vr = vb.viewRange()
-                rng_key = (
-                    round(vr[0][0], 2),
-                    round(vr[0][1], 2),
-                    round(vr[1][0], 2),
-                    round(vr[1][1], 2),
-                )
-            except Exception:  # noqa: BLE001
-                rng_key = ()
-            key = (
-                id(viewer._primary),
-                round(viewer._level_fraction(), 4),
-                (self.rect().width(), self.rect().height()),
-                rng_key,
-                tuple((round(p.x(), 1), round(p.y(), 1), t) for p, t in pts),
-            )
-            layout = self._layout_cache.get(key)
-            if layout is None:
-                blank_points = self._blank_points(viewer, vb)
-                layout = _layout_signal_labels(
-                    entries, hull_points, clamp_rect, font_px, blank_points
-                )
-                self._layout_cache = {key: layout}
             gap_peak = 6.0 + font_px * 0.25  # 峰端留缝,不接死
             leader_pen = QPen(QColor("#888888"), 1)
             label_pen = QPen(QColor("#c0392b"), 1)
-            for pos, anchor, pt, text in layout:
-                painter.setPen(leader_pen)
-                if (pos - anchor).manhattanLength() > 2.0:
-                    painter.drawLine(pos, anchor)  # 沿环短连接线
-                dx = pt.x() - anchor.x()
-                dy = pt.y() - anchor.y()
+            for row, (xi, yi) in enumerate(viewer._peak_data_xy):
+                peak = viewer._peaks[row]
+                label = str(peak.get("label") or "").strip()
+                if not label and row != viewer._selected_peak:
+                    continue
+                text = label or str(peak.get("Peak_ID", ""))
+                if not text:
+                    continue
+                lx, ly = viewer._label_position(row)
+                try:
+                    pp = QPointF(
+                        viewer.plot.mapFromScene(
+                            vb.mapViewToScene(QPointF(float(xi), float(yi)))
+                        )
+                    )
+                    lp = QPointF(
+                        viewer.plot.mapFromScene(
+                            vb.mapViewToScene(QPointF(float(lx), float(ly)))
+                        )
+                    )
+                except Exception:  # noqa: BLE001
+                    continue
+                if not QRectF(self.rect()).contains(pp):
+                    continue
+                dx = lp.x() - pp.x()
+                dy = lp.y() - pp.y()
                 d = max(float(np.hypot(dx, dy)), 1e-6)
-                ex = pt.x() - dx / d * gap_peak
-                ey = pt.y() - dy / d * gap_peak
-                painter.drawLine(anchor, QPointF(ex, ey))
+                ex = pp.x() + dx / d * gap_peak
+                ey = pp.y() + dy / d * gap_peak
+                painter.setPen(leader_pen)
+                painter.drawLine(lp, QPointF(ex, ey))
                 painter.setPen(label_pen)
-                ox = anchor.x() - pt.x()
-                oy = anchor.y() - pt.y()
-                od = max(float(np.hypot(ox, oy)), 1e-6)
-                _draw_outward_label(
-                    painter, text, pos, QPointF(ox / od, oy / od), font_px
+                fm = painter.fontMetrics()
+                tw = float(fm.horizontalAdvance(text))
+                th = float(fm.height())
+                painter.drawText(
+                    _label_text_box(lp, tw, th),
+                    int(Qt.AlignmentFlag.AlignCenter),
+                    text,
                 )
         finally:
             painter.end()
@@ -634,6 +227,9 @@ class SpectrumViewer(QWidget):
         self._box_selected_rows: set[int] = set()
         # 0.2.199-补29ay:峰数据坐标缓存(框选只做范围比对,不再逐峰换算)
         self._peak_data_xy: list[tuple[float, float]] = []
+        # 0.2.199-补29cb:Assignment 固定位置(数据坐标,缩放/平移不重排,可拖动)
+        self._label_positions: list[tuple[float, float] | None] = []
+        self._drag_label_row: int | None = None
         self._suppress_click = False  # 框选释放不当作单击
         self._mode_1d = False
         self._primary_1d: Spectrum1D | None = None
@@ -1287,9 +883,22 @@ class SpectrumViewer(QWidget):
                     self._mouse_left_pressed = True
                     self._box_press_scene = self._box_scene_pos(event)
                     self._box_selecting = True
+                    # 0.2.199-补29cb:选择模式按住 assignment 可拖动微调
+                    if self._box_select_enabled and self._click_mode == "select":
+                        scene_pos = self._box_scene_pos(event)
+                        if scene_pos is not None:
+                            row = self._label_at_widget(self.plot.mapFromScene(scene_pos))
+                            if row is not None:
+                                self._drag_label_row = row
+                                self._suppress_click = True
+                                return True
             elif kind == "release":
                 if event.button() == Qt.MouseButton.LeftButton:
                     self._mouse_left_pressed = False
+                    if self._drag_label_row is not None:
+                        self._drag_label_row = None
+                        self._suppress_click = True
+                        return True
                     if (
                         self._box_select_enabled
                         and self._click_mode == "select"
@@ -1305,6 +914,14 @@ class SpectrumViewer(QWidget):
                         else:
                             self._cancel_box_select()
             elif kind == "move" and self._mouse_left_pressed:
+                if self._drag_label_row is not None:
+                    scene_pos = self._box_scene_pos(event)
+                    if scene_pos is not None:
+                        self._move_label(
+                            self._drag_label_row,
+                            self.plot.mapFromScene(scene_pos),
+                        )
+                    return True
                 if self._strips_active or self._mode_1d:
                     # 0.2.199-补10:场景事件可能是 QGraphicsSceneMouseEvent
                     # (取 scenePos)或普通 QMouseEvent(取 position);PyQt6 无
@@ -1641,7 +1258,11 @@ class SpectrumViewer(QWidget):
         self._peaks = list(peaks)
         self._selected_peak = None
         self._box_selected_rows.clear()
+        self._drag_label_row = None
         self._apply_peak_items(show_labels=show_labels)
+        # 0.2.199-补29cb:Poky 式固定标签位置(峰右上方偏移,数据坐标)
+        self._compute_label_positions()
+        self._label_overlay.update()
 
     def highlight_peak(self, row: int, flash: bool = True) -> None:
         """选中峰:仅峰表点击触发闪烁定位(0.2.199-补29bk/补29bo);
@@ -1718,6 +1339,9 @@ class SpectrumViewer(QWidget):
             return
         self._show_peak_labels = visible
         self._apply_peak_items()
+        if visible:
+            self._compute_label_positions()
+        self._label_overlay.update()
 
     def set_peak_click_mode(self, mode: str) -> None:
         """左键单击行为:select=选中峰 / add=加峰 / delete=删峰。"""
@@ -1778,6 +1402,101 @@ class SpectrumViewer(QWidget):
         y_ppm = _pick(_dim_of(y_axis), "N_shift", "y_ppm")
         return x_ppm, y_ppm
 
+    def _label_position(self, row: int) -> tuple[float, float]:
+        """峰行标签的数据坐标位置(未设置时回落峰位置)。"""
+        if (
+            0 <= row < len(self._label_positions)
+            and self._label_positions[row] is not None
+        ):
+            return self._label_positions[row]
+        if 0 <= row < len(self._peak_data_xy):
+            return self._peak_data_xy[row]
+        return (0.0, 0.0)
+
+    def _compute_label_positions(self) -> None:
+        """Poky 式:标签放在峰右上方固定偏移(数据坐标);缩放/平移不重排,
+        选择模式可拖动微调(0.2.199-补29cb)。"""
+        if self._primary is None or not self._peaks:
+            return
+        self._label_positions = [None] * len(self._peaks)
+        vb = self.plot.getViewBox()
+        for row, (xi, yi) in enumerate(self._peak_data_xy):
+            peak = self._peaks[row]
+            label = str(peak.get("label") or "").strip()
+            if not label and row != self._selected_peak:
+                continue
+            text = label or str(peak.get("Peak_ID", ""))
+            if not text:
+                continue
+            try:
+                pp = self.plot.mapFromScene(
+                    vb.mapViewToScene(QPointF(float(xi), float(yi)))
+                )
+                scene = self.plot.mapToScene(
+                    QPoint(round(pp.x() + 18.0), round(pp.y() - 18.0))
+                )
+                data = vb.mapSceneToView(scene)
+            except Exception:  # noqa: BLE001
+                self._label_positions[row] = (float(xi), float(yi))
+                continue
+            self._label_positions[row] = (float(data.x()), float(data.y()))
+
+    def _label_widget_pos(self, row: int) -> QPointF | None:
+        """标签当前 widget 坐标(命中检测用)。"""
+        lx, ly = self._label_position(row)
+        try:
+            return QPointF(
+                self.plot.mapFromScene(
+                    self.plot.getViewBox().mapViewToScene(QPointF(float(lx), float(ly)))
+                )
+            )
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _label_at_widget(self, widget_pos: QPointF) -> int | None:
+        """选择模式拖动:命中 assignment 文本所在行(0.2.199-补29cb)。"""
+        if self._primary is None or self._mode_1d or not self._show_peak_labels:
+            return None
+        widget_pos = QPointF(widget_pos)
+        try:
+            ppu = 1.0 / max(self.plot.getViewBox().viewPixelSize()[0], 1e-9)
+        except Exception:  # noqa: BLE001
+            ppu = 1.0
+        font_px = max(6.0, min(60.0, self._peak_size * 3.0 * ppu))
+        font = QFont()
+        font.setPixelSize(int(round(font_px)))
+        fm = QFontMetrics(font)
+        for row, _xy in enumerate(self._peak_data_xy):
+            peak = self._peaks[row]
+            label = str(peak.get("label") or "").strip()
+            if not label and row != self._selected_peak:
+                continue
+            text = label or str(peak.get("Peak_ID", ""))
+            if not text:
+                continue
+            p = self._label_widget_pos(row)
+            if p is None:
+                continue
+            tw = float(fm.horizontalAdvance(text))
+            th = float(fm.height())
+            if _label_text_box(p, tw, th).adjusted(-4, -4, 4, 4).contains(
+                widget_pos
+            ):
+                return row
+        return None
+
+    def _move_label(self, row: int, widget_pos: QPointF) -> None:
+        """拖动 assignment 到新位置(转成数据坐标存储,引导线自动跟随)。"""
+        if not (0 <= row < len(self._label_positions)):
+            return
+        try:
+            scene = self.plot.mapToScene(widget_pos.toPoint())
+            data = self.plot.getViewBox().mapSceneToView(scene)
+        except Exception:  # noqa: BLE001
+            return
+        self._label_positions[row] = (float(data.x()), float(data.y()))
+        self._label_overlay.update()
+
     def _apply_peak_items(self, show_labels: bool = True) -> None:
         if not self._peaks_visible or self._mode_1d or self._primary is None:
             self.peak_item.setData(x=[], y=[])
@@ -1807,6 +1526,8 @@ class SpectrumViewer(QWidget):
                 else pg.mkPen("#8b0000", width=1.5)
             )
         self._peak_data_xy = list(zip(xs, ys))
+        if len(self._label_positions) != len(self._peaks):
+            self._label_positions = [None] * len(self._peaks)
         self.peak_item.setData(x=xs, y=ys, size=sizes, pen=pens)
 
         # 0.2.199-补29bn:峰指认标签与引导线由 _LabelOverlay 在 widget

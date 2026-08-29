@@ -9,17 +9,13 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import numpy as np
 import pytest
-from PyQt6.QtCore import QPointF, QRectF
+from PyQt6.QtCore import QPointF
 from PyQt6.QtWidgets import QApplication, QGraphicsItem
 
 from viewer.app import SpectrumWindow
 from viewer.contour_layer import ContourLayer
 from viewer.spectrum import Spectrum, SpectrumAxis
-from viewer.spectrum_viewer import (
-    SpectrumViewer,
-    _convex_hull,
-    _layout_signal_labels,
-)
+from viewer.spectrum_viewer import SpectrumViewer
 
 
 def _axis(label: str, size: int = 128, sw: float = 6000.0) -> SpectrumAxis:
@@ -347,7 +343,6 @@ def test_viewer_zoom_min_limit(qapp: QApplication) -> None:
 
 def test_viewer_zoom_out_bounded(qapp: QApplication) -> None:
     """0.2.133:滚轮/scaleBy 缩小不能越过完整范围,平移不能移出谱图。"""
-    from PyQt6.QtCore import QPointF
 
     viewer = SpectrumViewer()
     viewer.add_spectrum(_synthetic_spectrum((64, 128)))
@@ -413,7 +408,7 @@ def test_spectrum_window_load_failure(
 
 def test_viewer_drag_hold_follow_crosshair(qapp: QApplication) -> None:
     """hold left-button drag: eventFilter MouseMove drives crosshair."""
-    from PyQt6.QtCore import QEvent, QPointF, Qt
+    from PyQt6.QtCore import QEvent, Qt
     from PyQt6.QtGui import QMouseEvent
 
     viewer = SpectrumViewer()
@@ -447,7 +442,7 @@ def test_viewer_drag_1d_updates_readout(qapp: QApplication) -> None:
     """in 1D data mode, hold-drag updates readout label live."""
     from types import SimpleNamespace
 
-    from PyQt6.QtCore import QEvent, QPointF, Qt
+    from PyQt6.QtCore import QEvent, Qt
     from PyQt6.QtGui import QMouseEvent
 
     viewer = SpectrumViewer()
@@ -529,7 +524,6 @@ def test_phase_panel_spinboxes_roundtrip(qapp: QApplication) -> None:
 
 def test_2d_readout_refreshes_on_mouse_move(qapp: QApplication) -> None:
     """0.2.148:普通 2D(含 3D 切片)鼠标移动实时刷新 ppm 读数。"""
-    from PyQt6.QtCore import QPointF
 
     viewer = SpectrumViewer()
     viewer.add_spectrum(_synthetic_spectrum())
@@ -660,6 +654,64 @@ def test_peak_label_leader_line(qapp: QApplication) -> None:
     assert viewer._label_overlay.visible_label_count() == 1
     viewer.close()
 
+def test_label_positions_fixed_near_peak(qapp: QApplication) -> None:
+    """0.2.199-补29cb:Poky 式固定标签——位置在峰附近(数据坐标),缩放/平移不重排。"""
+    spectrum = _synthetic_spectrum()
+    viewer = SpectrumViewer()
+    viewer.add_spectrum(spectrum)
+    viewer.set_peaks(
+        [
+            {
+                'H_shift': spectrum.x_axis.ppm_at(30),
+                'N_shift': spectrum.y_axis.ppm_at(20),
+                'label': 'G1',
+            },
+            {
+                'H_shift': spectrum.x_axis.ppm_at(40),
+                'N_shift': spectrum.y_axis.ppm_at(30),
+                'label': 'G2',
+            },
+        ]
+    )
+    assert len(viewer._label_positions) == 2
+    assert viewer._label_positions[0] is not None
+    assert viewer._label_positions[1] is not None
+    pos0 = viewer._label_positions[0]
+    xi, yi = viewer._peak_data_xy[0]
+    # 标签在峰附近(数据坐标距离小,非远处乱放)
+    assert np.hypot(pos0[0] - xi, pos0[1] - yi) < 100.0
+    # 平移视图后存储位置不变
+    vb = viewer.plot.getViewBox()
+    vb.setRange(xRange=(20.0, 60.0), yRange=(10.0, 50.0), padding=0)
+    assert viewer._label_positions[0] == pos0
+    viewer.close()
+
+
+def test_label_drag_updates_position(qapp: QApplication) -> None:
+    """0.2.199-补29cb:选择模式拖动 assignment 更新固定位置,命中检测可用。"""
+    spectrum = _synthetic_spectrum()
+    viewer = SpectrumViewer()
+    viewer.add_spectrum(spectrum)
+    viewer.set_peaks(
+        [
+            {
+                'H_shift': spectrum.x_axis.ppm_at(30),
+                'N_shift': spectrum.y_axis.ppm_at(20),
+                'label': 'G1',
+            }
+        ]
+    )
+    pos0 = viewer._label_positions[0]
+    assert pos0 is not None
+    lp = viewer._label_widget_pos(0)
+    assert lp is not None
+    assert viewer._label_at_widget(lp) == 0
+
+    viewer._move_label(0, QPointF(lp.x() + 40.0, lp.y() + 30.0))
+    assert viewer._label_positions[0] != pos0
+    viewer.close()
+
+
 def test_highlight_flash_only_when_requested(qapp: QApplication) -> None:
     """0.2.199-补29bo:闪烁仅峰表点击触发;谱图点选/框选只高亮不闪。"""
     spectrum = _synthetic_spectrum()
@@ -680,143 +732,3 @@ def test_highlight_flash_only_when_requested(qapp: QApplication) -> None:
     viewer._clear_flash()
     assert viewer._flash_item is None
     viewer.close()
-
-
-
-
-def test_signal_region_containment(qapp: QApplication) -> None:
-    """0.2.199-补29ca:分区域独立规划——标签不超出所属区域范围。"""
-    cells = [
-        QPointF(float(x), float(y))
-        for y in range(20, 180, 20)
-        for x in range(20, 380, 20)
-    ]
-    peaks = [QPointF(80.0, 60.0), QPointF(300.0, 140.0)]
-    entries = [(p, f"P{i}", 30.0) for i, p in enumerate(peaks)]
-    layout = _layout_signal_labels(
-        entries, peaks, QRectF(0.0, 0.0, 400.0, 200.0), 12.0, cells
-    )
-    assert len(layout) == 2
-    grid_n = 2
-    x0, x1 = 20.0, 380.0
-    y0, y1 = 20.0, 180.0
-    xw = (x1 - x0) / grid_n
-    yh = (y1 - y0) / grid_n
-    for pos, anchor, pt, text in layout:
-        assert pos == anchor, f"leader not direct for {text}"
-        rcx = min(int((pt.x() - x0) // xw), grid_n - 1)
-        rcy = min(int((pt.y() - y0) // yh), grid_n - 1)
-        assert x0 + rcx * xw - 1e-6 <= pos.x() <= x0 + (rcx + 1) * xw + 1e-6
-        assert y0 + rcy * yh - 1e-6 <= pos.y() <= y0 + (rcy + 1) * yh + 1e-6
-
-def test_signal_blank_cell_layout(qapp: QApplication) -> None:
-    """0.2.199-补29bw:标签放进 contour 起点下看不见信号的空白格(含峰间空当),
-    直接连线、不叠在同一格。"""
-    data = np.zeros((64, 128))
-    data[20, 40] = 500.0
-    data[45, 90] = 500.0
-    from scipy.ndimage import gaussian_filter
-
-    data = gaussian_filter(data, sigma=1.5)
-    thr = 100.0
-    grid = 32
-    sy = max(1, data.shape[0] // grid)
-    sx = max(1, data.shape[1] // grid)
-    h = (data.shape[0] // sy) * sy
-    w = (data.shape[1] // sx) * sx
-    block = (
-        np.abs(data[:h, :w]).reshape(h // sy, sy, w // sx, sx).max(axis=(1, 3))
-    )
-    cells = [
-        QPointF((c + 0.5) * sx, (r + 0.5) * sy)
-        for r in range(block.shape[0])
-        for c in range(block.shape[1])
-        if block[r, c] < thr
-    ]
-    peaks = [QPointF(40.0, 20.0), QPointF(90.0, 45.0)]
-    entries = [(p, f"P{i}", 30.0) for i, p in enumerate(peaks)]
-    layout = _layout_signal_labels(
-        entries, peaks, QRectF(0.0, 0.0, 128.0, 64.0), 12.0, cells
-    )
-    assert len(layout) == 2
-    for pos, anchor, pt, text in layout:
-        assert pos == anchor, f"leader not direct for {text}"
-        on_blank = any(
-            abs(pos.x() - c.x()) <= sx and abs(pos.y() - c.y()) <= sy
-            for c in cells
-        )
-        assert on_blank, f"label {text} not on blank cell"
-    assert layout[0][0] != layout[1][0]
-
-def test_signal_ring_label_layout(qapp: QApplication) -> None:
-    """0.2.199-补29bo:信号区域环绕标签——标签在绿框内、围绕信号轮廓外圈、
-    左峰左标/右峰右标、径向引导线不交叉、不重叠。"""
-
-    def _segments_cross(a1, a2, b1, b2) -> bool:
-        def cross(o, p, q):
-            return (p[0] - o[0]) * (q[1] - o[1]) - (p[1] - o[1]) * (q[0] - o[0])
-
-        d1 = cross(a1, a2, b1)
-        d2 = cross(a1, a2, b2)
-        d3 = cross(b1, b2, a1)
-        d4 = cross(b1, b2, a2)
-        return ((d1 > 0) != (d2 > 0)) and ((d3 > 0) != (d4 > 0))
-
-    def _inside_hull(p, hull) -> bool:
-        # 凸包(CCW)内判定:相对所有边同侧(叉积符号一致)
-        sign = 0
-        n = len(hull)
-        for i in range(n):
-            a, b = hull[i], hull[(i + 1) % n]
-            cross = (b.x() - a.x()) * (p.y() - a.y()) - (
-                b.y() - a.y()
-            ) * (p.x() - a.x())
-            if abs(cross) < 1e-9:
-                continue
-            s = 1 if cross > 0 else -1
-            if sign == 0:
-                sign = s
-            elif s != sign:
-                return False
-        return True
-
-    clamp = QRectF(40.0, 40.0, 620.0, 460.0)
-    cx, cy = clamp.center().x(), clamp.center().y()
-    left = [
-        (cx - 220.0, cy - 60.0),
-        (cx - 180.0, cy - 10.0),
-        (cx - 200.0, cy + 50.0),
-    ]
-    right = [
-        (cx + 220.0, cy - 60.0),
-        (cx + 180.0, cy - 10.0),
-        (cx + 200.0, cy + 50.0),
-    ]
-    top = [(cx - 40.0, cy - 120.0), (cx + 40.0, cy - 120.0)]
-    bottom = [(cx - 40.0, cy + 120.0), (cx + 40.0, cy + 120.0)]
-    all_pts = [QPointF(x, y) for x, y in left + right + top + bottom]
-    entries = [(p, f"P{i}", 30.0) for i, p in enumerate(all_pts)]
-    layout = _layout_signal_labels(entries, all_pts, clamp, 12.0)
-    assert len(layout) == len(entries)
-    hull = _convex_hull(all_pts)
-    for pos, anchor, pt, text in layout:
-        assert pos == anchor, f"leader not direct for {text}"
-        assert clamp.contains(pos), f"label {text} outside green box"
-        assert not _inside_hull(pos, hull), f"label {text} inside signal region"
-    for i in range(len(layout)):
-        for j in range(i + 1, len(layout)):
-            a1 = (layout[i][1].x(), layout[i][1].y())
-            a2 = (layout[i][2].x(), layout[i][2].y())
-            b1 = (layout[j][1].x(), layout[j][1].y())
-            b2 = (layout[j][2].x(), layout[j][2].y())
-            assert not _segments_cross(a1, a2, b1, b2), (
-                f"leader cross {layout[i][3]} {layout[j][3]}"
-            )
-    centroid_x = sum(p.x() for p in all_pts) / len(all_pts)
-    for pos, anchor, pt, text in layout:
-        if pt.x() < centroid_x - 1e-6:
-            assert anchor.x() < centroid_x, f"left peak {text} label on right"
-        elif pt.x() > centroid_x + 1e-6:
-            assert anchor.x() > centroid_x, f"right peak {text} label on left"
-    positions = [(p.x(), p.y()) for p, _a, _pt, _t in layout]
-    assert len(set(positions)) == len(positions), "labels overlap at same position"
