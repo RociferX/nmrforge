@@ -129,6 +129,49 @@ def _convex_hull(points: list[QPointF]) -> list[QPointF]:
     return [QPointF(x, y) for x, y in hull]
 
 
+def _box_radius(cx: float, cy: float, ang: float, box: QRectF) -> float:
+    """质心沿角度到绿框边缘的距离(标签可用的最大半径)。"""
+    ux, uy = np.cos(ang), np.sin(ang)
+    ts: list[float] = []
+    if abs(ux) > 1e-9:
+        ts.append((box.right() - cx) / ux if ux > 0 else (box.left() - cx) / ux)
+    if abs(uy) > 1e-9:
+        ts.append((box.bottom() - cy) / uy if uy > 0 else (box.top() - cy) / uy)
+    t = min(t for t in ts if t > 0)
+    return max(float(t), 20.0)
+
+
+def _box_arc_point(box: QRectF, arc: float) -> QPointF:
+    """绿框周长上(左上角起顺时针)取弧长处坐标。"""
+    w = float(box.width())
+    h = float(box.height())
+    peri = max(2.0 * (w + h), 1e-9)
+    d = arc % peri
+    if d <= w:
+        return QPointF(box.left() + d, box.top())
+    d -= w
+    if d <= h:
+        return QPointF(box.right(), box.top() + d)
+    d -= h
+    if d <= w:
+        return QPointF(box.right() - d, box.bottom())
+    return QPointF(box.left(), box.bottom() - (d - w))
+
+
+def _box_arc_of_point(point: QPointF, box: QRectF) -> float:
+    """绿框周长上一点→弧长(左上角起顺时针),供切向滑动。"""
+    w = float(box.width())
+    h = float(box.height())
+    tol = 2.0
+    if abs(point.y() - box.top()) <= tol:
+        return max(0.0, point.x() - box.left())
+    if abs(point.x() - box.right()) <= tol:
+        return w + max(0.0, point.y() - box.top())
+    if abs(point.y() - box.bottom()) <= tol:
+        return w + h + max(0.0, box.right() - point.x())
+    return w + h + w + max(0.0, box.bottom() - point.y())
+
+
 def _draw_outward_label(
     painter: QPainter,
     text: str,
@@ -160,70 +203,55 @@ def _layout_signal_labels(
     clamp_rect: QRectF,
     font_px: float,
 ) -> list[tuple[QPointF, QPointF, QPointF, str]]:
-    """信号区域环绕标签布局(0.2.199-补29bu):标签按峰角度放上信号区域外接
-    圆环,引导线沿同一射线直接从峰连到标签(单段直线、零交叉);同角度标签
-    重叠时径向分层避让(同角不同半径);圆环被谱图绿框 ∩ 视口夹住。
-    返回 (标签位, 锚点, 峰点, 文本),锚点即标签位。"""
+    """标签散布布局(0.2.199-补29bv):标签沿峰方向放到绿框边缘(利用信号区
+    外的空白区,不挤在信号周围),再沿框边切向滑动展开避让重叠(循环序);
+    引导线为单段直线直连(尽量不交叉)。返回 (标签位, 锚点=标签位, 峰点,
+    文本)。"""
     hull = _convex_hull(hull_points)
     if not hull:
         return []
     cx = sum(p.x() for p in hull) / len(hull)
     cy = sum(p.y() for p in hull) / len(hull)
-    th = max(10.0, font_px * 1.15)  # 文本径向高度近似(分层步长)
     inset = font_px * 0.8
     box = QRectF(clamp_rect).adjusted(inset, inset, -inset, -inset)
-    # 圆环半径不被绿框整体压缩;每个标签位置单独夹到绿框内
-    base_r = (
-        max(float(np.hypot(p.x() - cx, p.y() - cy)) for p in hull)
-        + max(20.0, font_px * 1.2)
-    )
     items: list[tuple[float, QPointF, str, float]] = []
     for pt, text, tw in entries:
         dx = pt.x() - cx
         dy = pt.y() - cy
         if float(np.hypot(dx, dy)) < 1e-6:
             continue
-        items.append((float(np.arctan2(dy, dx)), QPointF(pt), text, float(tw)))
+        ang = float(np.arctan2(dy, dx))
+        r0 = _box_radius(cx, cy, ang, box)
+        base = QPointF(cx + r0 * np.cos(ang), cy + r0 * np.sin(ang))
+        arc = _box_arc_of_point(base, box)
+        items.append((arc, QPointF(pt), text, float(tw)))
     if not items:
         return []
     items.sort(key=lambda it: it[0])
     n = len(items)
-    # 圆环回绕:角度复制一周做贪心分层,取中间 n 个(首尾间距也被约束)
+    peri = 2.0 * (box.width() + box.height())
+    pad = max(4.0, font_px * 0.4)
+    # 圆环回绕:复制一周切向滑动,取中间 n 个(首尾间距也被约束)
     doubled: list[tuple[float, QPointF, str, float]] = []
     for k in range(2 * n):
-        ang, pt, text, tw = items[k % n]
-        doubled.append((ang + 2.0 * np.pi * (k // n), pt, text, tw))
-    layer_last: dict[int, tuple[float, float]] = {}
-    placed: list[tuple[float, int, QPointF, str, float]] = []
-    for ang, pt, text, tw in doubled:
-        layer = 0
-        while True:
-            r = base_r + layer * th
-            prev = layer_last.get(layer)
-            if prev is None:
-                break
-            prev_ang, prev_tw = prev
-            if (ang - prev_ang) * r >= (prev_tw + tw) / 2.0:
-                break
-            layer += 1
-            if layer > 12:
-                break
-        r = base_r + layer * th
-        layer_last[layer] = (ang, tw)
-        placed.append((ang, layer, pt, text, tw))
+        arc, pt, text, tw = items[k % n]
+        doubled.append((arc + peri * (k // n), pt, text, tw))
+    placed: list[tuple[float, QPointF, str, float]] = []
+    for arc, pt, text, tw in doubled:
+        if placed:
+            need = (placed[-1][3] + tw) / 2.0 + pad
+            arc = max(arc, placed[-1][0] + need)
+        placed.append((arc, pt, text, tw))
     out: list[tuple[QPointF, QPointF, QPointF, str]] = []
-    for ang, layer, pt, text, _tw in placed[n : 2 * n]:
-        r = base_r + layer * th
-        pos = QPointF(cx + r * np.cos(ang), cy + r * np.sin(ang))
-        pos.setX(min(max(pos.x(), box.left()), box.right()))
-        pos.setY(min(max(pos.y(), box.top()), box.bottom()))
+    for arc, pt, text, _tw in placed[n : 2 * n]:
+        pos = _box_arc_point(box, arc)
         out.append((QPointF(pos), QPointF(pos), pt, text))
     return out
 
 
 class _LabelOverlay(QWidget):
-    """峰指认标签覆盖层:标签环绕信号区域外接圆环(同角直接连线、零交叉,
-    径向分层避让重叠,绿框内),文字在 widget 坐标下始终直立。"""
+    """峰指认标签覆盖层:标签散布到绿框边缘空白区(切向展开、直接连线,
+    尽量不交叉),文字在 widget 坐标下始终直立。"""
 
     def __init__(self, parent: QWidget, viewer: SpectrumViewer) -> None:
         super().__init__(parent)
@@ -311,9 +339,8 @@ class _LabelOverlay(QWidget):
             font = QFont()
             font.setPixelSize(int(round(font_px)))
             painter.setFont(font)
-            # 0.2.199-补29bu:识别当前视野内全部峰分布(凸包→外接圆环),标签
-            # 按峰角度放上圆环并径向分层避让重叠;引导线沿同一射线直接从
-            # 峰连到标签(单段直线,零交叉);圆环被谱图绿框 ∩ 视口夹住。
+            # 0.2.199-补29bv:标签沿峰方向放到绿框边缘(信号区外空白区),
+            # 再沿框边切向展开避让重叠;引导线单段直线直连,尽量不交叉。
             hull_points: list[QPointF] = []
             for xi, yi in viewer._peak_data_xy:
                 try:
