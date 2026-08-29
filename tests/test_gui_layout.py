@@ -555,11 +555,28 @@ def test_main_window_spectrum_expand_toggle(
     assert window.center_panel.isHidden()
     assert window.log_panel.isHidden()
     assert not window.spectrum_panel.isHidden()
+    # 0.2.199-补29bq:只有绘图区放大,右侧控件列保留,小绘图区隐藏
+    panel = window.spectrum_panel
+    assert panel._expanded
+    assert panel._expand_splitter is not None
+    assert panel.viewer.plot_area.parent() is panel._expand_splitter
+    assert panel._expand_splitter.indexOf(panel.viewer.plot_area) == 0
+    assert panel._expand_controls is not None
+    assert panel.viewer.controls_layout.parentWidget().parent() is panel._expand_controls
+    assert panel.lists_row_widget.parent() is panel._expand_controls
+    assert panel.peak_toolbar_widget.parent() is panel._expand_controls
+    assert panel.peak_table.parent() is panel._expand_controls
+    assert panel.viewer.isHidden()
     btn.setChecked(False)
     assert btn.text() == "放大"
     assert not window.project_tree.isHidden()
     assert not window.center_panel.isHidden()
     assert not window.log_panel.isHidden()
+    assert not panel._expanded
+    assert panel._expand_splitter is None
+    assert panel.viewer.plot_area.parent() is panel.viewer.view_splitter
+    assert not panel.viewer.isHidden()
+    assert panel.lists_row_widget.parent() is panel._panel_splitter
     window.close()
 
 

@@ -191,34 +191,44 @@ class SpectrumPanel(QWidget):
         self.expand_button = QPushButton("放大")
         self.expand_button.setCheckable(True)
         self.expand_button.setToolTip(
-            "放大:收起左侧项目树/Pipeline/Log,谱图占满窗口;再点还原"
+            "放大:绘图区单独伸到左侧(收起项目树/Pipeline/Log),右侧保留按键;再点还原"
         )
         self.expand_button.toggled.connect(self._on_expand_toggled)
         self.lists_row.addStretch(1)
         self.lists_row.addWidget(self.expand_button)
+        self.lists_row.addSpacing(12)  # 0.2.199-补29bq:不贴最右边框
 
-        splitter = QSplitter(Qt.Orientation.Vertical)
-        splitter.addWidget(self.lists_row_widget)
-        splitter.addWidget(self.viewer)
+        # 0.2.199-补29bq:放大模式——垂直 splitter(默认)与水平
+        # [绘图区 | 右侧控件列] 之间切换,只有绘图区伸到左侧
+        self._expanded = False
+        self._expand_splitter: QSplitter | None = None
+        self._expand_controls: QWidget | None = None
+        self._expand_plot_area: QWidget | None = None
+        self._expand_viewer_controls: QWidget | None = None
+        self._collapsed_sizes: list[int] = []
+        self._view_splitter_sizes: list[int] = []
+        self._panel_splitter = QSplitter(Qt.Orientation.Vertical)
+        self._panel_splitter.addWidget(self.lists_row_widget)
+        self._panel_splitter.addWidget(self.viewer)
         self.peak_toolbar_widget = QWidget()
         _peak_rows = QVBoxLayout(self.peak_toolbar_widget)
         _peak_rows.setContentsMargins(0, 0, 0, 0)
         _peak_rows.setSpacing(4)
         _peak_rows.addLayout(self.peak_toolbar)
         _peak_rows.addLayout(self.peak_toolbar2)
-        splitter.addWidget(self.peak_toolbar_widget)
-        splitter.addWidget(self.peak_table)
-        splitter.setStretchFactor(0, 0)
-        splitter.setStretchFactor(1, 1)
-        splitter.setStretchFactor(2, 0)
-        splitter.setStretchFactor(3, 0)
-        splitter.setSizes([90, 480, 40, 160])
+        self._panel_splitter.addWidget(self.peak_toolbar_widget)
+        self._panel_splitter.addWidget(self.peak_table)
+        self._panel_splitter.setStretchFactor(0, 0)
+        self._panel_splitter.setStretchFactor(1, 1)
+        self._panel_splitter.setStretchFactor(2, 0)
+        self._panel_splitter.setStretchFactor(3, 0)
+        self._panel_splitter.setSizes([90, 480, 40, 160])
         self.viewer.peak_clicked.connect(self._on_viewer_peak_clicked)
         self.viewer.manual_peak_requested.connect(self._on_manual_peak_added)
         self.viewer.peaks_box_selected.connect(self._on_peaks_box_selected)
         self.viewer.show_1d_button.toggled.connect(self._on_viewer_1d_toggled)
         self.file_list.setMaximumWidth(16777215)  # 取消横向宽度限制
-        layout.addWidget(splitter)
+        layout.addWidget(self._panel_splitter)
         self.refresh()
 
     @property
@@ -1072,9 +1082,80 @@ class SpectrumPanel(QWidget):
                 self._syncing_table_selection = False
 
     def _on_expand_toggled(self, expanded: bool) -> None:
-        """谱图放大/收起:按钮文字切换并通知主窗口收起左侧三部分。"""
+        """谱图放大/收起:只有绘图区伸到左侧,右侧保留按键。"""
         self.expand_button.setText("收起" if expanded else "放大")
+        if expanded:
+            self._enter_expand_mode()
+        else:
+            self._exit_expand_mode()
         self.expand_requested.emit(expanded)
+
+    def _enter_expand_mode(self) -> None:
+        """放大:只把绘图区(plot_area)单独移到左侧覆盖原左三栏区域,
+        右侧控件列保留全部按键;原小绘图区(viewer 容器)隐藏不显示。"""
+        if self._expanded or self._expand_splitter is not None:
+            return
+        outer = self.layout()
+        viewer = self.viewer
+        self._collapsed_sizes = list(self._panel_splitter.sizes())
+        self._view_splitter_sizes = list(viewer.view_splitter.sizes())
+        plot_area = viewer.plot_area
+        controls_widget = viewer.controls_layout.parentWidget()
+        # 从 viewer 垂直 splitter 取出,避免两处同时显示
+        # (QSplitter 无 removeWidget;setParent(None) 即从 splitter 移除)
+        plot_area.setParent(None)
+        controls_widget.setParent(None)
+        self._expand_plot_area = plot_area
+        self._expand_viewer_controls = controls_widget
+        controls = QWidget()
+        col = QVBoxLayout(controls)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(4)
+        col.addWidget(controls_widget)
+        col.addWidget(self.lists_row_widget)
+        col.addWidget(self.peak_toolbar_widget)
+        col.addWidget(self.peak_table, 1)
+        self._expand_controls = controls
+        hsplit = QSplitter(Qt.Orientation.Horizontal)
+        hsplit.addWidget(plot_area)
+        hsplit.addWidget(controls)
+        hsplit.setStretchFactor(0, 1)
+        hsplit.setStretchFactor(1, 0)
+        right_w = max(360, min(self.width(), 560)) if self.width() > 100 else 520
+        hsplit.setSizes([max(400, self.width() - right_w), right_w])
+        self._expand_splitter = hsplit
+        outer.replaceWidget(self._panel_splitter, hsplit)
+        self._panel_splitter.setVisible(False)
+        viewer.setVisible(False)  # 原小绘图区所在容器不显示
+        self._expanded = True
+
+    def _exit_expand_mode(self) -> None:
+        """还原:绘图区与控件面板回到 viewer,右侧控件回原位。"""
+        if not self._expanded or self._expand_splitter is None:
+            return
+        outer = self.layout()
+        viewer = self.viewer
+        outer.replaceWidget(self._expand_splitter, self._panel_splitter)
+        self._expand_splitter.setVisible(False)
+        self._expand_splitter = None
+        self._expand_controls = None
+        if self._expand_plot_area is not None:
+            viewer.view_splitter.addWidget(self._expand_plot_area)
+        if self._expand_viewer_controls is not None:
+            viewer.view_splitter.addWidget(self._expand_viewer_controls)
+        if self._view_splitter_sizes:
+            viewer.view_splitter.setSizes(self._view_splitter_sizes)
+        self._expand_plot_area = None
+        self._expand_viewer_controls = None
+        self._panel_splitter.addWidget(self.lists_row_widget)
+        self._panel_splitter.addWidget(viewer)
+        self._panel_splitter.addWidget(self.peak_toolbar_widget)
+        self._panel_splitter.addWidget(self.peak_table)
+        if self._collapsed_sizes:
+            self._panel_splitter.setSizes(self._collapsed_sizes)
+        viewer.setVisible(True)
+        self._panel_splitter.setVisible(True)
+        self._expanded = False
 
     def _on_peak_header_clicked(self, section: int) -> None:
         """点击 Assignment 列标题:开关图上峰指认标签(0.2.199-补29bf)。"""
