@@ -28,8 +28,10 @@ import numpy as np
 
 from core.data.internal_data_model import Experiment, SamplingMode
 
-# 阈值(初版,经验值)
-DC_RATIO_THRESHOLD = 0.03          # DC 峰高于最强信号的 3% 即启用 POLY -time
+# 阈值(初版,经验值;0.2.199-补29cw 校准)
+# 时域指标 |FID 均值|/|FID 峰值|:VM 实测常规谱 0.07-0.20(100/102/3/28/101),
+# 真实直流(sampleC)≈0.49;阈值 0.25 区分二者,不再每个谱都误报。
+DC_RATIO_THRESHOLD = 0.25          # FID 均值超过最强幅度 25% 即启用 POLY -time
 BADPOINT_MAD = 12.0                # 孤立尖峰 = 幅度超出邻域中值 12×MAD
 FIRST_POINT_RATIO = 1.6            # 首点幅/次点幅超 1.6× 提示群延迟重建
 BROAD_PEAK_FRACTION = 0.08         # 最强峰 FWHM 超过谱宽 8% 视为宽带包(疑似溶剂)
@@ -137,6 +139,25 @@ def _read_fid_raw(
     return None
 
 
+def _dc_ratio_time(traces: np.ndarray) -> float:
+    """时域直流偏置估计:top 迹 |FID 均值| / |FID 峰值| 的中位数。
+
+    0.2.199-补29cw:原频域 bin0 指标受 FID 截断/包络泄漏影响,几乎所有真实
+    谱都超过 3% 阈值(用户反馈每个谱都报直流偏置)。时域均值直接对应
+    POLY -time 消除的常数分量,物理意义明确;VM 实测常规谱 0.07-0.20、
+    真实直流(sampleC)≈0.49。
+    """
+    energy = np.sum(np.abs(traces) ** 2, axis=-1)
+    order = np.argsort(energy)[::-1]
+    keep = min(max(int(np.ceil(len(order) * 0.05)), 4), 12)
+    top = traces[order[:keep]]
+    means = np.abs(np.mean(top, axis=-1))
+    peaks = np.max(np.abs(top), axis=-1)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        ratios = means / np.maximum(peaks, 1e-12)
+    return float(np.median(ratios))
+
+
 def _trace_metrics(
     traces: np.ndarray, n: int
 ) -> dict[str, float]:
@@ -150,9 +171,7 @@ def _trace_metrics(
     work[:, : min(n, n_pad)] = top[:, : min(n, n_pad)]
     spec = np.fft.fft(work, axis=-1)
     amp = np.abs(spec)
-    dc = np.median(amp[:, 0])
-    side = np.max(amp[:, 3 : n_pad // 2], axis=1)
-    dc_ratio = float(np.median(dc / np.maximum(side, 1e-12)))
+    dc_ratio = _dc_ratio_time(traces)
     p_side = np.argmax(amp[:, 3 : n_pad // 2], axis=1) + 3
     avg = np.median(amp, axis=0)
     pk = int(np.median(p_side))
@@ -265,7 +284,7 @@ def run_direct_diagnostics(
     if m["dc_ratio"] > DC_RATIO_THRESHOLD:
         res.apply_poly_time = True
         reports.append(
-            f"直接维存在直流偏置(DC 峰为最强信号的 {m['dc_ratio']:.2f} 倍),"
+            f"直接维存在直流偏置(FID 均值约为最强幅度的 {m['dc_ratio']*100:.0f}%),"
             "已启用 POLY -time 自动纠正"
         )
 

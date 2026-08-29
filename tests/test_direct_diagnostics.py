@@ -131,8 +131,8 @@ def test_parse_real_fid_layout(tmp_path: Path, exp_fixture) -> None:
 
 
 def test_dc_offset_enables_poly_time(tmp_path: Path, exp_fixture) -> None:
-    """显著直流偏置:自动启用 POLY -time 并报告。"""
-    _stage(tmp_path, synthetic=True, dc_amp=0.6)
+    """显著直流偏置:自动启用 POLY -time 并报告(0.2.199-补29cw 阈值 0.25)。"""
+    _stage(tmp_path, synthetic=True, dc_amp=1.0)
     res = run_direct_diagnostics(tmp_path, exp_fixture)
     assert isinstance(res, DirectDiagnosticsResult)
     assert res.apply_poly_time is True
@@ -145,6 +145,28 @@ def test_dc_small_stays_off(tmp_path: Path, exp_fixture) -> None:
     _stage(tmp_path, synthetic=True)
     res = run_direct_diagnostics(tmp_path, exp_fixture)
     assert res.apply_poly_time is False
+
+
+def test_dc_small_offset_stays_off(tmp_path: Path, exp_fixture) -> None:
+    """小幅 FID 均值(常规谱常见水平)不触发 POLY -time(0.2.199-补29cw)。"""
+    _stage(tmp_path, synthetic=True, dc_amp=0.08)
+    res = run_direct_diagnostics(tmp_path, exp_fixture)
+    assert res.apply_poly_time is False
+
+
+def test_dc_ratio_time_metric_unit() -> None:
+    """时域直流指标:常数偏移 ≈ 偏移/峰值;干净衰减 FID 很小。"""
+    from workflow.direct_diagnostics import _dc_ratio_time
+
+    rng = np.random.default_rng(3)
+    t = np.arange(1024, dtype=float)
+    sig = np.exp(-t / 200.0) * np.exp(2j * np.pi * 0.1 * t)
+    base = np.tile(sig, (20, 1)) * rng.uniform(0.5, 2.0, (20, 1))
+    base += 0.02 * (rng.normal(size=(20, 1024)) + 1j * rng.normal(size=(20, 1024)))
+    r_clean = _dc_ratio_time(base)
+    r_dc = _dc_ratio_time(base + 1.0)
+    assert r_clean < 0.20
+    assert r_dc > 0.30
 
 
 def test_badpoint_repaired_with_backup(tmp_path: Path, exp_fixture) -> None:
