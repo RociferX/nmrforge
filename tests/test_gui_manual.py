@@ -557,6 +557,50 @@ def test_click_already_selected_peak_row_flashes(
     panel.close()
 
 
+def test_edit_assignment_applies_immediately(
+    tmp_path, qapp, monkeypatch
+) -> None:
+    """0.2.199-补29cn:峰表 Assignment 编辑立即生效到图上标签,
+    并按 Poky 单字母氨基酸+核格式规范化。"""
+    import numpy as np
+
+    from viewer.spectrum import Spectrum, SpectrumAxis
+
+    manager = _manager(tmp_path, monkeypatch)
+    spectra = manager.data_dir('exp_001', 'd_001', 'spectra')
+    spectra.mkdir(parents=True, exist_ok=True)
+    (spectra / 'exp_001-d_001.ft2').write_bytes(b'x')
+    peaks = manager.data_dir('exp_001', 'd_001', 'peaks')
+    peaks.mkdir(parents=True, exist_ok=True)
+    (peaks / 'exp_001-d_001.list').write_text(
+        'Assignment w1 w2 Data Height Volume\n'
+        'G1  115.000  8.000  0  100  0\n'
+        'G2  112.000  8.500  0  90  0\n',
+        encoding='utf-8',
+    )
+    panel = SpectrumPanel(manager)
+    axis_x = SpectrumAxis(
+        label='H', size=64, sw_hz=6000.0, obs_mhz=600.0,
+        carrier_ppm=4.7, orig_hz=0.0,
+    )
+    axis_y = SpectrumAxis(
+        label='N', size=64, sw_hz=2189.0, obs_mhz=60.8,
+        carrier_ppm=118.0, orig_hz=0.0,
+    )
+    panel.viewer.add_spectrum(Spectrum(np.zeros((64, 64)), [axis_y, axis_x]))
+    panel.set_context('exp_001', 'd_001')
+    panel._load_peaks(spectra / 'exp_001-d_001.ft2')
+    item = panel.peak_table.item(0, 1)  # Assignment 列
+    assert item is not None and item.text() == 'G1'
+    item.setText('g1h')
+    qapp.processEvents()
+    assert panel.peak_table.item(0, 1).text() == 'G1H'  # Poky 规范化
+    assert panel.viewer._peaks[0]['label'] == 'G1H'  # 立即生效
+    labels = panel.viewer._label_overlay._collect_labels()
+    assert any(text == 'G1H' for _xi, _yi, text in labels)
+    panel.close()
+
+
 def test_assignment_header_toggles_labels(tmp_path, qapp, monkeypatch) -> None:
     # 0.2.199-补29bf:点击 Assignment 列标题开关图上指认标签
     import numpy as np

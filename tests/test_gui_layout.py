@@ -2105,20 +2105,23 @@ def test_experiment_page_dropdown_switch(
 
 
 
-def test_peak_threshold_range_up_to_30(
+def test_peak_threshold_range_up_to_50(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """0.2.199-补29bo:选峰阈值上限 15σ → 30σ(滑块/输入框联动)。"""
+    """0.2.199-补29bo/补29cn:选峰阈值上限 30σ → 50σ;输入框不设上限。"""
     manager = _manager_with_experiment(tmp_path, monkeypatch)
     panel = PipelinePanel(manager, FakeProcessingController())
     panel.set_selection('data', 'exp_001', 'd_001')
     row = panel._rows['peaks']
-    assert row.threshold_slider.maximum() == 300
-    assert row.threshold_spin.maximum() == pytest.approx(30.0)
+    assert row.threshold_slider.maximum() == 500          # 50σ
+    assert row.threshold_spin.maximum() > 50.0            # 输入框不设上限(补29cn)
     assert row.threshold_spin.value() == pytest.approx(15.0)  # 默认 15σ(补29cm)
     assert row.threshold_slider.value() == 150
     row.threshold_spin.setValue(28.5)
     assert row.threshold_slider.value() == 285
+    row.threshold_spin.setValue(100.0)                    # 超过滑块上限
+    assert row.threshold_slider.value() == 500            # 滑块停在 50σ
+    assert row.threshold_spin.value() == pytest.approx(100.0)  # 不回写覆盖
     panel.close()
 
 

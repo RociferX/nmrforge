@@ -19,6 +19,12 @@ from core.peaks.peak_table import (
     load_peaks as core_load,
 )
 from core.peaks.peak_table import (
+    normalize_poky_label as core_normalize_label,
+)
+from core.peaks.peak_table import (
+    poky_label_is_valid as core_label_valid,
+)
+from core.peaks.peak_table import (
     save_peaks as core_save,
 )
 
@@ -43,3 +49,13 @@ def export_peaks_poky(
 def import_peaks_poky(path: Path | str) -> list[dict[str, Any]]:
     """导入 Poky/Sparky .list(core.peaks 实现)。"""
     return list(core_import(path))
+
+
+def normalize_poky_label(text: str | None) -> str:
+    """Poky assignment 单字母氨基酸+核格式规范化(core.peaks 实现)。"""
+    return core_normalize_label(text)
+
+
+def poky_label_is_valid(text: str | None) -> bool:
+    """判断文本是否为 Poky assignment 格式(core.peaks 实现)。"""
+    return core_label_valid(text)

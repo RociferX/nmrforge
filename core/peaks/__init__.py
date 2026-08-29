@@ -7,6 +7,8 @@ from core.peaks.peak_table import (
     export_peaks_poky,
     import_peaks_poky,
     load_peaks,
+    normalize_poky_label,
+    poky_label_is_valid,
     save_peaks,
 )
 
@@ -17,5 +19,7 @@ __all__ = [
     "export_peaks_poky",
     "import_peaks_poky",
     "load_peaks",
+    "normalize_poky_label",
+    "poky_label_is_valid",
     "save_peaks",
 ]

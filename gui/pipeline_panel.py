@@ -605,27 +605,47 @@ class PipelineStepRow(QWidget):
             lambda: self.ext_range_requested.emit(self.step_id)
         )
         button_row.addWidget(self.ext_range_button)
-        # 0.2.199-补29ar/补29au/补29bo/补29cm:峰挑选阈值条(3.0–30.0 σ,默认 15);
+        # 0.2.199-补29ar/补29au/补29bo/补29cm/补29cn:峰挑选阈值条(3.0–50.0 σ,
+        # 默认 15;输入框不设上限,滑块仅到 50);
         # 补29au:调整只更新数值,点「运行/重新处理」才重新选峰
         self.threshold_label = QLabel("阈值(σ)")
         self.threshold_label.setVisible(self.step_id == "peaks")
         self.threshold_slider = QSlider(Qt.Orientation.Horizontal)
-        self.threshold_slider.setRange(30, 300)
+        self.threshold_slider.setRange(30, 500)
         self.threshold_slider.setValue(150)
         self.threshold_slider.setFixedWidth(120)
         self.threshold_slider.setVisible(self.step_id == "peaks")
         self.threshold_spin = QDoubleSpinBox()
-        self.threshold_spin.setRange(3.0, 30.0)
+        self.threshold_spin.setRange(3.0, 1_000_000.0)  # 输入值不设上限(补29cn)
         self.threshold_spin.setSingleStep(0.5)
         self.threshold_spin.setDecimals(1)
         self.threshold_spin.setValue(15.0)
         self.threshold_spin.setVisible(self.step_id == "peaks")
-        self.threshold_slider.valueChanged.connect(
-            lambda v: self.threshold_spin.setValue(v / 10.0)
-        )
-        self.threshold_spin.valueChanged.connect(
-            lambda v: self.threshold_slider.setValue(int(round(v * 10.0)))
-        )
+        # 联动保护:输入超过滑块上限(50σ)时滑块停在 500,不回写覆盖输入值
+        self._threshold_sync = False
+
+        def _slider_to_spin(v: int) -> None:
+            if self._threshold_sync:
+                return
+            self._threshold_sync = True
+            try:
+                self.threshold_spin.setValue(v / 10.0)
+            finally:
+                self._threshold_sync = False
+
+        def _spin_to_slider(v: float) -> None:
+            if self._threshold_sync:
+                return
+            self._threshold_sync = True
+            try:
+                self.threshold_slider.setValue(
+                    max(30, min(500, int(round(v * 10.0))))
+                )
+            finally:
+                self._threshold_sync = False
+
+        self.threshold_slider.valueChanged.connect(_slider_to_spin)
+        self.threshold_spin.valueChanged.connect(_spin_to_slider)
         tip = "调整选峰阈值(σ);点「运行/重新处理」后按新阈值重新选峰"
         self.threshold_slider.setToolTip(tip)
         self.threshold_spin.setToolTip(tip)

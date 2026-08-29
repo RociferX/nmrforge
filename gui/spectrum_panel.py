@@ -29,7 +29,13 @@ from PyQt6.QtWidgets import (
 
 from core.project import ProjectManager
 from gui.dialogs import InfoDialog
-from gui.peaks_io import export_peaks_poky, import_peaks_poky, load_peaks
+from gui.peaks_io import (
+    export_peaks_poky,
+    import_peaks_poky,
+    load_peaks,
+    normalize_poky_label,
+    poky_label_is_valid,
+)
 from gui.processing import ProcessingController
 from viewer.spectrum3d_panel import Spectrum3DPanel
 from viewer.spectrum_viewer import SpectrumViewer
@@ -61,6 +67,7 @@ class SpectrumPanel(QWidget):
         self._current_exp_id: str = ""
         self._current_data_id: str = ""
         self._loading_peaks = False
+        self._applying_label_format = False  # 0.2.199-补29cn:规范化防递归
         self._viewer3d_state: dict[str, int] = {}
         self._peak_keys: tuple[str, ...] = (
             "Peak_ID",
@@ -893,8 +900,38 @@ class SpectrumPanel(QWidget):
         self._peaks = self._table_peaks()
         self._update_delete_button()
 
-    def _on_peak_cell_edited(self, _item) -> None:
+    def _on_peak_cell_edited(self, item) -> None:
+        """峰表单元格编辑:内存同步;Assignment 列按 Poky 格式规范化并立即
+        生效到图上标签(0.2.199-补29cn)。"""
+        if self._applying_label_format:
+            return
         self._sync_peaks_in_memory()
+        if item is None:
+            return
+        if self.peak_table.column(item) == self._peak_keys.index("label"):
+            self._apply_label_format(item)
+
+    def _apply_label_format(self, item) -> None:
+        """Assignment 列:Poky 单字母氨基酸+核格式规范化,并立即生效到图上标签。"""
+        row = self.peak_table.row(item)
+        raw = str(item.text() or "").strip()
+        normalized = normalize_poky_label(raw)
+        if normalized != raw:
+            self._applying_label_format = True
+            try:
+                item.setText(normalized)
+                if 0 <= row < len(self._peaks):
+                    self._peaks[row]["label"] = normalized
+            finally:
+                self._applying_label_format = False
+        if raw and not poky_label_is_valid(raw):
+            InfoDialog.show_info(
+                self,
+                "Assignment 格式",
+                "Poky assignment 格式:单字母氨基酸+残基号+核"
+                "(如 G1H、A45N、V32CA);未指认可留空或 ?-?。",
+            )
+        self.viewer.apply_label_edit(row, normalized)
 
     def _on_add_peak_toggled(self, checked: bool) -> None:
         """Add peak 开关:开启后点击谱图加峰(吸附峰顶);与 1D/选择互斥。"""

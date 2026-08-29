@@ -1259,6 +1259,13 @@ class SpectrumViewer(QWidget):
         self._label_positions = [None] * len(self._peaks)
         self._label_overlay.update()
 
+    def apply_label_edit(self, row: int, text: str) -> None:
+        """峰表 Assignment 编辑后立即更新图上标签(0.2.199-补29cn):
+        只改该峰 label 并重绘标签覆盖层,不重建峰标记、不动已拖动位置。"""
+        if 0 <= row < len(self._peaks):
+            self._peaks[row]["label"] = text
+        self._label_overlay.update()
+
     def highlight_peak(self, row: int, flash: bool = True) -> None:
         """选中峰:仅峰表点击触发闪烁定位(0.2.199-补29bk/补29bo);
         谱图点选、框选只做标记高亮,不闪烁。"""

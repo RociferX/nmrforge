@@ -9,6 +9,8 @@ from core.peaks import (
     export_peaks_poky,
     import_peaks_poky,
     load_peaks,
+    normalize_poky_label,
+    poky_label_is_valid,
     save_peaks,
 )
 
@@ -198,3 +200,27 @@ def test_save_peaks_extra_columns_ignored_in_list(tmp_path: Path) -> None:
     lines = path.read_text(encoding="utf-8").splitlines()
     assert lines[0] == "Assignment w1 w2 Data Height Volume"
     assert "Reliability" not in "\n".join(lines)
+
+
+def test_normalize_poky_label() -> None:
+    """0.2.199-补29cn:Poky 单字母氨基酸+残基号+核格式规范化。"""
+    assert normalize_poky_label("g1h") == "G1H"
+    assert normalize_poky_label("a45ca") == "A45CA"
+    assert normalize_poky_label("V32cb") == "V32CB"
+    assert normalize_poky_label("g1h,g2h") == "G1H,G2H"
+    assert normalize_poky_label("G1") == "G1"
+    assert normalize_poky_label("?-?") == "?-?"
+    assert normalize_poky_label("") == ""
+    assert normalize_poky_label(None) == ""
+
+
+def test_poky_label_is_valid() -> None:
+    """0.2.199-补29cn:Poky assignment 格式校验。"""
+    assert poky_label_is_valid("G1H")
+    assert poky_label_is_valid("A45N")
+    assert poky_label_is_valid("V32CA")
+    assert poky_label_is_valid("G1H,G2H")
+    assert poky_label_is_valid("?-?")
+    assert poky_label_is_valid("")
+    assert not poky_label_is_valid("xyz")
+    assert not poky_label_is_valid("1H")
