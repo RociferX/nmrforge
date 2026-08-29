@@ -683,6 +683,32 @@ def test_highlight_flash_only_when_requested(qapp: QApplication) -> None:
 
 
 
+
+def test_signal_region_containment(qapp: QApplication) -> None:
+    """0.2.199-补29ca:分区域独立规划——标签不超出所属区域范围。"""
+    cells = [
+        QPointF(float(x), float(y))
+        for y in range(20, 180, 20)
+        for x in range(20, 380, 20)
+    ]
+    peaks = [QPointF(80.0, 60.0), QPointF(300.0, 140.0)]
+    entries = [(p, f"P{i}", 30.0) for i, p in enumerate(peaks)]
+    layout = _layout_signal_labels(
+        entries, peaks, QRectF(0.0, 0.0, 400.0, 200.0), 12.0, cells
+    )
+    assert len(layout) == 2
+    grid_n = 2
+    x0, x1 = 20.0, 380.0
+    y0, y1 = 20.0, 180.0
+    xw = (x1 - x0) / grid_n
+    yh = (y1 - y0) / grid_n
+    for pos, anchor, pt, text in layout:
+        assert pos == anchor, f"leader not direct for {text}"
+        rcx = min(int((pt.x() - x0) // xw), grid_n - 1)
+        rcy = min(int((pt.y() - y0) // yh), grid_n - 1)
+        assert x0 + rcx * xw - 1e-6 <= pos.x() <= x0 + (rcx + 1) * xw + 1e-6
+        assert y0 + rcy * yh - 1e-6 <= pos.y() <= y0 + (rcy + 1) * yh + 1e-6
+
 def test_signal_blank_cell_layout(qapp: QApplication) -> None:
     """0.2.199-补29bw:标签放进 contour 起点下看不见信号的空白格(含峰间空当),
     直接连线、不叠在同一格。"""
