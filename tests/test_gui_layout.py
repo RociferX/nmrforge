@@ -1741,7 +1741,7 @@ def test_segmented_import_rejects_non_container(
     (single / "acqus").write_text("x", encoding="utf-8")
     window._segmented_import("exp_001", str(single))
     assert not captured
-    assert messages and "不是分段采集容器" in messages[0]
+    assert messages and "不是分段/重复实验容器" in messages[0]
     window.close()
 
 

@@ -174,11 +174,12 @@ class ExperimentImportPanel(QWidget):
         )
         layout.addWidget(self.single_group)
 
-        self.segmented_group = QGroupBox("分段采集导入(合并 FID)")
+        self.segmented_group = QGroupBox("分段数据或重复实验叠加导入")
         segmented_layout = QVBoxLayout(self.segmented_group)
         segmented_hint = QLabel(
-            "用于同一次实验分多段采集、需要合并 FID 的数据:选择容器目录"
-            "(顶层无 acqus,至少 2 个子目录各含 acqus),导入后自动合并为一条样品数据"
+            "用于同一次实验分多段采集(NUS 互补采样点补全网格)或重复实验叠加"
+            "(同参数/同采样点,提高信噪比):选择容器目录(顶层无 acqus,至少 2 个"
+            "子目录各含 acqus),导入后自动合并为一条样品数据"
         )
         segmented_hint.setWordWrap(True)
         segmented_hint.setStyleSheet("color: #666;")
@@ -186,14 +187,14 @@ class ExperimentImportPanel(QWidget):
         segmented_form = QHBoxLayout()
         self.segmented_source_edit = QLineEdit()
         self.segmented_source_edit.setPlaceholderText(
-            "分段采集容器目录(含多个 acqus 子目录)"
+            "分段/重复实验容器目录(含多个 acqus 子目录)"
         )
         segmented_form.addWidget(self.segmented_source_edit, 1)
         segmented_browse = QPushButton("浏览...")
         segmented_browse.clicked.connect(self._on_segmented_browse)
         segmented_form.addWidget(segmented_browse)
         segmented_layout.addLayout(segmented_form)
-        self.segmented_import_button = QPushButton("分段采集导入")
+        self.segmented_import_button = QPushButton("分段/重复实验叠加导入")
         self.segmented_import_button.setEnabled(False)
         self.segmented_import_button.clicked.connect(self._on_segmented_import)
         segmented_layout.addWidget(self.segmented_import_button)
@@ -326,7 +327,7 @@ class ExperimentImportPanel(QWidget):
         """选择分段采集容器目录。"""
         path = QFileDialog.getExistingDirectory(
             self,
-            "选择分段采集容器目录",
+            "选择分段/重复实验容器目录",
             self.segmented_source_edit.text() or str(Path.home()),
         )
         if path:

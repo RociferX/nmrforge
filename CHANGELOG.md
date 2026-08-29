@@ -1,5 +1,19 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29cu(2026-08-30,多段容器识别:重复实验叠加 vs NUS 分段 + 导入入口改名)
+
+按用户说明(VM sampleN 是重复实验叠加去噪,不是 NUS 分段):
+- 识别规则(classify_segment_kind):传统采样(uniform)且采样参数一致 →
+  重复实验叠加去噪(repeat_uniform);NUS 各段采样点相同 → 重复实验叠加
+  (repeat_nus);NUS 各段采样点不同 → 分段(segmented_nus,互补采样点补全
+  网格);nuslist 缺失/采样模式混合时保守按分段;
+- 导入标注:多段导入把 segment_kind/segment_kind_label 写入 WorkflowRun
+  params 与数据 metadata,完成消息注明类型(如「导入完成(重复实验叠加
+  (uniform 同参数))」);
+- GUI 入口改名:导入面板「分段采集导入(合并 FID)」→「分段数据或重复实验
+  叠加导入」,提示说明两种用途,对话框/主窗口提示同步;
+- 测试:classify 三类单测 + 导入标注断言 + GUI 文案断言更新;全量 pytest 全绿。
+
 ## 0.2.199-补29ct(2026-08-30,补实现 _merge_slices:分段切片式 FID 合并)
 
 按用户报告(分段数据生成 FID 报 AttributeError):

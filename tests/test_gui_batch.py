@@ -292,7 +292,7 @@ def test_experiment_dashboard_segmented_between_single_and_batch(
 
     page = ExperimentDashboard()
     assert isinstance(page.segmented_group, QGroupBox)
-    assert page.segmented_group.title() == "分段采集导入(合并 FID)"
+    assert page.segmented_group.title() == "分段数据或重复实验叠加导入"
     # 0.2.162-补11:导入块在 import_panel 内(实验类型页不再内联展示)
     layout = page.import_panel.layout()
     assert layout.indexOf(page.single_group) < layout.indexOf(page.segmented_group)
@@ -432,7 +432,7 @@ def test_import_data_dropdown_panel(qapp: QApplication) -> None:
 
     dd = ImportDataDropdown()
     assert dd.panel.single_group.title() == "单个导入"
-    assert dd.panel.segmented_group.title() == "分段采集导入(合并 FID)"
+    assert dd.panel.segmented_group.title() == "分段数据或重复实验叠加导入"
     assert dd.panel.batch_group.title() == "批量处理"
     emitted: list[tuple] = []
     dd.import_options_requested.connect(lambda *a: emitted.append(a))

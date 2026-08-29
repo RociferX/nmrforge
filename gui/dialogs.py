@@ -216,7 +216,7 @@ class ImportExperimentDialog(QDialog):
         form.addRow("", self.copy_check)
         # 0.2.108:分段采集导入(容器目录,多个含 acqus 的子目录合并为一条数据)
         self.segmented_check = QCheckBox(
-            "分段采集导入(容器目录:多个含 acqus 的子目录合并为一条数据)"
+            "分段数据或重复实验叠加导入(容器目录:多个含 acqus 的子目录合并为一条数据)"
         )
         self.segmented_check.setToolTip(
             "适用于同一次采集分成多段的数据;普通单数据集目录保持不勾选。"
@@ -271,8 +271,8 @@ class ImportExperimentDialog(QDialog):
                 InfoDialog.show_info(
                     self,
                     "提示",
-                    "所选目录既不是 Bruker 数据集,也不是分段采集容器\n"
-                    "(分段容器需至少 2 个子目录各含 acqus 数据段;"
+                    "所选目录既不是 Bruker 数据集,也不是分段/重复实验容器\n"
+                    "(容器需至少 2 个子目录各含 acqus 数据段;"
                     "非数据子目录已忽略)",
                 )
                 return

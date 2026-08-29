@@ -168,10 +168,15 @@ def import_data(
         raise ImportWorkflowError("未加载项目,无法导入数据")
     src = Path(source).resolve()
     segment_paths: list[Path] = []
+    segment_kind: str | None = None
+    segment_label: str | None = None
     if segmented:
         # 单数据分段采集:source 为包含全部分段的容器目录(与批量导入区分,
         # 批量导入把多个独立数据集各自建条目;这里合并为一条 DataEntry)
-        from core.data.bruker_reader import read_dataset_container
+        from core.data.bruker_reader import (
+            classify_segment_kind,
+            read_dataset_container,
+        )
 
         experiment, discovered = read_dataset_container(src)
         if len(discovered) < 2:
@@ -180,6 +185,14 @@ def import_data(
             )
         experiment.dataset_id = src.name  # 容器名作为数据标识
         segment_paths = [Path(seg).resolve() for seg in discovered]
+        # 0.2.199-补29cu:识别重复实验叠加(uniform/NUS 同点)与 NUS 分段
+        segment_kind = classify_segment_kind(discovered)
+        segment_label = {
+            "repeat_uniform": "重复实验叠加(uniform 同参数)",
+            "repeat_nus": "重复实验叠加(NUS 同采样点)",
+            "segmented_nus": "分段(NUS 互补采样点)",
+        }.get(segment_kind, segment_kind)
+        experiment.sampling.evidence.append(f"多段类型: {segment_label}")
     else:
         _validate_dataset_dir(src)
         experiment = read_dataset(src)
@@ -259,6 +272,7 @@ def import_data(
                 "link_stats": dict(link_stats),
                 "data_id": data_id,
                 "segments": [str(seg) for seg in data_entry.segments],
+                "segment_kind": segment_kind,
                 "file_count": file_count,
                 "total_bytes": total_bytes,
             },
@@ -277,6 +291,8 @@ def import_data(
             "imported_at": data_entry.imported_at,
             "dataset": _dataset_summary(experiment),
             "segments": [str(seg) for seg in data_entry.segments],
+            "segment_kind": segment_kind,
+            "segment_kind_label": segment_label,
             "link_stats": dict(link_stats),  # G2B-009:hardlink/symlink/copy/writable
             "manifest": {
                 "file_count": file_count,
@@ -291,7 +307,14 @@ def import_data(
         outputs = {"metadata": metadata_path.relative_to(manager.root).as_posix()}
         if copied_dir is not None:
             outputs["raw_dir"] = copied_dir.relative_to(manager.root).as_posix()
-        manager.finish_run(run.run_id, "success", outputs=outputs, message="导入完成")
+        manager.finish_run(
+            run.run_id,
+            "success",
+            outputs=outputs,
+            message="导入完成"
+            if segment_label is None
+            else f"导入完成({segment_label})",
+        )
     except Exception:
         if run is not None:
             try:

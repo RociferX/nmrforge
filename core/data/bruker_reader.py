@@ -315,6 +315,32 @@ def discover_segment_dirs(container: Path | str) -> list[Path]:
     )
 
 
+def classify_segment_kind(paths: list[Path | str]) -> str:
+    """识别多段容器数据性质(0.2.199-补29cu,用户规则)。
+
+    返回:
+    - "repeat_uniform":传统采样(uniform)且采样参数一致 → 重复实验叠加去噪;
+    - "repeat_nus":NUS 且各段采样点集合相同 → 重复实验叠加去噪;
+    - "segmented_nus":NUS 且各段采样点集合不同 → 分段(互补采样点补全网格);
+      nuslist 缺失或采样模式混合/不确定时保守按分段。
+    """
+    dirs = [Path(p) for p in paths]
+    if len(dirs) < 2:
+        raise ValueError("至少需要 2 个数据集目录")
+    exps = [read_dataset(d) for d in dirs]
+    modes = {e.sampling.mode for e in exps}
+    if SamplingMode.NUS in modes:
+        if len(modes) > 1:
+            return "segmented_nus"  # 混合/不确定,保守按分段
+        point_sets = [set(e.sampling.nus_list) for e in exps]
+        if any(not ps for ps in point_sets):
+            return "segmented_nus"  # nuslist 缺失,无法确认同点
+        if all(ps == point_sets[0] for ps in point_sets[1:]):
+            return "repeat_nus"
+        return "segmented_nus"
+    return "repeat_uniform"
+
+
 def read_dataset_container(path: Path | str) -> tuple[Experiment, list[Path]]:
     """读数据集容器:单 Bruker 目录直接读(segments=[]);
     容器目录(多个直接含 acqus 的子目录)按分段读取(read_segments 校验一致)。"""

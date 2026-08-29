@@ -408,16 +408,16 @@ class MainWindow(QMainWindow):
             return
         source = source.strip()
         if not source:
-            InfoDialog.show_info(self, "提示", "请选择分段采集容器目录")
+            InfoDialog.show_info(self, "提示", "请选择分段/重复实验容器目录")
             return
         from gui.processing import is_segmented_container
 
         if not is_segmented_container(source):
             InfoDialog.show_info(
                 self,
-                "分段采集导入",
-                "所选目录不是分段采集容器(需至少 2 个子目录各含 acqus 数据段;"
-                "非数据子目录已忽略;容器顶层本身不含 acqus 属正常)",
+                "分段/重复实验叠加导入",
+                "所选目录不是分段/重复实验容器(需至少 2 个子目录各含 acqus "
+                "数据段;非数据子目录已忽略;容器顶层本身不含 acqus 属正常)",
             )
             return
         self._import_experiment_async(

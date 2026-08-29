@@ -68,6 +68,8 @@ def test_import_segmented_container_single_entry(
         manager.data_metadata_path("exp_001", "d_001").read_text(encoding="utf-8")
     )
     assert len(meta["segments"]) == 2
+    assert meta["segment_kind"] == "repeat_uniform"  # hsqc_2d 传统采样
+    assert "重复实验叠加" in meta["segment_kind_label"]
 
 
 def test_import_segmented_to_existing_experiment(

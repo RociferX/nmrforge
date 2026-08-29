@@ -158,3 +158,34 @@ def test_read_segments_sw_precision_tolerance(
     _set_sw(dst_b / "acqu2s", "11904.762")
     exp = read_segments([dst_a, dst_b])
     assert len(exp.segments) == 2
+
+
+def test_classify_segment_kind(tmp_path: Path, bruker_dir: Path) -> None:
+    """0.2.199-补29cu:uniform → 重复叠加;NUS 同点 → 重复叠加;NUS 异点 → 分段。"""
+    import shutil
+
+    from core.data.bruker_reader import classify_segment_kind
+    from core.data.nus_reader import read_nuslist
+
+    def _container(name: str, src: str, n: int = 2) -> Path:
+        c = tmp_path / name
+        for i in range(1, n + 1):
+            shutil.copytree(bruker_dir / src, c / f"s{i:02d}")
+        return c
+
+    c_uniform = _container("c_uniform", "hsqc_2d")
+    assert (
+        classify_segment_kind([c_uniform / "s01", c_uniform / "s02"])
+        == "repeat_uniform"
+    )
+    c_nus = _container("c_nus", "nus_2d")
+    segs = [c_nus / "s01", c_nus / "s02"]
+    assert classify_segment_kind(segs) == "repeat_nus"  # nuslist 相同
+    # 改第二段 nuslist 去掉首行 → 采样点不同 → 分段
+    nus2 = c_nus / "s02" / "nuslist"
+    points = read_nuslist(nus2)
+    nus2.write_text(
+        "\n".join(" ".join(str(v) for v in p) for p in points[1:]) + "\n",
+        encoding="utf-8",
+    )
+    assert classify_segment_kind(segs) == "segmented_nus"
