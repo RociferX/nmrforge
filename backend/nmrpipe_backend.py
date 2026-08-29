@@ -242,6 +242,47 @@ def _effective_params_base(
         "sampling": dict(sampling),
     }
 
+
+def _segment_kind_info(segments: list[Path | str]) -> tuple[str | None, list[str]]:
+    """识别多段容器类型并生成说明日志(0.2.199-补29cv)。
+
+    - repeat_uniform / repeat_nus:重复实验叠加——各段 FID 按 TopSpin
+      fidadd 语义时域逐点相加(co-addition,addNMR 默认不归一化),用于
+      提高信噪比;NUS 各段采样点相同,同网格叠加后单次重构。
+    - segmented_nus:NUS 分段——各段采样点互补,合并 nuslist 补全网格
+      后单次重构。
+    分类失败返回 (None, [警告]),不阻断 FID 生成(调用方仍按分段合并)。
+    """
+    from core.data.bruker_reader import classify_segment_kind
+
+    try:
+        kind = classify_segment_kind(list(segments))
+    except Exception as exc:  # noqa: BLE001 - 分类失败不阻断转换
+        return None, [f"⚠ 多段类型识别失败({exc}),按分段合并处理"]
+    label = {
+        "repeat_uniform": "重复实验叠加(uniform 同参数)",
+        "repeat_nus": "重复实验叠加(NUS 同采样点)",
+        "segmented_nus": "分段(NUS 互补采样点)",
+    }.get(kind, kind)
+    if kind == "repeat_uniform":
+        detail = (
+            f"识别为{label}:{len(segments)} 段 FID 按 TopSpin fidadd 语义"
+            "时域逐点相加(co-addition,addNMR 不归一化),提高信噪比"
+        )
+    elif kind == "repeat_nus":
+        detail = (
+            f"识别为{label}:各段采样点相同,同网格叠加后单次重构"
+            "(TopSpin fidadd 语义,addNMR 不归一化)"
+        )
+    elif kind == "segmented_nus":
+        detail = (
+            f"识别为{label}:各段采样点互补,合并 nuslist 补全网格后单次重构"
+        )
+    else:
+        detail = f"多段类型: {label}"
+    return kind, [detail]
+
+
 @dataclass
 class NMRPipeBackend:
     """NMRPipe 实现（Linux：bruker -AUTO + fid.com + NMRPipe 管道 + SMILE + 多段合并）。"""
@@ -508,9 +549,14 @@ class NMRPipeBackend:
         work = self._work_path(experiment)
         work.mkdir(parents=True, exist_ok=True)
         logs: list[str] = []
+        segment_kind: str | None = None
         if progress is not None:
             progress("开始转换 fid")
         if experiment.segments:
+            # 0.2.199-补29cv:识别重复实验叠加/分段,日志注明 TopSpin
+            # fidadd 语义的时域相加;分类失败不阻断转换
+            segment_kind, kind_logs = _segment_kind_info(experiment.segments)
+            logs += kind_logs
             # 0.2.124:坏点在源头 ser/nuslist 删除并备份(用户要求)
             _count, _bad, source_removed = self._clean_source_nus(
                 experiment, [Path(s) for s in experiment.segments], logs
@@ -568,6 +614,7 @@ class NMRPipeBackend:
                 "dataset_id": experiment.dataset_id,
                 "ndim": experiment.ndim,
                 "segments": len(experiment.segments),
+                "segment_kind": segment_kind,
                 "work_dir": str(work),
                 "fid_path": str(fid_path),
             },
@@ -626,6 +673,9 @@ class NMRPipeBackend:
                         merged_path.unlink()
                 merged_ready = False
             if not merged_ready:
+                # 0.2.199-补29cv:本路径自行转换/合并时同样注明多段类型
+                _kind, kind_logs = _segment_kind_info(experiment.segments)
+                logs += kind_logs
                 shifts = [float(v) for v in params.get("segment_shift_hz", [])]
                 converted, convert_logs = self._convert_segments(
                     runtime, experiment, work, shifts

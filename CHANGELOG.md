@@ -1,5 +1,19 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29cv(2026-08-30,后端跟进重复实验叠加 FID:TopSpin fidadd 语义标注)
+
+按用户要求(后端也跟进,参考 TopSpin 做法):
+- convert_to_fid 多段分支识别多段类型并写日志:repeat_uniform/repeat_nus =
+  重复实验叠加——各段 FID 按 TopSpin fidadd 语义时域逐点相加
+  (co-addition,addNMR 不归一化),提高信噪比;NUS 各段采样点相同,同网格
+  叠加后单次重构;segmented_nus = 互补采样点合并 nuslist 补全网格后单次
+  重构(合并算法沿用既有 addNMR 逐对相加,语义与 fidadd 一致);
+- effective_params 新增 segment_kind(生成 FID 阶段独立复识别,与导入标注
+  互补);分类失败降级为普通分段合并并记录 ⚠ 警告,不阻断转换;
+- reconstruct_nus 自行转换/合并路径同样标注(复用已合并 fid 时不重复);
+- 测试:3 类类型日志 + 分类失败降级 + convert_to_fid 集成(日志与参数)
+  共 6 项;本地全量 pytest 794 项全绿,tests/test_full_paths.py 11 项通过。
+
 ## 0.2.199-补29cu(2026-08-30,多段容器识别:重复实验叠加 vs NUS 分段 + 导入入口改名)
 
 按用户说明(VM sampleN 是重复实验叠加去噪,不是 NUS 分段):

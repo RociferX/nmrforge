@@ -909,3 +909,153 @@ def test_merge_slices_slice_count_mismatch(tmp_path: Path) -> None:
     logs: list[str] = []
     assert not backend._merge_slices(fake, work, 2, logs)
     assert any("切片数" in line for line in logs)
+
+
+def test_segment_kind_info_repeat_uniform(monkeypatch) -> None:
+    """0.2.199-补29cv:uniform 重复叠加日志注明 TopSpin 时域相加。"""
+    import core.data.bruker_reader as br
+    from backend.nmrpipe_backend import _segment_kind_info
+
+    monkeypatch.setattr(br, "classify_segment_kind", lambda paths: "repeat_uniform")
+    kind, logs = _segment_kind_info([Path("a"), Path("b")])
+    assert kind == "repeat_uniform"
+    assert "TopSpin fidadd" in logs[0]
+    assert "时域逐点相加" in logs[0]
+    assert "不归一化" in logs[0]
+
+
+def test_segment_kind_info_repeat_nus(monkeypatch) -> None:
+    """repeat_nus:同采样点同网格叠加。"""
+    import core.data.bruker_reader as br
+    from backend.nmrpipe_backend import _segment_kind_info
+
+    monkeypatch.setattr(br, "classify_segment_kind", lambda paths: "repeat_nus")
+    kind, logs = _segment_kind_info(["a", "b"])
+    assert kind == "repeat_nus"
+    assert "同网格叠加" in logs[0]
+    assert "TopSpin fidadd" in logs[0]
+
+
+def test_segment_kind_info_segmented_nus(monkeypatch) -> None:
+    """segmented_nus:互补采样点补全网格。"""
+    import core.data.bruker_reader as br
+    from backend.nmrpipe_backend import _segment_kind_info
+
+    monkeypatch.setattr(br, "classify_segment_kind", lambda paths: "segmented_nus")
+    kind, logs = _segment_kind_info(["a", "b"])
+    assert kind == "segmented_nus"
+    assert "补全网格" in logs[0]
+
+
+def test_segment_kind_info_classify_failure_nonblocking(monkeypatch) -> None:
+    """分类失败降级:返回 None + 警告,不阻断。"""
+    import core.data.bruker_reader as br
+    from backend.nmrpipe_backend import _segment_kind_info
+
+    def _boom(paths):
+        raise ValueError("缺 acqus")
+
+    monkeypatch.setattr(br, "classify_segment_kind", _boom)
+    kind, logs = _segment_kind_info(["a", "b"])
+    assert kind is None
+    assert "多段类型识别失败" in logs[0]
+
+
+def test_convert_to_fid_segments_annotates_segment_kind(
+    tmp_path: Path, bruker_dir: Path, monkeypatch
+) -> None:
+    """convert_to_fid 多段分支:segment_kind 入日志与 effective_params。"""
+    import shutil
+
+    import core.data.bruker_reader as br
+    from backend.nmrpipe_backend import NMRPipeBackend
+    from core.data.bruker_reader import read_segments
+
+    dst_a = tmp_path / "seg_a"
+    dst_b = tmp_path / "seg_b"
+    shutil.copytree(bruker_dir / "nus_3d", dst_a)
+    shutil.copytree(bruker_dir / "nus_3d", dst_b)
+    exp = read_segments([dst_a, dst_b])
+    backend = NMRPipeBackend(nmrpipe_bin="")
+    monkeypatch.setattr(backend, "_bin_dir", lambda: Path("nmrpipe"))
+    monkeypatch.setattr(
+        backend,
+        "_clean_source_nus",
+        lambda experiment, raw_dirs, logs: (0, [], False),
+    )
+    monkeypatch.setattr(
+        backend,
+        "_convert_segments",
+        lambda runtime, experiment, work, shifts, fid_com_overrides=None: (
+            True,
+            ["转换完成"],
+        ),
+    )
+    monkeypatch.setattr(
+        backend,
+        "_write_merged_nuslist",
+        lambda work, segment_dirs, experiment, logs: (0, []),
+    )
+    monkeypatch.setattr(
+        backend,
+        "_merged_fid_in",
+        lambda work, dataset_id: f"merged/{dataset_id}.fid",
+    )
+    monkeypatch.setattr(br, "classify_segment_kind", lambda paths: "repeat_nus")
+    result = backend.convert_to_fid(exp, tmp_path)
+    assert result["success"] is True
+    assert result["effective_params"]["segment_kind"] == "repeat_nus"
+    joined = "|".join(result["logs"])
+    assert "TopSpin fidadd" in joined
+    assert "同网格叠加" in joined
+
+
+def test_convert_to_fid_segments_classify_failure_nonblocking(
+    tmp_path: Path, bruker_dir: Path, monkeypatch
+) -> None:
+    """分类失败不阻断 FID 转换(降级普通分段合并 + 警告)。"""
+    import shutil
+
+    import core.data.bruker_reader as br
+    from backend.nmrpipe_backend import NMRPipeBackend
+    from core.data.bruker_reader import read_segments
+
+    dst_a = tmp_path / "seg_a"
+    dst_b = tmp_path / "seg_b"
+    shutil.copytree(bruker_dir / "nus_3d", dst_a)
+    shutil.copytree(bruker_dir / "nus_3d", dst_b)
+    exp = read_segments([dst_a, dst_b])
+    backend = NMRPipeBackend(nmrpipe_bin="")
+    monkeypatch.setattr(backend, "_bin_dir", lambda: Path("nmrpipe"))
+    monkeypatch.setattr(
+        backend,
+        "_clean_source_nus",
+        lambda experiment, raw_dirs, logs: (0, [], False),
+    )
+    monkeypatch.setattr(
+        backend,
+        "_convert_segments",
+        lambda runtime, experiment, work, shifts, fid_com_overrides=None: (
+            True,
+            [],
+        ),
+    )
+    monkeypatch.setattr(
+        backend,
+        "_write_merged_nuslist",
+        lambda work, segment_dirs, experiment, logs: (0, []),
+    )
+    monkeypatch.setattr(
+        backend,
+        "_merged_fid_in",
+        lambda work, dataset_id: f"merged/{dataset_id}.fid",
+    )
+
+    def _boom(paths):
+        raise ValueError("缺 acqus")
+
+    monkeypatch.setattr(br, "classify_segment_kind", _boom)
+    result = backend.convert_to_fid(exp, tmp_path)
+    assert result["success"] is True
+    assert result["effective_params"].get("segment_kind") is None
+    assert any("多段类型识别失败" in line for line in result["logs"])
