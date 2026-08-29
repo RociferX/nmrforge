@@ -224,6 +224,9 @@ def _assign_blank_cells(
     if not peaks or not cells:
         return []
     min_sep = max(20.0, font_px * 1.6)
+    # 0.2.199-补29by:性能上限——每峰最多检查 64 个最近候选、避让回看最近 40 个
+    max_cand = 64
+    max_placed = 40
     cell_arr = np.array([(c.x(), c.y()) for c in cells])
     peak_arr = np.array([(p.x(), p.y()) for p, _t in peaks])
     dists = np.hypot(
@@ -240,47 +243,58 @@ def _assign_blank_cells(
         cand = np.argsort(dists[pidx])
         chosen = -1
         for radius in radii:
-            in_r = cand[dists[pidx][cand] <= radius]
+            in_r = cand[dists[pidx][cand] <= radius][:max_cand]
             for k in in_r:
                 k = int(k)
                 if used[k]:
                     continue
                 c = cells[k]
+                recent = placed[-max_placed:]
                 if any(
                     float(np.hypot(c.x() - pos.x(), c.y() - pos.y())) < min_sep
-                    for pos, _p, _t in placed
+                    for pos, _p, _t in recent
                 ):
                     continue
                 seg = ((peaks[pidx][0].x(), peaks[pidx][0].y()), (c.x(), c.y()))
-                if not any(
-                    _segments_cross(
+                cross = False
+                for pp, pc, _t in recent:
+                    # 包围盒预筛:不相交则必不交叉
+                    if (
+                        min(seg[0][0], seg[1][0]) > max(pp.x(), pc.x())
+                        or max(seg[0][0], seg[1][0]) < min(pp.x(), pc.x())
+                        or min(seg[0][1], seg[1][1]) > max(pp.y(), pc.y())
+                        or max(seg[0][1], seg[1][1]) < min(pp.y(), pc.y())
+                    ):
+                        continue
+                    if _segments_cross(
                         seg[0],
                         seg[1],
                         (pp.x(), pp.y()),
                         (pc.x(), pc.y()),
-                    )
-                    for pp, pc, _t in placed
-                ):
+                    ):
+                        cross = True
+                        break
+                if not cross:
                     chosen = k
                     break
             if chosen >= 0:
                 break
         if chosen < 0:
-            # 放宽:只避重叠
-            for k in cand:
+            # 放宽:只避重叠(限候选与回看数量)
+            for k in cand[: max_cand * 2]:
                 k = int(k)
                 if used[k]:
                     continue
                 c = cells[k]
                 if not any(
                     float(np.hypot(c.x() - pos.x(), c.y() - pos.y())) < min_sep
-                    for pos, _p, _t in placed
+                    for pos, _p, _t in placed[-max_placed:]
                 ):
                     chosen = k
                     break
         if chosen < 0:
-            # 最后:最近的未用格
-            for k in cand:
+            # 最后:最近的未用格(限候选数量)
+            for k in cand[:max_cand]:
                 if not used[int(k)]:
                     chosen = int(k)
                     break
@@ -359,6 +373,7 @@ class _LabelOverlay(QWidget):
         super().__init__(parent)
         self._viewer = viewer
         self._blank_grid_cache: dict = {}  # (id(data), thr) -> 空白格网格(0.2.199-补29bx)
+        self._layout_cache: dict = {}  # (谱/阈值/视野/峰) -> 标签布局(0.2.199-补29by)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
@@ -531,10 +546,31 @@ class _LabelOverlay(QWidget):
                 (pt, text, float(fm.horizontalAdvance(text)))
                 for pt, text in pts
             ]
-            blank_points = self._blank_points(viewer, vb)
-            layout = _layout_signal_labels(
-                entries, hull_points, clamp_rect, font_px, blank_points
+            # 0.2.199-补29by:布局缓存(谱/阈值/视野/峰不变则复用),避免重绘卡顿
+            try:
+                vr = vb.viewRange()
+                rng_key = (
+                    round(vr[0][0], 2),
+                    round(vr[0][1], 2),
+                    round(vr[1][0], 2),
+                    round(vr[1][1], 2),
+                )
+            except Exception:  # noqa: BLE001
+                rng_key = ()
+            key = (
+                id(viewer._primary),
+                round(viewer._level_fraction(), 4),
+                (self.rect().width(), self.rect().height()),
+                rng_key,
+                tuple((round(p.x(), 1), round(p.y(), 1), t) for p, t in pts),
             )
+            layout = self._layout_cache.get(key)
+            if layout is None:
+                blank_points = self._blank_points(viewer, vb)
+                layout = _layout_signal_labels(
+                    entries, hull_points, clamp_rect, font_px, blank_points
+                )
+                self._layout_cache = {key: layout}
             gap_peak = 6.0 + font_px * 0.25  # 峰端留缝,不接死
             leader_pen = QPen(QColor("#888888"), 1)
             label_pen = QPen(QColor("#c0392b"), 1)
