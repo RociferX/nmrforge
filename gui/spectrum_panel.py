@@ -175,6 +175,8 @@ class SpectrumPanel(QWidget):
         # 上下布局:顶部文件/ Layers 行,中部查看器,下方峰操作+峰表
         # 0.2.147:文件列表与 Layers 列表并排一行,间隔明显
         self.lists_row_widget = QWidget()
+        # 0.2.199-补29bs:限制 Files/Layers 行高度,放大时右侧列不被撑爆
+        self.lists_row_widget.setMaximumHeight(110)
         self.lists_row = QHBoxLayout(self.lists_row_widget)
         self.lists_row.setContentsMargins(0, 0, 0, 0)
         self.lists_row.setSpacing(16)
@@ -195,7 +197,7 @@ class SpectrumPanel(QWidget):
             "放大:绘图区单独伸到左侧(收起项目树/Pipeline/Log),右侧保留按键;再点还原"
         )
         self.expand_button.toggled.connect(self._on_expand_toggled)
-        self.lists_row.addStretch(1)
+        # 0.2.199-补29bs:不留 Layers 与按钮之间的大空白
         self.lists_row.addWidget(self.expand_button)
         # 0.2.199-补29br:谱图查看器的「文件」「帮助」菜单移到放大按钮右边
         self.file_menu = QMenu(self)
@@ -224,6 +226,9 @@ class SpectrumPanel(QWidget):
         self._panel_splitter.addWidget(self.lists_row_widget)
         self._panel_splitter.addWidget(self.viewer)
         self.peak_toolbar_widget = QWidget()
+        # 0.2.199-补29bs:两行峰按钮(Show/Select/Add/尺寸 + Delete/Import/Export/Save)
+        self.peak_toolbar_widget.setMinimumHeight(68)
+        self.peak_toolbar_widget.setMaximumHeight(90)
         _peak_rows = QVBoxLayout(self.peak_toolbar_widget)
         _peak_rows.setContentsMargins(0, 0, 0, 0)
         _peak_rows.setSpacing(4)
@@ -235,7 +240,7 @@ class SpectrumPanel(QWidget):
         self._panel_splitter.setStretchFactor(1, 1)
         self._panel_splitter.setStretchFactor(2, 0)
         self._panel_splitter.setStretchFactor(3, 0)
-        self._panel_splitter.setSizes([90, 480, 40, 160])
+        self._panel_splitter.setSizes([90, 420, 76, 150])
         self.viewer.peak_clicked.connect(self._on_viewer_peak_clicked)
         self.viewer.manual_peak_requested.connect(self._on_manual_peak_added)
         self.viewer.peaks_box_selected.connect(self._on_peaks_box_selected)
@@ -1156,13 +1161,16 @@ class SpectrumPanel(QWidget):
         controls_widget.setParent(None)
         self._expand_plot_area = plot_area
         self._expand_viewer_controls = controls_widget
+        # 放大时峰表放开高度上限,吃右侧列剩余空间(更实用)
+        self._peak_table_max = self.peak_table.maximumHeight()
+        self.peak_table.setMaximumHeight(16777215)
         controls = QWidget()
         col = QVBoxLayout(controls)
         col.setContentsMargins(0, 0, 0, 0)
         col.setSpacing(4)
-        col.addWidget(controls_widget)
-        col.addWidget(self.lists_row_widget)
-        col.addWidget(self.peak_toolbar_widget)
+        col.addWidget(self.lists_row_widget, 0)
+        col.addWidget(controls_widget, 0)
+        col.addWidget(self.peak_toolbar_widget, 0)
         col.addWidget(self.peak_table, 1)
         self._expand_controls = controls
         hsplit = QSplitter(Qt.Orientation.Horizontal)
@@ -1196,6 +1204,8 @@ class SpectrumPanel(QWidget):
             viewer.view_splitter.setSizes(self._view_splitter_sizes)
         self._expand_plot_area = None
         self._expand_viewer_controls = None
+        if getattr(self, "_peak_table_max", None) is not None:
+            self.peak_table.setMaximumHeight(self._peak_table_max)
         self._panel_splitter.addWidget(self.lists_row_widget)
         self._panel_splitter.addWidget(viewer)
         self._panel_splitter.addWidget(self.peak_toolbar_widget)
