@@ -690,10 +690,21 @@ def test_label_positions_fixed_near_peak(qapp: QApplication) -> None:
     assert lp is not None
     assert abs(lp.x() - pp.x()) < 3.0  # 正上方(同 x)
     assert lp.y() < pp.y() - 5.0
-    # 平移谱图:assignment 层屏幕位置不动
-    lp_before = viewer._label_widget_pos(0)
     vb = viewer.plot.getViewBox()
-    vb.setRange(xRange=(20.0, 60.0), yRange=(10.0, 50.0), padding=0)
+    # 缩放:assignment 跟着缩放(重新锚定到峰正上方)
+    vb.setRange(xRange=(50.0, 150.0), yRange=(30.0, 80.0), padding=0)
+    qapp.processEvents()
+    lp_zoom = viewer._label_widget_pos(0)
+    xi2, yi2 = viewer._peak_data_xy[0]
+    pp2 = viewer.plot.mapFromScene(
+        viewer.plot.getViewBox().mapViewToScene(QPointF(float(xi2), float(yi2)))
+    )
+    assert abs(lp_zoom.x() - pp2.x()) < 3.0
+    assert lp_zoom.y() < pp2.y() - 5.0
+    # 平移(同尺寸):assignment 层屏幕位置不动(3D 视差)
+    lp_before = viewer._label_widget_pos(0)
+    vb.setRange(xRange=(60.0, 160.0), yRange=(30.0, 80.0), padding=0)
+    qapp.processEvents()
     assert viewer._label_widget_pos(0) == lp_before
     viewer.close()
 

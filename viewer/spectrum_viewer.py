@@ -234,6 +234,7 @@ class SpectrumViewer(QWidget):
         # 0.2.199-补29cb:Assignment 固定位置(数据坐标,缩放/平移不重排,可拖动)
         self._label_positions: list[tuple[float, float] | None] = []
         self._label_positions_pending = 0  # 视图定型等待帧数(0.2.199-补29cj)
+        self._label_anchor_scale: tuple[float, float] | None = None  # 锚定时的视图范围尺寸
         self._drag_label_row: int | None = None
         self._suppress_click = False  # 框选释放不当作单击
         self._mode_1d = False
@@ -482,6 +483,10 @@ class SpectrumViewer(QWidget):
         )
         self.plot.scene().sigMouseMoved.connect(self._on_mouse_moved)
         self.plot.scene().sigMouseClicked.connect(self._on_plot_clicked)
+        # 0.2.199-补29ck:assignment 平移固定、缩放跟随(重新锚定)
+        self.plot.getViewBox().sigRangeChanged.connect(
+            self._on_label_view_range_changed
+        )
         self.set_aspect_ratio(1.0)  # 默认正方形(1:1 数据长宽比)
         # 0.2.133: contour state
         self._contour_states: dict[str, tuple[int, int]] = {}
@@ -1268,6 +1273,7 @@ class SpectrumViewer(QWidget):
         # 0.2.199-补29cj:标签位置等视图定型(两帧)后补算(屏幕固定层)
         self._label_positions = [None] * len(self._peaks)
         self._label_positions_pending = 0
+        self._label_anchor_scale = None
         self._label_overlay.update()
 
     def highlight_peak(self, row: int, flash: bool = True) -> None:
@@ -1446,11 +1452,41 @@ class SpectrumViewer(QWidget):
                 float(pp.x() / w),
                 float((pp.y() - off_px) / h),
             )
+        try:
+            vr = vb.viewRange()
+            self._label_anchor_scale = (
+                float(vr[0][1] - vr[0][0]),
+                float(vr[1][1] - vr[1][0]),
+            )
+        except Exception:  # noqa: BLE001
+            pass
         self._label_overlay.update()
 
     def _label_box(self, pos: QPointF, tw: float, th: float) -> QRectF:
         """文字框:水平居中于锚点,文字在锚点上方(0.2.199-补29ci)。"""
         return QRectF(pos.x() - tw / 2.0, pos.y() - th, tw, th)
+
+    def _on_label_view_range_changed(self) -> None:
+        """assignment 层:平移谱图(范围尺寸不变)时标签屏幕固定;缩放(范围尺寸
+        变化)时重新锚定到各峰正上方,标签跟着缩放(0.2.199-补29ck)。"""
+        if (
+            self._primary is None
+            or not self._label_positions
+            or not any(self._label_positions)
+        ):
+            return
+        try:
+            vr = self.plot.getViewBox().viewRange()
+            w = vr[0][1] - vr[0][0]
+            h = vr[1][1] - vr[1][0]
+        except Exception:  # noqa: BLE001
+            return
+        ref = self._label_anchor_scale
+        if ref is None or ref[0] <= 0 or ref[1] <= 0:
+            return
+        if abs(w - ref[0]) / ref[0] > 0.01 or abs(h - ref[1]) / ref[1] > 0.01:
+            self._label_anchor_scale = (w, h)
+            self._compute_label_positions()
 
     def _label_widget_pos(self, row: int) -> QPointF | None:
         """标签当前屏幕坐标(视口比例 → 像素;0.2.199-补29cj)。"""
