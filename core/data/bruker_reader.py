@@ -272,16 +272,27 @@ def read_segments(paths: list[Path | str]) -> Experiment:
         return td
 
     def _key(exp: Experiment) -> tuple:
+        """维数/核/TD 严格一致(谱宽单独用相对容差比较,0.2.199-补29cs)。"""
         return (
             exp.ndim,
             [d.nucleus for d in exp.dimensions],
             _effective_td(exp),
-            [round(d.sw, 6) for d in exp.dimensions],
         )
+
+    def _same_sw(a: Experiment, b: Experiment) -> bool:
+        """谱宽相对容差(0.2.199-补29cs):不同分段 SW_h 写入精度可能不同
+        (如 11904.762 vs 11904.7619047619),物理谱宽相同;真正不同实验的
+        谱宽差异远大于 1e-4 相对容差。"""
+        if len(a.dimensions) != len(b.dimensions):
+            return False
+        for da, db in zip(a.dimensions, b.dimensions):
+            if abs(da.sw - db.sw) > 1e-4 * max(abs(da.sw), abs(db.sw), 1.0):
+                return False
+        return True
 
     for extra in dirs[1:]:
         other = read_dataset(extra)
-        if _key(other) != _key(base):
+        if _key(other) != _key(base) or not _same_sw(other, base):
             raise ValueError(
                 f"数据段参数不一致：{dirs[0]} vs {extra}（维数/核/TD/谱宽必须一致）"
             )

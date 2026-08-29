@@ -132,3 +132,29 @@ def test_read_segments_mismatch(tmp_path: Path, bruker_dir: Path) -> None:
     acqu2s.write_text(text.replace("##$TD= 256", "##$TD= 128"), encoding="utf-8")
     with pytest.raises(ValueError):
         read_segments([dst_a, dst_b])
+
+
+def test_read_segments_sw_precision_tolerance(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """0.2.199-补29cs:分段 SW_h 写入精度不同(11904.762 vs 11904.7619047619)
+    视为同一实验(谱宽相对容差);旧 round(sw,6) 严格比较会误拒。"""
+    import re as _re
+    import shutil
+
+    dst_a = tmp_path / "seg_a"
+    dst_b = tmp_path / "seg_b"
+    shutil.copytree(bruker_dir / "nus_2d", dst_a)
+    shutil.copytree(bruker_dir / "nus_2d", dst_b)
+
+    def _set_sw(path: Path, value: str) -> None:
+        text = path.read_text(encoding="utf-8")
+        path.write_text(
+            _re.sub(r"(##\$SW_h= )[\d.]+", rf"\g<1>{value}", text, count=1),
+            encoding="utf-8",
+        )
+
+    _set_sw(dst_a / "acqu2s", "11904.7619047619")
+    _set_sw(dst_b / "acqu2s", "11904.762")
+    exp = read_segments([dst_a, dst_b])
+    assert len(exp.segments) == 2
