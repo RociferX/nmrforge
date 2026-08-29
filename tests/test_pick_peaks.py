@@ -103,6 +103,7 @@ def test_pick_peaks_writes_poky_list(tmp_path: Path) -> None:
     assert len(lines) >= 2
     assert "Reliability" not in "\n".join(lines)
     assert "阈值" in result["logs"][0]
+    assert "15.0σ" in result["logs"][0]  # 默认 15σ(0.2.199-补29cm)
 
 
 def _write_metadata(
@@ -161,10 +162,12 @@ def _write_ft3_ordered(
 def _spectrum_with_peaks(
     shape: tuple[int, ...], peaks: list[tuple[tuple[int, ...], float]]
 ) -> np.ndarray:
-    """峰值点叠加高斯核的谱(正值/负值峰均可)。"""
-    spec = np.zeros(shape)
+    """峰值点叠加高斯核的谱(正值/负值峰均可);带 σ≈1 噪声底,使全局
+    噪声估计走 robust MAD(阈值与峰强相对关系符合真实谱,0.2.199-补29cm)。"""
+    rng = np.random.default_rng(20260829)
+    spec = rng.normal(0, 1.0, shape)
     for pos, height in peaks:
-        spec[pos] = height
+        spec[pos] += height
     return gaussian_filter(spec, sigma=1.5)
 
 
@@ -300,11 +303,13 @@ def test_pick_peaks_sigma_multiplier_param(tmp_path: Path) -> None:
 
 def test_pick_peaks_excludes_axial_edges(tmp_path: Path) -> None:
     # 0.2.199-补29at:上下边缘轴峰(横条)不选,谱内峰保留
-    spec = np.zeros((64, 128))
-    spec[0, 60] = 800.0  # 顶部轴峰(横条)
-    spec[63, 60] = 700.0  # 底部轴峰(横条)
-    spec[20, 40] = 500.0
-    spec[40, 90] = 450.0
+    # (带 σ≈1 噪声底,15σ 默认阈值下测试意图不变,0.2.199-补29cm)
+    rng = np.random.default_rng(20260829)
+    spec = rng.normal(0, 1.0, (64, 128))
+    spec[0, 60] += 800.0  # 顶部轴峰(横条)
+    spec[63, 60] += 700.0  # 底部轴峰(横条)
+    spec[20, 40] += 500.0
+    spec[40, 90] += 450.0
     spec = gaussian_filter(spec, sigma=1.0)
     ft2 = tmp_path / 'out.ft2'
     _write_ft2(ft2, spec)

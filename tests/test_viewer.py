@@ -655,8 +655,8 @@ def test_peak_label_leader_line(qapp: QApplication) -> None:
     viewer.close()
 
 def test_label_positions_magnified_about_center(qapp: QApplication) -> None:
-    """0.2.199-补29cl:assignment = 峰层以视图中心放大 1.5×(球面四散),
-    缩放时保持 1.5× 比例;谱图本身仍为 2D 平面。"""
+    """0.2.199-补29cl/补29cm:assignment = 峰层以视图中心放大 1.25×(球面四散),
+    缩放时保持 1.25× 比例;谱图本身仍为 2D 平面。"""
     spectrum = _synthetic_spectrum()
     viewer = SpectrumViewer()
     viewer.resize(640, 480)
@@ -686,9 +686,9 @@ def test_label_positions_magnified_about_center(qapp: QApplication) -> None:
             vb.mapViewToScene(QPointF(float(xi), float(yi)))
         )
         assert lp is not None
-        assert abs((lp.x() - cx) - 1.5 * (pp.x() - cx)) < 2.0
-        assert abs((lp.y() - cy) - 1.5 * (pp.y() - cy)) < 2.0
-    # 缩放后比例仍 1.5
+        assert abs((lp.x() - cx) - 1.25 * (pp.x() - cx)) < 2.0
+        assert abs((lp.y() - cy) - 1.25 * (pp.y() - cy)) < 2.0
+    # 缩放后比例仍 1.25
     vb.setRange(xRange=(80.0, 176.0), yRange=(25.0, 70.0), padding=0)
     qapp.processEvents()
     for row, (xi, yi) in enumerate(viewer._peak_data_xy):
@@ -697,8 +697,8 @@ def test_label_positions_magnified_about_center(qapp: QApplication) -> None:
             vb.mapViewToScene(QPointF(float(xi), float(yi)))
         )
         assert lp is not None
-        assert abs((lp.x() - cx) - 1.5 * (pp.x() - cx)) < 2.0
-        assert abs((lp.y() - cy) - 1.5 * (pp.y() - cy)) < 2.0
+        assert abs((lp.x() - cx) - 1.25 * (pp.x() - cx)) < 2.0
+        assert abs((lp.y() - cy) - 1.25 * (pp.y() - cy)) < 2.0
     viewer.close()
 
 
@@ -718,7 +718,7 @@ def test_label_drag_updates_position(qapp: QApplication) -> None:
         ]
     )
     qapp.processEvents()
-    assert viewer._label_positions[0] is None  # 默认动态 1.5×,无存储
+    assert viewer._label_positions[0] is None  # 默认动态 1.25×,无存储
     lp = viewer._label_widget_pos(0)
     assert lp is not None
     assert viewer._label_at_widget(lp) == 0

@@ -605,20 +605,20 @@ class PipelineStepRow(QWidget):
             lambda: self.ext_range_requested.emit(self.step_id)
         )
         button_row.addWidget(self.ext_range_button)
-        # 0.2.199-补29ar/补29au/补29bo:峰挑选阈值条(3.0–30.0 σ);
+        # 0.2.199-补29ar/补29au/补29bo/补29cm:峰挑选阈值条(3.0–30.0 σ,默认 15);
         # 补29au:调整只更新数值,点「运行/重新处理」才重新选峰
         self.threshold_label = QLabel("阈值(σ)")
         self.threshold_label.setVisible(self.step_id == "peaks")
         self.threshold_slider = QSlider(Qt.Orientation.Horizontal)
         self.threshold_slider.setRange(30, 300)
-        self.threshold_slider.setValue(60)
+        self.threshold_slider.setValue(150)
         self.threshold_slider.setFixedWidth(120)
         self.threshold_slider.setVisible(self.step_id == "peaks")
         self.threshold_spin = QDoubleSpinBox()
         self.threshold_spin.setRange(3.0, 30.0)
         self.threshold_spin.setSingleStep(0.5)
         self.threshold_spin.setDecimals(1)
-        self.threshold_spin.setValue(6.0)
+        self.threshold_spin.setValue(15.0)
         self.threshold_spin.setVisible(self.step_id == "peaks")
         self.threshold_slider.valueChanged.connect(
             lambda v: self.threshold_spin.setValue(v / 10.0)
@@ -719,8 +719,8 @@ class PipelineStepRow(QWidget):
         self.ext_range_button.setText(text)
 
     def get_threshold(self) -> float:
-        """峰挑选阈值(σ);非 peaks 步骤返回默认 6.0。"""
-        return self.threshold_spin.value() if self.step_id == "peaks" else 6.0
+        """峰挑选阈值(σ);非 peaks 步骤返回默认 15.0(0.2.199-补29cm)。"""
+        return self.threshold_spin.value() if self.step_id == "peaks" else 15.0
 
     def set_detail(self, text: str, failed: bool = False) -> None:
         """填充详情文本。"""

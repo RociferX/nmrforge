@@ -9,8 +9,8 @@ WorkflowRun(workflow_ref="pick_peaks") 登记;失败 finish_run("failed") 并抛
 peak_sign=uniform)只选占据主符号的峰(不关心正负,以候选峰计数多的符号
 为准);实验类型正负共存(mixed)正负都选。实验类型名取自已导入 metadata
 的 experiment_type.name,模板缺失回退 uniform。
-阈值(0.2.199-补29aq/补29ar,用户):默认 6σ(补29aq 5σ 仍多→再拉高),
-可经 sigma_multiplier 参数由 GUI 阈值条调整。
+阈值(0.2.199-补29aq/补29ar/补29cm,用户):默认 15σ(补29aq 5σ → 补29ar 6σ
+→ 补29cm 15σ),可经 sigma_multiplier 参数由 GUI 阈值条调整。
 """
 
 from __future__ import annotations
@@ -30,9 +30,9 @@ class PickPeaksError(Exception):
     """峰挑选错误(谱缺失/读取失败/检出失败)。"""
 
 
-# 选峰默认阈值(0.2.199-补29aq 5σ 仍选多 → 补29ar 再拉高到 6σ)。
+# 选峰默认阈值(0.2.199-补29aq 5σ → 补29ar 6σ → 补29cm 15σ,用户)。
 # 检测算法默认 3σ 供 QC 使用,选峰步骤用更严阈值。
-_PICK_THRESHOLD_SIGMA = 6.0
+_PICK_THRESHOLD_SIGMA = 15.0
 # 轴峰排除边缘点数(0.2.199-补29at/补29bf,用户):上下边缘横条内的峰不选;
 # 补29bf 从 2 加到 5,靠近边缘的轴峰残余一并排除。
 _PICK_EDGE_MARGIN = 5
@@ -186,7 +186,7 @@ def pick_peaks(
 ) -> dict[str, Any]:
     """峰挑选:检测谱峰并写 Poky .list,登记 WorkflowRun。
 
-    backend 保留为接口占位;sigma_multiplier 为噪声倍数阈值(默认 6σ,
+    backend 保留为接口占位;sigma_multiplier 为噪声倍数阈值(默认 15σ,
     min_snr 同步);返回 {"status", "peak_path", "peak_count", "logs"}。
     """
     data_entry = manager.data(exp_id, data_id)

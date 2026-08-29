@@ -156,6 +156,9 @@ class SpectrumPanel(QWidget):
         # 0.2.199-补29bo:谱图点选/框选引起的程序化选行,不触发单峰闪烁
         self._syncing_table_selection = False
         self.peak_table.itemSelectionChanged.connect(self._on_peak_row_selected)
+        # 0.2.199-补29cm:已选中行再次点击不触发 selectionChanged,
+        # 需另接 cellClicked 才能重复闪烁定位
+        self.peak_table.cellClicked.connect(self._on_peak_cell_clicked)
         self.peak_table.itemChanged.connect(self._on_peak_cell_edited)
         # 0.2.199-补29bf:点击 Assignment 列标题开关图上指认标签
         self.peak_table.horizontalHeader().sectionClicked.connect(
@@ -1235,5 +1238,13 @@ class SpectrumPanel(QWidget):
         if not rows:
             return
         row = rows[0].row()
+        if 0 <= row < len(self._peaks):
+            self.viewer.highlight_peak(row)
+
+    def _on_peak_cell_clicked(self, row: int, column: int) -> None:
+        """峰表单元格点击:已选中行再次点击同样触发闪烁定位
+        (0.2.199-补29cm,selectionChanged 在已选中行上不触发)。"""
+        if self._syncing_table_selection:
+            return
         if 0 <= row < len(self._peaks):
             self.viewer.highlight_peak(row)

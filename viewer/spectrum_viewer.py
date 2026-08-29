@@ -1396,8 +1396,8 @@ class SpectrumViewer(QWidget):
         return x_ppm, y_ppm
 
     def _label_widget_pos(self, row: int) -> QPointF | None:
-        """Assignment 屏幕位置(0.2.199-补29cl):默认 = 峰层以视图中心放大 1.5×
-        (球面映射,四散开;平移/缩放自动保持 1.5× 比例);用户拖动后存视口比例。"""
+        """Assignment 屏幕位置(0.2.199-补29cl/补29cm):默认 = 峰层以视图中心放大 1.25×
+        (球面映射,四散开;平移/缩放自动保持 1.25× 比例);用户拖动后存视口比例。"""
         pos = (
             self._label_positions[row]
             if 0 <= row < len(self._label_positions)
@@ -1423,8 +1423,8 @@ class SpectrumViewer(QWidget):
             cx = ov.width() / 2.0
             cy = ov.height() / 2.0
             return QPointF(
-                cx + 1.5 * (float(pp.x()) - cx),
-                cy + 1.5 * (float(pp.y()) - cy),
+                cx + 1.25 * (float(pp.x()) - cx),
+                cy + 1.25 * (float(pp.y()) - cy),
             )
         return None
 

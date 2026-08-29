@@ -512,6 +512,51 @@ def test_box_select_no_flash_table_click_flashes(
     panel.close()
 
 
+def test_click_already_selected_peak_row_flashes(
+    tmp_path, qapp, monkeypatch
+) -> None:
+    """0.2.199-补29cm:峰表已选中行再次点击也触发闪烁定位
+    (selectionChanged 在已选中行上不触发,补 cellClicked 处理)。"""
+    import numpy as np
+
+    from viewer.spectrum import Spectrum, SpectrumAxis
+
+    manager = _manager(tmp_path, monkeypatch)
+    spectra = manager.data_dir('exp_001', 'd_001', 'spectra')
+    spectra.mkdir(parents=True, exist_ok=True)
+    (spectra / 'exp_001-d_001.ft2').write_bytes(b'x')
+    peaks = manager.data_dir('exp_001', 'd_001', 'peaks')
+    peaks.mkdir(parents=True, exist_ok=True)
+    (peaks / 'exp_001-d_001.list').write_text(
+        'Assignment w1 w2 Data Height Volume\n'
+        'G1  115.000  8.000  0  100  0\n'
+        'G2  112.000  8.500  0  90  0\n',
+        encoding='utf-8',
+    )
+    panel = SpectrumPanel(manager)
+    axis_x = SpectrumAxis(
+        label='H', size=64, sw_hz=6000.0, obs_mhz=600.0,
+        carrier_ppm=4.7, orig_hz=0.0,
+    )
+    axis_y = SpectrumAxis(
+        label='N', size=64, sw_hz=2189.0, obs_mhz=60.8,
+        carrier_ppm=118.0, orig_hz=0.0,
+    )
+    panel.viewer.add_spectrum(Spectrum(np.zeros((64, 64)), [axis_y, axis_x]))
+    panel.set_context('exp_001', 'd_001')
+    panel._load_peaks(spectra / 'exp_001-d_001.ft2')
+    panel.viewer._clear_flash()
+    # 第一次点击选中行 → 闪烁
+    panel.peak_table.selectRow(1)
+    assert panel.viewer._flash_item is not None
+    panel.viewer._clear_flash()
+    # 已选中行再次点击(cellClicked)→ 仍闪烁
+    panel.peak_table.cellClicked.emit(1, 0)
+    assert panel.viewer._flash_item is not None
+    panel.viewer._clear_flash()
+    panel.close()
+
+
 def test_assignment_header_toggles_labels(tmp_path, qapp, monkeypatch) -> None:
     # 0.2.199-补29bf:点击 Assignment 列标题开关图上指认标签
     import numpy as np
