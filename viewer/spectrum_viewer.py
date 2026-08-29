@@ -218,6 +218,33 @@ def _inflate_polygon(poly: list[QPointF], margin: float) -> list[QPointF]:
     return out
 
 
+def _smooth_polygon(poly: list[QPointF], iterations: int = 2) -> list[QPointF]:
+    """Chaikin 角点切割平滑:凸多边形保持凸,轮廓更圆润(0.2.199-补29bp)。"""
+    out = poly
+    for _ in range(iterations):
+        n = len(out)
+        if n < 3:
+            break
+        nxt: list[QPointF] = []
+        for i in range(n):
+            p0 = out[i]
+            p1 = out[(i + 1) % n]
+            nxt.append(
+                QPointF(
+                    p0.x() * 0.75 + p1.x() * 0.25,
+                    p0.y() * 0.75 + p1.y() * 0.25,
+                )
+            )
+            nxt.append(
+                QPointF(
+                    p0.x() * 0.25 + p1.x() * 0.75,
+                    p0.y() * 0.25 + p1.y() * 0.75,
+                )
+            )
+        out = nxt
+    return out
+
+
 def _ray_polygon_hit(
     origin: QPointF, ux: float, uy: float, poly: list[QPointF]
 ) -> QPointF | None:
@@ -289,8 +316,9 @@ def _layout_signal_labels(
         return []
     cx = sum(p.x() for p in hull) / len(hull)
     cy = sum(p.y() for p in hull) / len(hull)
-    margin = max(20.0, font_px * 1.2)
-    ring = _inflate_polygon(hull, margin)
+    margin = max(24.0, font_px * 1.5)
+    # 0.2.199-补29bp:外扩后做圆角平滑,轮廓不再生硬直线
+    ring = _smooth_polygon(_inflate_polygon(hull, margin))
     inset = font_px * 0.6
     rr = QRectF(clamp_rect).adjusted(inset, inset, -inset, -inset)
     if rr.width() < 2.0 or rr.height() < 2.0:
@@ -438,7 +466,8 @@ class _LabelOverlay(QWidget):
                 ppu = 1.0 / max(vb.viewPixelSize()[0], 1e-9)
             except Exception:  # noqa: BLE001
                 ppu = 1.0
-            font_px = max(6.0, min(60.0, viewer._peak_size * ppu))
+            # 0.2.199-补29bp:assignment 字号 = 峰标记 × 3(固定比例)
+            font_px = max(6.0, min(60.0, viewer._peak_size * 3.0 * ppu))
             font = QFont()
             font.setPixelSize(int(round(font_px)))
             painter.setFont(font)

@@ -261,6 +261,10 @@ class MainWindow(QMainWindow):
         self.spectrum_panel.status_message.connect(
             self.statusBar().showMessage
         )
+        # 0.2.199-补29bp:谱图放大/收起(收起左侧三部分)
+        self.spectrum_panel.expand_requested.connect(
+            self._toggle_spectrum_expand
+        )
 
         self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
         self.main_splitter.addWidget(self.project_tree)
@@ -1548,6 +1552,11 @@ class MainWindow(QMainWindow):
 
     def _toggle_spectrum(self, checked: bool) -> None:
         self.spectrum_panel.setVisible(checked)
+
+    def _toggle_spectrum_expand(self, expanded: bool) -> None:
+        """谱图放大:隐藏左侧三部分(项目树/Pipeline/Log),谱图占满窗口。"""
+        for widget in (self.project_tree, self.center_panel, self.log_panel):
+            widget.setVisible(not expanded)
 
     # ------------------------------------------------------------------
     # 上下文联动

@@ -41,6 +41,8 @@ class SpectrumPanel(QWidget):
     status_message = pyqtSignal(str)  # 状态栏提示(主窗口接收)
     _ft3_ready = pyqtSignal(object, object)  # (path, Spectrum3D) 后台加载完成
     _ft3_failed = pyqtSignal(object, str)  # (path, message)
+    # 0.2.199-补29bp:谱图放大/收起(主窗口收起左侧三部分)
+    expand_requested = pyqtSignal(bool)
 
     # 0.2.89:超过该大小的 .ft3 后台线程加载,避免大文件读取卡死 UI
     _ASYNC_FT3_MIN_BYTES = 32 * 1024 * 1024
@@ -185,6 +187,15 @@ class SpectrumPanel(QWidget):
         layers_box.addWidget(self.viewer.layer_list, 1)
         self.lists_row.addLayout(files_box, 1)
         self.lists_row.addLayout(layers_box, 1)
+        # 0.2.199-补29bp:谱图放大按钮——收起左侧三部分,谱图占满窗口
+        self.expand_button = QPushButton("放大")
+        self.expand_button.setCheckable(True)
+        self.expand_button.setToolTip(
+            "放大:收起左侧项目树/Pipeline/Log,谱图占满窗口;再点还原"
+        )
+        self.expand_button.toggled.connect(self._on_expand_toggled)
+        self.lists_row.addStretch(1)
+        self.lists_row.addWidget(self.expand_button)
 
         splitter = QSplitter(Qt.Orientation.Vertical)
         splitter.addWidget(self.lists_row_widget)
@@ -1059,6 +1070,11 @@ class SpectrumPanel(QWidget):
                 self.peak_table.selectRow(row)
             finally:
                 self._syncing_table_selection = False
+
+    def _on_expand_toggled(self, expanded: bool) -> None:
+        """谱图放大/收起:按钮文字切换并通知主窗口收起左侧三部分。"""
+        self.expand_button.setText("收起" if expanded else "放大")
+        self.expand_requested.emit(expanded)
 
     def _on_peak_header_clicked(self, section: int) -> None:
         """点击 Assignment 列标题:开关图上峰指认标签(0.2.199-补29bf)。"""

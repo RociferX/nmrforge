@@ -538,6 +538,31 @@ def test_main_window_three_column_layout(
     window.close()
 
 
+def test_main_window_spectrum_expand_toggle(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.2.199-补29bp:谱图放大按钮——收起左侧三部分,再点还原。"""
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    window = MainWindow(manager=manager)
+    btn = window.spectrum_panel.expand_button
+    assert btn.text() == "放大"
+    assert not window.project_tree.isHidden()
+    assert not window.center_panel.isHidden()
+    assert not window.log_panel.isHidden()
+    btn.setChecked(True)
+    assert btn.text() == "收起"
+    assert window.project_tree.isHidden()
+    assert window.center_panel.isHidden()
+    assert window.log_panel.isHidden()
+    assert not window.spectrum_panel.isHidden()
+    btn.setChecked(False)
+    assert btn.text() == "放大"
+    assert not window.project_tree.isHidden()
+    assert not window.center_panel.isHidden()
+    assert not window.log_panel.isHidden()
+    window.close()
+
+
 def test_main_window_context_updates_on_tree_selection(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
