@@ -1,5 +1,16 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29co(2026-08-29,Assignment 格式按维度:2D 两段/3D 三段,连字符)
+
+按用户要求查证 Sparky/Poky 实际规范(ADAPT-NMR/PINE/relax 峰表样例):
+- assignment 按维度分段、以连字符连接:2D 两段(未指认 ?-?)、3D 三段(未指认
+  ?-?-?);每段 = 单字母氨基酸+残基号+核名(如 C16H-K15CB-C16N、G1H-G1N);
+- 修正补29cn:normalize_poky_label / poky_label_is_valid 增加 ndim 参数——
+  段数必须与维度一致(2D 2 段 / 3D 3 段),逐段统一大写,逐段未指认 ? 允许;
+- GUI 编辑校验按当前谱 2D/3D 传递 ndim,提示文案说明连字符分段格式;
+- 修复:峰表填充阶段(_loading_peaks)不触发校验/规范化,导入旧 label(如 CSV
+  "G1")不再弹模态框卡死。
+
 ## 0.2.199-补29cn(2026-08-29,Assignment 编辑即时生效 + Poky 格式 + 选峰阈值上限 50)
 
 按用户要求:

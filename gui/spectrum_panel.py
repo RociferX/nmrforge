@@ -902,8 +902,9 @@ class SpectrumPanel(QWidget):
 
     def _on_peak_cell_edited(self, item) -> None:
         """峰表单元格编辑:内存同步;Assignment 列按 Poky 格式规范化并立即
-        生效到图上标签(0.2.199-补29cn)。"""
-        if self._applying_label_format:
+        生效到图上标签(0.2.199-补29cn/补29co)。
+        填充阶段(_loading_peaks)只回填数据,不校验/规范化导入的旧 label。"""
+        if self._applying_label_format or self._loading_peaks:
             return
         self._sync_peaks_in_memory()
         if item is None:
@@ -912,10 +913,13 @@ class SpectrumPanel(QWidget):
             self._apply_label_format(item)
 
     def _apply_label_format(self, item) -> None:
-        """Assignment 列:Poky 单字母氨基酸+核格式规范化,并立即生效到图上标签。"""
+        """Assignment 列:按当前谱维度(2D 两段/3D 三段)做 Poky 格式规范化,
+        并立即生效到图上标签(0.2.199-补29co)。"""
         row = self.peak_table.row(item)
+        is_3d = bool(self._peaks) and "F1_shift" in self._peaks[0]
+        ndim = 3 if is_3d else 2
         raw = str(item.text() or "").strip()
-        normalized = normalize_poky_label(raw)
+        normalized = normalize_poky_label(raw, ndim=ndim)
         if normalized != raw:
             self._applying_label_format = True
             try:
@@ -924,12 +928,13 @@ class SpectrumPanel(QWidget):
                     self._peaks[row]["label"] = normalized
             finally:
                 self._applying_label_format = False
-        if raw and not poky_label_is_valid(raw):
+        if raw and not poky_label_is_valid(raw, ndim=ndim):
             InfoDialog.show_info(
                 self,
                 "Assignment 格式",
-                "Poky assignment 格式:单字母氨基酸+残基号+核"
-                "(如 G1H、A45N、V32CA);未指认可留空或 ?-?。",
+                "Poky assignment 按维度分段、连字符连接:2D 两段如 G1H-G1N,"
+                "3D 三段如 G1H-G1N-G1CA;每段 = 单字母氨基酸+残基号+核名"
+                "(如 G1H、K15CB);未指认 ?-?(2D)/?-?-?(3D),逐段可 ?。",
             )
         self.viewer.apply_label_edit(row, normalized)
 

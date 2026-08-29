@@ -51,11 +51,11 @@ def import_peaks_poky(path: Path | str) -> list[dict[str, Any]]:
     return list(core_import(path))
 
 
-def normalize_poky_label(text: str | None) -> str:
-    """Poky assignment 单字母氨基酸+核格式规范化(core.peaks 实现)。"""
-    return core_normalize_label(text)
+def normalize_poky_label(text: str | None, ndim: int = 2) -> str:
+    """Poky assignment 按维度分段规范化(core.peaks 实现,2D 两段/3D 三段)。"""
+    return core_normalize_label(text, ndim=ndim)
 
 
-def poky_label_is_valid(text: str | None) -> bool:
-    """判断文本是否为 Poky assignment 格式(core.peaks 实现)。"""
-    return core_label_valid(text)
+def poky_label_is_valid(text: str | None, ndim: int = 2) -> bool:
+    """判断文本是否为当前维度的 Poky assignment(core.peaks 实现)。"""
+    return core_label_valid(text, ndim=ndim)

@@ -592,12 +592,12 @@ def test_edit_assignment_applies_immediately(
     panel._load_peaks(spectra / 'exp_001-d_001.ft2')
     item = panel.peak_table.item(0, 1)  # Assignment 列
     assert item is not None and item.text() == 'G1'
-    item.setText('g1h')
+    item.setText('g1h-g1n')
     qapp.processEvents()
-    assert panel.peak_table.item(0, 1).text() == 'G1H'  # Poky 规范化
-    assert panel.viewer._peaks[0]['label'] == 'G1H'  # 立即生效
+    assert panel.peak_table.item(0, 1).text() == 'G1H-G1N'  # Poky 2D 两段
+    assert panel.viewer._peaks[0]['label'] == 'G1H-G1N'  # 立即生效
     labels = panel.viewer._label_overlay._collect_labels()
-    assert any(text == 'G1H' for _xi, _yi, text in labels)
+    assert any(text == 'G1H-G1N' for _xi, _yi, text in labels)
     panel.close()
 
 

@@ -38,51 +38,56 @@ _NUMERIC_KEYS = {
     "Reliability(%)",
 }
 
-# Poky assignment 单字母氨基酸(0.2.199-补29cn,用户:格式按 Poky)。
+# Poky assignment 单字母氨基酸(0.2.199-补29cn/补29co,用户:格式按 Poky)。
+# 查证(2026-08-29,ADAPT-NMR/PINE/relax 峰表样例):assignment 按维度分段、
+# 连字符连接——2D 两段(未指认 ?-?)、3D 三段(未指认 ?-?-?);每段 =
+# 单字母氨基酸+残基号+核名,如 C16H-K15CB-C16N、G1H-G1N。
 _AA_LETTERS = "ACDEFGHIKLMNPQRSTVWY"
-_POKY_UNASSIGNED = {"?", "?-?", "?-?-?"}
 
 
 def _poky_part(part: str) -> str | None:
-    """单段指认规范化:单字母氨基酸+残基号(+核),统一大写;不匹配返回 None。"""
-    m = re.fullmatch(r"([A-Za-z])(\d+)([A-Za-z]*)", part)
+    """单段指认规范化:单字母氨基酸+残基号+核名,统一大写;不匹配返回 None。"""
+    m = re.fullmatch(r"([A-Za-z])(\d+)([A-Za-z]+)", part)
     if m and m.group(1).upper() in _AA_LETTERS:
         return f"{m.group(1).upper()}{m.group(2)}{m.group(3).upper()}"
     return None
 
 
-def normalize_poky_label(text: str | None) -> str:
-    """把 assignment 规范为 Poky 格式(单字母氨基酸+残基号+核,如 G1H、A45N、V32CA)。
+def normalize_poky_label(text: str | None, ndim: int = 2) -> str:
+    """把 assignment 规范为 Poky 格式(按维度分段、连字符连接)。
 
-    - None/空串 → ""(导出时写 ?-?);
-    - 未指认标记 ? / ?-? / ?-?-? 原样保留;
-    - 逗号分隔多指认逐段规范化(如 "g1h,g2h" → "G1H,G2H");
-    - 其它内容原样返回(由调用方决定是否提示)。
+    - ndim:谱图维度——2D 两段(如 G1H-G1N)、3D 三段(如 G1H-G1N-G1CA);
+    - None/空串 → ""(导出时写 ?-?/?-?-?);
+    - 逐段统一大写(如 c16h-k15cb-c16n → C16H-K15CB-C16N),逐段 ? 保留;
+    - 段数与 ndim 不一致或其它内容原样返回(由调用方决定是否提示)。
     """
     if text is None:
         return ""
     raw = str(text).strip()
-    if not raw or raw in _POKY_UNASSIGNED:
-        return raw
+    if not raw:
+        return ""
     parts: list[str] = []
-    for part in (p.strip() for p in raw.split(",")):
-        if part in _POKY_UNASSIGNED:
-            parts.append(part)
+    for part in (p.strip() for p in raw.split("-")):
+        if part == "?":
+            parts.append("?")
             continue
         norm = _poky_part(part)
         parts.append(norm if norm is not None else part)
-    return ",".join(parts)
+    return "-".join(parts)
 
 
-def poky_label_is_valid(text: str | None) -> bool:
-    """判断文本是否为 Poky 单字母氨基酸+残基号(+核)或未指认标记。"""
+def poky_label_is_valid(text: str | None, ndim: int = 2) -> bool:
+    """判断文本是否为当前维度下的 Poky assignment(段数=ndim,每段格式正确)。"""
     if text is None:
         return True
     raw = str(text).strip()
-    if not raw or raw in _POKY_UNASSIGNED:
+    if not raw:
         return True
-    for part in (p.strip() for p in raw.split(",")):
-        if part in _POKY_UNASSIGNED:
+    parts = [p.strip() for p in raw.split("-")]
+    if len(parts) != ndim:
+        return False
+    for part in parts:
+        if part == "?":
             continue
         if _poky_part(part) is None:
             return False

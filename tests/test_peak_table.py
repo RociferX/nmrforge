@@ -203,24 +203,25 @@ def test_save_peaks_extra_columns_ignored_in_list(tmp_path: Path) -> None:
 
 
 def test_normalize_poky_label() -> None:
-    """0.2.199-补29cn:Poky 单字母氨基酸+残基号+核格式规范化。"""
-    assert normalize_poky_label("g1h") == "G1H"
-    assert normalize_poky_label("a45ca") == "A45CA"
-    assert normalize_poky_label("V32cb") == "V32CB"
-    assert normalize_poky_label("g1h,g2h") == "G1H,G2H"
-    assert normalize_poky_label("G1") == "G1"
+    """0.2.199-补29co:Poky assignment 按维度分段(2D 两段/3D 三段,连字符)。"""
+    assert normalize_poky_label("g1h-g1n") == "G1H-G1N"            # 2D
+    assert normalize_poky_label("c16h-k15cb-c16n", ndim=3) == "C16H-K15CB-C16N"
+    assert normalize_poky_label("v32ca-k31h-v32n", ndim=3) == "V32CA-K31H-V32N"
+    assert normalize_poky_label("g1h-?") == "G1H-?"                # 部分未指认
     assert normalize_poky_label("?-?") == "?-?"
+    assert normalize_poky_label("?-?-?", ndim=3) == "?-?-?"
     assert normalize_poky_label("") == ""
     assert normalize_poky_label(None) == ""
 
 
 def test_poky_label_is_valid() -> None:
-    """0.2.199-补29cn:Poky assignment 格式校验。"""
-    assert poky_label_is_valid("G1H")
-    assert poky_label_is_valid("A45N")
-    assert poky_label_is_valid("V32CA")
-    assert poky_label_is_valid("G1H,G2H")
+    """0.2.199-补29co:段数必须与维度一致(2D 两段/3D 三段)才有效。"""
+    assert poky_label_is_valid("G1H-G1N")               # 2D 两段
+    assert poky_label_is_valid("G1H-?")
     assert poky_label_is_valid("?-?")
-    assert poky_label_is_valid("")
+    assert not poky_label_is_valid("G1H")               # 2D 只有一段
+    assert poky_label_is_valid("G1H-G1N-G1CA", ndim=3)  # 3D 三段
+    assert not poky_label_is_valid("G1H-G1N", ndim=3)   # 3D 只有两段
+    assert poky_label_is_valid("?-?-?", ndim=3)
     assert not poky_label_is_valid("xyz")
-    assert not poky_label_is_valid("1H")
+    assert not poky_label_is_valid("1H-1N")
