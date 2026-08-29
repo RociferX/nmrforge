@@ -101,7 +101,13 @@ def apply_dark_theme(app: QApplication) -> None:
         QScrollBar { background-color: #252526; }
         QScrollBar::handle { background-color: #3c3c3c; }
         QLabel { color: #e8e8e8; }
-        QGroupBox { border: 1px solid #3c3c3c; color: #e8e8e8; }
+        /* 0.2.199-补29cc:QSS 自定义边框会压住标题,给标题留 margin-top */
+        QGroupBox { border: 1px solid #3c3c3c; margin-top: 18px;
+                    color: #e8e8e8; }
+        QGroupBox::title { subcontrol-origin: margin;
+                           subcontrol-position: top left;
+                           left: 8px; padding: 0 4px;
+                           color: #4fc1ff; }
         QProgressBar { background-color: #252526; border: 1px solid #3c3c3c;
                        color: #e8e8e8; }
         QProgressBar::chunk { background-color: #0e639c; }
