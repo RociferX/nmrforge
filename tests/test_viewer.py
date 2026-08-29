@@ -655,7 +655,10 @@ def test_peak_label_leader_line(qapp: QApplication) -> None:
     viewer.close()
 
 def test_label_positions_fixed_near_peak(qapp: QApplication) -> None:
-    """0.2.199-补29cb:Poky 式固定标签——位置在峰附近(数据坐标),缩放/平移不重排。"""
+    """0.2.199-补29cj:assignment 悬浮层——初始在峰正上方(视口比例存储),
+    平移谱图时标签屏幕位置不动(3D 俯视视差)。"""
+    import time
+
     spectrum = _synthetic_spectrum()
     viewer = SpectrumViewer()
     viewer.add_spectrum(spectrum)
@@ -673,22 +676,32 @@ def test_label_positions_fixed_near_peak(qapp: QApplication) -> None:
             },
         ]
     )
+    viewer._label_overlay.grab()
+    time.sleep(0.1)  # 等视图定型后的补算定时器
+    qapp.processEvents()
     assert len(viewer._label_positions) == 2
-    assert viewer._label_positions[0] is not None
-    assert viewer._label_positions[1] is not None
-    pos0 = viewer._label_positions[0]
+    fx, fy = viewer._label_positions[0]
+    assert 0.0 <= fx <= 1.0 and 0.0 <= fy <= 1.0
+    lp = viewer._label_widget_pos(0)
     xi, yi = viewer._peak_data_xy[0]
-    # 标签在峰附近(数据坐标距离小,非远处乱放)
-    assert np.hypot(pos0[0] - xi, pos0[1] - yi) < 100.0
-    # 平移视图后存储位置不变
+    pp = viewer.plot.mapFromScene(
+        viewer.plot.getViewBox().mapViewToScene(QPointF(float(xi), float(yi)))
+    )
+    assert lp is not None
+    assert abs(lp.x() - pp.x()) < 3.0  # 正上方(同 x)
+    assert lp.y() < pp.y() - 5.0
+    # 平移谱图:assignment 层屏幕位置不动
+    lp_before = viewer._label_widget_pos(0)
     vb = viewer.plot.getViewBox()
     vb.setRange(xRange=(20.0, 60.0), yRange=(10.0, 50.0), padding=0)
-    assert viewer._label_positions[0] == pos0
+    assert viewer._label_widget_pos(0) == lp_before
     viewer.close()
 
 
 def test_label_drag_updates_position(qapp: QApplication) -> None:
-    """0.2.199-补29cb:选择模式拖动 assignment 更新固定位置,命中检测可用。"""
+    """0.2.199-补29cj:选择模式拖动 assignment 更新屏幕位置,命中检测可用。"""
+    import time
+
     spectrum = _synthetic_spectrum()
     viewer = SpectrumViewer()
     viewer.add_spectrum(spectrum)
@@ -701,12 +714,14 @@ def test_label_drag_updates_position(qapp: QApplication) -> None:
             }
         ]
     )
+    viewer._label_overlay.grab()
+    time.sleep(0.1)
+    qapp.processEvents()
     pos0 = viewer._label_positions[0]
     assert pos0 is not None
     lp = viewer._label_widget_pos(0)
     assert lp is not None
     assert viewer._label_at_widget(lp) == 0
-
     viewer._move_label(0, QPointF(lp.x() + 40.0, lp.y() + 30.0))
     assert viewer._label_positions[0] != pos0
     viewer.close()

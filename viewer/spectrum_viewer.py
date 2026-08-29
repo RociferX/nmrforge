@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import numpy as np
 import pyqtgraph as pg
-from PyQt6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, Qt, pyqtSignal
+from PyQt6.QtCore import QEvent, QPointF, QRect, QRectF, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
 from PyQt6.QtWidgets import (
     QCheckBox,
@@ -142,6 +142,15 @@ class _LabelOverlay(QWidget):
             or not viewer._show_peak_labels
         ):
             return
+        # 0.2.199-补29cj:视图变换要等事件循环跑完才定型——首帧先安排
+        # 60ms 后补算(期间不画),之后固定(缩放/平移不再动 assignment 层)
+        if viewer._label_positions and not any(viewer._label_positions):
+            if viewer._label_positions_pending == 0:
+                viewer._label_positions_pending = 1
+                from PyQt6.QtCore import QTimer
+
+                QTimer.singleShot(60, viewer._compute_label_positions)
+            return
         painter = QPainter(self)
         try:
             vb = viewer.plot.getViewBox()
@@ -165,21 +174,16 @@ class _LabelOverlay(QWidget):
                 text = label or str(peak.get("Peak_ID", ""))
                 if not text:
                     continue
-                lx, ly = viewer._label_position(row)
                 try:
                     pp = QPointF(
                         viewer.plot.mapFromScene(
                             vb.mapViewToScene(QPointF(float(xi), float(yi)))
                         )
                     )
-                    lp = QPointF(
-                        viewer.plot.mapFromScene(
-                            vb.mapViewToScene(QPointF(float(lx), float(ly)))
-                        )
-                    )
                 except Exception:  # noqa: BLE001
                     continue
-                if not QRectF(self.rect()).contains(pp):
+                lp = viewer._label_widget_pos(row)
+                if lp is None or not QRectF(self.rect()).contains(pp):
                     continue
                 dx = lp.x() - pp.x()
                 dy = lp.y() - pp.y()
@@ -229,6 +233,7 @@ class SpectrumViewer(QWidget):
         self._peak_data_xy: list[tuple[float, float]] = []
         # 0.2.199-补29cb:Assignment 固定位置(数据坐标,缩放/平移不重排,可拖动)
         self._label_positions: list[tuple[float, float] | None] = []
+        self._label_positions_pending = 0  # 视图定型等待帧数(0.2.199-补29cj)
         self._drag_label_row: int | None = None
         self._suppress_click = False  # 框选释放不当作单击
         self._mode_1d = False
@@ -1260,8 +1265,9 @@ class SpectrumViewer(QWidget):
         self._box_selected_rows.clear()
         self._drag_label_row = None
         self._apply_peak_items(show_labels=show_labels)
-        # 0.2.199-补29cb:Poky 式固定标签位置(峰右上方偏移,数据坐标)
-        self._compute_label_positions()
+        # 0.2.199-补29cj:标签位置等视图定型(两帧)后补算(屏幕固定层)
+        self._label_positions = [None] * len(self._peaks)
+        self._label_positions_pending = 0
         self._label_overlay.update()
 
     def highlight_peak(self, row: int, flash: bool = True) -> None:
@@ -1339,8 +1345,6 @@ class SpectrumViewer(QWidget):
             return
         self._show_peak_labels = visible
         self._apply_peak_items()
-        if visible:
-            self._compute_label_positions()
         self._label_overlay.update()
 
     def set_peak_click_mode(self, mode: str) -> None:
@@ -1402,21 +1406,11 @@ class SpectrumViewer(QWidget):
         y_ppm = _pick(_dim_of(y_axis), "N_shift", "y_ppm")
         return x_ppm, y_ppm
 
-    def _label_position(self, row: int) -> tuple[float, float]:
-        """峰行标签的数据坐标位置(未设置时回落峰位置)。"""
-        if (
-            0 <= row < len(self._label_positions)
-            and self._label_positions[row] is not None
-        ):
-            return self._label_positions[row]
-        if 0 <= row < len(self._peak_data_xy):
-            return self._peak_data_xy[row]
-        return (0.0, 0.0)
-
     def _compute_label_positions(self) -> None:
-        """Assignment 悬浮(0.2.199-补29ci):标签锚点固定在峰标记正上方
-        (数据坐标),文字在锚点上方,引导线从文字底部连到峰;一次算好,
-        缩放/平移不重排,选择模式可拖动微调。"""
+        """Assignment 悬浮层(0.2.199-补29cj):标签固定在**屏幕坐标**(相对视口
+        比例存储)——谱图平移/缩放时 assignment 层不动,像 3D 俯视的更高一层;
+        引导线连到移动中的峰,拖动谱图产生斜视角视差。初始每个 assignment
+        悬浮在峰正上方。选择模式可拖动 assignment 层。"""
         if self._primary is None or not self._peaks:
             return
         self._label_positions = [None] * len(self._peaks)
@@ -1426,7 +1420,12 @@ class SpectrumViewer(QWidget):
         except Exception:  # noqa: BLE001
             ppu = 1.0
         font_px = max(6.0, min(60.0, self._peak_size * 3.0 * ppu))
-        off_px = max(10.0, font_px * 0.7)  # 锚点悬浮在峰正上方的像素偏移
+        off_px = max(10.0, font_px * 0.7)
+        ov = self._label_overlay
+        w = max(ov.width(), 1)
+        h = max(ov.height(), 1)
+        if w < 50 or h < 50:
+            return  # 布局未定型,等首次绘制用真实尺寸补算
         for row, (xi, yi) in enumerate(self._peak_data_xy):
             peak = self._peaks[row]
             label = str(peak.get("label") or "").strip()
@@ -1439,30 +1438,46 @@ class SpectrumViewer(QWidget):
                 pp = self.plot.mapFromScene(
                     vb.mapViewToScene(QPointF(float(xi), float(yi)))
                 )
-                scene = self.plot.mapToScene(
-                    QPoint(round(pp.x()), round(pp.y() - off_px))
-                )
-                data = vb.mapSceneToView(scene)
             except Exception:  # noqa: BLE001
-                self._label_positions[row] = (float(xi), float(yi))
+                self._label_positions[row] = (0.5, 0.5)
                 continue
-            self._label_positions[row] = (float(data.x()), float(data.y()))
+            # 悬浮在峰正上方的屏幕位置,存为视口比例(屏幕固定层)
+            self._label_positions[row] = (
+                float(pp.x() / w),
+                float((pp.y() - off_px) / h),
+            )
+        self._label_overlay.update()
 
     def _label_box(self, pos: QPointF, tw: float, th: float) -> QRectF:
         """文字框:水平居中于锚点,文字在锚点上方(0.2.199-补29ci)。"""
         return QRectF(pos.x() - tw / 2.0, pos.y() - th, tw, th)
 
     def _label_widget_pos(self, row: int) -> QPointF | None:
-        """标签当前 widget 坐标(命中检测用)。"""
-        lx, ly = self._label_position(row)
-        try:
+        """标签当前屏幕坐标(视口比例 → 像素;0.2.199-补29cj)。"""
+        pos = (
+            self._label_positions[row]
+            if 0 <= row < len(self._label_positions)
+            else None
+        )
+        if pos is not None:
+            ov = self._label_overlay
             return QPointF(
-                self.plot.mapFromScene(
-                    self.plot.getViewBox().mapViewToScene(QPointF(float(lx), float(ly)))
-                )
+                float(pos[0]) * max(ov.width(), 1),
+                float(pos[1]) * max(ov.height(), 1),
             )
-        except Exception:  # noqa: BLE001
-            return None
+        if 0 <= row < len(self._peak_data_xy):
+            xi, yi = self._peak_data_xy[row]
+            try:
+                return QPointF(
+                    self.plot.mapFromScene(
+                        self.plot.getViewBox().mapViewToScene(
+                            QPointF(float(xi), float(yi))
+                        )
+                    )
+                )
+            except Exception:  # noqa: BLE001
+                return None
+        return None
 
     def _label_at_widget(self, widget_pos: QPointF) -> int | None:
         """选择模式拖动:命中 assignment 文本所在行(0.2.199-补29cb)。"""
@@ -1497,15 +1512,16 @@ class SpectrumViewer(QWidget):
         return None
 
     def _move_label(self, row: int, widget_pos: QPointF) -> None:
-        """拖动 assignment 到新位置(转成数据坐标存储,引导线自动跟随)。"""
+        """拖动 assignment 到新屏幕位置(存视口比例,层固定;0.2.199-补29cj)。"""
         if not (0 <= row < len(self._label_positions)):
             return
-        try:
-            scene = self.plot.mapToScene(widget_pos.toPoint())
-            data = self.plot.getViewBox().mapSceneToView(scene)
-        except Exception:  # noqa: BLE001
-            return
-        self._label_positions[row] = (float(data.x()), float(data.y()))
+        ov = self._label_overlay
+        w = max(ov.width(), 1)
+        h = max(ov.height(), 1)
+        self._label_positions[row] = (
+            float(widget_pos.x() / w),
+            float(widget_pos.y() / h),
+        )
         self._label_overlay.update()
 
     def _apply_peak_items(self, show_labels: bool = True) -> None:
