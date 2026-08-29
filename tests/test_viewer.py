@@ -734,6 +734,7 @@ def test_signal_ring_label_layout(qapp: QApplication) -> None:
     assert len(layout) == len(entries)
     hull = _convex_hull(all_pts)
     for pos, anchor, pt, text in layout:
+        assert pos == anchor, f"leader not direct for {text}"
         assert clamp.contains(pos), f"label {text} outside green box"
         assert not _inside_hull(pos, hull), f"label {text} inside signal region"
     for i in range(len(layout)):

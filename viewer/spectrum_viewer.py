@@ -129,148 +129,6 @@ def _convex_hull(points: list[QPointF]) -> list[QPointF]:
     return [QPointF(x, y) for x, y in hull]
 
 
-def _polygon_perimeter(poly: list[QPointF]) -> float:
-    n = len(poly)
-    if n < 2:
-        return 0.0
-    return float(
-        sum(
-            np.hypot(
-                poly[(i + 1) % n].x() - poly[i].x(),
-                poly[(i + 1) % n].y() - poly[i].y(),
-            )
-            for i in range(n)
-        )
-    )
-
-
-def _point_on_segment(p: QPointF, a: QPointF, b: QPointF, tol: float) -> bool:
-    cross = (p.x() - a.x()) * (b.y() - a.y()) - (
-        p.y() - a.y()
-    ) * (b.x() - a.x())
-    seg = float(np.hypot(b.x() - a.x(), b.y() - a.y()))
-    if abs(cross) > tol * max(seg, 1.0):
-        return False
-    return (
-        min(a.x(), b.x()) - tol <= p.x() <= max(a.x(), b.x()) + tol
-        and min(a.y(), b.y()) - tol <= p.y() <= max(a.y(), b.y()) + tol
-    )
-
-
-def _polygon_arc_of_point(point: QPointF, poly: list[QPointF], peri: float) -> float:
-    """多边形周长上一点(径向投影落点)→弧长(沿顶点序),供滑动避让。"""
-    n = len(poly)
-    acc = 0.0
-    for i in range(n):
-        a = poly[i]
-        b = poly[(i + 1) % n]
-        seg = float(np.hypot(b.x() - a.x(), b.y() - a.y()))
-        if _point_on_segment(point, a, b, 2.0):
-            return acc + float(np.hypot(point.x() - a.x(), point.y() - a.y()))
-        acc += seg
-    return 0.0
-
-
-def _polygon_point_at_arc(poly: list[QPointF], arc: float, peri: float) -> QPointF:
-    n = len(poly)
-    if n == 0:
-        return QPointF()
-    arc = arc % max(peri, 1e-9)
-    acc = 0.0
-    for i in range(n):
-        a = poly[i]
-        b = poly[(i + 1) % n]
-        seg = float(np.hypot(b.x() - a.x(), b.y() - a.y()))
-        if arc <= acc + seg + 1e-9:
-            t = (arc - acc) / max(seg, 1e-9)
-            return QPointF(
-                a.x() + (b.x() - a.x()) * t,
-                a.y() + (b.y() - a.y()) * t,
-            )
-        acc += seg
-    return QPointF(poly[0])
-
-
-def _inflate_polygon(poly: list[QPointF], margin: float) -> list[QPointF]:
-    """凸多边形外扩:顶点沿两侧边外法线平均方向偏移 margin(半角修正)。"""
-    n = len(poly)
-    if n < 3:
-        return poly
-    normals: list[tuple[float, float]] = []
-    for i in range(n):
-        a = poly[i]
-        b = poly[(i + 1) % n]
-        dx = b.x() - a.x()
-        dy = b.y() - a.y()
-        length = max(float(np.hypot(dx, dy)), 1e-9)
-        normals.append((dy / length, -dx / length))  # CCW 外法线
-    out: list[QPointF] = []
-    for i in range(n):
-        nx1, ny1 = normals[(i - 1) % n]
-        nx2, ny2 = normals[i]
-        nx, ny = nx1 + nx2, ny1 + ny2
-        length = max(float(np.hypot(nx, ny)), 1e-9)
-        cos_a = max(-1.0, min(1.0, nx1 * nx2 + ny1 * ny2))
-        half = min(float(np.sqrt(2.0 / (1.0 + cos_a))), 4.0)
-        d = margin * half
-        v = poly[i]
-        out.append(QPointF(v.x() + nx / length * d, v.y() + ny / length * d))
-    return out
-
-
-def _smooth_polygon(poly: list[QPointF], iterations: int = 2) -> list[QPointF]:
-    """Chaikin 角点切割平滑:凸多边形保持凸,轮廓更圆润(0.2.199-补29bp)。"""
-    out = poly
-    for _ in range(iterations):
-        n = len(out)
-        if n < 3:
-            break
-        nxt: list[QPointF] = []
-        for i in range(n):
-            p0 = out[i]
-            p1 = out[(i + 1) % n]
-            nxt.append(
-                QPointF(
-                    p0.x() * 0.75 + p1.x() * 0.25,
-                    p0.y() * 0.75 + p1.y() * 0.25,
-                )
-            )
-            nxt.append(
-                QPointF(
-                    p0.x() * 0.25 + p1.x() * 0.75,
-                    p0.y() * 0.25 + p1.y() * 0.75,
-                )
-            )
-        out = nxt
-    return out
-
-
-def _ray_polygon_hit(
-    origin: QPointF, ux: float, uy: float, poly: list[QPointF]
-) -> QPointF | None:
-    """从 origin 沿 (ux,uy) 射线与多边形外边界的交点(取最远命中)。"""
-    best_t = -1.0
-    best: QPointF | None = None
-    n = len(poly)
-    ox, oy = origin.x(), origin.y()
-    for i in range(n):
-        a = poly[i]
-        b = poly[(i + 1) % n]
-        ex = b.x() - a.x()
-        ey = b.y() - a.y()
-        det = ex * uy - ux * ey
-        if abs(det) < 1e-12:
-            continue
-        t = (-(a.x() - ox) * ey + ex * (a.y() - oy)) / det
-        s = (ux * (a.y() - oy) - uy * (a.x() - ox)) / det
-        if t <= 1e-9 or s < -1e-9 or s > 1.0 + 1e-9:
-            continue
-        if t > best_t:
-            best_t = t
-            best = QPointF(ox + ux * t, oy + uy * t)
-    return best
-
-
 def _draw_outward_label(
     painter: QPainter,
     text: str,
@@ -302,88 +160,70 @@ def _layout_signal_labels(
     clamp_rect: QRectF,
     font_px: float,
 ) -> list[tuple[QPointF, QPointF, QPointF, str]]:
-    """信号区域环绕标签布局(0.2.199-补29bo)。
-
-    1) 全部峰点取凸包(信号区域近似轮廓)并外扩一圈做标签环,环被
-       clamp_rect(谱图绿框 ∩ 视口)夹住,标签不超出谱图范围;
-    2) 每个峰沿「凸包质心→峰」射线打到环上:左峰落左、右峰落右,
-       引导线在各自角楔内互不交叉;
-    3) 标签按文本宽度沿环贪心滑动避让重叠。
-    返回 (标签位, 锚点, 峰点, 文本) 列表。
-    """
+    """信号区域环绕标签布局(0.2.199-补29bu):标签按峰角度放上信号区域外接
+    圆环,引导线沿同一射线直接从峰连到标签(单段直线、零交叉);同角度标签
+    重叠时径向分层避让(同角不同半径);圆环被谱图绿框 ∩ 视口夹住。
+    返回 (标签位, 锚点, 峰点, 文本),锚点即标签位。"""
     hull = _convex_hull(hull_points)
     if not hull:
         return []
     cx = sum(p.x() for p in hull) / len(hull)
     cy = sum(p.y() for p in hull) / len(hull)
-    margin = max(24.0, font_px * 1.5)
-    # 0.2.199-补29bp:外扩后做圆角平滑,轮廓不再生硬直线
-    ring = _smooth_polygon(_inflate_polygon(hull, margin))
-    inset = font_px * 0.6
-    rr = QRectF(clamp_rect).adjusted(inset, inset, -inset, -inset)
-    if rr.width() < 2.0 or rr.height() < 2.0:
-        rr = QRectF(clamp_rect)
-    ring = [
-        QPointF(
-            min(max(p.x(), rr.left()), rr.right()),
-            min(max(p.y(), rr.top()), rr.bottom()),
-        )
-        for p in ring
-    ]
-    if len(ring) < 3:
-        return []
-    peri = _polygon_perimeter(ring)
-    items: list[tuple[float, QPointF, QPointF, str, float]] = []
+    th = max(10.0, font_px * 1.15)  # 文本径向高度近似(分层步长)
+    inset = font_px * 0.8
+    box = QRectF(clamp_rect).adjusted(inset, inset, -inset, -inset)
+    # 圆环半径不被绿框整体压缩;每个标签位置单独夹到绿框内
+    base_r = (
+        max(float(np.hypot(p.x() - cx, p.y() - cy)) for p in hull)
+        + max(20.0, font_px * 1.2)
+    )
+    items: list[tuple[float, QPointF, str, float]] = []
     for pt, text, tw in entries:
         dx = pt.x() - cx
         dy = pt.y() - cy
-        dist = float(np.hypot(dx, dy))
-        if dist < 1e-6:
-            dx, dy, dist = 1.0, 0.0, 1.0
-        anchor = _ray_polygon_hit(QPointF(cx, cy), dx / dist, dy / dist, ring)
-        if anchor is None:
+        if float(np.hypot(dx, dy)) < 1e-6:
             continue
-        items.append(
-            (
-                _polygon_arc_of_point(anchor, ring, peri),
-                anchor,
-                QPointF(pt),
-                text,
-                float(tw),
-            )
-        )
-    items.sort(key=lambda it: it[0])
+        items.append((float(np.arctan2(dy, dx)), QPointF(pt), text, float(tw)))
     if not items:
         return []
-    pad = max(4.0, font_px * 0.4)
-    for i in range(1, len(items)):
-        needed = (items[i - 1][4] + items[i][4]) / 2.0 + pad
-        gap = items[i][0] - items[i - 1][0]
-        if gap < needed:
-            items[i] = (
-                items[i - 1][0] + needed,
-                items[i][1],
-                items[i][2],
-                items[i][3],
-                items[i][4],
-            )
-    wrap_needed = (items[0][4] + items[-1][4]) / 2.0 + pad
-    wrap_gap = (items[0][0] + peri) - items[-1][0]
-    if wrap_gap < wrap_needed:
-        shift = (wrap_needed - wrap_gap) / 2.0
-        items = [
-            (arc + shift, anchor, pt, text, tw)
-            for arc, anchor, pt, text, tw in items
-        ]
-    return [
-        (_polygon_point_at_arc(ring, arc, peri), anchor, pt, text)
-        for arc, anchor, pt, text, _tw in items
-    ]
+    items.sort(key=lambda it: it[0])
+    n = len(items)
+    # 圆环回绕:角度复制一周做贪心分层,取中间 n 个(首尾间距也被约束)
+    doubled: list[tuple[float, QPointF, str, float]] = []
+    for k in range(2 * n):
+        ang, pt, text, tw = items[k % n]
+        doubled.append((ang + 2.0 * np.pi * (k // n), pt, text, tw))
+    layer_last: dict[int, tuple[float, float]] = {}
+    placed: list[tuple[float, int, QPointF, str, float]] = []
+    for ang, pt, text, tw in doubled:
+        layer = 0
+        while True:
+            r = base_r + layer * th
+            prev = layer_last.get(layer)
+            if prev is None:
+                break
+            prev_ang, prev_tw = prev
+            if (ang - prev_ang) * r >= (prev_tw + tw) / 2.0:
+                break
+            layer += 1
+            if layer > 12:
+                break
+        r = base_r + layer * th
+        layer_last[layer] = (ang, tw)
+        placed.append((ang, layer, pt, text, tw))
+    out: list[tuple[QPointF, QPointF, QPointF, str]] = []
+    for ang, layer, pt, text, _tw in placed[n : 2 * n]:
+        r = base_r + layer * th
+        pos = QPointF(cx + r * np.cos(ang), cy + r * np.sin(ang))
+        pos.setX(min(max(pos.x(), box.left()), box.right()))
+        pos.setY(min(max(pos.y(), box.top()), box.bottom()))
+        out.append((QPointF(pos), QPointF(pos), pt, text))
+    return out
 
 
 class _LabelOverlay(QWidget):
-    """峰指认标签覆盖层:标签环绕信号区域轮廓(全峰凸包外扩,绿框内),
-    左峰左标/右峰右标,引导线不交叉;文字在 widget 坐标下始终直立。"""
+    """峰指认标签覆盖层:标签环绕信号区域外接圆环(同角直接连线、零交叉,
+    径向分层避让重叠,绿框内),文字在 widget 坐标下始终直立。"""
 
     def __init__(self, parent: QWidget, viewer: SpectrumViewer) -> None:
         super().__init__(parent)
@@ -471,9 +311,9 @@ class _LabelOverlay(QWidget):
             font = QFont()
             font.setPixelSize(int(round(font_px)))
             painter.setFont(font)
-            # 0.2.199-补29bo:识别当前视野内全部峰分布(凸包≈信号区域轮廓),
-            # 外扩一圈做标签环;左峰左标、右峰右标,引导线在各自角楔内不
-            # 交叉;环被谱图绿框 ∩ 视口夹住,标签不超出谱图范围。
+            # 0.2.199-补29bu:识别当前视野内全部峰分布(凸包→外接圆环),标签
+            # 按峰角度放上圆环并径向分层避让重叠;引导线沿同一射线直接从
+            # 峰连到标签(单段直线,零交叉);圆环被谱图绿框 ∩ 视口夹住。
             hull_points: list[QPointF] = []
             for xi, yi in viewer._peak_data_xy:
                 try:
