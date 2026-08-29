@@ -60,18 +60,27 @@ class _AssignmentCell(QWidget):
         segs = segs[: self.ndim]
         lay = QHBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(0)
+        lay.setSpacing(2)
         self.setStyleSheet("QWidget { background: transparent; }")
         for i in range(self.ndim):
             if i:
                 dash = QLabel("-")
                 dash.setStyleSheet("color: #c8c8c8; background: transparent;")
-                dash.setFixedWidth(8)
+                dash.setFixedWidth(10)
                 lay.addWidget(dash)
-            le = QLineEdit(segs[i] if segs[i] else "?")
+            le = QLineEdit()
             le.setAlignment(Qt.AlignmentFlag.AlignCenter)
             le.setFixedWidth(38)
             le.setMaxLength(12)
+            # 0.2.199-补29cq:未指认段以占位符 "?" 显示(输入即替换,不追加残留)
+            if segs[i] in ("", "?"):
+                le.setPlaceholderText("?")
+            else:
+                le.setText(segs[i])
+            le.setStyleSheet(
+                "QLineEdit { color: #e8e8e8; } "
+                "QLineEdit::placeholder { color: #8a8a8a; }"
+            )
             self.lines.append(le)
             lay.addWidget(le)
         for le in self.lines:
@@ -917,7 +926,7 @@ class SpectrumPanel(QWidget):
                 self.peak_table.setCellWidget(row, label_col, widget)
                 # 行首单元格保存完整峰 dict(label 等编辑外字段随行保留)
                 self.peak_table.item(row, 0).setData(0x0100, dict(peak))
-            self.peak_table.setColumnWidth(label_col, 134 if is_3d else 88)
+            self.peak_table.setColumnWidth(label_col, 142 if is_3d else 94)
         finally:
             self._loading_peaks = False
 

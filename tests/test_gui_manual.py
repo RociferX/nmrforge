@@ -590,12 +590,24 @@ def test_edit_assignment_applies_immediately(
     panel.viewer.add_spectrum(Spectrum(np.zeros((64, 64)), [axis_y, axis_x]))
     panel.set_context('exp_001', 'd_001')
     panel._load_peaks(spectra / 'exp_001-d_001.ft2')
-    # 单元格 = 固定连字符 + 段输入框(2D 两段,默认 ?)
+    # 单元格 = 固定连字符 + 段输入框(2D 两段,未指认段为占位符 ?)
     widget = panel.peak_table.cellWidget(0, 1)
     assert widget is not None and len(widget.lines) == 2
-    assert widget.lines[0].text() == 'G1'   # 旧 label 首段保留
-    assert widget.lines[1].text() == '?'    # 缺省段为 ?
+    assert widget.lines[0].text() == 'G1'            # 旧 label 首段保留
+    assert widget.lines[1].text() == ''              # 缺省段无真实文本
+    assert widget.lines[1].placeholderText() == '?'  # 占位符显示 ?
     assert panel.peak_table.item(0, 1).text() == 'G1-?'
+    # 第二行:输入占位符框即替换,不追加 ?5
+    w2 = panel.peak_table.cellWidget(1, 1)
+    assert w2 is not None and w2.lines[0].text() == 'G2'
+    assert w2.lines[1].text() == '' and w2.lines[1].placeholderText() == '?'
+    from PyQt6.QtTest import QTest
+    w2.lines[1].setFocus()
+    QTest.keyClicks(w2.lines[1], '5')
+    qapp.processEvents()
+    assert w2.lines[1].text() == '5'                # 不追加 ?5
+    assert panel.peak_table.item(1, 1).text() == 'G2-5'
+    # 第一行编辑:逐段规范化后立即生效
     widget.lines[0].setText('g1h')
     widget.lines[1].setText('g1n')
     qapp.processEvents()
