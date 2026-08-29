@@ -197,85 +197,101 @@ def _draw_outward_label(
     painter.drawText(box, int(Qt.AlignmentFlag.AlignCenter), text)
 
 
+def _segments_cross(a1, a2, b1, b2) -> bool:
+    """两条线段是否相交(引导线交叉判定)。"""
+
+    def cross(o, p, q):
+        return (p[0] - o[0]) * (q[1] - o[1]) - (p[1] - o[1]) * (q[0] - o[0])
+
+    d1 = cross(a1, a2, b1)
+    d2 = cross(a1, a2, b2)
+    d3 = cross(b1, b2, a1)
+    d4 = cross(b1, b2, a2)
+    return ((d1 > 0) != (d2 > 0)) and ((d3 > 0) != (d4 > 0))
+
+
 def _assign_blank_cells(
     entries: list[tuple[QPointF, str, float]],
     cells: list[QPointF],
-    cx: float,
-    cy: float,
     font_px: float,
 ) -> list[tuple[QPointF, QPointF, QPointF, str]]:
-    """把标签分配到空白格(0.2.199-补29bw):峰与空白格按角度保序,DP 就近
-    分配且相邻标签保持最小间距(尽量不交叉、不叠字);标签可放进峰间空当。
+    """逐个先后放置标签(0.2.199-补29bx):每个标签找自己峰附近最近的空白格,
+    放置时避让已放标签(不重叠、不交叉);就近优先,不把标签推远。
     返回 (标签位, 锚点=标签位, 峰点, 文本)。"""
-    peaks: list[tuple[float, QPointF, str, float]] = []
-    for pt, text, tw in entries:
-        dx = pt.x() - cx
-        dy = pt.y() - cy
-        if float(np.hypot(dx, dy)) < 1e-6:
-            continue
-        peaks.append((float(np.arctan2(dy, dx)), QPointF(pt), text, float(tw)))
+    peaks: list[tuple[QPointF, str]] = [
+        (QPointF(pt), text) for pt, text, _tw in entries
+    ]
     if not peaks or not cells:
         return []
-    peaks.sort(key=lambda it: it[0])
-    cell_items = sorted(
-        (
-            (float(np.arctan2(c.y() - cy, c.x() - cx)), QPointF(c))
-            for c in cells
-        ),
-        key=lambda it: it[0],
+    min_sep = max(20.0, font_px * 1.6)
+    cell_arr = np.array([(c.x(), c.y()) for c in cells])
+    peak_arr = np.array([(p.x(), p.y()) for p, _t in peaks])
+    dists = np.hypot(
+        cell_arr[None, :, 0] - peak_arr[:, None, 0],
+        cell_arr[None, :, 1] - peak_arr[:, None, 1],
     )
-    n = len(peaks)
-    m = len(cell_items)
-    gap_px = max(20.0, font_px * 2.2)
-    if m > 1:
-        ds = [
-            float(
-                np.hypot(
-                    cell_items[i + 1][1].x() - cell_items[i][1].x(),
-                    cell_items[i + 1][1].y() - cell_items[i][1].y(),
-                )
+    # 最近空白格稀缺的先放,避免被抢
+    order = np.argsort(dists.min(axis=1))
+    used = [False] * len(cells)
+    placed: list[tuple[QPointF, QPointF, str]] = []
+    radii = [80.0, 150.0, 240.0, 400.0, 1e18]
+    for oi in order:
+        pidx = int(oi)
+        cand = np.argsort(dists[pidx])
+        chosen = -1
+        for radius in radii:
+            in_r = cand[dists[pidx][cand] <= radius]
+            for k in in_r:
+                k = int(k)
+                if used[k]:
+                    continue
+                c = cells[k]
+                if any(
+                    float(np.hypot(c.x() - pos.x(), c.y() - pos.y())) < min_sep
+                    for pos, _p, _t in placed
+                ):
+                    continue
+                seg = ((peaks[pidx][0].x(), peaks[pidx][0].y()), (c.x(), c.y()))
+                if not any(
+                    _segments_cross(
+                        seg[0],
+                        seg[1],
+                        (pp.x(), pp.y()),
+                        (pc.x(), pc.y()),
+                    )
+                    for pp, pc, _t in placed
+                ):
+                    chosen = k
+                    break
+            if chosen >= 0:
+                break
+        if chosen < 0:
+            # 放宽:只避重叠
+            for k in cand:
+                k = int(k)
+                if used[k]:
+                    continue
+                c = cells[k]
+                if not any(
+                    float(np.hypot(c.x() - pos.x(), c.y() - pos.y())) < min_sep
+                    for pos, _p, _t in placed
+                ):
+                    chosen = k
+                    break
+        if chosen < 0:
+            # 最后:最近的未用格
+            for k in cand:
+                if not used[int(k)]:
+                    chosen = int(k)
+                    break
+        if chosen >= 0:
+            used[chosen] = True
+            placed.append(
+                (QPointF(cells[chosen]), QPointF(peaks[pidx][0]), peaks[pidx][1])
             )
-            for i in range(min(m - 1, 48))
-        ]
-        cell_px = max(float(np.median(ds)), 1e-6)
-    else:
-        cell_px = gap_px
-    gap = max(1, int(round(gap_px / cell_px)))
-    if gap >= m:
-        gap = max(1, m // max(n, 1))
-    cost = np.zeros((n, m))
-    for i in range(n):
-        p = peaks[i][1]
-        for j in range(m):
-            c = cell_items[j][1]
-            cost[i, j] = float(np.hypot(p.x() - c.x(), p.y() - c.y()))
-    inf = float(np.inf)
-    dp = np.full((n, m), inf)
-    back = np.full((n, m), -1, dtype=int)
-    dp[0] = cost[0]
-    for i in range(1, n):
-        best = inf
-        best_j = -1
-        for j in range(m):
-            if j - gap >= 0 and dp[i - 1, j - gap] < best:
-                best = dp[i - 1, j - gap]
-                best_j = j - gap
-            if best < inf:
-                dp[i, j] = cost[i, j] + best
-                back[i, j] = best_j
-    if n == 0 or float(dp[n - 1].min()) >= inf:
-        return []
-    j = int(np.argmin(dp[n - 1]))
-    assign = [0] * n
-    for i in range(n - 1, -1, -1):
-        assign[i] = j
-        j = back[i, j]
     out: list[tuple[QPointF, QPointF, QPointF, str]] = []
-    for i, o in enumerate(assign):
-        pos = cell_items[o][1]
-        out.append(
-            (QPointF(pos), QPointF(pos), QPointF(peaks[i][1]), peaks[i][2])
-        )
+    for pos, pt, text in placed:
+        out.append((QPointF(pos), QPointF(pos), pt, text))
     return out
 
 
@@ -296,7 +312,7 @@ def _layout_signal_labels(
     cx = sum(p.x() for p in hull) / len(hull)
     cy = sum(p.y() for p in hull) / len(hull)
     if blank_points:
-        out = _assign_blank_cells(entries, blank_points, cx, cy, font_px)
+        out = _assign_blank_cells(entries, blank_points, font_px)
         if out:
             return out
     inset = font_px * 0.8
@@ -342,6 +358,7 @@ class _LabelOverlay(QWidget):
     def __init__(self, parent: QWidget, viewer: SpectrumViewer) -> None:
         super().__init__(parent)
         self._viewer = viewer
+        self._blank_grid_cache: dict = {}  # (id(data), thr) -> 空白格网格(0.2.199-补29bx)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
@@ -373,7 +390,7 @@ class _LabelOverlay(QWidget):
 
     def _blank_points(self, viewer, vb) -> list[QPointF] | None:
         """当前 contour 起点阈值下看不见信号的位置(降采样空白格中心,
-        widget 坐标;0.2.199-补29bw)。"""
+        widget 坐标;0.2.199-补29bw,补29bx 起缓存+仿射向量化)。"""
         primary = viewer._primary
         if primary is None or getattr(primary, "data", None) is None:
             return None
@@ -386,36 +403,57 @@ class _LabelOverlay(QWidget):
         if maximum <= 0:
             return None
         thr = maximum * viewer._level_fraction()
-        grid = 48
-        sy = max(1, data.shape[0] // grid)
-        sx = max(1, data.shape[1] // grid)
-        h = (data.shape[0] // sy) * sy
-        w = (data.shape[1] // sx) * sx
+        key = (id(data), round(thr, 6))
+        cached = self._blank_grid_cache.get(key)
+        if cached is None:
+            grid = 48
+            sy = max(1, data.shape[0] // grid)
+            sx = max(1, data.shape[1] // grid)
+            h = (data.shape[0] // sy) * sy
+            w = (data.shape[1] // sx) * sx
+            try:
+                block = (
+                    np.abs(data[:h, :w])
+                    .reshape(h // sy, sy, w // sx, sx)
+                    .max(axis=(1, 3))
+                )
+            except Exception:  # noqa: BLE001
+                return None
+            blank = block < thr
+            cell_x = (np.arange(blank.shape[1]) + 0.5) * sx
+            cell_y = (np.arange(blank.shape[0]) + 0.5) * sy
+            cached = (blank, cell_x, cell_y)
+            self._blank_grid_cache = {key: cached}
+        blank, cell_x, cell_y = cached
         try:
-            block = (
-                np.abs(data[:h, :w])
-                .reshape(h // sy, sy, w // sx, sx)
-                .max(axis=(1, 3))
-            )
+            p00 = viewer.plot.mapFromScene(vb.mapViewToScene(QPointF(0.0, 0.0)))
+            p10 = viewer.plot.mapFromScene(vb.mapViewToScene(QPointF(1.0, 0.0)))
+            p01 = viewer.plot.mapFromScene(vb.mapViewToScene(QPointF(0.0, 1.0)))
         except Exception:  # noqa: BLE001
             return None
-        blank = block < thr
-        pts: list[QPointF] = []
-        for r in range(blank.shape[0]):
-            for c in range(blank.shape[1]):
-                if not blank[r, c]:
-                    continue
-                xi = (c + 0.5) * sx
-                yi = (r + 0.5) * sy
-                try:
-                    p = viewer.plot.mapFromScene(
-                        vb.mapViewToScene(QPointF(xi, yi))
-                    )
-                except Exception:  # noqa: BLE001
-                    continue
-                if self.rect().contains(p):
-                    pts.append(QPointF(p))
-        return pts
+        ax = p10.x() - p00.x()
+        bx = p01.x() - p00.x()
+        cx0 = p00.x()
+        ay = p10.y() - p00.y()
+        by = p01.y() - p00.y()
+        cy0 = p00.y()
+        gx = np.outer(np.ones(blank.shape[0]), cell_x)
+        gy = np.outer(cell_y, np.ones(blank.shape[1]))
+        wx = cx0 + ax * gx + bx * gy
+        wy = cy0 + ay * gx + by * gy
+        r = self.rect()
+        mask = (
+            blank
+            & (wx >= r.left())
+            & (wx <= r.right())
+            & (wy >= r.top())
+            & (wy <= r.bottom())
+        )
+        rows, cols = np.nonzero(mask)
+        return [
+            QPointF(float(wx[row, col]), float(wy[row, col]))
+            for row, col in zip(rows, cols)
+        ]
 
     def _clamp_rect(self, viewer, vb) -> QRectF | None:
         """谱图数据边界(绿框)在 widget 坐标的矩形 ∩ 视口(标签活动范围)。"""
@@ -471,8 +509,8 @@ class _LabelOverlay(QWidget):
             font = QFont()
             font.setPixelSize(int(round(font_px)))
             painter.setFont(font)
-            # 0.2.199-补29bw:空白格 = 当前 contour 起点下看不见信号的位置;
-            # 标签按角度保序就近放进空白格(含峰间空当),直接连线尽量不交叉。
+            # 0.2.199-补29bx:空白格 = 当前 contour 起点下看不见信号的位置;
+            # 标签逐个先后放置,就近找峰旁空白格并避让已放标签(不重叠不交叉)。
             hull_points: list[QPointF] = []
             for xi, yi in viewer._peak_data_xy:
                 try:
