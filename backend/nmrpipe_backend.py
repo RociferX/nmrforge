@@ -1343,6 +1343,8 @@ class NMRPipeBackend:
         import nmrglue as ng
         from nmrglue.fileio import pipe as ngpipe
 
+        from backend.runtime import ToolError
+
         dic, data = ng.pipe.read(spectrum_path)
         data = np.asarray(data)
         if np.iscomplexobj(data):
@@ -2126,6 +2128,75 @@ class NMRPipeBackend:
             shutil.rmtree(merged)
             shutil.move(str(tmp), str(merged))
         logs.append(f"多段合并完成 → merged/{dataset_id}.fid（{n_segments} 段）")
+        return True
+
+    def _merge_slices(
+        self,
+        runtime: CshRuntime,
+        work: Path,
+        n_segments: int,
+        logs: list[str],
+    ) -> bool:
+        """addNMR 逐对时域合并各段切片式 fid(merged/fid/test%03d.fid)。
+
+        0.2.199-补28:任一段为切片时,全部归一为切片后按切片索引逐对合并;
+        与 _merge_single_fid 对称(单文件合并走 merged/{dataset_id}.fid)。
+        0.2.199-补29ct:补实现(此前调用点存在但方法缺失,生成 FID 报
+        AttributeError)。"""
+        merged = work / "merged"
+        if merged.exists():
+            shutil.rmtree(merged)  # 幂等:旧合并先清
+        merged.mkdir(parents=True)
+        (merged / "fid").mkdir(parents=True)
+        first_slices = sorted((work / "seg_001" / "fid").glob("test*.fid"))
+        if not first_slices:
+            return False
+        for sl in first_slices:
+            shutil.copy2(sl, merged / "fid" / sl.name)
+        for index in range(2, n_segments + 1):
+            seg_slices = sorted(
+                (work / f"seg_{index:03d}" / "fid").glob("test*.fid")
+            )
+            if len(seg_slices) != len(first_slices):
+                logs.append(
+                    f"段 {index} 切片数({len(seg_slices)})与首段"
+                    f"({len(first_slices)})不一致"
+                )
+                return False
+            tmp = work / "merge_tmp"
+            if tmp.exists():
+                shutil.rmtree(tmp)
+            (tmp / "fid").mkdir(parents=True)
+            ok = True
+            for sl in seg_slices:
+                result = runtime.run(
+                    [
+                        "addNMR",
+                        "-in1",
+                        f"seg_{index:03d}/fid/{sl.name}",
+                        "-in2",
+                        f"merged/fid/{sl.name}",
+                        "-out",
+                        f"merge_tmp/fid/{sl.name}",
+                        "-verb",
+                    ],
+                    cwd=str(work),
+                    timeout=600,
+                )
+                if result.returncode != 0 or not (
+                    tmp / "fid" / sl.name
+                ).is_file():
+                    ok = False
+                    break
+            logs.append(
+                f"addNMR seg_{index:03d} 切片合并: "
+                f"rc={'ok' if ok else 'fail'}"
+            )
+            if not ok:
+                return False
+            shutil.rmtree(merged)
+            shutil.move(str(tmp), str(merged))
+        logs.append(f"多段切片合并完成 → merged/fid/（{n_segments} 段）")
         return True
 
     def _convert_segments(

@@ -1,5 +1,18 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29ct(2026-08-30,补实现 _merge_slices:分段切片式 FID 合并)
+
+按用户报告(分段数据生成 FID 报 AttributeError):
+- 现象:分段实验中任一段为切片式 fid(非单文件)时,_convert_segments 走
+  slice_mode 分支调用 self._merge_slices,但该方法缺失,报
+  "'NMRPipeBackend' object has no attribute '_merge_slices'"(补28 只实现
+  了单文件合并 _merge_single_fid);
+- 修复:补实现 _merge_slices——按切片索引逐对 addNMR 时域合并各段
+  seg_NNN/fid/test%03d.fid → merged/fid/test%03d.fid(与 _merge_single_fid
+  对称;切片数不一致则拒绝并记录日志);
+- 顺带修复既有 F821:_project_memory_fallback 补 ToolError 局部导入;
+- 测试:fake addNMR 切片合并/切片数不一致拒绝 2 个用例;全量 pytest 全绿。
+
 ## 0.2.199-补29cs(2026-08-30,修复分段导入误判:谱宽一致性改相对容差)
 
 按用户报告(VM sampleN 分段导入被拒):

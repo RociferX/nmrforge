@@ -843,3 +843,69 @@ def test_finalize_nus_window_param_passthrough(
         if "| nmrPipe -fn FT" in line and i > zf
     )
     assert gm < zf < ft
+
+
+class _FakeMergeRuntime:
+    """模拟 addNMR:把 in1 内容接到 in2 后写入 out(合并产物可验证)。"""
+
+    def __init__(self) -> None:
+        self.calls: list[list[str]] = []
+
+    def run(self, argv, *, cwd=None, timeout=3600, on_line=None):
+        from backend.runtime import CompletedProcess
+
+        argv = list(argv)
+        self.calls.append(argv)
+        if argv[0] == "addNMR":
+            def _val(flag: str) -> str:
+                return argv[argv.index(flag) + 1]
+
+            base = Path(cwd)
+            in1 = base / _val("-in1")
+            in2 = base / _val("-in2")
+            out = base / _val("-out")
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_bytes(in1.read_bytes() + in2.read_bytes())
+            return CompletedProcess("", "", "", 0)
+        return CompletedProcess("", "", "", 0)
+
+
+def test_merge_slices_combines_segments(tmp_path: Path) -> None:
+    """0.2.199-补29ct:切片式多段合并到 merged/fid/test%03d.fid。"""
+    from backend.nmrpipe_backend import NMRPipeBackend
+
+    work = tmp_path / "work"
+    for seg, payload in (("seg_001", b"1"), ("seg_002", b"2")):
+        d = work / seg / "fid"
+        d.mkdir(parents=True)
+        (d / "test001.fid").write_bytes(payload + b"a")
+        (d / "test002.fid").write_bytes(payload + b"b")
+    fake = _FakeMergeRuntime()
+    backend = NMRPipeBackend(nmrpipe_bin="")
+    logs: list[str] = []
+    assert backend._merge_slices(fake, work, 2, logs)
+    merged = work / "merged" / "fid"
+    assert (merged / "test001.fid").read_bytes() == b"2a1a"  # in1(段2)+in2(合并)
+    assert (merged / "test002.fid").read_bytes() == b"2b1b"
+    add_calls = [c for c in fake.calls if c[0] == "addNMR"]
+    assert len(add_calls) == 2
+    assert any("多段切片合并完成" in line for line in logs)
+
+
+def test_merge_slices_slice_count_mismatch(tmp_path: Path) -> None:
+    """切片数不一致 → 拒绝合并(0.2.199-补29ct)。"""
+    from backend.nmrpipe_backend import NMRPipeBackend
+
+    work = tmp_path / "work"
+    d1 = work / "seg_001" / "fid"
+    d2 = work / "seg_002" / "fid"
+    d1.mkdir(parents=True)
+    d2.mkdir(parents=True)
+    (d1 / "test001.fid").write_bytes(b"1a")
+    (d1 / "test002.fid").write_bytes(b"1b")
+    (d2 / "test001.fid").write_bytes(b"2a")
+    fake = _FakeMergeRuntime()
+    backend = NMRPipeBackend(nmrpipe_bin="")
+    logs: list[str] = []
+    assert not backend._merge_slices(fake, work, 2, logs)
+    assert any("切片数" in line for line in logs)
