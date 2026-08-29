@@ -580,6 +580,33 @@ def test_main_window_spectrum_expand_toggle(
     window.close()
 
 
+def test_spectrum_panel_file_help_menus(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.2.199-补29br:文件/帮助菜单在放大按钮右边;查看菜单无谱图查看器入口。"""
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    window = MainWindow(manager=manager)
+    panel = window.spectrum_panel
+    assert panel.file_button.menu() is panel.file_menu
+    assert panel.help_button.menu() is panel.help_menu
+    row = panel.lists_row
+    assert row.indexOf(panel.expand_button) < row.indexOf(panel.file_button)
+    assert row.indexOf(panel.file_button) < row.indexOf(panel.help_button)
+    file_texts = [a.text() for a in panel.file_menu.actions()]
+    assert "打开谱图..." in file_texts and "清空谱图" in file_texts
+    help_texts = [a.text() for a in panel.help_menu.actions()]
+    assert "操作说明" in help_texts
+    panel._on_menu_clear_spectrum()  # 空状态下安全
+    view_menu = None
+    for action in window.menuBar().actions():
+        if action.text() == "查看(&V)":
+            view_menu = action.menu()
+    assert view_menu is not None
+    texts = [a.text() for a in view_menu.actions()]
+    assert not any("谱图查看器" in t for t in texts)
+    window.close()
+
+
 def test_main_window_context_updates_on_tree_selection(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:

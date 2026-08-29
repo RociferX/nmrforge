@@ -169,7 +169,7 @@ class MainWindow(QMainWindow):
         experiment_menu.addAction("删除实验", self.delete_experiment)
 
         view_menu = bar.addMenu("查看(&V)")
-        view_menu.addAction("谱图查看器", self._show_viewer)
+        # 0.2.199-补29br:隐藏独立谱图查看器入口(文件/帮助已移到谱图面板)
         view_menu.addSeparator()
         self.view_left_action = QAction("左侧项目管理", self, checkable=True)
         self.view_left_action.setChecked(True)

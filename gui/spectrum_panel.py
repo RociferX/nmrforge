@@ -18,6 +18,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QListWidget,
+    QMenu,
     QPushButton,
     QSplitter,
     QTableWidget,
@@ -196,6 +197,18 @@ class SpectrumPanel(QWidget):
         self.expand_button.toggled.connect(self._on_expand_toggled)
         self.lists_row.addStretch(1)
         self.lists_row.addWidget(self.expand_button)
+        # 0.2.199-补29br:谱图查看器的「文件」「帮助」菜单移到放大按钮右边
+        self.file_menu = QMenu(self)
+        self.file_menu.addAction("打开谱图...", self._on_menu_open_spectrum)
+        self.file_menu.addAction("清空谱图", self._on_menu_clear_spectrum)
+        self.file_button = QPushButton("文件")
+        self.file_button.setMenu(self.file_menu)
+        self.help_menu = QMenu(self)
+        self.help_menu.addAction("操作说明", self._on_menu_show_help)
+        self.help_button = QPushButton("帮助")
+        self.help_button.setMenu(self.help_menu)
+        self.lists_row.addWidget(self.file_button)
+        self.lists_row.addWidget(self.help_button)
         self.lists_row.addSpacing(12)  # 0.2.199-补29bq:不贴最右边框
 
         # 0.2.199-补29bq:放大模式——垂直 splitter(默认)与水平
@@ -1080,6 +1093,42 @@ class SpectrumPanel(QWidget):
                 self.peak_table.selectRow(row)
             finally:
                 self._syncing_table_selection = False
+
+    def _on_menu_open_spectrum(self) -> None:
+        """文件菜单:打开谱图文件到当前查看器(集成独立查看器入口)。"""
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "打开 NMRPipe 谱图",
+            "",
+            "NMRPipe 谱 (*.ft2 *.ft3 *.ft1 *.fid);;所有文件 (*)",
+        )
+        if not path:
+            return
+        target = Path(path)
+        if self.open_spectrum(target):
+            self._current_spectrum = target
+            self._load_peaks(target)
+            self.status_message.emit(f"已打开: {target.name}")
+
+    def _on_menu_clear_spectrum(self) -> None:
+        """文件菜单:清空当前查看器谱图与峰表。"""
+        self._current_spectrum = None
+        self._spectrum3d_panel.clear()
+        self.viewer.clear()
+        self._clear_peaks()
+
+    def _on_menu_show_help(self) -> None:
+        """帮助菜单:查看器操作说明。"""
+        InfoDialog.show_info(
+            self,
+            "操作说明",
+            "左键拖拽:框选放大;中键拖拽:平移;滚轮:缩放\n"
+            "Home / 全谱视图:恢复完整范围\n"
+            "选择模式:左键拖动框选峰;Add peak mode 开启后点击加峰(吸附峰顶)\n"
+            "3D 谱(.ft3):右侧面板选择查看平面、切片滑块逐平面查看,\n"
+            "  或切换 MIP/求和投影\n"
+            "二维谱:右键谱图提取 1D 行/列切片;图层列表右键删除图层",
+        )
 
     def _on_expand_toggled(self, expanded: bool) -> None:
         """谱图放大/收起:只有绘图区伸到左侧,右侧保留按键。"""
