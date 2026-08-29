@@ -95,76 +95,8 @@ def _label_text_box(pos: QPointF, tw: float, th: float) -> QRectF:
     return QRectF(pos.x() - tw / 2.0, pos.y() - th / 2.0, tw, th)
 
 
-def _assign_outward_blank(
-    entries: list[tuple[QPointF, str, float]],
-    cells: list[QPointF],
-    cx: float,
-    cy: float,
-    min_sep: float,
-) -> list[tuple[QPointF, QPointF, str]]:
-    """向四周发散空白放置(0.2.199-补29cd):每个标签从峰沿信号质心向外方向
-    找最近空白格(代价=距离×(1+1.2·角偏差)),避让已放标签(最小间距);
-    一次算好、数据坐标固定。返回按输入序的 (标签位, 峰点, 文本)。"""
-    peaks = [QPointF(pt) for pt, _t, _w in entries]
-    if not peaks or not cells:
-        return []
-    peak_arr = np.array([(p.x(), p.y()) for p in peaks])
-    cell_arr = np.array([(c.x(), c.y()) for c in cells])
-    dists = np.hypot(
-        cell_arr[None, :, 0] - peak_arr[:, None, 0],
-        cell_arr[None, :, 1] - peak_arr[:, None, 1],
-    )
-    out = peak_arr - np.array([cx, cy])
-    outn = out / np.maximum(np.hypot(out[:, 0], out[:, 1]), 1e-9)[:, None]
-    vec = cell_arr[None, :, :] - peak_arr[:, None, :]
-    vn = vec / np.maximum(np.hypot(vec[:, :, 0], vec[:, :, 1]), 1e-9)[:, :, None]
-    dot = np.clip(
-        vn[:, :, 0] * outn[:, None, 0] + vn[:, :, 1] * outn[:, None, 1],
-        -1.0,
-        1.0,
-    )
-    ang = np.arccos(dot)
-    cost = dists * (1.0 + 1.2 * ang)
-    order = np.argsort(dists.min(axis=1))  # 空白稀缺的先放
-    used = [False] * len(cells)
-    placed: list[tuple[QPointF, QPointF, str, int]] = []
-    for oi in order:
-        pidx = int(oi)
-        cand = np.argsort(cost[pidx])
-        chosen = -1
-        for k in cand[:80]:
-            k = int(k)
-            if used[k]:
-                continue
-            c = cells[k]
-            if any(
-                float(np.hypot(c.x() - q.x(), c.y() - q.y())) < min_sep
-                for q, _p, _t, _i in placed
-            ):
-                continue
-            chosen = k
-            break
-        if chosen < 0:
-            for k in cand[:120]:
-                if not used[int(k)]:
-                    chosen = int(k)
-                    break
-        if chosen >= 0:
-            used[chosen] = True
-            placed.append(
-                (
-                    QPointF(cells[chosen]),
-                    QPointF(peaks[pidx]),
-                    entries[pidx][1],
-                    pidx,
-                )
-            )
-    placed.sort(key=lambda it: it[3])
-    return [(pos, pk, text) for pos, pk, text, _i in placed]
-
-
 class _LabelOverlay(QWidget):
-    """峰指认标签覆盖层:标签一次规划进空白区并向外发散(数据坐标固定),
+    """峰指认标签覆盖层:标签按峰周围实际空白就近放置(数据坐标固定),
     缩放/平移不重排,选择模式可拖动微调;引导线从标签连到峰。"""
 
     def __init__(self, parent: QWidget, viewer: SpectrumViewer) -> None:
@@ -200,7 +132,7 @@ class _LabelOverlay(QWidget):
         return out
 
     def paintEvent(self, event) -> None:
-        """绘制峰指认标签(0.2.199-补29cd):位置固定在数据坐标(空白区规划),
+        """绘制峰指认标签(0.2.199-补29cf):位置固定在数据坐标(就近空白),
         缩放/平移不重排;引导线从标签连到峰(峰端留缝),文字以标签为中心直立。"""
         viewer = self._viewer
         if (
@@ -1481,18 +1413,18 @@ class SpectrumViewer(QWidget):
             return self._peak_data_xy[row]
         return (0.0, 0.0)
 
-    def _blank_cells_data(self) -> list[QPointF]:
-        """当前 contour 起点阈值下全谱空白格中心(数据坐标;0.2.199-补29cd)。"""
+    def _blank_mask(self) -> tuple[np.ndarray, int, int] | None:
+        """当前 contour 起点阈值下空白格掩码 + 格尺寸(数据坐标;0.2.199-补29ce)。"""
         if self._primary is None or getattr(self._primary, "data", None) is None:
-            return []
+            return None
         data = self._primary.data
         if getattr(data, "ndim", 0) != 2 or data.size == 0:
-            return []
+            return None
         maximum = float(
             getattr(self._primary, "robust_max", 0.0) or self._primary.max_intensity
         )
         if maximum <= 0:
-            return []
+            return None
         thr = maximum * self._level_fraction()
         grid = 48
         sy = max(1, data.shape[0] // grid)
@@ -1506,24 +1438,39 @@ class SpectrumViewer(QWidget):
                 .max(axis=(1, 3))
             )
         except Exception:  # noqa: BLE001
-            return []
-        blank = block < thr
-        return [
-            QPointF((c + 0.5) * sx, (r + 0.5) * sy)
-            for r in range(blank.shape[0])
-            for c in range(blank.shape[1])
-            if blank[r, c]
-        ]
+            return None
+        return block < thr, sx, sy
 
     def _compute_label_positions(self) -> None:
-        """Poky 式规划(0.2.199-补29cd):标签向四周发散放进当前 contour 起点下
-        看不见信号的空白格(数据坐标),一次算好,缩放/平移不重排;选择模式
-        可拖动微调。"""
+        """就近空白放置(0.2.199-补29cf):在峰周围的局部邻域(约 2 个空白格
+        半径)内找最近的空白格落位——根据实际周围空白情况调整,有空白就放
+        空白,邻域内没有空白则贴着峰放;一次算好、数据坐标固定,缩放/平移
+        不重排,选择模式可拖动微调。"""
         if self._primary is None or not self._peaks:
             return
         self._label_positions = [None] * len(self._peaks)
-        rows: list[int] = []
-        entries: list[tuple[QPointF, str, float]] = []
+        blank = self._blank_mask()
+        try:
+            ppu = 1.0 / max(self.plot.getViewBox().viewPixelSize()[0], 1e-9)
+        except Exception:  # noqa: BLE001
+            ppu = 1.0
+        font_px = max(6.0, min(60.0, self._peak_size * 3.0 * ppu))
+        cell_pts = np.zeros((0, 2), dtype=float)
+        max_radius = 0.0
+        if blank is not None:
+            mask, sx, sy = blank
+            rows_, cols_ = np.nonzero(mask)
+            if len(rows_):
+                cell_pts = np.column_stack(
+                    [(cols_ + 0.5) * sx, (rows_ + 0.5) * sy]
+                )
+            max_radius = max(
+                2.0 * float(np.hypot(sx, sy)),
+                30.0 / max(ppu, 1e-9),
+            )
+        fallback_off = max(18.0, font_px * 0.9) / max(ppu, 1e-9)
+        dirs = [(1.0, -1.0), (-1.0, -1.0), (1.0, 1.0), (-1.0, 1.0),
+                (0.0, -1.0), (1.0, 0.0), (0.0, 1.0), (-1.0, 0.0)]
         for row, (xi, yi) in enumerate(self._peak_data_xy):
             peak = self._peaks[row]
             label = str(peak.get("label") or "").strip()
@@ -1532,31 +1479,32 @@ class SpectrumViewer(QWidget):
             text = label or str(peak.get("Peak_ID", ""))
             if not text:
                 continue
-            rows.append(row)
-            entries.append((QPointF(float(xi), float(yi)), text, 30.0))
-        if not entries:
-            return
-        cells = self._blank_cells_data()
-        if not cells:
-            for row in rows:
-                xi, yi = self._peak_data_xy[row]
-                self._label_positions[row] = (float(xi), float(yi))
-            return
-        cx = float(np.mean([e[0].x() for e in entries]))
-        cy = float(np.mean([e[0].y() for e in entries]))
-        try:
-            ppu = 1.0 / max(self.plot.getViewBox().viewPixelSize()[0], 1e-9)
-        except Exception:  # noqa: BLE001
-            ppu = 1.0
-        font_px = max(6.0, min(60.0, self._peak_size * 3.0 * ppu))
-        min_sep = max(20.0, font_px * 1.6) / ppu
-        data = self._primary.data
-        sy = max(1, data.shape[0] // 48)
-        sx = max(1, data.shape[1] // 48)
-        min_sep = max(min_sep, float(np.hypot(sx, sy)) * 1.2)
-        out = _assign_outward_blank(entries, cells, cx, cy, min_sep)
-        for (pos, _p, _t), row in zip(out, rows):
-            self._label_positions[row] = (float(pos.x()), float(pos.y()))
+            chosen: tuple[float, float] | None = None
+            if len(cell_pts):
+                d = np.hypot(cell_pts[:, 0] - xi, cell_pts[:, 1] - yi)
+                within = np.nonzero(d <= max_radius)[0]
+                if len(within):
+                    k = int(within[int(np.argmin(d[within]))])
+                    chosen = (float(cell_pts[k, 0]), float(cell_pts[k, 1]))
+            if chosen is None:
+                # 邻域无空白:贴着峰放(优先空白方向,否则右上)
+                for sx_, sy_ in dirs:
+                    pos = (float(xi) + sx_ * fallback_off, float(yi) + sy_ * fallback_off)
+                    if blank is None or self._pos_in_blank(blank, pos):
+                        chosen = pos
+                        break
+            self._label_positions[row] = chosen or (float(xi), float(yi))
+
+    def _pos_in_blank(
+        self, blank: tuple[np.ndarray, int, int], pos: tuple[float, float]
+    ) -> bool:
+        """数据坐标点是否落在空白格内(0.2.199-补29cf)。"""
+        mask, sx, sy = blank
+        c = int(pos[0] // sx)
+        r = int(pos[1] // sy)
+        if 0 <= r < mask.shape[0] and 0 <= c < mask.shape[1]:
+            return bool(mask[r, c])
+        return False
 
     def _label_widget_pos(self, row: int) -> QPointF | None:
         """标签当前 widget 坐标(命中检测用)。"""
