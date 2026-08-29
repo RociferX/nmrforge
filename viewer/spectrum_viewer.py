@@ -727,14 +727,14 @@ class SpectrumViewer(QWidget):
 
         # TopSpin 式 1D 条带:上方行迹线(F2)、右侧列迹线(F1),与主谱联动
         self.strip_top = pg.PlotWidget()
-        self.strip_top.setFixedHeight(110)
+        self.strip_top.setFixedHeight(170)  # 0.2.199-补29bt:1D 条带调大
         self.strip_top.setMenuEnabled(False)
         self.strip_top.getViewBox().setXLink(self.plot.getViewBox())
         self.strip_top_curve = pg.PlotDataItem(pen=pg.mkPen("#1f77b4", width=1))
         self.strip_top.addItem(self.strip_top_curve)
         self.strip_top.hide()
         self.strip_right = pg.PlotWidget()
-        self.strip_right.setFixedWidth(90)
+        self.strip_right.setFixedWidth(190)  # 0.2.199-补29bt:竖条带优先加大
         self.strip_right.setMenuEnabled(False)
         self.strip_right.getViewBox().setYLink(self.plot.getViewBox())
         self.strip_right.getViewBox().invertY(False)

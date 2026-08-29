@@ -219,6 +219,11 @@ def test_viewer_1d_strips_toggle_and_update(qapp: QApplication) -> None:
     assert viewer.show_1d_button.isChecked()
     assert not viewer.strip_top.isHidden()
     assert not viewer.strip_right.isHidden()
+    # 0.2.199-补29bt:横条带 170 高、竖条带 190 宽
+    assert viewer.strip_top.minimumHeight() == viewer.strip_top.maximumHeight() == 170
+    assert (
+        viewer.strip_right.minimumWidth() == viewer.strip_right.maximumWidth() == 190
+    )
     # 更新十字线位置 → 两个一维迹线
     viewer._update_strips(40, 120)
     _xt, yt = viewer.strip_top_curve.getData()
