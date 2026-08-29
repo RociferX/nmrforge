@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QListWidget,
     QMenu,
     QPushButton,
@@ -34,11 +35,55 @@ from gui.peaks_io import (
     import_peaks_poky,
     load_peaks,
     normalize_poky_label,
-    poky_label_is_valid,
 )
 from gui.processing import ProcessingController
 from viewer.spectrum3d_panel import Spectrum3DPanel
 from viewer.spectrum_viewer import SpectrumViewer
+
+
+class _AssignmentCell(QWidget):
+    """峰表 Assignment 单元格:固定连字符 + 段输入框(2D 两段/3D 三段,默认 ?)。
+
+    0.2.199-补29cp(用户):"-" 固定显示,前后各一个输入框;编辑逐段 Poky
+    规范化后合并为 label(如 G1H-G1N、G1H-G1N-G1CA)。"""
+
+    edited = pyqtSignal(int)  # row
+
+    def __init__(self, ndim: int, row: int, text: str = "", parent=None) -> None:
+        super().__init__(parent)
+        self.ndim = max(1, int(ndim))
+        self.row = int(row)
+        self.lines: list[QLineEdit] = []
+        segs = [s.strip() for s in str(text or "").split("-")]
+        while len(segs) < self.ndim:
+            segs.append("?")
+        segs = segs[: self.ndim]
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        self.setStyleSheet("QWidget { background: transparent; }")
+        for i in range(self.ndim):
+            if i:
+                dash = QLabel("-")
+                dash.setStyleSheet("color: #c8c8c8; background: transparent;")
+                dash.setFixedWidth(8)
+                lay.addWidget(dash)
+            le = QLineEdit(segs[i] if segs[i] else "?")
+            le.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            le.setFixedWidth(38)
+            le.setMaxLength(12)
+            self.lines.append(le)
+            lay.addWidget(le)
+        for le in self.lines:
+            le.textChanged.connect(self._on_text_changed)
+
+    def _on_text_changed(self, *_args) -> None:
+        self.edited.emit(self.row)
+
+    def merged_text(self) -> str:
+        """当前各段合并的 label(空段 → ?)。"""
+        segs = [(le.text() or "").strip() for le in self.lines]
+        return "-".join(s if s else "?" for s in segs)
 
 
 class SpectrumPanel(QWidget):
@@ -853,6 +898,7 @@ class SpectrumPanel(QWidget):
         """把 self._peaks 写入表格(2D/3D 列自动切换)。"""
         is_3d = bool(self._peaks) and "F1_shift" in self._peaks[0]
         self._set_peak_columns(is_3d)
+        label_col = self._peak_keys.index("label")
         self._loading_peaks = True
         try:
             self.peak_table.setRowCount(len(self._peaks))
@@ -861,8 +907,17 @@ class SpectrumPanel(QWidget):
                     self.peak_table.setItem(
                         row, col, QTableWidgetItem(str(peak.get(key, "")))
                     )
+                # 0.2.199-补29cp:Assignment 列 = 固定连字符 + 段输入框(默认 ?)
+                widget = _AssignmentCell(
+                    3 if is_3d else 2, row, str(peak.get("label", "") or "")
+                )
+                widget.edited.connect(self._on_assignment_cell_edited)
+                label_item = self.peak_table.item(row, label_col)
+                label_item.setText(widget.merged_text())
+                self.peak_table.setCellWidget(row, label_col, widget)
                 # 行首单元格保存完整峰 dict(label 等编辑外字段随行保留)
                 self.peak_table.item(row, 0).setData(0x0100, dict(peak))
+            self.peak_table.setColumnWidth(label_col, 134 if is_3d else 88)
         finally:
             self._loading_peaks = False
 
@@ -901,42 +956,41 @@ class SpectrumPanel(QWidget):
         self._update_delete_button()
 
     def _on_peak_cell_edited(self, item) -> None:
-        """峰表单元格编辑:内存同步;Assignment 列按 Poky 格式规范化并立即
-        生效到图上标签(0.2.199-补29cn/补29co)。
-        填充阶段(_loading_peaks)只回填数据,不校验/规范化导入的旧 label。"""
+        """峰表单元格编辑:内存同步;Assignment 列由段输入框组件管理
+        (0.2.199-补29cp),不在此处理。"""
         if self._applying_label_format or self._loading_peaks:
             return
-        self._sync_peaks_in_memory()
         if item is None:
             return
         if self.peak_table.column(item) == self._peak_keys.index("label"):
-            self._apply_label_format(item)
+            return
+        self._sync_peaks_in_memory()
 
-    def _apply_label_format(self, item) -> None:
-        """Assignment 列:按当前谱维度(2D 两段/3D 三段)做 Poky 格式规范化,
-        并立即生效到图上标签(0.2.199-补29co)。"""
-        row = self.peak_table.row(item)
-        is_3d = bool(self._peaks) and "F1_shift" in self._peaks[0]
-        ndim = 3 if is_3d else 2
-        raw = str(item.text() or "").strip()
-        normalized = normalize_poky_label(raw, ndim=ndim)
-        if normalized != raw:
-            self._applying_label_format = True
-            try:
-                item.setText(normalized)
-                if 0 <= row < len(self._peaks):
-                    self._peaks[row]["label"] = normalized
-            finally:
-                self._applying_label_format = False
-        if raw and not poky_label_is_valid(raw, ndim=ndim):
-            InfoDialog.show_info(
-                self,
-                "Assignment 格式",
-                "Poky assignment 按维度分段、连字符连接:2D 两段如 G1H-G1N,"
-                "3D 三段如 G1H-G1N-G1CA;每段 = 单字母氨基酸+残基号+核名"
-                "(如 G1H、K15CB);未指认 ?-?(2D)/?-?-?(3D),逐段可 ?。",
-            )
-        self.viewer.apply_label_edit(row, normalized)
+    def _on_assignment_cell_edited(self, row: int) -> None:
+        """Assignment 段输入框变化:逐段 Poky 规范化(空→?),合并为固定连字符
+        label,立即生效到图上标签(0.2.199-补29cp)。"""
+        if self._loading_peaks or self._applying_label_format:
+            return
+        widget = self.peak_table.cellWidget(
+            row, self._peak_keys.index("label")
+        )
+        if widget is None or not hasattr(widget, "lines"):
+            return
+        segs = [
+            normalize_poky_label(line.text() or "", ndim=1) or "?"
+            for line in widget.lines
+        ]
+        label = "-".join(segs)
+        self._applying_label_format = True
+        try:
+            if 0 <= row < len(self._peaks):
+                self._peaks[row]["label"] = label
+            item = self.peak_table.item(row, self._peak_keys.index("label"))
+            if item is not None:
+                item.setText(label)
+        finally:
+            self._applying_label_format = False
+        self.viewer.apply_label_edit(row, label)
 
     def _on_add_peak_toggled(self, checked: bool) -> None:
         """Add peak 开关:开启后点击谱图加峰(吸附峰顶);与 1D/选择互斥。"""

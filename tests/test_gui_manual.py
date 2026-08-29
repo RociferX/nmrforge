@@ -374,7 +374,7 @@ def test_peak_table_assignment_column(tmp_path, qapp, monkeypatch) -> None:
     panel.set_context('exp_001', 'd_001')
     panel._load_peaks(spectra / 'exp_001-d_001.ft2')
     assert panel.peak_table.horizontalHeaderItem(1).text() == 'Assignment ✓'
-    assert panel.peak_table.item(0, 1).text() == 'G1'
+    assert panel.peak_table.item(0, 1).text() == 'G1-?'  # 2D 两段,缺段补 ?
     panel.close()
 
 
@@ -560,8 +560,8 @@ def test_click_already_selected_peak_row_flashes(
 def test_edit_assignment_applies_immediately(
     tmp_path, qapp, monkeypatch
 ) -> None:
-    """0.2.199-补29cn:峰表 Assignment 编辑立即生效到图上标签,
-    并按 Poky 单字母氨基酸+核格式规范化。"""
+    """0.2.199-补29cp:Assignment 列固定连字符 + 段输入框(默认 ?),
+    编辑立即生效到图上标签并按 Poky 逐段规范化。"""
     import numpy as np
 
     from viewer.spectrum import Spectrum, SpectrumAxis
@@ -590,9 +590,14 @@ def test_edit_assignment_applies_immediately(
     panel.viewer.add_spectrum(Spectrum(np.zeros((64, 64)), [axis_y, axis_x]))
     panel.set_context('exp_001', 'd_001')
     panel._load_peaks(spectra / 'exp_001-d_001.ft2')
-    item = panel.peak_table.item(0, 1)  # Assignment 列
-    assert item is not None and item.text() == 'G1'
-    item.setText('g1h-g1n')
+    # 单元格 = 固定连字符 + 段输入框(2D 两段,默认 ?)
+    widget = panel.peak_table.cellWidget(0, 1)
+    assert widget is not None and len(widget.lines) == 2
+    assert widget.lines[0].text() == 'G1'   # 旧 label 首段保留
+    assert widget.lines[1].text() == '?'    # 缺省段为 ?
+    assert panel.peak_table.item(0, 1).text() == 'G1-?'
+    widget.lines[0].setText('g1h')
+    widget.lines[1].setText('g1n')
     qapp.processEvents()
     assert panel.peak_table.item(0, 1).text() == 'G1H-G1N'  # Poky 2D 两段
     assert panel.viewer._peaks[0]['label'] == 'G1H-G1N'  # 立即生效
