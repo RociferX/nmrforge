@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import numpy as np
 import pyqtgraph as pg
-from PyQt6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, Qt, pyqtSignal
+from PyQt6.QtCore import QEvent, QPointF, QRect, QRectF, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
 from PyQt6.QtWidgets import (
     QCheckBox,
@@ -95,8 +95,76 @@ def _label_text_box(pos: QPointF, tw: float, th: float) -> QRectF:
     return QRectF(pos.x() - tw / 2.0, pos.y() - th / 2.0, tw, th)
 
 
+def _assign_outward_blank(
+    entries: list[tuple[QPointF, str, float]],
+    cells: list[QPointF],
+    cx: float,
+    cy: float,
+    min_sep: float,
+) -> list[tuple[QPointF, QPointF, str]]:
+    """向四周发散空白放置(0.2.199-补29cd):每个标签从峰沿信号质心向外方向
+    找最近空白格(代价=距离×(1+1.2·角偏差)),避让已放标签(最小间距);
+    一次算好、数据坐标固定。返回按输入序的 (标签位, 峰点, 文本)。"""
+    peaks = [QPointF(pt) for pt, _t, _w in entries]
+    if not peaks or not cells:
+        return []
+    peak_arr = np.array([(p.x(), p.y()) for p in peaks])
+    cell_arr = np.array([(c.x(), c.y()) for c in cells])
+    dists = np.hypot(
+        cell_arr[None, :, 0] - peak_arr[:, None, 0],
+        cell_arr[None, :, 1] - peak_arr[:, None, 1],
+    )
+    out = peak_arr - np.array([cx, cy])
+    outn = out / np.maximum(np.hypot(out[:, 0], out[:, 1]), 1e-9)[:, None]
+    vec = cell_arr[None, :, :] - peak_arr[:, None, :]
+    vn = vec / np.maximum(np.hypot(vec[:, :, 0], vec[:, :, 1]), 1e-9)[:, :, None]
+    dot = np.clip(
+        vn[:, :, 0] * outn[:, None, 0] + vn[:, :, 1] * outn[:, None, 1],
+        -1.0,
+        1.0,
+    )
+    ang = np.arccos(dot)
+    cost = dists * (1.0 + 1.2 * ang)
+    order = np.argsort(dists.min(axis=1))  # 空白稀缺的先放
+    used = [False] * len(cells)
+    placed: list[tuple[QPointF, QPointF, str, int]] = []
+    for oi in order:
+        pidx = int(oi)
+        cand = np.argsort(cost[pidx])
+        chosen = -1
+        for k in cand[:80]:
+            k = int(k)
+            if used[k]:
+                continue
+            c = cells[k]
+            if any(
+                float(np.hypot(c.x() - q.x(), c.y() - q.y())) < min_sep
+                for q, _p, _t, _i in placed
+            ):
+                continue
+            chosen = k
+            break
+        if chosen < 0:
+            for k in cand[:120]:
+                if not used[int(k)]:
+                    chosen = int(k)
+                    break
+        if chosen >= 0:
+            used[chosen] = True
+            placed.append(
+                (
+                    QPointF(cells[chosen]),
+                    QPointF(peaks[pidx]),
+                    entries[pidx][1],
+                    pidx,
+                )
+            )
+    placed.sort(key=lambda it: it[3])
+    return [(pos, pk, text) for pos, pk, text, _i in placed]
+
+
 class _LabelOverlay(QWidget):
-    """峰指认标签覆盖层:标签固定在数据坐标(峰右上方偏移,Poky 式),
+    """峰指认标签覆盖层:标签一次规划进空白区并向外发散(数据坐标固定),
     缩放/平移不重排,选择模式可拖动微调;引导线从标签连到峰。"""
 
     def __init__(self, parent: QWidget, viewer: SpectrumViewer) -> None:
@@ -132,7 +200,7 @@ class _LabelOverlay(QWidget):
         return out
 
     def paintEvent(self, event) -> None:
-        """绘制峰指认标签(0.2.199-补29cb):位置固定在数据坐标(峰右上方偏移),
+        """绘制峰指认标签(0.2.199-补29cd):位置固定在数据坐标(空白区规划),
         缩放/平移不重排;引导线从标签连到峰(峰端留缝),文字以标签为中心直立。"""
         viewer = self._viewer
         if (
@@ -1413,13 +1481,49 @@ class SpectrumViewer(QWidget):
             return self._peak_data_xy[row]
         return (0.0, 0.0)
 
+    def _blank_cells_data(self) -> list[QPointF]:
+        """当前 contour 起点阈值下全谱空白格中心(数据坐标;0.2.199-补29cd)。"""
+        if self._primary is None or getattr(self._primary, "data", None) is None:
+            return []
+        data = self._primary.data
+        if getattr(data, "ndim", 0) != 2 or data.size == 0:
+            return []
+        maximum = float(
+            getattr(self._primary, "robust_max", 0.0) or self._primary.max_intensity
+        )
+        if maximum <= 0:
+            return []
+        thr = maximum * self._level_fraction()
+        grid = 48
+        sy = max(1, data.shape[0] // grid)
+        sx = max(1, data.shape[1] // grid)
+        h = (data.shape[0] // sy) * sy
+        w = (data.shape[1] // sx) * sx
+        try:
+            block = (
+                np.abs(data[:h, :w])
+                .reshape(h // sy, sy, w // sx, sx)
+                .max(axis=(1, 3))
+            )
+        except Exception:  # noqa: BLE001
+            return []
+        blank = block < thr
+        return [
+            QPointF((c + 0.5) * sx, (r + 0.5) * sy)
+            for r in range(blank.shape[0])
+            for c in range(blank.shape[1])
+            if blank[r, c]
+        ]
+
     def _compute_label_positions(self) -> None:
-        """Poky 式:标签放在峰右上方固定偏移(数据坐标);缩放/平移不重排,
-        选择模式可拖动微调(0.2.199-补29cb)。"""
+        """Poky 式规划(0.2.199-补29cd):标签向四周发散放进当前 contour 起点下
+        看不见信号的空白格(数据坐标),一次算好,缩放/平移不重排;选择模式
+        可拖动微调。"""
         if self._primary is None or not self._peaks:
             return
         self._label_positions = [None] * len(self._peaks)
-        vb = self.plot.getViewBox()
+        rows: list[int] = []
+        entries: list[tuple[QPointF, str, float]] = []
         for row, (xi, yi) in enumerate(self._peak_data_xy):
             peak = self._peaks[row]
             label = str(peak.get("label") or "").strip()
@@ -1428,18 +1532,31 @@ class SpectrumViewer(QWidget):
             text = label or str(peak.get("Peak_ID", ""))
             if not text:
                 continue
-            try:
-                pp = self.plot.mapFromScene(
-                    vb.mapViewToScene(QPointF(float(xi), float(yi)))
-                )
-                scene = self.plot.mapToScene(
-                    QPoint(round(pp.x() + 18.0), round(pp.y() - 18.0))
-                )
-                data = vb.mapSceneToView(scene)
-            except Exception:  # noqa: BLE001
+            rows.append(row)
+            entries.append((QPointF(float(xi), float(yi)), text, 30.0))
+        if not entries:
+            return
+        cells = self._blank_cells_data()
+        if not cells:
+            for row in rows:
+                xi, yi = self._peak_data_xy[row]
                 self._label_positions[row] = (float(xi), float(yi))
-                continue
-            self._label_positions[row] = (float(data.x()), float(data.y()))
+            return
+        cx = float(np.mean([e[0].x() for e in entries]))
+        cy = float(np.mean([e[0].y() for e in entries]))
+        try:
+            ppu = 1.0 / max(self.plot.getViewBox().viewPixelSize()[0], 1e-9)
+        except Exception:  # noqa: BLE001
+            ppu = 1.0
+        font_px = max(6.0, min(60.0, self._peak_size * 3.0 * ppu))
+        min_sep = max(20.0, font_px * 1.6) / ppu
+        data = self._primary.data
+        sy = max(1, data.shape[0] // 48)
+        sx = max(1, data.shape[1] // 48)
+        min_sep = max(min_sep, float(np.hypot(sx, sy)) * 1.2)
+        out = _assign_outward_blank(entries, cells, cx, cy, min_sep)
+        for (pos, _p, _t), row in zip(out, rows):
+            self._label_positions[row] = (float(pos.x()), float(pos.y()))
 
     def _label_widget_pos(self, row: int) -> QPointF | None:
         """标签当前 widget 坐标(命中检测用)。"""
