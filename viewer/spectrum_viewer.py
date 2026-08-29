@@ -142,15 +142,6 @@ class _LabelOverlay(QWidget):
             or not viewer._show_peak_labels
         ):
             return
-        # 0.2.199-补29cj:视图变换要等事件循环跑完才定型——首帧先安排
-        # 60ms 后补算(期间不画),之后固定(缩放/平移不再动 assignment 层)
-        if viewer._label_positions and not any(viewer._label_positions):
-            if viewer._label_positions_pending == 0:
-                viewer._label_positions_pending = 1
-                from PyQt6.QtCore import QTimer
-
-                QTimer.singleShot(60, viewer._compute_label_positions)
-            return
         painter = QPainter(self)
         try:
             vb = viewer.plot.getViewBox()
@@ -233,8 +224,6 @@ class SpectrumViewer(QWidget):
         self._peak_data_xy: list[tuple[float, float]] = []
         # 0.2.199-补29cb:Assignment 固定位置(数据坐标,缩放/平移不重排,可拖动)
         self._label_positions: list[tuple[float, float] | None] = []
-        self._label_positions_pending = 0  # 视图定型等待帧数(0.2.199-补29cj)
-        self._label_anchor_scale: tuple[float, float] | None = None  # 锚定时的视图范围尺寸
         self._drag_label_row: int | None = None
         self._suppress_click = False  # 框选释放不当作单击
         self._mode_1d = False
@@ -483,10 +472,6 @@ class SpectrumViewer(QWidget):
         )
         self.plot.scene().sigMouseMoved.connect(self._on_mouse_moved)
         self.plot.scene().sigMouseClicked.connect(self._on_plot_clicked)
-        # 0.2.199-补29ck:assignment 平移固定、缩放跟随(重新锚定)
-        self.plot.getViewBox().sigRangeChanged.connect(
-            self._on_label_view_range_changed
-        )
         self.set_aspect_ratio(1.0)  # 默认正方形(1:1 数据长宽比)
         # 0.2.133: contour state
         self._contour_states: dict[str, tuple[int, int]] = {}
@@ -1270,10 +1255,8 @@ class SpectrumViewer(QWidget):
         self._box_selected_rows.clear()
         self._drag_label_row = None
         self._apply_peak_items(show_labels=show_labels)
-        # 0.2.199-补29cj:标签位置等视图定型(两帧)后补算(屏幕固定层)
+        # 0.2.199-补29cl:assignment 默认按「中心放大 1.5×」动态投影;拖动后存屏幕位置
         self._label_positions = [None] * len(self._peaks)
-        self._label_positions_pending = 0
-        self._label_anchor_scale = None
         self._label_overlay.update()
 
     def highlight_peak(self, row: int, flash: bool = True) -> None:
@@ -1412,84 +1395,9 @@ class SpectrumViewer(QWidget):
         y_ppm = _pick(_dim_of(y_axis), "N_shift", "y_ppm")
         return x_ppm, y_ppm
 
-    def _compute_label_positions(self) -> None:
-        """Assignment 悬浮层(0.2.199-补29cj):标签固定在**屏幕坐标**(相对视口
-        比例存储)——谱图平移/缩放时 assignment 层不动,像 3D 俯视的更高一层;
-        引导线连到移动中的峰,拖动谱图产生斜视角视差。初始每个 assignment
-        悬浮在峰正上方。选择模式可拖动 assignment 层。"""
-        if self._primary is None or not self._peaks:
-            return
-        self._label_positions = [None] * len(self._peaks)
-        vb = self.plot.getViewBox()
-        try:
-            ppu = 1.0 / max(vb.viewPixelSize()[0], 1e-9)
-        except Exception:  # noqa: BLE001
-            ppu = 1.0
-        font_px = max(6.0, min(60.0, self._peak_size * 3.0 * ppu))
-        off_px = max(10.0, font_px * 0.7)
-        ov = self._label_overlay
-        w = max(ov.width(), 1)
-        h = max(ov.height(), 1)
-        if w < 50 or h < 50:
-            return  # 布局未定型,等首次绘制用真实尺寸补算
-        for row, (xi, yi) in enumerate(self._peak_data_xy):
-            peak = self._peaks[row]
-            label = str(peak.get("label") or "").strip()
-            if not label and row != self._selected_peak:
-                continue
-            text = label or str(peak.get("Peak_ID", ""))
-            if not text:
-                continue
-            try:
-                pp = self.plot.mapFromScene(
-                    vb.mapViewToScene(QPointF(float(xi), float(yi)))
-                )
-            except Exception:  # noqa: BLE001
-                self._label_positions[row] = (0.5, 0.5)
-                continue
-            # 悬浮在峰正上方的屏幕位置,存为视口比例(屏幕固定层)
-            self._label_positions[row] = (
-                float(pp.x() / w),
-                float((pp.y() - off_px) / h),
-            )
-        try:
-            vr = vb.viewRange()
-            self._label_anchor_scale = (
-                float(vr[0][1] - vr[0][0]),
-                float(vr[1][1] - vr[1][0]),
-            )
-        except Exception:  # noqa: BLE001
-            pass
-        self._label_overlay.update()
-
-    def _label_box(self, pos: QPointF, tw: float, th: float) -> QRectF:
-        """文字框:水平居中于锚点,文字在锚点上方(0.2.199-补29ci)。"""
-        return QRectF(pos.x() - tw / 2.0, pos.y() - th, tw, th)
-
-    def _on_label_view_range_changed(self) -> None:
-        """assignment 层:平移谱图(范围尺寸不变)时标签屏幕固定;缩放(范围尺寸
-        变化)时重新锚定到各峰正上方,标签跟着缩放(0.2.199-补29ck)。"""
-        if (
-            self._primary is None
-            or not self._label_positions
-            or not any(self._label_positions)
-        ):
-            return
-        try:
-            vr = self.plot.getViewBox().viewRange()
-            w = vr[0][1] - vr[0][0]
-            h = vr[1][1] - vr[1][0]
-        except Exception:  # noqa: BLE001
-            return
-        ref = self._label_anchor_scale
-        if ref is None or ref[0] <= 0 or ref[1] <= 0:
-            return
-        if abs(w - ref[0]) / ref[0] > 0.01 or abs(h - ref[1]) / ref[1] > 0.01:
-            self._label_anchor_scale = (w, h)
-            self._compute_label_positions()
-
     def _label_widget_pos(self, row: int) -> QPointF | None:
-        """标签当前屏幕坐标(视口比例 → 像素;0.2.199-补29cj)。"""
+        """Assignment 屏幕位置(0.2.199-补29cl):默认 = 峰层以视图中心放大 1.5×
+        (球面映射,四散开;平移/缩放自动保持 1.5× 比例);用户拖动后存视口比例。"""
         pos = (
             self._label_positions[row]
             if 0 <= row < len(self._label_positions)
@@ -1504,16 +1412,25 @@ class SpectrumViewer(QWidget):
         if 0 <= row < len(self._peak_data_xy):
             xi, yi = self._peak_data_xy[row]
             try:
-                return QPointF(
-                    self.plot.mapFromScene(
-                        self.plot.getViewBox().mapViewToScene(
-                            QPointF(float(xi), float(yi))
-                        )
+                pp = self.plot.mapFromScene(
+                    self.plot.getViewBox().mapViewToScene(
+                        QPointF(float(xi), float(yi))
                     )
                 )
             except Exception:  # noqa: BLE001
                 return None
+            ov = self._label_overlay
+            cx = ov.width() / 2.0
+            cy = ov.height() / 2.0
+            return QPointF(
+                cx + 1.5 * (float(pp.x()) - cx),
+                cy + 1.5 * (float(pp.y()) - cy),
+            )
         return None
+
+    def _label_box(self, pos: QPointF, tw: float, th: float) -> QRectF:
+        """文字框:水平居中于锚点,文字在锚点上方(0.2.199-补29ci)。"""
+        return QRectF(pos.x() - tw / 2.0, pos.y() - th, tw, th)
 
     def _label_at_widget(self, widget_pos: QPointF) -> int | None:
         """选择模式拖动:命中 assignment 文本所在行(0.2.199-补29cb)。"""

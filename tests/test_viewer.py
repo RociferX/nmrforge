@@ -654,13 +654,12 @@ def test_peak_label_leader_line(qapp: QApplication) -> None:
     assert viewer._label_overlay.visible_label_count() == 1
     viewer.close()
 
-def test_label_positions_fixed_near_peak(qapp: QApplication) -> None:
-    """0.2.199-补29cj:assignment 悬浮层——初始在峰正上方(视口比例存储),
-    平移谱图时标签屏幕位置不动(3D 俯视视差)。"""
-    import time
-
+def test_label_positions_magnified_about_center(qapp: QApplication) -> None:
+    """0.2.199-补29cl:assignment = 峰层以视图中心放大 1.5×(球面四散),
+    缩放时保持 1.5× 比例;谱图本身仍为 2D 平面。"""
     spectrum = _synthetic_spectrum()
     viewer = SpectrumViewer()
+    viewer.resize(640, 480)
     viewer.add_spectrum(spectrum)
     viewer.set_peaks(
         [
@@ -676,45 +675,38 @@ def test_label_positions_fixed_near_peak(qapp: QApplication) -> None:
             },
         ]
     )
-    viewer._label_overlay.grab()
-    time.sleep(0.1)  # 等视图定型后的补算定时器
     qapp.processEvents()
-    assert len(viewer._label_positions) == 2
-    fx, fy = viewer._label_positions[0]
-    assert 0.0 <= fx <= 1.0 and 0.0 <= fy <= 1.0
-    lp = viewer._label_widget_pos(0)
-    xi, yi = viewer._peak_data_xy[0]
-    pp = viewer.plot.mapFromScene(
-        viewer.plot.getViewBox().mapViewToScene(QPointF(float(xi), float(yi)))
-    )
-    assert lp is not None
-    assert abs(lp.x() - pp.x()) < 3.0  # 正上方(同 x)
-    assert lp.y() < pp.y() - 5.0
+    ov = viewer._label_overlay
+    cx = ov.width() / 2.0
+    cy = ov.height() / 2.0
     vb = viewer.plot.getViewBox()
-    # 缩放:assignment 跟着缩放(重新锚定到峰正上方)
-    vb.setRange(xRange=(50.0, 150.0), yRange=(30.0, 80.0), padding=0)
+    for row, (xi, yi) in enumerate(viewer._peak_data_xy):
+        lp = viewer._label_widget_pos(row)
+        pp = viewer.plot.mapFromScene(
+            vb.mapViewToScene(QPointF(float(xi), float(yi)))
+        )
+        assert lp is not None
+        assert abs((lp.x() - cx) - 1.5 * (pp.x() - cx)) < 2.0
+        assert abs((lp.y() - cy) - 1.5 * (pp.y() - cy)) < 2.0
+    # 缩放后比例仍 1.5
+    vb.setRange(xRange=(80.0, 176.0), yRange=(25.0, 70.0), padding=0)
     qapp.processEvents()
-    lp_zoom = viewer._label_widget_pos(0)
-    xi2, yi2 = viewer._peak_data_xy[0]
-    pp2 = viewer.plot.mapFromScene(
-        viewer.plot.getViewBox().mapViewToScene(QPointF(float(xi2), float(yi2)))
-    )
-    assert abs(lp_zoom.x() - pp2.x()) < 3.0
-    assert lp_zoom.y() < pp2.y() - 5.0
-    # 平移(同尺寸):assignment 层屏幕位置不动(3D 视差)
-    lp_before = viewer._label_widget_pos(0)
-    vb.setRange(xRange=(60.0, 160.0), yRange=(30.0, 80.0), padding=0)
-    qapp.processEvents()
-    assert viewer._label_widget_pos(0) == lp_before
+    for row, (xi, yi) in enumerate(viewer._peak_data_xy):
+        lp = viewer._label_widget_pos(row)
+        pp = viewer.plot.mapFromScene(
+            vb.mapViewToScene(QPointF(float(xi), float(yi)))
+        )
+        assert lp is not None
+        assert abs((lp.x() - cx) - 1.5 * (pp.x() - cx)) < 2.0
+        assert abs((lp.y() - cy) - 1.5 * (pp.y() - cy)) < 2.0
     viewer.close()
 
 
 def test_label_drag_updates_position(qapp: QApplication) -> None:
-    """0.2.199-补29cj:选择模式拖动 assignment 更新屏幕位置,命中检测可用。"""
-    import time
-
+    """0.2.199-补29cl:选择模式拖动 assignment 存自定义屏幕位置,命中检测可用。"""
     spectrum = _synthetic_spectrum()
     viewer = SpectrumViewer()
+    viewer.resize(640, 480)
     viewer.add_spectrum(spectrum)
     viewer.set_peaks(
         [
@@ -725,16 +717,14 @@ def test_label_drag_updates_position(qapp: QApplication) -> None:
             }
         ]
     )
-    viewer._label_overlay.grab()
-    time.sleep(0.1)
     qapp.processEvents()
-    pos0 = viewer._label_positions[0]
-    assert pos0 is not None
+    assert viewer._label_positions[0] is None  # 默认动态 1.5×,无存储
     lp = viewer._label_widget_pos(0)
     assert lp is not None
     assert viewer._label_at_widget(lp) == 0
     viewer._move_label(0, QPointF(lp.x() + 40.0, lp.y() + 30.0))
-    assert viewer._label_positions[0] != pos0
+    assert viewer._label_positions[0] is not None  # 拖动后存屏幕比例
+    assert viewer._label_widget_pos(0) != lp
     viewer.close()
 
 
