@@ -215,8 +215,9 @@ def _assign_blank_cells(
     cells: list[QPointF],
     font_px: float,
 ) -> list[tuple[QPointF, QPointF, QPointF, str]]:
-    """逐个先后放置标签(0.2.199-补29bx):每个标签找自己峰附近最近的空白格,
-    放置时避让已放标签(不重叠、不交叉);就近优先,不把标签推远。
+    """分区域规划放置标签(0.2.199-补29bz):峰与空白格按空间划到 3×3 网格区域,
+    每个标签优先在自己区域就近放置(避让已放标签:不重叠、不交叉);区域空白
+    不足只向相邻区域溢出,并设硬距离上限——标签不再跑远。
     返回 (标签位, 锚点=标签位, 峰点, 文本)。"""
     peaks: list[tuple[QPointF, str]] = [
         (QPointF(pt), text) for pt, text, _tw in entries
@@ -233,68 +234,100 @@ def _assign_blank_cells(
         cell_arr[None, :, 0] - peak_arr[:, None, 0],
         cell_arr[None, :, 1] - peak_arr[:, None, 1],
     )
-    # 最近空白格稀缺的先放,避免被抢
-    order = np.argsort(dists.min(axis=1))
+    # 3×3 区域:按峰+空白格范围划分
+    xs = np.concatenate([peak_arr[:, 0], cell_arr[:, 0]])
+    ys = np.concatenate([peak_arr[:, 1], cell_arr[:, 1]])
+    x0, x1 = float(xs.min()), float(xs.max())
+    y0, y1 = float(ys.min()), float(ys.max())
+    xw = max((x1 - x0) / 3.0, 1e-6)
+    yh = max((y1 - y0) / 3.0, 1e-6)
+
+    def _region(arr, coord, span, lo):
+        return np.clip(((arr[:, coord] - lo) // span).astype(int), 0, 2)
+
+    peak_region = _region(peak_arr, 0, xw, x0) * 3 + _region(peak_arr, 1, yh, y0)
+    cell_region = _region(cell_arr, 0, xw, x0) * 3 + _region(cell_arr, 1, yh, y0)
+    region_cells: dict[int, np.ndarray] = {
+        r: np.nonzero(cell_region == r)[0] for r in range(9)
+    }
+
+    def _neighbors(r: int) -> list[int]:
+        row, col = divmod(r, 3)
+        out = []
+        for dr in (-1, 0, 1):
+            for dc in (-1, 0, 1):
+                rr, cc = row + dr, col + dc
+                if 0 <= rr < 3 and 0 <= cc < 3:
+                    out.append(rr * 3 + cc)
+        return out
+
+    def _seg_cross(seg, pp, pc) -> bool:
+        # 包围盒预筛:不相交则必不交叉
+        if (
+            min(seg[0][0], seg[1][0]) > max(pp.x(), pc.x())
+            or max(seg[0][0], seg[1][0]) < min(pp.x(), pc.x())
+            or min(seg[0][1], seg[1][1]) > max(pp.y(), pc.y())
+            or max(seg[0][1], seg[1][1]) < min(pp.y(), pc.y())
+        ):
+            return False
+        return _segments_cross(
+            seg[0], seg[1], (pp.x(), pp.y()), (pc.x(), pc.y())
+        )
+
+    def _pick(cand_sub: np.ndarray, allow_cross: bool, allow_overlap: bool) -> int:
+        for k in cand_sub[:max_cand]:
+            k = int(k)
+            if used[k]:
+                continue
+            c = cells[k]
+            recent = placed[-max_placed:]
+            if not allow_overlap and any(
+                float(np.hypot(c.x() - pos.x(), c.y() - pos.y())) < min_sep
+                for pos, _p, _t in recent
+            ):
+                continue
+            if not allow_cross:
+                seg = ((peaks[pidx][0].x(), peaks[pidx][0].y()), (c.x(), c.y()))
+                if any(_seg_cross(seg, pp, pc) for pp, pc, _t in recent):
+                    continue
+            return k
+        return -1
+
+    order = np.argsort(dists.min(axis=1))  # 最近空白格稀缺的先放
     used = [False] * len(cells)
     placed: list[tuple[QPointF, QPointF, str]] = []
-    radii = [80.0, 150.0, 240.0, 400.0, 1e18]
+    hard_cap = max(240.0, min(420.0, font_px * 20.0))  # 标签距峰硬上限
     for oi in order:
         pidx = int(oi)
-        cand = np.argsort(dists[pidx])
+        home = int(peak_region[pidx])
         chosen = -1
-        for radius in radii:
-            in_r = cand[dists[pidx][cand] <= radius][:max_cand]
-            for k in in_r:
-                k = int(k)
-                if used[k]:
-                    continue
-                c = cells[k]
-                recent = placed[-max_placed:]
-                if any(
-                    float(np.hypot(c.x() - pos.x(), c.y() - pos.y())) < min_sep
-                    for pos, _p, _t in recent
-                ):
-                    continue
-                seg = ((peaks[pidx][0].x(), peaks[pidx][0].y()), (c.x(), c.y()))
-                cross = False
-                for pp, pc, _t in recent:
-                    # 包围盒预筛:不相交则必不交叉
-                    if (
-                        min(seg[0][0], seg[1][0]) > max(pp.x(), pc.x())
-                        or max(seg[0][0], seg[1][0]) < min(pp.x(), pc.x())
-                        or min(seg[0][1], seg[1][1]) > max(pp.y(), pc.y())
-                        or max(seg[0][1], seg[1][1]) < min(pp.y(), pc.y())
-                    ):
-                        continue
-                    if _segments_cross(
-                        seg[0],
-                        seg[1],
-                        (pp.x(), pp.y()),
-                        (pc.x(), pc.y()),
-                    ):
-                        cross = True
-                        break
-                if not cross:
-                    chosen = k
-                    break
+        cand_all = np.argsort(dists[pidx])
+        # 1) 本区域:严格避让(不重叠、不交叉),半径递增
+        for radius in (80.0, 150.0, 240.0):
+            sub = region_cells[home]
+            sub = sub[np.argsort(dists[pidx][sub])]
+            sub = sub[dists[pidx][sub] <= radius]
+            chosen = _pick(sub, False, False)
             if chosen >= 0:
                 break
+        # 2) 相邻区域:严格避让
         if chosen < 0:
-            # 放宽:只避重叠(限候选与回看数量)
-            for k in cand[: max_cand * 2]:
-                k = int(k)
-                if used[k]:
-                    continue
-                c = cells[k]
-                if not any(
-                    float(np.hypot(c.x() - pos.x(), c.y() - pos.y())) < min_sep
-                    for pos, _p, _t in placed[-max_placed:]
-                ):
-                    chosen = k
-                    break
+            neigh = np.concatenate(
+                [region_cells[r] for r in _neighbors(home) if r != home]
+            )
+            sub = neigh[np.argsort(dists[pidx][neigh])]
+            sub = sub[dists[pidx][sub] <= 360.0]
+            chosen = _pick(sub, False, False)
+        # 3) 本区域+邻域:只避重叠
         if chosen < 0:
-            # 最后:最近的未用格(限候选数量)
-            for k in cand[:max_cand]:
+            pool = np.concatenate([region_cells[r] for r in _neighbors(home)])
+            sub = pool[np.argsort(dists[pidx][pool])]
+            sub = sub[dists[pidx][sub] <= hard_cap]
+            chosen = _pick(sub, True, False)
+        # 4) 硬距离上限内最近的未用格(允许交叉/重叠,但绝不跑远)
+        if chosen < 0:
+            sub = cand_all[dists[pidx][cand_all] <= hard_cap][: max_cand * 2]
+            for k in sub:
                 if not used[int(k)]:
                     chosen = int(k)
                     break
@@ -524,8 +557,8 @@ class _LabelOverlay(QWidget):
             font = QFont()
             font.setPixelSize(int(round(font_px)))
             painter.setFont(font)
-            # 0.2.199-补29bx:空白格 = 当前 contour 起点下看不见信号的位置;
-            # 标签逐个先后放置,就近找峰旁空白格并避让已放标签(不重叠不交叉)。
+            # 0.2.199-补29bz:空白格 = 当前 contour 起点下看不见信号的位置;
+            # 分区域规划:标签优先放自己区域,不足向邻域溢出,硬距离上限不跑远。
             hull_points: list[QPointF] = []
             for xi, yi in viewer._peak_data_xy:
                 try:
