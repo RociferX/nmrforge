@@ -469,6 +469,49 @@ def test_1d_mode_hides_peak_ui(tmp_path, qapp, monkeypatch) -> None:
 
 
 
+def test_box_select_no_flash_table_click_flashes(
+    tmp_path, qapp, monkeypatch
+) -> None:
+    """0.2.199-补29bo:框选联动峰表不触发闪烁;峰表点击才闪烁。"""
+    import numpy as np
+
+    from viewer.spectrum import Spectrum, SpectrumAxis
+
+    manager = _manager(tmp_path, monkeypatch)
+    spectra = manager.data_dir('exp_001', 'd_001', 'spectra')
+    spectra.mkdir(parents=True, exist_ok=True)
+    (spectra / 'exp_001-d_001.ft2').write_bytes(b'x')
+    peaks = manager.data_dir('exp_001', 'd_001', 'peaks')
+    peaks.mkdir(parents=True, exist_ok=True)
+    (peaks / 'exp_001-d_001.list').write_text(
+        'Assignment w1 w2 Data Height Volume\n'
+        'G1  115.000  8.000  0  100  0\n'
+        'G2  112.000  8.500  0  90  0\n',
+        encoding='utf-8',
+    )
+    panel = SpectrumPanel(manager)
+    axis_x = SpectrumAxis(
+        label='H', size=64, sw_hz=6000.0, obs_mhz=600.0,
+        carrier_ppm=4.7, orig_hz=0.0,
+    )
+    axis_y = SpectrumAxis(
+        label='N', size=64, sw_hz=2189.0, obs_mhz=60.8,
+        carrier_ppm=118.0, orig_hz=0.0,
+    )
+    panel.viewer.add_spectrum(Spectrum(np.zeros((64, 64)), [axis_y, axis_x]))
+    panel.set_context('exp_001', 'd_001')
+    panel._load_peaks(spectra / 'exp_001-d_001.ft2')
+    panel.viewer._clear_flash()
+    # 框选:联动峰表多选,不应闪烁
+    panel._on_peaks_box_selected([0])
+    assert panel.viewer._flash_item is None
+    # 峰表点击(程序化 selectRow 等价用户点击):触发闪烁
+    panel.peak_table.selectRow(1)
+    assert panel.viewer._flash_item is not None
+    panel.viewer._clear_flash()
+    panel.close()
+
+
 def test_assignment_header_toggles_labels(tmp_path, qapp, monkeypatch) -> None:
     # 0.2.199-补29bf:点击 Assignment 列标题开关图上指认标签
     import numpy as np

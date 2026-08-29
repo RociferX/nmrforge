@@ -605,17 +605,17 @@ class PipelineStepRow(QWidget):
             lambda: self.ext_range_requested.emit(self.step_id)
         )
         button_row.addWidget(self.ext_range_button)
-        # 0.2.199-补29ar/补29au:峰挑选阈值条(3.0–15.0 σ);
+        # 0.2.199-补29ar/补29au/补29bo:峰挑选阈值条(3.0–30.0 σ);
         # 补29au:调整只更新数值,点「运行/重新处理」才重新选峰
         self.threshold_label = QLabel("阈值(σ)")
         self.threshold_label.setVisible(self.step_id == "peaks")
         self.threshold_slider = QSlider(Qt.Orientation.Horizontal)
-        self.threshold_slider.setRange(30, 150)
+        self.threshold_slider.setRange(30, 300)
         self.threshold_slider.setValue(60)
         self.threshold_slider.setFixedWidth(120)
         self.threshold_slider.setVisible(self.step_id == "peaks")
         self.threshold_spin = QDoubleSpinBox()
-        self.threshold_spin.setRange(3.0, 15.0)
+        self.threshold_spin.setRange(3.0, 30.0)
         self.threshold_spin.setSingleStep(0.5)
         self.threshold_spin.setDecimals(1)
         self.threshold_spin.setValue(6.0)

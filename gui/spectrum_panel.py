@@ -150,6 +150,8 @@ class SpectrumPanel(QWidget):
         self.peak_table.setHorizontalHeaderLabels(list(self._peak_keys))
         self.peak_table.horizontalHeader().setStretchLastSection(True)
         self.peak_table.setMaximumHeight(150)
+        # 0.2.199-补29bo:谱图点选/框选引起的程序化选行,不触发单峰闪烁
+        self._syncing_table_selection = False
         self.peak_table.itemSelectionChanged.connect(self._on_peak_row_selected)
         self.peak_table.itemChanged.connect(self._on_peak_cell_edited)
         # 0.2.199-补29bf:点击 Assignment 列标题开关图上指认标签
@@ -882,18 +884,22 @@ class SpectrumPanel(QWidget):
         self.refresh()
 
     def _on_peaks_box_selected(self, rows: list[int]) -> None:
-        """框选峰:联动峰表多选。"""
+        """框选峰:联动峰表多选(程序化选行,不触发单峰闪烁)。"""
         model = self.peak_table.selectionModel()
         if model is None:
             return
-        model.clearSelection()
-        for row in rows:
-            if 0 <= row < self.peak_table.rowCount():
-                model.select(
-                    self.peak_table.model().index(row, 0),
-                    QItemSelectionModel.SelectionFlag.Select
-                    | QItemSelectionModel.SelectionFlag.Rows,
-                )
+        self._syncing_table_selection = True
+        try:
+            model.clearSelection()
+            for row in rows:
+                if 0 <= row < self.peak_table.rowCount():
+                    model.select(
+                        self.peak_table.model().index(row, 0),
+                        QItemSelectionModel.SelectionFlag.Select
+                        | QItemSelectionModel.SelectionFlag.Rows,
+                    )
+        finally:
+            self._syncing_table_selection = False
 
     def _on_manual_peak_added(self, peak: dict) -> None:
         """点击谱图加峰:吸附后追加到峰表(自动编号)并立即显示。"""
@@ -1048,7 +1054,11 @@ class SpectrumPanel(QWidget):
 
     def _on_viewer_peak_clicked(self, row: int) -> None:
         if 0 <= row < self.peak_table.rowCount():
-            self.peak_table.selectRow(row)
+            self._syncing_table_selection = True
+            try:
+                self.peak_table.selectRow(row)
+            finally:
+                self._syncing_table_selection = False
 
     def _on_peak_header_clicked(self, section: int) -> None:
         """点击 Assignment 列标题:开关图上峰指认标签(0.2.199-补29bf)。"""
@@ -1063,6 +1073,8 @@ class SpectrumPanel(QWidget):
             )
 
     def _on_peak_row_selected(self) -> None:
+        if self._syncing_table_selection:
+            return  # 谱图点选/框选引起的程序化选行,只高亮不闪烁
         rows = self.peak_table.selectionModel().selectedRows()
         if not rows:
             return

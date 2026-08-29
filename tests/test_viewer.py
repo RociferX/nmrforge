@@ -15,7 +15,11 @@ from PyQt6.QtWidgets import QApplication, QGraphicsItem
 from viewer.app import SpectrumWindow
 from viewer.contour_layer import ContourLayer
 from viewer.spectrum import Spectrum, SpectrumAxis
-from viewer.spectrum_viewer import SpectrumViewer, _layout_periphery_labels
+from viewer.spectrum_viewer import (
+    SpectrumViewer,
+    _convex_hull,
+    _layout_signal_labels,
+)
 
 
 def _axis(label: str, size: int = 128, sw: float = 6000.0) -> SpectrumAxis:
@@ -656,9 +660,31 @@ def test_peak_label_leader_line(qapp: QApplication) -> None:
     assert viewer._label_overlay.visible_label_count() == 1
     viewer.close()
 
-def test_periphery_label_layout(qapp: QApplication) -> None:
-    """0.2.199-补29bn:外周标签布局——标签落在矩形外周、径向引导线不交叉、
-    密集聚集峰滑动后不重叠。"""
+def test_highlight_flash_only_when_requested(qapp: QApplication) -> None:
+    """0.2.199-补29bo:闪烁仅峰表点击触发;谱图点选/框选只高亮不闪。"""
+    spectrum = _synthetic_spectrum()
+    viewer = SpectrumViewer()
+    viewer.add_spectrum(spectrum)
+    viewer.set_peaks(
+        [
+            {
+                'H_shift': spectrum.x_axis.ppm_at(30),
+                'N_shift': spectrum.y_axis.ppm_at(20),
+            }
+        ]
+    )
+    viewer.highlight_peak(0, flash=False)
+    assert viewer._flash_item is None
+    viewer.highlight_peak(0)
+    assert viewer._flash_item is not None
+    viewer._clear_flash()
+    assert viewer._flash_item is None
+    viewer.close()
+
+
+def test_signal_ring_label_layout(qapp: QApplication) -> None:
+    """0.2.199-补29bo:信号区域环绕标签——标签在绿框内、围绕信号轮廓外圈、
+    左峰左标/右峰右标、径向引导线不交叉、不重叠。"""
 
     def _segments_cross(a1, a2, b1, b2) -> bool:
         def cross(o, p, q):
@@ -670,28 +696,46 @@ def test_periphery_label_layout(qapp: QApplication) -> None:
         d4 = cross(b1, b2, a2)
         return ((d1 > 0) != (d2 > 0)) and ((d3 > 0) != (d4 > 0))
 
-    rect = QRectF(50.0, 50.0, 400.0, 300.0)
-    cx, cy = rect.center().x(), rect.center().y()
-    outer = [
-        (cx + 180.0 * np.cos(a), cy + 130.0 * np.sin(a))
-        for a in np.linspace(0.0, 2.0 * np.pi, 8, endpoint=False)
+    def _inside_hull(p, hull) -> bool:
+        # 凸包(CCW)内判定:相对所有边同侧(叉积符号一致)
+        sign = 0
+        n = len(hull)
+        for i in range(n):
+            a, b = hull[i], hull[(i + 1) % n]
+            cross = (b.x() - a.x()) * (p.y() - a.y()) - (
+                b.y() - a.y()
+            ) * (p.x() - a.x())
+            if abs(cross) < 1e-9:
+                continue
+            s = 1 if cross > 0 else -1
+            if sign == 0:
+                sign = s
+            elif s != sign:
+                return False
+        return True
+
+    clamp = QRectF(40.0, 40.0, 620.0, 460.0)
+    cx, cy = clamp.center().x(), clamp.center().y()
+    left = [
+        (cx - 220.0, cy - 60.0),
+        (cx - 180.0, cy - 10.0),
+        (cx - 200.0, cy + 50.0),
     ]
-    inner = [(cx + i * 8.0 - 20.0, cy + i * 6.0 - 15.0) for i in range(6)]
-    entries = [
-        (QPointF(x, y), f"P{i}", 30.0)
-        for i, (x, y) in enumerate(outer + inner)
+    right = [
+        (cx + 220.0, cy - 60.0),
+        (cx + 180.0, cy - 10.0),
+        (cx + 200.0, cy + 50.0),
     ]
-    layout = _layout_periphery_labels(entries, rect, 12.0)
+    top = [(cx - 40.0, cy - 120.0), (cx + 40.0, cy - 120.0)]
+    bottom = [(cx - 40.0, cy + 120.0), (cx + 40.0, cy + 120.0)]
+    all_pts = [QPointF(x, y) for x, y in left + right + top + bottom]
+    entries = [(p, f"P{i}", 30.0) for i, p in enumerate(all_pts)]
+    layout = _layout_signal_labels(entries, all_pts, clamp, 12.0)
     assert len(layout) == len(entries)
-    tol = 2.0
+    hull = _convex_hull(all_pts)
     for pos, anchor, pt, text in layout:
-        on_edge = (
-            abs(pos.y() - rect.top()) <= tol
-            or abs(pos.y() - rect.bottom()) <= tol
-            or abs(pos.x() - rect.left()) <= tol
-            or abs(pos.x() - rect.right()) <= tol
-        )
-        assert on_edge, f"label {text} not on perimeter"
+        assert clamp.contains(pos), f"label {text} outside green box"
+        assert not _inside_hull(pos, hull), f"label {text} inside signal region"
     for i in range(len(layout)):
         for j in range(i + 1, len(layout)):
             a1 = (layout[i][1].x(), layout[i][1].y())
@@ -701,5 +745,11 @@ def test_periphery_label_layout(qapp: QApplication) -> None:
             assert not _segments_cross(a1, a2, b1, b2), (
                 f"leader cross {layout[i][3]} {layout[j][3]}"
             )
+    centroid_x = sum(p.x() for p in all_pts) / len(all_pts)
+    for pos, anchor, pt, text in layout:
+        if pt.x() < centroid_x - 1e-6:
+            assert anchor.x() < centroid_x, f"left peak {text} label on right"
+        elif pt.x() > centroid_x + 1e-6:
+            assert anchor.x() > centroid_x, f"right peak {text} label on left"
     positions = [(p.x(), p.y()) for p, _a, _pt, _t in layout]
     assert len(set(positions)) == len(positions), "labels overlap at same position"

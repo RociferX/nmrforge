@@ -90,67 +90,234 @@ class _BoxSelectOverlay(QWidget):
             painter.end()
 
 
-def _point_on_perimeter(rect: QRectF, length: float) -> QPointF:
-    """沿矩形周长(左上角起顺时针)取 length 处坐标,供标签外周分布。"""
-    w = float(rect.width())
-    h = float(rect.height())
-    peri = max(2.0 * (w + h), 1e-9)
-    d = length % peri
-    x0, y0 = float(rect.x()), float(rect.y())
-    if d <= w:
-        return QPointF(x0 + d, y0)
-    d -= w
-    if d <= h:
-        return QPointF(x0 + w, y0 + d)
-    d -= h
-    if d <= w:
-        return QPointF(x0 + w - d, y0 + h)
-    return QPointF(x0, y0 + h - (d - w))
+def _convex_hull(points: list[QPointF]) -> list[QPointF]:
+    """单调链凸包(CCW);点数不足或共线时退化为包围盒角点。"""
+    pts = sorted(
+        {(round(float(p.x()), 3), round(float(p.y()), 3)) for p in points}
+    )
+    if not pts:
+        return []
+
+    def cross(o: tuple[float, float], a: tuple[float, float], b: tuple[float, float]) -> float:
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+
+    def bbox() -> list[QPointF]:
+        xs = [p[0] for p in pts]
+        ys = [p[1] for p in pts]
+        x0, x1 = min(xs), max(xs)
+        y0, y1 = min(ys), max(ys)
+        return [
+            QPointF(x0, y0),
+            QPointF(x1, y0),
+            QPointF(x1, y1),
+            QPointF(x0, y1),
+        ]
+
+    lower: list[tuple[float, float]] = []
+    for p in pts:
+        while len(lower) >= 2 and cross(lower[-2], lower[-1], p) <= 0:
+            lower.pop()
+        lower.append(p)
+    upper: list[tuple[float, float]] = []
+    for p in reversed(pts):
+        while len(upper) >= 2 and cross(upper[-2], upper[-1], p) <= 0:
+            upper.pop()
+        upper.append(p)
+    hull = lower[:-1] + upper[:-1]
+    if len(hull) < 3:
+        return bbox()
+    return [QPointF(x, y) for x, y in hull]
 
 
-def _perimeter_arc(point: QPointF, rect: QRectF) -> float:
-    """矩形周长上一点(径向投影落点)→弧长(左上角起顺时针),供滑动避让。"""
-    w = float(rect.width())
-    h = float(rect.height())
-    x0, y0 = rect.left(), rect.top()
-    x, y = point.x(), point.y()
-    tol = 2.0
-    if abs(y - y0) <= tol:
-        return max(0.0, x - x0)
-    if abs(x - (x0 + w)) <= tol:
-        return w + max(0.0, y - y0)
-    if abs(y - (y0 + h)) <= tol:
-        return w + h + max(0.0, x0 + w - x)
-    return w + h + w + max(0.0, y0 + h - y)
+def _polygon_perimeter(poly: list[QPointF]) -> float:
+    n = len(poly)
+    if n < 2:
+        return 0.0
+    return float(
+        sum(
+            np.hypot(
+                poly[(i + 1) % n].x() - poly[i].x(),
+                poly[(i + 1) % n].y() - poly[i].y(),
+            )
+            for i in range(n)
+        )
+    )
 
 
-def _layout_periphery_labels(
+def _point_on_segment(p: QPointF, a: QPointF, b: QPointF, tol: float) -> bool:
+    cross = (p.x() - a.x()) * (b.y() - a.y()) - (
+        p.y() - a.y()
+    ) * (b.x() - a.x())
+    seg = float(np.hypot(b.x() - a.x(), b.y() - a.y()))
+    if abs(cross) > tol * max(seg, 1.0):
+        return False
+    return (
+        min(a.x(), b.x()) - tol <= p.x() <= max(a.x(), b.x()) + tol
+        and min(a.y(), b.y()) - tol <= p.y() <= max(a.y(), b.y()) + tol
+    )
+
+
+def _polygon_arc_of_point(point: QPointF, poly: list[QPointF], peri: float) -> float:
+    """多边形周长上一点(径向投影落点)→弧长(沿顶点序),供滑动避让。"""
+    n = len(poly)
+    acc = 0.0
+    for i in range(n):
+        a = poly[i]
+        b = poly[(i + 1) % n]
+        seg = float(np.hypot(b.x() - a.x(), b.y() - a.y()))
+        if _point_on_segment(point, a, b, 2.0):
+            return acc + float(np.hypot(point.x() - a.x(), point.y() - a.y()))
+        acc += seg
+    return 0.0
+
+
+def _polygon_point_at_arc(poly: list[QPointF], arc: float, peri: float) -> QPointF:
+    n = len(poly)
+    if n == 0:
+        return QPointF()
+    arc = arc % max(peri, 1e-9)
+    acc = 0.0
+    for i in range(n):
+        a = poly[i]
+        b = poly[(i + 1) % n]
+        seg = float(np.hypot(b.x() - a.x(), b.y() - a.y()))
+        if arc <= acc + seg + 1e-9:
+            t = (arc - acc) / max(seg, 1e-9)
+            return QPointF(
+                a.x() + (b.x() - a.x()) * t,
+                a.y() + (b.y() - a.y()) * t,
+            )
+        acc += seg
+    return QPointF(poly[0])
+
+
+def _inflate_polygon(poly: list[QPointF], margin: float) -> list[QPointF]:
+    """凸多边形外扩:顶点沿两侧边外法线平均方向偏移 margin(半角修正)。"""
+    n = len(poly)
+    if n < 3:
+        return poly
+    normals: list[tuple[float, float]] = []
+    for i in range(n):
+        a = poly[i]
+        b = poly[(i + 1) % n]
+        dx = b.x() - a.x()
+        dy = b.y() - a.y()
+        length = max(float(np.hypot(dx, dy)), 1e-9)
+        normals.append((dy / length, -dx / length))  # CCW 外法线
+    out: list[QPointF] = []
+    for i in range(n):
+        nx1, ny1 = normals[(i - 1) % n]
+        nx2, ny2 = normals[i]
+        nx, ny = nx1 + nx2, ny1 + ny2
+        length = max(float(np.hypot(nx, ny)), 1e-9)
+        cos_a = max(-1.0, min(1.0, nx1 * nx2 + ny1 * ny2))
+        half = min(float(np.sqrt(2.0 / (1.0 + cos_a))), 4.0)
+        d = margin * half
+        v = poly[i]
+        out.append(QPointF(v.x() + nx / length * d, v.y() + ny / length * d))
+    return out
+
+
+def _ray_polygon_hit(
+    origin: QPointF, ux: float, uy: float, poly: list[QPointF]
+) -> QPointF | None:
+    """从 origin 沿 (ux,uy) 射线与多边形外边界的交点(取最远命中)。"""
+    best_t = -1.0
+    best: QPointF | None = None
+    n = len(poly)
+    ox, oy = origin.x(), origin.y()
+    for i in range(n):
+        a = poly[i]
+        b = poly[(i + 1) % n]
+        ex = b.x() - a.x()
+        ey = b.y() - a.y()
+        det = ex * uy - ux * ey
+        if abs(det) < 1e-12:
+            continue
+        t = (-(a.x() - ox) * ey + ex * (a.y() - oy)) / det
+        s = (ux * (a.y() - oy) - uy * (a.x() - ox)) / det
+        if t <= 1e-9 or s < -1e-9 or s > 1.0 + 1e-9:
+            continue
+        if t > best_t:
+            best_t = t
+            best = QPointF(ox + ux * t, oy + uy * t)
+    return best
+
+
+def _draw_outward_label(
+    painter: QPainter,
+    text: str,
+    pos: QPointF,
+    outward: QPointF,
+    font_px: float,
+) -> None:
+    """在环绕位置朝外绘制标签文本(文字始终直立,按外向主轴选锚点)。"""
+    fm = painter.fontMetrics()
+    tw = float(fm.horizontalAdvance(text))
+    th = float(fm.height())
+    x, y = pos.x(), pos.y()
+    if abs(outward.x()) >= abs(outward.y()):
+        if outward.x() < 0:
+            box = QRectF(x - tw, y - th / 2.0, tw, th)
+        else:
+            box = QRectF(x, y - th / 2.0, tw, th)
+    else:
+        if outward.y() < 0:
+            box = QRectF(x - tw / 2.0, y - th, tw, th)
+        else:
+            box = QRectF(x - tw / 2.0, y, tw, th)
+    painter.drawText(box, int(Qt.AlignmentFlag.AlignCenter), text)
+
+
+def _layout_signal_labels(
     entries: list[tuple[QPointF, str, float]],
-    rect: QRectF,
+    hull_points: list[QPointF],
+    clamp_rect: QRectF,
     font_px: float,
 ) -> list[tuple[QPointF, QPointF, QPointF, str]]:
-    """外周标签布局:峰沿中心射线径向投影到矩形外周(引导线在各自角楔内,
-    互不交叉),标签按文本宽度沿周长贪心前滑避让重叠;返回 (标签位, 锚点,
-    峰点, 文本) 列表,标签位与锚点不一致时用沿边短连接线接回。"""
-    center = rect.center()
-    hw = rect.width() / 2.0
-    hh = rect.height() / 2.0
+    """信号区域环绕标签布局(0.2.199-补29bo)。
+
+    1) 全部峰点取凸包(信号区域近似轮廓)并外扩一圈做标签环,环被
+       clamp_rect(谱图绿框 ∩ 视口)夹住,标签不超出谱图范围;
+    2) 每个峰沿「凸包质心→峰」射线打到环上:左峰落左、右峰落右,
+       引导线在各自角楔内互不交叉;
+    3) 标签按文本宽度沿环贪心滑动避让重叠。
+    返回 (标签位, 锚点, 峰点, 文本) 列表。
+    """
+    hull = _convex_hull(hull_points)
+    if not hull:
+        return []
+    cx = sum(p.x() for p in hull) / len(hull)
+    cy = sum(p.y() for p in hull) / len(hull)
+    margin = max(20.0, font_px * 1.2)
+    ring = _inflate_polygon(hull, margin)
+    inset = font_px * 0.6
+    rr = QRectF(clamp_rect).adjusted(inset, inset, -inset, -inset)
+    if rr.width() < 2.0 or rr.height() < 2.0:
+        rr = QRectF(clamp_rect)
+    ring = [
+        QPointF(
+            min(max(p.x(), rr.left()), rr.right()),
+            min(max(p.y(), rr.top()), rr.bottom()),
+        )
+        for p in ring
+    ]
+    if len(ring) < 3:
+        return []
+    peri = _polygon_perimeter(ring)
     items: list[tuple[float, QPointF, QPointF, str, float]] = []
     for pt, text, tw in entries:
-        dx = pt.x() - center.x()
-        dy = pt.y() - center.y()
+        dx = pt.x() - cx
+        dy = pt.y() - cy
         dist = float(np.hypot(dx, dy))
         if dist < 1e-6:
+            dx, dy, dist = 1.0, 0.0, 1.0
+        anchor = _ray_polygon_hit(QPointF(cx, cy), dx / dist, dy / dist, ring)
+        if anchor is None:
             continue
-        ux, uy = dx / dist, dy / dist
-        t = min(
-            hw / max(abs(ux), 1e-9),
-            hh / max(abs(uy), 1e-9),
-        )
-        anchor = QPointF(center.x() + ux * t, center.y() + uy * t)
         items.append(
             (
-                _perimeter_arc(anchor, rect),
+                _polygon_arc_of_point(anchor, ring, peri),
                 anchor,
                 QPointF(pt),
                 text,
@@ -158,12 +325,10 @@ def _layout_periphery_labels(
             )
         )
     items.sort(key=lambda it: it[0])
-    n = len(items)
-    if n == 0:
+    if not items:
         return []
-    # 沿外周贪心滑动:相邻标签间距 ≥ 半宽之和 + 间隔
     pad = max(4.0, font_px * 0.4)
-    for i in range(1, n):
+    for i in range(1, len(items)):
         needed = (items[i - 1][4] + items[i][4]) / 2.0 + pad
         gap = items[i][0] - items[i - 1][0]
         if gap < needed:
@@ -174,7 +339,6 @@ def _layout_periphery_labels(
                 items[i][3],
                 items[i][4],
             )
-    peri = 2.0 * (rect.width() + rect.height())
     wrap_needed = (items[0][4] + items[-1][4]) / 2.0 + pad
     wrap_gap = (items[0][0] + peri) - items[-1][0]
     if wrap_gap < wrap_needed:
@@ -184,35 +348,14 @@ def _layout_periphery_labels(
             for arc, anchor, pt, text, tw in items
         ]
     return [
-        (_point_on_perimeter(rect, arc), anchor, pt, text)
+        (_polygon_point_at_arc(ring, arc, peri), anchor, pt, text)
         for arc, anchor, pt, text, _tw in items
     ]
 
 
-def _draw_periphery_label(
-    painter: QPainter, text: str, pos: QPointF, rect: QRectF, font_px: float
-) -> None:
-    """在外周位置朝外绘制标签文本(按所在边选择锚点)。"""
-    fm = painter.fontMetrics()
-    tw = float(fm.horizontalAdvance(text))
-    th = float(fm.height())
-    tol = 2.0
-    x, y = pos.x(), pos.y()
-    if abs(y - rect.top()) <= tol:
-        box = QRectF(x - tw / 2.0, y - th, tw, th)
-    elif abs(y - rect.bottom()) <= tol:
-        box = QRectF(x - tw / 2.0, y, tw, th)
-    elif abs(x - rect.left()) <= tol:
-        box = QRectF(x, y - th / 2.0, tw, th)
-    else:
-        box = QRectF(x - tw, y - th / 2.0, tw, th)
-    painter.drawText(box, int(Qt.AlignmentFlag.AlignCenter), text)
-
-
 class _LabelOverlay(QWidget):
-    """峰指认标签覆盖层:标签画在谱图外周(径向投影 + 滑动避让,
-    引导线不交叉),文字在 widget 坐标下始终直立;字号绑定标记尺寸
-    (随谱图缩放)。"""
+    """峰指认标签覆盖层:标签环绕信号区域轮廓(全峰凸包外扩,绿框内),
+    左峰左标/右峰右标,引导线不交叉;文字在 widget 坐标下始终直立。"""
 
     def __init__(self, parent: QWidget, viewer: SpectrumViewer) -> None:
         super().__init__(parent)
@@ -246,6 +389,30 @@ class _LabelOverlay(QWidget):
             out.append((xi, yi, text))
         return out
 
+    def _clamp_rect(self, viewer, vb) -> QRectF | None:
+        """谱图数据边界(绿框)在 widget 坐标的矩形 ∩ 视口(标签活动范围)。"""
+        primary = viewer._primary
+        if primary is None:
+            return None
+        sx = primary.x_axis.size
+        sy = primary.y_axis.size
+        corners = [
+            QPointF(-0.5, -0.5),
+            QPointF(sx - 0.5, -0.5),
+            QPointF(sx - 0.5, sy - 0.5),
+            QPointF(-0.5, sy - 0.5),
+        ]
+        try:
+            ws = [
+                viewer.plot.mapFromScene(vb.mapViewToScene(c)) for c in corners
+            ]
+        except Exception:  # noqa: BLE001
+            return None
+        xs = [p.x() for p in ws]
+        ys = [p.y() for p in ws]
+        green = QRectF(min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys))
+        return green.intersected(QRectF(self.rect()))
+
     def paintEvent(self, event) -> None:
         entries = self._collect_labels()
         if not entries:
@@ -275,28 +442,39 @@ class _LabelOverlay(QWidget):
             font = QFont()
             font.setPixelSize(int(round(font_px)))
             painter.setFont(font)
-            margin = max(8.0, font_px * 1.1)
-            rect = QRectF(self.rect()).adjusted(
-                margin, margin, -margin, -margin
-            )
-            if rect.width() < 2.0 or rect.height() < 2.0:
-                return
-            # 0.2.199-补29bn:峰沿中心射线径向投影到矩形外周(同角楔内引导线
-            # 天然不交叉);标签沿外周按文本宽度滑动避让重叠,滑离投影点时用
-            # 沿边短连接线接回径向线。文字在 widget 坐标下始终直立。
+            # 0.2.199-补29bo:识别当前视野内全部峰分布(凸包≈信号区域轮廓),
+            # 外扩一圈做标签环;左峰左标、右峰右标,引导线在各自角楔内不
+            # 交叉;环被谱图绿框 ∩ 视口夹住,标签不超出谱图范围。
+            hull_points: list[QPointF] = []
+            for xi, yi in viewer._peak_data_xy:
+                try:
+                    p = viewer.plot.mapFromScene(
+                        vb.mapViewToScene(QPointF(xi, yi))
+                    )
+                except Exception:  # noqa: BLE001
+                    continue
+                if self.rect().contains(p):
+                    hull_points.append(QPointF(p))
+            if not hull_points:
+                hull_points = [p for p, _t in pts]
+            clamp_rect = self._clamp_rect(viewer, vb)
+            if clamp_rect is None:
+                clamp_rect = QRectF(self.rect())
             fm = painter.fontMetrics()
             entries = [
                 (pt, text, float(fm.horizontalAdvance(text)))
                 for pt, text in pts
             ]
-            layout = _layout_periphery_labels(entries, rect, font_px)
+            layout = _layout_signal_labels(
+                entries, hull_points, clamp_rect, font_px
+            )
             gap_peak = 6.0 + font_px * 0.25  # 峰端留缝,不接死
             leader_pen = QPen(QColor("#888888"), 1)
             label_pen = QPen(QColor("#c0392b"), 1)
             for pos, anchor, pt, text in layout:
                 painter.setPen(leader_pen)
                 if (pos - anchor).manhattanLength() > 2.0:
-                    painter.drawLine(pos, anchor)  # 沿边短连接线
+                    painter.drawLine(pos, anchor)  # 沿环短连接线
                 dx = pt.x() - anchor.x()
                 dy = pt.y() - anchor.y()
                 d = max(float(np.hypot(dx, dy)), 1e-6)
@@ -304,7 +482,12 @@ class _LabelOverlay(QWidget):
                 ey = pt.y() - dy / d * gap_peak
                 painter.drawLine(anchor, QPointF(ex, ey))
                 painter.setPen(label_pen)
-                _draw_periphery_label(painter, text, pos, rect, font_px)
+                ox = anchor.x() - pt.x()
+                oy = anchor.y() - pt.y()
+                od = max(float(np.hypot(ox, oy)), 1e-6)
+                _draw_outward_label(
+                    painter, text, pos, QPointF(ox / od, oy / od), font_px
+                )
         finally:
             painter.end()
 
@@ -1341,11 +1524,12 @@ class SpectrumViewer(QWidget):
         self._box_selected_rows.clear()
         self._apply_peak_items(show_labels=show_labels)
 
-    def highlight_peak(self, row: int) -> None:
+    def highlight_peak(self, row: int, flash: bool = True) -> None:
+        """选中峰:仅峰表点击触发闪烁定位(0.2.199-补29bk/补29bo);
+        谱图点选、框选只做标记高亮,不闪烁。"""
         self._selected_peak = row if 0 <= row < len(self._peaks) else None
         self._apply_peak_items()
-        # 0.2.199-补29bk:单点选中时在峰位置短暂放大闪烁,帮助定位
-        if 0 <= row < len(self._peak_data_xy):
+        if flash and 0 <= row < len(self._peak_data_xy):
             xi, yi = self._peak_data_xy[row]
             self._flash_at(xi, yi)
 
@@ -1516,7 +1700,7 @@ class SpectrumViewer(QWidget):
         point = points[0]
         row = point.data().get("row", -1)
         if 0 <= row < len(self._peaks):
-            self.highlight_peak(row)
+            self.highlight_peak(row, flash=False)
             peak = self._peaks[row]
             x_ppm, y_ppm = self._peak_xy(peak)
             self.peak_label.setText(
@@ -1587,7 +1771,7 @@ class SpectrumViewer(QWidget):
             # select:选中距点击位置最近的峰(像素距离)
             row = self._nearest_peak(xi, yi)
             if row is not None:
-                self.highlight_peak(row)
+                self.highlight_peak(row, flash=False)
                 self.peak_clicked.emit(row)
 
     def _peak_from_data_point(self, xi: int, yi: int) -> dict:

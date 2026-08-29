@@ -2036,6 +2036,21 @@ def test_experiment_page_dropdown_switch(
 
 
 
+def test_peak_threshold_range_up_to_30(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.2.199-补29bo:选峰阈值上限 15σ → 30σ(滑块/输入框联动)。"""
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    panel = PipelinePanel(manager, FakeProcessingController())
+    panel.set_selection('data', 'exp_001', 'd_001')
+    row = panel._rows['peaks']
+    assert row.threshold_slider.maximum() == 300
+    assert row.threshold_spin.maximum() == pytest.approx(30.0)
+    row.threshold_spin.setValue(28.5)
+    assert row.threshold_slider.value() == 285
+    panel.close()
+
+
 def test_peaks_threshold_change_does_not_auto_run(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
