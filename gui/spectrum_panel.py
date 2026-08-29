@@ -90,9 +90,12 @@ class _AssignmentCell(QWidget):
         self.edited.emit(self.row)
 
     def merged_text(self) -> str:
-        """当前各段合并的 label(空段 → ?)。"""
-        segs = [(le.text() or "").strip() for le in self.lines]
-        return "-".join(s if s else "?" for s in segs)
+        """当前各段合并的 label(逐段 Poky 规范化,空段 → ?)。"""
+        segs = [
+            normalize_poky_label((le.text() or "").strip(), ndim=1) or "?"
+            for le in self.lines
+        ]
+        return "-".join(segs)
 
 
 class SpectrumPanel(QWidget):
@@ -922,7 +925,9 @@ class SpectrumPanel(QWidget):
                 )
                 widget.edited.connect(self._on_assignment_cell_edited)
                 label_item = self.peak_table.item(row, label_col)
-                label_item.setText(widget.merged_text())
+                # 0.2.199-补29cr:item 文本清空,避免与输入框组件重叠显示;
+                # label 读取/保存走 cellWidget.merged_text()
+                label_item.setText("")
                 self.peak_table.setCellWidget(row, label_col, widget)
                 # 行首单元格保存完整峰 dict(label 等编辑外字段随行保留)
                 self.peak_table.item(row, 0).setData(0x0100, dict(peak))
@@ -941,6 +946,15 @@ class SpectrumPanel(QWidget):
                 if isinstance(stored, dict):
                     peak.update(stored)
             for col, key in enumerate(self._peak_keys):
+                if key == "label":
+                    # 0.2.199-补29cr:label 从段输入框组件合并读取(item 文本已清空)
+                    widget = self.peak_table.cellWidget(row, col)
+                    if widget is not None and hasattr(widget, "merged_text"):
+                        peak[key] = widget.merged_text()
+                    else:
+                        item = self.peak_table.item(row, col)
+                        peak[key] = item.text() if item is not None else ""
+                    continue
                 item = self.peak_table.item(row, col)
                 peak[key] = item.text() if item is not None else ""
             peaks.append(peak)
@@ -983,22 +997,12 @@ class SpectrumPanel(QWidget):
         widget = self.peak_table.cellWidget(
             row, self._peak_keys.index("label")
         )
-        if widget is None or not hasattr(widget, "lines"):
+        if widget is None or not hasattr(widget, "merged_text"):
             return
-        segs = [
-            normalize_poky_label(line.text() or "", ndim=1) or "?"
-            for line in widget.lines
-        ]
-        label = "-".join(segs)
-        self._applying_label_format = True
-        try:
-            if 0 <= row < len(self._peaks):
-                self._peaks[row]["label"] = label
-            item = self.peak_table.item(row, self._peak_keys.index("label"))
-            if item is not None:
-                item.setText(label)
-        finally:
-            self._applying_label_format = False
+        label = widget.merged_text()
+        # 0.2.199-补29cr:只更新内存与 viewer,不写 item 文本(避免重叠)
+        if 0 <= row < len(self._peaks):
+            self._peaks[row]["label"] = label
         self.viewer.apply_label_edit(row, label)
 
     def _on_add_peak_toggled(self, checked: bool) -> None:

@@ -374,7 +374,10 @@ def test_peak_table_assignment_column(tmp_path, qapp, monkeypatch) -> None:
     panel.set_context('exp_001', 'd_001')
     panel._load_peaks(spectra / 'exp_001-d_001.ft2')
     assert panel.peak_table.horizontalHeaderItem(1).text() == 'Assignment ✓'
-    assert panel.peak_table.item(0, 1).text() == 'G1-?'  # 2D 两段,缺段补 ?
+    # 0.2.199-补29cr:item 文本清空不重叠;合并值走组件读取
+    assert panel.peak_table.item(0, 1).text() == ''
+    widget0 = panel.peak_table.cellWidget(0, 1)
+    assert widget0 is not None and widget0.merged_text() == 'G1-?'  # 2D 两段,缺段补 ?
     panel.close()
 
 
@@ -596,7 +599,8 @@ def test_edit_assignment_applies_immediately(
     assert widget.lines[0].text() == 'G1'            # 旧 label 首段保留
     assert widget.lines[1].text() == ''              # 缺省段无真实文本
     assert widget.lines[1].placeholderText() == '?'  # 占位符显示 ?
-    assert panel.peak_table.item(0, 1).text() == 'G1-?'
+    assert panel.peak_table.item(0, 1).text() == ''  # item 文本清空不重叠
+    assert widget.merged_text() == 'G1-?'
     # 第二行:输入占位符框即替换,不追加 ?5
     w2 = panel.peak_table.cellWidget(1, 1)
     assert w2 is not None and w2.lines[0].text() == 'G2'
@@ -606,12 +610,13 @@ def test_edit_assignment_applies_immediately(
     QTest.keyClicks(w2.lines[1], '5')
     qapp.processEvents()
     assert w2.lines[1].text() == '5'                # 不追加 ?5
-    assert panel.peak_table.item(1, 1).text() == 'G2-5'
+    assert w2.merged_text() == 'G2-5'
     # 第一行编辑:逐段规范化后立即生效
     widget.lines[0].setText('g1h')
     widget.lines[1].setText('g1n')
     qapp.processEvents()
-    assert panel.peak_table.item(0, 1).text() == 'G1H-G1N'  # Poky 2D 两段
+    assert widget.merged_text() == 'G1H-G1N'  # Poky 2D 两段
+    assert panel.peak_table.item(0, 1).text() == ''  # item 文本保持清空
     assert panel.viewer._peaks[0]['label'] == 'G1H-G1N'  # 立即生效
     labels = panel.viewer._label_overlay._collect_labels()
     assert any(text == 'G1H-G1N' for _xi, _yi, text in labels)
