@@ -197,21 +197,108 @@ def _draw_outward_label(
     painter.drawText(box, int(Qt.AlignmentFlag.AlignCenter), text)
 
 
+def _assign_blank_cells(
+    entries: list[tuple[QPointF, str, float]],
+    cells: list[QPointF],
+    cx: float,
+    cy: float,
+    font_px: float,
+) -> list[tuple[QPointF, QPointF, QPointF, str]]:
+    """把标签分配到空白格(0.2.199-补29bw):峰与空白格按角度保序,DP 就近
+    分配且相邻标签保持最小间距(尽量不交叉、不叠字);标签可放进峰间空当。
+    返回 (标签位, 锚点=标签位, 峰点, 文本)。"""
+    peaks: list[tuple[float, QPointF, str, float]] = []
+    for pt, text, tw in entries:
+        dx = pt.x() - cx
+        dy = pt.y() - cy
+        if float(np.hypot(dx, dy)) < 1e-6:
+            continue
+        peaks.append((float(np.arctan2(dy, dx)), QPointF(pt), text, float(tw)))
+    if not peaks or not cells:
+        return []
+    peaks.sort(key=lambda it: it[0])
+    cell_items = sorted(
+        (
+            (float(np.arctan2(c.y() - cy, c.x() - cx)), QPointF(c))
+            for c in cells
+        ),
+        key=lambda it: it[0],
+    )
+    n = len(peaks)
+    m = len(cell_items)
+    gap_px = max(20.0, font_px * 2.2)
+    if m > 1:
+        ds = [
+            float(
+                np.hypot(
+                    cell_items[i + 1][1].x() - cell_items[i][1].x(),
+                    cell_items[i + 1][1].y() - cell_items[i][1].y(),
+                )
+            )
+            for i in range(min(m - 1, 48))
+        ]
+        cell_px = max(float(np.median(ds)), 1e-6)
+    else:
+        cell_px = gap_px
+    gap = max(1, int(round(gap_px / cell_px)))
+    if gap >= m:
+        gap = max(1, m // max(n, 1))
+    cost = np.zeros((n, m))
+    for i in range(n):
+        p = peaks[i][1]
+        for j in range(m):
+            c = cell_items[j][1]
+            cost[i, j] = float(np.hypot(p.x() - c.x(), p.y() - c.y()))
+    inf = float(np.inf)
+    dp = np.full((n, m), inf)
+    back = np.full((n, m), -1, dtype=int)
+    dp[0] = cost[0]
+    for i in range(1, n):
+        best = inf
+        best_j = -1
+        for j in range(m):
+            if j - gap >= 0 and dp[i - 1, j - gap] < best:
+                best = dp[i - 1, j - gap]
+                best_j = j - gap
+            if best < inf:
+                dp[i, j] = cost[i, j] + best
+                back[i, j] = best_j
+    if n == 0 or float(dp[n - 1].min()) >= inf:
+        return []
+    j = int(np.argmin(dp[n - 1]))
+    assign = [0] * n
+    for i in range(n - 1, -1, -1):
+        assign[i] = j
+        j = back[i, j]
+    out: list[tuple[QPointF, QPointF, QPointF, str]] = []
+    for i, o in enumerate(assign):
+        pos = cell_items[o][1]
+        out.append(
+            (QPointF(pos), QPointF(pos), QPointF(peaks[i][1]), peaks[i][2])
+        )
+    return out
+
+
 def _layout_signal_labels(
     entries: list[tuple[QPointF, str, float]],
     hull_points: list[QPointF],
     clamp_rect: QRectF,
     font_px: float,
+    blank_points: list[QPointF] | None = None,
 ) -> list[tuple[QPointF, QPointF, QPointF, str]]:
-    """标签散布布局(0.2.199-补29bv):标签沿峰方向放到绿框边缘(利用信号区
-    外的空白区,不挤在信号周围),再沿框边切向滑动展开避让重叠(循环序);
-    引导线为单段直线直连(尽量不交叉)。返回 (标签位, 锚点=标签位, 峰点,
+    """标签布局(0.2.199-补29bw):优先把标签放到当前 contour 起点阈值下看不见
+    信号的空白格(含峰间空当),按角度保序就近分配并保持最小间距(尽量不交叉、
+    不叠字);无空白格时回退绿框边缘散布。返回 (标签位, 锚点=标签位, 峰点,
     文本)。"""
     hull = _convex_hull(hull_points)
     if not hull:
         return []
     cx = sum(p.x() for p in hull) / len(hull)
     cy = sum(p.y() for p in hull) / len(hull)
+    if blank_points:
+        out = _assign_blank_cells(entries, blank_points, cx, cy, font_px)
+        if out:
+            return out
     inset = font_px * 0.8
     box = QRectF(clamp_rect).adjusted(inset, inset, -inset, -inset)
     items: list[tuple[float, QPointF, str, float]] = []
@@ -231,7 +318,6 @@ def _layout_signal_labels(
     n = len(items)
     peri = 2.0 * (box.width() + box.height())
     pad = max(4.0, font_px * 0.4)
-    # 圆环回绕:复制一周切向滑动,取中间 n 个(首尾间距也被约束)
     doubled: list[tuple[float, QPointF, str, float]] = []
     for k in range(2 * n):
         arc, pt, text, tw = items[k % n]
@@ -250,8 +336,8 @@ def _layout_signal_labels(
 
 
 class _LabelOverlay(QWidget):
-    """峰指认标签覆盖层:标签散布到绿框边缘空白区(切向展开、直接连线,
-    尽量不交叉),文字在 widget 坐标下始终直立。"""
+    """峰指认标签覆盖层:标签放进当前 contour 起点下看不见信号的空白区
+    (含峰间空当,保序就近分配,直接连线尽量不交叉),文字始终直立。"""
 
     def __init__(self, parent: QWidget, viewer: SpectrumViewer) -> None:
         super().__init__(parent)
@@ -284,6 +370,52 @@ class _LabelOverlay(QWidget):
                 continue
             out.append((xi, yi, text))
         return out
+
+    def _blank_points(self, viewer, vb) -> list[QPointF] | None:
+        """当前 contour 起点阈值下看不见信号的位置(降采样空白格中心,
+        widget 坐标;0.2.199-补29bw)。"""
+        primary = viewer._primary
+        if primary is None or getattr(primary, "data", None) is None:
+            return None
+        data = primary.data
+        if getattr(data, "ndim", 0) != 2 or data.size == 0:
+            return None
+        maximum = float(
+            getattr(primary, "robust_max", 0.0) or primary.max_intensity
+        )
+        if maximum <= 0:
+            return None
+        thr = maximum * viewer._level_fraction()
+        grid = 48
+        sy = max(1, data.shape[0] // grid)
+        sx = max(1, data.shape[1] // grid)
+        h = (data.shape[0] // sy) * sy
+        w = (data.shape[1] // sx) * sx
+        try:
+            block = (
+                np.abs(data[:h, :w])
+                .reshape(h // sy, sy, w // sx, sx)
+                .max(axis=(1, 3))
+            )
+        except Exception:  # noqa: BLE001
+            return None
+        blank = block < thr
+        pts: list[QPointF] = []
+        for r in range(blank.shape[0]):
+            for c in range(blank.shape[1]):
+                if not blank[r, c]:
+                    continue
+                xi = (c + 0.5) * sx
+                yi = (r + 0.5) * sy
+                try:
+                    p = viewer.plot.mapFromScene(
+                        vb.mapViewToScene(QPointF(xi, yi))
+                    )
+                except Exception:  # noqa: BLE001
+                    continue
+                if self.rect().contains(p):
+                    pts.append(QPointF(p))
+        return pts
 
     def _clamp_rect(self, viewer, vb) -> QRectF | None:
         """谱图数据边界(绿框)在 widget 坐标的矩形 ∩ 视口(标签活动范围)。"""
@@ -339,8 +471,8 @@ class _LabelOverlay(QWidget):
             font = QFont()
             font.setPixelSize(int(round(font_px)))
             painter.setFont(font)
-            # 0.2.199-补29bv:标签沿峰方向放到绿框边缘(信号区外空白区),
-            # 再沿框边切向展开避让重叠;引导线单段直线直连,尽量不交叉。
+            # 0.2.199-补29bw:空白格 = 当前 contour 起点下看不见信号的位置;
+            # 标签按角度保序就近放进空白格(含峰间空当),直接连线尽量不交叉。
             hull_points: list[QPointF] = []
             for xi, yi in viewer._peak_data_xy:
                 try:
@@ -361,8 +493,9 @@ class _LabelOverlay(QWidget):
                 (pt, text, float(fm.horizontalAdvance(text)))
                 for pt, text in pts
             ]
+            blank_points = self._blank_points(viewer, vb)
             layout = _layout_signal_labels(
-                entries, hull_points, clamp_rect, font_px
+                entries, hull_points, clamp_rect, font_px, blank_points
             )
             gap_peak = 6.0 + font_px * 0.25  # 峰端留缝,不接死
             leader_pen = QPen(QColor("#888888"), 1)
@@ -801,6 +934,9 @@ class SpectrumViewer(QWidget):
         self.level_label.setValue(self._level_fraction() * 100.0)
         for layer, spectrum in zip(self.layers, self.layer_spectra):
             layer.set_levels(self._levels_for(spectrum))
+        # 0.2.199-补29bw:contour 起点变化 → 空白区变化,重绘标签
+        if self._label_overlay is not None:
+            self._label_overlay.update()
 
     def _on_level_count(self, value: int) -> None:
         self._level_count = value

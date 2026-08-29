@@ -682,6 +682,46 @@ def test_highlight_flash_only_when_requested(qapp: QApplication) -> None:
     viewer.close()
 
 
+
+def test_signal_blank_cell_layout(qapp: QApplication) -> None:
+    """0.2.199-补29bw:标签放进 contour 起点下看不见信号的空白格(含峰间空当),
+    直接连线、不叠在同一格。"""
+    data = np.zeros((64, 128))
+    data[20, 40] = 500.0
+    data[45, 90] = 500.0
+    from scipy.ndimage import gaussian_filter
+
+    data = gaussian_filter(data, sigma=1.5)
+    thr = 100.0
+    grid = 32
+    sy = max(1, data.shape[0] // grid)
+    sx = max(1, data.shape[1] // grid)
+    h = (data.shape[0] // sy) * sy
+    w = (data.shape[1] // sx) * sx
+    block = (
+        np.abs(data[:h, :w]).reshape(h // sy, sy, w // sx, sx).max(axis=(1, 3))
+    )
+    cells = [
+        QPointF((c + 0.5) * sx, (r + 0.5) * sy)
+        for r in range(block.shape[0])
+        for c in range(block.shape[1])
+        if block[r, c] < thr
+    ]
+    peaks = [QPointF(40.0, 20.0), QPointF(90.0, 45.0)]
+    entries = [(p, f"P{i}", 30.0) for i, p in enumerate(peaks)]
+    layout = _layout_signal_labels(
+        entries, peaks, QRectF(0.0, 0.0, 128.0, 64.0), 12.0, cells
+    )
+    assert len(layout) == 2
+    for pos, anchor, pt, text in layout:
+        assert pos == anchor, f"leader not direct for {text}"
+        on_blank = any(
+            abs(pos.x() - c.x()) <= sx and abs(pos.y() - c.y()) <= sy
+            for c in cells
+        )
+        assert on_blank, f"label {text} not on blank cell"
+    assert layout[0][0] != layout[1][0]
+
 def test_signal_ring_label_layout(qapp: QApplication) -> None:
     """0.2.199-补29bo:信号区域环绕标签——标签在绿框内、围绕信号轮廓外圈、
     左峰左标/右峰右标、径向引导线不交叉、不重叠。"""
