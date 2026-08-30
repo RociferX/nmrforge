@@ -28,9 +28,23 @@ _NUCLEI = set(_NUCLEUS_PPM_RANGES) | {"2H", "19F", "31P", "23Na", "29Si"}
 # 横坐标显示优先级(0.2.153,用户规则):H > N > C;未知核不参与转置
 _NUCLEUS_X_PRIORITY: dict[str, int] = {"1H": 0, "15N": 1, "13C": 2}
 
+# NMRPipe/Sparky 常见非标准 LABEL 别名(0.2.199-补29dh):真实数据 1H 轴
+# 常写 "HN"(sampleC、cc 等实测),单字母为常见简写。
+_NMRPIPE_LABEL_ALIASES: dict[str, str] = {
+    "HN": "1H",
+    "H": "1H",
+    "N": "15N",
+    "C": "13C",
+    "P": "31P",
+    "F": "19F",
+    "D": "2H",
+    "NA": "23Na",
+    "SI": "29Si",
+}
+
 
 def _parse_nmrpipe_label(label: str) -> str:
-    """NMRPipe FDF*LABEL('N15'/'H1'/'C13',同核下标'15Nx'/'1Hy') →
+    """NMRPipe FDF*LABEL('N15'/'H1'/'C13',同核下标'15Nx'/'1Hy',别名'HN') →
     核名('15N'/'1H'/'13C');失败返回 ''。
 
     0.2.199-补29ai:同核唯一化标签(15Nx/1Hy/1Hz)先去尾部 x/y/z 再
@@ -41,6 +55,8 @@ def _parse_nmrpipe_label(label: str) -> str:
         return ""
     if text in _NUCLEI:
         return text
+    if text in _NMRPIPE_LABEL_ALIASES:
+        return _NMRPIPE_LABEL_ALIASES[text]
     if text[-1:] in ("X", "Y", "Z") and text[:-1] in _NUCLEI:
         return text[:-1]
     digits = "".join(ch for ch in text if ch.isdigit())
@@ -114,23 +130,25 @@ def _logical_nuclei_from_order(
 def _labels_from_nuclei(
     nuclei: list[str], labels: tuple[str, ...]
 ) -> tuple[str, ...]:
-    """generic F1/F2/F3 标签且核已知时,替换为核符号标签(N/H/C,Hx/Hy 等)。
+    """核已知时替换为核符号标签(N/H/C,Hx/Hy 等);核未知时只接受 F* 占位。
 
-    独立查看器无 metadata 直接打开时,轴标签由头部 LABEL/OBS 推断的核
-    生成(与 nmrDraw 的 NAME 一致),不再显示 F1/F2/F3(0.2.152)。
+    0.2.152:独立查看器无 metadata 直接打开时,轴标签由头部 LABEL/OBS
+    推断的核生成(与 nmrDraw NAME 一致),不再显示 F1/F2/F3。
+    0.2.199-补29dh(用户):轴序/标签不使用 metadata——核未知时拒绝
+    metadata 派生标签,回退 F* 位置占位,避免错标。
     """
     if not labels or len(nuclei) != len(labels):
+        return labels
+    if all(n for n in nuclei):
+        derived = axis_labels_from_nuclei(nuclei)
+        if derived and len(derived) == len(labels):
+            return derived
         return labels
     if any(
         not str(label).startswith("F") or not str(label)[1:].isdigit()
         for label in labels
     ):
-        return labels
-    if any(not n for n in nuclei):
-        return labels
-    derived = axis_labels_from_nuclei(nuclei)
-    if derived and len(derived) == len(labels):
-        return derived
+        return tuple(f"F{i + 1}" for i in range(len(nuclei)))
     return labels
 
 
@@ -381,16 +399,19 @@ class Spectrum:
             for i, prefix in enumerate(prefixes)
         ]
         storage = _storage_nuclei(dic, prefixes)
-        if nuclei:
+        # 0.2.199-补29dh(用户):轴序只以 .ft3 文件头(FDDIMORDER+LABEL/OBS)
+        # 为准,不使用 metadata 兜底——软件处理流程有轴重排,metadata 的
+        # Bruker F1/F2/F3 是采集序,不代表最终 .ft3 轴序。
+        logical = _logical_nuclei_from_order(dic, data.ndim, storage)
+        if logical is not None:
             data, axes, storage = _reorder_to_logical(
-                data, axes, storage, list(nuclei), path
+                data, axes, storage, logical, path
             )
-        else:
-            logical = _logical_nuclei_from_order(dic, data.ndim, storage)
-            if logical:
-                data, axes, storage = _reorder_to_logical(
-                    data, axes, storage, logical, path
-                )
+            labels = axis_labels_from_nuclei(logical)
+        elif all(storage):
+            # 头部无 FDDIMORDER:按存储序(位置式 FDF{i}=F{i})处理,核全部
+            # 已知时标签直接由存储核生成
+            labels = axis_labels_from_nuclei(storage)
         axes = _relabel_axes(axes, _labels_from_nuclei(storage, labels))
         _warn_ppm_range_mismatch(axes, storage, path)
         logger.info("载入谱图: %s (%s)", path, data.shape)
@@ -516,16 +537,16 @@ class Spectrum3D:
             for i, prefix in enumerate(prefixes)
         ]
         storage = _storage_nuclei(dic, prefixes)
-        if nuclei:
+        # 0.2.199-补29dh(用户):轴序只以文件头为准,不使用 metadata 兜底
+        # (同 load_from_ft2,见上)
+        logical = _logical_nuclei_from_order(dic, data.ndim, storage)
+        if logical is not None:
             data, axes, storage = _reorder_to_logical(
-                data, axes, storage, list(nuclei), path
+                data, axes, storage, logical, path
             )
-        else:
-            logical = _logical_nuclei_from_order(dic, data.ndim, storage)
-            if logical:
-                data, axes, storage = _reorder_to_logical(
-                    data, axes, storage, logical, path
-                )
+            labels = axis_labels_from_nuclei(logical)
+        elif all(storage):
+            labels = axis_labels_from_nuclei(storage)
         axes = _relabel_axes(axes, _labels_from_nuclei(storage, labels))
         _warn_ppm_range_mismatch(axes, storage, path)
         logger.info("载入三维谱: %s (%s)", path, data.shape)
@@ -561,13 +582,15 @@ class Spectrum3D:
             for i, prefix in enumerate(prefixes)
         ]
         storage_nuclei = _storage_nuclei(dic, prefixes)
-        if nuclei:
-            logical_nuclei = list(nuclei)
+        # 0.2.199-补29dh(用户):轴序只以文件头为准,不使用 metadata 兜底
+        # (同 load_from_ft3,见上)
+        logical_nuclei = _logical_nuclei_from_order(dic, 3, storage_nuclei)
+        if logical_nuclei is None:
+            logical_nuclei = storage_nuclei
+            if all(storage_nuclei):
+                labels = axis_labels_from_nuclei(storage_nuclei)
         else:
-            logical_nuclei = (
-                _logical_nuclei_from_order(dic, 3, storage_nuclei)
-                or storage_nuclei
-            )
+            labels = axis_labels_from_nuclei(logical_nuclei)
         perm = _permutation_to_logical(storage_nuclei, logical_nuclei)
         inv = list(range(3))
         if perm is not None and perm != [0, 1, 2]:

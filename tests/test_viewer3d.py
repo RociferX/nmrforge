@@ -650,10 +650,11 @@ def _misordered_dic_and_data() -> tuple[dict, np.ndarray]:
     return dic, data
 
 
-def test_load_from_ft3_reorders_axes_to_logical(
+def test_load_from_ft3_without_fddimorder_keeps_storage_order(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog
 ) -> None:
-    """0.2.122:存储轴序 (15N,1H,13C) 重排到逻辑序 (13C,15N,1H)。"""
+    """0.2.199-补29dh:头部无 FDDIMORDER 时保持存储序,标签按头部核生成;
+    metadata 不再兜底重排(用户:软件有轴重排过程,metadata 采集序不可作兜底)。"""
     dic, data = _misordered_dic_and_data()
     monkeypatch.setattr("nmrglue.pipe.read", lambda path: (dic, data))
     with caplog.at_level(logging.INFO, logger="nmrforge.viewer.spectrum"):
@@ -661,12 +662,12 @@ def test_load_from_ft3_reorders_axes_to_logical(
             tmp_path / "61.ft3", labels=("C", "N", "H"),
             nuclei=["13C", "15N", "1H"],
         )
-    assert [a.label for a in spec.axes] == ["C", "N", "H"]
-    assert spec.data.shape == (30, 20, 40)  # (13C, 15N, 1H)
-    assert round(spec.axes[0].obs_mhz, 1) == 150.9
-    assert round(spec.axes[1].obs_mhz, 1) == 81.1
-    assert round(spec.axes[2].obs_mhz, 1) == 600.1
-    assert "轴序重排" in caplog.text
+    # 存储序 (FDF1=15N, FDF2=1H, FDF3=13C):不重排,标签由头部核生成 N,H,C
+    assert [a.label for a in spec.axes] == ["N", "H", "C"]
+    assert spec.data.shape == (20, 40, 30)
+    assert round(spec.axes[0].obs_mhz, 1) == 81.1
+    assert round(spec.axes[1].obs_mhz, 1) == 600.1
+    assert round(spec.axes[2].obs_mhz, 1) == 150.9
 
 
 def test_load_from_ft3_warns_ppm_range_mismatch(
@@ -689,10 +690,11 @@ def test_load_from_ft3_warns_ppm_range_mismatch(
     assert "轴序/引用自检" in caplog.text
 
 
-def test_load_from_ft2_reorders_axes_to_logical(
+def test_load_from_ft2_without_fddimorder_keeps_storage_order(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog
 ) -> None:
-    """0.2.122:2D 同样按存储头重排到逻辑序(存储 1H/15N → 逻辑 15N/1H)。"""
+    """0.2.199-补29dh:2D 头部无 FDDIMORDER 时保持存储序,标签按头部核生成;
+    metadata 不再兜底重排(用户决策)。"""
     data = np.zeros((40, 20), dtype=np.float32)
     dic = {
         "FDDIMCOUNT": 2,
@@ -706,11 +708,12 @@ def test_load_from_ft2_reorders_axes_to_logical(
         spec = Spectrum.load_from_ft2(
             tmp_path / "x.ft2", labels=("N", "H"), nuclei=["15N", "1H"]
         )
-    assert spec.data.shape == (20, 40)
-    assert spec.y_axis.label == "N"
-    assert spec.x_axis.label == "H"
-    assert round(spec.y_axis.obs_mhz, 1) == 60.8
-    assert "轴序重排" in caplog.text
+    # 存储序 (FDF1=1H, FDF2=15N):不重排;load_from_ft2 不做显示定向,
+    # 原始轴序 x=F2(15N)、y=F1(1H);显示层由 orient_x_priority 转置
+    assert spec.data.shape == (40, 20)
+    assert spec.y_axis.label == "H"
+    assert spec.x_axis.label == "N"
+    assert round(spec.y_axis.obs_mhz, 1) == 600.0
 
 def test_3d_panel_slice_only() -> None:
     '''0.2.133:3D 面板只保留切片(slice),无 MIP/Sum/投影模式。'''
@@ -843,3 +846,28 @@ def test_slice_orientation_x_priority_h_n_c(tmp_path: Path) -> None:
     sl = loaded.slice(0, 1)
     assert sl.y_axis.label == "C" and sl.x_axis.label == "H"
     np.testing.assert_allclose(sl.data, loaded.data[1, :, :].T)
+
+
+def test_load_from_ft3_prefers_header_order_over_metadata(
+    tmp_path: Path,
+) -> None:
+    """0.2.199-补29dh:文件头完整时优先按头部重排,metadata 冲突不覆盖。
+
+    复现真实 HNCA:metadata(Bruker 采集序)F1=13C/F2=15N/F3=1H=CNH,
+    而 .ft3 头部 ORDER 2 3 1 给出 NHC——viewer 必须显示 N,H,C,与
+    峰表(pick_peaks 同源)一致。
+    """
+    nz, ny, nx = 2, 4, 6
+    P = np.arange(nz * ny * nx, dtype=np.float32).reshape(nz, ny, nx)
+    path = tmp_path / "conflict.ft3"
+    _write_ft3_ordered(path, P, [2.0, 3.0, 1.0])
+    loaded = Spectrum3D.load_from_ft3(
+        path, labels=("C", "N", "H"), nuclei=["13C", "15N", "1H"]
+    )
+    # 头部 ORDER 2 3 1 → 逻辑 (F1=15N, F2=1H, F3=13C),metadata CNH 不生效
+    assert [ax.label for ax in loaded.axes] == ["N", "H", "C"]
+    assert loaded.axes[0].obs_mhz == pytest.approx(60.8)
+    assert loaded.axes[1].obs_mhz == pytest.approx(600.0)
+    assert loaded.axes[2].obs_mhz == pytest.approx(150.9)
+    assert loaded.data.shape == (nz, nx, ny)
+

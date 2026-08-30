@@ -91,13 +91,31 @@ def _logical_axis_indices(dic: dict[str, Any], ndim: int) -> list[int]:
         return indices
     return list(range(ndim))
 
+# NMRPipe/Sparky 常见非标准 LABEL 别名(0.2.199-补29dh):真实数据 1H 轴
+# 常写 "HN"(sampleC、cc 等 30.ft3/d_011.ft3 实测),单字母为常见简写。
+_NMRPIPE_LABEL_ALIASES: dict[str, str] = {
+    "HN": "1H",
+    "H": "1H",
+    "N": "15N",
+    "C": "13C",
+    "P": "31P",
+    "F": "19F",
+    "D": "2H",
+    "NA": "23Na",
+    "SI": "29Si",
+}
+
+
 def _parse_nmrpipe_label(label: str) -> str:
-    """NMRPipe FDF*LABEL('N15'/'H1'/'C13',同核下标'15Nx') → 核名;失败返回 ''。"""
+    """NMRPipe FDF*LABEL('N15'/'H1'/'C13',同核下标'15Nx',别名'HN') → 核名;
+    失败返回 ''。"""
     text = str(label or "").strip().upper()
     if not text:
         return ""
     if text in _NUCLEUS_SET:
         return text
+    if text in _NMRPIPE_LABEL_ALIASES:
+        return _NMRPIPE_LABEL_ALIASES[text]
     if text[-1:] in ("X", "Y", "Z") and text[:-1] in _NUCLEUS_SET:
         return text[:-1]
     digits = "".join(ch for ch in text if ch.isdigit())
@@ -106,15 +124,35 @@ def _parse_nmrpipe_label(label: str) -> str:
     return candidate if candidate in _NUCLEUS_SET else ""
 
 
+# 核旋磁比(相对 1H)与常见 1H 频率场强,按观测频率推断核
+# (0.2.199-补29dh:与 viewer.axis_labels.infer_nucleus 同源;旧实现比值
+# 方向取反且只认 600 MHz——非 600 MHz 谱与 15N/13C 的 OBS 推断全部失败)
+_NUCLEUS_RATIOS: dict[str, float] = {
+    "1H": 1.0,
+    "2H": 0.15351,
+    "13C": 0.25145,
+    "15N": 0.10137,
+    "19F": 0.94077,
+    "31P": 0.40481,
+    "23Na": 0.26452,
+    "29Si": 0.19837,
+}
+_COMMON_B0_H1 = (
+    300.0, 400.0, 500.0, 600.0, 700.0, 800.0, 850.0, 900.0, 950.0,
+    1000.0, 1100.0, 1200.0, 1300.0, 1500.0, 2000.0,
+)
+
+
 def _infer_nucleus_obs(obs: float) -> str:
-    """按观测频率 OBS(MHz)与核旋磁比推断核(1H≈600/15N≈60/13C≈150)。"""
+    """按观测频率 OBS(MHz)与核旋磁比推断核(与 viewer.axis_labels 同源)。"""
     if not obs or obs <= 0:
         return ""
-    base = 600.13
-    best, best_err = "", 1.0
-    for nucleus, ratio in (("1H", 1.0), ("15N", base / 60.81), ("13C", base / 150.9)):
-        implied = obs / ratio
-        err = abs(implied - base) / base
+    best, best_err = "", float("inf")
+    for nucleus, ratio in _NUCLEUS_RATIOS.items():
+        implied_1h = obs / ratio
+        if not (300.0 <= implied_1h <= 2100.0):
+            continue
+        err = min(abs(implied_1h - b0) for b0 in _COMMON_B0_H1) / implied_1h
         if err < best_err:
             best, best_err = nucleus, err
     return best if best_err < 0.05 else ""
@@ -182,44 +220,6 @@ def _logical_nuclei_from_order(
     return [n for n in logical if n is not None]  # type: ignore[return-value]
 
 
-def _metadata_nuclei(
-    manager: ProjectManager, exp_id: str, data_id: str
-) -> list[str] | None:
-    """按导入 metadata 返回逻辑轴核(F1/F2/F3 序);无则 None。
-
-    0.2.199-补29df:viewer 显示按 metadata 核重排逻辑轴;选峰必须用同一
-    逻辑序写 F1/F2/F3_shift,否则峰表列与谱图轴错位(如 15N 列出现 1H 值)。
-    """
-    try:
-        meta_path = manager.data_metadata_path(exp_id, data_id)
-    except Exception:  # noqa: BLE001
-        return None
-    if meta_path is None or not Path(meta_path).is_file():
-        return None
-    try:
-        import json
-
-        metadata = json.loads(Path(meta_path).read_text(encoding="utf-8"))
-    except Exception:  # noqa: BLE001
-        return None
-    dims = ((metadata or {}).get("dataset") or {}).get("dimensions") or []
-    by_axis: dict[int, str] = {}
-    for dim in dims:
-        axis = str((dim or {}).get("logical_axis", "") or "")
-        if axis[:1] != "F" or not axis[1:].isdigit():
-            continue
-        try:
-            sf = float((dim or {}).get("sf", 0) or 0)
-        except (TypeError, ValueError):
-            sf = 0.0
-        nucleus = _infer_nucleus_obs(sf) or str((dim or {}).get("nucleus", "") or "")
-        if nucleus:
-            by_axis[int(axis[1:])] = nucleus
-    if not by_axis:
-        return None
-    return [by_axis[i] for i in sorted(by_axis)]
-
-
 
 def _axes_ppm(dic: dict[str, Any], data: np.ndarray) -> list[np.ndarray]:
     """按数据轴序构造 ppm 轴(每轴 FDF 块按 FDDIMORDER 定位)。"""
@@ -236,30 +236,26 @@ def _write_peaks_list(
     data: np.ndarray,
     dic: dict[str, Any],
     peaks: list[peak_detection.Peak],
-    *,
-    logical_nuclei: list[str] | None = None,
 ) -> Path:
     """把检测峰写为 Poky/Sparky `.list`(契约 §6,峰文件即 .list)。"""
     peaks_dir = manager.data_dir(exp_id, data_id, "peaks")
     peaks_dir.mkdir(parents=True, exist_ok=True)
     path = peaks_dir / f"{exp_id}-{data_id}.list"
     axes = _axes_ppm(dic, data)
-    # 0.2.199-补29df/补29dg:逻辑序与 viewer load_from_ft3 完全一致——
-    # 默认存储序;有 metadata 核则按核匹配;否则按 FDDIMORDER 推导逻辑核;
-    # 均无法构成排列时保持存储序(与 viewer 不重排行为一致)
+    # 0.2.199-补29df/补29dg/补29dh:逻辑序与 viewer load_from_ft3 完全一致。
+    # 补29dh(用户):轴序只以 .ft3 文件头(FDDIMORDER+LABEL/OBS)为准,不使用
+    # metadata 兜底——软件处理流程有轴重排,metadata 的 Bruker F1/F2/F3 是
+    # 采集序,不代表最终 .ft3 轴序;头部无法构成排列时保持存储序。
     logical_axes = list(range(data.ndim))
-    if data.ndim >= 3:
-        prefixes = tuple(_fdf_prefix(dic, data.ndim, i) for i in range(data.ndim))
-        storage_nuclei = _storage_nuclei(dic, prefixes)
-        target = logical_nuclei or _logical_nuclei_from_order(
-            dic, data.ndim, storage_nuclei
-        )
-        if target:
-            perm = _permutation_to_logical(storage_nuclei, target)
-            if perm is not None and perm != list(range(data.ndim)):
-                logical_axes = [0] * data.ndim
-                for spos, lpos in enumerate(perm):
-                    logical_axes[lpos] = spos
+    prefixes = tuple(_fdf_prefix(dic, data.ndim, i) for i in range(data.ndim))
+    storage_nuclei = _storage_nuclei(dic, prefixes)
+    target = _logical_nuclei_from_order(dic, data.ndim, storage_nuclei)
+    if target:
+        perm = _permutation_to_logical(storage_nuclei, target)
+        if perm is not None and perm != list(range(data.ndim)):
+            logical_axes = [0] * data.ndim
+            for spos, lpos in enumerate(perm):
+                logical_axes[lpos] = spos
     rows: list[dict[str, Any]] = []
     for i, peak in enumerate(peaks, start=1):
         row: dict[str, Any] = {
@@ -269,10 +265,17 @@ def _write_peaks_list(
             "label": "",
         }
         if data.ndim == 2:
-            row["H_shift"] = (
-                float(axes[1][int(peak.position[1])]) if len(axes) > 1 else 0.0
-            )
-            row["N_shift"] = float(axes[0][int(peak.position[0])])
+            # 0.2.199-补29dh:2D 按核匹配写 N/H 列(外部 (1H,15N) 存储序文件
+            # 不再把 1H 值写进 N_shift);两核齐全时按核名定位,否则按逻辑
+            # F1→N、F2→H 兜底(保持 HSQC 存储 (15N,1H) 的原有行为不变)。
+            if "15N" in storage_nuclei and "1H" in storage_nuclei:
+                n_axis = storage_nuclei.index("15N")
+                h_axis = storage_nuclei.index("1H")
+            else:
+                n_axis = logical_axes[0]
+                h_axis = logical_axes[1]
+            row["H_shift"] = float(axes[h_axis][int(peak.position[h_axis])])
+            row["N_shift"] = float(axes[n_axis][int(peak.position[n_axis])])
         else:
             for k in range(3):
                 if k >= len(axes):
@@ -374,10 +377,8 @@ def pick_peaks(
                 edge_margin=_PICK_EDGE_MARGIN,
             ),
         )
-        logical_nuclei = _metadata_nuclei(manager, exp_id, data_id)
         peak_path = _write_peaks_list(
             manager, exp_id, data_id, arr, dict(dic), peaks,
-            logical_nuclei=logical_nuclei,
         )
     except Exception as exc:  # noqa: BLE001 - 统一失败登记
         manager.finish_run(run.run_id, "failed", message=str(exc))

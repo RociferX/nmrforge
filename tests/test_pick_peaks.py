@@ -73,34 +73,6 @@ def test_pick_peaks_detects_and_writes(tmp_path: Path) -> None:
     assert runs[0].outputs["peak_path"] == result["peak_path"]
 
 
-def test_metadata_nuclei_reads_dimensions(tmp_path: Path) -> None:
-    """0.2.199-补29df:按 metadata dimensions 提取 F1/F2/F3 核。"""
-    import json
-
-    from workflow.pick_peaks import _metadata_nuclei
-
-    manager = ProjectManager.create_project(tmp_path / "proj", "demo")
-    entry = manager.create_experiment()
-    data = manager.import_data(entry.id, "/sampleD")
-    meta = manager.data_metadata_path(entry.id, data.id)
-    meta.parent.mkdir(parents=True, exist_ok=True)
-    meta.write_text(
-        json.dumps(
-            {
-                "dataset": {
-                    "dimensions": [
-                        {"logical_axis": "F1", "sf": 150.9, "nucleus": "13C"},
-                        {"logical_axis": "F2", "sf": 60.8, "nucleus": "15N"},
-                        {"logical_axis": "F3", "sf": 600.13, "nucleus": "1H"},
-                    ]
-                }
-            }
-        ),
-        encoding="utf-8",
-    )
-    nuclei = _metadata_nuclei(manager, entry.id, data.id)
-    assert nuclei == ["13C", "15N", "1H"]
-
 
 def test_permutation_to_logical_maps_storage_to_logical() -> None:
     """0.2.199-补29df:storage→逻辑轴置换与 viewer 同源。"""
@@ -360,3 +332,125 @@ def test_pick_peaks_excludes_axial_edges(tmp_path: Path) -> None:
     result = pick_peaks(manager, exp_id, data_id)
     rows = _read_rows(Path(result['peak_path']))
     assert len(rows) == 2  # 两个谱内峰,轴峰被排除
+
+
+def test_infer_nucleus_obs_covers_common_spectrometers() -> None:
+    """0.2.199-补29dh:OBS 推断支持各场强与 15N/13C(旧实现除反+只认 600 MHz)。"""
+    from workflow.pick_peaks import _infer_nucleus_obs as infer
+
+    assert infer(500.13) == "1H"
+    assert infer(700.13) == "1H"
+    assert infer(800.3) == "1H"
+    assert infer(1200.57) == "1H"
+    assert infer(50.68) == "15N"  # 500 MHz 15N
+    assert infer(81.1) == "15N"  # 800 MHz 15N
+    assert infer(125.76) == "13C"  # 500 MHz 13C
+    assert infer(201.2) == "13C"  # 800 MHz 13C
+    assert infer(0.0) == ""
+    assert infer(-1.0) == ""
+
+
+def test_parse_nmrpipe_label_hn_alias() -> None:
+    """0.2.199-补29dh:真实 NMRPipe LABEL 'HN' 解析为 1H(30.ft3/d_011.ft3 实测)。"""
+    from workflow.pick_peaks import _parse_nmrpipe_label as parse
+
+    assert parse("HN") == "1H"
+    assert parse("15N") == "15N"
+    assert parse("13C") == "13C"
+    assert parse("N15") == "15N"
+    assert parse("H1") == "1H"
+    assert parse("C13") == "13C"
+    assert parse("15Nx") == "15N"
+    assert parse("") == ""
+
+
+def _write_metadata_dims(
+    manager: ProjectManager, exp_id: str, data_id: str, dims: list[dict]
+) -> None:
+    """写带 dataset.dimensions 的 metadata(驱动选峰 metadata 核)。"""
+    import json
+
+    path = manager.data_metadata_path(exp_id, data_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({"experiment_type": {"name": "HNCA"},
+                    "dataset": {"dimensions": dims}}),
+        encoding="utf-8",
+    )
+
+
+def test_pick_peaks_ft3_header_order_wins_over_metadata(
+    tmp_path: Path,
+) -> None:
+    """0.2.199-补29dh:文件头(FDDIMORDER+LABEL)与 metadata 冲突时,文件头优先。
+
+    复现真实 HNCA(Bruker 采集序 metadata F1=13C/F2=15N/F3=1H=CNH vs
+    NMRPipe .ft3 头部 F1=15N/F2=1H/F3=13C=NHC):峰表必须按 NHC 写值。
+    """
+    data = np.zeros((16, 16, 16))
+    data[8, 5, 8] = 500.0  # 逻辑 F1(N)=8、F2(H)=8、F3(C)=5
+    data = gaussian_filter(data, sigma=1.0)
+    ft3 = tmp_path / "out.ft3"
+    _write_ft3_ordered(ft3, data, [2.0, 3.0, 1.0])
+    manager, exp_id, data_id = _manager_with_spectrum(tmp_path, ft3)
+    _write_metadata_dims(
+        manager,
+        exp_id,
+        data_id,
+        [
+            {"logical_axis": "F1", "sf": 150.9, "nucleus": "13C"},
+            {"logical_axis": "F2", "sf": 60.8, "nucleus": "15N"},
+            {"logical_axis": "F3", "sf": 600.13, "nucleus": "1H"},
+        ],
+    )
+
+    result = pick_peaks(manager, exp_id, data_id)
+    row = _read_rows(Path(result["peak_path"]))[0]
+    n_ppm = 100.0 + (16 - 1 - 8) * 2189.0 / (16 * 60.8)
+    h_ppm = 6.0 + (16 - 1 - 8) * 3000.0 / (16 * 600.0)
+    c_ppm = 40.0 + (16 - 1 - 5) * 11300.0 / (16 * 150.9)
+    assert abs(float(row["F1_shift"]) - n_ppm) < 0.05
+    assert abs(float(row["F2_shift"]) - h_ppm) < 0.05
+    assert abs(float(row["F3_shift"]) - c_ppm) < 0.05
+
+
+def test_pick_peaks_2d_reversed_storage_maps_by_nucleus(
+    tmp_path: Path,
+) -> None:
+    """0.2.199-补29dh:2D 存储序 (1H,15N) 时,N/H 列按核匹配,不再写反。"""
+    from nmrglue.fileio import pipe
+
+    spec = np.zeros((64, 32))
+    spec[20, 10] = 500.0  # 存储 axis0=1H idx20、axis1=15N idx10
+    spec = gaussian_filter(spec, sigma=1.2)
+    ft2 = tmp_path / "hn.ft2"
+    dic = {k: "0" for k in pipe.fdata_dic}
+    dic["FDMAGIC"] = 9.2330230000000007e14
+    dic["FDDIMCOUNT"] = 2
+    dic["FDSIZE"] = spec.shape[1]
+    dic["FDSPECNUM"] = spec.shape[0]
+    dic["FDQUADFLAG"] = 1
+    dic["FDF1QUADFLAG"] = 1
+    dic["FDF2QUADFLAG"] = 1
+    blocks = {
+        1: ("1H", 64, 3000.0, 600.0, 4.7, 6.0 * 600.0),
+        2: ("15N", 32, 2189.0, 60.8, 118.0, 100.0 * 60.8),
+    }
+    for dim, (lab, size, sw, obs, car, orig) in blocks.items():
+        prefix = f"FDF{dim}"
+        dic[prefix + "T"] = size
+        dic[prefix + "SW"] = sw
+        dic[prefix + "OBS"] = obs
+        dic[prefix + "CAR"] = car
+        dic[prefix + "ORIG"] = orig
+        dic[prefix + "LABEL"] = lab
+    pipe.write(str(ft2), dic, spec.astype(np.float32), overwrite=True)
+    manager, exp_id, data_id = _manager_with_spectrum(tmp_path, ft2)
+
+    result = pick_peaks(manager, exp_id, data_id)
+    row = _read_rows(Path(result["peak_path"]))[0]
+    n_ppm = 100.0 + (32 - 1 - 10) * 2189.0 / (32 * 60.8)
+    h_ppm = 6.0 + (64 - 1 - 20) * 3000.0 / (64 * 600.0)
+    assert abs(float(row["N_shift"]) - n_ppm) < 0.05
+    assert abs(float(row["H_shift"]) - h_ppm) < 0.05
+

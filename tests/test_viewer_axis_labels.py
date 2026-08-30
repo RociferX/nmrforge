@@ -101,6 +101,35 @@ def _write_ft2(path: Path, shape: tuple[int, int] = (64, 128)) -> None:
     pipe.write(str(path), dic, data, overwrite=True)
 
 
+def _write_ft2_nh(path: Path) -> None:
+    """真实 N-H 头部夹具(0.2.199-补29dh):FDF1=15N、FDF2=1H,带 LABEL。"""
+    import numpy as np
+    from nmrglue.fileio import pipe
+
+    data = np.zeros((64, 128), dtype=np.float32)
+    dic = {key: "0" for key in pipe.fdata_dic}
+    dic["FDMAGIC"] = 9.2330230000000007e14
+    dic["FDDIMCOUNT"] = 2
+    dic["FDSIZE"] = 128
+    dic["FDSPECNUM"] = 64
+    dic["FDQUADFLAG"] = 1
+    dic["FDF1QUADFLAG"] = 1
+    dic["FDF2QUADFLAG"] = 1
+    dic["FDF1T"] = 64
+    dic["FDF1SW"] = 1703.0
+    dic["FDF1OBS"] = 60.8
+    dic["FDF1CAR"] = 117.0
+    dic["FDF1ORIG"] = 117.0 * 60.8
+    dic["FDF1LABEL"] = "N15"
+    dic["FDF2T"] = 128
+    dic["FDF2SW"] = 6000.0
+    dic["FDF2OBS"] = 600.0
+    dic["FDF2CAR"] = 4.7
+    dic["FDF2ORIG"] = 4.7 * 600.0
+    dic["FDF2LABEL"] = "H1"
+    pipe.write(str(path), dic, data, overwrite=True)
+
+
 def _metadata_dims() -> dict:
     return {
         "dataset": {
@@ -115,7 +144,8 @@ def _metadata_dims() -> dict:
 def test_spectrum_panel_uses_nucleus_labels(
     tmp_path: Path, qapp: QApplication
 ) -> None:
-    """打开带 metadata 的数据谱图:轴标签为核名(N-H),而非 F1/F2。"""
+    """打开谱图:轴标签为头部核名(N-H),而非 F1/F2;metadata 不参与轴序/
+    标签(0.2.199-补29dh,用户:软件有轴重排过程)。"""
     from gui.spectrum_panel import SpectrumPanel
 
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
@@ -124,7 +154,7 @@ def test_spectrum_panel_uses_nucleus_labels(
     exp_id, data_id = entry.id, data.id
     spectra = manager.data_dir(exp_id, data_id, "spectra")
     spectra.mkdir(parents=True, exist_ok=True)
-    _write_ft2(spectra / f"{exp_id}-{data_id}.ft2")
+    _write_ft2_nh(spectra / f"{exp_id}-{data_id}.ft2")
     meta_path = manager.data_metadata_path(exp_id, data_id)
     meta_path.parent.mkdir(parents=True, exist_ok=True)
     meta_path.write_text(
@@ -211,14 +241,15 @@ def test_projection_same_nucleus_uses_header_and_subscript(
 def test_viewer_app_axis_labels_from_path(
     tmp_path: Path, qapp: QApplication
 ) -> None:
-    """独立查看器从谱图旁 metadata 推断核名。"""
+    """独立查看器:轴标签来自谱图头部核名,metadata 不参与
+    (0.2.199-补29dh,用户:软件有轴重排过程)。"""
     from viewer.app import SpectrumWindow
 
     base = tmp_path / "exp_001" / "d_001"
     spectra = base / "spectra"
     spectra.mkdir(parents=True, exist_ok=True)
     ft2 = spectra / "exp_001-d_001.ft2"
-    _write_ft2(ft2)
+    _write_ft2_nh(ft2)
     (base / "metadata.json").write_text(
         json.dumps(_metadata_dims()), encoding="utf-8"
     )

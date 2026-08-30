@@ -508,10 +508,8 @@ class SpectrumPanel(QWidget):
             path.suffix.lower() == ".ft2"
             and self._is_projection_name(path.name)
         )
-        labels3d = self._axis_labels(3) or ("F1", "F2", "F3")
-        labels2d = self._axis_labels(2) or ("F1", "F2")
-        nuclei3d = self._axis_nuclei(3)
-        nuclei2d = self._axis_nuclei(2)
+        # 0.2.199-补29dh(用户):轴序/标签只以 .ft3 头部为准,不向加载器
+        # 传 metadata 核/标签(软件处理有轴重排,metadata 采集序不可作兜底)
         try:
             if path.suffix.lower() == ".ft3":
                 from viewer.spectrum import Spectrum3D
@@ -524,15 +522,13 @@ class SpectrumPanel(QWidget):
                         f"正在后台加载 3D 谱: {path.name} "
                         f"({size // (1024 * 1024)} MB)"
                     )
-                    self._load_ft3_async(path, labels3d, nuclei3d)
+                    self._load_ft3_async(path)
                     return True
                 self._current_spectrum = path
                 # 在 set_spectrum3d(会重置平面/投影并触发保存)之前捕获记忆状态
                 state = self._viewer3d_state.get(self._current_data_id)
                 self._spectrum3d_panel.set_spectrum3d(
-                    Spectrum3D.load_from_ft3(
-                        path, labels=labels3d, nuclei=nuclei3d, lazy=True
-                    )
+                    Spectrum3D.load_from_ft3(path, lazy=True)
                 )
                 self._spectrum3d_panel.setVisible(True)
                 if state:
@@ -558,9 +554,7 @@ class SpectrumPanel(QWidget):
                 # 0.2.199-补29db:投影文件不加载/关联峰,清空峰表与标记
                 self._clear_peaks()
             else:
-                spectrum = Spectrum.load_from_ft2(
-                    path, labels=labels2d, nuclei=nuclei2d
-                )
+                spectrum = Spectrum.load_from_ft2(path)
         except Exception:  # noqa: BLE001 - 损坏文件统一由调用方提示
             return False
         self._spectrum3d_panel.clear()
@@ -570,7 +564,7 @@ class SpectrumPanel(QWidget):
         return True
 
 
-    def _load_ft3_async(self, path: Path, labels3d, nuclei3d=None) -> None:
+    def _load_ft3_async(self, path: Path) -> None:
         """后台线程读取大 .ft3,完成后经信号回主线程绑定渲染。"""
         import threading
 
@@ -578,9 +572,7 @@ class SpectrumPanel(QWidget):
             try:
                 from viewer.spectrum import Spectrum3D
 
-                spectrum3d = Spectrum3D.load_from_ft3(
-                    path, labels=labels3d, nuclei=nuclei3d, lazy=True
-                )
+                spectrum3d = Spectrum3D.load_from_ft3(path, lazy=True)
                 self._ft3_ready.emit(path, spectrum3d)
             except Exception as exc:  # noqa: BLE001 - 错误统一回主线程提示
                 self._ft3_failed.emit(path, f"{type(exc).__name__}: {exc}")

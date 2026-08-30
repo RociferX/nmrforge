@@ -1,5 +1,33 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29dh(2026-08-30,峰表轴序只以 .ft3 文件头为准;修复化学位移值与真实核错位)
+
+用户反馈:viewer 其它地方都是对的,只有峰表不对——化学位移值和真实核还是没
+对上。
+
+根因(VM 真实 cc/HNCA 数据验证):
+- metadata.json 的 dataset.dimensions[].logical_axis 记录的是 Bruker 采集序
+  (HNCA 为 F1=13C/F2=15N/F3=1H=CNH),而软件处理流程有轴重排,生成的 .ft3
+  头部(FDDIMORDER+LABEL/OBS)才是 NMRPipe 最终轴序(F1=15N/F2=1H/F3=13C=NHC);
+- viewer 与 pick_peaks 此前把 metadata 核当作逻辑轴序:加载/选峰按 metadata
+  CNH 重排,峰表列名 CNH、值与真实核错位;无 metadata 的谱(sampleC)反而正确;
+- 另修:pick_peaks 的 OBS 推断函数除反且只认 600 MHz(15N/13C 与非 600 MHz
+  全部失败);真实 1H 轴 LABEL 常为 "HN" 无法解析。
+
+修复(用户决策:不要 metadata 兜底,软件有轴重排过程):
+- workflow/pick_peaks.py:轴序只以 .ft3 文件头为准——FDDIMORDER 推导逻辑核,
+  失败保持存储序;删除 _metadata_nuclei 与 logical_nuclei 兜底参数;2D 峰表
+  按核匹配写 N/H 列(外部 (1H,15N) 存储序文件不再把 1H 值写进 N_shift);
+  修复 _infer_nucleus_obs(比值方向修正、补全 8 核与 300-2000 MHz 场强,
+  与 viewer.axis_labels 同源)与 "HN" 等标签别名解析;
+- viewer/spectrum.py:load_from_ft2/ft3/_build_lazy 只按文件头重排,不再用
+  metadata 兜底;标签一律由头部核生成(核未知回退 F* 占位);
+- gui/spectrum_panel.py、viewer/app.py:加载谱图不再向加载器传 metadata
+  核/标签(独立查看器同);
+- 测试:+11(删除 1 项 metadata 核读取测试);本地全量 pytest 819 项全绿;
+  ruff 通过;VM 真实数据复核:cc d_011(HNCA,metadata CNH)带/不带 metadata
+  均输出 N,H,C,峰表与 viewer 一致;sampleC 不变(0 越界)。
+
 ## 0.2.199-补29dg(2026-08-30,3D 列名用实际谱轴核名_shift;pick 逻辑序与 viewer 完全一致;3D 面板不撑宽)
 
 按用户反馈:(1) 3D 列名要像 2D 一样显示 H_shift 这种;(2) 正确序是 NHC 但
