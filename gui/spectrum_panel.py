@@ -45,6 +45,21 @@ from viewer.spectrum_viewer import SpectrumViewer
 _ASSIGNMENT_WIDGET_BUFFER = 12
 
 
+def _axis_step(axis) -> float:
+    """轴 ppm/点(相邻正步长中位数);异常返回 0。"""
+    ppm = getattr(axis, "ppm", None)
+    if ppm is None:
+        return 0.0
+    import numpy as np
+
+    arr = np.asarray(ppm, dtype=float)
+    if arr.size < 2:
+        return 0.0
+    diff = np.abs(np.diff(arr))
+    diff = diff[diff > 0]
+    return float(np.median(diff)) if diff.size else 0.0
+
+
 class _AssignmentCell(QWidget):
     """峰表 Assignment 单元格:固定连字符 + 段输入框(2D 两段/3D 三段,默认 ?)。
 
@@ -1566,7 +1581,8 @@ class SpectrumPanel(QWidget):
 
     def _jump_3d_slice_to_peak(self, row: int) -> None:
         """3D 峰表点峰:把切片跳到该峰固定轴对应切面,再按 2D 逻辑显示
-        (0.2.199-补29dc)。缺固定轴坐标的峰(2D 峰表等)不跳转。"""
+        (0.2.199-补29dc)。缺固定轴坐标或坐标越界的峰(2D 峰表/旧选峰结果)
+        不跳转并提示(0.2.199-补29de:避免任意峰都跳到最后一个切面)。"""
         s3d_panel = self._spectrum3d_panel
         s3d = getattr(s3d_panel, "_spectrum3d", None)
         primary = getattr(self.viewer, "_primary", None)
@@ -1584,8 +1600,21 @@ class SpectrumPanel(QWidget):
             value = float(peak.get(f"F{int(slice_axis) + 1}_shift"))
         except (TypeError, ValueError):
             return  # 无固定轴坐标,无法跳切面
+        if not value:
+            self.log_message.emit(
+                f"峰 {row + 1} 固定轴坐标缺失/为 0,无法定位切面"
+            )
+            return
         axis = s3d.axes[int(slice_axis)]
         index = int(axis.index_at(value))
+        # 0.2.199-补29de:坐标越出轴范围(峰表与当前谱轴不匹配)不跳转
+        if abs(value - float(axis.ppm[index])) > 3.0 * _axis_step(axis):
+            self.log_message.emit(
+                f"峰 {row + 1} 坐标 {axis.label} {value:.2f} ppm 不在当前"
+                f"谱轴范围({float(axis.ppm[-1]):.1f}-{float(axis.ppm[0]):.1f}),"
+                "可能为旧选峰结果,请重新选峰"
+            )
+            return
         if s3d_panel.slice_slider.value() != index:
             s3d_panel.slice_slider.setValue(index)
             s3d_panel.refresh()

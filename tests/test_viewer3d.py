@@ -402,8 +402,67 @@ def test_peak_table_click_jumps_3d_slice(
     panel.peak_table.selectRow(0)
     panel._on_peak_row_selected()
     assert panel._spectrum3d_panel.slice_slider.value() == target
-    # 跳转后该峰落在当前切片平面,viewer 可见
+    # 跳转后该峰落在当前切片平面,viewer 可见并闪烁
     assert panel.viewer._visible_peak_rows is None or 0 in panel.viewer._visible_peak_rows
+    assert panel.viewer._flash_item is not None
+    panel.close()
+
+
+def test_peak_table_click_skips_out_of_range_peak(
+    tmp_path: Path, qapp: QApplication
+) -> None:
+    """0.2.199-补29de:固定轴坐标越界/为 0 的峰不跳转、不闪、日志提示。"""
+    from core.project import ProjectManager
+    from gui.spectrum_panel import SpectrumPanel
+
+    manager = ProjectManager.create_project(tmp_path / "proj2", "demo")
+    entry = manager.create_experiment()
+    data = manager.import_data(entry.id, "/fake/1")
+    panel = SpectrumPanel(manager)
+    panel.set_context(entry.id, data.id)
+    s3d = _synthetic3d()
+    panel._spectrum3d_panel.set_spectrum3d(s3d)
+    panel._spectrum3d_panel.setVisible(True)
+    panel._render_3d_view()
+    logs: list[str] = []
+    panel.log_message.connect(logs.append)
+    before = panel._spectrum3d_panel.slice_slider.value()
+    panel._peaks = [
+        {
+            "F1_shift": float(s3d.axes[0].ppm_at(1)),
+            "F2_shift": float(s3d.axes[1].ppm_at(2)),
+            "F3_shift": 0.0,  # 固定轴(F3)坐标无效
+        }
+    ]
+    panel._populate_peak_table()
+    panel.peak_table.selectRow(0)
+    panel._on_peak_row_selected()
+    assert panel._spectrum3d_panel.slice_slider.value() == before
+    assert any("无法定位切面" in line or "不在当前谱轴范围" in line for line in logs)
+    panel.close()
+
+
+def test_viewer_slice_shows_out_of_range_peaks(qapp: QApplication) -> None:
+    """0.2.199-补29de:固定轴坐标越界的峰仍尽力显示,不全隐藏。"""
+    from viewer.spectrum3d_panel import Spectrum3DPanel
+    from viewer.spectrum_viewer import SpectrumViewer
+
+    panel = Spectrum3DPanel()
+    panel.set_spectrum3d(_synthetic3d())
+    spectrum = panel.current_spectrum()
+    viewer = SpectrumViewer()
+    viewer.add_spectrum(spectrum)
+    x_ppm = float(spectrum.x_axis.ppm_at(2))
+    y_ppm = float(spectrum.y_axis.ppm_at(3))
+    viewer.set_peaks(
+        [
+            {"F1_shift": y_ppm, "F2_shift": x_ppm, "F3_shift": 99999.0},
+            {"F1_shift": y_ppm, "F2_shift": x_ppm, "F3_shift": 0.0},
+        ]
+    )
+    assert len(viewer.peak_item.data["x"]) == 2
+    assert all(x == x for x in viewer.peak_item.data["x"])
+    viewer.close()
     panel.close()
 
 

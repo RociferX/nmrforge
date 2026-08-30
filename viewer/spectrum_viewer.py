@@ -1511,8 +1511,9 @@ class SpectrumViewer(QWidget):
         def _on_current_plane(peak: dict) -> bool:
             """3D 切片只显示固定轴坐标落在当前平面内的峰(0.2.199-补29da)。
 
-            缺固定轴坐标的峰(如 2D 峰表)无法按平面过滤,直接显示
-            (0.2.199-补29db:避免峰表有峰但谱图全不可见)。
+            缺固定轴坐标的峰(如 2D 峰表)或坐标越界(峰表与当前谱轴不匹配,
+            如旧选峰结果)无法按平面过滤,直接显示(0.2.199-补29db/补29de:
+            避免峰表有峰但谱图全不可见)。
             """
             if slice_axis is None or slice_ppm is None or not slice_step:
                 return True
@@ -1520,7 +1521,17 @@ class SpectrumViewer(QWidget):
                 value = float(peak.get(f"F{int(slice_axis) + 1}_shift"))
             except (TypeError, ValueError):
                 return True
-            return abs(value - float(slice_ppm)) <= 0.5 * float(slice_step)
+            if not value:
+                return True  # 0.0 等无效坐标:尽力显示,不按平面过滤
+            if abs(value - float(slice_ppm)) <= 0.5 * float(slice_step):
+                return True
+            # 坐标越出整个轴范围:该峰无法落在任何平面,尽力显示
+            if (
+                value < float(slice_ppm) - 10.0 * float(slice_step)
+                or value > float(slice_ppm) + 10.0 * float(slice_step)
+            ):
+                return True
+            return False
 
         visible = [_on_current_plane(peak) for peak in self._peaks]
         self._visible_peak_rows = (
