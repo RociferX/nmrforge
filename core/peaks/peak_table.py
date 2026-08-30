@@ -2,7 +2,9 @@
 
 - `.list`:内部峰文件即 Poky/Sparky 格式(0.2.199-补29ar,用户:峰文件全程
   Poky,不要 CSV);"Assignment w1 w2 [w3] Data Height Volume",
-  2D w1=15N(N_shift) w2=1H(H_shift),3D w1/w2/w3=F1/F2/F3_shift,
+  2D w1=15N(N_shift) w2=1H(H_shift),3D 按外部约定 w1=15N/w2=13C/w3=1H
+  (0.2.199-补29dk,用户:.list 与峰表显示都和外部一致,内部按 F1/F2/F3 逻辑
+  解读——导出/导入经 nuclei 做外部 w 列 ↔ 内部 F 列置换);
   未命名峰 ?-?(2D)/?-?-?(3D),Height=Intensity %.3g,Data/Volume=0,双空格;
 - 旧 CSV 仅兼容读取(load_peaks 自动判别),不再写入。
 """
@@ -42,6 +44,36 @@ _NUMERIC_KEYS = {
 # 查证(2026-08-29,ADAPT-NMR/PINE/relax 峰表样例):assignment 按维度分段、
 # 连字符连接——2D 两段(未指认 ?-?)、3D 三段(未指认 ?-?-?);每段 =
 # 单字母氨基酸+残基号+核名,如 C16H-K15CB-C16N、G1H-G1N。
+# Poky/Sparky 外部 .list 约定(0.2.199-补29dk,用户):2D w1=15N/w2=1H;
+# 3D w1=15N/w2=13C/w3=1H。内部行键(F1/F2/F3_shift)按谱轴序,导出/导入
+# 经 nuclei(每 F 轴核名,如 ["15N","1H","13C"])做外部 ↔ 内部置换。
+_EXTERNAL_2D_NUCLEI = ("15N", "1H")
+_EXTERNAL_3D_NUCLEI = ("15N", "13C", "1H")
+
+
+def _external_w_to_internal_axes(
+    nuclei: list[str] | None, external: tuple[str, ...], ndim: int
+) -> list[int]:
+    """外部 w 列 → 内部 F 轴下标(0-based)排列。
+
+    核信息完整、维度一致且与外部核集合一致时按核匹配(如
+    nuclei=["15N","1H","13C"] → [0, 2, 1],w1=F1/w2=F3/w3=F2);
+    否则回退位置式(F{j} ↔ w{j+1}),保持旧行为。
+    """
+    if (
+        nuclei
+        and len(nuclei) == len(external)
+        and len(nuclei) == ndim
+        and all(nuclei)
+        and set(nuclei) == set(external)
+    ):
+        try:
+            return [nuclei.index(n) for n in external]
+        except ValueError:
+            return list(range(ndim))
+    return list(range(ndim))
+
+
 _AA_LETTERS = "ACDEFGHIKLMNPQRSTVWY"
 
 
@@ -121,17 +153,22 @@ def save_peaks(
     path: Path | str,
     peaks: list[dict[str, Any]],
     extra_columns: tuple[str, ...] = (),
+    *,
+    nuclei: list[str] | None = None,
 ) -> Path:
     """把峰列表写为 Poky/Sparky `.list`(契约 §6:峰文件即 .list)。
 
     Poky 格式无附加列,extra_columns 仅兼容旧调用方(忽略);
-    返回实际写入路径(自动 .list 后缀)。
+    nuclei 为每 F 轴核名(F1/F2/F3 序),3D 导出按外部约定排 w 列
+    (0.2.199-补29dk);返回实际写入路径(自动 .list 后缀)。
     """
     path = Path(path)
     if path.suffix.lower() != ".list":
         path = path.with_suffix(".list")
     is_3d = bool(peaks) and "F1_shift" in peaks[0]
-    return export_peaks_poky(path, peaks, ndim=3 if is_3d else 2)
+    return export_peaks_poky(
+        path, peaks, ndim=3 if is_3d else 2, nuclei=nuclei
+    )
 
 
 def _load_csv_rows(path: Path) -> list[dict[str, Any]]:
@@ -199,11 +236,15 @@ def export_peaks_poky(
     path: Path | str,
     peaks: list[dict[str, Any]],
     ndim: int = 2,
+    *,
+    nuclei: list[str] | None = None,
 ) -> Path:
     """导出 Poky/Sparky 峰表(.list):"Assignment w1 w2 [w3] Data Height Volume"。
 
-    2D w1=15N(N_shift)、w2=1H(H_shift);3D w1/w2/w3=F1/F2/F3_shift;
-    未命名峰 ?-?(2D)/?-?-?(3D);Height=Intensity %.3g;Data/Volume=0;双空格。
+    2D w1=15N(N_shift)、w2=1H(H_shift);3D 按外部约定 w1=15N/w2=13C/w3=1H
+    (0.2.199-补29dk,用户);nuclei 为每 F 轴核名(F1/F2/F3 序),缺失或无法
+    构成排列时回退位置式 w1/w2/w3=F1/F2/F3_shift;未命名峰 ?-?(2D)/?-?-?(3D);
+    Height=Intensity %.3g;Data/Volume=0;双空格。
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -214,15 +255,19 @@ def export_peaks_poky(
         else "Assignment w1 w2 Data Height Volume"
     )
     lines = [header]
+    order = (
+        _external_w_to_internal_axes(nuclei, _EXTERNAL_3D_NUCLEI, 3)
+        if is_3d
+        else list(range(2))
+    )
     for peak in peaks:
         label = str(peak.get("label", "") or "").strip().replace(" ", "_")
         if not label:
             label = "?-?-?" if is_3d else "?-?"
         if is_3d:
             shifts = [
-                _poky_num(peak.get("F1_shift", 0.0)),
-                _poky_num(peak.get("F2_shift", 0.0)),
-                _poky_num(peak.get("F3_shift", 0.0)),
+                _poky_num(peak.get(f"F{order[j] + 1}_shift", 0.0))
+                for j in range(3)
             ]
         else:
             shifts = [
@@ -236,8 +281,15 @@ def export_peaks_poky(
     return path
 
 
-def import_peaks_poky(path: Path | str) -> list[dict[str, Any]]:
-    """反向解析 Poky/Sparky .list(header 行 + 行解析),返回峰 dict 列表。"""
+def import_peaks_poky(
+    path: Path | str, *, nuclei: list[str] | None = None
+) -> list[dict[str, Any]]:
+    """反向解析 Poky/Sparky .list(header 行 + 行解析),返回峰 dict 列表。
+
+    3D 默认按外部约定 w1=15N/w2=13C/w3=1H 解读(0.2.199-补29dk,用户);
+    nuclei 为每 F 轴核名(F1/F2/F3 序),据此把 w 列映射回内部
+    F1/F2/F3_shift;缺失或无法构成排列时回退位置式(w1→F1 等)。
+    """
     path = Path(path)
     if not path.is_file():
         return []
@@ -253,16 +305,20 @@ def import_peaks_poky(path: Path | str) -> list[dict[str, Any]]:
         is_3d = len(tokens) >= 7
         try:
             if is_3d:
-                row = {
-                    "label": label,
-                    "F1_shift": float(tokens[1]),
-                    "F2_shift": float(tokens[2]),
-                    "F3_shift": float(tokens[3]),
-                    "Data": float(tokens[4]),
-                    "Height": float(tokens[5]),
-                    "Volume": float(tokens[6]),
-                    "Intensity": float(tokens[5]),
-                }
+                order = _external_w_to_internal_axes(
+                    nuclei, _EXTERNAL_3D_NUCLEI, 3
+                )
+                row: dict[str, Any] = {"label": label}
+                for j in range(3):
+                    row[f"F{order[j] + 1}_shift"] = float(tokens[j + 1])
+                row.update(
+                    {
+                        "Data": float(tokens[4]),
+                        "Height": float(tokens[5]),
+                        "Volume": float(tokens[6]),
+                        "Intensity": float(tokens[5]),
+                    }
+                )
             else:
                 row = {
                     "label": label,

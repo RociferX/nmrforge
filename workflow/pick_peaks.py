@@ -286,7 +286,9 @@ def _write_peaks_list(
                         axes[ax][int(peak.position[ax])]
                     )
         rows.append(row)
-    save_peaks(path, rows)
+    # 0.2.199-补29dk:3D .list 按外部约定 w1=15N/w2=13C/w3=1H 写列;
+    # nuclei=target(头部 FDDIMORDER 推导的 F1/F2/F3 逻辑核),缺失回退位置式
+    save_peaks(path, rows, nuclei=target)
     return path
 
 

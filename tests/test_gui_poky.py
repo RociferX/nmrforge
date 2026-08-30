@@ -219,8 +219,9 @@ def test_3d_peak_table_columns_use_nucleus_names(
         panel.peak_table.horizontalHeaderItem(i).text()
         for i in range(panel.peak_table.columnCount())
     ]
-    assert "N_shift" in headers and "H_shift" in headers
-    assert "C_shift" in headers
+    # 0.2.199-补29dk:峰表列序与外部 .list 约定一致(w1=15N/w2=13C/w3=1H)
+    shift_cols = [h for h in headers if h.endswith("_shift")]
+    assert shift_cols == ["N_shift", "C_shift", "H_shift"]
     assert "F1_shift" not in headers and "F2_shift" not in headers
     panel.close()
 

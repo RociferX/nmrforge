@@ -599,6 +599,32 @@ class SpectrumPanel(QWidget):
         self._current_spectrum = None
         self.status_message.emit(f"3D 谱加载失败: {message}")
 
+    def _current_3d_nuclei(self) -> list[str] | None:
+        """当前已加载 3D 谱每 F 轴(F1/F2/F3)的完整核名;核不可知返回 None。
+
+        0.2.199-补29dk(用户):.list/峰表显示按外部约定,内部按 F 逻辑解读——
+        这里从已加载谱轴标签取核(仅文件头来源,不用 metadata)。
+        """
+        s3d = getattr(self._spectrum3d_panel, "_spectrum3d", None)
+        axes3 = getattr(s3d, "axes", None) if s3d is not None else None
+        if not axes3 or len(axes3) != 3:
+            return None
+        symbols = {
+            "H": "1H", "N": "15N", "C": "13C",
+            "F": "19F", "P": "31P", "D": "2H",
+        }
+        full = {"1H", "2H", "13C", "15N", "19F", "31P", "23Na", "29Si"}
+        nuclei: list[str] = []
+        for axis in axes3:
+            label = str(getattr(axis, "label", "") or "").strip()
+            if len(label) > 1 and label[-1:].lower() in ("x", "y", "z"):
+                label = label[:-1]
+            nuc = symbols.get(label, label)
+            nuclei.append(nuc if nuc in full else "")
+        if not all(nuclei):
+            return None
+        return nuclei
+
     def _axis_nuclei(self, required: int) -> list[str] | None:
         """按当前样品数据 metadata 返回逻辑轴核(F1/F2/F3 序);无则 None。"""
         from viewer.axis_labels import nuclei_from_metadata
@@ -1051,7 +1077,11 @@ class SpectrumPanel(QWidget):
         if peak_path is None:
             return
         if peak_path.suffix.lower() == ".list":
-            peaks = import_peaks_poky(peak_path)
+            # 0.2.199-补29dk:3D 按外部约定 w1=15N/w2=13C/w3=1H 解读,
+            # 经当前谱核名映射回内部 F1/F2/F3
+            peaks = import_peaks_poky(
+                peak_path, nuclei=self._current_3d_nuclei()
+            )
         else:
             peaks = load_peaks(peak_path)
         if not peaks:
@@ -1067,11 +1097,42 @@ class SpectrumPanel(QWidget):
         self._sync_peak_ui_visibility()
 
     def _set_peak_columns(self, is_3d: bool) -> None:
-        keys: list[str] = (
-            ["Peak_ID", "label", "F1_shift", "F2_shift", "F3_shift", "Intensity", "SN"]
-            if is_3d
-            else ["Peak_ID", "label", "H_shift", "N_shift", "Intensity", "SN"]
-        )
+        # 0.2.199-补29dk(用户):.list 与峰表显示都和外部 Poky 约定一致——
+        # 3D w1=15N/w2=13C/w3=1H(N,C,H);内部行键仍 F1/F2/F3,按核名排列。
+        keys: list[str]
+        header_map: dict[str, str] = {}
+        if is_3d:
+            s3d = getattr(self._spectrum3d_panel, "_spectrum3d", None)
+            axes3 = getattr(s3d, "axes", None)
+            nuclei3 = self._current_3d_nuclei()
+            if (
+                axes3
+                and len(axes3) == 3
+                and nuclei3
+                and set(nuclei3) == {"15N", "13C", "1H"}
+            ):
+                order = [nuclei3.index(n) for n in ("15N", "13C", "1H")]
+                keys = (
+                    ["Peak_ID", "label"]
+                    + [f"F{i + 1}_shift" for i in order]
+                    + ["Intensity", "SN"]
+                )
+                header_map = {
+                    f"F{i + 1}_shift": f"{axes3[i].label}_shift"
+                    for i in order
+                }
+            else:
+                keys = [
+                    "Peak_ID", "label", "F1_shift", "F2_shift", "F3_shift",
+                    "Intensity", "SN",
+                ]
+                if axes3 and len(axes3) == 3:
+                    header_map = {
+                        f"F{i + 1}_shift": f"{axes3[i].label}_shift"
+                        for i in range(3)
+                    }
+        else:
+            keys = ["Peak_ID", "label", "H_shift", "N_shift", "Intensity", "SN"]
         # 0.2.162-补4:峰带可靠性注释时追加显示列
         if any(
             str(p.get("Reliability(%)", "")).strip() for p in self._peaks
@@ -1082,20 +1143,8 @@ class SpectrumPanel(QWidget):
             return
         self._peak_keys = tuple_keys
         self.peak_table.setColumnCount(len(tuple_keys))
-        # 0.2.199-补29df/补29dg:3D 列名用实际加载谱轴标签 + _shift
-        # (如 N_shift/H_shift/C_shift,与 2D 风格一致);未加载 3D 谱时回退
-        # metadata 核标签,再回退 F1/F2/F3
-        header_map: dict[str, str] = {}
-        if is_3d:
-            s3d = getattr(self._spectrum3d_panel, "_spectrum3d", None)
-            axes3 = getattr(s3d, "axes", None)
-            if axes3 and len(axes3) == 3:
-                header_map = {
-                    f"F{i + 1}_shift": f"{axes3[i].label}_shift" for i in range(3)
-                }
-            # 0.2.199-补29dj:未加载 3D 谱时不再用 metadata 核名兜底(用户:
-            # 软件有轴重排,metadata 采集序不可作列名),保持 F1/F2/F3 中性名;
-            # 谱加载后 _load_peaks 会重新填充列名(axes3 标签)
+        # 0.2.199-补29dj:未加载 3D 谱时不用 metadata 核名兜底,保持 F1/F2/F3
+        # 中性名;谱加载后 _load_peaks 重新填充列名(axes3 标签)
         self.peak_table.setHorizontalHeaderLabels(
             [
                 (
@@ -1349,7 +1398,9 @@ class SpectrumPanel(QWidget):
         if not path:
             return
         try:
-            peaks = import_peaks_poky(path)
+            peaks = import_peaks_poky(
+                path, nuclei=self._current_3d_nuclei()
+            )
         except Exception as exc:  # noqa: BLE001
             InfoDialog.show_info(self, "导入失败", str(exc))
             return
@@ -1389,6 +1440,7 @@ class SpectrumPanel(QWidget):
                 peaks,
                 exp_id=self._current_exp_id,
                 data_id=self._current_data_id,
+                nuclei=self._current_3d_nuclei(),
             )
         except Exception as exc:  # noqa: BLE001 - 错误统一提示
             InfoDialog.show_info(self, "保存失败", f"{type(exc).__name__}: {exc}")
@@ -1421,7 +1473,9 @@ class SpectrumPanel(QWidget):
         if not path:
             return
         try:
-            export_peaks_poky(path, self._peaks, ndim=2)
+            export_peaks_poky(
+                path, self._peaks, nuclei=self._current_3d_nuclei()
+            )
             InfoDialog.show_info(self, "导出完成", f"已导出 Poky 峰表: {path}")
         except Exception as exc:  # noqa: BLE001
             InfoDialog.show_info(self, "导出失败", str(exc))

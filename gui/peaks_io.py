@@ -40,15 +40,21 @@ def save_peaks(path: Path | str, peaks: list[dict[str, Any]]) -> Path:
 
 
 def export_peaks_poky(
-    path: Path | str, peaks: list[dict[str, Any]], ndim: int = 2
+    path: Path | str,
+    peaks: list[dict[str, Any]],
+    ndim: int = 2,
+    *,
+    nuclei: list[str] | None = None,
 ) -> Path:
-    """导出 Poky/Sparky .list(core.peaks 实现)。"""
-    return Path(core_export(path, peaks, ndim=ndim))
+    """导出 Poky/Sparky .list(core.peaks 实现;nuclei 见 core)。"""
+    return Path(core_export(path, peaks, ndim=ndim, nuclei=nuclei))
 
 
-def import_peaks_poky(path: Path | str) -> list[dict[str, Any]]:
-    """导入 Poky/Sparky .list(core.peaks 实现)。"""
-    return list(core_import(path))
+def import_peaks_poky(
+    path: Path | str, *, nuclei: list[str] | None = None
+) -> list[dict[str, Any]]:
+    """导入 Poky/Sparky .list(core.peaks 实现;nuclei 见 core)。"""
+    return list(core_import(path, nuclei=nuclei))
 
 
 def normalize_poky_label(text: str | None, ndim: int = 2) -> str:

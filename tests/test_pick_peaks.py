@@ -185,8 +185,9 @@ def _spectrum_with_peaks(
     return gaussian_filter(spec, sigma=1.5)
 
 
-def _read_rows(path: Path) -> list[dict]:
-    return import_peaks_poky(path)
+def _read_rows(path: Path, nuclei=None) -> list[dict]:
+    # 0.2.199-补29dk:3D .list 按外部约定 N,C,H 写列,读取需传每 F 轴核名
+    return import_peaks_poky(path, nuclei=nuclei)
 
 
 def test_pick_peaks_uniform_type_keeps_dominant_sign_only(tmp_path: Path) -> None:
@@ -268,7 +269,7 @@ def test_pick_peaks_ft3_shifts_follow_logical_axes(tmp_path: Path) -> None:
     manager, exp_id, data_id = _manager_with_spectrum(tmp_path, ft3)
 
     result = pick_peaks(manager, exp_id, data_id)
-    rows = _read_rows(Path(result["peak_path"]))
+    rows = _read_rows(Path(result["peak_path"]), nuclei=["15N", "1H", "13C"])
     assert len(rows) >= 1
     row = rows[0]
     # 逻辑维:F1=15N(FDF1)、F2=1H(FDF2)、F3=13C(FDF3)
@@ -405,7 +406,7 @@ def test_pick_peaks_ft3_header_order_wins_over_metadata(
     )
 
     result = pick_peaks(manager, exp_id, data_id)
-    row = _read_rows(Path(result["peak_path"]))[0]
+    row = _read_rows(Path(result["peak_path"]), nuclei=["15N", "1H", "13C"])[0]
     n_ppm = 100.0 + (16 - 1 - 8) * 2189.0 / (16 * 60.8)
     h_ppm = 6.0 + (16 - 1 - 8) * 3000.0 / (16 * 600.0)
     c_ppm = 40.0 + (16 - 1 - 5) * 11300.0 / (16 * 150.9)

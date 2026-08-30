@@ -1,5 +1,22 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29dk(2026-08-30,.list 与峰表显示按外部 Poky 约定 3D=N,C,H)
+
+用户决策:.list 与峰表显示都和外部一致,内部按内部逻辑(F1/F2/F3)解读。
+外部 Poky/Sparky 约定:2D w1=15N/w2=1H(原已符合);3D w1=15N/w2=13C/w3=1H
+(VM 外部样本 sampleB-hncacb.list、hnca.list 实测)。
+实现(core/peaks/peak_table.py + gui):
+- export_peaks_poky/import_peaks_poky/save_peaks 新增 nuclei 参数(每 F 轴
+  核名,F1/F2/F3 序):3D 导出按外部约定排 w 列,导入按核名映射回内部
+  F1/F2/F3_shift;核信息缺失或无法构成排列(如同核)回退位置式;
+- workflow/pick_peaks 写 .list 传头部逻辑核(FDDIMORDER 推导);
+- gui/spectrum_panel:峰表 3D 列序按外部约定(N_shift/C_shift/H_shift),
+  内部行键仍 F1/F2/F3;导入/保存/导出均按当前谱核名映射;
+- 2D 不变(H_shift/N_shift 显示,.list w1=N/w2=H);
+- 注意:补29dk 前生成的旧 .list(内部 N,H,C 序)需重新选峰生成;
+- 测试:+1(外部列序导出/导入)、3D 列序断言更新、3D 读取传核名;全量
+  pytest 822 项全绿;ruff 通过;VM 实测 d_011 .list 与峰表均为 N,C,H。
+
 ## 0.2.199-补29dj(2026-08-30,切片只显示当前平面峰;峰表列名去掉 metadata 兜底)
 
 用户反馈:(1) 峰列表列名还是错的;(2) 显示的峰在一个 slice 显示了所有。

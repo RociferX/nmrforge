@@ -116,8 +116,11 @@ unified 相位路线),GUI 页面不得绕过本控制器直接调 Backend。
   peaks/<exp>-<data>.list;旧 CSV 兼容读取)。内部字段数字 Peak_ID,
   2D `Peak_ID,H_shift,N_shift,Intensity,SN,label`;3D 加
   F1/F2/F3_shift;`.list` 格式 `Assignment w1 w2 [w3] Data Height
-  Volume`(2D w1=15N/w2=1H,未命名 `?-?`/`?-?-?`);导入反向解析并
-  替换峰表关联(不覆盖文件)。实现见 core/peaks/peak_table.py(G2B-005)。
+  Volume`(2D w1=15N/w2=1H;3D 按外部约定 w1=15N/w2=13C/w3=1H,
+  0.2.199-补29dk,用户:.list 与峰表显示都和外部一致,内部按 F1/F2/F3 逻辑
+  解读,导出/导入经 nuclei 做外部 w 列 ↔ 内部 F 列置换;未命名
+  `?-?`/`?-?-?`);导入反向解析并替换峰表关联(不覆盖文件)。
+  实现见 core/peaks/peak_table.py(G2B-005)。
 
 ## 7. 变更流程
 

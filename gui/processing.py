@@ -497,7 +497,13 @@ class ProcessingController:
         return result
 
     def save_peaks_manual(
-        self, data, peaks: list[dict], exp_id: str | None = None, data_id: str | None = None
+        self,
+        data,
+        peaks: list[dict],
+        exp_id: str | None = None,
+        data_id: str | None = None,
+        *,
+        nuclei: list[str] | None = None,
     ) -> str:
         """人工峰表保存:写 Poky .list(峰表文件即 list)并登记运行。"""
         from gui.peaks_io import export_peaks_poky
@@ -509,7 +515,8 @@ class ProcessingController:
         peaks_dir = self._manager.data_dir(exp_id, data_id, "peaks")
         peaks_dir.mkdir(parents=True, exist_ok=True)
         list_path = export_peaks_poky(
-            peaks_dir / f"{exp_id}-{data_id}.list", peaks, ndim=ndim
+            peaks_dir / f"{exp_id}-{data_id}.list", peaks,
+            ndim=ndim, nuclei=nuclei,
         )
         if data_id:
             record_step_success(self._manager, exp_id, data_id, "peaks")

@@ -225,3 +225,34 @@ def test_poky_label_is_valid() -> None:
     assert poky_label_is_valid("?-?-?", ndim=3)
     assert not poky_label_is_valid("xyz")
     assert not poky_label_is_valid("1H-1N")
+
+def test_export_import_3d_external_nuclei_order(tmp_path: Path) -> None:
+    """0.2.199-补29dk:3D .list 按外部约定 w1=15N/w2=13C/w3=1H 导出/导入。"""
+    path = tmp_path / "ext.list"
+    export_peaks_poky(
+        path,
+        [
+            {
+                "Peak_ID": 1,
+                "F1_shift": 118.0,
+                "F2_shift": 8.2,
+                "F3_shift": 45.0,
+                "Intensity": 90.0,
+                "label": "",
+            }
+        ],
+        ndim=3,
+        nuclei=["15N", "1H", "13C"],
+    )
+    lines = path.read_text(encoding="utf-8").splitlines()
+    assert lines[1].split()[1:4] == ["118.000", "45.000", "8.200"]  # N,C,H
+    # 带核名导入:映射回内部 F1=N/F2=H/F3=C
+    rows = import_peaks_poky(path, nuclei=["15N", "1H", "13C"])
+    assert rows[0]["F1_shift"] == 118.0
+    assert rows[0]["F2_shift"] == 8.2
+    assert rows[0]["F3_shift"] == 45.0
+    # 无核名:回退位置式(w2→F2、w3→F3)
+    rows2 = import_peaks_poky(path)
+    assert rows2[0]["F2_shift"] == 45.0
+    assert rows2[0]["F3_shift"] == 8.2
+
