@@ -188,6 +188,21 @@ def test_3d_peak_table_columns_use_nucleus_names(
     )
     panel = SpectrumPanel(manager)
     panel.set_context(exp_id, data_id)
+    # 0.2.199-补29dj:列名来自已加载 3D 谱的轴标签(不再用 metadata 兜底),
+    # 先绑定合成 N,H,C 3D 谱再填峰表
+    import numpy as np
+
+    from viewer.spectrum import Spectrum3D, SpectrumAxis
+
+    panel._spectrum3d_panel._spectrum3d = Spectrum3D(
+        np.zeros((4, 4, 4)),
+        [
+            SpectrumAxis("N", 4, 1703.0, 81.1, 117.0, 117.0 * 81.1),
+            SpectrumAxis("H", 4, 6000.0, 600.1, 4.7, 4.7 * 600.1),
+            SpectrumAxis("C", 4, 3000.0, 150.9, 45.0, 45.0 * 150.9),
+        ],
+        source="x.ft3",
+    )
     panel._peaks = [
         {
             "Peak_ID": 1,

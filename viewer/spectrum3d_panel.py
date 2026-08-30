@@ -173,10 +173,20 @@ class Spectrum3DPanel(QWidget):
             spectrum.slice_step_ppm = (
                 float(np.median(diff)) if diff.size else 0.0
             )
+            # 0.2.199-补29dj:固定轴整条范围(供 viewer 判断峰坐标是否越出
+            # 轴范围;原「当前切片 ±10 步」会把几乎所有非本平面峰当越界)
+            spectrum.slice_ppm_min = (
+                float(np.min(ppm)) if ppm.size else None
+            )
+            spectrum.slice_ppm_max = (
+                float(np.max(ppm)) if ppm.size else None
+            )
         except Exception:  # noqa: BLE001 - 轴信息缺失不阻断切片
             spectrum.slice_axis = None
             spectrum.slice_ppm = None
             spectrum.slice_step_ppm = None
+            spectrum.slice_ppm_min = None
+            spectrum.slice_ppm_max = None
         return spectrum
 
     def current_name(self, base: str = "") -> str:

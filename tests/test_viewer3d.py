@@ -311,6 +311,10 @@ def test_spectrum3d_panel_widget(qapp: QApplication) -> None:
     assert spectrum.slice_axis == 2
     assert spectrum.slice_ppm is not None
     assert spectrum.slice_step_ppm > 0
+    # 0.2.199-补29dj:固定轴整条范围(越界判断用)
+    assert spectrum.slice_ppm_min is not None
+    assert spectrum.slice_ppm_max is not None
+    assert spectrum.slice_ppm_min <= spectrum.slice_ppm <= spectrum.slice_ppm_max
     panel.close()
 
 
@@ -888,5 +892,50 @@ def test_control_panel_spans_full_row(qapp: QApplication) -> None:
     # 控制区为 3 列网格;面板必须跨满整行(原实现只占第 0 列 → 右侧留空)
     assert viewer.controls_layout.columnCount() >= 3
     assert col_span == viewer.controls_layout.columnCount()
+    viewer.close()
+
+def test_viewer_slice_hides_peaks_far_in_axis_range(
+    qapp: QApplication,
+) -> None:
+    """0.2.199-补29dj:固定轴坐标在轴范围内但远离当前切片的峰必须隐藏。
+
+    原「越界尽力显示」用当前切片 ±10 步判断,几乎所有不在本平面的峰都被
+    当作越界显示(一个切片看到所有层峰);改用固定轴全范围判断后,只有
+    越出整条轴范围的峰(旧选峰/坏值)才尽力显示。
+    """
+    from viewer.spectrum import Spectrum, SpectrumAxis
+    from viewer.spectrum_viewer import SpectrumViewer
+
+    x_axis = SpectrumAxis(
+        label="H", size=256, sw_hz=3000.0, obs_mhz=600.0,
+        carrier_ppm=8.0, orig_hz=8.0 * 600.0,
+    )
+    y_axis = SpectrumAxis(
+        label="C", size=256, sw_hz=11300.0, obs_mhz=150.9,
+        carrier_ppm=45.0, orig_hz=45.0 * 150.9,
+    )
+    import numpy as np
+
+    spec = Spectrum(np.zeros((256, 256)), [y_axis, x_axis], source="x.ft3")
+    spec.slice_axis = 0  # 固定 F1(15N)
+    spec.slice_ppm = 117.0
+    spec.slice_step_ppm = 0.05
+    spec.slice_ppm_min = 105.0
+    spec.slice_ppm_max = 129.0
+    viewer = SpectrumViewer()
+    viewer.add_spectrum(spec)
+    x_ppm = float(x_axis.ppm_at(100))
+    y_ppm = float(y_axis.ppm_at(100))
+    viewer.set_peaks(
+        [
+            {"F1_shift": 117.0, "F2_shift": x_ppm, "F3_shift": y_ppm},  # 本平面
+            {"F1_shift": 125.0, "F2_shift": x_ppm, "F3_shift": y_ppm},  # 轴内远离
+            {"F1_shift": 50.0, "F2_shift": x_ppm, "F3_shift": y_ppm},  # 越出整轴
+        ]
+    )
+    assert viewer._visible_peak_rows == {0, 2}
+    xy = viewer._peak_data_xy
+    assert xy[0][0] == xy[0][0] and xy[2][0] == xy[2][0]  # 本平面+轴外可见
+    assert xy[1][0] != xy[1][0]  # 轴内远离当前切片:隐藏(NaN)
     viewer.close()
 

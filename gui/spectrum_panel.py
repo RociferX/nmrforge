@@ -1093,12 +1093,9 @@ class SpectrumPanel(QWidget):
                 header_map = {
                     f"F{i + 1}_shift": f"{axes3[i].label}_shift" for i in range(3)
                 }
-            else:
-                labels3 = self._axis_labels(3)
-                if labels3 and len(labels3) == 3:
-                    header_map = {
-                        f"F{i + 1}_shift": f"{labels3[i]}_shift" for i in range(3)
-                    }
+            # 0.2.199-补29dj:未加载 3D 谱时不再用 metadata 核名兜底(用户:
+            # 软件有轴重排,metadata 采集序不可作列名),保持 F1/F2/F3 中性名;
+            # 谱加载后 _load_peaks 会重新填充列名(axes3 标签)
         self.peak_table.setHorizontalHeaderLabels(
             [
                 (

@@ -1507,13 +1507,15 @@ class SpectrumViewer(QWidget):
         slice_axis = getattr(self._primary, "slice_axis", None)
         slice_ppm = getattr(self._primary, "slice_ppm", None)
         slice_step = getattr(self._primary, "slice_step_ppm", None)
+        slice_ppm_min = getattr(self._primary, "slice_ppm_min", None)
+        slice_ppm_max = getattr(self._primary, "slice_ppm_max", None)
 
         def _on_current_plane(peak: dict) -> bool:
             """3D 切片只显示固定轴坐标落在当前平面内的峰(0.2.199-补29da)。
 
-            缺固定轴坐标的峰(如 2D 峰表)或坐标越界(峰表与当前谱轴不匹配,
-            如旧选峰结果)无法按平面过滤,直接显示(0.2.199-补29db/补29de:
-            避免峰表有峰但谱图全不可见)。
+            缺固定轴坐标的峰(如 2D 峰表)或坐标越出整条固定轴范围(峰表与
+            当前谱轴不匹配,如旧选峰结果)无法按平面过滤,直接显示
+            (0.2.199-补29db/补29de/补29dj)。
             """
             if slice_axis is None or slice_ppm is None or not slice_step:
                 return True
@@ -1525,10 +1527,15 @@ class SpectrumViewer(QWidget):
                 return True  # 0.0 等无效坐标:尽力显示,不按平面过滤
             if abs(value - float(slice_ppm)) <= 0.5 * float(slice_step):
                 return True
-            # 坐标越出整个轴范围:该峰无法落在任何平面,尽力显示
+            # 0.2.199-补29dj:越界判断用固定轴整条范围(原「当前切片 ±10 步」
+            # 会把几乎所有非本平面峰当越界显示 → 一个切片看到所有层峰)
             if (
-                value < float(slice_ppm) - 10.0 * float(slice_step)
-                or value > float(slice_ppm) + 10.0 * float(slice_step)
+                slice_ppm_min is not None
+                and slice_ppm_max is not None
+                and (
+                    value < float(slice_ppm_min) - 0.5 * float(slice_step)
+                    or value > float(slice_ppm_max) + 0.5 * float(slice_step)
+                )
             ):
                 return True
             return False
