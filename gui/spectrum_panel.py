@@ -272,6 +272,7 @@ class SpectrumPanel(QWidget):
         self._peaks: list[dict] = []
         self._current_spectrum: Path | None = None
         self._viewer_1d_active = False  # 0.2.199-补29bd:1D 开启隐藏峰控件
+        self._projection_active = False  # 0.2.199-补29db:投影文件隐藏峰 UI
         self.placeholder = QLabel(
             "未打开项目\n\n从左侧选择项目下的实验,或点击谱图文件查看结果。"
         )
@@ -371,6 +372,17 @@ class SpectrumPanel(QWidget):
         self._current_data_id = data_id or ""
         self.refresh()
 
+    def _sync_peak_ui_visibility(self) -> None:
+        """峰相关 UI 可见性:1D 查看或投影文件打开时全部隐藏(0.2.199-补29db)。"""
+        show = (
+            self.manager.project is not None
+            and not self._viewer_1d_active
+            and not self._projection_active
+        )
+        self.peak_table.setVisible(show)
+        self.peak_toolbar_widget.setVisible(show)
+        self.viewer.peak_label.setVisible(show)
+
     def refresh(self) -> None:
         """刷新谱图文件列表;无文件时隐藏列表(避免右下角空白)。
 
@@ -398,9 +410,7 @@ class SpectrumPanel(QWidget):
         for path in paths:
             self.file_list.addItem(path.name)
         self.file_list.setVisible(bool(paths))
-        peaks_ui_visible = bool(paths) and not self._viewer_1d_active
-        self.peak_table.setVisible(peaks_ui_visible)
-        self.peak_toolbar_widget.setVisible(peaks_ui_visible)
+        self._sync_peak_ui_visibility()
         self.export_poky_button.setEnabled(False)
         self.save_peaks_button.setEnabled(False)
         if not paths:
@@ -470,6 +480,11 @@ class SpectrumPanel(QWidget):
         if self._current_spectrum is not None and self._current_spectrum != path:
             self.viewer.save_contour_state(str(self._current_spectrum))
         self.viewer.restore_contour_state(str(path))
+        # 0.2.199-补29db:投影文件隐藏一切峰相关 UI,不做峰关联/峰操作
+        self._projection_active = (
+            path.suffix.lower() == ".ft2"
+            and self._is_projection_name(path.name)
+        )
         labels3d = self._axis_labels(3) or ("F1", "F2", "F3")
         labels2d = self._axis_labels(2) or ("F1", "F2")
         nuclei3d = self._axis_nuclei(3)
@@ -517,6 +532,8 @@ class SpectrumPanel(QWidget):
                 if proj_spec is None:
                     return False
                 spectrum = proj_spec
+                # 0.2.199-补29db:投影文件不加载/关联峰,清空峰表与标记
+                self._clear_peaks()
             else:
                 spectrum = Spectrum.load_from_ft2(
                     path, labels=labels2d, nuclei=nuclei2d
@@ -526,6 +543,7 @@ class SpectrumPanel(QWidget):
         self._spectrum3d_panel.clear()
         self.viewer.clear()
         self.viewer.add_spectrum(spectrum, name=name or path.stem)
+        self._sync_peak_ui_visibility()
         return True
 
 
@@ -1011,6 +1029,9 @@ class SpectrumPanel(QWidget):
 
     def _load_peaks(self, spectrum_path: Path) -> None:
         self._clear_peaks()
+        if self._projection_active:
+            # 0.2.199-补29db:投影文件不做任何峰关联/峰操作
+            return
         peak_path = self._peak_file_path(spectrum_path)
         if peak_path is None:
             return
@@ -1028,6 +1049,7 @@ class SpectrumPanel(QWidget):
         self.export_poky_button.setEnabled(True)
         self.save_peaks_button.setEnabled(True)
         self._update_delete_button()
+        self._sync_peak_ui_visibility()
 
     def _set_peak_columns(self, is_3d: bool) -> None:
         keys: list[str] = (

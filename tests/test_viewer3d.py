@@ -344,6 +344,34 @@ def test_viewer_slice_filters_peaks_to_plane(qapp: QApplication) -> None:
     panel.close()
 
 
+def test_viewer_slice_shows_peaks_without_axis_coord(
+    qapp: QApplication,
+) -> None:
+    """0.2.199-补29db:缺固定轴坐标的峰(如 2D 峰表)在 3D 切片仍显示。"""
+    from viewer.spectrum3d_panel import Spectrum3DPanel
+    from viewer.spectrum_viewer import SpectrumViewer
+
+    panel = Spectrum3DPanel()
+    panel.set_spectrum3d(_synthetic3d())
+    spectrum = panel.current_spectrum()
+    viewer = SpectrumViewer()
+    viewer.add_spectrum(spectrum)
+    x_ppm = float(spectrum.x_axis.ppm_at(2))
+    y_ppm = float(spectrum.y_axis.ppm_at(3))
+    # 2D 峰表(无 F3_shift):无法按平面过滤,应显示而非全隐藏
+    viewer.set_peaks(
+        [
+            {"H_shift": x_ppm, "N_shift": y_ppm, "label": "G1"},
+            {"H_shift": x_ppm, "N_shift": y_ppm, "label": "A2"},
+        ]
+    )
+    assert viewer._visible_peak_rows is None or len(viewer._visible_peak_rows) == 2
+    assert len(viewer.peak_item.data["x"]) == 2
+    assert all(x == x for x in viewer.peak_item.data["x"])
+    viewer.close()
+    panel.close()
+
+
 # ----------------------------------------------------------------------
 # 独立查看器 / 谱图面板
 # ----------------------------------------------------------------------

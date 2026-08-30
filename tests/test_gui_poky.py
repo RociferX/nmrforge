@@ -88,3 +88,42 @@ def test_import_poky_replaces_association_then_save_writes_list(
     assert len(runs) == 1 and runs[0].status == "success"
     assert runs[0].outputs["peaks"] == str(list_path)
     panel.close()
+
+
+def test_projection_file_hides_peak_ui(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.2.199-补29db:打开投影文件隐藏峰 UI,不做峰关联/峰操作。"""
+    import numpy as np
+
+    from viewer.spectrum import Spectrum, SpectrumAxis
+
+    manager, exp_id, data_id = _manager_with_peaks(tmp_path)
+    spectra = manager.data_dir(exp_id, data_id, "spectra")
+    proj = spectra / f"{data_id}_15N-1H.ft2"
+    proj.write_bytes(b"x")
+    manager.save()
+    panel = SpectrumPanel(manager)
+    panel.set_context(exp_id, data_id)
+    assert panel._is_projection_name(proj.name) is True
+    fake = Spectrum(
+        np.zeros((8, 8), dtype=float),
+        [
+            SpectrumAxis("15N", 8, 6000.0, 600.0, 118.0),
+            SpectrumAxis("1H", 8, 6000.0, 600.0, 4.7),
+        ],
+    )
+    monkeypatch.setattr(panel, "_load_projection_ft2", lambda path: fake)
+    assert panel.open_spectrum(proj) is True
+    assert panel._projection_active is True
+    assert panel._peaks == []
+    assert panel.peak_table.rowCount() == 0
+    assert panel.peak_table.isVisible() is False
+    assert panel.peak_toolbar_widget.isVisible() is False
+    # _load_peaks(调用方统一入口)在投影下也保持空,不关联峰表
+    panel._load_peaks(proj)
+    assert panel._peaks == []
+    assert panel.peak_table.rowCount() == 0
+    panel.close()
+
+
