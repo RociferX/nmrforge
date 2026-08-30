@@ -1090,6 +1090,12 @@ class SpectrumPanel(QWidget):
             return
         self._peak_keys = tuple_keys
         self.peak_table.setColumnCount(len(tuple_keys))
+        # 0.2.199-补29df:3D 列名显示对应核名(F1_shift → N/H/C),无核信息回退
+        header_map: dict[str, str] = {}
+        if is_3d:
+            labels3 = self._axis_labels(3)
+            if labels3 and len(labels3) == 3:
+                header_map = {f"F{i + 1}_shift": str(labels3[i]) for i in range(3)}
         self.peak_table.setHorizontalHeaderLabels(
             [
                 (
@@ -1098,7 +1104,7 @@ class SpectrumPanel(QWidget):
                     else "Assignment ✗"
                 )
                 if k == "label"
-                else ("可信度" if k == "Reliability(%)" else k)
+                else ("可信度" if k == "Reliability(%)" else header_map.get(k, k))
                 for k in tuple_keys
             ]
         )

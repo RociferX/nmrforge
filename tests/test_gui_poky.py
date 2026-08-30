@@ -163,3 +163,49 @@ def test_peak_table_lazy_assignment_widgets(
     panel.close()
 
 
+def test_3d_peak_table_columns_use_nucleus_names(
+    tmp_path: Path, qapp: QApplication
+) -> None:
+    """0.2.199-补29df:3D 峰表列名显示对应核名(F1_shift → N/H/C)。"""
+    import json
+
+    manager, exp_id, data_id = _manager_with_peaks(tmp_path)
+    meta = manager.data_metadata_path(exp_id, data_id)
+    meta.parent.mkdir(parents=True, exist_ok=True)
+    meta.write_text(
+        json.dumps(
+            {
+                "dataset": {
+                    "dimensions": [
+                        {"logical_axis": "F1", "sf": 60.8, "nucleus": "15N"},
+                        {"logical_axis": "F2", "sf": 600.13, "nucleus": "1H"},
+                        {"logical_axis": "F3", "sf": 150.9, "nucleus": "13C"},
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    panel = SpectrumPanel(manager)
+    panel.set_context(exp_id, data_id)
+    panel._peaks = [
+        {
+            "Peak_ID": 1,
+            "F1_shift": 118.0,
+            "F2_shift": 8.2,
+            "F3_shift": 45.0,
+            "Intensity": 1,
+            "SN": 1,
+            "label": "",
+        }
+    ]
+    panel._populate_peak_table()
+    headers = [
+        panel.peak_table.horizontalHeaderItem(i).text()
+        for i in range(panel.peak_table.columnCount())
+    ]
+    assert "N" in headers and "H" in headers and "C" in headers
+    assert "F1_shift" not in headers and "F2_shift" not in headers
+    panel.close()
+
+

@@ -73,6 +73,48 @@ def test_pick_peaks_detects_and_writes(tmp_path: Path) -> None:
     assert runs[0].outputs["peak_path"] == result["peak_path"]
 
 
+def test_metadata_nuclei_reads_dimensions(tmp_path: Path) -> None:
+    """0.2.199-补29df:按 metadata dimensions 提取 F1/F2/F3 核。"""
+    import json
+
+    from workflow.pick_peaks import _metadata_nuclei
+
+    manager = ProjectManager.create_project(tmp_path / "proj", "demo")
+    entry = manager.create_experiment()
+    data = manager.import_data(entry.id, "/sampleD")
+    meta = manager.data_metadata_path(entry.id, data.id)
+    meta.parent.mkdir(parents=True, exist_ok=True)
+    meta.write_text(
+        json.dumps(
+            {
+                "dataset": {
+                    "dimensions": [
+                        {"logical_axis": "F1", "sf": 150.9, "nucleus": "13C"},
+                        {"logical_axis": "F2", "sf": 60.8, "nucleus": "15N"},
+                        {"logical_axis": "F3", "sf": 600.13, "nucleus": "1H"},
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    nuclei = _metadata_nuclei(manager, entry.id, data.id)
+    assert nuclei == ["13C", "15N", "1H"]
+
+
+def test_permutation_to_logical_maps_storage_to_logical() -> None:
+    """0.2.199-补29df:storage→逻辑轴置换与 viewer 同源。"""
+    from workflow.pick_peaks import _permutation_to_logical
+
+    # storage (15N, 1H, 13C) 但逻辑 (1H, 15N, 13C):F1=存储轴1、F2=存储轴0
+    perm = _permutation_to_logical(["15N", "1H", "13C"], ["1H", "15N", "13C"])
+    assert perm == [1, 0, 2]
+    logical_axes = [0, 0, 0]
+    for spos, lpos in enumerate(perm):
+        logical_axes[lpos] = spos
+    assert logical_axes == [1, 0, 2]  # F1←轴1、F2←轴0、F3←轴2
+
+
 def test_pick_peaks_missing_spectrum_fails(tmp_path: Path) -> None:
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     entry = manager.create_experiment()
