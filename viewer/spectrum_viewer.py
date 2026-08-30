@@ -1753,5 +1753,17 @@ class SpectrumViewer(QWidget):
     # ------------------------------------------------------------- misc
 
     def add_control_panel(self, panel: QWidget) -> None:
-        """把任意控制面板挂到查看器控制区。"""
-        self.controls_layout.addWidget(panel)
+        """把任意控制面板挂到查看器控制区,占满整行(跨全部列)。
+
+        0.2.199-补29di:原 addWidget(panel) 只放进第 0 列——3D 面板
+        (平面下拉/切片滑块/pt/ppm)右侧(第 1/2 列)留空,且面板最小宽度
+        只压在第 0 列上,把该列与整个窗口撑宽;跨列后使用整行宽度,
+        滑块可延伸填充,不再无谓变宽。
+        """
+        self.controls_layout.addWidget(
+            panel,
+            self.controls_layout.rowCount(),
+            0,
+            1,
+            self.controls_layout.columnCount(),
+        )

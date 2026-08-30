@@ -871,3 +871,22 @@ def test_load_from_ft3_prefers_header_order_over_metadata(
     assert loaded.axes[2].obs_mhz == pytest.approx(150.9)
     assert loaded.data.shape == (nz, nx, ny)
 
+def test_control_panel_spans_full_row(qapp: QApplication) -> None:
+    """0.2.199-补29di:add_control_panel 跨满控制区整行,不挤单列留空/撑宽。"""
+    from PyQt6.QtWidgets import QWidget
+
+    from viewer.spectrum_viewer import SpectrumViewer
+
+    viewer = SpectrumViewer()
+    panel = QWidget()
+    viewer.add_control_panel(panel)
+    index = viewer.controls_layout.indexOf(panel)
+    assert index >= 0
+    _row, _col, _row_span, col_span = viewer.controls_layout.getItemPosition(
+        index
+    )
+    # 控制区为 3 列网格;面板必须跨满整行(原实现只占第 0 列 → 右侧留空)
+    assert viewer.controls_layout.columnCount() >= 3
+    assert col_span == viewer.controls_layout.columnCount()
+    viewer.close()
+
