@@ -121,6 +121,8 @@ class _LabelOverlay(QWidget):
             return []
         out: list[tuple[float, float, str]] = []
         for row, (xi, yi) in enumerate(viewer._peak_data_xy):
+            if xi != xi or yi != yi:  # 0.2.199-补29da:非本平面峰
+                continue
             peak = viewer._peaks[row]
             label = str(peak.get("label") or "").strip()
             if not label and row != viewer._selected_peak:
@@ -158,6 +160,8 @@ class _LabelOverlay(QWidget):
             leader_pen = QPen(QColor("#888888"), 1)
             label_pen = QPen(QColor("#c0392b"), 1)
             for row, (xi, yi) in enumerate(viewer._peak_data_xy):
+                if xi != xi or yi != yi:  # 0.2.199-补29da:非本平面峰
+                    continue
                 peak = viewer._peaks[row]
                 label = str(peak.get("label") or "").strip()
                 if not label and row != viewer._selected_peak:
@@ -222,6 +226,8 @@ class SpectrumViewer(QWidget):
         self._box_selected_rows: set[int] = set()
         # 0.2.199-补29ay:峰数据坐标缓存(框选只做范围比对,不再逐峰换算)
         self._peak_data_xy: list[tuple[float, float]] = []
+        # 0.2.199-补29da:3D 切片当前平面可见峰行(None = 全部可见)
+        self._visible_peak_rows: set[int] | None = None
         # 0.2.199-补29cb:Assignment 固定位置(数据坐标,缩放/平移不重排,可拖动)
         self._label_positions: list[tuple[float, float] | None] = []
         self._drag_label_row: int | None = None
@@ -1273,7 +1279,8 @@ class SpectrumViewer(QWidget):
         self._apply_peak_items()
         if flash and 0 <= row < len(self._peak_data_xy):
             xi, yi = self._peak_data_xy[row]
-            self._flash_at(xi, yi)
+            if xi == xi and yi == yi:  # 非 NaN(当前平面可见)
+                self._flash_at(xi, yi)
 
     def _ensure_peak_visible(self, xi: float, yi: float) -> None:
         """选中峰不在视野时平移视图:尽量到中心,谱边缘则移入视野
@@ -1418,6 +1425,8 @@ class SpectrumViewer(QWidget):
             )
         if 0 <= row < len(self._peak_data_xy):
             xi, yi = self._peak_data_xy[row]
+            if xi != xi or yi != yi:  # 0.2.199-补29da:非本平面峰无标签
+                return None
             try:
                 pp = self.plot.mapFromScene(
                     self.plot.getViewBox().mapViewToScene(
@@ -1453,6 +1462,9 @@ class SpectrumViewer(QWidget):
         font.setPixelSize(int(round(font_px)))
         fm = QFontMetrics(font)
         for row, _xy in enumerate(self._peak_data_xy):
+            xi, yi = _xy
+            if xi != xi or yi != yi:  # 0.2.199-补29da:非本平面峰
+                continue
             peak = self._peaks[row]
             label = str(peak.get("label") or "").strip()
             if not label and row != self._selected_peak:
@@ -1492,12 +1504,35 @@ class SpectrumViewer(QWidget):
             return
         x_axis = self._primary.x_axis
         y_axis = self._primary.y_axis
+        slice_axis = getattr(self._primary, "slice_axis", None)
+        slice_ppm = getattr(self._primary, "slice_ppm", None)
+        slice_step = getattr(self._primary, "slice_step_ppm", None)
+
+        def _on_current_plane(peak: dict) -> bool:
+            """3D 切片只显示固定轴坐标落在当前平面内的峰(0.2.199-补29da)。"""
+            if slice_axis is None or slice_ppm is None or not slice_step:
+                return True
+            try:
+                value = float(peak.get(f"F{int(slice_axis) + 1}_shift"))
+            except (TypeError, ValueError):
+                return False
+            return abs(value - float(slice_ppm)) <= 0.5 * float(slice_step)
+
+        visible = [_on_current_plane(peak) for peak in self._peaks]
+        self._visible_peak_rows = (
+            {row for row, ok in enumerate(visible) if ok}
+            if any(not ok for ok in visible)
+            else None
+        )
         xs: list[float] = []
         ys: list[float] = []
         sizes: list[float] = []
+        rows_data: list[dict] = []
         base = self._peak_size
         pens: list = []
         for row, peak in enumerate(self._peaks):
+            if not visible[row]:
+                continue
             x_ppm, y_ppm = self._peak_xy(peak)
             xs.append(float(x_axis.index_at(x_ppm)))
             # view y 即数据行:峰标记按 y 轴数据行放置,与 contour 对齐
@@ -1512,10 +1547,22 @@ class SpectrumViewer(QWidget):
                 if selected
                 else pg.mkPen("#8b0000", width=1.5)
             )
-        self._peak_data_xy = list(zip(xs, ys))
+            rows_data.append({"row": row})
+        # 全行长列表保留行索引对齐(标签/选中/框选);隐藏行坐标置 NaN
+        full_xy: list[tuple[float, float]] = []
+        cursor = 0
+        for row in range(len(self._peaks)):
+            if visible[row]:
+                full_xy.append((xs[cursor], ys[cursor]))
+                cursor += 1
+            else:
+                full_xy.append((float("nan"), float("nan")))
+        self._peak_data_xy = full_xy
         if len(self._label_positions) != len(self._peaks):
             self._label_positions = [None] * len(self._peaks)
-        self.peak_item.setData(x=xs, y=ys, size=sizes, pen=pens)
+        self.peak_item.setData(
+            x=xs, y=ys, size=sizes, pen=pens, data=rows_data
+        )
 
         # 0.2.199-补29bn:峰指认标签与引导线由 _LabelOverlay 在 widget
         # 坐标绘制(文字直立、外周分布、引导线不交叉),此处仅触发重绘
@@ -1640,6 +1687,11 @@ class SpectrumViewer(QWidget):
         y_axis = self._primary.y_axis
         best: tuple[float, int | None] = (12.0, None)  # 数据点半径阈值
         for row, peak in enumerate(self._peaks):
+            if (
+                self._visible_peak_rows is not None
+                and row not in self._visible_peak_rows
+            ):
+                continue
             x_ppm, y_ppm = self._peak_xy(peak)
             dx = x_axis.index_at(x_ppm) - xi
             dy = y_axis.index_at(y_ppm) - yi

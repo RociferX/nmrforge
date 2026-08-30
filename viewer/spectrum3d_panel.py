@@ -157,6 +157,24 @@ class Spectrum3DPanel(QWidget):
                     dims.append(i)
                     break
         spectrum.dim_indices = tuple(dims)
+        # 0.2.199-补29da:记录切片固定轴/位置(ppm),viewer 只显示本平面峰
+        # (避免所有层峰叠加,看起来像在投影上选峰)
+        try:
+            import numpy as np
+
+            axis3 = self._spectrum3d.axes[self._slice_axis]
+            spectrum.slice_axis = int(self._slice_axis)
+            spectrum.slice_ppm = float(axis3.ppm_at(self.slice_slider.value()))
+            ppm = np.asarray(axis3.ppm, dtype=float)
+            diff = np.abs(np.diff(ppm))
+            diff = diff[diff > 0]
+            spectrum.slice_step_ppm = (
+                float(np.median(diff)) if diff.size else 0.0
+            )
+        except Exception:  # noqa: BLE001 - 轴信息缺失不阻断切片
+            spectrum.slice_axis = None
+            spectrum.slice_ppm = None
+            spectrum.slice_step_ppm = None
         return spectrum
 
     def current_name(self, base: str = "") -> str:

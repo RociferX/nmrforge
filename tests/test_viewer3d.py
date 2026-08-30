@@ -307,6 +307,40 @@ def test_spectrum3d_panel_widget(qapp: QApplication) -> None:
     spectrum = panel.current_spectrum()
     assert spectrum is not None and spectrum.data.shape == (4, 6)
     assert panel.slice_slider.isEnabled() is True
+    # 0.2.199-补29da:切片携带固定轴/位置,供峰按平面过滤
+    assert spectrum.slice_axis == 2
+    assert spectrum.slice_ppm is not None
+    assert spectrum.slice_step_ppm > 0
+    panel.close()
+
+
+def test_viewer_slice_filters_peaks_to_plane(qapp: QApplication) -> None:
+    """0.2.199-补29da:3D 切片只显示固定轴坐标落在当前平面的峰。"""
+    from viewer.spectrum3d_panel import Spectrum3DPanel
+    from viewer.spectrum_viewer import SpectrumViewer
+
+    panel = Spectrum3DPanel()
+    panel.set_spectrum3d(_synthetic3d())
+    spectrum = panel.current_spectrum()
+    on_ppm = float(spectrum.slice_ppm)
+    step = float(spectrum.slice_step_ppm)
+    viewer = SpectrumViewer()
+    viewer.add_spectrum(spectrum)
+    x_ppm = float(spectrum.x_axis.ppm_at(2))
+    y_ppm = float(spectrum.y_axis.ppm_at(3))
+    viewer.set_peaks(
+        [
+            {"F1_shift": y_ppm, "F2_shift": x_ppm, "F3_shift": on_ppm},
+            {"F1_shift": y_ppm, "F2_shift": x_ppm, "F3_shift": on_ppm + 3.0 * step},
+            {"F1_shift": y_ppm, "F2_shift": x_ppm, "F3_shift": on_ppm},
+        ]
+    )
+    assert viewer._visible_peak_rows == {0, 2}
+    xy = viewer._peak_data_xy
+    assert xy[0][0] == xy[0][0] and xy[2][0] == xy[2][0]  # 本平面可见
+    assert xy[1][0] != xy[1][0]  # 其它平面峰隐藏(NaN)
+    assert viewer._nearest_peak(int(xy[0][0]), int(xy[0][1])) == 0
+    viewer.close()
     panel.close()
 
 
