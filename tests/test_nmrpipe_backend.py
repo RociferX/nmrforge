@@ -518,6 +518,66 @@ def test_clean_source_nus_breaks_link_external_untouched(
     assert (raw / "ser.bak").stat().st_size == len(ser)
 
 
+def test_clean_source_nus_repeat_nus_keeps_same_points(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """0.2.199-补29cx:重复实验叠加(NUS 同点)跨段同点不是坏点,ser 不清空。"""
+    import shutil
+
+    from backend.nmrpipe_backend import NMRPipeBackend
+    from core.data.bruker_reader import read_segments
+
+    seg1 = tmp_path / "s1"
+    seg2 = tmp_path / "s2"
+    shutil.copytree(bruker_dir / "nus_2d", seg1)
+    shutil.copytree(bruker_dir / "nus_2d", seg2)
+    nl = (seg1 / "nuslist").read_text(encoding="utf-8")
+    (seg2 / "nuslist").write_text(nl, encoding="utf-8")  # 两段采样点相同
+    n = len(nl.splitlines())
+    row_bytes = 16384
+    ser = b"".join(bytes([i % 256]) * row_bytes for i in range(n))
+    (seg1 / "ser").write_bytes(ser)
+    (seg2 / "ser").write_bytes(ser)
+    exp = read_segments([seg1, seg2])
+    backend = NMRPipeBackend()
+    logs: list[str] = []
+    count, bad, removed = backend._clean_source_nus(exp, [seg1, seg2], logs)
+    assert removed is False
+    assert bad == []
+    assert count == n
+    assert (seg1 / "ser").stat().st_size == len(ser)
+    assert (seg2 / "ser").stat().st_size == len(ser)
+    assert not (seg1 / "ser.bak").exists()
+
+
+def test_write_merged_nuslist_repeat_nus_dedups(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """0.2.199-补29cx:重复叠加合并 nuslist 去重保留唯一点,无坏点。"""
+    import shutil
+
+    from backend.nmrpipe_backend import NMRPipeBackend
+    from core.data.bruker_reader import read_segments
+
+    seg1 = tmp_path / "s1"
+    seg2 = tmp_path / "s2"
+    shutil.copytree(bruker_dir / "nus_2d", seg1)
+    shutil.copytree(bruker_dir / "nus_2d", seg2)
+    nl = (seg1 / "nuslist").read_text(encoding="utf-8")
+    (seg2 / "nuslist").write_text(nl, encoding="utf-8")
+    n = len(nl.splitlines())
+    exp = read_segments([seg1, seg2])
+    backend = NMRPipeBackend()
+    logs: list[str] = []
+    count, bad = backend._write_merged_nuslist(
+        tmp_path, [seg1, seg2], exp, logs
+    )
+    assert bad == []
+    written = (tmp_path / "nuslist").read_text(encoding="utf-8").splitlines()
+    assert len(written) == n  # 跨段同点去重,不重复计数
+    assert count == n
+
+
 def test_clean_source_nus_segments_drops_bad_and_dups(
     tmp_path: Path, bruker_dir: Path
 ) -> None:

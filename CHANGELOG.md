@@ -1,5 +1,21 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29cx(2026-08-30,修复重复叠加 NUS 跨段同点被误判坏点清空 ser)
+
+合成数据端到端验证(VM 真实 NMRPipe)发现并修复:
+- 现象:repeat_nus(各段采样点相同)数据生成 FID 时,_clean_source_nus 把
+  全部采样点判为「重复(2)」坏点,ser 整段清空、合并 nuslist 为空,无法
+  重构;原补29ct/cu 的多段合并只覆盖了分段(uniform/NUS 互补点)与
+  repeat_uniform,repeat_nus 路径实际不可用;
+- 根因:_validate_nus_points 对多段合并点集做跨段重复判定,重复实验叠加的
+  跨段同点本是正常(补29cu 已分类 repeat_nus),却按 0.2.124 分段语义剔除;
+- 修复:_clean_source_nus / _write_merged_nuslist 按 classify_segment_kind
+  区分——repeat_nus 逐段校验(段内重复/越界为坏点),跨段同点保留、合并
+  nuslist 去重;分段/未知保守保持原规则(跨段重复剔除);
+- 测试:+2(重复叠加源头清理保留 ser、合并 nuslist 去重),分段跨段重复
+  回归保持;本地全量 pytest 798 项全绿;VM 合成数据端到端复核通过
+  (repeat_uniform/repeat_nus/segmented_nus/ser 坏点 + 真实 121212 三段)。
+
 ## 0.2.199-补29cw(2026-08-30,修复直流偏置检测每个谱都误报)
 
 按用户反馈(每个谱都被检测到直流偏置,不对;sampleC 真实有直流):

@@ -2390,8 +2390,10 @@ class NMRPipeBackend:
         而不是生成 fid 上清零。按 nuslist 行整块删除 ser(每行字节 =
         ser_size / nuslist 行数,须整除),同步清理 nuslist;删除前备份
         ser/nuslist 为 .bak(仅首次,幂等);os.replace 断硬/软链接,外部
-        原件不受影响。多段 raw_dirs 按同一校验规则处理(重复点全部剔除,
-        与 _write_merged_nuslist 语义一致)。
+        原件不受影响。多段 raw_dirs 校验规则(0.2.199-补29cx 起按类型):
+        - 重复实验叠加(NUS 同点,repeat_nus):跨段同点为正常叠加,保留;
+          仅段内重复/越界为坏点;
+        - 分段/混合/未知:跨段重复点视为坏点剔除(0.2.124 原规则)。
 
         返回 (有效点数, 坏点列表, 是否实际执行了源头删除);ser 缺失或
         大小不能按行整除时跳过源头删除并返回 removed=False(调用方回退
@@ -2412,9 +2414,38 @@ class NMRPipeBackend:
         if not entries:
             return 0, [], False
         points = [entry[2] for entry in entries]
-        valid, bad, reasons = _validate_nus_points(points, experiment)
+        repeat = False
+        if len(raw_dirs) > 1:
+            try:
+                from core.data.bruker_reader import classify_segment_kind
+
+                repeat = (
+                    classify_segment_kind([Path(p) for p in raw_dirs])
+                    == "repeat_nus"
+                )
+            except Exception:  # noqa: BLE001 - 分类失败保守按分段
+                repeat = False
+        if repeat:
+            # 逐段校验(段内重复/越界),跨段同点全部保留后去重
+            valid, bad, reasons = [], [], {}
+            for dir_pts in per_dir:
+                v, b, r = _validate_nus_points(dir_pts, experiment)
+                valid += v
+                for point in b:
+                    if point not in bad:
+                        bad.append(point)
+                    reasons.setdefault(point, r.get(point, []))
+            seen: set[tuple[int, ...]] = set()
+            unique: list[tuple[int, ...]] = []
+            for point in valid:
+                if point not in seen:
+                    seen.add(point)
+                    unique.append(point)
+            valid = unique
+        else:
+            valid, bad, reasons = _validate_nus_points(points, experiment)
         if not bad:
-            return len(points), [], False
+            return len(valid), [], False
         kept = set(valid)
         drop_by_dir: dict[int, set[int]] = {}
         for dir_idx, row_idx, point in entries:
@@ -2507,13 +2538,49 @@ class NMRPipeBackend:
 
         分段采样可能有个别「写错并采错」的点（如 cc/63 的 27 2350：F1 索引远超
         网格上限）。坏点从合并 nuslist 剔除并由调用方清理对应 FID，同时以 ⚠ 提示用户。
+        0.2.199-补29cx:重复实验叠加(NUS 同点)跨段同点为正常叠加,合并去重
+        保留唯一点;分段/未知保守按原规则(跨段重复视为坏点剔除)。
         """
         all_points: list[tuple[int, ...]] = []
         for seg_dir in segment_dirs:
             nuslist_path = Path(seg_dir) / "nuslist"
             if nuslist_path.is_file():
                 all_points += [tuple(p) for p in read_nuslist(nuslist_path)]
-        valid, bad, reasons = _validate_nus_points(all_points, experiment)
+        repeat = False
+        if len(segment_dirs) > 1:
+            try:
+                from core.data.bruker_reader import classify_segment_kind
+
+                repeat = (
+                    classify_segment_kind([Path(p) for p in segment_dirs])
+                    == "repeat_nus"
+                )
+            except Exception:  # noqa: BLE001 - 分类失败保守按分段
+                repeat = False
+        if repeat:
+            valid, bad, reasons = [], [], {}
+            for seg_dir in segment_dirs:
+                nl_path = Path(seg_dir) / "nuslist"
+                seg_pts = (
+                    [tuple(p) for p in read_nuslist(nl_path)]
+                    if nl_path.is_file()
+                    else []
+                )
+                v, b, r = _validate_nus_points(seg_pts, experiment)
+                valid += v
+                for point in b:
+                    if point not in bad:
+                        bad.append(point)
+                    reasons[point] = r.get(point, [])
+            seen: set[tuple[int, ...]] = set()
+            unique: list[tuple[int, ...]] = []
+            for point in valid:
+                if point not in seen:
+                    seen.add(point)
+                    unique.append(point)
+            valid = unique
+        else:
+            valid, bad, reasons = _validate_nus_points(all_points, experiment)
         for point in bad:
             logs.append(
                 f"⚠ 检测到采样坏点 {point}:{'、'.join(reasons.get(point, []) or ['未知'])},"
