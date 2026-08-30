@@ -411,7 +411,15 @@ class Spectrum3D:
 
     @property
     def max_intensity(self) -> float:
-        return float(np.max(self.data)) if self.data.size else 0.0
+        if getattr(self, "_lazy", False):
+            # 0.2.199-补29dd:懒加载不读全量,用样例平面估计
+            try:
+                plane = self._lazy_cached_plane(0, 0)
+                return float(np.max(plane)) if plane.size else 0.0
+            except Exception:  # noqa: BLE001 - 估计失败返回 0
+                return 0.0
+        size = int(np.prod(self.data.shape)) if hasattr(self.data, "shape") else 0
+        return float(np.max(self.data)) if size else 0.0
 
     @staticmethod
     def _normalize_data(data: np.ndarray, source: str) -> np.ndarray:
@@ -438,8 +446,14 @@ class Spectrum3D:
         path: Path | str,
         labels: tuple[str, str, str] = ("F1", "F2", "F3"),
         nuclei: list[str] | None = None,
+        *,
+        lazy: bool = False,
     ) -> Spectrum3D:
         """用 nmrglue 读取 NMRPipe 三维 .ft3 并构建 ppm 轴(契约 §10.1)。
+
+        lazy=True(0.2.199-补29dd):流式 3D(FDPIPEFLAG!=0)用 read_lowmem
+        只读头部/轴,切片时按需从文件读对应 2D 平面——不加载全 3D 体,
+        打开大谱不再慢/占内存;非流文件回退全量读取。
 
         nuclei 为 metadata 逻辑轴核(F1/F2/F3 序);非空时按存储头
         FDF*LABEL/FDF*OBS 推断存储轴核,不一致则重排 data/axes 到逻辑
@@ -455,6 +469,19 @@ class Spectrum3D:
         其中 F1=FDF3SIZE、F2=FDSPECNUM、F3=FDSIZE;非流文件按同约定重塑。
         """
         import nmrglue as ng
+
+        if lazy:
+            try:
+                dic, lazy_data = ng.pipe.read_lowmem(str(path))
+            except Exception:  # noqa: BLE001 - read_lowmem 不支持(头部不完整等)
+                return cls.load_from_ft3(path, labels=labels, nuclei=nuclei)
+            if cls._header_int(dic, "FDDIMCOUNT") < 3:
+                raise ValueError(f"仅支持三维谱图(FDDIMCOUNT<3): {path}")
+            flag = float(dic.get("FDPIPEFLAG", 0.0) or 0.0)
+            if flag == 0:
+                # 非流单文件:布局不同,懒读不可靠,回退全量(通常为小文件)
+                return cls.load_from_ft3(path, labels=labels, nuclei=nuclei)
+            return cls._build_lazy(path, dic, lazy_data, labels, nuclei)
 
         dic, data = ng.pipe.read(str(path))
         data = np.asarray(data)
@@ -504,6 +531,101 @@ class Spectrum3D:
         logger.info("载入三维谱: %s (%s)", path, data.shape)
         return cls(data, axes, source=Path(path))
 
+    @classmethod
+    def _build_lazy(
+        cls,
+        path: Path | str,
+        dic: dict,
+        lazy_data,
+        labels: tuple[str, str, str],
+        nuclei: list[str] | None,
+    ) -> Spectrum3D:
+        """懒加载构建:只读头部/轴,data 为流式懒对象(0.2.199-补29dd)。"""
+
+        def _axis(prefix: str, label: str, size: int) -> SpectrumAxis:
+            return SpectrumAxis(
+                label=label,
+                size=size,
+                sw_hz=float(dic[prefix + "SW"]),
+                obs_mhz=float(dic[prefix + "OBS"]),
+                carrier_ppm=float(dic[prefix + "CAR"]),
+                orig_hz=float(dic.get(prefix + "ORIG", 0.0) or 0.0),
+            )
+
+        data_shape = tuple(int(v) for v in lazy_data.shape)
+        prefixes = tuple(
+            _fdf_prefix_for_axis(dic, 3, i) for i in range(3)
+        )
+        axes = [
+            _axis(prefix, labels[i], data_shape[i])
+            for i, prefix in enumerate(prefixes)
+        ]
+        storage_nuclei = _storage_nuclei(dic, prefixes)
+        if nuclei:
+            logical_nuclei = list(nuclei)
+        else:
+            logical_nuclei = (
+                _logical_nuclei_from_order(dic, 3, storage_nuclei)
+                or storage_nuclei
+            )
+        perm = _permutation_to_logical(storage_nuclei, logical_nuclei)
+        inv = list(range(3))
+        if perm is not None and perm != [0, 1, 2]:
+            inv = [0] * 3
+            for spos, lpos in enumerate(perm):
+                inv[lpos] = spos
+            logger.info(
+                "轴序重排(懒加载): 存储 (%s) → 逻辑 (%s): %s",
+                " ".join(storage_nuclei), " ".join(logical_nuclei), path,
+            )
+        logical_axes = [axes[inv[dim]] for dim in range(3)]
+        logical_storage = [storage_nuclei[inv[dim]] for dim in range(3)]
+        logical_axes = _relabel_axes(
+            logical_axes, _labels_from_nuclei(logical_storage, labels)
+        )
+        _warn_ppm_range_mismatch(logical_axes, logical_storage, path)
+        obj = cls.__new__(cls)
+        obj.data = lazy_data  # 流式懒对象(存储序)
+        obj.axes = logical_axes
+        obj.source = Path(path)
+        obj._lazy = True
+        obj._lazy_inv = tuple(inv)
+        obj._plane_cache: dict[tuple[int, int], np.ndarray] = {}
+        logger.info("载入三维谱(懒加载): %s (%s)", path, data_shape)
+        return obj
+
+    def _lazy_read_plane(self, axis_idx: int, index: int) -> np.ndarray:
+        """懒加载:从流式存储读固定逻辑轴的一帧,转置到逻辑剩余轴序。"""
+        inv = self._lazy_inv
+        spos = inv[axis_idx]
+        idx: list = [slice(None), slice(None), slice(None)]
+        idx[spos] = int(index)
+        arr = np.asarray(self.data[tuple(idx)])
+        if np.iscomplexobj(arr):
+            arr = arr.real
+        plane = np.asarray(arr, dtype=float)
+        logical_remaining = [dim for dim in range(3) if dim != axis_idx]
+        storage_remaining = [s for s in range(3) if s != spos]
+        axes_perm = [
+            storage_remaining.index(inv[dim])
+            for dim in logical_remaining
+        ]
+        if axes_perm != [0, 1]:
+            plane = np.transpose(plane, axes_perm)
+        return plane
+
+    def _lazy_cached_plane(self, axis_idx: int, index: int) -> np.ndarray:
+        """懒切片 + 小缓存(最近 4 帧,滚动回看不重复读盘)。"""
+        key = (int(axis_idx), int(index))
+        cache = self._plane_cache
+        if key in cache:
+            return cache[key]
+        plane = self._lazy_read_plane(axis_idx, index)
+        cache[key] = plane
+        while len(cache) > 4:
+            cache.pop(next(iter(cache)))
+        return plane
+
     def index_at(self, axis_idx: int, ppm_value: float) -> int:
         """第 axis_idx 维按 ppm 定位下标(供滑块按 ppm 定位)。"""
         return self.axes[axis_idx].index_at(ppm_value)
@@ -514,6 +636,21 @@ class Spectrum3D:
         轴顺序与固定维后的剩余轴一致:axis 0 -> (F2,F3);axis 1 -> (F1,F3);
         axis 2 -> (F1,F2)。
         """
+        if getattr(self, "_lazy", False):
+            index = int(index)
+            if not (0 <= index < self.axes[axis_idx].size):
+                raise IndexError(
+                    f"切片索引越界: 第 {axis_idx} 维 index={index} "
+                    f"(size={self.axes[axis_idx].size})"
+                )
+            data2d = self._lazy_cached_plane(axis_idx, index)
+            remaining = [i for i in range(3) if i != axis_idx]
+            return orient_x_priority(
+                Spectrum(
+                    data2d, [self.axes[i] for i in remaining],
+                    source=self.source,
+                )
+            )
         index = int(index)
         size = self.data.shape[axis_idx]
         if not (0 <= index < size):
@@ -550,7 +687,18 @@ class Spectrum3D:
 
     def estimate_noise(self, fraction: float = 0.1) -> float:
         """用角落小块(三维)的标准差估计噪声水平。"""
-        if self.data.size == 0:
+        if getattr(self, "_lazy", False):
+            # 0.2.199-补29dd:懒加载用样例平面角落估计(不读全量)
+            try:
+                sample = self._lazy_cached_plane(0, 0)
+                s0 = max(1, int(sample.shape[0] * fraction))
+                s1 = max(1, int(sample.shape[1] * fraction))
+                region = sample[-s0:, -s1:]
+                return float(np.std(region)) if region.size else 0.0
+            except Exception:  # noqa: BLE001 - 估计失败返回 0
+                return 0.0
+        size = int(np.prod(self.data.shape)) if hasattr(self.data, "shape") else 0
+        if size == 0:
             return 0.0
         s0 = max(1, int(self.data.shape[0] * fraction))
         s1 = max(1, int(self.data.shape[1] * fraction))

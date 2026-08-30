@@ -127,3 +127,39 @@ def test_projection_file_hides_peak_ui(
     panel.close()
 
 
+def test_peak_table_lazy_assignment_widgets(
+    tmp_path: Path, qapp: QApplication
+) -> None:
+    """0.2.199-补29dc:Assignment 编辑组件按需创建,数千行峰表不再卡顿。"""
+    manager, exp_id, data_id = _manager_with_peaks(tmp_path)
+    peaks = [
+        {
+            "Peak_ID": i + 1,
+            "H_shift": 8.0,
+            "N_shift": 115.0,
+            "Intensity": 1,
+            "SN": 1,
+            "label": f"G{i + 1}",
+        }
+        for i in range(120)
+    ]
+    panel = SpectrumPanel(manager)
+    panel.set_context(exp_id, data_id)
+    panel._peaks = peaks
+    panel._populate_peak_table()
+    label_col = panel._peak_keys.index("label")
+    widget_count = sum(
+        1
+        for row in range(panel.peak_table.rowCount())
+        if panel.peak_table.cellWidget(row, label_col) is not None
+    )
+    # 只给可视行 ± 缓冲创建组件,远少于总行数
+    assert widget_count <= 60
+    table_peaks = panel._table_peaks()
+    # 可视行(有组件)label 按段规范化(2D 两段 → G1-?);
+    # 视口外行(无组件)回退 item 文本原始 label
+    assert table_peaks[0]["label"] == "G1-?"
+    assert table_peaks[-1]["label"] == "G120"
+    panel.close()
+
+

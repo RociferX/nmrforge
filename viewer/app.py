@@ -163,7 +163,7 @@ class SpectrumWindow(QMainWindow):
         try:
             if path.suffix.lower() == ".ft3":
                 spectrum3d = Spectrum3D.load_from_ft3(
-                    path, labels=labels3d, nuclei=nuclei3d
+                    path, labels=labels3d, nuclei=nuclei3d, lazy=True
                 )
                 spectrum = None
                 spectrum1d = None

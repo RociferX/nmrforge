@@ -40,6 +40,10 @@ from gui.processing import ProcessingController
 from viewer.spectrum3d_panel import Spectrum3DPanel
 from viewer.spectrum_viewer import SpectrumViewer
 
+# 0.2.199-补29dc:Assignment 编辑组件只给可视行(±缓冲)创建,数千行峰表
+# 逐行建 QWidget(每行 2-3 个输入框)是打开 3D 谱卡顿的主因。
+_ASSIGNMENT_WIDGET_BUFFER = 12
+
 
 class _AssignmentCell(QWidget):
     """峰表 Assignment 单元格:固定连字符 + 段输入框(2D 两段/3D 三段,默认 ?)。
@@ -268,6 +272,10 @@ class SpectrumPanel(QWidget):
         # 0.2.199-补29bf:点击 Assignment 列标题开关图上指认标签
         self.peak_table.horizontalHeader().sectionClicked.connect(
             self._on_peak_header_clicked
+        )
+        # 0.2.199-补29dc:滚动时按需创建/销毁 Assignment 编辑组件
+        self.peak_table.verticalScrollBar().valueChanged.connect(
+            self._ensure_assignment_widgets
         )
         self._peaks: list[dict] = []
         self._current_spectrum: Path | None = None
@@ -508,7 +516,7 @@ class SpectrumPanel(QWidget):
                 state = self._viewer3d_state.get(self._current_data_id)
                 self._spectrum3d_panel.set_spectrum3d(
                     Spectrum3D.load_from_ft3(
-                        path, labels=labels3d, nuclei=nuclei3d
+                        path, labels=labels3d, nuclei=nuclei3d, lazy=True
                     )
                 )
                 self._spectrum3d_panel.setVisible(True)
@@ -556,7 +564,7 @@ class SpectrumPanel(QWidget):
                 from viewer.spectrum import Spectrum3D
 
                 spectrum3d = Spectrum3D.load_from_ft3(
-                    path, labels=labels3d, nuclei=nuclei3d
+                    path, labels=labels3d, nuclei=nuclei3d, lazy=True
                 )
                 self._ft3_ready.emit(path, spectrum3d)
             except Exception as exc:  # noqa: BLE001 - 错误统一回主线程提示
@@ -1080,6 +1088,52 @@ class SpectrumPanel(QWidget):
             ]
         )
 
+    def _ensure_assignment_widgets(self) -> None:
+        """按需创建/销毁 Assignment 编辑组件:只给可视行(±缓冲)建 QWidget。
+
+        0.2.199-补29dc:数千行 3D 峰表逐行建 _AssignmentCell(每行 2-3 个
+        输入框)是打开卡顿主因;改为视口内懒创建、滚动维护。无组件的行
+        以 label item 文本显示,读取/保存走文本回退。
+        """
+        table = self.peak_table
+        n = table.rowCount()
+        if n <= 0 or "label" not in self._peak_keys:
+            return
+        label_col = self._peak_keys.index("label")
+        first = table.rowAt(0)
+        last = table.rowAt(max(table.viewport().height() - 1, 0))
+        if first < 0 and last < 0:
+            return
+        first = max(0, first - _ASSIGNMENT_WIDGET_BUFFER)
+        last = min(n - 1, last + _ASSIGNMENT_WIDGET_BUFFER)
+        is_3d = bool(self._peaks) and "F1_shift" in self._peaks[0]
+        for row in range(n):
+            has = table.cellWidget(row, label_col) is not None
+            in_view = first <= row <= last
+            if has and not in_view:
+                # 移出视口:销毁组件,label 回写到 item 文本显示
+                table.setCellWidget(row, label_col, None)
+                item = table.item(row, label_col)
+                if item is not None:
+                    label = (
+                        str(self._peaks[row].get("label", "") or "")
+                        if 0 <= row < len(self._peaks)
+                        else ""
+                    )
+                    item.setText(label)
+            elif not has and in_view:
+                label = (
+                    str(self._peaks[row].get("label", "") or "")
+                    if 0 <= row < len(self._peaks)
+                    else ""
+                )
+                widget = _AssignmentCell(3 if is_3d else 2, row, label)
+                widget.edited.connect(self._on_assignment_cell_edited)
+                table.setCellWidget(row, label_col, widget)
+                item = table.item(row, label_col)
+                if item is not None:
+                    item.setText("")
+
     def _populate_peak_table(self) -> None:
         """把 self._peaks 写入表格(2D/3D 列自动切换)。"""
         is_3d = bool(self._peaks) and "F1_shift" in self._peaks[0]
@@ -1093,21 +1147,15 @@ class SpectrumPanel(QWidget):
                     self.peak_table.setItem(
                         row, col, QTableWidgetItem(str(peak.get(key, "")))
                     )
-                # 0.2.199-补29cp:Assignment 列 = 固定连字符 + 段输入框(默认 ?)
-                widget = _AssignmentCell(
-                    3 if is_3d else 2, row, str(peak.get("label", "") or "")
-                )
-                widget.edited.connect(self._on_assignment_cell_edited)
-                label_item = self.peak_table.item(row, label_col)
-                # 0.2.199-补29cr:item 文本清空,避免与输入框组件重叠显示;
-                # label 读取/保存走 cellWidget.merged_text()
-                label_item.setText("")
-                self.peak_table.setCellWidget(row, label_col, widget)
+                # 0.2.199-补29dc:不再逐行创建 Assignment 编辑组件(数千行卡顿),
+                # label 先以 item 文本显示,可视行由 _ensure_assignment_widgets
+                # 按需替换为段输入框组件;读取/保存仍走 cellWidget/文本回退
                 # 行首单元格保存完整峰 dict(label 等编辑外字段随行保留)
                 self.peak_table.item(row, 0).setData(0x0100, dict(peak))
             self.peak_table.setColumnWidth(label_col, 142 if is_3d else 94)
         finally:
             self._loading_peaks = False
+        self._ensure_assignment_widgets()
 
     def _table_peaks(self) -> list[dict]:
         """把表格当前内容读回为峰 dict 列表(未编辑行为空串)。"""
@@ -1516,6 +1564,32 @@ class SpectrumPanel(QWidget):
                 "Assignment ✓" if new_state else "Assignment ✗"
             )
 
+    def _jump_3d_slice_to_peak(self, row: int) -> None:
+        """3D 峰表点峰:把切片跳到该峰固定轴对应切面,再按 2D 逻辑显示
+        (0.2.199-补29dc)。缺固定轴坐标的峰(2D 峰表等)不跳转。"""
+        s3d_panel = self._spectrum3d_panel
+        s3d = getattr(s3d_panel, "_spectrum3d", None)
+        primary = getattr(self.viewer, "_primary", None)
+        if s3d is None or primary is None:
+            return
+        if getattr(primary, "slice_axis", None) is None:
+            return  # 当前不是 3D 切片视图
+        if not (0 <= row < len(self._peaks)):
+            return
+        slice_axis = getattr(s3d_panel, "_slice_axis", None)
+        if slice_axis is None or not (0 <= int(slice_axis) < len(s3d.axes)):
+            return
+        peak = self._peaks[row]
+        try:
+            value = float(peak.get(f"F{int(slice_axis) + 1}_shift"))
+        except (TypeError, ValueError):
+            return  # 无固定轴坐标,无法跳切面
+        axis = s3d.axes[int(slice_axis)]
+        index = int(axis.index_at(value))
+        if s3d_panel.slice_slider.value() != index:
+            s3d_panel.slice_slider.setValue(index)
+            s3d_panel.refresh()
+
     def _on_peak_row_selected(self) -> None:
         if self._syncing_table_selection:
             return  # 谱图点选/框选引起的程序化选行,只高亮不闪烁
@@ -1524,6 +1598,8 @@ class SpectrumPanel(QWidget):
             return
         row = rows[0].row()
         if 0 <= row < len(self._peaks):
+            # 0.2.199-补29dc:3D 先跳到该峰对应切面,再按 2D 逻辑定位显示
+            self._jump_3d_slice_to_peak(row)
             self.viewer.highlight_peak(row)
 
     def _on_peak_cell_clicked(self, row: int, column: int) -> None:
@@ -1532,4 +1608,6 @@ class SpectrumPanel(QWidget):
         if self._syncing_table_selection:
             return
         if 0 <= row < len(self._peaks):
+            # 0.2.199-补29dc:3D 先跳到该峰对应切面,再定位显示
+            self._jump_3d_slice_to_peak(row)
             self.viewer.highlight_peak(row)

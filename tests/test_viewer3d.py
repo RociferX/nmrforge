@@ -372,6 +372,76 @@ def test_viewer_slice_shows_peaks_without_axis_coord(
     panel.close()
 
 
+def test_peak_table_click_jumps_3d_slice(
+    tmp_path: Path, qapp: QApplication
+) -> None:
+    """0.2.199-补29dc:3D 峰表点峰跳到该峰对应切面。"""
+    from core.project import ProjectManager
+    from gui.spectrum_panel import SpectrumPanel
+
+    manager = ProjectManager.create_project(tmp_path / "proj", "demo")
+    entry = manager.create_experiment()
+    data = manager.import_data(entry.id, "/fake/1")
+    panel = SpectrumPanel(manager)
+    panel.set_context(entry.id, data.id)
+    s3d = _synthetic3d()
+    panel._spectrum3d_panel.set_spectrum3d(s3d)
+    panel._spectrum3d_panel.setVisible(True)
+    panel._render_3d_view()
+    target = 5
+    panel._peaks = [
+        {
+            "F1_shift": float(s3d.axes[0].ppm_at(1)),
+            "F2_shift": float(s3d.axes[1].ppm_at(2)),
+            "F3_shift": float(s3d.axes[2].ppm_at(target)),
+            "Intensity": 1,
+            "SN": 1,
+        }
+    ]
+    panel._populate_peak_table()
+    panel.peak_table.selectRow(0)
+    panel._on_peak_row_selected()
+    assert panel._spectrum3d_panel.slice_slider.value() == target
+    # 跳转后该峰落在当前切片平面,viewer 可见
+    assert panel.viewer._visible_peak_rows is None or 0 in panel.viewer._visible_peak_rows
+    panel.close()
+
+
+def test_load_from_ft3_lazy_matches_full(tmp_path: Path) -> None:
+    """0.2.199-补29dd:懒加载(只读 2D 切片)与全量读取切片一致。"""
+    nz, ny, nx = 2, 4, 6
+    P = np.zeros((nz, ny, nx), dtype=np.float32)
+    for z in range(nz):
+        for y in range(ny):
+            for x in range(nx):
+                P[z, y, x] = z * 100 + y * 10 + x
+    path = tmp_path / "o231.ft3"
+    _write_ft3_ordered(path, P, [2.0, 3.0, 1.0])  # ORDER 2 3 1(真实常见)
+    full = Spectrum3D.load_from_ft3(path)
+    lazy = Spectrum3D.load_from_ft3(path, lazy=True)
+    assert getattr(lazy, "_lazy", False) is True
+    assert lazy.axes[0].size == full.axes[0].size
+    for axis in range(3):
+        for index in range(lazy.axes[axis].size):
+            a = lazy.slice(axis, index).data
+            b = full.slice(axis, index).data
+            assert np.allclose(a, b), (axis, index)
+    # 懒对象不读全量:data 是流式懒对象而非普通 ndarray
+    assert type(lazy.data).__name__ != "ndarray"
+    # 噪声/最大强度懒估计可用
+    assert lazy.estimate_noise() >= 0.0
+    assert lazy.max_intensity > 0.0
+
+
+def test_load_from_ft3_lazy_non_stream_falls_back(tmp_path: Path) -> None:
+    """0.2.199-补29dd:非流/头部不完整文件懒加载回退全量。"""
+    path = tmp_path / "ns.ft3"
+    _write_ft3(path, _synthetic3d(), stream=False)
+    loaded = Spectrum3D.load_from_ft3(path, lazy=True)
+    assert getattr(loaded, "_lazy", False) is False
+    assert loaded.slice(2, 1).data.shape == (4, 6)
+
+
 # ----------------------------------------------------------------------
 # 独立查看器 / 谱图面板
 # ----------------------------------------------------------------------
