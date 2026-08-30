@@ -157,6 +157,31 @@ def _permutation_to_logical(
     return [int(p) for p in perm]
 
 
+def _logical_nuclei_from_order(
+    dic: dict[str, Any], ndim: int, storage_nuclei: list[str]
+) -> list[str] | None:
+    """按 FDDIMORDER 推断逻辑序核列表(F1/F2/F3 序);无法构成排列返回 None。
+
+    与 viewer/spectrum 同源(0.2.152):nmrglue 数据轴 i 的逻辑维号 =
+    FDDIMORDER[ndim-1-i],据此把存储序核映射回逻辑序。
+    """
+    try:
+        order = [int(v) for v in dic.get("FDDIMORDER") or []]
+    except (TypeError, ValueError):
+        return None
+    if len(order) < ndim:
+        return None
+    logical: list[str | None] = [None] * ndim
+    for axis_idx, nucleus in enumerate(storage_nuclei):
+        dim = order[ndim - 1 - axis_idx]
+        if not (1 <= dim <= ndim) or logical[dim - 1] is not None:
+            return None
+        logical[dim - 1] = nucleus
+    if any(n is None for n in logical):
+        return None
+    return [n for n in logical if n is not None]  # type: ignore[return-value]
+
+
 def _metadata_nuclei(
     manager: ProjectManager, exp_id: str, data_id: str
 ) -> list[str] | None:
@@ -219,17 +244,22 @@ def _write_peaks_list(
     peaks_dir.mkdir(parents=True, exist_ok=True)
     path = peaks_dir / f"{exp_id}-{data_id}.list"
     axes = _axes_ppm(dic, data)
-    logical_axes = _logical_axis_indices(dic, data.ndim)
-    # 0.2.199-补29df:有 metadata 核时按核匹配逻辑轴(与 viewer 显示一致),
-    # 避免峰表 F 列与谱图轴错位(如 15N 列出现 1H 值)
-    if logical_nuclei and data.ndim >= 3:
+    # 0.2.199-补29df/补29dg:逻辑序与 viewer load_from_ft3 完全一致——
+    # 默认存储序;有 metadata 核则按核匹配;否则按 FDDIMORDER 推导逻辑核;
+    # 均无法构成排列时保持存储序(与 viewer 不重排行为一致)
+    logical_axes = list(range(data.ndim))
+    if data.ndim >= 3:
         prefixes = tuple(_fdf_prefix(dic, data.ndim, i) for i in range(data.ndim))
         storage_nuclei = _storage_nuclei(dic, prefixes)
-        perm = _permutation_to_logical(storage_nuclei, logical_nuclei)
-        if perm is not None and perm != list(range(data.ndim)):
-            logical_axes = [0] * data.ndim
-            for spos, lpos in enumerate(perm):
-                logical_axes[lpos] = spos
+        target = logical_nuclei or _logical_nuclei_from_order(
+            dic, data.ndim, storage_nuclei
+        )
+        if target:
+            perm = _permutation_to_logical(storage_nuclei, target)
+            if perm is not None and perm != list(range(data.ndim)):
+                logical_axes = [0] * data.ndim
+                for spos, lpos in enumerate(perm):
+                    logical_axes[lpos] = spos
     rows: list[dict[str, Any]] = []
     for i, peak in enumerate(peaks, start=1):
         row: dict[str, Any] = {

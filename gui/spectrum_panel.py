@@ -1090,12 +1090,23 @@ class SpectrumPanel(QWidget):
             return
         self._peak_keys = tuple_keys
         self.peak_table.setColumnCount(len(tuple_keys))
-        # 0.2.199-补29df:3D 列名显示对应核名(F1_shift → N/H/C),无核信息回退
+        # 0.2.199-补29df/补29dg:3D 列名用实际加载谱轴标签 + _shift
+        # (如 N_shift/H_shift/C_shift,与 2D 风格一致);未加载 3D 谱时回退
+        # metadata 核标签,再回退 F1/F2/F3
         header_map: dict[str, str] = {}
         if is_3d:
-            labels3 = self._axis_labels(3)
-            if labels3 and len(labels3) == 3:
-                header_map = {f"F{i + 1}_shift": str(labels3[i]) for i in range(3)}
+            s3d = getattr(self._spectrum3d_panel, "_spectrum3d", None)
+            axes3 = getattr(s3d, "axes", None)
+            if axes3 and len(axes3) == 3:
+                header_map = {
+                    f"F{i + 1}_shift": f"{axes3[i].label}_shift" for i in range(3)
+                }
+            else:
+                labels3 = self._axis_labels(3)
+                if labels3 and len(labels3) == 3:
+                    header_map = {
+                        f"F{i + 1}_shift": f"{labels3[i]}_shift" for i in range(3)
+                    }
         self.peak_table.setHorizontalHeaderLabels(
             [
                 (

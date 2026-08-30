@@ -204,7 +204,8 @@ def test_3d_peak_table_columns_use_nucleus_names(
         panel.peak_table.horizontalHeaderItem(i).text()
         for i in range(panel.peak_table.columnCount())
     ]
-    assert "N" in headers and "H" in headers and "C" in headers
+    assert "N_shift" in headers and "H_shift" in headers
+    assert "C_shift" in headers
     assert "F1_shift" not in headers and "F2_shift" not in headers
     panel.close()
 

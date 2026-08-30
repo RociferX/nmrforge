@@ -573,9 +573,10 @@ def test_spectrum_panel_opens_ft3(
         panel.peak_table.horizontalHeaderItem(i).text()
         for i in range(panel.peak_table.columnCount())
     ]
-    assert "F1_shift" in headers
-    assert "F2_shift" in headers
-    assert "F3_shift" in headers
+    # 0.2.199-补29df/补29dg:3D 列名改按核名显示(N_shift 风格),不再 F1/F2/F3
+    shift_cols = [h for h in headers if h.endswith("_shift")]
+    assert len(shift_cols) == 3
+    assert "F1_shift" not in headers
     assert len(panel.viewer._peaks) == 1
     panel.close()
 
