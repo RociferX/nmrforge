@@ -107,6 +107,47 @@ def test_confidence_not_written_to_list(
     panel.close()
 
 
+def test_confidence_match_logs(tmp_path: Path, qapp: QApplication) -> None:
+    """匹配结果输出任务日志(0.2.199-补29cz)。"""
+    rel = [
+        {"shifts": {"H_shift": 8.2, "N_shift": 118.0}, "confidence": 88.5},
+        {"shifts": {"H_shift": 7.5, "N_shift": 120.0}, "confidence": 55.0},
+    ]
+    manager, exp_id, data_id = _manager_with_peaks(
+        tmp_path,
+        "Assignment w1 w2 Data Height Volume\n"
+        "G1 118.0 8.2 0 100.0 100.0\n"
+        "A2 125.0 9.0 0 80.0 80.0\n",
+        rel,
+    )
+    panel = SpectrumPanel(manager)
+    logs: list[str] = []
+    panel.log_message.connect(logs.append)
+    panel.set_context(exp_id, data_id)
+    panel._load_peaks(Path("fake.ft2"))
+    assert any("可信度匹配" in line and "1/2" in line for line in logs)
+    panel.close()
+
+
+def test_confidence_match_logs_when_no_smile(
+    tmp_path: Path, qapp: QApplication
+) -> None:
+    """无 SMILE 优化时日志说明跳过(0.2.199-补29cz)。"""
+    manager, exp_id, data_id = _manager_with_peaks(
+        tmp_path,
+        "Assignment w1 w2 Data Height Volume\n"
+        "G1 118.0 8.2 0 100.0 100.0\n",
+        None,
+    )
+    panel = SpectrumPanel(manager)
+    logs: list[str] = []
+    panel.log_message.connect(logs.append)
+    panel.set_context(exp_id, data_id)
+    panel._load_peaks(Path("fake.ft2"))
+    assert any("未找到 SMILE 优化可靠性数据" in line for line in logs)
+    panel.close()
+
+
 def test_no_smile_no_confidence_column(
     tmp_path: Path, qapp: QApplication
 ) -> None:

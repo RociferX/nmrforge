@@ -143,6 +143,7 @@ class SpectrumPanel(QWidget):
 
     peaks_saved = pyqtSignal()  # 峰表写回后发出(主窗口刷新 Pipeline/日志)
     status_message = pyqtSignal(str)  # 状态栏提示(主窗口接收)
+    log_message = pyqtSignal(str)  # 任务日志(主窗口 LogPanel 接收,0.2.199-补29cz)
     _ft3_ready = pyqtSignal(object, object)  # (path, Spectrum3D) 后台加载完成
     _ft3_failed = pyqtSignal(object, str)  # (path, message)
     # 0.2.199-补29bp:谱图放大/收起(主窗口收起左侧三部分)
@@ -946,15 +947,20 @@ class SpectrumPanel(QWidget):
         return tol
 
     def _attach_smile_confidence(self) -> None:
-        """把 SMILE 优化逐峰可信度匹配到当前峰表(0.2.199-补29cy)。
+        """把 SMILE 优化逐峰可信度匹配到当前峰表(0.2.199-补29cy/补29cz)。
 
         匹配后写入 peak["Reliability(%)"],峰表显示列「可信度」;该列不写
-        .list(export_peaks_poky 固定列)。未做 SMILE 优化或无匹配留空。
+        .list(export_peaks_poky 固定列)。未做 SMILE 优化或无匹配留空;
+        匹配结果输出到任务日志(导入峰表/自动选峰/打开谱图均可看到)。
         """
         if not self._peaks:
             return
         rel_peaks = self._load_smile_reliability()
         if not rel_peaks:
+            self.log_message.emit(
+                "可信度匹配:未找到 SMILE 优化可靠性数据(smile_optimized/),"
+                "跳过"
+            )
             return
         tol = self._smile_match_tolerance()
         keys = (
@@ -962,10 +968,23 @@ class SpectrumPanel(QWidget):
             if "H_shift" in self._peaks[0]
             else ("F1_shift", "F2_shift", "F3_shift")
         )
+        matched = 0
         for peak in self._peaks:
             confidence = _nearest_smile_confidence(peak, rel_peaks, keys, tol)
             if confidence is not None:
                 peak["Reliability(%)"] = confidence
+                matched += 1
+        total = len(self._peaks)
+        if matched:
+            self.log_message.emit(
+                f"可信度匹配: {matched}/{total} 个峰匹配到 SMILE 优化可信度"
+                f"(未匹配 {total - matched} 个)"
+            )
+        else:
+            self.log_message.emit(
+                f"可信度匹配: {total} 个峰均未在 SMILE 优化结果中找到"
+                "对应峰,可信度留空"
+            )
 
     def _peak_file_path(self, spectrum_path: Path) -> Path | None:
         """峰表文件:.list 优先(峰表即 list),旧 CSV 兼容回退。"""

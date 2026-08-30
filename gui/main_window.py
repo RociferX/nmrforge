@@ -258,6 +258,8 @@ class MainWindow(QMainWindow):
 
         self.spectrum_panel = SpectrumPanel(self.manager, controller=self.controller)
         self.spectrum_panel.peaks_saved.connect(self._on_peaks_saved)
+        # 0.2.199-补29cz:峰表可信度匹配等任务日志进 LogPanel
+        self.spectrum_panel.log_message.connect(self._append_log)
         self.spectrum_panel.status_message.connect(
             self.statusBar().showMessage
         )
