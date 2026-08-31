@@ -494,9 +494,17 @@ def unified_route(    experiment: Experiment,
         search_axes = [
             a for a in search_axes if f"phase_{a}" in plan.dag.nodes
         ]
-    # 0.2.199-补29dn(方案A,用户):填零先定——相位搜索预览用与终跑一致的
-    # auto 完整填零,避免低分辨率(零填零)下评分最优与终谱不一致
-    zf_phase = {"zero_fill": {a: {"mode": "auto"} for a in axes}}
+    # 0.2.199-补29dn(方案A,用户):填零先定——间接维搜索预览用 auto 完整
+    # 填零,避免低分辨率(零填零)下评分最优与终谱不一致(sampleI F1 105°→90°);
+    # 0.2.199-补29dt(用户,VM 实测 sampleI):直接维搜索预览必须保持无填零
+    # (补29r 语义)——补29dn 全 auto 后直接维在填零分辨率上搜索,F2 由正确
+    # 310° 偏到 330°;直接维 none 预览 F2=305-312.5°(≈310)且 F1 仍 90°。
+    zf_phase = {
+        "zero_fill": {
+            a: ({"mode": "none"} if a == direct_axis else {"mode": "auto"})
+            for a in axes
+        }
+    }
     backend_runs = 0
     # 0.2.199-补29dr(用户):不做迭代——初始逐轴搜索(间接维先行)后,
     # 直接维确定,再对间接维重搜一轮(预览带直接维固定相位),不再交替迭代。
@@ -1273,7 +1281,9 @@ def _unified_nus(
     axis_traces: dict[str, tuple[list[int], list[int]]] = {}
     ext = "ft3" if experiment.ndim >= 3 else "ft2"
     # 0.2.199-补29dn(方案A,用户):填零先定——间接维相位搜索预览用与终跑
-    # 一致的 auto 完整填零,避免低分辨率下评分最优与终谱不一致
+    # 一致的 auto 完整填零,避免低分辨率下评分最优与终谱不一致;
+    # 0.2.199-补29dt:NUS 直接维在 finalize 实型终谱上搜索(直接维=平面序号,
+    # 不 FT/不填零),预览填零只作用于间接维,故 NUS 保持全 auto
     zf_phase = {
         "zero_fill": {
             a: {"mode": "auto"}
