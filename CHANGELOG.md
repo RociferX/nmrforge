@@ -1,5 +1,19 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29dv(2026-08-31,填零候选优化还原到与窗函数优化同阶段)
+
+用户:填零优化还原到和窗函数优化一起的地方——处理参数优化阶段,填零参与
+候选择优写回终跑(0.2.163-补6 语义,此前填零固定 auto)。
+实现(workflow/phase_routes.py):
+- _optimize_uniform_processing / _optimize_nus_processing 第 3 步(间接维窗
+  优化)之后新增「填零候选优化」:候选 auto/1×TD/2×TD(间接维,直接维保持
+  auto 由内存护栏兜底),在已选间接维窗基础上 uniform process / NUS finalize
+  重渲 + spectrum_quality 评分择优,写回终跑 zero_fill;
+- 与窗函数优化同一阶段(3.5),日志「填零候选(嵌入): …」;
+- 评分失败/候选不优于 auto 保持 auto 不阻断;
+- 测试:NUS 处理参数优化调用计数更新(joint+基线重渲+填零候选×3=5);
+- 全量 pytest 826 项全绿,ruff 通过,test_full_paths 通过。
+
 ## 0.2.199-补29du(2026-08-31,相位搜索预览全轴零填零,消除填零数据敏感性)
 
 用户:补29dt(间接维 auto、直接维 none)后 sampleH 间接维又不对(F1 应 85°,搜出
