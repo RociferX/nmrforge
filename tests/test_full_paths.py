@@ -451,6 +451,7 @@ def test_manual_full_path_uniform(
         run_manual_fid_com,
         run_manual_spectrum,
     )
+    from workflow.stepwise import generate_fid
 
     class Runtime:
         def run(self, argv, *, cwd=None, timeout=3600, on_line=None):
@@ -468,6 +469,8 @@ def test_manual_full_path_uniform(
         tmp_path, bruker_dir, "hsqc_2d"
     )
     backend = FakeBackend(manager.data_dir(exp_id, data_id, "process"))
+    # 0.2.199-补29dm:人工必须先自动生成 FID(fid.com 落盘)后才能读取
+    generate_fid(manager, exp_id, data_id, backend)
     content = manual_fid_com(manager, exp_id, data_id, backend)
     assert "fid.com" in content
     fid_path = run_manual_fid_com(manager, exp_id, data_id, content, backend=backend)

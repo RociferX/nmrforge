@@ -442,7 +442,8 @@ def test_pipeline_panel_refresh_shows_next_step(tmp_path: Path, qapp: QApplicati
     assert "生成 FID" in panel.next_label.text()
     assert not panel._rows["fid"].run_button.isHidden()
     assert panel._rows["spectrum"].run_button.isHidden()
-    assert not panel._rows["fid"].manual_button.isHidden()
+    # 0.2.199-补29dm:生成 FID 人工按钮须先自动处理(SUCCESS)才出现
+    assert panel._rows["fid"].manual_button.isHidden()
     panel.close()
 
 

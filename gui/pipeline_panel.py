@@ -1049,9 +1049,15 @@ class PipelinePanel(QWidget):
             # 0.2.163-补14:前置步骤未完成(LOCKED)时不提供人工按钮——
             # 上一步没完成就不给下一步的运行入口(与自动「运行」按钮一致)
             # 0.2.199-补29dl(用户):峰挑选无人工脚本(自动检测),不再显示人工按钮
-            self._rows[step_id].manual_button.setVisible(
-                step_id not in ("smile", "peaks") and status != "LOCKED"
-            )
+            # 0.2.199-补29dm(用户):生成 FID 必须先自动处理(SUCCESS)才出现
+            # 人工按钮——人工只读已生成的 fid.com,不再触发自动转换
+            if step_id == "fid":
+                manual_visible = status == "SUCCESS"
+            else:
+                manual_visible = (
+                    step_id not in ("smile", "peaks") and status != "LOCKED"
+                )
+            self._rows[step_id].manual_button.setVisible(manual_visible)
             # 0.2.88:生成谱图完成后出现「展示谱图」按钮(不再自动显示谱)
             self._rows[step_id].show_spectrum_button.setVisible(
                 step_id == "spectrum" and status == "SUCCESS"

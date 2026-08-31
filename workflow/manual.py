@@ -126,49 +126,39 @@ def manual_fid_com(
     manager: ProjectManager,
     exp_id: str,
     data_id: str,
-    backend: Any,
+    backend: Any | None = None,
 ) -> str:
-    """获取当前 fid.com 内容(供人工查看/修改);未生成时先自动生成。
+    """获取已生成的 fid.com 内容(供人工查看/修改);不触发自动转换。
 
-    分段采集:合并链路逐段生成 fid.com(seg_001 参数一致,作参考段),
-    返回参考段内容并加提示头;单数据集同样加提示头——人工改参数后由
-    run_manual_fid_com 作为覆盖交给后端统一执行(0.2.163-补13/
-    0.2.199-补2)。
+    0.2.199-补29dm(用户):生成 FID 的人工按钮只在自动处理成功后出现,这里
+    直接读已生成的 fid.com——单数据集 process/fid.com;分段取参考段
+    process/seg_001/fid.com 并加提示头(人工改参数后由 run_manual_fid_com
+    作为覆盖交给后端统一执行)。fid.com 不存在时明确报错,不再自动转换
+    (避免点击后隔一会才打开)。
     """
     data_entry = manager.data(exp_id, data_id)
     raw_dir = _resolve_raw_dir(manager, data_entry)
     work = _work_dir(manager, exp_id, data_id)
-    work.mkdir(parents=True, exist_ok=True)
     segments = list(getattr(data_entry, "segments", None) or [])
-    fid_com = work / "fid.com"
-    if not fid_com.is_file():
-        legacy = raw_dir / "fid.com"
-        if legacy.is_file():
-            return legacy.read_text(encoding="utf-8", errors="replace")
-        experiment = _read_experiment(manager, exp_id, data_id)
-        if hasattr(backend, "work_dir"):
-            backend.work_dir = str(work)
-        resp = backend.convert_to_fid(experiment, raw_dir)
-        if not resp.get("success"):
-            raise ManualRunError(
-                f"自动生成 fid.com 失败: {resp.get('message')}"
+    if segments:
+        seg_fid = work / "seg_001" / "fid.com"
+        if seg_fid.is_file():
+            header = (
+                "# 分段采集:此为参考段 fid.com,修改参数将应用到所有段\n"
+                "# (数据转换/切片/合并由后端统一执行,勿改输出名)\n"
             )
-        if segments:
-            seg_fid = work / "seg_001" / "fid.com"
-            if seg_fid.is_file():
-                content = seg_fid.read_text(encoding="utf-8", errors="replace")
-                header = (
-                    "# 分段采集:此为参考段 fid.com,修改参数将应用到所有段\n"
-                    "# (数据转换/切片/合并由后端统一执行,勿改输出名)\n"
-                )
-                return header + content
-        content = (work / "fid.com").read_text(encoding="utf-8", errors="replace")
-        header = (
-            "# 人工只调参数:修改的 bruk2pipe 参数会作为覆盖应用\n"
-            "# (数据转换/坏点清理/输出命名由后端统一执行,勿改输出名)\n"
-        )
-        return header + content
-    return fid_com.read_text(encoding="utf-8", errors="replace")
+            return header + seg_fid.read_text(
+                encoding="utf-8", errors="replace"
+            )
+    fid_com = work / "fid.com"
+    if fid_com.is_file():
+        return fid_com.read_text(encoding="utf-8", errors="replace")
+    legacy = raw_dir / "fid.com"
+    if legacy.is_file():
+        return legacy.read_text(encoding="utf-8", errors="replace")
+    raise ManualRunError(
+        "fid.com 不存在,请先自动生成 FID 后再打开人工编辑器"
+    )
 
 
 def run_manual_fid_com(

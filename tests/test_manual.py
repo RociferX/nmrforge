@@ -73,15 +73,28 @@ def _manager_with_raw(tmp_path: Path, bruker_dir: Path):
     return manager, entry.id, data.id, raw
 
 
-def test_manual_fid_com_generates_and_reads(
+def test_manual_fid_com_requires_auto_generated(
     tmp_path: Path, bruker_dir: Path
 ) -> None:
-    manager, exp_id, data_id, raw = _manager_with_raw(tmp_path, bruker_dir)
+    """0.2.199-补29dm:未自动生成 fid.com 时人工直接报错,不再自动转换。"""
+    manager, exp_id, data_id, _raw = _manager_with_raw(tmp_path, bruker_dir)
+    with pytest.raises(ManualRunError, match="请先自动生成 FID"):
+        manual_fid_com(manager, exp_id, data_id, _FakeBackend())
+
+
+def test_manual_fid_com_reads_existing(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """0.2.199-补29dm:已生成 fid.com 直接读取,不触发转换。"""
+    manager, exp_id, data_id, _raw = _manager_with_raw(tmp_path, bruker_dir)
+    work = manager.data_dir(exp_id, data_id, "process")
+    work.mkdir(parents=True, exist_ok=True)
+    (work / "fid.com").write_text(
+        "#!/bin/csh\n# existing fid.com\n", encoding="utf-8"
+    )
     content = manual_fid_com(manager, exp_id, data_id, _FakeBackend())
-    assert "fid.com" in content
-    assert (
-        manager.data_dir(exp_id, data_id, "process") / "fid.com"
-    ).is_file()
+    assert "# existing fid.com" in content
+    assert "# auto fid.com" not in content  # 未重新转换
 
 
 def test_run_manual_fid_com_registers(
@@ -355,12 +368,17 @@ class _SegFakeBackend:
 def test_manual_fid_com_segmented_returns_reference(
     tmp_path: Path, bruker_dir: Path
 ) -> None:
-    """分段人工 fid.com 返回参考段(seg_001)内容,提示头说明参数应用到所有段。"""
+    """0.2.199-补29dm:分段人工 fid.com 直接读参考段(seg_001),不触发转换。"""
     from workflow.manual import manual_fid_com
 
     manager, exp_id, data_id = _segmented_manager(tmp_path, bruker_dir)
-    backend = _SegFakeBackend()
-    content = manual_fid_com(manager, exp_id, data_id, backend)
+    work = manager.data_dir(exp_id, data_id, "process")
+    seg = work / "seg_001"
+    seg.mkdir(parents=True, exist_ok=True)
+    (seg / "fid.com").write_text(
+        "#!/bin/csh\n# seg fid.com\n", encoding="utf-8"
+    )
+    content = manual_fid_com(manager, exp_id, data_id, _SegFakeBackend())
     assert "# 分段采集" in content
     assert "# seg fid.com" in content
 

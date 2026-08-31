@@ -1,5 +1,21 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29dm(2026-08-31,生成 FID 人工按钮须先自动处理才出现,直接读 fid.com)
+
+用户:生成 FID 点人工要隔一会才打开(是加载了什么)——根因:manual_fid_com
+在 fid.com 未生成时会先自动执行完整 FID 转换(3D NUS/分段更慢),再打开编辑器。
+修复(用户):生成 FID 的人工按钮只在自动处理成功(SUCCESS)后出现;点击直接读
+已生成的 fid.com,不再触发自动转换。
+实现:
+- gui/pipeline_panel:set_status 对 fid 步骤人工按钮改为仅 status=="SUCCESS"
+  显示(先自动处理才出现);
+- workflow/manual:manual_fid_com 去掉"未生成时自动转换"分支——单数据集读
+  process/fid.com、分段读 process/seg_001/fid.com(带提示头);缺失时报
+  「fid.com 不存在,请先自动生成 FID」,不再自动转换;
+- 测试:test_manual 改为「未生成报错/已生成直接读」,test_gui_context/
+  test_gui_layout 增加 fid 人工按钮门控断言,test_full_paths 人工路径先自动
+  generate_fid 再读;全量 pytest 826 项全绿,ruff 通过,test_full_paths 11 项通过。
+
 ## 0.2.199-补29dl(2026-08-31,参考模式选峰:峰挑选可选参考谱,只保留匹配峰)
 
 用户:峰挑选加「参考谱」按钮,点击可选任意已有峰表的数据,选峰时加入约束——

@@ -148,6 +148,8 @@ def test_pipeline_buttons_gated_by_prerequisites(
     for sid in ("spectrum", "peaks", "analysis"):
         assert rows[sid].manual_button.isHidden(), sid
         assert rows[sid].run_button.isHidden(), sid
+    # 0.2.199-补29dm:fid 未自动处理(READY)时人工按钮隐藏
+    assert rows["fid"].manual_button.isHidden()
 
     # 程序化运行入口同样被前置守卫拒绝(不进入 RUNNING/后端)
     messages: list[str] = []
@@ -176,6 +178,8 @@ def test_pipeline_buttons_gated_by_prerequisites(
     record_step_success(manager, exp_id, data_id, "fid")
     manager.save()
     pipeline.refresh()
+    # 0.2.199-补29dm:fid 自动处理成功后人工按钮出现(直接读 fid.com)
+    assert not rows["fid"].manual_button.isHidden()
     assert not rows["spectrum"].manual_button.isHidden()
     assert not rows["spectrum"].run_button.isHidden()
     assert rows["peaks"].manual_button.isHidden()
