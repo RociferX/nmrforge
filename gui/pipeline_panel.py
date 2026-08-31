@@ -29,6 +29,7 @@ from PyQt6.QtWidgets import (
     QLayout,
     QLayoutItem,
     QLineEdit,
+    QListWidget,
     QPushButton,
     QScrollArea,
     QSlider,
@@ -559,6 +560,8 @@ class PipelineStepRow(QWidget):
     report_requested = pyqtSignal(str)  # step_id:分析完成后打开报告页
     show_spectrum_requested = pyqtSignal(str)  # step_id:生成谱图完成后展示谱图
     ext_range_requested = pyqtSignal(str)  # step_id:设置终跑直接维范围
+    ref_spectrum_requested = pyqtSignal(str)  # step_id:选择参考谱(峰挑选)
+    clear_ref_requested = pyqtSignal(str)  # step_id:清除参考谱约束
     detail_toggled = pyqtSignal(str)  # step_id:点击行切换详情
     view_log_requested = pyqtSignal(str)  # step_id:定位日志面板
 
@@ -652,6 +655,27 @@ class PipelineStepRow(QWidget):
         button_row.addWidget(self.threshold_label)
         button_row.addWidget(self.threshold_slider)
         button_row.addWidget(self.threshold_spin)
+        # 0.2.199-补29dl(用户):参考谱——选峰时只保留与参考峰表匹配的峰
+        self.ref_button = QPushButton("参考谱")
+        self.ref_button.setToolTip(
+            "选择参考谱(任意已有峰表的数据):选峰时只保留与参考峰表匹配的峰"
+        )
+        self.ref_button.setVisible(self.step_id == "peaks")
+        self.ref_button.clicked.connect(
+            lambda: self.ref_spectrum_requested.emit(self.step_id)
+        )
+        button_row.addWidget(self.ref_button)
+        self.ref_label = QLabel("")
+        self.ref_label.setVisible(self.step_id == "peaks")
+        self.ref_label.setStyleSheet("color: #16a085;")
+        button_row.addWidget(self.ref_label)
+        self.clear_ref_button = QPushButton("清除")
+        self.clear_ref_button.setVisible(False)
+        self.clear_ref_button.setToolTip("清除参考谱约束")
+        self.clear_ref_button.clicked.connect(
+            lambda: self.clear_ref_requested.emit(self.step_id)
+        )
+        button_row.addWidget(self.clear_ref_button)
         self.run_button = QPushButton("运行")
         self.run_button.setVisible(False)
         self.run_button.clicked.connect(lambda: self.run_requested.emit(self.step_id))
@@ -742,6 +766,16 @@ class PipelineStepRow(QWidget):
         """峰挑选阈值(σ);非 peaks 步骤返回默认 15.0(0.2.199-补29cm)。"""
         return self.threshold_spin.value() if self.step_id == "peaks" else 15.0
 
+    def set_ref_text(self, text: str) -> None:
+        """显示已选参考谱(0.2.199-补29dl)。"""
+        self.ref_label.setText(text)
+        self.clear_ref_button.setVisible(bool(text) and self.step_id == "peaks")
+
+    def clear_ref_display(self) -> None:
+        """清除参考谱显示。"""
+        self.ref_label.setText("")
+        self.clear_ref_button.setVisible(False)
+
     def set_detail(self, text: str, failed: bool = False) -> None:
         """填充详情文本。"""
         self.detail_label.setText(text)
@@ -828,6 +862,8 @@ class PipelinePanel(QWidget):
         # 重读大 ft3 算质量导致卡顿;运行中标志防连续点击重复启动
         self._spectrum_report_cache: dict[str, str] = {}
         self._run_active: bool = False
+        # 0.2.199-补29dl:参考谱约束 {label, peaks, nuclei, path}
+        self._ref_info: dict | None = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
@@ -870,6 +906,8 @@ class PipelinePanel(QWidget):
             row.report_requested.connect(self.report_requested.emit)
             row.show_spectrum_requested.connect(self.show_spectrum_requested.emit)
             row.ext_range_requested.connect(self._on_ext_range_requested)
+            row.ref_spectrum_requested.connect(self._on_pick_reference)
+            row.clear_ref_requested.connect(self._on_clear_reference)
             row.detail_toggled.connect(self._toggle_step_detail)
             row.view_log_requested.connect(self.view_log_requested.emit)
             steps_box.addWidget(row)
@@ -1010,8 +1048,9 @@ class PipelinePanel(QWidget):
             # 导入样品数据为自动化步骤,无人工入口;其余处理步骤保留人工;
             # 0.2.163-补14:前置步骤未完成(LOCKED)时不提供人工按钮——
             # 上一步没完成就不给下一步的运行入口(与自动「运行」按钮一致)
+            # 0.2.199-补29dl(用户):峰挑选无人工脚本(自动检测),不再显示人工按钮
             self._rows[step_id].manual_button.setVisible(
-                step_id != "smile" and status != "LOCKED"
+                step_id not in ("smile", "peaks") and status != "LOCKED"
             )
             # 0.2.88:生成谱图完成后出现「展示谱图」按钮(不再自动显示谱)
             self._rows[step_id].show_spectrum_button.setVisible(
@@ -1316,6 +1355,170 @@ class PipelinePanel(QWidget):
                 text, _params, failed = self._step_detail(step_id)
                 row.set_detail(text, failed=failed)
 
+    # ------------------------------------------------------------------
+    # 参考谱约束(0.2.199-补29dl,用户)
+    # ------------------------------------------------------------------
+    def _reference_candidates(self) -> list[tuple[str, str, str]]:
+        """项目内已有峰表的数据列表(显示名, exp_id, data_id)。"""
+        out: list[tuple[str, str, str]] = []
+        if self.manager is None or self.manager.project is None:
+            return out
+        for exp in self.manager.project.experiments:
+            for entry in getattr(exp, "data", []):
+                data_id = str(getattr(entry, "id", "") or "")
+                if not data_id:
+                    continue
+                try:
+                    peaks_dir = self.manager.data_dir(exp.id, data_id, "peaks")
+                except Exception:  # noqa: BLE001 - 单数据异常跳过
+                    continue
+                has = any(
+                    (peaks_dir / f"{exp.id}-{data_id}{suffix}").is_file()
+                    for suffix in (".list", ".csv")
+                )
+                if not has:
+                    continue
+                title = str(getattr(entry, "title", "") or "")
+                name = f"{exp.id}/{data_id}"
+                if title:
+                    name += f" ({title})"
+                out.append((name, exp.id, data_id))
+        return out
+
+    def _ref_nuclei_from_spectrum(self, spectrum_path: Path) -> list[str] | None:
+        """从参考谱头部取每轴核名(F 序);失败/核不可知返回 None。"""
+        symbols = {
+            "H": "1H", "N": "15N", "C": "13C",
+            "F": "19F", "P": "31P", "D": "2H",
+        }
+        full = {"1H", "2H", "13C", "15N", "19F", "31P", "23Na", "29Si"}
+        try:
+            if spectrum_path.suffix.lower() == ".ft3":
+                from viewer.spectrum import Spectrum3D
+
+                spec = Spectrum3D.load_from_ft3(spectrum_path, lazy=True)
+            else:
+                from viewer.spectrum import Spectrum
+
+                spec = Spectrum.load_from_ft2(spectrum_path)
+        except Exception:  # noqa: BLE001 - 谱读取失败回退 None
+            return None
+        nuclei: list[str] = []
+        for axis in getattr(spec, "axes", []):
+            label = str(getattr(axis, "label", "") or "").strip()
+            if len(label) > 1 and label[-1:].lower() in ("x", "y", "z"):
+                label = label[:-1]
+            nuc = symbols.get(label, label)
+            nuclei.append(nuc if nuc in full else "")
+        return nuclei if nuclei and all(nuclei) else None
+
+    def _load_reference(self, exp_id: str, data_id: str) -> dict | None:
+        """加载参考数据峰表 + 核名;失败返回 None。"""
+        from core.peaks.peak_table import load_peaks
+        from gui.peaks_io import import_peaks_poky
+
+        try:
+            peaks_dir = self.manager.data_dir(exp_id, data_id, "peaks")
+        except Exception:  # noqa: BLE001
+            return None
+        path: Path | None = None
+        for suffix in (".list", ".csv"):
+            cand = peaks_dir / f"{exp_id}-{data_id}{suffix}"
+            if cand.is_file():
+                path = cand
+                break
+        if path is None:
+            return None
+        data_entry = self.manager.data(exp_id, data_id)
+        spectrum_path = str(getattr(data_entry, "spectrum_path", "") or "")
+        nuclei = (
+            self._ref_nuclei_from_spectrum(Path(spectrum_path))
+            if spectrum_path and Path(spectrum_path).is_file()
+            else None
+        )
+        if path.suffix.lower() == ".list":
+            peaks = import_peaks_poky(path, nuclei=nuclei)
+        else:
+            peaks = load_peaks(path)
+        if not peaks:
+            return None
+        # 无谱可用时 2D 行按键名推断核(HSQC 参考常见场景)
+        if nuclei is None and "N_shift" in peaks[0] and "H_shift" in peaks[0]:
+            nuclei = ["15N", "1H"]
+        title = str(getattr(data_entry, "title", "") or "")
+        label = f"{exp_id}/{data_id}"
+        if title:
+            label += f" ({title})"
+        return {
+            "label": label,
+            "peaks": peaks,
+            "nuclei": nuclei,
+            "path": str(path),
+        }
+
+    def _on_pick_reference(self, step_id: str) -> None:
+        """「参考谱」按钮:选择任意已有峰表的数据作为选峰参考。"""
+        if self.manager is None or self.manager.project is None:
+            return
+        candidates = self._reference_candidates()
+        if not candidates:
+            from gui.dialogs import InfoDialog
+
+            InfoDialog.show_info(
+                self, "参考谱", "项目中没有已有峰表的数据,请先对某数据选峰"
+            )
+            return
+        dialog = QDialog(self)
+        dialog.setWindowTitle("选择参考谱(已有峰表)")
+        lay = QVBoxLayout(dialog)
+        tip = QLabel("选择参考数据:选峰时只保留与参考峰表匹配的峰(按核匹配)")
+        tip.setWordWrap(True)
+        lay.addWidget(tip)
+        lst = QListWidget()
+        for name, _exp, _did in candidates:
+            lst.addItem(name)
+        lay.addWidget(lst)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok
+            | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        lay.addWidget(buttons)
+        if dialog.exec() != QDialog.DialogCode.Accepted or lst.currentRow() < 0:
+            return
+        _name, ref_exp, ref_data = candidates[lst.currentRow()]
+        info = self._load_reference(ref_exp, ref_data)
+        if info is None:
+            from gui.dialogs import InfoDialog
+
+            InfoDialog.show_info(
+                self, "参考谱", f"无法加载参考峰表: {ref_exp}/{ref_data}"
+            )
+            return
+        if info.get("nuclei") is None and any(
+            "F1_shift" in p for p in info["peaks"]
+        ):
+            from gui.dialogs import InfoDialog
+
+            InfoDialog.show_info(
+                self,
+                "参考谱",
+                "参考峰表为 3D 且无法确定核名(未加载参考谱),约束将不生效",
+            )
+            return
+        self._ref_info = info
+        self._rows["peaks"].set_ref_text(
+            f"参考: {info['label']} ({len(info['peaks'])} 峰)"
+        )
+
+    def _on_clear_reference(self, step_id: str) -> None:
+        """清除参考谱约束。"""
+        self._ref_info = None
+        row = self._rows.get("peaks")
+        if row is not None:
+            row.clear_ref_display()
+
     def _on_run_requested(self, step_id: str) -> None:
         if not self._current_exp_id:
             return
@@ -1403,6 +1606,10 @@ class PipelinePanel(QWidget):
                         kwargs["sigma_multiplier"] = self._rows[
                             step_id
                         ].get_threshold()
+                        if self._ref_info:
+                            kwargs["ref_peaks"] = self._ref_info["peaks"]
+                            kwargs["ref_nuclei"] = self._ref_info.get("nuclei")
+                            kwargs["tolerance_ppm"] = None
                     if "progress" in inspect.signature(method).parameters:
                         kwargs["progress"] = lambda msg: self.log_scoped.emit(
                             f"{step_label}: {msg}", run_scope

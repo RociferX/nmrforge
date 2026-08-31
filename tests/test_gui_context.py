@@ -161,7 +161,11 @@ def test_pipeline_buttons_gated_by_prerequisites(
         product.write_bytes(b"x")
         manager.save()
         pipeline.refresh()
-        assert not rows[sid].manual_button.isHidden(), sid
+        # 0.2.199-补29dl(用户):峰挑选无人工脚本,人工按钮始终隐藏
+        if sid == "peaks":
+            assert rows[sid].manual_button.isHidden(), sid
+        else:
+            assert not rows[sid].manual_button.isHidden(), sid
         assert not rows[sid].run_button.isHidden(), sid
 
     # 生成 FID → spectrum READY;peaks/analysis 仍 LOCKED

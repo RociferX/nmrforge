@@ -376,6 +376,9 @@ class ProcessingController:
         exp_id: str | None = None,
         data_id: str | None = None,
         sigma_multiplier: float | None = None,
+        ref_peaks: list[dict] | None = None,
+        ref_nuclei: list[str] | None = None,
+        tolerance_ppm: dict[str, float] | None = None,
     ) -> dict:
         """峰挑选:调 workflow.pick_peaks,返回 {status, peak_path, peak_count, logs}。"""
         try:
@@ -387,7 +390,9 @@ class ProcessingController:
         exp_id = exp_id or getattr(data, "exp_id", "")
         data_id = data_id or getattr(data, "id", "")
         result = backend_pick_peaks(
-            self._manager, exp_id, data_id, sigma_multiplier=sigma_multiplier
+            self._manager, exp_id, data_id, sigma_multiplier=sigma_multiplier,
+            ref_peaks=ref_peaks, ref_nuclei=ref_nuclei,
+            tolerance_ppm=tolerance_ppm,
         )
         if data_id and result.get("status") == "success":
             record_step_success(self._manager, exp_id, data_id, "peaks")

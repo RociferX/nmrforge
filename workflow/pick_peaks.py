@@ -330,6 +330,89 @@ def _sign_mode_for(
     return "both" if peak_sign == "mixed" else "dominant"
 
 
+def _peak_nucleus_ppm(
+    peak: peak_detection.Peak,
+    axes: list[np.ndarray],
+    storage_nuclei: list[str],
+) -> dict[str, float]:
+    """检测峰(数据轴序) → {核名: ppm}(仅核已知的轴;0.2.199-补29dl)。"""
+    coords: dict[str, float] = {}
+    for ax, nucleus in enumerate(storage_nuclei):
+        if not nucleus or ax >= len(axes):
+            continue
+        idx = int(peak.position[ax])
+        if 0 <= idx < int(axes[ax].size):
+            coords[nucleus] = float(axes[ax][idx])
+    return coords
+
+
+def _row_nucleus_ppm(
+    row: dict[str, Any], nuclei: list[str] | None
+) -> dict[str, float]:
+    """参考峰表行 → {核名: ppm}(0.2.199-补29dl)。
+
+    nuclei 为参考轴核名(F 序,3D 行 F1/F2/F3_shift 用);2D 行直接按键名
+    (N_shift/H_shift/C_shift)取核。
+    """
+    coords: dict[str, float] = {}
+    if nuclei:
+        for i, nucleus in enumerate(nuclei):
+            value = row.get(f"F{i + 1}_shift")
+            if value is not None and str(value) != "":
+                coords[nucleus] = float(value)
+    for key, nucleus in (
+        ("H_shift", "1H"), ("N_shift", "15N"), ("C_shift", "13C"),
+    ):
+        value = row.get(key)
+        if value is not None and str(value) != "":
+            coords.setdefault(nucleus, float(value))
+    return coords
+
+
+def _default_tolerance_ppm(
+    axes: list[np.ndarray], storage_nuclei: list[str]
+) -> dict[str, float]:
+    """参考匹配容差(ppm):每核 ±4 点×ppm/点,无轴回退固定值(0.2.199-补29dl)。"""
+    tol = {
+        "1H": 0.1, "2H": 0.1, "15N": 0.5, "13C": 0.5,
+        "19F": 0.1, "31P": 0.1, "23Na": 0.5, "29Si": 0.5,
+    }
+    for ax, nucleus in enumerate(storage_nuclei):
+        if not nucleus or ax >= len(axes):
+            continue
+        ppm = np.asarray(axes[ax], dtype=float)
+        if ppm.size < 2:
+            continue
+        diff = np.abs(np.diff(ppm))
+        diff = diff[diff > 0]
+        step = float(np.median(diff)) if diff.size else 0.0
+        if step > 0:
+            tol[nucleus] = 4.0 * step
+    return tol
+
+
+def _reference_match(
+    peak_coords: dict[str, float],
+    ref_coords: list[dict[str, float]],
+    tol: dict[str, float],
+) -> bool:
+    """峰是否与任一参考峰匹配:参考的每个核,当前峰都须有且落在容差内。
+
+    当前谱比参考多出的核(如 3D 对 2D 参考)不参与匹配,第三维自由——
+    一个参考峰可保留多个峰(如 HNCA 的 CA/CB)。
+    """
+    for rc in ref_coords:
+        ok = True
+        for nucleus, rv in rc.items():
+            cv = peak_coords.get(nucleus)
+            if cv is None or abs(cv - rv) > tol.get(nucleus, 1.0):
+                ok = False
+                break
+        if ok:
+            return True
+    return False
+
+
 def pick_peaks(
     manager: ProjectManager,
     exp_id: str,
@@ -337,11 +420,17 @@ def pick_peaks(
     backend: Any | None = None,
     *,
     sigma_multiplier: float | None = None,
+    ref_peaks: list[dict[str, Any]] | None = None,
+    ref_nuclei: list[str] | None = None,
+    tolerance_ppm: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     """峰挑选:检测谱峰并写 Poky .list,登记 WorkflowRun。
 
     backend 保留为接口占位;sigma_multiplier 为噪声倍数阈值(默认 15σ,
-    min_snr 同步);返回 {"status", "peak_path", "peak_count", "logs"}。
+    min_snr 同步);ref_peaks/ref_nuclei/tolerance_ppm 为参考峰表约束
+    (0.2.199-补29dl,用户):只保留与参考峰表按核名匹配的峰——2D 参考匹配
+    全部核;3D 当前谱 + 2D 参考时第三维自由,一个参考峰可保留多个峰。
+    返回 {"status", "peak_path", "peak_count", "logs"}。
     """
     data_entry = manager.data(exp_id, data_id)
     spectrum_path = data_entry.spectrum_path
@@ -379,6 +468,40 @@ def pick_peaks(
                 edge_margin=_PICK_EDGE_MARGIN,
             ),
         )
+        # 0.2.199-补29dl(用户):参考峰表约束——只保留与参考谱峰表匹配的峰
+        ref_log: str | None = None
+        if ref_peaks:
+            prefixes = tuple(
+                _fdf_prefix(dict(dic), arr.ndim, i) for i in range(arr.ndim)
+            )
+            storage_nuclei = _storage_nuclei(dict(dic), prefixes)
+            axes = _axes_ppm(dict(dic), arr)
+            tol = (
+                dict(tolerance_ppm)
+                if tolerance_ppm
+                else _default_tolerance_ppm(axes, storage_nuclei)
+            )
+            ref_coords = [
+                c
+                for c in (_row_nucleus_ppm(r, ref_nuclei) for r in ref_peaks)
+                if c
+            ]
+            before = len(peaks)
+            if ref_coords:
+                peaks = [
+                    p
+                    for p in peaks
+                    if _reference_match(
+                        _peak_nucleus_ppm(p, axes, storage_nuclei),
+                        ref_coords, tol,
+                    )
+                ]
+                ref_log = (
+                    f"参考峰表约束: {before} → {len(peaks)} 峰"
+                    f"(参考 {len(ref_coords)} 峰,容差 {tol})"
+                )
+            else:
+                ref_log = "参考峰表约束: 参考峰表无法解析核坐标,未过滤"
         peak_path = _write_peaks_list(
             manager, exp_id, data_id, arr, dict(dic), peaks,
         )
@@ -402,6 +525,8 @@ def pick_peaks(
         f"峰挑选: {len(peaks)} 个峰 → {peak_path}"
         f"(符号模式: {sign_label},阈值: {threshold:.1f}σ)"
     ]
+    if ref_log:
+        logs.append(ref_log)
     return {
         "status": "success",
         "peak_path": str(peak_path),

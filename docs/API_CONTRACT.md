@@ -91,6 +91,11 @@ class ProcessingController:
     def optimize_smile(self, data, exp_id=None, data_id=None) -> dict
         # 可选 SMILE 优化(仅 NUS):网格搜索重构参数并采用最优谱,
         # 归位 spectra/ 并登记 smile_optimize 运行
+    def pick_peaks(self, data, exp_id=None, data_id=None, *,
+                   sigma_multiplier=None, ref_peaks=None, ref_nuclei=None,
+                   tolerance_ppm=None) -> dict
+        # 参考模式(0.2.199-补29dl):ref_peaks/ref_nuclei/tolerance_ppm 可选,
+        # 只保留与参考峰表按核名匹配的峰(2D 匹配全部核;3D+2D 参考第三维自由)
 ```
 
 自动化固定走 `stepwise.generate_fid/generate_spectrum`(内部 create_backend +

@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 from scipy.ndimage import gaussian_filter
 
-from core.peaks.peak_table import import_peaks_poky
+from core.peaks.peak_table import export_peaks_poky, import_peaks_poky
 from core.project import ProjectManager
 from workflow.pick_peaks import PickPeaksError, pick_peaks
 
@@ -454,4 +454,135 @@ def test_pick_peaks_2d_reversed_storage_maps_by_nucleus(
     h_ppm = 6.0 + (64 - 1 - 20) * 3000.0 / (64 * 600.0)
     assert abs(float(row["N_shift"]) - n_ppm) < 0.05
     assert abs(float(row["H_shift"]) - h_ppm) < 0.05
+
+def _write_ft2_nh(path: Path, data: np.ndarray) -> None:
+    """真实 N-H 二维谱夹具(0.2.199-补29dl 参考约束测试用)。"""
+    from nmrglue.fileio import pipe
+
+    dic = {k: "0" for k in pipe.fdata_dic}
+    dic["FDMAGIC"] = 9.2330230000000007e14
+    dic["FDDIMCOUNT"] = 2
+    dic["FDSIZE"] = data.shape[1]
+    dic["FDSPECNUM"] = data.shape[0]
+    dic["FDQUADFLAG"] = 1
+    dic["FDF1QUADFLAG"] = 1
+    dic["FDF2QUADFLAG"] = 1
+    blocks = {
+        1: ("15N", data.shape[0], 2189.0, 60.8, 118.0, 100.0 * 60.8),
+        2: ("1H", data.shape[1], 3000.0, 600.0, 4.7, 6.0 * 600.0),
+    }
+    for dim, (lab, size, sw, obs, car, orig) in blocks.items():
+        prefix = f"FDF{dim}"
+        dic[prefix + "T"] = size
+        dic[prefix + "SW"] = sw
+        dic[prefix + "OBS"] = obs
+        dic[prefix + "CAR"] = car
+        dic[prefix + "ORIG"] = orig
+        dic[prefix + "LABEL"] = lab
+    pipe.write(str(path), dic, data.astype(np.float32), overwrite=True)
+
+
+def _nh_ppm(n_idx: int, h_idx: int) -> tuple[float, float]:
+    """合成 N-H 谱的 (N,H) ppm(与 _write_ft2_nh 头部一致)。"""
+    n_ppm = 100.0 + (64 - 1 - n_idx) * 2189.0 / (64 * 60.8)
+    h_ppm = 6.0 + (128 - 1 - h_idx) * 3000.0 / (128 * 600.0)
+    return n_ppm, h_ppm
+
+
+def test_pick_peaks_reference_constraint_2d(tmp_path: Path) -> None:
+    """0.2.199-补29dl:参考峰表约束——2D 只保留与参考(N,H)匹配的峰。"""
+    rng = np.random.default_rng(20260831)
+    spec = rng.normal(0, 0.3, (64, 128))
+    spec[20, 40] += 1500.0
+    spec[25, 90] += 1200.0
+    spec[40, 60] += 1000.0
+    spec = gaussian_filter(spec, sigma=1.0)
+    ft2 = tmp_path / "out.ft2"
+    _write_ft2_nh(ft2, spec)
+    manager, exp_id, data_id = _manager_with_spectrum(tmp_path, ft2)
+    ref_path = tmp_path / "ref.list"
+    export_peaks_poky(
+        ref_path,
+        [
+            {"N_shift": _nh_ppm(20, 40)[0], "H_shift": _nh_ppm(20, 40)[1],
+             "Intensity": 1, "label": ""},
+            {"N_shift": _nh_ppm(25, 90)[0], "H_shift": _nh_ppm(25, 90)[1],
+             "Intensity": 1, "label": ""},
+        ],
+        ndim=2,
+    )
+    ref_peaks = import_peaks_poky(ref_path)
+    result = pick_peaks(
+        manager, exp_id, data_id,
+        ref_peaks=ref_peaks, ref_nuclei=["15N", "1H"],
+    )
+    rows = _read_rows(Path(result["peak_path"]))
+    assert len(rows) == 2
+    assert "参考峰表约束" in "".join(result["logs"])
+
+
+def test_pick_peaks_reference_constraint_3d_with_2d_ref(
+    tmp_path: Path,
+) -> None:
+    """0.2.199-补29dl:3D 选峰按 2D 参考(N,H)约束——第三维自由,一个参考峰
+    可保留多个峰(如 HNCA 的 CA/CB)。"""
+    rng = np.random.default_rng(20260831)
+    data = rng.normal(0, 0.3, (16, 16, 16))
+    # 逻辑 F1(N)=8、F2(H)=8、F3(C)=5 和 F3(C)=10;另一 (N,H)=(10,10)
+    data[8, 5, 8] += 1500.0
+    data[8, 10, 8] += 1200.0
+    data[10, 5, 10] += 1000.0
+    data = gaussian_filter(data, sigma=1.0)
+    ft3 = tmp_path / "out.ft3"
+    _write_ft3_ordered(ft3, data, [2.0, 3.0, 1.0])
+    manager, exp_id, data_id = _manager_with_spectrum(tmp_path, ft3)
+    n_ppm = 100.0 + (16 - 1 - 8) * 2189.0 / (16 * 60.8)
+    h_ppm = 6.0 + (16 - 1 - 8) * 3000.0 / (16 * 600.0)
+    ref_path = tmp_path / "ref.list"
+    export_peaks_poky(
+        ref_path,
+        [{"N_shift": n_ppm, "H_shift": h_ppm, "Intensity": 1, "label": ""}],
+        ndim=2,
+    )
+    ref_peaks = import_peaks_poky(ref_path)
+    result = pick_peaks(
+        manager, exp_id, data_id,
+        ref_peaks=ref_peaks, ref_nuclei=["15N", "1H"],
+        tolerance_ppm={"15N": 2.0, "1H": 0.5, "13C": 20.0},
+    )
+    rows = _read_rows(Path(result["peak_path"]), nuclei=["15N", "1H", "13C"])
+    assert len(rows) == 2  # (N=8,H=8) 的两个 C 值保留,另一个 (N,H) 剔除
+    assert "参考峰表约束" in "".join(result["logs"])
+
+
+def test_pick_peaks_reference_tolerance(tmp_path: Path) -> None:
+    """0.2.199-补29dl:参考容差——默认 4 点×ppm/点外剔除,放宽后保留。"""
+    rng = np.random.default_rng(20260831)
+    spec = rng.normal(0, 0.3, (64, 128))
+    spec[20, 40] += 1500.0
+    spec = gaussian_filter(spec, sigma=1.0)
+    ft2 = tmp_path / "out.ft2"
+    _write_ft2_nh(ft2, spec)
+    manager, exp_id, data_id = _manager_with_spectrum(tmp_path, ft2)
+    n20, h40 = _nh_ppm(20, 40)
+    ref_path = tmp_path / "ref.list"
+    # 参考 N 偏移 3 ppm:默认 15N 容差(4 点 ≈ 2.25 ppm)外 → 剔除
+    export_peaks_poky(
+        ref_path,
+        [{"N_shift": n20 + 3.0, "H_shift": h40, "Intensity": 1, "label": ""}],
+        ndim=2,
+    )
+    ref_peaks = import_peaks_poky(ref_path)
+    result = pick_peaks(
+        manager, exp_id, data_id,
+        ref_peaks=ref_peaks, ref_nuclei=["15N", "1H"],
+    )
+    assert _read_rows(Path(result["peak_path"])) == []
+    # tolerance_ppm 放宽到 5 ppm → 保留
+    result2 = pick_peaks(
+        manager, exp_id, data_id,
+        ref_peaks=ref_peaks, ref_nuclei=["15N", "1H"],
+        tolerance_ppm={"15N": 5.0, "1H": 1.0},
+    )
+    assert len(_read_rows(Path(result2["peak_path"]))) == 1
 

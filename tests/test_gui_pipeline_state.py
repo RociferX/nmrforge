@@ -311,3 +311,42 @@ def test_next_label_skips_optional_smile(tmp_path: Path, qapp: QApplication) -> 
     assert "可选做" not in text
     assert "峰挑选" in text
     panel.close()
+
+def test_pipeline_peaks_reference_selection(
+    tmp_path: Path, qapp: QApplication
+) -> None:
+    """0.2.199-补29dl:峰挑选「参考谱」按钮 + 候选数据 + 参考加载。"""
+    from core.peaks.peak_table import export_peaks_poky
+    from gui.pipeline_panel import PipelinePanel
+
+    manager = ProjectManager.create_project(tmp_path / "proj", "demo")
+    exp = manager.create_experiment("HSQC")
+    d1 = manager.import_data(exp.id, "/fake/1")
+    d2 = manager.import_data(exp.id, "/fake/2")
+    peaks_dir = manager.data_dir(exp.id, d1.id, "peaks")
+    peaks_dir.mkdir(parents=True, exist_ok=True)
+    export_peaks_poky(
+        peaks_dir / f"{exp.id}-{d1.id}.list",
+        [{"N_shift": 118.0, "H_shift": 8.0, "Intensity": 1, "label": ""}],
+        ndim=2,
+    )
+    manager.save()
+    panel = PipelinePanel(manager)
+    row = panel._rows["peaks"]
+    assert row.step_id == "peaks"
+    assert row.ref_button.text() == "参考谱"
+    assert not row.ref_button.isHidden()
+    candidates = panel._reference_candidates()
+    assert any(did == d1.id for _n, _e, did in candidates)
+    assert not any(did == d2.id for _n, _e, did in candidates)
+    info = panel._load_reference(exp.id, d1.id)
+    assert info is not None and info["peaks"]
+    assert info["nuclei"] == ["15N", "1H"]
+    panel._ref_info = info
+    row.set_ref_text(f"参考: {info['label']} ({len(info['peaks'])} 峰)")
+    assert not row.clear_ref_button.isHidden()
+    panel._on_clear_reference("peaks")
+    assert panel._ref_info is None
+    assert row.clear_ref_button.isHidden()
+    panel.close()
+
