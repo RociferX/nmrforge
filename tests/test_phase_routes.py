@@ -492,8 +492,10 @@ def test_optimize_nus_processing_baseline_and_window(
     assert "F1: 基线已优化" in " ".join(proc["logs"])
     assert "间接维窗(测试)" in " ".join(proc["logs"])
     assert "固定无窗" not in " ".join(proc["logs"])
-    assert len(calls) == 2
+    # 0.2.199-补29dv:填零候选(auto/1×TD/2×TD)与窗优化同阶段(finalize 重渲)
+    assert len(calls) == 5  # joint + 间接维基线重渲 + 填零候选×3
     assert calls[1]["baseline"]["F1"]["order"] == 2
+    assert any("winzf" in str(c["out_file"]) for c in calls)
 
 
 def test_unified_route_nus_progress_stages(

@@ -1000,6 +1000,73 @@ def _optimize_uniform_processing(
         out_logs += ires.logs
     except Exception as exc:  # noqa: BLE001 - 窗优化失败不影响相位/终跑
         out_logs.append(f"间接维窗优化失败: {exc}")
+    # 3.5) 填零候选优化(0.2.199-补29dv,用户):与窗函数优化同阶段——在已选
+    #      间接维窗基础上,填零候选(auto/1×TD/2×TD)process 重跑 + 谱质量
+    #      评分择优,写回终跑;直接维填零保持 auto(内存护栏兜底)。
+    zf_cfg_final = zf_params
+    try:
+        from backend.script_generator import effective_td as _eff_td
+
+        if progress is not None:
+            progress("填零候选优化中(process 重跑评分)")
+        _td = _eff_td(experiment)
+
+        def _zf_size(idx: int, factor: int) -> int:
+            n = max(int(_td[idx]) if idx < len(_td) else 0, 1)
+            return 1 << max(0, (factor * n - 1)).bit_length()
+
+        zf_candidates: list[tuple[str, dict[str, Any]]] = [("auto", zf_params)]
+        for label, factor in (("1×TD", 1), ("2×TD", 2)):
+            cfg: dict[str, Any] = {}
+            for idx, a in enumerate(axes):
+                cfg[a] = (
+                    {"mode": "auto"}
+                    if a == direct_axis
+                    else {"mode": "size", "size": _zf_size(idx, factor)}
+                )
+            zf_candidates.append((label, cfg))
+
+        def _score_path(path: Path) -> float:
+            import nmrglue as ng
+
+            from core.qc import spectrum_quality
+
+            _dic, data = ng.pipe.read(str(path))
+            return float(spectrum_quality.evaluate(np.asarray(data)).score.overall)
+
+        base_score = _score_path(base_path)
+        best_label, best_cfg, best_score = "auto", zf_params, base_score
+        for label, cfg in zf_candidates:
+            out_c = work / f"{experiment.dataset_id}_winzf_{label}.{ext}"
+            resp_c = backend.process(
+                experiment,
+                plan,
+                direct_phase_override=dict(fixed) if fixed else None,
+                params={"zero_fill": cfg, "window": window_cfg},
+                out_file=out_c.name,
+                script_name=f"{experiment.dataset_id}_winzf_{label}.com",
+                progress=progress,
+            )
+            if not resp_c.get("success") or not resp_c.get("spectrum_path"):
+                out_logs.append(f"填零候选(嵌入): {label} 运行失败,跳过")
+                continue
+            score = _score_path(Path(resp_c["spectrum_path"]))
+            out_logs.append(
+                f"填零候选(嵌入): 间接维 {label}+当前窗 score={score:.1f}"
+            )
+            if score > best_score:
+                best_label, best_cfg, best_score = label, cfg, score
+        if best_label != "auto" and best_score > base_score + 0.5:
+            zf_cfg_final = best_cfg
+            out_logs.append(
+                f"填零候选(嵌入): 已选 {best_label} "
+                f"(score={base_score:.1f} → {best_score:.1f}),终跑应用"
+            )
+        elif best_label != "auto":
+            out_logs.append("填零候选(嵌入): 候选未优于 auto,保持 auto")
+    except Exception as exc:  # noqa: BLE001 - 填零优化失败不影响相位/终跑
+        zf_cfg_final = zf_params
+        out_logs.append(f"填零优化(嵌入)失败: {exc}")
     return {
         "baseline": baseline_cfg,
         # 0.2.199-补29z:各轴基线优化选中配置的评分——最终谱图质量报告
@@ -1007,7 +1074,7 @@ def _optimize_uniform_processing(
         "baseline_scores": _chosen_baseline_scores(
             baseline_cfg, opt.scores if opt is not None else {}
         ),
-        "zero_fill": zf_params,
+        "zero_fill": zf_cfg_final,
         "window": window_cfg,
         "logs": out_logs,
     }
@@ -1148,6 +1215,73 @@ def _optimize_nus_processing(
         out_logs += ires.logs
     except Exception as exc:  # noqa: BLE001 - 窗优化失败不影响相位/终跑
         out_logs.append(f"间接维窗优化失败: {exc}")
+    # 3.5) 填零候选优化(0.2.199-补29dv,用户):与窗函数优化同阶段——在已选
+    #      间接维窗基础上,填零候选(auto/1×TD/2×TD)finalize 重渲 + 谱质量
+    #      评分择优,写回终跑;直接维填零保持 auto(内存护栏兜底,不重跑 SMILE)。
+    zf_cfg_final = zf_params
+    try:
+        from backend.script_generator import effective_td as _eff_td
+
+        if progress is not None:
+            progress("填零候选优化中(finalize 重渲评分,不重跑 SMILE)")
+        _td = _eff_td(experiment)
+
+        def _zf_size(idx: int, factor: int) -> int:
+            n = max(int(_td[idx]) if idx < len(_td) else 0, 1)
+            return 1 << max(0, (factor * n - 1)).bit_length()
+
+        zf_candidates: list[tuple[str, dict[str, Any]]] = [("auto", zf_params)]
+        for label, factor in (("1×TD", 1), ("2×TD", 2)):
+            cfg: dict[str, Any] = {}
+            for idx, a in enumerate(axes):
+                cfg[a] = (
+                    {"mode": "auto"}
+                    if a == direct_axis
+                    else {"mode": "size", "size": _zf_size(idx, factor)}
+                )
+            zf_candidates.append((label, cfg))
+
+        def _score_path(path: Path) -> float:
+            import nmrglue as ng
+
+            from core.qc import spectrum_quality
+
+            _dic, data = ng.pipe.read(str(path))
+            return float(spectrum_quality.evaluate(np.asarray(data)).score.overall)
+
+        base_score = _score_path(base_path)
+        best_label, best_cfg, best_score = "auto", zf_params, base_score
+        for label, cfg in zf_candidates:
+            out_c = work / f"{experiment.dataset_id}_winzf_{label}.{ext}"
+            resp_c = backend.finalize_nus(
+                experiment,
+                phases=dict(fixed),
+                work_dir=work,
+                params={"zero_fill": cfg, "window": window_cfg},
+                out_file=out_c.name,
+                script_name=f"{experiment.dataset_id}_winzf_{label}.com",
+                progress=progress,
+            )
+            if not resp_c.get("success") or not resp_c.get("spectrum_path"):
+                out_logs.append(f"填零候选(嵌入): {label} 运行失败,跳过")
+                continue
+            score = _score_path(Path(resp_c["spectrum_path"]))
+            out_logs.append(
+                f"填零候选(嵌入): 间接维 {label}+当前窗 score={score:.1f}"
+            )
+            if score > best_score:
+                best_label, best_cfg, best_score = label, cfg, score
+        if best_label != "auto" and best_score > base_score + 0.5:
+            zf_cfg_final = best_cfg
+            out_logs.append(
+                f"填零候选(嵌入): 已选 {best_label} "
+                f"(score={base_score:.1f} → {best_score:.1f}),终跑应用"
+            )
+        elif best_label != "auto":
+            out_logs.append("填零候选(嵌入): 候选未优于 auto,保持 auto")
+    except Exception as exc:  # noqa: BLE001 - 填零优化失败不影响相位/终跑
+        zf_cfg_final = zf_params
+        out_logs.append(f"填零优化(嵌入)失败: {exc}")
     return {
         "baseline": baseline_cfg,
         # 0.2.199-补29z:各轴基线优化选中配置的评分——最终谱图质量报告
@@ -1155,7 +1289,7 @@ def _optimize_nus_processing(
         "baseline_scores": _chosen_baseline_scores(
             baseline_cfg, opt.scores if opt is not None else {}
         ),
-        "zero_fill": zf_params,
+        "zero_fill": zf_cfg_final,
         "window": window_cfg,
         "logs": out_logs,
     }
