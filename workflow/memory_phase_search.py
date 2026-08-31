@@ -87,6 +87,12 @@ def rotate_real(
     phase(k) = p0 + p1·k/(n-1),逐点复乘 exp(i·phase),取实部(= -di 语义)。
     """
     arr = np.asarray(complex_arr, dtype=np.complex128)
+    # 0.2.199-补29dp:p1=0 时相位与 k 无关,标量旋转(避免整轴 ramp 数组
+    # 逐点复乘——3D NUS 大数组 ~50 次候选评分的主要开销)
+    if abs(p1) < 1e-9:
+        c = float(np.cos(np.deg2rad(p0)))
+        s = float(np.sin(np.deg2rad(p0)))
+        return arr.real * c - arr.imag * s
     n = arr.shape[axis]
     k = np.arange(n, dtype=float)
     ramp = np.exp(1j * np.deg2rad(p0 + p1 * k / max(n - 1, 1)))
@@ -141,6 +147,70 @@ def _window_nets(
         total = float(np.abs(profile).sum())
         nets.append((positive + negative) / total if total else 0.0)
     return nets
+
+
+def _window_nets_from_rows(
+    rows: np.ndarray,
+    positions: list[int],
+    *,
+    half_width: int | None = None,
+) -> list[float]:
+    """锁定迹线行(rows:(n_trace, n))的每行净吸收,与 _window_nets 同公式
+    (0.2.199-补29dp)。"""
+    hw = 5 if half_width is None else max(int(half_width), 1)
+    nets: list[float] = []
+    for row, peak in enumerate(positions):
+        trace = rows[row]
+        n = trace.shape[0]
+        left_base = trace[max(0, peak - 3 * hw - 3) : max(0, peak - hw - 1)]
+        right_base = trace[
+            min(n, peak + hw + 2) : min(n, peak + 3 * hw + 4)
+        ]
+        if left_base.size >= 4 and right_base.size >= 4:
+            baseline = 0.5 * (
+                float(np.median(left_base)) + float(np.median(right_base))
+            )
+        else:
+            baseline = float(np.median(trace))
+        profile = trace[max(0, peak - hw) : peak + hw + 1]
+        peak_h = float(np.max(np.abs(profile)))
+        if peak_h > 1e-12 and abs(baseline) / peak_h >= 0.01:
+            profile = profile - baseline
+        positive = float(np.clip(profile, 0.0, None).sum())
+        negative = float(np.clip(profile, None, 0.0).sum())
+        total = float(np.abs(profile).sum())
+        nets.append((positive + negative) / total if total else 0.0)
+    return nets
+
+
+def score_locked_memory(
+    rows: np.ndarray,
+    positions: list[int],
+    p0: float,
+    p1: float,
+    *,
+    sign_mode: str = "uniform",
+    net_half_width: int | None = None,
+) -> float:
+    """锁定迹线行评分(0.2.199-补29dp):只旋转锁定行,不再每次候选对全
+    数组做复型旋转(3D NUS (256,256,586) 每轴搜索 23-25s → 亚秒级)。"""
+    real = rotate_real(rows, -1, p0, p1)
+    nets = _window_nets_from_rows(
+        real, positions, half_width=net_half_width
+    )
+    if not nets:
+        return 50.0
+    if sign_mode == "mixed":
+        score = 50.0 * (float(np.median(np.abs(nets))) + 1.0)
+        strong = [nn for nn in nets if abs(nn) > 0.35]
+        if strong:
+            pos = sum(1 for nn in strong if nn > 0)
+            neg = sum(1 for nn in strong if nn < 0)
+            if pos >= 1 and neg >= 1:
+                return score
+            return score * 0.7
+        return score
+    return 50.0 * (float(np.median(nets)) + 1.0)
 
 
 def score_axis_memory(
@@ -260,6 +330,20 @@ def _subsampled_score_memory(
     return float(phase_quality.evaluate(traces[selected]).score)
 
 
+def _subsampled_score_rows(
+    rows: np.ndarray, k: int = 500, group: str = "even"
+) -> float:
+    """锁定迹线行的 top-K 半组子采样评分(0.2.199-补29dp,行式变体)。"""
+    from core.qc import phase_quality
+
+    peak_mag = np.max(np.abs(rows), axis=-1)
+    order = np.argsort(peak_mag)[::-1][:k]
+    selected = order[0::2] if group == "even" else order[1::2]
+    if selected.size == 0:
+        return 0.0
+    return float(phase_quality.evaluate(rows[selected]).score)
+
+
 def _symmetry_memory(real: np.ndarray, axis: int) -> float:
     """±90° 消歧用对称性指标(与旧方案 phase_quality.profile_symmetry_axis
     相同)。"""
@@ -304,8 +388,8 @@ def search_axis_memory(
     scored: dict[tuple[float, float], float] = {}
 
     def _score(p0: float, p1: float) -> float:
-        return score_axis_memory(
-            arr, axis, p0, p1, trace_indices, trace_positions,
+        return score_locked_memory(
+            locked_rows, trace_positions, p0, p1,
             sign_mode=sign_mode, net_half_width=net_half_width,
         )
 
@@ -322,6 +406,10 @@ def search_axis_memory(
         )
     if not trace_indices:
         return None
+    # 0.2.199-补29dp:只抽取锁定迹线行;候选评分只旋转这些行
+    _moved = np.moveaxis(arr, axis, -1)
+    _flat = _moved.reshape(-1, _moved.shape[-1])
+    locked_rows = _flat[trace_indices]
 
     def _run_batch(phases: list[tuple[float, float]]) -> None:
         for raw in phases:
@@ -389,8 +477,8 @@ def search_axis_memory(
                 best_group: tuple[float, float] | None = None
                 best_s = -1.0
                 for p in neighbor_phases:
-                    real = rotate_real(arr, axis, p[0], p[1])
-                    s = _subsampled_score_memory(real, axis, group=group)
+                    real = rotate_real(locked_rows, -1, p[0], p[1])
+                    s = _subsampled_score_rows(real, group=group)
                     if s > best_s:
                         best_s, best_group = s, p
                 p1s.append(float(best_group[1]) if best_group is not None else 0.0)
@@ -457,9 +545,9 @@ def search_axis_memory(
                         f"轴{axis}: 平台圆中位数 p0 → {center:.2f}° "
                         f"(score={r_score:.2f})"
                     )
-        # ±90° 对称性消歧(旧方案 NMRFlow)
-        best_real = rotate_real(arr, axis, best_phase[0], best_phase[1])
-        best_sym = _symmetry_memory(best_real, axis)
+        # ±90° 对称性消歧(旧方案 NMRFlow;0.2.199-补29dp 用锁定行)
+        best_real = rotate_real(locked_rows, -1, best_phase[0], best_phase[1])
+        best_sym = _symmetry_memory(best_real, -1)
         for offset in (90.0, -90.0):
             cand = (best_phase[0] + offset, best_phase[1])
             if cand not in scored:
@@ -468,7 +556,7 @@ def search_axis_memory(
                 c_score = scored[cand]
                 if c_score >= best_score - PHASE_SYMMETRY_TOL:
                     c_sym = _symmetry_memory(
-                        rotate_real(arr, axis, cand[0], cand[1]), axis
+                        rotate_real(locked_rows, -1, cand[0], cand[1]), -1
                     )
                     if c_sym > best_sym + 0.05:
                         logs.append(
