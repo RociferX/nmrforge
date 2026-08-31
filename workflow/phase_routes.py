@@ -494,17 +494,11 @@ def unified_route(    experiment: Experiment,
         search_axes = [
             a for a in search_axes if f"phase_{a}" in plan.dag.nodes
         ]
-    # 0.2.199-补29dn(方案A,用户):填零先定——间接维搜索预览用 auto 完整
-    # 填零,避免低分辨率(零填零)下评分最优与终谱不一致(sampleI F1 105°→90°);
-    # 0.2.199-补29dt(用户,VM 实测 sampleI):直接维搜索预览必须保持无填零
-    # (补29r 语义)——补29dn 全 auto 后直接维在填零分辨率上搜索,F2 由正确
-    # 310° 偏到 330°;直接维 none 预览 F2=305-312.5°(≈310)且 F1 仍 90°。
-    zf_phase = {
-        "zero_fill": {
-            a: ({"mode": "none"} if a == direct_axis else {"mode": "auto"})
-            for a in axes
-        }
-    }
+    # 0.2.199-补29du(用户,VM 实测 sampleI、sampleH):相位搜索预览全轴不填零。
+    # 填零对数据敏感:auto 填零 sampleI F1=90° 对但 sampleH F1=70° 错(应 85);
+    # 零填零 sampleI F1=90°(重搜保证)、sampleH F1=87.5°(差 2.5° 可接受),
+    # 直接维均 310°;故预览统一零填零,避免「填零对有的合理对有的不合理」。
+    zf_phase = {"zero_fill": {a: {"mode": "none"} for a in axes}}
     backend_runs = 0
     # 0.2.199-补29dr(用户):不做迭代——初始逐轴搜索(间接维先行)后,
     # 直接维确定,再对间接维重搜一轮(预览带直接维固定相位),不再交替迭代。
