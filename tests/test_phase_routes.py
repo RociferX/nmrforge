@@ -132,11 +132,11 @@ def test_unified_route_uniform_dc_offset_poly_time_into_final(
 
     monkeypatch.setattr(routes, "_read_complex_preview", fake_read)
     result = routes.unified_route(experiment, backend, work_dir=work)
-    # 0.2.199-补29dn:直接维确定后重搜间接维(F1 预览 + F2 预览 + F1 重搜 +
-    # joint + 终跑 = 5 次 process)
-    preview1, preview2, preview_r2, _joint, final = backend.process_calls
-    for preview in (preview1, preview2, preview_r2):
+    # 0.2.199-补29do:迭代式(F1 预览 + F2 预览 ×2 轮 + joint + 终跑)
+    previews = backend.process_calls[:-2]
+    for preview in previews:
         assert preview[2].get("direct_poly_time") in (None, False)
+    final = backend.process_calls[-1]
     assert final[2]["direct_poly_time"] is True
     assert result["diagnostics"]["apply_poly_time"] is True
     assert any("POLY -time" in r for r in result["diagnostics"]["reports"])
@@ -160,8 +160,8 @@ def test_unified_route_uniform_magnitude_skips_phase_search(
 
     monkeypatch.setattr(routes, "_read_complex_preview", fake_read)
     result = routes.unified_route(experiment, backend, work_dir=work)
-    # F2 预览 + joint + 终跑(无 F1 预览)
-    assert len(backend.process_calls) == 3
+    # 0.2.199-补29do:迭代式——F2 单轴 2 轮预览 + joint + 终跑(无 F1 预览)
+    assert len(backend.process_calls) == 4
     assert all(
         call[2].get("preview_axis") != "F1" for call in backend.process_calls
     )
@@ -209,24 +209,26 @@ def test_unified_route_uniform_order_and_phases(
     monkeypatch.setattr(routes, "_read_complex_preview", fake_read)
     result = routes.unified_route(experiment, backend, work_dir=work)
     # 0.2.163-补6:uniform 处理参数优化先跑 joint 复核谱;
-    # 0.2.199-补29dn:直接维确定后重搜间接维 → 5 次 process
-    # (F1 预览 + F2 预览 + F1 重搜 + joint + 终跑)
-    assert len(backend.process_calls) == 5
-    preview1, preview2, preview_r2, joint, final = backend.process_calls
+    # 0.2.199-补29do:迭代式——2 轮×2 轴 + joint + 终跑 = 6 次 process
+    assert len(backend.process_calls) == 6
+    preview1, preview2, preview3, preview4, joint, final = (
+        backend.process_calls
+    )
     assert joint[2].get("preview_axis") is None  # joint 不是预览
     assert preview1[2].get("preview_axis") == "F1"
     assert preview1[3] == {}  # 首个轴无固定相位
     assert preview2[2].get("preview_axis") == "F2"
     assert set(preview2[3]) == {"F1"}  # F1 已固定后传给 F2 预览
-    assert preview_r2[2].get("preview_axis") == "F1"
-    assert set(preview_r2[3]) == {"F2"}  # 重搜时直接维已固定
+    assert preview3[2].get("preview_axis") == "F1"  # 第 2 轮
+    assert set(preview3[3]) == {"F1", "F2"}
+    assert preview4[2].get("preview_axis") == "F2"
     assert set(final[3]) == {"F1", "F2"}
     phases = result["phases"]
     assert abs((phases["F1"][0] - 25.0 + 180.0) % 360.0 - 180.0) <= 8.0, phases
     assert abs((phases["F2"][0] - 35.0 + 180.0) % 360.0 - 180.0) <= 8.0, phases
     # 联合复核/处理参数优化为内存评分(不增后端运行计数):
-    # 2 预览 + 1 重搜 + 1 终跑
-    assert result["backend_runs"] == 4
+    # 4 预览 + 1 终跑
+    assert result["backend_runs"] == 5
     assert "spectrum_path" in result
 
 
@@ -353,7 +355,18 @@ def test_unified_route_nus_reconstruct_then_finalize(
     assert not backend.apply_direct_calls
     assert all(call["planes"] is None for call in backend.finalize_calls)
     assert "处理参数优化(测试): 固定配置" in result["logs"]
-    assert result["backend_runs"] == 4  # SMILE 首遍 + F1 预览 + 直接维实型终谱预览 + 终跑
+    # 0.2.199-补29do:迭代式 → SMILE + F1 预览 + 直接维预览 + F1 重搜 + 终跑
+    assert result["backend_runs"] == 5
+    # 0.2.199-补29do(修复):NUS finalize 预览会把 phases 里预览轴的相位
+    # 直接写进 PS(与 uniform 预览不同,后者会过滤),间接维重搜必须排除
+    # 预览轴自身,否则带旧相位生成会搜到残差(~0)并覆盖丢失绝对相位
+    f1_previews = [
+        c
+        for c in backend.finalize_calls
+        if c["params"].get("preview_axis") == "F1"
+    ]
+    assert len(f1_previews) == 2  # 首搜 + 重搜
+    assert "F1" not in f1_previews[-1]["phases"]
     # 0.2.155/0.2.160:诊断检测到直流偏置时,终跑脚本携带
     # direct_poly_time(POLY -time);首遍脚本不加(避免带偏直接维相位搜索);
     # 日志含分步耗时与末尾汇总
@@ -533,7 +546,8 @@ def test_unified_route_nus_progress_stages(
     assert "终跑(完整脚本,含各维最终相位)中" in joined, messages
     assert "终跑完成" in joined, messages
     assert all(call["progress"] is not None for call in backend.finalize_calls)
-    assert result["backend_runs"] == 4
+    # 0.2.199-补29do:迭代式 → 5
+    assert result["backend_runs"] == 5
 
 
 
@@ -762,12 +776,13 @@ def test_unified_route_uniform_final_ext_apply_to_opt(
         },
     )
     # 0.2.163-补6:uniform 处理参数优化先跑 joint 复核谱;
-    # 0.2.199-补29dn:新增 F1 重搜预览 → 5 次 process
-    assert len(backend.process_calls) == 5
-    preview1, preview2, preview_r2, _joint, final = backend.process_calls
-    for preview in (preview1, preview2, preview_r2):
+    # 0.2.199-补29do:迭代式 → 6 次 process(4 预览 + joint + 终跑)
+    assert len(backend.process_calls) == 6
+    previews = backend.process_calls[:-2]
+    for preview in previews:
         assert preview[2].get("ext_lo") is None
         assert "final_ext_lo" not in preview[2]
+    final = backend.process_calls[-1]
     assert final[2]["ext_lo"] == "11.0"
     assert final[2]["ext_hi"] == "5.5"
     assert "final_ext_lo" not in final[2]
@@ -780,13 +795,12 @@ def test_unified_route_uniform_final_ext_apply_to_opt(
         work_dir=backend2.work,
         base_params={"final_ext_lo": "11.0", "final_ext_hi": "5.5"},
     )
-    # 0.2.199-补29dn:新增 F1 重搜预览 → 5 次 process
-    assert len(backend2.process_calls) == 5
-    p1b, p2b, p_r2b, jointb, finalb = backend2.process_calls
-    for call in (p1b, p2b, p_r2b, jointb, finalb):
+    # 0.2.199-补29do:迭代式 → 6 次 process
+    assert len(backend2.process_calls) == 6
+    for call in backend2.process_calls:
         assert call[2].get("ext_lo") == "11.0"
         assert call[2].get("ext_hi") == "5.5"
-    assert "final_ext_lo" not in p1b[2]
+    assert "final_ext_lo" not in backend2.process_calls[0][2]
     assert result2["spectrum_path"]
 
 

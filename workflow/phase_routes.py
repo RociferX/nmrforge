@@ -21,6 +21,12 @@ from core.data.internal_data_model import Experiment, SamplingMode
 from core.planning.method_selector import select_method
 
 
+def _phase_delta(a: tuple[float, float], b: tuple[float, float]) -> float:
+    """相位差(p0 环向差 + p1 差),用于迭代收敛判断(0.2.199-补29do)。"""
+    p0 = abs((a[0] - b[0] + 180.0) % 360.0 - 180.0)
+    return float(p0 + abs(a[1] - b[1]))
+
+
 def _axis_index(axis: str, ndim: int = 2) -> int:
     """逻辑轴名 → 生产布局谱数组下标。
 
@@ -395,19 +401,17 @@ def unified_route(    experiment: Experiment,
     base_params: dict[str, Any] | None = None,
     progress: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
-    """统一方案(替代简单/进阶分派):第一遍逐维复型预览 → 内存调相
-    (旧算法判断标准,零额外后端)→ 联合复核 → 完整终跑。
+    """统一方案(替代简单/进阶分派):逐轴迭代复型预览 → 内存调相
+    (旧算法判断标准,零额外后端)→ 完整终跑。
 
-    uniform:每轴一条生产管道复型预览(仅搜索轴 PS 不加 -di,其它轴按已固定
-    相位加 -di,零填零);NUS:SMILE 一次出复型 recon 平面,直接维在平面上
-    内存搜索,间接维内存复刻 finalize 链完整搜索;最后把各维最终相位填入
-    完整脚本重跑出良谱(不写旋转平面副本)。
+    uniform(0.2.199-补29do):逐轴交替重搜直至收敛——每轮预览仅搜索轴
+    PS 不加 -di(保持 0,0),其它轴按已固定相位加 -di,auto 完整填零;
+    NUS:SMILE 一次出复型 recon 平面,直接维在实型终谱+投影迹线上内存
+    搜索(HT),间接维内存复刻 finalize 链完整搜索,直接维确定后间接维
+    再重搜一轮;最后把各维最终相位填入完整脚本重跑出良谱(不写旋转
+    平面副本)。
     """
-    from workflow.memory_phase_search import (
-        PHASE_SCORE_FLAT_MARGIN,
-        joint_recheck_memory,
-        search_axis_memory,
-    )
+    from workflow.memory_phase_search import search_axis_memory
 
     plan = plan or select_method(experiment)
     if experiment.sampling.mode is SamplingMode.NUS:
@@ -489,97 +493,32 @@ def unified_route(    experiment: Experiment,
     # auto 完整填零,避免低分辨率(零填零)下评分最优与终谱不一致
     zf_phase = {"zero_fill": {a: {"mode": "auto"} for a in axes}}
     backend_runs = 0
-    for axis in search_axes:
-        out_file = f"{experiment.dataset_id}_preview_{axis}.{ext}"
-        t_axis = time.time()
-        if progress is not None:
-            progress(f"{axis} 复型预览中")
-        resp = backend.process(
-            experiment,
-            plan,
-            direct_phase_override=dict(fixed) if fixed else None,
-            params={**params, **zf_phase, "preview_axis": axis},
-            out_file=out_file,
-            script_name=f"{experiment.dataset_id}_preview_{axis}.com",
-            progress=progress,
-        )
-        backend_runs += 1
-        if not resp.get("success") or not resp.get("spectrum_path"):
-            raise RuntimeError(f"复型预览({axis})失败: {resp.get('message')}")
-        if progress is not None:
-            progress(f"{axis} 复型预览完成")
-        ax = _axis_index(axis, experiment.ndim)
-        arr = _read_complex_preview(str(resp["spectrum_path"]), unpack_axis=ax)
-        est = search_axis_memory(
-            arr, ax, sign_mode=sign_mode, cancel=cancel_requested
-        )
-        if est is None:
-            raise RuntimeError(f"内存相位搜索({axis})无可用迹线")
-        if sign_mode == "mixed":
-            resolved = _disambiguate_180_mixed(
-                arr, ax, est.phase, experiment, axis
-            )
-            if resolved != est.phase:
-                logs.append(
-                    f"{axis}: ±180° 化学位移分区消歧 "
-                    f"{est.phase} → {resolved}"
-                )
-            fixed[axis] = resolved
-        else:
-            fixed[axis] = est.phase
-        axis_arrays[axis] = arr
-        axis_index[axis] = ax
-        axis_traces[axis] = est.traces
-        logs += est.logs
-        logs.append(
-            f"{axis}: 内存相位 = ({est.phase[0]:g}°, {est.phase[1]:g}°) "
-            f"score={est.score:.2f}"
-        )
-        logs.append(f"{axis} 相位搜索完成,耗时 {time.time() - t_axis:.1f} 秒")
-    if len(search_axes) >= 2:
-        t_joint = time.time()
-        best, best_score, fixed_score, zero_score = joint_recheck_memory(
-            axis_arrays, axis_index, axis_traces, fixed, sign_mode=sign_mode
-        )
-        if best != fixed and best_score - fixed_score >= PHASE_SCORE_FLAT_MARGIN:
-            logs.append(
-                f"联合复核: 联合最优 {best} (score={best_score:.2f}) "
-                f"优于顺序固定 {fixed} (score={fixed_score:.2f}),已更新"
-            )
-            fixed = best
-        else:
-            logs.append(
-                f"联合复核: 联合面平坦(顺序 {fixed} score={fixed_score:.2f} "
-                f"vs 联合最优 {best} score={best_score:.2f}),保持顺序固定"
-            )
-        logs.append(f"联合复核完成,耗时 {time.time() - t_joint:.1f} 秒")
-    # 0.2.199-补29dn(调查发现):间接维与直接维相位相互依赖——迹线锁定
-    # 基于实部,先搜的间接维在直接维 (0,0) 下锁定迹线会被带偏(如 sampleI
-    # F1 在直接维未校正时为 105°/150°,正确 ~90°)。直接维确定后重搜间接维
-    # (预览带直接维固定相位),sampleI F1 回到粗网格最优 90°。
-    indirect_axes = [a for a in axes if a != direct_axis]
-    if len(search_axes) >= 2 and direct_axis in fixed:
-        for axis in indirect_axes:
-            out_file = f"{experiment.dataset_id}_preview_{axis}_r2.{ext}"
+    # 0.2.199-补29do(用户):迭代式相位优化——逐轴交替重搜直到收敛。
+    # 间接维先行:直接维迹线锁定依赖间接维校正后的谱;直接维先行实测发散
+    # (sampleI F2 在 F1=(0,0) 下得 172°,再迭代到 270/150 垃圾值)。
+    # 每轮重搜重新锁定迹线(其它轴带当前相位),sampleI F1 收敛到 90°。
+    max_rounds = 3  # 每轴最多搜 3 次(含首轮)
+    for _round in range(max_rounds):
+        changed = False
+        for axis in search_axes:
+            out_file = f"{experiment.dataset_id}_preview_{axis}.{ext}"
             t_axis = time.time()
             if progress is not None:
-                progress(f"{axis} 复型预览(直接维已定)中")
+                progress(f"{axis} 复型预览中")
             resp = backend.process(
                 experiment,
                 plan,
-                direct_phase_override={
-                    k: v for k, v in fixed.items() if k != axis
-                },
+                direct_phase_override=dict(fixed) if fixed else None,
                 params={**params, **zf_phase, "preview_axis": axis},
                 out_file=out_file,
-                script_name=f"{experiment.dataset_id}_preview_{axis}_r2.com",
+                script_name=f"{experiment.dataset_id}_preview_{axis}.com",
                 progress=progress,
             )
             backend_runs += 1
             if not resp.get("success") or not resp.get("spectrum_path"):
-                raise RuntimeError(
-                    f"复型预览重搜({axis})失败: {resp.get('message')}"
-                )
+                raise RuntimeError(f"复型预览({axis})失败: {resp.get('message')}")
+            if progress is not None:
+                progress(f"{axis} 复型预览完成")
             ax = _axis_index(axis, experiment.ndim)
             arr = _read_complex_preview(
                 str(resp["spectrum_path"]), unpack_axis=ax
@@ -588,25 +527,39 @@ def unified_route(    experiment: Experiment,
                 arr, ax, sign_mode=sign_mode, cancel=cancel_requested
             )
             if est is None:
-                raise RuntimeError(f"内存相位重搜({axis})无可用迹线")
+                raise RuntimeError(f"内存相位搜索({axis})无可用迹线")
             if sign_mode == "mixed":
                 resolved = _disambiguate_180_mixed(
                     arr, ax, est.phase, experiment, axis
                 )
-                fixed[axis] = resolved
+                if resolved != est.phase:
+                    logs.append(
+                        f"{axis}: ±180° 化学位移分区消歧 "
+                        f"{est.phase} → {resolved}"
+                    )
+                phase = resolved
             else:
-                fixed[axis] = est.phase
+                phase = est.phase
+            prev = fixed.get(axis)
+            fixed[axis] = phase
             axis_arrays[axis] = arr
             axis_index[axis] = ax
             axis_traces[axis] = est.traces
             logs += est.logs
             logs.append(
-                f"{axis}: 内存相位重搜(直接维已定) = "
-                f"({est.phase[0]:g}°, {est.phase[1]:g}°) score={est.score:.2f}"
+                f"{axis}: 内存相位(迭代 {_round + 1}) = "
+                f"({phase[0]:g}°, {phase[1]:g}°) score={est.score:.2f}"
             )
+            if prev is None or _phase_delta(prev, phase) >= 5.0:
+                changed = True
             logs.append(
-                f"{axis} 相位重搜完成,耗时 {time.time() - t_axis:.1f} 秒"
+                f"{axis} 相位搜索完成,耗时 {time.time() - t_axis:.1f} 秒"
             )
+        if not changed:
+            logs.append(f"相位迭代: 第 {_round + 1} 轮无变化,收敛")
+            break
+    else:
+        logs.append(f"相位迭代: 达到最大轮次({max_rounds})")
     # 0.2.166:auto_phase=False 时直接维未参与搜索与联合复核,保持 (0,0)
     fixed.setdefault(direct_axis, (0.0, 0.0))
     # 0.2.163-补6:处理参数优化(基线/直接维窗/填零+间接窗),与 NUS 对称;
@@ -1441,6 +1394,77 @@ def _unified_nus(
         f"直接维内存相位: {direct_axis}=({direct_phase[0]:g}°, "
         f"{direct_phase[1]:g}°)"
     )
+    # 0.2.199-补29do(用户):迭代式——间接维在直接维确定后重搜一轮
+    # (直接维为独立实型 HT 方法,经 phase.json 缓存;间接维重搜重新锁定
+    # 迹线,解双向依赖。3D NUS 实测多轮重搜会 ±180° 符号摆动且每轮约
+    # 30s,故收敛迭代限一轮)
+    if indirect_axes and auto_phase:
+        for _round in range(1):
+            changed = False
+            for axis in indirect_axes:
+                out_file = (
+                    f"{experiment.dataset_id}_preview_{axis}"
+                    f"_r{_round + 2}.{ext}"
+                )
+                t_axis = time.time()
+                if progress is not None:
+                    progress(f"{axis} 复型预览(迭代)中")
+                # 预览轴自身须排除:finalize 预览会把 phases 里预览轴的
+                # 相位直接写进 PS(与 uniform 预览不同,后者会过滤),带旧
+                # 相位生成会搜到残差(≈0)并覆盖丢失绝对相位
+                resp = backend.finalize_nus(
+                    experiment,
+                    phases={
+                        k: v for k, v in fixed.items() if k != axis
+                    },
+                    work_dir=work,
+                    params={**zf_phase, "preview_axis": axis},
+                    out_file=out_file,
+                    script_name=(
+                        f"{experiment.dataset_id}_preview_{axis}"
+                        f"_r{_round + 2}_finalize.com"
+                    ),
+                    progress=progress,
+                )
+                backend_runs += 1
+                if not resp.get("success") or not resp.get("spectrum_path"):
+                    raise RuntimeError(
+                        f"NUS 复型预览重搜({axis})失败: {resp.get('message')}"
+                    )
+                ax = _axis_index(axis, experiment.ndim)
+                arr = _read_complex_preview(
+                    str(resp["spectrum_path"]), unpack_axis=ax
+                )
+                est = search_axis_memory(
+                    arr, ax, sign_mode=sign_mode, cancel=cancel_requested
+                )
+                if est is None:
+                    raise RuntimeError(f"内存相位重搜({axis})无可用迹线")
+                if sign_mode == "mixed":
+                    resolved = _disambiguate_180_mixed(
+                        arr, ax, est.phase, experiment, axis
+                    )
+                    phase = resolved
+                else:
+                    phase = est.phase
+                prev = fixed.get(axis)
+                fixed[axis] = phase
+                axis_arrays[axis] = arr
+                axis_index[axis] = ax
+                axis_traces[axis] = est.traces
+                logs += est.logs
+                logs.append(
+                    f"{axis}: 内存相位重搜(迭代 {_round + 2}) = "
+                    f"({phase[0]:g}°, {phase[1]:g}°) score={est.score:.2f}"
+                )
+                if prev is None or _phase_delta(prev, phase) >= 5.0:
+                    changed = True
+                logs.append(
+                    f"{axis} 相位重搜完成,耗时 {time.time() - t_axis:.1f} 秒"
+                )
+            if not changed:
+                logs.append(f"相位迭代: 间接维第 {_round + 2} 轮无变化,收敛")
+                break
     # 处理参数优化(基线/填零/窗函数):联合复核后、终跑前;各维最终相位
     # 与优化后的处理参数一起填入初始脚本,生成新的完整脚本做终跑——
     # 直接维相位进 step1 PS(EXT 后,与 recon 平面内存旋转同归一化),
