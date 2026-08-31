@@ -173,26 +173,6 @@ def _read_real_ft3(path: Path | str) -> np.ndarray:
     return np.asarray(arr, dtype=float)
 
 
-def _zf_min_indirect(experiment: Experiment) -> dict[str, dict[str, Any]]:
-    """最低填零(0.2.199-补29s):间接维相位优化预览 SI = next_pow2(TD)。
-
-    用户方案:优化前先默认最低填零(如 120→128),比完全无填零的峰位/
-    数字点距更好,又不引入完整填零的过度插值;直接维不改(均匀路径
-    保持计划直接维填零,NUS finalize 不填直接维)。
-    """
-    from backend.script_generator import _next_pow2, effective_td
-
-    from core.data.internal_data_model import AxisRole
-
-    td = effective_td(experiment)
-    axes = [dim.logical_axis for dim in experiment.dimensions]
-    return {
-        axis: {"mode": "size", "size": _next_pow2(max(int(td[i]), 1))}
-        for i, axis in enumerate(axes)
-        if experiment.dimensions[i].role is not AxisRole.DIRECT
-    }
-
-
 def _cleanup_unified_intermediates(
     work: Path,
     dataset_id: str,
@@ -505,7 +485,9 @@ def unified_route(    experiment: Experiment,
         search_axes = [
             a for a in search_axes if f"phase_{a}" in plan.dag.nodes
         ]
-    zf_min = {"zero_fill": _zf_min_indirect(experiment)}
+    # 0.2.199-补29dn(方案A,用户):填零先定——相位搜索预览用与终跑一致的
+    # auto 完整填零,避免低分辨率(零填零)下评分最优与终谱不一致
+    zf_phase = {"zero_fill": {a: {"mode": "auto"} for a in axes}}
     backend_runs = 0
     for axis in search_axes:
         out_file = f"{experiment.dataset_id}_preview_{axis}.{ext}"
@@ -516,7 +498,7 @@ def unified_route(    experiment: Experiment,
             experiment,
             plan,
             direct_phase_override=dict(fixed) if fixed else None,
-            params={**params, **zf_min, "preview_axis": axis},
+            params={**params, **zf_phase, "preview_axis": axis},
             out_file=out_file,
             script_name=f"{experiment.dataset_id}_preview_{axis}.com",
             progress=progress,
@@ -571,6 +553,60 @@ def unified_route(    experiment: Experiment,
                 f"vs 联合最优 {best} score={best_score:.2f}),保持顺序固定"
             )
         logs.append(f"联合复核完成,耗时 {time.time() - t_joint:.1f} 秒")
+    # 0.2.199-补29dn(调查发现):间接维与直接维相位相互依赖——迹线锁定
+    # 基于实部,先搜的间接维在直接维 (0,0) 下锁定迹线会被带偏(如 sampleI
+    # F1 在直接维未校正时为 105°/150°,正确 ~90°)。直接维确定后重搜间接维
+    # (预览带直接维固定相位),sampleI F1 回到粗网格最优 90°。
+    indirect_axes = [a for a in axes if a != direct_axis]
+    if len(search_axes) >= 2 and direct_axis in fixed:
+        for axis in indirect_axes:
+            out_file = f"{experiment.dataset_id}_preview_{axis}_r2.{ext}"
+            t_axis = time.time()
+            if progress is not None:
+                progress(f"{axis} 复型预览(直接维已定)中")
+            resp = backend.process(
+                experiment,
+                plan,
+                direct_phase_override={
+                    k: v for k, v in fixed.items() if k != axis
+                },
+                params={**params, **zf_phase, "preview_axis": axis},
+                out_file=out_file,
+                script_name=f"{experiment.dataset_id}_preview_{axis}_r2.com",
+                progress=progress,
+            )
+            backend_runs += 1
+            if not resp.get("success") or not resp.get("spectrum_path"):
+                raise RuntimeError(
+                    f"复型预览重搜({axis})失败: {resp.get('message')}"
+                )
+            ax = _axis_index(axis, experiment.ndim)
+            arr = _read_complex_preview(
+                str(resp["spectrum_path"]), unpack_axis=ax
+            )
+            est = search_axis_memory(
+                arr, ax, sign_mode=sign_mode, cancel=cancel_requested
+            )
+            if est is None:
+                raise RuntimeError(f"内存相位重搜({axis})无可用迹线")
+            if sign_mode == "mixed":
+                resolved = _disambiguate_180_mixed(
+                    arr, ax, est.phase, experiment, axis
+                )
+                fixed[axis] = resolved
+            else:
+                fixed[axis] = est.phase
+            axis_arrays[axis] = arr
+            axis_index[axis] = ax
+            axis_traces[axis] = est.traces
+            logs += est.logs
+            logs.append(
+                f"{axis}: 内存相位重搜(直接维已定) = "
+                f"({est.phase[0]:g}°, {est.phase[1]:g}°) score={est.score:.2f}"
+            )
+            logs.append(
+                f"{axis} 相位重搜完成,耗时 {time.time() - t_axis:.1f} 秒"
+            )
     # 0.2.166:auto_phase=False 时直接维未参与搜索与联合复核,保持 (0,0)
     fixed.setdefault(direct_axis, (0.0, 0.0))
     # 0.2.163-补6:处理参数优化(基线/直接维窗/填零+间接窗),与 NUS 对称;
@@ -1221,9 +1257,14 @@ def _unified_nus(
     axis_index: dict[str, int] = {}
     axis_traces: dict[str, tuple[list[int], list[int]]] = {}
     ext = "ft3" if experiment.ndim >= 3 else "ft2"
-    # 0.2.199-补29s:优化预览用最低填零(next_pow2(TD),如 120→128),
-    # 替代完全无填零——峰位/数字点距更好且不过度插值
-    zf_min = {"zero_fill": _zf_min_indirect(experiment)}
+    # 0.2.199-补29dn(方案A,用户):填零先定——间接维相位搜索预览用与终跑
+    # 一致的 auto 完整填零,避免低分辨率下评分最优与终谱不一致
+    zf_phase = {
+        "zero_fill": {
+            a: {"mode": "auto"}
+            for a in (dim.logical_axis for dim in experiment.dimensions)
+        }
+    }
     for axis in indirect_axes:
         out_file = f"{experiment.dataset_id}_preview_{axis}.{ext}"
         t_axis = time.time()
@@ -1233,7 +1274,7 @@ def _unified_nus(
             experiment,
             phases=fixed,
             work_dir=work,
-            params={**zf_min, "preview_axis": axis},
+            params={**zf_phase, "preview_axis": axis},
             out_file=out_file,
             script_name=f"{experiment.dataset_id}_preview_{axis}_finalize.com",
             progress=progress,
@@ -1314,10 +1355,10 @@ def _unified_nus(
             experiment,
             phases=fixed,
             work_dir=work,
-            # 0.2.199-补29r:直接维搜索用无填零终谱(与间接维预览
-            # zf_none 一致)——填零只进终跑,不进优化;此前带计划填零
-            # 使预览变 (512,512,…),与设计(优化用没填零的谱)不符。
-            params={**params_first, **zf_min},
+            # 0.2.199-补29dn(方案A,用户):直接维搜索预览同样用与终跑一致的
+            # auto 完整填零——相位搜索与终谱同分辨率,避免低分辨率下评分
+            # 最优与终谱不一致(原为最低填零,直接维 2048 vs 终跑 4096)
+            params={**params_first, **zf_phase},
             out_file=preview_out,
             script_name=(
                 f"{experiment.dataset_id}_direct_final_finalize.com"

@@ -61,19 +61,25 @@ def test_rotate_real_recovers_absorptive() -> None:
 
 
 def test_search_axis_memory_recovers_known_p0_axis0() -> None:
-    """常数相位 -40° 应恢复为校正相位约 +40°(旧算法 p0 粗搜 + 细化)。"""
+    """常数相位 -40° 应恢复为校正相位约 +40°(粗网格 30° 精度)。
+
+    0.2.199-补29dn:评分面平坦时保持粗网格最优(不再用平台圆中位数——
+    平坦区中位数会漂移,如 sampleI F1 粗网格 90° 被带偏到 80°);因此
+    恢复精度为粗网格步长(30°),容差放宽到 ±15°。
+    """
     mixed = _complex_axis_2d((128, 96), axis=0, p0=-40.0)
     est = search_axis_memory(mixed, axis=0)
     assert est is not None
-    assert abs((est.phase[0] - 40.0 + 180.0) % 360.0 - 180.0) <= 8.0, est
+    assert abs((est.phase[0] - 40.0 + 180.0) % 360.0 - 180.0) <= 15.0, est
     assert abs(est.phase[1]) <= 5.0, est
 
 
 def test_search_axis_memory_recovers_known_p0_axis1() -> None:
+    """0.2.199-补29dn:平坦面保持粗网格最优,恢复精度为粗网格步长(±15°)。"""
     mixed = _complex_axis_2d((96, 128), axis=1, p0=-50.0)
     est = search_axis_memory(mixed, axis=1)
     assert est is not None
-    assert abs((est.phase[0] - 50.0 + 180.0) % 360.0 - 180.0) <= 8.0, est
+    assert abs((est.phase[0] - 50.0 + 180.0) % 360.0 - 180.0) <= 15.0, est
 
 
 def test_search_axis_memory_near_zero_stays_zero() -> None:

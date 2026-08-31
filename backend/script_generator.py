@@ -744,14 +744,19 @@ def generate_preview_script(
     fixed_phases: dict[str, tuple[float, float]] | None = None,
     baseline: dict[str, dict[str, Any]] | None = None,
     window: dict[str, dict[str, Any]] | None = None,
+    zero_fill: dict[str, dict[str, Any]] | None = None,
     ext_lo: str = "10.5",
     ext_hi: str = "6.5",
     extract: bool = True,
     sampling: dict[str, Any] | None = None,
 ) -> str:
     """第一遍复型预览脚本(uniform):整条生产管道,仅 preview_axis 的 PS
-    不加 -di(该维输出真实虚部),其它轴按 fixed_phases(缺省 0)加 -di;
-    零填零(与旧相位候选同参,保证内存旋转候选与旧后端候选同源)。
+    不加 -di(该维输出真实虚部),其它轴按 fixed_phases(缺省 0)加 -di。
+
+    zero_fill 缺省为零填零(与旧相位候选同参,保证内存旋转候选与旧后端
+    候选同源);0.2.199-补29dn(方案A,用户):填零先于相位优化——相位搜索
+    预览可传与终跑一致的 auto 完整填零,避免低分辨率下评分最优与终谱
+    不一致(sampleI F1 在 431 点零填零预览得 105°,1024 点终谱最优 90°)。
 
     输出为生产布局复型文件(pipe2xyz -x),显示层读该文件沿 preview_axis
     的数组轴做内存旋转评分。3D 的 F2/F1 预览同样走生产布局,避免转置歧义。
@@ -762,7 +767,9 @@ def generate_preview_script(
     其它轴(已固定相位)的 POLY 保留,与旧候选一致。
     """
     axes = [dim.logical_axis for dim in experiment.dimensions]
-    zf_none = {axis: {"mode": "none"} for axis in axes}
+    zf_none = zero_fill if zero_fill is not None else {
+        axis: {"mode": "none"} for axis in axes
+    }
     phases = {
         axis: value
         for axis, value in (fixed_phases or {}).items()

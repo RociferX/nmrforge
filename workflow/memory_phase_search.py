@@ -96,14 +96,24 @@ def rotate_real(
 
 
 def _window_nets(
-    real: np.ndarray, axis: int, indices: list[int], positions: list[int]
+    real: np.ndarray,
+    axis: int,
+    indices: list[int],
+    positions: list[int],
+    *,
+    half_width: int | None = None,
 ) -> list[float]:
     """每窗签名净吸收 (pos+neg)/total(与旧 _window_metric 同公式)。
 
     正负判定先拉平基线——以峰两侧基线区中位数均值(±6..18 点)为基线
     水平,窗口减基线后再分正负;基线整体偏移(正或负)不再污染净吸收
     (0.2.175 用户方案)。
+    half_width(点)可调窗口半宽(0.2.199-补29dn,方案B测试):缺省 5 与旧
+    行为一致;按线宽/分辨率归一化(高分辨率窗口更大)可消除「低分辨率下
+    ±5 点覆盖过大线宽导致相位最优偏移」(sampleI F1 在 431 点预览 105°、
+    1024 点终谱最优 90°)。
     """
+    hw = 5 if half_width is None else max(int(half_width), 1)
     moved = np.moveaxis(real, axis, -1)
     traces = moved.reshape(-1, moved.shape[-1])
     nets: list[float] = []
@@ -111,15 +121,17 @@ def _window_nets(
         if index < 0 or index >= traces.shape[0]:
             continue
         n = traces.shape[1]
-        left_base = traces[index, max(0, peak - 18) : max(0, peak - 6)]
-        right_base = traces[index, min(n, peak + 7) : min(n, peak + 19)]
+        left_base = traces[index, max(0, peak - 3 * hw - 3) : max(0, peak - hw - 1)]
+        right_base = traces[
+            index, min(n, peak + hw + 2) : min(n, peak + 3 * hw + 4)
+        ]
         if left_base.size >= 4 and right_base.size >= 4:
             baseline = 0.5 * (
                 float(np.median(left_base)) + float(np.median(right_base))
             )
         else:
             baseline = float(np.median(traces[index]))
-        profile = traces[index, max(0, peak - 5) : peak + 6]
+        profile = traces[index, max(0, peak - hw) : peak + hw + 1]
         peak_h = float(np.max(np.abs(profile)))
         # 基线偏移相对峰高显著(≥1%)才拉平;基线平的谱保持零界
         if peak_h > 1e-12 and abs(baseline) / peak_h >= 0.01:
@@ -140,6 +152,7 @@ def score_axis_memory(
     positions: list[int],
     *,
     sign_mode: str = "uniform",
+    net_half_width: int | None = None,
 ) -> float:
     """候选相位评分(0-100)。
 
@@ -150,7 +163,9 @@ def score_axis_memory(
     (正峰偏好消解 ±180 歧义)。
     """
     real = rotate_real(complex_arr, axis, p0, p1)
-    nets = _window_nets(real, axis, indices, positions)
+    nets = _window_nets(
+        real, axis, indices, positions, half_width=net_half_width
+    )
     if not nets:
         return 50.0
     if sign_mode == "mixed":
@@ -277,6 +292,7 @@ def search_axis_memory(
     refine: bool = True,
     sign_mode: str = "uniform",
     discrete: bool | None = None,
+    net_half_width: int | None = None,
     cancel: Callable[[], bool] | None = None,
 ) -> MemoryAxisResult | None:
     """在复型数据的指定轴上做内存相位搜索(旧算法判断标准,零后端)。"""
@@ -289,7 +305,8 @@ def search_axis_memory(
 
     def _score(p0: float, p1: float) -> float:
         return score_axis_memory(
-            arr, axis, p0, p1, trace_indices, trace_positions, sign_mode=sign_mode
+            arr, axis, p0, p1, trace_indices, trace_positions,
+            sign_mode=sign_mode, net_half_width=net_half_width,
         )
 
     # 基线 (0,0) 锁定迹线:mixed(HNCACB 等)用离散峰选择过滤中央混杂峰团
@@ -411,8 +428,10 @@ def search_axis_memory(
             best_phase = coarse_best
             best_score = scored[coarse_best]
             logs.append(f"轴{axis}: 粗网格 p0 平坦但最优显著优于零相位,采用粗网格最优")
-    if refine:
+    if refine and not flat:
         # 平台圆中位数 p0(亚度精修,旧方案默认评分路径)
+        # 0.2.199-补29dn:平坦面不回退——平坦区中位数会漂移
+        # (如 sampleI F1 粗网格最优 90° 被改成 80°),保持粗网格最优
         plateau_p0 = [
             p[0] for p, s in scored.items() if s >= best_score - PHASE_PLATEAU_TOL
         ]

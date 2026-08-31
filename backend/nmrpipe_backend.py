@@ -2725,6 +2725,7 @@ class NMRPipeBackend:
                 fixed_phases=direct_phase,
                 baseline=baseline,
                 window=window,
+                zero_fill=zero_fill,
                 ext_lo=ext_lo,
                 ext_hi=ext_hi,
                 extract=extract,
