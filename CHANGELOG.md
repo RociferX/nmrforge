@@ -34,6 +34,13 @@
 - 结果:sampleM VM 实测 F2 23.1→11.7s、F1 25.0→8.6s(仍有 Python 层循环开销,
   非亚秒级);±90° 消歧候选与 best_sym 同源锁定行(审阅修复);
 - 测试:test_memory_phase_search 全绿;全量 pytest 826 项全绿,ruff 通过。
+- 等价性验证(2026-08-31,VM 项目 2/exp_003/d_011,轴 F2,复用 nus3d_rc 不跑
+  SMILE):内存 rotate_real(p) 谱 vs 后端 finalize PS(p) -di 实谱,12 个粗网格
+  候选相对最大差 ≤1.7e-7(谱值量级 1e11,绝对差为浮点运算顺序差),评分逐位
+  一致、Spearman=1.0000、top 一致(330°)——NUS 间接维「后端 finalize 复型预览
+  + 内存 PS 等价旋转评分」与逐候选后端重渲等价,保持内存评分(快),不改回
+  逐候选后端;旧方案A(直接在 recon 平面 apply)不等价结论不适用现实现;
+  验证脚本 scripts/vm_validate_nus_indirect_equiv.py。
 
 ## 0.2.199-补29dn(2026-08-31,填零先于间接维相位优化 + 直接维确定后重搜间接维;修 sampleI F1 105°→90°)
 
