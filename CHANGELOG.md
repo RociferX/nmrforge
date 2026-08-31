@@ -1,5 +1,19 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29dr(2026-08-31,相位优化不迭代:直接维调好后间接维再优化一轮)
+
+用户:不做多轮迭代——只是「初始搜索(间接维先行)→ 直接维确定 → 间接维再优化
+一轮」即可(回退补29do 在 uniform 上的逐轴交替重搜;NUS 补29do 本就是重搜一轮,
+保持不变)。
+实现(uniform,workflow/phase_routes.py):
+- 恢复 0.2.199-补29dn 结构:初始逐轴搜索(F1→F2,auto 完整填零)→
+  joint_recheck_memory 联合复核 → 直接维确定后间接维重搜一轮
+  (preview_{axis}_r2,预览带直接维固定相位、排除本轴自身相位);
+- 移除 max_rounds 迭代循环与收敛判断(uniform);_phase_delta 保留(NUS 重搜用);
+- 测试:uniform 调用计数恢复 5 次 process(F1+F2+F1重搜+joint+终跑),
+  backend_runs=4,magnitude 3 次,NUS backend_runs=5 不变;
+- 全量 pytest 826 项全绿,ruff 通过,test_full_paths 通过。
+
 ## 0.2.199-补29dq(2026-08-31,NUS 直接维填零默认 2×TD,内存不足护栏降 1×TD)
 
 用户:NUS 直接维填零不应该固定 1×TD——内存够时用正常填零(与 uniform 一致
