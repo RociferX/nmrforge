@@ -318,9 +318,9 @@ class MainWindow(QMainWindow):
             self.project_tree.begin_create_project()
 
     def _on_project_create_submitted(self, name: str) -> None:
-        """内联命名提交(欢迎页/项目树):填常规信息后创建工作区项目。"""
-        fields = self._ask_note_fields("新建项目 - 常规信息(可选)", "project")
-        self._new_project_in_workspace(name.strip(), fields=fields)
+        """内联命名提交(欢迎页/项目树):直接创建工作区项目(0.2.199-补29dw
+        不再弹常规信息表单,注释留空、创建后可通过「编辑注释」补充)。"""
+        self._new_project_in_workspace(name.strip())
 
     def _new_project_in_workspace(
         self, name: str, fields: dict | None = None
@@ -1359,11 +1359,11 @@ class MainWindow(QMainWindow):
         self.project_tree.begin_create_experiment()
 
     def _on_experiment_create_submitted(self, title: str) -> None:
-        """项目树内联命名提交:填常规信息后创建空白实验。"""
+        """项目树内联命名提交:直接创建空白实验(0.2.199-补29dw 不再弹常规
+        信息表单,注释留空、创建后可通过「编辑注释」补充)。"""
         if self.manager.project is None:
             return
-        fields = self._ask_note_fields("新建实验 - 常规信息(可选)", "experiment")
-        self._create_experiment_with_title_and_fields(title.strip(), fields)
+        self._create_experiment_with_title_and_fields(title.strip())
 
     def _import_data_with_options(
         self, exp_id: str, name: str, source: str, copy: bool
