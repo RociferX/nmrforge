@@ -1,5 +1,40 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29do(2026-08-31,迭代式相位优化:逐轴交替重搜至收敛;NUS 直接维确定后间接维重搜一轮)
+
+用户:处理流程相位优化要像迭代式——直接维、间接维、直接维、间接维交替进行,所有途径都改,
+并测试 3D 的时间消耗(承接「为什么 uniform 快」的 NUS 慢问题)。
+调查与实现:
+- 顺序实测:间接维先行可收敛(sampleI F1 105°→90°、sampleF F1→92.5°);直接维先行发散
+  (sampleI F2 在 F1=(0,0) 下得 172°,再迭代到 270/150 垃圾值)——代码支持两种顺序,
+  但实测直接维先行收敛失败,固定间接维先行(与既有 search_axes 拼接一致);
+- uniform(unified_route):max_rounds=3 逐轮按 search_axes 交替重搜(每轮预览其它轴带
+  当前相位、被搜轴 PS(0,0)),_phase_delta 判定收敛(≥5° 变化继续);移除顺序搜索后的
+  联合复核(迭代至不动点等价且更彻底);日志含「相位迭代: 第 N 轮…收敛」;
+- NUS(_unified_nus):直接维(实型终谱+投影迹线 HT,phase.json 缓存)确定后,间接维重搜
+  一轮;3D NUS 多轮重搜实测 ±180° 符号摆动且每轮约 30s,收敛迭代限一轮;
+- 修复:finalize 预览会把 phases 里预览轴自身相位直接写进 PS(与 uniform 预览过滤不同),
+  NUS 重搜若传 dict(fixed) 会搜到残差(≈0)并覆盖丢失绝对相位——重搜改为排除预览轴
+  (phases={k:v for k,v in fixed.items() if k != axis}),并加测试断言锁定;
+- 测试:更新调用计数(uniform 双轴 2 轮 = 4 预览 + joint(处理参数优化) + 终跑 = 6 次
+  process;NUS backend_runs=5);全量 pytest 826 项全绿,ruff 通过,test_full_paths 通过。
+
+## 0.2.199-补29dp(2026-08-31,NUS 内存相位搜索提速:锁定迹线行只旋转候选行)
+
+背景:用户问「为什么 NUS 慢、uniform 快」——VM 实测 sampleM(3D NUS,复型谱约
+(256,256,586)≈3840 万复点):复型预览(真实 NMRPipe FT)每轴仅约 2-3s,而内存相位搜索
+每轴 23-25s;每次候选评分对全数组做 rotate_real(构造整轴 ramp + 逐点复乘 + 取实部),
+约 50 次候选 × 全量内存搬运。uniform 预览谱小 1-2 个数量级(2D 如 (431,336) 复型),
+且走一次完整管道,所以每轴 1-4s。
+实现(workflow/memory_phase_search.py):
+- rotate_real:p1≈0 时标量旋转 arr.real*c − arr.imag*s(不构造整轴 ramp);
+- search_axis_memory:锁定迹线后只抽取锁定行(几百行),候选评分/可复现性子采样/
+  ±90° 消歧全部只在锁定行上旋转(_window_nets_from_rows/score_locked_memory/
+  _subsampled_score_rows 与原公式逐行一致,评分逐位等价);
+- 结果:sampleM VM 实测 F2 23.1→11.7s、F1 25.0→8.6s(仍有 Python 层循环开销,
+  非亚秒级);±90° 消歧候选与 best_sym 同源锁定行(审阅修复);
+- 测试:test_memory_phase_search 全绿;全量 pytest 826 项全绿,ruff 通过。
+
 ## 0.2.199-补29dn(2026-08-31,填零先于间接维相位优化 + 直接维确定后重搜间接维;修 sampleI F1 105°→90°)
 
 用户:sampleI(2D uniform 15N-1H Echo-Antiecho)间接维 F1 相位优化为 105°,
