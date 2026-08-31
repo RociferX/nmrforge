@@ -1,5 +1,18 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29dy(2026-08-31,填零候选 finalize 去重 + NUS 重构中间产物不留下)
+
+用户:检查优化过程是否有没必要重复(finalize 慢且反复输出「finalize 完成」);
+另外中间产物 nus3d_1、nus3d_rc 不留下。
+优化(workflow/phase_routes.py):
+- 填零候选按实际填零尺寸去重(zero_fill_plan 展开):auto 与 1×TD 常同 SI,
+  只评一次,日志「…同尺寸,跳过」;无间接维窗时 auto 候选 == joint 基底谱,
+  复用其评分不重跑 finalize(3D NUS 处理参数优化阶段可少 1-2 次 finalize);
+- _cleanup_unified_intermediates 末尾删除 NUS 重构中间目录 nus3d_1 /
+  nus3d_rc / nus3d_rc_ph / nus2d(清理后重新优化会重跑 SMILE,属正常代价);
+  保留终谱/最终脚本/phase.json/fid/nuslist/smile.log;
+- 测试:清理测试更新(nus3d 目录移入应删项);全量 pytest 826 项全绿,ruff 通过。
+
 ## 0.2.199-补29dx(2026-08-31,实验状态列与项目一致:当前实验显示「当前」,否则为空)
 
 用户:实验和项目的状态一样——在当前实验显示「当前」,否则为空。

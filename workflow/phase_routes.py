@@ -183,14 +183,16 @@ def _cleanup_unified_intermediates(
     work: Path,
     dataset_id: str,
 ) -> None:
-    """清理 unified 流程中间产物(相位校正预览与窗函数优化评分谱)。
+    """清理 unified 流程中间产物(相位预览/窗填零评分谱 + NUS 重构平面目录)。
 
-    清理(仅限 process 工作目录,不递归、不跨目录):
+    清理(仅限 process 工作目录):
     - {dataset_id}_preview_* 的 .com/.ft2/.ft3/.fdf
     - {dataset_id}_joint* 的 .com/.ft3/.fdf
     - {dataset_id}_win1* / _win2* / _win3* 的 .com/.ft3/.fdf
+    - 0.2.199-补29dy(用户):NUS 重构中间目录 nus3d_1 / nus3d_rc /
+      nus3d_rc_ph / nus2d 不留下(清理后再重新优化会重跑 SMILE,属正常代价)
 
-    保留项(终谱、最终脚本、phase.json、fid/、重构平面)不受影响。
+    保留项(终谱、最终脚本、phase.json、fid/、nuslist、smile.log)不受影响。
     """
     if not work.is_dir():
         return
@@ -209,6 +211,12 @@ def _cleanup_unified_intermediates(
                     p.unlink(missing_ok=True)
                 except OSError:
                     pass
+    import shutil
+
+    for _dir in ("nus3d_1", "nus3d_rc", "nus3d_rc_ph", "nus2d"):
+        _target = work / _dir
+        if _target.is_dir():
+            shutil.rmtree(_target, ignore_errors=True)
 
 
 def _append_final_summary(
@@ -1006,6 +1014,7 @@ def _optimize_uniform_processing(
     zf_cfg_final = zf_params
     try:
         from backend.script_generator import effective_td as _eff_td
+        from backend.script_generator import zero_fill_plan as _zf_plan
 
         if progress is not None:
             progress("填零候选优化中(process 重跑评分)")
@@ -1015,7 +1024,7 @@ def _optimize_uniform_processing(
             n = max(int(_td[idx]) if idx < len(_td) else 0, 1)
             return 1 << max(0, (factor * n - 1)).bit_length()
 
-        zf_candidates: list[tuple[str, dict[str, Any]]] = [("auto", zf_params)]
+        raw_candidates: list[tuple[str, dict[str, Any]]] = [("auto", zf_params)]
         for label, factor in (("1×TD", 1), ("2×TD", 2)):
             cfg: dict[str, Any] = {}
             for idx, a in enumerate(axes):
@@ -1024,7 +1033,26 @@ def _optimize_uniform_processing(
                     if a == direct_axis
                     else {"mode": "size", "size": _zf_size(idx, factor)}
                 )
-            zf_candidates.append((label, cfg))
+            raw_candidates.append((label, cfg))
+        # 0.2.199-补29dy:按实际填零尺寸去重(auto 与 1×TD 常同 SI),避免
+        # 重复 finalize;无间接维窗时 auto 候选 == joint 基底谱,复用评分
+        zf_candidates: list[tuple[str, dict[str, Any]]] = []
+        _seen: set[tuple[tuple[str, str, object], ...]] = set()
+        for _label, _cfg in raw_candidates:
+            _plan = _zf_plan(experiment, _cfg)
+            _key = tuple(
+                (a, _plan[a].get("mode"), _plan[a].get("size")) for a in axes
+            )
+            if _key in _seen:
+                out_logs.append(
+                    f"填零候选(嵌入): {_label} 与已评估配置同尺寸,跳过"
+                )
+                continue
+            _seen.add(_key)
+            zf_candidates.append((_label, _cfg))
+        if not any((window_cfg or {}).get(a) for a in indirect_axes):
+            zf_candidates = [c for c in zf_candidates if c[0] != "auto"]
+            out_logs.append("填零候选(嵌入): auto 复用 joint 基底谱评分")
 
         def _score_path(path: Path) -> float:
             import nmrglue as ng
@@ -1221,6 +1249,7 @@ def _optimize_nus_processing(
     zf_cfg_final = zf_params
     try:
         from backend.script_generator import effective_td as _eff_td
+        from backend.script_generator import zero_fill_plan as _zf_plan
 
         if progress is not None:
             progress("填零候选优化中(finalize 重渲评分,不重跑 SMILE)")
@@ -1230,7 +1259,7 @@ def _optimize_nus_processing(
             n = max(int(_td[idx]) if idx < len(_td) else 0, 1)
             return 1 << max(0, (factor * n - 1)).bit_length()
 
-        zf_candidates: list[tuple[str, dict[str, Any]]] = [("auto", zf_params)]
+        raw_candidates: list[tuple[str, dict[str, Any]]] = [("auto", zf_params)]
         for label, factor in (("1×TD", 1), ("2×TD", 2)):
             cfg: dict[str, Any] = {}
             for idx, a in enumerate(axes):
@@ -1239,7 +1268,26 @@ def _optimize_nus_processing(
                     if a == direct_axis
                     else {"mode": "size", "size": _zf_size(idx, factor)}
                 )
-            zf_candidates.append((label, cfg))
+            raw_candidates.append((label, cfg))
+        # 0.2.199-补29dy:按实际填零尺寸去重(auto 与 1×TD 常同 SI),避免
+        # 重复 finalize;无间接维窗时 auto 候选 == joint 基底谱,复用评分
+        zf_candidates: list[tuple[str, dict[str, Any]]] = []
+        _seen: set[tuple[tuple[str, str, object], ...]] = set()
+        for _label, _cfg in raw_candidates:
+            _plan = _zf_plan(experiment, _cfg)
+            _key = tuple(
+                (a, _plan[a].get("mode"), _plan[a].get("size")) for a in axes
+            )
+            if _key in _seen:
+                out_logs.append(
+                    f"填零候选(嵌入): {_label} 与已评估配置同尺寸,跳过"
+                )
+                continue
+            _seen.add(_key)
+            zf_candidates.append((_label, _cfg))
+        if not any((window_cfg or {}).get(a) for a in indirect_axes):
+            zf_candidates = [c for c in zf_candidates if c[0] != "auto"]
+            out_logs.append("填零候选(嵌入): auto 复用 joint 基底谱评分")
 
         def _score_path(path: Path) -> float:
             import nmrglue as ng

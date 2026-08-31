@@ -1140,8 +1140,14 @@ def test_cleanup_unified_intermediates(tmp_path: Path) -> None:
         proc / f"{dataset_id}_win2_finalize.com",
         proc / f"{dataset_id}_win3.ft3",
         proc / f"{dataset_id}_win3_finalize.com",
+        # 0.2.199-补29dy:NUS 重构中间目录不留下
+        proc / "nus3d_1" / "stage1.ft1",
+        proc / "nus3d_rc" / "test0001.ft1",
+        proc / "nus3d_rc_ph" / "test0001.ft1",
+        proc / "nus2d" / "recon.ft1",
     ]
     for p in intermediates:
+        p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text("x")
 
     # === 保留项(不应被删) ===
@@ -1151,8 +1157,6 @@ def test_cleanup_unified_intermediates(tmp_path: Path) -> None:
         proc / f"{dataset_id}_finalize.com",
         proc / "phase.json",
         proc / "fid" / "test001.fid",
-        proc / "nus3d_rc" / "test0001.ft1",
-        proc / "nus2d" / "recon.ft1",
         proc / "spectra" / f"{dataset_id}.ft3",
         # 保留 prob 为 0 的 _c* / _j* 旧中间产物(0.2.77 清理范围,本次不碰)
         proc / f"{dataset_id}_c_0.ft3",
