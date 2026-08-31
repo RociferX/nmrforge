@@ -1,5 +1,16 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29dx(2026-08-31,实验状态列与项目一致:当前实验显示「当前」,否则为空)
+
+用户:实验和项目的状态一样——在当前实验显示「当前」,否则为空。
+实现(gui/project_tree.py):
+- _make_experiment_item / _update_experiment_item:实验节点第 2 列不再显示
+  exp.status,改为「当前」if exp.id == current_experiment_id() else 「」;
+- 新增 _update_experiment_current_markers:_on_selection_changed 时刷新实验
+  节点「当前」标记(选中实验/数据/组均归一化到实验);
+- 删除已无引用的 _STATUS_TEXT(实验状态列不再用);
+- 测试:既有 GUI 测试全绿,全量 pytest 826 项全绿,ruff 通过。
+
 ## 0.2.199-补29dw(2026-08-31,新建项目/实验去掉填注释弹窗)
 
 用户:新建项目和新建实验的「填注释」弹窗去掉。

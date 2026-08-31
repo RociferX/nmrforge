@@ -32,15 +32,6 @@ from core.project import ProjectManager
 # 数据节点下真实目录(契约 v1.3 §9:raw/process/spectra/peaks/figures/report)
 DATA_SUBFOLDERS = ("raw", "process", "spectra", "peaks", "figures", "report")
 
-_STATUS_TEXT = {
-    "registered": "已登记",
-    "imported": "已导入",
-    "fid_ready": "已生成 FID",
-    "processed": "已生成谱图",
-    "picked": "已选峰",
-    "analyzed": "已分析",
-}
-
 
 def _terminal_argv(directory: str) -> list[str] | None:
     """构造「在终端中打开目录」的命令(优先 csh);无可用终端返回 None。
@@ -334,7 +325,8 @@ class ProjectTreePanel(QWidget):
     ) -> None:
         """更新实验节点文本并增量刷新数据组与未入组样品数据节点。"""
         exp_item.setText(0, exp.title or exp.id)
-        exp_item.setText(1, _STATUS_TEXT.get(exp.status, exp.status))
+        # 0.2.199-补29dx(用户):实验与项目一致——当前选中实验显示「当前」,否则为空
+        exp_item.setText(1, "当前" if exp.id == self.current_experiment_id() else "")
         exp_item.setToolTip(0, f"{exp.id}\n右键: 导入样品数据 / 重命名 / 删除")
         existing_data: dict[str, QTreeWidgetItem] = {}
         existing_groups: dict[str, QTreeWidgetItem] = {}
@@ -512,8 +504,9 @@ class ProjectTreePanel(QWidget):
         return Path(self._workspace_path()).name or "Workspace"
 
     def _make_experiment_item(self, exp) -> QTreeWidgetItem:
-        status = exp.status
-        exp_item = QTreeWidgetItem([exp.title or exp.id, _STATUS_TEXT.get(status, status)])
+        exp_item = QTreeWidgetItem(
+            [exp.title or exp.id, "当前" if exp.id == self.current_experiment_id() else ""]
+        )
         exp_item.setIcon(0, self._icon("experiment"))
         exp_item.setToolTip(0, f"{exp.id}\n右键: 导入样品数据 / 重命名 / 删除")
         exp_item.setData(0, Qt.ItemDataRole.UserRole, {"kind": "experiment", "exp_id": exp.id})
@@ -801,7 +794,20 @@ class ProjectTreePanel(QWidget):
                 return found
         return None
 
+    def _update_experiment_current_markers(self) -> None:
+        """选中实验变化时,更新实验节点第 2 列「当前/空」(0.2.199-补29dx)。"""
+        current = self.current_experiment_id()
+        workspace_item = self.tree.topLevelItem(0)
+        if workspace_item is None:
+            return
+        for index in range(workspace_item.childCount()):
+            child = workspace_item.child(index)
+            data = child.data(0, Qt.ItemDataRole.UserRole)
+            if isinstance(data, dict) and data.get("kind") == "experiment":
+                child.setText(1, "当前" if str(data.get("exp_id", "")) == current else "")
+
     def _on_selection_changed(self) -> None:
+        self._update_experiment_current_markers()
         item = self.tree.currentItem()
         if item is None:
             self.selection_changed.emit("", "", "")
