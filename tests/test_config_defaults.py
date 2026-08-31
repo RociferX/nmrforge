@@ -90,8 +90,9 @@ def test_zero_fill_plan_uses_config_defaults(
     )
     plan = zero_fill_plan(exp)
     td = effective_td(exp)
-    # 0.2.81:NUS 直接维填零 1×TD(2×TD 使 SMILE 平面翻倍→重载关机)
-    assert plan["F2"]["size"] == 1 << max(0, int(td[0]) - 1).bit_length()
+    # 0.2.199-补29dq(用户):NUS 直接维填零默认 2×TD(与 uniform 一致);
+    # 内存不足由内存护栏降为 1×TD 并提示,仍不足才报内存不够
+    assert plan["F2"]["size"] == 1 << max(0, int(2 * td[0]) - 1).bit_length()
     # 均匀路径保持 2×TD
     uniform = read_dataset(bruker_dir / "hsqc_2d")
     plan_uniform = zero_fill_plan(uniform)

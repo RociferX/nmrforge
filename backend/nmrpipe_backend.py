@@ -1937,8 +1937,9 @@ class NMRPipeBackend:
         t1(0)=0);p1 用多峰迹线相位集中度拟合取中位数(t1 只是逐峰常数
         偏置,不影响斜坡),p0 锚定首条有峰的迹线(增量 0)的峰相位圆均值
         取反(PS 校正约定),±180 消歧取正峰解——直接维公共 p0 不再丢失。
-        估计在 PS 应用尺寸上做(NUS 直接维 1×TD、均匀 2×TD),p1 语义与
-        脚本 PS 一致,无需缩放。fid_files 支持单个文件或切片列表。
+        估计在 PS 应用尺寸上做(p1 为跨轴总度数,与填零尺寸无关;
+        0.2.199-补29dq NUS 直接维默认 2×TD,内存不足护栏降 1×TD),
+        p1 语义与脚本 PS 一致,无需缩放。fid_files 支持单个文件或切片列表。
 
         0.2.91(NUS 自动路径):有 nuslist + 切片时优先走「非均匀 DFT 最强
         峰相位」(core.optimization.phase_search.nus_direct_phase)——沿增量
@@ -2034,7 +2035,7 @@ class NMRPipeBackend:
                 if n_points < 8:
                     continue
                 if is_nus:
-                    zf_size = None  # NUS 直接维 PS 在 1×TD 上应用
+                    zf_size = None  # NUS 直接维搜索用原始 FID 尺寸(不填零)
                 else:
                     zf_size = 1
                     while zf_size < 2 * n_points:

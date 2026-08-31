@@ -228,11 +228,10 @@ def zero_fill_plan(
     axes = [dim.logical_axis for dim in experiment.dimensions]
     td = effective_td(experiment)
     direct_axis = axes[0] if axes else ''
-    # 0.2.81:NUS 直接维填零 1×TD(2×TD 使直接维平面翻倍→SMILE 重载关机;
-    # 手动验证 1×TD 安全且 34s 完成);均匀路径保持 2×TD
-    direct_factor = (
-        1 if experiment.sampling.mode is SamplingMode.NUS else DIRECT_ZF_FACTOR
-    )
+    # 0.2.199-补29dq(用户):NUS 直接维填零默认与 uniform 一致 2×TD(分辨率优先);
+    # 内存不足时由 reconstruct_nus 内存护栏(0.2.112)降为 1×TD 并提示,
+    # 仍不足才报「当前内存无法处理该谱」
+    direct_factor = DIRECT_ZF_FACTOR
     plan: dict[str, dict[str, Any]] = {}
 
     override: dict[str, dict[str, Any]] = {}
