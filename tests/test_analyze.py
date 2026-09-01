@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 from scipy.ndimage import gaussian_filter
 
-from core.peaks.peak_table import export_peaks_poky
+from core.peaks.peak_table import export_peaks_poky, import_peaks_poky
 from core.project import ProjectManager
 from workflow.analyze import AnalyzeError, analyze
 
@@ -137,6 +137,36 @@ def test_csp_requires_reference(tmp_path: Path) -> None:
     )
     result = analyze(manager, exp_id, cur_id)
     assert result.get("status") == "pending"
+
+
+def test_csp_sequence_matching_when_assigned(tmp_path: Path) -> None:
+    """两份峰表都有 assignment 时按氨基酸序列(残基号)匹配——标签格式
+    不同、顺序不同、位置差超出容差也匹配(0.2.199-补29es-修3)。"""
+    labels = ["G1H", "A45N"]
+    cur_centers = [(45.0, 110.0), (42.0, 103.0)]
+    ref_centers = [(50.0, 120.0), (40.0, 100.0)]  # 位置差远超 1H 容差
+    manager, exp_id, cur_id, ref_id = _setup_project(
+        tmp_path, cur_centers, ref_centers, labels=labels
+    )
+    # 改比对峰表标签:顺序互换 + 不同格式
+    ref_p = (
+        manager.data_dir(exp_id, ref_id, "peaks")
+        / f"{exp_id}-{ref_id}.list"
+    )
+    ref_rows = import_peaks_poky(ref_p)
+    ref_rows[0]["label"] = "A45H"
+    ref_rows[1]["label"] = "G1H-G1N"
+    export_peaks_poky(ref_p, ref_rows)
+    result = analyze(manager, exp_id, cur_id, reference_data_id=ref_id)
+    import csv
+
+    with open(result["csp_data"], encoding="utf-8") as fh:
+        data = list(csv.DictReader(fh))
+    assert len(data) == 2
+    assignments = {r["Assignment"] for r in data}
+    assert "G1H" in assignments and "A45N" in assignments
+    # 位置差这么大,若退化位置最近邻会 0 匹配——序列匹配才是 2 个
+    assert any(abs(float(r["dH"])) > 0.05 for r in data)
 
 
 def test_csp_matches_by_assignment(tmp_path: Path) -> None:

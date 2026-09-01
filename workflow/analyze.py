@@ -67,30 +67,48 @@ def _label(peak: dict[str, Any]) -> str:
     return "" if lab in ("", "?-?", "?-?-?") else lab
 
 
+def _assignment_residue(label: str) -> int | None:
+    """从 assignment 提取残基号(首个字母段后的数字)。
+
+    Poky 标签如 G1H-G1N / A45N / C16H-K15CB-C16N——取首个连字符段的数字
+    作为氨基酸序列位置;无数字返回 None。两份峰表都指认时按残基号(序列)
+    匹配,而非位置最近邻(0.2.199-补29es-修3)。
+    """
+    seg = str(label or "").split("-", 1)[0].strip()
+    digits = "".join(ch for ch in seg if ch.isdigit())
+    return int(digits) if digits else None
+
+
 def _match_peaks(
     cur_peaks: list[dict[str, Any]],
     ref_peaks: list[dict[str, Any]],
     *,
     h_tol: float = _H_TOL,
     n_tol: float = _N_TOL,
+    sequence_only: bool = False,
 ) -> list[tuple[int, int]]:
-    """返回 [(cur_idx, ref_idx)]:先按 Assignment 精确匹配,剩余峰最近邻
-    一对一匹配(1H/15N 容差内取组合距离最小)。"""
+    """返回 [(cur_idx, ref_idx)]:先按 assignment 残基号(氨基酸序列)匹配
+    指认峰;sequence_only=True 时只做序列匹配(两份都充分指认时不退化为
+    位置最近邻),否则剩余峰最近邻一对一匹配(1H/15N 容差内组合距离最小)。"""
     pairs: list[tuple[int, int]] = []
     used_ref: set[int] = set()
     matched_cur: set[int] = set()
-    by_label: dict[str, list[int]] = {}
+    by_residue: dict[int, list[int]] = {}
     for i, p in enumerate(ref_peaks):
         lab = _label(p)
-        if lab:
-            by_label.setdefault(lab, []).append(i)
+        r = _assignment_residue(lab) if lab else None
+        if r is not None:
+            by_residue.setdefault(r, []).append(i)
     for ci, p in enumerate(cur_peaks):
         lab = _label(p)
-        if lab and by_label.get(lab):
-            ri = by_label[lab].pop(0)
+        r = _assignment_residue(lab) if lab else None
+        if r is not None and by_residue.get(r):
+            ri = by_residue[r].pop(0)
             pairs.append((ci, ri))
             used_ref.add(ri)
             matched_cur.add(ci)
+    if sequence_only:
+        return pairs
     for ci, p in enumerate(cur_peaks):
         if ci in matched_cur:
             continue
@@ -340,10 +358,30 @@ def analyze(
         raise AnalyzeError("CSP 分析目前仅支持 2D HSQC 峰表(N_shift/H_shift)")
     _log(f"使用选峰峰表: 当前 {cur_peaks_path.name}({len(cur_peaks)} 峰)")
     _log(f"使用选峰峰表: 比对 {ref_peaks_path.name}({len(ref_peaks)} 峰)")
-    pairs = _match_peaks(cur_peaks, ref_peaks, h_tol=h_tol, n_tol=n_tol)
+    # 0.2.199-补29es-修3(用户):两份峰表都有 assignment 时按氨基酸序列
+    # (残基号)匹配,不做位置最近邻
+    cur_assigned = sum(
+        1 for p in cur_peaks if _assignment_residue(_label(p)) is not None
+    ) / max(len(cur_peaks), 1)
+    ref_assigned = sum(
+        1 for p in ref_peaks if _assignment_residue(_label(p)) is not None
+    ) / max(len(ref_peaks), 1)
+    if cur_assigned >= 0.5 and ref_assigned >= 0.5:
+        _log(
+            f"两份峰表均有 assignment(当前 {cur_assigned:.0%}/比对 "
+            f"{ref_assigned:.0%}),按氨基酸序列(残基号)匹配,未指认峰不参与"
+        )
+        pairs = _match_peaks(cur_peaks, ref_peaks, sequence_only=True)
+    else:
+        _log(
+            f"峰表指认不完整(当前 {cur_assigned:.0%}/比对 {ref_assigned:.0%}),"
+            "指认峰按序列匹配,其余按位置最近邻"
+        )
+        pairs = _match_peaks(cur_peaks, ref_peaks, h_tol=h_tol, n_tol=n_tol)
     if not pairs:
         raise AnalyzeError(
-            "未找到匹配峰(按 Assignment 或 1H±0.05/15N±0.5 ppm 最近邻)"
+            "未找到匹配峰(两份都有 assignment 时按残基号序列匹配;"
+            "否则按 1H±0.05/15N±0.5 ppm 最近邻)"
         )
     _log(f"匹配峰: {len(pairs)} 个")
     rows: list[dict[str, Any]] = []
