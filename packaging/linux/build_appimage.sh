@@ -39,16 +39,34 @@ cat > "$APPDIR/AppRun" <<'APPRUN_EOF'
 #!/bin/sh
 HERE="$(dirname "$(readlink -f "$0")")"
 
-# 桌面集成自安装(0.2.199-补29ew):首次/移动后自动把 desktop 入口与图标装到
-# ~/.local/share,Exec 指向 AppImage 真实路径;设置 NMRFORGE_NO_DESKTOP=1 可跳过。
+# 桌面集成自安装/移除(0.2.199-补29ew):
+# - 首次/移动后自动把 desktop 入口与图标装到 ~/.local/share,Exec/TryExec 指向
+#   AppImage 真实路径(AppImage 文件被删除后菜单项自动隐藏);
+# - 运行 --remove-desktop(或 --uninstall-desktop)移除桌面入口与图标;
+# - 设 NMRFORGE_NO_DESKTOP=1 可跳过自安装。
+if [ "$1" = "--remove-desktop" ] || [ "$1" = "--uninstall-desktop" ]; then
+    rm -f "$HOME/.local/share/applications/nmrforge.desktop"
+    rm -f "$HOME/.local/share/icons/hicolor/256x256/apps/nmrforge.png"
+    if command -v update-desktop-database >/dev/null 2>&1; then
+        update-desktop-database "$HOME/.local/share/applications" >/dev/null 2>&1 || true
+    fi
+    if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+        gtk-update-icon-cache -f -t "$HOME/.local/share/icons/hicolor" >/dev/null 2>&1 || true
+    fi
+    echo "已移除 NMRForge 桌面入口与图标(项目数据不受影响;删除 AppImage 文件即完全卸载)"
+    exit 0
+fi
+
 if [ -z "${NMRFORGE_NO_DESKTOP:-}" ] && [ -n "${APPIMAGE:-}" ]; then
     APPIMG_PATH="$(readlink -f "$APPIMAGE")"
     DESKTOP_DIR="$HOME/.local/share/applications"
     ICON_DIR="$HOME/.local/share/icons/hicolor/256x256/apps"
     DESKTOP_FILE="$DESKTOP_DIR/nmrforge.desktop"
-    if [ ! -f "$DESKTOP_FILE" ] || ! grep -qF "Exec=\"$APPIMG_PATH\"" "$DESKTOP_FILE"; then
+    if [ ! -f "$DESKTOP_FILE" ] || ! grep -qF "Exec=$APPIMG_PATH" "$DESKTOP_FILE"; then
         mkdir -p "$DESKTOP_DIR" "$ICON_DIR"
-        sed "s|^Exec=.*|Exec=\"$APPIMG_PATH\"|" "$HERE/NMRForge.desktop" > "$DESKTOP_FILE"
+        sed -e "s|^Exec=.*|Exec=\"$APPIMG_PATH\"|" \
+            -e "1a TryExec=$APPIMG_PATH" \
+            "$HERE/NMRForge.desktop" > "$DESKTOP_FILE"
         cp -f "$HERE/nmrforge.png" "$ICON_DIR/nmrforge.png"
         if command -v update-desktop-database >/dev/null 2>&1; then
             update-desktop-database "$DESKTOP_DIR" >/dev/null 2>&1 || true
