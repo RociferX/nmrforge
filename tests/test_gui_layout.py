@@ -608,6 +608,19 @@ def test_spectrum_panel_file_help_menus(
     window.close()
 
 
+def test_main_window_has_app_icon(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.2.199-补29eq:主窗口设置了应用图标(gui/assets/nmrforge.png)。"""
+    from gui.theme import app_icon
+
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    window = MainWindow(manager=manager)
+    assert app_icon() is not None
+    assert not window.windowIcon().isNull()
+    window.close()
+
+
 def test_tools_menu_standalone_quality_entries(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:

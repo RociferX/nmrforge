@@ -1,5 +1,16 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29eq(2026-09-01,应用图标实装)
+
+用户:把软件的图标实装。
+实现:
+- 图标资源 packaging/linux/icons/nmrforge.png(make_icon.py 生成,深蓝圆角
+  + 谱峰折线)复制到 gui/assets/nmrforge.png(冻结态随 gui 打包);
+- gui/theme 新增 app_icon()(开发/冻结通用路径,缺失返回 None);
+- 主窗口 __init__ 与 run()、独立查看器 viewer/app.py 启动时设置窗口/
+  任务栏图标(QApplication.setWindowIcon + window.setWindowIcon);
+- 测试:+1(主窗口 windowIcon 非空),全量 pytest 842 项全绿,ruff 通过。
+
 ## 0.2.199-补29eo(2026-09-01,峰标记亚像素定位)
 
 用户:选峰基本位置没毛病,但峰标记很多明显偏离峰真正的顶。

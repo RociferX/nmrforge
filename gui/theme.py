@@ -9,8 +9,30 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtGui import QColor, QPalette
+from PyQt6.QtGui import QColor, QIcon, QPalette
 from PyQt6.QtWidgets import QApplication, QProxyStyle, QStyle
+
+
+def app_icon() -> QIcon | None:
+    """应用图标(gui/assets/nmrforge.png,开发/冻结通用);缺失返回 None。
+
+    0.2.199-补29eq:主窗口与独立查看器启动时调用,设置窗口/任务栏图标。
+    """
+    try:
+        from core.app_paths import resource_path
+
+        assets = Path(resource_path("gui")) / "assets"
+    except Exception:  # noqa: BLE001
+        assets = Path(__file__).resolve().parent / "assets"
+    candidates = (
+        assets / "nmrforge.png",
+        Path(__file__).resolve().parent.parent
+        / "packaging" / "linux" / "icons" / "nmrforge.png",
+    )
+    for p in candidates:
+        if p.is_file():
+            return QIcon(str(p))
+    return None
 
 
 def _theme_assets_dir() -> Path | None:

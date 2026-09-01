@@ -116,6 +116,15 @@ class MainWindow(QMainWindow):
         self._log_data_id = ""
         self._log_group_id = ""
         self.setWindowTitle("NMRForge")
+        # 0.2.199-补29eq:应用图标(窗口/任务栏)
+        try:
+            from gui.theme import app_icon
+
+            _icon = app_icon()
+            if _icon is not None:
+                self.setWindowIcon(_icon)
+        except Exception:  # noqa: BLE001 - 图标缺失不阻断启动
+            pass
         self.setAcceptDrops(True)  # 拖拽 Bruker 数据目录导入
         self._build_menus()
         self._build_central()
@@ -1871,10 +1880,13 @@ class MainWindow(QMainWindow):
 
         app = QApplication(sys.argv)
         from gui.dialogs import install_dialog_centering
-        from gui.theme import apply_dark_theme
+        from gui.theme import app_icon, apply_dark_theme
 
         install_dialog_centering(app)
         apply_dark_theme(app)
+        _icon = app_icon()
+        if _icon is not None:
+            app.setWindowIcon(_icon)
         window = MainWindow()
         window.show()
         return app.exec()
