@@ -1556,9 +1556,10 @@ class SpectrumViewer(QWidget):
             if not visible[row]:
                 continue
             x_ppm, y_ppm = self._peak_xy(peak)
-            xs.append(float(x_axis.index_at(x_ppm)))
-            # view y 即数据行:峰标记按 y 轴数据行放置,与 contour 对齐
-            ys.append(float(y_axis.index_at(y_ppm)))
+            xs.append(float(x_axis.index_at_f(x_ppm)))
+            # view y 即数据行:峰标记按 y 轴数据行放置,与 contour 对齐;
+            # 0.2.199-补29eo 用小数索引,标记落在亚像素峰顶
+            ys.append(float(y_axis.index_at_f(y_ppm)))
             selected = (
                 row == self._selected_peak or row in self._box_selected_rows
             )

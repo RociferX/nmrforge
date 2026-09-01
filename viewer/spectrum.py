@@ -298,6 +298,25 @@ class SpectrumAxis:
     def index_at(self, ppm_value: float) -> int:
         return int(np.argmin(np.abs(self.ppm - ppm_value)))
 
+    def index_at_f(self, ppm_value: float) -> float:
+        """亚像素索引:线性反插值(峰标记亚像素定位,0.2.199-补29eo)。"""
+        p = self.ppm
+        n = self.size
+        if n < 2:
+            return 0.0
+        i = int(np.argmin(np.abs(p - ppm_value)))
+        if i <= 0 or i >= n - 1 or p[i] == ppm_value:
+            return float(i)
+        between_next = (
+            (p[i + 1] <= ppm_value <= p[i])
+            or (p[i] <= ppm_value <= p[i + 1])
+        )
+        j = i + 1 if between_next else i - 1
+        denom = p[i] - p[j]
+        if abs(denom) < 1e-15:
+            return float(i)
+        return float(j) + (ppm_value - p[j]) * (i - j) / denom
+
     def ppm_at(self, index: int) -> float:
         return float(self.ppm[index])
 

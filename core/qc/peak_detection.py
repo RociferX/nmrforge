@@ -39,13 +39,37 @@ class PeakDetectionParams:
     edge_margin: int = 0
 
 
+def _refined_index(value: np.ndarray, idx: np.ndarray, axis: int) -> float:
+    """亚像素峰位:沿 axis 对局部极大及其两点邻域做抛物线顶点修正。
+
+    真实峰顶常落在像素之间,整数格 argmax 平均偏离 ~0.34px(VM 实测
+    71% 峰 >0.25px、最大 0.69px),放大后峰标记明显偏离峰顶;抛物线
+    修正后合成高斯峰精度 ~0.03-0.07px(0.2.199-补29eo)。
+    """
+    i = int(idx[axis])
+    if not (0 < i < value.shape[axis] - 1):
+        return float(i)
+    sl = list(idx)
+    vals = []
+    for di in (-1, 0, 1):
+        sl[axis] = i + di
+        vals.append(float(value[tuple(sl)]))
+    v0, v1, v2 = vals
+    denom = v0 - 2.0 * v1 + v2
+    if abs(denom) < 1e-12:
+        return float(i)
+    offset = 0.5 * (v0 - v2) / denom
+    return float(i + float(np.clip(offset, -0.5, 0.5)))
+
+
 def _candidates(
     real: np.ndarray, sigma: float, params: PeakDetectionParams, sign: int
 ) -> list[Peak]:
     """提取 sign(+1/-1) 方向的候选峰。
 
     严格局部极大(中心须大于环邻域最大,排除平坦区/脊线上「等于窗口最大」
-    的伪峰,0.2.199-补29aq 修)+ 强度>噪声×sigma + S/N 阈值。
+    的伪峰,0.2.199-补29aq 修)+ 强度>噪声×sigma + S/N 阈值;
+    位置做亚像素抛物线修正(0.2.199-补29eo),峰顶落在像素之间也能对齐。
     """
     value = sign * real
     footprint = np.ones([params.neighborhood] * real.ndim, dtype=bool)
@@ -65,9 +89,12 @@ def _candidates(
         val = float(real[tuple(idx)])
         snr_value = abs(val) / sigma if sigma > 0 else 0.0
         if snr_value >= params.min_snr:
+            position = tuple(
+                _refined_index(value, idx, a) for a in range(real.ndim)
+            )
             peaks.append(
                 Peak(
-                    position=tuple(float(i) for i in idx),
+                    position=position,
                     height=val,
                     snr=snr_value,
                     sign=sign,

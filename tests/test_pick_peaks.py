@@ -87,6 +87,34 @@ def test_permutation_to_logical_maps_storage_to_logical() -> None:
     assert logical_axes == [1, 0, 2]  # F1←轴1、F2←轴0、F3←轴2
 
 
+def test_pick_peaks_subpixel_shift_interpolated(tmp_path: Path) -> None:
+    """亚像素峰位:写 .list 的 ppm 为插值(非整数像素值,0.2.199-补29eo)。"""
+    shape = (64, 128)
+    yy, xx = np.mgrid[0:64, 0:128]
+    rng = np.random.default_rng(4)
+    real = np.exp(
+        -(((yy - 20.4) ** 2) / (2 * 1.2 ** 2) + ((xx - 40.7) ** 2) / (2 * 1.2 ** 2))
+    )
+    real = real + rng.normal(0, 0.01, size=shape)
+    ft2 = tmp_path / "sub.ft2"
+    _write_ft2(ft2, real)
+    manager, exp_id, data_id = _manager_with_spectrum(tmp_path, ft2)
+    result = pick_peaks(manager, exp_id, data_id)
+    rows = import_peaks_poky(Path(result["peak_path"]))
+    top = max(rows, key=lambda r: float(r["Intensity"]))
+    h = float(top["H_shift"])
+    n = float(top["N_shift"])
+    # _write_ft2 头部 ORIG=1000/600,SW=6000:
+    #   ppm_i = 1000/600 + (size-1-i)*6000/(size*600)
+    exp_h = 1000 / 600 + (127 - 40.7) * 6000 / (128 * 600)
+    exp_n = 1000 / 600 + (63 - 20.4) * 6000 / (64 * 600)
+    assert abs(h - exp_h) < 0.02
+    assert abs(n - exp_n) < 0.03
+    # 确认不是四舍五入到最近整数像素(确实做了插值)
+    int_h = 1000 / 600 + (127 - 41) * 6000 / (128 * 600)
+    assert abs(h - int_h) > 0.01
+
+
 def test_pick_peaks_missing_spectrum_fails(tmp_path: Path) -> None:
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     entry = manager.create_experiment()

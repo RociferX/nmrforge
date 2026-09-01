@@ -55,6 +55,19 @@ def _ppm_axis(dic: dict[str, Any], prefix: str, size: int) -> np.ndarray:
     return np.zeros(size)
 
 
+def _ppm_at_fraction(axis_ppm: np.ndarray, value: float) -> float:
+    """亚像素索引 → ppm 线性插值(0.2.199-补29eo:峰位亚像素修正后
+    写插值 ppm,与 viewer/spectrum.ppm_at_f 同语义)。"""
+    n = axis_ppm.size
+    if n < 2:
+        return float(axis_ppm[0]) if n else 0.0
+    i0 = max(0, int(np.floor(value)))
+    i1 = min(i0 + 1, n - 1)
+    i0 = min(i0, i1)
+    frac = value - i0
+    return float(axis_ppm[i0] * (1.0 - frac) + axis_ppm[i1] * frac)
+
+
 def _fdf_prefix(dic: dict[str, Any], ndim: int, axis_idx: int) -> str:
     """数据轴 axis_idx 对应的 FDF 块前缀('FDF1'/'FDF2'/...)。
 
@@ -274,16 +287,16 @@ def _write_peaks_list(
             else:
                 n_axis = logical_axes[0]
                 h_axis = logical_axes[1]
-            row["H_shift"] = float(axes[h_axis][int(peak.position[h_axis])])
-            row["N_shift"] = float(axes[n_axis][int(peak.position[n_axis])])
+            row["H_shift"] = _ppm_at_fraction(axes[h_axis], peak.position[h_axis])
+            row["N_shift"] = _ppm_at_fraction(axes[n_axis], peak.position[n_axis])
         else:
             for k in range(3):
                 if k >= len(axes):
                     row[f"F{k + 1}_shift"] = 0.0
                 else:
                     ax = logical_axes[k] if k < len(logical_axes) else k
-                    row[f"F{k + 1}_shift"] = float(
-                        axes[ax][int(peak.position[ax])]
+                    row[f"F{k + 1}_shift"] = _ppm_at_fraction(
+                        axes[ax], peak.position[ax]
                     )
         rows.append(row)
     # 0.2.199-补29dk:3D .list 按外部约定 w1=15N/w2=13C/w3=1H 写列;

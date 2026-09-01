@@ -84,6 +84,19 @@ def test_spectrum_axis_ppm_roundtrip() -> None:
     assert abs(axis.ppm_at(255) - 4.7) < 1e-9
 
 
+def test_spectrum_axis_index_at_f() -> None:
+    """亚像素反插值:index_at_f(ppm_at_f(x)) ≈ x(0.2.199-补29eo)。"""
+    axis = _axis("F2", size=256)
+    for index in (0, 10, 128, 255):
+        assert abs(axis.index_at_f(axis.ppm_at(index)) - index) < 1e-9
+    f = 100.3
+    ppm = axis.ppm_at_f(f)
+    assert abs(axis.index_at_f(ppm) - f) < 1e-6
+    # 越界 clamp 到端点
+    assert axis.index_at_f(axis.ppm[0] + 1.0) == 0.0
+    assert axis.index_at_f(axis.ppm[-1] - 1.0) == float(axis.size - 1)
+
+
 def test_spectrum_axis_fallback_carrier() -> None:
     axis = SpectrumAxis(
         label="F1", size=64, sw_hz=3000.0, obs_mhz=150.0, carrier_ppm=118.0

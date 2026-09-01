@@ -34,6 +34,22 @@ def test_noise_estimate_on_pure_noise() -> None:
     assert est.method == "robust_mad"
 
 
+def test_peak_detection_subpixel_position() -> None:
+    """亚像素峰位:高斯峰中心落在像素之间时,检测位置接近真实中心
+    (0.2.199-补29eo 抛物线修正)。"""
+    shape = (128, 256)
+    yy, xx = np.mgrid[0:128, 0:256]
+    rng = np.random.default_rng(3)
+    real = np.exp(
+        -(((yy - 50.4) ** 2) / (2 * 1.2 ** 2) + ((xx - 120.7) ** 2) / (2 * 1.2 ** 2))
+    )
+    real = real + rng.normal(0, 0.01, size=shape)
+    peaks = peak_detection.detect(real)
+    top = max(peaks, key=lambda p: p.height)
+    assert abs(top.position[0] - 50.4) < 0.3
+    assert abs(top.position[1] - 120.7) < 0.3
+
+
 def test_peak_detection_finds_peaks() -> None:
     spec = _synthetic_spectrum()
     peaks = peak_detection.detect(spec)

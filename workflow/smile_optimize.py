@@ -87,11 +87,29 @@ def _detect_peaks(spectrum_path: str) -> list[peak_detection.Peak]:
     return peak_detection.detect(arr)
 
 
+def _ppm_at_fraction(axis_ppm: np.ndarray, value: float) -> float:
+    """亚像素索引 → ppm 线性插值(0.2.199-补29eo 峰位亚像素修正后)。"""
+    n = axis_ppm.size
+    if n < 2:
+        return float(axis_ppm[0]) if n else 0.0
+    i0 = max(0, int(np.floor(value)))
+    i1 = min(i0 + 1, n - 1)
+    i0 = min(i0, i1)
+    frac = value - i0
+    return float(axis_ppm[i0] * (1.0 - frac) + axis_ppm[i1] * frac)
+
+
 def _snap_key(position: tuple[float, ...], tol_pts: float) -> tuple[float, ...]:
-    """峰位置快照键:按容差网格取整,供组内/跨组合匹配。"""
+    """峰位置快照键:按容差网格取整,供组内/跨组合匹配。
+
+    0.2.199-补29eo:先归一到整数像素——亚像素修正使位置在 ±0.5px 内抖动,
+    若不先取整,峰恰在 tol 网格边界(如 10pt/4pt 桶)时抖动会翻桶,
+    跨组合匹配断裂(稳定峰被误判为伪峰)。
+    """
+    ipos = tuple(round(float(v)) for v in position)
     if tol_pts > 0:
-        return tuple(round(float(v) / tol_pts) * tol_pts for v in position)
-    return tuple(round(float(v), 3) for v in position)
+        return tuple(round(float(v) / tol_pts) * tol_pts for v in ipos)
+    return ipos
 
 
 def _score_candidate(
@@ -437,7 +455,7 @@ def _peak_confidence_entry(
         if mean_h > 0:
             cv = float(np.std(heights)) / mean_h
     intensity_pts = _intensity_cv_points(cv)
-    pos_i = tuple(int(v) for v in peak["position"])
+    pos_i = tuple(round(v) for v in peak["position"])
     shift = _position_shift(positions, arr, pos_i)
     position_pts = _position_shift_points(shift)
     stability_pts = existence_pts + intensity_pts + position_pts
@@ -669,17 +687,17 @@ def write_smile_optimized_output(
         }
         if arr.ndim == 2:
             row["H_shift"] = (
-                float(axes[1][int(pos[1])])
+                _ppm_at_fraction(axes[1], pos[1])
                 if len(axes) > 1 and len(pos) > 1
                 else 0.0
             )
             row["N_shift"] = (
-                float(axes[0][int(pos[0])]) if len(pos) > 0 else 0.0
+                _ppm_at_fraction(axes[0], pos[0]) if len(pos) > 0 else 0.0
             )
         else:
             for k in range(3):
                 row[f"F{k + 1}_shift"] = (
-                    float(axes[k][int(pos[k])])
+                    _ppm_at_fraction(axes[k], pos[k])
                     if k < len(axes) and k < len(pos)
                     else 0.0
                 )
@@ -730,17 +748,17 @@ def write_smile_optimized_output(
         shifts: dict[str, float] = {}
         if arr.ndim == 2:
             shifts["H_shift"] = (
-                float(axes[1][int(pos[1])])
+                _ppm_at_fraction(axes[1], pos[1])
                 if len(axes) > 1 and len(pos) > 1
                 else 0.0
             )
             shifts["N_shift"] = (
-                float(axes[0][int(pos[0])]) if len(pos) > 0 else 0.0
+                _ppm_at_fraction(axes[0], pos[0]) if len(pos) > 0 else 0.0
             )
         else:
             for k in range(3):
                 shifts[f"F{k + 1}_shift"] = (
-                    float(axes[k][int(pos[k])])
+                    _ppm_at_fraction(axes[k], pos[k])
                     if k < len(axes) and k < len(pos)
                     else 0.0
                 )
