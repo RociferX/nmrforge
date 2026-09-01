@@ -1,5 +1,18 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29ea(2026-09-01,挂起风险排查收尾:stderr 线程读 + kill 超时)
+
+用户:检查还有没有挂起风险的地方。全仓排查(backend/gui/workflow/core):
+- 已安全:nmrpipe_finder._csh_which、runtime._children_map/_scan_processes 均
+  capture_output+timeout;GUI 工作线程为 daemon+信号不阻塞主界面;csh 脚本
+  执行由 CshRuntime timeout 兜底(补29dz 修复后生效);
+- 残留修复(本版):
+  - CshRuntime.run:stderr=PIPE 时子进程大量写 stderr 会写满 64KB 管道阻塞
+    自身导致误超时——stderr 也改线程读(stdout/stderr 并行),正常结束汇合;
+  - _kill_process_tree / cleanup_orphan_tasks:taskkill 加 timeout=10,
+    Linux proc.wait() 加 timeout=5 兜底;
+- 测试:全量 pytest 826 项全绿,ruff 通过。
+
 ## 0.2.199-补29dz(2026-09-01,缺文件提示而非卡住:runtime 超时修复 + 转换前置检查)
 
 用户:手动删了某些东西后,运行生成 FID 或生成谱图直接卡住;应提示缺什么文件

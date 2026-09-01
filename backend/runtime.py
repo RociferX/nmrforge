@@ -135,6 +135,7 @@ def _kill_process_tree(proc: subprocess.Popen) -> None:
                 ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
+                timeout=10,
             )
         else:
             # start_new_session=True → pid 即根进程组组长;再递归覆盖所有后代
@@ -147,7 +148,10 @@ def _kill_process_tree(proc: subprocess.Popen) -> None:
                         os.kill(pid, signal.SIGKILL)
                     except (OSError, ProcessLookupError):
                         pass
-            proc.wait()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
     except (OSError, ProcessLookupError):
         pass
 
@@ -265,6 +269,7 @@ def cleanup_orphan_tasks(
                     ["taskkill", "/PID", str(pid), "/T", "/F"],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
+                    timeout=10,
                 )
             else:
                 os.kill(pid, signal.SIGKILL)
@@ -321,6 +326,8 @@ class CshRuntime:
             # 后面的 wait(timeout) 永远执行不到(手动删输入文件等导致脚本挂起时
             # 界面卡死)。超时仍先杀进程树再返回,不残留。
             _done = threading.Event()
+            _stderr_done = threading.Event()
+            _stderr_buf: list[str] = []
 
             def _read_stdout() -> None:
                 try:
@@ -331,7 +338,16 @@ class CshRuntime:
                 finally:
                     _done.set()
 
+            def _read_stderr() -> None:
+                try:
+                    if proc.stderr is not None:
+                        _stderr_buf.append(proc.stderr.read())
+                finally:
+                    _stderr_done.set()
+
             threading.Thread(target=_read_stdout, daemon=True).start()
+            if proc.stderr is not None:
+                threading.Thread(target=_read_stderr, daemon=True).start()
             try:
                 returncode = proc.wait(timeout=timeout)
             except subprocess.TimeoutExpired:
@@ -345,10 +361,8 @@ class CshRuntime:
                     124,
                 )
             _done.wait(timeout=5.0)  # 正常退出:等 stdout 读完(EOF)
-            if proc.stderr is not None:
-                stderr = proc.stderr.read()
-            else:
-                stderr = ""
+            _stderr_done.wait(timeout=5.0)
+            stderr = "".join(_stderr_buf)
             with _LOCK:
                 if proc.pid in _USER_TERMINATED:
                     _USER_TERMINATED.discard(proc.pid)
