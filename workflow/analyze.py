@@ -50,9 +50,10 @@ def _spectrum_path(manager: Any, exp_id: str, data_id: str) -> str:
 
 
 def _load_peaks(path: Path) -> list[dict[str, Any]]:
-    from core.peaks.peak_table import import_peaks_poky
+    """读取选峰得到的峰表(.list 优先,旧 CSV 兼容;0.2.199-补29er)。"""
+    from core.peaks.peak_table import load_peaks
 
-    rows = import_peaks_poky(path)
+    rows = load_peaks(path)
     return [
         r
         for r in rows
@@ -337,7 +338,8 @@ def analyze(
         raise AnalyzeError("当前或比对峰表为空")
     if any("H_shift" not in p or "N_shift" not in p for p in cur_peaks + ref_peaks):
         raise AnalyzeError("CSP 分析目前仅支持 2D HSQC 峰表(N_shift/H_shift)")
-    _log(f"载入峰表: 当前 {len(cur_peaks)} 峰,比对 {len(ref_peaks)} 峰")
+    _log(f"使用选峰峰表: 当前 {cur_peaks_path.name}({len(cur_peaks)} 峰)")
+    _log(f"使用选峰峰表: 比对 {ref_peaks_path.name}({len(ref_peaks)} 峰)")
     pairs = _match_peaks(cur_peaks, ref_peaks, h_tol=h_tol, n_tol=n_tol)
     if not pairs:
         raise AnalyzeError(
