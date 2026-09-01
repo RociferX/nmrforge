@@ -1402,10 +1402,10 @@ class SpectrumPanel(QWidget):
                 path, nuclei=self._current_3d_nuclei()
             )
         except Exception as exc:  # noqa: BLE001
-            InfoDialog.show_info(self.import_poky_button, "导入失败", str(exc))
+            InfoDialog.show_info(self, "导入失败", str(exc))
             return
         if not peaks:
-            InfoDialog.show_info(self.import_poky_button, "导入结果", "文件中没有可解析的峰行")
+            InfoDialog.show_info(self, "导入结果", "文件中没有可解析的峰行")
             return
         self._peaks = self._assign_peak_ids(peaks)
         # 0.2.199-补29cy:导入峰表同样匹配 SMILE 可信度
@@ -1443,13 +1443,13 @@ class SpectrumPanel(QWidget):
                 nuclei=self._current_3d_nuclei(),
             )
         except Exception as exc:  # noqa: BLE001 - 错误统一提示
-            InfoDialog.show_info(self.save_peaks_button, "保存失败", f"{type(exc).__name__}: {exc}")
+            InfoDialog.show_info(self, "保存失败", f"{type(exc).__name__}: {exc}")
             return
         self._peaks = peaks
         self.viewer.set_peaks(peaks)
         self.save_peaks_button.setEnabled(True)
         self.peaks_saved.emit()
-        InfoDialog.show_info(self.save_peaks_button, "保存完成", f"峰表已写入:\n{list_path}")
+        InfoDialog.show_info(self, "保存完成", f"峰表已写入:\n{list_path}")
 
     def _export_peaks_poky(self) -> None:
         """导出当前峰表为 Poky .list;无峰表/谱图时禁用。"""
@@ -1476,9 +1476,9 @@ class SpectrumPanel(QWidget):
             export_peaks_poky(
                 path, self._peaks, nuclei=self._current_3d_nuclei()
             )
-            InfoDialog.show_info(self.export_poky_button, "导出完成", f"已导出 Poky 峰表: {path}")
+            InfoDialog.show_info(self, "导出完成", f"已导出 Poky 峰表: {path}")
         except Exception as exc:  # noqa: BLE001
-            InfoDialog.show_info(self.export_poky_button, "导出失败", str(exc))
+            InfoDialog.show_info(self, "导出失败", str(exc))
 
     def _clear_peaks(self) -> None:
         self._peaks = []
