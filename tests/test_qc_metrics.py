@@ -130,9 +130,22 @@ def test_baseline_quality_worst_axis_flags_other_dimension() -> None:
 
 
 def test_artifact_detection_isolated_peaks() -> None:
-    spec = _synthetic_spectrum() + 0j
-    report = artifact_detection.detect(spec)
-    assert report.score < 100
+    """密集峰场中注入孤立强峰 → 伪影分下降(0.2.199-补29el 密度归一化)。"""
+    rng = np.random.default_rng(0)
+    shape = (128, 256)
+    dense = np.zeros(shape)
+    for y in range(30, 95, 8):
+        for x in range(60, 181, 20):
+            dense[y, x] = 80.0
+    dense = gaussian_filter(dense, sigma=(1.5, 1.5))
+    dense = dense + rng.normal(0, 0.8, size=shape)
+    clean = artifact_detection.detect(dense + 0j)
+    assert clean.score == 100.0
+    bad = dense.copy()
+    bad[10, 240] += 500.0  # 密集场外孤立强伪峰
+    report = artifact_detection.detect(bad + 0j)
+    assert report.score < clean.score
+    assert report.isolated_peak_clusters >= 1
 
 
 def test_spectrum_quality_decision() -> None:

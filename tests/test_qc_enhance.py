@@ -16,14 +16,31 @@ def _peaks_spectrum(shape=(128, 256), peaks=((60, 180), (70, 120))) -> np.ndarra
 
 
 def test_artifact_penalty_continuous_with_distance() -> None:
-    """孤立峰惩罚随距离连续化:峰越远(越孤立)分数越低。"""
-    near = _peaks_spectrum(peaks=((60, 180), (62, 182)))  # 相邻峰 → 非孤立
-    far = _peaks_spectrum(peaks=((20, 20), (110, 230)))  # 相距远 → 孤立
-    score_near = artifact_detection.detect(near).score
-    score_far = artifact_detection.detect(far).score
-    assert score_near > score_far
-    assert score_far < 100.0
-    assert 0.0 <= score_near <= 100.0
+    """孤立峰惩罚连续化(0.2.199-补29el 密度归一化):
+    稀疏谱正常分布不误报;密集峰场中异常孤立的强峰才扣分。"""
+    rng = np.random.default_rng(0)
+    shape = (128, 256)
+    # 稀疏谱:两个相距很远的峰,正常分布 → 不判为伪影(旧绝对阈值误报)
+    sparse = np.zeros(shape)
+    sparse[20, 20] = 100.0
+    sparse[110, 230] = 100.0
+    sparse = gaussian_filter(sparse, sigma=(1.5, 1.5))
+    sparse = sparse + rng.normal(0, 0.8, size=shape)
+    assert artifact_detection.detect(sparse + 0j).score == 100.0
+    # 密集峰场 + 注入孤立强峰:异常孤立 → 扣分;无注入 → 100
+    dense = np.zeros(shape)
+    for y in range(30, 95, 8):
+        for x in range(60, 181, 20):
+            dense[y, x] = 80.0
+    dense = gaussian_filter(dense, sigma=(1.5, 1.5))
+    dense = dense + rng.normal(0, 0.8, size=shape)
+    clean = artifact_detection.detect(dense + 0j).score
+    bad = dense.copy()
+    bad[10, 240] += 500.0
+    score_bad = artifact_detection.detect(bad + 0j).score
+    assert clean == 100.0
+    assert score_bad < clean
+    assert 0.0 <= score_bad <= 100.0
 
 
 def test_spectrum_quality_resolution_penalty() -> None:
