@@ -9,7 +9,10 @@
 - gui/theme 新增 app_icon()(开发/冻结通用路径,缺失返回 None);
 - 主窗口 __init__ 与 run()、独立查看器 viewer/app.py 启动时设置窗口/
   任务栏图标(QApplication.setWindowIcon + window.setWindowIcon);
-- 测试:+1(主窗口 windowIcon 非空),全量 pytest 842 项全绿,ruff 通过。
+- 测试:+1(主窗口 windowIcon 非空),全量 pytest 842 项全绿,ruff 通过;
+- 桌面入口:GNOME 默认不在标题栏显示窗口图标,任务栏/启动器图标来自
+  .desktop + hicolor 图标主题——新增 scripts/install_desktop.sh(开发态
+  安装图标主题与启动入口到 ~/.local/share,VM 已执行)。
 
 ## 0.2.199-补29eo(2026-09-01,峰标记亚像素定位)
 
