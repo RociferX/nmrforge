@@ -1118,6 +1118,37 @@ class PipelinePanel(QWidget):
         lo = lo_edit.text().strip()
         hi = hi_edit.text().strip()
         apply_opt = apply_check.isChecked()
+        # 0.2.199-补29eg:输入约束——合理 ppm 范围(0-20),高场端必须大于低场端
+        from gui.dialogs import InfoDialog
+
+        try:
+            lo_f = float(lo) if lo else None
+            hi_f = float(hi) if hi else None
+        except ValueError:
+            InfoDialog.show_info(
+                self,
+                "直接维范围",
+                "请输入数字(ppm),或留空使用默认",
+            )
+            return
+        for _name, _v in (
+            ("高场端", lo_f),
+            ("低场端", hi_f),
+        ):
+            if _v is not None and not (0.0 <= _v <= 20.0):
+                InfoDialog.show_info(
+                    self,
+                    "直接维范围",
+                    f"{_name} ppm 应在 0-20 范围内",
+                )
+                return
+        if lo_f is not None and hi_f is not None and lo_f <= hi_f:
+            InfoDialog.show_info(
+                self,
+                "直接维范围",
+                "高场端 ppm 必须大于低场端 ppm(如 8.5-7.5)",
+            )
+            return
         if not lo and not hi:
             self._final_ext.pop(key, None)
             self.log_message.emit(
