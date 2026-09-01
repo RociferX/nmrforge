@@ -34,35 +34,6 @@ def test_noise_estimate_on_pure_noise() -> None:
     assert est.method == "robust_mad"
 
 
-def test_peak_detection_rejects_ringing_sidelobe() -> None:
-    """强峰振铃旁瓣(与主峰之间有负值谷的弱局部极大)被剔除
-    (0.2.199-补29ep)——否则峰标记会落在旁瓣上,看似偏离峰顶。"""
-    shape = (64, 64)
-    arr = np.zeros(shape)
-    arr[50, 50] = 100.0  # 主峰
-    arr[50, 53] = -15.0  # 负值谷(振铃特征)
-    arr[50, 56] = 10.0  # 正旁瓣(3×3 局部极大)
-    arr[49:52, 55:58] = np.maximum(arr[49:52, 55:58], 3.0)
-    arr[50, 56] = 10.0
-    peaks = peak_detection.detect(arr)
-    positions = {tuple(round(v) for v in p.position) for p in peaks}
-    assert (50, 50) in positions
-    assert (50, 56) not in positions
-
-
-def test_peak_detection_keeps_overlapping_peaks() -> None:
-    """真实重叠峰之间无负值谷,不被误剔(0.2.199-补29ep)。"""
-    shape = (64, 64)
-    arr = np.zeros(shape)
-    arr[50, 50] = 100.0
-    arr[50, 56] = 60.0
-    arr[50, 53] = 30.0  # 正谷(两峰之间保持正值)
-    peaks = peak_detection.detect(arr)
-    positions = {tuple(round(v) for v in p.position) for p in peaks}
-    assert (50, 50) in positions
-    assert (50, 56) in positions
-
-
 def test_peak_detection_subpixel_position() -> None:
     """亚像素峰位:高斯峰中心落在像素之间时,检测位置接近真实中心
     (0.2.199-补29eo 抛物线修正)。"""

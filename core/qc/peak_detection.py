@@ -62,55 +62,6 @@ def _refined_index(value: np.ndarray, idx: np.ndarray, axis: int) -> float:
     return float(i + float(np.clip(offset, -0.5, 0.5)))
 
 
-def _line_min_below_zero(value: np.ndarray, p: tuple, q: tuple) -> bool:
-    """沿 p→q 直线(整数像素)采样,是否存在 <0 的值(振铃负谷)。
-
-    0.2.199-补29ep:截断/加窗产生的主峰振铃旁瓣与主峰之间隔着负值谷,
-    真实重叠峰之间无负谷;该负谷是「旁瓣候选」与「更强峰」的判别依据。
-    """
-    d = int(np.ceil(np.linalg.norm(np.asarray(q) - np.asarray(p))))
-    if d <= 1:
-        return False
-    ts = np.linspace(0.0, 1.0, d + 1)
-    for t in ts:
-        idx = tuple(
-            int(round(a + (b - a) * t)) for a, b in zip(p, q)
-        )
-        if (
-            all(0 <= v < s for v, s in zip(idx, value.shape))
-            and value[idx] < 0
-        ):
-            return True
-    return False
-
-
-def _reject_ringing_sidelobes(
-    value: np.ndarray, candidates: list[Peak], radius: float = 6.0
-) -> list[Peak]:
-    """剔除强峰振铃旁瓣(0.2.199-补29ep)。
-
-    截断/加窗产生的旁瓣是真实局部极大,但位于更强峰附近,且与主峰之间
-    隔着负值谷——用户看到「峰标记明显偏离峰真正的顶」。候选按强度降序
-    处理:弱候选若在更强峰 radius 内且连线穿过负值 → 判为旁瓣剔除;
-    真实重叠峰之间无负谷,保留。
-    """
-    ordered = sorted(candidates, key=lambda p: -abs(p.height))
-    kept: list[Peak] = []
-    for p in ordered:
-        pi = tuple(int(round(v)) for v in p.position)
-        reject = False
-        for s in kept:
-            si = tuple(int(round(v)) for v in s.position)
-            if np.linalg.norm(np.asarray(pi) - np.asarray(si)) > radius:
-                continue
-            if _line_min_below_zero(value, pi, si):
-                reject = True
-                break
-        if not reject:
-            kept.append(p)
-    return kept
-
-
 def _candidates(
     real: np.ndarray, sigma: float, params: PeakDetectionParams, sign: int
 ) -> list[Peak]:
@@ -149,8 +100,7 @@ def _candidates(
                     sign=sign,
                 )
             )
-    # 0.2.199-补29ep:剔除强峰振铃旁瓣(与更强峰间有负值谷的弱局部极大)
-    return _reject_ringing_sidelobes(value, peaks)
+    return peaks
 
 
 def _keep_dominant(candidates: list[Peak]) -> list[Peak]:
