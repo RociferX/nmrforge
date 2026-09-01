@@ -1884,6 +1884,13 @@ class MainWindow(QMainWindow):
 
         install_dialog_centering(app)
         apply_dark_theme(app)
+        # 0.2.199-补29eq:GNOME 按 desktop 文件名匹配运行中的窗口到
+        # .desktop,任务栏/启动器才显示正确图标(终端启动同样生效)
+        app.setApplicationName("NMRForge")
+        try:
+            app.setDesktopFileName("NMRForge")
+        except AttributeError:
+            pass
         _icon = app_icon()
         if _icon is not None:
             app.setWindowIcon(_icon)

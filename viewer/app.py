@@ -288,6 +288,11 @@ def main(argv: list[str] | None = None) -> int:
     _icon = app_icon()
     if _icon is not None:
         app.setWindowIcon(_icon)
+    app.setApplicationName("NMRForge")
+    try:
+        app.setDesktopFileName("NMRForge")
+    except AttributeError:
+        pass
     window = SpectrumWindow()
     window.show()
     for path in paths:
