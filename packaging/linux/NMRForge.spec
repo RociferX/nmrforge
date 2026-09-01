@@ -8,6 +8,7 @@ a = Analysis(
     datas=[
         ("../../config", "config"),
         ("../../presets", "presets"),
+        ("../../gui/assets", "gui/assets"),
     ],
     hiddenimports=["PyQt6.QtSvg"],
     hookspath=[],
