@@ -253,9 +253,43 @@ def run_direct_diagnostics(
     *,
     repair: bool = True,
 ) -> DirectDiagnosticsResult:
-    """生成谱图最开始的直接维诊断门控。返回报告/指标/处理决定。"""
+    """Generate-spectrum direct-dimension diagnostic gate."""
     work = Path(work_dir)
     paths = _collect_fid_paths(work, experiment)
+    return _diagnose_paths(
+        paths,
+        work,
+        repair=repair,
+        is_uniform=experiment.sampling.mode is SamplingMode.UNIFORM,
+    )
+
+
+def run_fid_diagnostics_paths(
+    paths: list[Path | str],
+    *,
+    repair: bool = False,
+) -> DirectDiagnosticsResult:
+    """Standalone FID diagnostics for arbitrary fid files/folders
+    (no Experiment needed; detect-only by default)."""
+    files: list[Path] = []
+    for _p in paths:
+        _pp = Path(_p)
+        if _pp.is_dir():
+            _fs = sorted(_pp.glob("*.fid")) or sorted(_pp.glob("test*.fid"))
+            files.extend(_fs)
+        elif _pp.is_file():
+            files.append(_pp)
+    _work = files[0].parent if files else Path(".")
+    return _diagnose_paths(files, _work, repair=repair, is_uniform=False)
+
+
+def _diagnose_paths(
+    paths: list[Path],
+    work: Path,
+    *,
+    repair: bool = True,
+    is_uniform: bool = False,
+) -> DirectDiagnosticsResult:
     res = DirectDiagnosticsResult()
     if not paths:
         res.reports = ["数据质量诊断:未找到转换后 fid,跳过(诊断不阻断处理)"]
@@ -374,7 +408,7 @@ def run_direct_diagnostics(
         )
     zero_traces = int(np.sum(energy == 0))
     res.metrics["zero_traces"] = zero_traces
-    if experiment.sampling.mode is SamplingMode.UNIFORM and zero_traces:
+    if is_uniform and zero_traces:
         reports.append(
             f"检测到 {zero_traces} 条全零迹线,未自动处理"
             "(均匀采样不应存在全零迹,采集可能缺失)"

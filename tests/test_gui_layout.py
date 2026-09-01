@@ -608,6 +608,52 @@ def test_spectrum_panel_file_help_menus(
     window.close()
 
 
+def test_other_menu_standalone_quality_entries(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.2.199-补29ej:「其它」菜单含数据质量检测/
+    谱图质量评估独立入口,位于查看与设置之间。"""
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    window = MainWindow(manager=manager)
+    menus = [a.text() for a in window.menuBar().actions()]
+    assert "其他(&O)" in menus
+    idx = menus.index("其他(&O)")
+    assert menus[idx - 1] == "查看(&V)"
+    assert menus[idx + 1] == "设置(&T)"
+    other_menu = next(
+        a.menu() for a in window.menuBar().actions() if a.text() == "其他(&O)"
+    )
+    labels = [a.text() for a in other_menu.actions()]
+    assert "数据质量检测..." in labels
+    assert "谱图质量评估..." in labels
+    window.close()
+
+
+def test_other_menu_routes_to_standalone_check(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.2.199-补29ej:独立入口按 kind 路由到检测。"""
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    window = MainWindow(manager=manager)
+    calls: list[tuple[str, str]] = []
+    window._run_standalone_check = (  # type: ignore[method-assign]
+        lambda paths, kind: calls.append((str(paths[0]), kind))
+    )
+    monkeypatch.setattr(
+        "PyQt6.QtWidgets.QFileDialog.getOpenFileName",
+        lambda *a, **k: (r"C:\x\d_001.fid", ""),
+    )
+    window._run_standalone_fid_diagnostics()
+    assert calls == [(r"C:\x\d_001.fid", "fid")]
+    monkeypatch.setattr(
+        "PyQt6.QtWidgets.QFileDialog.getOpenFileName",
+        lambda *a, **k: (r"C:\x\d_001.ft3", ""),
+    )
+    window._run_standalone_spectrum_quality()
+    assert calls[-1] == (r"C:\x\d_001.ft3", "spectrum")
+    window.close()
+
+
 def test_main_window_context_updates_on_tree_selection(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:

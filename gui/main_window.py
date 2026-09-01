@@ -184,6 +184,16 @@ class MainWindow(QMainWindow):
         self.view_spectrum_action.toggled.connect(self._toggle_spectrum)
         view_menu.addAction(self.view_spectrum_action)
 
+        other_menu = bar.addMenu("其他(&O)")
+        other_menu.addAction(
+            "数据质量检测...",
+            self._run_standalone_fid_diagnostics,
+        )
+        other_menu.addAction(
+            "谱图质量评估...",
+            self._run_standalone_spectrum_quality,
+        )
+
         settings_menu = bar.addMenu("设置(&T)")
         settings_menu.addAction("软件设置...", self._open_settings)
         help_menu = bar.addMenu("帮助(&H)")
@@ -942,6 +952,77 @@ class MainWindow(QMainWindow):
         settings["guide"] = guide
         save_settings(settings)
         self.pipeline.show_first_import_hint()
+
+    def _run_standalone_fid_diagnostics(self) -> None:
+        """Other menu: pick fid file/folder, run diagnostics to global log."""
+        from pathlib import Path as _P
+
+        from PyQt6.QtWidgets import QFileDialog
+
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "选择 fid 文件", "",
+            "FID (*.fid);;所有文件 (*)",
+        )
+        if file_path:
+            self._run_standalone_check([_P(file_path)], "fid")
+            return
+        folder = QFileDialog.getExistingDirectory(
+            self, "选择 fid 文件夹"
+        )
+        if folder:
+            self._run_standalone_check([_P(folder)], "fid")
+
+    def _run_standalone_spectrum_quality(self) -> None:
+        """Other menu: pick spectrum file, run quality evaluation."""
+        from pathlib import Path as _P
+
+        from PyQt6.QtWidgets import QFileDialog
+
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "选择谱图文件", "",
+            "NMRPipe (*.ft2 *.ft3 *.fdf);;所有文件 (*)",
+        )
+        if file_path:
+            self._run_standalone_check([_P(file_path)], "spectrum")
+
+    def _run_standalone_check(self, paths, kind: str) -> None:
+        """Run check in worker thread, emit report to top-level global log."""
+        self.log_panel.set_scope("global", "", "", "")
+        self._log_kind = "global"
+
+        def worker() -> None:
+            scope = self._log_scope()
+            try:
+                if kind == "fid":
+                    from workflow.direct_diagnostics import (
+                        run_fid_diagnostics_paths,
+                    )
+
+                    res = run_fid_diagnostics_paths(paths)
+                    lines = (
+                        ["== " + "数据质量检测"
+                         + "(独立入口) =="]
+                        + list(res.reports)
+                    )
+                else:
+                    from workflow.optimization_report import (
+                        spectrum_quality_report_lines,
+                    )
+
+                    lines = spectrum_quality_report_lines(str(paths[0]))
+                for ln in lines:
+                    if ln:
+                        self.log_append_requested.emit(ln, scope)
+            except Exception as exc:  # noqa: BLE001
+                self.log_append_requested.emit(
+                    "检测失败: "
+                    f"{type(exc).__name__}: {exc}",
+                    scope,
+                )
+
+        import threading
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def _open_settings(self) -> None:
         """打开软件设置对话框(阶段 C3)。"""

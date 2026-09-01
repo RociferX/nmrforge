@@ -154,6 +154,39 @@ def test_dc_small_offset_stays_off(tmp_path: Path, exp_fixture) -> None:
     assert res.apply_poly_time is False
 
 
+def test_run_fid_diagnostics_paths_file(tmp_path: Path) -> None:
+    """独立入口:直接给 fid 文件路径即可诊断
+    (默认只检测不修复,不产生备份。
+    """
+    from workflow.direct_diagnostics import run_fid_diagnostics_paths
+
+    fid = _stage(tmp_path, synthetic=True)
+    res = run_fid_diagnostics_paths([fid])
+    assert isinstance(res, DirectDiagnosticsResult)
+    assert res.reports
+    assert res.apply_poly_time is False
+    assert not (tmp_path / "fid_diag_bak").exists()
+
+
+def test_run_fid_diagnostics_paths_folder(tmp_path: Path) -> None:
+    """独立入口:文件夹自动收集 *.fid / test*.fid。"""
+    from workflow.direct_diagnostics import run_fid_diagnostics_paths
+
+    _stage(tmp_path, synthetic=True)
+    res = run_fid_diagnostics_paths([tmp_path])
+    assert isinstance(res, DirectDiagnosticsResult)
+    assert res.reports
+
+
+def test_run_fid_diagnostics_paths_missing(tmp_path: Path) -> None:
+    """独立入口:路径不存在时提示未找到
+    fid,不崩溃。"""
+    from workflow.direct_diagnostics import run_fid_diagnostics_paths
+
+    res = run_fid_diagnostics_paths([tmp_path / "nope.fid"])
+    assert any("未找到" in r for r in res.reports)
+
+
 def test_dc_ratio_time_metric_unit() -> None:
     """时域直流指标:常数偏移 ≈ 偏移/峰值;干净衰减 FID 很小。"""
     from workflow.direct_diagnostics import _dc_ratio_time
