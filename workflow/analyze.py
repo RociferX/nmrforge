@@ -143,35 +143,82 @@ def _residue_key(assignment: str) -> int:
     return int(digits) if digits else 10**9
 
 
-def _make_csp_plot(
-    rows: list[dict[str, Any]],
-    path: Path,
-) -> None:
-    """Δδ 条形图(可编辑 SVG)。"""
+def _publication_style() -> None:
+    """发表级 matplotlib 样式(0.2.199-补29es-修5)。
+
+    svg.fonttype="none" 让 SVG 文字保持文本(可在 Inkscape/Illustrator
+    直接编辑),不转成路径。
+    """
     import matplotlib
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    labels = [r["Assignment"] or f"P{i + 1}" for i, r in enumerate(rows)]
+    plt.rcParams.update(
+        {
+            "font.family": "sans-serif",
+            "font.sans-serif": ["DejaVu Sans", "Arial", "Helvetica"],
+            "font.size": 9.5,
+            "axes.titlesize": 11,
+            "axes.labelsize": 10.5,
+            "xtick.labelsize": 8.5,
+            "ytick.labelsize": 8.5,
+            "legend.fontsize": 8.5,
+            "axes.linewidth": 0.8,
+            "axes.edgecolor": "#333333",
+            "axes.spines.top": False,
+            "axes.spines.right": False,
+            "svg.fonttype": "none",
+        }
+    )
+
+
+def _make_csp_plot(
+    rows: list[dict[str, Any]],
+    path: Path,
+) -> None:
+    """Δδ 条形图(发表级,可编辑 SVG):残基号横轴、显著残基着色、
+    均值与 mean+1σ 阈值标注。"""
+    _publication_style()
+    import matplotlib.pyplot as plt
+
     vals = np.array([float(r["dCSP"]) for r in rows], dtype=float)
-    fig, ax = plt.subplots(figsize=(max(8.0, 0.32 * len(rows)), 5.0))
-    ax.bar(range(len(vals)), vals, color="#2563eb", width=0.72)
+    xnums: list[int] = []
+    has_assign = False
+    for i, r in enumerate(rows):
+        lab = str(r.get("Assignment") or "")
+        digits = "".join(ch for ch in lab if ch.isdigit())
+        if digits:
+            xnums.append(int(digits))
+            has_assign = True
+        else:
+            xnums.append(i + 1)
     mean = float(np.mean(vals))
     th = mean + float(np.std(vals))
-    ax.axhline(
-        mean, color="#64748b", ls="--", lw=1.0,
-        label=f"mean = {mean:.4f} ppm",
+    n = len(vals)
+    fig, ax = plt.subplots(figsize=(max(7.0, 0.22 * n), 4.0))
+    colors = ["#c0392b" if v >= th else "#2980b9" for v in vals]
+    ax.bar(range(n), vals, color=colors, width=0.8, edgecolor="none")
+    ax.axhline(mean, color="#7f8c8d", ls="--", lw=0.9)
+    ax.axhline(th, color="#c0392b", ls=":", lw=1.0)
+    ax.text(
+        n - 0.3, mean, f"  mean = {mean:.3f} ppm",
+        va="center", ha="right", fontsize=8, color="#555555",
     )
-    ax.axhline(
-        th, color="#dc2626", ls=":", lw=1.3,
-        label=f"mean+1σ = {th:.4f} ppm",
+    ax.text(
+        n - 0.3, th, f"  mean+1σ = {th:.3f} ppm",
+        va="center", ha="right", fontsize=8, color="#c0392b",
     )
-    ax.set_xticks(range(len(vals)))
-    ax.set_xticklabels(labels, rotation=90, fontsize=8)
+    step = max(1, int(np.ceil(n / 24)))
+    ticks = list(range(0, n, step))
+    ax.set_xticks(ticks)
+    ax.set_xticklabels([xnums[t] for t in ticks], fontsize=8)
+    ax.set_xlim(-0.6, n - 0.4)
+    ax.set_xlabel("Residue number" if has_assign else "Peak index")
     ax.set_ylabel("Δδ (ppm)")
-    ax.set_title("HSQC Chemical Shift Perturbation (CSP)")
-    ax.legend(fontsize=9)
+    ax.set_title("HSQC chemical shift perturbation (CSP)")
+    ax.yaxis.grid(True, ls=":", lw=0.5, alpha=0.4)
+    ax.set_axisbelow(True)
     fig.tight_layout()
     fig.savefig(path, format="svg")
     plt.close(fig)
@@ -210,10 +257,9 @@ def _make_overlay(
     pairs: list[tuple[int, int]],
     path: Path,
 ) -> None:
-    """两谱等高线叠加(自由=蓝,扰动=红)+ 匹配峰位移矢量(可编辑 SVG)。"""
-    import matplotlib
-
-    matplotlib.use("Agg")
+    """两谱等高线叠加(发表级,可编辑 SVG):自由=蓝、扰动=红,
+    匹配峰位移矢量。"""
+    _publication_style()
     import matplotlib.pyplot as plt
 
     cur, cur_axes = _read_spectrum(cur_path)
@@ -221,26 +267,31 @@ def _make_overlay(
     if cur.ndim != 2 or ref.ndim != 2:
         raise AnalyzeError("叠加图仅支持 2D 谱(HSQC)")
     # 存储轴:(F1=间接=15N, F2=直接=1H);横轴=1H(axis1),纵轴=15N(axis0)
-    fig, ax = plt.subplots(figsize=(9.0, 7.0))
+    fig, ax = plt.subplots(figsize=(6.8, 5.4))
 
-    def _draw(arr: np.ndarray, axes: list[np.ndarray], color: str) -> None:
+    def _draw(
+        arr: np.ndarray, axes: list[np.ndarray], color: str, alpha: float
+    ) -> None:
         h = axes[1]
         n = axes[0]
-        # 降采样控制 SVG 体积(≤256×512)
-        step = max(1, int(np.ceil(max(arr.shape) / 512)))
+        # 降采样控制 SVG 体积(≤480px)
+        step = max(1, int(np.ceil(max(arr.shape) / 480)))
         a = arr[::step, ::step]
-        hh = h[::step]
-        nn = n[::step]
-        gx, gy = np.meshgrid(hh, nn)
+        gx, gy = np.meshgrid(h[::step], n[::step])
         vmax = float(np.max(a))
-        vmin = max(float(np.min(a[a > 0])) if (a > 0).any() else 0.0, vmax * 0.02)
-        levels = np.geomspace(max(vmin, vmax * 0.03), vmax * 0.95, 6)
+        if vmax <= 0:
+            return
+        pos = a[a > 0]
+        lo = float(np.min(pos)) if pos.size else vmax * 0.02
+        lo = max(lo, vmax * 0.02)
+        levels = np.geomspace(lo, vmax * 0.95, 6)
         ax.contour(
-            gx, gy, a, levels=levels, colors=[color], linewidths=0.6
+            gx, gy, a, levels=levels, colors=[color],
+            linewidths=0.7, alpha=alpha,
         )
 
-    _draw(cur, cur_axes, "#dc2626")
-    _draw(ref, ref_axes, "#2563eb")
+    _draw(ref, ref_axes, "#1f4e9c", alpha=0.9)
+    _draw(cur, cur_axes, "#b02318", alpha=0.9)
     # 匹配峰位移矢量(自由 → 扰动)
     for ci, ri in pairs:
         if ci < len(cur_pts) and ri < len(ref_pts):
@@ -250,24 +301,32 @@ def _make_overlay(
                 "",
                 xy=(hc, nc),
                 xytext=(hr, nr),
-                arrowprops=dict(arrowstyle="-|>", color="#0f172a", lw=1.0),
+                arrowprops=dict(
+                    arrowstyle="-|>",
+                    color="#555555",
+                    lw=0.7,
+                    shrinkA=0,
+                    shrinkB=0,
+                    mutation_scale=9,
+                ),
             )
     if ref_pts:
         ax.plot(
             [p[0] for p in ref_pts], [p[1] for p in ref_pts],
-            "x", color="#2563eb", ms=4, label="free peaks",
+            "x", color="#1f4e9c", ms=5, mew=1.2, label="free",
         )
     if cur_pts:
         ax.plot(
             [p[0] for p in cur_pts], [p[1] for p in cur_pts],
-            "o", color="#dc2626", ms=3.5, label="perturbed peaks",
+            "o", color="#b02318", ms=4, mfc="none", mew=1.2,
+            label="perturbed",
         )
     ax.set_xlabel("1H (ppm)")
     ax.set_ylabel("15N (ppm)")
-    ax.set_title("HSQC spectrum overlay (free blue x / perturbed red o)")
+    ax.set_title("HSQC overlay (free x / perturbed o)")
     ax.invert_xaxis()
     ax.invert_yaxis()
-    ax.legend(fontsize=9)
+    ax.legend(frameon=False, loc="upper right")
     fig.tight_layout()
     fig.savefig(path, format="svg")
     plt.close(fig)
