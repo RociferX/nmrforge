@@ -35,9 +35,9 @@ class _FastTooltipStyle(QProxyStyle):
         widget=None,
         returnData=None,
     ):
-        if hint == QStyle.StyleHint.SH_ToolTipDelayOn:
+        if hint == QStyle.StyleHint.SH_ToolTip_WakeUpDelay:
             return 120
-        if hint == QStyle.StyleHint.SH_ToolTipFallAsleepDelay:
+        if hint == QStyle.StyleHint.SH_ToolTip_FallAsleepDelay:
             return 120
         return super().styleHint(hint, option, widget, returnData)
 
