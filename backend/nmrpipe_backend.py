@@ -549,6 +549,38 @@ class NMRPipeBackend:
         work = self._work_path(experiment)
         work.mkdir(parents=True, exist_ok=True)
         logs: list[str] = []
+
+        # 0.2.199-补29dz(用户):缺关键输入文件直接提示,避免 bruker 挂起/卡住
+        def _missing_input(seg_dir: Path) -> str:
+            if not (seg_dir / "acqus").is_file():
+                return f"{seg_dir}/acqus"
+            has_ser = (seg_dir / "ser").is_file()
+            has_fid_dir = (
+                any((seg_dir / "fid").glob("*.fid"))
+                if (seg_dir / "fid").is_dir()
+                else False
+            )
+            if not has_ser and not has_fid_dir:
+                return f"{seg_dir}/ser"
+            return ""
+
+        if experiment.segments:
+            for _seg in [Path(s) for s in experiment.segments]:
+                _miss = _missing_input(_seg)
+                if _miss:
+                    return {
+                        "success": False,
+                        "message": f"缺少输入文件: {_miss}",
+                        "logs": logs,
+                    }
+        else:
+            _miss = _missing_input(raw)
+            if _miss:
+                return {
+                    "success": False,
+                    "message": f"缺少输入文件: {_miss}",
+                    "logs": logs,
+                }
         segment_kind: str | None = None
         if progress is not None:
             progress("开始转换 fid")
@@ -1530,6 +1562,9 @@ class NMRPipeBackend:
         bruker 失败时仅均匀采样走 bruk2pipe 回退。转换后清理 ser_full（可再生）。
         """
         convert_dir = raw_dir
+        if not (convert_dir / "acqus").is_file():
+            logs.append(f"缺少输入文件: {convert_dir}/acqus")
+            return False
         try:
             raw_fid = convert_dir / "fid.com"
             fid_com = dest_work / "fid.com"

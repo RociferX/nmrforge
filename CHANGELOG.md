@@ -1,5 +1,21 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29dz(2026-09-01,缺文件提示而非卡住:runtime 超时修复 + 转换前置检查)
+
+用户:手动删了某些东西后,运行生成 FID 或生成谱图直接卡住;应提示缺什么文件
+而不是卡住。
+排查:根因在 backend/runtime.py CshRuntime.run——`for line in proc.stdout` 阻塞
+读 stdout,子进程挂起(如 bruker 缺输入文件不退出)时永久卡住,后面的
+wait(timeout) 永远执行不到,所有 timeout(120s/7200s)形同虚设。
+修复:
+- CshRuntime.run:stdout 读取放 daemon 线程,主线程 proc.wait(timeout) 真正生效;
+  超时仍先杀进程树再返回(rc=124),on_line 实时转发保持;
+- convert_to_fid / _convert_dir:转换前检查 acqus(必)与 ser(或 fid 目录),
+  缺失直接返回「缺少输入文件: <路径>/acqus|ser」,不再进 bruker 挂起;
+- 分段数据逐段检查;
+- 测试:分段 convert_to_fid 测试补 ser 占位(fixture 简化目录无 ser,真实必有);
+  全量 pytest 826 项全绿,ruff 通过。
+
 ## 0.2.199-补29dy(2026-08-31,填零候选 finalize 去重 + NUS 重构中间产物不留下)
 
 用户:检查优化过程是否有没必要重复(finalize 慢且反复输出「finalize 完成」);

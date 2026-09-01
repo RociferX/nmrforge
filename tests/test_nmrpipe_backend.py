@@ -265,6 +265,9 @@ def test_reconstruct_nus_segments_missing_nmrpipe(bruker_dir: Path, tmp_path: Pa
     dst_b = tmp_path / "seg_b"
     shutil.copytree(bruker_dir / "nus_3d", dst_a)
     shutil.copytree(bruker_dir / "nus_3d", dst_b)
+    # 0.2.199-补29dz:前置检查要求 acqus+ser(fixture 简化目录无 ser,真实必有)
+    (dst_a / "ser").touch()
+    (dst_b / "ser").touch()
     exp = read_segments([dst_a, dst_b])
     backend = NMRPipeBackend(nmrpipe_bin="")
     result = backend.reconstruct_nus(exp, {})
@@ -1035,6 +1038,9 @@ def test_convert_to_fid_segments_annotates_segment_kind(
     dst_b = tmp_path / "seg_b"
     shutil.copytree(bruker_dir / "nus_3d", dst_a)
     shutil.copytree(bruker_dir / "nus_3d", dst_b)
+    # 0.2.199-补29dz:前置检查要求 acqus+ser(fixture 简化目录无 ser,真实必有)
+    (dst_a / "ser").touch()
+    (dst_b / "ser").touch()
     exp = read_segments([dst_a, dst_b])
     backend = NMRPipeBackend(nmrpipe_bin="")
     monkeypatch.setattr(backend, "_bin_dir", lambda: Path("nmrpipe"))
@@ -1084,6 +1090,9 @@ def test_convert_to_fid_segments_classify_failure_nonblocking(
     dst_b = tmp_path / "seg_b"
     shutil.copytree(bruker_dir / "nus_3d", dst_a)
     shutil.copytree(bruker_dir / "nus_3d", dst_b)
+    # 0.2.199-补29dz:前置检查要求 acqus+ser(fixture 简化目录无 ser,真实必有)
+    (dst_a / "ser").touch()
+    (dst_b / "ser").touch()
     exp = read_segments([dst_a, dst_b])
     backend = NMRPipeBackend(nmrpipe_bin="")
     monkeypatch.setattr(backend, "_bin_dir", lambda: Path("nmrpipe"))

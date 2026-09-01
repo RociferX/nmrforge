@@ -314,14 +314,24 @@ class CshRuntime:
         try:
             assert proc.stdout is not None
             lines: list[str] = []
-            for line in proc.stdout:
-                lines.append(line)
-                if on_line is not None:
-                    on_line(line.rstrip("\n"))
-            if proc.stderr is not None:
-                stderr = proc.stderr.read()
-            else:
-                stderr = ""
+            import threading
+
+            # 0.2.199-补29dz:stdout 读取放线程,主线程 wait(timeout) 真正生效——
+            # 旧代码 for line 阻塞读 stdout,子进程挂起不输出/不退出时永久卡住,
+            # 后面的 wait(timeout) 永远执行不到(手动删输入文件等导致脚本挂起时
+            # 界面卡死)。超时仍先杀进程树再返回,不残留。
+            _done = threading.Event()
+
+            def _read_stdout() -> None:
+                try:
+                    for line in proc.stdout:
+                        lines.append(line)
+                        if on_line is not None:
+                            on_line(line.rstrip("\n"))
+                finally:
+                    _done.set()
+
+            threading.Thread(target=_read_stdout, daemon=True).start()
             try:
                 returncode = proc.wait(timeout=timeout)
             except subprocess.TimeoutExpired:
@@ -334,6 +344,11 @@ class CshRuntime:
                     f"命令超时（>{timeout:.0f}s）,已终止进程树",
                     124,
                 )
+            _done.wait(timeout=5.0)  # 正常退出:等 stdout 读完(EOF)
+            if proc.stderr is not None:
+                stderr = proc.stderr.read()
+            else:
+                stderr = ""
             with _LOCK:
                 if proc.pid in _USER_TERMINATED:
                     _USER_TERMINATED.discard(proc.pid)
