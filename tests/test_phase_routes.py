@@ -492,10 +492,9 @@ def test_optimize_nus_processing_baseline_and_window(
     assert "F1: 基线已优化" in " ".join(proc["logs"])
     assert "间接维窗(测试)" in " ".join(proc["logs"])
     assert "固定无窗" not in " ".join(proc["logs"])
-    # 0.2.199-补29dv:填零候选(auto/1×TD/2×TD)与窗优化同阶段(finalize 重渲)
-    assert len(calls) == 5  # joint + 间接维基线重渲 + 填零候选×3
+    # 0.2.199-补29eb:进度文案带具体产物名
+    assert len(calls) == 2  # joint 谱 + 间接维基线重渲
     assert calls[1]["baseline"]["F1"]["order"] == 2
-    assert any("winzf" in str(c["out_file"]) for c in calls)
 
 
 def test_unified_route_nus_progress_stages(
@@ -955,8 +954,8 @@ def test_finalize_nus_progress_callback(tmp_path: Path, monkeypatch, bruker_dir:
     backend = NMRPipeBackend(nmrpipe_bin="")
     resp = backend.finalize_nus(experiment, work_dir=work, progress=messages.append)
     assert resp["success"] is True, resp
-    assert "开始 finalize(复型预览/终跑)" in messages, messages
-    assert "finalize 完成" in messages, messages
+    # 0.2.199-补29eb:finalize 不再输出泛化进度(由调用方输出具体「相位优化中: …」)
+    assert messages == []
 
 def test_split_final_ext_apply_to_opt_default_on() -> None:
     """0.2.199-补3:「应用此范围到优化过程」默认开启,参数透传解析。"""

@@ -1,5 +1,21 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29eb(2026-09-01,填零候选 finalize 移除 + 进度消息具体化)
+
+用户:①不要每一步 finalize 都输出「finalize 完成」,要具体什么完成;
+②填零按动态规则把数值填入终谱即可,单独跑 finalize 候选没价值;
+③不要「生成谱图:」前缀输出 log;「开始 finalize(复型预览/终跑)」赘述;
+④类似「F1 复型预览中」的消息应加「相位优化中」。
+实现:
+- 移除处理参数优化的填零候选 finalize(auto/1×TD/2×TD 重渲评分)——填零按
+  auto 动态规则(zero_fill_plan)直接写终跑;3D NUS 处理参数优化再少 2-3 次
+  finalize;
+- finalize_nus 内部不再输出「开始 finalize / finalize 完成」泛化进度(由调用方
+  输出具体消息);resp.message 保留「finalize 完成」;
+- 相位优化阶段进度消息统一加「相位优化中:」前缀(如「相位优化中: F1 复型
+  预览中」);GUI 日志无「生成谱图:」前缀(排查确认,仅时间戳);
+- 测试:finalize progress 测试改断言无泛化输出;全量 pytest 826 项全绿,ruff 通过。
+
 ## 0.2.199-补29ea(2026-09-01,挂起风险排查收尾:stderr 线程读 + kill 超时)
 
 用户:检查还有没有挂起风险的地方。全仓排查(backend/gui/workflow/core):

@@ -1293,8 +1293,6 @@ class NMRPipeBackend:
             script_name or f"{experiment.dataset_id}_finalize.com"
         )
         finalize_com.write_text(script, encoding="utf-8", newline="\n")
-        if progress is not None:
-            progress("开始 finalize(复型预览/终跑)")
         runtime = CshRuntime()
         result = runtime.run(
             ["csh", finalize_com.name], cwd=str(work), timeout=timeout
@@ -1312,8 +1310,6 @@ class NMRPipeBackend:
                 "logs": logs,
             }
         logs.append(f"谱图 → {spectrum}")
-        if progress is not None:
-            progress("finalize 完成")
         return {
             "success": True,
             "spectrum_path": str(spectrum),
