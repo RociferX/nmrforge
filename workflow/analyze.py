@@ -1,6 +1,6 @@
 """HSQC CSP 分析(0.2.199-补29er)。
 
-当前数据(扰动态/bound)对比参考数据(自由态/free/apo)的 HSQC 谱与峰表,
+当前数据(扰动态/bound)对比比对数据(自由态/free/apo)的 HSQC 谱与峰表,
 按 Assignment 优先、最近邻兜底匹配峰,计算化学位移扰动:
     Δδ = sqrt(ΔδH² + (csp_n_weight·ΔδN)²),csp_n_weight 默认 0.2(1/5,
     15N-HSQC 常用加权)。
@@ -257,8 +257,8 @@ def _make_overlay(
 def _make_symlink(target: Path, link: Path) -> bool:
     """在 link 处建指向 target 的相对软链接(0.2.199-补29es)。
 
-    参考数据与当前数据共享同一份 CSP 产物——文件只放当前数据,
-    参考数据对应位置放软链接;失败(如平台无权限)不阻断,返回 False。
+    比对数据与当前数据共享同一份 CSP 产物——文件只放当前数据,
+    比对数据对应位置放软链接;失败(如平台无权限)不阻断,返回 False。
     """
     try:
         if link.is_symlink() or link.exists():
@@ -295,7 +295,7 @@ def analyze(
     progress: Callable[[str], None] | None = None,
     **kwargs: Any,
 ) -> dict[str, Any]:
-    """HSQC CSP 分析:当前数据(扰动态) vs 参考数据(自由态)。
+    """HSQC CSP 分析:当前数据(扰动态) vs 比对数据(自由态)。
 
     返回 {"status","message","analysis_dir","csp_data","csp_plot",
     "overlay_spectra","peak_count","logs"};失败抛 AnalyzeError。
@@ -310,16 +310,16 @@ def analyze(
             progress(msg)
 
     if not reference_data_id:
-        # 未选参考谱:返回 pending 不抛错(自动/批量路径不阻断;GUI 已在
+        # 未选比对谱:返回 pending 不抛错(自动/批量路径不阻断;GUI 已在
         # 调用前拦截并提示选择)
         return {
             "status": "pending",
-            "message": "HSQC CSP 分析需要选择参考谱(自由态 HSQC):"
-            "请在分析步骤点「参考谱」选择",
+            "message": "HSQC CSP 分析需要选择比对谱(自由态 HSQC):"
+            "请在分析步骤点「比对谱」选择",
             "logs": logs,
         }
     if reference_data_id == data_id:
-        raise AnalyzeError("参考谱不能是当前数据本身")
+        raise AnalyzeError("比对谱不能是当前数据本身")
     cur_spectrum = _spectrum_path(manager, exp_id, data_id)
     ref_spectrum = _spectrum_path(manager, exp_id, reference_data_id)
     cur_peaks_path = _peaks_path(manager, exp_id, data_id)
@@ -327,17 +327,17 @@ def analyze(
     if not cur_spectrum or not Path(cur_spectrum).is_file():
         raise AnalyzeError(f"当前数据谱图缺失: {exp_id}/{data_id}")
     if not ref_spectrum or not Path(ref_spectrum).is_file():
-        raise AnalyzeError(f"参考数据谱图缺失: {exp_id}/{reference_data_id}")
+        raise AnalyzeError(f"比对数据谱图缺失: {exp_id}/{reference_data_id}")
     if cur_peaks_path is None or ref_peaks_path is None:
-        raise AnalyzeError("当前或参考数据缺少峰表(.list),请先选峰")
-    _log(f"HSQC CSP: 当前(扰动) {data_id} ↔ 参考(自由) {reference_data_id}")
+        raise AnalyzeError("当前或比对数据缺少峰表(.list),请先选峰")
+    _log(f"HSQC CSP: 当前(扰动) {data_id} ↔ 比对(自由) {reference_data_id}")
     cur_peaks = _load_peaks(cur_peaks_path)
     ref_peaks = _load_peaks(ref_peaks_path)
     if not cur_peaks or not ref_peaks:
-        raise AnalyzeError("当前或参考峰表为空")
+        raise AnalyzeError("当前或比对峰表为空")
     if any("H_shift" not in p or "N_shift" not in p for p in cur_peaks + ref_peaks):
         raise AnalyzeError("CSP 分析目前仅支持 2D HSQC 峰表(N_shift/H_shift)")
-    _log(f"载入峰表: 当前 {len(cur_peaks)} 峰,参考 {len(ref_peaks)} 峰")
+    _log(f"载入峰表: 当前 {len(cur_peaks)} 峰,比对 {len(ref_peaks)} 峰")
     pairs = _match_peaks(cur_peaks, ref_peaks, h_tol=h_tol, n_tol=n_tol)
     if not pairs:
         raise AnalyzeError(
@@ -385,7 +385,7 @@ def analyze(
     ref_pts = [(float(p["H_shift"]), float(p["N_shift"])) for p in ref_peaks]
     _make_overlay(cur_spectrum, ref_spectrum, cur_pts, ref_pts, pairs, overlay_path)
     _log("叠加图已生成: overlay_spectra.svg")
-    # 0.2.199-补29es:参考数据对应位置放软链接,表示两份数据共享 CSP 产物
+    # 0.2.199-补29es:比对数据对应位置放软链接,表示两份数据共享 CSP 产物
     ref_figures = manager.data_dir(exp_id, reference_data_id, "figures")
     ref_out_dir = manager.dir_path("analysis") / exp_id / reference_data_id
     symlink_ok = 0
@@ -397,9 +397,9 @@ def analyze(
         if _make_symlink(_target, _link):
             symlink_ok += 1
     if symlink_ok:
-        _log(f"参考数据 {reference_data_id} 对应位置已建 {symlink_ok} 个软链接(共享 CSP 产物)")
+        _log(f"比对数据 {reference_data_id} 对应位置已建 {symlink_ok} 个软链接(共享 CSP 产物)")
     else:
-        _log("参考数据软链接创建失败(平台无权限等),仅当前数据持有产物")
+        _log("比对数据软链接创建失败(平台无权限等),仅当前数据持有产物")
     run = manager.start_run(
         exp_id,
         workflow_ref="analyze",

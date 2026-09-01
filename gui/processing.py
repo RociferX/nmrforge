@@ -407,7 +407,7 @@ class ProcessingController:
         reference_data_id: str = "",
         progress: Callable[[str], None] | None = None,
     ) -> dict:
-        """分析(HSQC CSP,0.2.199-补29er):当前数据(扰动态) vs 参考数据
+        """分析(HSQC CSP,0.2.199-补29er):当前数据(扰动态) vs 比对数据
         (自由态);输出 csp_data.csv + csp_plot.svg + overlay_spectra.svg。"""
         try:
             from workflow.analyze import analyze as backend_analyze

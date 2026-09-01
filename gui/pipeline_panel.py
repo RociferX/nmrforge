@@ -562,8 +562,8 @@ class PipelineStepRow(QWidget):
     ext_range_requested = pyqtSignal(str)  # step_id:设置终跑直接维范围
     ref_spectrum_requested = pyqtSignal(str)  # step_id:选择参考谱(峰挑选)
     clear_ref_requested = pyqtSignal(str)  # step_id:清除参考谱约束
-    analysis_ref_requested = pyqtSignal(str)  # step_id:选择 CSP 参考谱(分析)
-    analysis_clear_ref_requested = pyqtSignal(str)  # step_id:清除 CSP 参考谱
+    analysis_ref_requested = pyqtSignal(str)  # step_id:选择 CSP 比对谱(分析)
+    analysis_clear_ref_requested = pyqtSignal(str)  # step_id:清除 CSP 比对谱
     detail_toggled = pyqtSignal(str)  # step_id:点击行切换详情
     view_log_requested = pyqtSignal(str)  # step_id:定位日志面板
 
@@ -678,10 +678,10 @@ class PipelineStepRow(QWidget):
             lambda: self.clear_ref_requested.emit(self.step_id)
         )
         button_row.addWidget(self.clear_ref_button)
-        # 0.2.199-补29er:CSP 分析参考谱(自由态 HSQC)——仅分析步骤显示
-        self.analysis_ref_button = QPushButton("参考谱")
+        # 0.2.199-补29er:CSP 分析比对谱(自由态 HSQC)——仅分析步骤显示
+        self.analysis_ref_button = QPushButton("比对谱")
         self.analysis_ref_button.setToolTip(
-            "选择参考谱(自由态 HSQC):CSP 计算当前数据(扰动态)相对参考的"
+            "选择比对谱(自由态 HSQC):CSP 计算当前数据(扰动态)相对比对数据的"
             "化学位移扰动,输出数据文件与两张 SVG 图"
         )
         self.analysis_ref_button.setVisible(self.step_id == "analysis")
@@ -695,7 +695,7 @@ class PipelineStepRow(QWidget):
         button_row.addWidget(self.analysis_ref_label)
         self.analysis_clear_ref_button = QPushButton("清除")
         self.analysis_clear_ref_button.setVisible(False)
-        self.analysis_clear_ref_button.setToolTip("清除 CSP 参考谱")
+        self.analysis_clear_ref_button.setToolTip("清除 CSP 比对谱")
         self.analysis_clear_ref_button.clicked.connect(
             lambda: self.analysis_clear_ref_requested.emit(self.step_id)
         )
@@ -801,14 +801,14 @@ class PipelineStepRow(QWidget):
         self.clear_ref_button.setVisible(False)
 
     def set_analysis_ref_text(self, text: str) -> None:
-        """显示已选 CSP 参考谱(0.2.199-补29er)。"""
+        """显示已选 CSP 比对谱(0.2.199-补29er)。"""
         self.analysis_ref_label.setText(text)
         self.analysis_clear_ref_button.setVisible(
             bool(text) and self.step_id == "analysis"
         )
 
     def clear_analysis_ref_display(self) -> None:
-        """清除 CSP 参考谱显示。"""
+        """清除 CSP 比对谱显示。"""
         self.analysis_ref_label.setText("")
         self.analysis_clear_ref_button.setVisible(False)
 
@@ -1537,7 +1537,7 @@ class PipelinePanel(QWidget):
     def _analysis_ref_candidates(
         self, exp_id: str, current_data_id: str
     ) -> list[tuple[str, str, str]]:
-        """CSP 参考候选:同实验内、非当前数据、已有谱图+峰表的数据
+        """CSP 比对候选:同实验内、非当前数据、已有谱图+峰表的数据
         (0.2.199-补29er)。"""
         out: list[tuple[str, str, str]] = []
         if self.manager is None or self.manager.project is None or not exp_id:
@@ -1570,7 +1570,7 @@ class PipelinePanel(QWidget):
         return out
 
     def _on_pick_analysis_reference(self, step_id: str) -> None:
-        """「参考谱」按钮(分析):选择同实验内自由态 HSQC 数据做 CSP。"""
+        """「比对谱」按钮(分析):选择同实验内自由态 HSQC 数据做 CSP。"""
         from gui.dialogs import InfoDialog
 
         if self.manager is None or self.manager.project is None:
@@ -1581,16 +1581,16 @@ class PipelinePanel(QWidget):
         if not candidates:
             InfoDialog.show_info(
                 self,
-                "参考谱(CSP)",
+                "比对谱(CSP)",
                 "同实验内没有其它「已生成谱图+峰表」的数据,无法做 CSP。"
                 "请先处理两个 HSQC 数据(自由态与扰动态)并选峰",
             )
             return
         dialog = QDialog(self)
-        dialog.setWindowTitle("选择 CSP 参考谱(自由态 HSQC)")
+        dialog.setWindowTitle("选择 CSP 比对谱(自由态 HSQC)")
         lay = QVBoxLayout(dialog)
         tip = QLabel(
-            "选择参考数据(自由态/apo):CSP 计算当前数据(扰动态)相对参考的"
+            "选择比对数据(自由态/apo):CSP 计算当前数据(扰动态)相对比对数据的"
             "化学位移扰动(Δδ = sqrt(ΔH² + (0.2·ΔN)²))"
         )
         tip.setWordWrap(True)
@@ -1612,13 +1612,13 @@ class PipelinePanel(QWidget):
         self._analysis_ref_info = {"exp_id": ref_exp, "data_id": ref_data}
         row = self._rows.get("analysis")
         if row is not None:
-            row.set_analysis_ref_text(f"参考(自由态): {_name}")
+            row.set_analysis_ref_text(f"比对(自由态): {_name}")
         self.log_message.emit(
-            f"CSP 参考谱已选择: {_name};运行「分析」后输出数据文件与 SVG 图"
+            f"CSP 比对谱已选择: {_name};运行「分析」后输出数据文件与 SVG 图"
         )
 
     def _on_clear_analysis_reference(self, step_id: str) -> None:
-        """清除 CSP 参考谱。"""
+        """清除 CSP 比对谱。"""
         self._analysis_ref_info = None
         row = self._rows.get("analysis")
         if row is not None:
@@ -1782,7 +1782,7 @@ class PipelinePanel(QWidget):
                         ref = getattr(self, "_analysis_ref_info", None)
                         if not ref or not ref.get("data_id"):
                             self.log_scoped.emit(
-                                "分析(HSQC CSP): 请先在分析步骤点「参考谱」"
+                                "分析(HSQC CSP): 请先在分析步骤点「比对谱」"
                                 "选择自由态数据",
                                 run_scope,
                             )

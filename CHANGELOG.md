@@ -1,13 +1,13 @@
 # 修改记录(历史条目)
 
-## 0.2.199-补29es(2026-09-01,CSP 输出位置:图进 figures/ + 参考数据软链接)
+## 0.2.199-补29es(2026-09-01,CSP 输出位置:图进 figures/ + 比对数据软链接)
 
 用户:1)图片输出到 figure 文件夹;2)对某数据选另一数据做 CSP,生成文件放
 这个数据的对应位置,另一个数据的对应位置用软链接,代表它们共有这份数据。
 实现(workflow/analyze):
 - csp_plot.svg / overlay_spectra.svg 输出到当前数据的 figures/ 目录
   (<exp>/<data>/figures/);csp_data.csv 仍在 analysis/<exp>/<data>/;
-- 参考数据的对应位置(analysis 与 figures)放指向当前数据的相对软链接,
+- 比对数据的对应位置(analysis 与 figures)放指向当前数据的相对软链接,
   表示两份数据共享同一份 CSP 产物;软链接创建失败(如 Windows 无权限)
   降级为仅当前数据持有,并写日志说明;
 - 测试更新(图位置 + 参考软链接断言,平台不支持软链接时跳过);
@@ -18,14 +18,14 @@
 用户:实现分析,目前只对 HSQC 做 CSP 分析,出图(1.CSP 图,2.原始谱叠加图,
 均 SVG 可编辑)+ CSP 数据文件。
 实现:
-- workflow/analyze:HSQC CSP——当前数据(扰动态)对比参考数据(自由态),
+- workflow/analyze:HSQC CSP——当前数据(扰动态)对比比对数据(自由态),
   峰匹配按 Assignment 精确优先、最近邻兜底(1H±0.05/15N±0.5 ppm 一对一),
   Δδ = sqrt(ΔH² + (0.2·ΔN)²);
 - 输出到 <项目根>/analysis/<exp>/<data>/:csp_data.csv(逐峰 H/N + ΔH/ΔN/Δδ)、
   csp_plot.svg(Δδ 条形图 + mean/mean+1σ 线)、overlay_spectra.svg(两谱
   等高线叠加,自由=蓝×/扰动=红○ + 位移矢量);matplotlib SVG 矢量可编辑
   (图内文字用英文,避免默认字体缺中文);
-- 未选参考谱返回 pending(自动/批量路径不阻断);GUI 在分析步骤加「参考谱」
+- 未选比对谱返回 pending(自动/批量路径不阻断);GUI 在分析步骤加「比对谱」
   按钮选择自由态数据,运行前拦截提示;
 - 测试:+5(输出/Δδ、pending、按指认匹配、缺峰表、参考候选过滤),
   全量 pytest 847 项全绿;
