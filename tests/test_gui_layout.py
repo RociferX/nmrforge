@@ -619,7 +619,7 @@ def test_tools_menu_standalone_quality_entries(
     assert "工具(&T)" in menus
     idx = menus.index("工具(&T)")
     assert menus[idx - 1] == "查看(&V)"
-    assert menus[idx + 1] == "设置(&T)"
+    assert menus[idx + 1] == "设置(&S)"
     tools_menu = next(
         a.menu() for a in window.menuBar().actions() if a.text() == "工具(&T)"
     )
@@ -649,6 +649,45 @@ def test_tools_run_jumps_to_workspace_log(
     window._run_standalone_fid_diagnostics()
     assert tree.currentItem() is top
     assert window.log_panel.current_scope() == "global"
+    window.close()
+
+
+def test_menu_mnemonics_unique_and_activate(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.2.199-补29en:顶层菜单助记键(&X)唯一,且 Alt+字母 能弹出对应菜单
+    (曾出现 工具/设置 都取 T,Alt+T 歧义导致设置助记键失效)。"""
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtTest import QTest
+
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    window = MainWindow(manager=manager)
+    window.show()
+    qapp.processEvents()
+    bar = window.menuBar()
+    letters: list[str] = []
+    by_letter: dict[str, object] = {}
+    for action in bar.actions():
+        text = action.text()
+        assert "&" in text, f"菜单缺少助记键: {text}"
+        letter = text.split("&", 1)[1][0]
+        letters.append(letter)
+        by_letter[letter] = action.menu()
+    assert len(set(letters)) == len(letters), f"助记键重复: {letters}"
+    # Alt+T → 工具;Alt+S → 设置
+    for key, title in ((Qt.Key.Key_T, "工具(&T)"), (Qt.Key.Key_S, "设置(&S)")):
+        target = next(
+            a.menu()
+            for a in bar.actions()
+            if a.text() == title
+        )
+        bar.setFocus()
+        QTest.keyClick(bar, key, Qt.KeyboardModifier.AltModifier)
+        qapp.processEvents()
+        popup = QApplication.activePopupWidget()
+        assert popup is target, f"Alt+{key} 未弹出 {title}"
+        popup.close()
+        qapp.processEvents()
     window.close()
 
 

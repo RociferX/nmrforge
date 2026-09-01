@@ -194,7 +194,7 @@ class MainWindow(QMainWindow):
             self._run_standalone_spectrum_quality,
         )
 
-        settings_menu = bar.addMenu("设置(&T)")
+        settings_menu = bar.addMenu("设置(&S)")
         settings_menu.addAction("软件设置...", self._open_settings)
         help_menu = bar.addMenu("帮助(&H)")
         help_menu.addAction("关于", self.about)
