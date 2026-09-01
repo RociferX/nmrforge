@@ -34,6 +34,14 @@ install -m 0644 packaging/linux/icons/nmrforge.png \
 cp "$APPDIR/usr/share/applications/NMRForge.desktop" "$APPDIR/NMRForge.desktop"
 cp "$APPDIR/usr/share/icons/hicolor/256x256/apps/nmrforge.png" "$APPDIR/nmrforge.png"
 
+# 3.5) AppRun 入口(appimagetool 不自动生成;AppImage 运行时经它启动主程序)
+cat > "$APPDIR/AppRun" <<'APPRUN_EOF'
+#!/bin/sh
+HERE="$(dirname "$(readlink -f "$0")")"
+exec "$HERE/usr/bin/NMRForge" "$@"
+APPRUN_EOF
+chmod +x "$APPDIR/AppRun"
+
 # 4) appimagetool 生成 AppImage
 appimagetool "$APPDIR" "$BUILD_DIR/${APP}-${VERSION}-${ARCH}.AppImage"
 echo "产物：$BUILD_DIR/${APP}-${VERSION}-${ARCH}.AppImage"
