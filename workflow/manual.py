@@ -464,8 +464,19 @@ def _run_manual_spectrum_impl(
         write_quality_record(
             spectrum_path, {"mode": "manual"}, "\n".join(lines)
         )
-    except Exception:  # noqa: BLE001 - 报告失败不影响谱图生成
-        pass
+    except Exception as exc:  # noqa: BLE001 - 报告失败不影响谱图生成
+        # 0.2.199-补29eh:评估失败不静默——写入 manual_quality.log 并提示
+        _msg = (
+            "谱图质量评估失败: "
+            f"{type(exc).__name__}: {exc}"
+        )
+        try:
+            with (work / "manual_quality.log").open("a", encoding="utf-8") as _fh:
+                _fh.write(_msg + "\n")
+        except OSError:
+            pass
+        if progress is not None:
+            progress(_msg)
     _finish_run(
         manager,
         exp_id,

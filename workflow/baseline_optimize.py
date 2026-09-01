@@ -30,7 +30,6 @@ from core.processing import baseline as baseline_proc
 from core.processing.axes import file_axis_index
 
 
-
 @dataclass
 class BaselineOptimizeResult:
     """逐维基线优化结果。"""
@@ -190,13 +189,11 @@ def optimize_baseline(
     axes = [dim.logical_axis for dim in experiment.dimensions]
     grid = grid if grid is not None else [
         ("off", 0),
-        ("auto", 1),
-        ("order", 1),
+        ("auto", 1),  # auto 为 1 阶,与 order1 相同,去重不重复评分
         ("order", 2),
         ("order", 3),
     ]
     score_fn = score_fn or _default_score
-    default_cfg: dict[str, Any] = {"enabled": True, "mode": "auto", "order": 0}
     off_cfg: dict[str, Any] = {"enabled": False, "mode": "auto", "order": 0}
     min_gain = 0.5  # 无实质增益(评分单位)时保持 off,避免无意义/有害写回
     baseline_cfg: dict[str, dict[str, Any]] = {}
@@ -311,7 +308,7 @@ def optimize_baseline(
         else:
             baseline_cfg[axis] = new_cfg
             logs.append(
-                f"{axis}: 基线已优化 {_fmt_cfg(default_cfg)} → {_fmt_cfg(new_cfg)} "
+                f"{axis}: 基线已优化 {_fmt_cfg(off_cfg)} → {_fmt_cfg(new_cfg)} "
                 f"(score={current_score:.1f} → {score:.1f}, +{gain:.1f})"
             )
             optimized.append(axis)
