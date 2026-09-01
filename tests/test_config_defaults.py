@@ -18,7 +18,13 @@ from core.data.bruker_reader import read_dataset
 def _auto_nthread_expected() -> int:
     import os
 
-    return max(1, (os.cpu_count() or 4) - 2)
+    # 0.2.199-补24 起 thread_offset 可配置(本地 config 可设非 2,如 VM 2 线程
+    # 约束);期望值必须读配置 offset,与 backend.config._auto_nthread 一致
+    # (0.2.199-补29ekb)。
+    from backend.config import load_processing_defaults
+
+    offset = int(load_processing_defaults()["thread_offset"])
+    return max(1, (os.cpu_count() or 4) - offset)
 
 
 def test_load_processing_defaults_empty_config() -> None:
