@@ -464,6 +464,10 @@ def _run_manual_spectrum_impl(
         write_quality_record(
             spectrum_path, {"mode": "manual"}, "\n".join(lines)
         )
+        # 0.2.199-补29ei:评估报告同步输出到进度/日志,人工运行后可见
+        if progress is not None:
+            for _ln in lines:
+                progress(_ln)
     except Exception as exc:  # noqa: BLE001 - 报告失败不影响谱图生成
         # 0.2.199-补29eh:评估失败不静默——写入 manual_quality.log 并提示
         _msg = (
