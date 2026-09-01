@@ -1139,6 +1139,11 @@ def test_cleanup_unified_intermediates(tmp_path: Path) -> None:
         proc / f"{dataset_id}_win2_finalize.com",
         proc / f"{dataset_id}_win3.ft3",
         proc / f"{dataset_id}_win3_finalize.com",
+        # 0.2.199-补29em:旧版填零/窗候选遗留(winzf)一并清理
+        proc / f"{dataset_id}_winzf_auto.ft2",
+        proc / f"{dataset_id}_winzf_auto.com",
+        proc / f"{dataset_id}_winzf_1×TD.ft2",
+        proc / f"{dataset_id}_winzf_2×TD.ft2",
         # 0.2.199-补29dy:NUS 重构中间目录不留下
         proc / "nus3d_1" / "stage1.ft1",
         proc / "nus3d_rc" / "test0001.ft1",
@@ -1165,6 +1170,13 @@ def test_cleanup_unified_intermediates(tmp_path: Path) -> None:
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text("x")
 
+    # 0.2.199-补29em:后端默认工作目录回退(.nmrpipe)整体删除
+    fallback = tmp_path / f"{dataset_id}.nmrpipe"
+    fallback.mkdir()
+    (fallback / f"{dataset_id}_preview_F1.ft2").write_text("x")
+    (fallback / f"{dataset_id}_joint.ft2").write_text("x")
+    (fallback / f"{dataset_id}_winzf_auto.ft2").write_text("x")
+
     _cleanup_unified_intermediates(proc, dataset_id)
 
     # 验证中间产物已删
@@ -1174,6 +1186,9 @@ def test_cleanup_unified_intermediates(tmp_path: Path) -> None:
     # 验证保留项仍在
     for p in kept:
         assert p.exists(), f"保留项被误删: {p}"
+
+    # 验证 .nmrpipe 回退目录已删
+    assert not fallback.exists(), f".nmrpipe 回退目录未删: {fallback}"
 
     # 验证不存在的目录不报错
     _cleanup_unified_intermediates(tmp_path / "nonexistent", dataset_id)

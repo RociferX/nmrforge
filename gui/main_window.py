@@ -184,12 +184,12 @@ class MainWindow(QMainWindow):
         self.view_spectrum_action.toggled.connect(self._toggle_spectrum)
         view_menu.addAction(self.view_spectrum_action)
 
-        other_menu = bar.addMenu("其他(&O)")
-        other_menu.addAction(
+        tools_menu = bar.addMenu("工具(&T)")
+        tools_menu.addAction(
             "数据质量检测...",
             self._run_standalone_fid_diagnostics,
         )
-        other_menu.addAction(
+        tools_menu.addAction(
             "谱图质量评估...",
             self._run_standalone_spectrum_quality,
         )
@@ -986,7 +986,14 @@ class MainWindow(QMainWindow):
             self._run_standalone_check([_P(file_path)], "spectrum")
 
     def _run_standalone_check(self, paths, kind: str) -> None:
-        """Run check in worker thread, emit report to top-level global log."""
+        """Run check in worker thread, emit report to top-level global log.
+
+        0.2.199-补29em:先跳转到最顶层(工作区根节点),把日志面板切到
+        NMRForgeWorkspace 全局作用域,再后台执行并逐行输出。
+        """
+        top = self.project_tree.tree.topLevelItem(0)
+        if top is not None:
+            self.project_tree.tree.setCurrentItem(top)
         self.log_panel.set_scope("global", "", "", "")
         self._log_kind = "global"
 

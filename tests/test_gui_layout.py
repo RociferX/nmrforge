@@ -608,24 +608,47 @@ def test_spectrum_panel_file_help_menus(
     window.close()
 
 
-def test_other_menu_standalone_quality_entries(
+def test_tools_menu_standalone_quality_entries(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """0.2.199-补29ej:「其它」菜单含数据质量检测/
+    """0.2.199-补29em:「工具」菜单含数据质量检测/
     谱图质量评估独立入口,位于查看与设置之间。"""
     manager = _manager_with_experiment(tmp_path, monkeypatch)
     window = MainWindow(manager=manager)
     menus = [a.text() for a in window.menuBar().actions()]
-    assert "其他(&O)" in menus
-    idx = menus.index("其他(&O)")
+    assert "工具(&T)" in menus
+    idx = menus.index("工具(&T)")
     assert menus[idx - 1] == "查看(&V)"
     assert menus[idx + 1] == "设置(&T)"
-    other_menu = next(
-        a.menu() for a in window.menuBar().actions() if a.text() == "其他(&O)"
+    tools_menu = next(
+        a.menu() for a in window.menuBar().actions() if a.text() == "工具(&T)"
     )
-    labels = [a.text() for a in other_menu.actions()]
+    labels = [a.text() for a in tools_menu.actions()]
     assert "数据质量检测..." in labels
     assert "谱图质量评估..." in labels
+    window.close()
+
+
+def test_tools_run_jumps_to_workspace_log(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.2.199-补29em:工具执行时跳转到最顶层(工作区根)并把日志
+    切到全局(NMRForgeWorkspace)作用域。"""
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    window = MainWindow(manager=manager)
+    tree = window.project_tree.tree
+    top = tree.topLevelItem(0)
+    assert top is not None
+    child = top.child(0)
+    if child is not None:
+        tree.setCurrentItem(child)
+    monkeypatch.setattr(
+        "PyQt6.QtWidgets.QFileDialog.getOpenFileName",
+        lambda *a, **k: (str(tmp_path / "nope.fid"), ""),
+    )
+    window._run_standalone_fid_diagnostics()
+    assert tree.currentItem() is top
+    assert window.log_panel.current_scope() == "global"
     window.close()
 
 

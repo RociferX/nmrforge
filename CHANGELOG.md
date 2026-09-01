@@ -1,5 +1,28 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29em(2026-09-01,uniform 中间文件清理 + 「工具」菜单/工作区日志)
+
+用户:①uniform 途径窗函数优化产生的中间文件没有删除;②「其它」改名为
+「工具」,里面两个执行要跳转到 NMRForgeWorkspace 的 log 窗口去输出。
+排查(VM exp_007 d_001-d_011 全量):
+- process/ 里残留 d_001-d_005/d_007 的 `*_winzf_*` 候选谱+脚本(08-31
+  旧版填零/窗候选时代产物,当前不再生成但清理模式 `_win1*/_win2*/_win3*`
+  匹配不到 `_winzf_*`,历史遗留永不清理);
+- d_010/d_010.nmrpipe 与 ~/Desktop/sampleI.nmrpipe 里残留 preview/joint
+  中间谱+脚本——某些调用路径未设置 backend.work_dir 时,后端把相位预览/
+  联合复核谱写进默认工作目录 raw.parent/{dataset_id}.nmrpipe,清理函数
+  只清 process/ 工作目录,该回退目录从不被清理。
+实现:
+- workflow/phase_routes._cleanup_unified_intermediates:清理模式补
+  `{dataset_id}_winzf_*`;新增清理后端默认工作目录回退
+  (work.parent 与 experiment.source_path 旁的 {dataset_id}.nmrpipe,
+  整体删除,纯临时产物);调用点传 experiment/backend;
+- gui/main_window:「其它(&O)」改名「工具(&T)」;工具执行前先
+  setCurrentItem 到工作区根节点(跳转最顶层),并把日志面板切到全局
+  (NMRForgeWorkspace)作用域,后台执行逐行输出到全局缓冲;
+- 测试:+1(工具跳转工作区日志),清理测试补 winzf 与 .nmrpipe 断言;
+  全量 pytest 837 项全绿,ruff 通过。
+
 ## 0.2.199-补29el(2026-09-01,伪影评分孤立峰误报修复)
 
 用户:伪影的评分合理吗?(承接补29ek 基线修复,质疑伪影分 30-69 与目视不符)

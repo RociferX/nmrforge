@@ -230,15 +230,25 @@ def _read_real_ft3(path: Path | str) -> np.ndarray:
 def _cleanup_unified_intermediates(
     work: Path,
     dataset_id: str,
+    *,
+    experiment: Any | None = None,
+    backend: Any | None = None,
 ) -> None:
     """清理 unified 流程中间产物(相位预览/窗填零评分谱 + NUS 重构平面目录)。
 
     清理(仅限 process 工作目录):
     - {dataset_id}_preview_* 的 .com/.ft2/.ft3/.fdf
     - {dataset_id}_joint* 的 .com/.ft3/.fdf
-    - {dataset_id}_win1* / _win2* / _win3* 的 .com/.ft3/.fdf
+    - {dataset_id}_win1* / _win2* / _win3* / _winzf_* 的 .com/.ft3/.fdf
+      (_winzf_* 为 0.2.199-补29em:旧版填零/窗候选遗留,当前不再生成但
+      历史数据目录仍有残留)
     - 0.2.199-补29dy(用户):NUS 重构中间目录 nus3d_1 / nus3d_rc /
       nus3d_rc_ph / nus2d 不留下(清理后再重新优化会重跑 SMILE,属正常代价)
+    - 0.2.199-补29em(用户):uniform 窗函数/相位优化中间文件未删除——某些
+      调用路径未设置 backend.work_dir 时,后端会把 preview/joint 等写进
+      默认工作目录 raw.parent/{dataset_id}.nmrpipe,该目录从不被清理;现
+      一并删除(工作区数据目录下的同名目录与源数据旁的回退目录,均为纯
+      临时产物,不包含终谱/最终脚本)。
 
     保留项(终谱、最终脚本、phase.json、fid/、nuslist、smile.log)不受影响。
     """
@@ -252,6 +262,7 @@ def _cleanup_unified_intermediates(
         f"{dataset_id}_win1*",
         f"{dataset_id}_win2*",
         f"{dataset_id}_win3*",
+        f"{dataset_id}_winzf_*",
     ):
         for p in work.glob(base_pattern):
             if p.suffix in exts:
@@ -265,6 +276,19 @@ def _cleanup_unified_intermediates(
         _target = work / _dir
         if _target.is_dir():
             shutil.rmtree(_target, ignore_errors=True)
+    # 0.2.199-补29em:清理后端默认工作目录回退(work_dir 未设置时
+    # preview/joint 等中间产物落在 raw.parent/{dataset_id}.nmrpipe)
+    fallbacks: list[Path] = [work.parent / f"{dataset_id}.nmrpipe"]
+    if experiment is not None:
+        try:
+            fallbacks.append(
+                Path(experiment.source_path).parent / f"{dataset_id}.nmrpipe"
+            )
+        except (TypeError, ValueError):
+            pass
+    for _fb in fallbacks:
+        if _fb != work and _fb.is_dir():
+            shutil.rmtree(_fb, ignore_errors=True)
 
 
 def _append_final_summary(
@@ -773,7 +797,9 @@ def unified_route(    experiment: Experiment,
         peak_sign=_template_peak_sign(experiment),
         progress=progress,
     )
-    _cleanup_unified_intermediates(work, experiment.dataset_id)
+    _cleanup_unified_intermediates(
+        work, experiment.dataset_id, experiment=experiment, backend=backend
+    )
     return {
         "phases": fixed_final,
         "spectrum_path": str(resp["spectrum_path"]),
@@ -1697,7 +1723,9 @@ def _unified_nus(
         peak_sign=_template_peak_sign(experiment),
         progress=progress,
     )
-    _cleanup_unified_intermediates(work, experiment.dataset_id)
+    _cleanup_unified_intermediates(
+        work, experiment.dataset_id, experiment=experiment, backend=backend
+    )
     return {
         "phases": fixed,
         "direct_phase": direct_phase_final,
