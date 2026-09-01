@@ -210,7 +210,7 @@ class ImportExperimentDialog(QDialog):
         self.copy_check = QCheckBox("链接原始数据到项目(只读文件链接,必要时复制)")
         self.copy_check.setChecked(True)
         self.copy_check.setToolTip(
-            "勾选后把 Bruker 数据集复制进项目 raw/ 目录并计算输入指纹;"
+            "勾选后把 Bruker 数据集链接进项目 raw/ 目录并计算输入指纹;"
             "不勾选仅登记引用(源目录需保持可访问)。"
         )
         form.addRow("", self.copy_check)
@@ -219,7 +219,7 @@ class ImportExperimentDialog(QDialog):
             "分段数据或重复实验叠加导入(容器目录:多个含 acqus 的子目录合并为一条数据)"
         )
         self.segmented_check.setToolTip(
-            "适用于同一次采集分成多段的数据;普通单数据集目录保持不勾选。"
+            "适用于同一次采集分成多段(分段 NUS/重复实验叠加)的数据;普通单数据集目录保持不勾选。"
             "选择容器目录时自动勾选。"
         )
         self.segmented_check.setChecked(False)

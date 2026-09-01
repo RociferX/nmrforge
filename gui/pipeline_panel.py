@@ -600,8 +600,8 @@ class PipelineStepRow(QWidget):
         # 0.2.162-补15:生成谱图运行前「直接维范围」按钮(仅终跑生效)
         self.ext_range_button = QPushButton("直接维范围")
         self.ext_range_button.setToolTip(
-            "指定终跑脚本的直接维提取窗口(EXT -x1/-xn);"
-            "首遍相位搜索保持原窗口"
+            "指定直接维提取窗口(EXT -x1/-xn);"
+            "默认开启「应用此范围到优化过程」,可关闭;未设置时用默认(10.5-6.5)"
         )
         self.ext_range_button.setVisible(self.step_id == "spectrum")
         self.ext_range_button.clicked.connect(

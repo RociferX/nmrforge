@@ -346,7 +346,7 @@ class SpectrumViewer(QWidget):
         self.show_1d_button = QPushButton("1D")
         self.show_1d_button.setCheckable(True)
         self.show_1d_button.setToolTip(
-            "开启后出现随鼠标十字线,点击显示该处两个一维谱(TopSpin 式)"
+            "开启后出现随鼠标十字线,移动鼠标显示该处两个一维谱(TopSpin 式)"
         )
         self.show_1d_button.toggled.connect(self.set_1d_mode)
 

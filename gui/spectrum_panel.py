@@ -326,7 +326,7 @@ class SpectrumPanel(QWidget):
         self.expand_button = QPushButton("放大")
         self.expand_button.setCheckable(True)
         self.expand_button.setToolTip(
-            "放大:绘图区单独伸到左侧(收起项目树/Pipeline/Log),右侧保留按键;再点还原"
+            "放大:绘图区单独伸到左侧(覆盖项目树/Pipeline/Log),右侧保留按键;再点还原"
         )
         self.expand_button.toggled.connect(self._on_expand_toggled)
         # 0.2.199-补29bs:不留 Layers 与按钮之间的大空白
