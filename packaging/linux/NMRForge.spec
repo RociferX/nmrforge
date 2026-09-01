@@ -1,6 +1,8 @@
 # NMRForge PyInstaller spec（Linux AppImage 构建）
 # 路径相对本文件所在目录（packaging/linux/）；用法见 docs/packaging.md
 
+import os
+
 a = Analysis(
     ["../../main.py"],
     pathex=["../.."],
@@ -11,7 +13,7 @@ a = Analysis(
         ("../../gui/assets", "gui/assets"),
     ],
     hiddenimports=["PyQt6.QtSvg"],
-    hookspath=["hooks"],
+    hookspath=[os.path.abspath(os.path.join(SPECPATH, "hooks"))],
     runtime_hooks=[],
     excludes=[],
     noarchive=False,
