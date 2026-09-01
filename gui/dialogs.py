@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import QEvent, QObject, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QEvent, QObject, QPoint, Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -42,6 +42,28 @@ from gui.notes import (
 )
 
 
+def _position_near_parent(dialog: QDialog) -> None:
+    """把小弹窗锚定到父控件(触发按钮)下方,夹到屏幕内。
+
+    0.2.199-补29et:原生 Wayland 下普通 QDialog 的 move() 被合成器忽略,
+    弹窗落到左上角;Qt.Popup 类型(InfoDialog 已设置)在 Wayland 走
+    xdg_popup positioner,可可靠锚定到父控件附近。
+    """
+    parent = dialog.parentWidget()
+    if parent is None:
+        _center_on_screen(dialog)
+        return
+    screen = QApplication.screenAt(parent.mapToGlobal(QPoint(0, 0)))
+    screen = screen or QApplication.primaryScreen()
+    if screen is None:
+        return
+    geo = screen.availableGeometry()
+    p = parent.mapToGlobal(QPoint(0, parent.height() + 8))
+    x = min(max(p.x(), geo.left() + 8), geo.right() - dialog.width() - 8)
+    y = min(max(p.y(), geo.top() + 8), geo.bottom() - dialog.height() - 8)
+    dialog.move(x, y)
+
+
 def _center_on_screen(dialog: QDialog) -> None:
     """把对话框移到其所在屏幕中心(所有弹窗统一居中,0.2.112)。"""
     parent = dialog.parentWidget()
@@ -65,7 +87,11 @@ class _DialogCenteringFilter(QObject):
 
     def eventFilter(self, obj, event) -> bool:
         if isinstance(obj, QDialog) and event.type() == QEvent.Type.Show:
-            QTimer.singleShot(0, lambda d=obj: _center_on_screen(d))
+            if obj.windowFlags() & Qt.WindowType.Popup:
+                # 0.2.199-补29et:小弹窗锚定到触发控件附近
+                QTimer.singleShot(0, lambda d=obj: _position_near_parent(d))
+            else:
+                QTimer.singleShot(0, lambda d=obj: _center_on_screen(d))
         return super().eventFilter(obj, event)
 
 
@@ -76,10 +102,15 @@ def install_dialog_centering(app) -> None:
 
 
 class InfoDialog(QDialog):
-    """带确定按钮的信息对话框(替代 QMessageBox.information/critical/about)。"""
+    """带确定按钮的信息对话框(替代 QMessageBox.information/critical/about)。
+
+    0.2.199-补29et:Popup 类型——Wayland 下可靠锚定到触发控件附近,
+    点外部即关闭(小信息弹窗语义);X11/Windows 同样生效。
+    """
 
     def __init__(self, parent: QWidget | None, title: str, text: str) -> None:
         super().__init__(parent)
+        self.setWindowFlag(Qt.WindowType.Popup)
         self.setWindowTitle(title)
         self.setMinimumWidth(360)
         layout = QVBoxLayout(self)
@@ -89,6 +120,11 @@ class InfoDialog(QDialog):
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)
         buttons.accepted.connect(self.accept)
         layout.addWidget(buttons)
+        # 0.2.199-补29et:show 前定位(Wayland xdg_popup 在显示时按初始
+        # 位置锚定,show 后再 move 无效)
+        if parent is not None:
+            self.adjustSize()
+            _position_near_parent(self)
 
     @staticmethod
     def show_info(parent: QWidget | None, title: str, text: str) -> None:

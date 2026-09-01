@@ -1,5 +1,20 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29et(2026-09-01,小弹窗锚定到触发控件附近)
+
+用户:导入峰文件后的小弹窗(及其它类似小弹窗)出现在左上附近,应出现在
+点击的按钮附近。
+根因:原生 Wayland(GNOME)下普通 QDialog 的 move() 被合成器忽略,弹窗
+落到左上角(实测 dialog.global 为 0,0);Qt.Popup 类型走 xdg_popup
+positioner,可可靠锚定到父控件附近(实测按钮下方 9px)。
+实现(gui/dialogs.py + gui/spectrum_panel.py):
+- InfoDialog 改 Qt.Popup 类型,show 前按父控件(触发按钮)下方定位并夹到
+  屏幕内(show 后再 move 在 Wayland 无效);
+- 对话框定位过滤器按类型分流:Popup 锚定父控件,其余保持屏幕居中;
+- 峰表导入/保存/导出的结果提示改传对应按钮为父控件(Import peaks/
+  Save peaks/Export peaks),弹窗出现在按钮下方;
+- 测试:全量 pytest 848 项全绿;VM 原生 Wayland 实测锚定正确。
+
 ## 0.2.199-补29es-修5(2026-09-01,CSP 图发表级重排)
 
 用户:画的两个图完全达不到发表水平。
