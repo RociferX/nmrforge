@@ -1177,3 +1177,25 @@ def test_cleanup_unified_intermediates(tmp_path: Path) -> None:
 
     # 验证不存在的目录不报错
     _cleanup_unified_intermediates(tmp_path / "nonexistent", dataset_id)
+
+
+def test_load_preview_memory_error_hint(tmp_path, monkeypatch) -> None:
+    # 29ec: MemoryError on preview load -> clear RuntimeError hint.
+    from workflow.phase_routes import _load_preview_with_memory_guard
+
+    fake = tmp_path / "preview.ft3"
+    fake.write_bytes(b"x" * 1024)
+
+    def boom(path, unpack_axis=None):
+        raise MemoryError
+
+    monkeypatch.setattr(
+        "workflow.phase_routes._read_complex_preview", boom
+    )
+    import pytest
+
+    with pytest.raises(RuntimeError) as ei:
+        _load_preview_with_memory_guard(str(fake), axis="F1")
+    msg = str(ei.value)
+    assert "内存不足" in msg  # oom prefix
+    assert "F1" in msg

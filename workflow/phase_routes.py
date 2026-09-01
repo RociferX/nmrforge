@@ -144,6 +144,54 @@ def _read_complex_preview(
     return read_pipe_complex(path)
 
 
+def _preview_memory_warning(
+    path, *, axis="", progress=None, logs=None
+) -> None:
+    """相位搜索预览数组内存提示(0.2.199-补29ec):按文件大小估计 complex128
+    数组,超过可用内存 85% 时提示(不阻断;失败时另有 MemoryError 明确报错)。"""
+    try:
+        size_bytes = Path(path).stat().st_size * 2
+        est_mb = size_bytes / (1024.0 * 1024.0)
+        from backend.memory_guard import available_memory_mb
+
+        avail = available_memory_mb()
+        if est_mb > avail * 0.85:
+            msg = (
+                f"内存提示: {axis} 复型预览约 {est_mb:.0f}MB,"
+                f"可用约 {avail}MB,可能内存不足"
+                "(失败请释放内存或减小数据)"
+            )
+            if progress is not None:
+                progress(msg)
+            if logs is not None:
+                logs.append(msg)
+    except OSError:
+        pass
+
+
+def _load_preview_with_memory_guard(
+    path, *, axis, unpack_axis=None, progress=None, logs=None
+) -> np.ndarray:
+    """读复型预览并做内存提示(0.2.199-补29ec):读前估计内存超限提示;
+    MemoryError 转明确 RuntimeError,避免崩溃/被杀无提示。"""
+    _preview_memory_warning(path, axis=axis, progress=progress, logs=logs)
+    try:
+        return _read_complex_preview(path, unpack_axis=unpack_axis)
+    except MemoryError:
+        size_mb = 0.0
+        try:
+            size_mb = Path(path).stat().st_size * 2 / (1024.0 * 1024.0)
+        except OSError:
+            pass
+        suffix = f"(约 {size_mb:.0f}MB)" if size_mb else ""
+        raise RuntimeError(
+            "内存不足: 无法加载 "
+            f"{axis} 复型预览{suffix},"
+            "请释放内存或减小数据"
+        ) from None
+
+
+
 def _read_complex_ft3(path: Path | str) -> np.ndarray:
     """读全复型 3D 终谱(0.2.199-补18 keep_complex 模式)。
 
@@ -532,8 +580,9 @@ def unified_route(    experiment: Experiment,
         if progress is not None:
             progress(f"相位优化中: {axis} 复型预览完成")
         ax = _axis_index(axis, experiment.ndim)
-        arr = _read_complex_preview(
-            str(resp["spectrum_path"]), unpack_axis=ax
+        arr = _load_preview_with_memory_guard(
+            str(resp["spectrum_path"]), axis=axis, unpack_axis=ax,
+            progress=progress, logs=logs,
         )
         est = search_axis_memory(
             arr, ax, sign_mode=sign_mode, cancel=cancel_requested
@@ -605,8 +654,9 @@ def unified_route(    experiment: Experiment,
                     f"复型预览重搜({axis})失败: {resp.get('message')}"
                 )
             ax = _axis_index(axis, experiment.ndim)
-            arr = _read_complex_preview(
-                str(resp["spectrum_path"]), unpack_axis=ax
+            arr = _load_preview_with_memory_guard(
+                str(resp["spectrum_path"]), axis=axis, unpack_axis=ax,
+                progress=progress, logs=logs,
             )
             est = search_axis_memory(
                 arr, ax, sign_mode=sign_mode, cancel=cancel_requested
@@ -1314,7 +1364,10 @@ def _unified_nus(
         if progress is not None:
             progress(f"相位优化中: {axis} 复型预览完成")
         ax = _axis_index(axis, experiment.ndim)
-        arr = _read_complex_preview(str(resp["spectrum_path"]), unpack_axis=ax)
+        arr = _load_preview_with_memory_guard(
+            str(resp["spectrum_path"]), axis=axis, unpack_axis=ax,
+            progress=progress, logs=logs,
+        )
         est = search_axis_memory(
             arr, ax, sign_mode=sign_mode, cancel=cancel_requested
         )
@@ -1508,8 +1561,9 @@ def _unified_nus(
                         f"NUS 复型预览重搜({axis})失败: {resp.get('message')}"
                     )
                 ax = _axis_index(axis, experiment.ndim)
-                arr = _read_complex_preview(
-                    str(resp["spectrum_path"]), unpack_axis=ax
+                arr = _load_preview_with_memory_guard(
+                    str(resp["spectrum_path"]), axis=axis, unpack_axis=ax,
+                    progress=progress, logs=logs,
                 )
                 est = search_axis_memory(
                     arr, ax, sign_mode=sign_mode, cancel=cancel_requested

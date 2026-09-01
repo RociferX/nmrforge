@@ -1617,8 +1617,10 @@ class PipelinePanel(QWidget):
                             kwargs["ref_nuclei"] = self._ref_info.get("nuclei")
                             kwargs["tolerance_ppm"] = None
                     if "progress" in inspect.signature(method).parameters:
+                        # 0.2.199-补29ec:进度消息不带步骤名前缀(开始/完成/失败
+                        # 标记保留,具体进度由后端消息本身表达)
                         kwargs["progress"] = lambda msg: self.log_scoped.emit(
-                            f"{step_label}: {msg}", run_scope
+                            msg, run_scope
                         )
                     result = method(data_node, **kwargs)
                     if (
