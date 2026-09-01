@@ -81,6 +81,12 @@ exec "$HERE/usr/bin/NMRForge" "$@"
 APPRUN_EOF
 chmod +x "$APPDIR/AppRun"
 
-# 4) appimagetool 生成 AppImage
-appimagetool "$APPDIR" "$BUILD_DIR/${APP}-${VERSION}-${ARCH}.AppImage"
+# 4) appimagetool 生成 AppImage(runtime 优先用本地缓存,避免每次联网下载)
+RUNTIME_FILE="${RUNTIME_FILE:-$HOME/.cache/nmrforge-appimage/runtime-${ARCH}}"
+APPIMAGE_TOOL_ARGS=()
+if [ -f "$RUNTIME_FILE" ]; then
+    APPIMAGE_TOOL_ARGS+=(--runtime-file "$RUNTIME_FILE")
+fi
+appimagetool "${APPIMAGE_TOOL_ARGS[@]}" \
+  "$APPDIR" "$BUILD_DIR/${APP}-${VERSION}-${ARCH}.AppImage"
 echo "产物：$BUILD_DIR/${APP}-${VERSION}-${ARCH}.AppImage"

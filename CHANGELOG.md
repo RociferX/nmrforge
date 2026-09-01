@@ -1,5 +1,22 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29ew(2026-09-02,AppImage 桌面集成:自安装/可移除/自动隐藏)
+
+用户:桌面入口能否 AppImage 自带;用户想移除也能移除。
+实现(build_appimage.sh 的 AppRun):
+- 首次/移动后自动把 nmrforge.desktop 装到 ~/.local/share/applications 并把
+  Exec/TryExec 指向 AppImage 真实路径($APPIMAGE),图标装到
+  ~/.local/share/icons/hicolor/256x256/apps,刷新 desktop/icon 缓存;
+- TryExec 使直接删除 AppImage 文件后系统菜单自动隐藏入口(不残留失效启动器);
+- ./NMRForge.AppImage --remove-desktop(或 --uninstall-desktop)移除桌面入口
+  与图标(项目数据不受影响,删除 AppImage 文件即完全卸载);
+- 设 NMRFORGE_NO_DESKTOP=1 跳过自安装;
+- build_appimage.sh 步骤4 支持 RUNTIME_FILE 缓存(默认
+  ~/.cache/nmrforge-appimage/runtime-<arch>),避免 appimagetool 每次联网
+  下载 runtime(GitHub 抖动会致失败,2026-09-02 实测后固化)。
+验证(VM,隔离 HOME):安装→desktop 内容正确(Exec/TryExec)→--remove-desktop
+删除→再安装恢复→NMRFORGE_NO_DESKTOP=1 不创建;应用均正常启动。
+
 ## 0.2.199-补29ev(2026-09-02,AppImage 打包修复与首份产物)
 
 用户:把当前用到的所有东西取出,打包成 AppImage,用不到的不带。

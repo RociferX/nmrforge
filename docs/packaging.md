@@ -37,9 +37,13 @@ packaging/linux/build_appimage.sh
 3. 组装 AppDir：`usr/bin/NMRForge`（可执行 + _internal）、
    `usr/share/applications/NMRForge.desktop`、
    `usr/share/icons/hicolor/256x256/apps/nmrforge.png`。
-4. 生成可执行 `AppRun`（appimagetool **不**自动生成）：
-   `exec "$HERE/usr/bin/NMRForge" "$@"`，`HERE` 为 AppDir 路径。
-5. `appimagetool AppDir` 生成单文件 AppImage。
+4. 生成可执行 `AppRun`（appimagetool **不**自动生成）。AppRun 内置桌面
+   集成：首次/移动后自动把 desktop 入口与图标装到 `~/.local/share`（Exec/
+   TryExec 指向 AppImage 真实路径，直接删除 AppImage 文件后菜单项自动隐藏）；
+   `./NMRForge.AppImage --remove-desktop`（或 `--uninstall-desktop`）可移除
+   入口与图标；`NMRFORGE_NO_DESKTOP=1` 跳过自安装。
+5. `appimagetool AppDir` 生成单文件 AppImage（runtime 优先用本地缓存
+   `~/.cache/nmrforge-appimage/runtime-<arch>`，可用 `RUNTIME_FILE` 覆盖）。
 
 ## 版本与命名
 
@@ -61,6 +65,13 @@ packaging/linux/build_appimage.sh
   "AppRun: No such file or directory"。
 
 ## 构建记录（2026-09-02 首次端到端验证）
+- 验证（桌面集成，隔离 HOME）：自动安装 → desktop 的 Exec/TryExec 指向
+  AppImage；`--remove-desktop` 删除入口与图标；再次运行恢复；`NMRFORGE_NO_DESKTOP=1`
+  不创建入口。应用均正常启动。
+- runtime 下载抖动处理：appimagetool 需要联网下载 type2-runtime，GitHub
+  抖动会报 "Failed to download runtime"；可从 appimagetool 自身提取
+  （`--appimage-offset` + `dd`）后放入缓存目录，脚本自动复用。
+
 
 - 构建机：VM Ubuntu 22.04（glibc 2.35）、uv python 3.12.13、
   PyInstaller 6.22.2、appimagetool continuous 8c8c91f、mksquashfs 系统包。
