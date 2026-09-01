@@ -9,8 +9,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from PyQt6.QtCore import QStyle
 from PyQt6.QtGui import QColor, QPalette
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QProxyStyle
 
 
 def _theme_assets_dir() -> Path | None:
@@ -25,9 +26,27 @@ def _theme_assets_dir() -> Path | None:
     return None
 
 
+class _FastTooltipStyle(QProxyStyle):
+    """29ed: shorten tooltip delay so button hover hints appear quickly."""
+
+    def styleHint(
+        self,
+        hint,
+        option=None,
+        widget=None,
+        returnData=None,
+    ):
+        if hint == QStyle.StyleHint.SH_ToolTipDelayOn:
+            return 120
+        if hint == QStyle.StyleHint.SH_ToolTipFallAsleepDelay:
+            return 120
+        return super().styleHint(hint, option, widget, returnData)
+
+
 def apply_dark_theme(app: QApplication) -> None:
     """把 QApplication 设置为强制暗色主题。"""
     app.setStyle("Fusion")
+    app.setStyle(_FastTooltipStyle(app.style()))
     palette = QPalette()
     palette.setColor(QPalette.ColorRole.Window, QColor("#1e1e1e"))
     palette.setColor(QPalette.ColorRole.WindowText, QColor("#e8e8e8"))

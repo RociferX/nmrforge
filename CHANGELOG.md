@@ -1,5 +1,15 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29ed(2026-09-01,按钮 tooltip 悬停提示快速显示 + 日志批量刷新)
+
+用户:按钮鼠标悬停显示的说明(一行字,tooltip)显示很慢,要快点出现。
+实现:
+- gui/theme.py:QProxyStyle 覆盖 SH_ToolTipDelayOn/SH_ToolTipFallAsleepDelay
+  → 120ms(默认约 700ms),暗色 Fusion 主题保持不变;所有按钮悬停提示立即出现;
+- gui/log_panel.py:日志批量刷新——append 累积到 _pending,QTimer 60ms 合并
+  一次 appendPlainText(密集进度消息不再逐条卡);_reload_text 一次拼接整段;
+- 测试:全量 pytest 827 项全绿,ruff 通过。
+
 ## 0.2.199-补29ec(2026-09-01,相位搜索内存提示 + 去掉进度步骤名前缀)
 
 用户:①软件自身(非 SMILE)内存占用大的部分(3D NUS 相位搜索复型预览数组
