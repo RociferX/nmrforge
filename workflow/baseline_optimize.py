@@ -64,25 +64,23 @@ _VETOED_SCORE = -1e9
 
 
 def _stripe_ratio(data: np.ndarray, axis: int) -> float:
-    """逐迹校正引入的迹间断层指标(条纹):相邻迹端部均值跳变 max / 中位。
+    """逐迹校正引入的迹间断层指标(条纹):相邻迹端部基线水平 p95 跳变/中位。
 
-    与 core.qc.baseline_quality 的罚项同一度量;此处用于硬性否决。
+    与 core.qc.baseline_quality 的罚项同一度量(中位数边带 + p95 跳变,
+    0.2.199-补29ek 对 t1 噪声带/轴边缘强峰稳健);此处用于硬性否决。
     """
+    from core.qc.baseline_quality import _trace_edge_jumps
+
     real = np.real(np.asarray(data))
     n = real.shape[axis]
     if n < 8:
         return 0.0
-    edge = max(int(n * 0.08), 2)
-    moved = np.moveaxis(real, axis, -1)
-    flat = moved.reshape(-1, n)
-    left = flat[:, :edge].mean(axis=1)
-    right = flat[:, -edge:].mean(axis=1)
-    jumps = np.abs(np.diff(0.5 * (left + right)))
+    jumps = _trace_edge_jumps(real, axis)
     if jumps.size == 0:
         return 0.0
     med = float(np.median(jumps))
     floor = float(np.max(np.abs(real))) * 1e-4 + 1e-12
-    return float(np.max(jumps)) / max(med, floor)
+    return float(np.percentile(jumps, 95)) / max(med, floor)
 
 
 def _has_stripe_artifact(

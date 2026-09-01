@@ -20,27 +20,31 @@ class BaselineQuality:
 
 
 def _trace_edge_jumps(real: np.ndarray, axis: int, edge_fraction: float = 0.08) -> np.ndarray:
-    """沿 axis 每迹两端均值(带状区)的相邻迹差——逐迹校正引入的条纹度量。
+    """沿 axis 每迹两端基线水平(带状区中位数)的相邻迹差——逐迹校正
+    引入的条纹度量。
 
-    若某条迹的基线被强峰拉偏,其端部均值会与相邻迹明显不同,形成一条
-    贯穿谱图的条纹;该差值的分布(中位数/最大跳变)即条纹指标。
+    若某条迹的基线被强峰拉偏,其端部基线水平会与相邻迹明显不同,形成
+    一条贯穿谱图的条纹;该差值的分布(中位数/高分位跳变)即条纹指标。
+    边带用中位数而非均值——真实谱边缘常含强峰/t1 噪声,均值会被边缘
+    信号拉高造成误报(0.2.199-补29ek)。
     """
     n = real.shape[axis]
     edge = max(int(n * edge_fraction), 2)
     moved = np.moveaxis(real, axis, -1)
     flat = moved.reshape(-1, n)
-    left = flat[:, :edge].mean(axis=1)
-    right = flat[:, -edge:].mean(axis=1)
+    left = np.median(flat[:, :edge], axis=1)
+    right = np.median(flat[:, -edge:], axis=1)
     return np.abs(np.diff(0.5 * (left + right)))
 
 
 def stripe_penalty(data: Any, axis: int | None = None) -> float:
-    """逐迹条纹罚项(0..0.5):相邻迹端部均值最大跳变相对中位数的比值。
+    """逐迹条纹罚项(0..0.5):相邻迹端部基线水平 p95 跳变相对中位数的比值。
 
-    ratio = max_jump / max(median_jump, 动态范围×1e-4)。ratio≤8 无罚;
-    ratio 16 达半罚(0.25),≥32 封顶 0.5。稀疏强峰拉偏产生的单条条纹
-    (少数迹跳变、其余一致)比值很大,会被显著惩罚;均匀噪声/平滑漂移
-    的比值通常 <8,不惩罚。
+    ratio = p95_jump / max(median_jump, 动态范围×1e-4)。ratio≤8 无罚;
+    ratio 16 达半罚(0.25),≥32 封顶 0.5。p95 与中位数边带组合对真实谱
+    常规伪影(t1 噪声带、首增量偏置、轴边缘强峰)稳健——这些只影响
+    少量迹(<5%),不再把几乎每张谱打成 0.5 条纹(0.2.199-补29ek);
+    校正引入的明显条纹(覆盖 >5% 迹)仍被显著惩罚。
     """
     arr = np.asarray(data)
     real = np.real(arr)
@@ -52,7 +56,7 @@ def stripe_penalty(data: Any, axis: int | None = None) -> float:
         return 0.0
     med = float(np.median(jumps))
     floor = float(np.max(np.abs(real))) * 1e-4 + 1e-12
-    ratio = float(np.max(jumps)) / max(med, floor)
+    ratio = float(np.percentile(jumps, 95)) / max(med, floor)
     if ratio <= 8.0:
         return 0.0
     return float(np.clip((ratio - 8.0) / 48.0, 0.0, 0.5))

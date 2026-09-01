@@ -50,6 +50,43 @@ def _strong_peak_spectrum() -> np.ndarray:
     return spec
 
 
+def test_t1_ridge_not_flagged_as_stripe() -> None:
+    """t1 噪声带/首增量偏置(前几根迹整迹 DC 偏移)不再误判为条纹
+    (0.2.199-补29ek:中位数边带 + p95 跳变统计)。旧 max/均值组合
+    几乎把所有真实 2D 谱打成 0.50 条纹。"""
+    rng = np.random.default_rng(21)
+    n1, n2 = 256, 512
+    spec = rng.normal(0.0, 1.0, size=(n1, n2))
+    spec[:8] += np.linspace(20.0, 80.0, 8)[:, None]
+    for i, row in enumerate((50, 120, 200)):
+        spec[row, 100 + 120 * i] += 200.0
+    m = bq.evaluate(spec, axis=1)
+    assert m.stripe <= 0.1
+    assert m.score >= 80.0
+    assert not m.needs_correction
+
+
+def test_edge_peak_not_flagged_as_stripe() -> None:
+    """轴边缘带内强峰不再把端部均值拉高误判为条纹(中位数边带稳健)。"""
+    rng = np.random.default_rng(22)
+    n1, n2 = 128, 512
+    spec = rng.normal(0.0, 1.0, size=(n1, n2))
+    for row in range(60, 66):
+        spec[row, 500] += 150.0  # 峰落在最后 8% 边带内
+    m = bq.evaluate(spec, axis=1)
+    assert m.stripe <= 0.1
+    assert m.score >= 80.0
+
+
+def test_single_trace_stripe_still_caught() -> None:
+    """真正的逐迹基线偏置(整迹 DC 偏移)仍被显著惩罚——p95 只放过
+    少量伪影迹,不会放过真实条纹。"""
+    rng = np.random.default_rng(0)
+    spec = rng.normal(0.0, 1.0, size=(24, 40))
+    spec[1, :] += 50.0
+    assert float(stripe_penalty(spec)) >= 0.25
+
+
 def test_robust_correction_removes_slope_without_stripes() -> None:
     """稳健校正:强峰+漂移谱校正后斜率归零且不引入条纹(0.2.190)。
 
