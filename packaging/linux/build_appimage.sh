@@ -38,6 +38,27 @@ cp "$APPDIR/usr/share/icons/hicolor/256x256/apps/nmrforge.png" "$APPDIR/nmrforge
 cat > "$APPDIR/AppRun" <<'APPRUN_EOF'
 #!/bin/sh
 HERE="$(dirname "$(readlink -f "$0")")"
+
+# 桌面集成自安装(0.2.199-补29ew):首次/移动后自动把 desktop 入口与图标装到
+# ~/.local/share,Exec 指向 AppImage 真实路径;设置 NMRFORGE_NO_DESKTOP=1 可跳过。
+if [ -z "${NMRFORGE_NO_DESKTOP:-}" ] && [ -n "${APPIMAGE:-}" ]; then
+    APPIMG_PATH="$(readlink -f "$APPIMAGE")"
+    DESKTOP_DIR="$HOME/.local/share/applications"
+    ICON_DIR="$HOME/.local/share/icons/hicolor/256x256/apps"
+    DESKTOP_FILE="$DESKTOP_DIR/nmrforge.desktop"
+    if [ ! -f "$DESKTOP_FILE" ] || ! grep -qF "Exec=\"$APPIMG_PATH\"" "$DESKTOP_FILE"; then
+        mkdir -p "$DESKTOP_DIR" "$ICON_DIR"
+        sed "s|^Exec=.*|Exec=\"$APPIMG_PATH\"|" "$HERE/NMRForge.desktop" > "$DESKTOP_FILE"
+        cp -f "$HERE/nmrforge.png" "$ICON_DIR/nmrforge.png"
+        if command -v update-desktop-database >/dev/null 2>&1; then
+            update-desktop-database "$DESKTOP_DIR" >/dev/null 2>&1 || true
+        fi
+        if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+            gtk-update-icon-cache -f -t "$HOME/.local/share/icons/hicolor" >/dev/null 2>&1 || true
+        fi
+    fi
+fi
+
 exec "$HERE/usr/bin/NMRForge" "$@"
 APPRUN_EOF
 chmod +x "$APPDIR/AppRun"
