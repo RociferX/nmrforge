@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import csv
+import os
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -253,6 +254,23 @@ def _make_overlay(
     plt.close(fig)
 
 
+def _make_symlink(target: Path, link: Path) -> bool:
+    """在 link 处建指向 target 的相对软链接(0.2.199-补29es)。
+
+    参考数据与当前数据共享同一份 CSP 产物——文件只放当前数据,
+    参考数据对应位置放软链接;失败(如平台无权限)不阻断,返回 False。
+    """
+    try:
+        if link.is_symlink() or link.exists():
+            link.unlink()
+        link.parent.mkdir(parents=True, exist_ok=True)
+        rel = os.path.relpath(target, link.parent)
+        link.symlink_to(rel)
+        return True
+    except OSError:
+        return False
+
+
 def _write_csv(rows: list[dict[str, Any]], path: Path) -> None:
     cols = [
         "Assignment", "H_ref", "N_ref", "H_cur", "N_cur",
@@ -354,8 +372,11 @@ def analyze(
     out_dir = manager.dir_path("analysis") / exp_id / data_id
     out_dir.mkdir(parents=True, exist_ok=True)
     csv_path = out_dir / "csp_data.csv"
-    plot_path = out_dir / "csp_plot.svg"
-    overlay_path = out_dir / "overlay_spectra.svg"
+    # 0.2.199-补29es:图片输出到当前数据的 figures/ 目录
+    figures_dir = manager.data_dir(exp_id, data_id, "figures")
+    figures_dir.mkdir(parents=True, exist_ok=True)
+    plot_path = figures_dir / "csp_plot.svg"
+    overlay_path = figures_dir / "overlay_spectra.svg"
     _write_csv(rows, csv_path)
     _log("CSP 数据文件已写: csp_data.csv")
     _make_csp_plot(rows, plot_path)
@@ -364,6 +385,21 @@ def analyze(
     ref_pts = [(float(p["H_shift"]), float(p["N_shift"])) for p in ref_peaks]
     _make_overlay(cur_spectrum, ref_spectrum, cur_pts, ref_pts, pairs, overlay_path)
     _log("叠加图已生成: overlay_spectra.svg")
+    # 0.2.199-补29es:参考数据对应位置放软链接,表示两份数据共享 CSP 产物
+    ref_figures = manager.data_dir(exp_id, reference_data_id, "figures")
+    ref_out_dir = manager.dir_path("analysis") / exp_id / reference_data_id
+    symlink_ok = 0
+    for _target, _link in (
+        (csv_path, ref_out_dir / "csp_data.csv"),
+        (plot_path, ref_figures / "csp_plot.svg"),
+        (overlay_path, ref_figures / "overlay_spectra.svg"),
+    ):
+        if _make_symlink(_target, _link):
+            symlink_ok += 1
+    if symlink_ok:
+        _log(f"参考数据 {reference_data_id} 对应位置已建 {symlink_ok} 个软链接(共享 CSP 产物)")
+    else:
+        _log("参考数据软链接创建失败(平台无权限等),仅当前数据持有产物")
     run = manager.start_run(
         exp_id,
         workflow_ref="analyze",

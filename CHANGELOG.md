@@ -1,5 +1,18 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29es(2026-09-01,CSP 输出位置:图进 figures/ + 参考数据软链接)
+
+用户:1)图片输出到 figure 文件夹;2)对某数据选另一数据做 CSP,生成文件放
+这个数据的对应位置,另一个数据的对应位置用软链接,代表它们共有这份数据。
+实现(workflow/analyze):
+- csp_plot.svg / overlay_spectra.svg 输出到当前数据的 figures/ 目录
+  (<exp>/<data>/figures/);csp_data.csv 仍在 analysis/<exp>/<data>/;
+- 参考数据的对应位置(analysis 与 figures)放指向当前数据的相对软链接,
+  表示两份数据共享同一份 CSP 产物;软链接创建失败(如 Windows 无权限)
+  降级为仅当前数据持有,并写日志说明;
+- 测试更新(图位置 + 参考软链接断言,平台不支持软链接时跳过);
+  全量 pytest 847 项全绿。
+
 ## 0.2.199-补29er(2026-09-01,HSQC CSP 分析)
 
 用户:实现分析,目前只对 HSQC 做 CSP 分析,出图(1.CSP 图,2.原始谱叠加图,

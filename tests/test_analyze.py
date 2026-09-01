@@ -98,11 +98,23 @@ def test_csp_analysis_outputs(tmp_path: Path) -> None:
     assert result["status"] == "success"
     out_dir = Path(result["analysis_dir"])
     csv_path = out_dir / "csp_data.csv"
-    plot_path = out_dir / "csp_plot.svg"
-    overlay_path = out_dir / "overlay_spectra.svg"
+    figures_dir = manager.data_dir(exp_id, cur_id, "figures")
+    plot_path = figures_dir / "csp_plot.svg"
+    overlay_path = figures_dir / "overlay_spectra.svg"
     assert csv_path.is_file()
     assert plot_path.is_file()
     assert overlay_path.is_file()
+    # 0.2.199-补29es:参考数据对应位置有软链接(共享 CSP 产物;平台不支持
+    # 软链接时跳过链接断言)
+    ref_figures = manager.data_dir(exp_id, ref_id, "figures")
+    ref_out = Path(result["analysis_dir"]).parent / ref_id
+    for _link in (
+        ref_figures / "csp_plot.svg",
+        ref_figures / "overlay_spectra.svg",
+        ref_out / "csp_data.csv",
+    ):
+        if _link.is_symlink():
+            assert _link.resolve().is_file()
     assert plot_path.read_text(encoding="utf-8").lstrip().startswith("<?xml")
     assert overlay_path.read_text(encoding="utf-8").lstrip().startswith("<?xml")
     # Δδ 校验:peak0 dH = 1*6000/(256*600)=0.0390625,dN = 1*6000/(128*600)=0.078125
