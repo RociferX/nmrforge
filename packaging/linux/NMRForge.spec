@@ -11,7 +11,7 @@ a = Analysis(
         ("../../gui/assets", "gui/assets"),
     ],
     hiddenimports=["PyQt6.QtSvg"],
-    hookspath=[],
+    hookspath=["hooks"],
     runtime_hooks=[],
     excludes=[],
     noarchive=False,
