@@ -15,22 +15,23 @@ from backend.script_generator import effective_td, zero_fill_plan
 from core.data.bruker_reader import read_dataset
 
 
-def _auto_nthread_expected() -> int:
+def _auto_nthread_expected(config=None) -> int:
     import os
 
     # 0.2.199-补24 起 thread_offset 可配置(本地 config 可设非 2,如 VM 2 线程
-    # 约束);期望值必须读配置 offset,与 backend.config._auto_nthread 一致
-    # (0.2.199-补29ekb)。
-    from backend.config import load_processing_defaults
+    # 约束);期望值必须与 backend.config._auto_nthread 同源——读同一
+    # load_config(config) 的 smile.thread_offset(0.2.199-补29ekb)。
+    from backend.config import DEFAULT_THREAD_OFFSET, _as_int, load_config
 
-    offset = int(load_processing_defaults()["thread_offset"])
+    smile = load_config(config).get("smile") or {}
+    offset = _as_int(smile.get("thread_offset"), DEFAULT_THREAD_OFFSET)
     return max(1, (os.cpu_count() or 4) - offset)
 
 
 def test_load_processing_defaults_empty_config() -> None:
     defaults = load_processing_defaults({})
     assert defaults["points_per_line"] == 2.0
-    assert defaults["nthread"] == _auto_nthread_expected()
+    assert defaults["nthread"] == _auto_nthread_expected({})
     assert defaults["nmrpipe_path"] == ""
     assert isinstance(defaults["linewidth_hz"], dict)
 
@@ -65,7 +66,7 @@ def test_load_processing_defaults_invalid_fallback() -> None:
     assert defaults["linewidth_hz"]["1H"] == 8.0  # 无效 → 核素默认
     assert defaults["linewidth_hz"]["13C"] == 20.0
     assert defaults["points_per_line"] == 2.0
-    assert defaults["nthread"] == _auto_nthread_expected()
+    assert defaults["nthread"] == _auto_nthread_expected(cfg)
     assert defaults["nmrpipe_path"] == "123"
 
 
