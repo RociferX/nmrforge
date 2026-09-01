@@ -576,9 +576,12 @@ class ProjectTreePanel(QWidget):
         data_item.setIcon(0, self._icon("data"))
         tooltip = f"{data_id}\n来源: {source}"
         if in_group:
-            tooltip += "\n右键: 把该数据移出组 / 生成 FID / 生成谱图 / 删除"
+            tooltip += (
+                "\n右键: 把该数据移出组 / 打开所在目录 / 在终端中打开 / "
+                "重命名 / 删除样品数据"
+            )
         else:
-            tooltip += "\n右键: 生成 FID / 生成谱图 / 删除"
+            tooltip += "\n右键: 打开所在目录 / 在终端中打开 / 重命名 / 删除样品数据"
         data_item.setToolTip(0, tooltip)
         data_item.setData(
             0,

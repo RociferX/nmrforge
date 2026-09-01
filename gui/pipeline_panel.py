@@ -707,7 +707,7 @@ class PipelineStepRow(QWidget):
         )
         button_row.addWidget(self.show_spectrum_button)
         self.manual_button = QPushButton("人工")
-        self.manual_button.setToolTip("脚本编辑器:自动运行过则展示已有脚本,可直接修改运行")
+        self.manual_button.setToolTip("脚本编辑器:打开该步骤已生成的脚本,可直接修改后运行")
         self.manual_button.setVisible(False)
         self.manual_button.clicked.connect(
             lambda: self.manual_requested.emit(self.step_id)
