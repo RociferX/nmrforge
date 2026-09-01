@@ -272,6 +272,8 @@ def analyze(
     *,
     reference_data_id: str = "",
     csp_n_weight: float = _DEFAULT_N_WEIGHT,
+    h_tol: float = _H_TOL,
+    n_tol: float = _N_TOL,
     progress: Callable[[str], None] | None = None,
     **kwargs: Any,
 ) -> dict[str, Any]:
@@ -279,6 +281,8 @@ def analyze(
 
     返回 {"status","message","analysis_dir","csp_data","csp_plot",
     "overlay_spectra","peak_count","logs"};失败抛 AnalyzeError。
+    h_tol/n_tol 为未指认峰最近邻匹配容差(ppm),位移大的体系(如光态转换)
+    可放宽。
     """
     logs: list[str] = []
 
@@ -316,7 +320,7 @@ def analyze(
     if any("H_shift" not in p or "N_shift" not in p for p in cur_peaks + ref_peaks):
         raise AnalyzeError("CSP 分析目前仅支持 2D HSQC 峰表(N_shift/H_shift)")
     _log(f"载入峰表: 当前 {len(cur_peaks)} 峰,参考 {len(ref_peaks)} 峰")
-    pairs = _match_peaks(cur_peaks, ref_peaks)
+    pairs = _match_peaks(cur_peaks, ref_peaks, h_tol=h_tol, n_tol=n_tol)
     if not pairs:
         raise AnalyzeError(
             "未找到匹配峰(按 Assignment 或 1H±0.05/15N±0.5 ppm 最近邻)"
