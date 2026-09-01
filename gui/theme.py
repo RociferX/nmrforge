@@ -9,9 +9,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import QStyle
 from PyQt6.QtGui import QColor, QPalette
-from PyQt6.QtWidgets import QApplication, QProxyStyle
+from PyQt6.QtWidgets import QApplication, QProxyStyle, QStyle
 
 
 def _theme_assets_dir() -> Path | None:
