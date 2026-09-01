@@ -37,7 +37,9 @@ packaging/linux/build_appimage.sh
 3. 组装 AppDir：`usr/bin/NMRForge`（可执行 + _internal）、
    `usr/share/applications/NMRForge.desktop`、
    `usr/share/icons/hicolor/256x256/apps/nmrforge.png`。
-4. `appimagetool AppDir` 生成单文件 AppImage（自动生成 AppRun）。
+4. 生成可执行 `AppRun`（appimagetool **不**自动生成）：
+   `exec "$HERE/usr/bin/NMRForge" "$@"`，`HERE` 为 AppDir 路径。
+5. `appimagetool AppDir` 生成单文件 AppImage。
 
 ## 版本与命名
 
@@ -46,6 +48,30 @@ packaging/linux/build_appimage.sh
 - 发布节奏：每次 tag 后构建；后续可加 CI（GitHub Actions Linux runner）。
 
 ## 已知注意点
+
+- **pyinstaller-hooks-contrib hook-workflow 冲突**：contrib 的泛用 hook-workflow
+  会把本地顶层包 `workflow/` 当 PyPI 发行包并 `copy_metadata('workflow')`，
+  构建报 PackageNotFoundError。已用 packaging/linux/hooks/hook-workflow.py
+  空 hook 遮蔽（spec `hookspath` 生效）。
+- **hookspath 路径基准**：PyInstaller 的 hookspath 按进程 cwd 解析（构建脚本
+  在仓库根运行），与 datas 的 spec 目录基准不同；spec 内必须用
+  `os.path.abspath(os.path.join(SPECPATH, "hooks"))`，否则目录不存在被静默
+  跳过。
+- **AppRun 必须自带**：appimagetool 不生成 AppRun，缺失时 AppImage 解压后报
+  "AppRun: No such file or directory"。
+
+## 构建记录（2026-09-02 首次端到端验证）
+
+- 构建机：VM Ubuntu 22.04（glibc 2.35）、uv python 3.12.13、
+  PyInstaller 6.22.2、appimagetool continuous 8c8c91f、mksquashfs 系统包。
+- 命令：`PYTHON=<python3.12> PATH=$HOME/nmrforge-test-artifacts/tools:$PATH
+  APPIMAGE_EXTRACT_AND_RUN=1 bash packaging/linux/build_appimage.sh`。
+- 产物：`build/appimage/NMRForge-0.1.0-x86_64.AppImage`（约 123 MB，
+  858 文件，zstd squashfs）。
+- 验证：`_internal` 内含 config/presets/gui/assets；`ldd` 无缺失系统库；
+  `timeout 15 env QT_QPA_PLATFORM=offscreen ./NMRForge-*.AppImage
+  --appimage-extract-and-run` 退出码 124（正常启动被超时结束，无 traceback）。
+
 
 - **glibc 兼容**：PyInstaller 不静态链接 glibc，应在较老发行版（如 Ubuntu 20.04/22.04）
   上构建，产物才能覆盖更多目标机器。

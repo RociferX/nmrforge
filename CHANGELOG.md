@@ -1,5 +1,30 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29ev(2026-09-02,AppImage 打包修复与首份产物)
+
+用户:把当前用到的所有东西取出,打包成 AppImage,用不到的不带。
+方案(沿用 docs/packaging.md):PyInstaller + appimagetool,AppImage 只含
+应用本身+Python/Qt 依赖+config/presets/gui assets;NMRPipe/SMILE 外部
+后端不打包(运行时 PATH/csh/常见目录发现)。
+本次修复(既有打包资产从未端到端跑通,首跑逐项补齐):
+- NMRForge.spec:datas 补 ("../../gui/assets","gui/assets")(图标/spin 箭头
+  冻结态缺失);
+- packaging/linux/hooks/hook-workflow.py:遮蔽 pyinstaller-hooks-contrib 泛用
+  hook-workflow(它把本地顶层包 workflow/ 当 PyPI 发行包执行
+  copy_metadata('workflow'),报 PackageNotFoundError 构建失败);
+- NMRForge.spec:hookspath 改 os.path.abspath(os.path.join(SPECPATH,"hooks"))
+  (PyInstaller 按进程 cwd 解析 hookspath、与 datas 的 spec_dir 不同,原相对
+  路径解析到不存在的目录被静默跳过,contrib hook 仍生效);
+- build_appimage.sh:组装 AppDir 时生成可执行 AppRun(appimagetool 不自动
+  生成,原产物解压后报 AppRun 不存在)。
+构建与验证(VM Ubuntu 22.04,uv python 3.12.13,PyInstaller 6.22.2,
+appimagetool continuous 8c8c91f):
+- 产物 build/appimage/NMRForge-0.1.0-x86_64.AppImage(约 123 MB);
+- 包内含 config/presets/gui/assets;ldd 无缺失系统库;
+- offscreen 冒烟:应用正常启动并保持运行(15s timeout 退出码 124,无
+  traceback);
+- 命名版本取 core.__version__(0.1.0),与 CHANGELOG 发布序号无关。
+
 ## 0.2.199-补29et(2026-09-01,小弹窗屏幕居中,Wayland 可靠)
 
 用户:导入峰文件后的小弹窗(及其它类似小弹窗)出现在左上附近;尝试锚定
