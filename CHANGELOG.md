@@ -17,8 +17,11 @@
 - 测试:+5(输出/Δδ、pending、按指认匹配、缺峰表、参考候选过滤),
   全量 pytest 847 项全绿;
 - CSP 测试数据:O:\llm\workspace\nmrData bmr19213(PVB)/bmr19214(PCB)
-  同蛋白 TePixJ,实验 33_750_15N_PixJ_pg,已复制到 VM
-  ~/Desktop/data/csp_test/{teppixj_pvb,teppixj_pcb}。
+  同蛋白 TePixJ 不同条件(209_dexter/210_dexter,ser 不同),已复制到
+  VM ~/Desktop/data/csp_test/{teppixj_209,teppixj_210};
+  实测 206/143 峰,81 个匹配峰全部有真实 Δδ(0.09-0.10 ppm 级);
+  注:bmr19213(PVB)/bmr19214(PCB) 共享同一份原始数据(ser md5 相同),
+  不适合做 CSP 对;Pb/Pg 光态位移过大,analyze 已支持 h_tol/n_tol 放宽。
 
 ## 0.2.199-补29eq(2026-09-01,应用图标实装)
 
