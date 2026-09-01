@@ -1,5 +1,25 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29er(2026-09-01,HSQC CSP 分析)
+
+用户:实现分析,目前只对 HSQC 做 CSP 分析,出图(1.CSP 图,2.原始谱叠加图,
+均 SVG 可编辑)+ CSP 数据文件。
+实现:
+- workflow/analyze:HSQC CSP——当前数据(扰动态)对比参考数据(自由态),
+  峰匹配按 Assignment 精确优先、最近邻兜底(1H±0.05/15N±0.5 ppm 一对一),
+  Δδ = sqrt(ΔH² + (0.2·ΔN)²);
+- 输出到 <项目根>/analysis/<exp>/<data>/:csp_data.csv(逐峰 H/N + ΔH/ΔN/Δδ)、
+  csp_plot.svg(Δδ 条形图 + mean/mean+1σ 线)、overlay_spectra.svg(两谱
+  等高线叠加,自由=蓝×/扰动=红○ + 位移矢量);matplotlib SVG 矢量可编辑
+  (图内文字用英文,避免默认字体缺中文);
+- 未选参考谱返回 pending(自动/批量路径不阻断);GUI 在分析步骤加「参考谱」
+  按钮选择自由态数据,运行前拦截提示;
+- 测试:+5(输出/Δδ、pending、按指认匹配、缺峰表、参考候选过滤),
+  全量 pytest 847 项全绿;
+- CSP 测试数据:O:\llm\workspace\nmrData bmr19213(PVB)/bmr19214(PCB)
+  同蛋白 TePixJ,实验 33_750_15N_PixJ_pg,已复制到 VM
+  ~/Desktop/data/csp_test/{teppixj_pvb,teppixj_pcb}。
+
 ## 0.2.199-补29eq(2026-09-01,应用图标实装)
 
 用户:把软件的图标实装。

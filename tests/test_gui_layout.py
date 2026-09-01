@@ -608,6 +608,40 @@ def test_spectrum_panel_file_help_menus(
     window.close()
 
 
+def test_analysis_ref_candidates_filters(tmp_path: Path, qapp: QApplication) -> None:
+    """0.2.199-补29er:分析参考候选 = 同实验内已有谱图+峰表、非当前的数据。"""
+    from gui.pipeline_panel import PipelinePanel
+
+    manager = ProjectManager.create_project(tmp_path / "proj", "demo")
+    entry = manager.create_experiment()
+    cur = manager.import_data(entry.id, "/data/cur")
+    ref = manager.import_data(entry.id, "/data/ref")
+    other = manager.import_data(entry.id, "/data/other")
+    for data, name in ((cur, "cur"), (ref, "ref")):
+        spec_dir = manager.data_dir(entry.id, data.id, "spectra")
+        spec_dir.mkdir(parents=True, exist_ok=True)
+        spec = spec_dir / f"{name}.ft2"
+        spec.write_bytes(b"x")
+        manager.set_data_spectrum(entry.id, data.id, str(spec))
+        peaks_dir = manager.data_dir(entry.id, data.id, "peaks")
+        peaks_dir.mkdir(parents=True, exist_ok=True)
+        (peaks_dir / f"{entry.id}-{data.id}.list").write_text(
+            "Assignment w1 w2 Data Height Volume\n?-?  110.0  8.0  0  1  0\n",
+            encoding="utf-8",
+        )
+    panel = PipelinePanel(manager)
+    panel._current_exp_id = entry.id
+    panel._current_data_id = cur.id
+    cands = panel._analysis_ref_candidates(entry.id, cur.id)
+    ids = [c[2] for c in cands]
+    assert ref.id in ids
+    assert cur.id not in ids
+    assert other.id not in ids
+    # 分析行有参考谱按钮
+    row = panel._rows["analysis"]
+    assert not row.analysis_ref_button.isHidden()
+
+
 def test_main_window_has_app_icon(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:

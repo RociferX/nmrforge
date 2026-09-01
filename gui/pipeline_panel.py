@@ -562,6 +562,8 @@ class PipelineStepRow(QWidget):
     ext_range_requested = pyqtSignal(str)  # step_id:设置终跑直接维范围
     ref_spectrum_requested = pyqtSignal(str)  # step_id:选择参考谱(峰挑选)
     clear_ref_requested = pyqtSignal(str)  # step_id:清除参考谱约束
+    analysis_ref_requested = pyqtSignal(str)  # step_id:选择 CSP 参考谱(分析)
+    analysis_clear_ref_requested = pyqtSignal(str)  # step_id:清除 CSP 参考谱
     detail_toggled = pyqtSignal(str)  # step_id:点击行切换详情
     view_log_requested = pyqtSignal(str)  # step_id:定位日志面板
 
@@ -676,6 +678,28 @@ class PipelineStepRow(QWidget):
             lambda: self.clear_ref_requested.emit(self.step_id)
         )
         button_row.addWidget(self.clear_ref_button)
+        # 0.2.199-补29er:CSP 分析参考谱(自由态 HSQC)——仅分析步骤显示
+        self.analysis_ref_button = QPushButton("参考谱")
+        self.analysis_ref_button.setToolTip(
+            "选择参考谱(自由态 HSQC):CSP 计算当前数据(扰动态)相对参考的"
+            "化学位移扰动,输出数据文件与两张 SVG 图"
+        )
+        self.analysis_ref_button.setVisible(self.step_id == "analysis")
+        self.analysis_ref_button.clicked.connect(
+            lambda: self.analysis_ref_requested.emit(self.step_id)
+        )
+        button_row.addWidget(self.analysis_ref_button)
+        self.analysis_ref_label = QLabel("")
+        self.analysis_ref_label.setVisible(self.step_id == "analysis")
+        self.analysis_ref_label.setStyleSheet("color: #16a085;")
+        button_row.addWidget(self.analysis_ref_label)
+        self.analysis_clear_ref_button = QPushButton("清除")
+        self.analysis_clear_ref_button.setVisible(False)
+        self.analysis_clear_ref_button.setToolTip("清除 CSP 参考谱")
+        self.analysis_clear_ref_button.clicked.connect(
+            lambda: self.analysis_clear_ref_requested.emit(self.step_id)
+        )
+        button_row.addWidget(self.analysis_clear_ref_button)
         self.run_button = QPushButton("运行")
         self.run_button.setVisible(False)
         self.run_button.clicked.connect(lambda: self.run_requested.emit(self.step_id))
@@ -776,6 +800,18 @@ class PipelineStepRow(QWidget):
         self.ref_label.setText("")
         self.clear_ref_button.setVisible(False)
 
+    def set_analysis_ref_text(self, text: str) -> None:
+        """显示已选 CSP 参考谱(0.2.199-补29er)。"""
+        self.analysis_ref_label.setText(text)
+        self.analysis_clear_ref_button.setVisible(
+            bool(text) and self.step_id == "analysis"
+        )
+
+    def clear_analysis_ref_display(self) -> None:
+        """清除 CSP 参考谱显示。"""
+        self.analysis_ref_label.setText("")
+        self.analysis_clear_ref_button.setVisible(False)
+
     def set_detail(self, text: str, failed: bool = False) -> None:
         """填充详情文本。"""
         self.detail_label.setText(text)
@@ -864,6 +900,7 @@ class PipelinePanel(QWidget):
         self._run_active: bool = False
         # 0.2.199-补29dl:参考谱约束 {label, peaks, nuclei, path}
         self._ref_info: dict | None = None
+        self._analysis_ref_info: dict[str, str] | None = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
@@ -908,6 +945,10 @@ class PipelinePanel(QWidget):
             row.ext_range_requested.connect(self._on_ext_range_requested)
             row.ref_spectrum_requested.connect(self._on_pick_reference)
             row.clear_ref_requested.connect(self._on_clear_reference)
+            row.analysis_ref_requested.connect(self._on_pick_analysis_reference)
+            row.analysis_clear_ref_requested.connect(
+                self._on_clear_analysis_reference
+            )
             row.detail_toggled.connect(self._toggle_step_detail)
             row.view_log_requested.connect(self.view_log_requested.emit)
             steps_box.addWidget(row)
@@ -1493,6 +1534,96 @@ class PipelinePanel(QWidget):
             "path": str(path),
         }
 
+    def _analysis_ref_candidates(
+        self, exp_id: str, current_data_id: str
+    ) -> list[tuple[str, str, str]]:
+        """CSP 参考候选:同实验内、非当前数据、已有谱图+峰表的数据
+        (0.2.199-补29er)。"""
+        out: list[tuple[str, str, str]] = []
+        if self.manager is None or self.manager.project is None or not exp_id:
+            return out
+        exp = self.manager.project.experiment(exp_id)
+        if exp is None:
+            return out
+        for entry in getattr(exp, "data", []):
+            data_id = str(getattr(entry, "id", "") or "")
+            if not data_id or data_id == current_data_id:
+                continue
+            spectrum = str(getattr(entry, "spectrum_path", "") or "")
+            if not spectrum or not Path(spectrum).is_file():
+                continue
+            try:
+                peaks_dir = self.manager.data_dir(exp_id, data_id, "peaks")
+            except Exception:  # noqa: BLE001 - 单数据异常跳过
+                continue
+            has = any(
+                (peaks_dir / f"{exp_id}-{data_id}{suffix}").is_file()
+                for suffix in (".list", ".csv")
+            )
+            if not has:
+                continue
+            title = str(getattr(entry, "title", "") or "")
+            name = f"{exp_id}/{data_id}"
+            if title:
+                name += f" ({title})"
+            out.append((name, exp_id, data_id))
+        return out
+
+    def _on_pick_analysis_reference(self, step_id: str) -> None:
+        """「参考谱」按钮(分析):选择同实验内自由态 HSQC 数据做 CSP。"""
+        from gui.dialogs import InfoDialog
+
+        if self.manager is None or self.manager.project is None:
+            return
+        candidates = self._analysis_ref_candidates(
+            self._current_exp_id, self._current_data_id
+        )
+        if not candidates:
+            InfoDialog.show_info(
+                self,
+                "参考谱(CSP)",
+                "同实验内没有其它「已生成谱图+峰表」的数据,无法做 CSP。"
+                "请先处理两个 HSQC 数据(自由态与扰动态)并选峰",
+            )
+            return
+        dialog = QDialog(self)
+        dialog.setWindowTitle("选择 CSP 参考谱(自由态 HSQC)")
+        lay = QVBoxLayout(dialog)
+        tip = QLabel(
+            "选择参考数据(自由态/apo):CSP 计算当前数据(扰动态)相对参考的"
+            "化学位移扰动(Δδ = sqrt(ΔH² + (0.2·ΔN)²))"
+        )
+        tip.setWordWrap(True)
+        lay.addWidget(tip)
+        lst = QListWidget()
+        for name, _exp, _did in candidates:
+            lst.addItem(name)
+        lay.addWidget(lst)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok
+            | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        lay.addWidget(buttons)
+        if dialog.exec() != QDialog.DialogCode.Accepted or lst.currentRow() < 0:
+            return
+        _name, ref_exp, ref_data = candidates[lst.currentRow()]
+        self._analysis_ref_info = {"exp_id": ref_exp, "data_id": ref_data}
+        row = self._rows.get("analysis")
+        if row is not None:
+            row.set_analysis_ref_text(f"参考(自由态): {_name}")
+        self.log_message.emit(
+            f"CSP 参考谱已选择: {_name};运行「分析」后输出数据文件与 SVG 图"
+        )
+
+    def _on_clear_analysis_reference(self, step_id: str) -> None:
+        """清除 CSP 参考谱。"""
+        self._analysis_ref_info = None
+        row = self._rows.get("analysis")
+        if row is not None:
+            row.clear_analysis_ref_display()
+
     def _on_pick_reference(self, step_id: str) -> None:
         """「参考谱」按钮:选择任意已有峰表的数据作为选峰参考。"""
         if self.manager is None or self.manager.project is None:
@@ -1647,6 +1778,16 @@ class PipelinePanel(QWidget):
                             kwargs["ref_peaks"] = self._ref_info["peaks"]
                             kwargs["ref_nuclei"] = self._ref_info.get("nuclei")
                             kwargs["tolerance_ppm"] = None
+                    if step_id == "analysis":
+                        ref = getattr(self, "_analysis_ref_info", None)
+                        if not ref or not ref.get("data_id"):
+                            self.log_scoped.emit(
+                                "分析(HSQC CSP): 请先在分析步骤点「参考谱」"
+                                "选择自由态数据",
+                                run_scope,
+                            )
+                            return
+                        kwargs["reference_data_id"] = ref["data_id"]
                     if "progress" in inspect.signature(method).parameters:
                         # 0.2.199-补29ec:进度消息不带步骤名前缀(开始/完成/失败
                         # 标记保留,具体进度由后端消息本身表达)

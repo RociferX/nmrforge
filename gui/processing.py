@@ -399,8 +399,16 @@ class ProcessingController:
         self._manager.save()
         return result
 
-    def analyze(self, data, exp_id: str | None = None, data_id: str | None = None) -> dict:
-        """分析(峰归属/统计):调 workflow.analyze;接口占位。"""
+    def analyze(
+        self,
+        data,
+        exp_id: str | None = None,
+        data_id: str | None = None,
+        reference_data_id: str = "",
+        progress: Callable[[str], None] | None = None,
+    ) -> dict:
+        """分析(HSQC CSP,0.2.199-补29er):当前数据(扰动态) vs 参考数据
+        (自由态);输出 csp_data.csv + csp_plot.svg + overlay_spectra.svg。"""
         try:
             from workflow.analyze import analyze as backend_analyze
         except ImportError as exc:  # pragma: no cover - Backend 未落地
@@ -409,7 +417,13 @@ class ProcessingController:
             raise RuntimeError("ProcessingController 未绑定项目(ProjectManager)")
         exp_id = exp_id or getattr(data, "exp_id", "")
         data_id = data_id or getattr(data, "id", "")
-        result = backend_analyze(self._manager, exp_id, data_id)
+        result = backend_analyze(
+            self._manager,
+            exp_id,
+            data_id,
+            reference_data_id=reference_data_id,
+            progress=progress,
+        )
         if data_id and result.get("status") == "success":
             record_step_success(self._manager, exp_id, data_id, "analysis")
         self._manager.save()
