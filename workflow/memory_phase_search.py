@@ -405,6 +405,72 @@ class MemoryAxisResult:
     logs: list[str] = field(default_factory=list)
 
 
+def _opposite_pair_profiles(
+    real_rows: np.ndarray, positions: list[int],
+    *, window: int = 20, radius: int = 6,
+) -> list[np.ndarray]:
+    """锁定迹线上提取「相邻正负峰对」剖面。"""
+    n = int(real_rows.shape[1])
+    out: list[np.ndarray] = []
+    for row, peak in zip(real_rows, positions):
+        peak = int(peak)
+        if not (0 <= peak < n):
+            continue
+        main = float(row[peak])
+        if abs(main) < 1e-12:
+            continue
+        lo = max(0, peak - window)
+        hi = min(n, peak + window + 1)
+        seg = row[lo:hi]
+        opp = np.where(np.sign(seg) * np.sign(main) < 0, seg, 0.0)
+        idx = int(np.argmax(np.abs(opp)))
+        if opp[idx] == 0.0:
+            continue
+        other = lo + idx
+        a, b = min(peak, other), max(peak, other)
+        if b - a < 2:
+            continue
+        p0 = max(0, a - radius)
+        p1 = min(n, b + radius + 1)
+        prof = row[p0:p1].astype(float)
+        if prof.size < 5 or float(np.std(prof)) < 1e-12:
+            continue
+        out.append(prof)
+    return out
+
+
+def _pair_similarity(real_rows: np.ndarray, positions: list[int]) -> float | None:
+    """成对正负峰剖面的两两相关中位数;对数<3 返回 None。"""
+    profiles = _opposite_pair_profiles(real_rows, positions)
+    if len(profiles) < 3:
+        return None
+    fixed: list[np.ndarray] = []
+    length = 32
+    xi = np.linspace(0.0, 1.0, length)
+    for prof in profiles:
+        x = np.linspace(0.0, 1.0, prof.size)
+        p = np.interp(xi, x, prof)
+        p = p - float(np.mean(p))
+        norm = float(np.linalg.norm(p))
+        if norm < 1e-12:
+            continue
+        fixed.append(p / norm)
+    if len(fixed) < 3:
+        return None
+    arr = np.asarray(fixed)
+    dots = arr @ arr.T
+    tri = dots[np.triu_indices(len(fixed), 1)]
+    return float(np.median(tri))
+
+
+def _pair_arbiter_score(real_rows: np.ndarray, positions: list[int]) -> float:
+    """0-100:相似性越低越好(真实混合正负峰各不相同);无对/对数不足=50。"""
+    sim = _pair_similarity(real_rows, positions)
+    if sim is None:
+        return 50.0
+    return float(100.0 * (1.0 - max(0.0, min(1.0, sim))))
+
+
 def search_axis_memory(
     complex_arr: np.ndarray,
     axis: int,
@@ -530,32 +596,62 @@ def search_axis_memory(
                     f"回退 (0,0)"
                 )
     if flat:
-        zero_score = scored.get((0.0, 0.0))
-        if coarse_best == (0.0, 0.0) and zero_score is not None:
-            best_phase = (0.0, 0.0)
-            best_score = zero_score
-            logs.append(f"轴{axis}: 已回退 (0,0)(粗网格最优为零)")
-        elif coarse_margin >= PHASE_SCORE_FLAT_MARGIN:
-            if best_phase != coarse_best:
+        # 0.2.199-补29fo(用户):平坦时加入新的评分要求——成对正负峰相似性。
+        # 相位错时色散给每个峰配系统性正负对(形态相似),真实混合谱正负峰
+        # (Cα/Cβ 等)彼此不同。候选 = p1=0 且净分距最优 ≤±90 消歧容差的
+        # 已评分候选 + 零相位(不截断);对数足够时用它重评选优并直接定案。
+        pair_tol = PHASE_SYMMETRY_TOL
+        candidates = sorted(
+            (
+                p
+                for p, s in scored.items()
+                if s >= best_score - pair_tol and abs(p[1]) < 1e-9
+            ),
+            key=lambda p: -scored[p],
+        )
+        if (0.0, 0.0) in scored and (0.0, 0.0) not in candidates:
+            candidates.append((0.0, 0.0))
+        if len(candidates) >= 2:
+            pair_scores: list[tuple[float, tuple[float, float]]] = []
+            for cand in candidates:
+                real_rows = rotate_real(locked_rows, -1, cand[0], cand[1])
+                pair_scores.append(
+                    (_pair_arbiter_score(real_rows, trace_positions), cand)
+                )
+            best_pair, pair_best_cand = max(
+                pair_scores, key=lambda item: (item[0], scored[item[1]])
+            )
+            if pair_best_cand != best_phase:
+                logs.append(
+                    f"轴{axis}: 主评分平坦,成对正负峰相似性仲裁 "
+                    f"{best_phase}(net={scored[best_phase]:.2f}) → "
+                    f"{pair_best_cand}(net={scored[pair_best_cand]:.2f}, "
+                    f"pair={best_pair:.2f});候选="
+                    + ", ".join(
+                        f"{c}=({scored[c]:.1f}/{q:.1f})" for q, c in pair_scores
+                    )
+                )
+                best_phase = pair_best_cand
+                best_score = scored[pair_best_cand]
+            else:
+                logs.append(
+                    f"轴{axis}: 主评分平坦,成对正负峰相似性仲裁保持 "
+                    f"{best_phase}(pair={best_pair:.2f})"
+                )
+        else:
+            # 候选不足(罕见):保留原平坦兜底(含零相位回退)
+            zero_score = scored.get((0.0, 0.0))
+            if coarse_best == (0.0, 0.0) and zero_score is not None:
+                best_phase = (0.0, 0.0)
+                best_score = zero_score
+                logs.append(f"轴{axis}: 已回退 (0,0)(粗网格最优为零)")
+            else:
+                best_phase = coarse_best
+                best_score = scored[coarse_best]
                 logs.append(
                     f"轴{axis}: 细网格评分平坦,采用粗网格最优 {coarse_best} "
                     f"(粗 margin={coarse_margin:.2f} 分)"
                 )
-            else:
-                logs.append(
-                    f"轴{axis}: 细网格评分平坦,保持粗网格最优 {coarse_best} "
-                    f"(粗 margin={coarse_margin:.2f} 分)"
-                )
-            best_phase = coarse_best
-            best_score = scored[coarse_best]
-        elif zero_score is not None and coarse_best_score - zero_score < PHASE_SCORE_FLAT_MARGIN:
-            best_phase = (0.0, 0.0)
-            best_score = zero_score
-            logs.append(f"轴{axis}: 已回退 (0,0)(粗网格平坦且零相位不劣于最优)")
-        else:
-            best_phase = coarse_best
-            best_score = scored[coarse_best]
-            logs.append(f"轴{axis}: 粗网格 p0 平坦但最优显著优于零相位,采用粗网格最优")
     if refine and not flat:
         # 平台圆中位数 p0(亚度精修,旧方案默认评分路径)
         # 0.2.199-补29dn:平坦面不回退——平坦区中位数会漂移
