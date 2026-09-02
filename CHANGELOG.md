@@ -14,7 +14,10 @@ optimize_indirect_windows_from_recon),填零已无候选(auto 规则直写终谱
 - docstring/注释同步:联合复核谱只作基线评分基底,窗函数不消费该谱;
 - 测试:test_optimize_nus_processing_baseline_and_window 断言 finalize
   次数 2→1(只剩 joint 谱),calls[0].baseline 为空。
-验证:全量 pytest 全绿;test_full_paths 通过;ruff(改动文件)通过。
+验证:全量 pytest 全绿;test_full_paths 通过;ruff(改动文件)通过;
+VM 真机回归(用户:回归一个即可)——sampleI(2D uniform):F1=90°/
+F2=310°(-5°),与历史基线一致;综合 95.7 接受;后端运行 4 次;
+全程无「基线(嵌入)」重渲日志(2.1 段已不存在)。
 说明:缓存前置(直接维 phase.json 查询提前到 preview 渲染前)为审查候选 a),
 用户随后取消,本轮未做;reconstruct_nus 全局语义保持(供 SMILE 25 组评峰)。
 
