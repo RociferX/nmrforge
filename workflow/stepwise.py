@@ -254,10 +254,17 @@ def generate_spectrum(
     """
     experiment = _read_experiment(manager, exp_id, data_id)
     mem_work: Path | None = None
-    work = Path(work_dir) if work_dir else _work_dir(manager, exp_id, data_id)
+    persistent = Path(work_dir) if work_dir else _work_dir(manager, exp_id, data_id)
+    work = persistent
     if work_dir is None:
-        mem_work = memory_disk.select_work_root(experiment)
+        # 0.2.199-补29ey-修:持久产物(fid/nuslist/phase.json/脚本)始终在磁盘,
+        # 内存盘只承载当次渲染的中间谱——先预置持久产物,结束同步回磁盘。
+        mem_work = memory_disk.memory_work_dir(persistent, experiment)
         if mem_work is not None:
+            if mem_work.exists():
+                shutil.rmtree(mem_work, ignore_errors=True)
+            mem_work.mkdir(parents=True, exist_ok=True)
+            memory_disk.seed_persistent(persistent, mem_work)
             work = mem_work
             if progress is not None:
                 progress(f"中间谱工作目录使用内存盘(自适应): {work}")
@@ -274,6 +281,7 @@ def generate_spectrum(
         )
     finally:
         if mem_work is not None:
+            memory_disk.sync_persistent(mem_work, persistent)
             shutil.rmtree(mem_work, ignore_errors=True)
 
 

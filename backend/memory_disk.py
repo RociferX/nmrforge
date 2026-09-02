@@ -1,22 +1,30 @@
-"""中间谱内存盘自适应放置(0.2.199-补29ey)。
+"""中间谱内存盘自适应放置(0.2.199-补29ey,补29ey-修 持久安全版)。
 
-处理流程的中间谱(preview/joint/候选评分谱/SMILE 重构平面)默认写在工作区
-数据目录;若系统内存余量充足,把工作目录放到内存盘(tmpfs,/dev/shm),
-中间谱不进磁盘、用完即删(工作目录整体移除)。
+处理流程的工作目录同时承载两类内容:
+- 持久产物:fid/、merged/、seg_001/、nuslist、phase.json、*.com 脚本、
+  smile.log——跨步骤/跨运行需要保留(人工重跑/相位缓存/重新优化),必须
+  始终在磁盘(数据 process 目录);
+- 中间谱:preview/joint/候选评分谱、SMILE 重构平面、终谱(写后即移动到
+  spectra/)——用完即删,可放内存盘。
 
-- 配置 processing.intermediate_memory:auto(默认)=内存充足时用内存盘;
-  off=始终磁盘;
+本实现:工作目录主体仍在磁盘;内存余量充足时,把「运行期渲染工作区」放到
+内存盘——每次运行:从磁盘持久目录预置持久产物 → 渲染(中间谱在内存) →
+把持久产物同步回磁盘 → 删除内存盘目录。重启/崩溃最多丢失当次未同步的
+脚本/相位缓存(重跑即可),fid/ 等原始派生物始终在磁盘,不会出现
+「找不到脚本/fid」的奇怪问题。
+
+- 配置 processing.intermediate_memory:auto(默认)=内存充足时启用;off=关闭;
 - 配置 processing.memory_disk_path:可选显式内存盘路径(Windows 无标准
   tmpfs,自建 RAM 盘后在此指定;默认 Linux 用 /dev/shm);
-- 自适应判据:估算中间谱峰值 × 2 ≤ 系统可用内存,且 × 1.2 ≤ 内存盘剩余
-  空间,且峰值 ≥ 32MB(过小无收益);任一不满足回退磁盘。
+- 判据:中间谱峰值 ×2 + 持久产物 ≤ 系统可用内存,且 峰值 ×1.2 + 持久产物
+  ≤ 内存盘剩余,且峰值 ≥32MB;任一不满足回退磁盘。
 """
 
 from __future__ import annotations
 
+import hashlib
 import os
 import shutil
-import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +38,11 @@ BYTES_PER_POINT = 8  # 复 float32
 NUS_PEAK_FACTOR = 3  # SMILE 重构平面 + 终谱 + 预览
 UNIFORM_PEAK_FACTOR = 2
 
+# 工作目录中需要跨运行保留的产物(其余为可再生成中间谱)
+PERSISTENT_DIRS = ("fid", "merged", "seg_001")
+PERSISTENT_FILES = ("nuslist", "phase.json", "smile.log")
+PERSISTENT_GLOBS = ("*.com",)
+
 
 def intermediate_memory_policy(config: dict[str, Any] | None = None) -> str:
     """中间谱内存盘策略(auto/off,无效值回退 auto)。"""
@@ -40,10 +53,7 @@ def intermediate_memory_policy(config: dict[str, Any] | None = None) -> str:
 
 
 def memory_disk_path(config: dict[str, Any] | None = None) -> Path | None:
-    """内存盘根目录:显式配置优先;Linux 默认 /dev/shm(tmpfs);Windows 无。
-
-    显式路径必须是已存在目录(用户自建 RAM 盘);/dev/shm 需为挂载点。
-    """
+    """内存盘根目录:显式配置优先;Linux 默认 /dev/shm(tmpfs);Windows 无。"""
     cfg = load_config(config)
     processing = cfg.get("processing") or {}
     explicit = str(processing.get("memory_disk_path", "")).strip()
@@ -126,10 +136,76 @@ def estimate_intermediate_peak(experiment: Any) -> int | None:
         return None
 
 
-def select_work_root(
-    experiment: Any, config: dict[str, Any] | None = None
+def _persistent_paths(directory: Path) -> list[Path]:
+    """工作目录中需要跨运行保留的路径(目录 + 文件 glob)。"""
+    paths: list[Path] = []
+    for name in PERSISTENT_DIRS:
+        p = directory / name
+        if p.is_dir():
+            paths.append(p)
+    for name in PERSISTENT_FILES:
+        p = directory / name
+        if p.is_file():
+            paths.append(p)
+    for pattern in PERSISTENT_GLOBS:
+        paths.extend(sorted(directory.glob(pattern)))
+    return paths
+
+
+def persistent_usage(directory: Path) -> int:
+    """工作目录中持久产物总字节数(用于内存盘容量/内存余量判断)。"""
+    total = 0
+    for path in _persistent_paths(directory):
+        if path.is_dir():
+            for p in path.rglob("*"):
+                if p.is_file():
+                    try:
+                        total += p.stat().st_size
+                    except OSError:
+                        pass
+        elif path.is_file():
+            try:
+                total += path.stat().st_size
+            except OSError:
+                pass
+    return total
+
+
+def _copy_persistent(src: Path, dst: Path) -> None:
+    """把 src 的持久产物复制到 dst(覆盖;目录合并)。"""
+    for name in PERSISTENT_DIRS:
+        p = src / name
+        if p.is_dir():
+            shutil.copytree(p, dst / name, dirs_exist_ok=True)
+    for name in PERSISTENT_FILES:
+        p = src / name
+        if p.is_file():
+            shutil.copy2(p, dst / name)
+    for pattern in PERSISTENT_GLOBS:
+        for p in sorted(src.glob(pattern)):
+            shutil.copy2(p, dst / p.name)
+
+
+def seed_persistent(persistent_dir: Path, mem_dir: Path) -> None:
+    """运行前:把磁盘持久产物预置到内存盘工作目录。"""
+    _copy_persistent(persistent_dir, mem_dir)
+
+
+def sync_persistent(mem_dir: Path, persistent_dir: Path) -> None:
+    """运行后:把内存盘工作目录中的持久产物同步回磁盘。"""
+    _copy_persistent(mem_dir, persistent_dir)
+
+
+def memory_work_dir(
+    persistent_dir: Path,
+    experiment: Any,
+    config: dict[str, Any] | None = None,
 ) -> Path | None:
-    """自适应选择内存盘工作目录;任一条件不满足返回 None(用磁盘)。"""
+    """自适应选择内存盘工作目录;任一条件不满足返回 None(用磁盘)。
+
+    返回的目录不存在(调用方负责 mkdir 并预置/同步/清理);目录名按持久
+    目录路径哈希稳定,重启后残留由下次运行清理。
+    """
     if intermediate_memory_policy(config) == "off":
         return None
     root = memory_disk_path(config)
@@ -138,25 +214,31 @@ def select_work_root(
     peak = estimate_intermediate_peak(experiment)
     if peak is None or peak < MIN_PEAK_BYTES:
         return None
+    persistent_bytes = persistent_usage(persistent_dir)
+    required_disk = int(peak * DISK_SAFETY_FACTOR) + persistent_bytes
+    required_sys = int(peak * SYSTEM_SAFETY_FACTOR) + persistent_bytes
     try:
         free = shutil.disk_usage(root).free
     except OSError:
         return None
     avail = system_available_bytes()
-    if avail is not None and avail < peak * SYSTEM_SAFETY_FACTOR:
+    if avail is not None and avail < required_sys:
         return None
-    if free < peak * DISK_SAFETY_FACTOR:
+    if free < required_disk:
         return None
-    try:
-        return Path(tempfile.mkdtemp(prefix="nmrforge-mem-", dir=str(root)))
-    except OSError:
-        return None
+    digest = hashlib.sha1(
+        str(persistent_dir.resolve()).encode("utf-8")
+    ).hexdigest()[:12]
+    return root / f"nmrforge-{digest}"
 
 
 __all__ = [
     "estimate_intermediate_peak",
     "intermediate_memory_policy",
     "memory_disk_path",
-    "select_work_root",
+    "memory_work_dir",
+    "persistent_usage",
+    "seed_persistent",
+    "sync_persistent",
     "system_available_bytes",
 ]
