@@ -1,5 +1,15 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29fd-修(2026-09-02,导入提示统一:所有导入入口一律提醒检查类型)
+
+按用户要求「不管是否命中都提示」:导入完成日志一律输出
+「数据类型识别: name(置信 x);请检查数据类型是否识别正确(可在样品数据注释
+中修改)」,不再只有低置信/涉及 title 时才提醒。
+入口统一性核对:单条/分段(重复叠加)/拖拽/重导入全部经 _import_experiment_async
+→ import_finished → _on_import_done(单条提示);批量导入经 batch_import_finished
+→ _on_batch_import_done(逐项提示);多段容器由 read_segments 以首段
+read_dataset(带 pdata/title)识别,与单条同源。
+
 ## 0.2.199-补29fd(2026-09-02,数据类型:用户 pdata/title 优先、导入提示、GUI 选择写回)
 
 用户:1) 用户会在 pdata/title 写类型——未命中时用,命中时判断是否一致、不一致
