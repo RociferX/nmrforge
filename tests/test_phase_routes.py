@@ -543,7 +543,7 @@ def test_unified_route_nus_progress_stages(
     assert "第一遍 SMILE 完成" in joined, messages
     assert "F1 复型预览中" in joined, messages
     assert "F1 复型预览完成" in joined, messages
-    assert "联合复核完成,开始处理参数优化(基线/填零/窗函数)" in joined, messages
+    assert "相位搜索完成,开始处理参数优化(基线/填零/窗函数)" in joined, messages
     assert "终跑(完整脚本,含各维最终相位)中" in joined, messages
     assert "终跑完成" in joined, messages
     assert all(call["progress"] is not None for call in backend.finalize_calls)

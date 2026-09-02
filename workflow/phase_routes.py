@@ -2,7 +2,8 @@
 
 统一方案:第一遍逐维复型预览(仅搜索轴 PS 不加 -di,其它轴按已固定
 相位加 -di,零填零)→ 内存调相(旧算法判断标准:固定迹线中位数净吸收,
-零额外后端)→ 联合复核 → 处理参数优化(基线/填零/窗函数)→ 完整终跑:
+零额外后端)→ 处理参数优化(基线/填零/窗函数)→ 完整终跑(0.2.199-补29fj
+起跳过联合复核):
 各维最终相位填入初始脚本生成新的完整脚本(NUS 不再写 nus3d_rc_ph 旋转
 副本;直接维相位进 step1 PS(EXT 后),间接维相位进 step3 PS)。
 """
@@ -490,19 +491,15 @@ def unified_route(    experiment: Experiment,
     """统一方案(替代简单/进阶分派):逐轴复型预览 → 内存调相
     (旧算法判断标准,零额外后端)→ 完整终跑。
 
-    uniform(0.2.199-补29dr):初始逐轴搜索(间接维先行)→ 联合复核 →
-    直接维确定后间接维重搜一轮(不再迭代);预览仅搜索轴 PS 不加 -di
+    uniform(0.2.199-补29dr):初始逐轴搜索(间接维先行)→ 直接维确定后
+    间接维重搜一轮(不再迭代;0.2.199-补29fj 起跳过联合复核);预览仅搜索轴 PS 不加 -di
     (保持 0,0),其它轴按已固定相位加 -di,auto 完整填零;
     NUS:SMILE 一次出复型 recon 平面,直接维在实型终谱+投影迹线上内存
     搜索(HT),间接维内存复刻 finalize 链完整搜索,直接维确定后间接维
     再重搜一轮;最后把各维最终相位填入完整脚本重跑出良谱(不写旋转
     平面副本)。
     """
-    from workflow.memory_phase_search import (
-        PHASE_SCORE_FLAT_MARGIN,
-        joint_recheck_memory,
-        search_axis_memory,
-    )
+    from workflow.memory_phase_search import search_axis_memory
 
     plan = plan or select_method(experiment)
     if experiment.sampling.mode is SamplingMode.NUS:
@@ -560,9 +557,6 @@ def unified_route(    experiment: Experiment,
     # (不套用 NUS 的 SMILE 强制实型 + HT 方案)
     search_axes = [a for a in axes if a != direct_axis] + [direct_axis]
     fixed: dict[str, tuple[float, float]] = {}
-    axis_arrays: dict[str, np.ndarray] = {}
-    axis_index: dict[str, int] = {}
-    axis_traces: dict[str, tuple[list[int], list[int]]] = {}
     # 0.2.169:数据质量诊断在流程最开头执行,日志必须排在预览/优化之前
     # (此前 diag_logs 延后到优化后拼接,时序错乱;NUS 分支本就在开头)
     logs: list[str] = list(diag_logs)
@@ -632,32 +626,16 @@ def unified_route(    experiment: Experiment,
         else:
             phase = est.phase
         fixed[axis] = phase
-        axis_arrays[axis] = arr
-        axis_index[axis] = ax
-        axis_traces[axis] = est.traces
         logs += est.logs
         logs.append(
             f"{axis}: 内存相位 = ({phase[0]:g}°, {phase[1]:g}°) "
             f"score={est.score:.2f}"
         )
         logs.append(f"{axis} 相位搜索完成,耗时 {time.time() - t_axis:.1f} 秒")
-    if len(search_axes) >= 2:
-        t_joint = time.time()
-        best, best_score, fixed_score, zero_score = joint_recheck_memory(
-            axis_arrays, axis_index, axis_traces, fixed, sign_mode=sign_mode
-        )
-        if best != fixed and best_score - fixed_score >= PHASE_SCORE_FLAT_MARGIN:
-            logs.append(
-                f"联合复核: 联合最优 {best} (score={best_score:.2f}) "
-                f"优于顺序固定 {fixed} (score={fixed_score:.2f}),已更新"
-            )
-            fixed = best
-        else:
-            logs.append(
-                f"联合复核: 联合面平坦(顺序 {fixed} score={fixed_score:.2f} "
-                f"vs 联合最优 {best} score={best_score:.2f}),保持顺序固定"
-            )
-        logs.append(f"联合复核完成,耗时 {time.time() - t_joint:.1f} 秒")
+    # 0.2.199-补29fj(用户):跳过联合复核——历史与实测(900/102/101)均未
+    # 越过 0.05 门控纠正顺序搜索相位(补29dn 修 sampleI 靠填零+直接维定后
+    # 重搜,非复核);直接维定案后 r2 重搜已覆盖。joint_recheck_memory 代码
+    # 与其测试保留(不调用,供参考/将来需要时恢复)。
     # 0.2.199-补29dr(用户):直接维确定后,间接维再优化一轮(预览带直接维
     # 固定相位;排除本轴自身相位,统一/内存语义,sampleI F1 回粗网格最优 90°)
     indirect_axes = [a for a in axes if a != direct_axis]
@@ -701,9 +679,6 @@ def unified_route(    experiment: Experiment,
             else:
                 phase = est.phase
             fixed[axis] = phase
-            axis_arrays[axis] = arr
-            axis_index[axis] = ax
-            axis_traces[axis] = est.traces
             logs += est.logs
             logs.append(
                 f"{axis}: 内存相位重搜(直接维已定) = "
@@ -712,12 +687,12 @@ def unified_route(    experiment: Experiment,
             logs.append(
                 f"{axis} 相位重搜完成,耗时 {time.time() - t_axis:.1f} 秒"
             )
-    # 0.2.166:auto_phase=False 时直接维未参与搜索与联合复核,保持 (0,0)
+    # 0.2.166:auto_phase=False 时直接维未参与搜索,保持 (0,0)
     fixed.setdefault(direct_axis, (0.0, 0.0))
     # 0.2.163-补6:处理参数优化(基线/直接维窗/填零+间接窗),与 NUS 对称;
     # uniform 无重构,候选重跑完整 process 更快
     if progress is not None:
-        progress("联合复核完成,开始处理参数优化(基线/填零/窗函数)")
+        progress("相位搜索完成,开始处理参数优化(基线/填零/窗函数)")
     t_opt = time.time()
     proc = _optimize_uniform_processing(
         experiment,
@@ -965,7 +940,7 @@ def _optimize_uniform_processing(
     plan: Any = None,
     progress: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
-    """联合复核后的处理参数优化(uniform 2D/3D):基线(内存评分)+ 直接维
+    """逐轴相位搜索后的处理参数优化(uniform 2D/3D):基线(内存评分)+ 直接维
     窗函数(FID 内存评分)+ 间接维窗函数(FID 内存评分,候选含无窗)。
 
     顺序约束(用户要求,0.2.190):基线校正先于窗函数优化——2) 基线 →
@@ -1083,7 +1058,7 @@ def _optimize_nus_processing(
     base_params: dict[str, Any] | None,
     progress: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
-    """联合复核后的处理参数优化(NUS):基线(内存评分)+ 直接维窗(FID 内存
+    """逐轴相位搜索后的处理参数优化(NUS):基线(内存评分)+ 直接维窗(FID 内存
     评分)+ 间接维窗函数(重构平面内存评分,候选含无窗,不重跑 SMILE)。
 
     顺序约束(用户要求,0.2.190):基线校正先于窗函数优化——2) 基线 →
@@ -1204,16 +1179,12 @@ def _unified_nus(
     progress: Callable[[str], None] | None,
 ) -> dict[str, Any]:
     """NUS 统一流程:SMILE 一次(直接维 PS(0,0))→ 直接维在 recon 复型平面
-    内存搜索 → 间接维内存复刻 finalize 链完整逐维搜索 → 联合复核 →
-    处理参数优化(基线/填零/窗函数)→ 终跑:各维最终相位填入初始脚本生成
+    内存搜索 → 间接维内存复刻 finalize 链完整逐维搜索(0.2.199-补29fj 起
+    跳过联合复核)→ 处理参数优化(基线/填零/窗函数)→ 终跑:各维最终相位填入初始脚本生成
     新的完整脚本(直接维相位进 step1 PS,EXT 后;间接维进 step3 PS),
     不再写 nus3d_rc_ph 旋转副本。"""
     from core.data.internal_data_model import AxisRole
-    from workflow.memory_phase_search import (
-        PHASE_SCORE_FLAT_MARGIN,
-        joint_recheck_memory,
-        search_axis_memory,
-    )
+    from workflow.memory_phase_search import search_axis_memory
 
     work = Path(work_dir) if work_dir else backend._work_path(experiment)
     # 0.2.140:生成谱图最开端先跑直接维数据质量诊断(FID 内存扫描,
@@ -1303,9 +1274,6 @@ def _unified_nus(
     # 间接维:finalize 复型预览(该轴 PS 不加 -di,其它轴按已固定相位 -di,
     # 零填零)提供基底,内存完整逐维搜索——FT/-alt/ZTP 约定由真实后端保证
     fixed: dict[str, tuple[float, float]] = {}
-    axis_arrays: dict[str, np.ndarray] = {}
-    axis_index: dict[str, int] = {}
-    axis_traces: dict[str, tuple[list[int], list[int]]] = {}
     ext = "ft3" if experiment.ndim >= 3 else "ft2"
     # 0.2.199-补29dn(方案A,用户):填零先定——间接维相位搜索预览用与终跑
     # 一致的 auto 完整填零,避免低分辨率下评分最优与终谱不一致;
@@ -1358,32 +1326,13 @@ def _unified_nus(
             fixed[axis] = resolved
         else:
             fixed[axis] = est.phase
-        axis_arrays[axis] = arr
-        axis_index[axis] = ax
-        axis_traces[axis] = est.traces
         logs += est.logs
         logs.append(
             f"{axis}: 内存相位 = ({est.phase[0]:g}°, {est.phase[1]:g}°) "
             f"score={est.score:.2f}"
         )
         logs.append(f"{axis} 相位搜索完成,耗时 {time.time() - t_axis:.1f} 秒")
-    if len(indirect_axes) >= 2:
-        t_joint = time.time()
-        best, best_score, fixed_score, zero_score = joint_recheck_memory(
-            axis_arrays, axis_index, axis_traces, fixed, sign_mode=sign_mode
-        )
-        if best != fixed and best_score - fixed_score >= PHASE_SCORE_FLAT_MARGIN:
-            logs.append(
-                f"联合复核: 联合最优 {best} (score={best_score:.2f}) "
-                f"优于顺序固定 {fixed} (score={fixed_score:.2f}),已更新"
-            )
-            fixed = best
-        else:
-            logs.append(
-                f"联合复核: 联合面平坦(顺序 {fixed} score={fixed_score:.2f} "
-                f"vs 联合最优 {best} score={best_score:.2f}),保持顺序固定"
-            )
-        logs.append(f"联合复核完成,耗时 {time.time() - t_joint:.1f} 秒")
+    # 0.2.199-补29fj(用户):跳过联合复核(与 uniform 一致,代码保留)。
     # 直接维:0.2.199-补29l 改到「纯实终谱 + 投影迹线 + HT」上搜。
     # 间接维已按上述搜索校正(phases=fixed),生成真实(实型)finalize 终谱
     # (HNN 等含两个同名 15N 间接核时头标签重复,proj3D 无法按标签选轴,
@@ -1552,9 +1501,6 @@ def _unified_nus(
                     phase = est.phase
                 prev = fixed.get(axis)
                 fixed[axis] = phase
-                axis_arrays[axis] = arr
-                axis_index[axis] = ax
-                axis_traces[axis] = est.traces
                 logs += est.logs
                 logs.append(
                     f"{axis}: 内存相位重搜(迭代 {_round + 2}) = "
@@ -1568,12 +1514,12 @@ def _unified_nus(
             if not changed:
                 logs.append(f"相位迭代: 间接维第 {_round + 2} 轮无变化,收敛")
                 break
-    # 处理参数优化(基线/填零/窗函数):联合复核后、终跑前;各维最终相位
+    # 处理参数优化(基线/填零/窗函数):逐轴相位搜索后、终跑前;各维最终相位
     # 与优化后的处理参数一起填入初始脚本,生成新的完整脚本做终跑——
     # 直接维相位进 step1 PS(EXT 后,与 recon 平面内存旋转同归一化),
     # 间接维相位进 step3 PS;不写 nus3d_rc_ph 旋转副本。
     if progress is not None:
-        progress("联合复核完成,开始处理参数优化(基线/填零/窗函数)")
+        progress("相位搜索完成,开始处理参数优化(基线/填零/窗函数)")
     t_opt = time.time()
     proc = _optimize_nus_processing(
         experiment,
