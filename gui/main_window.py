@@ -1366,8 +1366,21 @@ class MainWindow(QMainWindow):
         threading.Thread(target=worker, daemon=True).start()
 
     def _on_pipeline_run_started(self, exp_id: str, data_id: str) -> None:
-        """处理开始:左侧树该数据显示「运行中」(主线程)。"""
+        """处理开始:左侧树该数据显示「运行中」,并把日志面板切到目标
+        数据/组作用域(否则进度日志只进缓冲不显示,观感像日志被吞)。"""
         self.project_tree.mark_running(exp_id, data_id)
+        try:
+            group = (
+                self.manager.group_of_data(exp_id, data_id)
+                if self.manager is not None and self.manager.project is not None
+                else None
+            )
+        except Exception:  # noqa: BLE001 - 组解析失败按单数据作用域
+            group = None
+        if group is not None:
+            self.log_panel.set_scope("group", exp_id, "", group.id)
+        else:
+            self.log_panel.set_scope("data", exp_id, data_id)
 
     def _on_pipeline_run_finished(self) -> None:
         """Pipeline 处理步骤完成后刷新左侧树/中间/谱图面板(主线程)。"""

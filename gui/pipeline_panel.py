@@ -1725,7 +1725,6 @@ class PipelinePanel(QWidget):
             except Exception:  # noqa: BLE001 - 状态判定失败不阻断原流程
                 pass
         self._rows[step_id].set_status("RUNNING")
-        self.log_message.emit(f"开始 {STEP_LABEL.get(step_id, step_id)}: {entry.id}")
 
         def worker() -> None:
             try:
@@ -1753,9 +1752,14 @@ class PipelinePanel(QWidget):
                     else None
                 )
                 # 0.2.199-补29d:运行日志按目标数据/组作用域落地,切换选中
-                # 不再串——旧代码 emit log_message 落当前选中作用域
+                # 不再串;0.2.199-补29fk-修:开始行也落 run_scope,并请主窗口
+                # 把日志面板切到该作用域(否则只见「开始」不见后续进度)
                 run_scope = self._run_log_scope(
                     exp_id, target_data_id, group.id if group is not None else ""
+                )
+                self.log_scoped.emit(
+                    f"开始 {STEP_LABEL.get(step_id, step_id)}: {entry.id}",
+                    run_scope,
                 )
                 if group is not None:
                     self._run_group_step(exp_id, group.id, step_id, target_data_id)
