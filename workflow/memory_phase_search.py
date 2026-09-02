@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import math
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
@@ -380,6 +381,7 @@ def search_axis_memory(
     cancel: Callable[[], bool] | None = None,
 ) -> MemoryAxisResult | None:
     """在复型数据的指定轴上做内存相位搜索(旧算法判断标准,零后端)。"""
+    _t_search0 = time.monotonic()
     arr = np.asarray(complex_arr, dtype=np.complex128)
     n = arr.shape[axis]
     if arr.ndim < 2 or n < 8:
@@ -410,6 +412,7 @@ def search_axis_memory(
     _moved = np.moveaxis(arr, axis, -1)
     _flat = _moved.reshape(-1, _moved.shape[-1])
     locked_rows = _flat[trace_indices]
+    _t_lock_done = time.monotonic()
 
     def _run_batch(phases: list[tuple[float, float]]) -> None:
         for raw in phases:
@@ -582,6 +585,13 @@ def search_axis_memory(
                         f"(score={c_score:.2f})"
                     )
                     best_phase, best_score = cand, c_score
+    # 0.2.199-补29fe:内部阶段计时(不改算法,供热点分析)
+    _wall = time.monotonic() - _t_search0
+    logs.append(
+        f"内存搜索内部: 锁定迹线耗时 {_t_lock_done - _t_search0:.2f}s,"
+        f"评分/其余 {_wall - (_t_lock_done - _t_search0):.2f}s,"
+        f"共评分 {len(scored)} 个候选,合计 {_wall:.2f}s"
+    )
     return MemoryAxisResult(
         axis=axis,
         phase=(float(best_phase[0]), float(best_phase[1])),
