@@ -1,5 +1,25 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29fb(2026-09-02,固体核磁预设复查 + 分类智能族回退)
+
+用户:复查固体核磁预设缺什么、识别是否正确、回退能否智能而非仅 generic。
+复查结论(合成核组合+PULPROG 逐类实测):0.2.119 的 23 个固体类型在 PULPROG
+正确时全部可达(NCA/NCO/TEDOR/PAIN-CP、DARR/PDSD/RFDR/CORD/INADEQUATE/HCC、
+HETCOR/HNHETCOR/NN/CHHC/NHHC、NCACX/NCOCX/NCACB/NCOCACB、CANCO/CAN(CO)CA/
+CBCANCO、CCC、CCH/CCH-TOCSY、NNH 等);纯核组合唯一命中(如 HETCOR/NNH)置信
+0.95,同族靠 PULPROG 区分 0.9。
+已知缺口(记录待补):1D CP 系列(CP13C/CP15N/1H MAS 等)受 ndim=1 GUI 未放开
+限制;四极核 MQMAS/DQMAS(23Na/27Al/17O/11B)无预设与核支持;固体 31P/19F
+CP 2D(HETCOR 型)缺失(现有 hsqc/hmqc/hmbc_31p/19f 为溶液 1H 检测)。
+实现(core/experiment/experiment_classifier.py):
+- 新增 _FAMILY_FALLBACK 同族智能回退:同核组合族 PULPROG 未细分时,族内成员
+  符号规则一致(全 uniform/mixed 同语义)才取安全族代表(NCA/DARR/CHHC/
+  HSQC-13C/HSQC/HMQC-31P/HSQC-19F/CCH),置信 0.5 待确认,证据注明可改注释;
+- 3D 13C/15N/13C 族混 uniform(NCACX/CANCO)与 mixed(NCACB/CBCANCO),核组合
+  猜不出符号语义,保持 Generic 但证据列出全部候选说明原因;
+- 测试:+2(安全族回退/混合族仍 generic 且说明),unknown_2d 用例改断言新回退;
+  全量 pytest 全绿,ruff 通过。
+
 ## 0.2.199-补29fa(2026-09-02,修复 HNCACB 等 mixed 谱选峰只选主符号)
 
 现象(用户):HNCACB 数据类型显示正确,但选峰日志为「仅主符号峰(uniform)」,

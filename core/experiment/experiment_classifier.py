@@ -103,6 +103,31 @@ _PULPROG_TYPES: list[tuple[str, str]] = [
 ]
 
 
+# 0.2.199-补29fb(用户):同核组合族在 PULPROG 未细分时的智能回退。
+# 仅收录「族内成员处理性质一致(peak_sign 同 uniform/mixed 且区域先验一致)」
+# 的组合——回退结果不会改变相位/符号规则;族内混合 uniform/mixed(如 3D
+# 13C/15N/13C 的 NCACX(uni)/NCACB(mixed)/CBCANCO(mixed))必须保留 PULPROG
+# 判定,不能靠核组合猜,仍走 Generic 并列出候选供确认。
+_FAMILY_FALLBACK: dict[tuple[int, str, tuple[str, ...]], str] = {
+    (2, "13C", ("15N",)): "NCA",      # NCA/NCO/TEDOR/PAIN-CP(uniform)
+    (2, "13C", ("13C",)): "DARR",     # DARR/PDSD/RFDR/CORD/INADEQUATE/HCC(uniform)
+    (2, "1H", ("1H",)): "CHHC",       # CHHC/NHHC(uniform)
+    (2, "1H", ("13C",)): "HSQC-13C",  # HSQC/HMQC/TOCSY/NOESY 13C 族(uniform)
+    (2, "1H", ("15N",)): "HSQC",      # HSQC/HMQC/TOCSY/NOESY 15N 族(uniform)
+    (2, "1H", ("31P",)): "HMQC-31P",  # 溶液 31P 族(uniform)
+    (2, "1H", ("19F",)): "HSQC-19F",  # 溶液 19F 族(uniform)
+    (3, "1H", ("13C", "13C")): "CCH",  # CCH/CCH-TOCSY(uniform)
+}
+
+
+def _family_fallback(experiment: Experiment) -> str | None:
+    """同核组合族 PULPROG 未知时的代表模板(核组合 → 族代表);无安全代表返回 None。"""
+    indirect = tuple(sorted(d.nucleus for d in experiment.dimensions[1:]))
+    return _FAMILY_FALLBACK.get(
+        (experiment.ndim, experiment.dimensions[0].nucleus, indirect)
+    )
+
+
 def _data_nuclei(experiment: Experiment) -> tuple[str, ...]:
     """数据各维度核序列(按维度位置 x/y/z 序)。
 
@@ -177,11 +202,31 @@ def classify(experiment: Experiment) -> ExperimentType:
                     confidence=0.9,
                     evidence=evidence + [f"PULPROG 含 {keyword!r}(候选核匹配)"],
                 )
+        # 0.2.199-补29fb:同族安全代表优先(保留核组合信息);族内符号语义
+        # 不一致(3D 13C/15N/13C 混 uniform/mixed)或无可安全代表时仍 Generic,
+        # 但证据列出候选与原因,便于界面/日志说明而非「纯粹 generic」。
+        canonical = _family_fallback(experiment)
+        if canonical:
+            return ExperimentType(
+                name=canonical,
+                confidence=0.5,
+                evidence=evidence
+                + [
+                    "PULPROG 未细分同核组合族,取安全族代表 "
+                    + canonical
+                    + "(符号规则一致;可在注释中改精确类型)"
+                ],
+            )
         generic = "generic_3d" if experiment.ndim == 3 else "generic_2d"
         return ExperimentType(
             name=generic,
             confidence=0.4,
-            evidence=evidence + ["核组合有候选模板但 PULPROG 未识别,进入 Generic"],
+            evidence=evidence
+            + [
+                "PULPROG 未识别且同族符号语义不一致(候选: "
+                + ", ".join(sorted(set(candidates)))
+                + "),需人工确认类型"
+            ],
         )
 
     # 3) 核组合无候选:PULPROG 兜底(液体类型但核不符,降置信度)

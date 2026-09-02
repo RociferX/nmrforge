@@ -41,10 +41,13 @@ def test_read_hnca_3d(bruker_dir: Path) -> None:
     assert nuclei == {"F1": "13C", "F2": "15N", "F3": "1H"}
 
 
-def test_read_unknown_2d_generic(bruker_dir: Path) -> None:
+def test_read_unknown_2d_family_fallback(bruker_dir: Path) -> None:
+    """0.2.199-补29fb:未知 PULPROG 的 2D 1H-15N 回退 HSQC 族代表(置信<0.6
+    仍待确认),不再纯 Generic。"""
     exp = read_dataset(bruker_dir / "unknown_2d")
-    assert exp.experiment_type.name == "generic_2d"
+    assert exp.experiment_type.name == "HSQC"
     assert exp.experiment_type.confidence < 0.6
+    assert "族代表 HSQC" in exp.experiment_type.evidence[-1]
 
 
 def test_ft_neg_for_3d_first_indirect(bruker_dir: Path) -> None:
@@ -305,6 +308,42 @@ def test_classify_ssnmr_tedor_pain_nn() -> None:
     assert pain.name == "PAIN-CP"
     nn = classify(_experiment_with_nuclei(2, ["15N", "15N"], "nn"))
     assert nn.name == "NN"
+
+
+
+def test_classify_family_fallback_safe() -> None:
+    """0.2.199-补29fb:同核组合族 PULPROG 未知时回退安全族代表,不再纯 Generic。"""
+    from core.experiment.experiment_classifier import classify
+
+    n15c13 = classify(_experiment_with_nuclei(2, ["13C", "15N"], "unknown_pulprog"))
+    assert n15c13.name == "NCA"
+    assert 0.4 < n15c13.confidence < 0.6  # 待用户确认
+    assert "族代表 NCA" in n15c13.evidence[-1]
+
+    cc = classify(_experiment_with_nuclei(2, ["13C", "13C"], "unknown_pulprog"))
+    assert cc.name == "DARR"
+
+    hh = classify(_experiment_with_nuclei(2, ["1H", "1H"], "unknown_pulprog"))
+    assert hh.name == "CHHC"
+
+    cch3d = classify(
+        _experiment_with_nuclei(3, ["1H", "13C", "13C"], "unknown_pulprog")
+    )
+    assert cch3d.name == "CCH"
+
+
+def test_classify_family_fallback_mixed_sign_stays_generic() -> None:
+    """0.2.199-补29fb:3D 13C/15N/13C 族混 uniform/mixed,核组合猜不出符号
+    语义,必须 Generic 并列出候选(不能误选族代表)。"""
+    from core.experiment.experiment_classifier import classify
+
+    result = classify(
+        _experiment_with_nuclei(3, ["13C", "15N", "13C"], "unknown_pulprog")
+    )
+    assert result.name == "generic_3d"
+    assert result.confidence < 0.6
+    joined = " ".join(result.evidence)
+    assert "NCACX" in joined and "NCACB" in joined and "CANCO" in joined
 
 
 def test_classify_ssnmr_chhc_nhhc_and_ccc() -> None:
