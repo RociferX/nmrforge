@@ -839,16 +839,11 @@ class MainWindow(QMainWindow):
             conf = float(et.get("confidence", 0.0) or 0.0)
         except (TypeError, ValueError):
             conf = 0.0
-        evidence = [str(e) for e in (et.get("evidence") or [])]
-        line = f"数据类型识别: {name}(置信 {conf:.2f})"
-        need_check = (
-            conf < 0.9
-            or str(name).startswith("generic")
-            or any(k in e for e in evidence for k in ("请核对", "title", "族代表", "未识别"))
+        # 0.2.199-补29fd-修:不管是否命中,一律提示检查数据类型
+        self._append_log(
+            f"数据类型识别: {name}(置信 {conf:.2f});"
+            "请检查数据类型是否识别正确(可在样品数据注释中修改)"
         )
-        if need_check:
-            line += ";请检查数据类型是否识别正确(可在样品数据注释中修改)"
-        self._append_log(line)
 
     def _read_data_metadata(self, exp_id: str, data_id: str) -> dict:
         """读样品数据 metadata.json(缺失返回空 dict)。"""
