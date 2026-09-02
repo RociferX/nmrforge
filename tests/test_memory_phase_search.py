@@ -177,3 +177,49 @@ def test_joint_recheck_tie_keeps_fixed() -> None:
     # p1 平坦:联合最优不会比顺序固定显著更优(否则门控会更新)
     assert best_score - fixed_score < PHASE_SCORE_FLAT_MARGIN + 1e-9
     assert fixed_score >= zero_score - 1e-9
+
+
+def test_joint_recheck_row_scoring_matches_full_array() -> None:
+    """补29fi:joint 行式评分与旧全数组 score_axis_memory 等价(相位/评分)。"""
+    import itertools
+
+    size = (96, 80)
+    arr0 = _complex_axis_2d(size, axis=0, p0=-30.0)
+    arr1 = _complex_axis_2d(size, axis=1, p0=-20.0)
+    est0 = search_axis_memory(arr0, axis=0)
+    est1 = search_axis_memory(arr1, axis=1)
+    assert est0 is not None and est1 is not None
+    fixed = {"F1": est0.phase, "F2": est1.phase}
+    arrays = {"F1": arr0, "F2": arr1}
+    index = {"F1": 0, "F2": 1}
+    traces = {"F1": est0.traces, "F2": est1.traces}
+    axes = list(fixed)
+    combos: list[dict] = []
+    for combo in itertools.product((-5.0, 0.0, 5.0), repeat=2):
+        ph = dict(fixed)
+        for axis, off in zip(axes, combo):
+            p0, p1 = fixed[axis]
+            ph[axis] = (p0, p1 + off)
+        combos.append(ph)
+    combos.append({axis: (0.0, 0.0) for axis in axes})
+
+    def ref_score(ph: dict) -> float:
+        vals: list[float] = []
+        for axis in axes:
+            idx, pos = traces[axis]
+            vals.append(
+                score_axis_memory(
+                    arrays[axis], index[axis],
+                    ph[axis][0], ph[axis][1], idx, pos,
+                )
+            )
+        return float(np.mean(vals))
+
+    best_ref = max(combos, key=ref_score)
+    best, best_score, fixed_score, zero_score = joint_recheck_memory(
+        arrays, index, traces, fixed
+    )
+    assert best == best_ref, (best, best_ref)
+    assert abs(best_score - ref_score(best_ref)) < 1e-6
+    assert abs(fixed_score - ref_score(fixed)) < 1e-6
+    assert abs(zero_score - ref_score({a: (0.0, 0.0) for a in axes})) < 1e-6

@@ -652,7 +652,9 @@ def joint_recheck_memory(
     sign_mode: str = "uniform",
 ) -> tuple[dict[str, tuple[float, float]], float, float, float]:
     """联合 ±final_step 邻域复核(内存版):各轴 p1 3 值组合 + 全零,
-    逐轴在各自复型数组上旋转评分取均值(与旧方案 trace_map 同基准)。
+    逐轴在锁定迹线行上旋转评分取均值(0.2.199-补29fi 行式化,与全数组
+    评分逐位等价——补29ff 已验证行式评分=全数组评分;不再对整卷复型
+    数组逐组合旋转)。
 
     返回 (最优 phases, 最优 score, 固定组合 score, 全零组合 score)。
     """
@@ -670,22 +672,30 @@ def joint_recheck_memory(
     all_zero = {axis: (0.0, 0.0) for axis in search_axes}
     combos.append(all_zero)
 
+    # 0.2.199-补29fi(用户):行式化——每轴只抽取锁定迹线行一次,后续
+    # 各组合仅旋转这些行评分(与 search_axis_memory 同路径;旧 score_axis_
+    # memory 每次对整卷复型数组旋转+逐窗 Python 评分,3D NUS 一次 joint
+    # 曾 ~34-45.5s)。
+    axis_rows: dict[str, np.ndarray] = {}
+    for axis in search_axes:
+        idx, pos = axis_traces.get(axis, ([], []))
+        if not idx or axis not in axis_arrays:
+            continue
+        arr = np.asarray(axis_arrays[axis], dtype=np.complex128)
+        moved = np.moveaxis(arr, axis_index[axis], -1)
+        flat = moved.reshape(-1, moved.shape[-1])
+        axis_rows[axis] = flat[idx]
+
     def _score_combo(phases: dict[str, tuple[float, float]]) -> float:
         vals: list[float] = []
         for axis in search_axes:
             idx, pos = axis_traces.get(axis, ([], []))
-            if not idx or axis not in axis_arrays:
+            if not idx or axis not in axis_rows:
                 continue
             p0, p1 = phases[axis]
             vals.append(
-                score_axis_memory(
-                    axis_arrays[axis],
-                    axis_index[axis],
-                    p0,
-                    p1,
-                    idx,
-                    pos,
-                    sign_mode=sign_mode,
+                score_locked_memory(
+                    axis_rows[axis], pos, p0, p1, sign_mode=sign_mode
                 )
             )
         return float(np.mean(vals)) if vals else -1.0
