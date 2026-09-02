@@ -493,8 +493,10 @@ def test_optimize_nus_processing_baseline_and_window(
     assert "间接维窗(测试)" in " ".join(proc["logs"])
     assert "固定无窗" not in " ".join(proc["logs"])
     # 0.2.199-补29eb:进度文案带具体产物名
-    assert len(calls) == 2  # joint 谱 + 间接维基线重渲
-    assert calls[1]["baseline"]["F1"]["order"] == 2
+    # 0.2.199-补29fg:移除 2.1 间接维基线重渲(死渲染——窗函数在
+    # recon/FID 内存评分、填零无候选),只剩 joint 谱一次 finalize
+    assert len(calls) == 1  # joint 谱
+    assert calls[0]["baseline"] == {}
 
 
 def test_unified_route_nus_progress_stages(

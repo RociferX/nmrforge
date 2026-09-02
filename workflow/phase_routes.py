@@ -969,21 +969,21 @@ def _optimize_uniform_processing(
     窗函数(FID 内存评分)+ 间接维窗函数(FID 内存评分,候选含无窗)。
 
     顺序约束(用户要求,0.2.190):基线校正先于窗函数优化——2) 基线 →
-    2.1) 间接维基线重渲评分基底 → 2.5) 直接维窗 → 3) 间接维窗;窗候选
+    2.5) 直接维窗 → 3) 间接维窗;窗候选
     不反过来影响基线选择(0.2.189 曾因 spectrum_quality 相位/基线联动
     把间接维从无窗带偏)。uniform 无 SMILE 重构,任何评估失败均降级:
     保持 base_params 既有配置或默认,不阻断终跑。
     """
     axes = [dim.logical_axis for dim in experiment.dimensions]
     direct_axis = "F3" if experiment.ndim >= 3 else "F2"
-    indirect_axes = [a for a in axes if a != direct_axis]
     ext = "ft3" if experiment.ndim >= 3 else "ft2"
     zf_params = {a: {"mode": "auto"} for a in axes}
     base = dict(base_params or {})
     out_logs: list[str] = []
     baseline_cfg = dict(base.get("baseline") or {})
     window_cfg = base.get("window")
-    # 1) 联合复核谱:最终相位 + 完整填零,作基线/窗评分基底(process 一次);
+    # 1) 联合复核谱:最终相位 + 完整填零,作基线评分基底(process 一次);
+    #    窗函数走 FID 内存评分,不消费该谱(0.2.199-补29fg 移除 2.1 重渲);
     #    开启「应用此范围到优化过程」时(0.2.199-补3)评估谱用用户直接维范围
     opt_ext = {k: base[k] for k in ("ext_lo", "ext_hi") if k in base}
     joint_file = f"{experiment.dataset_id}_joint.{ext}"
@@ -1026,36 +1026,6 @@ def _optimize_uniform_processing(
         out_logs += opt.logs
     except Exception as exc:  # noqa: BLE001 - 基线评估失败不影响相位/终跑
         out_logs.append(f"基线优化(嵌入)失败: {exc}")
-    # 2.1) 间接维基线变化 → 用新基线重渲基底谱(与 NUS 对称),供窗/填零
-    #      候选评分;直接维基线随终跑完整脚本统一应用
-    default_cfg: dict[str, Any] = {"enabled": True, "mode": "auto", "order": 0}
-    changed_indirect = [
-        a for a in indirect_axes if baseline_cfg.get(a) not in (None, default_cfg)
-    ]
-    if changed_indirect:
-        apply_baseline = {a: baseline_cfg[a] for a in changed_indirect}
-        resp = backend.process(
-            experiment,
-            plan,
-            direct_phase_override=dict(fixed) if fixed else None,
-            params={
-                "zero_fill": zf_params,
-                "baseline": apply_baseline,
-                **opt_ext,
-            },
-            out_file=joint_file,
-            script_name=f"{experiment.dataset_id}_joint.com",
-            progress=progress,
-        )
-        if resp.get("success") and resp.get("spectrum_path"):
-            base_path = Path(resp["spectrum_path"])
-            out_logs.append("基线(嵌入): 间接维已用最优基线重渲基底谱")
-        else:
-            out_logs.append(
-                "基线(嵌入): 间接维基线重渲失败("
-                + str(resp.get("message"))
-                + "),评分沿用默认基线"
-            )
     # 2.5) 直接维窗函数:FID 直接维迹内存评分(不重跑 process),写回终跑
     try:
         from workflow.window_optimize import optimize_direct_window_from_work
@@ -1117,21 +1087,21 @@ def _optimize_nus_processing(
     评分)+ 间接维窗函数(重构平面内存评分,候选含无窗,不重跑 SMILE)。
 
     顺序约束(用户要求,0.2.190):基线校正先于窗函数优化——2) 基线 →
-    2.1) 间接维基线重渲评分基底 → 2.5) 直接维窗 → 3) 间接维窗。返回
+    2.5) 直接维窗 → 3) 间接维窗。返回
     {"baseline", "zero_fill", "window", "logs"},优化结果写回终跑完整
     脚本;直接维基线仍逐轴评分后写回(终跑 step1 POLY 应用)。任何评估
     失败均降级:保持 base_params 既有配置或默认,不阻断终跑。
     """
     axes = [dim.logical_axis for dim in experiment.dimensions]
     direct_axis = "F3" if experiment.ndim >= 3 else "F2"
-    indirect_axes = [a for a in axes if a != direct_axis]
     ext = "ft3" if experiment.ndim >= 3 else "ft2"
     zf_params = {a: {"mode": "auto"} for a in axes}
     base = dict(base_params or {})
     out_logs: list[str] = []
     baseline_cfg = dict(base.get("baseline") or {})
     window_cfg = base.get("window")
-    # 1) 联合复核谱:间接维最终相位 + 完整填零,作基线/窗函数评分基底
+    # 1) 联合复核谱:间接维最终相位 + 完整填零,作基线评分基底
+    #    (窗函数走 recon/FID 内存评分,不消费该谱;0.2.199-补29fg 移除 2.1 重渲)
     joint_file = f"{experiment.dataset_id}_joint.{ext}"
     resp = backend.finalize_nus(
         experiment,
@@ -1172,35 +1142,6 @@ def _optimize_nus_processing(
         out_logs += opt.logs
     except Exception as exc:  # noqa: BLE001 - 基线评估失败不影响相位/终跑
         out_logs.append(f"基线优化(嵌入)失败: {exc}")
-    # 间接维基线变化 → 用新基线重渲基底谱(供窗/填零评分);直接维基线在
-    # SMILE 重构内,重渲不生效,由终跑完整脚本 step1 POLY 统一应用
-    default_cfg: dict[str, Any] = {"enabled": True, "mode": "auto", "order": 0}
-    changed_indirect = [
-        a for a in indirect_axes if baseline_cfg.get(a) not in (None, default_cfg)
-    ]
-    apply_baseline: dict[str, Any] = {}
-    if changed_indirect:
-        apply_baseline = {a: baseline_cfg[a] for a in indirect_axes}
-        resp = backend.finalize_nus(
-            experiment,
-            phases=fixed,
-            work_dir=work,
-            baseline=apply_baseline,
-            params={"zero_fill": zf_params},
-            out_file=joint_file,
-            script_name=f"{experiment.dataset_id}_joint_finalize.com",
-            progress=progress,
-        )
-        if resp.get("success") and resp.get("spectrum_path"):
-            base_path = Path(resp["spectrum_path"])
-            out_logs.append("基线(嵌入): 间接维已用最优基线重渲基底谱")
-        else:
-            out_logs.append(
-                "基线(嵌入): 间接维基线重渲失败("
-                + str(resp.get("message"))
-                + "),评分沿用默认基线"
-            )
-            apply_baseline = {}
     # 2.5) 直接维窗函数:FID 直接维迹内存评分(不重跑 SMILE 重构),
     #      分辨率优先 + 信噪比/线形平衡,写回终跑 step1 SP
     try:
