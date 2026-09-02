@@ -1,5 +1,14 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29fi(2026-09-02,联合复核评分行式化 + joint 结论)
+
+joint_recheck_memory 原对整卷复型数组逐组合旋转评分(score_axis_memory,
+sampleJ 一次 34-45.5s);改为每轴只抽取锁定迹线行一次、组合评分走
+score_locked_memory(与补29dp/ff 行式评分逐位等价)。新增等价回归测试
+(行式 vs 全数组 best/评分 1e-6)。VM 实测:joint ~4-5s;真实 3D NUS
+900/102/101 上复核均未越过 0.05 门控(900 仅 +0.0146 分),流程相位不变;
+sampleB、sampleC 与 uniform 3D 样本待补。全量 pytest 全绿。
+
 ## 0.2.199-补29fh(2026-09-02,全项目梳理修复 + master 单分支)
 
 用户:全部修改审计发现;同时清理 gui-dev/backend-dev 两分支,只保留
