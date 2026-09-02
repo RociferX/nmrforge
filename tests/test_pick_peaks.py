@@ -156,8 +156,16 @@ def _write_metadata(
 
     path = manager.data_metadata_path(exp_id, data_id)
     path.parent.mkdir(parents=True, exist_ok=True)
+    # 0.2.199-补29fa(修复):真实 metadata 结构为 dataset.experiment_type
+    # (此前测试写顶层 experiment_type,掩盖了选峰读不到类型的 bug)
     path.write_text(
-        json.dumps({"experiment_type": {"name": name, "confidence": 1.0}}),
+        json.dumps(
+            {
+                "dataset": {
+                    "experiment_type": {"name": name, "confidence": 1.0}
+                }
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -216,6 +224,32 @@ def _spectrum_with_peaks(
 def _read_rows(path: Path, nuclei=None) -> list[dict]:
     # 0.2.199-补29dk:3D .list 按外部约定 N,C,H 写列,读取需传每 F 轴核名
     return import_peaks_poky(path, nuclei=nuclei)
+
+
+
+def test_experiment_type_name_reads_dataset_and_legacy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.2.199-补29fa:真实 metadata 的 dataset.experiment_type 优先,顶层旧结构兼容。"""
+    import json
+
+    from workflow.pick_peaks import _experiment_type_name
+
+    manager = ProjectManager.create_project(tmp_path / "proj", "demo")
+    entry = manager.create_experiment()
+    data = manager.import_data(entry.id, "/sampleD")
+    _write_metadata(manager, entry.id, data.id, "HNCACB")
+    assert _experiment_type_name(manager, entry.id, data.id) == "HNCACB"
+
+    path = manager.data_metadata_path(entry.id, data.id)
+    path.write_text(
+        json.dumps({"experiment_type": {"name": "HNCACB", "confidence": 1.0}}),
+        encoding="utf-8",
+    )
+    assert _experiment_type_name(manager, entry.id, data.id) == "HNCACB"
+
+    path.write_text(json.dumps({"dataset": {}}), encoding="utf-8")
+    assert _experiment_type_name(manager, entry.id, data.id) == ""
 
 
 def test_pick_peaks_uniform_type_keeps_dominant_sign_only(tmp_path: Path) -> None:

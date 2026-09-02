@@ -325,7 +325,13 @@ def _experiment_type_name(
             payload = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
-        name = (payload.get("experiment_type") or {}).get("name", "")
+        # 0.2.199-补29fa(修复):真实 metadata.json 中实验类型在
+        # dataset.experiment_type(导入时 _dataset_summary 写入);旧/兼容结构
+        # 可能在顶层 experiment_type——两处都读,先 dataset 后顶层。
+        name = (
+            ((payload.get("dataset") or {}).get("experiment_type") or {})
+            .get("name", "")
+        ) or (payload.get("experiment_type") or {}).get("name", "")
         if name:
             return str(name)
     return ""

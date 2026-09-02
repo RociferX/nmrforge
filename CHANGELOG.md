@@ -1,5 +1,22 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29fa(2026-09-02,修复 HNCACB 等 mixed 谱选峰只选主符号)
+
+现象(用户):HNCACB 数据类型显示正确,但选峰日志为「仅主符号峰(uniform)」,
+只选出正峰。
+根因:metadata.json 的真实结构是 dataset.experiment_type(导入时
+_dataset_summary 写入);workflow/pick_peaks._experiment_type_name 只读顶层
+experiment_type(旧/兼容结构)——真实数据永远读不到类型 → 模板缺失回退
+dominant → mixed 谱只留主符号峰。GUI「数据类型」显示来自样品注释(从
+dataset.experiment_type 自动填充),与选峰读的源不一致,故界面正确而选峰退化;
+单测伪造 metadata 用顶层结构,掩盖了该 bug。
+修复:
+- workflow/pick_peaks.py:_experiment_type_name 优先读 dataset.experiment_type,
+  顶层旧结构兼容兜底;
+- tests/test_pick_peaks.py:_write_metadata 改为真实 dataset 结构(此前顶层
+  结构导致测试恒通过),新增回归测试(dataset 优先/顶层兼容/缺失返回空);
+- 全量 pytest 全绿,ruff 通过。
+
 ## 0.2.199-补29ez(2026-09-02,中间产物收进 process/_intermediate,内存盘只接管该子目录)
 
 用户方案:把中间产物统一放到 process/ 的子文件夹,内存盘只接管它,其它一律
