@@ -28,7 +28,8 @@ class AxisRole(str, Enum): DIRECT / INDIRECT
 ProjectManager:
     create_project(root, name, ...) / open_project(root) / save() / close()
     add_experiment(source, title, sample_id, segments, metadata) -> ExperimentEntry
-    rename_experiment / delete_experiment(清产物,审计保留) / set_experiment_notes
+    rename_experiment / delete_experiment(移系统回收站,软删除可恢复,审计保留)
+    delete_data(移系统回收站,软删除可恢复,审计保留) / recover_trashed(原位自动还原)
     infer_status(exp_id) -> ExperimentStatus(registered→imported→processed→picked→analyzed)
     add_sample(**fields) -> SampleEntry / delete_sample(引用保护)
     add_history(action, fields) -> HistoryEntry

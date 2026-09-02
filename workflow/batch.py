@@ -94,7 +94,8 @@ def _resolve_data_ids(
         data_ids = [
             data.id
             for data in entry.data
-            if _batch_id_of(manager, exp_id, data.id) == batch
+            if not getattr(data, "trashed", False)
+            and _batch_id_of(manager, exp_id, data.id) == batch
         ]
         if not data_ids:
             raise BatchError(f"批量组 {batch} 在实验 {exp_id} 中没有数据")

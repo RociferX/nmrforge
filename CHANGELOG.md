@@ -1,5 +1,25 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29ex(2026-09-02,删除全部进系统回收站,软删除可恢复)
+
+用户:1) 删除(项目/实验/数据)全部走系统回收站;2) 检查恢复文件能否无损接回、
+无冲突;3) 相应删除提示对应修改;先只改开发,打包另行。
+实现:
+- 新增 core/trash.py:send_to_trash 优先系统回收站(send2trash 2.1.0 依赖),
+  失败回退应用内回收站(<项目>/.nmrforge_trash 或 <工作区>/.nmrforge_trash),
+  任何情况不直接销毁数据;
+- core/project/manager.py:delete_data/delete_experiment 改为「文件移回收站 +
+  条目软删除」(DataEntry/ExperimentEntry 新增 trashed/trashed_at);组引用与
+  注释保留;data() 对软删除条目视为不存在;新增 active_experiments/active_data/
+  recover_trashed——打开项目/刷新树时检测目录回到原位自动还原(无损接回,
+  编号不复用保证无 id 冲突);
+- core/workspace.py:delete_project 走系统回收站(回退工作区 .nmrforge_trash);
+- GUI:项目树/统计/批处理过滤软删除条目;删除确认文案与日志改为
+  「将移入系统回收站,可恢复」;删除项目状态栏同步;
+- 依赖:pyproject.toml 增加 send2trash>=1.8;
+- 测试:删除用例更新(确定性假回收站)+ 新增恢复/组引用/注释保留断言;
+  全量 pytest 全绿,ruff 通过。
+
 ## 0.2.199-补29ew(2026-09-02,AppImage 桌面集成:自安装/可移除/自动隐藏)
 
 用户:桌面入口能否 AppImage 自带;用户想移除也能移除。

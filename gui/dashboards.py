@@ -34,14 +34,27 @@ from core.project import ProjectManager
 from gui.dialogs import InfoDialog
 
 
+def _active_data_of(exp) -> list:
+    """实验下未软删除的数据条目。"""
+    return [
+        d for d in (getattr(exp, "data", None) or []) if not getattr(d, "trashed", False)
+    ]
+
+
 def _data_count(project) -> int:
-    return sum(len(exp.data) for exp in project.experiments)
+    return sum(
+        len(_active_data_of(exp))
+        for exp in project.experiments
+        if not getattr(exp, "trashed", False)
+    )
 
 
 def _data_processed(project) -> int:
     count = 0
     for exp in project.experiments:
-        for data in exp.data:
+        if getattr(exp, "trashed", False):
+            continue
+        for data in _active_data_of(exp):
             status = getattr(data, "status", "") or ""
             if status in ("fid_ready", "processed"):
                 count += 1
@@ -753,7 +766,7 @@ class ExperimentDashboard(QWidget):
             return
         self._loading_table = True
         try:
-            for data in exp.data:
+            for data in _active_data_of(exp):
                 row = self.data_table.rowCount()
                 self.data_table.insertRow(row)
                 self.data_table.setItem(row, 0, QTableWidgetItem(data.id))

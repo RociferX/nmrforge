@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from core.project import DataGroupEntry, ProjectManager
+from core.project import DataGroupEntry, ProjectError, ProjectManager
 from workflow.batch import BatchError, run_batch
 
 
@@ -83,16 +83,35 @@ def test_group_membership_operations(tmp_path: Path) -> None:
     assert len(manager.project.experiment(exp_id).data) == 3
 
 
-def test_delete_data_removes_from_groups(tmp_path: Path) -> None:
-    """删除数据时同步从所有组移除成员引用。"""
+def test_delete_data_keeps_group_membership_for_restore(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.2.199-补29ex:删除数据保留组引用(软删除),恢复后无损回组。"""
+    import shutil
+
     manager, exp_id, data_ids = _manager_with_data(tmp_path)
     manager.create_data_group(exp_id, data_ids=data_ids)
+    trash = tmp_path / "trash"
+    trash.mkdir()
+
+    def fake(path, fallback_dir, rel=None):
+        dest = trash / (rel or Path(path).name)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(path), str(dest))
+        return dest
+
+    monkeypatch.setattr("core.project.manager.send_to_trash", fake)
     manager.delete_data(exp_id, data_ids[0])
     manager.save()
     group = manager.group(exp_id, "G1")
     assert group is not None
-    assert data_ids[0] not in group.data_ids
-    assert group.data_ids == data_ids[1:]
+    assert group.data_ids == data_ids  # 组引用保留,待恢复
+    with pytest.raises(ProjectError):
+        manager.data(exp_id, data_ids[0])
+    # 恢复后再次可访问
+    manager.data_base(exp_id, data_ids[0]).mkdir(parents=True)
+    manager.recover_trashed()
+    assert manager.data(exp_id, data_ids[0]).id == data_ids[0]
 
 
 class _FakeBackend:

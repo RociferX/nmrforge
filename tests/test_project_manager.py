@@ -19,6 +19,23 @@ from core.project import (
 from core.project.manager import atomic_write_json, sha256_file
 
 
+def _install_fake_trash(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    """把 send_to_trash 换成移动到临时目录的假回收站(测试确定性)。"""
+    import shutil
+
+    trash = tmp_path / "trash"
+    trash.mkdir(exist_ok=True)
+
+    def fake(path, fallback_dir, rel=None):
+        dest = trash / (rel or Path(path).name)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(path), str(dest))
+        return dest
+
+    monkeypatch.setattr("core.project.manager.send_to_trash", fake)
+    return trash
+
+
 def test_create_project_layout(tmp_path: Path) -> None:
     root = tmp_path / "proj"
     manager = ProjectManager.create_project(root, "demo", protein_name="GB1")
@@ -133,7 +150,11 @@ def test_infer_status_stages(tmp_path: Path) -> None:
     assert manager.infer_status(exp.id) is ExperimentStatus.ANALYZED
 
 
-def test_delete_experiment_removes_artifacts_keeps_runs(tmp_path: Path) -> None:
+def test_delete_experiment_trashes_and_restores(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.2.199-补29ex:删除实验进回收站,条目软删除,恢复后自动还原。"""
+    _install_fake_trash(monkeypatch, tmp_path)
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     exp = manager.add_experiment("/sampleD")
     (manager.dir_path("raw") / exp.id).mkdir(parents=True)
@@ -149,7 +170,8 @@ def test_delete_experiment_removes_artifacts_keeps_runs(tmp_path: Path) -> None:
 
     manager.delete_experiment(exp.id)
     assert manager.project is not None
-    assert manager.project.experiment(exp.id) is None
+    assert exp.trashed is True
+    assert manager.project.experiment(exp.id) is exp  # 条目保留(软删除)
     assert not (manager.dir_path("raw") / exp.id).exists()
     assert not (manager.dir_path("spectra") / f"{exp.id}.ft2").exists()
     assert not (manager.dir_path("processing") / exp.id).exists()
@@ -157,6 +179,11 @@ def test_delete_experiment_removes_artifacts_keeps_runs(tmp_path: Path) -> None:
     assert any(
         h.action == "experiment_deleted" for h in manager.project.processing_history
     )
+
+    # 恢复:实验目录回到原位 → recover 自动还原
+    (manager.root / exp.id).mkdir(parents=True)
+    assert manager.recover_trashed() == 1
+    assert exp.trashed is False
 
 
 def test_delete_experiment_outside_root_refused(tmp_path: Path) -> None:
@@ -367,7 +394,11 @@ def test_set_data_fid_and_spectrum(tmp_path: Path) -> None:
     assert "data_fid" in actions and "data_spectrum" in actions
 
 
-def test_delete_data_removes_artifacts(tmp_path: Path) -> None:
+def test_delete_data_trashes_and_restores(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.2.199-补29ex:删除数据进回收站,条目软删除,恢复后自动还原。"""
+    trash = _install_fake_trash(monkeypatch, tmp_path)
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     entry = manager.create_experiment()
     data = manager.import_data(entry.id, "/sampleD")
@@ -382,11 +413,21 @@ def test_delete_data_removes_artifacts(tmp_path: Path) -> None:
     spec.write_bytes(b"x")
 
     manager.delete_data(entry.id, data.id)
-    assert entry.data == []
+    assert data.trashed is True
     assert entry.status == ExperimentStatus.REGISTERED.value
     assert not raw.exists()
     assert not spec.exists()
+    assert (trash / entry.id / data.id).exists()  # 文件进了(假)回收站
+    with pytest.raises(ProjectError):
+        manager.data(entry.id, data.id)
     assert any(h.action == "data_deleted" for h in manager.project.processing_history)
+
+    # 恢复:数据基座回到原位 → recover 自动还原
+    raw.mkdir(parents=True)
+    (raw / "acqus").write_text("x", encoding="utf-8")
+    assert manager.recover_trashed() == 1
+    assert data.trashed is False
+    assert manager.data(entry.id, data.id).id == data.id
 
 
 def test_schema_1_1_migration_to_1_3(tmp_path: Path) -> None:
@@ -511,17 +552,34 @@ def test_experiment_id_not_reused_after_delete(tmp_path: Path) -> None:
     assert data.id == "d_001"
 
 
-def test_delete_data_cleans_data_notes(tmp_path: Path) -> None:
-    """0.2.159:删除数据时清除 metadata.data_notes 中该数据的注释。"""
+def test_delete_data_keeps_notes_and_group_for_restore(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.2.199-补29ex:删除数据保留注释与组引用,恢复后无损。"""
+    _install_fake_trash(monkeypatch, tmp_path)
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     entry = manager.create_experiment()
     data = manager.import_data(entry.id, "/sampleD")
+    manager.data_base(entry.id, data.id).mkdir(parents=True)
+    group = manager.create_data_group(entry.id, data_ids=[data.id])
     meta = dict(entry.metadata or {})
     meta["data_notes"] = {data.id: {"notes": "旧注释"}}
     entry.metadata = meta
+
     manager.delete_data(entry.id, data.id)
-    assert "data_notes" not in (entry.metadata or {})
-def test_data_dir_supports_smile_optimized(tmp_path: Path) -> None:
+    assert data.trashed is True
+    assert group.data_ids == [data.id]  # 组引用保留
+    assert (entry.metadata or {}).get("data_notes", {}).get(data.id, {}).get("notes") == "旧注释"
+    assert manager.active_data(entry.id) == []
+
+    # 恢复后条目回到激活态,可再次访问
+    manager.data_base(entry.id, data.id).mkdir(parents=True)
+    manager.recover_trashed()
+    assert manager.active_data(entry.id) == [data]
+    assert manager.data(entry.id, data.id).id == data.id
+def test_data_dir_supports_smile_optimized(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """0.2.162:smile_optimized/ 作为数据基座子目录(与 raw 同级)。"""
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     entry = manager.create_experiment()
@@ -531,5 +589,6 @@ def test_data_dir_supports_smile_optimized(tmp_path: Path) -> None:
     opt.mkdir(parents=True, exist_ok=True)
     (opt / "x.csv").write_text("x", encoding="utf-8")
     # 删除数据时随数据基座一并清理
+    _install_fake_trash(monkeypatch, tmp_path)
     manager.delete_data(entry.id, data.id)
     assert not opt.exists()

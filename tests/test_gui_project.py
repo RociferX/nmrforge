@@ -230,10 +230,16 @@ def test_delete_experiment_action_keeps_audit(
         "confirm",
         staticmethod(lambda *args, **kwargs: True),
     )
+
+    def fake(path, fallback_dir, rel=None):
+        return path
+
+    monkeypatch.setattr("core.project.manager.send_to_trash", fake)
     window = MainWindow(manager=manager)
     window.project_tree.select_experiment("exp_001")
     window.delete_experiment()
-    assert window.experiment_tree.topLevelItemCount() == 1
+    assert window.experiment_tree.topLevelItemCount() == 1  # 报告树非本次刷新范围
+    assert manager.project.experiment("exp_001").trashed is True  # 软删除
     assert manager.project is not None
     assert len(manager.project.workflow_runs) == 1  # 审计保留
     window.close()

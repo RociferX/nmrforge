@@ -93,6 +93,8 @@ class DataEntry:
     spectrum_path: str = ""          # 生成谱后(空串表示未生成)
     checksums: dict[str, str] = field(default_factory=dict)
     migrated_from_1_1: bool = False
+    trashed: bool = False                # 软删除:文件已入回收站,可恢复
+    trashed_at: str = ""                 # 软删除时间(空=未删除)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> DataEntry:
@@ -109,6 +111,8 @@ class DataEntry:
             spectrum_path=str(data.get("spectrum_path", "")),
             checksums={str(k): str(v) for k, v in (data.get("checksums") or {}).items()},
             migrated_from_1_1=bool(data.get("migrated_from_1_1", False)),
+            trashed=bool(data.get("trashed", False)),
+            trashed_at=str(data.get("trashed_at", "")),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -125,6 +129,8 @@ class DataEntry:
             "spectrum_path": self.spectrum_path,
             "checksums": dict(self.checksums),
             "migrated_from_1_1": self.migrated_from_1_1,
+            "trashed": self.trashed,
+            "trashed_at": self.trashed_at,
         }
 
 
@@ -168,6 +174,8 @@ class ExperimentEntry:
     groups: list[DataGroupEntry] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
     created_at: str = ""
+    trashed: bool = False                # 软删除:文件已入回收站,可恢复
+    trashed_at: str = ""                 # 软删除时间(空=未删除)
 
     # ---- schema 1.1 兼容只读属性(指向 data[0]) -------------------------
     @property
@@ -219,6 +227,8 @@ class ExperimentEntry:
             ],
             metadata=dict(data.get("metadata") or {}),
             created_at=str(data.get("created_at", "") or data.get("imported_at", "")),
+            trashed=bool(data.get("trashed", False)),
+            trashed_at=str(data.get("trashed_at", "")),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -232,6 +242,8 @@ class ExperimentEntry:
             "groups": [g.to_dict() for g in self.groups],
             "metadata": self.metadata,
             "created_at": self.created_at,
+            "trashed": self.trashed,
+            "trashed_at": self.trashed_at,
         }
 
 

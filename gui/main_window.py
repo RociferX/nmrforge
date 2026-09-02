@@ -862,13 +862,15 @@ class MainWindow(QMainWindow):
         confirmed = ConfirmDialog.confirm(
             self,
             "删除实验",
-            f"删除实验 {exp_id} 及其产物文件?\n(WorkflowRun 审计记录将保留)",
+            f"删除实验 {exp_id} 及其产物文件?\n将移入系统回收站,可恢复。"
+            f"\n(WorkflowRun 审计记录将保留)",
         )
         if not confirmed:
             return
         try:
             self.manager.delete_experiment(exp_id)
             self.manager.save()
+            self._append_log(f"实验 {exp_id} 已移入系统回收站(可从回收站恢复)")
         except ProjectError as exc:
             InfoDialog.show_info(self, "删除实验失败", str(exc))
             return
@@ -1426,7 +1428,7 @@ class MainWindow(QMainWindow):
             self,
             "删除项目",
             f"删除项目 {self.manager.project.name} 及其全部样品数据/产物?"
-            "(操作不可恢复,审计历史将保留)\n路径: {self.manager.root}",
+            "\n项目将移入系统回收站,可恢复(审计历史将保留)\n路径: {self.manager.root}",
         )
         if not confirmed:
             return
@@ -1446,7 +1448,7 @@ class MainWindow(QMainWindow):
         self.manager.close()
         self.refresh()
         self.center_panel.welcome_page.refresh()
-        self.statusBar().showMessage("项目已关闭")
+        self.statusBar().showMessage("项目已移入系统回收站,可从回收站恢复")
 
     def _create_experiment(self) -> None:
         """新建空白实验(菜单/Project/空白处右键):项目树内内联命名(不弹窗)。"""
@@ -1510,7 +1512,8 @@ class MainWindow(QMainWindow):
         confirmed = ConfirmDialog.confirm(
             self,
             "删除样品数据",
-            f"删除样品数据 {data_id} 及其产物文件?\n(WorkflowRun 审计记录将保留)",
+            f"删除样品数据 {data_id} 及其产物文件?\n将移入系统回收站,可恢复。"
+            f"\n(WorkflowRun 审计记录将保留)",
         )
         if not confirmed:
             return
@@ -1520,6 +1523,7 @@ class MainWindow(QMainWindow):
                 raise ProjectError("后端 delete_data 接口待实现")
             delete_data(exp_id, data_id)
             self.manager.save()
+            self._append_log(f"样品数据 {data_id} 已移入系统回收站(可从回收站恢复)")
         except ProjectError as exc:
             InfoDialog.show_info(self, "删除样品数据失败", str(exc))
             return
@@ -1862,6 +1866,8 @@ class MainWindow(QMainWindow):
             self._update_context_bar()
             return
         for exp in project.experiments:
+            if getattr(exp, "trashed", False):
+                continue
             status = self.manager.infer_status(exp.id).value
             item = QTreeWidgetItem([exp.id, exp.title, status, exp.sample_id, exp.source])
             item.setData(0, Qt.ItemDataRole.UserRole, exp.id)
@@ -1869,8 +1875,9 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"NMRForge - {project.name}")
         self.statusBar().showMessage(f"项目: {self.manager.root}")
         # 打开/新建项目后默认聚焦第一个实验
-        if project.experiments and not self.center_panel.current_experiment_id():
-            self.project_tree.select_experiment(project.experiments[0].id)
+        active_exps = [e for e in project.experiments if not getattr(e, "trashed", False)]
+        if active_exps and not self.center_panel.current_experiment_id():
+            self.project_tree.select_experiment(active_exps[0].id)
         self._update_context_bar()
 
     @staticmethod

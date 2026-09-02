@@ -1273,10 +1273,15 @@ def test_data_delete_wires_manager_delete_data(
     manager = _manager_with_experiment(tmp_path, monkeypatch)
     window = MainWindow(manager=manager)
     monkeypatch.setattr(ConfirmDialog, "confirm", staticmethod(lambda *a, **k: True))
+
+    def fake(path, fallback_dir, rel=None):
+        return path
+
+    monkeypatch.setattr("core.project.manager.send_to_trash", fake)
     window.project_tree.select_experiment("exp_001")
     window._delete_data("exp_001", "d_001")
     entry = manager.project.experiment("exp_001")
-    assert entry is not None and entry.data == []  # 样品数据被删,实验类型保留
+    assert entry is not None and entry.data and all(d.trashed for d in entry.data)
     window.close()
 
 

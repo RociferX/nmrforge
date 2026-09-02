@@ -98,13 +98,31 @@ def test_rename_project_conflicts_and_validation(tmp_path: Path) -> None:
         manager.rename_project("nope", "gamma")
 
 
-def test_delete_project_trash_moves(tmp_path: Path) -> None:
+def test_delete_project_trash_moves(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.2.199-补29ex:删除项目进(假)回收站,移回工作区后项目重新可见。"""
+    import shutil
+
     manager = WorkspaceManager(tmp_path / "ws")
     manager.create_project("alpha")
+    trash = tmp_path / "trash"
+    trash.mkdir()
+
+    def fake(path, fallback_dir, rel=None):
+        dest = trash / (rel or Path(path).name)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(path), str(dest))
+        return dest
+
+    monkeypatch.setattr("core.workspace.send_to_trash", fake)
     target = manager.delete_project("alpha", trash=True)
     assert not (manager.root / "alpha").exists()
     assert target.exists()
     assert (target / "project.json").is_file()
+    # 恢复:移回工作区 → 项目重新可见(扫描式,无中心注册表)
+    shutil.move(str(target), str(manager.root / "alpha"))
+    assert manager.list_projects() == [manager.root / "alpha"]
 
 
 def test_delete_project_direct_and_missing(tmp_path: Path) -> None:

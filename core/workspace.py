@@ -8,10 +8,10 @@ from __future__ import annotations
 
 import re
 import shutil
-import tempfile
 from pathlib import Path
 
 from core.project import ProjectManager
+from core.trash import send_to_trash
 
 DEFAULT_WORKSPACE_NAME = "NMRForgeWorkspace"
 
@@ -93,17 +93,9 @@ class WorkspaceManager:
         if not trash:
             shutil.rmtree(path)
             return path
-        try:
-            import send2trash  # 可选:系统回收站
-        except ImportError:
-            send2trash = None
-        if send2trash is not None:
-            send2trash.send2trash(str(path))
-            return path
-        trash_dir = Path(tempfile.mkdtemp(prefix="nmrforge_trash_"))
-        target = trash_dir / name
-        shutil.move(str(path), str(target))
-        return target
+        # 0.2.199-补29ex:删除进系统回收站(send2trash;失败回退工作区内
+        # .nmrforge_trash,均可恢复);不直接销毁。
+        return send_to_trash(path, self.root / ".nmrforge_trash", Path(name))
 
     def rename_project(self, old_name: str, new_name: str) -> Path:
         """重命名项目:校验新名 + 重名冲突,改目录名并同步 project.json 的 name。"""

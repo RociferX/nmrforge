@@ -15,7 +15,6 @@ import hashlib
 import json
 import os
 import re
-import shutil
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -34,6 +33,7 @@ from core.project.models import (
     WorkflowRun,
     now_iso,
 )
+from core.trash import send_to_trash
 
 
 class ProjectError(Exception):
@@ -151,6 +151,8 @@ class ProjectManager:
             manager.add_history(
                 "project_migrated", {"from": old, "to": SCHEMA_VERSION}
             )
+        # 0.2.199-补29ex:软删除条目若已从回收站恢复到原位,打开即自动还原
+        manager.recover_trashed()
         return manager
 
     def save(self) -> None:
@@ -280,12 +282,51 @@ class ProjectManager:
         return entry
 
     def data(self, exp_id: str, data_id: str) -> DataEntry:
-        """取实验下的数据条目。"""
+        """取实验下的数据条目(软删除条目视为不存在)。"""
         entry = self._require_experiment(exp_id)
         data_entry = next((d for d in entry.data if d.id == data_id), None)
         if data_entry is None:
             raise ProjectError(f"数据不存在: {exp_id}/{data_id}")
+        if data_entry.trashed:
+            raise ProjectError(f"数据已移入回收站: {exp_id}/{data_id}")
         return data_entry
+
+    def active_experiments(self) -> list[ExperimentEntry]:
+        """未软删除的实验(树/统计/批处理用)。"""
+        return [
+            e for e in (self.project.experiments if self.project else []) if not e.trashed
+        ]
+
+    def active_data(self, exp_id: str) -> list[DataEntry]:
+        """实验下未软删除的数据条目。"""
+        entry = self._require_experiment(exp_id)
+        return [d for d in entry.data if not d.trashed]
+
+    def _trash_dir(self) -> Path:
+        """应用内回收站回退目录(<项目>/.nmrforge_trash)。"""
+        if self.root is None:
+            raise ProjectError("未加载项目")
+        return self.root / ".nmrforge_trash"
+
+    def recover_trashed(self) -> int:
+        """把已恢复到原路径的软删除条目自动还原;返回还原数量。"""
+        if self.project is None or self.root is None:
+            return 0
+        n = 0
+        for exp in self.project.experiments:
+            if exp.trashed and (self.root / exp.id).is_dir():
+                exp.trashed = False
+                exp.trashed_at = ""
+                n += 1
+            for d in exp.data:
+                if d.trashed and self.data_base(exp.id, d.id).is_dir():
+                    d.trashed = False
+                    d.trashed_at = ""
+                    n += 1
+        if n:
+            self.add_history("trash_restored", {"count": n})
+            self.save()
+        return n
 
     def import_data(
         self,
@@ -376,33 +417,32 @@ class ProjectManager:
         )
         return data_entry
 
-    def delete_data(self, exp_id: str, data_id: str) -> None:
-        """删除数据条目与产物文件;WorkflowRun 审计保留。"""
+    def delete_data(self, exp_id: str, data_id: str) -> list[str]:
+        """删除数据:产物移入系统回收站,条目软删除(可从回收站恢复)。
+
+        文件进系统回收站(send2trash;失败回退项目内 .nmrforge_trash);
+        条目保留 trashed 标记与组引用/注释——用户从回收站恢复目录到原路径后,
+        项目打开/刷新自动还原(recover_trashed)。WorkflowRun 审计保留。
+        """
         entry = self._require_experiment(exp_id)
-        data_entry = self.data(exp_id, data_id)
+        data_entry = next((d for d in entry.data if d.id == data_id), None)
+        if data_entry is None:
+            raise ProjectError(f"数据不存在: {exp_id}/{data_id}")
+        if data_entry.trashed:
+            raise ProjectError(f"数据已移入回收站: {exp_id}/{data_id}")
         removed: list[str] = []
         for path in self._data_paths(exp_id, data_id):
             target = self._ensure_inside_root(path)
-            if target.is_dir():
-                shutil.rmtree(target)
-                removed.append(str(target))
-            elif target.is_file():
-                target.unlink()
-                removed.append(str(target))
-        entry.data.remove(data_entry)
-        # 0.2.163:从所有数据组移除该成员引用(组随数据删除同步收缩)
-        for group in entry.groups:
-            if data_id in group.data_ids:
-                group.data_ids.remove(data_id)
-        # 0.2.159:清理该数据的样品注释(metadata.data_notes),避免残留
-        meta = dict(entry.metadata or {})
-        data_notes = meta.get("data_notes")
-        if isinstance(data_notes, dict) and data_id in data_notes:
-            data_notes.pop(data_id, None)
-            if not data_notes:
-                meta.pop("data_notes", None)
-            entry.metadata = meta
-        if not entry.data:
+            if not target.exists():
+                continue
+            dest = send_to_trash(
+                target, self._trash_dir(), target.relative_to(self.root)
+            )
+            removed.append(str(dest))
+        data_entry.trashed = True
+        data_entry.trashed_at = now_iso()
+        # 组引用与注释保留:恢复后无损回到原组/原注释
+        if not any(d for d in entry.data if not d.trashed):
             entry.status = ExperimentStatus.REGISTERED.value
         self.add_history(
             "data_deleted",
@@ -410,9 +450,11 @@ class ProjectManager:
                 "experiment_id": exp_id,
                 "data_id": data_id,
                 "source": data_entry.source,
-                "removed_files": removed,
+                "trashed": True,
+                "moved_to": removed,
             },
         )
+        return removed
 
     # ------------------------------------------------------------------
     # 数据组(schema 1.4):批量处理单元,成员 data_ids 有序;删除组不解散数据
@@ -569,30 +611,39 @@ class ProjectManager:
             "experiment_notes", {"experiment_id": exp_id, "notes": notes}
         )
 
-    def delete_experiment(self, exp_id: str) -> None:
-        """删除实验条目并清理产物文件;WorkflowRun 审计记录保留。"""
+    def delete_experiment(self, exp_id: str) -> list[str]:
+        """删除实验:产物移入系统回收站,实验条目软删除(可从回收站恢复)。
+
+        文件进系统回收站(send2trash;失败回退项目内 .nmrforge_trash);
+        条目保留 trashed 标记,恢复目录到原路径后自动还原。WorkflowRun 审计保留。
+        """
         entry = self._require_experiment(exp_id)
+        if entry.trashed:
+            raise ProjectError(f"实验已移入回收站: {exp_id}")
         removed: list[str] = []
         for path in self._experiment_paths(exp_id):
             target = self._ensure_inside_root(path)
-            if target.is_dir():
-                shutil.rmtree(target)
-                removed.append(str(target))
-            elif target.is_file():
-                target.unlink()
-                removed.append(str(target))
-        self.project.experiments.remove(entry)
+            if not target.exists():
+                continue
+            dest = send_to_trash(
+                target, self._trash_dir(), target.relative_to(self.root)
+            )
+            removed.append(str(dest))
+        entry.trashed = True
+        entry.trashed_at = now_iso()
         self.add_history(
             "experiment_deleted",
             {
                 "experiment_id": exp_id,
                 "title": entry.title,
-                "removed_files": removed,
+                "trashed": True,
+                "moved_to": removed,
                 "workflow_runs_kept": [
                     r.run_id for r in self.project.workflow_runs if r.experiment_id == exp_id
                 ],
             },
         )
+        return removed
 
     def infer_status(self, exp_id: str) -> ExperimentStatus:
         """按数据条目与产物文件推断实验状态(兼容 schema 1.1 旧命名)。
@@ -601,13 +652,14 @@ class ProjectManager:
         picked(峰表)→ analyzed(报告/分析产物)。
         """
         entry = self._require_experiment(exp_id)
-        if not entry.data:
+        active = [d for d in entry.data if not d.trashed]
+        if not active:
             return ExperimentStatus.REGISTERED
         metadata_dir = self.dir_path("metadata")
         spectra_dir = self.dir_path("spectra")
         # 兼容:旧命名 metadata/<exp_id>.json 与 spectra/<exp_id>.ft2
         has_imported = (metadata_dir / f"{exp_id}.json").is_file()
-        for d in entry.data:
+        for d in active:
             # schema 1.3 规范布局:<exp>/<data>/metadata.json
             if self.data_metadata_path(exp_id, d.id).is_file():
                 has_imported = True
@@ -622,7 +674,7 @@ class ProjectManager:
                 has_imported = True
             # 优先按 DataEntry 记录的产物路径(可能在工作目录),再回退旧命名 glob
             has_spectrum = False
-            for d in entry.data:
+            for d in active:
                 if d.spectrum_path:
                     candidate = Path(d.spectrum_path)
                     if not candidate.is_absolute():
@@ -635,7 +687,7 @@ class ProjectManager:
                     spectra_dir.glob(f"{exp_id}-*.*")
                 )
             if not has_spectrum:
-                for d in entry.data:
+                for d in active:
                     spectra = self.data_dir(exp_id, d.id, "spectra")
                     if any(spectra.glob("*.ft2")) or any(spectra.glob("*.ft3")):
                         has_spectrum = True
@@ -649,7 +701,7 @@ class ProjectManager:
                 or bool(list(self.dir_path("peaks").glob(f"{exp_id}-*.csv")))
                 or any(
                     list(self.data_dir(exp_id, d.id, "peaks").glob("*.csv"))
-                    for d in entry.data
+                    for d in active
                 ),
             ),
             (
@@ -664,7 +716,7 @@ class ProjectManager:
                     list(self.data_dir(exp_id, d.id, "report").glob("*.pdf"))
                     or list(self.data_dir(exp_id, d.id, "report").glob("*.html"))
                     or list(self.data_dir(exp_id, d.id, "report").glob("*.json"))
-                    for d in entry.data
+                    for d in active
                 ),
             ),
         ]

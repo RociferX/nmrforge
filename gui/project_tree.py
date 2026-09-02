@@ -305,9 +305,11 @@ class ProjectTreePanel(QWidget):
             data = item.data(0, Qt.ItemDataRole.UserRole)
             if isinstance(data, dict) and data.get("kind") == "experiment":
                 existing[str(data.get("exp_id"))] = item
-        experiments = (
-            self.manager.project.experiments if self.manager.project else []
-        )
+        experiments = [
+            e
+            for e in (self.manager.project.experiments if self.manager.project else [])
+            if not getattr(e, "trashed", False)
+        ]
         ids = {exp.id for exp in experiments}
         for exp_id in list(existing):
             if exp_id not in ids:
@@ -372,7 +374,8 @@ class ProjectTreePanel(QWidget):
     ) -> None:
         """更新数据组节点文本/成员数,并增量刷新组内样品数据节点。"""
         group_id = getattr(group, "id", "")
-        members = list(getattr(group, "data_ids", None) or [])
+        by_id = {getattr(d, "id", ""): d for d in self._data_of(exp)}
+        members = [m for m in (getattr(group, "data_ids", None) or []) if m in by_id]
         title = getattr(group, "title", "") or f"数据组 {group_id}"
         group_item.setText(0, title)
         group_item.setText(1, f"{len(members)} 个数据")
@@ -386,7 +389,6 @@ class ProjectTreePanel(QWidget):
             data = item.data(0, Qt.ItemDataRole.UserRole)
             if isinstance(data, dict) and data.get("kind") == "data":
                 existing[str(data.get("data_id"))] = item
-        by_id = {getattr(d, "id", ""): d for d in self._data_of(exp)}
         member_set = set(members)
         for data_id in list(existing):
             if data_id not in member_set:
@@ -520,8 +522,12 @@ class ProjectTreePanel(QWidget):
         return exp_item
 
     def _data_of(self, exp) -> list:
-        """实验下的全部样品数据节点。"""
-        return list(getattr(exp, "data", None) or [])
+        """实验下的样品数据节点(软删除条目不显示)。"""
+        return [
+            d
+            for d in (getattr(exp, "data", None) or [])
+            if not getattr(d, "trashed", False)
+        ]
 
     def _groups_of(self, exp) -> list:
         """实验下的数据组节点(schema 1.4;空返回空列表)。"""
@@ -543,7 +549,8 @@ class ProjectTreePanel(QWidget):
     def _make_group_item(self, exp, group) -> QTreeWidgetItem:
         group_id = getattr(group, "id", "")
         title = getattr(group, "title", "") or f"数据组 {group_id}"
-        members = list(getattr(group, "data_ids", None) or [])
+        by_id = {getattr(d, "id", ""): d for d in self._data_of(exp)}
+        members = [m for m in (getattr(group, "data_ids", None) or []) if m in by_id]
         group_item = QTreeWidgetItem([title, f"{len(members)} 个数据"])
         group_item.setIcon(0, self._icon("group"))
         group_item.setToolTip(
@@ -555,7 +562,6 @@ class ProjectTreePanel(QWidget):
             Qt.ItemDataRole.UserRole,
             {"kind": "group", "exp_id": exp.id, "group_id": group_id},
         )
-        by_id = {getattr(d, "id", ""): d for d in self._data_of(exp)}
         for data_id in members:
             data_node = by_id.get(data_id)
             if data_node is None:
