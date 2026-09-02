@@ -994,15 +994,16 @@ class MainWindow(QMainWindow):
 
         from PyQt6.QtWidgets import QFileDialog
 
+        default_dir = str(self.workspace.root)
         file_path, _ = QFileDialog.getOpenFileName(
-            self, "选择 fid 文件", "",
+            self, "选择 fid 文件", default_dir,
             "FID (*.fid);;所有文件 (*)",
         )
         if file_path:
             self._run_standalone_check([_P(file_path)], "fid")
             return
         folder = QFileDialog.getExistingDirectory(
-            self, "选择 fid 文件夹"
+            self, "选择 fid 文件夹", default_dir
         )
         if folder:
             self._run_standalone_check([_P(folder)], "fid")
@@ -1014,7 +1015,7 @@ class MainWindow(QMainWindow):
         from PyQt6.QtWidgets import QFileDialog
 
         file_path, _ = QFileDialog.getOpenFileName(
-            self, "选择谱图文件", "",
+            self, "选择谱图文件", str(self.workspace.root),
             "NMRPipe (*.ft2 *.ft3 *.fdf);;所有文件 (*)",
         )
         if file_path:
@@ -1034,6 +1035,11 @@ class MainWindow(QMainWindow):
 
         def worker() -> None:
             scope = self._log_scope()
+            target = ", ".join(str(p) for p in paths)
+            label = "数据质量检测" if kind == "fid" else "谱图质量评估"
+            self.log_append_requested.emit(
+                f"正在进行{label}: {target}", scope
+            )
             try:
                 if kind == "fid":
                     from workflow.direct_diagnostics import (
@@ -1051,10 +1057,18 @@ class MainWindow(QMainWindow):
                         spectrum_quality_report_lines,
                     )
 
-                    lines = spectrum_quality_report_lines(str(paths[0]))
+                    lines = spectrum_quality_report_lines(
+                        str(paths[0]),
+                        progress=lambda ln: self.log_append_requested.emit(
+                            ln, scope
+                        ),
+                    )
                 for ln in lines:
                     if ln:
                         self.log_append_requested.emit(ln, scope)
+                self.log_append_requested.emit(
+                    f"{label}完成: {target}", scope
+                )
             except Exception as exc:  # noqa: BLE001
                 self.log_append_requested.emit(
                     "检测失败: "
