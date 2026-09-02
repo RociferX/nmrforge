@@ -55,7 +55,7 @@ def test_estimate_intermediate_peak(monkeypatch: pytest.MonkeyPatch) -> None:
     """补29fk:直接维按默认 EXT 窗口(10.5-6.5)后点数估算(fixture 无 sw/sf,
     按默认 8ppm 谱宽折半),不再按全直接维 SI 虚高。"""
     _patch_plan(monkeypatch, {"F1": 512, "F2": 4096})
-    assert memory_disk.estimate_intermediate_peak(_experiment(nus=True)) == 256 * 4096 * 8 * 3
+    assert memory_disk.estimate_intermediate_peak(_experiment(nus=True)) == 256 * 4096 * 8 * 2
     assert memory_disk.estimate_intermediate_peak(_experiment(nus=False)) == 256 * 4096 * 8 * 2
 
 
@@ -68,7 +68,7 @@ def test_estimate_intermediate_peak_ext_window_params(
     # 窄窗 8.5-7.5(1ppm/8ppm → 1/8):512→64
     assert memory_disk.estimate_intermediate_peak(
         exp, {"final_ext_lo": "8.5", "final_ext_hi": "7.5"}
-    ) == 64 * 4096 * 8 * 3
+    ) == 64 * 4096 * 8 * 2
     # 关闭「应用此范围到优化过程」:中间产物仍按默认宽窗估算(保守)
     assert memory_disk.estimate_intermediate_peak(
         exp,
@@ -77,11 +77,11 @@ def test_estimate_intermediate_peak_ext_window_params(
             "final_ext_hi": "7.5",
             "apply_ext_to_opt": "0",
         },
-    ) == 256 * 4096 * 8 * 3
+    ) == 256 * 4096 * 8 * 2
     # 显式 ext_lo/ext_hi 优先
     assert memory_disk.estimate_intermediate_peak(
         exp, {"ext_lo": "8.5", "ext_hi": "7.5"}
-    ) == 64 * 4096 * 8 * 3
+    ) == 64 * 4096 * 8 * 2
 
 
 def test_select_memory_dir_policy_and_conditions(
@@ -115,6 +115,24 @@ def test_select_memory_dir_policy_and_conditions(
         memory_disk.shutil, "disk_usage", lambda p: SimpleNamespace(free=1)
     )
     assert memory_disk.select_memory_dir(_experiment(), _big_memory_cfg(tmp_path)) is None
+
+
+def test_selection_reason_text(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """补29fk-修:selection_reason 给出回退原因;条件满足时为空。"""
+    cfg_off = {"processing": {"intermediate_memory": "off"}}
+    assert "off" in memory_disk.selection_reason(_experiment(), cfg_off)
+    _patch_plan(monkeypatch, {"F1": 1024, "F2": 8192})
+    monkeypatch.setattr(
+        memory_disk, "system_available_bytes", lambda: 1024 * 1024 * 1024
+    )
+    monkeypatch.setattr(
+        memory_disk.shutil,
+        "disk_usage",
+        lambda p: SimpleNamespace(free=1024 * 1024 * 1024),
+    )
+    assert memory_disk.selection_reason(
+        _experiment(), _big_memory_cfg(tmp_path)
+    ) == ""
 
 
 def test_prepare_teardown_disk_mode(tmp_path: Path) -> None:

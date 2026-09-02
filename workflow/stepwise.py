@@ -301,6 +301,12 @@ def generate_spectrum(
         )
         if memory_dir is not None and progress is not None:
             progress(f"中间谱工作目录使用内存盘(自适应): {_intermediate_root}")
+        elif progress is not None:
+            _reason = memory_disk.selection_reason(experiment, params=params)
+            progress(
+                "中间谱工作目录使用磁盘"
+                + (f"({_reason})" if _reason else "(内存目录创建失败)")
+            )
     try:
         return _generate_spectrum_impl(
             manager,

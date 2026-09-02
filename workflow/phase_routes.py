@@ -24,6 +24,24 @@ from core.data.internal_data_model import Experiment, SamplingMode
 from core.planning.method_selector import select_method
 
 
+def _unlink_quiet(path) -> None:
+    """删除已消费的中间谱文件(0.2.199-补29fk-修:用完即删,不再等整个
+    finalize 结束才清理;文件在内存盘时同步释放 tmpfs 空间)。"""
+    try:
+        Path(path).unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def _rmtree_quiet(path: Path) -> None:
+    """删除已消费完的中间目录(NUS 重构平面;终跑会重建)。"""
+    try:
+        if path.is_dir():
+            shutil.rmtree(path, ignore_errors=True)
+    except OSError:
+        pass
+
+
 def _phase_delta(a: tuple[float, float], b: tuple[float, float]) -> float:
     """相位差(p0 环向差 + p1 差),用于迭代收敛判断(0.2.199-补29do)。"""
     p0 = abs((a[0] - b[0] + 180.0) % 360.0 - 180.0)
@@ -608,6 +626,7 @@ def unified_route(    experiment: Experiment,
             str(resp["spectrum_path"]), axis=axis, unpack_axis=ax,
             progress=progress, logs=logs,
         )
+        _unlink_quiet(resp["spectrum_path"])
         est = search_axis_memory(
             arr, ax, sign_mode=sign_mode, cancel=cancel_requested
         )
@@ -666,6 +685,7 @@ def unified_route(    experiment: Experiment,
                 str(resp["spectrum_path"]), axis=axis, unpack_axis=ax,
                 progress=progress, logs=logs,
             )
+            _unlink_quiet(resp["spectrum_path"])
             est = search_axis_memory(
                 arr, ax, sign_mode=sign_mode, cancel=cancel_requested
             )
@@ -1001,6 +1021,8 @@ def _optimize_uniform_processing(
         out_logs += opt.logs
     except Exception as exc:  # noqa: BLE001 - 基线评估失败不影响相位/终跑
         out_logs.append(f"基线优化(嵌入)失败: {exc}")
+    # 0.2.199-补29fk-修:joint/base 谱只作基线评分基底,评分完即删
+    _unlink_quiet(base_path)
     # 2.5) 直接维窗函数:FID 直接维迹内存评分(不重跑 process),写回终跑
     try:
         from workflow.window_optimize import optimize_direct_window_from_work
@@ -1117,6 +1139,8 @@ def _optimize_nus_processing(
         out_logs += opt.logs
     except Exception as exc:  # noqa: BLE001 - 基线评估失败不影响相位/终跑
         out_logs.append(f"基线优化(嵌入)失败: {exc}")
+    # 0.2.199-补29fk-修:joint/base 谱只作基线评分基底,评分完即删
+    _unlink_quiet(base_path)
     # 2.5) 直接维窗函数:FID 直接维迹内存评分(不重跑 SMILE 重构),
     #      分辨率优先 + 信噪比/线形平衡,写回终跑 step1 SP
     try:
@@ -1309,6 +1333,7 @@ def _unified_nus(
             str(resp["spectrum_path"]), axis=axis, unpack_axis=ax,
             progress=progress, logs=logs,
         )
+        _unlink_quiet(resp["spectrum_path"])
         est = search_axis_memory(
             arr, ax, sign_mode=sign_mode, cancel=cancel_requested
         )
@@ -1384,6 +1409,7 @@ def _unified_nus(
         search_arr = _read_real_ft3(
             str(resp_direct["spectrum_path"])
         )
+        _unlink_quiet(resp_direct["spectrum_path"])
         logs.append(
             f"直接维相位搜索基底: 实型终谱 {search_arr.shape}"
             f"(间接维已校正,直接维=最后一轴,投影迹线=间接维点数之和)"
@@ -1496,6 +1522,7 @@ def _unified_nus(
                     str(resp["spectrum_path"]), axis=axis, unpack_axis=ax,
                     progress=progress, logs=logs,
                 )
+                _unlink_quiet(resp["spectrum_path"])
                 est = search_axis_memory(
                     arr, ax, sign_mode=sign_mode, cancel=cancel_requested
                 )
@@ -1540,6 +1567,10 @@ def _unified_nus(
     )
     logs += proc["logs"]
     logs.append(f"处理参数优化(基线/填零/窗函数)完成,耗时 {time.time() - t_opt:.1f} 秒")
+    # 0.2.199-补29fk-修:重构平面已被参数优化(间接窗从 recon 评分)消费完,
+    # 终跑 reconstruct 会重建(mkdir -p + 重写),此处提前释放磁盘/内存盘
+    for _sub in ("nus3d_1", "nus3d_rc", "nus2d"):
+        _rmtree_quiet(work / _sub)
     params_final = dict(base_params or {})
     params_final.pop("final_ext_lo", None)
     params_final.pop("final_ext_hi", None)

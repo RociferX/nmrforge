@@ -7,8 +7,8 @@
 - process/_intermediate 落盘(默认)或符号链接到内存盘(Linux /dev/shm,
   显式配置 processing.memory_disk_path 可覆盖;Windows 无标准 tmpfs,
   自建 RAM 盘后指定路径);
-- 判据:中间谱峰值 ×2 ≤ 系统可用内存,且 峰值 ×1.2 ≤ 内存盘剩余,且峰值
-  ≥32MB;任一不满足回退磁盘(_intermediate 为真实目录);
+- 判据(0.2.199-补29fk-修):中间谱峰值 ×1.6 ≤ 系统可用内存,且 峰值 ×1.1 ≤
+  内存盘剩余,且峰值 ≥32MB;任一不满足回退磁盘(_intermediate 为真实目录);
 - 峰值估算(0.2.199-补29fk):间接维按 auto 填零 SI,直接维按 EXT 窗口后的
   点数(默认 10.5-6.5 ppm;用户 final_ext/ext 改了就按用户值)——此前按全
   直接维 SI 估算使大 3D NUS 峰值虚高(如 sampleJ 25.8GB),15G 内存机器
@@ -28,10 +28,10 @@ from backend.config import load_config, resolve_ext_hi, resolve_ext_lo
 
 DEFAULT_POLICY = "auto"
 MIN_PEAK_BYTES = 32 * 1024 * 1024  # 小于 32MB 不上内存盘(无收益)
-SYSTEM_SAFETY_FACTOR = 2.0  # 系统可用内存 ≥ 峰值 × 2
-DISK_SAFETY_FACTOR = 1.2  # 内存盘剩余 ≥ 峰值 × 1.2
+SYSTEM_SAFETY_FACTOR = 1.6  # 系统可用内存 ≥ 峰值 × 1.6(防 SMILE 主内存挤占)
+DISK_SAFETY_FACTOR = 1.1  # 内存盘剩余 ≥ 峰值 × 1.1(防 tmpfs 写满)
 BYTES_PER_POINT = 8  # 复 float32
-NUS_PEAK_FACTOR = 3  # SMILE 重构平面 + 终谱 + 预览
+NUS_PEAK_FACTOR = 2  # 中间谱用完即删后峰值≈单份最大谱,留 2× 裕量
 UNIFORM_PEAK_FACTOR = 2
 
 # 中间产物统一子目录(位于工作目录下;可符号链接到内存盘)
@@ -166,28 +166,63 @@ def estimate_intermediate_peak(
         return None
 
 
+def _memory_conditions(
+    experiment: Any,
+    config: dict[str, Any] | None = None,
+    params: dict[str, Any] | None = None,
+) -> tuple[bool, str]:
+    """返回 (是否可用内存盘, 原因)。不创建目录。"""
+    if intermediate_memory_policy(config) == "off":
+        return False, "策略 intermediate_memory=off"
+    root = memory_disk_path(config)
+    if root is None:
+        return False, "无内存盘路径(Windows 无 /dev/shm 或 memory_disk_path 无效)"
+    peak = estimate_intermediate_peak(experiment, params)
+    if peak is None:
+        return False, "中间谱峰值估算不可用"
+    if peak < MIN_PEAK_BYTES:
+        return False, f"中间谱峰值过小({peak / 1e6:.0f}MB < 32MB,无收益)"
+    try:
+        free = shutil.disk_usage(root).free
+    except OSError as exc:
+        return False, f"内存盘不可读: {exc}"
+    avail = system_available_bytes()
+    need_avail = int(peak * SYSTEM_SAFETY_FACTOR)
+    need_free = int(peak * DISK_SAFETY_FACTOR)
+    if avail is not None and avail < need_avail:
+        return False, (
+            f"可用内存不足:峰值 {peak / 1e9:.2f}GB,需 ≥{need_avail / 1e9:.1f}GB,"
+            f"当前 {avail / 1e9:.1f}GB"
+        )
+    if free < need_free:
+        return False, (
+            f"内存盘剩余不足:峰值 {peak / 1e9:.2f}GB,需 ≥{need_free / 1e9:.1f}GB,"
+            f"当前 {free / 1e9:.1f}GB"
+        )
+    return True, ""
+
+
+def selection_reason(
+    experiment: Any,
+    config: dict[str, Any] | None = None,
+    params: dict[str, Any] | None = None,
+) -> str:
+    """回退原因文本(条件满足为空字符串,供日志提示)。"""
+    ok, reason = _memory_conditions(experiment, config, params)
+    return "" if ok else reason
+
+
 def select_memory_dir(
     experiment: Any,
     config: dict[str, Any] | None = None,
     params: dict[str, Any] | None = None,
 ) -> Path | None:
     """内存充足时在内存盘建一个临时目录;任一条件不满足返回 None。"""
-    if intermediate_memory_policy(config) == "off":
+    ok, _reason = _memory_conditions(experiment, config, params)
+    if not ok:
         return None
     root = memory_disk_path(config)
     if root is None:
-        return None
-    peak = estimate_intermediate_peak(experiment, params)
-    if peak is None or peak < MIN_PEAK_BYTES:
-        return None
-    try:
-        free = shutil.disk_usage(root).free
-    except OSError:
-        return None
-    avail = system_available_bytes()
-    if avail is not None and avail < int(peak * SYSTEM_SAFETY_FACTOR):
-        return None
-    if free < int(peak * DISK_SAFETY_FACTOR):
         return None
     try:
         return Path(tempfile.mkdtemp(prefix="nmrforge-mem-", dir=str(root)))
@@ -246,6 +281,7 @@ __all__ = [
     "memory_disk_path",
     "prepare_intermediate",
     "select_memory_dir",
+    "selection_reason",
     "system_available_bytes",
     "teardown_intermediate",
 ]
