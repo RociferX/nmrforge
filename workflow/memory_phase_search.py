@@ -405,6 +405,14 @@ class MemoryAxisResult:
     logs: list[str] = field(default_factory=list)
 
 
+def _quality_arbiter_score(real: np.ndarray, sign_mode: str) -> float:
+    """终谱质检同源相位分(0.2.199-补29fm):全谱峰窗净吸收 + 熵项。
+    用于主评分(锁定迹线净吸收)判定平坦时的候选仲裁。"""
+    from core.qc import phase_quality
+
+    return float(phase_quality.evaluate(real, sign_mode=sign_mode).score)
+
+
 def search_axis_memory(
     complex_arr: np.ndarray,
     axis: int,
@@ -530,32 +538,61 @@ def search_axis_memory(
                     f"回退 (0,0)"
                 )
     if flat:
-        zero_score = scored.get((0.0, 0.0))
-        if coarse_best == (0.0, 0.0) and zero_score is not None:
-            best_phase = (0.0, 0.0)
-            best_score = zero_score
-            logs.append(f"轴{axis}: 已回退 (0,0)(粗网格最优为零)")
-        elif coarse_margin >= PHASE_SCORE_FLAT_MARGIN:
-            if best_phase != coarse_best:
+        # 0.2.199-补29fm(用户):主评分(锁定迹线净吸收)面平坦时,直接把
+        # 候选交给终谱质检同源评分(phase_quality)重评选最优,不做其它
+        # 额外操作。候选 = 净评分距最优 ≤ ±90 消歧容差(2.5)的已评分
+        # p1=0 候选 + 零相位,按净分降序,最多 8 个。
+        q_tol = PHASE_SYMMETRY_TOL
+        candidates = sorted(
+            (
+                p
+                for p, s in scored.items()
+                if s >= best_score - q_tol and abs(p[1]) < 1e-9
+            ),
+            key=lambda p: -scored[p],
+        )
+        if (0.0, 0.0) in scored and (0.0, 0.0) not in candidates:
+            candidates.append((0.0, 0.0))
+        candidates = candidates[:8]
+        if len(candidates) >= 2:
+            q_scores: list[tuple[float, tuple[float, float]]] = []
+            for cand in candidates:
+                real = rotate_real(arr, axis, cand[0], cand[1])
+                q_scores.append((_quality_arbiter_score(real, sign_mode), cand))
+            quality_best, q_best_cand = max(
+                q_scores, key=lambda item: (item[0], scored[item[1]])
+            )
+            if q_best_cand != best_phase:
+                logs.append(
+                    f"轴{axis}: 主评分平坦,质检重评 {best_phase}"
+                    f"(net={scored[best_phase]:.2f}) → {q_best_cand}"
+                    f"(net={scored[q_best_cand]:.2f}, quality={quality_best:.2f});"
+                    " 候选="
+                    + ", ".join(
+                        f"{c}=({scored[c]:.1f}/{q:.1f})" for q, c in q_scores
+                    )
+                )
+                best_phase = q_best_cand
+                best_score = scored[q_best_cand]
+            else:
+                logs.append(
+                    f"轴{axis}: 主评分平坦,质检重评保持 {best_phase} "
+                    f"(quality={quality_best:.2f})"
+                )
+        else:
+            # 候选不足(罕见)保留原平坦兜底
+            zero_score = scored.get((0.0, 0.0))
+            if coarse_best == (0.0, 0.0) and zero_score is not None:
+                best_phase = (0.0, 0.0)
+                best_score = zero_score
+                logs.append(f"轴{axis}: 已回退 (0,0)(粗网格最优为零)")
+            else:
+                best_phase = coarse_best
+                best_score = scored[coarse_best]
                 logs.append(
                     f"轴{axis}: 细网格评分平坦,采用粗网格最优 {coarse_best} "
                     f"(粗 margin={coarse_margin:.2f} 分)"
                 )
-            else:
-                logs.append(
-                    f"轴{axis}: 细网格评分平坦,保持粗网格最优 {coarse_best} "
-                    f"(粗 margin={coarse_margin:.2f} 分)"
-                )
-            best_phase = coarse_best
-            best_score = scored[coarse_best]
-        elif zero_score is not None and coarse_best_score - zero_score < PHASE_SCORE_FLAT_MARGIN:
-            best_phase = (0.0, 0.0)
-            best_score = zero_score
-            logs.append(f"轴{axis}: 已回退 (0,0)(粗网格平坦且零相位不劣于最优)")
-        else:
-            best_phase = coarse_best
-            best_score = scored[coarse_best]
-            logs.append(f"轴{axis}: 粗网格 p0 平坦但最优显著优于零相位,采用粗网格最优")
     if refine and not flat:
         # 平台圆中位数 p0(亚度精修,旧方案默认评分路径)
         # 0.2.199-补29dn:平坦面不回退——平坦区中位数会漂移
