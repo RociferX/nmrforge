@@ -1,5 +1,27 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29fd(2026-09-02,数据类型:用户 pdata/title 优先、导入提示、GUI 选择写回)
+
+用户:1) 用户会在 pdata/title 写类型——未命中时用,命中时判断是否一致、不一致
+哪个更合理;2) 不管是否命中,导入 log 提示检查类型;3) GUI 选择的类型以用户
+为准并更新 metadata。
+实现:
+- 分类器 classify(experiment, user_title=):pdata/title 解析为模板(整串/分词
+  归一化匹配);未命中(低置信/generic)且 title 核/维兼容 → 采用(0.75);
+  命中不一致但核兼容 → 以用户 title 为准(0.75,证据说明不一致请核对);
+  title 核/维不兼容 → 忽略并说明;一致则保持;
+- core/data/bruker_reader:读 pdata/<最大 procno>/title 传入识别(读取谱时自动
+  生效,pdata/title 与 metadata 同源);
+- GUI 选择权威写回:workflow.import_workflow.apply_user_experiment_type 把用户
+  类型写 metadata.json dataset.experiment_type(confidence=1.0,
+  evidence=gui_user_selected);stepwise._read_experiment 检测该标记后以用户类型
+  覆盖 live 分类——处理/选峰/后续均以用户为准;
+- 导入日志提示(GUI 单条/批量):追加「数据类型识别: name(置信 x);…请检查
+  数据类型是否识别正确(可在样品数据注释中修改)」,低置信/generic/标题参与
+  时必提示,高置信也提示一次供核对;
+- 测试 +3(title 未命中/命中不一致/核不兼容+一致、pdata 读取、GUI 写回→mixed
+  选峰);全量 pytest 全绿,ruff 通过。
+
 ## 0.2.199-补29fc(2026-09-02,选峰谱面回补 mixed 判定,数量+强度综合抗污染)
 
 用户:谱图生成后能否回补识别——正负峰占比都很高明显是 mixed;且不能只看数量,

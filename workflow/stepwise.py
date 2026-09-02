@@ -60,7 +60,43 @@ def _read_experiment(manager: ProjectManager, exp_id: str, data_id: str) -> Expe
     # 2026-08-19:中间产物/终谱前缀统一用数据 id(d_001),不随重命名变化;
     # read_dataset 的 dataset_id 取自 raw 目录名(常为 raw),必须覆盖
     experiment.dataset_id = data_id
+    # 0.2.199-补29fd:用户在 GUI 选择的实验类型(metadata evidence=gui_user_selected)
+    # 权威覆盖 live 分类(pdata/title/PULPROG),处理/选峰以其为准。
+    _apply_gui_type_override(manager, exp_id, data_id, experiment)
     return experiment
+
+
+def _apply_gui_type_override(
+    manager: ProjectManager, exp_id: str, data_id: str, experiment: Experiment
+) -> None:
+    """若数据 metadata 的 experiment_type 标记 gui_user_selected,以其为准。"""
+    try:
+        from core.data.internal_data_model import ExperimentType
+
+        data_entry = _require_data(manager, exp_id, data_id)
+        path = manager.data_metadata_path(exp_id, data_id)
+        if not path.is_file() and data_entry.metadata_path:
+            mp = Path(data_entry.metadata_path)
+            path = mp if mp.is_absolute() else manager.root / mp
+        if not path.is_file():
+            return
+        import json
+
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        et = ((payload.get("dataset") or {}).get("experiment_type") or {})
+        if not et:
+            return
+        evidence = [str(e) for e in (et.get("evidence") or [])]
+        if not any("gui_user_selected" in e for e in evidence):
+            return
+        name = str(et.get("name", "") or "")
+        if not name:
+            return
+        experiment.experiment_type = ExperimentType(
+            name=name, confidence=1.0, evidence=evidence
+        )
+    except Exception:
+        return
 
 
 def _work_dir(manager: ProjectManager, exp_id: str, data_id: str) -> Path:

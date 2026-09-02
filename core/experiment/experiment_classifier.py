@@ -16,6 +16,7 @@ PULPROG 区分。
 
 from __future__ import annotations
 
+import re
 from collections import Counter
 
 import core.experiments  # noqa: F401  导入即从 presets/*.yaml 注册模板
@@ -120,6 +121,33 @@ _FAMILY_FALLBACK: dict[tuple[int, str, tuple[str, ...]], str] = {
 }
 
 
+def _normalize_type_name(name: str) -> str:
+    """类型名/标题归一化:小写、去非字母数字。"""
+    return re.sub(r"[^a-z0-9]", "", str(name).lower())
+
+
+def _title_template_name(title: str) -> str | None:
+    """把 Bruker pdata/title 内容解析为模板类型名;无法识别返回 None。"""
+    text = str(title or "").strip()
+    if not text:
+        return None
+    normalized = {}
+    seen = set()
+    for tpl in REGISTRY.values():
+        if id(tpl) in seen:
+            continue
+        seen.add(id(tpl))
+        normalized.setdefault(_normalize_type_name(tpl.name), tpl.name)
+    whole = _normalize_type_name(text)
+    if whole in normalized:
+        return normalized[whole]
+    for token in re.split(r"[\s,;:_\-/()]+", text):
+        n = _normalize_type_name(token)
+        if len(n) >= 3 and n in normalized:
+            return normalized[n]
+    return None
+
+
 def _family_fallback(experiment: Experiment) -> str | None:
     """同核组合族 PULPROG 未知时的代表模板(核组合 → 族代表);无安全代表返回 None。"""
     indirect = tuple(sorted(d.nucleus for d in experiment.dimensions[1:]))
@@ -176,7 +204,34 @@ def _nuclei_candidates(experiment: Experiment) -> list[str]:
     return out
 
 
-def classify(experiment: Experiment) -> ExperimentType:
+def classify(experiment: Experiment, *, user_title: str = "") -> ExperimentType:
+    """实验类型识别(0.2.199-补29fd 起支持 pdata/title 用户类型)。"""
+    base = _classify_base(experiment)
+    tname = _title_template_name(user_title)
+    if tname is None:
+        return base
+    candidates = set(_nuclei_candidates(experiment))
+    if tname not in candidates:
+        base.evidence.append(
+            f"pdata/title 含 {tname!r} 但核组合/维度不匹配,忽略标题,以分类结果为准"
+        )
+        return base
+    if base.name == tname:
+        if not any("pdata/title 与分类一致" in e for e in base.evidence):
+            base.evidence.append(f"pdata/title 与分类一致: {tname}")
+        return base
+    return ExperimentType(
+        name=tname,
+        confidence=0.75,
+        evidence=base.evidence
+        + [
+            f"分类为 {base.name}(置信 {base.confidence:.2f}) 与 pdata/title "
+            f"{tname} 不一致;核组合兼容,以用户 title 为准(请核对)"
+        ],
+    )
+
+
+def _classify_base(experiment: Experiment) -> ExperimentType:
     """核组合优先:排除不匹配模板 → 候选中 PULPROG 精排 → 兜底。"""
     acqus = experiment.acquisition_parameters.get("acqus", {})
     pulprog = str(acqus.get("PULPROG", "")).lower()

@@ -311,6 +311,58 @@ def test_classify_ssnmr_tedor_pain_nn() -> None:
 
 
 
+
+def test_classify_user_title_miss_and_hit() -> None:
+    """0.2.199-补29fd:pdata/title 用户类型——未命中时采用;命中不一致时核兼容
+    则以用户 title 为准并提示;核不兼容忽略标题。"""
+    from core.experiment.experiment_classifier import classify
+
+    # 未命中(自定义 PULPROG)→ title 命中 CBCANH
+    miss = classify(
+        _experiment_with_nuclei(3, ["1H", "15N", "13C"], "custom123"),
+        user_title="CBCANH",
+    )
+    assert miss.name == "CBCANH"
+    assert miss.confidence == 0.75
+
+    # 分类命中 HNCACB(0.9),title CBCANH 核兼容 → 以用户 title 为准
+    hit = classify(
+        _experiment_with_nuclei(3, ["1H", "15N", "13C"], "hncacb"),
+        user_title="CBCANH",
+    )
+    assert hit.name == "CBCANH"
+    assert "不一致" in hit.evidence[-1] and "请核对" in hit.evidence[-1]
+
+    # 一致
+    same = classify(
+        _experiment_with_nuclei(3, ["1H", "15N", "13C"], "hncacb"),
+        user_title="HNCACB",
+    )
+    assert same.name == "HNCACB"
+    assert "一致" in same.evidence[-1]
+
+    # title 核不兼容(2D 1H-15N 上写 HNCACB)→ 忽略标题,保持分类
+    incompat = classify(
+        _experiment_with_nuclei(2, ["1H", "15N"], "hsqc"),
+        user_title="HNCACB",
+    )
+    assert incompat.name == "HSQC"
+    assert "忽略标题" in incompat.evidence[-1]
+
+
+def test_pdata_title_reads_latest_procno(tmp_path: Path) -> None:
+    """0.2.199-补29fd:读取 pdata 最大 procno 的 title。"""
+    from core.data.bruker_reader import _pdata_title
+
+    root = tmp_path / "dataset"
+    (root / "pdata" / "1").mkdir(parents=True)
+    (root / "pdata" / "2").mkdir(parents=True)
+    (root / "pdata" / "1" / "title").write_text("old name", encoding="utf-8")
+    (root / "pdata" / "2" / "title").write_text("CBCANH", encoding="utf-8")
+    assert _pdata_title(root) == "CBCANH"
+    assert _pdata_title(tmp_path / "no_such") == ""
+
+
 def test_classify_family_fallback_safe() -> None:
     """0.2.199-补29fb:同核组合族 PULPROG 未知时回退安全族代表,不再纯 Generic。"""
     from core.experiment.experiment_classifier import classify

@@ -371,6 +371,28 @@ def read_dataset_container(path: Path | str) -> tuple[Experiment, list[Path]]:
         raise
 
 
+def _pdata_title(dataset_dir: Path) -> str:
+    """读取 Bruker 处理结果 pdata/<procno>/title(补29fd)。"""
+    try:
+        pdata = dataset_dir / "pdata"
+        if not pdata.is_dir():
+            return ""
+        procs = sorted(
+            (p for p in pdata.iterdir() if p.is_dir() and p.name.isdigit()),
+            key=lambda p: int(p.name),
+            reverse=True,
+        )
+        for proc in procs:
+            title = proc / "title"
+            if title.is_file():
+                text = title.read_text(encoding="latin-1", errors="replace").strip()
+                if text:
+                    return text
+    except Exception:
+        pass
+    return ""
+
+
 def read_dataset(path: Path) -> Experiment:
     """读取一个 Bruker 数据集目录并生成 Experiment（元数据，不做语义判断）。"""
     dataset_dir = path
@@ -388,5 +410,7 @@ def read_dataset(path: Path) -> Experiment:
         acquisition_parameters=params,
     )
     experiment.sampling = detect(experiment)
-    experiment.experiment_type = classify(experiment)
+    experiment.experiment_type = classify(
+        experiment, user_title=_pdata_title(dataset_dir)
+    )
     return experiment

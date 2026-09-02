@@ -409,6 +409,41 @@ def test_pick_peaks_spectrum_evidence_rejects_contamination(
     assert not any("谱面回补" in log for log in result["logs"])
 
 
+
+def test_gui_user_type_updates_metadata(tmp_path: Path) -> None:
+    """0.2.199-补29fd:GUI 用户选择类型权威写回 metadata,选峰按新类型(mixed)。"""
+    import json
+
+    from workflow.import_workflow import apply_user_experiment_type
+
+    spec = _spectrum_with_peaks(
+        (64, 128),
+        [
+            ((20, 40), 600.0),
+            ((25, 90), 500.0),
+            ((15, 50), -600.0),
+            ((30, 70), -500.0),
+        ],
+    )
+    ft2 = tmp_path / "out.ft2"
+    _write_ft2(ft2, spec)
+    manager, exp_id, data_id = _manager_with_spectrum(tmp_path, ft2)
+    _write_metadata(manager, exp_id, data_id, "HSQC", confidence=0.95)
+
+    assert apply_user_experiment_type(manager, exp_id, data_id, "HNCACB") is True
+    path = manager.data_metadata_path(exp_id, data_id)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    et = payload["dataset"]["experiment_type"]
+    assert et["name"] == "HNCACB"
+    assert et["confidence"] == 1.0
+    assert "gui_user_selected" in et["evidence"]
+
+    result = pick_peaks(manager, exp_id, data_id)
+    rows = _read_rows(Path(result["peak_path"]))
+    signs = {float(r["Intensity"]) > 0 for r in rows}
+    assert signs == {True, False}  # HNCACB mixed → 正负都选
+
+
 def test_pick_peaks_mixed_type_picks_both_signs(tmp_path: Path) -> None:
     """mixed 实验(如 HNCACB 13Cα/13Cβ 反相):正负峰都选。"""
     spec = _spectrum_with_peaks(

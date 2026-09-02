@@ -514,6 +514,7 @@ class MainWindow(QMainWindow):
                     quality = check_raw_quality(self.manager, exp_id, data_id)
                     self._append_log("  原始数据质量:")
                     self._append_log(format_quality_report(quality))
+                    self._log_experiment_type_check(exp_id, data_id)
                 except Exception:  # noqa: BLE001 - 自动填充/质检失败不阻断批量导入
                     pass
             else:
@@ -792,6 +793,7 @@ class MainWindow(QMainWindow):
             self._append_log(format_quality_report(quality))
         exp_id = getattr(result, "experiment_id", None) or result.get("experiment_id", "")
         data_id = getattr(result, "data_id", "") or ""
+        self._log_experiment_type_check(exp_id, data_id)
         name = self._pending_data_names.pop(exp_id, "") if exp_id else ""
         if exp_id and data_id and name and self.manager.project is not None:
             entry = self.manager.project.experiment(exp_id)
@@ -820,6 +822,33 @@ class MainWindow(QMainWindow):
             InfoDialog.show_info(
                 self, "导入完成(有提示)", "\n".join(warnings)
             )
+
+    def _log_experiment_type_check(self, exp_id: str, data_id: str) -> None:
+        """导入后提示检查数据类型识别(0.2.199-补29fd)。"""
+        if not exp_id or not data_id:
+            return
+        try:
+            meta = self._read_data_metadata(exp_id, data_id)
+        except Exception:
+            return
+        et = ((meta or {}).get("dataset") or {}).get("experiment_type") or {}
+        name = str(et.get("name", "") or "")
+        if not name:
+            return
+        try:
+            conf = float(et.get("confidence", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            conf = 0.0
+        evidence = [str(e) for e in (et.get("evidence") or [])]
+        line = f"数据类型识别: {name}(置信 {conf:.2f})"
+        need_check = (
+            conf < 0.9
+            or str(name).startswith("generic")
+            or any(k in e for e in evidence for k in ("请核对", "title", "族代表", "未识别"))
+        )
+        if need_check:
+            line += ";请检查数据类型是否识别正确(可在样品数据注释中修改)"
+        self._append_log(line)
 
     def _read_data_metadata(self, exp_id: str, data_id: str) -> dict:
         """读样品数据 metadata.json(缺失返回空 dict)。"""
@@ -1619,6 +1648,14 @@ class MainWindow(QMainWindow):
             set_experiment_note_fields(self.manager.project, exp_id, fields)
         else:
             set_data_note_fields(self.manager.project, exp_id, data_id, fields)
+            exptype = str((fields or {}).get("experiment_type", "") or "")
+            if exptype:
+                from workflow.import_workflow import apply_user_experiment_type
+
+                if apply_user_experiment_type(
+                    self.manager, exp_id, data_id, exptype
+                ):
+                    self._append_log(f"数据类型已按用户选择更新: {exptype}")
         try:
             self.manager.save()
         except ProjectError as exc:

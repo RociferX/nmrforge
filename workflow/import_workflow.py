@@ -419,3 +419,42 @@ __all__ = [
     "import_bruker_dataset",
     "import_data",
 ]
+
+
+def apply_user_experiment_type(
+    manager: ProjectManager,
+    exp_id: str,
+    data_id: str,
+    name: str,
+) -> bool:
+    """GUI 用户选择的实验类型权威写回 metadata(0.2.199-补29fd)。"""
+    if manager.project is None or manager.root is None:
+        return False
+    try:
+        entry = manager.project.experiment(exp_id)
+        if entry is None:
+            return False
+        path = manager.data_metadata_path(exp_id, data_id)
+        data_entry = next((d for d in entry.data if d.id == data_id), None)
+        if not path.is_file() and data_entry is not None and data_entry.metadata_path:
+            mp = Path(data_entry.metadata_path)
+            path = mp if mp.is_absolute() else manager.root / mp
+        if not path.is_file():
+            return False
+        import json
+
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        value = {
+            "name": str(name),
+            "confidence": 1.0,
+            "evidence": ["gui_user_selected"],
+        }
+        dataset = dict(payload.get("dataset") or {})
+        dataset["experiment_type"] = value
+        payload["dataset"] = dataset
+        payload["experiment_type"] = value
+        atomic_write_json(path, payload)
+        return True
+    except Exception:
+        return False
+
