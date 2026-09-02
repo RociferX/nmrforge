@@ -1,5 +1,23 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29fg(2026-09-02,移除处理参数优化 2.1 间接维基线重渲死渲染)
+
+背景:统一相位优化非必要渲染审查——2.1 段在间接维基线被选为非默认(auto→非
+auto)时,用新基线重渲 joint/base 谱,注释称「供窗/填零评分」;但当前窗函数
+评分走 FID/recon 平面内存评分(uniform optimize_*_from_work / NUS
+optimize_indirect_windows_from_recon),填零已无候选(auto 规则直写终谱),
+重渲产物没有任何消费者,只是基线非默认时额外多一次 process/finalize 渲染
+(数十秒)。
+实现(workflow/phase_routes.py):
+- _optimize_uniform_processing / _optimize_nus_processing 删除 2.1 重渲段
+  (changed_indirect/default_cfg/apply_baseline 及相关成功/失败日志);
+- docstring/注释同步:联合复核谱只作基线评分基底,窗函数不消费该谱;
+- 测试:test_optimize_nus_processing_baseline_and_window 断言 finalize
+  次数 2→1(只剩 joint 谱),calls[0].baseline 为空。
+验证:全量 pytest 全绿;test_full_paths 通过;ruff(改动文件)通过。
+说明:缓存前置(直接维 phase.json 查询提前到 preview 渲染前)为审查候选 a),
+用户随后取消,本轮未做;reconstruct_nus 全局语义保持(供 SMILE 25 组评峰)。
+
 ## 0.2.199-补29fe/补29ff(2026-09-02,相位搜索计时 + 窗口评分/迹线锁定向量化)
 
 补29fe:内存相位搜索内部阶段计时日志;补29ff:窗口评分/迹线锁定向量化(等价改写,
