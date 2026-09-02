@@ -17,6 +17,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from backend import memory_disk
 from core.data.bruker_reader import read_dataset, read_dataset_container
 from core.data.internal_data_model import Experiment, SamplingMode
 from core.planning.method_selector import select_method
@@ -247,10 +248,47 @@ def generate_spectrum(
       不加 -di),内存调相(旧算法判断标准,零额外后端),完整终跑;
     - "none":保持旧路径,直接 process/reconstruct_nus,不额外优化
       (逃生口)。
+
+    0.2.199-补29ey:未显式指定 work_dir 时,按 processing.intermediate_memory
+    自适应把中间谱工作目录放到内存盘(内存余量充足时),用完整体删除。
     """
     experiment = _read_experiment(manager, exp_id, data_id)
+    mem_work: Path | None = None
     work = Path(work_dir) if work_dir else _work_dir(manager, exp_id, data_id)
+    if work_dir is None:
+        mem_work = memory_disk.select_work_root(experiment)
+        if mem_work is not None:
+            work = mem_work
+            if progress is not None:
+                progress(f"中间谱工作目录使用内存盘(自适应): {work}")
     _ensure_work_dir(backend, work)
+    try:
+        return _generate_spectrum_impl(
+            manager,
+            exp_id,
+            data_id,
+            backend,
+            work=work,
+            params=params,
+            progress=progress,
+        )
+    finally:
+        if mem_work is not None:
+            shutil.rmtree(mem_work, ignore_errors=True)
+
+
+def _generate_spectrum_impl(
+    manager: ProjectManager,
+    exp_id: str,
+    data_id: str,
+    backend: Any,
+    *,
+    work: Path,
+    params: dict[str, Any] | None = None,
+    progress: Callable[[str], None] | None = None,
+) -> str:
+    """原 generate_spectrum 主体(工作目录已由外层决定)。"""
+    experiment = _read_experiment(manager, exp_id, data_id)
     params = dict(params or {})
     route = str(params.pop("phase_route", "unified"))
     plan = select_method(experiment)

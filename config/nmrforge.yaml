@@ -17,6 +17,8 @@ processing:
   points_per_line: 2.0         # 目标数字点距 = max(线宽, 1/AQ)/points_per_line
   ext_lo: "10.5"                 # 直接维提取窗口高端(EXT -x1),默认 10.5 ppm
   ext_hi: "6.5"                  # 直接维提取窗口低端(EXT -xn),默认 6.5 ppm
+  intermediate_memory: auto      # auto=内存余量充足时中间谱工作目录放内存盘;off=始终磁盘
+  memory_disk_path: ""           # 可选:内存盘根目录(默认 Linux /dev/shm;Windows 自建 RAM 盘后指定)
 
 smile:
   nthread: 0                   # 0=自动(机器线程数-offset);正整数=固定;大网格仍护栏强制 ≤2

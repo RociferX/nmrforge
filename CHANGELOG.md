@@ -1,5 +1,22 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29ey(2026-09-02,中间谱内存盘自适应放置)
+
+用户:1) 填零候选为何写谱——确认当前填零已是规则直写(补29eb 已移除填零候选
+finalize,auto 动态规则直接进终跑脚本,不再写候选谱);2) 内存余量充足时把
+中间谱放在内存盘。
+实现:
+- 新增 backend/memory_disk.py:estimate_intermediate_peak(按 auto 填零 SI ×
+  复点数 × 安全系数估算中间谱峰值,NUS ×3 / uniform ×2)、select_work_root
+  (策略 auto/off;系统可用内存 ≥ 峰值×2 且内存盘剩余 ≥ 峰值×1.2 且峰值
+  ≥32MB 才启用,任一不满足回退磁盘);
+- workflow/stepwise.generate_spectrum:未显式指定 work_dir 时按策略选择内存
+  盘工作目录(Linux /dev/shm;Windows 无标准 tmpfs,可用
+  processing.memory_disk_path 指向自建 RAM 盘),流程结束整目录删除;
+- config/nmrforge.yaml:processing.intermediate_memory(auto/off)+
+  processing.memory_disk_path;
+- 测试:+4(估算/启用条件/启用即清理/回退磁盘);全量 pytest 全绿,ruff 通过。
+
 ## 0.2.199-补29ex(2026-09-02,删除全部进系统回收站,软删除可恢复)
 
 用户:1) 删除(项目/实验/数据)全部走系统回收站;2) 检查恢复文件能否无损接回、
