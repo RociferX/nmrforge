@@ -103,8 +103,9 @@ def _candidates(
     return peaks
 
 
-def _keep_dominant(candidates: list[Peak]) -> list[Peak]:
-    """dominant 模式:只保留候选峰更多的符号(平局按绝对强度总和,再平局取正)。"""
+def keep_dominant(candidates: list[Peak]) -> list[Peak]:
+    """dominant 模式:只保留候选峰更多的符号(平局按绝对强度总和,再平局取正)。
+    选峰可用 both 检出后按谱面占比决定是否调用本函数(0.2.199-补29fc)。"""
     counts: dict[int, int] = {1: 0, -1: 0}
     totals: dict[int, float] = {1: 0.0, -1: 0.0}
     for peak in candidates:
@@ -175,6 +176,6 @@ def detect(data: Any, params: PeakDetectionParams | None = None) -> list[Peak]:
     for sign in signs:
         candidates.extend(_candidates(real, sigma, params, sign))
     if mode == "dominant" and candidates:
-        candidates = _keep_dominant(candidates)
+        candidates = keep_dominant(candidates)
     candidates.sort(key=lambda peak: abs(peak.height), reverse=True)
     return candidates

@@ -149,9 +149,13 @@ def test_pick_peaks_writes_poky_list(tmp_path: Path) -> None:
 
 
 def _write_metadata(
-    manager: ProjectManager, exp_id: str, data_id: str, name: str
+    manager: ProjectManager,
+    exp_id: str,
+    data_id: str,
+    name: str,
+    confidence: float = 1.0,
 ) -> None:
-    """写数据 metadata(experiment_type.name),驱动峰符号模式。"""
+    """写数据 metadata(experiment_type.name+confidence),驱动峰符号模式。"""
     import json
 
     path = manager.data_metadata_path(exp_id, data_id)
@@ -162,7 +166,10 @@ def _write_metadata(
         json.dumps(
             {
                 "dataset": {
-                    "experiment_type": {"name": name, "confidence": 1.0}
+                    "experiment_type": {
+                        "name": name,
+                        "confidence": confidence,
+                    }
                 }
             }
         ),
@@ -295,6 +302,111 @@ def test_pick_peaks_uniform_type_negative_dominant(tmp_path: Path) -> None:
     rows = _read_rows(Path(result["peak_path"]))
     assert len(rows) == 3
     assert all(float(r["Intensity"]) < 0 for r in rows)
+
+
+
+def test_pick_peaks_spectrum_evidence_backfill(tmp_path: Path) -> None:
+    """0.2.199-补29fc:低置信类型但谱面正负数量+强度占比都高 → 按 mixed 正负都选。"""
+    spec = _spectrum_with_peaks(
+        (64, 128),
+        [
+            ((20, 40), 600.0),
+            ((25, 90), 500.0),
+            ((40, 60), 400.0),
+            ((10, 100), 300.0),
+            ((15, 50), -600.0),
+            ((30, 70), -500.0),
+            ((45, 20), -400.0),
+        ],
+    )
+    ft2 = tmp_path / "out.ft2"
+    _write_ft2(ft2, spec)
+    manager, exp_id, data_id = _manager_with_spectrum(tmp_path, ft2)
+    _write_metadata(manager, exp_id, data_id, "HSQC", confidence=0.3)  # 低置信
+
+    result = pick_peaks(manager, exp_id, data_id)
+    rows = _read_rows(Path(result["peak_path"]))
+    signs = {float(r["Intensity"]) > 0 for r in rows}
+    assert signs == {True, False}  # 正负都选
+    assert any("谱面回补" in log for log in result["logs"])
+
+
+def test_pick_peaks_spectrum_evidence_keeps_dominant_when_mostly_one_sign(
+    tmp_path: Path,
+) -> None:
+    """0.2.199-补29fc:低置信但负峰只是零星伪峰 → 仍 dominant 只留主符号。"""
+    spec = _spectrum_with_peaks(
+        (64, 128),
+        [
+            ((20, 40), 600.0),
+            ((25, 90), 500.0),
+            ((40, 60), 400.0),
+            ((10, 100), 300.0),
+            ((15, 50), -200.0),  # 单个零星负峰
+        ],
+    )
+    ft2 = tmp_path / "out.ft2"
+    _write_ft2(ft2, spec)
+    manager, exp_id, data_id = _manager_with_spectrum(tmp_path, ft2)
+    _write_metadata(manager, exp_id, data_id, "HSQC", confidence=0.3)
+
+    result = pick_peaks(manager, exp_id, data_id)
+    rows = _read_rows(Path(result["peak_path"]))
+    assert all(float(r["Intensity"]) > 0 for r in rows)
+
+
+def test_pick_peaks_spectrum_evidence_respects_confident_uniform(
+    tmp_path: Path,
+) -> None:
+    """0.2.199-补29fc:高置信 uniform 模板(HSQC 0.9+)即使谱面平衡也尊重模板 dominant。"""
+    spec = _spectrum_with_peaks(
+        (64, 128),
+        [
+            ((20, 40), 600.0),
+            ((25, 90), 500.0),
+            ((40, 60), 400.0),
+            ((10, 100), 300.0),
+            ((15, 50), -600.0),
+            ((30, 70), -500.0),
+            ((45, 20), -400.0),
+        ],
+    )
+    ft2 = tmp_path / "out.ft2"
+    _write_ft2(ft2, spec)
+    manager, exp_id, data_id = _manager_with_spectrum(tmp_path, ft2)
+    _write_metadata(manager, exp_id, data_id, "HSQC", confidence=0.95)
+
+    result = pick_peaks(manager, exp_id, data_id)
+    rows = _read_rows(Path(result["peak_path"]))
+    assert all(float(r["Intensity"]) > 0 for r in rows)
+    assert not any("谱面回补" in log for log in result["logs"])
+
+
+def test_pick_peaks_spectrum_evidence_rejects_contamination(
+    tmp_path: Path,
+) -> None:
+    """0.2.199-补29fc-修:少数符号被单个极强峰主导(疑似污染)不触发 mixed。"""
+    spec = _spectrum_with_peaks(
+        (64, 128),
+        [
+            ((20, 40), 500.0),
+            ((25, 90), 450.0),
+            ((40, 60), 400.0),
+            ((10, 100), 350.0),
+            ((15, 50), -1800.0),  # 单个极强负峰(污染)
+            ((30, 70), -260.0),
+            ((45, 20), -240.0),
+        ],
+    )
+    ft2 = tmp_path / "out.ft2"
+    _write_ft2(ft2, spec)
+    manager, exp_id, data_id = _manager_with_spectrum(tmp_path, ft2)
+    _write_metadata(manager, exp_id, data_id, "HSQC", confidence=0.3)
+
+    result = pick_peaks(manager, exp_id, data_id)
+    rows = _read_rows(Path(result["peak_path"]))
+    assert all(float(r["Intensity"]) > 0 for r in rows)
+    assert not any("谱面回补" in log for log in result["logs"])
 
 
 def test_pick_peaks_mixed_type_picks_both_signs(tmp_path: Path) -> None:

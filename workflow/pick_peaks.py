@@ -39,6 +39,15 @@ _PICK_THRESHOLD_SIGMA = 15.0
 # 轴峰排除边缘点数(0.2.199-补29at/补29bf,用户):上下边缘横条内的峰不选;
 # 补29bf 从 2 加到 5,靠近边缘的轴峰残余一并排除。
 _PICK_EDGE_MARGIN = 5
+# 谱面 mixed 证据(0.2.199-补29fc,用户):类型低置信/未知时,若谱面正负峰
+# 占比都高(少数符号 ≥ 主符号数 × 0.2 且 ≥3 个,总数 ≥6),按 mixed 正负都选;
+# 高置信 uniform 模板(如 HSQC)仍尊重模板,避免噪声负峰带偏。
+_MIXED_MIN_MINOR = 3
+_MIXED_COUNT_SHARE = 0.20   # 少数符号数量 ≥ 主符号数 × 0.2
+_MIXED_INTEN_SHARE = 0.15   # 少数符号绝对强度总和 ≥ 主符号 × 0.15
+_MIXED_MIN_TOTAL = 6
+# 抗污染:少数符号不能由单个极强峰主导——次强峰强度 ≥ 最强 × 0.25
+_MIXED_OUTLIER_RATIO = 0.25
 
 
 def _ppm_axis(dic: dict[str, Any], prefix: str, size: int) -> np.ndarray:
@@ -305,10 +314,10 @@ def _write_peaks_list(
     return path
 
 
-def _experiment_type_name(
+def _metadata_experiment_type(
     manager: ProjectManager, exp_id: str, data_id: str
-) -> str:
-    """从数据 metadata(experiment_type.name)取实验类型名;缺失返回 ''。"""
+) -> tuple[str, float]:
+    """从数据 metadata 读 (实验类型名, 置信度);缺失返回 ("", 0.0)。"""
     data_entry = manager.data(exp_id, data_id)
     candidates: list[Path] = []
     try:
@@ -328,13 +337,66 @@ def _experiment_type_name(
         # 0.2.199-补29fa(修复):真实 metadata.json 中实验类型在
         # dataset.experiment_type(导入时 _dataset_summary 写入);旧/兼容结构
         # 可能在顶层 experiment_type——两处都读,先 dataset 后顶层。
-        name = (
+        entry = (
             ((payload.get("dataset") or {}).get("experiment_type") or {})
-            .get("name", "")
-        ) or (payload.get("experiment_type") or {}).get("name", "")
+            or (payload.get("experiment_type") or {})
+        )
+        name = str(entry.get("name", "") or "")
+        try:
+            confidence = float(entry.get("confidence", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            confidence = 0.0
         if name:
-            return str(name)
-    return ""
+            return name, confidence
+    return "", 0.0
+
+
+def _experiment_type_name(
+    manager: ProjectManager, exp_id: str, data_id: str
+) -> str:
+    """从数据 metadata(experiment_type.name)取实验类型名;缺失返回 ''。"""
+    return _metadata_experiment_type(manager, exp_id, data_id)[0]
+
+
+def _type_uncertain(
+    manager: ProjectManager, exp_id: str, data_id: str
+) -> bool:
+    """类型是否低置信/未知(可被谱面证据覆盖):无类型或置信度 < 0.6。"""
+    name, confidence = _metadata_experiment_type(manager, exp_id, data_id)
+    if not name:
+        return True
+    return confidence < 0.6
+
+
+def _strong_two_sign(peaks: list[Any]) -> bool:
+    """谱面是否明显正负共存(0.2.199-补29fc/补29fc-修)。
+
+    数量与强度综合:少数符号数量占比 ≥ _MIXED_COUNT_SHARE 且少数符号绝对
+    强度总和占比 ≥ _MIXED_INTEN_SHARE;抗污染——少数符号不能由一个极强峰
+    主导(次强峰 ≥ 最强峰 × _MIXED_OUTLIER_RATIO),零星/单峰污染不会误判。
+    """
+    pos = [abs(p.height) for p in peaks if p.height > 0]
+    neg = [abs(p.height) for p in peaks if p.height < 0]
+    total = len(pos) + len(neg)
+    if total < _MIXED_MIN_TOTAL:
+        return False
+    minor_abs, major_abs = (
+        (pos, neg) if len(pos) <= len(neg) else (neg, pos)
+    )
+    minor = len(minor_abs)
+    major = len(major_abs)
+    if minor < _MIXED_MIN_MINOR or major <= 0:
+        return False
+    if minor / major < _MIXED_COUNT_SHARE:
+        return False
+    sum_minor = float(sum(minor_abs))
+    sum_major = float(sum(major_abs))
+    if sum_major <= 0 or sum_minor / sum_major < _MIXED_INTEN_SHARE:
+        return False
+    ordered = sorted(minor_abs, reverse=True)
+    if len(ordered) >= 2 and ordered[1] < ordered[0] * _MIXED_OUTLIER_RATIO:
+        return False  # 少数符号被单个极强峰主导(疑似污染)
+    return True
 
 
 def _sign_mode_for(
@@ -478,15 +540,34 @@ def pick_peaks(
             if sigma_multiplier and float(sigma_multiplier) > 0
             else _PICK_THRESHOLD_SIGMA
         )
+        # 0.2.199-补29fc(用户):谱面回补——未知/低置信类型时先用 both 检出,
+        # 若正负峰占比都高则按 mixed 正负都选;否则按模板规则(dominant 过滤)。
+        evidence_log: str | None = None
         peaks = peak_detection.detect(
             arr,
             peak_detection.PeakDetectionParams(
-                sign_mode=sign_mode,
+                sign_mode="both",
                 sigma_multiplier=threshold,
                 min_snr=threshold,
                 edge_margin=_PICK_EDGE_MARGIN,
             ),
         )
+        if sign_mode == "both":
+            pass  # 模板已 mixed
+        else:
+            n_pos = sum(1 for p in peaks if p.height > 0)
+            n_neg = sum(1 for p in peaks if p.height < 0)
+            if (
+                _type_uncertain(manager, exp_id, data_id)
+                and _strong_two_sign(peaks)
+            ):
+                sign_mode = "both"
+                evidence_log = (
+                    f"谱面回补: 类型低置信/未知但正负峰占比都高"
+                    f"(正 {n_pos} / 负 {n_neg}),按 mixed 正负都选"
+                )
+            else:
+                peaks = peak_detection.keep_dominant(peaks)
         # 0.2.199-补29dl(用户):参考峰表约束——只保留与参考谱峰表匹配的峰
         ref_log: str | None = None
         if ref_peaks:
@@ -544,6 +625,8 @@ def pick_peaks(
         f"峰挑选: {len(peaks)} 个峰 → {peak_path}"
         f"(符号模式: {sign_label},阈值: {threshold:.1f}σ)"
     ]
+    if evidence_log:
+        logs.append(evidence_log)
     if ref_log:
         logs.append(ref_log)
     return {
