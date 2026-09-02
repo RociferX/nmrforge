@@ -1355,6 +1355,10 @@ def _unified_nus(
     else:
         ext = "ft3" if experiment.ndim >= 3 else "ft2"
         preview_out = f"{experiment.dataset_id}_direct_final.{ext}"
+        # 0.2.199-补29fj-修:直接维实型预览渲染数秒且此前无进度(缓存命中
+        # 时整段静默),补 progress 与间接维复型预览一致,避免日志被吞观感
+        if progress is not None:
+            progress("相位优化中: 直接维实型终谱预览中")
         resp_direct = backend.finalize_nus(
             experiment,
             phases=fixed,
@@ -1384,15 +1388,20 @@ def _unified_nus(
             f"直接维相位搜索基底: 实型终谱 {search_arr.shape}"
             f"(间接维已校正,直接维=最后一轴,投影迹线=间接维点数之和)"
         )
+        if progress is not None:
+            progress("相位优化中: 直接维实型终谱预览完成")
         cache = _load_direct_phase_cache(
             work, experiment, params_first, search_arr.shape
         )
         if cache is not None:
             direct_phase = (float(cache["p0"]), float(cache["p1"]))
-            logs.append(
+            _cache_msg = (
                 f"直接维相位复用缓存 phase.json: {direct_axis}="
                 f"({direct_phase[0]:g}°, {direct_phase[1]:g}°)"
             )
+            logs.append(_cache_msg)
+            if progress is not None:
+                progress(_cache_msg)
         else:
             last_s = _estimate_direct_phase_seconds(work)
             if progress is not None:
