@@ -52,9 +52,36 @@ def _big_memory_cfg(tmp_path: Path) -> dict:
 
 
 def test_estimate_intermediate_peak(monkeypatch: pytest.MonkeyPatch) -> None:
+    """补29fk:直接维按默认 EXT 窗口(10.5-6.5)后点数估算(fixture 无 sw/sf,
+    按默认 8ppm 谱宽折半),不再按全直接维 SI 虚高。"""
     _patch_plan(monkeypatch, {"F1": 512, "F2": 4096})
-    assert memory_disk.estimate_intermediate_peak(_experiment(nus=True)) == 512 * 4096 * 8 * 3
-    assert memory_disk.estimate_intermediate_peak(_experiment(nus=False)) == 512 * 4096 * 8 * 2
+    assert memory_disk.estimate_intermediate_peak(_experiment(nus=True)) == 256 * 4096 * 8 * 3
+    assert memory_disk.estimate_intermediate_peak(_experiment(nus=False)) == 256 * 4096 * 8 * 2
+
+
+def test_estimate_intermediate_peak_ext_window_params(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """补29fk:用户 final_ext(默认应用)与 ext 覆盖改变直接维估算;关应用回默认。"""
+    _patch_plan(monkeypatch, {"F1": 512, "F2": 4096})
+    exp = _experiment(nus=True)
+    # 窄窗 8.5-7.5(1ppm/8ppm → 1/8):512→64
+    assert memory_disk.estimate_intermediate_peak(
+        exp, {"final_ext_lo": "8.5", "final_ext_hi": "7.5"}
+    ) == 64 * 4096 * 8 * 3
+    # 关闭「应用此范围到优化过程」:中间产物仍按默认宽窗估算(保守)
+    assert memory_disk.estimate_intermediate_peak(
+        exp,
+        {
+            "final_ext_lo": "8.5",
+            "final_ext_hi": "7.5",
+            "apply_ext_to_opt": "0",
+        },
+    ) == 256 * 4096 * 8 * 3
+    # 显式 ext_lo/ext_hi 优先
+    assert memory_disk.estimate_intermediate_peak(
+        exp, {"ext_lo": "8.5", "ext_hi": "7.5"}
+    ) == 64 * 4096 * 8 * 3
 
 
 def test_select_memory_dir_policy_and_conditions(
@@ -195,7 +222,7 @@ def test_generate_spectrum_intermediate_memory(
         ),
     )
 
-    def fake_prepare(work_dir, experiment, config=None):
+    def fake_prepare(work_dir, experiment, config=None, params=None):
         root = work_dir / memory_disk.INTERMEDIATE_SUBDIR
         root.symlink_to(mem, target_is_directory=True)
         return root, mem

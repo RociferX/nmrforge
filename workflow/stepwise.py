@@ -297,7 +297,7 @@ def generate_spectrum(
         # 内存余量充足时该子目录符号链接到内存盘;工作目录其余内容(fid/脚本/
         # phase.json/终跑)一律保持原逻辑在磁盘。
         _intermediate_root, memory_dir = memory_disk.prepare_intermediate(
-            work, experiment
+            work, experiment, params=params
         )
         if memory_dir is not None and progress is not None:
             progress(f"中间谱工作目录使用内存盘(自适应): {_intermediate_root}")
