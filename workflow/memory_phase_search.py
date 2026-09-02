@@ -37,17 +37,14 @@ def _axis_traces(real: np.ndarray, axis: int) -> np.ndarray:
 def _trace_indices_fixed(
     real: np.ndarray, axis: int, threshold: float = 0.0
 ) -> tuple[list[int], list[int]]:
-    """返回沿 axis 的信号迹线下标及每条迹线最强点位置(阈值过滤)。"""
+    """返回沿 axis 的信号迹线下标及最强点位置(补29ff 向量化,结果一致)。"""
     traces = _axis_traces(real, axis)
-    indices: list[int] = []
-    positions: list[int] = []
-    for index in range(traces.shape[0]):
-        trace = traces[index]
-        if float(np.max(np.abs(trace))) <= threshold:
-            continue
-        indices.append(index)
-        positions.append(int(np.argmax(np.abs(trace))))
-    return indices, positions
+    mag = np.abs(traces)
+    peaks = np.argmax(mag, axis=-1)
+    maxima = mag[np.arange(traces.shape[0]), peaks]
+    keep = maxima > threshold
+    idx = np.nonzero(keep)[0]
+    return [int(i) for i in idx], [int(peaks[i]) for i in idx]
 
 
 def _grid_step(values: tuple[float, ...]) -> float:
@@ -100,6 +97,33 @@ def rotate_real(
     shape = [1] * arr.ndim
     shape[axis] = n
     return np.real(arr * ramp.reshape(shape))
+
+
+def _gather_slices(
+    rows: np.ndarray, starts: np.ndarray, ends: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """每行 [start,end) 切片收集为等宽矩阵(补29ff,越界 NaN 掩码)。"""
+    n_rows, width = rows.shape
+    maxlen = int(np.max(ends - starts)) if n_rows else 0
+    if maxlen <= 0:
+        return np.zeros((n_rows, 0)), np.zeros((n_rows, 0), dtype=bool)
+    cols = np.arange(maxlen)[None, :]
+    offs = starts[:, None] + cols
+    valid = (offs < ends[:, None]) & (offs < width)
+    idx = np.where(valid, offs, 0)
+    return rows[np.arange(n_rows)[:, None], idx], valid
+
+
+def _median_rows(gathered: np.ndarray, valid: np.ndarray) -> np.ndarray:
+    """按行有效值中位数(等价逐条 np.median,末位允许 1e-16)。"""
+    counts = valid.sum(axis=1)
+    if counts.size == 0:
+        return np.zeros(0)
+    s = np.sort(np.where(valid, gathered, np.inf), axis=1)
+    k1 = (counts - 1) // 2
+    k2 = counts // 2
+    vals = np.take_along_axis(s, np.stack([k1, k2], axis=1), axis=1)
+    return 0.5 * (vals[:, 0] + vals[:, 1])
 
 
 def _window_nets(
@@ -156,32 +180,45 @@ def _window_nets_from_rows(
     *,
     half_width: int | None = None,
 ) -> list[float]:
-    """锁定迹线行(rows:(n_trace, n))的每行净吸收,与 _window_nets 同公式
-    (0.2.199-补29dp)。"""
+    """锁定迹线行每行净吸收(补29ff 向量化,等价改写;基线平移仅作用于
+    峰窗内有效点,越界补零不参与平移)。"""
     hw = 5 if half_width is None else max(int(half_width), 1)
-    nets: list[float] = []
-    for row, peak in enumerate(positions):
-        trace = rows[row]
-        n = trace.shape[0]
-        left_base = trace[max(0, peak - 3 * hw - 3) : max(0, peak - hw - 1)]
-        right_base = trace[
-            min(n, peak + hw + 2) : min(n, peak + 3 * hw + 4)
-        ]
-        if left_base.size >= 4 and right_base.size >= 4:
-            baseline = 0.5 * (
-                float(np.median(left_base)) + float(np.median(right_base))
-            )
-        else:
-            baseline = float(np.median(trace))
-        profile = trace[max(0, peak - hw) : peak + hw + 1]
-        peak_h = float(np.max(np.abs(profile)))
-        if peak_h > 1e-12 and abs(baseline) / peak_h >= 0.01:
-            profile = profile - baseline
-        positive = float(np.clip(profile, 0.0, None).sum())
-        negative = float(np.clip(profile, None, 0.0).sum())
-        total = float(np.abs(profile).sum())
-        nets.append((positive + negative) / total if total else 0.0)
-    return nets
+    n_rows = rows.shape[0]
+    if n_rows == 0:
+        return []
+    width = rows.shape[1]
+    peaks = np.asarray(positions, dtype=int)
+    ls = np.maximum(0, peaks - 3 * hw - 3)
+    le = np.maximum(0, peaks - hw - 1)
+    lmat, lvalid = _gather_slices(rows, ls, le)
+    rs = np.minimum(width, peaks + hw + 2)
+    re = np.minimum(width, peaks + 3 * hw + 4)
+    rmat, rvalid = _gather_slices(rows, rs, re)
+    lcount = lvalid.sum(axis=1)
+    rcount = rvalid.sum(axis=1)
+    ok = (lcount >= 4) & (rcount >= 4)
+    lmed = np.zeros(n_rows)
+    rmed = np.zeros(n_rows)
+    if ok.any():
+        lmed[ok] = _median_rows(lmat[ok], lvalid[ok])
+        rmed[ok] = _median_rows(rmat[ok], rvalid[ok])
+    baseline = np.where(ok, 0.5 * (lmed + rmed), np.median(rows, axis=1))
+    ps = np.maximum(0, peaks - hw)
+    pe = peaks + hw + 1
+    pmat, pvalid = _gather_slices(rows, ps, pe)
+    profile = np.where(pvalid, pmat, 0.0)
+    peak_h = np.max(np.abs(profile), axis=1)
+    cond = (
+        (peak_h > 1e-12)
+        & (np.abs(baseline) / np.maximum(peak_h, 1e-30) >= 0.01)
+    )
+    shifted = np.where(pvalid, pmat - baseline[:, None], 0.0)
+    profile = np.where(cond[:, None], shifted, profile)
+    positive = np.clip(profile, 0.0, None).sum(axis=1)
+    negative = np.clip(profile, None, 0.0).sum(axis=1)
+    total = np.abs(profile).sum(axis=1)
+    nets = np.where(total > 0, (positive + negative) / total, 0.0)
+    return [float(v) for v in nets]
 
 
 def score_locked_memory(
