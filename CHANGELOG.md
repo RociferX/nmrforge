@@ -1,5 +1,27 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29fh(2026-09-02,全项目梳理修复 + master 单分支)
+
+用户:全部修改审计发现;同时清理 gui-dev/backend-dev 两分支,只保留
+master;VM 真实 SMILE 约束放宽为「2 线程护栏即可,可跑」。
+代码/文案:
+- gui/main_window 人工提示:峰表「写回 CSV」→ 保存为 Poky .list;分析
+  「占位」→ HSQC CSP 自动步骤说明(产物路径);
+- gui/peaks_io、gui/spectrum_panel 旧 CSV 注释→.list 主路径+旧 CSV 兼容;
+- gui/pipeline_panel 删除已失效「相位优化途径下拉」注释;
+- tests/test_phase_consensus 删除被遮蔽的旧版重复 HT 测试(保留确定性新版);
+- workflow/optimization_report 补 Callable import;phase_consensus/
+  projection_phase 清未使用 import;
+流程/文档:
+- 删除 gui-dev/backend-dev 分支与 workspaces worktree,远程 vm 同步删除;
+  只保留 master(AGENTS/GIT_WORKFLOW/project_state/handoff/decisions
+  单分支口径;D-2026-09-02);
+- VM 真机 SMILE:2 线程护栏即可,可跑真实 SMILE(D-2026-09-02);
+- handoff 移除已过时「方案 A 未通过、保持逐候选 finalize」条目;
+  project_state 子 Agent 状态同步 D-2026-08-28;
+- docs/gui/{handoff,state} 交接头更新到补29fh。
+验证:全量 pytest 全绿;ruff(改动文件)通过。
+
 ## 0.2.199-补29fg(2026-09-02,移除处理参数优化 2.1 间接维基线重渲死渲染)
 
 背景:统一相位优化非必要渲染审查——2.1 段在间接维基线被选为非默认(auto→非
