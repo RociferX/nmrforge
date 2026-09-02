@@ -18,7 +18,6 @@ import numpy as np
 from core.optimization.phase_search import (
     _row_absorption,
     _row_p1_fit,
-    _row_peak_positions,
 )
 
 

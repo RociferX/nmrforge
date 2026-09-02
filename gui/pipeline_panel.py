@@ -1103,7 +1103,6 @@ class PipelinePanel(QWidget):
             self._rows[step_id].show_spectrum_button.setVisible(
                 step_id == "spectrum" and status == "SUCCESS"
             )
-            # 0.2.108:生成谱图步骤提供「相位优化途径」选择
         self._update_ext_button()
         self._refresh_expanded_details()
 

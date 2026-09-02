@@ -8,6 +8,7 @@ zero_fill、diagnostics、backend_runs)。数据质量诊断在此直接展示
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 _PHASE_ROUTE_LABELS = {"unified": "统一自动处理", "none": "None(逃生口)"}
@@ -71,7 +72,6 @@ def write_quality_record(
     """
     import hashlib
     import json
-
     from pathlib import Path
 
     p = Path(spectrum_path)

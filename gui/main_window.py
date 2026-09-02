@@ -1157,13 +1157,15 @@ class MainWindow(QMainWindow):
             InfoDialog.show_info(
                 self,
                 "峰表编辑",
-                "峰表添加/删除/编辑请在右侧谱图面板峰表操作,保存后写回 CSV。",
+                "峰表添加/删除/编辑请在右侧谱图面板峰表操作,保存为 Poky .list 文件。",
             )
         elif step_id == "analysis":
             InfoDialog.show_info(
                 self,
                 "分析",
-                "分析步骤后端为占位(workflow.analyze);完成后报告页展示 report/ 产物。",
+                "分析为自动步骤(HSQC CSP):在分析步骤选「比对谱」(自由态数据)后"
+                "点运行;产物为分析目录 csp_data.csv 与当前数据 figures/ 下 "
+                "csp_plot.svg、overlay_spectra.svg。",
             )
         else:
             InfoDialog.show_info(self, "人工处理", f"暂不支持该步骤的人工入口: {step_id}")

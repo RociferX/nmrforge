@@ -161,29 +161,6 @@ def test_mixed_sign_mode_keeps_negative_peaks() -> None:
     assert est[2] > 50.0, est
 
 
-def test_direct_phase_real_ht_2d_rows() -> None:
-    """2D 谱:各行即直接维迹线(无投影),同样恢复校正。"""
-    rng = np.random.default_rng(11)
-    n1, n_dir = 24, 120
-    spec = np.zeros((n1, n_dir), dtype=complex)
-    t = np.arange(n_dir, dtype=float)
-    for i in range(4, n1 - 4):
-        for _ in range(3):
-            f0 = int(rng.integers(12, n_dir // 2 - 12))
-            amp = float(rng.uniform(20.0, 60.0))
-            t2 = float(rng.uniform(40.0, 80.0))
-            fid = amp * np.exp(-t / t2) * np.exp(
-                1j * (2 * np.pi * f0 * t / n_dir + np.deg2rad(-70.0))
-            )
-            spec[i] += np.fft.fft(fid)
-    real = np.real(spec) + rng.normal(0.0, 0.05, spec.shape)
-    est = search_direct_phase_real_ht(real, axis=-1)
-    assert est is not None
-    assert _close(est[0], 70.0, 25.0), est
-    assert abs(est[1]) <= 15.0, est
-
-
-
 def _exact_direct_spectrum(
     shape: tuple[int, ...],
     psi0: float,

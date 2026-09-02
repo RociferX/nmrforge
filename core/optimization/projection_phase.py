@@ -18,11 +18,8 @@ from collections.abc import Callable
 import numpy as np
 
 from core.optimization.phase_consensus import (
-    _lock_trace_peaks,
-    _row_p0_raw,
     search_axis_phase_consensus,
 )
-from core.optimization.phase_search import _row_p1_fit
 
 
 def projected_traces(

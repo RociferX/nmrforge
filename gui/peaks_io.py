@@ -30,12 +30,12 @@ from core.peaks.peak_table import (
 
 
 def load_peaks(path: Path | str) -> list[dict[str, Any]]:
-    """读取峰表 CSV(core.peaks 实现)。"""
+    """读取峰表(.list 优先,Poky;旧 CSV 兼容;core.peaks 实现)。"""
     return list(core_load(path))
 
 
 def save_peaks(path: Path | str, peaks: list[dict[str, Any]]) -> Path:
-    """写回峰表 CSV(core.peaks 实现)。"""
+    """写回峰表文件(.list/Poky;core.peaks 实现)。"""
     return Path(core_save(path, peaks))
 
 
