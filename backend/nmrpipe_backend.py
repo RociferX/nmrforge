@@ -39,6 +39,7 @@ from backend.config import (
     resolve_nthread,
     resolve_points_per_line,
 )
+from backend.memory_disk import INTERMEDIATE_SUBDIR
 from backend.nmrpipe_finder import find_nmrpipe_bin, find_tool
 from backend.runtime import CshRuntime, cancel_requested
 from backend.script_generator import (
@@ -1267,7 +1268,14 @@ class NMRPipeBackend:
                     "logs": [],
                 }
         out_ext = "ft3" if experiment.ndim >= 3 else "ft2"
+        # 0.2.199-补29ez:显式 out_file = 中间渲染(预览/joint/候选),统一写入
+        # work/_intermediate;终跑默认名保持原位。
+        _render_out = out_file not in (None, "")
         out_file = out_file or f"{experiment.dataset_id}.{out_ext}"
+        if _render_out:
+            _render_dir = work / INTERMEDIATE_SUBDIR
+            _render_dir.mkdir(parents=True, exist_ok=True)
+            out_file = f"{INTERMEDIATE_SUBDIR}/{out_file}"
         zf_params = dict(params or {})
         zf_plan = zero_fill_plan(
             experiment,
@@ -2746,7 +2754,14 @@ class NMRPipeBackend:
         logs: list[str] = []
         ext = "ft3" if experiment.ndim >= 3 else "ft2"
         in_file = in_file or f"{experiment.dataset_id}.fid"
+        # 0.2.199-补29ez:显式 out_file = 中间渲染(预览/joint/候选),统一写入
+        # work/_intermediate(可被内存盘接管);终跑默认名保持原位。
+        _render_out = out_file not in (None, "")
         out_file = out_file or f"{experiment.dataset_id}.{ext}"
+        if _render_out:
+            _render_dir = work / INTERMEDIATE_SUBDIR
+            _render_dir.mkdir(parents=True, exist_ok=True)
+            out_file = f"{INTERMEDIATE_SUBDIR}/{out_file}"
         if preview_axis:
             script = generate_preview_script(
                 experiment,

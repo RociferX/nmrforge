@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import shutil
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -16,6 +17,7 @@ from typing import Any
 
 import numpy as np
 
+from backend.memory_disk import INTERMEDIATE_SUBDIR
 from backend.runtime import cancel_requested
 from core.data.internal_data_model import Experiment, SamplingMode
 from core.planning.method_selector import select_method
@@ -254,6 +256,11 @@ def _cleanup_unified_intermediates(
     """
     if not work.is_dir():
         return
+    # 0.2.199-补29ez:中间产物统一在 work/_intermediate(磁盘模式整目录清理;
+    # 内存盘模式为符号链接,由 generate_spectrum 结束拆除)
+    _intermediate = work / INTERMEDIATE_SUBDIR
+    if _intermediate.is_dir() and not _intermediate.is_symlink():
+        shutil.rmtree(_intermediate, ignore_errors=True)
     exts = (".com", ".ft2", ".ft3", ".fdf")
     for base_pattern in (
         f"{dataset_id}_preview_*",
@@ -270,7 +277,6 @@ def _cleanup_unified_intermediates(
                     p.unlink(missing_ok=True)
                 except OSError:
                     pass
-    import shutil
 
     for _dir in ("nus3d_1", "nus3d_rc", "nus3d_rc_ph", "nus2d"):
         _target = work / _dir

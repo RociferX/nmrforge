@@ -1,5 +1,24 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29ez(2026-09-02,中间产物收进 process/_intermediate,内存盘只接管该子目录)
+
+用户方案:把中间产物统一放到 process/ 的子文件夹,内存盘只接管它,其它一律
+保持原逻辑。替代补29ey/补29ey-修 的「整个工作目录临时迁内存+预置/同步」
+实现(功能意图保留,机制按本方案重做)。
+实现:
+- 中间渲染(显式 out_file 的预览/joint/候选/finalize 预览)统一写入
+  work/_intermediate(backend.process/finalize_nus 内部加前缀;终跑默认名
+  保持原位,reconstruct_nus 不动);
+- phase_routes 清理:磁盘模式整目录删除 work/_intermediate(符号链接跳过,
+  由 generate_spectrum 结束拆除);
+- generate_spectrum:准备/拆除 work/_intermediate——内存余量充足时该子目录
+  符号链接到内存盘(/dev/shm 或配置路径),否则真实目录;结束删除子目录与
+  内存目录;work_dir 本身仍是数据 process 目录(原逻辑);
+- backend/memory_disk.py 重写:select_memory_dir / prepare_intermediate /
+  teardown_intermediate;
+- 工作目录其余内容(fid/nuslist/phase.json/脚本/终谱归属)一律原逻辑在磁盘;
+- 测试重写(+子目录/符号链接/回退);全量 pytest 全绿,ruff 通过。
+
 ## 0.2.199-补29ey-修(2026-09-02,内存盘持久安全版)
 
 用户:不会造成奇怪的问题吧——复核发现第一版把整个工作目录(含 fid/、nuslist、

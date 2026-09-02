@@ -1,30 +1,22 @@
-"""中间谱内存盘自适应放置(0.2.199-补29ey,补29ey-修 持久安全版)。
+"""中间谱内存盘自适应放置(0.2.199-补29ey,用户方案 0.2.199-补29ez)。
 
-处理流程的工作目录同时承载两类内容:
-- 持久产物:fid/、merged/、seg_001/、nuslist、phase.json、*.com 脚本、
-  smile.log——跨步骤/跨运行需要保留(人工重跑/相位缓存/重新优化),必须
-  始终在磁盘(数据 process 目录);
-- 中间谱:preview/joint/候选评分谱、SMILE 重构平面、终谱(写后即移动到
-  spectra/)——用完即删,可放内存盘。
+把中间产物统一收进工作目录(process/)下的 _intermediate 子目录,内存盘只
+接管这一个子目录;工作目录其它内容(fid/、nuslist、phase.json、脚本、终谱
+归属)一律保持原逻辑、始终在磁盘。
 
-本实现:工作目录主体仍在磁盘;内存余量充足时,把「运行期渲染工作区」放到
-内存盘——每次运行:从磁盘持久目录预置持久产物 → 渲染(中间谱在内存) →
-把持久产物同步回磁盘 → 删除内存盘目录。重启/崩溃最多丢失当次未同步的
-脚本/相位缓存(重跑即可),fid/ 等原始派生物始终在磁盘,不会出现
-「找不到脚本/fid」的奇怪问题。
-
-- 配置 processing.intermediate_memory:auto(默认)=内存充足时启用;off=关闭;
-- 配置 processing.memory_disk_path:可选显式内存盘路径(Windows 无标准
-  tmpfs,自建 RAM 盘后在此指定;默认 Linux 用 /dev/shm);
-- 判据:中间谱峰值 ×2 + 持久产物 ≤ 系统可用内存,且 峰值 ×1.2 + 持久产物
-  ≤ 内存盘剩余,且峰值 ≥32MB;任一不满足回退磁盘。
+- process/_intermediate 落盘(默认)或符号链接到内存盘(Linux /dev/shm,
+  显式配置 processing.memory_disk_path 可覆盖;Windows 无标准 tmpfs,
+  自建 RAM 盘后指定路径);
+- 判据:中间谱峰值 ×2 ≤ 系统可用内存,且 峰值 ×1.2 ≤ 内存盘剩余,且峰值
+  ≥32MB;任一不满足回退磁盘(_intermediate 为真实目录);
+- 结束由调用方 teardown:删除 _intermediate(符号链接则只删链接)与内存目录。
 """
 
 from __future__ import annotations
 
-import hashlib
 import os
 import shutil
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -38,10 +30,8 @@ BYTES_PER_POINT = 8  # 复 float32
 NUS_PEAK_FACTOR = 3  # SMILE 重构平面 + 终谱 + 预览
 UNIFORM_PEAK_FACTOR = 2
 
-# 工作目录中需要跨运行保留的产物(其余为可再生成中间谱)
-PERSISTENT_DIRS = ("fid", "merged", "seg_001")
-PERSISTENT_FILES = ("nuslist", "phase.json", "smile.log")
-PERSISTENT_GLOBS = ("*.com",)
+# 中间产物统一子目录(位于工作目录下;可符号链接到内存盘)
+INTERMEDIATE_SUBDIR = "_intermediate"
 
 
 def intermediate_memory_policy(config: dict[str, Any] | None = None) -> str:
@@ -136,76 +126,10 @@ def estimate_intermediate_peak(experiment: Any) -> int | None:
         return None
 
 
-def _persistent_paths(directory: Path) -> list[Path]:
-    """工作目录中需要跨运行保留的路径(目录 + 文件 glob)。"""
-    paths: list[Path] = []
-    for name in PERSISTENT_DIRS:
-        p = directory / name
-        if p.is_dir():
-            paths.append(p)
-    for name in PERSISTENT_FILES:
-        p = directory / name
-        if p.is_file():
-            paths.append(p)
-    for pattern in PERSISTENT_GLOBS:
-        paths.extend(sorted(directory.glob(pattern)))
-    return paths
-
-
-def persistent_usage(directory: Path) -> int:
-    """工作目录中持久产物总字节数(用于内存盘容量/内存余量判断)。"""
-    total = 0
-    for path in _persistent_paths(directory):
-        if path.is_dir():
-            for p in path.rglob("*"):
-                if p.is_file():
-                    try:
-                        total += p.stat().st_size
-                    except OSError:
-                        pass
-        elif path.is_file():
-            try:
-                total += path.stat().st_size
-            except OSError:
-                pass
-    return total
-
-
-def _copy_persistent(src: Path, dst: Path) -> None:
-    """把 src 的持久产物复制到 dst(覆盖;目录合并)。"""
-    for name in PERSISTENT_DIRS:
-        p = src / name
-        if p.is_dir():
-            shutil.copytree(p, dst / name, dirs_exist_ok=True)
-    for name in PERSISTENT_FILES:
-        p = src / name
-        if p.is_file():
-            shutil.copy2(p, dst / name)
-    for pattern in PERSISTENT_GLOBS:
-        for p in sorted(src.glob(pattern)):
-            shutil.copy2(p, dst / p.name)
-
-
-def seed_persistent(persistent_dir: Path, mem_dir: Path) -> None:
-    """运行前:把磁盘持久产物预置到内存盘工作目录。"""
-    _copy_persistent(persistent_dir, mem_dir)
-
-
-def sync_persistent(mem_dir: Path, persistent_dir: Path) -> None:
-    """运行后:把内存盘工作目录中的持久产物同步回磁盘。"""
-    _copy_persistent(mem_dir, persistent_dir)
-
-
-def memory_work_dir(
-    persistent_dir: Path,
-    experiment: Any,
-    config: dict[str, Any] | None = None,
+def select_memory_dir(
+    experiment: Any, config: dict[str, Any] | None = None
 ) -> Path | None:
-    """自适应选择内存盘工作目录;任一条件不满足返回 None(用磁盘)。
-
-    返回的目录不存在(调用方负责 mkdir 并预置/同步/清理);目录名按持久
-    目录路径哈希稳定,重启后残留由下次运行清理。
-    """
+    """内存充足时在内存盘建一个临时目录;任一条件不满足返回 None。"""
     if intermediate_memory_policy(config) == "off":
         return None
     root = memory_disk_path(config)
@@ -214,31 +138,71 @@ def memory_work_dir(
     peak = estimate_intermediate_peak(experiment)
     if peak is None or peak < MIN_PEAK_BYTES:
         return None
-    persistent_bytes = persistent_usage(persistent_dir)
-    required_disk = int(peak * DISK_SAFETY_FACTOR) + persistent_bytes
-    required_sys = int(peak * SYSTEM_SAFETY_FACTOR) + persistent_bytes
     try:
         free = shutil.disk_usage(root).free
     except OSError:
         return None
     avail = system_available_bytes()
-    if avail is not None and avail < required_sys:
+    if avail is not None and avail < int(peak * SYSTEM_SAFETY_FACTOR):
         return None
-    if free < required_disk:
+    if free < int(peak * DISK_SAFETY_FACTOR):
         return None
-    digest = hashlib.sha1(
-        str(persistent_dir.resolve()).encode("utf-8")
-    ).hexdigest()[:12]
-    return root / f"nmrforge-{digest}"
+    try:
+        return Path(tempfile.mkdtemp(prefix="nmrforge-mem-", dir=str(root)))
+    except OSError:
+        return None
+
+
+def _remove_link_or_dir(path: Path) -> None:
+    """删除符号链接(仅链接本身)或真实目录(整树)。"""
+    if path.is_symlink():
+        try:
+            path.unlink()
+        except OSError:
+            pass
+    elif path.is_dir():
+        shutil.rmtree(path, ignore_errors=True)
+
+
+def prepare_intermediate(
+    work: Path,
+    experiment: Any,
+    config: dict[str, Any] | None = None,
+) -> tuple[Path, Path | None]:
+    """把 work/_intermediate 建好;内存充足时改为指向内存盘的符号链接。
+
+    返回 (intermediate_root, memory_dir 或 None);调用方结束须
+    teardown_intermediate(work, memory_dir)。符号链接失败自动回退真实目录。
+    """
+    root = work / INTERMEDIATE_SUBDIR
+    _remove_link_or_dir(root)
+    mem = select_memory_dir(experiment, config)
+    if mem is not None:
+        try:
+            root.symlink_to(mem, target_is_directory=True)
+            return root, mem
+        except OSError:
+            _remove_link_or_dir(root)
+            mem = None
+    root.mkdir(parents=True, exist_ok=True)
+    return root, None
+
+
+def teardown_intermediate(work: Path, memory_dir: Path | None) -> None:
+    """运行结束:删除 _intermediate(符号链接只删链接)与内存目录。"""
+    root = work / INTERMEDIATE_SUBDIR
+    _remove_link_or_dir(root)
+    if memory_dir is not None:
+        shutil.rmtree(memory_dir, ignore_errors=True)
 
 
 __all__ = [
+    "INTERMEDIATE_SUBDIR",
     "estimate_intermediate_peak",
     "intermediate_memory_policy",
     "memory_disk_path",
-    "memory_work_dir",
-    "persistent_usage",
-    "seed_persistent",
-    "sync_persistent",
+    "prepare_intermediate",
+    "select_memory_dir",
     "system_available_bytes",
+    "teardown_intermediate",
 ]
