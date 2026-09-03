@@ -624,8 +624,11 @@ def search_axis_memory(
                 pair_scores.append(
                     (_pair_arbiter_score(real_rows, trace_positions), cand)
                 )
+            # 补29fo-修2:pair 分先四舍五入到 0.01 再比,同分按净分——
+            # 大谱 pair 常全接近 100,浮点尾差会让 355° 意外压过 0°
             best_pair, pair_best_cand = max(
-                pair_scores, key=lambda item: (item[0], scored[item[1]])
+                pair_scores,
+                key=lambda item: (round(item[0], 2), scored[item[1]]),
             )
             if pair_best_cand != best_phase:
                 logs.append(
