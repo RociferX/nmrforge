@@ -145,9 +145,6 @@ def test_main_window_manual_flows(
 
     window._open_manual_dialog("peaks")
     assert any("峰表" in message for message in messages)
-
-    window._open_manual_dialog("analysis")
-    assert any("分析" in message for message in messages)
     window.close()
 
 

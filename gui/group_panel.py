@@ -4,7 +4,7 @@
 - 按参考数据处理整组:选择实验内已运行过谱图的数据,取其最近成功谱图
   运行的有效参数应用到组内每个数据(可截止到 pipeline 某一步);
 - 依次优化组内数据:对组内每个数据依次执行完整自动处理流程
-  (fid → spectrum[统一自动优化] → peaks → analysis)。
+  (fid → spectrum[统一自动优化] → peaks;analysis 已隐藏,2026-09-03)。
 
 实际执行由 main_window 起后台线程调 ProcessingController.run_group_batch
 (workflow.batch.run_batch),本面板只负责参数选择与信号发出。
@@ -28,7 +28,7 @@ STOP_STEP_OPTIONS: list[tuple[str, str]] = [
     ("fid", "生成 FID"),
     ("spectrum", "生成谱图"),
     ("peaks", "峰挑选"),
-    ("analysis", "分析"),
+    # ("analysis", "分析"),  # hidden from GUI (2026-09-03)
 ]
 
 
@@ -102,7 +102,7 @@ class GroupBatchPanel(QWidget):
         opt_layout = QVBoxLayout(opt_box)
         opt_hint = QLabel(
             "对组内每个数据依次执行完整自动处理流程(FID → 谱图[统一自动优化]"
-            " → 峰挑选 → 分析),单数据失败不中断整组。"
+            " → 峰挑选),单数据失败不中断整组。"
         )
         opt_hint.setWordWrap(True)
         opt_hint.setStyleSheet("color: #666;")
@@ -178,7 +178,7 @@ class GroupBatchPanel(QWidget):
     def _stop_steps(self) -> list[str]:
         """截止步骤对应的 BATCH_STEPS 前缀子集(fid 起)。"""
         value = STOP_STEP_OPTIONS[self.stop_combo.currentIndex()][0]
-        order = ("fid", "spectrum", "peaks", "analysis")
+        order = ("fid", "spectrum", "peaks")
         return list(order[: order.index(value) + 1])
 
     def _on_run_reference(self) -> None:
@@ -192,7 +192,7 @@ class GroupBatchPanel(QWidget):
         )
 
     def _on_run_optimize(self) -> None:
-        steps = ["fid", "spectrum", "peaks", "analysis"]
+        steps = ["fid", "spectrum", "peaks"]
         self.run_group_batch_requested.emit(
             self._exp_id, self._group_id, steps, ""
         )

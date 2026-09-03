@@ -127,7 +127,7 @@ def test_pipeline_buttons_gated_by_prerequisites(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """0.2.163-补14:前置步骤未完成(LOCKED)时,后续步骤(生成谱图/
-    峰挑选/分析)不提供运行/人工按钮,程序化运行入口也被拒绝。"""
+    峰挑选)不提供运行/人工按钮,程序化运行入口也被拒绝。"""
     from gui.main_window import MainWindow
     from gui.pipeline_state import record_step_success
 
@@ -144,8 +144,8 @@ def test_pipeline_buttons_gated_by_prerequisites(
     pipeline.set_selection("data", exp_id, data_id)
     rows = pipeline._rows
     # 窗口未 show,用 isHidden 反映 setVisible 的显隐状态
-    # fid 未生成:spectrum/peaks/analysis 全部 LOCKED → 无运行/人工按钮
-    for sid in ("spectrum", "peaks", "analysis"):
+    # fid 未生成:spectrum/peaks 全部 LOCKED → 无运行/人工按钮
+    for sid in ("spectrum", "peaks"):
         assert rows[sid].manual_button.isHidden(), sid
         assert rows[sid].run_button.isHidden(), sid
     # 0.2.199-补29dm:fid 未自动处理(READY)时人工按钮隐藏
@@ -170,7 +170,7 @@ def test_pipeline_buttons_gated_by_prerequisites(
             assert not rows[sid].manual_button.isHidden(), sid
         assert not rows[sid].run_button.isHidden(), sid
 
-    # 生成 FID → spectrum READY;peaks/analysis 仍 LOCKED
+    # 生成 FID → spectrum READY;peaks 仍 LOCKED
     fid = manager.data_dir(exp_id, data_id, "process") / f"{data_id}.fid"
     fid.parent.mkdir(parents=True, exist_ok=True)
     fid.write_bytes(b"fid")
@@ -183,9 +183,8 @@ def test_pipeline_buttons_gated_by_prerequisites(
     assert not rows["spectrum"].manual_button.isHidden()
     assert not rows["spectrum"].run_button.isHidden()
     assert rows["peaks"].manual_button.isHidden()
-    assert rows["analysis"].manual_button.isHidden()
 
-    # 生成谱图 → peaks READY;analysis 仍 LOCKED
+    # 生成谱图 → peaks READY
     spectra = manager.data_dir(exp_id, data_id, "spectra")
     spectra.mkdir(parents=True, exist_ok=True)
     spec = spectra / f"{data_id}.ft2"
@@ -194,13 +193,14 @@ def test_pipeline_buttons_gated_by_prerequisites(
     record_step_success(manager, exp_id, data_id, "spectrum")
     _ready("peaks", spec)
 
-    # 峰表 → analysis READY
+    # 峰表 → peaks 完成(流程止于峰挑选,analysis 已隐藏)
     peaks = manager.data_dir(exp_id, data_id, "peaks")
     peaks.mkdir(parents=True, exist_ok=True)
     peaks_list = peaks / f"{exp_id}-{data_id}.list"
     peaks_list.write_text("", encoding="utf-8")
     record_step_success(manager, exp_id, data_id, "peaks")
-    _ready("analysis", peaks_list)
+    pipeline.refresh()
+    assert "全部步骤已完成" in pipeline.next_label.text()
     window.close()
 
 

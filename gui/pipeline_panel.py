@@ -2,7 +2,8 @@
 
 六步流程(契约 v1.2 / G2B-002,含可选 SMILE 优化):
 导入样品数据 → 生成 FID → 生成谱图(含 SMILE 重构)→ [SMILE 优化,可选] →
-峰挑选 → 分析。
+峰挑选。分析(HSQC CSP)步骤按用户要求暂时隐藏,代码保留(恢复见
+VISIBLE_PIPELINE_STEPS 注释)。
 
 - 步骤状态依据前置依赖与产物文件推断(LOCKED/READY/RUNNING/SUCCESS/FAILED);
 - READY 步骤提供「运行」按钮,经 ProcessingController 对应方法执行;
@@ -54,7 +55,20 @@ PIPELINE_STEPS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ("analysis", "分析", "峰归属与结果分析", ("peaks",)),
 )
 
-STEP_LABEL: dict[str, str] = {step_id: label for step_id, label, _, _ in PIPELINE_STEPS}
+# 2026-09-03 user: analysis step hidden from GUI.  Full table kept for
+# backend/restore; GUI and status machine consume VISIBLE_PIPELINE_STEPS.
+_HIDDEN_GUI_STEPS = ("analysis",)
+VISIBLE_PIPELINE_STEPS = tuple(
+    s for s in PIPELINE_STEPS if s[0] not in _HIDDEN_GUI_STEPS
+)
+
+def _visible_pipeline_steps():
+    return VISIBLE_PIPELINE_STEPS
+
+STEP_LABEL: dict[str, str] = {
+    step_id: label
+    for step_id, label, _, _ in _visible_pipeline_steps()
+}
 
 STATUS_TEXT = {
     "LOCKED": "未就绪",
@@ -79,7 +93,7 @@ STEP_METHOD: dict[str, str] = {
     "spectrum": "generate_spectrum",
     "smile": "optimize_smile",
     "peaks": "pick_peaks",
-    "analysis": "analyze",
+    # "analysis": "analyze",  # hidden from GUI (2026-09-03)
 }
 
 
@@ -228,7 +242,7 @@ def _node_step_statuses(
     state = load_pipeline_state(manager, exp_id, data_id)
     simple_mode = _pipeline_flags()
     statuses: dict[str, str] = {}
-    for step_id, _, _, deps in PIPELINE_STEPS:
+    for step_id, _, _, deps in _visible_pipeline_steps():
         artifact = (
             None if step_id == 'smile' else artifacts.get(step_id)
         )
@@ -290,7 +304,7 @@ def _node_step_statuses(
             statuses[step_id] = 'LOCKED'
     # 上游 OUTDATED 传播:下游即使指纹匹配也视为过期(开关关闭时不传播)
     if not simple_mode:
-        for step_id, _, _, deps in PIPELINE_STEPS:
+        for step_id, _, _, deps in _visible_pipeline_steps():
             if statuses.get(step_id) == 'SUCCESS' and any(
                 statuses.get(dep) == 'OUTDATED' for dep in deps
             ):
@@ -305,10 +319,10 @@ def compute_step_statuses(manager: ProjectManager, exp_id: str) -> dict[str, str
     """
     nodes = _data_nodes(manager, exp_id)
     if not nodes:
-        return {step_id: 'LOCKED' for step_id, _, _, _ in PIPELINE_STEPS}
+        return {step_id: 'LOCKED' for step_id, _, _, _ in _visible_pipeline_steps()}
     per_node = [_node_step_statuses(manager, exp_id, node) for node in nodes]
     statuses: dict[str, str] = {}
-    for step_id, _, _, deps in PIPELINE_STEPS:
+    for step_id, _, _, deps in _visible_pipeline_steps():
         verdicts = [node_status[step_id] for node_status in per_node]
         if 'OUTDATED' in verdicts:
             statuses[step_id] = 'OUTDATED'
@@ -345,7 +359,7 @@ def _outdated_reasons(
     nodes = _data_nodes(manager, exp_id)
     if data_id:
         nodes = [n for n in nodes if getattr(n, "id", "") == data_id]
-    for step_id, _, _, deps in PIPELINE_STEPS:
+    for step_id, _, _, deps in _visible_pipeline_steps():
         if statuses.get(step_id) != 'OUTDATED':
             continue
         reason = ''
@@ -384,7 +398,7 @@ def _outdated_reasons(
 def _lock_reasons(statuses: dict[str, str]) -> dict[str, str]:
     """为 LOCKED 步骤生成依赖提示(告诉用户缺哪个前置产物)。"""
     reasons: dict[str, str] = {}
-    for step_id, _, _, deps in PIPELINE_STEPS:
+    for step_id, _, _, deps in _visible_pipeline_steps():
         if statuses.get(step_id) != "LOCKED":
             continue
         missing = [STEP_LABEL[dep] for dep in deps if statuses.get(dep) != "SUCCESS"]
@@ -935,7 +949,7 @@ class PipelinePanel(QWidget):
         layout.addWidget(self.hint_bubble)
 
         steps_box = QVBoxLayout()
-        for step_id, label, description, _deps in PIPELINE_STEPS:
+        for step_id, label, description, _deps in _visible_pipeline_steps():
             row = PipelineStepRow(step_id, label, description)
             row.run_requested.connect(self._on_run_requested)
             row.rerun_final_requested.connect(self._on_rerun_final_requested)

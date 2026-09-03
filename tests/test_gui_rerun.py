@@ -92,7 +92,7 @@ def test_success_steps_show_reprocess_button(
     manager, exp_id, data_id = _manager_with_artifacts(tmp_path)
     panel = PipelinePanel(manager, _FakeController())
     panel.set_selection("data", exp_id, data_id)
-    for step_id in ("fid", "peaks", "analysis"):
+    for step_id in ("fid", "peaks"):
         assert panel._rows[step_id].run_button.text() == "重新处理"
         assert not panel._rows[step_id].run_button.isHidden()
     # 0.2.163-补5:spectrum 拆「重新优化」+「重新运行终脚本」
@@ -269,11 +269,11 @@ def test_rerun_final_applies_latest_ext(
 def test_reprocess_downstream_becomes_outdated(
     tmp_path: Path, qapp: QApplication
 ) -> None:
-    """重新处理谱图并登记指纹 → 下游峰挑选/分析标记过期。"""
+    """重新处理谱图并登记指纹 → 下游峰挑选标记过期。"""
     from gui.pipeline_state import record_step_success
 
     manager, exp_id, data_id = _manager_with_artifacts(tmp_path)
-    for step in ("fid", "spectrum", "peaks", "analysis"):
+    for step in ("fid", "spectrum", "peaks"):
         record_step_success(manager, exp_id, data_id, step)
     ft2 = manager.data_dir(exp_id, data_id, "spectra") / f"{exp_id}-{data_id}.ft2"
     ft2.write_bytes(b"ft2-v2")
@@ -282,5 +282,4 @@ def test_reprocess_downstream_becomes_outdated(
     panel.set_selection("data", exp_id, data_id)
     assert panel._rows["spectrum"].run_button.text() == "重新优化"
     assert panel._rows["peaks"].status_label.text().startswith("!")
-    assert panel._rows["analysis"].status_label.text().startswith("!")
     panel.close()

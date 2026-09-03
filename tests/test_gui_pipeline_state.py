@@ -57,7 +57,7 @@ def _manager_with_artifacts(tmp_path: Path):
 
 
 def _record_all(manager: ProjectManager, exp_id: str, data_id: str) -> None:
-    for step in ("fid", "spectrum", "smile", "peaks", "analysis"):
+    for step in ("fid", "spectrum", "smile", "peaks"):
         record_step_success(manager, exp_id, data_id, step)
 
 
@@ -136,14 +136,14 @@ def test_statuses_success_without_state(
     """旧数据(无指纹状态):产物存在即 SUCCESS,不误判 OUTDATED。"""
     manager, exp_id, _data_id, _artifacts = _manager_with_artifacts(tmp_path)
     statuses = compute_step_statuses(manager, exp_id)
-    for step in ("fid", "spectrum", "peaks", "analysis"):
+    for step in ("fid", "spectrum", "peaks"):
         assert statuses[step] == "SUCCESS"
 
 
 def test_upstream_regen_marks_downstream_outdated(
     tmp_path: Path, qapp: QApplication
 ) -> None:
-    """重新运行生成谱图并登记 → 峰挑选/分析变为 OUTDATED(指纹校验)。"""
+    """重新运行生成谱图并登记 → 峰挑选变为 OUTDATED(指纹校验)。"""
     manager, exp_id, data_id, artifacts = _manager_with_artifacts(tmp_path)
     _record_all(manager, exp_id, data_id)
     statuses = compute_step_statuses(manager, exp_id)
@@ -155,9 +155,8 @@ def test_upstream_regen_marks_downstream_outdated(
     assert statuses["fid"] == "SUCCESS"
     assert statuses["spectrum"] == "SUCCESS"
     assert statuses["peaks"] == "OUTDATED"
-    assert statuses["analysis"] == "OUTDATED"
 
-    # 重新挑峰(峰表内容更新)并登记 → 分析仍 OUTDATED
+    # 重新挑峰(峰表内容更新)并登记 → peaks 恢复 SUCCESS
     artifacts["csv"].write_text(
         "Peak_ID,H_shift,N_shift,Intensity,SN,label\n"
         "1,8.0,115.0,100,20,G1\n2,7.5,118.0,80,15,A2\n",
@@ -166,7 +165,6 @@ def test_upstream_regen_marks_downstream_outdated(
     record_step_success(manager, exp_id, data_id, "peaks")
     statuses = compute_step_statuses(manager, exp_id)
     assert statuses["peaks"] == "SUCCESS"
-    assert statuses["analysis"] == "OUTDATED"
 
 
 def test_raw_change_marks_fid_outdated_and_propagates(
@@ -181,7 +179,6 @@ def test_raw_change_marks_fid_outdated_and_propagates(
     assert statuses["fid"] == "OUTDATED"
     assert statuses["spectrum"] == "OUTDATED"
     assert statuses["peaks"] == "OUTDATED"
-    assert statuses["analysis"] == "OUTDATED"
 
 
 def test_segmented_merged_fid_directory_counts_as_done(
@@ -235,7 +232,6 @@ def test_mtime_fallback_without_state(
     statuses = compute_step_statuses(manager, exp_id)
     assert statuses["spectrum"] == "SUCCESS"
     assert statuses["peaks"] == "OUTDATED"
-    assert statuses["analysis"] == "OUTDATED"
 
 
 def test_panel_shows_outdated_and_rerun_button(
@@ -257,7 +253,7 @@ def test_panel_shows_outdated_and_rerun_button(
 
 
 def test_save_peaks_manual_records_state(tmp_path: Path) -> None:
-    """人工保存峰表后登记 peaks 指纹(下游分析可判 OUTDATED)。"""
+    """人工保存峰表后登记 peaks 指纹。"""
     from gui.processing import ProcessingController
 
     manager, exp_id, data_id, _artifacts = _manager_with_artifacts(tmp_path)
@@ -292,7 +288,7 @@ def test_next_label_skips_optional_smile(tmp_path: Path, qapp: QApplication) -> 
     from gui.pipeline_state import record_step_success
 
     manager, exp_id, data_id, _ft2 = _manager_with_artifacts(tmp_path)
-    # 移除峰表/报告,使 peaks/analysis 保持 READY/LOCKED(夹具默认全套产物)
+    # 移除峰表,使 peaks 保持 READY(夹具默认全套产物)
     for f in manager.data_dir(exp_id, data_id, "peaks").glob("*"):
         f.unlink()
     for f in manager.data_dir(exp_id, data_id, "report").glob("*"):

@@ -347,8 +347,9 @@ def test_auto_full_path(
     tmp_path: Path, bruker_dir: Path, monkeypatch: pytest.MonkeyPatch,
     dataset: str, exp_title: str,
 ) -> None:
-    """自动路径:导入 → 生成 FID → 生成谱图(unified,诊断+优化)→ 峰挑选 → 分析。"""
-    from workflow.analyze import analyze
+    """自动路径:导入 → 生成 FID → 生成谱图(unified,诊断+优化)→ 峰挑选。
+    分析步骤按用户要求从 GUI 隐藏(2026-09-03);workflow.analyze 由
+    test_analyze.py 独立覆盖。"""
     from workflow.pick_peaks import pick_peaks
     from workflow.stepwise import generate_fid, generate_spectrum
 
@@ -376,10 +377,8 @@ def test_auto_full_path(
 
     peaks = pick_peaks(manager, exp_id, data_id)
     assert peaks.get("status") == "success"
-    analysis = analyze(manager, exp_id, data_id)
-    assert analysis.get("status") in ("success", "pending")
     assert any(
-        r.workflow_ref in ("analyze", "pick_peaks") and r.status == "success"
+        r.workflow_ref == "pick_peaks" and r.status == "success"
         for r in manager.project.workflow_runs
     )
 

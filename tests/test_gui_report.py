@@ -1,4 +1,5 @@
-"""报告页测试:ReportPanel 产物扫描/内嵌预览 + Pipeline analysis 状态由报告驱动(offscreen)。"""
+"""报告页测试:ReportPanel 产物扫描/内嵌预览(offscreen)。
+analysis 步骤已从 GUI 隐藏(2026-09-03),相关状态断言移除。"""
 
 from __future__ import annotations
 
@@ -13,7 +14,6 @@ from PyQt6.QtWidgets import QApplication
 from core.project import ProjectManager
 from gui.center_panel import CenterPanel
 from gui.main_window import MainWindow
-from gui.pipeline_panel import PipelinePanel, compute_step_statuses
 from gui.report_panel import ReportPanel, report_products
 
 
@@ -99,35 +99,6 @@ def test_report_panel_lists_and_previews_html(
     assert "报告内容" in panel.preview.toHtml()
     assert panel.open_button.isEnabled()
     assert panel.current_report_path() == report_dir / "report.html"
-    panel.close()
-
-
-def test_analysis_status_driven_by_report_products(
-    tmp_path: Path, qapp: QApplication
-) -> None:
-    """Pipeline analysis 状态由 report 产物驱动(产物存在 → SUCCESS)。"""
-    manager = _manager(tmp_path)
-    statuses = compute_step_statuses(manager, "exp_001")
-    assert statuses["analysis"] == "LOCKED"  # 无报告产物
-
-    report_dir = manager.data_dir("exp_001", "d_001", "report")
-    report_dir.mkdir(parents=True, exist_ok=True)
-    (report_dir / "report.json").write_text('{"qc": "ok"}', encoding="utf-8")
-    statuses = compute_step_statuses(manager, "exp_001")
-    assert statuses["analysis"] == "SUCCESS"
-
-
-def test_pipeline_report_button_on_analysis_success(
-    tmp_path: Path, qapp: QApplication
-) -> None:
-    """分析成功(报告存在)时 Pipeline 显示「报告」按钮。"""
-    manager = _manager(tmp_path)
-    report_dir = manager.data_dir("exp_001", "d_001", "report")
-    report_dir.mkdir(parents=True, exist_ok=True)
-    (report_dir / "report.json").write_text("{}", encoding="utf-8")
-    panel = PipelinePanel(manager)
-    panel.set_selection("data", "exp_001", "d_001")
-    assert not panel._rows["analysis"].report_button.isHidden()
     panel.close()
 
 

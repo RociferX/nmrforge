@@ -397,7 +397,7 @@ def test_pipeline_status_registered(tmp_path: Path, qapp: QApplication) -> None:
     manager = _manager_with_experiment(tmp_path)
     statuses = compute_step_statuses(manager, "exp_001")
     assert statuses["fid"] == "READY"
-    for step_id in ("spectrum", "peaks", "analysis"):
+    for step_id in ("spectrum", "peaks"):
         assert statuses[step_id] == "LOCKED"
 
 
@@ -415,7 +415,6 @@ def test_pipeline_status_after_spectrum(tmp_path: Path, qapp: QApplication) -> N
     assert statuses["fid"] == "SUCCESS"
     assert statuses["spectrum"] == "SUCCESS"
     assert statuses["peaks"] == "READY"
-    assert statuses["analysis"] == "LOCKED"
 
 
 def test_pipeline_fid_unlocks_spectrum(
@@ -637,9 +636,6 @@ def test_analysis_ref_candidates_filters(tmp_path: Path, qapp: QApplication) -> 
     assert ref.id in ids
     assert cur.id not in ids
     assert other.id not in ids
-    # 分析行有参考谱按钮
-    row = panel._rows["analysis"]
-    assert not row.analysis_ref_button.isHidden()
 
 
 def test_main_window_has_app_icon(
@@ -1225,7 +1221,6 @@ def test_pipeline_status_peaks_from_data_dir(
     statuses = compute_step_statuses(manager, "exp_001")
     assert statuses["spectrum"] == "SUCCESS"
     assert statuses["peaks"] == "SUCCESS"
-    assert statuses["analysis"] == "READY"
 
 
 def test_pipeline_peaks_step_runs_pick_peaks(
@@ -2138,7 +2133,7 @@ def test_spectrum_param_report_shows_diagnostics_details() -> None:
 def test_experiment_page_import_buttons(
     tmp_path: Path, qapp: QApplication
 ) -> None:
-    """0.2.162-补12:实验类型页(原导入块位置)含「导入数据」「数据组间分析」按钮与下拉。"""
+    """0.2.162-补12:实验类型页(原导入块位置)含「导入数据」按钮与下拉(「数据组间分析」已隐藏,2026-09-03)。"""
     from gui.main_window import MainWindow
 
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
@@ -2147,11 +2142,8 @@ def test_experiment_page_import_buttons(
     window = MainWindow(manager=manager)
     page = window.center_panel.experiment_page
     assert page.import_dropdown_button.text() == "导入数据"
-    assert page.group_analysis_button.text() == "数据组间分析"
     page._open_import_dropdown()
     assert page._import_dropdown is not None
-    page._open_group_analysis_dropdown()
-    assert page._group_analysis_dropdown is not None
     window.close()
 
 
@@ -2206,23 +2198,13 @@ def test_experiment_page_dropdown_not_covering_button(
     # 高度受限:不超过本页高度,且出现滚动区(内容过长时)
     assert drop.height() <= page.height()
     assert hasattr(drop, "_scroll") and drop._scroll.isVisible()
-    # 数据组间分析下拉同样不遮按钮
-    page._open_group_analysis_dropdown()
-    gdrop = page._group_analysis_dropdown
-    gbtn = page.group_analysis_button
-    gbtn_top = gbtn.mapTo(page, QPoint(0, 0)).y()
-    gbtn_bottom = gbtn.mapTo(page, QPoint(0, gbtn.height())).y()
-    covering_g = gdrop.pos().y() < gbtn_bottom and (
-        gdrop.pos().y() + gdrop.height() > gbtn_top
-    )
-    assert not covering_g
     window.close()
 
 
 def test_experiment_page_dropdown_switch(
     tmp_path: Path, qapp: QApplication
 ) -> None:
-    """0.2.162-补13:导入/组间分析下拉一次点击直接切换。"""
+    """0.2.162-补13:导入下拉开关行为(组间分析下拉已移除)。"""
     from gui.main_window import MainWindow
 
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
@@ -2254,14 +2236,6 @@ def test_experiment_page_dropdown_switch(
     )
     assert drop.pos().y() >= expected.y() - 1  # 在按钮下方
     assert drop.pos().y() + drop.height() <= page.height() + 1
-    # 点「数据组间分析」:一次调用即切换(导入关闭 + 组间分析打开)
-    page._open_group_analysis_dropdown()
-    assert not page._import_dropdown.isVisible()
-    assert page._group_analysis_dropdown.isVisible()
-    # 再点「导入数据」:切回
-    page._open_import_dropdown()
-    assert page._import_dropdown.isVisible()
-    assert not page._group_analysis_dropdown.isVisible()
     window.close()
 
 

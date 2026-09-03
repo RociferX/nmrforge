@@ -301,7 +301,7 @@ class _Ft2Backend(_FakeBackend):
 
 
 def test_run_batch_full_pipeline(tmp_path: Path, bruker_dir: Path) -> None:
-    """完整五步:import→fid→spectrum→peaks→analysis,逐数据成功。"""
+    """GUI 全流程(分析已隐藏):import→fid→spectrum→peaks,逐数据成功。"""
     manager, exp_id, data_ids = _manager_with_data(
         tmp_path, bruker_dir / "hsqc_2d", n=1
     )
@@ -310,7 +310,7 @@ def test_run_batch_full_pipeline(tmp_path: Path, bruker_dir: Path) -> None:
         manager,
         exp_id,
         data_ids,
-        ["import", "fid", "spectrum", "peaks", "analysis"],
+        ["import", "fid", "spectrum", "peaks"],
         backend,
         params={"phase_route": "none"},
     )
@@ -321,7 +321,7 @@ def test_run_batch_full_pipeline(tmp_path: Path, bruker_dir: Path) -> None:
     assert per["steps"]["peaks"]["peak_count"] >= 1
     peak_path = Path(per["steps"]["peaks"]["peak_path"])
     assert peak_path.parent == manager.data_dir(exp_id, data_ids[0], "peaks")
-    assert per["steps"]["analysis"]["status"] == "pending"
+    assert "analysis" not in per["steps"]
     assert any(r.workflow_ref == "pick_peaks" for r in manager.project.workflow_runs)
 
 

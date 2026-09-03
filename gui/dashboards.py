@@ -684,16 +684,11 @@ class ExperimentDashboard(QWidget):
         self.batch_add_button = self.import_panel.batch_add_button
         self.batch_clear_button = self.import_panel.batch_clear_button
         self.batch_import_button = self.import_panel.batch_import_button
-        # 0.2.162-补12:「导入数据」「数据组间分析」按钮(原导入块位置)
+        # 0.2.162-补12:「导入数据」按钮(原导入块位置);「数据组间分析」已隐藏(2026-09-03)
         action_row = QHBoxLayout()
         self.import_dropdown_button = QPushButton("导入数据")
         self.import_dropdown_button.clicked.connect(self._open_import_dropdown)
         action_row.addWidget(self.import_dropdown_button)
-        self.group_analysis_button = QPushButton("数据组间分析")
-        self.group_analysis_button.clicked.connect(
-            self._open_group_analysis_dropdown
-        )
-        action_row.addWidget(self.group_analysis_button)
         action_row.addStretch(1)
         layout.addLayout(action_row)
         self._import_dropdown = ImportDataDropdown(self)
@@ -706,7 +701,6 @@ class ExperimentDashboard(QWidget):
         self._import_dropdown.batch_import_requested.connect(
             self.batch_import_requested.emit
         )
-        self._group_analysis_dropdown = GroupAnalysisDropdown(self)
         layout.addStretch(1)
 
     def _open_import_dropdown(self) -> None:
@@ -715,20 +709,11 @@ class ExperimentDashboard(QWidget):
         下拉未打开 → 在按钮下方弹出;已打开 → 置顶聚焦(不重复 setParent,
         避免重复安装事件过滤器)。关闭通过点击外部(EventFilter)触发。
         """
-        self._group_analysis_dropdown.close()
         if self._import_dropdown.isVisible():
             self._import_dropdown.raise_()
             self._import_dropdown.activateWindow()
             return
         self._import_dropdown.open_below(self.import_dropdown_button, self._exp_id)
-
-    def _open_group_analysis_dropdown(self) -> None:
-        """实验页「数据组间分析」:占位下拉(0.2.162-补13)。"""
-        if self._group_analysis_dropdown.isVisible():
-            self._group_analysis_dropdown.close()
-            return
-        self._import_dropdown.close()
-        self._group_analysis_dropdown.open_below(self.group_analysis_button)
 
     def set_context(self, manager: ProjectManager, exp_id: str, label: str) -> None:
         self.manager = manager

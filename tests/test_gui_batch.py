@@ -443,18 +443,6 @@ def test_import_data_dropdown_panel(qapp: QApplication) -> None:
     dd.close()
 
 
-def test_group_analysis_dropdown_placeholder(qapp: QApplication) -> None:
-    """0.2.162-补11:数据组间分析下拉为占位。"""
-    from PyQt6.QtWidgets import QLabel
-
-    from gui.dashboards import GroupAnalysisDropdown
-
-    dd = GroupAnalysisDropdown()
-    labels = dd.findChildren(QLabel)
-    assert any("功能开发中" in label.text() for label in labels)
-    dd.close()
-
-
 def test_batch_import_no_group(tmp_path: Path, bruker_dir: Path) -> None:
     """0.2.162-补12:批量导入不成组 = 多个单次导入(不建数据组)。"""
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
