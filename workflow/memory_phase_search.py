@@ -27,6 +27,11 @@ PHASE_REPRODUCIBILITY_TOL = 10.0
 PHASE_PLATEAU_TOL = 1.0
 PHASE_SYMMETRY_TOL = 2.5
 
+# 0.2.199-补29fr(用户):仲裁只用「真峰」——谱中真正有价值的仲裁峰最多几百
+# 个;不再在整批锁定行(可上万条,多为噪声/伪特征)上凑剖面、硬算噪音。
+PAIR_ARBITER_MAX_PEAKS = 500
+PAIR_ARBITER_MIN_PEAKS = 10
+
 
 def _axis_traces(real: np.ndarray, axis: int) -> np.ndarray:
     """把谱沿 axis 展开为 (n_trace, axis_len),任意维度通用。"""
@@ -480,6 +485,87 @@ def _pair_arbiter_score(real_rows: np.ndarray, positions: list[int]) -> float:
     return float(100.0 * (1.0 - max(0.0, min(1.0, sim))))
 
 
+def _select_arbitration_peaks(
+    complex_rows: np.ndarray,
+    *,
+    max_peaks: int = PAIR_ARBITER_MAX_PEAKS,
+    min_peaks: int = PAIR_ARBITER_MIN_PEAKS,
+    window: int = 10,
+    prominence_min: float = 2.5,
+    edge_margin: int = 30,
+) -> tuple[np.ndarray, list[int]] | None:
+    """真峰级仲裁取行(0.2.199-补29fr,用户)。
+
+    谱中真正有价值的仲裁峰最多几百个;此前对整批锁定行(常上万条,多数是
+    噪声过零/振铃/色散尾巴/t1 噪声带)逐行找反号对,成对相关的判别被噪音
+    淹没(pair 分饱和≈100,30 vs 90 只剩 0.5 分残差,256 剖面抽样即抹平)。
+
+    本函数在锁定行的复型幅度(|·| 与候选相位无关)上找严格局部极大,再按
+    SNR/离散度(duty≤0.5)/显著性(prominence)过滤,取幅度最强 ≤max_peaks 条
+    真峰;返回 (rows, positions),行按峰重复(同一条迹线上 Cα/Cβ 等多个真峰
+    都保留)。真峰不足 min_peaks 或无法估计噪声时返回 None(调用方回退)。
+    """
+    rows = np.asarray(complex_rows, dtype=np.complex128)
+    n, length = rows.shape
+    if n < 3 or length < 2 * edge_margin + 2:
+        return None
+    # 噪声用抽样实部的稳健 MAD(锁定行首部角落常是信号区,直接 std 会被
+    # 抬高超阈值把真峰滤掉);实部噪声 ~ N(0, σ),1.4826·MAD → σ。
+    step = max(1, n // 2000)
+    sample = np.real(rows[::step]).ravel()
+    if sample.size > 2_000_000:
+        sample = sample[: 2_000_000]
+    med = float(np.median(sample))
+    noise_real = float(1.4826 * np.median(np.abs(sample - med)))
+    if noise_real <= 0.0 or not np.isfinite(noise_real):
+        return None
+    thr = max(noise_real * 5.0, 1e-12)
+    picked: list[tuple[int, int, float]] = []
+    block = 8192
+    for b0 in range(0, n, block):
+        blk = rows[b0 : b0 + block]
+        mag = np.abs(blk)
+        b, ll = mag.shape
+        if ll < 3:
+            continue
+        lm = (mag[:, 1:-1] > mag[:, :-2]) & (mag[:, 1:-1] > mag[:, 2:])
+        cand = np.argwhere(lm)  # (r_local, k), k ∈ [1, ll-2]
+        if cand.size == 0:
+            continue
+        ks = cand[:, 1]
+        keep_margin = (ks >= edge_margin) & (ks < ll - edge_margin)
+        cand = cand[keep_margin]
+        if cand.size == 0:
+            continue
+        rl = cand[:, 0]
+        ks = cand[:, 1]
+        pk = mag[rl, ks]
+        w = int(window)
+        cols = np.arange(-w, w + 1)[None, :]
+        seg = mag[rl[:, None], (ks[:, None] + cols).clip(0, ll - 1)]
+        half = 0.5 * pk
+        duty = np.mean(seg >= half[:, None], axis=1)
+        bg = np.percentile(seg, 25.0, axis=1)
+        prominence = pk / (bg + 1e-12)
+        good = (
+            (pk > thr)
+            & (duty <= 0.5)
+            & (prominence >= prominence_min)
+            & np.isfinite(pk)
+        )
+        for r0, k, val in zip((b0 + rl)[good], ks[good], pk[good]):
+            picked.append((int(r0), int(k), float(val)))
+    if len(picked) < min_peaks:
+        return None
+    picked.sort(key=lambda item: -item[2])
+    picked = picked[:max_peaks]
+    if len(picked) < min_peaks:
+        return None
+    ridx = np.asarray([r for r, _, _ in picked], dtype=int)
+    positions = [int(k) for _, k, _ in picked]
+    return rows[ridx], positions
+
+
 def search_axis_memory(
     complex_arr: np.ndarray,
     axis: int,
@@ -620,12 +706,20 @@ def search_axis_memory(
         )
         if (0.0, 0.0) in scored and (0.0, 0.0) not in candidates:
             candidates.append((0.0, 0.0))
+        # 0.2.199-补29fr(用户):平坦仲裁只取真峰(≤500,幅度局部极大+SNR+
+        # 离散度),不再对整批锁定行凑剖面/硬算噪音;真峰不足回退旧兜底。
+        arb_sel = None
         if len(candidates) >= 2:
+            arb_sel = _select_arbitration_peaks(locked_rows)
+            if arb_sel is not None:
+                logs.append(f"轴{axis}: 平坦仲裁峰 {len(arb_sel[1])} 条")
+        if arb_sel is not None:
+            arb_rows, arb_pos = arb_sel
             pair_scores: list[tuple[float, tuple[float, float]]] = []
             for cand in candidates:
-                real_rows = rotate_real(locked_rows, -1, cand[0], cand[1])
+                real_rows = rotate_real(arb_rows, -1, cand[0], cand[1])
                 pair_scores.append(
-                    (_pair_arbiter_score(real_rows, trace_positions), cand)
+                    (_pair_arbiter_score(real_rows, arb_pos), cand)
                 )
             # 补29fo-修2:pair 分先四舍五入到 0.01 再比,同分按净分——
             # 大谱 pair 常全接近 100,浮点尾差会让 355° 意外压过 0°
@@ -651,7 +745,7 @@ def search_axis_memory(
                     f"{best_phase}(pair={best_pair:.2f})"
                 )
         else:
-            # 候选不足(罕见):保留原平坦兜底(含零相位回退)
+            # 候选不足或真峰不足(补29fr):保留原平坦兜底(含零相位回退)
             zero_score = scored.get((0.0, 0.0))
             if coarse_best == (0.0, 0.0) and zero_score is not None:
                 best_phase = (0.0, 0.0)
