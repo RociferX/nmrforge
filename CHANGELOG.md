@@ -1,5 +1,29 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29fu(2026-09-03,总管接手审计:弃用代码统一归档+代码卫生)
+- 用户:开始前审阅所有代码,把以前任务弃用的代码放统一文件夹存档,让剩余
+  代码干净;同时检查 bug、矛盾、不符合要求的 GUI 显示;
+- 归档:新增 archive/deprecated/(README 说明来源与维护约定)——约 100 个
+  一次性 VM 排查/诊断脚本(vm_100_*/vm_101_*/vm_102_*/vm_check_*/
+  vm_verify_*/vm_proj_*/vm_ht_*/vm_direct_* 等)与 5 个就地补丁工具
+  (apply_cmp300/apply_pair_fix/apply_quad_fix/apply_verify_zf/
+  fix_p1_clamp)从 scripts/ git mv 至 archive/deprecated/scripts/,
+  全部保留 git 历史;受维护脚本(vm_test.sh、vm_sample_*、vm_validate_*
+  =9 个)留在 scripts/;
+- 代码卫生(gui/):processing.py 过时「占位实现」注释更正;main_window
+  _delete_data 不可达 getattr 防御分支删除(接口早已实装);
+  spectrum_panel 手动导入峰表后 viewer 与面板同源(补 Peak_ID/可信度后的
+  列表,修 import 后两处对象不一致);
+- 审计确认非问题的点:数据组间分析占位按钮为 0.2.162 用户要求的有意占位
+  (有测试锁定),组批量经树组节点/GroupBatchPanel 提供,本次保留;
+  joint_recheck_memory 与其测试按用户要求保留(不调用);
+  gui/peaks_io.py 为现行薄转发层(多处引用),保留;
+  core/experiments 为现行 presets 注册通道,非弃用;
+- 基线:本地全量 pytest 全绿(含 test_full_paths 四路径);ruff(改动文件)
+  通过;check_ownership --owner all 通过;VM 全量 848 passed/19 skipped;
+
+# 修改记录(历史条目)
+
 ## 0.2.199-补29ft(2026-09-03,r2 第二轮间接维优化必要性结论)
 - 对照(门控基线,phase_r2=False,VM):sampleH F1=107.5(有 r2 参考
   87.5,差 20°);sampleI F1=105(有 r2 90,差 15°,即补29dn 历史上依赖
