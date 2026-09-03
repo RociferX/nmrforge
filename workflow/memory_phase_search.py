@@ -444,6 +444,12 @@ def _pair_similarity(real_rows: np.ndarray, positions: list[int]) -> float | Non
     profiles = _opposite_pair_profiles(real_rows, positions)
     if len(profiles) < 3:
         return None
+    # 0.2.199-补29fo-修:大谱剖面可上万,两两 O(N^2) 内存爆炸
+    # (sampleJ 7.6 万对 → 43GB);确定性均匀抽样到 ≤256 条再两两相关
+    max_profiles = 256
+    if len(profiles) > max_profiles:
+        idx = np.linspace(0, len(profiles) - 1, max_profiles).astype(int)
+        profiles = [profiles[int(i)] for i in idx]
     fixed: list[np.ndarray] = []
     length = 32
     xi = np.linspace(0.0, 1.0, length)
