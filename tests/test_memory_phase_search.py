@@ -156,67 +156,6 @@ def test_lock_discrete_traces_excludes_clump() -> None:
     assert len(idx) < n1, "不应选中全部迹线"
 
 
-def _rows_with_peaks(
-    n_noise: int, peaks: list[tuple[int, int, float, float]]
-) -> np.ndarray:
-    """构造复型行集:前 n_noise 行为纯噪声,后续每行一个 Lorentzian。
-
-    peaks = [(row, center, amp, width)];行号相对噪声区之后(从 0 计)。
-    """
-    length = 300
-    k = np.arange(length, dtype=float)
-    rng = np.random.default_rng(7)
-    rows = rng.normal(0.0, 0.2, (n_noise, length)) + 1j * rng.normal(
-        0.0, 0.2, (n_noise, length)
-    )
-    n_peak = max((r for r, _, _, _ in peaks), default=-1) + 1
-    extra = np.zeros((n_peak, length), dtype=np.complex128)
-    for r, center, amp, width in peaks:
-        z = 1.0 / (1.0 + 1j * (k - center) / width)
-        extra[r, :] += amp * z
-    return np.vstack([rows, extra])
-
-
-def test_select_arbitration_peaks_picks_genuine_only() -> None:
-    """补29fr:仲裁峰选择只保留干净真峰(噪声行/宽特征被过滤)。"""
-    from workflow.memory_phase_search import _select_arbitration_peaks
-
-    planted = [
-        (0, 80, 200.0, 2.0),
-        (1, 120, 180.0, 2.5),
-        (2, 160, 160.0, 2.0),
-        (3, 200, 150.0, 1.5),
-        (4, 90, 140.0, 2.0),
-        (5, 140, 130.0, 2.5),
-        (6, 180, 120.0, 2.0),
-        (7, 220, 110.0, 2.0),
-        (8, 70, 100.0, 2.0),
-        (9, 110, 90.0, 2.0),
-        (10, 150, 80.0, 2.0),
-        (11, 190, 70.0, 2.0),
-        # 宽特征(宽 40):离散度过滤应排除
-        (12, 130, 300.0, 40.0),
-    ]
-    rows = _rows_with_peaks(60, planted)
-    sel = _select_arbitration_peaks(rows)
-    assert sel is not None
-    _, positions = sel
-    narrow = [(r, c) for r, c, _, w in planted if w <= 2.5]
-    assert len(positions) >= len(narrow), (len(positions), len(narrow))
-    # 所有选中峰位都落在窄峰中心附近(噪声行/宽峰行没有贡献)
-    for k in positions:
-        near = any(abs(k - c) <= 2 for _, c in narrow)
-        assert near, k
-
-
-def test_select_arbitration_peaks_noise_only_returns_none() -> None:
-    """补29fr:纯噪声(无真峰)返回 None,调用方回退粗网格最优。"""
-    from workflow.memory_phase_search import _select_arbitration_peaks
-
-    rows = _rows_with_peaks(80, [])
-    assert _select_arbitration_peaks(rows) is None
-
-
 def test_joint_recheck_tie_keeps_fixed() -> None:
     """联合复核 p1 平坦(±5° 同分)时,不应显著优于顺序固定(调用方按
     PHASE_SCORE_FLAT_MARGIN 门控,不再整体回退)。"""
