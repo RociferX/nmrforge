@@ -628,7 +628,7 @@ def search_axis_memory(
             # 大谱 pair 常全接近 100,浮点尾差会让 355° 意外压过 0°
             best_pair, pair_best_cand = max(
                 pair_scores,
-                key=lambda item: (round(item[0], 2), scored[item[1]]),
+                key=lambda item: (round(item[0], 1), scored[item[1]]),
             )
             if pair_best_cand != best_phase:
                 logs.append(
