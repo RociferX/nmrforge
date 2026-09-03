@@ -504,6 +504,7 @@ def unified_route(    experiment: Experiment,
     plan: Any | None = None,
     work_dir: Path | str | None = None,
     base_params: dict[str, Any] | None = None,
+    phase_r2: bool = True,
     progress: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     """统一方案(替代简单/进阶分派):逐轴复型预览 → 内存调相
@@ -527,6 +528,7 @@ def unified_route(    experiment: Experiment,
             plan=plan,
             work_dir=work_dir,
             base_params=base_params,
+            phase_r2=phase_r2,
             progress=progress,
         )
     work = Path(work_dir) if work_dir else backend._work_path(experiment)
@@ -658,7 +660,9 @@ def unified_route(    experiment: Experiment,
     # 0.2.199-补29dr(用户):直接维确定后,间接维再优化一轮(预览带直接维
     # 固定相位;排除本轴自身相位,统一/内存语义,sampleI F1 回粗网格最优 90°)
     indirect_axes = [a for a in axes if a != direct_axis]
-    if len(search_axes) >= 2 and direct_axis in fixed:
+    # 0.2.199-补29fp-验2:phase_r2=False 时跳过直接维确定后的间接维重搜
+    # (r2)——验证有了平坦仲裁后第二轮是否仍必要(VM A/C 对照)。
+    if phase_r2 and len(search_axes) >= 2 and direct_axis in fixed:
         for axis in indirect_axes:
             out_file = f"{experiment.dataset_id}_preview_{axis}_r2.{ext}"
             t_axis = time.time()
@@ -1200,6 +1204,7 @@ def _unified_nus(
     plan: Any,
     work_dir: Path | str | None,
     base_params: dict[str, Any] | None,
+    phase_r2: bool = True,
     progress: Callable[[str], None] | None,
 ) -> dict[str, Any]:
     """NUS 统一流程:SMILE 一次(直接维 PS(0,0))→ 直接维在 recon 复型平面
@@ -1484,7 +1489,9 @@ def _unified_nus(
     # (直接维为独立实型 HT 方法,经 phase.json 缓存;间接维重搜重新锁定
     # 迹线,解双向依赖。3D NUS 实测多轮重搜会 ±180° 符号摆动且每轮约
     # 30s,故收敛迭代限一轮)
-    if indirect_axes and auto_phase:
+    # 0.2.199-补29fp-验2:phase_r2=False 时跳过间接维重搜一轮(r2),
+    # 首搜(含平坦仲裁)结果即为最终相位。
+    if phase_r2 and indirect_axes and auto_phase:
         for _round in range(1):
             changed = False
             for axis in indirect_axes:
