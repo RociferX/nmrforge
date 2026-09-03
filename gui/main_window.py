@@ -1571,10 +1571,7 @@ class MainWindow(QMainWindow):
         if not confirmed:
             return
         try:
-            delete_data = getattr(self.manager, "delete_data", None)
-            if delete_data is None:
-                raise ProjectError("后端 delete_data 接口待实现")
-            delete_data(exp_id, data_id)
+            self.manager.delete_data(exp_id, data_id)
             self.manager.save()
             self._append_log(f"样品数据 {data_id} 已移入系统回收站(可从回收站恢复)")
         except ProjectError as exc:

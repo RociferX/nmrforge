@@ -114,8 +114,8 @@ class ProcessingController:
 
     # ------------------------------------------------------------------
     # 步骤化处理(G2B-002 / 契约 v1.2):导入样品数据 → 生成 FID → 生成谱图
-    # 实现依赖 Backend 的 DataEntry 层级与 convert_to_fid(待 Backend 落地),
-    # 当前提供签名与占位实现;GUI 界面按此接口接线。
+    # 实现位于 workflow/(import_workflow / stepwise + backend),本控制器
+    # 负责接线、状态登记与参数组装。
     # ------------------------------------------------------------------
     def import_data(self, entry: ExperimentEntry, source: str, copy: bool = True) -> dict:
         """第 1 步:导入样品数据(只读参数 + 复制 raw),返回 ImportResult dict。"""

@@ -17,6 +17,12 @@
 - vm_sample_make_nus.py / vm_sample_regression.py / vm_sample_noext.py /
   vm_sample_water_profile.py / vm_sample_viewer_check.py / vm_sample_compare.py
 - vm_validate_phase_score.py / vm_validate_zero_fill.py
+- vm_validate_nus_indirect_equiv.py:NUS 间接维内存评分等价性复验
+  (docs/manager/decisions.md D-2026-08-31)
+
+一次性排查/诊断脚本(vm_100_*/vm_102_*/vm_check_*/vm_verify_*/vm_proj_*
+等,2026-09-03 0.2.199-补29fu)已归档至 archive/deprecated/scripts/——
+git 历史与归档目录均可回查,不再随 scripts/ 分发。
 
 已删除(0.2.164,旧 git 可恢复):recon_phase_search.py、
 vm_validate_optimize.py、vm_validate_recon_phase_equiv.py。

@@ -1411,7 +1411,8 @@ class SpectrumPanel(QWidget):
         # 0.2.199-补29cy:导入峰表同样匹配 SMILE 可信度
         self._attach_smile_confidence()
         self._populate_peak_table()
-        self.viewer.set_peaks(peaks)
+        # 0.2.199-补29fu:viewer 与面板同源(补 Peak_ID/可信度后的列表)
+        self.viewer.set_peaks(self._peaks)
         self.export_poky_button.setEnabled(True)
         self.save_peaks_button.setEnabled(True)
         self._update_delete_button()
