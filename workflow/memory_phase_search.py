@@ -27,6 +27,12 @@ PHASE_REPRODUCIBILITY_TOL = 10.0
 PHASE_PLATEAU_TOL = 1.0
 PHASE_SYMMETRY_TOL = 2.5
 
+# 0.2.199-补29fs(用户):仲裁只对「mixed 且净分偏低」的轴做——好谱(净分
+# ≥95)不仲裁结果同样正确,还省去整批行旋转/配对的优化时间;低净分轴的
+# pair 尾差(如 99.8 vs 99.9)不再有机会把好轴误翻(VM sampleB 轴1 0→5 连锁
+# 带偏 r2 的教训)。
+PAIR_ARBITER_NET_GATE = 95.0
+
 
 def _axis_traces(real: np.ndarray, axis: int) -> np.ndarray:
     """把谱沿 axis 展开为 (n_trace, axis_len),任意维度通用。"""
@@ -620,7 +626,14 @@ def search_axis_memory(
         )
         if (0.0, 0.0) in scored and (0.0, 0.0) not in candidates:
             candidates.append((0.0, 0.0))
-        if len(candidates) >= 2:
+        arb_ok = (
+            sign_mode == "mixed"
+            and best_score < PAIR_ARBITER_NET_GATE
+            and len(candidates) >= 2
+        )
+        # 0.2.199-补29fs(用户):好谱不仲裁——只有 mixed 且本身净分差
+        # (<95)的轴才做成对正负峰仲裁;其余(含 uniform)用粗网格最优兜底。
+        if arb_ok:
             pair_scores: list[tuple[float, tuple[float, float]]] = []
             for cand in candidates:
                 real_rows = rotate_real(locked_rows, -1, cand[0], cand[1])
@@ -651,7 +664,7 @@ def search_axis_memory(
                     f"{best_phase}(pair={best_pair:.2f})"
                 )
         else:
-            # 候选不足(罕见):保留原平坦兜底(含零相位回退)
+            # 好谱/非 mixed/候选不足:保留原平坦兜底(含零相位回退)
             zero_score = scored.get((0.0, 0.0))
             if coarse_best == (0.0, 0.0) and zero_score is not None:
                 best_phase = (0.0, 0.0)
