@@ -487,7 +487,6 @@ def search_axis_memory(
     sign_mode: str = "uniform",
     discrete: bool | None = None,
     net_half_width: int | None = None,
-    flat_pair_arbiter: bool = True,
     cancel: Callable[[], bool] | None = None,
 ) -> MemoryAxisResult | None:
     """在复型数据的指定轴上做内存相位搜索(旧算法判断标准,零后端)。"""
@@ -618,10 +617,7 @@ def search_axis_memory(
         )
         if (0.0, 0.0) in scored and (0.0, 0.0) not in candidates:
             candidates.append((0.0, 0.0))
-        # 0.2.199-补29fp-验:flat_pair_arbiter=False(首搜)时跳过成对正负峰
-        # 相似性仲裁,保持补29fo 之前「平坦→粗网格最优/零相位」兜底;仲裁
-        # 只在间接维重搜(r2,直接维已定)阶段进行,VM 对照验证结果一致性。
-        if flat_pair_arbiter and len(candidates) >= 2:
+        if len(candidates) >= 2:
             pair_scores: list[tuple[float, tuple[float, float]]] = []
             for cand in candidates:
                 real_rows = rotate_real(locked_rows, -1, cand[0], cand[1])
@@ -652,8 +648,7 @@ def search_axis_memory(
                     f"{best_phase}(pair={best_pair:.2f})"
                 )
         else:
-            # 候选不足(罕见)或首搜关闭仲裁(补29fp-验):保留原平坦兜底
-            # (含零相位回退)
+            # 候选不足(罕见):保留原平坦兜底(含零相位回退)
             zero_score = scored.get((0.0, 0.0))
             if coarse_best == (0.0, 0.0) and zero_score is not None:
                 best_phase = (0.0, 0.0)
