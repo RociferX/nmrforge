@@ -618,11 +618,23 @@ def search_axis_memory(
         if (0.0, 0.0) in scored and (0.0, 0.0) not in candidates:
             candidates.append((0.0, 0.0))
         if len(candidates) >= 2:
+            # 补29fp:只对强峰行做仲裁——旋转与逐行找反号对都只在 ≤256 条
+            # 迹线上进行(此前整批 7.5 万行 × 每候选,浪费在弱峰/噪声行)
+            row_mags = np.max(np.abs(locked_rows), axis=1)
+            thr = float(np.percentile(row_mags, 70))
+            arb_idx = np.flatnonzero(row_mags >= thr)
+            if arb_idx.size > 256:
+                step = int(np.ceil(arb_idx.size / 256.0))
+                arb_idx = arb_idx[::step][:256]
+            if arb_idx.size < 3:
+                arb_idx = np.arange(min(len(locked_rows), 256))
+            arb_rows = locked_rows[arb_idx]
+            arb_pos = [trace_positions[int(i)] for i in arb_idx]
             pair_scores: list[tuple[float, tuple[float, float]]] = []
             for cand in candidates:
-                real_rows = rotate_real(locked_rows, -1, cand[0], cand[1])
+                real_sub = rotate_real(arb_rows, -1, cand[0], cand[1])
                 pair_scores.append(
-                    (_pair_arbiter_score(real_rows, trace_positions), cand)
+                    (_pair_arbiter_score(real_sub, arb_pos), cand)
                 )
             # 补29fo-修2:pair 分先四舍五入到 0.01 再比,同分按净分——
             # 大谱 pair 常全接近 100,浮点尾差会让 355° 意外压过 0°
