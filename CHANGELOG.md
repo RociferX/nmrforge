@@ -1,5 +1,23 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29fv(2026-09-03,隐藏「分析」与「数据组间分析」入口)
+- 用户:把数据组间分析和分析隐藏了,暂时不用这个功能;
+- GUI 处理流程止于峰挑选:单数据 Pipeline 可见步骤 = fid/spectrum/
+  [smile 可选]/peaks(分析行不再显示,状态机/下一步提示同步不再含 analysis);
+- 数据组批量处理面板:「分析」截止选项与「依次优化」流程中的 analysis 移除
+  (停止选项 = fid/spectrum/peaks);
+- 实验页「数据组间分析」占位按钮与其下拉接线移除;
+- 保留(便于恢复):PIPELINE_STEPS 完整定义(含 analysis)、workflow.analyze、
+  ProcessingController.analyze、workflow.batch 后端分析能力、analysis 产物
+  与 .pipeline_state 记录兼容;恢复 = 把 analysis 加回 VISIBLE_PIPELINE_STEPS
+  与组面板选项;
+- 测试:引用 analysis 的 GUI/流程测试改四步口径(test_full_paths/test_batch
+  止于峰挑选;删除组间分析占位与报告驱动断言;test_analyze.py 保留后端覆盖);
+- 验证:本地全量 pytest 全绿(退出码 0);ruff(改动文件)通过;
+  VM 全量 845 passed/19 skipped;
+
+# 修改记录(历史条目)
+
 ## 0.2.199-补29fu(2026-09-03,总管接手审计:弃用代码统一归档+代码卫生)
 - 用户:开始前审阅所有代码,把以前任务弃用的代码放统一文件夹存档,让剩余
   代码干净;同时检查 bug、矛盾、不符合要求的 GUI 显示;
