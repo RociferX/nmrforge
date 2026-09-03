@@ -628,7 +628,8 @@ def unified_route(    experiment: Experiment,
         )
         _unlink_quiet(resp["spectrum_path"])
         est = search_axis_memory(
-            arr, ax, sign_mode=sign_mode, cancel=cancel_requested
+            arr, ax, sign_mode=sign_mode, flat_pair_arbiter=False,
+            cancel=cancel_requested,
         )
         if est is None:
             raise RuntimeError(f"内存相位搜索({axis})无可用迹线")
@@ -1335,7 +1336,8 @@ def _unified_nus(
         )
         _unlink_quiet(resp["spectrum_path"])
         est = search_axis_memory(
-            arr, ax, sign_mode=sign_mode, cancel=cancel_requested
+            arr, ax, sign_mode=sign_mode, flat_pair_arbiter=False,
+            cancel=cancel_requested,
         )
         if est is None:
             raise RuntimeError(f"内存相位搜索({axis})无可用迹线")
