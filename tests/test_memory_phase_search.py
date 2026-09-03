@@ -156,6 +156,34 @@ def test_lock_discrete_traces_excludes_clump() -> None:
     assert len(idx) < n1, "不应选中全部迹线"
 
 
+def test_arbiter_row_indices_full_below_budget() -> None:
+    """补29fp-修:行数 ≤ 预算时仲裁取全部行(与旧全量行为逐位一致)。"""
+    from workflow.memory_phase_search import _arbiter_row_indices
+
+    small = _arbiter_row_indices(1000)
+    assert small.tolist() == list(range(1000))
+
+
+def test_arbiter_row_indices_uniform_coverage_over_budget() -> None:
+    """补29fp-修:超预算时按行号 linspace 均匀抽样——含首尾、步长稳定、
+    不按峰强挑行(补29fp 强峰抽样把判别带偏后改回均匀覆盖)。"""
+    import numpy as np
+
+    from workflow.memory_phase_search import (
+        PAIR_ARBITER_MAX_ROWS,
+        _arbiter_row_indices,
+    )
+
+    big = _arbiter_row_indices(100_000)
+    assert big.size == PAIR_ARBITER_MAX_ROWS
+    assert big[0] == 0 and big[-1] == 99_999
+    steps = np.diff(big)
+    assert float(np.max(steps)) / float(np.min(steps)) < 2.0
+    # 预算 3 行时也应含首尾且升序
+    tiny = _arbiter_row_indices(100, max_rows=3)
+    assert tiny.tolist() == [0, 50, 99]
+
+
 def test_joint_recheck_tie_keeps_fixed() -> None:
     """联合复核 p1 平坦(±5° 同分)时,不应显著优于顺序固定(调用方按
     PHASE_SCORE_FLAT_MARGIN 门控,不再整体回退)。"""
