@@ -445,8 +445,11 @@ def _pair_similarity(real_rows: np.ndarray, positions: list[int]) -> float | Non
     if len(profiles) < 3:
         return None
     # 0.2.199-补29fo-修:大谱剖面可上万,两两 O(N^2) 内存爆炸
-    # (sampleJ 7.6 万对 → 43GB);确定性均匀抽样到 ≤256 条再两两相关
-    max_profiles = 256
+    # (sampleJ 7.6 万对 → 43GB);确定性均匀抽样后两两相关
+    # 0.2.199-补29fq:上限 256→4096——VM sampleB 轴0 实测 256 时 30/90 的
+    # pair 分都≈100(判别被抹平,保持 30°);4096 恢复 30→99.56/90→100.0
+    # (与全剖面 99.46/100.0 一致,两两矩阵 4096²×8B≈134MB 仍安全)。
+    max_profiles = 4096
     if len(profiles) > max_profiles:
         idx = np.linspace(0, len(profiles) - 1, max_profiles).astype(int)
         profiles = [profiles[int(i)] for i in idx]
