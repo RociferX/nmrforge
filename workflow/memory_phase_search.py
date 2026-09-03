@@ -27,10 +27,6 @@ PHASE_REPRODUCIBILITY_TOL = 10.0
 PHASE_PLATEAU_TOL = 1.0
 PHASE_SYMMETRY_TOL = 2.5
 
-# 0.2.199-补29fp-修:仲裁「边收集边限」行预算——超过预算的整批迹线按行号
-# 确定性均匀抽样参与配对(不按峰强挑行);行数 ≤ 预算时与旧全量行为逐位一致。
-PAIR_ARBITER_MAX_ROWS = 4096
-
 
 def _axis_traces(real: np.ndarray, axis: int) -> np.ndarray:
     """把谱沿 axis 展开为 (n_trace, axis_len),任意维度通用。"""
@@ -481,26 +477,6 @@ def _pair_arbiter_score(real_rows: np.ndarray, positions: list[int]) -> float:
     return float(100.0 * (1.0 - max(0.0, min(1.0, sim))))
 
 
-def _arbiter_row_indices(
-    n_rows: int, *, max_rows: int = PAIR_ARBITER_MAX_ROWS
-) -> np.ndarray:
-    """仲裁取行的「边收集边限」行预算(0.2.199-补29fp-修)。
-
-    行数 ≤ max_rows 时返回全部行(与旧全量行为逐位一致);超过时按行号
-    linspace 确定性均匀抽样(含首尾,覆盖整批迹线)。不按峰强挑行——补29fp
-    的 top30% 强峰抽样把判别带偏(VM:sampleB F2 30° 无法翻案 90°,sampleJ
-    轴1 0° 被改成 5°/10°);均匀抽样保留全谱面弱/强行混合的总体统计。
-    """
-    if n_rows <= 0:
-        return np.zeros(0, dtype=int)
-    if n_rows <= max_rows:
-        return np.arange(n_rows, dtype=int)
-    idx = np.unique(
-        np.linspace(0, n_rows - 1, max_rows).round().astype(int)
-    )
-    return idx
-
-
 def search_axis_memory(
     complex_arr: np.ndarray,
     axis: int,
@@ -642,13 +618,16 @@ def search_axis_memory(
         if (0.0, 0.0) in scored and (0.0, 0.0) not in candidates:
             candidates.append((0.0, 0.0))
         if len(candidates) >= 2:
-            # 0.2.199-补29fp-修:仲裁取行改「边收集边限」——补29fp 按强峰
-            # (top30%)挑行抽样把判别带偏(sampleB F2 30° 无法翻案 90°、
-            # sampleJ 轴1 0°→5°/10°),弃用;改为只做行数预算:旋转与逐行
-            # 找反号对都在 ≤PAIR_ARBITER_MAX_ROWS 的均匀行子集上进行
-            # (收集前即限行,覆盖全谱面、不按强度挑行);行数 ≤ 预算时与
-            # 旧全量行为逐位一致,配对阶段仍保留 ≤256 剖面上限(补29fo-修)。
-            arb_idx = _arbiter_row_indices(len(locked_rows))
+            # 补29fp:只对强峰行做仲裁——旋转与逐行找反号对都只在 ≤256 条
+            # 迹线上进行(此前整批 7.5 万行 × 每候选,浪费在弱峰/噪声行)
+            row_mags = np.max(np.abs(locked_rows), axis=1)
+            thr = float(np.percentile(row_mags, 70))
+            arb_idx = np.flatnonzero(row_mags >= thr)
+            if arb_idx.size > 256:
+                step = int(np.ceil(arb_idx.size / 256.0))
+                arb_idx = arb_idx[::step][:256]
+            if arb_idx.size < 3:
+                arb_idx = np.arange(min(len(locked_rows), 256))
             arb_rows = locked_rows[arb_idx]
             arb_pos = [trace_positions[int(i)] for i in arb_idx]
             pair_scores: list[tuple[float, tuple[float, float]]] = []
