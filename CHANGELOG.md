@@ -1,5 +1,17 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29fz(2026-09-04,阈值与谱图显示调节按数据隔离)
+- 用户:阈值调整、contour start level 等等调整都要数据隔离,不要改一个
+  全部数据都变;
+- gui/pipeline_panel.py:峰挑选阈值按 (exp_id, data_id) 存储——调节即时
+  记入当前数据,切换数据/程序化运行恢复各自阈值(默认 15σ);
+- gui/spectrum_panel.py:contour start(滑块)、Levels 级数、Aspect、峰标记
+  尺寸按 (exp_id, data_id) 存储——变化即时记入当前数据,谱图加载成功后按
+  该数据恢复(首次默认 contour ~3%/8 级/aspect 1×/标记 1.5);替换原按谱
+  文件路径打开前快照的 contour 状态机制;
+- 测试:+阈值按数据隔离、显示调节按数据隔离(切数据用默认、切回恢复);
+  本地全量 pytest 全绿,ruff 通过。
+
 ## 0.2.199-补29fy(2026-09-04,对齐检查图同时输出 SVG 可编辑矢量)
 - 用户:输出的图同时加一份 SVG;
 - workflow/peak_align.alignment_figure:保存 PNG(300dpi)的同时写同路径
