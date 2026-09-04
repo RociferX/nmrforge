@@ -179,6 +179,9 @@ def orient_x_priority(spectrum: Spectrum) -> Spectrum:
     robust = getattr(spectrum, "robust_max", None)
     if robust is not None:
         transposed.robust_max = robust
+    floor = getattr(spectrum, "noise_floor", None)
+    if floor is not None:
+        transposed.noise_floor = floor
     return transposed
 
 
@@ -448,6 +451,9 @@ class Spectrum3D:
         self.data = np.asarray(data, dtype=float)
         self.axes = list(axes)
         self.source = Path(source) if source else None
+        self._lazy = False
+        self._global_noise: float | None = None
+        self._full_noise: float | None = None
 
     @property
     def max_intensity(self) -> float:
@@ -633,8 +639,8 @@ class Spectrum3D:
         obj._lazy = True
         obj._lazy_inv = tuple(inv)
         obj._plane_cache: dict[tuple[int, int], np.ndarray] = {}
-        obj._global_robust_max: float | None = None
-        obj._full_robust_max: float | None = None
+        obj._global_noise: float | None = None
+        obj._full_noise: float | None = None
         logger.info("载入三维谱(懒加载): %s (%s)", path, data_shape)
         return obj
 
@@ -670,40 +676,64 @@ class Spectrum3D:
             cache.pop(next(iter(cache)))
         return plane
 
-    def _compute_global_robust_max(self) -> float | None:
-        """全谱级 robust 最大值(contour 基准,切面一致)。
+    def _compute_global_noise(self) -> float | None:
+        """全谱噪声水平(角区 RMS;懒加载抽样平面取中位数)。
 
-        全量数据直接取整谱绝对值的 99.9 分位;懒加载(流式)沿固定轴抽样
-        若干平面取各平面最大绝对值的中位数,避免切面间显示跳变。"""
-        if getattr(self, "_full_robust_max", None) is not None:
-            return self._full_robust_max
+        供 viewer 作为 contour 下限:低于该水平(×倍数)的等高线不画,
+        纯噪声切面不会因以自身最大值为基准而满屏显示噪声。"""
+        if getattr(self, "_full_noise", None) is not None:
+            return self._full_noise
+        import numpy as np
+
+        def _plane_noise(plane: np.ndarray) -> float:
+            a = np.asarray(plane, dtype=float)
+            if a.size == 0:
+                return 0.0
+            # 四角小块去边带,稳健噪声估计
+            h, w = a.shape
+            if h < 4 or w < 4:
+                return float(np.std(a))
+            ch = max(2, int(h * 0.08))
+            cw = max(2, int(w * 0.08))
+            corners = np.concatenate(
+                [
+                    a[:ch, :cw].ravel(),
+                    a[:ch, -cw:].ravel(),
+                    a[-ch:, :cw].ravel(),
+                    a[-ch:, -cw:].ravel(),
+                ]
+            )
+            med = float(np.median(corners))
+            return float(np.sqrt(np.mean((corners - med) ** 2)))
+
         if getattr(self, "_lazy", False):
             try:
-                import numpy as np
-
-                axis = 2  # 固定快速轴抽样即可代表全谱量级
+                axis = 2
                 size = self.axes[axis].size
-                step = max(1, size // 12)
-                peaks: list[float] = []
-                for index in range(0, size, step):
-                    plane = self._lazy_read_plane(axis, index)
-                    if plane.size:
-                        peaks.append(float(np.max(np.abs(plane))))
-                if not peaks:
-                    return None
-                self._global_robust_max = float(np.median(peaks))
-                return self._global_robust_max
-            except Exception:  # noqa: BLE001 - 抽样失败回退 None
+                step = max(1, size // 10)
+                vals = [
+                    _plane_noise(self._lazy_read_plane(axis, i))
+                    for i in range(0, size, step)
+                ]
+                vals = [v for v in vals if v > 0]
+                noise = float(np.median(vals)) if vals else 0.0
+            except Exception:  # noqa: BLE001
                 return None
-        try:
-            import numpy as np
-
-            val = float(np.percentile(np.abs(self.data), 99.9))
-            self._global_robust_max = val if val > 0 else None
-            self._full_robust_max = self._global_robust_max
-            return self._global_robust_max
-        except Exception:  # noqa: BLE001 - 计算失败回退 None
-            return None
+        else:
+            try:
+                data = np.asarray(self.data, dtype=float)
+                s0 = max(2, int(data.shape[0] * 0.08))
+                s1 = max(2, int(data.shape[1] * 0.08))
+                s2 = max(2, int(data.shape[2] * 0.08))
+                region = data[-s0:, -s1:, -s2:]
+                med = float(np.median(region))
+                noise = float(np.sqrt(np.mean((region - med) ** 2)))
+            except Exception:  # noqa: BLE001
+                return None
+        if noise > 0:
+            self._global_noise = noise
+            self._full_noise = noise
+        return self._global_noise
 
     def index_at(self, axis_idx: int, ppm_value: float) -> int:
         """第 axis_idx 维按 ppm 定位下标(供滑块按 ppm 定位)。"""
@@ -728,7 +758,9 @@ class Spectrum3D:
                 data2d, [self.axes[i] for i in remaining],
                 source=self.source,
             )
-            out.robust_max = self._compute_global_robust_max()
+            _noise = self._compute_global_noise()
+            if _noise:
+                out.noise_floor = 3.0 * _noise
             return orient_x_priority(out)
         index = int(index)
         size = self.data.shape[axis_idx]
@@ -747,7 +779,9 @@ class Spectrum3D:
             np.asarray(data2d), [self.axes[i] for i in remaining],
             source=self.source,
         )
-        out.robust_max = self._compute_global_robust_max()
+        _noise = self._compute_global_noise()
+        if _noise:
+            out.noise_floor = 3.0 * _noise
         return orient_x_priority(out)
 
     def project(self, axis_idx: int, mode: str = "max") -> Spectrum:
@@ -761,7 +795,9 @@ class Spectrum3D:
             np.asarray(data2d), [self.axes[i] for i in remaining],
             source=self.source,
         )
-        out.robust_max = self._compute_global_robust_max()
+        _noise = self._compute_global_noise()
+        if _noise:
+            out.noise_floor = 3.0 * _noise
         return orient_x_priority(out)
 
     def estimate_noise(self, fraction: float = 0.1) -> float:

@@ -593,21 +593,29 @@ class SpectrumViewer(QWidget):
         return f"Contour start {self._level_fraction() * 100:.2f}%"
 
     def _levels_for(self, spectrum: Spectrum) -> np.ndarray:
-        """从起点(base)到最大值之间取 n 级对数间隔,含对称负级。
+        """从起点到切面最大值取 n 级对数间隔,含对称负级。
 
-        二维 FID 等动态范围大的数据可用 ``robust_max``(高分位数)代替
-        全局最大值作为基准,避免被个别尖峰淹没。
-        """
-        maximum = float(
-            getattr(spectrum, "robust_max", 0.0) or spectrum.max_intensity
-        )
-        if maximum <= 0:
-            maximum = abs(float(np.min(spectrum.data))) if spectrum.data.size else 0.0
+        基准为当前切面自身最大值(峰可画满、不空心);3D 切片带
+        noise_floor(全谱噪声乘倍数)时剔除低于下限的级别——纯噪声
+        切面不会满屏噪点。返回级别单调递增。"""
+        maximum = float(spectrum.max_intensity)
+        if maximum <= 0 and spectrum.data.size:
+            maximum = abs(float(np.min(spectrum.data)))
         if maximum <= 0:
             return np.array([-1.0, 1.0])
         base = maximum * self._level_fraction()
-        positive = np.geomspace(max(base, maximum * 1e-6), maximum, self._level_count)
-        return np.concatenate([-positive[::-1], positive])
+        lo = max(base, maximum * 1e-6)
+        if lo >= maximum:
+            lo = maximum * 0.5
+        positive = np.geomspace(lo, maximum, self._level_count)
+        levels = np.concatenate([-positive[::-1], positive])
+        floor = float(getattr(spectrum, "noise_floor", 0.0) or 0.0)
+        if floor > 0:
+            levels = levels[np.abs(levels) >= floor]
+            if levels.size == 0:
+                return np.array([-1.0, 1.0])
+        return levels
+
 
     def _update_levels_debounced(self) -> None:
         """拖动过程中仅刷新数值,避免每格都重建轮廓(性能)。"""
