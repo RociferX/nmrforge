@@ -372,7 +372,7 @@ def test_pipeline_peak_threshold_isolated_per_data(
     row.threshold_spin.setValue(22.5)
     assert panel._threshold_by_data[(exp.id, d1.id)] == 22.5
     panel.set_selection("data", exp.id, d2.id)
-    assert row.threshold_spin.value() == 15.0
+    assert row.threshold_spin.value() == 25.0
     row.threshold_spin.setValue(9.0)
     panel.set_selection("data", exp.id, d1.id)
     assert row.threshold_spin.value() == 22.5
@@ -406,3 +406,53 @@ def test_pipeline_threshold_persisted_in_data_folder(
     assert panel2._rows["peaks"].threshold_spin.value() == 18.0
     panel.close()
     panel2.close()
+
+
+def test_threshold_legacy_default15_migrates_to25(
+    tmp_path: Path, qapp: QApplication
+) -> None:
+    """0.2.199-补29gc:旧默认 15σ(未显式自定义)迁移到新默认 25σ。"""
+    import json
+
+    from core.project import ProjectManager
+    from gui.pipeline_panel import PipelinePanel
+
+    manager = ProjectManager.create_project(tmp_path / "proj_m", "demo")
+    exp = manager.create_experiment("HSQC")
+    d1 = manager.import_data(exp.id, "/fake/1")
+    base = manager.data_base(exp.id, d1.id)
+    base.mkdir(parents=True, exist_ok=True)
+    (base / "ui_state.json").write_text(
+        json.dumps({"version": 1, "peaks": {"threshold": 15.0}}),
+        encoding="utf-8",
+    )
+    panel = PipelinePanel(manager)
+    panel.set_selection("data", exp.id, d1.id)
+    assert panel._rows["peaks"].threshold_spin.value() == 25.0
+    panel.close()
+
+
+def test_threshold_explicit_15_preserved_when_custom(
+    tmp_path: Path, qapp: QApplication
+) -> None:
+    """0.2.199-补29gc:显式自定义(custom=True)的 15σ 不被迁移覆盖。"""
+    import json
+
+    from core.project import ProjectManager
+    from gui.pipeline_panel import PipelinePanel
+
+    manager = ProjectManager.create_project(tmp_path / "proj_c", "demo")
+    exp = manager.create_experiment("HSQC")
+    d1 = manager.import_data(exp.id, "/fake/1")
+    base = manager.data_base(exp.id, d1.id)
+    base.mkdir(parents=True, exist_ok=True)
+    (base / "ui_state.json").write_text(
+        json.dumps(
+            {"version": 1, "peaks": {"threshold": 15.0, "custom": True}}
+        ),
+        encoding="utf-8",
+    )
+    panel = PipelinePanel(manager)
+    panel.set_selection("data", exp.id, d1.id)
+    assert panel._rows["peaks"].threshold_spin.value() == 15.0
+    panel.close()

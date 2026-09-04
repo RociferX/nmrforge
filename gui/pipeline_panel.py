@@ -632,14 +632,14 @@ class PipelineStepRow(QWidget):
         self.threshold_label.setVisible(self.step_id == "peaks")
         self.threshold_slider = QSlider(Qt.Orientation.Horizontal)
         self.threshold_slider.setRange(30, 500)
-        self.threshold_slider.setValue(150)
+        self.threshold_slider.setValue(250)
         self.threshold_slider.setFixedWidth(120)
         self.threshold_slider.setVisible(self.step_id == "peaks")
         self.threshold_spin = QDoubleSpinBox()
         self.threshold_spin.setRange(3.0, 1_000_000.0)  # 输入值不设上限(补29cn)
         self.threshold_spin.setSingleStep(0.5)
         self.threshold_spin.setDecimals(1)
-        self.threshold_spin.setValue(15.0)
+        self.threshold_spin.setValue(25.0)
         self.threshold_spin.setVisible(self.step_id == "peaks")
         # 联动保护:输入超过滑块上限(50σ)时滑块停在 500,不回写覆盖输入值
         self._threshold_sync = False
@@ -802,8 +802,8 @@ class PipelineStepRow(QWidget):
         self.ext_range_button.setText(text)
 
     def get_threshold(self) -> float:
-        """峰挑选阈值(σ);非 peaks 步骤返回默认 15.0(0.2.199-补29cm)。"""
-        return self.threshold_spin.value() if self.step_id == "peaks" else 15.0
+        """峰挑选阈值(σ);非 peaks 步骤返回默认 25.0(0.2.199-补29gc)。"""
+        return self.threshold_spin.value() if self.step_id == "peaks" else 25.0
 
     def set_ref_text(self, text: str) -> None:
         """显示已选参考谱(0.2.199-补29dl)。"""
@@ -920,6 +920,8 @@ class PipelinePanel(QWidget):
         # 0.2.199-补29fz(用户):峰挑选阈值按数据隔离——
         # (exp_id, data_id) → σ;切换数据恢复各自阈值。
         self._threshold_by_data: dict[tuple[str, str], float] = {}
+        # 0.2.199-补29gc:显式自定义标记(默认值迁移后仍尊重用户设置)
+        self._threshold_custom_by_data: dict[tuple[str, str], bool] = {}
         self._analysis_ref_info: dict[str, str] | None = None
 
         layout = QVBoxLayout(self)
@@ -973,11 +975,18 @@ class PipelinePanel(QWidget):
             row.view_log_requested.connect(self.view_log_requested.emit)
             steps_box.addWidget(row)
             self._rows[step_id] = row
-        # 0.2.199-补29fz(用户):阈值每次调节即记入当前数据
+        # 0.2.199-补29fz/补29gc(用户):阈值每次调节即记入当前数据;
+        # 编辑结束/滑块松手标记为用户显式自定义(程序化恢复不算)。
         peaks_row = self._rows.get("peaks")
         if peaks_row is not None:
             peaks_row.threshold_spin.valueChanged.connect(
                 self._store_current_threshold
+            )
+            peaks_row.threshold_spin.editingFinished.connect(
+                self._mark_current_threshold_custom
+            )
+            peaks_row.threshold_slider.sliderReleased.connect(
+                self._mark_current_threshold_custom
             )
         steps_box.addStretch(1)
 
@@ -1031,11 +1040,13 @@ class PipelinePanel(QWidget):
             row.clear_ref_display()
 
     def _store_current_threshold(self, value: float) -> None:
-        """阈值调节即时记入当前数据并持久化(0.2.199-补29fz/补29ga)。"""
+        """阈值即时记入当前数据并持久化(0.2.199-补29fz/补29ga/补29gc);
+        不覆盖用户的显式自定义标记。"""
         if not (self._current_exp_id and self._current_data_id):
             return
         key = (self._current_exp_id, self._current_data_id)
         self._threshold_by_data[key] = float(value)
+        custom = self._threshold_custom_by_data.get(key, False)
         try:
             from gui.per_data_records import update_ui_state
 
@@ -1044,26 +1055,62 @@ class PipelinePanel(QWidget):
                 self._current_exp_id,
                 self._current_data_id,
                 "peaks",
-                {"threshold": float(value)},
+                {"threshold": float(value), "custom": custom},
             )
         except Exception:  # noqa: BLE001 - 持久化失败不阻断调节
             pass
 
+    def _mark_current_threshold_custom(self) -> None:
+        """用户显式编辑阈值(输入完成/滑块松手)置自定义标记。"""
+        if not (self._current_exp_id and self._current_data_id):
+            return
+        key = (self._current_exp_id, self._current_data_id)
+        self._threshold_custom_by_data[key] = True
+        if key not in self._threshold_by_data:
+            self._threshold_by_data[key] = 25.0
+        try:
+            from gui.per_data_records import update_ui_state
+
+            update_ui_state(
+                self.manager,
+                self._current_exp_id,
+                self._current_data_id,
+                "peaks",
+                {
+                    "threshold": self._threshold_by_data[key],
+                    "custom": True,
+                },
+            )
+        except Exception:  # noqa: BLE001 - 持久化失败不阻断
+            pass
+
     def _threshold_for(self, exp_id: str, data_id: str) -> float:
-        """该数据阈值:会话缓存优先,缺省读 d_xxx/ui_state.json(补29ga)。"""
+        """该数据阈值:会话缓存优先,否则读 d_xxx/ui_state.json(补29ga);
+        旧默认 15(未显式自定义)迁移为 25(0.2.199-补29gc)。"""
         key = (exp_id, data_id)
         if key not in self._threshold_by_data:
-            value = 15.0
+            value = 25.0
+            custom = False
             try:
                 from gui.per_data_records import load_ui_state
 
-                raw = (load_ui_state(self.manager, exp_id, data_id)
-                       .get("peaks") or {}).get("threshold")
+                peaks_state = (
+                    load_ui_state(self.manager, exp_id, data_id)
+                    .get("peaks")
+                    or {}
+                )
+                raw = peaks_state.get("threshold")
+                custom = bool(peaks_state.get("custom", False))
                 if raw is not None:
                     value = float(raw)
+                # 旧版本默认 15σ 会在查看数据时被自动写盘;未显式自定义的
+                # 一律迁移到新默认 25σ。
+                if not custom and abs(value - 15.0) < 1e-9:
+                    value = 25.0
             except Exception:  # noqa: BLE001 - 读取失败用默认
                 pass
             self._threshold_by_data[key] = value
+            self._threshold_custom_by_data[key] = custom
         return self._threshold_by_data[key]
 
     def _current_statuses(self) -> dict[str, str]:

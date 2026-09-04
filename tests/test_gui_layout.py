@@ -2250,8 +2250,8 @@ def test_peak_threshold_range_up_to_50(
     row = panel._rows['peaks']
     assert row.threshold_slider.maximum() == 500          # 50σ
     assert row.threshold_spin.maximum() > 50.0            # 输入框不设上限(补29cn)
-    assert row.threshold_spin.value() == pytest.approx(15.0)  # 默认 15σ(补29cm)
-    assert row.threshold_slider.value() == 150
+    assert row.threshold_spin.value() == pytest.approx(25.0)  # 默认 25σ(补29gc)
+    assert row.threshold_slider.value() == 250
     row.threshold_spin.setValue(28.5)
     assert row.threshold_slider.value() == 285
     row.threshold_spin.setValue(100.0)                    # 超过滑块上限

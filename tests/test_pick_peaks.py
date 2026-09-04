@@ -145,7 +145,7 @@ def test_pick_peaks_writes_poky_list(tmp_path: Path) -> None:
     assert len(lines) >= 2
     assert "Reliability" not in "\n".join(lines)
     assert "阈值" in result["logs"][0]
-    assert "15.0σ" in result["logs"][0]  # 默认 15σ(0.2.199-补29cm)
+    assert "25.0σ" in result["logs"][0]  # 默认 25σ(0.2.199-补29gc)
 
 
 def _write_metadata(
@@ -527,7 +527,7 @@ def test_pick_peaks_sigma_multiplier_param(tmp_path: Path) -> None:
 
 def test_pick_peaks_excludes_axial_edges(tmp_path: Path) -> None:
     # 0.2.199-补29at:上下边缘轴峰(横条)不选,谱内峰保留
-    # (带 σ≈1 噪声底,15σ 默认阈值下测试意图不变,0.2.199-补29cm)
+    # (带 σ≈1 噪声底,25σ 默认阈值下测试意图不变,0.2.199-补29gc)
     rng = np.random.default_rng(20260829)
     spec = rng.normal(0, 1.0, (64, 128))
     spec[0, 60] += 800.0  # 顶部轴峰(横条)
@@ -657,7 +657,10 @@ def test_pick_peaks_2d_reversed_storage_maps_by_nucleus(
     pipe.write(str(ft2), dic, spec.astype(np.float32), overwrite=True)
     manager, exp_id, data_id = _manager_with_spectrum(tmp_path, ft2)
 
-    result = pick_peaks(manager, exp_id, data_id)
+    # 轴映射测试:显式 15σ(默认已 25σ,弱峰用例不依赖默认)
+    result = pick_peaks(
+        manager, exp_id, data_id, sigma_multiplier=15.0
+    )
     row = _read_rows(Path(result["peak_path"]))[0]
     n_ppm = 100.0 + (32 - 1 - 10) * 2189.0 / (32 * 60.8)
     h_ppm = 6.0 + (64 - 1 - 20) * 3000.0 / (64 * 600.0)
