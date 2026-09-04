@@ -21,6 +21,7 @@ NOT per-peak CSP matching:
 from __future__ import annotations
 
 from itertools import product
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -164,27 +165,48 @@ def _best_shift(
     tol: np.ndarray,
     ranges: np.ndarray,
 ) -> tuple[np.ndarray, int]:
-    """Coarse then fine grid search over per-nucleus shifts.
+    """Estimate the whole-file shift:
 
-    Objective: maximize matched pairs (one-to-one greedy, capped by the
-    smaller list); ties are broken by the smallest normalized distance
-    sum."""
-    coarse = np.maximum(tol / 4.0, _MIN_STEP_PPM)
-    best_shift = np.zeros(cur.shape[1])
-    best_matched, best_cost = _score_shift(cur, ref, tol)
+    1. For every current peak take its nearest reference neighbour and collect
+       the per-axis displacement (ref - cur).
+    2. The median displacement is a robust initial shift (a minority of
+       outliers/real-displacement peaks cannot drag it).
+    3. Refine around the initial shift with a fine local grid that maximizes
+       the one-to-one matched count and minimizes the pair residual.
+    """
+    if cur.size == 0 or ref.size == 0:
+        return np.zeros(cur.shape[1]), 0
+    # per-cur nearest reference neighbour displacement, but only when the
+    # nearest pair is not absurdly far away (beyond the search window); a
+    # dissimilar spectrum then keeps deltas empty and stays unshifted.
+    deltas: list[np.ndarray] = []
+    for i in range(cur.shape[0]):
+        d = ref - cur[i]
+        dist = np.sum((d / tol) ** 2, axis=1)
+        nearest = d[int(np.argmin(dist))]
+        if np.all(np.abs(nearest) <= ranges + tol):
+            deltas.append(nearest)
+    if not deltas:
+        return np.zeros(cur.shape[1]), 0
+    med = np.median(np.vstack(deltas), axis=0)
+    # local refine: +- max(2*tol, 0.4) around median, step = tol/4
+    span = np.maximum(2.0 * tol, 0.4)
+    step = np.maximum(tol / 4.0, _MIN_STEP_PPM)
+    best_shift = med
+    best_matched, best_cost = _score_shift(cur + med, ref, tol)
     for _round in range(2):
-        step = coarse if _round == 0 else np.maximum(
-            coarse / 2.0, _MIN_STEP_PPM
-        )
         axes = [
-            np.arange(-r, r + 0.5 * s, s) for r, s in zip(ranges, step)
+            np.arange(-s, s + 0.5 * st, st)
+            for s, st in zip(span, step)
         ]
-        for trial in product(*axes):
-            shifted = cur + np.asarray(trial)
-            matched, cost = _score_shift(shifted, ref, tol)
+        for delta in product(*axes):
+            trial = med + np.asarray(delta)
+            matched, cost = _score_shift(cur + trial, ref, tol)
             if (matched, -cost) > (best_matched, -best_cost):
                 best_matched, best_cost = matched, cost
-                best_shift = np.asarray(trial, dtype=float)
+                best_shift = trial
+        span = span / 2.0
+        step = np.maximum(step / 2.0, _MIN_STEP_PPM / 2.0)
     return best_shift, best_matched
 
 
@@ -243,6 +265,123 @@ def align_peak_files(
             f"list), per-nucleus shift {shift}"
         ),
     }
+
+def matched_pairs(
+    cur_coords: list[dict[str, float]],
+    ref_coords: list[dict[str, float]],
+    shift: dict[str, float],
+    *,
+    tol_ppm: dict[str, float] | None = None,
+) -> tuple[list[tuple[int, int]], list[str]]:
+    """Return (cur_idx, ref_idx) matched pairs after applying shift.
+
+    Uses the same one-to-one greedy matching as the shift scoring so the
+    figure shows exactly the pairs that define the alignment ratio."""
+    # accept either {nucleus: ppm} dicts or peak-table rows
+    cur_coords = [row_coords(r) for r in cur_coords]
+    ref_coords = [row_coords(r) for r in ref_coords]
+    nuclei = common_nuclei(cur_coords, ref_coords)
+    if not nuclei:
+        return [], []
+    tol = TOLERANCE_PPM if tol_ppm is None else {**TOLERANCE_PPM, **tol_ppm}
+    tol_a = np.asarray([tol[n] for n in nuclei], dtype=float)
+    shift_a = np.asarray([shift.get(n, 0.0) for n in nuclei], dtype=float)
+    cur_m = _coord_matrix(cur_coords, nuclei)
+    ref_m = _coord_matrix(ref_coords, nuclei)
+    shifted = cur_m + shift_a
+    used = np.zeros(ref_m.shape[0], dtype=bool)
+    pairs: list[tuple[int, int]] = []
+    for i in range(shifted.shape[0]):
+        d = np.abs(ref_m - shifted[i])
+        inside = np.all(d <= tol_a, axis=1) & ~used
+        if not inside.any():
+            continue
+        dist = np.sum((d[inside] / tol_a) ** 2, axis=1)
+        j = int(np.argmin(dist))
+        used_idx = int(np.flatnonzero(inside)[j])
+        used[used_idx] = True
+        pairs.append((i, used_idx))
+    return pairs, nuclei
+
+
+def alignment_figure(
+    cur_rows: list[dict[str, Any]],
+    ref_rows: list[dict[str, Any]],
+    shift: dict[str, float],
+    out_path: Path | str,
+    *,
+    cur_nuclei: list[str] | None = None,
+    ref_nuclei: list[str] | None = None,
+    tol_ppm: dict[str, float] | None = None,
+    cur_label: str = "current",
+    ref_label: str = "reference",
+) -> Path:
+    """Render an alignment check figure (PNG) of current vs reference peaks.
+
+    Uses the first two common nuclei for the 2D projection (usually 15N/1H);
+    matched pairs are connected by lines after the whole shift is applied.
+    """
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    cur_c = [row_coords(r, cur_nuclei) for r in cur_rows]
+    ref_c = [row_coords(r, ref_nuclei) for r in ref_rows]
+    pairs, nuclei = matched_pairs(
+        cur_c, ref_c, shift, tol_ppm=tol_ppm
+    )
+    x_nuc, y_nuc = (nuclei[0], nuclei[1]) if len(nuclei) >= 2 else (
+        nuclei[0], nuclei[0]
+    )
+    fig, ax = plt.subplots(figsize=(7.2, 6.0))
+    cur_pts = [
+        (c[x_nuc], c[y_nuc]) for c in cur_c if x_nuc in c and y_nuc in c
+    ]
+    ref_pts = [
+        (c[x_nuc], c[y_nuc]) for c in ref_c if x_nuc in c and y_nuc in c
+    ]
+    if cur_pts:
+        ax.scatter(
+            [p[0] for p in cur_pts],
+            [p[1] for p in cur_pts],
+            marker="x", color="#1f77b4", s=28, label=cur_label,
+        )
+    if ref_pts:
+        ax.scatter(
+            [p[0] for p in ref_pts],
+            [p[1] for p in ref_pts],
+            marker="o", facecolors="none", edgecolors="#d62728",
+            s=40, label=ref_label,
+        )
+    # shifted current points + matched-pair connectors
+    for i, j in pairs:
+        ci, ri = cur_c[i], ref_c[j]
+        if not (x_nuc in ci and y_nuc in ci and x_nuc in ri and y_nuc in ri):
+            continue
+        x0 = ci[x_nuc] + shift.get(x_nuc, 0.0)
+        y0 = ci[y_nuc] + shift.get(y_nuc, 0.0)
+        ax.plot(
+            [x0, ri[x_nuc]], [y0, ri[y_nuc]],
+            color="#888888", lw=0.5, alpha=0.6,
+        )
+    ax.set_xlabel(f"{x_nuc} (ppm)")
+    ax.set_ylabel(f"{y_nuc} (ppm)")
+    ax.set_title(
+        f"Peak alignment ({len(pairs)} matched)\n"
+        f"shift {x_nuc} {shift.get(x_nuc, 0.0):+.3f}, "
+        f"{y_nuc} {shift.get(y_nuc, 0.0):+.3f} ppm"
+    )
+    ax.invert_xaxis()
+    ax.invert_yaxis()
+    ax.legend(frameon=False)
+    ax.grid(True, ls=":", lw=0.5, alpha=0.4)
+    fig.tight_layout()
+    out = Path(out_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out, dpi=160)
+    plt.close(fig)
+    return out
 
 
 def shifted_rows(
@@ -331,6 +470,8 @@ __all__ = [
     "SEARCH_RANGE_PPM",
     "TOLERANCE_PPM",
     "align_peak_files",
+    "alignment_figure",
+    "matched_pairs",
     "_existence_count",
     "common_nuclei",
     "filter_by_reference",

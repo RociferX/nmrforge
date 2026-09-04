@@ -1790,6 +1790,9 @@ class PipelinePanel(QWidget):
                         if self._ref_info:
                             kwargs["ref_peaks"] = self._ref_info["peaks"]
                             kwargs["ref_nuclei"] = self._ref_info.get("nuclei")
+                            kwargs["ref_name"] = str(
+                                self._ref_info.get("label", "")
+                            ).split(" (")[0]
                             kwargs["tolerance_ppm"] = None
                     if step_id == "analysis":
                         ref = getattr(self, "_analysis_ref_info", None)

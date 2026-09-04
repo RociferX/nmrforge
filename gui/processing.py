@@ -379,6 +379,7 @@ class ProcessingController:
         ref_peaks: list[dict] | None = None,
         ref_nuclei: list[str] | None = None,
         tolerance_ppm: dict[str, float] | None = None,
+        ref_name: str = "",
     ) -> dict:
         """峰挑选:调 workflow.pick_peaks,返回 {status, peak_path, peak_count, logs}。"""
         try:
@@ -393,6 +394,7 @@ class ProcessingController:
             self._manager, exp_id, data_id, sigma_multiplier=sigma_multiplier,
             ref_peaks=ref_peaks, ref_nuclei=ref_nuclei,
             tolerance_ppm=tolerance_ppm,
+            ref_name=ref_name,
         )
         if data_id and result.get("status") == "success":
             record_step_success(self._manager, exp_id, data_id, "peaks")

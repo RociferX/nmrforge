@@ -1509,6 +1509,7 @@ class SpectrumPanel(QWidget):
         from workflow.peak_align import (
             MIN_ACCEPTABLE_RATIO,
             align_peak_files,
+            alignment_figure,
             shifted_rows,
         )
 
@@ -1562,12 +1563,46 @@ class SpectrumPanel(QWidget):
             if not path:
                 return
             export_peaks_poky(path, out_rows, nuclei=nuclei)
-            InfoDialog.show_info(
-                self,
-                "导出完成",
+            # 对齐检查图 → 当前数据 figures/;文件名 = 当前峰表_aligned_参考峰表
+            fig_lines: list[str] = []
+            try:
+                cur_path = None
+                if self._current_spectrum:
+                    try:
+                        cur_path = self._peak_file_path(
+                            Path(self._current_spectrum)
+                        )
+                    except Exception:
+                        cur_path = None
+                cur_name = (
+                    Path(cur_path).stem
+                    if cur_path
+                    else f"{self._current_exp_id}-{self._current_data_id}"
+                )
+                ref_name = Path(ref_path).stem
+                figures_dir = self.manager.data_dir(
+                    self._current_exp_id, self._current_data_id, "figures"
+                )
+                fig_path = figures_dir / f"{cur_name}_aligned_{ref_name}.png"
+                alignment_figure(
+                    self._peaks,
+                    ref_rows,
+                    result["shift"],
+                    fig_path,
+                    cur_nuclei=nuclei,
+                    cur_label=cur_name,
+                    ref_label=ref_name,
+                )
+                fig_lines.append(f"对齐检查图: {fig_path}")
+            except Exception as exc:  # noqa: BLE001 - 图失败不阻断导出
+                fig_lines.append(f"对齐检查图生成失败: {exc}")
+            msg = (
                 "已导出对齐后峰表: " + str(path) + "\n"
-                f"(对齐率 {result['ratio']:.0%},偏移 {result['shift']})",
+                f"(对齐率 {result['ratio']:.0%},偏移 {result['shift']})"
             )
+            if fig_lines:
+                msg += "\n" + "\n".join(fig_lines)
+            InfoDialog.show_info(self, "导出完成", msg)
         except Exception as exc:  # noqa: BLE001
             InfoDialog.show_info(self, "对齐导出失败", str(exc))
 

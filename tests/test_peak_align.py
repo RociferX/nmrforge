@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from workflow.peak_align import (
     MIN_ACCEPTABLE_RATIO,
     TOLERANCE_PPM,
@@ -132,6 +134,34 @@ def test_ratio_denominator_is_smaller_list() -> None:
     assert result["matched"] <= 3
     assert result["ratio"] == result["matched"] / 3.0
 
+
+def test_alignment_figure_writes_png(tmp_path: Path) -> None:
+    """Alignment check figure lands as a PNG under the given path."""
+    from workflow.peak_align import (
+        align_peak_files,
+        alignment_figure,
+        matched_pairs,
+    )
+
+    cur = _hsqc_rows([8.0, 8.5, 9.0], [118.0, 121.0, 124.0])
+    ref = _hsqc_rows([8.03, 8.52], [118.1, 121.2])
+    result = align_peak_files(cur, ref, ref_nuclei=["15N", "1H"])
+    pairs, nuclei = matched_pairs(cur, ref, result["shift"])
+    assert nuclei == ["1H", "15N"]
+    assert len(pairs) == min(len(cur), len(ref))
+    out = tmp_path / "d_001_aligned_d_002.png"
+    written = alignment_figure(
+        cur,
+        ref,
+        result["shift"],
+        out,
+        ref_nuclei=["15N", "1H"],
+        cur_label="d_001",
+        ref_label="d_002",
+    )
+    assert written == out
+    assert out.is_file()
+    assert out.stat().st_size > 1000
 
 def test_constants() -> None:
     assert MIN_ACCEPTABLE_RATIO == 0.60
