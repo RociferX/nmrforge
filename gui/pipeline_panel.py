@@ -31,6 +31,7 @@ from PyQt6.QtWidgets import (
     QLayoutItem,
     QLineEdit,
     QListWidget,
+    QMenu,
     QPushButton,
     QScrollArea,
     QSlider,
@@ -1638,7 +1639,9 @@ class PipelinePanel(QWidget):
             row.clear_analysis_ref_display()
 
     def _on_pick_reference(self, step_id: str) -> None:
-        """「参考谱」按钮:选择任意已有峰表的数据作为选峰参考。"""
+        """「参考谱」按钮:按钮下方弹出下拉,列出项目内已有峰文件的数据
+        (按 exp/data 编号排序)。选中后加载为选峰参考(对齐后剔除参考中
+        找不到对应峰的峰)。"""
         if self.manager is None or self.manager.project is None:
             return
         candidates = self._reference_candidates()
@@ -1649,26 +1652,19 @@ class PipelinePanel(QWidget):
                 self, "参考谱", "项目中没有已有峰表的数据,请先对某数据选峰"
             )
             return
-        dialog = QDialog(self)
-        dialog.setWindowTitle("选择参考谱(已有峰表)")
-        lay = QVBoxLayout(dialog)
-        tip = QLabel("选择参考数据:选峰时只保留与参考峰表匹配的峰(按核匹配)")
-        tip.setWordWrap(True)
-        lay.addWidget(tip)
-        lst = QListWidget()
-        for name, _exp, _did in candidates:
-            lst.addItem(name)
-        lay.addWidget(lst)
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok
-            | QDialogButtonBox.StandardButton.Cancel
-        )
-        buttons.accepted.connect(dialog.accept)
-        buttons.rejected.connect(dialog.reject)
-        lay.addWidget(buttons)
-        if dialog.exec() != QDialog.DialogCode.Accepted or lst.currentRow() < 0:
+        row = self._rows.get(step_id)
+        anchor = row.ref_button if row is not None else self
+        menu = QMenu(anchor)
+        # 按数据编号排序(exp id, data id 自然序即 d_001 < d_002)
+        for name, ref_exp, ref_data in sorted(
+            candidates, key=lambda item: (item[1], item[2])
+        ):
+            action = menu.addAction(f"{name}")
+            action.setData((ref_exp, ref_data))
+        chosen = menu.exec(anchor.mapToGlobal(anchor.rect().bottomLeft()))
+        if chosen is None:
             return
-        _name, ref_exp, ref_data = candidates[lst.currentRow()]
+        ref_exp, ref_data = chosen.data()
         info = self._load_reference(ref_exp, ref_data)
         if info is None:
             from gui.dialogs import InfoDialog
