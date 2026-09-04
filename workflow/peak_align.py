@@ -332,20 +332,22 @@ def alignment_figure(
     cur_label: str = "current",
     ref_label: str = "reference",
 ) -> Path:
-    """Render an alignment check figure (PNG) of current vs reference peaks.
+    """Render an alignment check figure (PNG + SVG) of current vs reference
+    peaks.
 
     Uses the first two common nuclei for the 2D projection (usually 15N/1H);
     matched pairs are connected by lines after the whole shift is applied.
     只画真实匹配连线(0.2.199-补29fx:去掉虚线网格,避免被误认成长线)。
-    只画真实匹配连线(0.2.199-补29fx:去掉虚线网格,避免被误认成长线)。
-    只画真实匹配连线(0.2.199-补29fx:去掉虚线网格,避免被误认成长线)。
-    只画真实匹配连线(0.2.199-补29fx:去掉虚线网格,避免被误认成长线)。
-    只画真实匹配连线(0.2.199-补29fx:去掉虚线网格,避免被误认成长线)。
+    PNG 300dpi + 同路径 .svg 各一份(0.2.199-补29fy,用户:同时加一份 SVG;
+    svg.fonttype=none,文字保持文本可在 Inkscape/Illustrator 编辑)。
     """
     import matplotlib
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+
+    # SVG 文字保持文本(与 workflow/analyze 的可编辑 SVG 约定一致)
+    matplotlib.rcParams["svg.fonttype"] = "none"
 
     cur_c = [row_coords(r, cur_nuclei) for r in cur_rows]
     ref_c = [row_coords(r, ref_nuclei) for r in ref_rows]
@@ -400,6 +402,8 @@ def alignment_figure(
     out = Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out, dpi=300)
+    # 0.2.199-补29fy(用户):同路径同时输出 SVG 矢量版
+    fig.savefig(out.with_suffix(".svg"), format="svg")
     plt.close(fig)
     return out
 

@@ -653,18 +653,22 @@ def pick_peaks(
                             f"{exp_id}-{data_id}_aligned_"
                             f"{_safe_figure_token(ref_label)}.png"
                         )
+                        fig_path = figures_dir / fig_name
                         alignment_figure(
                             cur_rows,
                             ref_peaks,
                             align["shift"],
-                            figures_dir / fig_name,
+                            fig_path,
                             cur_nuclei=None,
                             ref_nuclei=ref_nuclei,
                             tol_ppm=ref_tol,
                             cur_label=f"{exp_id}-{data_id}",
                             ref_label=ref_label,
                         )
-                        ref_log += f"(检查图 {figures_dir / fig_name})"
+                        ref_log += (
+                            f"(检查图 {fig_path};SVG "
+                            f"{fig_path.with_suffix('.svg')})"
+                        )
                     except Exception:  # noqa: BLE001 - 图失败不阻断选峰
                         pass
             else:

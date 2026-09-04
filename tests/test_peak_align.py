@@ -136,7 +136,7 @@ def test_ratio_denominator_is_smaller_list() -> None:
 
 
 def test_alignment_figure_writes_png(tmp_path: Path) -> None:
-    """Alignment check figure lands as a PNG under the given path."""
+    """Alignment check figure lands as PNG + SVG under the given path."""
     from workflow.peak_align import (
         align_peak_files,
         alignment_figure,
@@ -162,6 +162,11 @@ def test_alignment_figure_writes_png(tmp_path: Path) -> None:
     assert written == out
     assert out.is_file()
     assert out.stat().st_size > 1000
+    # 0.2.199-补29fy:同路径同时输出可编辑 SVG
+    svg = out.with_suffix(".svg")
+    assert svg.is_file()
+    assert svg.stat().st_size > 100
+    assert "<svg" in svg.read_text(encoding="utf-8", errors="ignore")[:2000]
 
 def test_constants() -> None:
     """0.2.199-补29fx:对齐容差按 Poky kr 默认(1H ±0.02,其它核 ±0.2)。"""

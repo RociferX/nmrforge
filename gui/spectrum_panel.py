@@ -1611,7 +1611,10 @@ class SpectrumPanel(QWidget):
                     cur_label=cur_name,
                     ref_label=ref_name,
                 )
-                fig_lines.append(f"对齐检查图: {fig_path}")
+                fig_lines.append(f"对齐检查图(PNG): {fig_path}")
+                fig_lines.append(
+                    f"对齐检查图(SVG): {fig_path.with_suffix('.svg')}"
+                )
             except Exception as exc:  # noqa: BLE001 - 图失败不阻断导出
                 fig_lines.append(f"对齐检查图生成失败: {exc}")
             msg = (
