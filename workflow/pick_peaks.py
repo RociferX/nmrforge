@@ -504,6 +504,7 @@ def pick_peaks(
     ref_peaks: list[dict[str, Any]] | None = None,
     ref_nuclei: list[str] | None = None,
     tolerance_ppm: dict[str, float] | None = None,
+    ref_name: str = "",
 ) -> dict[str, Any]:
     """峰挑选:检测谱峰并写 Poky .list,登记 WorkflowRun。
 
@@ -654,6 +655,30 @@ def pick_peaks(
                         ref_log += ",请检查参考谱是否与此谱相似"
                     ref_log += ")"
                     peaks = kept_peaks
+                    try:
+                        from workflow.peak_align import alignment_figure
+
+                        figures_dir = manager.data_dir(
+                            exp_id, data_id, "figures"
+                        )
+                        figures_dir.mkdir(parents=True, exist_ok=True)
+                        ref_label = ref_name or "reference"
+                        fig_name = (
+                            f"{exp_id}-{data_id}_aligned_{ref_label}.png"
+                        )
+                        alignment_figure(
+                            cur_rows,
+                            ref_peaks,
+                            align["shift"],
+                            figures_dir / fig_name,
+                            cur_nuclei=None,
+                            ref_nuclei=ref_nuclei,
+                            cur_label=f"{exp_id}-{data_id}",
+                            ref_label=ref_label,
+                        )
+                        ref_log += f"(检查图 {figures_dir / fig_name})"
+                    except Exception:  # noqa: BLE001 - 图失败不阻断选峰
+                        pass
             else:
                 # 参考峰很少:整体平移不可靠 → 零平移直接匹配(补29dl)
                 zero_shift = {}
