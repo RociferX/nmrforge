@@ -53,6 +53,74 @@ class LogPanel(QWidget):
         layout.addWidget(self.text, 1)
         self._buffers: dict[str, list[str]] = {"global": []}
         self._current_scope = "global"
+        self._manager = None
+
+    def set_manager(self, manager) -> None:
+        """绑定当前 ProjectManager(切换项目时由主窗口重绑)。"""
+        self._manager = manager
+
+    def _data_log_path(self, key: str):
+        """data:{exp}:{data} 作用域 → d_xxx/log.txt;其它作用域返回 None。"""
+        if not key.startswith("data:"):
+            return None
+        try:
+            _kind, exp_id, data_id = key.split(":", 2)
+        except ValueError:
+            return None
+        manager = getattr(self, "_manager", None)
+        if manager is None or getattr(manager, "project", None) is None:
+            return None
+        try:
+            return manager.data_base(exp_id, data_id) / "log.txt"
+        except Exception:  # noqa: BLE001 - 路径失败不持久化
+            return None
+
+    def _persist_line(self, key: str, line: str) -> None:
+        """单数据作用域日志镜像到 d_xxx/log.txt(0.2.199-补29ga)。"""
+        path = self._data_log_path(key)
+        if path is None:
+            return
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if not path.is_file():
+                path.write_text(
+                    "# NMRForge 数据日志(d_xxx 文件夹)\n", encoding="utf-8"
+                )
+            with path.open("a", encoding="utf-8") as fh:
+                fh.write(line + "\n")
+        except OSError:
+            pass
+
+    def _seed_persisted(self, key: str) -> None:
+        """切到单数据作用域时载入该数据历史日志(本会话已有则不重复)。"""
+        if self._buffers.get(key):
+            return
+        path = self._data_log_path(key)
+        if path is None or not path.is_file():
+            return
+        try:
+            lines = []
+            for raw in path.read_text(encoding="utf-8").splitlines():
+                text = raw.strip()
+                if text and not text.startswith("#"):
+                    lines.append(text)
+            if lines:
+                self._buffers[key] = lines
+        except OSError:
+            pass
+
+    def _reset_persisted(self, key: str) -> None:
+        """清空单数据作用域时同步清空 d_xxx/log.txt。"""
+        path = self._data_log_path(key)
+        if path is None:
+            return
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(
+                "# NMRForge 数据日志(d_xxx 文件夹)\n", encoding="utf-8"
+            )
+        except OSError:
+            pass
 
     @staticmethod
     def scope_key(
@@ -85,6 +153,8 @@ class LogPanel(QWidget):
                 f"exp:{exp_id}": f"实验 {exp_id}",
             }.get(self._current_scope, self._current_scope)
         )
+        # 0.2.199-补29ga:单数据作用域载入 d_xxx/log.txt 历史
+        self._seed_persisted(self._current_scope)
         self._reload_text()
 
     def current_scope(self) -> str:
@@ -95,11 +165,15 @@ class LogPanel(QWidget):
         line = f"[{timestamp}] {message}"
         key = scope or self._current_scope
         self._buffers.setdefault(key, []).append(line)
+        # 0.2.199-补29ga:data 作用域镜像到 d_xxx/log.txt
+        self._persist_line(key, line)
         if key == self._current_scope:
             self._append_line(line)
 
     def clear(self) -> None:
         self._buffers[self._current_scope] = []
+        # 0.2.199-补29ga:单数据作用域同步清空 d_xxx/log.txt
+        self._reset_persisted(self._current_scope)
         self._reload_text()
 
     def _append_line(self, line: str) -> None:

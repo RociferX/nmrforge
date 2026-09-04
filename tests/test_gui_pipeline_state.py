@@ -379,3 +379,30 @@ def test_pipeline_peak_threshold_isolated_per_data(
     panel.set_selection("data", exp.id, d2.id)
     assert row.threshold_spin.value() == 9.0
     panel.close()
+
+
+def test_pipeline_threshold_persisted_in_data_folder(
+    tmp_path: Path, qapp: QApplication
+) -> None:
+    """0.2.199-补29ga:阈值持久化到 d_xxx/ui_state.json,重启后恢复。"""
+    import json
+
+    from core.project import ProjectManager
+    from gui.pipeline_panel import PipelinePanel
+
+    manager = ProjectManager.create_project(tmp_path / "proj_p", "demo")
+    exp = manager.create_experiment("HSQC")
+    d1 = manager.import_data(exp.id, "/fake/1")
+    panel = PipelinePanel(manager)
+    panel.set_selection("data", exp.id, d1.id)
+    panel._rows["peaks"].threshold_spin.setValue(18.0)
+    path = manager.data_base(exp.id, d1.id) / "ui_state.json"
+    assert path.is_file()
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["peaks"]["threshold"] == 18.0
+    # 新面板(模拟重启)从文件恢复
+    panel2 = PipelinePanel(manager)
+    panel2.set_selection("data", exp.id, d1.id)
+    assert panel2._rows["peaks"].threshold_spin.value() == 18.0
+    panel.close()
+    panel2.close()

@@ -1031,11 +1031,40 @@ class PipelinePanel(QWidget):
             row.clear_ref_display()
 
     def _store_current_threshold(self, value: float) -> None:
-        """阈值调节即时记入当前数据(0.2.199-补29fz)。"""
-        if self._current_exp_id and self._current_data_id:
-            self._threshold_by_data[
-                (self._current_exp_id, self._current_data_id)
-            ] = float(value)
+        """阈值调节即时记入当前数据并持久化(0.2.199-补29fz/补29ga)。"""
+        if not (self._current_exp_id and self._current_data_id):
+            return
+        key = (self._current_exp_id, self._current_data_id)
+        self._threshold_by_data[key] = float(value)
+        try:
+            from gui.per_data_records import update_ui_state
+
+            update_ui_state(
+                self.manager,
+                self._current_exp_id,
+                self._current_data_id,
+                "peaks",
+                {"threshold": float(value)},
+            )
+        except Exception:  # noqa: BLE001 - 持久化失败不阻断调节
+            pass
+
+    def _threshold_for(self, exp_id: str, data_id: str) -> float:
+        """该数据阈值:会话缓存优先,缺省读 d_xxx/ui_state.json(补29ga)。"""
+        key = (exp_id, data_id)
+        if key not in self._threshold_by_data:
+            value = 15.0
+            try:
+                from gui.per_data_records import load_ui_state
+
+                raw = (load_ui_state(self.manager, exp_id, data_id)
+                       .get("peaks") or {}).get("threshold")
+                if raw is not None:
+                    value = float(raw)
+            except Exception:  # noqa: BLE001 - 读取失败用默认
+                pass
+            self._threshold_by_data[key] = value
+        return self._threshold_by_data[key]
 
     def _current_statuses(self) -> dict[str, str]:
         """当前选中样品数据的步骤状态;未选中样品数据/旧单样品数据回退实验类型聚合。"""
@@ -1088,9 +1117,8 @@ class PipelinePanel(QWidget):
         peaks_row = self._rows.get("peaks")
         if peaks_row is not None:
             peaks_row.threshold_spin.setValue(
-                self._threshold_by_data.get(
-                    (self._current_exp_id, self._current_data_id),
-                    15.0,
+                self._threshold_for(
+                    self._current_exp_id, self._current_data_id
                 )
             )
         # 样品数据层不提示/展示导入步骤(导入属于实验类型层动作)
@@ -1328,9 +1356,8 @@ class PipelinePanel(QWidget):
             peaks_row = self._rows.get("peaks")
             if peaks_row is not None:
                 peaks_row.threshold_spin.setValue(
-                    self._threshold_by_data.get(
-                        (self._current_exp_id, self._current_data_id),
-                        15.0,
+                    self._threshold_for(
+                        self._current_exp_id, self._current_data_id
                     )
                 )
         row = self._rows[step_id]

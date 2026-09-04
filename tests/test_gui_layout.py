@@ -2371,3 +2371,79 @@ def test_spectrum_display_settings_isolated_per_data(
     assert panel.viewer.aspect_slider.value() == 80
     assert panel.peak_size_spin.value() == 2.0
     panel.close()
+
+
+def test_log_panel_data_scope_persists_to_data_folder(
+    tmp_path: Path, qapp: QApplication
+) -> None:
+    """0.2.199-补29ga:单数据日志持久化到 d_xxx/log.txt,新面板可读回。"""
+    from core.project import ProjectManager
+    from gui.log_panel import LogPanel
+
+    manager = ProjectManager.create_project(tmp_path / "proj_log", "demo")
+    exp = manager.create_experiment("HSQC")
+    data = manager.import_data(exp.id, "/fake/1")
+    log = LogPanel()
+    log.set_manager(manager)
+    scope = log.scope_key("data", exp.id, data.id)
+    log.append("第一次处理完成", scope=scope)
+    path = manager.data_base(exp.id, data.id) / "log.txt"
+    assert path.is_file()
+    text = path.read_text(encoding="utf-8")
+    assert "第一次处理完成" in text
+    # 新 LogPanel(模拟重启)切到该数据能看到历史
+    log2 = LogPanel()
+    log2.set_manager(manager)
+    log2.set_scope("data", exp.id, data.id)
+    assert any(
+        "第一次处理完成" in line for line in log2._buffers[scope]
+    )
+    # 清空面板同步清空记录文件(保留标题行)
+    log2.clear()
+    text2 = path.read_text(encoding="utf-8")
+    assert "第一次处理完成" not in text2
+    assert text2.startswith("#")
+    log.close()
+    log2.close()
+
+
+def test_spectrum_display_settings_persisted_in_data_folder(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.2.199-补29ga:显示调节持久化到 d_xxx/ui_state.json,重启恢复。"""
+    import json
+
+    from gui.spectrum_panel import SpectrumPanel
+
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    exp = manager.project.experiment("exp_001")
+    assert exp is not None
+    d1_id = str(exp.data[0].id)
+    spectra1 = manager.data_dir(exp.id, d1_id, "spectra")
+    spectra1.mkdir(parents=True, exist_ok=True)
+    _write_ft2(spectra1 / f"{exp.id}-{d1_id}.ft2")
+    panel = SpectrumPanel(manager)
+    panel.set_context(exp.id, d1_id)
+    assert panel.load_current_spectrum() is True
+    panel.viewer.level_slider.setValue(55)
+    panel.viewer.count_slider.setValue(11)
+    panel.viewer.aspect_slider.setValue(70)
+    panel.peak_size_spin.setValue(2.5)
+    path = manager.data_base(exp.id, d1_id) / "ui_state.json"
+    assert path.is_file()
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    spectrum = payload["spectrum"]
+    assert spectrum["level_slider"] == 55
+    assert spectrum["level_count"] == 11
+    assert spectrum["aspect"] == 70
+    assert spectrum["peak_size"] == 2.5
+    # 新面板(模拟重启)打开该数据恢复
+    panel2 = SpectrumPanel(manager)
+    panel2.set_context(exp.id, d1_id)
+    assert panel2.load_current_spectrum() is True
+    assert panel2.viewer.level_slider.value() == 55
+    assert panel2.viewer.count_slider.value() == 11
+    assert panel2.viewer.aspect_slider.value() == 70
+    assert panel2.peak_size_spin.value() == 2.5
+    panel.close()
+    panel2.close()

@@ -445,7 +445,17 @@ class SpectrumPanel(QWidget):
                 "aspect": int(self.viewer.aspect_slider.value()),
                 "peak_size": float(self.peak_size_spin.value()),
             }
-        except Exception:  # noqa: BLE001 - 记录失败不阻断调节
+            # 0.2.199-补29ga:镜像到 d_xxx/ui_state.json
+            from gui.per_data_records import update_ui_state
+
+            update_ui_state(
+                self.manager,
+                self._current_exp_id,
+                self._current_data_id,
+                "spectrum",
+                dict(self._display_states[key]),
+            )
+        except Exception:  # noqa: BLE001 - 记录/持久化失败不阻断调节
             pass
 
     def _restore_display_state(self) -> None:
@@ -456,12 +466,29 @@ class SpectrumPanel(QWidget):
             return
         state = self._display_states.get(key)
         if state is None:
-            state = {
+            defaults = {
                 "level_slider": 31,
                 "level_count": 8,
                 "aspect": 100,
                 "peak_size": 1.5,
             }
+            # 0.2.199-补29ga:重启后从 d_xxx/ui_state.json 恢复
+            try:
+                from gui.per_data_records import load_ui_state
+
+                file_state = (
+                    load_ui_state(
+                        self.manager, self._current_exp_id,
+                        self._current_data_id,
+                    ).get("spectrum")
+                    or {}
+                )
+                for field in defaults:
+                    if file_state.get(field) is not None:
+                        defaults[field] = file_state[field]
+            except Exception:  # noqa: BLE001 - 读取失败用默认
+                pass
+            state = defaults
             self._display_states[key] = dict(state)
         try:
             self.viewer.level_slider.setValue(

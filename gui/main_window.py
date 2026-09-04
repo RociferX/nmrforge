@@ -291,6 +291,7 @@ class MainWindow(QMainWindow):
         self.main_splitter.addWidget(self.project_tree)
         self.main_splitter.addWidget(self.center_panel)
         self.log_panel = LogPanel()
+        self.log_panel.set_manager(self.manager)
         self.log_panel.stop_requested.connect(self._on_stop_requested)
         # 0.2.143:log 界面常驻显示(不再默认隐藏),宽度不限可拖拽
         self.log_panel.setVisible(True)
@@ -396,6 +397,7 @@ class MainWindow(QMainWindow):
         self.center_panel._manager = self.manager
         self.pipeline.manager = self.manager
         self.spectrum_panel.manager = self.manager
+        self.log_panel.set_manager(self.manager)
         self.controller.set_manager(self.manager)
 
     def _refresh_recent_menu(self) -> None:
