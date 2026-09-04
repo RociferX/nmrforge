@@ -248,8 +248,17 @@ class SpectrumPanel(QWidget):
         self.peak_toolbar2.addWidget(self.import_poky_button)
         self.export_poky_button = QPushButton("Export peaks")
         self.export_poky_button.setEnabled(False)
-        self.export_poky_button.setToolTip("把当前峰表导出为 Poky/Sparky .list")
-        self.export_poky_button.clicked.connect(self._export_peaks_poky)
+        self.export_poky_button.setToolTip(
+            "导出峰表:直接导出(原坐标)或对齐后导出(整体平移对齐到所选参考峰文件)"
+        )
+        self.export_menu = QMenu(self)
+        self.export_direct_action = self.export_menu.addAction(
+            "直接导出", self._export_peaks_poky
+        )
+        self.export_aligned_action = self.export_menu.addAction(
+            "对齐后导出", self._export_peaks_aligned
+        )
+        self.export_poky_button.setMenu(self.export_menu)
         self.peak_toolbar2.addWidget(self.export_poky_button)
         self.save_peaks_button = QPushButton("Save peaks")
         self.save_peaks_button.setEnabled(False)
@@ -1480,6 +1489,87 @@ class SpectrumPanel(QWidget):
             InfoDialog.show_info(self, "导出完成", f"已导出 Poky 峰表: {path}")
         except Exception as exc:  # noqa: BLE001
             InfoDialog.show_info(self, "导出失败", str(exc))
+
+    def _export_peaks_aligned(self) -> None:
+        """对齐后导出:选参考 .list → 整体平移搜索 → 导出平移后的峰表。
+
+        0.2.199-补29fw(用户):导出参考谱可以是任意 .list 文件,与选峰参考
+        解耦;按整体平移把当前峰文件移动后输出,以参考为基准。
+        """
+        if not self._peaks or self.manager.project is None:
+            return
+        ref_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "选择导出参考峰文件(.list)",
+            "",
+            "Poky 峰表 (*.list);;所有文件 (*)",
+        )
+        if not ref_path:
+            return
+        from workflow.peak_align import (
+            MIN_ACCEPTABLE_RATIO,
+            align_peak_files,
+            shifted_rows,
+        )
+
+        try:
+            ref_path = Path(ref_path)
+            ref_rows = import_peaks_poky(ref_path)
+            if not ref_rows:
+                InfoDialog.show_info(self, "对齐导出失败", "参考峰文件为空或无法解析")
+                return
+            is_3d = "F1_shift" in (self._peaks[0] if self._peaks else {})
+            nuclei = self._current_3d_nuclei() if is_3d else None
+            result = align_peak_files(
+                self._peaks, ref_rows, cur_nuclei=nuclei
+            )
+            if result["status"] == "no_common":
+                InfoDialog.show_info(
+                    self, "对齐导出失败", result["message"]
+                )
+                return
+            if result["status"] == "low":
+                InfoDialog.show_info(
+                    self,
+                    "对齐率偏低",
+                    f"对齐率 {result['ratio']:.0%} < "
+                    f"{MIN_ACCEPTABLE_RATIO:.0%},请检查参考谱是否与此谱相似",
+                )
+                return
+            out_rows = shifted_rows(self._peaks, result["shift"], nuclei)
+            default = None
+            try:
+                default = (
+                    self.manager.data_dir(
+                        self._current_exp_id, self._current_data_id, "peaks"
+                    )
+                    / f"{self._current_exp_id}-{self._current_data_id}"
+                    "_refaligned.list"
+                )
+            except Exception:  # noqa: BLE001
+                default = None
+            start = (
+                str(default.parent)
+                if default is not None
+                else str(Path.home())
+            )
+            path, _ = QFileDialog.getSaveFileName(
+                self,
+                "导出对齐后 Poky 峰表",
+                str(default) if default is not None else start,
+                "Poky 峰表 (*.list);;所有文件 (*)",
+            )
+            if not path:
+                return
+            export_peaks_poky(path, out_rows, nuclei=nuclei)
+            InfoDialog.show_info(
+                self,
+                "导出完成",
+                "已导出对齐后峰表: " + str(path) + "\n"
+                f"(对齐率 {result['ratio']:.0%},偏移 {result['shift']})",
+            )
+        except Exception as exc:  # noqa: BLE001
+            InfoDialog.show_info(self, "对齐导出失败", str(exc))
 
     def _clear_peaks(self) -> None:
         self._peaks = []

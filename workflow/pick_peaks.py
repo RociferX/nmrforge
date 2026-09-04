@@ -568,40 +568,129 @@ def pick_peaks(
                 )
             else:
                 peaks = peak_detection.keep_dominant(peaks)
-        # 0.2.199-补29dl(用户):参考峰表约束——只保留与参考谱峰表匹配的峰
+        # 0.2.199-补29dl/补29fw(用户):参考峰表约束。参考峰文件足够多时
+        # (>=5)先整体平移对齐(不同采集间可能有偏移,2026-09-04 用户裁定),
+        # 再剔除参考中找不到对应峰的峰;参考峰很少时整体平移不可靠,
+        # 退化为零平移直接按坐标匹配(保留补29dl 语义)。
         ref_log: str | None = None
         if ref_peaks:
+            from workflow.peak_align import (
+                MIN_ACCEPTABLE_RATIO,
+                align_peak_files,
+                filter_by_reference,
+            )
+
             prefixes = tuple(
                 _fdf_prefix(dict(dic), arr.ndim, i) for i in range(arr.ndim)
             )
             storage_nuclei = _storage_nuclei(dict(dic), prefixes)
             axes = _axes_ppm(dict(dic), arr)
-            tol = (
-                dict(tolerance_ppm)
-                if tolerance_ppm
-                else _default_tolerance_ppm(axes, storage_nuclei)
-            )
-            ref_coords = [
-                c
-                for c in (_row_nucleus_ppm(r, ref_nuclei) for r in ref_peaks)
+            # 检测峰 → {核: ppm}(数据轴序;与参考行同构)
+            cur_coords = [
+                _peak_nucleus_ppm(peak, axes, storage_nuclei)
+                for peak in peaks
+            ]
+            cur_rows = [c for c in cur_coords if c]
+            ref_rows = [
+                c for c in (_row_nucleus_ppm(r, ref_nuclei) for r in ref_peaks)
                 if c
             ]
             before = len(peaks)
-            if ref_coords:
-                peaks = [
-                    p
-                    for p in peaks
-                    if _reference_match(
-                        _peak_nucleus_ppm(p, axes, storage_nuclei),
-                        ref_coords, tol,
+            if len(ref_rows) >= 5:
+                align = align_peak_files(
+                    cur_rows,
+                    ref_peaks,
+                    cur_nuclei=None,
+                    ref_nuclei=ref_nuclei,
+                    tol_ppm=(
+                        tolerance_ppm
+                        if tolerance_ppm
+                        else _default_tolerance_ppm(axes, storage_nuclei)
+                    ),
+                )
+                if align["status"] == "no_common":
+                    ref_log = (
+                        "参考峰表约束: 当前谱与参考峰无共同核坐标,未过滤"
                     )
+                else:
+                    kept_rows, _stats = filter_by_reference(
+                        cur_rows,
+                        ref_peaks,
+                        align["shift"],
+                        nuclei=None,
+                        ref_nuclei=ref_nuclei,
+                        tol_ppm=(
+                            tolerance_ppm
+                            if tolerance_ppm
+                            else _default_tolerance_ppm(
+                                axes, storage_nuclei
+                            )
+                        ),
+                    )
+                    kept_keys = {
+                        tuple(
+                            round(v, 6)
+                            for _, v in sorted(row.items())
+                        )
+                        for row in kept_rows
+                    }
+                    kept_peaks: list = []
+                    for peak, coord in zip(peaks, cur_coords):
+                        if not coord:
+                            continue
+                        key = tuple(
+                            round(v, 6)
+                            for _, v in sorted(coord.items())
+                        )
+                        if key in kept_keys:
+                            kept_peaks.append(peak)
+                    ratio = align.get("ratio", 0.0)
+                    ref_log = (
+                        f"参考峰表约束(对齐后): {before} → "
+                        f"{len(kept_peaks)} 峰(整体偏移 "
+                        f"{align['shift']},对齐率 {ratio:.0%}"
+                    )
+                    if ratio < MIN_ACCEPTABLE_RATIO:
+                        ref_log += ",请检查参考谱是否与此谱相似"
+                    ref_log += ")"
+                    peaks = kept_peaks
+            else:
+                # 参考峰很少:整体平移不可靠 → 零平移直接匹配(补29dl)
+                zero_shift = {}
+                kept_rows, _stats = filter_by_reference(
+                    cur_rows,
+                    ref_peaks,
+                    zero_shift,
+                    nuclei=None,
+                    ref_nuclei=ref_nuclei,
+                    tol_ppm=(
+                        tolerance_ppm
+                        if tolerance_ppm
+                        else _default_tolerance_ppm(axes, storage_nuclei)
+                    ),
+                )
+                kept_keys = {
+                    tuple(
+                        round(v, 6)
+                        for _, v in sorted(row.items())
+                    )
+                    for row in kept_rows
+                }
+                kept_peaks = [
+                    peak
+                    for peak, coord in zip(peaks, cur_coords)
+                    if not coord
+                    or tuple(
+                        round(v, 6) for _, v in sorted(coord.items())
+                    )
+                    in kept_keys
                 ]
                 ref_log = (
-                    f"参考峰表约束: {before} → {len(peaks)} 峰"
-                    f"(参考 {len(ref_coords)} 峰,容差 {tol})"
+                    f"参考峰表约束(直匹配): {before} → "
+                    f"{len(kept_peaks)} 峰(参考峰较少,未做整体平移)"
                 )
-            else:
-                ref_log = "参考峰表约束: 参考峰表无法解析核坐标,未过滤"
+                peaks = kept_peaks
+
         peak_path = _write_peaks_list(
             manager, exp_id, data_id, arr, dict(dic), peaks,
         )

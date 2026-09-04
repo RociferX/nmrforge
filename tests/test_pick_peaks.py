@@ -764,34 +764,34 @@ def test_pick_peaks_reference_constraint_3d_with_2d_ref(
     assert "参考峰表约束" in "".join(result["logs"])
 
 
-def test_pick_peaks_reference_tolerance(tmp_path: Path) -> None:
-    """0.2.199-补29dl:参考容差——默认 4 点×ppm/点外剔除,放宽后保留。"""
+def test_pick_peaks_reference_whole_shift(tmp_path: Path) -> None:
+    """0.2.199-补29fw:参考整体平移(3 ppm 15N)。参考峰足够多(>=5)时
+    先整体对齐再匹配;参考峰少(如单峰)时整体平移不可靠,退化为直匹配。
+    本用例用 5 个参考峰(整体 +3 ppm)验证对齐路径保留当前峰。"""
     rng = np.random.default_rng(20260831)
     spec = rng.normal(0, 0.3, (64, 128))
-    spec[20, 40] += 1500.0
+    for row, col in ((20, 40), (25, 90), (30, 60), (40, 100), (50, 70)):
+        spec[row, col] += 1200.0
     spec = gaussian_filter(spec, sigma=1.0)
     ft2 = tmp_path / "out.ft2"
     _write_ft2_nh(ft2, spec)
     manager, exp_id, data_id = _manager_with_spectrum(tmp_path, ft2)
-    n20, h40 = _nh_ppm(20, 40)
     ref_path = tmp_path / "ref.list"
-    # 参考 N 偏移 3 ppm:默认 15N 容差(4 点 ≈ 2.25 ppm)外 → 剔除
-    export_peaks_poky(
-        ref_path,
-        [{"N_shift": n20 + 3.0, "H_shift": h40, "Intensity": 1, "label": ""}],
-        ndim=2,
-    )
+    refs = []
+    for row, col in ((20, 40), (25, 90), (30, 60), (40, 100), (50, 70)):
+        n_ppm, h_ppm = _nh_ppm(row, col)
+        refs.append({"N_shift": n_ppm + 3.0, "H_shift": h_ppm,
+                     "Intensity": 1, "label": ""})
+    export_peaks_poky(ref_path, refs, ndim=2)
     ref_peaks = import_peaks_poky(ref_path)
     result = pick_peaks(
         manager, exp_id, data_id,
         ref_peaks=ref_peaks, ref_nuclei=["15N", "1H"],
+        tolerance_ppm={"15N": 1.0, "1H": 0.2},
     )
-    assert _read_rows(Path(result["peak_path"])) == []
-    # tolerance_ppm 放宽到 5 ppm → 保留
-    result2 = pick_peaks(
-        manager, exp_id, data_id,
-        ref_peaks=ref_peaks, ref_nuclei=["15N", "1H"],
-        tolerance_ppm={"15N": 5.0, "1H": 1.0},
-    )
-    assert len(_read_rows(Path(result2["peak_path"]))) == 1
+    rows = _read_rows(Path(result["peak_path"]))
+    # 5 个真实峰经整体 +3 ppm 对齐后全部保留(15N 搜索范围覆盖 3 ppm)
+    assert len(rows) == 5
+    logs = "".join(result["logs"])
+    assert "整体偏移" in logs
 
