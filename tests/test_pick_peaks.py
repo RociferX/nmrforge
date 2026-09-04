@@ -795,3 +795,11 @@ def test_pick_peaks_reference_whole_shift(tmp_path: Path) -> None:
     logs = "".join(result["logs"])
     assert "整体偏移" in logs
 
+
+
+def test_safe_figure_token() -> None:
+    """0.2.199-补29fx:参考显示名(exp/data 含 '/')转单段安全文件名。"""
+    from workflow.pick_peaks import _safe_figure_token
+
+    assert _safe_figure_token("exp_009/d_002") == "exp_009_d_002"
+    assert "/" not in _safe_figure_token("exp_009/d_002 (HSQC)")

@@ -12,8 +12,9 @@ NOT per-peak CSP matching:
 - Alignment ratio (user definition, 2026-09-03): matched / min(cur_count,
   ref_count).  Peaks with real displacement naturally do not match and count
   as unmatched.
-- Matching: every nucleus must fall within tolerance (defaults 1H +-0.1,
-  15N/13C +-0.5 ppm).  One reference peak is used at most once.
+- Matching: every nucleus must fall within tolerance (Poky kr dialog
+  defaults, 0.2.199-补29fx 用户:1H +-0.02 ppm,其它核 +-0.2 ppm).
+  One reference peak is used at most once.
 - Minimum acceptable ratio is 60%: below it the result is flagged "low" so
   the GUI can tell the user to check whether the reference is similar.
 """
@@ -27,15 +28,17 @@ from typing import Any
 import numpy as np
 
 # --- tunables (edit here and rerun) ---------------------------------------
+# Poky kr(Restricted Peak Pick)对话框默认(0.2.199-补29fx,用户裁定):
+# setup_axis_table 中 "1H" 填 .02 ppm,其它核一律 .2 ppm。
 TOLERANCE_PPM: dict[str, float] = {
-    "1H": 0.10,
-    "2H": 0.10,
-    "15N": 0.50,
-    "13C": 0.50,
-    "19F": 0.10,
-    "31P": 0.10,
-    "23Na": 0.50,
-    "29Si": 0.50,
+    "1H": 0.02,
+    "2H": 0.20,
+    "15N": 0.20,
+    "13C": 0.20,
+    "19F": 0.20,
+    "31P": 0.20,
+    "23Na": 0.20,
+    "29Si": 0.20,
 }
 SEARCH_RANGE_PPM: dict[str, float] = {
     "1H": 1.0,
@@ -100,19 +103,30 @@ def common_nuclei(
     return sorted(common, key=lambda n: (order.get(n, 99), n))
 
 
-def _coord_matrix(
+def _coord_matrix_full(
     coords: list[dict[str, float]], nuclei: list[str]
-) -> np.ndarray:
-    """{nucleus:ppm} list -> (N,K) matrix; rows missing any common nucleus
-    are skipped (they cannot participate in a joint match)."""
+) -> tuple[np.ndarray, list[int]]:
+    """{nucleus:ppm} list -> (N,K) matrix + 原行下标;缺共同核的行被跳过
+    (不能参与共同核匹配),返回下标用于把矩阵行映射回原峰行(0.2.199-补29fx:
+    否则检查图会把连线画到错误的峰上)。"""
     rows: list[np.ndarray] = []
-    for c in coords:
+    orig: list[int] = []
+    for k, c in enumerate(coords):
         values = [c.get(n) for n in nuclei]
         if all(v is not None for v in values):
             rows.append(np.asarray(values, dtype=float))
+            orig.append(k)
     if not rows:
-        return np.zeros((0, len(nuclei)), dtype=float)
-    return np.vstack(rows)
+        return np.zeros((0, len(nuclei)), dtype=float), []
+    return np.vstack(rows), orig
+
+
+def _coord_matrix(
+    coords: list[dict[str, float]], nuclei: list[str]
+) -> np.ndarray:
+    """Matrix form of _coord_matrix_full (matrix rows only)."""
+    matrix, _orig = _coord_matrix_full(coords, nuclei)
+    return matrix
 
 
 def _existence_count(
@@ -182,7 +196,9 @@ def _best_shift(
     deltas: list[np.ndarray] = []
     for i in range(cur.shape[0]):
         d = ref - cur[i]
-        dist = np.sum((d / tol) ** 2, axis=1)
+        # 初值用搜索范围归一:容差很紧(kr 1H ±0.02)时按容差归一会让
+        # “最近邻”偏向邻近峰(小 H 差、大 N 差)而不是真实配对。
+        dist = np.sum((d / ranges) ** 2, axis=1)
         nearest = d[int(np.argmin(dist))]
         if np.all(np.abs(nearest) <= ranges + tol):
             deltas.append(nearest)
@@ -286,8 +302,8 @@ def matched_pairs(
     tol = TOLERANCE_PPM if tol_ppm is None else {**TOLERANCE_PPM, **tol_ppm}
     tol_a = np.asarray([tol[n] for n in nuclei], dtype=float)
     shift_a = np.asarray([shift.get(n, 0.0) for n in nuclei], dtype=float)
-    cur_m = _coord_matrix(cur_coords, nuclei)
-    ref_m = _coord_matrix(ref_coords, nuclei)
+    cur_m, cur_idx = _coord_matrix_full(cur_coords, nuclei)
+    ref_m, ref_idx = _coord_matrix_full(ref_coords, nuclei)
     shifted = cur_m + shift_a
     used = np.zeros(ref_m.shape[0], dtype=bool)
     pairs: list[tuple[int, int]] = []
@@ -300,7 +316,7 @@ def matched_pairs(
         j = int(np.argmin(dist))
         used_idx = int(np.flatnonzero(inside)[j])
         used[used_idx] = True
-        pairs.append((i, used_idx))
+        pairs.append((cur_idx[i], ref_idx[used_idx]))
     return pairs, nuclei
 
 
@@ -320,6 +336,11 @@ def alignment_figure(
 
     Uses the first two common nuclei for the 2D projection (usually 15N/1H);
     matched pairs are connected by lines after the whole shift is applied.
+    只画真实匹配连线(0.2.199-补29fx:去掉虚线网格,避免被误认成长线)。
+    只画真实匹配连线(0.2.199-补29fx:去掉虚线网格,避免被误认成长线)。
+    只画真实匹配连线(0.2.199-补29fx:去掉虚线网格,避免被误认成长线)。
+    只画真实匹配连线(0.2.199-补29fx:去掉虚线网格,避免被误认成长线)。
+    只画真实匹配连线(0.2.199-补29fx:去掉虚线网格,避免被误认成长线)。
     """
     import matplotlib
 
@@ -375,7 +396,6 @@ def alignment_figure(
     ax.invert_xaxis()
     ax.invert_yaxis()
     ax.legend(frameon=False)
-    ax.grid(True, ls=":", lw=0.5, alpha=0.4)
     fig.tight_layout()
     out = Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)

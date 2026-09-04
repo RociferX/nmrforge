@@ -1514,15 +1514,31 @@ class SpectrumPanel(QWidget):
         )
 
         try:
+            # 0.2.199-补29fx:对齐容差可在软件设置里改(与线宽同处)
+            from gui.settings import load_settings
+
+            settings_tol = (
+                load_settings().get("alignment_tolerance_ppm") or None
+            )
             ref_path = Path(ref_path)
             ref_rows = import_peaks_poky(ref_path)
             if not ref_rows:
                 InfoDialog.show_info(self, "对齐导出失败", "参考峰文件为空或无法解析")
                 return
+            # 0.2.199-补29fx:外部 3D .list 按 Poky 约定 w1=15N/w2=13C/w3=1H
+            # (位置式导入即 F1=N/F2=C/F3=H);核名须显式传给对齐,否则 3D
+            # 参考行无法解析共同核坐标(2D 参考自带 N_shift/H_shift 不受影响)。
+            ref_nuclei_ref = None
+            if ref_rows and "F1_shift" in ref_rows[0]:
+                ref_nuclei_ref = ["15N", "13C", "1H"]
             is_3d = "F1_shift" in (self._peaks[0] if self._peaks else {})
             nuclei = self._current_3d_nuclei() if is_3d else None
             result = align_peak_files(
-                self._peaks, ref_rows, cur_nuclei=nuclei
+                self._peaks,
+                ref_rows,
+                cur_nuclei=nuclei,
+                ref_nuclei=ref_nuclei_ref,
+                tol_ppm=settings_tol,
             )
             if result["status"] == "no_common":
                 InfoDialog.show_info(
@@ -1590,6 +1606,8 @@ class SpectrumPanel(QWidget):
                     result["shift"],
                     fig_path,
                     cur_nuclei=nuclei,
+                    ref_nuclei=ref_nuclei_ref,
+                    tol_ppm=settings_tol,
                     cur_label=cur_name,
                     ref_label=ref_name,
                 )

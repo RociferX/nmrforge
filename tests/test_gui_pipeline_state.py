@@ -338,11 +338,17 @@ def test_pipeline_peaks_reference_selection(
     info = panel._load_reference(exp.id, d1.id)
     assert info is not None and info["peaks"]
     assert info["nuclei"] == ["15N", "1H"]
-    panel._ref_info = info
-    row.set_ref_text(f"参考: {info['label']} ({len(info['peaks'])} 峰)")
+    # 0.2.199-补29fx:参考按 (exp, data) 隔离,切换数据不残留
+    panel.set_selection("data", exp.id, d1.id)
+    panel._ref_info[(exp.id, d1.id)] = info
+    panel.refresh()
+    assert not row.clear_ref_button.isHidden()
+    panel.set_selection("data", exp.id, d2.id)
+    assert row.clear_ref_button.isHidden()
+    panel.set_selection("data", exp.id, d1.id)
     assert not row.clear_ref_button.isHidden()
     panel._on_clear_reference("peaks")
-    assert panel._ref_info is None
+    assert panel._ref_info == {}
     assert row.clear_ref_button.isHidden()
     panel.close()
 

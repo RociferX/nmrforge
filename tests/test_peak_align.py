@@ -164,5 +164,23 @@ def test_alignment_figure_writes_png(tmp_path: Path) -> None:
     assert out.stat().st_size > 1000
 
 def test_constants() -> None:
+    """0.2.199-补29fx:对齐容差按 Poky kr 默认(1H ±0.02,其它核 ±0.2)。"""
     assert MIN_ACCEPTABLE_RATIO == 0.60
-    assert isinstance(TOLERANCE_PPM["1H"], float)
+    assert TOLERANCE_PPM["1H"] == 0.02
+    for nucleus in ("2H", "15N", "13C", "19F", "31P", "23Na", "29Si"):
+        assert TOLERANCE_PPM[nucleus] == 0.2
+
+
+def test_matched_pairs_uses_original_row_indices() -> None:
+    """0.2.199-补29fx:缺共同核行被矩阵跳过时,配对必须返回原行下标
+    (否则检查图会把连线画到错误的峰上)。"""
+    from workflow.peak_align import matched_pairs
+
+    cur = [
+        {"1H": 7.2},  # 缺 15N,不能参与共同核匹配 → 被矩阵跳过
+        {"1H": 8.0, "15N": 118.0},
+    ]
+    ref = [{"1H": 8.0, "15N": 118.0}]
+    pairs, nuclei = matched_pairs(cur, ref, {})
+    assert nuclei == ["1H", "15N"]
+    assert pairs == [(1, 0)]

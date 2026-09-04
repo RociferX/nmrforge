@@ -730,6 +730,7 @@ class SettingsDialog(QDialog):
         self.nmrpipe_edit.setPlaceholderText("未配置(自动查找)")
         form.addRow("NMRPipe 路径", self.nmrpipe_edit)
         self.linewidth_spins: dict[str, QDoubleSpinBox] = {}
+        self.tolerance_spins: dict[str, QDoubleSpinBox] = {}
         for nucleus, default in DEFAULTS["linewidth_hz"].items():
             spin = QDoubleSpinBox()
             spin.setRange(0, 200)
@@ -737,6 +738,26 @@ class SettingsDialog(QDialog):
             spin.setValue(float(settings["linewidth_hz"].get(nucleus, default)))
             form.addRow(f"{nucleus} 默认线宽 (Hz)", spin)
             self.linewidth_spins[nucleus] = spin
+            # 0.2.199-补29fx(用户):对齐容差与线宽同处设置。
+            # 默认 Poky kr:1H ±0.02、15N/13C ±0.2 ppm。
+            tol_default = float(
+                DEFAULTS["alignment_tolerance_ppm"].get(nucleus, 0.2)
+            )
+            tol_spin = QDoubleSpinBox()
+            tol_spin.setRange(0.001, 2.0)
+            tol_spin.setDecimals(3)
+            tol_spin.setValue(
+                float(
+                    (settings.get("alignment_tolerance_ppm") or {})
+                    .get(nucleus, tol_default)
+                )
+            )
+            tol_spin.setToolTip(
+                "峰对齐/参考匹配容差(ppm)。Poky kr 默认 1H 0.02、"
+                "15N/13C 0.2;越小要求越严"
+            )
+            form.addRow(f"{nucleus} 对齐容差 (ppm)", tol_spin)
+            self.tolerance_spins[nucleus] = tol_spin
         # 0.2.199-补24:SMILE 自动线程预留数(机器线程数 - thread_offset)
         self.thread_offset_spin = QSpinBox()
         self.thread_offset_spin.setRange(0, 16)
@@ -783,6 +804,10 @@ class SettingsDialog(QDialog):
             "linewidth_hz": {
                 nucleus: spin.value()
                 for nucleus, spin in self.linewidth_spins.items()
+            },
+            "alignment_tolerance_ppm": {
+                nucleus: spin.value()
+                for nucleus, spin in self.tolerance_spins.items()
             },
             "pipeline": {
                 "simple_mode": self.simple_mode_check.isChecked(),

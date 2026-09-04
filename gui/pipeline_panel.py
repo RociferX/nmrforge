@@ -913,8 +913,10 @@ class PipelinePanel(QWidget):
         # 重读大 ft3 算质量导致卡顿;运行中标志防连续点击重复启动
         self._spectrum_report_cache: dict[str, str] = {}
         self._run_active: bool = False
-        # 0.2.199-补29dl:参考谱约束 {label, peaks, nuclei, path}
-        self._ref_info: dict | None = None
+        # 0.2.199-补29dl/补29fx:参考谱约束按数据隔离——
+        # (exp_id, data_id) → {label, peaks, nuclei, path};切换数据时
+        # 参考不串到其它数据处理界面(用户 2026-09-04)。
+        self._ref_info: dict[tuple[str, str], dict] = {}
         self._analysis_ref_info: dict[str, str] | None = None
 
         layout = QVBoxLayout(self)
@@ -999,6 +1001,26 @@ class PipelinePanel(QWidget):
     def current_experiment_id(self) -> str:
         return self._current_exp_id
 
+    def _sync_reference_display(self) -> None:
+        """按当前选中数据同步「参考: …」行显示(0.2.199-补29fx:
+        参考按数据隔离,切换数据不残留到其它数据)。"""
+        row = self._rows.get("peaks")
+        if row is None:
+            return
+        ref = (
+            self._ref_info.get(
+                (self._current_exp_id, self._current_data_id)
+            )
+            if self._current_data_id
+            else None
+        )
+        if ref:
+            row.set_ref_text(
+                f"参考: {ref['label']} ({len(ref['peaks'])} 峰)"
+            )
+        else:
+            row.clear_ref_display()
+
     def _current_statuses(self) -> dict[str, str]:
         """当前选中样品数据的步骤状态;未选中样品数据/旧单样品数据回退实验类型聚合。"""
         if self._current_data_id:
@@ -1015,6 +1037,7 @@ class PipelinePanel(QWidget):
             self.next_label.setText("")
             for row in self._rows.values():
                 row.set_status("LOCKED")
+            self._sync_reference_display()
             self._refresh_expanded_details()
             return
         if self._selection_kind in ("project", "experiment"):
@@ -1025,6 +1048,7 @@ class PipelinePanel(QWidget):
             for row in self._rows.values():
                 row.set_status("LOCKED")
                 row.manual_button.setVisible(False)  # 未选中数据不显示人工
+            self._sync_reference_display()
             self._refresh_expanded_details()
             return
         exp = project.experiment(self._current_exp_id)
@@ -1042,6 +1066,7 @@ class PipelinePanel(QWidget):
         if group is not None:
             context_text += f" [数据组 {group.id}: {len(group.data_ids)} 数据]"
         self.context_label.setText(context_text)
+        self._sync_reference_display()
         statuses = self._current_statuses()
         # 样品数据层不提示/展示导入步骤(导入属于实验类型层动作)
         # 0.2.199-补29as:SMILE 优化为可选步骤——未做/过期不占「下一步」,
@@ -1691,14 +1716,18 @@ class PipelinePanel(QWidget):
                 "参考峰表为 3D 且无法确定核名(未加载参考谱),约束将不生效",
             )
             return
-        self._ref_info = info
+        self._ref_info[
+            (self._current_exp_id, self._current_data_id)
+        ] = info
         self._rows["peaks"].set_ref_text(
             f"参考: {info['label']} ({len(info['peaks'])} 峰)"
         )
 
     def _on_clear_reference(self, step_id: str) -> None:
         """清除参考谱约束。"""
-        self._ref_info = None
+        self._ref_info.pop(
+            (self._current_exp_id, self._current_data_id), None
+        )
         row = self._rows.get("peaks")
         if row is not None:
             row.clear_ref_display()
@@ -1794,13 +1823,24 @@ class PipelinePanel(QWidget):
                         kwargs["sigma_multiplier"] = self._rows[
                             step_id
                         ].get_threshold()
-                        if self._ref_info:
-                            kwargs["ref_peaks"] = self._ref_info["peaks"]
-                            kwargs["ref_nuclei"] = self._ref_info.get("nuclei")
+                        ref = self._ref_info.get(
+                            (exp_id, target_data_id)
+                        )
+                        if ref:
+                            kwargs["ref_peaks"] = ref["peaks"]
+                            kwargs["ref_nuclei"] = ref.get("nuclei")
                             kwargs["ref_name"] = str(
-                                self._ref_info.get("label", "")
+                                ref.get("label", "")
                             ).split(" (")[0]
-                            kwargs["tolerance_ppm"] = None
+                            # 0.2.199-补29fx:容差可在软件设置里改(与线宽同处)
+                            from gui.settings import load_settings
+
+                            kwargs["tolerance_ppm"] = (
+                                load_settings().get(
+                                    "alignment_tolerance_ppm"
+                                )
+                                or None
+                            )
                     if step_id == "analysis":
                         ref = getattr(self, "_analysis_ref_info", None)
                         if not ref or not ref.get("data_id"):

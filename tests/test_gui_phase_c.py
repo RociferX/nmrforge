@@ -188,6 +188,12 @@ def test_settings_defaults_and_roundtrip(
     assert "points_per_line" not in loaded
     assert "smile_thread_cap" not in loaded
     assert loaded["linewidth_hz"]["1H"] == 8
+    # 0.2.199-补29fx:对齐容差默认 = Poky kr
+    assert loaded["alignment_tolerance_ppm"] == {
+        "1H": 0.02,
+        "15N": 0.2,
+        "13C": 0.2,
+    }
     settings_module.save_settings(
         {"linewidth_hz": {"1H": 10}}
     )
@@ -195,6 +201,13 @@ def test_settings_defaults_and_roundtrip(
     assert loaded2["linewidth_hz"]["1H"] == 10
     assert loaded2["linewidth_hz"]["15N"] == 15
     assert loaded2["linewidth_hz"]["13C"] == 20
+    # 只覆盖 1H 容差时,15N/13C 保持默认
+    settings_module.save_settings(
+        {"alignment_tolerance_ppm": {"1H": 0.05}}
+    )
+    loaded3 = settings_module.load_settings()
+    assert loaded3["alignment_tolerance_ppm"]["1H"] == 0.05
+    assert loaded3["alignment_tolerance_ppm"]["15N"] == 0.2
 
 
 def test_settings_dialog_defaults(qapp: QApplication) -> None:
@@ -204,6 +217,9 @@ def test_settings_dialog_defaults(qapp: QApplication) -> None:
     assert dialog.linewidth_spins["1H"].value() == 8
     assert dialog.linewidth_spins["15N"].value() == 15
     assert dialog.linewidth_spins["13C"].value() == 20
+    assert dialog.tolerance_spins["1H"].value() == 0.02
+    assert dialog.tolerance_spins["15N"].value() == 0.2
+    assert dialog.tolerance_spins["13C"].value() == 0.2
     assert not hasattr(dialog, "ppl_spin")
     assert not hasattr(dialog, "smile_spin")
     dialog.close()

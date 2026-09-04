@@ -1,7 +1,8 @@
 """GUI 设置读写(阶段 C3):config/nmrforge.local.yaml,重启生效。
 
 默认值:线宽 1H 8 / 15N 15 / 13C 20 Hz(接入生成谱图参数);
-未配置时显示默认值。
+对齐容差 1H 0.02 / 15N 0.2 / 13C 0.2 ppm(0.2.199-补29fx,按 Poky kr,
+接入选峰参考与对齐导出);未配置时显示默认值。
 """
 
 from __future__ import annotations
@@ -16,6 +17,9 @@ SETTINGS_FILENAME = "nmrforge.local.yaml"
 DEFAULTS: dict = {
     "nmrpipe_path": "",
     "linewidth_hz": {"1H": 8, "15N": 15, "13C": 20},
+    # 0.2.199-补29fx(用户:设置里改容差,与线宽同处):峰对齐/参考匹配容差
+    # ppm,默认 Poky kr(Restricted Peak Pick):1H 0.02、15N/13C 0.2。
+    "alignment_tolerance_ppm": {"1H": 0.02, "15N": 0.2, "13C": 0.2},
     "guide": {"first_import_hint_shown": False},
     "pipeline": {"simple_mode": False},
     "smile": {"thread_offset": 2},
@@ -53,6 +57,14 @@ def load_settings() -> dict:
         merged["linewidth_hz"] = {
             nucleus: linewidth.get(nucleus, default)
             for nucleus, default in DEFAULTS["linewidth_hz"].items()
+        }
+    align_tol = raw.get("alignment_tolerance_ppm")
+    if isinstance(align_tol, dict):
+        merged["alignment_tolerance_ppm"] = {
+            nucleus: align_tol.get(nucleus, default)
+            for nucleus, default in DEFAULTS[
+                "alignment_tolerance_ppm"
+            ].items()
         }
     guide = raw.get("guide")
     if isinstance(guide, dict):

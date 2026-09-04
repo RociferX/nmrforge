@@ -256,3 +256,55 @@ def test_export_import_3d_external_nuclei_order(tmp_path: Path) -> None:
     assert rows2[0]["F2_shift"] == 45.0
     assert rows2[0]["F3_shift"] == 8.2
 
+
+
+def test_import_poky_lowercase_header_and_extra_columns(
+    tmp_path: Path,
+) -> None:
+    """0.2.199-补29fx:真实 Poky 参考 .list 兼容——小写 header、精简 2D/3D
+    列、多余尾列忽略。"""
+    p = tmp_path / "ref_min2d.list"
+    p.write_text("assignment w1 w2\n?-? 118.500 4.703\n", encoding="utf-8")
+    rows = load_peaks(p)
+    assert len(rows) == 1
+    assert rows[0]["N_shift"] == 118.5
+    assert rows[0]["H_shift"] == 4.703
+    assert rows[0]["Data"] == 0.0 and rows[0]["Height"] == 0.0
+
+    p3 = tmp_path / "ref_min3d.list"
+    p3.write_text(
+        "assignment w1 w2 w3\n"
+        "?-?-? 118.0 45.0 8.5 0 100 0 9.9 8.8\n",
+        encoding="utf-8",
+    )
+    rows3 = import_peaks_poky(p3)
+    assert len(rows3) == 1
+    assert rows3[0]["F1_shift"] == 118.0
+    assert rows3[0]["F2_shift"] == 45.0
+    assert rows3[0]["F3_shift"] == 8.5
+    assert rows3[0]["Height"] == 100.0
+
+
+def test_import_poky_headerless_2d(tmp_path: Path) -> None:
+    """0.2.199-补29fx:无 header 精简 .list 按列数推断为 2D。"""
+    p = tmp_path / "ref_nohdr.list"
+    p.write_text(
+        "?-? 118.5 4.703\nG1H-G1N 120.1 7.2\n",
+        encoding="utf-8",
+    )
+    rows = load_peaks(p)
+    assert len(rows) == 2
+    assert rows[0]["Peak_ID"] == 1
+    assert rows[0]["N_shift"] == 118.5
+    assert rows[1]["H_shift"] == 7.2
+
+
+def test_import_poky_minimal_3d_with_nuclei(tmp_path: Path) -> None:
+    """0.2.199-补29fx:精简 3D 4 列 + 核名 → 映射回内部 F1/F2/F3。"""
+    p = tmp_path / "ref_min3d_nuc.list"
+    p.write_text("?-?-? 118.0 45.0 8.5\n", encoding="utf-8")
+    rows = import_peaks_poky(p, nuclei=["15N", "1H", "13C"])
+    assert len(rows) == 1
+    assert rows[0]["F1_shift"] == 118.0
+    assert rows[0]["F2_shift"] == 8.5
+    assert rows[0]["F3_shift"] == 45.0

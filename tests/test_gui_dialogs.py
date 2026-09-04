@@ -155,6 +155,7 @@ def test_settings_dialog_trimmed_and_linewidth_saved(
     )
     dialog = SettingsDialog(None)
     assert set(dialog.linewidth_spins) == {"1H", "15N", "13C"}
+    assert set(dialog.tolerance_spins) == {"1H", "15N", "13C"}
     assert not hasattr(dialog, "ppl_spin")
     assert not hasattr(dialog, "smile_spin")
     saved: dict = {}
@@ -165,6 +166,8 @@ def test_settings_dialog_trimmed_and_linewidth_saved(
     monkeypatch.setattr("gui.settings.save_settings", fake_save)
     dialog._on_accept()
     assert "linewidth_hz" in saved
+    assert "alignment_tolerance_ppm" in saved
+    assert saved["alignment_tolerance_ppm"]["1H"] == 0.02
     assert "points_per_line" not in saved
     assert "smile_thread_cap" not in saved
     dialog.close()

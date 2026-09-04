@@ -421,9 +421,12 @@ def _peak_nucleus_ppm(
     for ax, nucleus in enumerate(storage_nuclei):
         if not nucleus or ax >= len(axes):
             continue
-        idx = int(peak.position[ax])
-        if 0 <= idx < int(axes[ax].size):
-            coords[nucleus] = float(axes[ax][idx])
+        pos = float(peak.position[ax])
+        if 0 <= pos < int(axes[ax].size):
+            # 0.2.199-补29fx:与 _write_peaks_list 同源——亚像素插值而非
+            # int() 截断(截断在 19.999… 这类浮点会差 1 个数据点,收紧
+            # 到 Poky kr 容差后参考匹配会漏掉真峰)。
+            coords[nucleus] = _ppm_at_fraction(axes[ax], pos)
     return coords
 
 
@@ -450,26 +453,13 @@ def _row_nucleus_ppm(
     return coords
 
 
-def _default_tolerance_ppm(
-    axes: list[np.ndarray], storage_nuclei: list[str]
-) -> dict[str, float]:
-    """参考匹配容差(ppm):每核 ±4 点×ppm/点,无轴回退固定值(0.2.199-补29dl)。"""
-    tol = {
-        "1H": 0.1, "2H": 0.1, "15N": 0.5, "13C": 0.5,
-        "19F": 0.1, "31P": 0.1, "23Na": 0.5, "29Si": 0.5,
-    }
-    for ax, nucleus in enumerate(storage_nuclei):
-        if not nucleus or ax >= len(axes):
-            continue
-        ppm = np.asarray(axes[ax], dtype=float)
-        if ppm.size < 2:
-            continue
-        diff = np.abs(np.diff(ppm))
-        diff = diff[diff > 0]
-        step = float(np.median(diff)) if diff.size else 0.0
-        if step > 0:
-            tol[nucleus] = 4.0 * step
-    return tol
+def _safe_figure_token(name: str) -> str:
+    """参考显示名 → 单段安全文件名 token(0.2.199-补29fx:exp/data 显示名
+    含 '/' 时不再在 figures/ 下生成嵌套目录)。"""
+    token = "".join(
+        c if c.isalnum() or c in "_-." else "_" for c in str(name)
+    )
+    return token.strip("_.") or "reference"
 
 
 def _reference_match(
@@ -577,6 +567,7 @@ def pick_peaks(
         if ref_peaks:
             from workflow.peak_align import (
                 MIN_ACCEPTABLE_RATIO,
+                TOLERANCE_PPM,
                 align_peak_files,
                 filter_by_reference,
             )
@@ -586,6 +577,11 @@ def pick_peaks(
             )
             storage_nuclei = _storage_nuclei(dict(dic), prefixes)
             axes = _axes_ppm(dict(dic), arr)
+            # 参考匹配容差(0.2.199-补29fx,用户:按 Poky kr 默认——1H
+            # ±0.02 ppm、其它核 ±0.2 ppm;显式 tolerance_ppm 仍可覆盖)
+            ref_tol = (
+                tolerance_ppm if tolerance_ppm else dict(TOLERANCE_PPM)
+            )
             # 检测峰 → {核: ppm}(数据轴序;与参考行同构)
             cur_coords = [
                 _peak_nucleus_ppm(peak, axes, storage_nuclei)
@@ -603,11 +599,7 @@ def pick_peaks(
                     ref_peaks,
                     cur_nuclei=None,
                     ref_nuclei=ref_nuclei,
-                    tol_ppm=(
-                        tolerance_ppm
-                        if tolerance_ppm
-                        else _default_tolerance_ppm(axes, storage_nuclei)
-                    ),
+                    tol_ppm=ref_tol,
                 )
                 if align["status"] == "no_common":
                     ref_log = (
@@ -620,13 +612,7 @@ def pick_peaks(
                         align["shift"],
                         nuclei=None,
                         ref_nuclei=ref_nuclei,
-                        tol_ppm=(
-                            tolerance_ppm
-                            if tolerance_ppm
-                            else _default_tolerance_ppm(
-                                axes, storage_nuclei
-                            )
-                        ),
+                        tol_ppm=ref_tol,
                     )
                     kept_keys = {
                         tuple(
@@ -664,7 +650,8 @@ def pick_peaks(
                         figures_dir.mkdir(parents=True, exist_ok=True)
                         ref_label = ref_name or "reference"
                         fig_name = (
-                            f"{exp_id}-{data_id}_aligned_{ref_label}.png"
+                            f"{exp_id}-{data_id}_aligned_"
+                            f"{_safe_figure_token(ref_label)}.png"
                         )
                         alignment_figure(
                             cur_rows,
@@ -673,6 +660,7 @@ def pick_peaks(
                             figures_dir / fig_name,
                             cur_nuclei=None,
                             ref_nuclei=ref_nuclei,
+                            tol_ppm=ref_tol,
                             cur_label=f"{exp_id}-{data_id}",
                             ref_label=ref_label,
                         )
@@ -688,11 +676,7 @@ def pick_peaks(
                     zero_shift,
                     nuclei=None,
                     ref_nuclei=ref_nuclei,
-                    tol_ppm=(
-                        tolerance_ppm
-                        if tolerance_ppm
-                        else _default_tolerance_ppm(axes, storage_nuclei)
-                    ),
+                    tol_ppm=ref_tol,
                 )
                 kept_keys = {
                     tuple(

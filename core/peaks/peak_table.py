@@ -6,6 +6,9 @@
   (0.2.199-补29dk,用户:.list 与峰表显示都和外部一致,内部按 F1/F2/F3 逻辑
   解读——导出/导入经 nuclei 做外部 w 列 ↔ 内部 F 列置换);
   未命名峰 ?-?(2D)/?-?-?(3D),Height=Intensity %.3g,Data/Volume=0,双空格;
+- 导入兼容(0.2.199-补29fx,用户:参考 .list 可能带后面几列/精简列/小写头):
+  header 大小写不敏感、2D 最少 3 列/3D 最少 4 列、Data/Height/Volume 可缺省
+  为 0、多余尾列忽略、无 header 时按列数推断维度;
 - 旧 CSV 仅兼容读取(load_peaks 自动判别),不再写入。
 """
 
@@ -49,6 +52,8 @@ _NUMERIC_KEYS = {
 # 经 nuclei(每 F 轴核名,如 ["15N","1H","13C"])做外部 ↔ 内部置换。
 _EXTERNAL_2D_NUCLEI = ("15N", "1H")
 _EXTERNAL_3D_NUCLEI = ("15N", "13C", "1H")
+# Poky .list header(0.2.199-补29fx:真实文件可能是小写 assignment)
+_POKY_HEADER_RE = re.compile(r"^assignment\b", re.IGNORECASE)
 
 
 def _external_w_to_internal_axes(
@@ -204,11 +209,12 @@ def load_peaks(path: Path | str) -> list[dict[str, Any]]:
     if not path.is_file():
         return []
     text = path.read_text(encoding="utf-8")
-    rows = (
-        import_peaks_poky(path)
-        if text.lstrip().startswith("Assignment")
-        else _load_csv_rows(path)
+    # .list 一律按 Poky 解析(含无 header 精简文件);其它后缀按 header 判别
+    # (0.2.199-补29fx:header 大小写不敏感)。
+    is_poky = path.suffix.lower() == ".list" or bool(
+        _POKY_HEADER_RE.match(text.lstrip())
     )
+    rows = import_peaks_poky(path) if is_poky else _load_csv_rows(path)
     for i, row in enumerate(rows, start=1):
         if not (row.get("Peak_ID") or ""):
             row["Peak_ID"] = i
@@ -281,6 +287,65 @@ def export_peaks_poky(
     return path
 
 
+def _poky_header_ndim(line: str) -> int | None:
+    """Poky header 的坐标列数(w 列个数 2/3);非 header 行返回 None。"""
+    if not _POKY_HEADER_RE.match(line):
+        return None
+    cols = line.split()
+    w = sum(1 for c in cols[1:] if c.lower().startswith("w"))
+    return w if w in (2, 3) else None
+
+
+def _infer_poky_ndim(tokens: list[str]) -> int | None:
+    """无 header 时按 token 数推断维度(0.2.199-补29fx)。
+
+    2D 最少 3 列(label+w1+w2)、全列 6 列;3D 最少 4 列、全列 7 列;
+    5 列(少见,2D+两个附加列)按 2D 保守处理。
+    """
+    n = len(tokens)
+    if n in (3, 6):
+        return 2
+    if n in (4, 7) or n > 7:
+        return 3
+    if n == 5:
+        return 2
+    return None
+
+
+def _parse_poky_row(
+    tokens: list[str], ndim: int, nuclei: list[str] | None
+) -> dict[str, Any] | None:
+    """一行 Poky 数据 → 峰 dict;坐标列必须可解析,Data/Height/Volume
+    缺省 0.0,多余尾列忽略(0.2.199-补29fx)。"""
+    if len(tokens) < ndim + 1:
+        return None
+    try:
+        coords = [float(tokens[j + 1]) for j in range(ndim)]
+    except (TypeError, ValueError):
+        return None
+    row: dict[str, Any] = {"label": tokens[0]}
+    if ndim == 2:
+        row.update({"N_shift": coords[0], "H_shift": coords[1]})
+    else:
+        order = _external_w_to_internal_axes(
+            nuclei, _EXTERNAL_3D_NUCLEI, 3
+        )
+        for j in range(3):
+            row[f"F{order[j] + 1}_shift"] = coords[j]
+    data = _poky_num(tokens[ndim + 1]) if len(tokens) > ndim + 1 else 0.0
+    height = _poky_num(tokens[ndim + 2]) if len(tokens) > ndim + 2 else 0.0
+    volume = _poky_num(tokens[ndim + 3]) if len(tokens) > ndim + 3 else 0.0
+    row.update(
+        {
+            "Data": data,
+            "Height": height,
+            "Volume": volume,
+            "Intensity": height,
+        }
+    )
+    return row
+
+
 def import_peaks_poky(
     path: Path | str, *, nuclei: list[str] | None = None
 ) -> list[dict[str, Any]]:
@@ -289,49 +354,36 @@ def import_peaks_poky(
     3D 默认按外部约定 w1=15N/w2=13C/w3=1H 解读(0.2.199-补29dk,用户);
     nuclei 为每 F 轴核名(F1/F2/F3 序),据此把 w 列映射回内部
     F1/F2/F3_shift;缺失或无法构成排列时回退位置式(w1→F1 等)。
+    0.2.199-补29fx:header 大小写不敏感;2D ≥3 列 / 3D ≥4 列即可;
+    Data/Height/Volume 缺省 0;多余尾列忽略;无 header 按列数推断。
     """
     path = Path(path)
     if not path.is_file():
         return []
     rows: list[dict[str, Any]] = []
+    header_ndim: int | None = None
     for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("Assignment") or line.startswith("#"):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
             continue
-        tokens = line.split()
-        if len(tokens) < 6:
+        if header_ndim is None:
+            guessed = _poky_header_ndim(stripped)
+            if guessed is not None:
+                header_ndim = guessed
+                continue
+        tokens = stripped.split()
+        if len(tokens) < 3:
             continue
-        label = tokens[0]
-        is_3d = len(tokens) >= 7
-        try:
-            if is_3d:
-                order = _external_w_to_internal_axes(
-                    nuclei, _EXTERNAL_3D_NUCLEI, 3
-                )
-                row: dict[str, Any] = {"label": label}
-                for j in range(3):
-                    row[f"F{order[j] + 1}_shift"] = float(tokens[j + 1])
-                row.update(
-                    {
-                        "Data": float(tokens[4]),
-                        "Height": float(tokens[5]),
-                        "Volume": float(tokens[6]),
-                        "Intensity": float(tokens[5]),
-                    }
-                )
-            else:
-                row = {
-                    "label": label,
-                    "N_shift": float(tokens[1]),
-                    "H_shift": float(tokens[2]),
-                    "Data": float(tokens[3]),
-                    "Height": float(tokens[4]),
-                    "Volume": float(tokens[5]),
-                    "Intensity": float(tokens[4]),
-                }
-        except ValueError:
+        ndim = (
+            header_ndim
+            if header_ndim is not None
+            else _infer_poky_ndim(tokens)
+        )
+        if ndim is None:
             continue
-        rows.append(row)
+        row = _parse_poky_row(tokens, ndim, nuclei)
+        if row is not None:
+            rows.append(row)
     return rows
 
 
