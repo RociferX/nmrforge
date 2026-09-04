@@ -1,5 +1,19 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29ga(2026-09-04,调节状态与单数据日志持久化到 d_xxx 文件夹)
+- 用户:持久化(持久化),最好 log 面板也持久化,记录文件放在 d_xxx 文件夹;
+- 新增 gui/per_data_records.py:统一按数据读写 <项目>/<exp>/<data_id>/
+  ui_state.json(peaks 阈值 + spectrum 显示调节)与 log.txt(单数据日志);
+- gui/pipeline_panel.py:峰挑选阈值调节即时写 ui_state.json,切换/启动时
+  从文件恢复(默认 15σ);
+- gui/spectrum_panel.py:contour start/Levels/Aspect/标记尺寸调节即时写
+  ui_state.json,谱图加载时从文件恢复;
+- gui/log_panel.py:data 作用域日志镜像追加 d_xxx/log.txt,切换该数据自动
+  载入历史(本会话已有不重复),「清空」同步清空记录文件;主窗口切换项目时
+  同步 ProjectManager 给 LogPanel;
+- 测试:+阈值持久化重启恢复、显示调节持久化重启恢复、日志落盘/读回/清空;
+  本地全量 pytest 全绿,ruff 通过。
+
 ## 0.2.199-补29fz(2026-09-04,阈值与谱图显示调节按数据隔离)
 - 用户:阈值调整、contour start level 等等调整都要数据隔离,不要改一个
   全部数据都变;
