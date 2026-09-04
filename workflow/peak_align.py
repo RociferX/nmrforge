@@ -345,14 +345,14 @@ def alignment_figure(
         ax.scatter(
             [p[0] for p in cur_pts],
             [p[1] for p in cur_pts],
-            marker="x", color="#1f77b4", s=28, label=cur_label,
+            marker="x", color="#1f77b4", s=18, label=cur_label,
         )
     if ref_pts:
         ax.scatter(
             [p[0] for p in ref_pts],
             [p[1] for p in ref_pts],
-            marker="o", facecolors="none", edgecolors="#d62728",
-            s=40, label=ref_label,
+            marker=".", color="#d62728",
+            s=26, label=ref_label,
         )
     # shifted current points + matched-pair connectors
     for i, j in pairs:
@@ -379,7 +379,7 @@ def alignment_figure(
     fig.tight_layout()
     out = Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out, dpi=160)
+    fig.savefig(out, dpi=300)
     plt.close(fig)
     return out
 

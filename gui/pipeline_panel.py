@@ -1451,14 +1451,20 @@ class PipelinePanel(QWidget):
     # 参考谱约束(0.2.199-补29dl,用户)
     # ------------------------------------------------------------------
     def _reference_candidates(self) -> list[tuple[str, str, str]]:
-        """项目内已有峰表的数据列表(显示名, exp_id, data_id)。"""
+        """项目内已有峰表的数据列表(显示名, exp_id, data_id);
+        排除当前数据自己(2026-09-04 用户)。"""
         out: list[tuple[str, str, str]] = []
         if self.manager is None or self.manager.project is None:
             return out
+        cur_exp = str(getattr(self, "_current_exp_id", "") or "")
+        cur_data = str(getattr(self, "_current_data_id", "") or "")
         for exp in self.manager.project.experiments:
             for entry in getattr(exp, "data", []):
                 data_id = str(getattr(entry, "id", "") or "")
                 if not data_id:
+                    continue
+                # 参考谱不能是自己(同 exp + data 排除)
+                if str(exp.id) == cur_exp and data_id == cur_data:
                     continue
                 try:
                     peaks_dir = self.manager.data_dir(exp.id, data_id, "peaks")
@@ -1476,6 +1482,7 @@ class PipelinePanel(QWidget):
                     name += f" ({title})"
                 out.append((name, exp.id, data_id))
         return out
+
 
     def _ref_nuclei_from_spectrum(self, spectrum_path: Path) -> list[str] | None:
         """从参考谱头部取每轴核名(F 序);失败/核不可知返回 None。"""
