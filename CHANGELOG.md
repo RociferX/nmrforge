@@ -1,5 +1,14 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29fy(2026-09-04,对齐检查图同时输出 SVG 可编辑矢量)
+- 用户:输出的图同时加一份 SVG;
+- workflow/peak_align.alignment_figure:保存 PNG(300dpi)的同时写同路径
+  .svg(svg.fonttype=none,文字保持文本,可在 Inkscape/Illustrator 编辑);
+- 选峰参考检查图日志与「对齐后导出」完成提示分别给出 PNG/SVG 路径;
+- 顺带清理补29fx 补丁重跑残留的 alignment_figure docstring 重复行;
+- 测试:图断言同时校验 PNG+SVG 存在且 SVG 含 <svg>;本地全量 pytest 全绿,
+  ruff 通过。
+
 ## 0.2.199-补29fx(2026-09-04,对齐容差按 Poky kr+参考峰表/检查图修复+参考按数据隔离+设置可调容差)
 - 用户:看 Poky 容差 → 裁定对齐/参考匹配容差按 Poky kr(Restricted Peak
   Pick)对话框默认:1H ±0.02 ppm、其它核 ±0.2 ppm(VM Poky 源码
