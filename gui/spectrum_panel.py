@@ -186,6 +186,9 @@ class SpectrumPanel(QWidget):
         self._loading_peaks = False
         self._applying_label_format = False  # 0.2.199-补29cn:规范化防递归
         self._viewer3d_state: dict[str, int] = {}
+        # 0.2.199-补29fz(用户):谱图显示调节按数据隔离——
+        # (exp_id, data_id) → {contour 滑块/级数/aspect/峰标记尺寸}。
+        self._display_states: dict[tuple[str, str], dict] = {}
         self._peak_keys: tuple[str, ...] = (
             "Peak_ID",
             "H_shift",
@@ -275,6 +278,18 @@ class SpectrumPanel(QWidget):
         self.peak_size_spin.setToolTip("标记尺寸(数据坐标单位,随谱图缩放)")
         self.peak_size_spin.setEnabled(False)
         self.peak_size_spin.valueChanged.connect(self.viewer.set_peak_size)
+        # 0.2.199-补29fz(用户):显示调节(contour start/levels/aspect/标记
+        # 尺寸)每次变化即记入当前数据,切换数据时互不影响。
+        self.viewer.level_slider.valueChanged.connect(
+            self._save_display_state
+        )
+        self.viewer.count_slider.valueChanged.connect(
+            self._save_display_state
+        )
+        self.viewer.aspect_slider.valueChanged.connect(
+            self._save_display_state
+        )
+        self.peak_size_spin.valueChanged.connect(self._save_display_state)
         self.peak_toolbar.addWidget(self.peak_size_label)
         self.peak_toolbar.addWidget(self.peak_size_spin)
         self.peak_toolbar.addStretch(1)
@@ -415,6 +430,56 @@ class SpectrumPanel(QWidget):
         self.peak_toolbar_widget.setVisible(show)
         self.viewer.peak_label.setVisible(show)
 
+    def _display_key(self) -> tuple[str, str]:
+        return (self._current_exp_id or "", self._current_data_id or "")
+
+    def _save_display_state(self, *_args) -> None:
+        """把当前显示调节即时记入当前数据(0.2.199-补29fz)。"""
+        key = self._display_key()
+        if not all(key):
+            return
+        try:
+            self._display_states[key] = {
+                "level_slider": int(self.viewer.level_slider.value()),
+                "level_count": int(self.viewer.count_slider.value()),
+                "aspect": int(self.viewer.aspect_slider.value()),
+                "peak_size": float(self.peak_size_spin.value()),
+            }
+        except Exception:  # noqa: BLE001 - 记录失败不阻断调节
+            pass
+
+    def _restore_display_state(self) -> None:
+        """谱图加载成功后按当前数据恢复显示调节;无记录用默认并落档
+        (0.2.199-补29fz,用户:阈值/contour start 等调节都要数据隔离)。"""
+        key = self._display_key()
+        if not all(key):
+            return
+        state = self._display_states.get(key)
+        if state is None:
+            state = {
+                "level_slider": 31,
+                "level_count": 8,
+                "aspect": 100,
+                "peak_size": 1.5,
+            }
+            self._display_states[key] = dict(state)
+        try:
+            self.viewer.level_slider.setValue(
+                int(state.get("level_slider", 31))
+            )
+            self.viewer.count_slider.setValue(
+                int(state.get("level_count", 8))
+            )
+            self.viewer.aspect_slider.setValue(
+                int(state.get("aspect", 100))
+            )
+            self.viewer._update_levels()
+            self.peak_size_spin.setValue(
+                float(state.get("peak_size", 1.5))
+            )
+        except Exception:  # noqa: BLE001 - 恢复失败不阻断谱图显示
+            pass
+
     def refresh(self) -> None:
         """刷新谱图文件列表;无文件时隐藏列表(避免右下角空白)。
 
@@ -508,10 +573,9 @@ class SpectrumPanel(QWidget):
         .ft3 走 3D 查看路径(契约 §10):绑定 Spectrum3D 并显示默认切片,
         3D 面板提供平面/切片/投影切换;.ft2 走二维叠加。
         """
-        # 0.2.133: save/restore contour state per spectrum
-        if self._current_spectrum is not None and self._current_spectrum != path:
-            self.viewer.save_contour_state(str(self._current_spectrum))
-        self.viewer.restore_contour_state(str(path))
+        # 0.2.199-补29fz:显示调节按数据隔离——每次调节已即时记入当前
+        # 数据;谱图加载成功后 _restore_display_state() 恢复各自数值,
+        # 不再按谱文件路径在打开前快照。
         # 0.2.199-补29db:投影文件隐藏一切峰相关 UI,不做峰关联/峰操作
         self._projection_active = (
             path.suffix.lower() == ".ft2"
@@ -543,6 +607,7 @@ class SpectrumPanel(QWidget):
                 if state:
                     self._spectrum3d_panel.plane_combo.setCurrentIndex(state)
                 self._render_3d_view()
+                self._restore_display_state()
                 return True
             if path.suffix.lower() == ".fid":
                 from viewer.spectrum import Spectrum1D
@@ -552,6 +617,7 @@ class SpectrumPanel(QWidget):
                 self.viewer.add_spectrum(
                     Spectrum1D.load_from_fid(path), name=path.stem
                 )
+                self._restore_display_state()
                 return True
             from viewer.spectrum import Spectrum
 
@@ -569,6 +635,7 @@ class SpectrumPanel(QWidget):
         self._spectrum3d_panel.clear()
         self.viewer.clear()
         self.viewer.add_spectrum(spectrum, name=name or path.stem)
+        self._restore_display_state()
         self._sync_peak_ui_visibility()
         return True
 
@@ -598,6 +665,7 @@ class SpectrumPanel(QWidget):
         if state:
             self._spectrum3d_panel.plane_combo.setCurrentIndex(state)
         self._render_3d_view()
+        self._restore_display_state()
         self._load_peaks(path)
         self.status_message.emit(f"已加载 3D 谱: {path.name}")
 

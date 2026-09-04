@@ -917,6 +917,9 @@ class PipelinePanel(QWidget):
         # (exp_id, data_id) → {label, peaks, nuclei, path};切换数据时
         # 参考不串到其它数据处理界面(用户 2026-09-04)。
         self._ref_info: dict[tuple[str, str], dict] = {}
+        # 0.2.199-补29fz(用户):峰挑选阈值按数据隔离——
+        # (exp_id, data_id) → σ;切换数据恢复各自阈值。
+        self._threshold_by_data: dict[tuple[str, str], float] = {}
         self._analysis_ref_info: dict[str, str] | None = None
 
         layout = QVBoxLayout(self)
@@ -970,6 +973,12 @@ class PipelinePanel(QWidget):
             row.view_log_requested.connect(self.view_log_requested.emit)
             steps_box.addWidget(row)
             self._rows[step_id] = row
+        # 0.2.199-补29fz(用户):阈值每次调节即记入当前数据
+        peaks_row = self._rows.get("peaks")
+        if peaks_row is not None:
+            peaks_row.threshold_spin.valueChanged.connect(
+                self._store_current_threshold
+            )
         steps_box.addStretch(1)
 
         scroll = QScrollArea()
@@ -1021,6 +1030,13 @@ class PipelinePanel(QWidget):
         else:
             row.clear_ref_display()
 
+    def _store_current_threshold(self, value: float) -> None:
+        """阈值调节即时记入当前数据(0.2.199-补29fz)。"""
+        if self._current_exp_id and self._current_data_id:
+            self._threshold_by_data[
+                (self._current_exp_id, self._current_data_id)
+            ] = float(value)
+
     def _current_statuses(self) -> dict[str, str]:
         """当前选中样品数据的步骤状态;未选中样品数据/旧单样品数据回退实验类型聚合。"""
         if self._current_data_id:
@@ -1068,6 +1084,15 @@ class PipelinePanel(QWidget):
         self.context_label.setText(context_text)
         self._sync_reference_display()
         statuses = self._current_statuses()
+        # 0.2.199-补29fz(用户):阈值按数据隔离——刷新即恢复当前数据阈值
+        peaks_row = self._rows.get("peaks")
+        if peaks_row is not None:
+            peaks_row.threshold_spin.setValue(
+                self._threshold_by_data.get(
+                    (self._current_exp_id, self._current_data_id),
+                    15.0,
+                )
+            )
         # 样品数据层不提示/展示导入步骤(导入属于实验类型层动作)
         # 0.2.199-补29as:SMILE 优化为可选步骤——未做/过期不占「下一步」,
         # 单独显示「可选做」;「下一步」永远指向真实必做步骤
@@ -1298,6 +1323,16 @@ class PipelinePanel(QWidget):
             return
         if data_id is not None:
             self._current_data_id = data_id
+        # 0.2.199-补29fz:程序化切换数据时也恢复该数据阈值
+        if step_id == "peaks":
+            peaks_row = self._rows.get("peaks")
+            if peaks_row is not None:
+                peaks_row.threshold_spin.setValue(
+                    self._threshold_by_data.get(
+                        (self._current_exp_id, self._current_data_id),
+                        15.0,
+                    )
+                )
         row = self._rows[step_id]
         if not row.run_button.isHidden():
             self._on_run_requested(step_id)

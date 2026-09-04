@@ -352,3 +352,30 @@ def test_pipeline_peaks_reference_selection(
     assert row.clear_ref_button.isHidden()
     panel.close()
 
+
+
+def test_pipeline_peak_threshold_isolated_per_data(
+    tmp_path: Path, qapp: QApplication
+) -> None:
+    """0.2.199-补29fz:峰挑选阈值按数据隔离——d_001 改阈值不影响 d_002,
+    切回 d_001 恢复各自数值。"""
+    from core.project import ProjectManager
+    from gui.pipeline_panel import PipelinePanel
+
+    manager = ProjectManager.create_project(tmp_path / "proj_t", "demo")
+    exp = manager.create_experiment("HSQC")
+    d1 = manager.import_data(exp.id, "/fake/1")
+    d2 = manager.import_data(exp.id, "/fake/2")
+    panel = PipelinePanel(manager)
+    row = panel._rows["peaks"]
+    panel.set_selection("data", exp.id, d1.id)
+    row.threshold_spin.setValue(22.5)
+    assert panel._threshold_by_data[(exp.id, d1.id)] == 22.5
+    panel.set_selection("data", exp.id, d2.id)
+    assert row.threshold_spin.value() == 15.0
+    row.threshold_spin.setValue(9.0)
+    panel.set_selection("data", exp.id, d1.id)
+    assert row.threshold_spin.value() == 22.5
+    panel.set_selection("data", exp.id, d2.id)
+    assert row.threshold_spin.value() == 9.0
+    panel.close()

@@ -2328,3 +2328,46 @@ def test_project_tree_data_status_shows_picked(
 
     assert _data_item().text(1) == '已选峰'
     panel.close()
+
+
+def test_spectrum_display_settings_isolated_per_data(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.2.199-补29fz:contour start / levels / aspect / 标记尺寸按数据
+    隔离——d_001 的调节不串到 d_002,切回 d_001 恢复。"""
+    from gui.spectrum_panel import SpectrumPanel
+
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    exp = manager.project.experiment("exp_001")
+    assert exp is not None
+    d1_id = str(exp.data[0].id)
+    d2 = manager.import_data(exp.id, "/fake/2")
+    spectra1 = manager.data_dir(exp.id, d1_id, "spectra")
+    spectra1.mkdir(parents=True, exist_ok=True)
+    _write_ft2(spectra1 / f"{exp.id}-{d1_id}.ft2")
+    spectra2 = manager.data_dir(exp.id, d2.id, "spectra")
+    spectra2.mkdir(parents=True, exist_ok=True)
+    _write_ft2(spectra2 / f"{exp.id}-{d2.id}.ft2")
+    panel = SpectrumPanel(manager)
+    panel.set_context(exp.id, d1_id)
+    assert panel.load_current_spectrum() is True
+    panel.viewer.level_slider.setValue(60)
+    panel.viewer.count_slider.setValue(12)
+    panel.viewer.aspect_slider.setValue(80)
+    panel.peak_size_spin.setValue(2.0)
+    assert panel._display_states[(exp.id, d1_id)]["level_slider"] == 60
+    # d_002 首次打开用默认,不受 d_001 影响
+    panel.set_context(exp.id, d2.id)
+    assert panel.load_current_spectrum() is True
+    assert panel.viewer.level_slider.value() == 31
+    assert panel.viewer.count_slider.value() == 8
+    assert panel.viewer.aspect_slider.value() == 100
+    assert panel.peak_size_spin.value() == 1.5
+    # 切回 d_001 恢复各自调节
+    panel.set_context(exp.id, d1_id)
+    assert panel.load_current_spectrum() is True
+    assert panel.viewer.level_slider.value() == 60
+    assert panel.viewer.count_slider.value() == 12
+    assert panel.viewer.aspect_slider.value() == 80
+    assert panel.peak_size_spin.value() == 2.0
+    panel.close()
