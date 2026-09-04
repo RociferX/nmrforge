@@ -1,5 +1,19 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29gb(2026-09-04,数据组日志落盘;AppImage 设置路径/简单模式)
+- 用户:1)数据组的日志也落盘;2)打包时设置里简单模式隐藏,保存路径要改
+  (AppImage 运行时不是包内 config 路径);
+- gui/per_data_records.py:新增 group_log_path——组日志存
+  <项目>/<exp_id>/groups/<group_id>/log.txt;
+- gui/log_panel.py:单数据与数据组作用域统一落盘(追加/载入/清空同步);
+- gui/settings.py:is_appimage()($APPIMAGE 或 PyInstaller frozen);
+  AppImage 设置文件改存 ~/.config/NMRForge/nmrforge.local.yaml,
+  不再尝试写包内 config(squashfs 只读、路径非开发期路径);
+- gui/dialogs.py:AppImage 运行时隐藏「简单模式」,保存位置提示按环境显示
+  真实路径;
+- 测试:+组日志落盘/读回/清空、AppImage 设置路径、AppImage 隐藏简单模式;
+  本地全量 pytest 全绿,ruff 通过。
+
 ## 0.2.199-补29ga(2026-09-04,调节状态与单数据日志持久化到 d_xxx 文件夹)
 - 用户:持久化(持久化),最好 log 面板也持久化,记录文件放在 d_xxx 文件夹;
 - 新增 gui/per_data_records.py:统一按数据读写 <项目>/<exp>/<data_id>/
