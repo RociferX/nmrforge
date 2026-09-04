@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import numpy as np
-
 from workflow.peak_align import (
     MIN_ACCEPTABLE_RATIO,
     TOLERANCE_PPM,
