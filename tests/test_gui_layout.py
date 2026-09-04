@@ -2447,3 +2447,39 @@ def test_spectrum_display_settings_persisted_in_data_folder(
     assert panel2.peak_size_spin.value() == 2.5
     panel.close()
     panel2.close()
+
+
+def test_log_panel_group_scope_persists_to_group_folder(
+    tmp_path: Path, qapp: QApplication
+) -> None:
+    """0.2.199-补29gb:数据组日志也落盘(组目录 log.txt),新面板读回。"""
+    from core.project import ProjectManager
+    from gui.log_panel import LogPanel
+
+    manager = ProjectManager.create_project(tmp_path / "proj_gl", "demo")
+    exp = manager.create_experiment("HSQC")
+    data = manager.import_data(exp.id, "/fake/1")
+    group = manager.create_data_group(exp.id, data_ids=[data.id])
+    log = LogPanel()
+    log.set_manager(manager)
+    scope = log.scope_key("group", exp.id, "", group.id)
+    log.append("组日志第一行", scope=scope)
+    path = (
+        manager.root
+        / exp.id
+        / "groups"
+        / group.id
+        / "log.txt"
+    )
+    assert path.is_file()
+    assert "组日志第一行" in path.read_text(encoding="utf-8")
+    log2 = LogPanel()
+    log2.set_manager(manager)
+    log2.set_scope("group", exp.id, "", group.id)
+    assert any(
+        "组日志第一行" in line for line in log2._buffers[scope]
+    )
+    log2.clear()
+    assert "组日志第一行" not in path.read_text(encoding="utf-8")
+    log.close()
+    log2.close()

@@ -21,6 +21,16 @@ def data_log_path(manager: Any, exp_id: str, data_id: str) -> Path:
     return manager.data_base(exp_id, data_id) / DATA_LOG_FILENAME
 
 
+def group_log_path(manager: Any, exp_id: str, group_id: str) -> Path:
+    """数据组日志记录文件:<项目>/<exp_id>/groups/<group_id>/log.txt。
+
+    0.2.199-补29gb(用户:数据组的也落盘)。"""
+    root = manager.root
+    if root is None:
+        raise ValueError("项目未加载")
+    return Path(root) / exp_id / "groups" / group_id / DATA_LOG_FILENAME
+
+
 def ui_state_path(manager: Any, exp_id: str, data_id: str) -> Path:
     """d_xxx 数据文件夹下的界面调节状态文件。"""
     return manager.data_base(exp_id, data_id) / UI_STATE_FILENAME

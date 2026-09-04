@@ -59,25 +59,27 @@ class LogPanel(QWidget):
         """绑定当前 ProjectManager(切换项目时由主窗口重绑)。"""
         self._manager = manager
 
-    def _data_log_path(self, key: str):
-        """data:{exp}:{data} 作用域 → d_xxx/log.txt;其它作用域返回 None。"""
-        if not key.startswith("data:"):
-            return None
-        try:
-            _kind, exp_id, data_id = key.split(":", 2)
-        except ValueError:
-            return None
+    def _record_path(self, key: str):
+        """单数据(d_xxx)与数据组作用域 → 各自 log.txt;其它返回 None。"""
         manager = getattr(self, "_manager", None)
         if manager is None or getattr(manager, "project", None) is None:
             return None
         try:
-            return manager.data_base(exp_id, data_id) / "log.txt"
+            from gui.per_data_records import data_log_path, group_log_path
+
+            if key.startswith("data:"):
+                _kind, exp_id, data_id = key.split(":", 2)
+                return data_log_path(manager, exp_id, data_id)
+            if key.startswith("group:"):
+                _kind, exp_id, group_id = key.split(":", 2)
+                return group_log_path(manager, exp_id, group_id)
         except Exception:  # noqa: BLE001 - 路径失败不持久化
             return None
+        return None
 
     def _persist_line(self, key: str, line: str) -> None:
         """单数据作用域日志镜像到 d_xxx/log.txt(0.2.199-补29ga)。"""
-        path = self._data_log_path(key)
+        path = self._record_path(key)
         if path is None:
             return
         try:
@@ -95,7 +97,7 @@ class LogPanel(QWidget):
         """切到单数据作用域时载入该数据历史日志(本会话已有则不重复)。"""
         if self._buffers.get(key):
             return
-        path = self._data_log_path(key)
+        path = self._record_path(key)
         if path is None or not path.is_file():
             return
         try:
@@ -111,7 +113,7 @@ class LogPanel(QWidget):
 
     def _reset_persisted(self, key: str) -> None:
         """清空单数据作用域时同步清空 d_xxx/log.txt。"""
-        path = self._data_log_path(key)
+        path = self._record_path(key)
         if path is None:
             return
         try:

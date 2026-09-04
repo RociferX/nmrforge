@@ -721,7 +721,12 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("软件设置")
         self.resize(420, 300)
-        from gui.settings import DEFAULTS, load_settings
+        from gui.settings import (
+            DEFAULTS,
+            SETTINGS_FILENAME,
+            is_appimage,
+            load_settings,
+        )
 
         settings = load_settings()
         layout = QVBoxLayout(self)
@@ -781,9 +786,17 @@ class SettingsDialog(QDialog):
         self.simple_mode_check.setChecked(
             bool(pipeline.get("simple_mode", False))
         )
+        # 0.2.199-补29gb(用户):AppImage 打包运行时隐藏「简单模式」
+        self.simple_mode_check.setVisible(not is_appimage())
         layout.addWidget(self.simple_mode_check)
+        if is_appimage():
+            dest = str(
+                Path.home() / ".config" / "NMRForge" / SETTINGS_FILENAME
+            )
+        else:
+            dest = "config/" + SETTINGS_FILENAME
         hint = QLabel(
-            "保存到 config/nmrforge.local.yaml,重启后生效;未配置时显示默认值。"
+            f"保存到 {dest},重启后生效;未配置时显示默认值。"
         )
         hint.setWordWrap(True)
         hint.setStyleSheet("color: #666;")

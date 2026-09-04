@@ -3,16 +3,27 @@
 默认值:线宽 1H 8 / 15N 15 / 13C 20 Hz(接入生成谱图参数);
 对齐容差 1H 0.02 / 15N 0.2 / 13C 0.2 ppm(0.2.199-补29fx,按 Poky kr,
 接入选峰参考与对齐导出);未配置时显示默认值。
+AppImage 运行时(0.2.199-补29gb):设置文件改存
+~/.config/NMRForge/nmrforge.local.yaml,不再依赖包内 config/
+(squashfs 只读且运行时路径不是开发期 config 路径)。
 """
 
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 from core.app_paths import resource_path
 
 SETTINGS_FILENAME = "nmrforge.local.yaml"
+
+
+def is_appimage() -> bool:
+    """是否运行在 AppImage/冻结打包环境(0.2.199-补29gb)。"""
+    return bool(os.environ.get("APPIMAGE")) or bool(
+        getattr(sys, "frozen", False)
+    )
 
 DEFAULTS: dict = {
     "nmrpipe_path": "",
@@ -27,7 +38,10 @@ DEFAULTS: dict = {
 
 
 def _settings_path() -> Path:
-    """本地设置文件:优先包内 config/,不可写时回退用户目录。"""
+    """本地设置文件:AppImage 用 ~/.config/NMRForge/(0.2.199-补29gb);
+    开发期优先包内 config/,不可写时回退用户主目录 dotfile。"""
+    if is_appimage():
+        return Path.home() / ".config" / "NMRForge" / SETTINGS_FILENAME
     try:
         candidate = resource_path("config") / SETTINGS_FILENAME
         if os.access(candidate.parent, os.W_OK):
@@ -98,4 +112,4 @@ def save_settings(settings: dict) -> Path:
     return path
 
 
-__all__ = ["DEFAULTS", "load_settings", "save_settings"]
+__all__ = ["DEFAULTS", "is_appimage", "load_settings", "save_settings"]

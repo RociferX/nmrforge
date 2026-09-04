@@ -243,3 +243,37 @@ def test_batch_summary_dialog(qapp: QApplication) -> None:
     dialog = BatchSummaryDialog(None, summary, "demo")
     assert dialog.list_widget.count() == 2
     dialog.close()
+
+
+def test_settings_path_appimage_uses_user_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """0.2.199-补29gb:AppImage 运行时设置保存到 ~/.config/NMRForge/。"""
+    from pathlib import Path
+
+    from gui import settings as settings_module
+
+    monkeypatch.setattr(settings_module, "is_appimage", lambda: True)
+    path = settings_module._settings_path()
+    assert path == (
+        Path.home()
+        / ".config"
+        / "NMRForge"
+        / settings_module.SETTINGS_FILENAME
+    )
+
+
+def test_settings_dialog_hides_simple_mode_in_appimage(
+    qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.2.199-补29gb:AppImage 打包运行时隐藏「简单模式」。"""
+    from gui import settings as settings_module
+    from gui.dialogs import SettingsDialog
+
+    monkeypatch.setattr(settings_module, "is_appimage", lambda: True)
+    monkeypatch.setattr(
+        settings_module, "load_settings", lambda: dict(settings_module.DEFAULTS)
+    )
+    dialog = SettingsDialog()
+    assert not dialog.simple_mode_check.isVisible()
+    dialog.close()
