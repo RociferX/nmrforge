@@ -198,6 +198,36 @@ def _write_ft2(path: Path, data: np.ndarray) -> None:
 # ----------------------------------------------------------------------
 # Spectrum3D 模型(契约 §10.1)
 # ----------------------------------------------------------------------
+def test_slices_share_global_robust_max(tmp_path: Path) -> None:
+    """0.2.199-补29fw:3D 切面 contour 基准 = 全谱 robust_max(切面间一致,
+    避免噪声切面自动放大;懒加载与全量同源)。"""
+    rng = np.random.default_rng(7)
+    data = rng.normal(0, 1.0, (4, 32, 32)).astype(np.float32)
+    data[1, 12:18, 12:18] += 500.0
+    axes = [
+        _axis3("15N", 4, 118.0),
+        _axis3("1H", 32, 4.7),
+        _axis3("13C", 32, 40.0),
+    ]
+    spec = Spectrum3D(data, axes)
+    path = tmp_path / "slice_base.ft3"
+    _write_ft3(path, spec, stream=True)
+
+    full = Spectrum3D.load_from_ft3(path)
+    g = full._compute_global_robust_max()
+    assert g is not None and g > 400.0  # 强平面主导 p99.9
+    s0 = full.slice(2, 0)
+    s1 = full.slice(2, 1)
+    assert s0.robust_max == g
+    assert s1.robust_max == g
+
+    lazy = Spectrum3D.load_from_ft3(path, lazy=True)
+    gl = lazy._compute_global_robust_max()
+    assert gl is not None and gl > 0
+    sl = lazy.slice(2, 0)
+    assert sl.robust_max == gl
+
+
 def test_load_from_ft3_roundtrip(tmp_path: Path) -> None:
     spectrum3d = _synthetic3d()
     path = tmp_path / "test.ft3"

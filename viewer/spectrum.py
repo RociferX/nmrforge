@@ -633,6 +633,8 @@ class Spectrum3D:
         obj._lazy = True
         obj._lazy_inv = tuple(inv)
         obj._plane_cache: dict[tuple[int, int], np.ndarray] = {}
+        obj._global_robust_max: float | None = None
+        obj._full_robust_max: float | None = None
         logger.info("载入三维谱(懒加载): %s (%s)", path, data_shape)
         return obj
 
@@ -668,6 +670,41 @@ class Spectrum3D:
             cache.pop(next(iter(cache)))
         return plane
 
+    def _compute_global_robust_max(self) -> float | None:
+        """全谱级 robust 最大值(contour 基准,切面一致)。
+
+        全量数据直接取整谱绝对值的 99.9 分位;懒加载(流式)沿固定轴抽样
+        若干平面取各平面最大绝对值的中位数,避免切面间显示跳变。"""
+        if getattr(self, "_full_robust_max", None) is not None:
+            return self._full_robust_max
+        if getattr(self, "_lazy", False):
+            try:
+                import numpy as np
+
+                axis = 2  # 固定快速轴抽样即可代表全谱量级
+                size = self.axes[axis].size
+                step = max(1, size // 12)
+                peaks: list[float] = []
+                for index in range(0, size, step):
+                    plane = self._lazy_read_plane(axis, index)
+                    if plane.size:
+                        peaks.append(float(np.max(np.abs(plane))))
+                if not peaks:
+                    return None
+                self._global_robust_max = float(np.median(peaks))
+                return self._global_robust_max
+            except Exception:  # noqa: BLE001 - 抽样失败回退 None
+                return None
+        try:
+            import numpy as np
+
+            val = float(np.percentile(np.abs(self.data), 99.9))
+            self._global_robust_max = val if val > 0 else None
+            self._full_robust_max = self._global_robust_max
+            return self._global_robust_max
+        except Exception:  # noqa: BLE001 - 计算失败回退 None
+            return None
+
     def index_at(self, axis_idx: int, ppm_value: float) -> int:
         """第 axis_idx 维按 ppm 定位下标(供滑块按 ppm 定位)。"""
         return self.axes[axis_idx].index_at(ppm_value)
@@ -687,12 +724,12 @@ class Spectrum3D:
                 )
             data2d = self._lazy_cached_plane(axis_idx, index)
             remaining = [i for i in range(3) if i != axis_idx]
-            return orient_x_priority(
-                Spectrum(
-                    data2d, [self.axes[i] for i in remaining],
-                    source=self.source,
-                )
+            out = Spectrum(
+                data2d, [self.axes[i] for i in remaining],
+                source=self.source,
             )
+            out.robust_max = self._compute_global_robust_max()
+            return orient_x_priority(out)
         index = int(index)
         size = self.data.shape[axis_idx]
         if not (0 <= index < size):
@@ -706,12 +743,12 @@ class Spectrum3D:
             data2d = self.data[:, index, :]
         else:
             data2d = self.data[:, :, index]
-        return orient_x_priority(
-            Spectrum(
-                np.asarray(data2d), [self.axes[i] for i in remaining],
-                source=self.source,
-            )
+        out = Spectrum(
+            np.asarray(data2d), [self.axes[i] for i in remaining],
+            source=self.source,
         )
+        out.robust_max = self._compute_global_robust_max()
+        return orient_x_priority(out)
 
     def project(self, axis_idx: int, mode: str = "max") -> Spectrum:
         """沿第 axis_idx 维投影:MIP(max)/ 求和(sum),轴序同 slice。"""
@@ -720,12 +757,12 @@ class Spectrum3D:
         else:
             data2d = np.max(self.data, axis=axis_idx)
         remaining = [i for i in range(3) if i != axis_idx]
-        return orient_x_priority(
-            Spectrum(
-                np.asarray(data2d), [self.axes[i] for i in remaining],
-                source=self.source,
-            )
+        out = Spectrum(
+            np.asarray(data2d), [self.axes[i] for i in remaining],
+            source=self.source,
         )
+        out.robust_max = self._compute_global_robust_max()
+        return orient_x_priority(out)
 
     def estimate_noise(self, fraction: float = 0.1) -> float:
         """用角落小块(三维)的标准差估计噪声水平。"""
