@@ -449,7 +449,11 @@ class NMRPipeBackend:
                 logs.append("直接维相位搜索:未找到 fid/切片,保持 p0=p1=0")
             else:
                 p0, p1 = self._search_direct_phase(
-                    work, phase_inputs, logs, is_nus=False
+                    work,
+                    phase_inputs,
+                    logs,
+                    is_nus=False,
+                    is_1d=(experiment.ndim == 1),
                 )
                 direct_axis = "F2" if experiment.ndim <= 2 else "F3"
                 direct_phase = {direct_axis: (p0, p1)}
@@ -1970,6 +1974,7 @@ class NMRPipeBackend:
         is_nus: bool = False,
         n_f1: int = 0,
         n_f2: int = 1,
+        is_1d: bool = False,
     ) -> tuple[float, float]:
         """直接维相位搜索:直接维 FT 谱上 (p0, p1) 频域搜索,结果缓存 phase.json。
 
@@ -2112,7 +2117,7 @@ class NMRPipeBackend:
                 ),
                 encoding="utf-8",
             )
-            if gain < min_gain or score < 0.55:
+            if (gain < min_gain or score < 0.55) and not is_1d:
                 logs.append(
                     f"直接维相位信息弱(gain={gain:.3f}, score={score:.3f}),"
                     "保持 p0=p1=0"
@@ -2120,7 +2125,8 @@ class NMRPipeBackend:
                 return 0.0, 0.0
             logs.append(
                 f"直接维相位搜索: p0={p0:g} p1={p1:g} "
-                f"(score={score:.3f}, gain={gain:.3f}, {spectra.shape[0]} 迹线)"
+                f"(score={score:.3f}, gain={gain:.3f}, {spectra.shape[0]} 迹线"
+                + (", 1D 弱信号采用估计值)" if is_1d else ")")
             )
             return p0, p1
         except Exception as exc:  # noqa: BLE001
