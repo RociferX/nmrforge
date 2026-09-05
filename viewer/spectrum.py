@@ -907,7 +907,13 @@ class Spectrum1D:
             data = data.real
         if data.ndim != 1:
             raise ValueError(f"非 1D 谱: {path} shape={data.shape}")
-        axis = cls._axis_from_dic(_dic, label=label, size=int(data.shape[0]))
+        axis_label = str(
+            _dic.get("FDF2LABEL")
+            or _dic.get("FDF1LABEL")
+            or _dic.get("FDLABEL")
+            or label
+        )
+        axis = cls._axis_from_dic(_dic, label=axis_label, size=int(data.shape[0]))
         return cls(data, axis, source=Path(path))
 
     @classmethod

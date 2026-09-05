@@ -770,16 +770,24 @@ class SpectrumViewer(QWidget):
         for layer in self.layers:
             layer.setVisible(False)
         axis = spectrum1d.axis
+        vb = self.plot.getViewBox()
+        # 0.2.199-补29gj-修:1D 迹线 x=ppm、y=强度,单位不可比——解除 2D
+        # 长宽比锁定,否则 y 量级(1e13)会把 x 轴范围撑爆、谱压成一条线
+        self.set_aspect_ratio(None)
+        # 1D 谱本身已是 1D,TopSpin 式条带按钮无意义,隐藏(用户,补29gj)
+        self.show_1d_button.setVisible(False)
         if spectrum1d.ppm_valid:
             ticks = []
             for i in np.linspace(0, axis.size - 1, 10):
-                ppm = axis.ppm_at(int(i))
+                ppm = float(axis.ppm_at(int(i)))
                 if abs(ppm - round(ppm)) < 0.1:
-                    ticks.append((int(i), f"{round(ppm):.0f}"))
+                    ticks.append((ppm, f"{round(ppm):.0f}"))
                 else:
-                    ticks.append((int(i), f"{ppm:.1f}"))
+                    ticks.append((ppm, f"{ppm:.1f}"))
             self.plot.getAxis("bottom").setTicks([ticks])
             self.plot.setLabels(bottom=f"{axis.label} (ppm)", left="Intensity")
+            # NMR 约定:高 ppm 在左(与 2D 谱一致)
+            vb.invertX(True)
         else:
             ticks = [
                 (int(i), str(int(i)))
@@ -787,7 +795,8 @@ class SpectrumViewer(QWidget):
             ]
             self.plot.getAxis("bottom").setTicks([ticks])
             self.plot.setLabels(bottom=axis.label, left="Intensity")
-        self.plot.getViewBox().invertY(False)
+            vb.invertX(False)
+        vb.invertY(False)
         self.set_1d_mode(False)
         self.reset_view()
         self._connect_axis_refresh()
@@ -807,7 +816,12 @@ class SpectrumViewer(QWidget):
             self._plot_1d = None
         for layer in self.layers:
             layer.setVisible(True)
-        self.plot.getViewBox().invertY(False)
+        vb = self.plot.getViewBox()
+        vb.invertX(False)
+        vb.invertY(False)
+        self.show_1d_button.setVisible(True)
+        # 恢复 2D 长宽比(按滑块当前值;1D 进入时临时解锁)
+        self.set_aspect_ratio(self._aspect_ratio_from_slider(self.aspect_slider.value()))
         if self._primary is not None:
             self._setup_axes(self._primary)
             self.reset_view()
