@@ -1,5 +1,19 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29gl(2026-09-05,关闭主窗口退出时 PyQt6/SIP 收尾段错误规避)
+- 用户:每次关闭应用主窗口就"段错误(核心已转储)",退出码 139;
+- 根因:PyQt6/SIP 解释器收尾(cleanup_on_exit)遍历已悬空的 sip 包装指针
+  (C++ 对象先销毁、Python 包装残留),sip_api_get_address 读到无效地址
+  (gdb 实抓 w=0x1e80)导致 SIGSEGV;发生在 Py_FinalizeEx,与业务代码无关,
+  属 Qt/PyQt6 对象生命周期与退出收尾问题;faulthandler 无 Python 帧,
+  需 gdb 原生栈确认;
+- 解决:MainWindow.run() 在 app.exec() 返回后、Python 进入收尾前,显式
+  关闭并 deleteLater 全部顶层窗口,两次 processEvents/sendPostedEvents,
+  让 Qt 对象树在 sip 仍追踪时按序析构,绕开对无有效 C++ 对象包装的访问;
+- 验证:本地 ruff+编译+导入+全量 pytest 全绿;VM 全量 889 passed/19 skipped
+  无段错误;用户在 VM gdb 启动→关闭窗口→退出码 0(修复生效);
+- 无副作用:仅在退出路径执行,不影响处理/渲染/结果,失败被 try/except
+  保护,返回码不变。
 ## 0.2.199-补29gk(2026-09-05,1D 相位专用优化 + FID 卡死修复)
 - 用户:1D 相位优化不太对(d_002 13C 很色散),生成 fid 会卡住;
   指出 1D 需单独 p1 优化(2D/3D 窗窄,p1 影响小),顺序为「先 p1 再 p0」,并把其它 1D 都加进来一起优化;
