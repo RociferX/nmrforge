@@ -776,6 +776,10 @@ class SpectrumViewer(QWidget):
         self.set_aspect_ratio(None)
         # 1D 谱本身已是 1D,TopSpin 式条带按钮无意义,隐藏(用户,补29gj)
         self.show_1d_button.setVisible(False)
+        # 1D 时 aspect(数据长宽比)控件无意义,隐藏;相位面板显示供调相
+        self.aspect_label.setVisible(False)
+        self.aspect_slider.setVisible(False)
+        self.phase_panel.set_visible_1d_mode(True)
         if spectrum1d.ppm_valid:
             ticks = []
             for i in np.linspace(0, axis.size - 1, 10):
@@ -820,6 +824,9 @@ class SpectrumViewer(QWidget):
         vb.invertX(False)
         vb.invertY(False)
         self.show_1d_button.setVisible(True)
+        self.aspect_label.setVisible(True)
+        self.aspect_slider.setVisible(True)
+        self.phase_panel.set_visible_1d_mode(False)
         # 恢复 2D 长宽比(按滑块当前值;1D 进入时临时解锁)
         self.set_aspect_ratio(self._aspect_ratio_from_slider(self.aspect_slider.value()))
         if self._primary is not None:
