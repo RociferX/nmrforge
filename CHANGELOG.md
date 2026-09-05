@@ -1,5 +1,16 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29ge(2026-09-05,数据节点打开 d_xxx;log.txt 进 report)
+- 用户:1)样品数据双击/右键打开目录应打开 d_xxx 文件夹而不是 raw;
+  2)log.txt 放到 report 文件夹;
+- gui/project_tree.py:data 节点目录解析不再优先 raw——双击与右键
+  「打开所在目录」均打开 <exp>/<data_id>/ 基座(d_xxx);
+- gui/per_data_records.py:data 日志 → <data_id>/report/log.txt;组日志 →
+  <exp>/groups/<gid>/report/log.txt;
+- gui/log_panel.py:旧位置日志首次写入时自动迁移到 report/ (旧记录保留);
+- 测试:打开路径断言改 d_xxx;日志路径改 report;+旧位置迁移回归;
+  本地全量 pytest 全绿,ruff 通过。
+
 ## 0.2.199-补29gd(2026-09-05,非 NUS 数据不显示 SMILE 优化步骤)
 - 用户:检测到不是 NUS 数据,或像 NUS 但实际全采样的,Pipeline 不用显示
   SMILE 优化;
