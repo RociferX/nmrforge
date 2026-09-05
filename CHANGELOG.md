@@ -1,5 +1,15 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29gd(2026-09-05,非 NUS 数据不显示 SMILE 优化步骤)
+- 用户:检测到不是 NUS 数据,或像 NUS 但实际全采样的,Pipeline 不用显示
+  SMILE 优化;
+- gui/pipeline_panel.py:按数据读取采样方式(复用 stepwise._read_experiment,
+  按 (exp,data) 缓存);仅 SamplingMode.NUS 显示 SMILE 步骤——uncertain/
+  读取失败一律隐藏;未选数据/实验级隐藏;「可选做 SMILE」文案按可见性门控;
+  smile 程序化运行入口防御(非 NUS 提示返回);
+- 测试:+uniform 隐藏、NUS 显示、可选文案测试改用 NUS 假控制器;
+  本地全量 pytest 全绿,ruff 通过。
+
 ## 0.2.199-补29gc(2026-09-04,选峰默认阈值 15σ → 25σ)
 - 用户:选峰的阈值改成 25(默认 25);
 - workflow/pick_peaks._PICK_THRESHOLD_SIGMA 15.0 → 25.0;
