@@ -1,5 +1,23 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29gk(2026-09-05,1D 相位专用优化 + FID 卡死修复)
+- 用户:1D 相位优化不太对(d_002 13C 很色散),生成 fid 会卡住;
+  指出 1D 需单独 p1 优化(2D/3D 窗窄,p1 影响小),顺序为「先 p1 再 p0」,并把其它 1D 都加进来一起优化;
+- FID 卡死:根因 acqus TD=0(如 TDP43_LCD_20250615/13,acqu TD=11904 正常)时补丁后 fid.com xN=0,导致 bruk2pipe 输出无限流、nmrPipe MULT 99% CPU 死转;
+  - core/experiment/bruker_parser.parse_dataset_params 追加读 acqu(直接维权威
+    采集参数);core/data/bruker_reader._build_dimensions 直接维 TD=0 回退 acqu TD;
+  - backend/nmrpipe_backend._convert_dir 对直接维 TD=0 直接中止(避免挂起,与补29dz 缺文件口径一致);
+  - 验证:exp13 读取 dimension_td 0→11904、expected xN 0→11904;
+- 1D 相位:新增 core/optimization/phase_search.dominant_absorption_ratio(主峰吸收比);
+  - _search_direct_phase 对 is_1d 走对称性 (p0,p1) 联合搜索,并与旧 p0-only 结果
+    按主峰吸收择优:保 1H 窄谱(水峰主导)不回归,修 13C 宽谱色散;
+  - VM 全 13 个 1D 验证:1H(1/4/6/8/9/13/21/25)全选 OLD(主峰吸收 0.55-0.67),
+    13C(2/10/22/26)选 SYM 明显改善(exp10 0.016→0.515、exp22 0.147→0.65、
+    exp26 0.513→0.731、exp2 0.436→0.521),exp11 回退 OLD;
+  - d_001 保持 OLD(0.673,不回归),d_002 修 SYM(0.515);
+- 测试:新增 tests/test_1d_phase_td.py(TD 回退 + dominant_absorption_ratio);
+  本地全量 pytest 全绿,ruff 通过;VM 全量 886 passed/19 skipped 无段错误;
+
 ## 0.2.199-补29gj(2026-09-05,加入 1D 处理)
 - 用户:加入 1D 的处理;1D 不需要选峰;1D 预设要加入;
 - presets 新增 Generic1D/1H-1D/13C-1D/31P-1D/19F-1D(ndim=1,Generic
