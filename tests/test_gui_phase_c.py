@@ -188,6 +188,8 @@ def test_settings_defaults_and_roundtrip(
     assert "points_per_line" not in loaded
     assert "smile_thread_cap" not in loaded
     assert loaded["linewidth_hz"]["1H"] == 8
+    # 0.2.199-补29gg:数据总目录默认空(导入浏览回退用户主目录)
+    assert loaded["data_root"] == ""
     # 0.2.199-补29fx:对齐容差默认 = Poky kr
     assert loaded["alignment_tolerance_ppm"] == {
         "1H": 0.02,
@@ -208,6 +210,11 @@ def test_settings_defaults_and_roundtrip(
     loaded3 = settings_module.load_settings()
     assert loaded3["alignment_tolerance_ppm"]["1H"] == 0.05
     assert loaded3["alignment_tolerance_ppm"]["15N"] == 0.2
+    # 0.2.199-补29gg:数据总目录保存/读取/路径回退
+    settings_module.save_settings({"data_root": str(tmp_path)})
+    loaded4 = settings_module.load_settings()
+    assert loaded4["data_root"] == str(tmp_path)
+    assert settings_module.data_root_path() == tmp_path
 
 
 def test_settings_dialog_defaults(qapp: QApplication) -> None:
@@ -217,6 +224,7 @@ def test_settings_dialog_defaults(qapp: QApplication) -> None:
     assert dialog.linewidth_spins["1H"].value() == 8
     assert dialog.linewidth_spins["15N"].value() == 15
     assert dialog.linewidth_spins["13C"].value() == 20
+    assert hasattr(dialog, "data_root_edit")  # 0.2.199-补29gg
     assert dialog.tolerance_spins["1H"].value() == 0.02
     assert dialog.tolerance_spins["15N"].value() == 0.2
     assert dialog.tolerance_spins["13C"].value() == 0.2
@@ -277,3 +285,25 @@ def test_settings_dialog_hides_simple_mode_in_appimage(
     dialog = SettingsDialog()
     assert not dialog.simple_mode_check.isVisible()
     dialog.close()
+
+
+def test_data_root_path_fallback_to_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.2.199-补29gg:data_root 无效/为空时回退用户主目录。"""
+    from pathlib import Path as _Path
+
+    from gui import settings as settings_module
+
+    monkeypatch.setattr(
+        settings_module,
+        "load_settings",
+        lambda: {"data_root": str(tmp_path / "missing")},
+    )
+    assert settings_module.data_root_path() == _Path.home()
+    monkeypatch.setattr(
+        settings_module,
+        "load_settings",
+        lambda: {"data_root": str(tmp_path)},
+    )
+    assert settings_module.data_root_path() == tmp_path

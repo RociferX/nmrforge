@@ -3,6 +3,8 @@
 默认值:线宽 1H 8 / 15N 15 / 13C 20 Hz(接入生成谱图参数);
 对齐容差 1H 0.02 / 15N 0.2 / 13C 0.2 ppm(0.2.199-补29fx,按 Poky kr,
 接入选峰参考与对齐导出);未配置时显示默认值。
+data_root(0.2.199-补29gg,用户):数据总目录,空=用户主目录;导入浏览默认
+定位到该目录再找子文件夹。
 AppImage 运行时(0.2.199-补29gb):设置文件改存
 ~/.config/NMRForge/nmrforge.local.yaml,不再依赖包内 config/
 (squashfs 只读且运行时路径不是开发期 config 路径)。
@@ -25,8 +27,20 @@ def is_appimage() -> bool:
         getattr(sys, "frozen", False)
     )
 
+
+def data_root_path() -> Path:
+    """数据总目录(0.2.199-补29gg):设置 data_root,空/无效回退用户主目录。"""
+    value = str((load_settings().get("data_root") or "") or "").strip()
+    if value:
+        path = Path(value).expanduser()
+        if path.is_dir():
+            return path
+    return Path.home()
+
 DEFAULTS: dict = {
     "nmrpipe_path": "",
+    # 0.2.199-补29gg(用户):数据总目录,空=用户主目录;导入浏览默认起点。
+    "data_root": "",
     "linewidth_hz": {"1H": 8, "15N": 15, "13C": 20},
     # 0.2.199-补29fx(用户:设置里改容差,与线宽同处):峰对齐/参考匹配容差
     # ppm,默认 Poky kr(Restricted Peak Pick):1H 0.02、15N/13C 0.2。
@@ -112,4 +126,10 @@ def save_settings(settings: dict) -> Path:
     return path
 
 
-__all__ = ["DEFAULTS", "is_appimage", "load_settings", "save_settings"]
+__all__ = [
+    "DEFAULTS",
+    "data_root_path",
+    "is_appimage",
+    "load_settings",
+    "save_settings",
+]

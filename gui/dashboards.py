@@ -254,16 +254,23 @@ class ExperimentImportPanel(QWidget):
         self._exp_id = exp_id
 
     def _browse(self) -> None:
+        # 0.2.199-补29gg:空输入时从「数据总目录」开始(默认用户主目录)
+        from gui.settings import data_root_path
+
+        start = self.source_edit.text().strip() or str(data_root_path())
         path = QFileDialog.getExistingDirectory(
-            self, "选择 Bruker 数据集目录", self.source_edit.text() or str(Path.home())
+            self, "选择 Bruker 数据集目录", start
         )
         if path:
             self.source_edit.setText(path)
 
     def _on_batch_add_folder(self) -> None:
-        """批量列表添加数据文件夹(自动检查子文件夹中的 Bruker 数据集)。"""
+        """批量列表添加数据文件夹(自动检查子文件夹中的 Bruker 数据集)。
+        0.2.199-补29gg:浏览起点=数据总目录。"""
+        from gui.settings import data_root_path
+
         path = QFileDialog.getExistingDirectory(
-            self, "选择 Bruker 数据文件夹(批量)"
+            self, "选择 Bruker 数据文件夹(批量)", str(data_root_path())
         )
         if not path:
             return
@@ -337,11 +344,14 @@ class ExperimentImportPanel(QWidget):
         self.segmented_source_edit.clear()
 
     def _on_segmented_browse(self) -> None:
-        """选择分段采集容器目录。"""
+        """选择分段采集容器目录(0.2.199-补29gg:空输入起点=数据总目录)。"""
+        from gui.settings import data_root_path
+
         path = QFileDialog.getExistingDirectory(
             self,
             "选择分段/重复实验容器目录",
-            self.segmented_source_edit.text() or str(Path.home()),
+            self.segmented_source_edit.text().strip()
+            or str(data_root_path()),
         )
         if path:
             self.segmented_source_edit.setText(path)

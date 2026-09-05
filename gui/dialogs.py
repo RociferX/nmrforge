@@ -247,8 +247,12 @@ class ImportExperimentDialog(QDialog):
         layout.addWidget(buttons)
 
     def _browse(self) -> None:
+        # 0.2.199-补29gg:空输入时从「数据总目录」开始(默认用户主目录)
+        from gui.settings import data_root_path
+
+        start = self.source_edit.text().strip() or str(data_root_path())
         path = QFileDialog.getExistingDirectory(
-            self, "选择 Bruker 数据集目录", self.source_edit.text() or str(Path.home())
+            self, "选择 Bruker 数据集目录", start
         )
         if path:
             self.source_edit.setText(path)
@@ -734,6 +738,17 @@ class SettingsDialog(QDialog):
         self.nmrpipe_edit = QLineEdit(str(settings.get("nmrpipe_path", "")))
         self.nmrpipe_edit.setPlaceholderText("未配置(自动查找)")
         form.addRow("NMRPipe 路径", self.nmrpipe_edit)
+        # 0.2.199-补29gg(用户):数据总目录(空=用户主目录,导入浏览起点)
+        self.data_root_edit = QLineEdit(str(settings.get("data_root", "")))
+        self.data_root_edit.setPlaceholderText(f"默认: {Path.home()}")
+        data_root_browse = QPushButton("浏览...")
+        data_root_browse.clicked.connect(self._browse_data_root)
+        data_root_row = QHBoxLayout()
+        data_root_row.addWidget(self.data_root_edit, 1)
+        data_root_row.addWidget(data_root_browse)
+        data_root_widget = QWidget()
+        data_root_widget.setLayout(data_root_row)
+        form.addRow("数据总目录", data_root_widget)
         self.linewidth_spins: dict[str, QDoubleSpinBox] = {}
         self.tolerance_spins: dict[str, QDoubleSpinBox] = {}
         for nucleus, default in DEFAULTS["linewidth_hz"].items():
@@ -809,11 +824,21 @@ class SettingsDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
+    def _browse_data_root(self) -> None:
+        """选择数据总目录(0.2.199-补29gg)。"""
+        start = self.data_root_edit.text().strip() or str(Path.home())
+        path = QFileDialog.getExistingDirectory(
+            self, "选择数据总目录", start
+        )
+        if path:
+            self.data_root_edit.setText(path)
+
     def _on_accept(self) -> None:
         from gui.settings import save_settings
 
         settings = {
             "nmrpipe_path": self.nmrpipe_edit.text().strip(),
+            "data_root": self.data_root_edit.text().strip(),
             "linewidth_hz": {
                 nucleus: spin.value()
                 for nucleus, spin in self.linewidth_spins.items()

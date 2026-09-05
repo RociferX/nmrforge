@@ -168,6 +168,7 @@ def test_settings_dialog_trimmed_and_linewidth_saved(
     assert "linewidth_hz" in saved
     assert "alignment_tolerance_ppm" in saved
     assert saved["alignment_tolerance_ppm"]["1H"] == 0.02
+    assert "data_root" in saved  # 0.2.199-补29gg
     assert "points_per_line" not in saved
     assert "smile_thread_cap" not in saved
     dialog.close()
@@ -199,4 +200,34 @@ def test_dialog_centered_on_screen(qapp: QApplication) -> None:
     assert center is not None
     assert abs(center[0] - geo.center().x()) <= 2
     assert abs(center[1] - geo.center().y()) <= 2
+    dialog.close()
+
+
+def test_import_dialog_browse_starts_at_data_root(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.2.199-补29gg:导入「浏览...」默认起点=数据总目录。"""
+    from PyQt6.QtWidgets import QFileDialog
+
+    from gui import settings as settings_module
+    from gui.dialogs import ImportExperimentDialog
+
+    monkeypatch.setattr(
+        settings_module,
+        "load_settings",
+        lambda: {"data_root": str(tmp_path)},
+    )
+    starts: list[str] = []
+
+    def fake_existing(parent, title, start="", *_a, **_k):
+        starts.append(str(start))
+        return str(tmp_path)
+
+    monkeypatch.setattr(
+        QFileDialog, "getExistingDirectory", staticmethod(fake_existing)
+    )
+    dialog = ImportExperimentDialog(None)
+    dialog._browse()
+    assert starts == [str(tmp_path)]
+    assert dialog.source_edit.text() == str(tmp_path)
     dialog.close()
