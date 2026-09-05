@@ -309,7 +309,8 @@ def _cleanup_unified_intermediates(
             fallbacks.append(
                 Path(experiment.source_path).parent / f"{dataset_id}.nmrpipe"
             )
-        except (TypeError, ValueError):
+        except (AttributeError, TypeError, ValueError):
+            # 缺 source_path(测试假对象/旧对象)不追加回退目录
             pass
     for _fb in fallbacks:
         if _fb != work and _fb.is_dir():

@@ -291,6 +291,23 @@ def generate_spectrum(
     experiment = _read_experiment(manager, exp_id, data_id)
     work = Path(work_dir) if work_dir else _work_dir(manager, exp_id, data_id)
     _ensure_work_dir(backend, work)
+
+    def _sweep_intermediates() -> None:
+        """清理本数据 unified 中间产物残留(0.2.199-补29gi)。
+
+        运行前与结束各执行一次:运行前清上次硬中断(SIGKILL/断电)遗留,
+        结束(含异常)清本次残留;只删中间产物,终谱/最终脚本/fid 保留。
+        """
+        from workflow.phase_routes import _cleanup_unified_intermediates
+
+        _cleanup_unified_intermediates(
+            work,
+            experiment.dataset_id,
+            experiment=experiment,
+            backend=backend,
+        )
+
+    _sweep_intermediates()
     memory_dir: Path | None = None
     if work_dir is None:
         # 0.2.199-补29ez(用户方案):中间产物统一收进 work/_intermediate 子目录,
@@ -318,6 +335,8 @@ def generate_spectrum(
             progress=progress,
         )
     finally:
+        # 0.2.199-补29gi:异常/中断也不留中间产物(运行前清扫兜底硬中断)
+        _sweep_intermediates()
         if work_dir is None:
             memory_disk.teardown_intermediate(work, memory_dir)
 

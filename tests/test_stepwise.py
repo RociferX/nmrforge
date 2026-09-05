@@ -363,8 +363,8 @@ def test_read_experiment_prefers_raw_copy(
 
 def test_rewrite_duplicate_nucleus_labels(tmp_path: Path) -> None:
     """0.2.199-补29af:双 15N(HNN/NNH)标签唯一化——F2→15Nx、F1→15Ny。"""
-    import numpy as np
     import nmrglue as ng
+    import numpy as np
     from nmrglue.fileio import pipe as ngpipe
 
     from core.data.internal_data_model import (
@@ -421,8 +421,8 @@ def test_rewrite_duplicate_nucleus_labels(tmp_path: Path) -> None:
 
 def test_rewrite_duplicate_nucleus_labels_2d(tmp_path: Path) -> None:
     """0.2.199-补29ag:2D 双 1H 标签唯一化——直接维 F2→Hx、间接维 F1→Hy。"""
-    import numpy as np
     import nmrglue as ng
+    import numpy as np
     from nmrglue.fileio import pipe as ngpipe
 
     from core.data.internal_data_model import (
@@ -470,8 +470,8 @@ def test_rewrite_duplicate_nucleus_labels_2d(tmp_path: Path) -> None:
 def test_rewrite_duplicate_nucleus_labels_3d_triple(tmp_path: Path) -> None:
     """0.2.199-补29ah:3D 三同核(1H-1H-1H)标签唯一化——直接维 F3→1Hx、
     F2(acqu2)→1Hy、F1(acqu3)→1Hz。"""
-    import numpy as np
     import nmrglue as ng
+    import numpy as np
     from nmrglue.fileio import pipe as ngpipe
 
     from core.data.internal_data_model import (
@@ -521,3 +521,72 @@ def test_rewrite_duplicate_nucleus_labels_3d_triple(tmp_path: Path) -> None:
     assert rdic.get("FDF1LABEL") == "1Hy"  # F2(acqu2)→1Hy
     assert rdic.get("FDF2LABEL") == "1Hz"  # F1(acqu3)→1Hz
     assert rdic.get("FDF3LABEL") == "1Hx"  # 直接维 F3→1Hx
+
+
+def test_generate_spectrum_cleans_intermediates_on_error(
+    tmp_path: Path, bruker_dir: Path, monkeypatch
+) -> None:
+    """中断残留(0.2.199-补29gi):运行前清扫上次残留;异常时 finally 清理。
+
+    统一路由中途抛错时,preview/joint/nus3d_* 等中间产物不留;
+    保留项(process/fid 等)不受影响。
+    """
+    import workflow.phase_routes as phase_routes
+
+    manager, exp_id, data_id, work = _manager_with_data(
+        tmp_path, bruker_dir / "hsqc_2d"
+    )
+    backend = _FakeBackend(work)
+    generate_fid(manager, exp_id, data_id, backend)
+    proc = manager.data_dir(exp_id, data_id, "process")
+    fallback = proc.parent / f"{data_id}.nmrpipe"
+
+    # 上次中断残留(应被本次运行前清扫删除)
+    stale = [
+        proc / "nus3d_rc" / "test0001.ft1",
+        proc / f"{data_id}_preview_F1.ft2",
+        proc / f"{data_id}_joint.ft3",
+        proc / "_intermediate" / "prev.ft2",
+    ]
+    for p in stale:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("x")
+    fallback_file = fallback / f"{data_id}_preview_F2.ft2"
+    fallback_file.parent.mkdir(parents=True, exist_ok=True)
+    fallback_file.write_text("x")
+
+    def fake_unified(
+        experiment, backend_, plan=None, work_dir=None, base_params=None, progress=None
+    ):
+        # 运行前清扫应已删除上次残留(_intermediate 会被重建为空目录)
+        assert not (proc / "nus3d_rc").exists()
+        assert not (proc / f"{data_id}_preview_F1.ft2").exists()
+        assert not (proc / f"{data_id}_joint.ft3").exists()
+        assert not (proc / "_intermediate" / "prev.ft2").exists()
+        assert not fallback.exists()
+        # 模拟本次运行失败前留下的中间产物
+        created = [
+            proc / "nus3d_1" / "stage1.ft1",
+            proc / "nus3d_rc" / "test0001.ft1",
+            proc / f"{data_id}_preview_F1.ft2",
+            proc / f"{data_id}_joint.ft3",
+            proc / "_intermediate" / "cur.ft2",
+        ]
+        for p in created:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text("x")
+        raise RuntimeError("模拟中途失败")
+
+    monkeypatch.setattr(phase_routes, "unified_route", fake_unified)
+    with pytest.raises(RuntimeError, match="模拟中途失败"):
+        generate_spectrum(manager, exp_id, data_id, backend)
+
+    # finally 清扫:本次失败残留已删
+    assert not (proc / "nus3d_1").exists()
+    assert not (proc / "nus3d_rc").exists()
+    assert not (proc / f"{data_id}_preview_F1.ft2").exists()
+    assert not (proc / f"{data_id}_joint.ft3").exists()
+    assert not (proc / "_intermediate").exists()
+    # 保留项不受影响(fid 由 generate_fid 写入 process/)
+    assert (proc / f"{data_id}.fid").exists()
+
