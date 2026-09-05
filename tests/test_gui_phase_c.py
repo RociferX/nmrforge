@@ -221,6 +221,8 @@ def test_settings_dialog_defaults(qapp: QApplication) -> None:
     from gui.dialogs import SettingsDialog
 
     dialog = SettingsDialog()
+    # 0.2.199-补29gh:窗口高度足够,新增行不被裁剪
+    assert dialog.height() >= 460
     assert dialog.linewidth_spins["1H"].value() == 8
     assert dialog.linewidth_spins["15N"].value() == 15
     assert dialog.linewidth_spins["13C"].value() == 20

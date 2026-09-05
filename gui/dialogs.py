@@ -724,7 +724,9 @@ class SettingsDialog(QDialog):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("软件设置")
-        self.resize(420, 300)
+        # 0.2.199-补29gh(用户):窗口太矮导致行内容被裁剪/文字显示不全
+        self.resize(560, 480)
+        self.setMinimumWidth(520)
         from gui.settings import (
             DEFAULTS,
             SETTINGS_FILENAME,
