@@ -1778,7 +1778,7 @@ class SpectrumViewer(QWidget):
             # 1D:view x 即 ppm(数据 x),直接读横轴,不转数据下标
             axis = self._primary_1d.axis
             xv = float(point.x())
-            if axis.ppm_valid:
+            if self._primary_1d.ppm_valid:
                 self.crosshair_label.setText(
                     f"{axis.label} {xv:.3f} ppm"
                 )
