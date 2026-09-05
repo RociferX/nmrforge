@@ -1,5 +1,19 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29gj(2026-09-05,加入 1D 处理)
+- 用户:加入 1D 的处理;1D 不需要选峰;1D 预设要加入;
+- presets 新增 Generic1D/1H-1D/13C-1D/31P-1D/19F-1D(ndim=1,Generic
+  不在类型下拉);分类器 generic 按维度选(1D 不再误入 generic_2d),1D
+  数据按直接核唯一命中(VM 实测 1H-1D conf 0.95);
+- workflow/stepwise:ndim=1 默认 phase_route="none"(无间接维,直连
+  process,跳过复型预览/参数优化);
+- backend/nmrpipe_backend:1D 直接轴 F2、extract 默认关(整谱保留)、
+  输出 .ft1;1D Bruker fid(文件)识别为有效输入(补29gj-修 14e505c);
+- viewer/spectrum.Spectrum1D.load_from_ft1 + 谱图面板 .ft1 加载与文件
+  列表 *.ft1;Pipeline 对 1D 数据隐藏「峰挑选」步骤行;
+- 验证:本地全量 pytest 全绿,ruff 通过;VM 真实 TDP43_LCD_20250615/1
+  (1H 1D)导入→FID→谱图→.ft1 ppm 轴加载全链路通过(相位 0/0,整谱无 EXT);
+
 ## 0.2.199-补29gi(2026-09-05,生成谱图异常/中断后统一清理中间产物残留)
 - 用户:检查软件会不会产生垃圾——VM sampleK 发现旧流程残留 nus3d_1/nus3d_rc
   (2026-08-26,共 179M);代码审阅确认中间目录清理只在统一流程「成功返回前」
