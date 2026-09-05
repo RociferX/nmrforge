@@ -1338,6 +1338,9 @@ def test_right_click_open_path_emits_signal(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """右键「打开所在目录」:data/folder 节点发出 open_path_requested(与双击一致)。"""
+    # 0.2.199-补29gk 补:MainWindow 把 open_terminal_requested 连到 _open_terminal→
+    # open_in_terminal(x-terminal-emulator),测试只验证信号;mock 掉避免真开终端窗口。
+    monkeypatch.setattr("gui.project_tree.open_in_terminal", lambda p: True)
     from PyQt6.QtWidgets import QMenu
 
     manager = _manager_with_experiment(tmp_path, monkeypatch)
