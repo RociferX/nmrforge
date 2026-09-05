@@ -18,6 +18,10 @@
   - 补(用户:峰要向上,不是向下吸收):新增 orient_dominant_positive,选出
     (p0,p1) 后若主峰实部为负则 p0+180 翻转——主吸收峰一律向上;VM 实测
     d_001/d_002 主峰均 UP(0.673/0.515);
+  - 补(用户:TopSpin 导出的文件夹里有这些参数):读 pdata/1/proc 的 PHC0/PHC1
+    (实验室已调相位)作为 1D 候选(±PHC1 两个符号,择优后向上定向)——d_001
+    pick phc(p0=301.9,p1=-31.2) dom=0.749 UP、d_002 pick phc(p0=24.1,p1=128)
+    dom=0.813 UP,优于旧/对称性(0.673/0.076、0.016/0.515);
 - 测试:新增 tests/test_1d_phase_td.py(TD 回退 + dominant_absorption_ratio);
   本地全量 pytest 全绿,ruff 通过;VM 全量 886 passed/19 skipped 无段错误;
 
