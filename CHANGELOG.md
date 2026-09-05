@@ -1,5 +1,13 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29gn(2026-09-05,批量导入后面板清空待导入列表)
+- 用户:批量导入框里的文件夹在导入后不消失,一直占着;
+- 根因:ExperimentImportPanel._on_batch_import 只把 batch_list 目录发信号,
+  未清空列表;
+- 解决:_on_batch_import 发完 batch_import_requested 后 _on_batch_clear()
+  清空列表并禁用按钮;测试适配:test_batch_import_group_option 第二次调用前
+  重新添加目录;
+- 验证:本地 ruff+全量 pytest 通过;VM 全量 889 passed/19 skipped(无段错误);
 ## 0.2.199-补29gm(2026-09-05,批量导入缺数据文件拦截 + 导入汇总)
 - 用户:TDP43_LCD_20250615 很多数据无法正常处理;要求缺文件导入时拦截,
   并给批量导入总结(成功/失败/原因);
