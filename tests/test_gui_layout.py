@@ -1350,7 +1350,11 @@ def test_right_click_open_path_emits_signal(
     data_item = tree.topLevelItem(0).child(0).child(0).child(0)
     folder_item = data_item.child(2)  # spectra
     opened: list[str] = []
+    opened_term: list[str] = []
     window.project_tree.open_path_requested.connect(lambda p: opened.append(p))
+    window.project_tree.open_terminal_requested.connect(
+        lambda p: opened_term.append(p)
+    )
 
     data_menu = window.project_tree._on_context_menu_impl(QMenu(), data_item)
     data_acts = [a for a in data_menu.actions() if a.text() == "打开所在目录"]
@@ -1358,6 +1362,13 @@ def test_right_click_open_path_emits_signal(
     data_acts[0].trigger()
     # 0.2.199-补29ge:右键数据打开 d_xxx 基座,不是 raw
     assert opened and Path(opened[0]) == base
+    # 0.2.199-补29gf:数据节点终端同样打开 d_xxx(raw 子节点自己可开终端)
+    data_terms = [
+        a for a in data_menu.actions() if a.text() == "在终端中打开"
+    ]
+    assert len(data_terms) == 1
+    data_terms[0].trigger()
+    assert opened_term and Path(opened_term[0]) == base
 
     folder_menu = window.project_tree._on_context_menu_impl(QMenu(), folder_item)
     folder_acts = [a for a in folder_menu.actions() if a.text() == "打开所在目录"]
