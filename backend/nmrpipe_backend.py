@@ -69,31 +69,6 @@ from core.optimization.phase_search import (
 from core.planning.processing_plan import ProcessingPlan
 
 
-def _read_topspin_phase(raw_dir: Path | None) -> tuple[float, float] | None:
-    """读 TopSpin 处理参数 pdata/1/proc 的 PHC0/PHC1(实验室已定的直接维相位),
-    作为 1D 相位候选(0.2.199-补29gk 补,用户:文件夹里有这些参数)。缺文件/无值
-    返回 None。"""
-    if raw_dir is None:
-        return None
-    proc = Path(raw_dir) / "pdata" / "1" / "proc"
-    if not proc.is_file():
-        return None
-    try:
-        text = proc.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return None
-    phc0: float | None = None
-    phc1: float | None = None
-    for line in text.splitlines():
-        if "$PHC0=" in line:
-            phc0 = float(line.split("=", 1)[1].strip().split()[0])
-        elif "$PHC1=" in line:
-            phc1 = float(line.split("=", 1)[1].strip().split()[0])
-    if phc0 is None or phc1 is None:
-        return None
-    return phc0, phc1
-
-
 def _slice_candidates(directory: Path, dataset_id: str) -> list[Path]:
     """目录内切片 fid 候选:新命名 {dataset_id}*.fid 优先,兼容旧 test*.fid。"""
     if not directory.is_dir():
@@ -486,7 +461,6 @@ class NMRPipeBackend:
                     logs,
                     is_nus=False,
                     is_1d=(experiment.ndim == 1),
-                    experiment=experiment,
                 )
                 direct_axis = "F2" if experiment.ndim <= 2 else "F3"
                 direct_phase = {direct_axis: (p0, p1)}
@@ -902,7 +876,6 @@ class NMRPipeBackend:
                     n_f1=int(_td[1]) if len(_td) > 1 else 0,
                     n_f2=int(_td[2]) if len(_td) > 2 else 1,
                     is_1d=(experiment.ndim == 1),
-                    experiment=experiment,
                 )
 
         td = effective_td(experiment)
@@ -2020,7 +1993,6 @@ class NMRPipeBackend:
         n_f1: int = 0,
         n_f2: int = 1,
         is_1d: bool = False,
-        experiment: Any | None = None,
     ) -> tuple[float, float]:
         """直接维相位搜索:直接维 FT 谱上 (p0, p1) 频域搜索,结果缓存 phase.json。
 
@@ -2044,7 +2016,7 @@ class NMRPipeBackend:
             try:
                 data = json.loads(phase_file.read_text(encoding="utf-8"))
                 if data.get("version") != 2 or (
-                    is_1d and data.get("source") != "1d_hybrid"
+                    is_1d and data.get("source") != "1d_self"
                 ):
                     raise ValueError("旧版缓存(算法已更新),需重搜")
                 logs.append(
@@ -2176,20 +2148,6 @@ class NMRPipeBackend:
                             float(est_sym[2]), 0.0,
                         )
                     )
-                topspin_phase = _read_topspin_phase(
-                    getattr(experiment, "source_path", None)
-                ) if experiment is not None else None
-                if topspin_phase is not None:
-                    phc0, phc1 = topspin_phase
-                    # 0.2.199-补29gk 补:TopSpin PHC 是实验室已定相位,作为候选;
-                    # ±PHC1 两个符号(谱轴方向/NMRPipe 换算差异),择优后向上定向。
-                    for sg in (1.0, -1.0):
-                        cands.append(
-                            (
-                                dominant_absorption_ratio(spectra[0], phc0, sg * phc1),
-                                float(phc0), float(sg * phc1), 0.0, 0.0,
-                            )
-                        )
                 if not cands:
                     logs.append("1D 相位搜索:无可用结果,保持 p0=p1=0")
                     return 0.0, 0.0
@@ -2201,7 +2159,7 @@ class NMRPipeBackend:
                     json.dumps(
                         {
                             "version": 2,
-                            "source": "1d_hybrid",
+                            "source": "1d_self",
                             "p0": p0,
                             "p1": p1,
                             "score": score,
