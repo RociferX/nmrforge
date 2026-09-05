@@ -267,6 +267,12 @@ def generate_fid(
     return fid_path
 
 
+
+def _default_phase_route(experiment) -> str:
+    """按维度选默认 phase_route:1D 无间接维,直连 process(补29gj)。"""
+    return "none" if int(getattr(experiment, "ndim", 2) or 2) == 1 else "unified"
+
+
 def generate_spectrum(
     manager: ProjectManager,
     exp_id: str,
@@ -354,7 +360,7 @@ def _generate_spectrum_impl(
     """原 generate_spectrum 主体(工作目录已由外层决定)。"""
     experiment = _read_experiment(manager, exp_id, data_id)
     params = dict(params or {})
-    route = str(params.pop("phase_route", "unified"))
+    route = str(params.pop("phase_route", _default_phase_route(experiment)))
     plan = select_method(experiment)
     if route == "none":
         # 0.2.162-补15:逃生口只有一次运行,直接把终跑直接维范围映射到 ext

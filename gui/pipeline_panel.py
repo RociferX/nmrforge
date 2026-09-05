@@ -926,6 +926,7 @@ class PipelinePanel(QWidget):
         # SMILE 优化——(exp_id, data_id) → 是否 NUS,检测一次缓存。
         self._nus_cache: dict[tuple[str, str], bool] = {}
         self._smile_step_visible = False
+        self._ndim_cache: dict[tuple[str, str], int] = {}
         self._analysis_ref_info: dict[str, str] | None = None
 
         layout = QVBoxLayout(self)
@@ -1143,6 +1144,25 @@ class PipelinePanel(QWidget):
                 self._nus_cache[key] = False
         return self._nus_cache[key]
 
+    def _data_ndim(self, exp_id: str, data_id: str) -> int:
+        """当前数据维度(读取失败按 2 处理,不影响 2D/3D 主流程)。"""
+        if not (exp_id and data_id):
+            return 2
+        key = (exp_id, data_id)
+        if key not in self._ndim_cache:
+            try:
+                experiment = self.controller._read_experiment(exp_id, data_id)
+                self._ndim_cache[key] = int(getattr(experiment, "ndim", 2) or 2)
+            except Exception:  # noqa: BLE001 - 读取失败按 2D/3D 处理
+                self._ndim_cache[key] = 2
+        return self._ndim_cache[key]
+
+    def _set_peaks_visible(self, visible: bool) -> None:
+        """按当前数据显隐峰挑选步骤行(1D 不需要选峰,补29gj)。"""
+        row = self._rows.get("peaks")
+        if row is not None:
+            row.setVisible(bool(visible))
+
     def _set_smile_visible(self, visible: bool) -> None:
         """按当前数据显隐 SMILE 优化步骤行。"""
         self._smile_step_visible = bool(visible)
@@ -1159,6 +1179,7 @@ class PipelinePanel(QWidget):
             for row in self._rows.values():
                 row.set_status("LOCKED")
             self._set_smile_visible(False)
+            self._set_peaks_visible(True)
             self._sync_reference_display()
             self._refresh_expanded_details()
             return
@@ -1171,6 +1192,7 @@ class PipelinePanel(QWidget):
                 row.set_status("LOCKED")
                 row.manual_button.setVisible(False)  # 未选中数据不显示人工
             self._set_smile_visible(False)
+            self._set_peaks_visible(True)
             self._sync_reference_display()
             self._refresh_expanded_details()
             return
@@ -1193,6 +1215,9 @@ class PipelinePanel(QWidget):
         # 0.2.199-补29gd:SMILE 优化仅 NUS 显示(非 NUS/uncertain 隐藏)
         self._set_smile_visible(
             self._data_is_nus(self._current_exp_id, self._current_data_id)
+        )
+        self._set_peaks_visible(
+            self._data_ndim(self._current_exp_id, self._current_data_id) != 1
         )
         statuses = self._current_statuses()
         # 0.2.199-补29fz(用户):阈值按数据隔离——刷新即恢复当前数据阈值

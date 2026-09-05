@@ -260,15 +260,20 @@ def test_edit_notes_saves(
     window.close()
 def test_experiment_type_options_from_presets() -> None:
     """0.2.85:数据类型选项来自 presets,按维度过滤(排除 Generic 兜底)。"""
+    options_1d = experiment_type_options("1D")
     options_2d = experiment_type_options("2D")
     options_3d = experiment_type_options("3D")
+    assert "1H-1D" in options_1d and "13C-1D" in options_1d
     assert "HSQC" in options_2d and "COSY" in options_2d
     assert "HNCA" in options_3d and "HNCACB" in options_3d
     assert "HNCA" not in options_2d
     assert "HSQC" not in options_3d
     assert "Generic2D" not in options_2d
     assert "Generic3D" not in options_3d
-    assert set(options_2d) | set(options_3d) == set(experiment_type_options())
+    assert (
+        set(options_1d) | set(options_2d) | set(options_3d)
+        == set(experiment_type_options())
+    )
 
 
 def test_temperature_from_acqus_detects_celsius_and_kelvin(

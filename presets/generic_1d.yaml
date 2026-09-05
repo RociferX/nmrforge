@@ -1,0 +1,10 @@
+name: Generic1D
+description: 未知 1D 实验的安全兜底
+phase_sensitive: false
+direct_nucleus: ""
+indirect_nuclei: []
+expected_peak_mode: unknown
+peak_sign: uniform
+display_orientation: ""
+constraints:
+  ndim: 1

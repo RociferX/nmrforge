@@ -63,7 +63,7 @@ NUCLEI_OPTIONS: tuple[str, ...] = (
 )
 # 实验注释:「实验类型」仅两种取值:指认实验 / 动力学实验
 EXPERIMENT_CATEGORY_OPTIONS: tuple[str, ...] = ("指认实验", "动力学实验")
-_GENERIC_PRESET_NAMES = {"Generic2D", "Generic3D"}
+_GENERIC_PRESET_NAMES = {"Generic1D", "Generic2D", "Generic3D"}
 _PRESET_OPTIONS: list[tuple[str, int]] | None = None
 
 

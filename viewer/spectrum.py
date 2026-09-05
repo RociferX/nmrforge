@@ -893,6 +893,24 @@ class Spectrum1D:
         )
 
     @classmethod
+    def load_from_ft1(cls, path: Path | str, label: str = "ppm") -> Spectrum1D:
+        """读取 NMRPipe 1D 频域谱(.ft1):单维实数组 + 头部 ppm 轴(补29gj)。
+
+        直接维 x 参数按 FDF2* 读取(与 _axis_from_dic 一致);头部缺失时
+        退化为点轴(sw/obs=0),仍可显示迹线。
+        """
+        import nmrglue as ng
+
+        _dic, data = ng.pipe.read(str(path))
+        data = np.asarray(data)
+        if np.iscomplexobj(data):
+            data = data.real
+        if data.ndim != 1:
+            raise ValueError(f"非 1D 谱: {path} shape={data.shape}")
+        axis = cls._axis_from_dic(_dic, label=label, size=int(data.shape[0]))
+        return cls(data, axis, source=Path(path))
+
+    @classmethod
     def load_from_fid(
         cls, path: Path | str, label: str = "FID"
     ) -> Spectrum1D | Spectrum:

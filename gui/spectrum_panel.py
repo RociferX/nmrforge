@@ -579,9 +579,9 @@ class SpectrumPanel(QWidget):
         try:
             if data_id:
                 spectra_dir = self.manager.data_dir(exp_id, data_id, "spectra")
-                files = list(spectra_dir.glob("*.ft2")) + list(
-                    spectra_dir.glob("*.ft3")
-                )
+                files = list(spectra_dir.glob("*.ft1")) + list(
+                    spectra_dir.glob("*.ft2")
+                ) + list(spectra_dir.glob("*.ft3"))
                 paths = sorted(files)
                 if paths:
                     return paths
@@ -589,9 +589,9 @@ class SpectrumPanel(QWidget):
             pass
         # 旧扁平布局回退(项目根 spectra/,{exp_id}* 通配)
         spectra_dir = self.manager.dir_path("spectra")
-        files = list(spectra_dir.glob(f"{exp_id}*.ft2")) + list(
-            spectra_dir.glob(f"{exp_id}*.ft3")
-        )
+        files = list(spectra_dir.glob(f"{exp_id}*.ft1")) + list(
+            spectra_dir.glob(f"{exp_id}*.ft2")
+        ) + list(spectra_dir.glob(f"{exp_id}*.ft3"))
         return sorted(files)
 
     def open_spectrum(self, path: Path, name: str | None = None) -> bool:
@@ -634,6 +634,16 @@ class SpectrumPanel(QWidget):
                 if state:
                     self._spectrum3d_panel.plane_combo.setCurrentIndex(state)
                 self._render_3d_view()
+                self._restore_display_state()
+                return True
+            if path.suffix.lower() == ".ft1":
+                from viewer.spectrum import Spectrum1D
+
+                self._current_spectrum = path
+                self._spectrum3d_panel.clear()
+                self.viewer.add_spectrum(
+                    Spectrum1D.load_from_ft1(path), name=name or path.stem
+                )
                 self._restore_display_state()
                 return True
             if path.suffix.lower() == ".fid":

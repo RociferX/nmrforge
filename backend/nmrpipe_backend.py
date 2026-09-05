@@ -451,13 +451,13 @@ class NMRPipeBackend:
                 p0, p1 = self._search_direct_phase(
                     work, phase_inputs, logs, is_nus=False
                 )
-                direct_axis = "F2" if experiment.ndim == 2 else "F3"
+                direct_axis = "F2" if experiment.ndim <= 2 else "F3"
                 direct_phase = {direct_axis: (p0, p1)}
                 _progress(
                     f"完成相位优化(直接维 {direct_axis} "
                     f"p0={p0:g}° p1={p1:g}°)"
                 )
-        extract = _as_bool(proc_params.get("extract", True))
+        extract = _as_bool(proc_params.get("extract", experiment.ndim > 1))
         ext_lo = resolve_ext_lo(proc_params.get("ext_lo"))
         ext_hi = resolve_ext_hi(proc_params.get("ext_hi"))
         baseline = expand_baseline(experiment, proc_params.get("baseline"))
@@ -1267,7 +1267,7 @@ class NMRPipeBackend:
                     "message": f"缺少重构平面 nus2d/recon.ft1: {work}",
                     "logs": [],
                 }
-        out_ext = "ft3" if experiment.ndim >= 3 else "ft2"
+        out_ext = {1: "ft1", 2: "ft2"}.get(experiment.ndim, "ft3")
         # 0.2.199-补29ez:显式 out_file = 中间渲染(预览/joint/候选),统一写入
         # work/_intermediate;终跑默认名保持原位。
         _render_out = out_file not in (None, "")
@@ -2752,7 +2752,7 @@ class NMRPipeBackend:
     ) -> tuple[bool, list[str], Path]:
         """生成并执行 NMRPipe 处理管道（输出 ft2/ft3）。"""
         logs: list[str] = []
-        ext = "ft3" if experiment.ndim >= 3 else "ft2"
+        ext = {1: "ft1", 2: "ft2"}.get(experiment.ndim, "ft3")
         in_file = in_file or f"{experiment.dataset_id}.fid"
         # 0.2.199-补29ez:显式 out_file = 中间渲染(预览/joint/候选),统一写入
         # work/_intermediate(可被内存盘接管);终跑默认名保持原位。

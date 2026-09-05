@@ -1,0 +1,14 @@
+name: 13C-1D
+description: 13C 一维谱
+phase_sensitive: true
+direct_nucleus: 13C
+indirect_nuclei: []
+expected_peak_mode: absorption
+peak_sign: uniform
+display_orientation: "13C"
+priors:
+  "13C": [-30.0, 230.0]
+constraints:
+  ndim: 1
+processing_hints:
+  auto_phase: false

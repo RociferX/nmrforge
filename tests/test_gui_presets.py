@@ -25,7 +25,7 @@ def test_all_presets_parse_and_required_fields() -> None:
     for name, data in presets:
         assert isinstance(data, dict) and data.get("name"), name
         ndim = (data.get("constraints") or {}).get("ndim")
-        assert ndim in (2, 3), f"{name}: ndim={ndim}"
+        assert ndim in (1, 2, 3), f"{name}: ndim={ndim}"
         generic = str(data.get("name", "")).lower().startswith("generic")
         if not generic:
             assert data.get("direct_nucleus"), f"{name}: 缺 direct_nucleus"
@@ -41,7 +41,7 @@ def test_presets_priors_are_valid_ranges() -> None:
 
 
 def test_common_types_present() -> None:
-    """常用 2D/3D 谱预设齐全。"""
+    """常用 1D/2D/3D 谱预设齐全。"""
     names = {data["name"] for _, data in _presets()}
     for expected in (
         "HSQC",
@@ -65,5 +65,9 @@ def test_common_types_present() -> None:
         "HMBC-31P",
         "HSQC-19F",
         "REDOR",
+        "1H-1D",
+        "13C-1D",
+        "31P-1D",
+        "19F-1D",
     ):
         assert expected in names, f"缺少常用预设 {expected}"

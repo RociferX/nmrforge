@@ -1,0 +1,14 @@
+name: 31P-1D
+description: 31P 一维谱
+phase_sensitive: true
+direct_nucleus: 31P
+indirect_nuclei: []
+expected_peak_mode: absorption
+peak_sign: uniform
+display_orientation: "31P"
+priors:
+  "31P": [-50.0, 150.0]
+constraints:
+  ndim: 1
+processing_hints:
+  auto_phase: false

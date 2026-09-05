@@ -121,6 +121,13 @@ _FAMILY_FALLBACK: dict[tuple[int, str, tuple[str, ...]], str] = {
 }
 
 
+_GENERIC_BY_NDIM: dict[int, str] = {
+    1: "generic_1d",
+    2: "generic_2d",
+    3: "generic_3d",
+}
+
+
 def _normalize_type_name(name: str) -> str:
     """类型名/标题归一化:小写、去非字母数字。"""
     return re.sub(r"[^a-z0-9]", "", str(name).lower())
@@ -272,7 +279,7 @@ def _classify_base(experiment: Experiment) -> ExperimentType:
                     + "(符号规则一致;可在注释中改精确类型)"
                 ],
             )
-        generic = "generic_3d" if experiment.ndim == 3 else "generic_2d"
+        generic = _GENERIC_BY_NDIM.get(experiment.ndim, "generic_2d")
         return ExperimentType(
             name=generic,
             confidence=0.4,
@@ -293,7 +300,7 @@ def _classify_base(experiment: Experiment) -> ExperimentType:
                 evidence=evidence + [f"核组合无匹配模板,PULPROG 含 {keyword!r} 推断"],
             )
 
-    generic = "generic_3d" if experiment.ndim == 3 else "generic_2d"
+    generic = _GENERIC_BY_NDIM.get(experiment.ndim, "generic_2d")
     return ExperimentType(
         name=generic,
         confidence=0.3,
