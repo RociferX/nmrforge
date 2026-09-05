@@ -1761,7 +1761,10 @@ class SpectrumViewer(QWidget):
         return best[1]
 
     def _on_mouse_moved(self, pos) -> None:
-        if self._primary is None:
+        # 1D 纯谱无 2D primary,仍允许移动读数(只显示横轴 ppm)
+        if self._primary is None and not (
+            self._mode_1d and self._primary_1d is not None
+        ):
             return
         try:
             point = self.plot.getViewBox().mapSceneToView(pos)

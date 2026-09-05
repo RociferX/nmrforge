@@ -427,7 +427,10 @@ class NMRPipeBackend:
             direct_phase = dict(direct_phase_override)
             logs.append(f"直接维相位覆盖: {direct_phase}")
         elif direct_phase_search:
-            _progress("开始相位优化(直接维)")
+            _progress(
+                "开始相位优化(1D)" if experiment.ndim == 1
+                else "开始相位优化(直接维)"
+            )
             phase_inputs: Path | list[Path]
             if experiment.segments:
                 phase_inputs = work / "seg_001" / f"{experiment.dataset_id}.fid"
@@ -457,10 +460,13 @@ class NMRPipeBackend:
                 )
                 direct_axis = "F2" if experiment.ndim <= 2 else "F3"
                 direct_phase = {direct_axis: (p0, p1)}
-                _progress(
-                    f"完成相位优化(直接维 {direct_axis} "
-                    f"p0={p0:g}° p1={p1:g}°)"
-                )
+                if experiment.ndim == 1:
+                    _progress(f"完成 1D 相位优化: p0={p0:g}° p1={p1:g}°")
+                else:
+                    _progress(
+                        f"完成相位优化(直接维 {direct_axis} "
+                        f"p0={p0:g}° p1={p1:g}°)"
+                    )
         extract = _as_bool(proc_params.get("extract", experiment.ndim > 1))
         ext_lo = resolve_ext_lo(proc_params.get("ext_lo"))
         ext_hi = resolve_ext_hi(proc_params.get("ext_hi"))
