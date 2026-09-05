@@ -60,22 +60,42 @@ class LogPanel(QWidget):
         self._manager = manager
 
     def _record_path(self, key: str):
-        """单数据(d_xxx)与数据组作用域 → 各自 log.txt;其它返回 None。"""
+        """单数据/数据组作用域 → report/log.txt;旧位置(根级)存在时迁移
+        (0.2.199-补29ge,用户:log.txt 放 report 文件夹)。"""
         manager = getattr(self, "_manager", None)
         if manager is None or getattr(manager, "project", None) is None:
             return None
+        new_path = None
+        legacy = None
         try:
+            from pathlib import Path as _Path
+
             from gui.per_data_records import data_log_path, group_log_path
 
             if key.startswith("data:"):
                 _kind, exp_id, data_id = key.split(":", 2)
-                return data_log_path(manager, exp_id, data_id)
-            if key.startswith("group:"):
+                new_path = data_log_path(manager, exp_id, data_id)
+                legacy = _Path(manager.data_base(exp_id, data_id)) / "log.txt"
+            elif key.startswith("group:"):
                 _kind, exp_id, group_id = key.split(":", 2)
-                return group_log_path(manager, exp_id, group_id)
+                new_path = group_log_path(manager, exp_id, group_id)
+                root = manager.root
+                if root is not None:
+                    legacy = (
+                        _Path(root) / exp_id / "groups" / group_id / "log.txt"
+                    )
         except Exception:  # noqa: BLE001 - 路径失败不持久化
             return None
-        return None
+        if new_path is not None and not new_path.exists():
+            if legacy is not None and legacy.is_file():
+                try:
+                    import shutil
+
+                    new_path.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.move(str(legacy), str(new_path))
+                except Exception:  # noqa: BLE001 - 迁移失败按新位置新建
+                    pass
+        return new_path
 
     def _persist_line(self, key: str, line: str) -> None:
         """单数据作用域日志镜像到 d_xxx/log.txt(0.2.199-补29ga)。"""
@@ -86,7 +106,7 @@ class LogPanel(QWidget):
             path.parent.mkdir(parents=True, exist_ok=True)
             if not path.is_file():
                 path.write_text(
-                    "# NMRForge 数据日志(d_xxx 文件夹)\n", encoding="utf-8"
+                    "# NMRForge 数据日志(report 文件夹)\n", encoding="utf-8"
                 )
             with path.open("a", encoding="utf-8") as fh:
                 fh.write(line + "\n")
@@ -119,7 +139,7 @@ class LogPanel(QWidget):
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(
-                "# NMRForge 数据日志(d_xxx 文件夹)\n", encoding="utf-8"
+                "# NMRForge 数据日志(report 文件夹)\n", encoding="utf-8"
             )
         except OSError:
             pass

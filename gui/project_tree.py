@@ -933,13 +933,8 @@ class ProjectTreePanel(QWidget):
             if folder is not None:
                 candidate = folder / str(data.get("name", ""))
                 return candidate if candidate.exists() else None
-        # data 节点:优先 raw 目录,缺失时回退 data 基座
-        try:
-            raw_dir = self.manager.data_dir(exp_id, data_id, "raw")
-            if raw_dir.is_dir():
-                return raw_dir
-        except Exception:  # noqa: BLE001
-            pass
+        # data 节点(0.2.199-补29ge,用户):双击/右键打开 d_xxx 数据基座,
+        # 不再优先打开 raw。
         try:
             base = self.manager.data_base(exp_id, data_id)
             return base if base.is_dir() else None
