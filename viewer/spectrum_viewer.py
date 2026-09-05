@@ -1770,6 +1770,19 @@ class SpectrumViewer(QWidget):
             point = self.plot.getViewBox().mapSceneToView(pos)
         except Exception:  # noqa: BLE001
             return
+        if self._mode_1d and self._primary_1d is not None:
+            # 1D:view x 即 ppm(数据 x),直接读横轴,不转数据下标
+            axis = self._primary_1d.axis
+            xv = float(point.x())
+            if axis.ppm_valid:
+                self.crosshair_label.setText(
+                    f"{axis.label} {xv:.3f} ppm"
+                )
+            else:
+                self.crosshair_label.setText(
+                    f"{axis.label} 点 {int(round(xv))}"
+                )
+            return
         xi, yi = self._view_to_data(point)
         if xi < 0:
             return
@@ -1783,11 +1796,6 @@ class SpectrumViewer(QWidget):
             self.crosshair_label.setText(
                 f"{x_axis.label} {x_axis.ppm_at(xi):.3f} ppm | "
                 f"{y_axis.label} {y_axis.ppm_at(yi):.3f} ppm"
-            )
-        elif self._mode_1d and self._primary_1d is not None:
-            axis = self._primary_1d.axis
-            self.crosshair_label.setText(
-                f"{axis.label} {axis.ppm_at(xi):.3f} ppm"
             )
         else:
             # 0.2.148:普通 2D(含 3D 切片)鼠标移动实时刷新 ppm 读数
