@@ -486,12 +486,27 @@ class SpectrumViewer(QWidget):
 
     # ------------------------------------------------------------ layers
 
+    def _set_2d_controls_visible(self, visible: bool) -> None:
+        """显示/隐藏 2D contour/aspect 相关控件(1D 视图隐藏,2D/3D 恢复)。
+
+        0.2.199-补29gj-修:此前 _show_1d 隐藏后 clear() 未恢复,_mode_1d 已为
+        False 使 add_spectrum 跳过 _restore_2d,导致 2D/3D 谱 contour 控件一直隐藏。"""
+        self.show_1d_button.setVisible(visible)
+        self.level_label.setVisible(visible)
+        self.level_slider.setVisible(visible)
+        self.count_label.setVisible(visible)
+        self.count_slider.setVisible(visible)
+        self.aspect_label.setVisible(visible)
+        self.aspect_slider.setVisible(visible)
+
     def clear(self) -> None:
         self._mode_1d = False
         self._primary_1d = None
         if self._plot_1d is not None:
             self.plot.removeItem(self._plot_1d)
             self._plot_1d = None
+        # 0.2.199-补29gj-修:恢复 2D contour/aspect 控件(_show_1d 隐藏后 clear 未恢复)
+        self._set_2d_controls_visible(True)
         self.set_1d_mode(False)
         # 统一 2D 显示方向:行 0(高 ppm)在底部,1D 视图后不泄漏到后续 2D/3D
         self.plot.getViewBox().invertY(False)
@@ -779,12 +794,7 @@ class SpectrumViewer(QWidget):
         # 1D 谱本身已是 1D,TopSpin 式条带按钮无意义,隐藏(用户,补29gj)
         self.show_1d_button.setVisible(False)
         # 1D 时 contour/aspect 控件无意义,隐藏;相位面板显示供调相
-        self.level_label.setVisible(False)
-        self.level_slider.setVisible(False)
-        self.count_label.setVisible(False)
-        self.count_slider.setVisible(False)
-        self.aspect_label.setVisible(False)
-        self.aspect_slider.setVisible(False)
+        self._set_2d_controls_visible(False)
         self.phase_panel.set_visible_1d_mode(True)
         if spectrum1d.ppm_valid:
             ticks = []
@@ -829,13 +839,7 @@ class SpectrumViewer(QWidget):
         vb = self.plot.getViewBox()
         vb.invertX(False)
         vb.invertY(False)
-        self.show_1d_button.setVisible(True)
-        self.level_label.setVisible(True)
-        self.level_slider.setVisible(True)
-        self.count_label.setVisible(True)
-        self.count_slider.setVisible(True)
-        self.aspect_label.setVisible(True)
-        self.aspect_slider.setVisible(True)
+        self._set_2d_controls_visible(True)
         self.phase_panel.set_visible_1d_mode(False)
         # 恢复 2D 长宽比(按滑块当前值;1D 进入时临时解锁)
         self.set_aspect_ratio(self._aspect_ratio_from_slider(self.aspect_slider.value()))

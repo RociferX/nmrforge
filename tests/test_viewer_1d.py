@@ -207,6 +207,33 @@ def test_viewer_phase_panel_display_only_real_data(
     viewer.close()
 
 
+def test_viewer_1d_hide_then_clear_restore_2d_controls(
+    qapp: QApplication,
+) -> None:
+    """0.2.199-补29gj-修:1D 视图隐藏 contour/aspect 控件后,clear() 应恢复;
+    否则切回 2D/3D 时 contour 控件一直隐藏。"""
+    from viewer.spectrum import SpectrumAxis
+
+    n = 64
+    time = np.arange(n)
+    real = np.exp(-time / 20.0) * np.cos(2 * np.pi * time / 8.0)
+    spectrum1d = Spectrum1D(real, SpectrumAxis("1H", n, 6000.0, 600.0, 4.7))
+    viewer = SpectrumViewer()
+    viewer.add_spectrum(spectrum1d, name="1d")
+    assert viewer._mode_1d
+    assert viewer.level_slider.isHidden()
+    assert viewer.aspect_slider.isHidden()
+    # 模拟切回 2D/3D 前的 clear()(此前未恢复 contour 控件,回归)
+    viewer.clear()
+    assert not viewer.level_slider.isHidden()
+    assert not viewer.aspect_slider.isHidden()
+    assert not viewer.count_slider.isHidden()
+    assert not viewer.level_label.isHidden()
+    viewer.add_spectrum(_synthetic_spectrum(), name="2d")
+    assert not viewer.level_slider.isHidden()
+    viewer.close()
+
+
 def test_viewer_1d_strips_toggle_and_update(qapp: QApplication) -> None:
     """一维谱开关:十字线 + 上/右条带,点击位置显示两个一维谱。"""
     spectrum = _synthetic_spectrum()
