@@ -229,6 +229,24 @@ def dominant_absorption_ratio(
     return float(np.abs(re) / (np.abs(re) + np.abs(im) + 1e-12))
 
 
+def orient_dominant_positive(
+    spectrum: np.ndarray, p0: float, p1: float, radius: int = 3
+) -> float:
+    """把 (p0,p1) 调整为让主峰向上(正吸收):若主峰窗口实部为负则 p0 翻转 180。
+
+    0.2.199-补29gk(用户:峰要向上而不是向下的吸收)。"""
+    arr = np.asarray(spectrum, dtype=np.complex128)
+    n = arr.shape[-1]
+    k = np.arange(n, dtype=float)
+    rot = arr * np.exp(1j * np.deg2rad(p0 + p1 * k / max(n - 1, 1)))
+    imax = int(np.argmax(np.abs(arr)))
+    lo, hi = max(0, imax - radius), min(n, imax + radius + 1)
+    re = float(np.sum(np.real(rot[lo:hi])))
+    if re < 0.0:
+        return (p0 + 180.0) % 360.0
+    return p0 % 360.0
+
+
 def search_direct_spectrum_phase(
     traces: np.ndarray,
     *,

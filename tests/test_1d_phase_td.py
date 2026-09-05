@@ -8,7 +8,10 @@ import numpy as np
 
 from core.data.bruker_reader import _build_dimensions
 from core.experiment.bruker_parser import parse_dataset_params
-from core.optimization.phase_search import dominant_absorption_ratio
+from core.optimization.phase_search import (
+    dominant_absorption_ratio,
+    orient_dominant_positive,
+)
 
 
 def test_dimensions_acqus_td_zero_falls_back_to_acqu(tmp_path: object) -> None:
@@ -56,6 +59,19 @@ def test_dimensions_acqus_td_zero_no_acqu_keeps_zero() -> None:
     }
     dims = _build_dimensions(params, 1)
     assert dims[0].td == 0
+
+
+def test_orient_dominant_positive() -> None:
+    """主峰为负(向下)时,p0 应翻转 180 让峰向上(正吸收)。"""
+    n = 64
+    spec = np.zeros(n, dtype=complex)
+    spec[32] = -1.0 + 0.0j  # 向下/负峰
+    assert orient_dominant_positive(spec, 0.0, 0.0) == 180.0
+    spec[32] = 1.0 + 0.0j  # 向上/正峰
+    assert orient_dominant_positive(spec, 0.0, 0.0) == 0.0
+    # p0=180 时,负峰(原始 -1)旋转后已为正(+1,向上),无需再翻
+    spec[32] = -1.0 + 0.0j
+    assert orient_dominant_positive(spec, 180.0, 0.0) == 180.0
 
 
 def test_dominant_absorption_ratio() -> None:

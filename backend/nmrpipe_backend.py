@@ -62,6 +62,7 @@ from core.data.nus_reader import read_nuslist
 from core.optimization.phase_search import (
     direct_ft_traces,
     dominant_absorption_ratio,
+    orient_dominant_positive,
     search_direct_phase_on_spectrum,
     search_direct_spectrum_phase,
 )
@@ -2146,6 +2147,9 @@ class NMRPipeBackend:
                     logs.append("1D 相位搜索:无可用结果,保持 p0=p1=0")
                     return 0.0, 0.0
                 _da, p0, p1, score, gain = max(cands, key=lambda c: c[0])
+                # 0.2.199-补29gk(用户:峰要向上而不是向下吸收):主峰为负则
+                # p0 翻转 180,保证吸收峰向上(正)。
+                p0 = orient_dominant_positive(spectra[0], p0, p1)
                 phase_file.write_text(
                     json.dumps(
                         {
