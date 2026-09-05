@@ -922,6 +922,10 @@ class PipelinePanel(QWidget):
         self._threshold_by_data: dict[tuple[str, str], float] = {}
         # 0.2.199-补29gc:显式自定义标记(默认值迁移后仍尊重用户设置)
         self._threshold_custom_by_data: dict[tuple[str, str], bool] = {}
+        # 0.2.199-补29gd(用户):非 NUS(含误判为 NUS 但实际全采样)不显示
+        # SMILE 优化——(exp_id, data_id) → 是否 NUS,检测一次缓存。
+        self._nus_cache: dict[tuple[str, str], bool] = {}
+        self._smile_step_visible = False
         self._analysis_ref_info: dict[str, str] | None = None
 
         layout = QVBoxLayout(self)
@@ -1121,6 +1125,31 @@ class PipelinePanel(QWidget):
             )
         return compute_step_statuses(self.manager, self._current_exp_id)
 
+    def _data_is_nus(self, exp_id: str, data_id: str) -> bool:
+        """当前数据是否检测为 NUS(仅 NUS 显示 SMILE 优化,0.2.199-补29gd)。
+        uncertain/读取失败一律按非 NUS 处理——「像 NUS 但实际全采样」也隐藏。"""
+        if not (exp_id and data_id):
+            return False
+        key = (exp_id, data_id)
+        if key not in self._nus_cache:
+            try:
+                from core.data.internal_data_model import SamplingMode
+
+                experiment = self.controller._read_experiment(exp_id, data_id)
+                self._nus_cache[key] = (
+                    experiment.sampling.mode is SamplingMode.NUS
+                )
+            except Exception:  # noqa: BLE001 - 判定失败按非 NUS 处理
+                self._nus_cache[key] = False
+        return self._nus_cache[key]
+
+    def _set_smile_visible(self, visible: bool) -> None:
+        """按当前数据显隐 SMILE 优化步骤行。"""
+        self._smile_step_visible = bool(visible)
+        row = self._rows.get("smile")
+        if row is not None:
+            row.setVisible(self._smile_step_visible)
+
     def refresh(self) -> None:
         """刷新上下文标签与步骤状态。"""
         project = self.manager.project
@@ -1129,6 +1158,7 @@ class PipelinePanel(QWidget):
             self.next_label.setText("")
             for row in self._rows.values():
                 row.set_status("LOCKED")
+            self._set_smile_visible(False)
             self._sync_reference_display()
             self._refresh_expanded_details()
             return
@@ -1140,6 +1170,7 @@ class PipelinePanel(QWidget):
             for row in self._rows.values():
                 row.set_status("LOCKED")
                 row.manual_button.setVisible(False)  # 未选中数据不显示人工
+            self._set_smile_visible(False)
             self._sync_reference_display()
             self._refresh_expanded_details()
             return
@@ -1159,6 +1190,10 @@ class PipelinePanel(QWidget):
             context_text += f" [数据组 {group.id}: {len(group.data_ids)} 数据]"
         self.context_label.setText(context_text)
         self._sync_reference_display()
+        # 0.2.199-补29gd:SMILE 优化仅 NUS 显示(非 NUS/uncertain 隐藏)
+        self._set_smile_visible(
+            self._data_is_nus(self._current_exp_id, self._current_data_id)
+        )
         statuses = self._current_statuses()
         # 0.2.199-补29fz(用户):阈值按数据隔离——刷新即恢复当前数据阈值
         peaks_row = self._rows.get("peaks")
@@ -1187,7 +1222,7 @@ class PipelinePanel(QWidget):
             ),
             None,
         )
-        smile_status = statuses.get("smile")
+        smile_status = statuses.get("smile") if self._smile_step_visible else None
         if smile_status == "OUTDATED":
             optional_text = "SMILE 优化(重新运行)"
         elif smile_status == "READY":
@@ -1850,6 +1885,14 @@ class PipelinePanel(QWidget):
             else None
         )
         if entry is None:
+            return
+        # 0.2.199-补29gd:非 NUS 数据不提供 SMILE 优化(防御程序化入口)
+        if step_id == "smile" and not self._data_is_nus(
+            self._current_exp_id, self._current_data_id
+        ):
+            self.log_message.emit(
+                "SMILE 优化仅适用于 NUS 数据(当前非 NUS,步骤已隐藏)"
+            )
             return
         if self._run_active:
             self.log_message.emit(

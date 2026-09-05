@@ -279,6 +279,16 @@ def test_save_peaks_manual_records_state(tmp_path: Path) -> None:
 class _FakeController:
     """PipelinePanel 构造用最小假控制器(测试只刷新状态,不运行步骤)。"""
 
+    def _read_experiment(self, *args, **kwargs):
+        """返回 NUS 采样(0.2.199-补29gd:SMILE 行仅 NUS 显示)。"""
+        from types import SimpleNamespace
+
+        from core.data.internal_data_model import SamplingMode
+
+        return SimpleNamespace(
+            sampling=SimpleNamespace(mode=SamplingMode.NUS)
+        )
+
 
 
 
@@ -455,4 +465,52 @@ def test_threshold_explicit_15_preserved_when_custom(
     panel = PipelinePanel(manager)
     panel.set_selection("data", exp.id, d1.id)
     assert panel._rows["peaks"].threshold_spin.value() == 15.0
+    panel.close()
+
+
+def test_pipeline_smile_step_hidden_for_uniform_data(
+    tmp_path: Path, qapp: QApplication
+) -> None:
+    """0.2.199-补29gd:非 NUS(全采样)数据不显示 SMILE 优化步骤。"""
+    from types import SimpleNamespace
+
+    from core.data.internal_data_model import SamplingMode
+    from core.project import ProjectManager
+    from gui.pipeline_panel import PipelinePanel
+
+    manager = ProjectManager.create_project(tmp_path / "proj_su", "demo")
+    exp = manager.create_experiment("HSQC")
+    d1 = manager.import_data(exp.id, "/fake/1")
+    panel = PipelinePanel(manager)
+    panel.controller._read_experiment = (
+        lambda *a, **k: SimpleNamespace(
+            sampling=SimpleNamespace(mode=SamplingMode.UNIFORM)
+        )
+    )
+    panel.set_selection("data", exp.id, d1.id)
+    assert panel._rows["smile"].isHidden()
+    panel.close()
+
+
+def test_pipeline_smile_step_shown_for_nus_data(
+    tmp_path: Path, qapp: QApplication
+) -> None:
+    """0.2.199-补29gd:检测为 NUS 的数据显示 SMILE 优化步骤。"""
+    from types import SimpleNamespace
+
+    from core.data.internal_data_model import SamplingMode
+    from core.project import ProjectManager
+    from gui.pipeline_panel import PipelinePanel
+
+    manager = ProjectManager.create_project(tmp_path / "proj_sn", "demo")
+    exp = manager.create_experiment("HNCA")
+    d1 = manager.import_data(exp.id, "/fake/1")
+    panel = PipelinePanel(manager)
+    panel.controller._read_experiment = (
+        lambda *a, **k: SimpleNamespace(
+            sampling=SimpleNamespace(mode=SamplingMode.NUS)
+        )
+    )
+    panel.set_selection("data", exp.id, d1.id)
+    assert not panel._rows["smile"].isHidden()
     panel.close()
