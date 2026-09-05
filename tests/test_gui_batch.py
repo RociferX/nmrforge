@@ -483,6 +483,8 @@ def test_batch_import_group_option(qapp: QApplication) -> None:
     panel._on_batch_import()
     assert emitted and emitted[0][2] is True
     panel.batch_group_check.setChecked(False)
+    # 0.2.199-补29gn:导入后列表被清空,重新添加以测试不成组
+    panel.batch_list.addItem("/data/b")
     panel._on_batch_import()
     assert emitted[-1][2] is False
     panel.close()

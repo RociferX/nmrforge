@@ -320,6 +320,8 @@ class ExperimentImportPanel(QWidget):
         self.batch_import_requested.emit(
             self._exp_id, folders, self.batch_group_check.isChecked()
         )
+        # 0.2.199-补29gn:导入后清空待导入列表,避免文件夹一直占着
+        self._on_batch_clear()
 
     def _on_import(self) -> None:
         source = self.source_edit.text().strip()
