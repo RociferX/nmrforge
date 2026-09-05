@@ -644,6 +644,8 @@ class SpectrumViewer(QWidget):
         self.count_slider.setValue(value)
 
     def _on_aspect_spin_changed(self, value: float) -> None:
+        if self._mode_1d:
+            return  # 1D 恒为 aspect free
         self.aspect_slider.setValue(int(round(value * 100.0)))
 
     @staticmethod
@@ -1263,6 +1265,8 @@ class SpectrumViewer(QWidget):
 
     def _on_aspect_changed(self, value: int) -> None:
         """Aspect ratio slider callback."""
+        if self._mode_1d:
+            return  # 1D 恒为 aspect free,忽略恢复/外部写回(0.2.199-补29gj)
         ratio = self._aspect_ratio_from_slider(value)
         if ratio is None:
             self.aspect_label.setValue(0.0)  # SpecialValueText 显示 "Aspect free"
