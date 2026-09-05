@@ -15,6 +15,9 @@
     13C(2/10/22/26)选 SYM 明显改善(exp10 0.016→0.515、exp22 0.147→0.65、
     exp26 0.513→0.731、exp2 0.436→0.521),exp11 回退 OLD;
   - d_001 保持 OLD(0.673,不回归),d_002 修 SYM(0.515);
+  - 补(用户:峰要向上,不是向下吸收):新增 orient_dominant_positive,选出
+    (p0,p1) 后若主峰实部为负则 p0+180 翻转——主吸收峰一律向上;VM 实测
+    d_001/d_002 主峰均 UP(0.673/0.515);
 - 测试:新增 tests/test_1d_phase_td.py(TD 回退 + dominant_absorption_ratio);
   本地全量 pytest 全绿,ruff 通过;VM 全量 886 passed/19 skipped 无段错误;
 
