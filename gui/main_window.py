@@ -1963,4 +1963,23 @@ class MainWindow(QMainWindow):
             app.setWindowIcon(_icon)
         window = MainWindow()
         window.show()
-        return app.exec()
+        code = app.exec()
+        # 0.2.199:PyQt6/SIP 在解释器收尾时遍历已悬空的 sip 包装指针
+        # (cleanup_on_exit -> sip_api_get_address(0x1e80))导致 SIGSEGV,
+        # 现象为关闭主窗口退出时核心转储。在事件循环返回后、Python 进入
+        # Py_FinalizeEx 之前,显式销毁全部顶层窗口并处理 deleteLater,让
+        # Qt 对象树在 sip 仍追踪时按序析构,绕开进程结束阶段对无有效 C++
+        # 对象包装的访问。
+        try:
+            for _w in list(app.topLevelWidgets()):
+                try:
+                    _w.close()
+                    _w.deleteLater()
+                except RuntimeError:  # pragma: no cover - 已销毁
+                    pass
+            app.processEvents()
+            app.sendPostedEvents(None, 0)
+            app.processEvents()
+        except Exception:  # noqa: BLE001 - 清理失败不阻断退出
+            pass
+        return code
