@@ -194,6 +194,14 @@ class ProcessingController:
                 "error": "",
             }
             try:
+                # 0.2.199-补29gl:批量导入先校验原始数据文件存在,缺文件
+                # 直接标记失败,避免"看着导入了、处理时才失败";采集不全/更多
+                # 不在此拦截,由 FID 生成步骤按实际数据反推。
+                _f = Path(str(folder))
+                _is_nd = (_f / "acqu2s").is_file() or (_f / "acqu3s").is_file()
+                _data_file = "ser" if _is_nd else "fid"
+                if not (_f / _data_file).is_file():
+                    raise RuntimeError(f"缺少数据文件 {_data_file}")
                 result = self.import_data(entry, str(folder))
                 data_id = str(result.get("data_id", "") or "")
                 item["data_id"] = data_id

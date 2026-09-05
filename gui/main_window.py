@@ -527,6 +527,17 @@ class MainWindow(QMainWindow):
             self.manager.save()
         except ProjectError:
             pass
+        ok_count = sum(1 for item in results or [] if item.get("ok"))
+        fail_count = (len(results or []) - ok_count)
+        self._append_log(
+            f"批量导入汇总: 共 {count} 个数据, 成功 {ok_count} 个, 失败 {fail_count} 个"
+        )
+        if fail_count:
+            for item in results or []:
+                if not item.get("ok"):
+                    self._append_log(
+                        f"  失败: {item.get('folder')} → {item.get('error')}"
+                    )
         self._append_log(
             f"批量导入完成: 实验 {exp_id} 组 {batch_id_value},共 {count} 个样品数据"
         )

@@ -598,6 +598,9 @@ def test_batch_full_path_group(
         str(bruker_dir / "hsqc_2d"),
         str(bruker_dir / "nus_2d"),
     ]
+    # 0.2.199-补29gl:批量导入校验原始数据文件;为测试临时备份补 ser
+    (bruker_dir / "hsqc_2d" / "ser").write_bytes(b"")
+    (bruker_dir / "nus_2d" / "ser").write_bytes(b"")
     controller = ProcessingController(manager)
     result = controller.batch_import(entry.id, folders, group=True)
     assert result["batch_id"].startswith("G")
