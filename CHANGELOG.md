@@ -1,5 +1,17 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29gi(2026-09-05,生成谱图异常/中断后统一清理中间产物残留)
+- 用户:检查软件会不会产生垃圾——VM sampleK 发现旧流程残留 nus3d_1/nus3d_rc
+  (2026-08-26,共 179M);代码审阅确认中间目录清理只在统一流程「成功返回前」
+  执行,中途报错/停止/强杀会留下 preview/joint/nus3d_*/回退 .nmrpipe;
+- workflow/stepwise.generate_spectrum(生产唯一漏斗):新增 _sweep_intermediates
+  运行前清扫上次硬中断残留(兜底 SIGKILL/断电)+ finally(含异常)清扫本次残留;
+  _intermediate 仍由 prepare/teardown_intermediate 接管;
+- workflow/phase_routes._cleanup_unified_intermediates:缺 source_path 的假
+  对象容错(AttributeError),不影响真实 experiment;
+- 测试:+回归(预置残留→运行前已清;fake 统一路由失败→finally 已清;保留项
+  fid 不受影响);本地全量 pytest 全绿,ruff 通过,test_full_paths 通过。
+
 ## 0.2.199-补29gh(2026-09-05,设置窗口加高防裁剪)
 - 用户:设置内容显示不全,输入框高度显示不完文字(新增数据总目录行后明显);
 - 根因:SettingsDialog resize(420,300) 过矮,内容 sizeHint≈374,行被挤压;
