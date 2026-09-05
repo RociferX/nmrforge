@@ -52,6 +52,8 @@
   level/count/aspect 控件后 clear() 未恢复(_mode_1d 已 False 使 add_spectrum
   跳过 _restore_2d),2D/3D 谱 contour 控件一直隐藏;新增
   _set_2d_controls_visible(visible) 在 _show_1d/_restore_2d/clear 三处统一控制;
+- 补(用户:1D 不用生成 ucsf 文件):_export_ucsf 对 .ft1(1D)直接跳过,不调用
+  pipe2ucsf——UCSF 面向 2D/3D,1D 无意义,避免多余产物与失败日志;+回归测试;
 
 ## 0.2.199-补29gi(2026-09-05,生成谱图异常/中断后统一清理中间产物残留)
 - 用户:检查软件会不会产生垃圾——VM sampleK 发现旧流程残留 nus3d_1/nus3d_rc

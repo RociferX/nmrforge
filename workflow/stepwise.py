@@ -197,6 +197,10 @@ def _export_ucsf(
     spectrum_path: str,
 ) -> tuple[str | None, str]:
     """终谱归位后顺带生成 Sparky UCSF 文件(spectra/<data_id>.ucsf)。"""
+    # 0.2.199-补29gj-修(用户):1D 谱(.ft1)不生成 UCSF 文件——UCSF 面向 2D/3D,
+    # pipe2ucsf 对 1D 无意义;直接跳过,避免多余产物与失败日志。
+    if Path(spectrum_path).suffix.lower() == ".ft1":
+        return None, "1D 谱不生成 UCSF 文件(跳过)"
     spectra_dir = manager.data_dir(exp_id, data_id, "spectra")
     spectra_dir.mkdir(parents=True, exist_ok=True)
     target = spectra_dir / f"{Path(spectrum_path).stem}.ucsf"

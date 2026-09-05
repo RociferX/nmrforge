@@ -8,6 +8,26 @@ from types import SimpleNamespace
 from workflow.ucsf_export import export_ucsf
 
 
+def test_stepwise_export_ucsf_skips_1d_ft1(monkeypatch) -> None:
+    """0.2.199-补29gj-修:1D 终谱(.ft1)不调用 pipe2ucsf,直接跳过。"""
+    import workflow.stepwise as stepwise
+
+    called: list[str] = []
+    manager = SimpleNamespace()
+
+    def _boom(*args, **kwargs):
+        called.append("export")
+        return "boom", "boom"
+
+    monkeypatch.setattr(stepwise, "export_ucsf", _boom)
+    path, message = stepwise._export_ucsf(
+        manager, "exp_001", "d_001", "d_001.ft1"
+    )
+    assert path is None
+    assert "1D" in message
+    assert not called  # 未真正执行 pipe2ucsf
+
+
 def test_export_ucsf_runs_pipe2ucsf_and_writes_target(tmp_path: Path) -> None:
     """pipe2ucsf 成功:调用参数正确,UCSF 路径返回。"""
     source = tmp_path / "d_001.ft2"
