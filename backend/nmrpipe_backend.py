@@ -2043,8 +2043,10 @@ class NMRPipeBackend:
         if phase_file.is_file():
             try:
                 data = json.loads(phase_file.read_text(encoding="utf-8"))
-                if data.get("version") != 2:
-                    raise ValueError("旧版缓存(0.2.87 前 p0 恒 0),需重搜")
+                if data.get("version") != 2 or (
+                    is_1d and data.get("source") != "1d_hybrid"
+                ):
+                    raise ValueError("旧版缓存(算法已更新),需重搜")
                 logs.append(
                     f"直接维相位(缓存): p0={data['p0']:g} p1={data['p1']:g}"
                 )
