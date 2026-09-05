@@ -644,6 +644,8 @@ class SpectrumPanel(QWidget):
                 self.viewer.add_spectrum(
                     Spectrum1D.load_from_ft1(path), name=name or path.stem
                 )
+                self._viewer_1d_active = True
+                self._sync_peak_ui_visibility()
                 self._restore_display_state()
                 return True
             if path.suffix.lower() == ".fid":
@@ -654,6 +656,8 @@ class SpectrumPanel(QWidget):
                 self.viewer.add_spectrum(
                     Spectrum1D.load_from_fid(path), name=path.stem
                 )
+                self._viewer_1d_active = True
+                self._sync_peak_ui_visibility()
                 self._restore_display_state()
                 return True
             from viewer.spectrum import Spectrum
@@ -672,6 +676,7 @@ class SpectrumPanel(QWidget):
         self._spectrum3d_panel.clear()
         self.viewer.clear()
         self.viewer.add_spectrum(spectrum, name=name or path.stem)
+        self._viewer_1d_active = False
         self._restore_display_state()
         self._sync_peak_ui_visibility()
         return True
