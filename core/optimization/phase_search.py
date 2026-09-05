@@ -211,6 +211,24 @@ def _row_p0_at_p1(
     return p0, score
 
 
+def dominant_absorption_ratio(
+    spectrum: np.ndarray, p0: float, p1: float, radius: int = 3
+) -> float:
+    """应用 (p0,p1) 后主峰(幅度最大)吸收比 |Re|/(|Re|+|Im|)。
+
+    用于 1D 新旧相位结果择优(0.2.199-补29gk)。"""
+    arr = np.asarray(spectrum, dtype=np.complex128)
+    n = arr.shape[-1]
+    k = np.arange(n, dtype=float)
+    rot = arr * np.exp(1j * np.deg2rad(p0 + p1 * k / max(n - 1, 1)))
+    mag = np.abs(arr)
+    imax = int(np.argmax(mag))
+    lo, hi = max(0, imax - radius), min(n, imax + radius + 1)
+    re = np.sum(np.real(rot[lo:hi]))
+    im = np.sum(np.imag(rot[lo:hi]))
+    return float(np.abs(re) / (np.abs(re) + np.abs(im) + 1e-12))
+
+
 def search_direct_spectrum_phase(
     traces: np.ndarray,
     *,

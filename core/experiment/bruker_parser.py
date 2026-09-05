@@ -90,5 +90,11 @@ def parse_dataset_params(dataset_dir: Path) -> dict[str, Any]:
         if path.exists():
             order.append(name)
             result[name] = parse_param_file(path)
+    # 0.2.199-补29gk:acqu 是直接维权威采集参数(acqus 有时把 TD 写成 0,
+    # 如数据 acqus TD=0 但 acqu TD 正常,导致补丁后 fid.com xN=0 转换卡死);
+    # 这里额外读入 acqu 作为直接维 TD 的回退源。
+    acq_path = dataset_dir / "acqu"
+    if acq_path.exists():
+        result["acqu"] = parse_param_file(acq_path)
     result["order"] = order
     return result

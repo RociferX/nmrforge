@@ -230,6 +230,10 @@ def _build_dimensions(params: dict, ndim: int) -> list[Dimension]:
                 o1p = o1 / bf1
             elif o1 and sf:
                 o1p = o1 / sf  # BF1 缺失时兼容旧数据(相对 SFO1)
+        td = int(block.get("TD", 0) or 0)
+        if td == 0 and filename == "acqus" and "acqu" in params:
+            # 0.2.199-补29gk:acqus TD=0 时回退到 acqu 权威 TD(避免转换卡死)
+            td = int(params["acqu"].get("TD", 0) or 0)
         dims.append(
             Dimension(
                 logical_axis=logical,
@@ -238,7 +242,7 @@ def _build_dimensions(params: dict, ndim: int) -> list[Dimension]:
                 sw=_param_float(block, "SW_h", "SW"),
                 o1=o1,
                 o1p=o1p,
-                td=int(block.get("TD", 0) or 0),
+                td=td,
                 acquisition_mode=str(block.get("FnMODE", "")),
                 axis_direction="increasing",
                 role=role,

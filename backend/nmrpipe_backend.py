@@ -61,6 +61,7 @@ from core.data.internal_data_model import Experiment, SamplingMode
 from core.data.nus_reader import read_nuslist
 from core.optimization.phase_search import (
     direct_ft_traces,
+    dominant_absorption_ratio,
     search_direct_phase_on_spectrum,
     search_direct_spectrum_phase,
 )
@@ -1617,6 +1618,13 @@ class NMRPipeBackend:
                     # LF 行尾必须：CRLF 会让 csh 的 \ 续行失效;脚本在 work 目录,
                     # 内部相对路径(./ser)以转换目录为 cwd 解析
                     fid_com.write_text(patched, encoding="utf-8", newline="\n")
+                    # 0.2.199-补29gk:直接维无效 TD(0) 会让 bruk2pipe 无限转换卡死,
+                    # 直接明确中止而非挂起(与补29dz 缺文件口径一致)。
+                    if experiment.dimensions and experiment.dimensions[0].td == 0:
+                        logs.append(
+                            "直接维 TD=0(acqus/acqu 均未提供有效 TD),中止转换避免卡死"
+                        )
+                        return False
                     run_result = runtime.run(
                         ["csh", str(fid_com)], cwd=str(convert_dir), timeout=900
                     )
@@ -2104,6 +2112,57 @@ class NMRPipeBackend:
                 logs.append("直接维相位搜索:无可用切片,保持 p0=p1=0")
                 return 0.0, 0.0
             spectra = np.concatenate(rows, axis=0)
+            if is_1d:
+                # 0.2.199-补29gk: 1D 窗宽,group-delay 引入显著线性相位,须先定
+                # p1 再定 p0(2D/3D 窄窗 p1 影响小,仍走 search_direct_spectrum_phase,
+                # 见 D-2026-09-05 用户口径)。用对称性 (p0,p1) 联合搜索与旧
+                # p0-only 结果择优:若对称性主峰吸收不及旧结果(如 1H 以水峰
+                # 为主),回退旧结果,保证窄谱不回归。
+                est_old = search_direct_spectrum_phase(spectra)
+                est_sym = search_direct_phase_on_spectrum(
+                    spectra, axis=-1, metric="symmetry",
+                    coarse_p0_step=15.0, radius=12, min_windows=3,
+                    prefer_p1_zero=False, sign_mode="uniform",
+                )
+                cands: list[tuple[float, float, float, float, float]] = []
+                if est_old is not None:
+                    cands.append(
+                        (
+                            dominant_absorption_ratio(spectra[0], est_old[0], 0.0),
+                            est_old[0], 0.0, float(est_old[2]), float(est_old[3]),
+                        )
+                    )
+                if est_sym is not None:
+                    cands.append(
+                        (
+                            dominant_absorption_ratio(
+                                spectra[0], float(est_sym[0]), float(est_sym[1])
+                            ),
+                            float(est_sym[0]), float(est_sym[1]),
+                            float(est_sym[2]), 0.0,
+                        )
+                    )
+                if not cands:
+                    logs.append("1D 相位搜索:无可用结果,保持 p0=p1=0")
+                    return 0.0, 0.0
+                _da, p0, p1, score, gain = max(cands, key=lambda c: c[0])
+                phase_file.write_text(
+                    json.dumps(
+                        {
+                            "version": 2,
+                            "source": "1d_hybrid",
+                            "p0": p0,
+                            "p1": p1,
+                            "score": score,
+                            "gain": gain,
+                            "n": int(spectra.shape[0]),
+                        },
+                        indent=2,
+                    ),
+                    encoding="utf-8",
+                )
+                logs.append(f"1D 相位搜索: p0={p0:g} p1={p1:g} (score={score:.3f})")
+                return p0, p1
             est = search_direct_spectrum_phase(spectra)
             if est is None:
                 logs.append("直接维相位搜索:直接维谱无信号,保持 p0=p1=0")
