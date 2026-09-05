@@ -556,13 +556,15 @@ class NMRPipeBackend:
             if not (seg_dir / "acqus").is_file():
                 return f"{seg_dir}/acqus"
             has_ser = (seg_dir / "ser").is_file()
+            # 0.2.199-补29gj-修:1D Bruker 数据文件是 fid(文件),不是 ser/或 fid 目录
+            has_fid_file = (seg_dir / "fid").is_file()
             has_fid_dir = (
                 any((seg_dir / "fid").glob("*.fid"))
                 if (seg_dir / "fid").is_dir()
                 else False
             )
-            if not has_ser and not has_fid_dir:
-                return f"{seg_dir}/ser"
+            if not has_ser and not has_fid_file and not has_fid_dir:
+                return f"{seg_dir}/fid" if experiment.ndim == 1 else f"{seg_dir}/ser"
             return ""
 
         if experiment.segments:
