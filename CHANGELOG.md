@@ -1,5 +1,16 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29go(2026-09-06,删除数据后不在重启时重现)
+- 用户:删了的数据留下 report 文件夹和里面的 log.txt,重启软件后该数据又能看见,
+  运行却说找不到文件;
+- 根因:_delete_data 在 manager.delete_data() 移走 data_base 后,仍对正处于
+  被删数据作用域的日志调用 _persist_line,导致重建 data_base/report/log.txt;
+  项目打开 recover_trashed 检测到 data_base 存在便误还原条目(数据可见但文件已删);
+- 解决:gui/log_panel._record_path 对已删除/入回收站(或不存在)的数据不返回日志路径,
+  不再重建;core/project/manager.recover_trashed 仅当 data_base 含真实产物
+  (非仅遗留 report/)时才还原数据;测试适配(恢复测试创建 raw/);
+- 验证:本地验证(删除后日志不重建;仅剩 report 不还原;有 raw/ 正常还原);
+  本地全量 pytest 通过;VM 全量 889 passed/19 skipped(首闪为已知 pyqtgraph 段错误);
 ## 0.2.199-补29gn(2026-09-05,批量导入后面板清空待导入列表)
 - 用户:批量导入框里的文件夹在导入后不消失,一直占着;
 - 根因:ExperimentImportPanel._on_batch_import 只把 batch_list 目录发信号,
