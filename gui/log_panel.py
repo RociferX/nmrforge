@@ -15,6 +15,27 @@ from PyQt6.QtWidgets import (
 )
 
 
+def _data_is_trashed(manager: object, exp_id: str, data_id: str) -> bool:
+    """数据是否已删除/已入回收站(不存在也算),用于停写其日志。"""
+    proj = getattr(manager, "project", None)
+    if proj is None:
+        return False
+    exp = getattr(proj, "experiment", None)
+    if exp is None:
+        return False
+    entry = None
+    try:
+        entry = exp(exp_id)
+    except Exception:
+        entry = None
+    if entry is None:
+        return True
+    for d in getattr(entry, "data", None) or []:
+        if getattr(d, "id", "") == data_id:
+            return bool(getattr(d, "trashed", False))
+    return True
+
+
 class LogPanel(QWidget):
     """日志面板:按作用域(单个数据/数据组/实验/全局)隔离 + 追加 + 清空。
 
@@ -74,6 +95,10 @@ class LogPanel(QWidget):
 
             if key.startswith("data:"):
                 _kind, exp_id, data_id = key.split(":", 2)
+                # 0.2.199-补29gp:已删除/已入回收站的数据不再持久化日志,
+                # 避免重建 data_base/report/log.txt 导致重启时误还原
+                if _data_is_trashed(manager, exp_id, data_id):
+                    return None
                 new_path = data_log_path(manager, exp_id, data_id)
                 legacy = _Path(manager.data_base(exp_id, data_id)) / "log.txt"
             elif key.startswith("group:"):

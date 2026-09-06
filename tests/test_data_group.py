@@ -109,7 +109,9 @@ def test_delete_data_keeps_group_membership_for_restore(
     with pytest.raises(ProjectError):
         manager.data(exp_id, data_ids[0])
     # 恢复后再次可访问
-    manager.data_base(exp_id, data_ids[0]).mkdir(parents=True)
+    (manager.data_base(exp_id, data_ids[0]) / "raw").mkdir(
+        parents=True
+    )
     manager.recover_trashed()
     assert manager.data(exp_id, data_ids[0]).id == data_ids[0]
 

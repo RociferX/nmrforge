@@ -573,7 +573,9 @@ def test_delete_data_keeps_notes_and_group_for_restore(
     assert manager.active_data(entry.id) == []
 
     # 恢复后条目回到激活态,可再次访问
-    manager.data_base(entry.id, data.id).mkdir(parents=True)
+    (manager.data_base(entry.id, data.id) / "raw").mkdir(
+        parents=True
+    )
     manager.recover_trashed()
     assert manager.active_data(entry.id) == [data]
     assert manager.data(entry.id, data.id).id == data.id

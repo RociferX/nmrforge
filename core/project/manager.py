@@ -308,6 +308,17 @@ class ProjectManager:
             raise ProjectError("未加载项目")
         return self.root / ".nmrforge_trash"
 
+    def _data_base_has_real_content(self, exp_id: str, data_id: str) -> bool:
+        """数据目录是否含真实产物(非仅遗留 report/log.txt)。"""
+        base = self.data_base(exp_id, data_id)
+        if not base.is_dir():
+            return False
+        for child in base.iterdir():
+            if child.name == "report":
+                continue
+            return True
+        return False
+
     def recover_trashed(self) -> int:
         """把已恢复到原路径的软删除条目自动还原;返回还原数量。"""
         if self.project is None or self.root is None:
@@ -319,7 +330,11 @@ class ProjectManager:
                 exp.trashed_at = ""
                 n += 1
             for d in exp.data:
-                if d.trashed and self.data_base(exp.id, d.id).is_dir():
+                if (
+                    d.trashed
+                    and self.data_base(exp.id, d.id).is_dir()
+                    and self._data_base_has_real_content(exp.id, d.id)
+                ):
                     d.trashed = False
                     d.trashed_at = ""
                     n += 1
