@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -199,8 +200,8 @@ class CenterPanel(QWidget):
         self.notes_label.setText(f"注释:\n{text}" if text else "注释: (未填写)")
 
     def _set_group_notes(self, project, exp_id: str, group_id: str) -> None:
-        """数据组注释:每数据一列(标题 + 注释),放入滚动区。"""
-        from gui.notes import data_note
+        """数据组注释:注记字段为行(第一列字段名),每个数据为一列。"""
+        from gui.notes import DATA_FIELDS, data_note_fields
 
         exp = project.experiment(exp_id) if project is not None else None
         group = None
@@ -209,34 +210,66 @@ class CenterPanel(QWidget):
                 (g for g in (getattr(exp, "groups", None) or []) if g.id == group_id),
                 None,
             )
-        container = QWidget()
-        cols = QHBoxLayout(container)
-        cols.setContentsMargins(8, 8, 8, 8)
-        cols.setSpacing(12)
-        for data_id in (group.data_ids or [] if group is not None else []):
+        member_ids = (group.data_ids or []) if group is not None else []
+        cols_data: list[tuple[str, str, dict]] = []
+        for data_id in member_ids:
             d = (
                 next((x for x in exp.data if x.id == data_id), None)
                 if exp is not None
                 else None
             )
             label_text = (d.title or f"样品数据 {data_id}") if d else f"样品数据 {data_id}"
-            note = data_note(project, exp_id, data_id) or "(未填写)"
-            col = QVBoxLayout()
-            head = QLabel(f"◆ {label_text} ({data_id})")
+            cols_data.append(
+                (
+                    data_id,
+                    label_text,
+                    data_note_fields(project, exp_id, data_id),
+                )
+            )
+        # 字段行:先按标准 DATA_FIELDS 顺序,再补各数据里出现的额外字段
+        row_keys: list[str] = [k for k, _ in DATA_FIELDS]
+        display = {k: v for k, v in DATA_FIELDS}
+        for _di, _lb, fields in cols_data:
+            for k in fields:
+                if k not in row_keys:
+                    row_keys.append(k)
+                    display[k] = k
+
+        container = QWidget()
+        grid = QGridLayout(container)
+        grid.setContentsMargins(8, 8, 8, 8)
+        grid.setSpacing(8)
+        # 表头行:第一格"数据",之后每数据一列
+        head0 = QLabel("数据")
+        head0.setStyleSheet(
+            "font-weight: bold; color: #f0f0f0; border: none; background: transparent;"
+        )
+        grid.addWidget(head0, 0, 0)
+        for ci, (data_id, label_text, _f) in enumerate(cols_data, start=1):
+            head = QLabel(f"◆ {label_text}\n({data_id})")
             head.setWordWrap(True)
             head.setStyleSheet(
                 "font-weight: bold; color: #f0f0f0; border: none; background: transparent;"
             )
-            note_lb = QLabel(note)
-            note_lb.setWordWrap(True)
-            note_lb.setStyleSheet(
-                "color: #ffffff; border: none; background: transparent;"
+            grid.addWidget(head, 0, ci)
+        # 字段行
+        for ri, key in enumerate(row_keys, start=1):
+            fname = QLabel(display.get(key, key))
+            fname.setStyleSheet(
+                "font-weight: bold; color: #f0f0f0; border: none; background: transparent;"
             )
-            note_lb.setFixedWidth(168)
-            col.addWidget(head)
-            col.addWidget(note_lb)
-            cols.addLayout(col)
-        cols.addStretch(1)
+            grid.addWidget(fname, ri, 0)
+            for ci, (_di, _lb, fields) in enumerate(cols_data, start=1):
+                val = fields.get(key)
+                val_lb = QLabel(str(val) if val not in (None, "") else "—")
+                val_lb.setWordWrap(True)
+                val_lb.setFixedWidth(150)
+                val_lb.setStyleSheet(
+                    "color: #ffffff; border: none; background: transparent;"
+                )
+                grid.addWidget(val_lb, ri, ci)
+        grid.setColumnStretch(0, 0)
+        grid.setColumnStretch(len(cols_data) + 1, 0)
         self.group_notes_scroll.setWidget(container)
 
     def _on_group_summary(self, summary: dict) -> None:
