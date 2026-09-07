@@ -193,6 +193,38 @@ def _run_step(
 
 
 
+
+def _step_already_done(manager: object, exp_id: str, data_id: str, step: str) -> bool:
+    """该数据指定步骤是否已完成(输出文件存在),用于组批跳过已处理数据。"""
+    if step == "import":
+        return False  # 幂等确认步骤,不跳过(保持既有返回值语义)
+    try:
+        data = manager.data(exp_id, data_id)
+    except Exception:
+        return False
+    if step == "fid":
+        p = getattr(data, "fid_path", "")
+        return bool(p) and Path(p).is_file()
+    if step == "spectrum":
+        p = getattr(data, "spectrum_path", "")
+        return bool(p) and Path(p).is_file()
+    if step == "peaks":
+        try:
+            peaks_dir = manager.dir_path("peaks")
+        except Exception:
+            return False
+        for pat in (
+            f"{exp_id}-{data_id}.list",
+            f"{exp_id}-{data_id}.csv",
+            f"{exp_id}_{data_id}.list",
+            f"{exp_id}_{data_id}.csv",
+        ):
+            if (peaks_dir / pat).is_file():
+                return True
+        return False
+    return False
+
+
 def _data_source_path(manager: object, exp_id: str, data_id: str):
     """取数据原始目录(raw_dir 或 source)。"""
     data = manager.data(exp_id, data_id)
@@ -299,6 +331,13 @@ def run_batch(
                         progress(f"{data_id}: 跳过({reason})")
                     continue
         for step in steps:
+            # 0.2.199-补29gt:组批直接跳过已做过的步骤(避免重跑已处理数据)
+            if _step_already_done(manager, exp_id, data_id, step):
+                per_data["steps"][step] = "already_done"
+                per_data["logs"].append(f"{step} 已完成,跳过")
+                if progress is not None:
+                    progress(f"{data_id}: {step} 已完成,跳过")
+                continue
             if progress is not None:
                 progress(f"{data_id}: 开始 {step}")
             step_logs: list[str] = []

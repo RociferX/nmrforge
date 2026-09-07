@@ -667,7 +667,7 @@ class MainWindow(QMainWindow):
                     items.append(
                         {
                             "data_id": data_id,
-                            "ok": status == "success",
+                            "ok": status in ("success", "already_done"),
                             "skipped": status == "skipped",
                             "message": "",
                             "error": per.get("error", ""),
