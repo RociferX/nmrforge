@@ -1,5 +1,18 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29gp(2026-09-07,数据组处理:参考整组兼容跳过 + 组注释列表 + 优化模式选项)
+- 用户:数据成组后按参考数据处理整组,组内与参考数据类型不同或实验条件差别大的
+  数据应告知无法应用并跳过;数据组注释用列表列出每个数据注释;依次优化组内数据
+  也加处理到某步骤选项,并按截止步骤显示直接维范围/峰挑选阈值设置;
+- 实现:
+  * workflow/batch.run_batch:参考整组处理时取参考谱指纹(维数/核/谱宽/载频),组内
+    成员与参考不一致则 status=skipped 带原因、跳过该数据处理;结果加顶层 skipped 列表;
+  * gui/notes.group_note:组注释按列表列出每个成员数据注释;
+  * gui/center_panel:组层级注释用 group_note;组运行请求信号加 params;汇总显示 skipped;
+  * gui/main_window._run_group_batch:接收 params 传 run_group_batch;info/汇总显示跳过;
+  * gui/group_panel:依次优化加处理到下拉 + 直接维范围(ext_lo/ext_hi,到 spectrum 显示)
+    + 峰挑选阈值(sigma_multiplier,到 peaks 显示);
+- 验证:本地 ruff+全量 pytest 通过;VM 全量 889 passed/19 skipped(首闪已知 pyqtgraph 段错误);
 ## 0.2.199-补29go(2026-09-06,删除数据后不在重启时重现)
 - 用户:删了的数据留下 report 文件夹和里面的 log.txt,重启软件后该数据又能看见,
   运行却说找不到文件;
