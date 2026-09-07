@@ -1,5 +1,15 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29gt(2026-09-07,组批跳过已处理过的步骤)
+- 用户:点到单个可直接运行单个;数据组界面运行应直接跳过单个已经做过的;
+- 实现:workflow/batch.run_batch 逐步骤判断 _step_already_done(fid/spectrum 依
+  DataEntry.fid_path/spectrum_path 且文件在;peaks 依 dir_path(peaks) 峰表文件存在),
+  已完成则该步标记 already_done 并跳过、不调后端;避免组批重跑已处理数据(尤其重跑
+  到谱图的内存峰值);GUI ok 计入 already_done;
+- 验证:本地验证(已做过数据两步均 already_done、后端零调用;未做数据正常处理);
+  本地全量 pytest 通过;VM 全量 889 passed/19 skipped(EXIT=0);
+- 注:test_gui_batch 紧随 test_full_paths 的特定组合顺序干扰(workflow/memory_phase_search
+  RuntimeError)属既有顺序问题,标准全量正常。
 ## 0.2.199-补29gs(2026-09-07,组批量处理给每个数据落自身作用域日志)
 - 用户:批量处理要像单个处理一样有 log,数据组界面依次输出,下面单个数据自己输出自己的;
 - 实现:workflow/batch._run_step 增加 progress 透传 generate_fid/generate_spectrum,
