@@ -1,5 +1,11 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29gs(2026-09-07,组批量处理给每个数据落自身作用域日志)
+- 用户:批量处理要像单个处理一样有 log,数据组界面依次输出,下面单个数据自己输出自己的;
+- 实现:workflow/batch._run_step 增加 progress 透传 generate_fid/generate_spectrum,
+  run_batch 逐数据收集分步日志到 per_data["logs"];gui/main_window._run_group_batch
+  批处理后把每个数据的分步日志写到其 data:{exp}:{data} 作用域(persist 到 d_xxx/…);
+- 验证:本地 ruff+全量 pytest 通过;VM 全量 889 passed/19 skipped(首闪已知 pyqtgraph 段错误);
 ## 0.2.199-补29gr(2026-09-07,组注释改字段×数据网格)
 - 用户:注释把维度这种放到第一列作为行名;即注记字段为行、每个数据为一列;
 - 实现:gui/center_panel._set_group_notes 重构为 QGridLayout——首格"数据",
