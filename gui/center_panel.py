@@ -10,11 +10,12 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QScrollArea,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -112,6 +113,20 @@ class CenterPanel(QWidget):
             "color: #ffffff; padding: 4px 8px;"
         )
         self.notes_header.addWidget(self.notes_label, 1)
+        # 0.2.199-补29gp:数据组注释按每数据一列展示,带横向/纵向滚动条防过长过宽
+        self.group_notes_scroll = QScrollArea()
+        self.group_notes_scroll.setWidgetResizable(True)
+        self.group_notes_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        self.group_notes_scroll.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        self.group_notes_scroll.setStyleSheet(
+            "background: #1e1e1e; border: 1px solid #3c3c3c; color: #ffffff;"
+        )
+        self.group_notes_scroll.setVisible(False)
+        self.notes_header.addWidget(self.group_notes_scroll, 1)
         self.edit_notes_button = QPushButton("编辑注释")
         self.edit_notes_button.setToolTip("添加/修改当前项目、实验类型或样品数据的注释信息")
         self.edit_notes_button.clicked.connect(self._on_edit_notes)
@@ -153,7 +168,7 @@ class CenterPanel(QWidget):
         self, kind: str, exp_id: str, data_id: str = "", group_id: str = ""
     ) -> None:
         """按选中层级显示项目/实验类型/样品数据/数据组注释(中间区域最上方)。"""
-        from gui.notes import data_note, experiment_note, group_note, sample_note
+        from gui.notes import data_note, experiment_note, sample_note
 
         self._notes_kind = kind if kind in (
             "project", "experiment", "data", "folder", "group"
@@ -162,23 +177,67 @@ class CenterPanel(QWidget):
         self._notes_data_id = data_id if kind in ("data", "folder") else ""
         self._notes_group_id = group_id if kind == "group" else ""
         show = bool(self._notes_kind)
-        self.notes_label.setVisible(show)
-        # 数据组注释按列表展示,不可单独编辑(编辑注释只针对项目/实验/数据)
+        # 组注释用每数据一列的滚动区;其它层级用单标签,编辑按钮仅非组可用
+        self.notes_label.setVisible(show and kind != "group")
+        self.group_notes_scroll.setVisible(show and kind == "group")
         self.edit_notes_button.setVisible(show and kind != "group")
         if not show:
             return
         project = self._manager.project if self._manager is not None else None
+        if project is None:
+            return
+        if kind == "group":
+            self._set_group_notes(project, exp_id, group_id)
+            return
         text = ""
-        if project is not None:
-            if kind == "project":
-                text = sample_note(project)
-            elif kind == "experiment":
-                text = experiment_note(project, exp_id)
-            elif kind in ("data", "folder"):
-                text = data_note(project, exp_id, data_id)
-            elif kind == "group":
-                text = group_note(project, exp_id, group_id)
+        if kind == "project":
+            text = sample_note(project)
+        elif kind == "experiment":
+            text = experiment_note(project, exp_id)
+        elif kind in ("data", "folder"):
+            text = data_note(project, exp_id, data_id)
         self.notes_label.setText(f"注释:\n{text}" if text else "注释: (未填写)")
+
+    def _set_group_notes(self, project, exp_id: str, group_id: str) -> None:
+        """数据组注释:每数据一列(标题 + 注释),放入滚动区。"""
+        from gui.notes import data_note
+
+        exp = project.experiment(exp_id) if project is not None else None
+        group = None
+        if exp is not None:
+            group = next(
+                (g for g in (getattr(exp, "groups", None) or []) if g.id == group_id),
+                None,
+            )
+        container = QWidget()
+        cols = QHBoxLayout(container)
+        cols.setContentsMargins(8, 8, 8, 8)
+        cols.setSpacing(12)
+        for data_id in (group.data_ids or [] if group is not None else []):
+            d = (
+                next((x for x in exp.data if x.id == data_id), None)
+                if exp is not None
+                else None
+            )
+            label_text = (d.title or f"样品数据 {data_id}") if d else f"样品数据 {data_id}"
+            note = data_note(project, exp_id, data_id) or "(未填写)"
+            col = QVBoxLayout()
+            head = QLabel(f"◆ {label_text} ({data_id})")
+            head.setWordWrap(True)
+            head.setStyleSheet(
+                "font-weight: bold; color: #f0f0f0; border: none; background: transparent;"
+            )
+            note_lb = QLabel(note)
+            note_lb.setWordWrap(True)
+            note_lb.setStyleSheet(
+                "color: #ffffff; border: none; background: transparent;"
+            )
+            note_lb.setFixedWidth(168)
+            col.addWidget(head)
+            col.addWidget(note_lb)
+            cols.addLayout(col)
+        cols.addStretch(1)
+        self.group_notes_scroll.setWidget(container)
 
     def _on_group_summary(self, summary: dict) -> None:
         """组批量处理完成汇总:日志输出 + 面板清进度。"""

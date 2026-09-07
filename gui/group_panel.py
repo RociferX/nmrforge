@@ -141,6 +141,8 @@ class GroupBatchPanel(QWidget):
         self.opt_stop_combo.currentIndexChanged.connect(
             self._on_opt_stop_changed
         )
+        # 0.2.199-补29gp:初始按默认截止步骤(生成 FID)隐藏范围/阈值设置
+        self._on_opt_stop_changed()
         self.run_optimize_button = QPushButton("依次优化组内数据")
         self.run_optimize_button.setEnabled(False)
         self.run_optimize_button.clicked.connect(self._on_run_optimize)
