@@ -614,6 +614,7 @@ class MainWindow(QMainWindow):
         group_id: str,
         steps: list,
         reference_data_id: str = "",
+        params: dict | None = None,
     ) -> None:
         """数据组批量处理:后台线程执行,进度经日志输出。"""
         if self.manager.project is None:
@@ -644,27 +645,34 @@ class MainWindow(QMainWindow):
                     group_id,
                     steps,
                     reference_data_id=reference_data_id,
+                    params=params or {},
                     progress=lambda msg: self.log_append_requested.emit(
                         msg, group_scope
                     ),
                 )
                 summary = dict(result.get("summary") or {})
                 failed = list(result.get("failed") or [])
+                skipped = list(result.get("skipped") or [])
                 info = (
                     f"数据组 {group_id} 批量处理完成: "
                     f"{summary.get('success', 0)}/{summary.get('total', 0)} 成功"
                 )
                 if failed:
                     info += " · 失败: " + ",".join(failed)
-                items = [
-                    {
-                        "data_id": data_id,
-                        "ok": per.get("status") == "success",
-                        "message": "",
-                        "error": per.get("error", ""),
-                    }
-                    for data_id, per in (result.get("results") or {}).items()
-                ]
+                if skipped:
+                    info += " · 跳过(类型/条件不一致): " + ",".join(skipped)
+                items = []
+                for data_id, per in (result.get("results") or {}).items():
+                    status = per.get("status")
+                    items.append(
+                        {
+                            "data_id": data_id,
+                            "ok": status == "success",
+                            "skipped": status == "skipped",
+                            "message": "",
+                            "error": per.get("error", ""),
+                        }
+                    )
                 self.center_panel.group_page.summary_requested.emit(
                     {"info": info, "items": items}
                 )

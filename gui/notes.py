@@ -225,6 +225,26 @@ def set_data_note_fields(project, exp_id: str, data_id: str, fields: dict) -> No
     entry.metadata = meta
 
 
+def group_note(project, exp_id: str, group_id: str) -> str:
+    """数据组注释:按列表列出组内每个数据的注释。"""
+    if project is None:
+        return ""
+    exp = project.experiment(exp_id)
+    if exp is None:
+        return ""
+    group = next((g for g in getattr(exp, "groups", None) or [] if g.id == group_id), None)
+    if group is None:
+        return ""
+    lines: list[str] = []
+    for data_id in (group.data_ids or []):
+        d = next((x for x in exp.data if x.id == data_id), None)
+        label = (d.title or f"样品数据 {data_id}") if d else f"样品数据 {data_id}"
+        note = data_note(project, exp_id, data_id)
+        lines.append(f"◆ {label} ({data_id})")
+        lines.append("   " + (note if note else "(未填写)"))
+    return "\n".join(lines)
+
+
 def data_note(project, exp_id: str, data_id: str) -> str:
     """样品数据注释展示文本(结构化字段优先;兼容旧纯文本字符串)。"""
     fields = data_note_fields(project, exp_id, data_id)

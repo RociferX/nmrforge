@@ -182,6 +182,43 @@ def _run_step(
     raise BatchError(f"不支持的批处理步骤: {step}")
 
 
+
+def _data_source_path(manager: object, exp_id: str, data_id: str):
+    """取数据原始目录(raw_dir 或 source)。"""
+    data = manager.data(exp_id, data_id)
+    source = Path(data.raw_dir) if getattr(data, "raw_dir", "") else Path(data.source)
+    if not source.is_absolute():
+        source = manager.root / source
+    return source
+
+
+def _data_fingerprint(manager: object, exp_id: str, data_id: str):
+    """数据谱指纹:维数 + 每维(核,谱宽,载频),用于比较类型/条件。"""
+    from core.data.bruker_reader import read_dataset
+    exp = read_dataset(_data_source_path(manager, exp_id, data_id))
+    dims = tuple(
+        (d.nucleus, round(float(d.sw or 0.0), 3), round(float(d.o1 or 0.0), 3))
+        for d in exp.dimensions
+    )
+    return (exp.ndim, dims)
+
+
+def _fingerprints_match(ref, member):
+    """比较两个谱指纹是否一致(类型/条件);返回(是否一致, 原因)。"""
+    if ref[0] != member[0]:
+        return False, "维数不同"
+    if len(ref[1]) != len(member[1]):
+        return False, "维度数不同"
+    for (rn, rsw, ro1), (mn, msw, mo1) in zip(ref[1], member[1]):
+        if rn != mn:
+            return False, f"核不同({rn} vs {mn})"
+        if abs(rsw - msw) > 1e-3 * max(abs(rsw), abs(msw), 1.0):
+            return False, f"谱宽差异大({rsw:.1f} vs {msw:.1f})"
+        if abs(ro1 - mo1) > 1e-3 * max(abs(ro1), abs(mo1), 1.0):
+            return False, f"载频差异大({ro1:.1f} vs {mo1:.1f})"
+    return True, ""
+
+
 def run_batch(
     manager: ProjectManager,
     exp_id: str,
@@ -213,6 +250,13 @@ def run_batch(
         if reference_data_id
         else {}
     )
+    # 0.2.199-补29pq:参考整组处理时,先取参考数据谱指纹用于类型/条件校验
+    ref_fp = None
+    if reference_data_id and "spectrum" in steps:
+        try:
+            ref_fp = _data_fingerprint(manager, exp_id, reference_data_id)
+        except Exception:  # noqa: BLE001 - 参考数据无法识别则不跳过
+            ref_fp = None
     total = len(data_ids)
     results: dict[str, dict[str, Any]] = {}
     for index, data_id in enumerate(data_ids, start=1):
@@ -224,6 +268,26 @@ def run_batch(
             "error": "",
             "logs": [],
         }
+        # 参考整组处理:与参考数据(类型/条件)不一致的成员无法套用参考参数,
+        # 跳过并告知,不处理。
+        if ref_fp is not None and data_id != reference_data_id:
+            try:
+                member_fp = _data_fingerprint(manager, exp_id, data_id)
+            except Exception:  # noqa: BLE001 - 读不到参数视为不可套用
+                member_fp = None
+            if member_fp is not None:
+                ok, reason = _fingerprints_match(ref_fp, member_fp)
+                if not ok:
+                    per_data["status"] = "skipped"
+                    per_data["error"] = (
+                        f"与参考数据 {reference_data_id} 不一致"
+                        ",无法应用其处理参数,已跳过: " + reason
+                    )
+                    per_data["logs"].append(per_data["error"])
+                    results[data_id] = per_data
+                    if progress is not None:
+                        progress(f"{data_id}: 跳过({reason})")
+                    continue
         for step in steps:
             if progress is not None:
                 progress(f"{data_id}: 开始 {step}")
@@ -250,6 +314,7 @@ def run_batch(
             )
     manager.save()
     failed = [d for d, r in results.items() if r["status"] == "failed"]
+    skipped = [d for d, r in results.items() if r["status"] == "skipped"]
     return {
         "experiment_id": exp_id,
         "batch_id": batch,
@@ -257,9 +322,10 @@ def run_batch(
         "steps": steps,
         "results": results,
         "failed": failed,
+        "skipped": skipped,
         "summary": {
             "total": total,
-            "success": total - len(failed),
+            "success": total - len(failed) - len(skipped),
             "failed": len(failed),
         },
     }

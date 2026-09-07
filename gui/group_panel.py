@@ -14,10 +14,12 @@ from __future__ import annotations
 
 from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -36,7 +38,7 @@ class GroupBatchPanel(QWidget):
     """数据组批量处理面板(选中组节点时显示)。"""
 
     log_message = pyqtSignal(str)
-    run_group_batch_requested = pyqtSignal(str, str, list, str)
+    run_group_batch_requested = pyqtSignal(str, str, list, str, dict)
     # (exp_id, group_id, steps, reference_data_id)
     summary_requested = pyqtSignal(dict)  # 批量汇总(信息 + 逐数据结果)
 
@@ -101,12 +103,44 @@ class GroupBatchPanel(QWidget):
         opt_box = QGroupBox("依次优化组内数据")
         opt_layout = QVBoxLayout(opt_box)
         opt_hint = QLabel(
-            "对组内每个数据依次执行完整自动处理流程(FID → 谱图[统一自动优化]"
-            " → 峰挑选),单数据失败不中断整组。"
+            "对组内每个数据依次执行自动处理流程(FID → 谱图 → 峰挑选),"
+            "单数据失败不中断整组。"
         )
         opt_hint.setWordWrap(True)
         opt_hint.setStyleSheet("color: #666;")
         opt_layout.addWidget(opt_hint)
+        # 处理到某步骤
+        opt_row = QHBoxLayout()
+        opt_row.addWidget(QLabel("处理到:"))
+        self.opt_stop_combo = QComboBox()
+        for _value, _label in STOP_STEP_OPTIONS:
+            self.opt_stop_combo.addItem(_label)
+        opt_row.addWidget(self.opt_stop_combo)
+        opt_row.addStretch(1)
+        opt_layout.addLayout(opt_row)
+        # 直接维范围设置(处理到 spectrum/peaks 时显示)
+        self.ext_group = QGroupBox("直接维范围设置")
+        ext_row = QHBoxLayout(self.ext_group)
+        self.ext_enable = QCheckBox("指定范围")
+        ext_row.addWidget(self.ext_enable)
+        ext_row.addWidget(QLabel("下限(ppm):"))
+        self.ext_lo_edit = QLineEdit("10.5")
+        ext_row.addWidget(self.ext_lo_edit)
+        ext_row.addWidget(QLabel("上限(ppm):"))
+        self.ext_hi_edit = QLineEdit("6.5")
+        ext_row.addWidget(self.ext_hi_edit)
+        opt_layout.addWidget(self.ext_group)
+        # 峰挑选阈值设置(处理到 peaks 时显示)
+        self.thresh_group = QGroupBox("峰挑选阈值设置")
+        thr_row = QHBoxLayout(self.thresh_group)
+        thr_row.addWidget(QLabel("噪声阈值(σ):"))
+        self.thresh_edit = QLineEdit("")
+        self.thresh_edit.setPlaceholderText("留空用默认")
+        thr_row.addWidget(self.thresh_edit)
+        opt_layout.addWidget(self.thresh_group)
+        self.opt_stop_combo.currentIndexChanged.connect(
+            self._on_opt_stop_changed
+        )
         self.run_optimize_button = QPushButton("依次优化组内数据")
         self.run_optimize_button.setEnabled(False)
         self.run_optimize_button.clicked.connect(self._on_run_optimize)
@@ -188,13 +222,44 @@ class GroupBatchPanel(QWidget):
             return
         steps = self._stop_steps()
         self.run_group_batch_requested.emit(
-            self._exp_id, self._group_id, steps, ref_id
+            self._exp_id, self._group_id, steps, ref_id, {}
         )
 
+    def _opt_steps(self) -> list[str]:
+        """依次优化模式的截止步骤(fid 起前缀)。"""
+        value = STOP_STEP_OPTIONS[self.opt_stop_combo.currentIndex()][0]
+        order = ("fid", "spectrum", "peaks")
+        return list(order[: order.index(value) + 1])
+
+    def _on_opt_stop_changed(self) -> None:
+        """按截止步骤显隐直接维范围/峰阈值设置。"""
+        steps = self._opt_steps()
+        self.ext_group.setVisible("spectrum" in steps)
+        self.thresh_group.setVisible("peaks" in steps)
+
+    def _collect_params(self) -> dict:
+        """收集当前可见设置到处理参数。"""
+        params: dict = {}
+        steps = self._opt_steps()
+        if "spectrum" in steps and self.ext_enable.isChecked():
+            lo = self.ext_lo_edit.text().strip()
+            hi = self.ext_hi_edit.text().strip()
+            if lo:
+                params["ext_lo"] = lo
+            if hi:
+                params["ext_hi"] = hi
+        if "peaks" in steps and self.thresh_edit.text().strip():
+            params["sigma_multiplier"] = self.thresh_edit.text().strip()
+        return params
+
     def _on_run_optimize(self) -> None:
-        steps = ["fid", "spectrum", "peaks"]
+        steps = self._opt_steps()
         self.run_group_batch_requested.emit(
-            self._exp_id, self._group_id, steps, ""
+            self._exp_id,
+            self._group_id,
+            steps,
+            "",
+            self._collect_params(),
         )
 
     def set_progress(self, text: str) -> None:

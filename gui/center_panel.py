@@ -41,7 +41,7 @@ class CenterPanel(QWidget):
     segmented_import_requested = pyqtSignal(str, str)  # (exp_id, 分段采集容器目录)
     create_experiment_requested = pyqtSignal(str)  # 实验类型标题
     edit_notes_requested = pyqtSignal(str, str, str)  # (kind, exp_id, data_id)
-    group_run_requested = pyqtSignal(str, str, list, str)
+    group_run_requested = pyqtSignal(str, str, list, str, dict)
     # (exp_id, group_id, steps, reference_data_id)
     new_project_requested = pyqtSignal(str)  # 项目名称
     open_project_requested = pyqtSignal(str)  # 项目路径
@@ -127,7 +127,7 @@ class CenterPanel(QWidget):
         self, kind: str, exp_id: str, data_id: str = "", group_id: str = ""
     ) -> None:
         """按树选中层级切换中间页面,并刷新顶部注释条。"""
-        self._update_notes(kind, exp_id, data_id)
+        self._update_notes(kind, exp_id, data_id, group_id)
         if kind == "workspace":
             self.stack.setCurrentIndex(0)
             self.welcome_page.refresh()
@@ -149,16 +149,22 @@ class CenterPanel(QWidget):
             self.pipeline.set_selection(kind, exp_id, data_id)
 
     # ------------------------------------------------------------------
-    def _update_notes(self, kind: str, exp_id: str, data_id: str = "") -> None:
-        """按选中层级显示项目/实验类型/样品数据注释(中间区域最上方)。"""
-        from gui.notes import data_note, experiment_note, sample_note
+    def _update_notes(
+        self, kind: str, exp_id: str, data_id: str = "", group_id: str = ""
+    ) -> None:
+        """按选中层级显示项目/实验类型/样品数据/数据组注释(中间区域最上方)。"""
+        from gui.notes import data_note, experiment_note, group_note, sample_note
 
-        self._notes_kind = kind if kind in ("project", "experiment", "data", "folder") else ""
+        self._notes_kind = kind if kind in (
+            "project", "experiment", "data", "folder", "group"
+        ) else ""
         self._notes_exp_id = exp_id
         self._notes_data_id = data_id if kind in ("data", "folder") else ""
+        self._notes_group_id = group_id if kind == "group" else ""
         show = bool(self._notes_kind)
         self.notes_label.setVisible(show)
-        self.edit_notes_button.setVisible(show)
+        # 数据组注释按列表展示,不可单独编辑(编辑注释只针对项目/实验/数据)
+        self.edit_notes_button.setVisible(show and kind != "group")
         if not show:
             return
         project = self._manager.project if self._manager is not None else None
@@ -170,6 +176,8 @@ class CenterPanel(QWidget):
                 text = experiment_note(project, exp_id)
             elif kind in ("data", "folder"):
                 text = data_note(project, exp_id, data_id)
+            elif kind == "group":
+                text = group_note(project, exp_id, group_id)
         self.notes_label.setText(f"注释:\n{text}" if text else "注释: (未填写)")
 
     def _on_group_summary(self, summary: dict) -> None:
@@ -179,7 +187,11 @@ class CenterPanel(QWidget):
             self.log_message.emit(info)
         for item in summary.get("items") or []:
             data_id = item.get("data_id", "")
-            if item.get("ok"):
+            if item.get("skipped"):
+                self.log_message.emit(
+                    f"  跳过 {data_id}: {item.get('error', '')}"
+                )
+            elif item.get("ok"):
                 self.log_message.emit(
                     f"  完成 {data_id}: {item.get('message', '')}"
                 )
