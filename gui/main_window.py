@@ -673,6 +673,13 @@ class MainWindow(QMainWindow):
                             "error": per.get("error", ""),
                         }
                     )
+                    # 0.2.199-补29gs:组批量后把每个数据的分步日志落到其自身
+                    # 数据作用域(与单个处理一致,选该数据可见)。
+                    data_scope = self.log_panel.scope_key(
+                        "data", exp_id, data_id
+                    )
+                    for _lg in per.get("logs") or []:
+                        self.log_append_requested.emit(_lg, data_scope)
                 self.center_panel.group_page.summary_requested.emit(
                     {"info": info, "items": items}
                 )

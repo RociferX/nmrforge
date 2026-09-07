@@ -214,9 +214,9 @@ def test_run_batch_reuses_stepwise(
     original_fid = stepwise_mod.generate_fid
     original_spectrum = stepwise_mod.generate_spectrum
 
-    def fake_fid(manager_, exp_id_, data_id_, backend_):
+    def fake_fid(manager_, exp_id_, data_id_, backend_, **kw):
         calls.append(("fid", data_id_))
-        return original_fid(manager_, exp_id_, data_id_, backend_)
+        return original_fid(manager_, exp_id_, data_id_, backend_, **kw)
 
     def fake_spectrum(manager_, exp_id_, data_id_, backend_, **kw):
         calls.append(("spectrum", data_id_, kw.get("params")))

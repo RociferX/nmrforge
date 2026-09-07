@@ -150,6 +150,7 @@ def _run_step(
     step: str,
     backend: Any,
     params: dict[str, Any],
+    progress: Callable[[str], None] | None = None,
 ) -> Any:
     """执行单个步骤,返回步骤产物(fid/spectrum 路径、peaks/analysis dict 等)。"""
     if step == "import":
@@ -166,11 +167,20 @@ def _run_step(
     if step == "fid":
         from workflow.stepwise import generate_fid
 
-        return generate_fid(manager, exp_id, data_id, backend)
+        return generate_fid(
+            manager, exp_id, data_id, backend, progress=progress
+        )
     if step == "spectrum":
         from workflow.stepwise import generate_spectrum
 
-        return generate_spectrum(manager, exp_id, data_id, backend, params=params)
+        return generate_spectrum(
+            manager,
+            exp_id,
+            data_id,
+            backend,
+            params=params,
+            progress=progress,
+        )
     if step == "peaks":
         from workflow.pick_peaks import pick_peaks
 
@@ -291,17 +301,28 @@ def run_batch(
         for step in steps:
             if progress is not None:
                 progress(f"{data_id}: 开始 {step}")
+            step_logs: list[str] = []
             try:
                 merged = dict(ref_params) if step == "spectrum" else {}
                 merged.update(step_params)
-                value = _run_step(manager, exp_id, data_id, step, backend, merged)
+                value = _run_step(
+                    manager,
+                    exp_id,
+                    data_id,
+                    step,
+                    backend,
+                    merged,
+                    progress=step_logs.append,
+                )
             except Exception as exc:  # noqa: BLE001 - 单数据失败不中断整组
                 per_data["status"] = "failed"
                 per_data["failed_step"] = step
                 per_data["error"] = f"{type(exc).__name__}: {exc}"
                 per_data["logs"].append(f"{step} 失败: {exc}")
+                per_data["logs"].extend(step_logs)
                 break
             per_data["steps"][step] = value
+            per_data["logs"].extend(step_logs)
         results[data_id] = per_data
         if progress is not None:
             progress(
