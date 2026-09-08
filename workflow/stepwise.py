@@ -292,7 +292,13 @@ def _apply_note_overrides(manager, exp_id: str, data_id: str, experiment) -> Non
         if tname:
             from gui.notes import experiment_type_options
             if tname in experiment_type_options(experiment.ndim):
-                experiment.experiment_type = tname
+                # 0.2.199-补29hc:填的是类型名字符串,须构造 ExperimentType
+                # 对象(.name/.confidence/.evidence),否则下游 select_method/
+                # import_workflow 访问 .confidence 报 AttributeError。
+                from core.data.internal_data_model import ExperimentType
+                experiment.experiment_type = ExperimentType(
+                    name=tname, confidence=1.0, evidence=["data_note"]
+                )
         psign = str(note.get("peak_sign", "") or "").strip()
         if psign in ("uniform", "mixed"):
             experiment.note_peak_sign = psign
