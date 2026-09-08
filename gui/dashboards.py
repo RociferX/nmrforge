@@ -222,7 +222,8 @@ class ExperimentImportPanel(QWidget):
         batch_layout = QVBoxLayout(self.batch_group)
         batch_hint = QLabel(
             "可添加总文件夹(自动检查子文件夹中的 Bruker 数据集)或多个数据目录;"
-            "同批数据绑定同一批量组标记,中间处理页操作对整组数据执行"
+            "同批数据绑定同一批量组标记,中间处理页操作对整组数据执行。"
+            "注:批量暂仅支持 2D 谱,3D 数据会跳过(可单个处理)"
         )
         batch_hint.setWordWrap(True)
         batch_hint.setStyleSheet("color: #666;")
@@ -231,7 +232,7 @@ class ExperimentImportPanel(QWidget):
         self.batch_list.setMaximumHeight(110)
         batch_layout.addWidget(self.batch_list)
         self.batch_group_check = QCheckBox(
-            "批量导入并成组(后续处理会一起处理);不勾选则不成组(相当于多个单次导入)"
+            "批量导入并成组(后续处理会一起处理,仅支持 2D 谱);不勾选则不成组(相当于多个单次导入)"
         )
         self.batch_group_check.setChecked(True)
         batch_layout.addWidget(self.batch_group_check)
