@@ -199,6 +199,8 @@ class ProjectTreePanel(QWidget):
         self.workspace = workspace
         # 0.2.199-补5:正在运行处理的数据节点状态覆盖为「运行中」
         self._running: set[tuple[str, str]] = set()
+        # 0.2.199-补29hd:批量完成后逐数据状态叠加(成功/失败/跳过),刷新后保留
+        self._batch_status: dict[tuple[str, str], str] = {}
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -661,6 +663,25 @@ class ProjectTreePanel(QWidget):
             }
         self.refresh()
 
+    def set_batch_status(self, exp_id: str, data_id: str, status: str) -> None:
+        """记录批量完成后某数据的状态(成功/失败/跳过),刷新后保留。"""
+        if exp_id and data_id and status:
+            self._batch_status[(exp_id, data_id)] = status
+            self._running.discard((exp_id, data_id))
+            self.refresh()
+
+    def clear_batch_status(self, exp_id: str = "", data_id: str = "") -> None:
+        """清除批量状态叠加(缺省清全部)。"""
+        if not exp_id and not data_id:
+            self._batch_status.clear()
+        else:
+            self._batch_status = {
+                (e, d): s
+                for (e, d), s in self._batch_status.items()
+                if (exp_id and e != exp_id) or (data_id and d != data_id)
+            }
+        self.refresh()
+
     def _data_status(self, exp, data_node) -> str:
         """按产物文件推断样品数据状态(0.2.199-补29aa/补29av):
 
@@ -672,6 +693,9 @@ class ProjectTreePanel(QWidget):
             data_id = getattr(data_node, "id", exp_id)
             if (exp_id, data_id) in self._running:
                 return "运行中"
+            batch_status = self._batch_status.get((exp_id, data_id))
+            if batch_status:
+                return batch_status
             entry = self.manager.data(exp_id, data_id)
             # 0.2.199-补29av:峰表存在 → 已选峰(优先于谱图)
             peaks_dir = self.manager.data_dir(exp_id, data_id, "peaks")

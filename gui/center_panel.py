@@ -282,6 +282,10 @@ class CenterPanel(QWidget):
                 self.log_message.emit(
                     f"  跳过 {data_id}: {item.get('error', '')}"
                 )
+            elif item.get("failed"):
+                self.log_message.emit(
+                    f"  失败 {data_id}: {item.get('error', '')}"
+                )
             elif item.get("ok"):
                 self.log_message.emit(
                     f"  完成 {data_id}: {item.get('message', '')}"

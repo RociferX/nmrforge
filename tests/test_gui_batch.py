@@ -256,11 +256,17 @@ def test_batch_subfolder_scan(tmp_path: Path) -> None:
     root = tmp_path / "batch_root"
     (root / "hsqc").mkdir(parents=True)
     (root / "hsqc" / "acqus").write_text("x")
+    (root / "hsqc" / "acqu2s").write_text("x")  # 2D 标识
     (root / "nested" / "hnca").mkdir(parents=True)
     (root / "nested" / "hnca" / "acqus").write_text("x")
+    (root / "nested" / "hnca" / "acqu2s").write_text("x")  # 2D 标识
+    (root / "nested" / "canh").mkdir(parents=True)
+    (root / "nested" / "canh" / "acqus").write_text("x")
+    (root / "nested" / "canh" / "acqu3s").write_text("x")  # 3D 标识
     (root / "notes.txt").write_text("not a dataset")
     found = ExperimentDashboard._bruker_datasets_under(root)
     names = {p.name for p in found}
+    # 0.2.199-补29hd:批量仅支持 2D——3D(canh)被过滤,只有 2D 的 hsqc/hnca
     assert names == {"hsqc", "hnca"}
     # 直接选择数据集目录 → 返回自身
     direct = ExperimentDashboard._bruker_datasets_under(root / "hsqc")

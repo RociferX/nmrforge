@@ -338,6 +338,24 @@ def run_batch(
                     if progress is not None:
                         progress(f"{data_id}: 跳过({reason})")
                     continue
+        # 0.2.199-补29hd:批量仅支持 2D 谱——1D/3D 数据(尤其 3D NUS/SMILE 在
+        # 不稳定主机易断电)直接跳过,不跑任何步骤。
+        try:
+            from workflow.stepwise import _read_experiment
+
+            _exp = _read_experiment(manager, exp_id, data_id)
+            _ndim = int(getattr(_exp, "ndim", 2) or 2)
+        except Exception:  # noqa: BLE001 - 读不到维度当作 2D 放宽(不误拦)
+            _ndim = 2
+        if _ndim != 2:
+            per_data["status"] = "skipped"
+            _msg = f"批量暂仅支持 2D 谱,{_ndim}D 数据跳过"
+            per_data["error"] = _msg
+            per_data["logs"].append(_msg)
+            results[data_id] = per_data
+            if progress is not None:
+                progress(f"{data_id}: {_msg}")
+            continue
         for step in steps:
             # 0.2.199-补29gt:组批直接跳过已做过的步骤(避免重跑已处理数据)
             if _step_already_done(manager, exp_id, data_id, step):
@@ -346,24 +364,6 @@ def run_batch(
                 if progress is not None:
                     progress(f"{data_id}: {step} 已完成,跳过")
                 continue
-            if step == "spectrum":
-                # 0.2.199-补29hd:批量暂仅支持 2D 谱——3D(含 NUS/SMILE)在
-                # 不稳定主机上易触发断电,跳过并给出明确文案。
-                try:
-                    from workflow.stepwise import _read_experiment
-
-                    _exp = _read_experiment(manager, exp_id, data_id)
-                    if int(getattr(_exp, "ndim", 2) or 2) >= 3:
-                        per_data["steps"][step] = "skipped_3d"
-                        _msg = "批量暂仅支持 2D 谱,3D 数据跳过"
-                        per_data["status"] = "skipped"
-                        per_data["error"] = _msg
-                        per_data["logs"].append(_msg)
-                        if progress is not None:
-                            progress(f"{data_id}: {step} {_msg}")
-                        break
-                except Exception:  # noqa: BLE001 - 读不到维度不拦截
-                    pass
             if progress is not None:
                 progress(f"{data_id}: 开始 {step}")
             step_logs: list[str] = []

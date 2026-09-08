@@ -78,6 +78,8 @@ class MainWindow(QMainWindow):
     batch_import_finished = pyqtSignal(str, str, int, object)  # (exp_id, batch_id, count, results)
     # 0.2.199-补29hd:批量导入逐条进度(后台线程 → 主线程逐条显示,不等批量完成)
     batch_import_progress = pyqtSignal(str, str, str, bool, str)  # 逐条进度
+    # 0.2.199-补29hd:数据组批量完成后逐数据状态(成功/失败/跳过)写回左侧树
+    group_data_done = pyqtSignal(str, str, str)  # (exp_id, data_id, status)
     manual_run_log = pyqtSignal(str)  # 人工脚本运行日志(后台线程 → 主线程)
     manual_run_done = pyqtSignal()  # 人工脚本运行完成(主线程刷新 UI)
     batch_run_done = pyqtSignal()  # 数据组批量处理完成(后台线程 → 主线程清运行标记)
@@ -100,6 +102,7 @@ class MainWindow(QMainWindow):
         self.import_finished.connect(self._on_import_done)
         self.batch_import_finished.connect(self._on_batch_import_done)
         self.batch_import_progress.connect(self._on_batch_import_progress)
+        self.group_data_done.connect(self._on_group_data_done)
         self.manual_run_log.connect(self._append_log)
         self.manual_run_done.connect(self._on_manual_run_done)
         self.batch_run_done.connect(self._on_batch_run_done)
@@ -495,6 +498,11 @@ class MainWindow(QMainWindow):
 
         threading.Thread(target=worker, daemon=True).start()
 
+    def _on_group_data_done(self, exp_id: str, data_id: str, status: str) -> None:
+        """组批量某数据完成:左侧树写回状态(成功/失败/跳过)。"""
+        self.project_tree.set_batch_status(exp_id, data_id, status)
+
+
     def _on_batch_import_progress(
         self, exp_id: str, folder: str, data_id: str, ok: bool, error: str
     ) -> None:
@@ -673,6 +681,7 @@ class MainWindow(QMainWindow):
         )
         self.center_panel.group_page.set_progress("批量处理运行中...")
         # 0.2.199-补5:组批量开始,左侧树组内各数据显示「运行中」
+        self.project_tree.clear_batch_status()
         for data_id in group.data_ids:
             self.project_tree.mark_running(exp_id, data_id)
 
@@ -707,11 +716,19 @@ class MainWindow(QMainWindow):
                         {
                             "data_id": data_id,
                             "ok": status in ("success", "already_done"),
+                            "failed": status == "failed",
                             "skipped": status == "skipped",
                             "message": "",
                             "error": per.get("error", ""),
                         }
                     )
+                    # 0.2.199-补29hd:逐数据完成状态写回左侧树(失败/跳过分得清)
+                    _st = (
+                        "成功"
+                        if status in ("success", "already_done")
+                        else ("失败" if status == "failed" else "跳过")
+                    )
+                    self.group_data_done.emit(exp_id, data_id, _st)
                     # 0.2.199-补29gs:组批量后把每个数据的分步日志落到其自身
                     # 数据作用域(与单个处理一致,选该数据可见)。
                     data_scope = self.log_panel.scope_key(

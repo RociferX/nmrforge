@@ -198,8 +198,12 @@ class ProcessingController:
             # 0.2.199-补29hd:批量暂仅支持 2D 谱——3D 数据在导入前按 raw 目录
             # 是否含 acqu3s/acqu3 判定并直接跳过(不导入),避免批量处理时触发
             # SMILE(不稳定主机断电);2D 数据按原流程导入。
-            if group and ((_f / "acqu3s").is_file() or (_f / "acqu3").is_file()):
-                item["error"] = "3D 谱,批量暂仅支持 2D,已跳过"
+            if group and (
+                not (_f / "acqu2s").is_file()
+                or (_f / "acqu3s").is_file()
+                or (_f / "acqu3").is_file()
+            ):
+                item["error"] = "非 2D 谱,批量暂仅支持 2D,已跳过"
                 results.append(item)
                 if on_progress is not None:
                     on_progress(str(folder), "", False, item["error"])
