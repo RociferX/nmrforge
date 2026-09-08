@@ -76,6 +76,8 @@ class MainWindow(QMainWindow):
     import_failed = pyqtSignal(str)  # 导入失败信息(后台线程 → 主线程)
     import_finished = pyqtSignal(object)  # ImportResult(后台线程 → 主线程)
     batch_import_finished = pyqtSignal(str, str, int, object)  # (exp_id, batch_id, count, results)
+    # 0.2.199-补29hd:批量导入逐条进度(后台线程 → 主线程逐条显示,不等批量完成)
+    batch_import_progress = pyqtSignal(str, str, str, bool, str)  # 逐条进度
     manual_run_log = pyqtSignal(str)  # 人工脚本运行日志(后台线程 → 主线程)
     manual_run_done = pyqtSignal()  # 人工脚本运行完成(主线程刷新 UI)
     batch_run_done = pyqtSignal()  # 数据组批量处理完成(后台线程 → 主线程清运行标记)
@@ -97,6 +99,7 @@ class MainWindow(QMainWindow):
         self.import_failed.connect(self._on_import_failed)
         self.import_finished.connect(self._on_import_done)
         self.batch_import_finished.connect(self._on_batch_import_done)
+        self.batch_import_progress.connect(self._on_batch_import_progress)
         self.manual_run_log.connect(self._append_log)
         self.manual_run_done.connect(self._on_manual_run_done)
         self.batch_run_done.connect(self._on_batch_run_done)
@@ -467,7 +470,12 @@ class MainWindow(QMainWindow):
         def worker() -> None:
             try:
                 self.controller.set_manager(self.manager)
-                result = self.controller.batch_import(exp_id, folders, group=group)
+                result = self.controller.batch_import(
+                    exp_id, folders, group=group,
+                    on_progress=lambda folder, data_id, ok, error: self.batch_import_progress.emit(
+                        exp_id, folder, data_id, ok, error
+                    ),
+                )
                 results = list(result.get("results", []))
                 ok = [item for item in results if item.get("ok")]
                 failed = [item for item in results if not item.get("ok")]
@@ -486,6 +494,16 @@ class MainWindow(QMainWindow):
                 self.import_failed.emit(f"{type(exc).__name__}: {exc}")
 
         threading.Thread(target=worker, daemon=True).start()
+
+    def _on_batch_import_progress(
+        self, exp_id: str, folder: str, data_id: str, ok: bool, error: str
+    ) -> None:
+        """批量导入逐条进度(主线程):立即记录当前条,不等批量全部完成。"""
+        if ok:
+            self._append_log(f"  导入中: {folder} → {data_id}")
+        else:
+            self._append_log(f"  跳过/失败: {folder} - {error}")
+
 
     def _on_batch_import_done(
         self, exp_id: str, batch_id_value: str, count: int, results

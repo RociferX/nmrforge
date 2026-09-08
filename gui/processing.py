@@ -117,20 +117,6 @@ class ProcessingController:
     # 实现位于 workflow/(import_workflow / stepwise + backend),本控制器
     # 负责接线、状态登记与参数组装。
     # ------------------------------------------------------------------
-    def _data_ndim(self, exp_id: str, data_id: str) -> int:
-        """从 metadata 读数据维度(3D 批量暂不支持用);读不到回退 2。"""
-        try:
-            meta_path = self._manager.data_metadata_path(exp_id, data_id)
-            if meta_path is not None and meta_path.is_file():
-                import json
-
-                metadata = json.loads(meta_path.read_text(encoding="utf-8"))
-                return int((metadata.get("dataset") or {}).get("ndim") or 2)
-        except Exception:  # noqa: BLE001
-            pass
-        return 2
-
-
     def import_data(self, entry: ExperimentEntry, source: str, copy: bool = True) -> dict:
         """第 1 步:导入样品数据(只读参数 + 复制 raw),返回 ImportResult dict。"""
         from workflow.import_workflow import import_data
@@ -179,7 +165,8 @@ class ProcessingController:
         )
 
     def batch_import(
-        self, exp_id: str, folders: list, group: bool = True
+        self, exp_id: str, folders: list, group: bool = True,
+        on_progress: Callable[[str, str, bool, str], None] | None = None,
     ) -> dict:
         """批量导入多个数据目录到实验类型;group=True 归入同一数据组(组 id 即 batch)。
 
@@ -207,11 +194,20 @@ class ProcessingController:
                 "ok": False,
                 "error": "",
             }
+            _f = Path(str(folder))
+            # 0.2.199-补29hd:批量暂仅支持 2D 谱——3D 数据在导入前按 raw 目录
+            # 是否含 acqu3s/acqu3 判定并直接跳过(不导入),避免批量处理时触发
+            # SMILE(不稳定主机断电);2D 数据按原流程导入。
+            if group and ((_f / "acqu3s").is_file() or (_f / "acqu3").is_file()):
+                item["error"] = "3D 谱,批量暂仅支持 2D,已跳过"
+                results.append(item)
+                if on_progress is not None:
+                    on_progress(str(folder), "", False, item["error"])
+                continue
             try:
                 # 0.2.199-补29gl:批量导入先校验原始数据文件存在,缺文件
                 # 直接标记失败,避免"看着导入了、处理时才失败";采集不全/更多
                 # 不在此拦截,由 FID 生成步骤按实际数据反推。
-                _f = Path(str(folder))
                 _is_nd = (_f / "acqu2s").is_file() or (_f / "acqu3s").is_file()
                 _data_file = "ser" if _is_nd else "fid"
                 if not (_f / _data_file).is_file():
@@ -220,16 +216,18 @@ class ProcessingController:
                 data_id = str(result.get("data_id", "") or "")
                 item["data_id"] = data_id
                 if data_id and group:
-                    # 0.2.199-补29hd:批量暂仅支持 2D 谱——3D 绑定批量组会在
-                    # 批量处理时触发 SMILE(不稳定主机断电),此处拦截提示。
-                    if self._data_ndim(exp_id, data_id) >= 3:
-                        item["note"] = "3D 谱,批量暂仅支持 2D,未绑定批量组;可单个处理"
-                    else:
-                        self._manager.add_to_group(exp_id, batch, data_id)
+                    self._manager.add_to_group(exp_id, batch, data_id)
                 item["ok"] = True
             except Exception as exc:  # noqa: BLE001 - 单个失败不阻断整批
                 item["error"] = f"{type(exc).__name__}: {exc}"
             results.append(item)
+            if on_progress is not None:
+                on_progress(
+                    str(folder),
+                    item.get("data_id", ""),
+                    bool(item.get("ok")),
+                    item.get("error", ""),
+                )
         # 全部失败时移除空组,避免残留空数据组节点
         if group and not any(item.get("ok") for item in results):
             try:
