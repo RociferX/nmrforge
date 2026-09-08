@@ -874,6 +874,26 @@ class SpectrumPanel(QWidget):
                     break
         s3d = getattr(self._spectrum3d_panel, "_spectrum3d", None)
         s3d_axes = list(getattr(s3d, "axes", []) or []) if s3d is not None else []
+        # 0.2.199-补29hd:面板未加载 3D 时,从同目录 .ft3 懒读轴作兜底——
+        # 投影 .ft2 文件头被 proj3D.tcl 复制为输入平面头(全 15N/1H),不可用于
+        # 轴参数;直接双击投影而未先加载 .ft3 时,否则投影轴参数全乱。
+        if len(s3d_axes) != 3:
+            from viewer.spectrum import Spectrum3D  # noqa: PLC0415
+
+            parent = path.parent
+            ft3_candidates = []
+            if data_id:
+                ft3_candidates.append(parent / f"{data_id}.ft3")
+            ft3_candidates += list(parent.glob("*.ft3"))
+            for ft3 in ft3_candidates:
+                if not ft3.is_file() or not ft3.name.endswith(".ft3"):
+                    continue
+                try:
+                    s3d_axes = list(Spectrum3D.load_from_ft3(ft3, lazy=True).axes or [])
+                except Exception:  # noqa: BLE001 - 兄弟谱读取失败回退空,走文件头
+                    s3d_axes = []
+                if len(s3d_axes) == 3:
+                    break
         # 0.2.199-补29w:重复核(HNN 双 15N)按逻辑轴下标区分——投影的核
         # 无法单靠核名区分是 F1 还是 F2 的 15N,用固定轴推导剩余两轴
         # 的逻辑下标(15Nx/15Ny)。
