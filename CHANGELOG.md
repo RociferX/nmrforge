@@ -13,6 +13,19 @@
   处理失败"异常捕获,记日志后以 phase_route=none 重试(复用已转换 fid);
 - 验证:VM canh/72 处理后出谱(回退 none,~12s);
 
+## 0.2.199-补29ha(2026-09-08,CANH 识别为独立 CANH 类型)
+- 用户:CANH 就是 CANH,不是 CBCANH;
+- 实现:新增 presets/canh.yaml(CANH,1H 检测 15N/13C,仅 Cα,峰 uniform);分类器
+  cnh/canh 映射由 CBCANH 改为 CANH(排在 cbcanh 后,避免子串抢先);
+- 验证:VM canh/72 分类 CANH(conf 0.9)并处理出谱(回退 none);
+
+## 0.2.199-补29hb(2026-09-08,分类器先判液体/固体证据提示)
+- 用户:CANH 也是固体类型;希望先判液体还是固体再找类型;
+- 实现:experiment_classifier 增加 _pulprog_state_hint(SOLID_HINTS: shex/cnh/canh/
+  ccnh/conh/cch/nnh/ncacx/darr/pdsd/…;LIQUID_HINTS: gp/fhsqc/hsqc/hmqc/…),
+  在 _classify_base 给出"疑似固体/液体核磁(PULPROG 特征)"证据;安全仅加证据,不改变
+  现有识别决策(避免遮蔽液体 conh 子串问题);CANH 归固体;
+- 验证:本地 ruff+分类测试+全量 pytest 通过;VM 全量 889 passed/19 skipped(EXIT=0);
 ## 0.2.199-补29gz(2026-09-08,新增固体 3D 预设 CONH/CCNH)
 - 用户:CoNH/CCNH 等固体谱预设不足;固体预设需补齐;
 - 实现:新增 presets/conh.yaml(CONH,1H 检测 15N/13C,峰 uniform)、presets/ccnh.yaml
