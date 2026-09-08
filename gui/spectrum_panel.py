@@ -185,7 +185,7 @@ class SpectrumPanel(QWidget):
         self._current_data_id: str = ""
         self._loading_peaks = False
         self._applying_label_format = False  # 0.2.199-补29cn:规范化防递归
-        self._viewer3d_state: dict[str, int] = {}
+        self._viewer3d_state: dict[tuple[str, str], int] = {}
         # 0.2.199-补29fz(用户):谱图显示调节按数据隔离——
         # (exp_id, data_id) → {contour 滑块/级数/aspect/峰标记尺寸}。
         self._display_states: dict[tuple[str, str], dict] = {}
@@ -626,7 +626,7 @@ class SpectrumPanel(QWidget):
                     return True
                 self._current_spectrum = path
                 # 在 set_spectrum3d(会重置平面/投影并触发保存)之前捕获记忆状态
-                state = self._viewer3d_state.get(self._current_data_id)
+                state = self._viewer3d_state.get((self._current_exp_id, self._current_data_id))
                 self._spectrum3d_panel.set_spectrum3d(
                     Spectrum3D.load_from_ft3(path, lazy=True)
                 )
@@ -701,7 +701,7 @@ class SpectrumPanel(QWidget):
         """大 .ft3 加载完成(主线程):绑定 3D 面板并渲染;已切换则忽略。"""
         if path != self._current_spectrum:
             return
-        state = self._viewer3d_state.get(self._current_data_id)
+        state = self._viewer3d_state.get((self._current_exp_id, self._current_data_id))
         self._spectrum3d_panel.set_spectrum3d(spectrum3d)
         self._spectrum3d_panel.setVisible(True)
         if state:
@@ -1063,7 +1063,7 @@ class SpectrumPanel(QWidget):
     def _save_3d_state(self, *_args) -> None:
         """记忆当前样品数据的 3D 查看平面(0.2.133 仅 slice 模式)。"""
         if self._current_data_id:
-            self._viewer3d_state[self._current_data_id] = (
+            self._viewer3d_state[(self._current_exp_id, self._current_data_id)] = (
                 self._spectrum3d_panel.plane_combo.currentIndex()
             )
 
