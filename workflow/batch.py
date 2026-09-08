@@ -31,6 +31,7 @@
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
@@ -40,6 +41,10 @@ from core.project import ProjectManager
 # 支持的批处理步骤(与 gui/pipeline_panel.PIPELINE_STEPS 前五步一致;
 # Engine 不 import Qt,批量组语义通过读取状态文件对齐)
 BATCH_STEPS = ("import", "fid", "spectrum", "peaks", "analysis")
+
+# 0.2.199-补29hd:批量相邻数据之间冷却秒数——连续 SMILE 背靠背高负载
+# 会顶到不稳定主机(电源/散热)断电(problems.md 记录);加间隔让主机冷却。
+BATCH_COOLDOWN_SECONDS = 2.0
 
 STATE_FILENAME = ".pipeline_state.json"
 
@@ -380,6 +385,10 @@ def run_batch(
                     else "失败 " + per_data["error"]
                 )
             )
+        if index < total:
+            # 0.2.199-补29hd:相邻数据之间冷却,避免连续 SMILE 背靠背顶到
+            # 不稳定主机(电源/散热)断电(problems.md 记录)。
+            time.sleep(BATCH_COOLDOWN_SECONDS)
     manager.save()
     failed = [d for d, r in results.items() if r["status"] == "failed"]
     skipped = [d for d, r in results.items() if r["status"] == "skipped"]
