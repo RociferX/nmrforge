@@ -1,5 +1,16 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29he(2026-09-08,删除数据组拆分为「删除组标记」与「删除组(含数据)」)
+- 用户:删除数据组只是删除了组标记,应为两个动作——单独「删除组标记」(数据保留
+  为单个数据),「删除组」=删组连同组内数据(进回收站,可恢复);
+- 实现:manager 新增 delete_data_group_with_members(逐成员 delete_data 软删除+回收站,
+  组移除,审计 data_group_deleted_with_members 含 deleted_data_ids);project_tree
+  组右键菜单拆为「删除组标记(数据保留)...」「删除组(含数据)...」,新增
+  group_delete_with_members_requested 信号;main_window 新增 _group_delete_with_members
+  (确认弹窗→删除→保存→刷新/日志);
+- 验证:test_data_group 新增 delete_data_group_with_members(成员 trashed+回收站+组移除
+  +审计),test_gui_data_group 更新组右键菜单断言;本地相关测试全绿,ruff 通过;
+
 ## 0.2.199-补29hd(2026-09-08,uniform 3D 单遍轴变换补 ZTP+末尾 TP,修复 F2 复型预览)
 - 用户:data/canh(3D uniform)unified 的「F2 复型预览」Broken pipe;不要用回退
   phase_route=none 当解决,要修根因;

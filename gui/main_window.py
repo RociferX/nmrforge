@@ -246,6 +246,9 @@ class MainWindow(QMainWindow):
         )
         self.project_tree.group_rename_requested.connect(self._group_rename)
         self.project_tree.group_delete_requested.connect(self._group_delete)
+        self.project_tree.group_delete_with_members_requested.connect(
+            self._group_delete_with_members
+        )
 
         self.center_panel = CenterPanel(self.manager, self.controller)
         self.pipeline = self.center_panel.pipeline  # 兼容旧引用
@@ -653,6 +656,28 @@ class MainWindow(QMainWindow):
         self.manager.delete_data_group(exp_id, group_id)
         self.manager.save()
         self._append_log(f"数据组 {group_id} 已删除(成员恢复单个数据)")
+        self.refresh()
+
+    def _group_delete_with_members(self, exp_id: str, group_id: str) -> None:
+        """删除数据组连同组内全部数据(产物移入回收站,可恢复)。"""
+        if self.manager.project is None:
+            return
+        group = self.manager.group(exp_id, group_id)
+        if group is None:
+            return
+        ok = ConfirmDialog.confirm(
+            self,
+            "删除数据组(含数据)",
+            f"删除数据组 {group_id}?组内 {len(group.data_ids)} 个数据"
+            "将连同组一起移入回收站(可恢复)。",
+        )
+        if not ok:
+            return
+        deleted = self.manager.delete_data_group_with_members(exp_id, group_id)
+        self.manager.save()
+        self._append_log(
+            f"数据组 {group_id} 已删除,连同 {len(deleted)} 个数据移入回收站"
+        )
         self.refresh()
 
     def _run_group_batch(

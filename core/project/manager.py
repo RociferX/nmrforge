@@ -559,6 +559,37 @@ class ProjectManager:
             {"experiment_id": exp_id, "group_id": group_id},
         )
 
+    def delete_data_group_with_members(
+        self, exp_id: str, group_id: str
+    ) -> list[str]:
+        """删除数据组并连同组内全部数据(各产物移入系统回收站+软删除)。
+
+        组内每个成员调用 delete_data(可回收恢复);被删成员返回其 id 列表;
+        已删/不存在的数据跳过不阻断。删除组后条目保留 trashed 标记可恢复。
+        """
+        entry = self._require_experiment(exp_id)
+        group = self.group(exp_id, group_id)
+        if group is None:
+            raise ProjectError(f"数据组不存在: {exp_id}/{group_id}")
+        members = list(group.data_ids)
+        deleted: list[str] = []
+        for data_id in members:
+            try:
+                self.delete_data(exp_id, data_id)
+            except ProjectError:  # noqa: BLE001 - 已删/不存在跳过
+                continue
+            deleted.append(data_id)
+        entry.groups.remove(group)
+        self.add_history(
+            "data_group_deleted_with_members",
+            {
+                "experiment_id": exp_id,
+                "group_id": group_id,
+                "deleted_data_ids": deleted,
+            },
+        )
+        return deleted
+
     def add_to_group(self, exp_id: str, group_id: str, data_id: str) -> None:
         """把数据加入组(已在组内幂等;数据必须属于该实验)。"""
         group = self.group(exp_id, group_id)

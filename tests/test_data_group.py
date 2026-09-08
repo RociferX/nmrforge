@@ -275,3 +275,42 @@ def test_run_batch_explicit_params_override_reference(
     )
     assert result["summary"]["failed"] == 0
     assert backend.spectrum_params[data_ids[1]].get("baseline") == "manual"
+def test_delete_data_group_with_members(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """删除组连同组内数据:成员软删除+回收站,组移除,审计记录 deleted_data_ids。"""
+    import shutil
+
+    manager, exp_id, data_ids = _manager_with_data(tmp_path, n=3)
+    manager.create_data_group(exp_id, data_ids=data_ids)
+    trash = tmp_path / "trash"
+    trash.mkdir()
+
+    def fake(path, fallback_dir, rel=None):
+        dest = trash / (rel or Path(path).name)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(path), str(dest))
+        return dest
+
+    monkeypatch.setattr("core.project.manager.send_to_trash", fake)
+    deleted = manager.delete_data_group_with_members(exp_id, "G1")
+    assert deleted == data_ids
+
+    # 组已移除
+    assert manager.group(exp_id, "G1") is None
+    assert len(manager.data_groups(exp_id)) == 0
+    # 组内成员全部软删除(可恢复)
+    entry = manager.project.experiment(exp_id)
+    assert all(d.trashed for d in entry.data)
+    for data_id in data_ids:
+        with pytest.raises(ProjectError):
+            manager.data(exp_id, data_id)
+    # 审计记录含被删成员
+    hist = [
+        h
+        for h in manager.project.processing_history
+        if h.action == "data_group_deleted_with_members"
+    ]
+    assert hist
+    assert hist[-1].fields.get("group_id") == "G1"
+    assert hist[-1].fields.get("deleted_data_ids") == data_ids

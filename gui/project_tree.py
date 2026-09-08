@@ -185,6 +185,8 @@ class ProjectTreePanel(QWidget):
     group_remove_data_requested = pyqtSignal(str, str, str)  # (exp_id, group_id, data_id)
     group_rename_requested = pyqtSignal(str, str, str)  # (exp_id, group_id, new_title)
     group_delete_requested = pyqtSignal(str, str)  # (exp_id, group_id)
+    group_delete_with_members_requested = pyqtSignal(str, str)
+    # (exp_id, group_id):删除组连同组内数据
     rename_requested = pyqtSignal(str, str)  # (exp_id, new_title):重命名实验
     delete_requested = pyqtSignal(str)  # 删除实验(exp_id)
 
@@ -383,7 +385,8 @@ class ProjectTreePanel(QWidget):
         group_item.setText(1, f"{len(members)} 个数据")
         group_item.setToolTip(
             0,
-            f"{group_id}\n右键: 把其它数据加入该组 / 重命名组 / 删除组",
+            f"{group_id}\n右键: 把其它数据加入该组 / 重命名组 / "
+            "删除组标记(数据保留) / 删除组(含数据)",
         )
         existing: dict[str, QTreeWidgetItem] = {}
         for index in range(group_item.childCount()):
@@ -557,7 +560,8 @@ class ProjectTreePanel(QWidget):
         group_item.setIcon(0, self._icon("group"))
         group_item.setToolTip(
             0,
-            f"{group_id}\n右键: 把其它数据加入该组 / 重命名组 / 删除组",
+            f"{group_id}\n右键: 把其它数据加入该组 / 重命名组 / "
+            "删除组标记(数据保留) / 删除组(含数据)",
         )
         group_item.setData(
             0,
@@ -1051,8 +1055,14 @@ class ProjectTreePanel(QWidget):
                     )
                     menu.addSeparator()
                     menu.addAction(
-                        "删除组",
+                        "删除组标记(数据保留)...",
                         lambda: self.group_delete_requested.emit(exp_id, group_id),
+                    )
+                    menu.addAction(
+                        "删除组(含数据)...",
+                        lambda: self.group_delete_with_members_requested.emit(
+                            exp_id, group_id
+                        ),
                     )
             elif kind == "data" and exp_id and data_id:
                 parent_item = item.parent()

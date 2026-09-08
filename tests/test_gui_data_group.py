@@ -93,7 +93,7 @@ def test_tree_renders_group_node(
 
 
 def test_group_context_menu(tmp_path: Path, qapp: QApplication) -> None:
-    """组节点右键含「把其它数据加入该组/重命名组/删除组」。"""
+    """组节点右键含「把其它数据加入该组/重命名组/删除组标记(数据保留)」及「删除组(含数据)」。"""
     manager, exp_id, _data_ids, group_id = _manager_with_group(tmp_path)
     panel = ProjectTreePanel(
         manager, workspace=_TempWorkspace(tmp_path / "ws")
@@ -105,7 +105,8 @@ def test_group_context_menu(tmp_path: Path, qapp: QApplication) -> None:
     texts = [a.text() for a in menu.actions()]
     assert "把其它数据加入该组..." in texts
     assert "重命名组..." in texts
-    assert "删除组" in texts
+    assert "删除组标记(数据保留)..." in texts
+    assert "删除组(含数据)..." in texts
     panel.tree.clear()
     panel.close()
 
