@@ -896,16 +896,21 @@ class SpectrumPanel(QWidget):
         # FDF*LABEL 不可靠,最后才用文件头槽位。
         if len(s3d_axes) == 3:
             sym_a, sym_b = nucleus_symbol(a), nucleus_symbol(b)
-            for i, sym in enumerate(labels3 or ()):
-                if str(sym) == sym_a and x_params is None:
+            # 0.2.133 本意是「从已加载 3D 谱对应核的轴取参数」;原用 metadata
+            # 核序(nuclei/labels3)按下标 i 索引 s3d_axes,二者顺序不一致时
+            # (CANH metadata 为 Bruker 采集序 C,N,H,加载谱逻辑序 N,H,C)会
+            # 错配。改为按已加载谱自身的轴标签匹配(含 15Ny/15Nx 下标)。
+            s3d_syms = [str(ax.label) for ax in s3d_axes]
+            for i, sym in enumerate(s3d_syms):
+                if sym == sym_a and x_params is None:
                     x_params = s3d_axes[i]
-                if str(sym) == sym_b and y_params is None:
+                if sym == sym_b and y_params is None:
                     y_params = s3d_axes[i]
             if x_params is None or y_params is None:
-                for i, nuc in enumerate(nuclei):
-                    if _base_norm(nuc) == na and x_params is None:
+                for i, ax in enumerate(s3d_axes):
+                    if _base_norm(str(ax.label)) == na and x_params is None:
                         x_params = s3d_axes[i]
-                    if _base_norm(nuc) == nb and y_params is None:
+                    if _base_norm(str(ax.label)) == nb and y_params is None:
                         y_params = s3d_axes[i]
         if x_params is None or y_params is None:
             # 轴参数缺失:用文件头槽位兜底(与 0.2.126 一致)
