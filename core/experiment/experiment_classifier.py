@@ -94,9 +94,10 @@ _PULPROG_TYPES: list[tuple[str, str]] = [
     ("cbcaconh", "CBCA(CO)NH"),
     ("cbcanh", "CBCANH"),
     # 0.2.199-补29gx(用户):CANH 固体实验(PULPROG 含 cnh/canh,如
-    # xh.3d.cnh_top3.shex)识别为 CBCANH(1H 检测 15N/13C 3D);排在 cbcanh 后
-    ("cnh", "CBCANH"),
-    ("canh", "CBCANH"),
+    # xh.3d.cnh_top3.shex)识别为独立 CANH(1H 检测 15N/13C 3D,仅 Cα,uniform);
+    # 排在 cbcanh 后,避免 cbcanh 的 canh 子串被抢先。
+    ("cnh", "CANH"),
+    ("canh", "CANH"),
     ("hncoca", "HN(CO)CA"),
     ("hnco", "HNCO"),
     ("hnca", "HNCA"),
