@@ -422,14 +422,35 @@ def _generate_spectrum_impl(
 
     from workflow.phase_routes import unified_route
 
-    result = unified_route(
-        experiment,
-        backend,
-        plan=plan,
-        work_dir=work,
-        base_params=params,
-        progress=progress,
-    )
+    try:
+        result = unified_route(
+            experiment,
+            backend,
+            plan=plan,
+            work_dir=work,
+            base_params=params,
+            progress=progress,
+        )
+    except (RuntimeError, StepwiseError) as exc:  # noqa: BLE001
+        # 0.2.199-补29gy:统一自动相位复型预览对某些数据(如固体 CANH)会失败
+        # (NMRPipe 报 data in Frequency Domain / Broken pipe);回退 phase_route=none
+        # 逃生口,复用已转换 fid,保证正常出谱(相位 p0=p1=0)。
+        msg = str(exc)
+        if "复型预览" not in msg and "NMRPipe 处理失败" not in msg:
+            raise
+        if progress is not None:
+            progress(f"统一复型预览失败({msg});回退 phase_route=none")
+        fb_params = dict(params)
+        fb_params["phase_route"] = "none"
+        return _generate_spectrum_impl(
+            manager,
+            exp_id,
+            data_id,
+            backend,
+            work=work,
+            params=fb_params,
+            progress=progress,
+        )
     workflow_ref = "phase_optimize_unified"
 
     if not result.get("spectrum_path"):
