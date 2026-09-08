@@ -45,7 +45,7 @@ def _manager(tmp_path: Path) -> tuple[ProjectManager, str, str]:
 
 
 def test_note_fields_schemas_differ_per_level() -> None:
-    """2026-08-18:实验类型注释=实验类型(指认/动力学);样品=重复/条件/pH/温度+维度/数据类型/核。"""
+    """实验类型=指认/动力学;样品=重复/条件/pH/温度+维度/数据类型/核/峰符号。"""
     assert [key for key, _ in SAMPLE_FIELDS] == [
         "protein_name",
         "expression_system",
@@ -68,6 +68,7 @@ def test_note_fields_schemas_differ_per_level() -> None:
         "dimension",
         "experiment_type",
         "nuclei",
+        "peak_sign",
         "notes",
     ]
     assert note_fields("project") == SAMPLE_FIELDS
