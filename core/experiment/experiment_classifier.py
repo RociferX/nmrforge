@@ -90,6 +90,10 @@ _PULPROG_TYPES: list[tuple[str, str]] = [
     ("hncacb", "HNCACB"),
     ("cbcaconh", "CBCA(CO)NH"),
     ("cbcanh", "CBCANH"),
+    # 0.2.199-补29gx(用户):CANH 固体实验(PULPROG 含 cnh/canh,如
+    # xh.3d.cnh_top3.shex)识别为 CBCANH(1H 检测 15N/13C 3D);排在 cbcanh 后
+    ("cnh", "CBCANH"),
+    ("canh", "CBCANH"),
     ("hncoca", "HN(CO)CA"),
     ("hnco", "HNCO"),
     ("hnca", "HNCA"),
