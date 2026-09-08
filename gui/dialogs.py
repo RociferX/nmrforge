@@ -412,6 +412,16 @@ class NotesDialog(QDialog):
                 if current:
                     combo.setEditText(current)
                 form.addRow(f"{label}:", combo)
+            elif key == "peak_sign":
+                combo = QComboBox()
+                combo.addItem("", "")
+                combo.addItem("单符号谱(uniform)", "uniform")
+                combo.addItem("正负峰谱(mixed)", "mixed")
+                current = str(values.get("peak_sign", "") or "")
+                if current in ("uniform", "mixed"):
+                    combo.setCurrentData(current)
+                self._combos["peak_sign"] = combo
+                form.addRow(f"{label}:", combo)
             elif key == "nuclei":
                 combo = QComboBox()
                 combo.setEditable(True)

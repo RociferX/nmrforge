@@ -414,6 +414,10 @@ def _template_auto_phase(experiment: Experiment) -> bool:
 def _template_peak_sign(experiment: Experiment) -> str:
     """实验类型峰符号(presets peak_sign):uniform 同号 / mixed 正负共存。
     与 _template_auto_phase 同源;模板缺失/解析失败回退 uniform。"""
+    # 0.2.199-补29hc:数据注释峰的覆盖优先。
+    ov = getattr(experiment, "note_peak_sign", "")
+    if ov in ("uniform", "mixed"):
+        return ov
     try:
         from core.experiments.registry import REGISTRY
 

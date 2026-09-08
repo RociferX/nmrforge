@@ -40,6 +40,7 @@ DATA_FIELDS: tuple[tuple[str, str], ...] = (
     ("dimension", "维度"),
     ("experiment_type", "数据类型"),
     ("nuclei", "核"),
+    ("peak_sign", "峰符号"),
     ("notes", "备注"),
 )
 

@@ -276,6 +276,30 @@ def generate_fid(
 
 
 
+def _apply_note_overrides(manager, exp_id: str, data_id: str, experiment) -> None:
+    """用数据注释(数据类型的实验类型/峰符号)覆盖自动分类与预设(0.2.199-补29hc)。"""
+    try:
+        project = getattr(manager, "project", None)
+        if project is None:
+            return
+        exp = project.experiment(exp_id)
+        if exp is None:
+            return
+        note = ((exp.metadata or {}).get("data_notes") or {}).get(data_id)
+        if not isinstance(note, dict):
+            return
+        tname = str(note.get("experiment_type", "") or "").strip()
+        if tname:
+            from gui.notes import experiment_type_options
+            if tname in experiment_type_options(experiment.ndim):
+                experiment.experiment_type = tname
+        psign = str(note.get("peak_sign", "") or "").strip()
+        if psign in ("uniform", "mixed"):
+            experiment.note_peak_sign = psign
+    except Exception:  # noqa: BLE001 - 注释覆盖失败不阻断
+        pass
+
+
 def _default_phase_route(experiment) -> str:
     """按维度选默认 phase_route:1D 无间接维,直连 process(补29gj)。"""
     return "none" if int(getattr(experiment, "ndim", 2) or 2) == 1 else "unified"
@@ -369,6 +393,8 @@ def _generate_spectrum_impl(
     experiment = _read_experiment(manager, exp_id, data_id)
     params = dict(params or {})
     route = str(params.pop("phase_route", _default_phase_route(experiment)))
+    # 0.2.199-补29hc:数据注释里的"数据类型/峰符号"优先于自动分类/预设。
+    _apply_note_overrides(manager, exp_id, data_id, experiment)
     plan = select_method(experiment)
     if route == "none":
         # 0.2.162-补15:逃生口只有一次运行,直接把终跑直接维范围映射到 ext
