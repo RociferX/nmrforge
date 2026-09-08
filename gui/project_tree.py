@@ -682,6 +682,26 @@ class ProjectTreePanel(QWidget):
             }
         self.refresh()
 
+    def _data_last_run_failed(self, exp_id: str, data_id: str) -> bool:
+        """该数据最近一次处理运行是否失败(process/reconstruct/pick 等)。"""
+        try:
+            runs = getattr(getattr(self.manager, "project", None), "workflow_runs", None) or []
+        except Exception:  # noqa: BLE001
+            runs = []
+        refs = {
+            "convert_to_fid", "process", "reconstruct_nus", "pick_peaks",
+            "manual_fid", "manual_process", "manual_nus", "manual_peaks",
+            "smile_optimize", "analyze", "phase_optimize_unified",
+        }
+        for r in reversed(runs):
+            if r.experiment_id != exp_id or r.workflow_ref not in refs:
+                continue
+            if str((r.inputs or {}).get("data_id", "")) != data_id:
+                continue
+            return str(getattr(r, "status", "")) == "failed"
+        return False
+
+
     def _data_status(self, exp, data_node) -> str:
         """按产物文件推断样品数据状态(0.2.199-补29aa/补29av):
 
@@ -696,6 +716,9 @@ class ProjectTreePanel(QWidget):
             batch_status = self._batch_status.get((exp_id, data_id))
             if batch_status:
                 return batch_status
+            # 0.2.199-补29hd:单数据最近一次处理运行失败 → 状态显示「失败」
+            if self._data_last_run_failed(exp_id, data_id):
+                return "失败"
             entry = self.manager.data(exp_id, data_id)
             # 0.2.199-补29av:峰表存在 → 已选峰(优先于谱图)
             peaks_dir = self.manager.data_dir(exp_id, data_id, "peaks")

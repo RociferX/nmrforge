@@ -723,11 +723,20 @@ class MainWindow(QMainWindow):
                         }
                     )
                     # 0.2.199-补29hd:逐数据完成状态写回左侧树(失败/跳过分得清)
-                    _st = (
-                        "成功"
-                        if status in ("success", "already_done")
-                        else ("失败" if status == "failed" else "跳过")
-                    )
+                    # 0.2.199-补29hd:成功状态 = 实际处理完且成功的步骤
+                    if status in ("success", "already_done"):
+                        _done_map = {
+                            "import": "已导入",
+                            "fid": "已生成 FID",
+                            "spectrum": "已生成谱图",
+                            "peaks": "已选峰",
+                            "analysis": "已分析",
+                        }
+                        _st = _done_map.get(str(steps[-1]) if steps else "", "成功")
+                    elif status == "failed":
+                        _st = "失败"
+                    else:
+                        _st = "跳过"
                     self.group_data_done.emit(exp_id, data_id, _st)
                     # 0.2.199-补29gs:组批量后把每个数据的分步日志落到其自身
                     # 数据作用域(与单个处理一致,选该数据可见)。
