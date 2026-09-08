@@ -171,13 +171,10 @@ def test_pipeline_group_run_applies_to_all(
     panel = PipelinePanel(manager, controller)
     panel.set_selection("data", entry.id, data1.id)
     assert f"数据组 {group.id}" in panel.context_label.text()
-    summaries: list[dict] = []
-    panel.batch_summary_requested.connect(summaries.append)
+    # 0.2.199-补29gv:组内单个数据在面板里独立运行(不自动转整组)
     panel._on_run_requested("spectrum")
-    assert controller.group_calls == [(group.id, ["spectrum"], {})]
-    assert summaries and summaries[0]["info"].startswith(
-        f"数据组 {group.id}: 2/2 成功"
-    )
+    assert controller.group_calls == []
+    assert controller.calls == [data1.id]
     panel.close()
 
 

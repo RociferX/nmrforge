@@ -115,9 +115,10 @@ def test_run_batch_multiple_data(tmp_path: Path, bruker_dir: Path) -> None:
     )
     assert result["summary"] == {"total": 2, "success": 2, "failed": 0}
     assert result["failed"] == []
-    # 进度回调顺序:逐数据逐步骤消息
-    assert events[0].startswith(f"{data_ids[0]}: 开始 fid")
-    assert events[1].startswith(f"{data_ids[0]}: 开始 spectrum")
+    # 进度回调顺序:每数据前输出 x/y,再逐步骤消息
+    assert events[0].startswith(f"[1/2] 开始处理数据 {data_ids[0]}")
+    assert events[1].startswith(f"{data_ids[0]}: 开始 fid")
+    assert events[2].startswith(f"{data_ids[0]}: 开始 spectrum")
     assert events[-1] == f"{data_ids[1]}: 成功"
     # 逐数据执行:convert → process → convert → process
     assert [m for m, _ in backend.calls] == [

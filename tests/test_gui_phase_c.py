@@ -131,11 +131,10 @@ def test_batch_progress_and_summary(
     panel.log_message.connect(logs.append)
     panel.log_scoped.connect(lambda msg, _scope: logs.append(msg))  # 0.2.199-补29d
     panel._on_run_requested("spectrum")
-    assert controller.group_calls == [(group.id, ["spectrum"])]
-    assert summaries and summaries[0]["info"].startswith(
-        f"数据组 {group.id}: 1/2 成功"
-    )
-    assert any(f"数据组 {group.id}" in msg for msg in logs)
+    # 0.2.199-补29gv:组内单个数据在面板里独立运行(不自动转整组)
+    assert controller.group_calls == []
+    assert controller.calls == [data1.id]
+    assert any("正在重构" in msg for msg in logs)
     panel.close()
 
 

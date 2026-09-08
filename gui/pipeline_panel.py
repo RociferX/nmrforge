@@ -1967,26 +1967,13 @@ class PipelinePanel(QWidget):
                 target_data_id = getattr(data_node, "id", exp_id)
                 # 0.2.199-补5:处理开始,左侧树该数据显示「运行中」
                 self.run_started.emit(exp_id, target_data_id)
-                # 批量组:统一委托新引擎(controller.run_group_batch ->
-                # workflow.batch.run_batch);0.2.164-补1 删除旧内联逐数据循环
-                group = (
-                    self.manager.group_of_data(exp_id, target_data_id)
-                    if self.manager is not None and self.manager.project is not None
-                    else None
-                )
-                # 0.2.199-补29d:运行日志按目标数据/组作用域落地,切换选中
-                # 不再串;0.2.199-补29fk-修:开始行也落 run_scope,并请主窗口
-                # 把日志面板切到该作用域(否则只见「开始」不见后续进度)
-                run_scope = self._run_log_scope(
-                    exp_id, target_data_id, group.id if group is not None else ""
-                )
+                # 0.2.199-补29gv:组内单个数据在面板里仍独立运行(不自动转整组);
+                # 整组批处理由数据组页面(GroupBatchPanel)的"依次优化/按参考处理"触发。
+                run_scope = self._run_log_scope(exp_id, target_data_id, "")
                 self.log_scoped.emit(
                     f"开始 {STEP_LABEL.get(step_id, step_id)}: {entry.id}",
                     run_scope,
                 )
-                if group is not None:
-                    self._run_group_step(exp_id, group.id, step_id, target_data_id)
-                    return
                 step_label = STEP_LABEL.get(step_id, step_id)
                 try:
                     import inspect

@@ -310,6 +310,9 @@ def run_batch(
             "error": "",
             "logs": [],
         }
+        # 0.2.199-补29gv:开始处理每个数据前输出进度 x/y,便于用户了解进度
+        if progress is not None:
+            progress(f"[{index}/{total}] 开始处理数据 {data_id}")
         # 参考整组处理:与参考数据(类型/条件)不一致的成员无法套用参考参数,
         # 跳过并告知,不处理。
         if ref_fp is not None and data_id != reference_data_id:
