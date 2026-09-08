@@ -29,6 +29,30 @@ from core.experiments.registry import REGISTRY
 # HETCOR(1H-13C)/HNHETCOR(1H-15N)。1D 类型(CP13C/CP15N/PROTON1D/
 # C13_1D)暂无 presets YAML(test_gui_presets 仅允许 ndim=2/3),关键词待
 # GUI 侧放开 ndim=1 后补。
+# 0.2.199-补29hb(用户):先判液体还是固体。固体/液体 PULPROG 特征子串。
+_SOLID_HINTS: tuple[str, ...] = (
+    "shex", "cnh", "canh", "ccnh", "conh", "cch", "nnh", "nhhc", "chhc",
+    "ncacx", "ncocx", "ncacb", "ncocacb", "ncoca", "ncaco", "darr", "pdsd",
+    "rfdr", "tedor", "redor", "ccc", "inadequate", "nn", "nca", "nco",
+    "cbcanco", "canco", "pain", "hetcor", "fslg", "cp_",
+)
+_LIQUID_HINTS: tuple[str, ...] = (
+    "gp_", "gpph", "gradient", "fhsqc", "hsqc", "hmqc", "hmbc", "tocsy",
+    "noesy", "roesy", "cosy", "sfg", "zg",
+)
+
+
+def _pulprog_state_hint(pulprog: str) -> str | None:
+    """根据 PULPROG 子串判液体/固体;无法判断返回 None。"""
+    for kw in _SOLID_HINTS:
+        if kw in pulprog:
+            return "solid"
+    for kw in _LIQUID_HINTS:
+        if kw in pulprog:
+            return "liquid"
+    return None
+
+
 _PULPROG_TYPES: list[tuple[str, str]] = [
     # —— 溶液核磁:HNN(hncannh/hncocannh 为溶液梯度脉冲程序;须排在
     # "nnh" 之前,否则 hncocannh 的子串 nnh 抢先匹配固体 NNH)——
@@ -251,6 +275,13 @@ def _classify_base(experiment: Experiment) -> ExperimentType:
     acqus = experiment.acquisition_parameters.get("acqus", {})
     pulprog = str(acqus.get("PULPROG", "")).lower()
     evidence: list[str] = [f"核组合 {'/'.join(_data_nuclei(experiment))}"]
+
+    state_hint = _pulprog_state_hint(pulprog)
+    if state_hint is not None:
+        evidence.append(
+            "疑似" + ("固体" if state_hint == "solid" else "液体")
+            + "核磁(PULPROG 特征)"
+        )
 
     candidates = _nuclei_candidates(experiment)
 
