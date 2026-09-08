@@ -303,6 +303,10 @@ class ExperimentImportPanel(QWidget):
             candidates = [root]
         for cand in candidates:
             if (cand / "acqus").is_file():
+                # 0.2.199-补29hd:批量暂仅支持 2D——3D(含 acqu3s/acqu3)数据集
+                # 不进批量列表,避免误选后批量触发 SMILE/断电。
+                if (cand / "acqu3s").is_file() or (cand / "acqu3").is_file():
+                    continue
                 datasets.add(cand.resolve())
         return sorted(datasets)
 
