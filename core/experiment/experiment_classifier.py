@@ -51,6 +51,9 @@ _PULPROG_TYPES: list[tuple[str, str]] = [
     ("ncacx", "NCACX"),
     ("nco", "NCO"),
     ("nca", "NCA"),
+    # 0.2.199-补29gz(用户):固体 3D 1H 检测——CoNH/CCNH 等已注册预设为候选,
+    # 但子串 conh 会遮蔽液体 cbcaconh/hcconh/ccconh,故不做粗略 PULPROG 子串映射;
+    # 依赖核组合族回退命中(1H/15N/13C)。
     # —— 固体核磁:13C-13C / 同核 / 距离约束 ——
     ("cshi.hcc", "HCC"),
     ("ccc", "CCC"),
