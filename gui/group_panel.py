@@ -50,7 +50,21 @@ class GroupBatchPanel(QWidget):
         self._exp_id = ""
         self._group_id = ""
 
-        layout = QVBoxLayout(self)
+        # 0.2.199-补29hd:整页可上下滚动——成员/上下文注释内容长时不再被压扁。
+        self._scroll = QScrollArea(self)
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        self._scroll.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        self._content = QWidget()
+        self._scroll.setWidget(self._content)
+        _outer = QVBoxLayout(self)
+        _outer.setContentsMargins(0, 0, 0, 0)
+        _outer.addWidget(self._scroll)
+        layout = QVBoxLayout(self._content)
         layout.setContentsMargins(16, 16, 16, 16)
 
         title = QLabel("数据组批量处理")
