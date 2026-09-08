@@ -1,5 +1,14 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29gu(2026-09-08,组批/单数据日志与单个处理一样详细并按数据落各自作用域)
+- 用户:组界面 log 要像单个处理一样详细、依次输出;组内点到单个数据,其 log 界面显示
+  它自己的那一部分;
+- 根因:generate_fid/_generate_spectrum_impl 成功时丢弃后端 resp["logs"](详细日志),
+  只在失败时拼进错误;组批 run_batch 每数据 progress 仅收集不转发,故组/数据日志偏简略;
+- 解决:workflow/stepwise 成功时把 resp["logs"] 逐条经 progress 转发;workflow/batch
+  每数据 _collect_log 既写入该数据 per_data["logs"](供数据作用域),又同步转发外部
+  progress(组作用域依次详细输出);gui/main_window 批处理后写数据作用域;
+- 验证:本地 ruff+全量 pytest 通过;VM 全量 889 passed/19 skipped(首闪已知 pyqtgraph 段错误);
 ## 0.2.199-补29gt(2026-09-07,组批跳过已处理过的步骤)
 - 用户:点到单个可直接运行单个;数据组界面运行应直接跳过单个已经做过的;
 - 实现:workflow/batch.run_batch 逐步骤判断 _step_already_done(fid/spectrum 依
