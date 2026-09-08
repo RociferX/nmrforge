@@ -551,6 +551,20 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     # 数据组(schema 1.4)
     # ------------------------------------------------------------------
+    def _data_ndim(self, exp_id: str, data_id: str) -> int:
+        """从 metadata 读数据维度(3D 批量暂不支持用);读不到回退 2。"""
+        try:
+            meta_path = self._manager.data_metadata_path(exp_id, data_id)
+            if meta_path is not None and meta_path.is_file():
+                import json
+
+                metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+                return int((metadata.get("dataset") or {}).get("ndim") or 2)
+        except Exception:  # noqa: BLE001 - 读不到按 2D 放宽(不误拦)
+            pass
+        return 2
+
+
     def _group_add_data(self, exp_id: str, group_id: str, data_ids: list) -> None:
         """把多个数据加入数据组(project.json 为唯一来源,0.2.164-补1)。"""
         if self.manager.project is None:
@@ -561,6 +575,13 @@ class MainWindow(QMainWindow):
             return
         for data_id in data_ids or []:
             try:
+                # 0.2.199-补29hd:批量暂仅支持 2D 谱——3D 数据加入数据组会
+                # 在批量处理时触发 SMILE(不稳定主机断电),此处直接拦截提示。
+                if self._data_ndim(exp_id, str(data_id)) >= 3:
+                    self._append_log(
+                        f"数据 {data_id} 为 3D 谱,批量暂仅支持 2D,未加入数据组"
+                    )
+                    continue
                 self.manager.add_to_group(exp_id, group_id, str(data_id))
                 self._append_log(f"数据 {data_id} 已加入数据组 {group_id}")
             except Exception as exc:  # noqa: BLE001 - 单数据失败继续
