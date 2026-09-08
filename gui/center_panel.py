@@ -179,16 +179,15 @@ class CenterPanel(QWidget):
         self._notes_group_id = group_id if kind == "group" else ""
         show = bool(self._notes_kind)
         # 组注释用每数据一列的滚动区;其它层级用单标签,编辑按钮仅非组可用
+        # 0.2.199-补29gw:组注释改由数据组页面展示(置于"按参考数据处理"上方),
+        # 不再占用顶部注释条。
         self.notes_label.setVisible(show and kind != "group")
-        self.group_notes_scroll.setVisible(show and kind == "group")
+        self.group_notes_scroll.setVisible(False)
         self.edit_notes_button.setVisible(show and kind != "group")
-        if not show:
+        if not show or kind == "group":
             return
         project = self._manager.project if self._manager is not None else None
         if project is None:
-            return
-        if kind == "group":
-            self._set_group_notes(project, exp_id, group_id)
             return
         text = ""
         if kind == "project":
@@ -237,8 +236,8 @@ class CenterPanel(QWidget):
 
         container = QWidget()
         grid = QGridLayout(container)
-        grid.setContentsMargins(8, 8, 8, 8)
-        grid.setSpacing(8)
+        grid.setContentsMargins(6, 4, 6, 4)
+        grid.setSpacing(2)
         # 表头行:第一格"数据",之后每数据一列
         head0 = QLabel("数据")
         head0.setStyleSheet(
@@ -263,7 +262,7 @@ class CenterPanel(QWidget):
                 val = fields.get(key)
                 val_lb = QLabel(str(val) if val not in (None, "") else "—")
                 val_lb.setWordWrap(True)
-                val_lb.setFixedWidth(150)
+                val_lb.setFixedWidth(190)
                 val_lb.setStyleSheet(
                     "color: #ffffff; border: none; background: transparent;"
                 )

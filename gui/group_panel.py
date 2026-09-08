@@ -12,15 +12,17 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
@@ -64,7 +66,26 @@ class GroupBatchPanel(QWidget):
         self.member_label.setWordWrap(True)
         self.member_label.setStyleSheet("color: #555;")
         layout.addWidget(self.member_label)
-        layout.addSpacing(10)
+        # 0.2.199-补29gw:组内数据注释(字段×数据网格),置于"按参考数据处理"上方
+        self.notes_label = QLabel("组内数据注释")
+        self.notes_label.setStyleSheet("font-weight: bold; color: #2c3e50;")
+        self.notes_label.setVisible(False)
+        layout.addWidget(self.notes_label)
+        self.notes_scroll = QScrollArea()
+        self.notes_scroll.setWidgetResizable(True)
+        self.notes_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        self.notes_scroll.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        self.notes_scroll.setStyleSheet(
+            "background: #1e1e1e; color: #ffffff; border: 1px solid #3c3c3c;"
+        )
+        self.notes_scroll.setMaximumHeight(200)
+        self.notes_scroll.setVisible(False)
+        layout.addWidget(self.notes_scroll)
+        layout.addSpacing(6)
 
         # ---- 模式 A:按参考数据处理整组 ----
         ref_box = QGroupBox("按参考数据处理整组")
@@ -165,6 +186,75 @@ class GroupBatchPanel(QWidget):
         self._exp_id = exp_id
         self._group_id = group_id
         self._refresh()
+        self._refresh_notes()
+
+    def _refresh_notes(self) -> None:
+        """组内数据注释:注记字段为行(第一列字段名),每个数据为一列。"""
+        from gui.notes import DATA_FIELDS, data_note_fields
+
+        manager = self._manager
+        exp_id, group_id = self._exp_id, self._group_id
+        self.notes_label.setVisible(False)
+        self.notes_scroll.setVisible(False)
+        if manager is None or manager.project is None:
+            return
+        exp = manager.project.experiment(exp_id)
+        group = manager.group(exp_id, group_id) if exp is not None else None
+        if group is None:
+            return
+        member_ids = (group.data_ids or [])
+        if not member_ids:
+            return
+        cols_data: list[tuple[str, str, dict]] = []
+        for data_id in member_ids:
+            d = next((x for x in exp.data if x.id == data_id), None)
+            label_text = (d.title or f"样品数据 {data_id}") if d else f"样品数据 {data_id}"
+            cols_data.append(
+                (data_id, label_text, data_note_fields(manager.project, exp_id, data_id))
+            )
+        row_keys: list[str] = [k for k, _ in DATA_FIELDS]
+        display = {k: v for k, v in DATA_FIELDS}
+        for _di, _lb, fields in cols_data:
+            for k in fields:
+                if k not in row_keys:
+                    row_keys.append(k)
+                    display[k] = k
+        container = QWidget()
+        grid = QGridLayout(container)
+        grid.setContentsMargins(6, 4, 6, 4)
+        grid.setSpacing(2)
+        head0 = QLabel("数据")
+        head0.setStyleSheet(
+            "font-weight: bold; color: #f0f0f0; border: none; background: transparent;"
+        )
+        grid.addWidget(head0, 0, 0)
+        for ci, (_data_id, label_text, _f) in enumerate(cols_data, start=1):
+            head = QLabel(f"◆ {label_text}")
+            head.setWordWrap(True)
+            head.setStyleSheet(
+                "font-weight: bold; color: #f0f0f0; border: none; background: transparent;"
+            )
+            grid.addWidget(head, 0, ci)
+        for ri, key in enumerate(row_keys, start=1):
+            fname = QLabel(display.get(key, key))
+            fname.setStyleSheet(
+                "font-weight: bold; color: #f0f0f0; border: none; background: transparent;"
+            )
+            grid.addWidget(fname, ri, 0)
+            for ci, (_di, _lb, fields) in enumerate(cols_data, start=1):
+                val = fields.get(key)
+                val_lb = QLabel(str(val) if val not in (None, "") else "—")
+                val_lb.setWordWrap(True)
+                val_lb.setFixedWidth(190)
+                val_lb.setStyleSheet(
+                    "color: #ffffff; border: none; background: transparent;"
+                )
+                grid.addWidget(val_lb, ri, ci)
+        grid.setColumnStretch(0, 0)
+        grid.setColumnStretch(len(cols_data) + 1, 0)
+        self.notes_scroll.setWidget(container)
+        self.notes_label.setVisible(True)
+        self.notes_scroll.setVisible(True)
 
     def _refresh(self) -> None:
         manager = self._manager
