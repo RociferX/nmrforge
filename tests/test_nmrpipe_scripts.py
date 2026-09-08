@@ -235,9 +235,6 @@ def test_preview_script_3d(bruker_dir: Path) -> None:
     assert script.count("| nmrPipe -fn PS -p0 0 -p1 0 -di \\") == 2
     assert "| nmrPipe -fn PS -p0 0 -p1 0 \\" in script
     assert script.count("| nmrPipe -fn TP") == 2
-    # 3D 慢维(F1)须 ZTP 搬到 FT 轴,否则第三个 FT 作用在已频域数据上,
-    # 复型中间维转置会 Broken pipe(与 NUS finalize 的 TP+TP+ZTP 对齐)。
-    assert "| nmrPipe -fn ZTP" in script
     assert "| nmrPipe -fn ZF" not in script
     assert script.count("| nmrPipe -fn POLY") == 2  # 搜索轴 F2 跳过 POLY
 

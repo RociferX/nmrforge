@@ -704,12 +704,6 @@ def generate_process_script(
         f"xyz2pipe -in {in_file} -x \\",
     ]
     for index, axis in enumerate(axes):
-        if len(axes) >= 3 and index == len(axes) - 1:
-            # 3D/4D:处理完平面内两维后,用 ZTP 把慢维(最后一轴)搬到当前 FT 轴再 FT;
-            # 否则最后一个 FT 会作用在已频域数据上(NMRPipe "data seems to be
-            # in the Frequency Domain" 警告,复型中间维转置会 Broken pipe)。
-            # 与 NUS finalize 的 TP+TP+ZTP 对齐(标准 3D 单遍:FT_X|TP|FT_Y|ZTP|FT_Z)。
-            lines.append("| nmrPipe -fn ZTP \\")
         # 直流偏置纠正(POLY -time)作用于直接维时域 FID,必须在窗/FT 之前,
         # 与 NUS 脚本 step1 一致(0.2.155/0.2.160:只进终跑完整脚本)
         if direct_poly_time and index == 0:
