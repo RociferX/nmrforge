@@ -1,5 +1,20 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29hd(2026-09-08,uniform 3D 单遍轴变换补 ZTP+末尾 TP,修复 F2 复型预览)
+- 用户:data/canh(3D uniform)unified 的「F2 复型预览」Broken pipe;不要用回退
+  phase_route=none 当解决,要修根因;
+- 根因:generate_process_script 的 3D 单遍序列 FT_F3|TP|FT_F2|TP|FT_F1 缺 ZTP,
+  导致 F1(慢维)根本没 FT(实测 DATA 36/APOD 18),第三个 FT 作用在已频域维度
+  (NMRPipe "Frequency Domain" 警告),复型中间维(F2=15N)再转置即 Broken pipe;
+  且输出布局≠(F2,F1,F3)(file_axis_index 契约),phase search 读错轴。
+- 解决:改为 FT_F3|TP|FT_F2|ZTP|FT_F1|TP|pipe2xyz -x——F2 后用一个 ZTP 把慢维
+  搬到 FT 轴,末尾再补一个 TP,输出恰好 (F2,F1,F3),与 file_axis_index/_axis_index
+  一致(参考实验室标准两遍式 3D 脚本的思路)。
+- 验证:本地 test_nmrpipe_scripts/test_phase_routes/test_full_paths 全绿,ruff 通过;
+  VM canh/72 三预览 rc=0 且 file_axis_index 读对轴(score 100/100/98.8),unified
+  端到端出谱(相位 F1 168°/-22.5°,F2 190°,F3 346.8°),终谱 (F2,F1,F3) 布局可读;
+  注:补29gy 的 phase_route=none 回退保留为兜底,本修复后不再依赖。
+
 ## 0.2.199-补29gx(2026-09-08,分类器识别 CANH 固体实验)
 - 用户:CANH 这种固体实验识别不出来;
 - 实现:experiment_classifier._PULPROG_TYPES 加 (cnh→CBCANH),(canh→CBCANH),
