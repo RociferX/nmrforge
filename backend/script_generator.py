@@ -725,9 +725,19 @@ def generate_process_script(
                 f"| nmrPipe -fn EXT -x1 {ext_lo}ppm -xn {ext_hi}ppm -sw -round 2 \\"
             )
         if index < len(axes) - 1:
-            lines.append("| nmrPipe -fn TP \\")
+            if len(axes) >= 3 and index == len(axes) - 2:
+                # 3D 单遍:最后一维(F1)前用 ZTP 把慢维搬到当前 FT 轴(与 NUS
+                # finalize 对齐);否则第三个 FT 作用在已频域维度上,复型中间维
+                # 转置会 Broken pipe、F1 也停在时域。
+                lines.append("| nmrPipe -fn ZTP \\")
+            else:
+                lines.append("| nmrPipe -fn TP \\")
     if len(axes) == 2:
         # NMRPipe 2D:间接维 FT 后需再 TP 转置回来,否则输出 F1/F2 交换
+        lines.append("| nmrPipe -fn TP \\")
+    elif len(axes) >= 3:
+        # 3D 单遍:最后一维 FT 后再补一个 TP,输出 (F2,F1,F3) 文件布局
+        # (与 file_axis_index/_axis_index 一致,复型预览才能被读对轴)。
         lines.append("| nmrPipe -fn TP \\")
     lines.append(f"| pipe2xyz -out {out_file} -x")
     return "\n".join(lines) + "\n"

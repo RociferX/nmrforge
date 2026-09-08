@@ -168,6 +168,8 @@ def test_process_script_3d_two_tps(bruker_dir: Path) -> None:
     script = generate_process_script(exp, plan, in_file="test.fid", out_file="out.ft3")
     assert script.count("| nmrPipe -fn TP") == 2
     assert "| pipe2xyz -out out.ft3 -x" in script
+    # 3D 单遍:补 ZTP 把慢维(F1)搬到 FT 轴 + 末尾 TP,输出 (F2,F1,F3) 布局
+    assert script.count("| nmrPipe -fn ZTP") == 1
     # 3D 第一间接维 F2(acqu2s FnMODE=5 States-TPPI)→ FT -alt -neg;
     # 第二间接维 F1(acqu3s FnMODE=4 States)→ FT 无标志
     assert "| nmrPipe -fn FT -alt -neg" in script
@@ -235,6 +237,7 @@ def test_preview_script_3d(bruker_dir: Path) -> None:
     assert script.count("| nmrPipe -fn PS -p0 0 -p1 0 -di \\") == 2
     assert "| nmrPipe -fn PS -p0 0 -p1 0 \\" in script
     assert script.count("| nmrPipe -fn TP") == 2
+    assert script.count("| nmrPipe -fn ZTP") == 1  # 慢维 ZTP + 末尾 TP → (F2,F1,F3)
     assert "| nmrPipe -fn ZF" not in script
     assert script.count("| nmrPipe -fn POLY") == 2  # 搜索轴 F2 跳过 POLY
 
