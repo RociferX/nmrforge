@@ -256,6 +256,10 @@ def generate_fid(
         raise StepwiseError(
             str(resp.get("message", "转换失败")) + " | " + " | ".join(logs)
         )
+    # 0.2.199-补29gu:成功也把后端详细日志转发 progress(组批/单个都能看到)
+    if progress is not None:
+        for _lg in logs:
+            progress(_lg)
     fid_path = str(resp.get("fid_path", ""))
     manager.set_data_fid(exp_id, data_id, fid_path)
     merged_params = dict(resp.get("effective_params") or {})
@@ -385,6 +389,10 @@ def _generate_spectrum_impl(
             raise StepwiseError(
                 str(resp.get("message", "谱图生成失败")) + " | " + " | ".join(logs)
             )
+        # 0.2.199-补29gu:成功也把后端详细日志转发 progress
+        if progress is not None:
+            for _lg in logs:
+                progress(_lg)
         spectrum_path = _register_spectrum(
             manager, exp_id, data_id, str(resp.get("spectrum_path", ""))
         )

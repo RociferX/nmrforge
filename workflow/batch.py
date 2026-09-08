@@ -341,6 +341,11 @@ def run_batch(
             if progress is not None:
                 progress(f"{data_id}: 开始 {step}")
             step_logs: list[str] = []
+            def _collect_log(_msg: str) -> None:
+                """收集到本数据日志,并同步转发到组作用域(详细依次输出)。"""
+                step_logs.append(_msg)
+                if progress is not None:
+                    progress(_msg)
             try:
                 merged = dict(ref_params) if step == "spectrum" else {}
                 merged.update(step_params)
@@ -351,7 +356,7 @@ def run_batch(
                     step,
                     backend,
                     merged,
-                    progress=step_logs.append,
+                    progress=_collect_log,
                 )
             except Exception as exc:  # noqa: BLE001 - 单数据失败不中断整组
                 per_data["status"] = "failed"
