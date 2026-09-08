@@ -1,5 +1,24 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29gx(2026-09-08,分类器识别 CANH 固体实验)
+- 用户:CANH 这种固体实验识别不出来;
+- 实现:experiment_classifier._PULPROG_TYPES 加 (cnh→CBCANH),(canh→CBCANH),
+  使 xh.3d.cnh_top3.shex 等 CANH 固体实验识别为 CBCANH(1H 检测 15N/13C 3D);
+- 验证:VM canh/72 分类 CBCANH(conf 0.9);
+
+## 0.2.199-补29gy(2026-09-08,unified 复型预览失败回退 phase_route=none)
+- 用户:CANH 数据处理时"相位优化 F2 复型预览"失败(NMRPipe data in Frequency Domain/Broken pipe);
+- 根因:unified 自动相位第一遍复型预览对固体 CANH 不兼容;phase_route=none 可正常出谱;
+- 解决:workflow/stepwise._generate_spectrum_impl 对 unified_route 的"复型预览/NMRPipe
+  处理失败"异常捕获,记日志后以 phase_route=none 重试(复用已转换 fid);
+- 验证:VM canh/72 处理后出谱(回退 none,~12s);
+
+## 0.2.199-补29gz(2026-09-08,新增固体 3D 预设 CONH/CCNH)
+- 用户:CoNH/CCNH 等固体谱预设不足;固体预设需补齐;
+- 实现:新增 presets/conh.yaml(CONH,1H 检测 15N/13C,峰 uniform)、presets/ccnh.yaml
+  (CCNH,1H 检测 15N/13C,Cα/Cβ mixed)并注册为 1H/15N/13C 候选;注:conh 子串会遮蔽
+  液体 cbcaconh/hcconh/ccconh,故不做粗略 PULPROG 子串映射(依赖核组合族回退命中);
+- 验证:本地 ruff+全量 pytest 通过;VM 全量 889 passed/19 skipped(EXIT=0);
 ## 0.2.199-补29gw(2026-09-08,组注释行距紧凑 + 置于数据组页"按参考数据处理"上方)
 - 用户:注释行间距太大、太占位置;组注释应在"按参考数据处理"这几个字上方,而非中间面板最顶部;
 - 实现:gui/group_panel.GroupBatchPanel 新增组内数据注释(字段×数据网格,行距 2/边距小,
