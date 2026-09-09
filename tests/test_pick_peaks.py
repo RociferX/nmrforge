@@ -52,7 +52,7 @@ def test_pick_peaks_detects_and_writes(tmp_path: Path) -> None:
     _write_ft2(ft2, spec)
 
     manager, exp_id, data_id = _manager_with_spectrum(tmp_path, ft2)
-    result = pick_peaks(manager, exp_id, data_id)
+    result = pick_peaks(manager, exp_id, data_id, sigma_multiplier=25.0)
 
     assert result["status"] == "success"
     assert result["peak_count"] >= 1
@@ -100,7 +100,7 @@ def test_pick_peaks_subpixel_shift_interpolated(tmp_path: Path) -> None:
     ft2 = tmp_path / "sub.ft2"
     _write_ft2(ft2, real)
     manager, exp_id, data_id = _manager_with_spectrum(tmp_path, ft2)
-    result = pick_peaks(manager, exp_id, data_id)
+    result = pick_peaks(manager, exp_id, data_id, sigma_multiplier=25.0)
     rows = import_peaks_poky(Path(result["peak_path"]))
     top = max(rows, key=lambda r: float(r["Intensity"]))
     h = float(top["H_shift"])
@@ -138,7 +138,7 @@ def test_pick_peaks_writes_poky_list(tmp_path: Path) -> None:
     _write_ft2(ft2, spec)
     manager, exp_id, data_id = _manager_with_spectrum(tmp_path, ft2)
 
-    result = pick_peaks(manager, exp_id, data_id)
+    result = pick_peaks(manager, exp_id, data_id, sigma_multiplier=25.0)
     path = Path(result["peak_path"])
     assert path.suffix == ".list"
     lines = path.read_text(encoding="utf-8").splitlines()
@@ -146,7 +146,7 @@ def test_pick_peaks_writes_poky_list(tmp_path: Path) -> None:
     assert len(lines) >= 2
     assert "Reliability" not in "\n".join(lines)
     assert "阈值" in result["logs"][0]
-    assert "25.0σ" in result["logs"][0]  # 默认 25σ(0.2.199-补29gc)
+    assert "25.0σ" in result["logs"][0]  # 机制测试显式 25σ(默认 35σ,补29hn)
 
 
 def _write_metadata(
@@ -276,7 +276,7 @@ def test_pick_peaks_uniform_type_keeps_dominant_sign_only(tmp_path: Path) -> Non
     manager, exp_id, data_id = _manager_with_spectrum(tmp_path, ft2)
     _write_metadata(manager, exp_id, data_id, "HSQC")  # peak_sign: uniform
 
-    result = pick_peaks(manager, exp_id, data_id)
+    result = pick_peaks(manager, exp_id, data_id, sigma_multiplier=25.0)
     rows = _read_rows(Path(result["peak_path"]))
     assert len(rows) == 3
     assert all(float(r["Intensity"]) > 0 for r in rows)
@@ -299,7 +299,7 @@ def test_pick_peaks_uniform_type_negative_dominant(tmp_path: Path) -> None:
     manager, exp_id, data_id = _manager_with_spectrum(tmp_path, ft2)
     _write_metadata(manager, exp_id, data_id, "HSQC")
 
-    result = pick_peaks(manager, exp_id, data_id)
+    result = pick_peaks(manager, exp_id, data_id, sigma_multiplier=25.0)
     rows = _read_rows(Path(result["peak_path"]))
     assert len(rows) == 3
     assert all(float(r["Intensity"]) < 0 for r in rows)
@@ -325,7 +325,7 @@ def test_pick_peaks_spectrum_evidence_backfill(tmp_path: Path) -> None:
     manager, exp_id, data_id = _manager_with_spectrum(tmp_path, ft2)
     _write_metadata(manager, exp_id, data_id, "HSQC", confidence=0.3)  # 低置信
 
-    result = pick_peaks(manager, exp_id, data_id)
+    result = pick_peaks(manager, exp_id, data_id, sigma_multiplier=25.0)
     rows = _read_rows(Path(result["peak_path"]))
     signs = {float(r["Intensity"]) > 0 for r in rows}
     assert signs == {True, False}  # 正负都选
@@ -351,7 +351,7 @@ def test_pick_peaks_spectrum_evidence_keeps_dominant_when_mostly_one_sign(
     manager, exp_id, data_id = _manager_with_spectrum(tmp_path, ft2)
     _write_metadata(manager, exp_id, data_id, "HSQC", confidence=0.3)
 
-    result = pick_peaks(manager, exp_id, data_id)
+    result = pick_peaks(manager, exp_id, data_id, sigma_multiplier=25.0)
     rows = _read_rows(Path(result["peak_path"]))
     assert all(float(r["Intensity"]) > 0 for r in rows)
 
@@ -377,7 +377,7 @@ def test_pick_peaks_spectrum_evidence_respects_confident_uniform(
     manager, exp_id, data_id = _manager_with_spectrum(tmp_path, ft2)
     _write_metadata(manager, exp_id, data_id, "HSQC", confidence=0.95)
 
-    result = pick_peaks(manager, exp_id, data_id)
+    result = pick_peaks(manager, exp_id, data_id, sigma_multiplier=25.0)
     rows = _read_rows(Path(result["peak_path"]))
     assert all(float(r["Intensity"]) > 0 for r in rows)
     assert not any("谱面回补" in log for log in result["logs"])
@@ -404,7 +404,7 @@ def test_pick_peaks_spectrum_evidence_rejects_contamination(
     manager, exp_id, data_id = _manager_with_spectrum(tmp_path, ft2)
     _write_metadata(manager, exp_id, data_id, "HSQC", confidence=0.3)
 
-    result = pick_peaks(manager, exp_id, data_id)
+    result = pick_peaks(manager, exp_id, data_id, sigma_multiplier=25.0)
     rows = _read_rows(Path(result["peak_path"]))
     assert all(float(r["Intensity"]) > 0 for r in rows)
     assert not any("谱面回补" in log for log in result["logs"])
@@ -439,7 +439,7 @@ def test_gui_user_type_updates_metadata(tmp_path: Path) -> None:
     assert et["confidence"] == 1.0
     assert "gui_user_selected" in et["evidence"]
 
-    result = pick_peaks(manager, exp_id, data_id)
+    result = pick_peaks(manager, exp_id, data_id, sigma_multiplier=25.0)
     rows = _read_rows(Path(result["peak_path"]))
     signs = {float(r["Intensity"]) > 0 for r in rows}
     assert signs == {True, False}  # HNCACB mixed → 正负都选
@@ -461,7 +461,7 @@ def test_pick_peaks_mixed_type_picks_both_signs(tmp_path: Path) -> None:
     manager, exp_id, data_id = _manager_with_spectrum(tmp_path, ft2)
     _write_metadata(manager, exp_id, data_id, "HNCACB")  # peak_sign: mixed
 
-    result = pick_peaks(manager, exp_id, data_id)
+    result = pick_peaks(manager, exp_id, data_id, sigma_multiplier=25.0)
     rows = _read_rows(Path(result["peak_path"]))
     assert len(rows) == 4
     signs = {float(r["Intensity"]) > 0 for r in rows}
@@ -478,7 +478,7 @@ def test_pick_peaks_ft3_shifts_follow_logical_axes(tmp_path: Path) -> None:
     _write_ft3_ordered(ft3, data, [2.0, 3.0, 1.0])
     manager, exp_id, data_id = _manager_with_spectrum(tmp_path, ft3)
 
-    result = pick_peaks(manager, exp_id, data_id)
+    result = pick_peaks(manager, exp_id, data_id, sigma_multiplier=25.0)
     rows = _read_rows(Path(result["peak_path"]), nuclei=["15N", "1H", "13C"])
     assert len(rows) >= 1
     row = rows[0]
@@ -501,7 +501,7 @@ def test_pick_peaks_flat_plateau_not_picked(tmp_path: Path) -> None:
     _write_ft2(ft2, spec)
     manager, exp_id, data_id = _manager_with_spectrum(tmp_path, ft2)
 
-    result = pick_peaks(manager, exp_id, data_id)
+    result = pick_peaks(manager, exp_id, data_id, sigma_multiplier=25.0)
     rows = _read_rows(Path(result["peak_path"]))
     assert len(rows) == 2
 
@@ -540,7 +540,7 @@ def test_pick_peaks_excludes_axial_edges(tmp_path: Path) -> None:
     _write_ft2(ft2, spec)
     manager, exp_id, data_id = _manager_with_spectrum(tmp_path, ft2)
 
-    result = pick_peaks(manager, exp_id, data_id)
+    result = pick_peaks(manager, exp_id, data_id, sigma_multiplier=25.0)
     rows = _read_rows(Path(result['peak_path']))
     assert len(rows) == 2  # 两个谱内峰,轴峰被排除
 
@@ -615,7 +615,7 @@ def test_pick_peaks_ft3_header_order_wins_over_metadata(
         ],
     )
 
-    result = pick_peaks(manager, exp_id, data_id)
+    result = pick_peaks(manager, exp_id, data_id, sigma_multiplier=25.0)
     row = _read_rows(Path(result["peak_path"]), nuclei=["15N", "1H", "13C"])[0]
     n_ppm = 100.0 + (16 - 1 - 8) * 2189.0 / (16 * 60.8)
     h_ppm = 6.0 + (16 - 1 - 8) * 3000.0 / (16 * 600.0)

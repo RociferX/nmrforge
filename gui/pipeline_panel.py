@@ -627,20 +627,20 @@ class PipelineStepRow(QWidget):
         )
         button_row.addWidget(self.ext_range_button)
         # 0.2.199-补29ar/补29au/补29bo/补29cm/补29cn:峰挑选阈值条(3.0–50.0 σ,
-        # 默认 15;输入框不设上限,滑块仅到 50);
+        # 默认 35;输入框不设上限,滑块仅到 50);
         # 补29au:调整只更新数值,点「运行/重新处理」才重新选峰
         self.threshold_label = QLabel("阈值(σ)")
         self.threshold_label.setVisible(self.step_id == "peaks")
         self.threshold_slider = QSlider(Qt.Orientation.Horizontal)
         self.threshold_slider.setRange(30, 500)
-        self.threshold_slider.setValue(250)
+        self.threshold_slider.setValue(350)
         self.threshold_slider.setFixedWidth(120)
         self.threshold_slider.setVisible(self.step_id == "peaks")
         self.threshold_spin = QDoubleSpinBox()
         self.threshold_spin.setRange(3.0, 1_000_000.0)  # 输入值不设上限(补29cn)
         self.threshold_spin.setSingleStep(0.5)
         self.threshold_spin.setDecimals(1)
-        self.threshold_spin.setValue(25.0)
+        self.threshold_spin.setValue(35.0)
         self.threshold_spin.setVisible(self.step_id == "peaks")
         # 联动保护:输入超过滑块上限(50σ)时滑块停在 500,不回写覆盖输入值
         self._threshold_sync = False
@@ -804,7 +804,7 @@ class PipelineStepRow(QWidget):
 
     def get_threshold(self) -> float:
         """峰挑选阈值(σ);非 peaks 步骤返回默认 25.0(0.2.199-补29gc)。"""
-        return self.threshold_spin.value() if self.step_id == "peaks" else 25.0
+        return self.threshold_spin.value() if self.step_id == "peaks" else 35.0
 
     def set_ref_text(self, text: str) -> None:
         """显示已选参考谱(0.2.199-补29dl)。"""
@@ -1073,7 +1073,7 @@ class PipelinePanel(QWidget):
         key = (self._current_exp_id, self._current_data_id)
         self._threshold_custom_by_data[key] = True
         if key not in self._threshold_by_data:
-            self._threshold_by_data[key] = 25.0
+            self._threshold_by_data[key] = 35.0
         try:
             from gui.per_data_records import update_ui_state
 
@@ -1095,7 +1095,7 @@ class PipelinePanel(QWidget):
         旧默认 15(未显式自定义)迁移为 25(0.2.199-补29gc)。"""
         key = (exp_id, data_id)
         if key not in self._threshold_by_data:
-            value = 25.0
+            value = 35.0
             custom = False
             try:
                 from gui.per_data_records import load_ui_state
@@ -1109,10 +1109,11 @@ class PipelinePanel(QWidget):
                 custom = bool(peaks_state.get("custom", False))
                 if raw is not None:
                     value = float(raw)
-                # 旧版本默认 15σ 会在查看数据时被自动写盘;未显式自定义的
-                # 一律迁移到新默认 25σ。
-                if not custom and abs(value - 15.0) < 1e-9:
-                    value = 25.0
+                # 旧版本默认 15/25σ(未显式自定义)一律迁移到新默认 35σ。
+                if not custom and (
+                    abs(value - 15.0) < 1e-9 or abs(value - 25.0) < 1e-9
+                ):
+                    value = 35.0
             except Exception:  # noqa: BLE001 - 读取失败用默认
                 pass
             self._threshold_by_data[key] = value

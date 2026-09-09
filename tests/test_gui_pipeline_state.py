@@ -382,7 +382,7 @@ def test_pipeline_peak_threshold_isolated_per_data(
     row.threshold_spin.setValue(22.5)
     assert panel._threshold_by_data[(exp.id, d1.id)] == 22.5
     panel.set_selection("data", exp.id, d2.id)
-    assert row.threshold_spin.value() == 25.0
+    assert row.threshold_spin.value() == 35.0
     row.threshold_spin.setValue(9.0)
     panel.set_selection("data", exp.id, d1.id)
     assert row.threshold_spin.value() == 22.5
@@ -418,10 +418,10 @@ def test_pipeline_threshold_persisted_in_data_folder(
     panel2.close()
 
 
-def test_threshold_legacy_default15_migrates_to25(
+def test_threshold_legacy_default15_migrates_to35(
     tmp_path: Path, qapp: QApplication
 ) -> None:
-    """0.2.199-补29gc:旧默认 15σ(未显式自定义)迁移到新默认 25σ。"""
+    """旧默认 15σ(未显式自定义)迁移到新默认 35σ。"""
     import json
 
     from core.project import ProjectManager
@@ -438,7 +438,7 @@ def test_threshold_legacy_default15_migrates_to25(
     )
     panel = PipelinePanel(manager)
     panel.set_selection("data", exp.id, d1.id)
-    assert panel._rows["peaks"].threshold_spin.value() == 25.0
+    assert panel._rows["peaks"].threshold_spin.value() == 35.0
     panel.close()
 
 
