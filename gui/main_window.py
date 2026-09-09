@@ -901,7 +901,11 @@ class MainWindow(QMainWindow):
         threading.Thread(target=worker, daemon=True).start()
 
     def _on_import_failed(self, message: str) -> None:
-        """主线程处理导入失败(弹窗 + 日志)。"""
+        """主线程处理导入失败(弹窗 + 日志);动力学暂不支持走独立提示。"""
+        if "动力学" in message or "暂不支持" in message:
+            self._append_log(f"提示: {message}")
+            InfoDialog.show_info(self, "暂不支持", message)
+            return
         self._append_log(f"导入失败: {message}")
         InfoDialog.show_info(self, "导入失败", message)
 

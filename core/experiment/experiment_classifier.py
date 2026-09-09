@@ -65,6 +65,11 @@ def _is_kinetics(experiment) -> bool:
     return any(kw in pulprog for kw in _KINETICS_PULPROG_HINTS)
 
 
+def is_kinetics(experiment) -> bool:
+    """公开:快速判断是否动力学/变延时系列(供导入拦截等上游使用)。"""
+    return _is_kinetics(experiment)
+
+
 def _pulprog_state_hint(pulprog: str) -> str | None:
     """根据 PULPROG 子串判液体/固体;无法判断返回 None。"""
     for kw in _SOLID_HINTS:

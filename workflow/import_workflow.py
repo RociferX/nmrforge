@@ -36,6 +36,10 @@ class ImportWorkflowError(Exception):
     """导入工作流错误(参数校验/IO/项目状态)。"""
 
 
+class KineticsUnsupportedError(ImportWorkflowError):
+    """动力学/变延时系列暂不支持,导入即拦截。"""
+
+
 @dataclass
 class ImportResult:
     """一次导入的结果摘要(GUI 展示用)。"""
@@ -149,6 +153,16 @@ def _link_tree(src: Path, dst: Path, stats: dict[str, int]) -> None:
             stats[_link_one(source_item, dest_item)] += 1
 
 
+def _raise_if_kinetics(experiment) -> None:
+    """动力学/变延时系列不支持自动处理,导入拦截(不创建条目/不拷贝)。"""
+    from core.experiment.experiment_classifier import is_kinetics
+
+    if is_kinetics(experiment):
+        raise KineticsUnsupportedError(
+            "检测到动力学实验(变延时/时间系列),暂不支持导入"
+        )
+
+
 def import_data(
     manager: ProjectManager,
     exp_id: str,
@@ -179,6 +193,7 @@ def import_data(
         )
 
         experiment, discovered = read_dataset_container(src)
+        _raise_if_kinetics(experiment)
         if len(discovered) < 2:
             raise ImportWorkflowError(
                 f"分段导入至少需要 2 个含 acqus 的分段子目录(非数据子目录已忽略): {src}"
@@ -196,6 +211,7 @@ def import_data(
     else:
         _validate_dataset_dir(src)
         experiment = read_dataset(src)
+        _raise_if_kinetics(experiment)
         segment_paths = [Path(seg).resolve() for seg in (segments or [])]
         for seg in segment_paths:
             _validate_dataset_dir(seg)

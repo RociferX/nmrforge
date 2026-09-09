@@ -4,8 +4,11 @@
 - 用户:软件要能识别动力学实验,导入时提示暂不支持;
 - 实现:experiment_classifier 加 _is_kinetics(源目录 vdlist 文件 / acqus.VDLIST 非空 /
   PULPROG 含 kinetics/relax/t1ir/t2ir/vdlist/pseudo2d),命中返回
-  ExperimentType(name=Kinetics, conf 0.9);main_window 导入后检测到 Kinetics
-  弹窗「暂不支持」并写日志;
+  ExperimentType(name=Kinetics, conf 0.9);
+- 修1(2026-09-09,按用户反馈):动力学改为**导入即拦截**——import_data 读数据集后检测
+  到动力学立即抛 KineticsUnsupportedError(不创建条目/不拷贝),main_window 的
+  _on_import_failed 识别后弹窗「暂不支持」(不再导入数据);新增
+  test_kinetics_import_blocked;
 - 验证:新增 test_classify_kinetics_by_pulprog / test_classify_kinetics_by_vdlist;
   相关分类/全路径/布局测试全绿,ruff 通过;
 

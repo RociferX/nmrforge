@@ -580,3 +580,17 @@ def test_classify_kinetics_by_vdlist() -> None:
     exp.acquisition_parameters["acqus"]["VDLIST"] = "vdlist"
     result = classify(exp)
     assert result.name == "Kinetics"
+
+def test_kinetics_import_blocked(tmp_path: Path) -> None:
+    """补29hm:动力学/变延时实验导入即拦截(KineticsUnsupportedError,不导入)。"""
+    import pytest
+
+    from workflow.import_workflow import KineticsUnsupportedError, _raise_if_kinetics
+
+    exp = _experiment_with_nuclei(2, ["1H", "13C"], "hsqc")
+    exp.acquisition_parameters["acqus"]["VDLIST"] = "vdlist"
+    with pytest.raises(KineticsUnsupportedError):
+        _raise_if_kinetics(exp)
+
+    normal = _experiment_with_nuclei(2, ["1H", "13C"], "hsqc")
+    _raise_if_kinetics(normal)  # 正常实验不抛
