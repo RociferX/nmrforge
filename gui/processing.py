@@ -249,6 +249,7 @@ class ProcessingController:
         reference_data_id: str = "",
         progress: Callable[[str], None] | None = None,
         params: dict | None = None,
+        on_data_done: Callable[[dict], None] | None = None,
     ) -> dict:
         """对数据组执行批量处理(workflow.batch.run_batch)。
 
@@ -268,6 +269,7 @@ class ProcessingController:
             reference_data_id=reference_data_id or None,
             progress=progress,
             params=params,
+            on_data_done=on_data_done,
         )
 
     def generate_fid(

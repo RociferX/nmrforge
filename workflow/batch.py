@@ -276,6 +276,7 @@ def run_batch(
     params: dict[str, Any] | None = None,
     progress: Callable[[str], None] | None = None,
     reference_data_id: str | None = None,
+    on_data_done: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     """按序对组内每个数据执行指定步骤,单数据失败不中断整组。
 
@@ -286,6 +287,8 @@ def run_batch(
     """
     if manager.project is None:
         raise BatchError("未加载项目,无法批量处理")
+    from backend.runtime import cancel_requested
+
     steps = list(steps)
     unknown = [s for s in steps if s not in BATCH_STEPS]
     if unknown:
@@ -315,6 +318,21 @@ def run_batch(
             "error": "",
             "logs": [],
         }
+        # 0.2.199-补29hf:停止按钮已请求取消 → 剩余数据标记已取消并终止整组
+        if cancel_requested():
+            for _remaining in data_ids[index - 1:]:
+                _per = {
+                    "data_id": _remaining,
+                    "status": "cancelled",
+                    "steps": {},
+                    "failed_step": "",
+                    "error": "用户已停止批量处理",
+                    "logs": ["批量已停止,该数据未处理"],
+                }
+                results[_remaining] = _per
+                if on_data_done is not None:
+                    on_data_done(_per)
+            break
         # 0.2.199-补29gv:开始处理每个数据前输出进度 x/y,便于用户了解进度
         if progress is not None:
             progress(f"[{index}/{total}] 开始处理数据 {data_id}")
@@ -335,6 +353,8 @@ def run_batch(
                     )
                     per_data["logs"].append(per_data["error"])
                     results[data_id] = per_data
+                    if on_data_done is not None:
+                        on_data_done(per_data)
                     if progress is not None:
                         progress(f"{data_id}: 跳过({reason})")
                     continue
@@ -353,6 +373,8 @@ def run_batch(
             per_data["error"] = _msg
             per_data["logs"].append(_msg)
             results[data_id] = per_data
+            if on_data_done is not None:
+                on_data_done(per_data)
             if progress is not None:
                 progress(f"{data_id}: {_msg}")
             continue
@@ -385,15 +407,22 @@ def run_batch(
                     progress=_collect_log,
                 )
             except Exception as exc:  # noqa: BLE001 - 单数据失败不中断整组
-                per_data["status"] = "failed"
-                per_data["failed_step"] = step
-                per_data["error"] = f"{type(exc).__name__}: {exc}"
-                per_data["logs"].append(f"{step} 失败: {exc}")
+                if cancel_requested():
+                    per_data["status"] = "cancelled"
+                    per_data["error"] = "用户已停止批量处理"
+                    per_data["logs"].append(f"{step} 中断(用户停止)")
+                else:
+                    per_data["status"] = "failed"
+                    per_data["failed_step"] = step
+                    per_data["error"] = f"{type(exc).__name__}: {exc}"
+                    per_data["logs"].append(f"{step} 失败: {exc}")
                 per_data["logs"].extend(step_logs)
                 break
             per_data["steps"][step] = value
             per_data["logs"].extend(step_logs)
         results[data_id] = per_data
+        if on_data_done is not None:
+            on_data_done(per_data)
         if progress is not None:
             progress(
                 f"{data_id}: "
@@ -410,6 +439,7 @@ def run_batch(
     manager.save()
     failed = [d for d, r in results.items() if r["status"] == "failed"]
     skipped = [d for d, r in results.items() if r["status"] == "skipped"]
+    cancelled = [d for d, r in results.items() if r["status"] == "cancelled"]
     return {
         "experiment_id": exp_id,
         "batch_id": batch,
@@ -418,9 +448,10 @@ def run_batch(
         "results": results,
         "failed": failed,
         "skipped": skipped,
+        "cancelled": cancelled,
         "summary": {
             "total": total,
-            "success": total - len(failed) - len(skipped),
+            "success": total - len(failed) - len(skipped) - len(cancelled),
             "failed": len(failed),
         },
     }

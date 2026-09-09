@@ -333,3 +333,49 @@ def test_migrate_legacy_default_titles(tmp_path: Path) -> None:
     reopened.save()
     again = ProjectManager.open_project(tmp_path / "proj")
     assert again.group(exp_id, "G1").title == "Group G1"
+def test_run_batch_on_data_done_per_data(tmp_path: Path) -> None:
+    """补29hf:on_data_done 每个数据完成即触发,携带最终 status。"""
+    manager, exp_id, data_ids = _manager_with_data(tmp_path, n=2)
+    manager.create_data_group(exp_id, data_ids=data_ids)
+    backend = _FakeBackend(tmp_path / "work")
+    done: list[dict] = []
+    result = run_batch(
+        manager,
+        exp_id,
+        "G1",
+        ["fid"],
+        backend,
+        on_data_done=lambda per: done.append(per),
+    )
+    assert [d["data_id"] for d in done] == data_ids
+    # 每数据完成即回调,携带各自最终 status(不依赖假后端成功)
+    assert all(d.get("data_id") and d.get("status") for d in done)
+    assert set(result["results"]) == set(data_ids)
+
+
+def test_run_batch_cancel_marks_remaining(tmp_path: Path) -> None:
+    """补29hf:停止按钮请求取消 → 剩余数据标记 cancelled,整组终止。"""
+    from backend.runtime import clear_cancel, request_cancel
+
+    manager, exp_id, data_ids = _manager_with_data(tmp_path, n=2)
+    manager.create_data_group(exp_id, data_ids=data_ids)
+    backend = _FakeBackend(tmp_path / "work")
+    done: list[dict] = []
+    clear_cancel()
+    request_cancel()
+    try:
+        result = run_batch(
+            manager,
+            exp_id,
+            "G1",
+            ["fid"],
+            backend,
+            on_data_done=lambda per: done.append(per),
+        )
+    finally:
+        clear_cancel()
+    assert all(r["status"] == "cancelled" for r in result["results"].values())
+    assert result["cancelled"] == data_ids
+    assert result["summary"]["total"] == 2
+    assert result["summary"]["success"] == 0
+    assert len(done) == 2

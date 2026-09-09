@@ -710,6 +710,32 @@ class MainWindow(QMainWindow):
         for data_id in group.data_ids:
             self.project_tree.mark_running(exp_id, data_id)
 
+        _done_map = {
+            "import": "已导入",
+            "fid": "已生成 FID",
+            "spectrum": "已生成谱图",
+            "peaks": "已选峰",
+            "analysis": "已分析",
+        }
+
+        def _status_label(status: str) -> str:
+            if status == "failed":
+                return "失败"
+            if status == "skipped":
+                return "跳过"
+            if status == "cancelled":
+                return "已取消"
+            return _done_map.get(str(steps[-1]) if steps else "", "成功")
+
+        def on_data_done(per: dict) -> None:
+            """0.2.199-补29hf:每数据完成即回主线程写回树状态(不等批量全部)。"""
+            data_id = per.get("data_id", "")
+            _st = _status_label(per.get("status", ""))
+            self.group_data_done.emit(exp_id, data_id, _st)
+            data_scope = self.log_panel.scope_key("data", exp_id, data_id)
+            for _lg in per.get("logs") or []:
+                self.log_append_requested.emit(_lg, data_scope)
+
         def worker() -> None:
             try:
                 self.controller.set_manager(self.manager)
@@ -719,6 +745,7 @@ class MainWindow(QMainWindow):
                     steps,
                     reference_data_id=reference_data_id,
                     params=params or {},
+                    on_data_done=on_data_done,
                     progress=lambda msg: self.log_append_requested.emit(
                         msg, group_scope
                     ),
@@ -726,16 +753,22 @@ class MainWindow(QMainWindow):
                 summary = dict(result.get("summary") or {})
                 failed = list(result.get("failed") or [])
                 skipped = list(result.get("skipped") or [])
+                results = result.get("results") or {}
+                cancelled = [
+                    d for d, r in results.items() if r.get("status") == "cancelled"
+                ]
                 info = (
                     f"数据组 {group_id} 批量处理完成: "
                     f"{summary.get('success', 0)}/{summary.get('total', 0)} 成功"
                 )
+                if cancelled:
+                    info += f" · 已停止,{len(cancelled)} 个未处理"
                 if failed:
                     info += " · 失败: " + ",".join(failed)
                 if skipped:
                     info += " · 跳过(类型/条件不一致): " + ",".join(skipped)
                 items = []
-                for data_id, per in (result.get("results") or {}).items():
+                for data_id, per in results.items():
                     status = per.get("status")
                     items.append(
                         {
@@ -743,33 +776,11 @@ class MainWindow(QMainWindow):
                             "ok": status in ("success", "already_done"),
                             "failed": status == "failed",
                             "skipped": status == "skipped",
+                            "cancelled": status == "cancelled",
                             "message": "",
                             "error": per.get("error", ""),
                         }
                     )
-                    # 0.2.199-补29hd:逐数据完成状态写回左侧树(失败/跳过分得清)
-                    # 0.2.199-补29hd:成功状态 = 实际处理完且成功的步骤
-                    if status in ("success", "already_done"):
-                        _done_map = {
-                            "import": "已导入",
-                            "fid": "已生成 FID",
-                            "spectrum": "已生成谱图",
-                            "peaks": "已选峰",
-                            "analysis": "已分析",
-                        }
-                        _st = _done_map.get(str(steps[-1]) if steps else "", "成功")
-                    elif status == "failed":
-                        _st = "失败"
-                    else:
-                        _st = "跳过"
-                    self.group_data_done.emit(exp_id, data_id, _st)
-                    # 0.2.199-补29gs:组批量后把每个数据的分步日志落到其自身
-                    # 数据作用域(与单个处理一致,选该数据可见)。
-                    data_scope = self.log_panel.scope_key(
-                        "data", exp_id, data_id
-                    )
-                    for _lg in per.get("logs") or []:
-                        self.log_append_requested.emit(_lg, data_scope)
                 self.center_panel.group_page.summary_requested.emit(
                     {"info": info, "items": items}
                 )

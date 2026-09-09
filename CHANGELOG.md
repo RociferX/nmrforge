@@ -1,5 +1,16 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29hg(2026-09-09,数据组批量实时刷新状态 + 停止按钮整组终止)
+- 用户:依次运行时第一个已完成却仍显示「运行中」;停止按钮只能停当前数据,无法终止整组;
+- 根因:worker 在 run_group_batch 整体跑完后才遍历 results 发射 group_data_done,故
+  逐数据状态不实时;run_batch 循环从不检查后端取消标志,停止只杀当前子进程后仍继续下一数据;
+- 解决:run_batch 新增 on_data_done 回调,每数据完成(成功/失败/跳过/取消)即触发;
+  main_window 用它在 worker 里实时发射 group_data_done(已生成X/失败/跳过/已取消)写回树,
+  并把该数据分步日志落到自身数据作用域;run_batch 循环开始与步骤异常时检查
+  cancel_requested(),停止后剩余数据标记 cancelled、整组终止(summary 保持原契约);
+- 验证:新增 test_run_batch_on_data_done_per_data / test_run_batch_cancel_marks_remaining;
+  相关 batch/GUI 测试全绿,ruff 通过;
+
 ## 0.2.199-补29hf(2026-09-09,树节点及面板默认名「数据组/样品数据」改为「Group/Data」)
 - 用户:树节点的数据组、样品数据这种默认生成的名字改成 Group 和 Data;
 - 实现:新建数据组默认标题 f"数据组 {group_id}" → f"Group {group_id}";实体名
