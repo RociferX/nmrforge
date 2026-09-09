@@ -9,7 +9,8 @@
   并把该数据分步日志落到自身数据作用域;run_batch 循环开始与步骤异常时检查
   cancel_requested(),停止后剩余数据标记 cancelled、整组终止(summary 保持原契约);
 - 验证:新增 test_run_batch_on_data_done_per_data / test_run_batch_cancel_marks_remaining;
-  相关 batch/GUI 测试全绿,ruff 通过;
+  conftest 加每测试前 clear_cancel 的 autouse fixture(修跨测试泄漏 _CANCEL 导致
+  GUI 测试后处理/相位搜索误报「任务已取消」);相关 batch/GUI 测试全绿,ruff 通过;
 
 ## 0.2.199-补29hf(2026-09-09,树节点及面板默认名「数据组/样品数据」改为「Group/Data」)
 - 用户:树节点的数据组、样品数据这种默认生成的名字改成 Group 和 Data;

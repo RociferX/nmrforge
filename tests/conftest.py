@@ -46,6 +46,16 @@ def bruker_dir(tmp_path: Path) -> Path:
     return copy
 
 
+@pytest.fixture(autouse=True)
+def _clear_cancel_between_tests() -> None:
+    """0.2.199-补29hg:每测试开始前清后端取消标志,避免上一个测试(如 GUI
+    停止按钮)泄漏 _CANCEL 到下个处理/相位搜索测试造成「任务已取消」误报。"""
+    from backend.runtime import clear_cancel
+
+    clear_cancel()
+    yield
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _close_gui_windows_at_session_end() -> None:
     """会话结束前关闭所有残留顶层窗口并处理事件。
