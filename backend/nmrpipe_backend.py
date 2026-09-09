@@ -36,7 +36,6 @@ from backend.bruker_workflow import (
 from backend.config import (
     resolve_ext_hi,
     resolve_ext_lo,
-    resolve_max_smile_threads,
     resolve_nthread,
     resolve_points_per_line,
 )
@@ -895,15 +894,6 @@ class NMRPipeBackend:
         smile_scaling = bool(params.get("smile_scaling", True))
         smile_report = int(params.get("smile_report", 1))
         nthread = resolve_nthread(params.get("nthread"))
-        # 0.2.199-补29hp:用户实测 SMILE 超 2 线程会致宿主关机(电源/散热保护),
-        # 无论直接维窗口多窄;一律 clamp 到 max_threads(默认 2,可在设置调)。
-        max_threads = resolve_max_smile_threads()
-        if nthread > max_threads:
-            logs.append(
-                f"SMILE 线程已限制为 {max_threads}"
-                f"(原 {nthread} 超过阈值会触发高负载关机;可在设置 smile.max_threads 调整)"
-            )
-            nthread = max_threads
         # 0.2.113:不再按网格限线程——sampleM 事故根因是直接维内存
         # (非切片流/直接维填零过多),由 0.2.112 内存护栏兜底
         ext_lo = resolve_ext_lo(params.get("ext_lo"))
@@ -1737,11 +1727,6 @@ class NMRPipeBackend:
             logs.append("轻量 SMILE 相位搜索:符号链接失败,跳过")
             return None
         nthread = resolve_nthread(params.get("nthread"))
-        # 0.2.199-补29hp:轻量 SMILE 相位搜索同样 clamp 线程,避免高负载关机。
-        max_threads = resolve_max_smile_threads()
-        if nthread > max_threads:
-            logs.append(f"轻量 SMILE 相位搜索线程已限制为 {max_threads}")
-            nthread = max_threads
         ext_lo = resolve_ext_lo(params.get("ext_lo"))
         ext_hi = resolve_ext_hi(params.get("ext_hi"))
         extract = _as_bool(params.get("extract", True))

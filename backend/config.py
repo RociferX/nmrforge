@@ -25,9 +25,6 @@ DEFAULT_EXT_LO = "10.5"
 DEFAULT_EXT_HI = "6.5"
 # 0.2.199-补24:SMILE 自动线程 = 机器线程数 - thread_offset(可在设置改)
 DEFAULT_THREAD_OFFSET = 2
-# 0.2.199-补29hp(用户):SMILE 超过 2 线程会致宿主高负载关机(窄直接维窗也如此,实测);
-# SMILE 线程一律 clamp 到 max_threads(默认 2,可在设置 smile.max_threads 调)。
-DEFAULT_SMILE_MAX_THREADS = 2
 
 
 def _auto_nthread(config: dict[str, Any] | None = None) -> int:
@@ -154,13 +151,6 @@ def resolve_nthread(value: Any, config: dict[str, Any] | None = None) -> int:
     return int(load_processing_defaults(config)["nthread"])
 
 
-def resolve_max_smile_threads(config: dict[str, Any] | None = None) -> int:
-    """SMILE 线程硬上限(默认 2):超过会触发宿主高负载关机(用户,2026-09-09 实测)。"""
-    smile = load_config(config).get("smile") or {}
-    v = _as_int(smile.get("max_threads"), DEFAULT_SMILE_MAX_THREADS)
-    return max(1, min(v, 8))
-
-
 def resolve_ext_lo(value: Any, config: dict[str, Any] | None = None) -> str:
     """直接维提取窗口高端(EXT -x1):显式值优先,否则配置默认,再否则内置默认。"""
     if value is not None:
@@ -189,14 +179,12 @@ __all__ = [
     "DEFAULT_POINTS_PER_LINE",
     "DEFAULT_EXT_LO",
     "DEFAULT_EXT_HI",
-    "DEFAULT_SMILE_MAX_THREADS",
     "DEFAULT_THREAD_OFFSET",
     "load_config",
     "load_processing_defaults",
     "nmrpipe_path",
     "resolve_ext_hi",
     "resolve_ext_lo",
-    "resolve_max_smile_threads",
     "resolve_nthread",
     "resolve_points_per_line",
 ]
