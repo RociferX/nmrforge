@@ -1,5 +1,12 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29hq(2026-09-09,设置「SMILE 线程预留数」改「SMILE 线程数」,默认2)
+- 用户:设置里预留线程数改成 SMILE 设置线程数,默认 2;最大=机器线程数-2,核数≤3 只能 1;
+- 实现:backend.config 增 DEFAULT_SMILE_THREADS=2 与 smile_thread_limit()(核数-2,≤3核=1);
+  resolve_nthread 显式值 clamp 到上限,缺省/0=默认 2;load_processing_defaults nthread 同源;
+  设置对话框字段改名「SMILE 线程数」,值域 1..上限,存 smile.nthread;settings/yaml 默认 nthread=2;
+- 验证:更新 test_config_defaults 默认断言;config/对话框相关测试全绿,ruff 通过;
+
 ## 0.2.199-补29hn(2026-09-09,选峰默认阈值 25σ → 35σ)
 - 用户:选峰默认阈值改为 35;
 - 实现:_PICK_THRESHOLD_SIGMA 25→35;pipeline 阈值滑块/步进器默认 250/25.0→350/35.0;

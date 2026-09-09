@@ -790,17 +790,20 @@ class SettingsDialog(QDialog):
             )
             form.addRow(f"{nucleus} 对齐容差 (ppm)", tol_spin)
             self.tolerance_spins[nucleus] = tol_spin
-        # 0.2.199-补24:SMILE 自动线程预留数(机器线程数 - thread_offset)
-        self.thread_offset_spin = QSpinBox()
-        self.thread_offset_spin.setRange(0, 16)
-        self.thread_offset_spin.setValue(
-            int((settings.get("smile") or {}).get("thread_offset", 2))
+        # 0.2.199-补29hq(用户):SMILE 线程数(默认 2;上限=机器核数-2,≤3核只能 1)
+        from backend.config import smile_thread_limit
+        sm_limit = smile_thread_limit()
+        self.smile_thread_spin = QSpinBox()
+        self.smile_thread_spin.setRange(1, max(1, sm_limit))
+        default_threads = int((settings.get("smile") or {}).get("nthread", 2) or 0)
+        if default_threads <= 0:
+            default_threads = 2
+        self.smile_thread_spin.setValue(max(1, min(default_threads, sm_limit)))
+        self.smile_thread_spin.setToolTip(
+            f"SMILE 重构线程数(默认 2);本机上限 {sm_limit}(机器核数-2,核数≤3 只能 1)。"
+            "超过主机可承受线程数会触发高负载关机(本机实测 >2 即关机),建议保持 2"
         )
-        self.thread_offset_spin.setToolTip(
-            "SMILE 自动线程 = 机器线程数 - 该值(默认 2,给系统留线程);"
-            "改小可提升速度,改大可降低 CPU/功耗占用"
-        )
-        form.addRow("SMILE 线程预留数", self.thread_offset_spin)
+        form.addRow("SMILE 线程数", self.smile_thread_spin)
         layout.addLayout(form)
         pipeline = settings.get("pipeline") or {}
         self.simple_mode_check = QCheckBox(
@@ -863,7 +866,7 @@ class SettingsDialog(QDialog):
                 "simple_mode": self.simple_mode_check.isChecked(),
             },
             "smile": {
-                "thread_offset": self.thread_offset_spin.value(),
+                "nthread": self.smile_thread_spin.value(),
             },
         }
         save_settings(settings)

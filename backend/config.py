@@ -25,6 +25,8 @@ DEFAULT_EXT_LO = "10.5"
 DEFAULT_EXT_HI = "6.5"
 # 0.2.199-补24:SMILE 自动线程 = 机器线程数 - thread_offset(可在设置改)
 DEFAULT_THREAD_OFFSET = 2
+# 0.2.199-补29hq(用户):SMILE 线程数默认 2(实测 >2 会致宿主关机);上限=机器核数-2。
+DEFAULT_SMILE_THREADS = 2
 
 
 def _auto_nthread(config: dict[str, Any] | None = None) -> int:
@@ -117,7 +119,7 @@ def load_processing_defaults(config: dict[str, Any] | None = None) -> dict[str, 
         "points_per_line": _as_float(
             processing.get("points_per_line"), DEFAULT_POINTS_PER_LINE
         ),
-        "nthread": _as_int(smile.get("nthread"), 0) or _auto_nthread(cfg),
+        "nthread": resolve_nthread(smile.get("nthread"), cfg),
         "thread_offset": _as_int(
             smile.get("thread_offset"), DEFAULT_THREAD_OFFSET
         ),
@@ -140,15 +142,24 @@ def resolve_points_per_line(value: Any, config: dict[str, Any] | None = None) ->
 
 
 def resolve_nthread(value: Any, config: dict[str, Any] | None = None) -> int:
-    """显式值优先,否则配置默认(smile.nthread);无效/非正回退自动(机器线程数-2)。"""
+    """SMILE 线程数:显式值(>0)优先,否则默认 2;一律 clamp 到机上限(核数-2,≤3核=1)。"""
+    limit = smile_thread_limit(config)
     if value is not None:
         try:
             v = int(value)
             if v > 0:
-                return v
+                return min(v, limit)
         except (TypeError, ValueError):
             pass
-    return int(load_processing_defaults(config)["nthread"])
+    return min(DEFAULT_SMILE_THREADS, limit)
+
+
+def smile_thread_limit(config: dict[str, Any] | None = None) -> int:
+    """SMILE 线程上限 = 机器核数-2;核数≤3 只允许 1(用户,2026-09-09)。"""
+    cores = os.cpu_count() or 4
+    if cores <= 3:
+        return 1
+    return max(1, cores - 2)
 
 
 def resolve_ext_lo(value: Any, config: dict[str, Any] | None = None) -> str:
@@ -179,6 +190,7 @@ __all__ = [
     "DEFAULT_POINTS_PER_LINE",
     "DEFAULT_EXT_LO",
     "DEFAULT_EXT_HI",
+    "DEFAULT_SMILE_THREADS",
     "DEFAULT_THREAD_OFFSET",
     "load_config",
     "load_processing_defaults",
@@ -186,5 +198,6 @@ __all__ = [
     "resolve_ext_hi",
     "resolve_ext_lo",
     "resolve_nthread",
+    "smile_thread_limit",
     "resolve_points_per_line",
 ]

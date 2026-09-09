@@ -47,7 +47,7 @@ DEFAULTS: dict = {
     "alignment_tolerance_ppm": {"1H": 0.02, "15N": 0.2, "13C": 0.2},
     "guide": {"first_import_hint_shown": False},
     "pipeline": {"simple_mode": False},
-    "smile": {"thread_offset": 2},
+    "smile": {"nthread": 2},
 }
 
 

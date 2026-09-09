@@ -31,7 +31,7 @@ def _auto_nthread_expected(config=None) -> int:
 def test_load_processing_defaults_empty_config() -> None:
     defaults = load_processing_defaults({})
     assert defaults["points_per_line"] == 2.0
-    assert defaults["nthread"] == _auto_nthread_expected({})
+    assert defaults["nthread"] == 2
     assert defaults["nmrpipe_path"] == ""
     assert isinstance(defaults["linewidth_hz"], dict)
 
@@ -66,7 +66,7 @@ def test_load_processing_defaults_invalid_fallback() -> None:
     assert defaults["linewidth_hz"]["1H"] == 8.0  # 无效 → 核素默认
     assert defaults["linewidth_hz"]["13C"] == 20.0
     assert defaults["points_per_line"] == 2.0
-    assert defaults["nthread"] == _auto_nthread_expected(cfg)
+    assert defaults["nthread"] == 2
     assert defaults["nmrpipe_path"] == "123"
 
 
@@ -74,9 +74,9 @@ def test_resolve_helpers() -> None:
     assert resolve_points_per_line(None) == 2.0
     assert resolve_points_per_line(4.0) == 4.0
     assert resolve_points_per_line("abc") == 2.0
-    assert resolve_nthread(None) == _auto_nthread_expected()
+    assert resolve_nthread(None) == 2
     assert resolve_nthread(4) == 4
-    assert resolve_nthread(0) == _auto_nthread_expected()
+    assert resolve_nthread(0) == 2
 
 
 def test_zero_fill_plan_uses_config_defaults(

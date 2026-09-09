@@ -21,8 +21,8 @@ processing:
   memory_disk_path: ""           # 可选:内存盘根目录(默认 Linux /dev/shm;Windows 自建 RAM 盘后指定)
 
 smile:
-  nthread: 0                   # 0=自动(机器线程数-offset);正整数=固定;大网格仍护栏强制 ≤2
-  thread_offset: 2             # 自动线程预留数(机器线程数 - thread_offset,0.2.199-补24)
+  nthread: 2                   # SMILE 线程数(默认 2;上限=机器核数-2,≤3核只能 1;0=自动旧行为)
+  thread_offset: 2             # 旧自动线程预留数(仅 nthread=0 时用;现在默认 2,0.2.199-补24)
 
 optimization:
   budget:
