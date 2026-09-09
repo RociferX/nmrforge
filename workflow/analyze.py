@@ -503,6 +503,7 @@ def analyze(
         exp_id,
         workflow_ref="analyze",
         inputs={
+            "data_id": data_id,
             "spectrum_path": cur_spectrum,
             "reference_spectrum_path": ref_spectrum,
             "reference_data_id": reference_data_id,

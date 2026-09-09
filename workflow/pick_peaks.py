@@ -508,7 +508,9 @@ def pick_peaks(
     data_entry = manager.data(exp_id, data_id)
     spectrum_path = data_entry.spectrum_path
     if not spectrum_path or not Path(spectrum_path).is_file():
-        run = manager.start_run(exp_id, workflow_ref="pick_peaks", inputs={})
+        run = manager.start_run(
+            exp_id, workflow_ref="pick_peaks", inputs={"data_id": data_id}
+        )
         manager.finish_run(
             run.run_id, "failed", message=f"谱图缺失: {exp_id}/{data_id}"
         )
@@ -517,7 +519,7 @@ def pick_peaks(
     run = manager.start_run(
         exp_id,
         workflow_ref="pick_peaks",
-        inputs={"spectrum_path": spectrum_path},
+        inputs={"data_id": data_id, "spectrum_path": spectrum_path},
     )
     try:
         import nmrglue as ng

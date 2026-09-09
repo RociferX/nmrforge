@@ -1,5 +1,15 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29hi(2026-09-09,峰挑选/分析 WorkflowRun 记录 data_id,修报告串数据)
+- 用户:数据组内运行后,pipeline 里后续数据的峰挑选报告全是第一个数据的(而不是无);
+- 根因:pipeline_panel._last_run_for 按 inputs["data_id"] 过滤最近一次运行,但
+  pick_peaks/analyze 的 start_run inputs 未写 data_id(空串匹配任意数据),导致返回
+  实验内最近一次该步骤运行,跨数据串;generate_fid/spectrum 经 _finish_step 已写;
+- 解决:pick_peaks(失败与主 run)与 analyze 的 inputs 补 "data_id": data_id,
+  与 generate_fid/manual 对齐;
+- 验证:新增 test_pick_peaks_run_records_data_id_per_data(多数据各记各自 data_id);
+  相关峰挑选/管线/批处理测试全绿,ruff 通过;
+
 ## 0.2.199-补29hh(2026-09-09,pipeline 组内批量把每数据日志落到自身数据作用域)
 - 用户:生成谱图失败(RuntimeError: 第一遍 SMILE 重构失败: 缺少 nuslist 采样表)
   的详情在数据 log 界面没有,组界面/单个运行都有;

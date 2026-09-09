@@ -70,6 +70,7 @@ def test_pick_peaks_detects_and_writes(tmp_path: Path) -> None:
     assert len(runs) == 1
     assert runs[0].status == "success"
     assert runs[0].inputs["spectrum_path"] == str(ft2)
+    assert runs[0].inputs["data_id"] == data_id
     assert runs[0].outputs["peak_path"] == result["peak_path"]
 
 
@@ -806,3 +807,32 @@ def test_safe_figure_token() -> None:
 
     assert _safe_figure_token("exp_009/d_002") == "exp_009_d_002"
     assert "/" not in _safe_figure_token("exp_009/d_002 (HSQC)")
+
+def test_pick_peaks_run_records_data_id_per_data(tmp_path: Path) -> None:
+    """补29hi:pick_peaks WorkflowRun 记录各自 data_id,避免跨数据串报告。"""
+    spec = np.zeros((64, 128))
+    spec[20, 40] = 500.0
+    spec[25, 90] = 350.0
+    spec = gaussian_filter(spec, sigma=1.5)
+    ft2 = tmp_path / "out.ft2"
+    _write_ft2(ft2, spec)
+
+    manager = ProjectManager.create_project(tmp_path / "proj", "demo")
+    entry = manager.create_experiment()
+    d1 = manager.import_data(entry.id, "/sampleD")
+    d2 = manager.import_data(entry.id, "/sampleE")
+    manager.set_data_spectrum(entry.id, d1.id, str(ft2))
+    manager.set_data_spectrum(entry.id, d2.id, str(ft2))
+
+    pick_peaks(manager, entry.id, d1.id)
+    pick_peaks(manager, entry.id, d2.id)
+
+    by_data = {
+        (r.inputs or {}).get("data_id", ""): r
+        for r in manager.project.workflow_runs
+        if r.workflow_ref == "pick_peaks"
+    }
+    assert by_data[d1.id] is not None
+    assert by_data[d2.id] is not None
+    assert by_data[d1.id].inputs["data_id"] == d1.id
+    assert by_data[d2.id].inputs["data_id"] == d2.id
