@@ -8,6 +8,7 @@ Phase 1：孤立峰检测——按谱自身峰密度归一化,只对「异常孤
   dmin > 5×s 且(近轴边缘 ≤2% 或极端孤立 >8×s)才标记;
   无可比峰的强峰仅在整体峰数 ≥20(密集谱语境)时标记;
   弱峰(snr<5)不标记(噪声峰不是伪影)。
+每个孤立峰按超出期望间距程度扣 5–10 分(单个最多 10,2026-09-09 用户)。
 真实谱常规稀疏/3D 分布不再误报;密集谱中注入的孤立强伪峰仍被抓。
 """
 
@@ -57,7 +58,7 @@ def detect(data: Any) -> ArtifactReport:
                 # 稀疏谱中孤立是正常分布,不误报
                 if total >= 20:
                     isolated += 1
-                    penalty += 20.0
+                    penalty += 10.0
                 continue
             dists = np.linalg.norm(positions[comparable] - pos, axis=1)
             dmin = float(np.min(dists))
@@ -71,6 +72,6 @@ def detect(data: Any) -> ArtifactReport:
                     1.0,
                     (dmin - 5.0 * spacing) / max(5.0 * spacing, 1e-9),
                 )
-                penalty += 20.0 * (0.5 + 0.5 * excess)
+                penalty += 10.0 * (0.5 + 0.5 * excess)
     score = float(max(0.0, 100.0 - penalty))
     return ArtifactReport(isolated_peak_clusters=isolated, score=score)
