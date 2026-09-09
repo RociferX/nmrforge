@@ -217,7 +217,7 @@ class CenterPanel(QWidget):
                 if exp is not None
                 else None
             )
-            label_text = (d.title or f"样品数据 {data_id}") if d else f"样品数据 {data_id}"
+            label_text = (d.title or f"Data {data_id}") if d else f"Data {data_id}"
             cols_data.append(
                 (
                     data_id,

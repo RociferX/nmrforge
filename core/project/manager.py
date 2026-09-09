@@ -518,7 +518,7 @@ class ProjectManager:
             raise ProjectError(f"数据不存在: {exp_id}/{unknown[0]}")
         group = DataGroupEntry(
             id=group_id,
-            title=title or f"数据组 {group_id}",
+            title=title or f"Group {group_id}",
             data_ids=members,
             created_at=now_iso(),
         )

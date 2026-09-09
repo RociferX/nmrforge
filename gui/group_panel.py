@@ -222,7 +222,7 @@ class GroupBatchPanel(QWidget):
         cols_data: list[tuple[str, str, dict]] = []
         for data_id in member_ids:
             d = next((x for x in exp.data if x.id == data_id), None)
-            label_text = (d.title or f"样品数据 {data_id}") if d else f"样品数据 {data_id}"
+            label_text = (d.title or f"Data {data_id}") if d else f"Data {data_id}"
             cols_data.append(
                 (data_id, label_text, data_note_fields(manager.project, exp_id, data_id))
             )
@@ -278,11 +278,11 @@ class GroupBatchPanel(QWidget):
         exp = manager.project.experiment(exp_id)
         group = manager.group(exp_id, group_id) if exp is not None else None
         if exp is None or group is None:
-            self.context_label.setText(f"数据组 {group_id}(不存在)")
+            self.context_label.setText(f"Group {group_id}(不存在)")
             self.run_ref_button.setEnabled(False)
             self.run_optimize_button.setEnabled(False)
             return
-        title = group.title or f"数据组 {group_id}"
+        title = group.title or f"Group {group_id}"
         self.context_label.setText(f"实验: {exp.title or exp_id}  ·  组: {title}")
         members = [
             d
@@ -290,7 +290,7 @@ class GroupBatchPanel(QWidget):
             if d.id in (group.data_ids or [])
         ]
         names = "、".join(
-            f"{d.title or '样品数据 ' + d.id}" for d in members
+            f"{d.title or 'Data ' + d.id}" for d in members
         )
         self.member_label.setText(
             f"组内数据({len(members)} 个): {names or '(空组)'}"
@@ -305,7 +305,7 @@ class GroupBatchPanel(QWidget):
         for data in exp.data:
             if not data.spectrum_path:
                 continue
-            label = data.title or f"样品数据 {data.id}"
+            label = data.title or f"Data {data.id}"
             candidates.append((data.id, f"{label} ({data.id})"))
         if not candidates:
             self.run_ref_button.setEnabled(False)

@@ -239,7 +239,7 @@ def group_note(project, exp_id: str, group_id: str) -> str:
     lines: list[str] = []
     for data_id in (group.data_ids or []):
         d = next((x for x in exp.data if x.id == data_id), None)
-        label = (d.title or f"样品数据 {data_id}") if d else f"样品数据 {data_id}"
+        label = (d.title or f"Data {data_id}") if d else f"Data {data_id}"
         note = data_note(project, exp_id, data_id)
         lines.append(f"◆ {label} ({data_id})")
         lines.append("   " + (note if note else "(未填写)"))

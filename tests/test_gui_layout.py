@@ -171,7 +171,7 @@ def test_project_tree_structure(
     assert exp_item.text(0) == "HSQC"
     assert exp_item.childCount() == 1
     data_item = exp_item.child(0)
-    assert data_item.text(0) == "样品数据 d_001"
+    assert data_item.text(0) == "Data d_001"
     assert data_item.text(1) == "已导入"
     assert data_item.childCount() == 6  # raw/process/spectra/peaks/figures/report
     panel.close()

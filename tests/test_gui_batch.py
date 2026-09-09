@@ -170,7 +170,7 @@ def test_pipeline_group_run_applies_to_all(
     controller.member_ids = [data1.id, data2.id]
     panel = PipelinePanel(manager, controller)
     panel.set_selection("data", entry.id, data1.id)
-    assert f"数据组 {group.id}" in panel.context_label.text()
+    assert f"Group {group.id}" in panel.context_label.text()
     # 0.2.199-补29gv:组内单个数据在面板里独立运行(不自动转整组)
     panel._on_run_requested("spectrum")
     assert controller.group_calls == []

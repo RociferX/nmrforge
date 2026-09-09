@@ -380,7 +380,7 @@ class ProjectTreePanel(QWidget):
         group_id = getattr(group, "id", "")
         by_id = {getattr(d, "id", ""): d for d in self._data_of(exp)}
         members = [m for m in (getattr(group, "data_ids", None) or []) if m in by_id]
-        title = getattr(group, "title", "") or f"数据组 {group_id}"
+        title = getattr(group, "title", "") or f"Group {group_id}"
         group_item.setText(0, title)
         group_item.setText(1, f"{len(members)} 个数据")
         group_item.setToolTip(
@@ -416,7 +416,7 @@ class ProjectTreePanel(QWidget):
         data_id = getattr(data_node, "id", exp.id)
         status = self._data_status(exp, data_node)
         title = getattr(data_node, "title", "") or ""
-        label = title or f"样品数据 {data_id}"
+        label = title or f"Data {data_id}"
         # 组内数据由组节点标识;0.2.164-补1 起批量组即数据组,
         # 不再有 pipeline_state 独立标记后缀
         data_item.setText(0, label)
@@ -553,7 +553,7 @@ class ProjectTreePanel(QWidget):
 
     def _make_group_item(self, exp, group) -> QTreeWidgetItem:
         group_id = getattr(group, "id", "")
-        title = getattr(group, "title", "") or f"数据组 {group_id}"
+        title = getattr(group, "title", "") or f"Group {group_id}"
         by_id = {getattr(d, "id", ""): d for d in self._data_of(exp)}
         members = [m for m in (getattr(group, "data_ids", None) or []) if m in by_id]
         group_item = QTreeWidgetItem([title, f"{len(members)} 个数据"])
@@ -582,7 +582,7 @@ class ProjectTreePanel(QWidget):
         source = getattr(data_node, "source", "") or getattr(exp, "source", "")
         status = self._data_status(exp, data_node)
         title = getattr(data_node, "title", "") or ""
-        label = title or f"样品数据 {data_id}"
+        label = title or f"Data {data_id}"
         # 组内数据由组节点标识;批量组即数据组,无独立标记后缀(0.2.164-补1)
         data_item = QTreeWidgetItem([label, status])
         data_item.setIcon(0, self._icon("data"))
@@ -961,7 +961,7 @@ class ProjectTreePanel(QWidget):
             self,
             "把其它数据加入该组",
             [
-                (d.id, getattr(d, "title", "") or f"样品数据 {d.id}")
+                (d.id, getattr(d, "title", "") or f"Data {d.id}")
                 for d in candidates
             ],
         )

@@ -1907,7 +1907,7 @@ class MainWindow(QMainWindow):
         ):
             group_id = str(current_data.get("group_id", ""))
             group = self.manager.group(exp_id, group_id)
-            label = getattr(group, "title", "") or f"数据组 {group_id}"
+            label = getattr(group, "title", "") or f"Group {group_id}"
             parts.append(f"{label} ({len(group.data_ids or [])} 个数据)" if group else label)
         if data_id and exp_id:
             label = data_id

@@ -1209,7 +1209,7 @@ class PipelinePanel(QWidget):
             f"{project.name} / {exp_title} ({self._current_exp_id})"
         )
         if group is not None:
-            context_text += f" [数据组 {group.id}: {len(group.data_ids)} 数据]"
+            context_text += f" [Group {group.id}: {len(group.data_ids)} 数据]"
         self.context_label.setText(context_text)
         self._sync_reference_display()
         # 0.2.199-补29gd:SMILE 优化仅 NUS 显示(非 NUS/uncertain 隐藏)
