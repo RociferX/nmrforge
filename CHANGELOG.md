@@ -5,8 +5,11 @@
 - 实现:新建数据组默认标题 f"数据组 {group_id}" → f"Group {group_id}";实体名
   fallback f"样品数据 {id}" → f"Data {id}"(project_tree/group_panel/notes/
   center_panel/pipeline_panel 上下文标签);描述性日志/确认弹窗术语保留中文;
-- 验证:test_gui_layout/test_gui_batch 断言同步为 Data d_001/Group G1;相关 GUI
-  测试与 ruff 通过;
+- 修复:历史项目已存旧自动默认标题(数据组 G1/样品数据 d_001)在 open_project
+  时由 _migrate_legacy_default_titles 迁移为 Group/Data(仅匹配自动生成模式,用户
+  自定义名不动);
+- 验证:test_gui_layout/test_gui_batch 断言同步为 Data d_001/Group G1;新增
+  test_migrate_legacy_default_titles;相关 GUI 测试与 ruff 通过;
 
 ## 0.2.199-补29he(2026-09-08,删除数据组拆分为「删除组标记」与「删除组(含数据)」)
 - 用户:删除数据组只是删除了组标记,应为两个动作——单独「删除组标记」(数据保留

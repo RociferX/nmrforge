@@ -143,6 +143,8 @@ class ProjectManager:
             raise ProjectError(f"project.json 结构无效: {project_file}")
         manager = cls(root_path)
         manager.project = ProjectInfo.from_dict(data)
+        # 0.2.199-补29hf:迁移旧自动默认标题(数据组 G1/样品数据 d_001 → Group/Data)
+        manager._migrate_legacy_default_titles()
         if manager.project.schema_version != SCHEMA_VERSION:
             # schema 1.0/1.1 → 1.2:旧 source/segments → data[0]
             # (ExperimentEntry.from_dict 已完成迁移)
@@ -154,6 +156,30 @@ class ProjectManager:
         # 0.2.199-补29ex:软删除条目若已从回收站恢复到原位,打开即自动还原
         manager.recover_trashed()
         return manager
+
+    def _migrate_legacy_default_titles(self) -> bool:
+        """0.2.199-补29hf:把旧自动默认标题迁移为 Group/Data 形式(仅匹配自动生成模式)。
+
+        旧版本 create_data_group 会把自动默认标题写成"数据组 G1",样品数据在
+        (个别)路径下存过"样品数据 d_001";display 优先用存储 title,导致即使
+        fallback 已改英文,历史组仍显示中文。此处仅把与自动生成模式完全一致的
+        标题改为 Group/Data,用户手动命名的标题不动。返回是否有改动。
+        """
+        if self.project is None:
+            return False
+        migrated = False
+        for entry in self.project.experiments or []:
+            for group in entry.groups or []:
+                legacy = f"数据组 {group.id}"
+                if group.title == legacy:
+                    group.title = f"Group {group.id}"
+                    migrated = True
+            for data in entry.data or []:
+                legacy = f"样品数据 {data.id}"
+                if data.title == legacy:
+                    data.title = f"Data {data.id}"
+                    migrated = True
+        return migrated
 
     def save(self) -> None:
         """原子写 project.json 并刷新 updated 时间戳。"""

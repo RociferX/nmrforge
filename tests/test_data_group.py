@@ -314,3 +314,22 @@ def test_delete_data_group_with_members(
     assert hist
     assert hist[-1].fields.get("group_id") == "G1"
     assert hist[-1].fields.get("deleted_data_ids") == data_ids
+def test_migrate_legacy_default_titles(tmp_path: Path) -> None:
+    """补29hf:旧自动默认标题(数据组 G1/样品数据 d_001)打开即迁移,用户自定义名不动。"""
+    manager, exp_id, data_ids = _manager_with_data(tmp_path, n=2)
+    manager.create_data_group(
+        exp_id, title="数据组 G1", data_ids=data_ids[:1]
+    )
+    group2 = manager.create_data_group(exp_id, title="对比组", data_ids=data_ids[1:2])
+    manager.data(exp_id, data_ids[0]).title = f"样品数据 {data_ids[0]}"
+    manager.save()
+
+    reopened = ProjectManager.open_project(tmp_path / "proj")
+    assert reopened.group(exp_id, "G1").title == "Group G1"
+    assert reopened.data(exp_id, data_ids[0]).title == f"Data {data_ids[0]}"
+    # 用户自定义标题不动
+    assert reopened.group(exp_id, group2.id).title == "对比组"
+    # 再次打开无旧模式 → 不再改动(幂等)
+    reopened.save()
+    again = ProjectManager.open_project(tmp_path / "proj")
+    assert again.group(exp_id, "G1").title == "Group G1"
