@@ -305,7 +305,7 @@ class SpectrumViewer(QWidget):
         # 0.2.133: aspect ratio slider(0.2.147 移到控件行 0 并排)
         self.aspect_slider = QSlider(Qt.Orientation.Horizontal)
         self.aspect_slider.setRange(0, 400)
-        self.aspect_slider.setValue(100)
+        self.aspect_slider.setValue(0)
         self.aspect_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
         self.aspect_slider.setTickInterval(50)
         self.aspect_slider.valueChanged.connect(self._on_aspect_changed)
@@ -336,7 +336,7 @@ class SpectrumViewer(QWidget):
         self.aspect_label.setSuffix("x")
         self.aspect_label.setRange(0.0, 4.0)
         self.aspect_label.setDecimals(2)
-        self.aspect_label.setValue(1.00)
+        self.aspect_label.setValue(0.0)
         self.aspect_label.setFixedWidth(130)
         self.aspect_label.setSpecialValueText("Aspect free")
         self.aspect_label.valueChanged.connect(self._on_aspect_spin_changed)
@@ -478,7 +478,7 @@ class SpectrumViewer(QWidget):
         )
         self.plot.scene().sigMouseMoved.connect(self._on_mouse_moved)
         self.plot.scene().sigMouseClicked.connect(self._on_plot_clicked)
-        self.set_aspect_ratio(1.0)  # 默认正方形(1:1 数据长宽比)
+        self.set_aspect_ratio(None)  # 默认自由长宽比(free)
         # 0.2.133: contour state
         self._contour_states: dict[str, tuple[int, int]] = {}
         self._mouse_left_pressed = False

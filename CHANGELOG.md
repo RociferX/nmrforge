@@ -1,5 +1,11 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29hl(2026-09-09,谱图查看器 aspect 默认改 free)
+- 用户:aspect 默认都改成 free;
+- 实现:aspect_slider 默认 0(free)、aspect_label 默认 0.0(free)、set_aspect_ratio
+  默认 None;独立窗口「显示长宽比」菜单默认勾选「自由」;per-data 显示状态 aspect 默认 0;
+- 验证:更新 test_viewer_aspect_slider / test_gui_layout 默认断言;相关测试全绿,ruff 通过;
+
 ## 0.2.199-补29hk(2026-09-09,「导入数据」下拉界面改紧凑)
 - 用户:导入数据下拉略宽于默认显示宽度,改紧凑一点;
 - 实现:缩短两个超长复选框文案(复制链接说明、批量成组说明)并给批量成组勾选加 tooltip;

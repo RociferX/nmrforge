@@ -332,8 +332,8 @@ def test_viewer_aspect_ratio(qapp: QApplication) -> None:
 def test_viewer_aspect_slider(qapp: QApplication) -> None:
     viewer = SpectrumViewer()
     viewer.add_spectrum(_synthetic_spectrum())
-    assert viewer.aspect_slider.value() == 100
-    assert viewer.plot.getViewBox().state['aspectLocked'] == 1.0
+    assert viewer.aspect_slider.value() == 0
+    assert viewer.plot.getViewBox().state['aspectLocked'] is False
     viewer.aspect_slider.setValue(200)
     assert viewer.plot.getViewBox().state['aspectLocked'] == 2.0
     viewer.aspect_slider.setValue(0)

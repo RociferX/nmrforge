@@ -469,7 +469,7 @@ class SpectrumPanel(QWidget):
             defaults = {
                 "level_slider": 31,
                 "level_count": 8,
-                "aspect": 100,
+                "aspect": 0,
                 "peak_size": 1.5,
             }
             # 0.2.199-补29ga:重启后从 d_xxx/ui_state.json 恢复
@@ -498,7 +498,7 @@ class SpectrumPanel(QWidget):
                 int(state.get("level_count", 8))
             )
             self.viewer.aspect_slider.setValue(
-                int(state.get("aspect", 100))
+                int(state.get("aspect", 0))
             )
             self.viewer._update_levels()
             self.peak_size_spin.setValue(

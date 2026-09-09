@@ -2377,7 +2377,7 @@ def test_spectrum_display_settings_isolated_per_data(
     assert panel.load_current_spectrum() is True
     assert panel.viewer.level_slider.value() == 31
     assert panel.viewer.count_slider.value() == 8
-    assert panel.viewer.aspect_slider.value() == 100
+    assert panel.viewer.aspect_slider.value() == 0
     assert panel.peak_size_spin.value() == 1.5
     # 切回 d_001 恢复各自调节
     panel.set_context(exp.id, d1_id)

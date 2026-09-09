@@ -99,7 +99,7 @@ class SpectrumWindow(QMainWindow):
             )
             aspect_menu.addAction(action)
             self._aspect_actions.append(action)
-        self._aspect_actions[1].setChecked(True)  # 默认 1:1 正方形
+        self._aspect_actions[0].setChecked(True)  # 默认自由(free)
 
         peak_menu = self.menuBar().addMenu("峰(&P)")
         self._peak_actions: list[QAction] = []
