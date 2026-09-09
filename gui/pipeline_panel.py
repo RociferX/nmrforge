@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from pathlib import Path
 
 from PyQt6.QtCore import QPoint, QRect, QSize, Qt, pyqtSignal
@@ -2093,6 +2094,7 @@ class PipelinePanel(QWidget):
             for _lg in per.get("logs") or []:
                 self.log_scoped.emit(_lg, data_scope)
 
+        _t0 = time.monotonic()
         try:
             kwargs: dict = {}
             if step_id == "spectrum":
@@ -2122,9 +2124,12 @@ class PipelinePanel(QWidget):
         failed = list(result.get("failed") or [])
         ok_count = int(summary.get("success", 0))
         total = int(summary.get("total", 0))
-        info = f"数据组 {group_id}: {ok_count}/{total} 成功"
-        if failed:
-            info += " · 失败: " + ",".join(failed)
+        info = (
+            f"数据组 {group_id} 批量处理完成: 成功 {ok_count},失败 {len(failed)},"
+            f"耗时 {time.monotonic() - _t0:.1f}s"
+        )
+        if total:
+            info += f"(共 {total})"
         items = [
             {
                 "data_id": data_id,

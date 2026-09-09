@@ -1,5 +1,12 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29hj(2026-09-09,组界面批量结束汇总加 成功/失败/耗时/每个失败原因)
+- 用户:组界面运行结束最后 log 输出成功多少、失败多少、耗时多少、每一个的失败原因;
+- 实现:main_window._run_group_batch 与 pipeline_panel._run_group_step 批量开始记
+  _t0,结束 info 改「成功 N,失败 M,耗时 X.Xs(共 T)」;每个失败项原因仍逐条输出
+  (失败 data_id: error),取消/跳过各计数并列出;
+- 验证:相关批量/管线/全路径测试全绿,ruff 通过;
+
 ## 0.2.199-补29hi(2026-09-09,峰挑选/分析 WorkflowRun 记录 data_id,修报告串数据)
 - 用户:数据组内运行后,pipeline 里后续数据的峰挑选报告全是第一个数据的(而不是无);
 - 根因:pipeline_panel._last_run_for 按 inputs["data_id"] 过滤最近一次运行,但

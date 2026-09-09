@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 from PyQt6.QtCore import Qt, pyqtSignal
@@ -739,6 +740,7 @@ class MainWindow(QMainWindow):
         def worker() -> None:
             try:
                 self.controller.set_manager(self.manager)
+                _t0 = time.monotonic()
                 result = self.controller.run_group_batch(
                     exp_id,
                     group_id,
@@ -757,14 +759,17 @@ class MainWindow(QMainWindow):
                 cancelled = [
                     d for d, r in results.items() if r.get("status") == "cancelled"
                 ]
+                _elapsed = time.monotonic() - _t0
+                _success = int(summary.get("success", 0))
+                _total = int(summary.get("total", 0))
                 info = (
-                    f"数据组 {group_id} 批量处理完成: "
-                    f"{summary.get('success', 0)}/{summary.get('total', 0)} 成功"
+                    f"数据组 {group_id} 批量处理完成: 成功 {_success},失败 {len(failed)},"
+                    f"耗时 {_elapsed:.1f}s"
                 )
+                if _total:
+                    info += f"(共 {_total})"
                 if cancelled:
                     info += f" · 已停止,{len(cancelled)} 个未处理"
-                if failed:
-                    info += " · 失败: " + ",".join(failed)
                 if skipped:
                     info += " · 跳过(类型/条件不一致): " + ",".join(skipped)
                 items = []
