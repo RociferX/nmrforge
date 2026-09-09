@@ -158,7 +158,7 @@ class ExperimentImportPanel(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        self.copy_check = QCheckBox("链接原始数据到项目(只读文件链接,必要时复制)")
+        self.copy_check = QCheckBox("链接原始数据到项目(只读,必要时复制)")
         self.copy_check.setChecked(True)
         layout.addWidget(self.copy_check)
         layout.addSpacing(4)
@@ -231,8 +231,10 @@ class ExperimentImportPanel(QWidget):
         self.batch_list = QListWidget()
         self.batch_list.setMaximumHeight(110)
         batch_layout.addWidget(self.batch_list)
-        self.batch_group_check = QCheckBox(
-            "批量导入并成组(后续处理会一起处理,仅支持 2D 谱);不勾选则不成组(相当于多个单次导入)"
+        self.batch_group_check = QCheckBox("批量导入并成组(仅支持 2D 谱)")
+        self.batch_group_check.setToolTip(
+            "勾选:导入到同一数据组,后续一起处理(仅支持 2D 谱);"
+            "不勾选:不成组,相当于多个单次导入"
         )
         self.batch_group_check.setChecked(True)
         batch_layout.addWidget(self.batch_group_check)
@@ -442,7 +444,7 @@ class ImportDataDropdown(QWidget):
         self._scroll.setFrameShape(QFrame.Shape.NoFrame)
         self._scroll.setWidget(self.panel)
         layout.addWidget(self._scroll, 1)
-        self.setMinimumWidth(560)
+        self.setMinimumWidth(400)
         # 构造即隐藏:子部件方案下父页面显示会连带显示子部件,不隐藏会以
         # (0,0) 残影出现在页面顶部(0.2.194-补2 实测),且 isVisible 为真
         # 导致 open_below 从不执行
