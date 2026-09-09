@@ -594,3 +594,12 @@ def test_kinetics_import_blocked(tmp_path: Path) -> None:
 
     normal = _experiment_with_nuclei(2, ["1H", "13C"], "hsqc")
     _raise_if_kinetics(normal)  # 正常实验不抛
+
+def test_vdlist_placeholder_not_kinetics() -> None:
+    """补29hq-修:acqus.VDLIST 为纯 D 占位(Bruker 未设变延时)不判为动力学。"""
+    from core.experiment.experiment_classifier import _is_kinetics, classify
+
+    exp = _experiment_with_nuclei(2, ["1H", "13C"], "hncacbgp3d.x")
+    exp.acquisition_parameters["acqus"]["VDLIST"] = "DDDDDDDDDDDDDDD"
+    assert _is_kinetics(exp) is False
+    assert classify(exp).name != "Kinetics"

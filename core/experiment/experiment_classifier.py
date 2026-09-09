@@ -59,7 +59,14 @@ def _is_kinetics(experiment) -> bool:
     except OSError:
         pass
     acqus = experiment.acquisition_parameters.get("acqus", {})
-    if str(acqus.get("VDLIST", "") or "").strip():
+    vd = str(acqus.get("VDLIST", "") or "").strip()
+    # Bruker 未用变延时时 acqus.VDLIST 常为纯 D 占位(如 DDD.../0/none),非变延时
+    if vd and (
+        vd.upper().strip("D") == ""
+        or vd.strip().lower() in {"0", "0.0", "none", "n/a", "null", "off"}
+    ):
+        vd = ""
+    if vd:
         return True
     pulprog = str(acqus.get("PULPROG", "")).lower()
     return any(kw in pulprog for kw in _KINETICS_PULPROG_HINTS)
