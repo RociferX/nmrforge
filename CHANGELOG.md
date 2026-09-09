@@ -6,6 +6,8 @@
   resolve_nthread 显式值 clamp 到上限,缺省/0=默认 2;load_processing_defaults nthread 同源;
   设置对话框字段改名「SMILE 线程数」,值域 1..上限,存 smile.nthread;settings/yaml 默认 nthread=2;
 - 验证:更新 test_config_defaults 默认断言;config/对话框相关测试全绿,ruff 通过;
+- 追加(用户):谱质量分重新分配权重 信噪比35/相位25/基线20/伪影20(原各25);
+  QC/参数优化/SMILE 相关测试全绿,ruff 通过;
 
 ## 0.2.199-补29hn(2026-09-09,选峰默认阈值 25σ → 35σ)
 - 用户:选峰默认阈值改为 35;

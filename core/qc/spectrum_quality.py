@@ -77,7 +77,8 @@ def evaluate(
     )
     score = QualityScore(
         components=components,
-        weights={"snr": 1.0, "phase": 1.0, "baseline": 1.0, "artifact": 1.0},
+        # 0.2.199-补29hq(用户):质量分权重 信噪比35/相位25/基线20/伪影20
+        weights={"snr": 0.35, "phase": 0.25, "baseline": 0.20, "artifact": 0.20},
     )
     overall = score.compute()
     resolution_penalty = (
