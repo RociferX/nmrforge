@@ -25,7 +25,7 @@ DEFAULT_EXT_LO = "10.5"
 DEFAULT_EXT_HI = "6.5"
 # 0.2.199-补24:SMILE 自动线程 = 机器线程数 - thread_offset(可在设置改)
 DEFAULT_THREAD_OFFSET = 2
-# 0.2.199-补29hq(用户):SMILE 线程数默认 2(实测 >2 会致宿主关机);上限=机器核数-2。
+# 0.2.199-补29hq(用户):SMILE 线程数默认 2(过高可能触发高负载关机);上限=机器核数-2。
 DEFAULT_SMILE_THREADS = 2
 
 

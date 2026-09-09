@@ -800,8 +800,8 @@ class SettingsDialog(QDialog):
             default_threads = 2
         self.smile_thread_spin.setValue(max(1, min(default_threads, sm_limit)))
         self.smile_thread_spin.setToolTip(
-            f"SMILE 重构线程数(默认 2);本机上限 {sm_limit}(机器核数-2,核数≤3 只能 1)。"
-            "超过主机可承受线程数会触发高负载关机(本机实测 >2 即关机),建议保持 2"
+            f"SMILE 重构线程数(默认 2);上限 {sm_limit}(机器核数-2,核数≤3 只能 1);"
+            "过高可能触发高负载关机,建议保持 2"
         )
         form.addRow("SMILE 线程数", self.smile_thread_spin)
         layout.addLayout(form)
