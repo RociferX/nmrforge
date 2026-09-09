@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
+from pathlib import Path
 
 import core.experiments  # noqa: F401  导入即从 presets/*.yaml 注册模板
 from core.data.internal_data_model import Experiment, ExperimentType
@@ -40,6 +41,28 @@ _LIQUID_HINTS: tuple[str, ...] = (
     "gp_", "gpph", "gradient", "fhsqc", "hsqc", "hmqc", "hmbc", "tocsy",
     "noesy", "roesy", "cosy", "sfg", "zg",
 )
+
+
+# 0.2.199-补29hm(用户):动力学/变延时系列(伪2D)识别——源目录有 vdlist、
+# acqus.VDLIST 非空、或 PULPROG 含动力学关键词;暂不支持自动处理。
+_KINETICS_PULPROG_HINTS: tuple[str, ...] = (
+    "kinetic", "relax", "t1ir", "t2ir", "vdlist", "pseudo2d",
+)
+
+
+def _is_kinetics(experiment) -> bool:
+    """动力学/变延时系列识别(vdlist 文件 / acqus.VDLIST / PULPROG 关键词)。"""
+    src = getattr(experiment, "source_path", None) or ""
+    try:
+        if src and Path(src).is_dir() and (Path(src) / "vdlist").is_file():
+            return True
+    except OSError:
+        pass
+    acqus = experiment.acquisition_parameters.get("acqus", {})
+    if str(acqus.get("VDLIST", "") or "").strip():
+        return True
+    pulprog = str(acqus.get("PULPROG", "")).lower()
+    return any(kw in pulprog for kw in _KINETICS_PULPROG_HINTS)
 
 
 def _pulprog_state_hint(pulprog: str) -> str | None:
@@ -281,6 +304,15 @@ def _classify_base(experiment: Experiment) -> ExperimentType:
         evidence.append(
             "疑似" + ("固体" if state_hint == "solid" else "液体")
             + "核磁(PULPROG 特征)"
+        )
+
+    # 0.2.199-补29hm(用户):动力学/变延时系列识别(暂不支持自动处理)
+    if _is_kinetics(experiment):
+        return ExperimentType(
+            name="Kinetics",
+            confidence=0.9,
+            evidence=evidence
+            + ["检测到动力学/变延时系列(伪2D,VDLIST/相关 PULPROG),暂不支持自动处理"],
         )
 
     candidates = _nuclei_candidates(experiment)

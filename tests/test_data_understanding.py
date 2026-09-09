@@ -562,3 +562,21 @@ def test_read_dataset_container_not_segmented_experiment(
     acqu2s.write_text(text.replace("##$TD= 256", "##$TD= 128"), encoding="utf-8")
     with pytest.raises(ValueError, match="不是分段实验"):
         read_dataset_container(container)
+
+def test_classify_kinetics_by_pulprog() -> None:
+    """29hm: kinetics PULPROG -> Kinetics(暂不支持)。"""
+    from core.experiment.experiment_classifier import classify
+    exp = _experiment_with_nuclei(2, ["1H", "13C"], "kinetics-2d")
+    result = classify(exp)
+    assert result.name == "Kinetics"
+    assert result.confidence >= 0.9
+    assert any("动力学" in e for e in result.evidence)
+
+
+def test_classify_kinetics_by_vdlist() -> None:
+    """29hm: acqus.VDLIST -> Kinetics。"""
+    from core.experiment.experiment_classifier import classify
+    exp = _experiment_with_nuclei(2, ["1H", "13C"], "hsqc")
+    exp.acquisition_parameters["acqus"]["VDLIST"] = "vdlist"
+    result = classify(exp)
+    assert result.name == "Kinetics"

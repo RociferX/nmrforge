@@ -1,5 +1,14 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29hm(2026-09-09,识别动力学实验并在导入时提示暂不支持)
+- 用户:软件要能识别动力学实验,导入时提示暂不支持;
+- 实现:experiment_classifier 加 _is_kinetics(源目录 vdlist 文件 / acqus.VDLIST 非空 /
+  PULPROG 含 kinetics/relax/t1ir/t2ir/vdlist/pseudo2d),命中返回
+  ExperimentType(name=Kinetics, conf 0.9);main_window 导入后检测到 Kinetics
+  弹窗「暂不支持」并写日志;
+- 验证:新增 test_classify_kinetics_by_pulprog / test_classify_kinetics_by_vdlist;
+  相关分类/全路径/布局测试全绿,ruff 通过;
+
 ## 0.2.199-补29hl(2026-09-09,谱图查看器 aspect 默认改 free)
 - 用户:aspect 默认都改成 free;
 - 实现:aspect_slider 默认 0(free)、aspect_label 默认 0.0(free)、set_aspect_ratio

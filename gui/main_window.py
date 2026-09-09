@@ -973,6 +973,17 @@ class MainWindow(QMainWindow):
             conf = float(et.get("confidence", 0.0) or 0.0)
         except (TypeError, ValueError):
             conf = 0.0
+        # 0.2.199-补29hm(用户):动力学实验暂不支持,导入后明确提示
+        if name == "Kinetics":
+            self._append_log(
+                "  提示: 检测到动力学实验(变延时/时间系列),暂不支持自动处理"
+            )
+            InfoDialog.show_info(
+                self,
+                "暂不支持",
+                "检测到动力学实验,暂不支持自动处理。\n"
+                "数据已导入项目(可查看原始参数),但生成谱图/选峰等功能暂不可用。",
+            )
         # 0.2.199-补29fd-修:不管是否命中,一律提示检查数据类型
         self._append_log(
             f"数据类型识别: {name}(置信 {conf:.2f});"
