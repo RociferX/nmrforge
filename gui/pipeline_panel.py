@@ -2085,6 +2085,14 @@ class PipelinePanel(QWidget):
         # 0.2.199-补5:组内各数据开始处理,左侧树显示「运行中」
         for data_id in self.manager.group_data_ids(exp_id, group_id):
             self.run_started.emit(exp_id, data_id)
+        # 0.2.199-补29hh:组内批量也要把每个数据的日志落到其自身数据作用域,
+        # 否则数据 log 界面看不到该数据的失败详情(如 SMILE 缺 nuslist)。
+        def on_data_done(per: dict) -> None:
+            data_id = per.get("data_id", "")
+            data_scope = self._run_log_scope(exp_id, data_id, "")
+            for _lg in per.get("logs") or []:
+                self.log_scoped.emit(_lg, data_scope)
+
         try:
             kwargs: dict = {}
             if step_id == "spectrum":
@@ -2099,6 +2107,7 @@ class PipelinePanel(QWidget):
                 progress=lambda msg: self.log_scoped.emit(
                     f"{step_label}: {msg}", group_scope
                 ),
+                on_data_done=on_data_done,
                 **kwargs,
             )
         except Exception as exc:  # noqa: BLE001 - 引擎级失败

@@ -1,5 +1,14 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29hh(2026-09-09,pipeline 组内批量把每数据日志落到自身数据作用域)
+- 用户:生成谱图失败(RuntimeError: 第一遍 SMILE 重构失败: 缺少 nuslist 采样表)
+  的详情在数据 log 界面没有,组界面/单个运行都有;
+- 根因:pipeline_panel._run_group_step(pipeline 组内整组跑)调 run_group_batch
+  未传 on_data_done,每个数据的日志只落到组作用域,数据作用域为空;
+- 解决:该路径补 on_data_done,把每数据 per["logs"] 转发到 data:{exp}:{data}
+  作用域(与 main_window 组面板路径一致);
+- 验证:相关管线/批处理/全路径测试全绿,ruff 通过;
+
 ## 0.2.199-补29hg(2026-09-09,数据组批量实时刷新状态 + 停止按钮整组终止)
 - 用户:依次运行时第一个已完成却仍显示「运行中」;停止按钮只能停当前数据,无法终止整组;
 - 根因:worker 在 run_group_batch 整体跑完后才遍历 results 发射 group_data_done,故
