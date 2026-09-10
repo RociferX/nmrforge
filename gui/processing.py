@@ -748,7 +748,7 @@ class ProcessingController:
         用户点「按 Rank1 重跑」时才真正出谱——运行 `process/<data_id>_nus_rank1.com`,
         产物归位 `spectra/` 并登记为活动谱。
         """
-        from backend import runtime
+        from backend.runtime import CshRuntime
 
         self._require_manager()
         proc = self._manager.data_dir(exp_id, data_id, "process")
@@ -759,7 +759,7 @@ class ProcessingController:
         ext = {1: "ft1", 2: "ft2"}.get(experiment.ndim, "ft3")
         if progress is not None:
             progress(f"按 Rank1 重跑终脚本: {script.name}")
-        run_result = runtime.run(
+        run_result = CshRuntime().run(
             ["csh", script.name], cwd=str(proc), timeout=7200.0
         )
         produced = proc / f"{data_id}.{ext}"

@@ -1266,12 +1266,12 @@ class NMRPipeBackend:
         ④ 立刻删除该谱。候选各自独立命名、互不覆盖,也不触碰数据 process/
         下的终跑脚本。返回 {success, message, logs, candidates}。
         """
-        from backend import runtime
         from backend.script_generator import (
             rename_nus_scan_output,
             split_nus_script,
         )
 
+        runtime = CshRuntime()
         combos = list(combos or [])
         base = dict(params or {})
         scan_dir = Path(work_dir)
