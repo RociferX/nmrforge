@@ -330,12 +330,15 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
 
         # 兼容旧测试/旧代码:保留扁平实验表(隐藏),仍随 refresh() 同步。
-        self.experiment_tree = QTreeWidget()
-        self.experiment_tree.setColumnCount(5)
-        self.experiment_tree.setHeaderLabels(["ID", "标题", "状态", "项目", "来源"])
-        self.experiment_tree.setRootIsDecorated(False)
-        self.experiment_tree.hide()
-        self.experiment_tree.setParent(central)
+        # 0.2.199-补29hr(用户):隐藏的兼容扁平实验表改懒建(访问时才填充),
+        # 启动/刷新不再逐实验 infer_status。
+        self._experiment_tree = QTreeWidget()
+        self._experiment_tree.setColumnCount(5)
+        self._experiment_tree.setHeaderLabels(["ID", "标题", "状态", "项目", "来源"])
+        self._experiment_tree.setRootIsDecorated(False)
+        self._experiment_tree.hide()
+        self._experiment_tree.setParent(central)
+        self._experiment_tree_dirty = True
 
     # ------------------------------------------------------------------
     # 项目动作
@@ -2060,8 +2063,8 @@ class MainWindow(QMainWindow):
         """刷新窗口标题、最近项目菜单、左侧树与兼容实验表。"""
         self._refresh_recent_menu()
         self.project_tree.refresh()
-        tree = self.experiment_tree
-        tree.clear()
+        # 隐藏兼容表懒建:只置脏标记,不在此处逐实验 infer_status
+        self._experiment_tree_dirty = True
         project = self.manager.project
         if project is None:
             self.setWindowTitle("NMRForge - 欢迎")
@@ -2072,13 +2075,6 @@ class MainWindow(QMainWindow):
             self.main_splitter.setVisible(True)  # 欢迎页在三栏中显示
             self._update_context_bar()
             return
-        for exp in project.experiments:
-            if getattr(exp, "trashed", False):
-                continue
-            status = self.manager.infer_status(exp.id).value
-            item = QTreeWidgetItem([exp.id, exp.title, status, exp.sample_id, exp.source])
-            item.setData(0, Qt.ItemDataRole.UserRole, exp.id)
-            tree.addTopLevelItem(item)
         self.setWindowTitle(f"NMRForge - {project.name}")
         self.statusBar().showMessage(f"项目: {self.manager.root}")
         # 打开/新建项目后默认聚焦第一个实验
@@ -2086,6 +2082,29 @@ class MainWindow(QMainWindow):
         if active_exps and not self.center_panel.current_experiment_id():
             self.project_tree.select_experiment(active_exps[0].id)
         self._update_context_bar()
+
+    def _rebuild_experiment_tree(self) -> None:
+        """重建隐藏的兼容扁平实验表(懒建:仅外部访问 experiment_tree 时)。"""
+        self._experiment_tree.clear()
+        project = self.manager.project
+        if project is not None:
+            for exp in project.experiments:
+                if getattr(exp, "trashed", False):
+                    continue
+                status = self.manager.infer_status(exp.id).value
+                item = QTreeWidgetItem(
+                    [exp.id, exp.title, status, exp.sample_id, exp.source]
+                )
+                item.setData(0, Qt.ItemDataRole.UserRole, exp.id)
+                self._experiment_tree.addTopLevelItem(item)
+        self._experiment_tree_dirty = False
+
+    @property
+    def experiment_tree(self):
+        """兼容旧代码/测试的隐藏扁平实验表;首次访问时才构建(懒加载)。"""
+        if getattr(self, "_experiment_tree_dirty", False):
+            self._rebuild_experiment_tree()
+        return self._experiment_tree
 
     @staticmethod
     def run() -> int:

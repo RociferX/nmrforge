@@ -1621,6 +1621,7 @@ def test_folder_node_shows_files(
     panel = ProjectTreePanel(manager)
     data_item = panel.tree.topLevelItem(0).child(0).child(0).child(0)
     raw_item = data_item.child(0)
+    panel._on_item_expanded(raw_item)  # 懒加载:展开时才列文件
     names = [raw_item.child(i).text(0) for i in range(raw_item.childCount())]
     assert "acqus" in names and "ser" in names
     panel.close()
@@ -1662,6 +1663,7 @@ def test_spectrum_file_double_click_opens_in_panel(
     window.project_tree.select_experiment("exp_001")
     tree = window.project_tree.tree
     data_item = tree.topLevelItem(0).child(0).child(0).child(0)
+    window.project_tree._on_item_expanded(data_item.child(2))  # 懒加载展开 spectra
     file_item = data_item.child(2).child(0)  # spectra/exp_001-d_001.ft2
     opened: list[str] = []
     window.project_tree.open_spectrum_requested.connect(lambda p: opened.append(p))

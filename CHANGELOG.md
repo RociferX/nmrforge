@@ -1,5 +1,15 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29hr(2026-09-10,左侧树懒加载,修进入软件 1s 才出数据)
+- 用户:进入软件 ~1s 才出现已导入数据及其相关内容;担心数据多了会卡,建议先加载树/运行记录、能懒加载就懒加载;
+- 根因:refresh 时对每个数据的 6 个子目录(raw/process/spectra/peaks/figures/report)即时列文件+建节点
+  (_folder_fingerprint 还额外列一遍);且 _data_status 每数据都遍历全部 workflow_runs(O(数据×运行));
+  另有隐藏的兼容扁平表逐实验 infer_status;
+- 解决:①子目录文件改「展开时才加载」(占位项;已展开的才刷新内容);②刷新时一次性建
+  (exp,data)→最近运行状态缓存(_data_last_run_failed 由 O(数据×运行) 降为 O(运行));
+  ③隐藏兼容扁平表改懒建(访问 experiment_tree 时才填充,刷新不再 infer_status);
+- 验证:MainWindow.refresh 200 数据 + 500 运行 ~1.4ms;相关 GUI 测试全绿,ruff 通过;
+
 ## 0.2.199-补29hq(2026-09-09,设置「SMILE 线程预留数」改「SMILE 线程数」,默认2)
 - 用户:设置里预留线程数改成 SMILE 设置线程数,默认 2;最大=机器线程数-2,核数≤3 只能 1;
 - 实现:backend.config 增 DEFAULT_SMILE_THREADS=2 与 smile_thread_limit()(核数-2,≤3核=1);
