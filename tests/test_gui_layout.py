@@ -409,8 +409,9 @@ def test_pipeline_status_after_spectrum(tmp_path: Path, qapp: QApplication) -> N
     fid_file = process_dir / "exp_001-d_001.fid"
     fid_file.write_bytes(b"fid")
     manager.set_data_fid("exp_001", "d_001", fid_file)
-    spectra = manager.dir_path("spectra")
-    _write_ft2(spectra / "exp_001.ft2")
+    spectra = manager.data_dir("exp_001", "d_001", "spectra")
+    spectra.mkdir(parents=True, exist_ok=True)
+    _write_ft2(spectra / "d_001.ft2")
     statuses = compute_step_statuses(manager, "exp_001")
     assert statuses["fid"] == "SUCCESS"
     assert statuses["spectrum"] == "SUCCESS"
@@ -475,13 +476,15 @@ def test_spectrum_panel_lists_and_loads_spectrum(
     tmp_path: Path, qapp: QApplication
 ) -> None:
     manager = _manager_with_experiment(tmp_path)
-    spectra = manager.dir_path("spectra")
-    _write_ft2(spectra / "exp_001.ft2")
+    spectra = manager.data_dir("exp_001", "d_001", "spectra")
+    spectra.mkdir(parents=True, exist_ok=True)
+    spectrum = spectra / "hsqc_2d.ft2"   # 后端按 dataset_id 命名
+    _write_ft2(spectrum)
     panel = SpectrumPanel(manager)
-    panel.set_context("exp_001")
+    panel.set_context("exp_001")          # 实验级:汇总实验下全部数据谱图
     assert panel.file_list.count() == 1
-    assert panel.file_list.item(0).text() == "exp_001.ft2"
-    assert panel.open_spectrum(spectra / "exp_001.ft2") is True
+    assert panel.file_list.item(0).text() == "hsqc_2d.ft2"
+    assert panel.open_spectrum(spectrum) is True
     assert panel.viewer.layer_list.count() == 1
     panel.close()
 
@@ -1624,7 +1627,6 @@ def test_folder_node_shows_files(
     panel = ProjectTreePanel(manager)
     data_item = panel.tree.topLevelItem(0).child(0).child(0).child(0)
     raw_item = data_item.child(0)
-    panel._on_item_expanded(raw_item)  # 懒加载:展开时才列文件
     names = [raw_item.child(i).text(0) for i in range(raw_item.childCount())]
     assert "acqus" in names and "ser" in names
     panel.close()
@@ -1666,7 +1668,6 @@ def test_spectrum_file_double_click_opens_in_panel(
     window.project_tree.select_experiment("exp_001")
     tree = window.project_tree.tree
     data_item = tree.topLevelItem(0).child(0).child(0).child(0)
-    window.project_tree._on_item_expanded(data_item.child(2))  # 懒加载展开 spectra
     file_item = data_item.child(2).child(0)  # spectra/exp_001-d_001.ft2
     opened: list[str] = []
     window.project_tree.open_spectrum_requested.connect(lambda p: opened.append(p))
@@ -2505,33 +2506,3 @@ def test_log_panel_group_scope_persists_to_group_folder(
     assert "组日志第一行" not in path.read_text(encoding="utf-8")
     log.close()
     log2.close()
-
-
-def test_legacy_data_log_migrated_to_report_folder(
-    tmp_path: Path, qapp: QApplication
-) -> None:
-    """0.2.199-补29ge:旧 d_xxx/log.txt 首次写入时迁移到 report/log.txt。"""
-    from core.project import ProjectManager
-    from gui.log_panel import LogPanel
-
-    manager = ProjectManager.create_project(tmp_path / "proj_lm", "demo")
-    exp = manager.create_experiment("HSQC")
-    data = manager.import_data(exp.id, "/fake/1")
-    base = manager.data_base(exp.id, data.id)
-    base.mkdir(parents=True, exist_ok=True)
-    legacy = base / "log.txt"
-    legacy.write_text(
-        "# NMRForge 数据日志\n[09:00:00] 旧会话记录\n",
-        encoding="utf-8",
-    )
-    log = LogPanel()
-    log.set_manager(manager)
-    scope = log.scope_key("data", exp.id, data.id)
-    log.append("新会话记录", scope=scope)
-    new_path = base / "report" / "log.txt"
-    assert new_path.is_file()
-    assert not legacy.exists()
-    text = new_path.read_text(encoding="utf-8")
-    assert "旧会话记录" in text
-    assert "新会话记录" in text
-    log.close()

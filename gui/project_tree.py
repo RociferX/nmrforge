@@ -222,8 +222,6 @@ class ProjectTreePanel(QWidget):
         self.tree.itemSelectionChanged.connect(self._on_selection_changed)
         self.tree.itemDoubleClicked.connect(self._on_double_clicked)
         self.tree.itemClicked.connect(self._on_item_clicked)
-        # 0.2.199-补29hr(用户):子目录文件懒加载——展开时才列文件
-        self.tree.itemExpanded.connect(self._on_item_expanded)
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._on_context_menu)
         # 内联命名(新建项目/实验):监听树内编辑器提交/取消
@@ -248,9 +246,6 @@ class ProjectTreePanel(QWidget):
     # ------------------------------------------------------------------
     def refresh(self) -> None:
         """增量刷新树:只更新变化节点/子目录,未变化节点保留实例。"""
-        # 0.2.199-补29hr(用户):刷新时一次性建「数据最近运行状态」缓存,
-        # 避免每个数据都遍历全部 workflow_runs(O(数据×运行))。
-        self._build_run_status_cache()
         workspace_item = self.tree.topLevelItem(0)
         if workspace_item is None:
             workspace_item = QTreeWidgetItem([self._workspace_name(), ""])
@@ -435,18 +430,29 @@ class ProjectTreePanel(QWidget):
                 existing[str(data.get("folder"))] = item
         for sub in DATA_SUBFOLDERS:
             folder_item = existing.get(sub)
+            fingerprint = self._folder_fingerprint(exp.id, data_id, sub)
             if folder_item is None:
-                data_item.addChild(self._make_folder_item(exp.id, data_id, sub))
-                continue
-            # 懒加载:仅已展开的文件夹刷新内容;折叠的保持占位
-            role = folder_item.data(0, Qt.ItemDataRole.UserRole)
-            if (
-                isinstance(role, dict)
-                and role.get("populated")
-                and folder_item.isExpanded()
-            ):
-                fingerprint = self._folder_fingerprint(exp.id, data_id, sub)
+                folder_item = QTreeWidgetItem([sub, ""])
+                folder_item.setIcon(0, self._icon("folder"))
+                folder_item.setData(
+                    0,
+                    Qt.ItemDataRole.UserRole,
+                    {
+                        "kind": "folder",
+                        "exp_id": exp.id,
+                        "data_id": data_id,
+                        "folder": sub,
+                        "fingerprint": fingerprint,
+                    },
+                )
+                data_item.addChild(folder_item)
+                self._populate_folder_children(folder_item, exp.id, data_id, sub)
+            else:
+                role = folder_item.data(0, Qt.ItemDataRole.UserRole)
                 if role.get("fingerprint") != fingerprint:
+                    role["fingerprint"] = fingerprint
+                    for index in range(folder_item.childCount() - 1, -1, -1):
+                        folder_item.removeChild(folder_item.child(index))
                     self._populate_folder_children(
                         folder_item, exp.id, data_id, sub
                     )
@@ -595,23 +601,32 @@ class ProjectTreePanel(QWidget):
             {"kind": "data", "exp_id": exp.id, "data_id": data_id},
         )
         for sub in DATA_SUBFOLDERS:
-            data_item.addChild(self._make_folder_item(exp.id, data_id, sub))
+            sub_item = QTreeWidgetItem([sub, ""])
+            sub_item.setIcon(0, self._icon("folder"))
+            sub_item.setData(
+                0,
+                Qt.ItemDataRole.UserRole,
+                {
+                    "kind": "folder",
+                    "exp_id": exp.id,
+                    "data_id": data_id,
+                    "folder": sub,
+                    "fingerprint": self._folder_fingerprint(
+                        exp.id, data_id, sub
+                    ),
+                },
+            )
+            self._populate_folder_children(sub_item, exp.id, data_id, sub)
+            data_item.addChild(sub_item)
         data_item.setExpanded(False)
         return data_item
 
     def _populate_folder_children(
         self, folder_item: QTreeWidgetItem, exp_id: str, data_id: str, folder: str
     ) -> None:
-        """把子文件夹内的文件挂到文件夹节点下(懒加载:展开时调用,可重复)。"""
-        for index in range(folder_item.childCount() - 1, -1, -1):
-            folder_item.removeChild(folder_item.child(index))
+        """把子文件夹内的文件挂到文件夹节点下(可下拉查看)。"""
         path = self._folder_path(exp_id, data_id, folder)
         if path is None or not path.is_dir():
-            _role = folder_item.data(0, Qt.ItemDataRole.UserRole)
-            if isinstance(_role, dict):
-                _role["populated"] = True
-                _role["fingerprint"] = ""
-                folder_item.setData(0, Qt.ItemDataRole.UserRole, _role)
             return
         for child in sorted(path.iterdir(), key=lambda p: (p.is_dir(), p.name.lower())):
             name = child.name
@@ -629,53 +644,6 @@ class ProjectTreePanel(QWidget):
                 },
             )
             folder_item.addChild(file_item)
-        _role = folder_item.data(0, Qt.ItemDataRole.UserRole)
-        if isinstance(_role, dict):
-            _role["populated"] = True
-            _role["fingerprint"] = self._folder_fingerprint(
-                exp_id, data_id, folder
-            )
-            folder_item.setData(0, Qt.ItemDataRole.UserRole, _role)
-
-    def _make_folder_item(
-        self, exp_id: str, data_id: str, folder: str
-    ) -> QTreeWidgetItem:
-        """子目录节点(占位,展开时才列文件——懒加载,0.2.199-补29hr)。"""
-        item = QTreeWidgetItem([folder, ""])
-        item.setIcon(0, self._icon("folder"))
-        item.setData(
-            0,
-            Qt.ItemDataRole.UserRole,
-            {
-                "kind": "folder",
-                "exp_id": exp_id,
-                "data_id": data_id,
-                "folder": folder,
-                "populated": False,
-                "fingerprint": "",
-            },
-        )
-        placeholder = QTreeWidgetItem(["", ""])
-        placeholder.setData(
-            0, Qt.ItemDataRole.UserRole, {"kind": "placeholder"}
-        )
-        item.addChild(placeholder)
-        return item
-
-    def _on_item_expanded(self, item: QTreeWidgetItem) -> None:
-        """展开子目录时才加载文件(懒加载,0.2.199-补29hr)。"""
-        role = item.data(0, Qt.ItemDataRole.UserRole)
-        if (
-            isinstance(role, dict)
-            and role.get("kind") == "folder"
-            and not role.get("populated")
-        ):
-            self._populate_folder_children(
-                item,
-                str(role.get("exp_id", "")),
-                str(role.get("data_id", "")),
-                str(role.get("folder", "")),
-            )
 
     def mark_running(self, exp_id: str, data_id: str) -> None:
         """标记某数据正在处理(左侧状态显示「运行中」)。"""
@@ -719,31 +687,23 @@ class ProjectTreePanel(QWidget):
         self.refresh()
 
     def _data_last_run_failed(self, exp_id: str, data_id: str) -> bool:
-        """该数据最近一次处理运行是否失败(读刷新期缓存)。"""
-        return (
-            getattr(self, "_last_run_status", {})
-            .get((exp_id, data_id), "")
-            == "failed"
-        )
-
-    def _build_run_status_cache(self) -> None:
-        """一次遍历 workflow_runs,建 (exp_id, data_id) → 最近一次状态。"""
+        """该数据最近一次处理运行是否失败(process/reconstruct/pick 等)。"""
+        try:
+            runs = getattr(getattr(self.manager, "project", None), "workflow_runs", None) or []
+        except Exception:  # noqa: BLE001
+            runs = []
         refs = {
             "convert_to_fid", "process", "reconstruct_nus", "pick_peaks",
             "manual_fid", "manual_process", "manual_nus", "manual_peaks",
             "smile_optimize", "analyze", "phase_optimize_unified",
         }
-        cache: dict[tuple[str, str], str] = {}
-        proj = getattr(self.manager, "project", None)
-        for r in getattr(proj, "workflow_runs", None) or []:
-            if getattr(r, "workflow_ref", "") not in refs:
+        for r in reversed(runs):
+            if r.experiment_id != exp_id or r.workflow_ref not in refs:
                 continue
-            did = str((r.inputs or {}).get("data_id", ""))
-            if not did:
+            if str((r.inputs or {}).get("data_id", "")) != data_id:
                 continue
-            # 正序遍历,后写覆盖 → 保留最近一次
-            cache[(str(r.experiment_id), did)] = str(getattr(r, "status", ""))
-        self._last_run_status = cache
+            return str(getattr(r, "status", "")) == "failed"
+        return False
 
 
     def _data_status(self, exp, data_node) -> str:
@@ -768,10 +728,6 @@ class ProjectTreePanel(QWidget):
             peaks_dir = self.manager.data_dir(exp_id, data_id, "peaks")
             for suffix in (".list", ".csv"):
                 if (peaks_dir / f"{exp_id}-{data_id}{suffix}").is_file():
-                    return "已选峰"
-            flat_peaks = self.manager.dir_path("peaks")
-            for suffix in (".list", ".csv"):
-                if (flat_peaks / f"{exp_id}{suffix}").is_file():
                     return "已选峰"
             spec = str(getattr(entry, "spectrum_path", "") or "")
             if spec and Path(spec).is_file():

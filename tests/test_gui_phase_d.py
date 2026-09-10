@@ -90,9 +90,7 @@ def test_tree_folder_children_preserved_when_unchanged(
     panel = ProjectTreePanel(manager, workspace=_TempWorkspace(ws))
     data_item = panel.tree.topLevelItem(0).child(0).child(0).child(0)
     folder_item = data_item.child(0)
-    # 懒加载(0.2.199-补29hr):展开时才列文件
-    panel._on_item_expanded(folder_item)
-    folder_item.setExpanded(True)
+    assert folder_item.childCount() >= 1
     before = [folder_item.child(i) for i in range(folder_item.childCount())]
     assert any(c.text(0) == "acqus" for c in before)
     panel.refresh()
