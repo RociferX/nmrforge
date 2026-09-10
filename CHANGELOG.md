@@ -1,5 +1,20 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29ht(2026-09-10,启动顺序调整:窗口先出现,重模块后台导入)
+- 用户:做一个「导入顺序」改变——其它先来、重的(谱图相关)后导入,用户正常用其它功能时
+  后台导入不影响体验,且后面点谱图不会多加载时间;
+- 实现(仅 app 启动路径,MainWindow(defer_spectrum_panel=True)):
+  ①顶层不再导入 gui.spectrum_panel / workflow.import_workflow(改 TYPE_CHECKING),
+    viewer 包改惰性属性(PEP 562)——`import gui.main_window` 不再连带 pyqtgraph/viewer;
+  ②窗口 show() 之后 _finish_startup() 起后台线程:先导入 gui.spectrum_panel,完成后
+    主线程 replaceWidget 补建右侧面板并补应用当前上下文;再后台预热
+    nmrglue / scipy.ndimage / scipy.signal / matplotlib.pyplot;
+  ③面板未就绪期间 _update_context 等跳过;用户抢先点击(展示谱图/双击谱图文件)
+    时 _ensure_spectrum_panel() 同步补建;
+- 测试/直接构造 MainWindow 仍立即构建面板,行为不变(占位控件占住第四列,列序不变);
+- 验证:import gui.main_window 本机 589→76ms(补29hs 后为 390ms);窗口出现约 120ms
+  (含 Qt/构建/show),右侧谱图面板在窗口后约 0.3s 后台就绪;全量测试全绿,ruff 通过。
+
 ## 0.2.199-补29hs(2026-09-10,启动提速:scipy.ndimage 延迟导入)
 - 用户:启动耗时节省先只做第一项(延迟 scipy.ndimage);
 - 背景:VM 实测 `import gui.main_window` 351ms,其中 scipy.ndimage 约 150–190ms,来源是

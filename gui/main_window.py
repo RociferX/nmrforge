@@ -15,8 +15,9 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (
     QApplication,
@@ -47,8 +48,13 @@ from gui.log_panel import LogPanel
 from gui.pipeline_panel import STEP_LABEL
 from gui.processing import ProcessingController
 from gui.project_tree import ProjectTreePanel
-from gui.spectrum_panel import SpectrumPanel
-from workflow.import_workflow import ImportResult
+
+# 0.2.199-补29ht(用户):重模块改为延迟导入——谱图面板(pyqtgraph/viewer)与
+# 导入工作流不在 `import gui.main_window` 时载入,窗口先出现,随后由
+# _finish_startup() 在后台导入并补建谱图面板;顶层只留轻量导入。
+if TYPE_CHECKING:  # pragma: no cover - 仅类型检查,运行时不执行
+    from gui.spectrum_panel import SpectrumPanel
+    from workflow.import_workflow import ImportResult
 
 
 def _pick_script_key(scripts: dict[str, str], data_id: str) -> str:
@@ -79,12 +85,16 @@ class MainWindow(QMainWindow):
     manual_run_done = pyqtSignal()  # 人工脚本运行完成(主线程刷新 UI)
     batch_run_done = pyqtSignal()  # 数据组批量处理完成(后台线程 → 主线程清运行标记)
     log_append_requested = pyqtSignal(str, object)  # 工作线程日志经队列信号(0.2.199-补29c)
+    # 0.2.199-补29ht:后台预热完成 → 主线程补建谱图面板
+    _spectrum_panel_ready = pyqtSignal()
 
     def __init__(
         self,
         manager: ProjectManager | None = None,
         recent: JsonRecentProjectsStore | None = None,
         controller: ProcessingController | None = None,
+        *,
+        defer_spectrum_panel: bool = False,
     ) -> None:
         super().__init__()
         self.manager = manager or ProjectManager()
@@ -105,12 +115,18 @@ class MainWindow(QMainWindow):
         # 调 _append_log → LogPanel.append → QTextEdit(光标闪烁计时器)触发
         # QBasicTimer::start 错误并卡死
         self.log_append_requested.connect(self._append_log)
+        self._spectrum_panel_ready.connect(self._on_spectrum_panel_ready)
         self._pending_data_names: dict[str, str] = {}
         # 非模态脚本编辑器持有引用(0.2.192);0.2.193 起按 (data_id, step)
         # 去重——同数据同步骤只允许一个编辑器
         self._script_editors: dict[tuple[str, str], ScriptEditorDialog] = {}
         self._last_auto_fill: dict = {}
         self._last_raw_quality: dict | None = None
+        # 0.2.199-补29ht:谱图面板可延后构建(重导入 pyqtgraph);默认立即构建,
+        # 只有 MainWindow.run() 走延后路径。占位控件先占住第四列。
+        self._defer_spectrum_panel = bool(defer_spectrum_panel)
+        self.spectrum_panel: SpectrumPanel | None = None
+        self._spectrum_placeholder: QWidget | None = None
         # 日志作用域:当前选中上下文(由 _update_context 维护)
         self._log_kind = ""
         self._log_exp_id = ""
@@ -279,17 +295,9 @@ class MainWindow(QMainWindow):
             self._show_spectrum_from_pipeline
         )
 
-        self.spectrum_panel = SpectrumPanel(self.manager, controller=self.controller)
-        self.spectrum_panel.peaks_saved.connect(self._on_peaks_saved)
-        # 0.2.199-补29cz:峰表可信度匹配等任务日志进 LogPanel
-        self.spectrum_panel.log_message.connect(self._append_log)
-        self.spectrum_panel.status_message.connect(
-            self.statusBar().showMessage
-        )
-        # 0.2.199-补29bp:谱图放大/收起(收起左侧三部分)
-        self.spectrum_panel.expand_requested.connect(
-            self._toggle_spectrum_expand
-        )
+        self._spectrum_placeholder = QWidget()
+        if not self._defer_spectrum_panel:
+            self._build_spectrum_panel()
 
         self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
         self.main_splitter.addWidget(self.project_tree)
@@ -300,7 +308,11 @@ class MainWindow(QMainWindow):
         # 0.2.143:log 界面常驻显示(不再默认隐藏),宽度不限可拖拽
         self.log_panel.setVisible(True)
         self.main_splitter.addWidget(self.log_panel)
-        self.main_splitter.addWidget(self.spectrum_panel)
+        self.main_splitter.addWidget(
+            self.spectrum_panel
+            if self.spectrum_panel is not None
+            else self._spectrum_placeholder
+        )
         self.main_splitter.setStretchFactor(0, 20)
         self.main_splitter.setStretchFactor(1, 40)
         self.main_splitter.setStretchFactor(2, 0)
@@ -322,6 +334,99 @@ class MainWindow(QMainWindow):
         central_layout.addWidget(self.context_bar)
         central_layout.addWidget(self.main_splitter, 1)
         self.setCentralWidget(central)
+
+    # ------------------------------------------------------------------
+    # 谱图面板构建(可延后)
+    # ------------------------------------------------------------------
+    def _build_spectrum_panel(self, apply_context: bool = False):
+        """构建右侧谱图面板(已构建则直接返回)。
+
+        0.2.199-补29ht:面板导入 pyqtgraph/viewer 较重,可等窗口显示后再调用;
+        用户抢先触发谱图操作时由 _ensure_spectrum_panel() 同步构建。
+        apply_context=True 时按当前树选中补应用上下文(延后构建路径使用)。
+        """
+        if self.spectrum_panel is not None:
+            return self.spectrum_panel
+        from gui.spectrum_panel import SpectrumPanel
+
+        panel = SpectrumPanel(self.manager, controller=self.controller)
+        panel.peaks_saved.connect(self._on_peaks_saved)
+        # 0.2.199-补29cz:峰表可信度匹配等任务日志进 LogPanel
+        panel.log_message.connect(self._append_log)
+        panel.status_message.connect(self.statusBar().showMessage)
+        # 0.2.199-补29bp:谱图放大/收起(收起左侧三部分)
+        panel.expand_requested.connect(self._toggle_spectrum_expand)
+        self.spectrum_panel = panel
+        placeholder = self._spectrum_placeholder
+        splitter = getattr(self, "main_splitter", None)
+        if placeholder is not None and splitter is not None:
+            index = splitter.indexOf(placeholder)
+            if index >= 0:
+                splitter.replaceWidget(index, panel)
+            else:  # pragma: no cover - 占位缺失时直接追加
+                splitter.addWidget(panel)
+            placeholder.deleteLater()
+            self._spectrum_placeholder = None
+        elif placeholder is not None and splitter is None:
+            # 立即构建路径(测试/直接构造):分隔条随后创建时会直接加 panel
+            self._spectrum_placeholder = None
+        if apply_context:
+            current = self.project_tree.tree.currentItem()
+            panel.set_context(
+                self.project_tree.current_experiment_id(),
+                self.project_tree._data_id_of(current),
+            )
+        return panel
+
+    def _ensure_spectrum_panel(self):
+        """确保谱图面板已就绪(未就绪则立即构建,用于用户抢先点击)。"""
+        return self.spectrum_panel or self._build_spectrum_panel(
+            apply_context=True
+        )
+
+    def _on_spectrum_panel_ready(self) -> None:
+        """后台预热完成 → 主线程补建谱图面板。"""
+        try:
+            self._build_spectrum_panel(apply_context=True)
+        except Exception:  # noqa: BLE001 - 面板构建失败不阻断启动
+            pass
+
+    def _finish_startup(self) -> None:
+        """窗口显示后:后台导入重模块,完成后补建谱图面板。
+
+        0.2.199-补29ht(用户):先 show 再导入——用户可立即用其它功能,
+        导入在后台线程进行;预热 nmrglue/scipy/matplotlib 后,后续点谱图/
+        选峰不再额外等待(代价从"点谱图时"挪到"窗口已可用之后")。
+        """
+        import threading
+
+        def work() -> None:
+            # ① 先把谱图面板自身(含 pyqtgraph/viewer)导入好 → 立刻补建面板,
+            #    右列尽快可见;
+            try:
+                import gui.spectrum_panel  # noqa: F401 - 面板依赖 pyqtgraph + viewer
+            except Exception:  # noqa: BLE001 - 预热失败不影响功能
+                pass
+            self._spectrum_panel_ready.emit()
+            # ② 面板之后再预热后续会用到的重模块(均在后台,不挡首帧):
+            #    nmrglue 读谱、scipy 峰检测/插值/Hilbert、matplotlib 等高线。
+            for _mod in (
+                "nmrglue",
+                "scipy.ndimage",
+                "scipy.signal",
+                "matplotlib.pyplot",
+            ):
+                try:
+                    import importlib
+
+                    importlib.import_module(_mod)
+                except Exception:  # noqa: BLE001 - 单个模块失败不中断
+                    continue
+
+        self._prewarm_thread = threading.Thread(
+            target=work, daemon=True, name="nmrforge-prewarm"
+        )
+        self._prewarm_thread.start()
 
     # ------------------------------------------------------------------
     # 项目动作
@@ -392,7 +497,8 @@ class MainWindow(QMainWindow):
         self.project_tree.manager = self.manager
         self.center_panel._manager = self.manager
         self.pipeline.manager = self.manager
-        self.spectrum_panel.manager = self.manager
+        if self.spectrum_panel is not None:
+            self.spectrum_panel.manager = self.manager
         self.log_panel.set_manager(self.manager)
         self.controller.set_manager(self.manager)
 
@@ -1479,7 +1585,8 @@ class MainWindow(QMainWindow):
         self.refresh()
         self.center_panel.refresh()
         # 0.2.88:不自动显示谱,刷新文件列表即可(「展示谱图」按钮已出现)
-        self.spectrum_panel.refresh()
+        if self.spectrum_panel is not None:
+            self.spectrum_panel.refresh()
 
     def _show_spectrum_from_pipeline(self, _step_id: str = "") -> None:
         """「展示谱图」按钮:在右侧谱图面板显示当前数据的最终谱。"""
@@ -1487,8 +1594,9 @@ class MainWindow(QMainWindow):
         data_id = getattr(self.pipeline, "_current_data_id", "")
         if not (exp_id and data_id) or self.manager.project is None:
             return
-        self.spectrum_panel.set_context(exp_id, data_id)
-        if not self.spectrum_panel.load_current_spectrum():
+        panel = self._ensure_spectrum_panel()
+        panel.set_context(exp_id, data_id)
+        if not panel.load_current_spectrum():
             InfoDialog.show_info(self, "提示", "该样品数据还没有谱图文件")
 
     def _on_batch_run_done(self) -> None:
@@ -1762,7 +1870,8 @@ class MainWindow(QMainWindow):
         self.pipeline.setVisible(checked)
 
     def _toggle_spectrum(self, checked: bool) -> None:
-        self.spectrum_panel.setVisible(checked)
+        if self.spectrum_panel is not None:
+            self.spectrum_panel.setVisible(checked)
 
     def _toggle_spectrum_expand(self, expanded: bool) -> None:
         """谱图放大:隐藏左侧三部分(项目树/Pipeline/Log),谱图占满窗口。"""
@@ -1775,9 +1884,10 @@ class MainWindow(QMainWindow):
     def _open_spectrum_from_tree(self, path: str) -> None:
         """树中双击谱图文件:右侧谱图面板直接显示并加载峰表。"""
         target = Path(path)
-        if self.spectrum_panel.open_spectrum(target):
-            self.spectrum_panel._current_spectrum = target
-            self.spectrum_panel._load_peaks(target)
+        panel = self._ensure_spectrum_panel()
+        if panel.open_spectrum(target):
+            panel._current_spectrum = target
+            panel._load_peaks(target)
             self.statusBar().showMessage(f"已打开: {target.name}")
 
     def _open_terminal(self, path: str) -> None:
@@ -1805,7 +1915,8 @@ class MainWindow(QMainWindow):
 
     def _on_open_experiment(self, exp_id: str) -> None:
         self.center_panel.set_selection("experiment", exp_id, "")
-        self.spectrum_panel.set_context(exp_id, "")
+        if self.spectrum_panel is not None:
+            self.spectrum_panel.set_context(exp_id, "")
         self.statusBar().showMessage(
             f"实验 {exp_id}: 双击查看谱图文件,中间 Pipeline 显示处理步骤"
         )
@@ -1867,10 +1978,12 @@ class MainWindow(QMainWindow):
     ) -> None:
         """左侧选择变化 → 中间按选中类型显示,右侧围绕数据刷新,日志切换作用域。"""
         self.center_panel.set_selection(kind, exp_id, data_id, group_id)
-        if kind == "group":
-            self.spectrum_panel.set_context(exp_id, "")
-        else:
-            self.spectrum_panel.set_context(exp_id, data_id)
+        # 补29ht:面板可能尚未构建(延后构建),就绪时由构建收尾补应用上下文
+        if self.spectrum_panel is not None:
+            if kind == "group":
+                self.spectrum_panel.set_context(exp_id, "")
+            else:
+                self.spectrum_panel.set_context(exp_id, data_id)
         self._log_kind = kind or ""
         self._log_exp_id = exp_id or ""
         self._log_data_id = data_id or ""
@@ -1967,7 +2080,8 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("新建或打开项目开始工作")
             self.center_panel.welcome_page.refresh()
             self.center_panel.set_selection("workspace", "", "")
-            self.spectrum_panel.set_context("", "")
+            if self.spectrum_panel is not None:
+                self.spectrum_panel.set_context("", "")
             self.main_splitter.setVisible(True)  # 欢迎页在三栏中显示
             self._update_context_bar()
             return
@@ -2000,8 +2114,11 @@ class MainWindow(QMainWindow):
         _icon = app_icon()
         if _icon is not None:
             app.setWindowIcon(_icon)
-        window = MainWindow()
+        # 0.2.199-补29ht(用户):窗口先出现(谱图面板延后构建),首帧之后
+        # 后台导入重模块并补建面板,期间用户可正常使用其它功能。
+        window = MainWindow(defer_spectrum_panel=True)
         window.show()
+        QTimer.singleShot(0, window._finish_startup)
         code = app.exec()
         # 0.2.199:PyQt6/SIP 在解释器收尾时遍历已悬空的 sip 包装指针
         # (cleanup_on_exit -> sip_api_get_address(0x1e80))导致 SIGSEGV,
