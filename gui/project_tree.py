@@ -28,6 +28,7 @@ from PyQt6.QtWidgets import (
 )
 
 from core.project import ProjectManager
+from gui.pipeline_state import ALL_STEP_RUN_REFS
 from gui.theme import TEXT_SECONDARY
 
 # 数据节点下真实目录(契约 v1.3 §9:raw/process/spectra/peaks/figures/report)
@@ -688,23 +689,18 @@ class ProjectTreePanel(QWidget):
         self.refresh()
 
     def _data_last_run_failed(self, exp_id: str, data_id: str) -> bool:
-        """该数据最近一次处理运行是否失败(process/reconstruct/pick 等)。"""
+        """该数据最近一次处理运行是否失败。
+
+        0.2.199-补29hz:与 Pipeline 步骤状态共用一处判定
+        (ProjectManager.last_run_for_data + STEP_RUN_REFS),避免两处规则漂移。
+        """
         try:
-            runs = getattr(getattr(self.manager, "project", None), "workflow_runs", None) or []
-        except Exception:  # noqa: BLE001
-            runs = []
-        refs = {
-            "convert_to_fid", "process", "reconstruct_nus", "pick_peaks",
-            "manual_fid", "manual_process", "manual_nus", "manual_peaks",
-            "smile_optimize", "analyze", "phase_optimize_unified",
-        }
-        for r in reversed(runs):
-            if r.experiment_id != exp_id or r.workflow_ref not in refs:
-                continue
-            if str((r.inputs or {}).get("data_id", "")) != data_id:
-                continue
-            return str(getattr(r, "status", "")) == "failed"
-        return False
+            run = self.manager.last_run_for_data(
+                exp_id, data_id, ALL_STEP_RUN_REFS
+            )
+        except Exception:  # noqa: BLE001 - 判定失败按未失败处理
+            return False
+        return run is not None and str(getattr(run, "status", "")) == "failed"
 
 
     def _data_status(self, exp, data_node) -> str:
@@ -795,6 +791,10 @@ class ProjectTreePanel(QWidget):
                 return str(data["data_id"])
             item = item.parent()
         return ""
+
+    def current_data_id(self) -> str:
+        """当前选中节点所属的样品数据 id(非数据节点为空串)。"""
+        return self._data_id_of(self.tree.currentItem())
 
     def select_data(self, exp_id: str, data_id: str) -> None:
         """选中实验下的样品数据节点(展开实验;找不到时静默)。"""

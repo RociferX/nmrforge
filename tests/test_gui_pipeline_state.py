@@ -289,6 +289,15 @@ class _FakeController:
             sampling=SimpleNamespace(mode=SamplingMode.NUS)
         )
 
+    def data_facts(self, *args, **kwargs) -> dict:
+        """公开接口(0.2.199-补29hz):Pipeline 门控按 dict 读,不再碰私有。"""
+        return {
+            "ndim": 2,
+            "direct_nucleus": "1H",
+            "is_nus": True,
+            "sampling_mode": "NUS",
+        }
+
 
 
 

@@ -813,6 +813,28 @@ class ProjectManager:
     # ------------------------------------------------------------------
     # WorkflowRun
     # ------------------------------------------------------------------
+    def last_run_for_data(
+        self, exp_id: str, data_id: str, refs: tuple[str, ...]
+    ) -> WorkflowRun | None:
+        """该数据在指定步骤 ref 下的最近一次运行(严格按 data_id 归属)。
+
+        0.2.199-补29hz:只接受 inputs.data_id 精确匹配的记录。补29hi 之前的
+        版本写下的峰挑选/分析记录没有 data_id,归属不明——多数据实验里会把
+        一条失败算到所有数据头上;老项目产物一律重新生成(用户 2026-09-10
+        确认),因此不再保留兼容回退。
+        """
+        if self.project is None or not refs:
+            return None
+        wanted = str(data_id)
+        for candidate in reversed(self.project.workflow_runs):
+            if candidate.experiment_id != exp_id:
+                continue
+            if candidate.workflow_ref not in refs:
+                continue
+            if str((candidate.inputs or {}).get("data_id", "")) != wanted:
+                continue
+            return candidate
+        return None
     def start_run(
         self,
         experiment_id: str,

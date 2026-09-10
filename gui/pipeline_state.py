@@ -30,6 +30,25 @@ STATE_FILENAME = ".pipeline_state.json"
 # 大于该尺寸的产物(终谱等)用 (size, mtime_ns) 摘要,避免每次刷新全量哈希大文件
 _HASH_LIMIT = 8 * 1024 * 1024
 
+# 步骤 → 可能的工作流 ref(查最近运行 / 判定失败用)。
+# 0.2.199-补29hz:Pipeline 与项目树原来各存一份,统一到这里,避免漂移。
+STEP_RUN_REFS: dict[str, tuple[str, ...]] = {
+    "fid": ("convert_to_fid", "manual_fid"),
+    "spectrum": (
+        "process",
+        "reconstruct_nus",
+        "manual_process",
+        "manual_nus",
+        "phase_optimize_unified",
+    ),
+    "smile": ("smile_optimize",),
+    "peaks": ("pick_peaks", "manual_peaks"),
+    "analysis": ("analyze",),
+}
+ALL_STEP_RUN_REFS: tuple[str, ...] = tuple(
+    sorted({ref for refs in STEP_RUN_REFS.values() for ref in refs})
+)
+
 
 def file_fingerprint(path: Path | str) -> str | None:
     """文件内容指纹:≤8MiB 全量 SHA-256;大文件用 size+mtime_ns 摘要。"""

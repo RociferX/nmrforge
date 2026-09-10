@@ -588,6 +588,29 @@ class ProcessingController:
         self._manager.save()
         return str(list_path)
 
+    def data_facts(self, exp_id: str, data_id: str) -> dict[str, object]:
+        """该数据的读取事实:ndim / direct_nucleus / is_nus。
+
+        0.2.199-补29hz:GUI 门控(如 Pipeline 的 SMILE/峰步骤显隐、直接维
+        范围档位)原来各自调私有 _read_experiment 并各自缓存,口径容易分叉;
+        统一从这里取。读取失败返回空 dict,调用方按缺省降级。
+        """
+        try:
+            experiment = self._read_experiment(exp_id, data_id)
+        except Exception:  # noqa: BLE001 - 读取失败由调用方降级
+            return {}
+        from core.data.internal_data_model import SamplingMode
+
+        dim = getattr(experiment, "direct_dimension", None)
+        sampling = getattr(experiment, "sampling", None)
+        mode = getattr(sampling, "mode", None)
+        return {
+            "ndim": int(getattr(experiment, "ndim", 2) or 2),
+            "direct_nucleus": str(getattr(dim, "nucleus", "") or ""),
+            "is_nus": mode is SamplingMode.NUS,
+            "sampling_mode": str(getattr(mode, "value", "") or ""),
+        }
+
     def _read_experiment(self, exp_id: str, data_id: str):
         """读取数据对应 Experiment(复用 workflow.stepwise 统一实现,0.2.164)。"""
         from workflow.stepwise import _read_experiment as _read

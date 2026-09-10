@@ -371,10 +371,9 @@ class MainWindow(QMainWindow):
             # 立即构建路径(测试/直接构造):分隔条随后创建时会直接加 panel
             self._spectrum_placeholder = None
         if apply_context:
-            current = self.project_tree.tree.currentItem()
             panel.set_context(
                 self.project_tree.current_experiment_id(),
-                self.project_tree._data_id_of(current),
+                self.project_tree.current_data_id(),
             )
         return panel
 
@@ -495,7 +494,7 @@ class MainWindow(QMainWindow):
     def _rebind_shared_manager(self) -> None:
         """项目对象更换后,让各面板共享同一个 ProjectManager 实例。"""
         self.project_tree.manager = self.manager
-        self.center_panel._manager = self.manager
+        self.center_panel.set_manager(self.manager)
         self.pipeline.manager = self.manager
         if self.spectrum_panel is not None:
             self.spectrum_panel.manager = self.manager
@@ -661,7 +660,7 @@ class MainWindow(QMainWindow):
         self.project_tree.select_experiment(exp_id)
         self.center_panel.set_selection("experiment", exp_id)
         # 0.2.87:批量导入自动填充注释后立即刷新注释条
-        self.center_panel._update_notes("experiment", exp_id, "")
+        self.center_panel.update_notes("experiment", exp_id, "")
         self._maybe_show_first_import_hint()
 
     # ------------------------------------------------------------------
@@ -1034,7 +1033,7 @@ class MainWindow(QMainWindow):
         if exp_id:
             self.project_tree.select_experiment(exp_id)
             # 0.2.87:导入自动填充注释后立即刷新注释条
-            self.center_panel._update_notes("experiment", exp_id, "")
+            self.center_panel.update_notes("experiment", exp_id, "")
         self._maybe_show_first_import_hint()
         warnings = list(result.warnings)
         quality = getattr(self, "_last_raw_quality", None) or {}
@@ -1372,7 +1371,7 @@ class MainWindow(QMainWindow):
         nodes = list(getattr(entry, "data", None) or [])
         if not nodes:
             return None
-        data_id = self.project_tree._data_id_of(self.project_tree.tree.currentItem())
+        data_id = self.project_tree.current_data_id()
         if data_id:
             return next((n for n in nodes if getattr(n, "id", "") == data_id), nodes[0])
         return nodes[0]
@@ -1591,7 +1590,7 @@ class MainWindow(QMainWindow):
     def _show_spectrum_from_pipeline(self, _step_id: str = "") -> None:
         """「展示谱图」按钮:在右侧谱图面板显示当前数据的最终谱。"""
         exp_id = self.pipeline.current_experiment_id()
-        data_id = getattr(self.pipeline, "_current_data_id", "")
+        data_id = self.pipeline.current_data_id
         if not (exp_id and data_id) or self.manager.project is None:
             return
         panel = self._ensure_spectrum_panel()
@@ -1857,7 +1856,7 @@ class MainWindow(QMainWindow):
         except ProjectError as exc:
             InfoDialog.show_info(self, "保存失败", str(exc))
             return
-        self.center_panel._update_notes(kind, exp_id, data_id)
+        self.center_panel.update_notes(kind, exp_id, data_id)
         self._append_log(f"已保存{title}")
 
     # ------------------------------------------------------------------
@@ -1912,7 +1911,7 @@ class MainWindow(QMainWindow):
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(target)))
         # 保持中间 Pipeline 上下文(当前选中实验时切回样品数据页)
         exp_id = self.project_tree.current_experiment_id()
-        data_id = self.project_tree._data_id_of(self.project_tree.tree.currentItem())
+        data_id = self.project_tree.current_data_id()
         if exp_id:
             self.center_panel.set_selection("data", exp_id, data_id or "")
         self.statusBar().showMessage(f"已打开: {target}")
@@ -1941,7 +1940,7 @@ class MainWindow(QMainWindow):
             return
         exp_id = self.project_tree.current_experiment_id()
         current = self.project_tree.tree.currentItem()
-        data_id = self.project_tree._data_id_of(current)
+        data_id = self.project_tree.current_data_id()
         parts = [self.manager.project.name]
         if exp_id:
             exp = self.manager.project.experiment(exp_id)

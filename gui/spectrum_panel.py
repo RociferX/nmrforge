@@ -501,7 +501,7 @@ class SpectrumPanel(QWidget):
             self.viewer.aspect_slider.setValue(
                 int(state.get("aspect", 0))
             )
-            self.viewer._update_levels()
+            self.viewer.refresh_levels()
             self.peak_size_spin.setValue(
                 float(state.get("peak_size", 1.5))
             )
@@ -737,7 +737,7 @@ class SpectrumPanel(QWidget):
         0.2.199-补29dk(用户):.list/峰表显示按外部约定,内部按 F 逻辑解读——
         这里从已加载谱轴标签取核(仅文件头来源,不用 metadata)。
         """
-        s3d = getattr(self._spectrum3d_panel, "_spectrum3d", None)
+        s3d = self._spectrum3d_panel.spectrum3d
         axes3 = getattr(s3d, "axes", None) if s3d is not None else None
         if not axes3 or len(axes3) != 3:
             return None
@@ -885,7 +885,7 @@ class SpectrumPanel(QWidget):
                 if _base_norm(nuc) not in (na, nb):
                     fixed_axis = i
                     break
-        s3d = getattr(self._spectrum3d_panel, "_spectrum3d", None)
+        s3d = self._spectrum3d_panel.spectrum3d
         s3d_axes = list(getattr(s3d, "axes", []) or []) if s3d is not None else []
         # 0.2.199-补29hd:面板未加载 3D 时,从同目录 .ft3 懒读轴作兜底——
         # 投影 .ft2 文件头被 proj3D.tcl 复制为输入平面头(全 15N/1H),不可用于
@@ -1141,7 +1141,7 @@ class SpectrumPanel(QWidget):
             "F2_shift": 0.1,
             "F3_shift": 0.5,
         }
-        primary = getattr(self.viewer, "_primary", None)
+        primary = self.viewer.primary_spectrum
         axes = getattr(primary, "axes", None) if primary is not None else None
         if axes:
             if len(axes) > 1:
@@ -1152,7 +1152,7 @@ class SpectrumPanel(QWidget):
                 step = self._axis_step_ppm(axes[0])
                 if step:
                     tol["N_shift"] = 4.0 * step
-        s3d = getattr(self._spectrum3d_panel, "_spectrum3d", None)
+        s3d = self._spectrum3d_panel.spectrum3d
         axes3 = getattr(s3d, "axes", None) if s3d is not None else None
         if axes3:
             for index, key in enumerate(("F1_shift", "F2_shift", "F3_shift")):
@@ -1255,7 +1255,7 @@ class SpectrumPanel(QWidget):
         keys: list[str]
         header_map: dict[str, str] = {}
         if is_3d:
-            s3d = getattr(self._spectrum3d_panel, "_spectrum3d", None)
+            s3d = self._spectrum3d_panel.spectrum3d
             axes3 = getattr(s3d, "axes", None)
             nuclei3 = self._current_3d_nuclei()
             if (
@@ -1302,7 +1302,7 @@ class SpectrumPanel(QWidget):
             [
                 (
                     "Assignment ✓"
-                    if self.viewer._show_peak_labels
+                    if self.viewer.peak_labels_visible
                     else "Assignment ✗"
                 )
                 if k == "label"
@@ -1922,7 +1922,7 @@ class SpectrumPanel(QWidget):
         """点击 Assignment 列标题:开关图上峰指认标签(0.2.199-补29bf)。"""
         if section != 1:
             return
-        new_state = not self.viewer._show_peak_labels
+        new_state = not self.viewer.peak_labels_visible
         self.viewer.set_peak_labels_visible(new_state)
         header_item = self.peak_table.horizontalHeaderItem(1)
         if header_item is not None:
@@ -1935,8 +1935,8 @@ class SpectrumPanel(QWidget):
         (0.2.199-补29dc)。缺固定轴坐标或坐标越界的峰(2D 峰表/旧选峰结果)
         不跳转并提示(0.2.199-补29de:避免任意峰都跳到最后一个切面)。"""
         s3d_panel = self._spectrum3d_panel
-        s3d = getattr(s3d_panel, "_spectrum3d", None)
-        primary = getattr(self.viewer, "_primary", None)
+        s3d = s3d_panel.spectrum3d
+        primary = self.viewer.primary_spectrum
         if s3d is None or primary is None:
             return
         if getattr(primary, "slice_axis", None) is None:

@@ -42,6 +42,7 @@ from PyQt6.QtWidgets import (
 
 from core.project import ProjectManager
 from gui.pipeline_state import (
+    STEP_RUN_REFS,
     input_fingerprint,
     load_pipeline_state,
     script_fingerprint,
@@ -485,37 +486,19 @@ def _lock_reasons(statuses: dict[str, str]) -> dict[str, str]:
 
 
 def _step_refs(step_id: str) -> tuple[str, ...]:
-    """步骤 → 可能的工作流 refs(查最近运行用)。"""
-    return {
-        "fid": ("convert_to_fid", "manual_fid"),
-        "spectrum": (
-            "process",
-            "reconstruct_nus",
-            "manual_process",
-            "manual_nus",
-            "phase_optimize_unified",
-        ),
-        "smile": ("smile_optimize",),
-        "peaks": ("pick_peaks", "manual_peaks"),
-        "analysis": ("analyze",),
-    }.get(step_id, ())
+    """步骤 → 可能的工作流 refs(表见 gui.pipeline_state.STEP_RUN_REFS)。"""
+    return STEP_RUN_REFS.get(step_id, ())
 
 
 def _last_run_for(
     manager: ProjectManager, exp_id: str, data_id: str, refs: tuple[str, ...]
 ):
-    """数据在指定步骤 refs 下的最近一次 WorkflowRun(无则 None)。"""
-    if manager.project is None:
-        return None
-    for candidate in reversed(manager.project.workflow_runs):
-        if candidate.experiment_id != exp_id:
-            continue
-        if candidate.workflow_ref not in refs:
-            continue
-        if (candidate.inputs or {}).get("data_id", "") not in ("", data_id):
-            continue
-        return candidate
-    return None
+    """数据在指定步骤 refs 下的最近一次运行(严格 data_id 归属)。
+
+    0.2.199-补29hz:原来 accepted inputs 缺 data_id 的老记录,多数据实验里
+    一条老失败会算到所有数据头上;老项目产物一律重新生成,故不再回退。
+    """
+    return manager.last_run_for_data(exp_id, data_id, refs)
 
 
 def _format_params(params: dict) -> str:
@@ -1084,6 +1067,24 @@ class PipelinePanel(QWidget):
     # ------------------------------------------------------------------
     # 上下文
     # ------------------------------------------------------------------
+    def _data_facts(self, exp_id: str, data_id: str) -> dict:
+        """当前数据事实(ndim / 直接维核素 / 是否 NUS)。
+
+        0.2.199-补29hz:统一走 ProcessingController.data_facts;测试替身等
+        不提供该接口时按「未知」降级(与读取失败同等处理,不抛错)。
+        """
+        getter = getattr(self.controller, "data_facts", None)
+        if getter is None:
+            return {}
+        try:
+            return dict(getter(exp_id, data_id) or {})
+        except Exception:  # noqa: BLE001 - 读取失败按未知处理
+            return {}
+    @property
+    def current_data_id(self) -> str:
+        """当前选中的样品数据 id(未选中为空串)。"""
+        return str(self._current_data_id or "")
+
     def set_context(self, exp_id: str, data_id: str | None = None) -> None:
         """兼容入口:按实验类型设置上下文(data_id 缺省回退首个样品数据)。"""
         self._selection_kind = "experiment" if exp_id else ""
@@ -1212,15 +1213,8 @@ class PipelinePanel(QWidget):
             return False
         key = (exp_id, data_id)
         if key not in self._nus_cache:
-            try:
-                from core.data.internal_data_model import SamplingMode
-
-                experiment = self.controller._read_experiment(exp_id, data_id)
-                self._nus_cache[key] = (
-                    experiment.sampling.mode is SamplingMode.NUS
-                )
-            except Exception:  # noqa: BLE001 - 判定失败按非 NUS 处理
-                self._nus_cache[key] = False
+            facts = self._data_facts(exp_id, data_id)
+            self._nus_cache[key] = bool(facts.get("is_nus", False))
         return self._nus_cache[key]
 
     def _data_ndim(self, exp_id: str, data_id: str) -> int:
@@ -1229,11 +1223,8 @@ class PipelinePanel(QWidget):
             return 2
         key = (exp_id, data_id)
         if key not in self._ndim_cache:
-            try:
-                experiment = self.controller._read_experiment(exp_id, data_id)
-                self._ndim_cache[key] = int(getattr(experiment, "ndim", 2) or 2)
-            except Exception:  # noqa: BLE001 - 读取失败按 2D/3D 处理
-                self._ndim_cache[key] = 2
+            facts = self._data_facts(exp_id, data_id)
+            self._ndim_cache[key] = int(facts.get("ndim", 2) or 2)
         return self._ndim_cache[key]
 
     def _data_direct_nucleus(self, exp_id: str, data_id: str) -> str:
@@ -1242,14 +1233,10 @@ class PipelinePanel(QWidget):
             return ""
         key = (exp_id, data_id)
         if key not in self._nucleus_cache:
-            try:
-                experiment = self.controller._read_experiment(exp_id, data_id)
-                dim = getattr(experiment, "direct_dimension", None)
-                self._nucleus_cache[key] = str(
-                    getattr(dim, "nucleus", "") or ""
-                )
-            except Exception:  # noqa: BLE001 - 读取失败按未知核处理
-                self._nucleus_cache[key] = ""
+            facts = self._data_facts(exp_id, data_id)
+            self._nucleus_cache[key] = str(
+                facts.get("direct_nucleus", "") or ""
+            )
         return self._nucleus_cache[key]
 
     def _set_peaks_visible(self, visible: bool) -> None:

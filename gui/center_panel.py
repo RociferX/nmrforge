@@ -165,6 +165,18 @@ class CenterPanel(QWidget):
             self.pipeline.set_selection(kind, exp_id, data_id)
 
     # ------------------------------------------------------------------
+    def set_manager(self, manager) -> None:
+        """绑定/更新 ProjectManager(切换项目时由主窗口调用)。"""
+        self._manager = manager
+        try:
+            self.report_page.manager = manager
+        except Exception:  # noqa: BLE001 - 报告页缺 manager 时忽略
+            pass
+
+    def update_notes(self, *args, **kwargs) -> None:
+        """刷新注释页面(公开包装:_update_notes)。"""
+        self._update_notes(*args, **kwargs)
+
     def _update_notes(
         self, kind: str, exp_id: str, data_id: str = "", group_id: str = ""
     ) -> None:
@@ -312,7 +324,7 @@ class CenterPanel(QWidget):
         self.project_page.refresh()
         self.experiment_page.refresh()
         if self._exp_group_context():
-            self.group_page._refresh()
+            self.group_page.refresh()
         self.report_page.manager = self._manager
         self.report_page.refresh()
 
@@ -320,13 +332,13 @@ class CenterPanel(QWidget):
         """当前是否停留在数据组页面(供 refresh 刷新)。"""
         return bool(
             self.stack.currentWidget() is self.group_page
-            and getattr(self.group_page, "_group_id", "")
+            and self.group_page.current_group_id
         )
 
     def show_report(self, _step_id: str = "", exp_id: str = "", data_id: str = "") -> None:
         """打开报告页(分析产物存在时);缺省用当前选中实验/数据。"""
         exp_id = exp_id or self.pipeline.current_experiment_id()
-        data_id = data_id or getattr(self.pipeline, "_current_data_id", "")
+        data_id = data_id or self.pipeline.current_data_id
         self.report_page.manager = self._manager
         self.report_page.set_context(exp_id, data_id)
         self.stack.setCurrentIndex(4)

@@ -37,6 +37,17 @@ def qapp() -> QApplication:
     yield app
 
 
+@pytest.fixture
+def host(qapp: QApplication):
+    """控件宿主:测试结束整体销毁,避免顶层控件残留(PyQt6 收尾崩溃)。"""
+    from PyQt6.QtWidgets import QWidget
+
+    widget = QWidget()
+    yield widget
+    widget.deleteLater()
+    QApplication.processEvents()
+
+
 def _project(tmp_path: Path, title: str = "demo"):
     manager = ProjectManager.create_project(tmp_path / title, title)
     exp = manager.create_experiment("HSQC")
@@ -142,7 +153,7 @@ def test_recover_trashed_ignores_ui_records_only(tmp_path: Path) -> None:
 
 
 def test_double_click_ft1_opens_spectrum(
-    tmp_path: Path, qapp: QApplication
+    tmp_path: Path, qapp: QApplication, host
 ) -> None:
     from gui.project_tree import ProjectTreePanel
 
@@ -152,7 +163,7 @@ def test_double_click_ft1_opens_spectrum(
     ft1 = spectra / f"{data.id}.ft1"
     ft1.write_bytes(b"1d")
 
-    panel = ProjectTreePanel(manager)
+    panel = ProjectTreePanel(manager, parent=host)
     opened: list[str] = []
     panel.open_spectrum_requested.connect(opened.append)
     item = QTreeWidgetItem()
@@ -169,4 +180,3 @@ def test_double_click_ft1_opens_spectrum(
     )
     panel._on_double_clicked(item, 0)
     assert opened and opened[0].endswith(f"{data.id}.ft1")
-    panel.close()

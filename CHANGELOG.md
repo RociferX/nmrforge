@@ -1,5 +1,33 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29hz-修1(2026-09-10,运行记录严格归属 + GUI 私有访问收口)
+- 用户:审阅待办第 2、4 项要改;并明确「老项目产物并未投入使用,一切可以全新生成」——
+  因此**不做兼容回退**;
+- 运行记录归属(问题 2):Pipeline 的 _last_run_for 原来接受 inputs 缺 data_id 的
+  老记录(data_id in ("", data_id)),多数据实验里一条老失败会算到所有数据头上;
+  项目树却用严格匹配,两边还会显示不一致(0.2.199-补29hi 之前的峰挑选/分析记录
+  没有 data_id)。现在:
+  ① core/project/manager.py 新增 last_run_for_data(exp_id, data_id, refs)——只认
+     inputs.data_id 精确匹配的记录,老记录不再回退(用户:可全新生成);
+  ② 步骤→ref 表统一到 gui/pipeline_state.py::STEP_RUN_REFS(+ALL_STEP_RUN_REFS),
+     pipeline_panel._step_refs 与项目树 _data_last_run_failed 共用,不再各存一份;
+  ③ 项目树「失败」与 Pipeline 步骤 FAILED 现在同源;
+- GUI 私有访问收口(问题 4):gui/ 里跨对象私有访问清零(原 30+ 处),改为公开接口:
+  SpectrumViewer.peak_labels_visible / primary_spectrum / refresh_levels()、
+  Spectrum3DPanel.spectrum3d、ProjectTreePanel.current_data_id()、
+  PipelinePanel.current_data_id、GroupBatchPanel.current_group_id / refresh()、
+  CenterPanel.set_manager()/update_notes()、ExperimentImportPanel 的 7 个公开动作
+  (browse_single/add_batch_folder/clear_batch_list/import_batch/import_single/
+  browse_segmented/import_segmented),以及 ProcessingController.data_facts()
+  (ndim/直接维核素/是否 NUS 一次取回,Pipeline 三个缓存共用;控制器缺该接口时
+  按「未知」降级,测试替身不受影响);
+- 新增测试:tests/test_run_ownership.py(严格归属/树与步骤同源/refs 单一表)、
+  tests/test_gui_api_guard.py(gui/ 跨对象私有访问守卫 + 公开接口冒烟);
+- 修复过程中的坑:新 GUI 测试创建顶层控件未销毁,全量跑在 test_gui_layout
+  触发 Windows access violation;改为挂宿主控件 + deleteLater 后全量通过
+  (已记入 docs/problems.md);
+- 验证:本地全量 pytest 全绿(exit 0);ruff 全仓仍只有 2 处历史告警;
+  VM ~/NMRForge 已同步并回归。
 ## 0.2.199-补29hz(2026-09-10,全项目审阅修复:暗色主题可读性 + 交互反馈 + 删除守卫)
 - 用户:审查整个项目,找出 bug、交互不合理与视觉呈现问题 → 本轮修 P1/P2/P3;
 - 视觉(暗色主题可读性):软件自 0.2.199-补29am 起强制暗色(窗口 #1e1e1e),但多处

@@ -374,6 +374,15 @@ class GroupBatchPanel(QWidget):
             self._collect_params(),
         )
 
+    @property
+    def current_group_id(self) -> str:
+        """当前数据组 id(未选中为空串)。"""
+        return str(self._group_id or "")
+
+    def refresh(self) -> None:
+        """刷新组页面(公开包装:_refresh,供 center_panel 调用)。"""
+        self._refresh()
+
     def set_progress(self, text: str) -> None:
         """批量进度提示(主线程更新)。"""
         self.progress_label.setText(text)

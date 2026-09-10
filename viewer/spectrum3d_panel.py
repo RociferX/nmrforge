@@ -106,6 +106,11 @@ class Spectrum3DPanel(QWidget):
             return fixed[0]
         return None
 
+    @property
+    def spectrum3d(self) -> Spectrum3D | None:
+        """当前绑定的 3D 谱(未加载为 None)。"""
+        return self._spectrum3d
+
     def set_spectrum3d(self, spectrum3d: Spectrum3D) -> None:
         """绑定 3D 谱并重置默认平面(优先 CH,回退 F1-F2);自动发出重绘。"""
         self._spectrum3d = spectrum3d

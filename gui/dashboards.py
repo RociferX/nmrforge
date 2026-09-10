@@ -256,6 +256,39 @@ class ExperimentImportPanel(QWidget):
         layout.addWidget(self.batch_group)
         layout.addStretch(1)
 
+    # ------------------------------------------------------------------
+    # 公开动作接口(0.2.199-补29hz)
+    # 仪表盘快捷按钮原来直接调 _browse/_on_import 等私有方法,内部改名会
+    # 静默失效;这里给出稳定入口。
+    # ------------------------------------------------------------------
+    def browse_single(self) -> None:
+        """选择单个 Bruker 数据集目录。"""
+        self._browse()
+
+    def add_batch_folder(self) -> None:
+        """把目录加入批量导入列表。"""
+        self._on_batch_add_folder()
+
+    def clear_batch_list(self) -> None:
+        """清空批量导入列表。"""
+        self._on_batch_clear()
+
+    def import_batch(self) -> None:
+        """按列表执行批量导入(或重复实验叠加)。"""
+        self._on_batch_import()
+
+    def import_single(self) -> None:
+        """导入当前选择的单个数据集。"""
+        self._on_import()
+
+    def browse_segmented(self) -> None:
+        """选择分段数据/重复叠加的容器目录。"""
+        self._on_segmented_browse()
+
+    def import_segmented(self) -> None:
+        """执行分段数据/重复叠加导入。"""
+        self._on_segmented_import()
+
     def set_context(self, exp_id: str) -> None:
         self._exp_id = exp_id
 
@@ -690,25 +723,25 @@ class ExperimentDashboard(QWidget):
             self._loading_table = False
 
     def _browse(self) -> None:
-        self.import_panel._browse()
+        self.import_panel.browse_single()
 
     def _on_batch_add_folder(self) -> None:
-        self.import_panel._on_batch_add_folder()
+        self.import_panel.add_batch_folder()
 
     @staticmethod
     def _bruker_datasets_under(root: Path) -> list[Path]:
         return ExperimentImportPanel._bruker_datasets_under(root)
 
     def _on_batch_clear(self) -> None:
-        self.import_panel._on_batch_clear()
+        self.import_panel.clear_batch_list()
 
     def _on_batch_import(self) -> None:
         self.import_panel.set_context(self._exp_id)
-        self.import_panel._on_batch_import()
+        self.import_panel.import_batch()
 
     def _on_import(self) -> None:
         self.import_panel.set_context(self._exp_id)
-        self.import_panel._on_import()
+        self.import_panel.import_single()
 
     def clear_import_form(self) -> None:
         """导入成功后清空导入表单(含下拉面板,0.2.162-补12)。"""
@@ -717,8 +750,8 @@ class ExperimentDashboard(QWidget):
             self._import_dropdown.panel.clear_import_form()
 
     def _on_segmented_browse(self) -> None:
-        self.import_panel._on_segmented_browse()
+        self.import_panel.browse_segmented()
 
     def _on_segmented_import(self) -> None:
         self.import_panel.set_context(self._exp_id)
-        self.import_panel._on_segmented_import()
+        self.import_panel.import_segmented()

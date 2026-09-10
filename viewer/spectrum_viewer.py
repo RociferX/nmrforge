@@ -1386,6 +1386,25 @@ class SpectrumViewer(QWidget):
         self._peak_size = max(0.5, float(size))
         self._apply_peak_items()
 
+    # ----------------------------------------------------------------
+    # 公开只读/薄包装接口(供 gui/spectrum_panel 等外部使用)
+    # 0.2.199-补29hz:原来外部直接访问 _update_levels/_show_peak_labels/
+    # _primary,内部一改名就会静默失效。
+    # ----------------------------------------------------------------
+    @property
+    def peak_labels_visible(self) -> bool:
+        """峰值标签(Assignment)当前是否显示。"""
+        return bool(self._show_peak_labels)
+
+    @property
+    def primary_spectrum(self):
+        """当前主谱(叠加层第一张;未加载为 None)。"""
+        return self._primary
+
+    def refresh_levels(self) -> None:
+        """按当前 contour 起点/层数重画等高线。"""
+        self._update_levels()
+
     def set_peak_labels_visible(self, visible: bool) -> None:
         """开关图上峰指认标签(Assignment 列标题点击联动,0.2.199-补29bf)。"""
         visible = bool(visible)
