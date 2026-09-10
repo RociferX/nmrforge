@@ -674,8 +674,13 @@ class NMRPipeBackend:
         experiment: Experiment,
         params: dict[str, Any] | None = None,
         progress: Callable[[str], None] | None = None,
+        script_only: bool = False,
     ) -> dict[str, Any]:
-        """NUS 数据：bruker 原生转换（单段/多段合并）+ SMILE 重构输出终谱。"""
+        """NUS 数据：bruker 原生转换（单段/多段合并）+ SMILE 重构输出终谱。
+
+        script_only=True 时只生成脚本并返回文本（0.2.199-补29hz-修3:SMILE
+        参数扫描需要先拿到脚本文本再决定怎么跑），不执行 NMRPipe。
+        """
         params = dict(params or {})
         if experiment.sampling.mode is not SamplingMode.NUS:
             return {"success": False, "message": "非 NUS 数据，请使用 process()", "logs": []}
@@ -1041,6 +1046,15 @@ class NMRPipeBackend:
         )
         nus_com = work / f"{experiment.dataset_id}_nus.com"
         nus_com.write_text(script, encoding="utf-8", newline="\n")
+        if script_only:
+            return {
+                "success": True,
+                "message": "仅生成脚本(script_only)",
+                "logs": logs,
+                "script": script,
+                "script_path": str(nus_com),
+                "work_dir": str(work),
+            }
         logs.append(
             f"SMILE 重构（{nuslist_count} 采样点，{fraction * 100:.1f}%，"
             f"1H {ext_lo}-{ext_hi} ppm，nSigma={nsigma:g} thresh={thresh:g}）"
@@ -1233,6 +1247,126 @@ class NMRPipeBackend:
             im = np.ascontiguousarray(noisy[row].imag, dtype="<f4")
             out += re.tobytes() + im.tobytes()
         target.write_bytes(bytes(out))
+
+    def smile_scan(
+        self,
+        experiment: Experiment,
+        params: dict[str, Any] | None = None,
+        combos: list[dict[str, Any]] | None = None,
+        *,
+        work_dir: Path | str,
+        evaluate: Callable[[str], dict[str, Any]] | None = None,
+        progress: Callable[[int, int, str], None] | None = None,
+        delete_spectra: bool = True,
+    ) -> dict[str, Any]:
+        """SMILE 参数扫描:直接维跑一次,候选谱评估后即删(0.2.199-补29hz-修3)。
+
+        以终跑脚本为模板只换 SMILE 参数:① 直接维段跑一次得到切片文件;
+        ② 每组参数跑一次「SMILE + 间接维」得到终谱;③ evaluate(path) 取指标;
+        ④ 立刻删除该谱。候选各自独立命名、互不覆盖,也不触碰数据 process/
+        下的终跑脚本。返回 {success, message, logs, candidates}。
+        """
+        from backend import runtime
+        from backend.script_generator import (
+            rename_nus_scan_output,
+            split_nus_script,
+        )
+
+        combos = list(combos or [])
+        base = dict(params or {})
+        scan_dir = Path(work_dir)
+        scan_dir.mkdir(parents=True, exist_ok=True)
+        logs: list[str] = []
+        old_work_dir = self.work_dir
+        self.work_dir = str(scan_dir)
+        try:
+            scripts: list[str] = []
+            for combo in combos:
+                resp = self.reconstruct_nus(
+                    experiment, {**base, **combo}, script_only=True
+                )
+                if not resp.get("success") or not resp.get("script"):
+                    return {
+                        "success": False,
+                        "message": str(resp.get("message", "无法生成扫描脚本")),
+                        "logs": logs + list(resp.get("logs", [])),
+                        "candidates": [],
+                    }
+                scripts.append(str(resp["script"]))
+                logs.extend(str(line) for line in resp.get("logs", []))
+            prefix, _ = split_nus_script(scripts[0])
+            # 无切片切点(2D 单文件脚本)→ 回退:整脚本逐组跑,输出各自命名
+            split_available = bool(prefix)
+            timeout = float(base.get("timeout_s", 7200))
+            if split_available:
+                step1 = scan_dir / "step1_direct.com"
+                step1.write_text(prefix, encoding="utf-8", newline="\n")
+                if progress is not None:
+                    progress(0, len(combos), "直接维处理(生成切片)…")
+                run1 = runtime.run(
+                    ["csh", step1.name], cwd=str(scan_dir), timeout=timeout
+                )
+                logs.append(f"step1 直接维: rc={run1.returncode}")
+                if run1.returncode != 0:
+                    return {
+                        "success": False,
+                        "message": f"直接维处理失败(rc={run1.returncode})",
+                        "logs": logs,
+                        "candidates": [],
+                    }
+            out_ext = {1: "ft1", 2: "ft2"}.get(experiment.ndim, "ft3")
+            candidates: list[dict[str, Any]] = []
+            for index, (combo, script) in enumerate(
+                zip(combos, scripts), start=1
+            ):
+                tag = f"cand{index:02d}"
+                if split_available:
+                    _, suffix = split_nus_script(script)
+                else:
+                    suffix = script
+                suffix = rename_nus_scan_output(suffix, f"{tag}.{out_ext}")
+                task = scan_dir / f"step2_{tag}.com"
+                task.write_text(suffix, encoding="utf-8", newline="\n")
+                if progress is not None:
+                    progress(index, len(combos), f"扫描 {index}/{len(combos)}: {combo}")
+                run2 = runtime.run(
+                    ["csh", task.name], cwd=str(scan_dir), timeout=timeout
+                )
+                spectrum = scan_dir / f"{tag}.{out_ext}"
+                ok = (
+                    run2.returncode == 0
+                    and spectrum.is_file()
+                    and spectrum.stat().st_size > 0
+                )
+                metrics: dict[str, Any] = {}
+                if ok and evaluate is not None:
+                    try:
+                        metrics = dict(evaluate(str(spectrum)) or {})
+                    except Exception as exc:  # noqa: BLE001 - 单组失败不阻断其余
+                        metrics = {"error": str(exc)}
+                elif not ok:
+                    metrics = {"error": f"重构失败(rc={run2.returncode})"}
+                if delete_spectra:
+                    spectrum.unlink(missing_ok=True)
+                candidates.append(
+                    {
+                        "index": index,
+                        "params": dict(combo),
+                        "metrics": metrics,
+                        "script": script,
+                        "ok": bool(ok),
+                    }
+                )
+                logs.append(f"{tag}: rc={run2.returncode} 指标={metrics}")
+            return {
+                "success": True,
+                "message": f"完成 {len(candidates)} 组扫描",
+                "logs": logs,
+                "candidates": candidates,
+                "scan_dir": str(scan_dir),
+            }
+        finally:
+            self.work_dir = old_work_dir
 
     def finalize_nus(
         self,

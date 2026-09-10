@@ -1092,6 +1092,80 @@ def generate_2d_nus_script(
     return "\n".join(lines) + "\n"
 
 
+
+# ---------------------------------------------------------------------------
+# SMILE 参数扫描:终跑脚本切分(0.2.199-补29hz-修3)
+#
+# 扫描时以终跑脚本为模板,只换 SMILE 参数:
+#   第一段(直接维 → 切片文件)只跑一次;
+#   第二段(SMILE + 间接维 → 终谱)按不同 SMILE 参数重复跑,候选谱评估后即删。
+# 3D 与 2D 多文件脚本已自带切片写出/读回,直接在两者之间切开;2D 单文件脚本
+# 没有独立切片,这里补一步显式切片写出(与 2D 多文件同构:写出用 -z、读回用 -x,
+# 读回后不再需要原来的 TP)。
+# ---------------------------------------------------------------------------
+_NUS_SLICE_WRITES = (
+    "pipe2xyz -out nus3d_1/test%04d.ft1 -z",
+    "pipe2xyz -out nus2d/test%03d.ft1 -z",
+)
+_NUS_DIRECT_SLICE = "pipe2xyz -out nus2d/direct%03d.ft1 -z"
+_NUS_DIRECT_SLICE_IN = "xyz2pipe -in nus2d/direct%03d.ft1 -x \\"
+_TP_LINE = "| nmrPipe -fn TP \\"
+
+
+def rename_nus_scan_output(script: str, out_name: str) -> str:
+    """把扫描脚本**最后一行**输出改成该候选专属名(避免 25 组互相覆盖)。
+
+    只改终谱写出:3D 是 `| pipe2xyz -out <file> -x`,2D 是 `-out <file> -ov`。
+    中间产物(如 nus3d_rc/…、nus2d/recon.ft1)保持不变,否则后续语句读不到。
+    找不到输出行时原样返回。
+    """
+    import re
+
+    lines = script.split("\n")
+    index = next(
+        (i for i in range(len(lines) - 1, -1, -1) if "-out " in lines[i]),
+        None,
+    )
+    if index is None:
+        return script
+    lines[index] = re.sub(r"(-out\s+)\S+", rf"\g<1>{out_name}", lines[index], count=1)
+    return "\n".join(lines)
+
+
+def _statement_start(lines: list[str], index: int) -> int:
+    """返回包含第 index 行的管道语句起始行号(续行以反斜杠结尾)。"""
+    start = index
+    while start > 0:
+        prev = lines[start - 1].rstrip()
+        if prev.endswith("\\") or prev.lstrip().startswith("|"):
+            start -= 1
+            continue
+        break
+    return start
+
+
+def split_nus_script(script: str) -> tuple[str, str]:
+    """把 NUS 终跑脚本切成 (直接维段, SMILE+间接维段)。
+
+    切不出来时返回 (", ") ,调用方应回退(不静默错切)。
+    """
+    lines = script.split("\n")
+    write_index = None
+    for i, line in enumerate(lines):
+        if any(marker in line for marker in _NUS_SLICE_WRITES):
+            write_index = i
+            break
+    if write_index is not None:
+        for j in range(write_index + 1, len(lines)):
+            if lines[j].strip().startswith("xyz2pipe -in "):
+                prefix = "\n".join(lines[: write_index + 1]) + "\n"
+                return prefix, "\n".join(lines[j:])
+        return "", ""
+    # 2D 单文件脚本没有独立切片(直接维与 SMILE 在同一管道内,且 SMILE 用
+    # `-sample None`),改成切片流会改变 SMILE 的采样语义,因此不在这里切;
+    # 调用方(smile_scan)对这种情况回退为「整脚本逐组跑、输出各自命名」。
+    return "", ""
+
 def _check_real_modes(experiment: Experiment) -> None:
     """real/magnitude 间接维(FnMODE 1/2/3)显式报错,防止静默错脚本。
 
