@@ -100,6 +100,9 @@ def test_eta_messages_and_single_combo_fallback() -> None:
     assert any("实测" in m for m in messages)      # 第一组之后用实测更新
     assert result["n_combos"] == 4
     assert all(row["stable_count"] > 0 for row in result["rows"])
+    assert all("suspect_count" in row and "net_peaks" in row for row in result["rows"])
+    # 4 组网格里两个公共峰都稳定出现 → 疑伪峰为 0,净真峰=稳定峰
+    assert all(row["suspect_count"] == 0 for row in result["rows"])
 
     single = scan_smile_parameters(
         exp,

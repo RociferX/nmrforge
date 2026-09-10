@@ -812,10 +812,13 @@ def scan_smile_parameters(
         metrics = dict(entry.get("metrics") or {})
         params = dict(entry.get("params") or {})
         stable = 0
+        suspect = 0
         snr_values: list[float] = []
         for peak in metrics.get("peaks") or []:
             key = _snap_key(tuple(peak["position"]), peak_tol_pts)
             if len(key_to_combos.get(key, set())) < effective_cross:
+                # 只在个别参数组合里出现的峰:疑伪峰
+                suspect += 1
                 continue
             stable += 1
             try:
@@ -831,16 +834,25 @@ def scan_smile_parameters(
                 "thresh": float(params.get("thresh", 0.0) or 0.0),
                 "peak_count": int(metrics.get("peak_count", 0) or 0),
                 "stable_count": int(stable),
+                "suspect_count": int(suspect),
+                "net_peaks": int(stable - suspect),
                 "mean_snr": round(mean_snr, 3),
                 "quality": round(quality, 2),
-                "composite": round(stable + 0.01 * mean_snr + 0.01 * quality, 3),
+                "composite": round(stable - suspect + 0.01 * mean_snr + 0.01 * quality, 3),
                 "ok": bool(entry.get("ok")),
                 "error": str(metrics.get("error", "") or ""),
                 "_script": str(entry.get("script", "")),
             }
         )
+    # 用户目标(2026-09-10):尽量少伪峰 + 尽量多真峰 → 先按「净真峰」
+    # (稳定峰 − 疑伪峰),再按稳定峰数、平均 S/N、质量分
     rows.sort(
-        key=lambda r: (r["stable_count"], r["mean_snr"], r["quality"]),
+        key=lambda r: (
+            r["net_peaks"],
+            r["stable_count"],
+            r["mean_snr"],
+            r["quality"],
+        ),
         reverse=True,
     )
     for rank, row in enumerate(rows, start=1):
@@ -885,7 +897,8 @@ def write_smile_scan_output(
     csv_path = out_dir / f"{exp_id}-{data_id}_smile_ranking.csv"
     json_path = out_dir / f"{exp_id}-{data_id}_smile_ranking.json"
     fields = [
-        "rank", "index", "nsigma", "thresh", "stable_count", "peak_count",
+        "rank", "index", "nsigma", "thresh", "net_peaks", "stable_count",
+        "suspect_count", "peak_count",
         "mean_snr", "quality", "composite", "ok", "error",
     ]
     with csv_path.open("w", encoding="utf-8", newline="") as fh:
