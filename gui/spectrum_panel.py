@@ -566,33 +566,33 @@ class SpectrumPanel(QWidget):
         return True
 
     def _spectrum_paths(self) -> list[Path]:
-        """当前实验/样品数据下的谱图文件(新布局优先,旧扁平路径回退)。
+        """当前实验/样品数据下的谱图文件(schema 1.4 数据级 spectra/)。
 
-        新布局按数据级 spectra/ 目录内全部 .ft2/.ft3 列——后端终谱按
-        dataset_id 命名(如 hsqc_2d.ft2),不假设 exp_id-data_id 前缀(0.2.112)。
+        数据级上下文只列该数据;实验级上下文汇总实验下(未删除)全部数据。
+        后端终谱按 dataset_id 命名(如 hsqc_2d.ft2),不假设前缀(0.2.112)。
         """
-        paths: list[Path] = []
         exp_id = self._current_exp_id
         data_id = self._current_data_id
-        if self.manager.project is None:
-            return paths
-        try:
-            if data_id:
-                spectra_dir = self.manager.data_dir(exp_id, data_id, "spectra")
-                files = list(spectra_dir.glob("*.ft1")) + list(
-                    spectra_dir.glob("*.ft2")
-                ) + list(spectra_dir.glob("*.ft3"))
-                paths = sorted(files)
-                if paths:
-                    return paths
-        except Exception:  # noqa: BLE001 - 新布局不可用回退旧路径
-            pass
-        # 旧扁平布局回退(项目根 spectra/,{exp_id}* 通配)
-        spectra_dir = self.manager.dir_path("spectra")
-        files = list(spectra_dir.glob(f"{exp_id}*.ft1")) + list(
-            spectra_dir.glob(f"{exp_id}*.ft2")
-        ) + list(spectra_dir.glob(f"{exp_id}*.ft3"))
-        return sorted(files)
+        if self.manager.project is None or not exp_id:
+            return []
+        entry = self.manager.project.experiment(exp_id)
+        if entry is None:
+            return []
+        data_ids = (
+            [data_id]
+            if data_id
+            else [d.id for d in (entry.data or []) if not getattr(d, "trashed", False)]
+        )
+        files: list[Path] = []
+        for did in data_ids:
+            spectra_dir = self.manager.data_dir(exp_id, did, "spectra")
+            for ext in ("ft1", "ft2", "ft3"):
+                try:
+                    files.extend(spectra_dir.glob(f"*.{ext}"))
+                except OSError:  # noqa: PERF203 - 目录缺失/不可读时跳过
+                    continue
+        return sorted(set(files))
+
 
     def open_spectrum(self, path: Path, name: str | None = None) -> bool:
         """加载谱图到查看器;失败返回 False(不弹窗,由调用方决定提示)。
@@ -1206,10 +1206,6 @@ class SpectrumPanel(QWidget):
                         return candidate
         except Exception:  # noqa: BLE001
             pass
-        for suffix in (".list", ".csv"):
-            legacy = self.manager.dir_path("peaks") / f"{self._current_exp_id}{suffix}"
-            if legacy.is_file():
-                return legacy
         return None
 
     def _load_peaks(self, spectrum_path: Path) -> None:

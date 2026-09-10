@@ -125,29 +125,6 @@ def test_add_experiment_unknown_sample_raises(tmp_path: Path) -> None:
         manager.add_experiment("/sampleD", sample_id="S999")
 
 
-def test_infer_status_stages(tmp_path: Path) -> None:
-    manager = ProjectManager.create_project(tmp_path / "proj", "demo")
-    exp = manager.add_experiment("/sampleD")
-    assert manager.infer_status(exp.id) is ExperimentStatus.REGISTERED
-
-    def _legacy_write(path: Path, content: str = "x") -> None:
-        """模拟旧扁平布局产物(目录需显式创建,新项目不预建)。"""
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
-
-    _legacy_write(manager.dir_path("metadata") / f"{exp.id}.json", "{}")
-    assert manager.infer_status(exp.id) is ExperimentStatus.IMPORTED
-
-    _legacy_write(manager.dir_path("spectra") / f"{exp.id}.ft2")
-    assert manager.infer_status(exp.id) is ExperimentStatus.PROCESSED
-
-    _legacy_write(manager.dir_path("peaks") / f"{exp.id}.csv", "")
-    assert manager.infer_status(exp.id) is ExperimentStatus.PICKED
-
-    _legacy_write(manager.dir_path("report") / f"{exp.id}.pdf")
-    assert manager.infer_status(exp.id) is ExperimentStatus.ANALYZED
-
-
 def test_delete_experiment_trashes_and_restores(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -155,24 +132,23 @@ def test_delete_experiment_trashes_and_restores(
     _install_fake_trash(monkeypatch, tmp_path)
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     exp = manager.add_experiment("/sampleD")
-    (manager.dir_path("raw") / exp.id).mkdir(parents=True)
-    (manager.dir_path("raw") / exp.id / "fid").write_bytes(b"fid")
-    spectra_path = manager.dir_path("spectra") / f"{exp.id}.ft2"
+    data = exp.data[0]
+    base = manager.data_base(exp.id, data.id)
+    (base / "raw").mkdir(parents=True)
+    (base / "raw" / "fid").write_bytes(b"fid")
+    spectra_path = manager.data_dir(exp.id, data.id, "spectra") / f"{data.id}.ft2"
     spectra_path.parent.mkdir(parents=True, exist_ok=True)
     spectra_path.write_bytes(b"ft2")
-    (manager.dir_path("processing") / exp.id / "log.txt").parent.mkdir(parents=True)
-    (manager.dir_path("processing") / exp.id / "log.txt").write_text("log", encoding="utf-8")
 
     run = manager.start_run(exp.id, workflow_ref="hsqc_standard")
-    manager.finish_run(run.run_id, "success", outputs={"spectrum": "spectra/x.ft2"})
+    manager.finish_run(run.run_id, "success", outputs={"spectrum": str(spectra_path)})
 
     manager.delete_experiment(exp.id)
     assert manager.project is not None
     assert exp.trashed is True
     assert manager.project.experiment(exp.id) is exp  # 条目保留(软删除)
-    assert not (manager.dir_path("raw") / exp.id).exists()
-    assert not (manager.dir_path("spectra") / f"{exp.id}.ft2").exists()
-    assert not (manager.dir_path("processing") / exp.id).exists()
+    assert not base.exists()
+    assert not (manager.root / exp.id).exists()
     assert manager.project.run(run.run_id) is run  # 审计保留
     assert any(
         h.action == "experiment_deleted" for h in manager.project.processing_history
@@ -187,11 +163,11 @@ def test_delete_experiment_trashes_and_restores(
 def test_delete_experiment_outside_root_refused(tmp_path: Path) -> None:
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     exp = manager.add_experiment("/sampleD")
-    # 篡改目录映射指向项目外
+    # 篡改目录映射指向项目外(processing 运行快照目录仍在用)
     outside = tmp_path / "outside"
     outside.mkdir()
     assert manager.project is not None
-    manager.project.directories["raw"] = str(outside)
+    manager.project.directories["processing"] = str(outside)
     with pytest.raises(ProjectError, match="超出项目目录"):
         manager.delete_experiment(exp.id)
 
@@ -300,7 +276,7 @@ def test_default_directories_configurable(tmp_path: Path) -> None:
     manager = ProjectManager.create_project(
         tmp_path / "proj", "demo", directories={"raw": "data/raw"}
     )
-    # schema 1.3:目录映射仅作兼容解析,不预建目录
+    # schema 1.4:目录映射仅作解析,不预建目录
     assert manager.dir_path("raw") == (tmp_path / "proj" / "data" / "raw").resolve()
     assert not (tmp_path / "proj" / "data" / "raw").exists()
 

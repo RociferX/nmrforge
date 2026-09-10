@@ -18,7 +18,7 @@ from typing import Any
 
 SCHEMA_VERSION = "1.4"
 
-# 项目目录模板(相对路径,创建项目时逐项建目录)
+# 项目级目录映射默认值(raw/processing/... → 项目根下同名目录,不预建)
 DEFAULT_DIRECTORIES = [
     "raw",
     "processing",

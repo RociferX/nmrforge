@@ -62,11 +62,7 @@ def pipeline_state_path(manager: Any, exp_id: str, data_id: str) -> Path:
 
 
 def load_pipeline_state(manager: Any, exp_id: str, data_id: str) -> dict:
-    """读取指纹状态(缺失/损坏返回空状态,不抛异常)。
-
-    除 steps 外保留 batch 等额外顶层键(旧批量组标记等遗留元数据,
-    兼容读取;0.2.164-补1 起批量组即数据组,不再写入新标记)。
-    """
+    """读取指纹状态(缺失/损坏返回空状态,不抛异常)。"""
     path = pipeline_state_path(manager, exp_id, data_id)
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
@@ -75,15 +71,9 @@ def load_pipeline_state(manager: Any, exp_id: str, data_id: str) -> dict:
     if not isinstance(raw, dict):
         return {"version": STATE_VERSION, "steps": {}}
     steps = raw.get("steps")
-    extra = {
-        key: value
-        for key, value in raw.items()
-        if key not in ("version", "steps")
-    }
     return {
         "version": STATE_VERSION,
         "steps": steps if isinstance(steps, dict) else {},
-        **extra,
     }
 
 
@@ -192,26 +182,25 @@ def _spectrum_file(manager: Any, exp_id: str, data_id: str) -> Path | None:
         path = spectra / f"{exp_id}-{data_id}.{ext}"
         if path.is_file():
             return path
-    flat = manager.dir_path("spectra")
+    # 后端终谱按 dataset_id 命名(如 hsqc_2d.ft2),按扩展名兜底扫描
     for ext in ("ft2", "ft3"):
-        path = flat / f"{exp_id}.{ext}"
-        if path.is_file():
-            return path
+        try:
+            matches = sorted(spectra.glob(f"*.{ext}"))
+        except OSError:
+            matches = []
+        if matches:
+            return matches[0]
     return None
 
 
 def _peaks_file(manager: Any, exp_id: str, data_id: str) -> Path | None:
-    """峰表文件:.list 优先(峰表即 list),旧 CSV 兼容回退。"""
+    """峰表文件:.list 优先(峰表即 list),CSV 兜底。"""
     for suffix in (".list", ".csv"):
         path = manager.data_dir(exp_id, data_id, "peaks") / (
             f"{exp_id}-{data_id}{suffix}"
         )
         if path.is_file():
             return path
-    for suffix in (".list", ".csv"):
-        flat = manager.dir_path("peaks") / f"{exp_id}{suffix}"
-        if flat.is_file():
-            return flat
     return None
 
 

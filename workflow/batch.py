@@ -215,15 +215,10 @@ def _step_already_done(manager: object, exp_id: str, data_id: str, step: str) ->
         return bool(p) and Path(p).is_file()
     if step == "peaks":
         try:
-            peaks_dir = manager.dir_path("peaks")
-        except Exception:
+            peaks_dir = manager.data_dir(exp_id, data_id, "peaks")
+        except Exception:  # noqa: BLE001 - 目录不可解析时按未完成处理
             return False
-        for pat in (
-            f"{exp_id}-{data_id}.list",
-            f"{exp_id}-{data_id}.csv",
-            f"{exp_id}_{data_id}.list",
-            f"{exp_id}_{data_id}.csv",
-        ):
+        for pat in (f"{exp_id}-{data_id}.list", f"{exp_id}-{data_id}.csv"):
             if (peaks_dir / pat).is_file():
                 return True
         return False

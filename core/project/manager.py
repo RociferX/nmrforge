@@ -119,7 +119,7 @@ class ProjectManager:
         # schema 1.3(契约 §9.2):文件系统即层级,不预建扁平 raw/processing/
         # spectra 等模板目录;数据目录在导入/处理时按
         # <exp>/<data>/{raw,process,spectra,peaks,figures,report} 创建。
-        # dir_map 仅作兼容解析(旧扁平路径),不 mkdir。
+        # dir_map 只作项目级目录解析(如 processing 运行快照),不 mkdir。
         manager.add_history("project_created", {"name": name, "root": str(root_path)})
         manager.save()
         return manager
@@ -197,11 +197,16 @@ class ProjectManager:
     # 目录解析
     # ------------------------------------------------------------------
     def dir_path(self, key: str) -> Path:
-        """兼容层:旧扁平目录(项目根下 raw/processing/spectra/...)。"""
+        """项目级目录解析(project.directories,默认项目根下同名目录)。
+
+        schema 1.4 的产物在 <exp>/<data>/ 下;该映射只服务项目级目录,
+        如 processing/<exp>/runs 运行快照与 analysis 分析输出。
+        """
         if self.root is None or self.project is None:
             raise ProjectError("未加载项目")
         rel = self.project.directories.get(key, key)
         return self.root / rel
+
 
     def data_base(self, exp_id: str, data_id: str) -> Path:
         """schema 1.3 数据目录基座:<project>/<exp_id>/<data_id>/。"""
@@ -221,28 +226,21 @@ class ProjectManager:
         return self.data_base(exp_id, data_id) / "metadata.json"
 
     def _experiment_paths(self, exp_id: str) -> list[Path]:
-        """实验全部相关文件/目录(删除实验时按此清理;兼容新旧布局)。"""
-        candidates: list[Path] = [self.root / exp_id]  # schema 1.3 数据基座
-        for key in ("raw", "processing", "spectra", "peaks", "analysis", "figures", "report"):
-            base = self.dir_path(key)
-            if key in ("raw", "processing", "analysis", "figures"):
-                candidates.append(base / exp_id)
-            else:
-                candidates.extend(base.glob(f"{exp_id}.*"))
-                candidates.extend(base.glob(f"{exp_id}-*.*"))
-        candidates.append(self.dir_path("metadata") / f"{exp_id}.json")
-        candidates.extend(self.dir_path("metadata").glob(f"{exp_id}-*.json"))
-        return candidates
+        """实验全部相关文件/目录(删除实验时按此清理)。"""
+        return [
+            self.root / exp_id,  # schema 1.4 数据基座 <exp>/<data>/...
+            self.dir_path("processing") / exp_id,  # 运行脚本/参数快照
+            self.dir_path("analysis") / exp_id,  # CSP 分析输出
+        ]
+
 
     def _data_paths(self, exp_id: str, data_id: str) -> list[Path]:
-        """单个数据的全部产物路径(删除数据时清理;兼容新旧布局)。"""
-        candidates = [self.data_base(exp_id, data_id)]
-        candidates.append(self.dir_path("raw") / exp_id / data_id)
-        candidates.append(self.dir_path("processing") / exp_id / data_id)
-        for key in ("spectra", "peaks", "report"):
-            candidates.extend(self.dir_path(key).glob(f"{exp_id}-{data_id}.*"))
-        candidates.append(self.dir_path("metadata") / f"{exp_id}-{data_id}.json")
-        return candidates
+        """单个数据的全部产物路径(删除数据时清理)。"""
+        return [
+            self.data_base(exp_id, data_id),
+            self.dir_path("analysis") / exp_id / data_id,  # CSP 分析输出
+        ]
+
 
     def _ensure_inside_root(self, path: Path) -> Path:
         resolved = path.resolve()
@@ -705,79 +703,49 @@ class ProjectManager:
         return removed
 
     def infer_status(self, exp_id: str) -> ExperimentStatus:
-        """按数据条目与产物文件推断实验状态(兼容 schema 1.1 旧命名)。
+        """按数据条目与产物文件推断实验状态(schema 1.4 数据级布局)。
 
         registered(无数据)→ imported(metadata 存在)→ processed(谱存在)→
-        picked(峰表)→ analyzed(报告/分析产物)。
+        picked(峰表)→ analyzed(报告产物)。
         """
         entry = self._require_experiment(exp_id)
         active = [d for d in entry.data if not d.trashed]
         if not active:
             return ExperimentStatus.REGISTERED
-        metadata_dir = self.dir_path("metadata")
-        spectra_dir = self.dir_path("spectra")
-        # 兼容:旧命名 metadata/<exp_id>.json 与 spectra/<exp_id>.ft2
-        has_imported = (metadata_dir / f"{exp_id}.json").is_file()
+        has_imported = False
+        has_spectrum = False
+        has_peaks = False
+        has_report = False
         for d in active:
-            # schema 1.3 规范布局:<exp>/<data>/metadata.json
             if self.data_metadata_path(exp_id, d.id).is_file():
                 has_imported = True
-            if d.metadata_path:
+            elif d.metadata_path:
                 rel = Path(d.metadata_path)
-                # schema 1.3:<exp>/<data>/metadata.json(项目内相对路径)
                 if not rel.is_absolute() and (self.root / rel).is_file():
                     has_imported = True
-                elif (metadata_dir / rel.name).is_file():  # 旧扁平命名
-                    has_imported = True
-            if (metadata_dir / f"{exp_id}-{d.id}.json").is_file():
-                has_imported = True
-            # 优先按 DataEntry 记录的产物路径(可能在工作目录),再回退旧命名 glob
-            has_spectrum = False
-            for d in active:
-                if d.spectrum_path:
-                    candidate = Path(d.spectrum_path)
-                    if not candidate.is_absolute():
-                        candidate = self.root / candidate
-                    if candidate.is_file():
-                        has_spectrum = True
-                        break
-            if not has_spectrum:
-                has_spectrum = any(spectra_dir.glob(f"{exp_id}.*")) or any(
-                    spectra_dir.glob(f"{exp_id}-*.*")
-                )
-            if not has_spectrum:
-                for d in active:
-                    spectra = self.data_dir(exp_id, d.id, "spectra")
-                    if any(spectra.glob("*.ft2")) or any(spectra.glob("*.ft3")):
-                        has_spectrum = True
-                        break
+            if not has_spectrum and d.spectrum_path:
+                candidate = Path(d.spectrum_path)
+                if not candidate.is_absolute():
+                    candidate = self.root / candidate
+                has_spectrum = candidate.is_file()
+            spectra = self.data_dir(exp_id, d.id, "spectra")
+            if not has_spectrum and (
+                any(spectra.glob("*.ft2")) or any(spectra.glob("*.ft3"))
+            ):
+                has_spectrum = True
+            peaks = self.data_dir(exp_id, d.id, "peaks")
+            if any(peaks.glob("*.list")) or any(peaks.glob("*.csv")):
+                has_peaks = True
+            report = self.data_dir(exp_id, d.id, "report")
+            for ext in ("pdf", "html", "json"):
+                if any(report.glob(f"*.{ext}")):
+                    has_report = True
+                    break
         checks: list[tuple[ExperimentStatus, bool]] = [
             (ExperimentStatus.IMPORTED, has_imported),
             (ExperimentStatus.PROCESSED, has_spectrum),
-            (
-                ExperimentStatus.PICKED,
-                self.dir_path("peaks").joinpath(f"{exp_id}.csv").is_file()
-                or bool(list(self.dir_path("peaks").glob(f"{exp_id}-*.csv")))
-                or any(
-                    list(self.data_dir(exp_id, d.id, "peaks").glob("*.csv"))
-                    for d in active
-                ),
-            ),
-            (
-                ExperimentStatus.ANALYZED,
-                any(
-                    self.dir_path("report").joinpath(f"{exp_id}.{ext}").is_file()
-                    for ext in ("pdf", "html", "json")
-                )
-                or bool(list(self.dir_path("report").glob(f"{exp_id}-*.*")))
-                or self.dir_path("analysis").joinpath(exp_id).exists()
-                or any(
-                    list(self.data_dir(exp_id, d.id, "report").glob("*.pdf"))
-                    or list(self.data_dir(exp_id, d.id, "report").glob("*.html"))
-                    or list(self.data_dir(exp_id, d.id, "report").glob("*.json"))
-                    for d in active
-                ),
-            ),
+            (ExperimentStatus.PICKED, has_peaks),
+            (ExperimentStatus.ANALYZED, has_report),
         ]
         status = ExperimentStatus.REGISTERED
         order = ExperimentStatus.order()
@@ -785,6 +753,7 @@ class ProjectManager:
             if present and order.index(candidate) > order.index(status):
                 status = candidate
         return status
+
 
     # 样本
     # ------------------------------------------------------------------

@@ -130,7 +130,7 @@ def _first_report(directory: Path) -> Path | None:
 def _node_artifacts(
     manager: ProjectManager, exp_id: str, data_id: str
 ) -> dict[str, Path | None]:
-    """单个数据节点各步骤产物路径(兼容 schema 1.3 与旧扁平布局)。"""
+    """单个数据节点各步骤产物路径(schema 1.4 数据级布局)。"""
     artifacts: dict[str, Path | None] = {
         'fid': None,
         'spectrum': None,
@@ -167,17 +167,15 @@ def _node_artifacts(
             artifacts['spectrum'] = path
     if artifacts['spectrum'] is None:
         spectra = manager.data_dir(exp_id, data_id, 'spectra')
-        for ext in ('ft2', 'ft3'):
-            path = spectra / f'{exp_id}-{data_id}.{ext}'
-            if path.is_file():
-                artifacts['spectrum'] = path
-                break
-    if artifacts['spectrum'] is None:  # 旧扁平布局
-        flat = manager.dir_path('spectra')
-        for ext in ('ft2', 'ft3'):
-            path = flat / f'{exp_id}.{ext}'
-            if path.is_file():
-                artifacts['spectrum'] = path
+        for pattern in (
+            f'{exp_id}-{data_id}.ft2',
+            f'{exp_id}-{data_id}.ft3',
+            '*.ft2',
+            '*.ft3',
+        ):
+            matches = sorted(spectra.glob(pattern))
+            if matches:
+                artifacts['spectrum'] = matches[0]
                 break
     for suffix in ('.list', '.csv'):
         candidate = (
@@ -187,20 +185,9 @@ def _node_artifacts(
         if candidate.is_file():
             artifacts['peaks'] = candidate
             break
-    if artifacts['peaks'] is None:
-        for suffix in ('.list', '.csv'):
-            flat = manager.dir_path('peaks') / f'{exp_id}{suffix}'
-            if flat.is_file():
-                artifacts['peaks'] = flat
-                break
-    report = _first_report(manager.data_dir(exp_id, data_id, 'report'))
-    if report is None:
-        report = _first_report(manager.dir_path('report'))
-    if report is None:
-        analysis_dir = manager.dir_path('analysis') / exp_id
-        if analysis_dir.is_dir():
-            report = analysis_dir
-    artifacts['analysis'] = report
+    artifacts['analysis'] = _first_report(
+        manager.data_dir(exp_id, data_id, 'report')
+    )
     return artifacts
 
 
