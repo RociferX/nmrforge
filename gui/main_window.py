@@ -411,12 +411,6 @@ class MainWindow(QMainWindow):
         """兼容入口:等同新建空白实验(导入样品数据走实验右键「导入样品数据」)。"""
         self._create_experiment()
 
-    def add_experiment_via_import(self, source: str, title: str = "") -> None:
-        """直接按路径导入(供测试与自动化场景使用,不弹对话框)。"""
-        self._import_experiment_async(
-            {"source": source, "title": title, "sample_id": "", "copy": True}
-        )
-
     def _segmented_import(self, exp_id: str, source: str) -> None:
         """分段采集导入:容器目录(≥2 个含 acqus 的子目录)合并为一条样品数据。
 
@@ -1052,9 +1046,6 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     # 处理动作
     # ------------------------------------------------------------------
-    def _manual_script_editor_menu(self) -> None:
-        self._open_manual_dialog("script")
-
     def _on_view_step_log(self, step_id: str) -> None:
         """定位日志面板:追加标记行并展开(append 自动滚底)。"""
         self._append_log(
@@ -1522,16 +1513,6 @@ class MainWindow(QMainWindow):
         self._append_log("峰表已保存并登记 manual_peaks 运行")
         self.center_panel.refresh()
 
-    def _show_report(self) -> None:
-        """查看菜单:打开报告页(当前选中实验/样品数据)。"""
-        if self.manager.project is None:
-            InfoDialog.show_info(self, "提示", "请先打开项目")
-            return
-        self.center_panel.show_report()
-
-    # ------------------------------------------------------------------
-    # 树动作(契约 v1.2 §8.5)
-    # ------------------------------------------------------------------
     def _rename_project(self, new_name: str = "") -> None:
         """重命名当前项目:优先 WorkspaceManager.rename_project(目录+name)。"""
         if self.manager.project is None or self.manager.root is None:

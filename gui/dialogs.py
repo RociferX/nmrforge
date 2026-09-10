@@ -303,64 +303,6 @@ class ImportExperimentDialog(QDialog):
         }
 
 
-class SampleDialog(QDialog):
-    """项目表单:名称/蛋白/序列/浓度/缓冲液/备注。"""
-
-    def __init__(self, parent: QWidget | None, sample_id: str = "") -> None:
-        super().__init__(parent)
-        self.setWindowTitle(f"项目 {sample_id}".strip() if sample_id else "添加项目")
-        self.setMinimumWidth(420)
-        layout = QVBoxLayout(self)
-        form = QFormLayout()
-        self.name_edit = QLineEdit()
-        self.protein_edit = QLineEdit()
-        self.sequence_edit = QLineEdit()
-        self.concentration_edit = QLineEdit()
-        self.concentration_edit.setPlaceholderText("μM,可留空")
-        self.buffer_edit = QLineEdit()
-        self.notes_edit = QLineEdit()
-        form.addRow("名称:", self.name_edit)
-        form.addRow("蛋白:", self.protein_edit)
-        form.addRow("序列:", self.sequence_edit)
-        form.addRow("浓度(μM):", self.concentration_edit)
-        form.addRow("缓冲液:", self.buffer_edit)
-        form.addRow("备注:", self.notes_edit)
-        layout.addLayout(form)
-
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok
-            | QDialogButtonBox.StandardButton.Cancel
-        )
-        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("确定")
-        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
-        buttons.accepted.connect(self._validate_and_accept)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
-
-    def _validate_and_accept(self) -> None:
-        if not self.name_edit.text().strip():
-            InfoDialog.show_info(self, "提示", "请填写项目名称")
-            return
-        self.accept()
-
-    def result_data(self) -> dict:
-        concentration = 0.0
-        raw = self.concentration_edit.text().strip()
-        if raw:
-            try:
-                concentration = float(raw)
-            except ValueError:
-                concentration = 0.0
-        return {
-            "name": self.name_edit.text().strip(),
-            "protein_name": self.protein_edit.text().strip(),
-            "sequence": self.sequence_edit.text().strip(),
-            "concentration_um": concentration,
-            "buffer": self.buffer_edit.text().strip(),
-            "notes": self.notes_edit.text().strip(),
-        }
-
-
 class NotesDialog(QDialog):
     """三级注释表单:按层级字段列表逐行填写;仅有几种取值的字段用下拉。
 

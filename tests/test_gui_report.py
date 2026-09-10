@@ -13,7 +13,6 @@ from PyQt6.QtWidgets import QApplication
 
 from core.project import ProjectManager
 from gui.center_panel import CenterPanel
-from gui.main_window import MainWindow
 from gui.report_panel import ReportPanel, report_products
 
 
@@ -114,13 +113,3 @@ def test_center_panel_report_page(tmp_path: Path, qapp: QApplication) -> None:
     panel.close()
 
 
-def test_main_window_report_menu(
-    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """查看 → 报告:中间面板切到报告页。"""
-    manager = _manager(tmp_path, monkeypatch)
-    window = MainWindow(manager=manager)
-    window.project_tree.select_experiment("exp_001")
-    window._show_report()
-    assert window.center_panel.stack.currentIndex() == 4
-    window.close()

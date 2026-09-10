@@ -670,13 +670,6 @@ class ProjectManager:
             {"experiment_id": exp_id, "old_title": old, "new_title": new_title},
         )
 
-    def set_experiment_notes(self, exp_id: str, notes: str) -> None:
-        entry = self._require_experiment(exp_id)
-        entry.notes = notes
-        self.add_history(
-            "experiment_notes", {"experiment_id": exp_id, "notes": notes}
-        )
-
     def delete_experiment(self, exp_id: str) -> list[str]:
         """删除实验:产物移入系统回收站,实验条目软删除(可从回收站恢复)。
 
@@ -922,40 +915,6 @@ class ProjectManager:
         run.scripts = sorted(set(run.scripts) | set(scripts))
         return snapshot
 
-    def build_template_from_run(
-        self, run_id: str, template_dir: Path | str | None = None
-    ) -> Path:
-        """从成功运行提取 preset/overrides/nus 生成模板 YAML(默认 presets/templates/)。"""
-        run = self._require_run(run_id)
-        if run.status != "success":
-            raise ProjectError(f"仅成功运行可提取模板: {run_id} status={run.status}")
-        params = run.params or {}
-        template = {
-            "name": f"{run.workflow_ref or run.experiment_id}_{run.run_id}",
-            "source_run": run.run_id,
-            "preset": run.workflow_ref,
-            "overrides": params.get("overrides", {}),
-            "nus": params.get("nus", {}),
-            "created": now_iso(),
-        }
-        target_dir = Path(template_dir) if template_dir else self.root / "presets" / "templates"
-        target_dir.mkdir(parents=True, exist_ok=True)
-        target = target_dir / f"{template['name']}.yaml"
-        try:
-            import yaml
-        except ImportError as exc:  # pragma: no cover - PyYAML 是必需依赖
-            raise ProjectError("PyYAML 不可用,无法导出模板") from exc
-        target.write_text(
-            yaml.safe_dump(template, allow_unicode=True, sort_keys=False),
-            encoding="utf-8",
-        )
-        self.add_history(
-            "template_created",
-            {"run_id": run_id, "template": str(target)},
-        )
-        return target
-
-    # ------------------------------------------------------------------
     # 内部辅助
     # ------------------------------------------------------------------
     def _require_experiment(self, exp_id: str) -> ExperimentEntry:

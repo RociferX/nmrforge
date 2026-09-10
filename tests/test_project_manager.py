@@ -109,15 +109,13 @@ def test_experiment_crud_and_sequencing(tmp_path: Path) -> None:
 
     manager.rename_experiment("exp_001", "15N HSQC")
     assert manager.project.experiment("exp_001").title == "15N HSQC"
-    manager.set_experiment_notes("exp_002", "骨架实验")
-    assert manager.project.experiment("exp_002").notes == "骨架实验"
     # 审计历史只追加
     actions = [h.action for h in manager.project.processing_history]
     assert actions == [
         "project_created",
         "experiment_created", "data_imported",
         "experiment_created", "data_imported",
-        "experiment_renamed", "experiment_notes",
+        "experiment_renamed",
     ]
 
 
@@ -259,32 +257,6 @@ def test_snapshot_run_writes_scripts_and_params(tmp_path: Path) -> None:
     assert params["zero_fill"] == 2
     assert run.snapshot_dir == snapshot.relative_to(manager.root).as_posix()
     assert "process.com" in run.scripts
-
-
-def test_build_template_from_run(tmp_path: Path) -> None:
-    manager = ProjectManager.create_project(tmp_path / "proj", "demo")
-    exp = manager.add_experiment("/sampleD")
-    run = manager.start_run(
-        exp.id,
-        workflow_ref="hsqc_standard",
-        params={"overrides": {"phase.p0": 90}, "nus": {"nSigma": 5}},
-    )
-    manager.finish_run(run.run_id, "success")
-    target = manager.build_template_from_run(run.run_id)
-    assert target.is_file()
-    content = target.read_text(encoding="utf-8")
-    assert "hsqc_standard" in content
-    assert "phase.p0" in content
-    assert "nSigma" in content
-
-
-def test_build_template_refuses_failed_run(tmp_path: Path) -> None:
-    manager = ProjectManager.create_project(tmp_path / "proj", "demo")
-    exp = manager.add_experiment("/sampleD")
-    run = manager.start_run(exp.id)
-    manager.finish_run(run.run_id, "failed")
-    with pytest.raises(ProjectError, match="仅成功运行"):
-        manager.build_template_from_run(run.run_id)
 
 
 def test_atomic_write_json_and_sha256(tmp_path: Path) -> None:

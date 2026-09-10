@@ -292,7 +292,9 @@ def test_import_workflow_e2e(
         staticmethod(lambda *args, **kwargs: None),
     )
     window = MainWindow(manager=manager)
-    window.add_experiment_via_import(str(dataset), title="HSQC")
+    window._import_experiment_async(
+        {"source": str(dataset), "title": "HSQC", "copy": True}
+    )
     assert manager.project is not None
     entry = manager.project.experiment("exp_001")
     assert entry is not None and entry.title == "HSQC"

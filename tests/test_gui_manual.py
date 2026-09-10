@@ -238,20 +238,6 @@ def test_script_editor_run_saves_emits_and_closes(
     dialog.close()
 
 
-def test_manual_menu_actions_require_experiment(
-    qapp: QApplication, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    messages: list[str] = []
-    monkeypatch.setattr(
-        "gui.main_window.InfoDialog.show_info",
-        staticmethod(lambda parent, title, text_: messages.append(text_)),
-    )
-    window = MainWindow()
-    window._manual_script_editor_menu()
-    assert messages and "选择" in messages[0]
-    window.close()
-
-
 def test_spectrum_panel_peak_add_edit_delete_save(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -36,7 +36,6 @@ ProjectManager:
     start_run(experiment_id, workflow_ref, inputs, scripts, params) -> WorkflowRun
     finish_run(run_id, status, outputs, message)
     snapshot_run(run_id, scripts, params) -> snapshot 目录
-    build_template_from_run(run_id) -> YAML 模板
 ```
 
 `ExperimentEntry`:id(exp_NNN)/title/source/status/metadata/imported_at/notes/

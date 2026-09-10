@@ -10,7 +10,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 from PyQt6.QtWidgets import QApplication
 
-from gui.dialogs import ConfirmDialog, ImportExperimentDialog, InfoDialog, SampleDialog
+from gui.dialogs import ConfirmDialog, ImportExperimentDialog, InfoDialog
 
 
 @pytest.fixture(scope="module")
@@ -95,35 +95,6 @@ def test_import_dialog_segmented_container(
     dialog._validate_and_accept()
     assert dialog.result() == dialog.DialogCode.Accepted
     assert dialog.result_data()["segmented"] is True
-    dialog.close()
-
-
-def test_sample_dialog_result_data(qapp: QApplication) -> None:
-    dialog = SampleDialog(None, sample_id="S001")
-    dialog.name_edit.setText("sample B")
-    dialog.protein_edit.setText("Ubq")
-    dialog.concentration_edit.setText("100.5")
-    dialog.buffer_edit.setText("PBS")
-    data = dialog.result_data()
-    assert data["name"] == "sample B"
-    assert data["protein_name"] == "Ubq"
-    assert data["concentration_um"] == 100.5
-    assert data["buffer"] == "PBS"
-    dialog.close()
-
-
-def test_sample_dialog_requires_name(
-    qapp: QApplication, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    messages: list[str] = []
-    monkeypatch.setattr(
-        "gui.dialogs.InfoDialog.show_info",
-        staticmethod(lambda parent, title, text: messages.append(text)),
-    )
-    dialog = SampleDialog(None)
-    dialog._validate_and_accept()
-    assert messages and "名称" in messages[0]
-    assert dialog.result() != 1
     dialog.close()
 
 
