@@ -26,6 +26,7 @@ C 55-69/D 40-54/E<40。
 from __future__ import annotations
 
 import json
+import time
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
@@ -57,6 +58,57 @@ class SmileParameterResult:
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
+
+# 优化程度 2x2..5x5:从 5 档默认值均匀取样(0.2.199-补29hz-修4)
+_NSIGMA_FULL: tuple[float, ...] = (3.0, 4.0, 5.0, 6.0, 7.0)
+_THRESH_FULL: tuple[float, ...] = (0.90, 0.93, 0.95, 0.97, 0.99)
+SMILE_GRID_MIN, SMILE_GRID_MAX = 2, 5
+
+
+def _subsample(values: tuple[float, ...], count: int) -> tuple[float, ...]:
+    """从 values 均匀取 count 个(含首尾)。"""
+    if count <= 1:
+        return (values[len(values) // 2],)
+    if count >= len(values):
+        return tuple(values)
+    picked = [round(i * (len(values) - 1) / (count - 1)) for i in range(count)]
+    return tuple(values[i] for i in dict.fromkeys(picked))
+
+
+def smile_grid(size: int = SMILE_GRID_MAX) -> list[dict[str, Any]]:
+    """按优化程度生成 n×n 网格(2x2..5x5,默认 5x5=25 组)。
+
+    2x2 最快(4 组),5x5 最细(25 组);耗时大致与组数成正比。
+    """
+    count = max(SMILE_GRID_MIN, min(SMILE_GRID_MAX, int(size or SMILE_GRID_MAX)))
+    return default_smile_grid(
+        _subsample(_NSIGMA_FULL, count), _subsample(_THRESH_FULL, count)
+    )
+
+
+def estimate_scan_seconds(
+    experiment: Experiment, n_combos: int
+) -> tuple[float, float]:
+    """按数据规模粗估每组/总耗时(秒);第一组跑完由实测覆盖。
+
+    经验模型(2026-09-10,sampleC 3D NUS 250 点/直接维 TD 2048 实测 86s/组):
+    每组 ≈ 85s × (采样点数/250) × (直接维 TD/2048);2D 再 ×0.3。
+    """
+    sampling = getattr(experiment, "sampling", None)
+    nus_points = len(getattr(sampling, "nus_list", None) or []) or 250
+    direct_td = 2048.0
+    for dim in getattr(experiment, "dimensions", None) or []:
+        role = str(getattr(getattr(dim, "role", None), "name", ""))
+        if role.startswith("DIRECT"):
+            try:
+                direct_td = float(getattr(dim, "td", 0) or 0) or direct_td
+            except (TypeError, ValueError):
+                pass
+    per_group = 85.0 * (float(nus_points) / 250.0) * (direct_td / 2048.0)
+    if int(getattr(experiment, "ndim", 2) or 2) <= 2:
+        per_group *= 0.3
+    per_group = max(5.0, per_group)
+    return per_group, per_group * max(1, int(n_combos))
 
 def default_smile_grid(
     nsigma_values: tuple[float, ...] = (3.0, 4.0, 5.0, 6.0, 7.0),
@@ -661,6 +713,7 @@ def scan_smile_parameters(
     *,
     scan_dir: Path | str,
     grid: list[dict[str, Any]] | None = None,
+    grid_size: int = SMILE_GRID_MAX,
     cross_min: int = 2,
     peak_tol_pts: float = 4.0,
     keep_top: int = 3,
@@ -677,8 +730,35 @@ def scan_smile_parameters(
     返回 {success, message, logs, rows(按名次), scripts({名次: 脚本文本}),
     scan_dir, n_combos}。
     """
-    combos = list(grid) if grid is not None else default_smile_grid()
+    combos = list(grid) if grid is not None else smile_grid(grid_size)
     base = dict(base_params or {})
+    est_group, est_total = estimate_scan_seconds(experiment, len(combos))
+    started = time.time()
+    _first_done: list[float] = []
+
+    def _progress(index: int, total: int, message: str) -> None:
+        if progress is None:
+            return
+        if index == 0:
+            progress(
+                index,
+                total,
+                f"{message} | 按数据规模估算约 {est_group:.0f}s/组、"
+                f"合计约 {est_total / 60.0:.1f} 分钟(第一组完成后更新)",
+            )
+            return
+        if index >= 2 and not _first_done:
+            measured = time.time() - started
+            _first_done.append(measured)
+            remain = measured * max(0, total - index + 1)
+            progress(
+                index,
+                total,
+                f"{message} | 实测约 {measured:.0f}s/组,"
+                f"预计剩余 {remain / 60.0:.1f} 分钟",
+            )
+            return
+        progress(index, total, message)
 
     def _evaluate(path: str) -> dict[str, Any]:
         """候选谱评估:峰 + 质量分(此刻谱还在,评完即被删)。"""
@@ -710,12 +790,13 @@ def scan_smile_parameters(
         combos,
         work_dir=scan_dir,
         evaluate=_evaluate,
-        progress=progress,
+        progress=_progress,
     )
     if not scan.get("success"):
         raise RuntimeError(str(scan.get("message", "SMILE 扫描失败")))
     candidates = list(scan.get("candidates") or [])
     n_combos = len(candidates) or 1
+    effective_cross = cross_min if n_combos >= cross_min else 1
     key_to_combos: dict[tuple[float, ...], set[int]] = defaultdict(set)
     keys_by_index: dict[int, set[tuple[float, ...]]] = {}
     for entry in candidates:
@@ -734,7 +815,7 @@ def scan_smile_parameters(
         snr_values: list[float] = []
         for peak in metrics.get("peaks") or []:
             key = _snap_key(tuple(peak["position"]), peak_tol_pts)
-            if len(key_to_combos.get(key, set())) < cross_min:
+            if len(key_to_combos.get(key, set())) < effective_cross:
                 continue
             stable += 1
             try:

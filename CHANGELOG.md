@@ -1,5 +1,25 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29hz-修4(2026-09-10,用户):SMILE 优化程度可选 + 耗时预计
+- 用户:① 加耗时预计——第一组 SMILE 跑之前按数据估算,第一组跑完用实测更新;
+  ② 加用户可选优化程度(2x2..5x5);③ 继续排查质量分问题;
+- 质量分(排查):根因是取值错误——`spectrum_quality.evaluate()` 返回的
+  `QualityResult` 没有 `overall`,综合分在 `quality.score.overall`;修正后 sampleC
+  真机复核 quality 0.0 → **77.16**;
+- 优化程度:`workflow.smile_optimize.smile_grid(size)` 生成 n×n(2x2..5x5,
+  默认 5x5=25 组),从 5 档默认值均匀取样(2→nSigma[3,7]×thresh[0.90,0.99]、
+  3→[3,5,7]×[0.90,0.95,0.99] 等);Pipeline 的 SMILE 行新增「优化程度」下拉
+  (2x2/3x3/4x4/5x5),选择按数据写入 `ui_state.json` 的 `smile.grid_size`;
+  控制器 `optimize_smile(grid_size=None)` 未显式给定时读该值,再缺省 5x5;
+- 耗时预计:`estimate_scan_seconds()` 按数据规模粗估(每组 ≈ 85s × 采样点数/250
+  × 直接维 TD/2048,2D ×0.3;经验点:sampleC 3D NUS 250 点实测 86s/组),跑之前在
+  日志里给「按数据规模估算约 X s/组、合计约 Y 分钟」;`progress` 回调包裹后,第一组
+  完成时(第 2 组开始)改用实测平均并提示「实测约 X s/组,预计剩余 Y 分钟」;
+- 顺带修:单组网格(或组数 < cross_min)时跨组合规则会让稳定峰恒为 0,现加
+  `effective_cross` 回退(=1),单组也能给出稳定峰数;
+- 测试:新增 `tests/test_smile_grid_eta.py`(网格尺寸 4/9/16/25 与首尾档、粗估随组数
+  增长、ETA 文案「估算」→「实测」、单组回退);本地全量 pytest 全绿(exit 0);
+  ruff 仅剩 2 处历史告警。
 ## 0.2.199-补29hz-修3(第 2、3 步,完成):SMILE 扫描接线 + Rank1 入口
 - 第 2 步(工作流 + 控制器):
   ① `workflow.smile_optimize.scan_smile_parameters()`:驱动后端扫描并聚合 25 份

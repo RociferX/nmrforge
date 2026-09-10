@@ -657,8 +657,12 @@ class ProcessingController:
         exp_id=None,
         data_id=None,
         progress: Callable[[str], None] | None = None,
+        grid_size: int | None = None,
     ) -> str:
         """SMILE 优化(可选):以终跑脚本为模板只换 SMILE 参数做扫描。
+
+        grid_size: 优化程度 2..5(2x2..5x5);None 时读该数据 ui_state,
+        再缺省用 5x5(25 组)。
 
         0.2.199-补29hz-修3(用户方案):直接维跑一次得到切片 → 每组参数跑一次
         「SMILE + 间接维」得到终谱 → 立即评估指标 → 删除该谱(候选谱只短暂
@@ -682,6 +686,16 @@ class ProcessingController:
             if progress is not None:
                 progress(msg)
 
+        if grid_size is None:
+            try:
+                from gui.per_data_records import load_ui_state
+
+                grid_size = int(
+                    (load_ui_state(self._manager, exp_id, data_id).get("smile") or {})
+                    .get("grid_size", 5)
+                )
+            except Exception:  # noqa: BLE001 - 读不到用默认
+                grid_size = 5
         work = self._manager.data_dir(exp_id, data_id, "process")
         work.mkdir(parents=True, exist_ok=True)
         # 候选谱评估完即删:中间目录优先放内存盘
@@ -695,6 +709,7 @@ class ProcessingController:
                 self._backend_instance(),
                 base_params,
                 scan_dir=scan_dir,
+                grid_size=int(grid_size or 5),
                 progress=_smile_progress,
             )
         finally:

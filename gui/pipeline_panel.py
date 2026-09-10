@@ -21,6 +21,7 @@ from pathlib import Path
 from PyQt6.QtCore import QPoint, QRect, QSize, Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
@@ -734,6 +735,19 @@ class PipelineStepRow(QWidget):
         button_row.addWidget(self.threshold_slider)
         button_row.addWidget(self.threshold_spin)
         # 0.2.199-补29dl(用户):参考谱——选峰时只保留与参考峰表匹配的峰
+        # 0.2.199-补29hz-修4:SMILE 优化程度 2x2..5x5(按数据记住)
+        self.grid_label = QLabel("优化程度")
+        self.grid_label.setVisible(self.step_id == "smile")
+        self.grid_combo = QComboBox()
+        for _n in (2, 3, 4, 5):
+            self.grid_combo.addItem(f"{_n}x{_n}", _n)
+        self.grid_combo.setCurrentIndex(3)  # 默认 5x5
+        self.grid_combo.setVisible(self.step_id == "smile")
+        self.grid_combo.setToolTip(
+            "SMILE 参数网格 n×n:越大越细、越慢(2x2≈4 组,5x5=25 组)"
+        )
+        button_row.addWidget(self.grid_label)
+        button_row.addWidget(self.grid_combo)
         self.ref_button = QPushButton("参考谱")
         self.ref_button.setToolTip(
             "选择参考谱(任意已有峰表的数据):选峰时只保留与参考峰表匹配的峰"
@@ -1094,6 +1108,12 @@ class PipelinePanel(QWidget):
             peaks_row.threshold_slider.sliderReleased.connect(
                 self._mark_current_threshold_custom
             )
+        # 0.2.199-补29hz-修4:SMILE 优化程度按数据记入 ui_state
+        smile_row = self._rows.get("smile")
+        if smile_row is not None:
+            smile_row.grid_combo.currentIndexChanged.connect(
+                self._store_smile_grid_size
+            )
         steps_box.addStretch(1)
 
         scroll = QScrollArea()
@@ -1242,8 +1262,50 @@ class PipelinePanel(QWidget):
             self._threshold_custom_by_data[key] = custom
         return self._threshold_by_data[key]
 
+    def _store_smile_grid_size(self, *_args) -> None:
+        """把当前数据的 SMILE 优化程度写进 ui_state(与峰阈值同款)。"""
+        row = self._rows.get("smile")
+        if row is None or not (self._current_exp_id and self._current_data_id):
+            return
+        try:
+            from gui.per_data_records import update_ui_state
+
+            update_ui_state(
+                self.manager,
+                self._current_exp_id,
+                self._current_data_id,
+                "smile",
+                {"grid_size": int(row.grid_combo.currentData() or 5)},
+            )
+        except Exception:  # noqa: BLE001 - 持久化失败不阻断
+            pass
+
+    def _sync_smile_grid_size(self) -> None:
+        """按当前数据显示 SMILE 优化程度(读 ui_state;默认 5x5)。"""
+        row = self._rows.get("smile")
+        if row is None or not (self._current_exp_id and self._current_data_id):
+            return
+        key = (self._current_exp_id, self._current_data_id)
+        if key == getattr(self, "_grid_key", None):
+            return
+        size = 5
+        try:
+            from gui.per_data_records import load_ui_state
+
+            size = int(
+                (load_ui_state(self.manager, key[0], key[1]).get("smile") or {})
+                .get("grid_size", 5)
+            )
+        except Exception:  # noqa: BLE001 - 读取失败用默认
+            size = 5
+        self._grid_key = key
+        index = row.grid_combo.findData(max(2, min(5, size)))
+        if index >= 0:
+            row.grid_combo.setCurrentIndex(index)
+
     def _current_statuses(self) -> dict[str, str]:
         """当前选中样品数据的步骤状态;未选中样品数据/旧单样品数据回退实验类型聚合。"""
+        self._sync_smile_grid_size()
         if self._current_data_id:
             return compute_data_step_statuses(
                 self.manager, self._current_exp_id, self._current_data_id
