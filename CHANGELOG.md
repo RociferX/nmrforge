@@ -1,5 +1,13 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29hs(2026-09-10,启动提速:scipy.ndimage 延迟导入)
+- 用户:启动耗时节省先只做第一项(延迟 scipy.ndimage);
+- 背景:VM 实测 `import gui.main_window` 351ms,其中 scipy.ndimage 约 150–190ms,来源是
+  viewer.spectrum_viewer → core/qc/peak_detection 顶层 `from scipy.ndimage import maximum_filter`;
+- 实现:core/qc/peak_detection.py 顶层导入改为延迟包装函数 maximum_filter(首次调用才导入并缓存),
+  峰检测/峰吸附的实际计算不变,只把导入移出启动路径;
+- 验证:import gui.main_window 本地 589→390ms;峰检测/选峰/QC 相关与全量测试全绿,ruff 通过。
+
 ## 0.2.199-补29hr(2026-09-10,左侧树懒加载,修进入软件 1s 才出数据)
 - 用户:进入软件 ~1s 才出现已导入数据及其相关内容;担心数据多了会卡,建议先加载树/运行记录、能懒加载就懒加载;
 - 根因:refresh 时对每个数据的 6 个子目录(raw/process/spectra/peaks/figures/report)即时列文件+建节点
@@ -11,6 +19,9 @@
 - 验证:MainWindow.refresh 200 数据 + 500 运行 ~1.4ms;相关 GUI 测试全绿,ruff 通过;
 - 追加(用户):删除遗留的隐藏扁平实验表(experiment_tree 仅测试引用、app 已不用);
   相关测试改为核对真实项目/树;相关 GUI 测试全绿,ruff 通过。
+- 回退(用户,0.2.199-补29hr 整体回退):实测启动没变快,且看不到 log 与文件、点中的数据像没加载;
+  已整体回退——子目录恢复「建节点即列文件」,去掉占位行/itemExpanded/运行状态缓存;
+  真正瓶颈在启动导入(scipy.ndimage/pyqtgraph/import_workflow,合计约 350ms),见 补29hs。
 
 ## 0.2.199-补29hq(2026-09-09,设置「SMILE 线程预留数」改「SMILE 线程数」,默认2)
 - 用户:设置里预留线程数改成 SMILE 设置线程数,默认 2;最大=机器线程数-2,核数≤3 只能 1;

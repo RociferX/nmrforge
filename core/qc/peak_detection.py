@@ -6,9 +6,22 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
-from scipy.ndimage import maximum_filter
 
 from core.qc import noise
+
+# scipy.ndimage 首次导入约 150ms(VM 实测):峰检测只在真正选峰/吸附时才需要,
+# 顶层导入会白算进软件启动时间,故改延迟导入(0.2.199-补29hs)。
+_MAXIMUM_FILTER = None
+
+
+def maximum_filter(*args: Any, **kwargs: Any) -> np.ndarray:
+    """scipy.ndimage.maximum_filter 的延迟导入包装(首次调用后缓存)。"""
+    global _MAXIMUM_FILTER
+    if _MAXIMUM_FILTER is None:
+        from scipy.ndimage import maximum_filter as _impl
+
+        _MAXIMUM_FILTER = _impl
+    return _MAXIMUM_FILTER(*args, **kwargs)
 
 
 @dataclass
