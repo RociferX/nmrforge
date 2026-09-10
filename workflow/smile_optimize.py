@@ -654,6 +654,178 @@ def optimize_smile_parameters(
     results.sort(key=lambda r: (r.rank if r.rank > 0 else 999, -r.overall))
     return results
 
+def scan_smile_parameters(
+    experiment: Experiment,
+    backend: Any,
+    base_params: dict[str, Any] | None = None,
+    *,
+    scan_dir: Path | str,
+    grid: list[dict[str, Any]] | None = None,
+    cross_min: int = 2,
+    peak_tol_pts: float = 4.0,
+    keep_top: int = 3,
+    progress: Callable[[int, int, str], None] | None = None,
+) -> dict[str, Any]:
+    """SMILE 参数扫描(0.2.199-补29hz-修3,用户方案)。
+
+    以终跑脚本为模板**只换 SMILE 参数**:① 直接维跑一次得到切片文件;
+    ② 每组参数跑一次「SMILE + 间接维」得到终谱;③ 立即取指标;④ 删除该谱
+(候选谱只短暂存在于 scan_dir,通常位于内存盘)。
+
+    指标(无需保留谱):检出峰数、跨参数组合稳定峰数(出现 ≥cross_min 组)、
+    稳定峰平均 S/N、谱图综合质量分;排序按(稳定峰数, 平均 S/N, 质量分)。
+    返回 {success, message, logs, rows(按名次), scripts({名次: 脚本文本}),
+    scan_dir, n_combos}。
+    """
+    combos = list(grid) if grid is not None else default_smile_grid()
+    base = dict(base_params or {})
+
+    def _evaluate(path: str) -> dict[str, Any]:
+        """候选谱评估:峰 + 质量分(此刻谱还在,评完即被删)。"""
+        _dic, data = _read_spectrum(path)
+        arr = np.asarray(data)
+        if np.iscomplexobj(arr):
+            arr = arr.real
+        peaks = peak_detection.detect(arr)
+        quality = spectrum_quality.evaluate(arr)
+        return {
+            "peak_count": len(peaks),
+            "quality": float(getattr(quality, "overall", 0.0) or 0.0),
+            "peaks": [
+                {
+                    "position": [float(v) for v in peak.position],
+                    "height": float(peak.height),
+                    "snr": float(peak.snr),
+                }
+                for peak in peaks
+            ],
+        }
+
+    scan = backend.smile_scan(
+        experiment,
+        base,
+        combos,
+        work_dir=scan_dir,
+        evaluate=_evaluate,
+        progress=progress,
+    )
+    if not scan.get("success"):
+        raise RuntimeError(str(scan.get("message", "SMILE 扫描失败")))
+    candidates = list(scan.get("candidates") or [])
+    n_combos = len(candidates) or 1
+    key_to_combos: dict[tuple[float, ...], set[int]] = defaultdict(set)
+    keys_by_index: dict[int, set[tuple[float, ...]]] = {}
+    for entry in candidates:
+        metrics = dict(entry.get("metrics") or {})
+        seen: set[tuple[float, ...]] = set()
+        for peak in metrics.get("peaks") or []:
+            key = _snap_key(tuple(peak["position"]), peak_tol_pts)
+            seen.add(key)
+            key_to_combos[key].add(int(entry["index"]))
+        keys_by_index[int(entry["index"])] = seen
+    rows: list[dict[str, Any]] = []
+    for entry in candidates:
+        metrics = dict(entry.get("metrics") or {})
+        params = dict(entry.get("params") or {})
+        stable = 0
+        snr_values: list[float] = []
+        for peak in metrics.get("peaks") or []:
+            key = _snap_key(tuple(peak["position"]), peak_tol_pts)
+            if len(key_to_combos.get(key, set())) < cross_min:
+                continue
+            stable += 1
+            try:
+                snr_values.append(float(peak.get("snr", 0.0) or 0.0))
+            except (TypeError, ValueError):
+                continue
+        mean_snr = float(np.mean(snr_values)) if snr_values else 0.0
+        quality = float(metrics.get("quality", 0.0) or 0.0)
+        rows.append(
+            {
+                "index": int(entry["index"]),
+                "nsigma": float(params.get("nsigma", 0.0) or 0.0),
+                "thresh": float(params.get("thresh", 0.0) or 0.0),
+                "peak_count": int(metrics.get("peak_count", 0) or 0),
+                "stable_count": int(stable),
+                "mean_snr": round(mean_snr, 3),
+                "quality": round(quality, 2),
+                "composite": round(stable + 0.01 * mean_snr + 0.01 * quality, 3),
+                "ok": bool(entry.get("ok")),
+                "error": str(metrics.get("error", "") or ""),
+                "_script": str(entry.get("script", "")),
+            }
+        )
+    rows.sort(
+        key=lambda r: (r["stable_count"], r["mean_snr"], r["quality"]),
+        reverse=True,
+    )
+    for rank, row in enumerate(rows, start=1):
+        row["rank"] = rank
+    scripts = {
+        int(row["rank"]): str(row.get("_script", ""))
+        for row in rows[: max(1, int(keep_top))]
+    }
+    for row in rows:
+        row.pop("_script", None)
+    return {
+        "success": True,
+        "message": str(scan.get("message", "")),
+        "logs": list(scan.get("logs") or []),
+        "rows": rows,
+        "scripts": scripts,
+        "scan_dir": str(scan.get("scan_dir", scan_dir)),
+        "n_combos": n_combos,
+    }
+
+
+def write_smile_scan_output(
+    manager: Any,
+    exp_id: str,
+    data_id: str,
+    rows: list[dict[str, Any]],
+    scripts: dict[int, str],
+) -> dict[str, str]:
+    """写「参数组合排序表」(CSV+JSON)与前三名脚本(0.2.199-补29hz-修3)。
+
+    排序表落 `<data>/smile_optimized/`;前三脚本落 `<data>/process/
+    <data_id>_nus_rankN.com`(与终跑脚本同处,可直接运行)。
+    返回 {csv, json, rank1, rank2, rank3}(缺项不出现)。
+    """
+    import csv
+    import json
+
+    out_dir = manager.data_dir(exp_id, data_id, "smile_optimized")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    proc_dir = manager.data_dir(exp_id, data_id, "process")
+    proc_dir.mkdir(parents=True, exist_ok=True)
+    csv_path = out_dir / f"{exp_id}-{data_id}_smile_ranking.csv"
+    json_path = out_dir / f"{exp_id}-{data_id}_smile_ranking.json"
+    fields = [
+        "rank", "index", "nsigma", "thresh", "stable_count", "peak_count",
+        "mean_snr", "quality", "composite", "ok", "error",
+    ]
+    with csv_path.open("w", encoding="utf-8", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=fields)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({key: row.get(key, "") for key in fields})
+    json_path.write_text(
+        json.dumps({"rows": rows, "count": len(rows)}, ensure_ascii=False, indent=2)
+        + "\n",
+        encoding="utf-8",
+    )
+    paths: dict[str, str] = {
+        "csv": str(csv_path),
+        "json": str(json_path),
+    }
+    for rank, script in sorted(scripts.items()):
+        if not script or rank < 1 or rank > 3:
+            continue
+        target = proc_dir / f"{data_id}_nus_rank{rank}.com"
+        target.write_text(script, encoding="utf-8", newline="\n")
+        paths[f"rank{rank}"] = str(target)
+    return paths
+
 def write_smile_optimized_output(
     manager: Any,
     exp_id: str,

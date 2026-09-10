@@ -294,6 +294,7 @@ class MainWindow(QMainWindow):
         self.pipeline.show_spectrum_requested.connect(
             self._show_spectrum_from_pipeline
         )
+        self.pipeline.rank1_run_requested.connect(self._on_rank1_rerun)
 
         self._spectrum_placeholder = QWidget()
         if not self._defer_spectrum_panel:
@@ -1597,6 +1598,30 @@ class MainWindow(QMainWindow):
         panel.set_context(exp_id, data_id)
         if not panel.load_current_spectrum():
             InfoDialog.show_info(self, "提示", "该样品数据还没有谱图文件")
+
+    def _on_rank1_rerun(self) -> None:
+        """「按 Rank1 重跑」:用 SMILE 扫描的 Rank1 脚本重跑终谱(方案 B)。"""
+        import threading
+
+        exp_id = self.pipeline.current_experiment_id()
+        data_id = self.pipeline.current_data_id
+        if not (exp_id and data_id):
+            return
+        self._append_log(f"按 Rank1 重跑终脚本开始: {exp_id}/{data_id}")
+
+        def worker() -> None:
+            try:
+                out = self.controller.rerun_smile_rank1(
+                    exp_id,
+                    data_id,
+                    progress=lambda msg: self.manual_run_log.emit(msg),
+                )
+                self.manual_run_log.emit(f"Rank1 重跑完成: {out}")
+            except Exception as exc:  # noqa: BLE001 - 失败写日志不抛出
+                self.manual_run_log.emit(f"Rank1 重跑失败: {exc}")
+            self.manual_run_done.emit()
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def _on_batch_run_done(self) -> None:
         """数据组批量处理完成:清除运行中标记、进度并刷新(主线程)。

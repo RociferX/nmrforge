@@ -638,6 +638,7 @@ class PipelineStepRow(QWidget):
     analysis_clear_ref_requested = pyqtSignal(str)  # step_id:清除 CSP 比对谱
     detail_toggled = pyqtSignal(str)  # step_id:点击行切换详情
     view_log_requested = pyqtSignal(str)  # step_id:定位日志面板
+    rank1_run_requested = pyqtSignal(str)  # step_id:按 SMILE 扫描 Rank1 重跑终谱
 
     def __init__(
         self, step_id: str, label: str, description: str, parent: QWidget | None = None
@@ -805,6 +806,17 @@ class PipelineStepRow(QWidget):
             lambda: self.show_spectrum_requested.emit(self.step_id)
         )
         button_row.addWidget(self.show_spectrum_button)
+        # 0.2.199-补29hz-修3:SMILE 优化只出排序表 + 前三脚本(方案 B),
+        # 用户确认后才用 Rank1 脚本真正出谱
+        self.rank1_button = QPushButton("按 Rank1 重跑")
+        self.rank1_button.setToolTip(
+            "用 SMILE 扫描选出的 Rank1 参数重跑终脚本,并把结果作为当前谱"
+        )
+        self.rank1_button.setVisible(False)
+        self.rank1_button.clicked.connect(
+            lambda: self.rank1_run_requested.emit(self.step_id)
+        )
+        button_row.addWidget(self.rank1_button)
         self.manual_button = QPushButton("人工")
         self.manual_button.setToolTip("脚本编辑器:打开该步骤已生成的脚本,可直接修改后运行")
         self.manual_button.setVisible(False)
@@ -941,6 +953,10 @@ class PipelineStepRow(QWidget):
             self.run_button.setVisible(status == "READY")
             self.run_button.setToolTip("运行当前步骤")
             self.rerun_final_button.setVisible(False)
+        # SMILE 扫描完成(SUCCESS)后才提供「按 Rank1 重跑」入口
+        self.rank1_button.setVisible(
+            status == "SUCCESS" and self.step_id == "smile"
+        )
         # 分析步骤产物就绪后提供「报告」入口
         self.report_button.setVisible(status == "SUCCESS" and self.step_id == "analysis")
 
@@ -959,6 +975,7 @@ class PipelinePanel(QWidget):
     view_log_requested = pyqtSignal(str)  # step_id:定位日志面板
     progress_updated = pyqtSignal(str)  # 批量进度文本(主线程更新标签)
     batch_summary_requested = pyqtSignal(object)  # 批量汇总 dict
+    rank1_run_requested = pyqtSignal(str)  # SMILE Rank1 重跑
 
     def __init__(
         self,
@@ -1061,6 +1078,7 @@ class PipelinePanel(QWidget):
             )
             row.detail_toggled.connect(self._toggle_step_detail)
             row.view_log_requested.connect(self.view_log_requested.emit)
+            row.rank1_run_requested.connect(self.rank1_run_requested.emit)
             steps_box.addWidget(row)
             self._rows[step_id] = row
         # 0.2.199-补29fz/补29gc(用户):阈值每次调节即记入当前数据;

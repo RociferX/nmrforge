@@ -1,5 +1,27 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29hz-修3(第 2、3 步,完成):SMILE 扫描接线 + Rank1 入口
+- 第 2 步(工作流 + 控制器):
+  ① `workflow.smile_optimize.scan_smile_parameters()`:驱动后端扫描并聚合 25 份
+     指标(检出峰数、跨参数组合稳定峰数(≥2 组)、稳定峰平均 S/N、谱图质量分),
+     按(稳定峰数, 平均 S/N, 质量分)排序;
+  ② `write_smile_scan_output()`:写排序表 `smile_optimized/<exp>-<data>_smile_ranking
+     .csv|json` + 前三脚本 `process/<data_id>_nus_rank1|2|3.com`;
+  ③ `ProcessingController.optimize_smile` 改走扫描:中间目录用 `memory_disk.
+     prepare_intermediate`(候选谱在内存盘、评估后即删)、`teardown_intermediate`
+     收尾、**不替换活动谱**(方案 B)、记 `smile_optimize` 运行 + SMILE 步骤成功,
+     返回精简汇总(组数 + 前三参数/稳定峰/平均 S/N/质量 + 排序表路径);
+- 第 3 步(GUI 入口):
+  ① `ProcessingController.rerun_smile_rank1()`:运行 `process/<data_id>_nus_rank1.com`
+     → 产物归位 `spectra/` → 登记为活动谱 + 步骤成功(缺脚本时明确报错);
+  ② Pipeline 的 SMILE 行新增「按 Rank1 重跑」按钮(仅 SMILE 步骤 SUCCESS 后出现),
+     主窗口用工作线程执行、日志进 LogPanel,不阻塞界面;
+- 测试:新增 `tests/test_smile_scan_workflow.py`(排序/删谱/排序表与前三脚本落盘)、
+  `tests/test_gui_smile_rank1.py`(按钮显隐 + 缺脚本报错);legacy 的 `test_gui_smile
+  ::test_optimize_smile_progress_and_concise_return` 已对齐扫描路径;
+- 验证:本地全量 pytest 全绿(exit 0);ruff 仅剩 2 处历史告警;
+  待 VM 用 sampleC 真实 NUS 数据验证扫描链路(切分 → 直接维一次 → 每组 SMILE+间接维
+  → 评估后删谱 → 排序)。
 ## 0.2.199-补29hz-修3(第 1 步,仅后端):SMILE 扫描的脚本切分与执行器
 - 用户方案(2026-09-10):SMILE 优化不必保留候选谱——以终跑脚本为模板**只换
   SMILE 参数**:① 直接维跑一次得到切片文件;② 以切片为输入跑 25 次「SMILE +

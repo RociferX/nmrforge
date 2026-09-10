@@ -658,13 +658,18 @@ class ProcessingController:
         data_id=None,
         progress: Callable[[str], None] | None = None,
     ) -> str:
-        """SMILE 优化(可选):基于已有参数仅优化 SMILE 参数,
-        多次重构去伪峰,稳定峰写入 smile_optimized/。
+        """SMILE 优化(可选):以终跑脚本为模板只换 SMILE 参数做扫描。
 
-        progress 可选回调:扫描/去伪进度(正在优化 x/25 + 当前参数),
-        不转发后端 SMILE 原始输出(与生成谱图日志区分,0.2.162-补)。"""
+        0.2.199-补29hz-修3(用户方案):直接维跑一次得到切片 → 每组参数跑一次
+        「SMILE + 间接维」得到终谱 → 立即评估指标 → 删除该谱(候选谱只短暂
+        存在于内存盘)。最后写参数组合排序表 + 前三名脚本,**不替换活动谱**
+        (方案 B;要用最优参数出谱请点「按 Rank1 重跑」)。"""
+        from backend import memory_disk
         from core.data.internal_data_model import SamplingMode
-        from workflow.smile_optimize import optimize_smile_parameters
+        from workflow.smile_optimize import (
+            scan_smile_parameters,
+            write_smile_scan_output,
+        )
 
         self._require_manager()
         exp_id = exp_id or getattr(data, "exp_id", "")
@@ -677,36 +682,118 @@ class ProcessingController:
             if progress is not None:
                 progress(msg)
 
-        results = optimize_smile_parameters(
-            experiment,
-            self._backend_instance(),
-            base_params=base_params,
-            progress=_smile_progress,
+        work = self._manager.data_dir(exp_id, data_id, "process")
+        work.mkdir(parents=True, exist_ok=True)
+        # 候选谱评估完即删:中间目录优先放内存盘
+        intermediate_root, memory_dir = memory_disk.prepare_intermediate(
+            work, experiment, params=base_params
         )
-        valid = [
-            result
-            for result in results
-            if getattr(result, "spectrum_path", "")
-            and getattr(result, "decision", "") not in ("failed", "error")
-        ]
-        if not valid:
-            raise RuntimeError("SMILE 优化未获得可用候选")
-        # 0.2.162-补9:最终保留真峰数最多的前 3 个谱(rank 1..3)
-        selected = [r for r in valid if getattr(r, "rank", 0) > 0][:3]
-        if not selected:
-            selected = valid[:1]
-        applied = []
-        for rank, result in enumerate(selected, start=1):
-            applied.append(
-                self._apply_smile_result(exp_id, data_id, result, rank=rank)
+        scan_dir = Path(intermediate_root) / "smile_scan"
+        try:
+            result = scan_smile_parameters(
+                experiment,
+                self._backend_instance(),
+                base_params,
+                scan_dir=scan_dir,
+                progress=_smile_progress,
             )
-        return (
-            f"{len(results)} 组候选,保留真峰最多前 {len(applied)} 个谱:"
+        finally:
+            memory_disk.teardown_intermediate(work, memory_dir)
+        rows = list(result["rows"])
+        top = rows[:3]
+        paths = write_smile_scan_output(
+            self._manager, exp_id, data_id, rows, result["scripts"]
+        )
+        # 方案 B(用户 2026-09-10):不替换活动谱,只出排序表 + 前三脚本
+        run = self._manager.start_run(
+            exp_id,
+            workflow_ref="smile_optimize",
+            inputs={"data_id": data_id},
+            params={"ranking": top, "n_combos": int(result["n_combos"])},
+        )
+        self._manager.finish_run(
+            run.run_id,
+            "success",
+            outputs=dict(paths),
+            message="SMILE 参数扫描: "
             + ", ".join(
-                f"Top{o['rank']} 真峰 {o['true_peak_count']} 个" for o in applied
-            )
+                f"Rank{r['rank']} nSigma={r['nsigma']:g}/thresh={r['thresh']:g}"
+                f"(稳定峰 {r['stable_count']})"
+                for r in top
+            ),
+        )
+        if data_id:
+            record_step_success(self._manager, exp_id, data_id, "smile")
+        self._manager.save()
+        summary = "; ".join(
+            f"Rank{r['rank']}: nSigma={r['nsigma']:g} thresh={r['thresh']:g}"
+            f" 稳定峰 {r['stable_count']} 平均S/N {r['mean_snr']:.1f}"
+            f" 质量 {r['quality']:.1f}"
+            for r in top
+        )
+        return (
+            f"{result['n_combos']} 组扫描完成(候选谱已评估后删除);{summary};"
+            f"排序表 {paths['csv']}"
         )
 
+    def rerun_smile_rank1(
+        self,
+        exp_id: str,
+        data_id: str,
+        progress: Callable[[str], None] | None = None,
+    ) -> str:
+        """用 SMILE 扫描选出的 Rank1 脚本重跑终谱并采用(方案 B 的落地入口)。
+
+        0.2.199-补29hz-修3:SMILE 优化只出「排序表 + 前三脚本」,不替换活动谱;
+        用户点「按 Rank1 重跑」时才真正出谱——运行 `process/<data_id>_nus_rank1.com`,
+        产物归位 `spectra/` 并登记为活动谱。
+        """
+        from backend import runtime
+
+        self._require_manager()
+        proc = self._manager.data_dir(exp_id, data_id, "process")
+        script = proc / f"{data_id}_nus_rank1.com"
+        if not script.is_file():
+            raise RuntimeError("未找到 Rank1 脚本,请先运行 SMILE 优化")
+        experiment = self._read_experiment(exp_id, data_id)
+        ext = {1: "ft1", 2: "ft2"}.get(experiment.ndim, "ft3")
+        if progress is not None:
+            progress(f"按 Rank1 重跑终脚本: {script.name}")
+        run_result = runtime.run(
+            ["csh", script.name], cwd=str(proc), timeout=7200.0
+        )
+        produced = proc / f"{data_id}.{ext}"
+        if (
+            run_result.returncode != 0
+            or not produced.is_file()
+            or produced.stat().st_size == 0
+        ):
+            raise RuntimeError(
+                f"Rank1 重跑失败(rc={run_result.returncode}),未生成 {produced.name}"
+            )
+        spectra = self._manager.data_dir(exp_id, data_id, "spectra")
+        spectra.mkdir(parents=True, exist_ok=True)
+        target = spectra / produced.name
+        if produced.resolve() != target.resolve():
+            import shutil
+
+            shutil.move(str(produced), str(target))
+        self._manager.set_data_spectrum(exp_id, data_id, target)
+        run = self._manager.start_run(
+            exp_id,
+            workflow_ref="smile_optimize_rank1",
+            inputs={"data_id": data_id, "script": str(script)},
+        )
+        self._manager.finish_run(
+            run.run_id,
+            "success",
+            outputs={"spectrum_path": str(target)},
+            message="按 Rank1(SMILE 扫描最优参数)重跑终谱",
+        )
+        if data_id:
+            record_step_success(self._manager, exp_id, data_id, "spectrum")
+        self._manager.save()
+        return str(target)
     def _apply_smile_result(
         self, exp_id: str, data_id: str, result, rank: int = 1
     ) -> dict:
