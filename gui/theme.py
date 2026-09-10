@@ -25,6 +25,22 @@ TEXT_MUTED = "#8a8a8a"         # 提示/占位/灰字(≈4.8:1)
 TEXT_ON_LIGHT = "#222222"      # 浅色面板(白底详情框/内联编辑器)内的文字
 WINDOW_BACKGROUND = "#1e1e1e"  # 与 apply_dark_theme 的 Window 色一致
 
+# 分区(面板)外观(0.2.199-补29hz-修2):四个主分区用卡片底色 + 边框区分,
+# 分隔条加宽并在悬停时高亮,让「树 / 处理流程 / 日志 / 谱图」一眼可分。
+PANEL_BACKGROUND = "#202124"
+PANEL_BORDER = "#33363b"
+SURFACE_ALT = "#232326"      # 表格/树交替行
+
+# 状态语义色(Pipeline 步骤行图标与文字、树状态)::
+STATUS_COLORS: dict[str, str] = {
+    "SUCCESS": "#5cb85c",
+    "OUTDATED": "#f0ad4e",
+    "FAILED": "#e05c5c",
+    "RUNNING": "#4fc1ff",
+    "READY": "#4fc1ff",
+    "LOCKED": "#9e9e9e",
+}
+
 
 def app_icon() -> QIcon | None:
     """应用图标(gui/assets/nmrforge.png,开发/冻结通用);缺失返回 None。
@@ -128,9 +144,12 @@ def apply_dark_theme(app: QApplication) -> None:
         QMenu::item:selected { background-color: #0e639c; }
         QStatusBar { background-color: #1e1e1e; color: #e8e8e8; }
         QTreeView, QListView, QTableView, QTableWidget, QTreeWidget {
-            background-color: #252526; color: #e8e8e8; }
+            background-color: #252526; color: #e8e8e8;
+            alternate-background-color: #232326; }
         QHeaderView::section { background-color: #2d2d30; color: #e8e8e8;
-                               border: 1px solid #3c3c3c; }
+                               border: none;
+                               border-bottom: 1px solid #3c3c3c;
+                               padding: 4px 6px; }
         QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QPlainTextEdit,
         QTextEdit, QDateEdit, QTimeEdit {
             background-color: #1e1e1e; color: #e8e8e8;
@@ -143,14 +162,19 @@ def apply_dark_theme(app: QApplication) -> None:
         QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {
             background-color: #4a4a4a; }
         QPushButton { background-color: #3c3c3c; color: #e8e8e8;
-                      border: 1px solid #555555; padding: 4px 8px; }
+                      border: 1px solid #555555; padding: 5px 10px;
+                      border-radius: 4px; }
         QPushButton:hover { background-color: #4a4a4a; }
         QPushButton:disabled { color: #6e6e6e; }
         QTabWidget::pane { border: 1px solid #3c3c3c; }
         QTabBar::tab { background-color: #252526; color: #e8e8e8;
                        padding: 4px 8px; }
         QTabBar::tab:selected { background-color: #0e639c; }
-        QSplitter::handle { background-color: #2d2d30; }
+        QSplitter::handle { background-color: #3a3d42; }
+        QSplitter::handle:horizontal { width: 6px; }
+        QSplitter::handle:vertical { height: 6px; }
+        QSplitter::handle:hover { background-color: #0e639c; }
+        QSplitter::handle:pressed { background-color: #1177bb; }
         QScrollBar { background-color: #252526; }
         QScrollBar::handle { background-color: #3c3c3c; }
         QLabel { color: #e8e8e8; }
@@ -167,6 +191,54 @@ def apply_dark_theme(app: QApplication) -> None:
         QCheckBox, QRadioButton { color: #e8e8e8; }
         QListWidget { background-color: #252526; color: #e8e8e8; }
         QStackedWidget { background-color: #1e1e1e; }
+        /* 0.2.199-补29hz-修2:分区卡片与标题 */
+        QWidget#PanelCard { background-color: #202124;
+                            border: 1px solid #33363b;
+                            border-radius: 6px; }
+        QLabel#PanelTitle { font-size: 13px; font-weight: bold;
+                            color: #e8e8e8; }
+        QLabel#PanelSubtitle { font-size: 11px; color: #b0b0b0; }
+        /* 步骤行:底部细线分隔 + 悬停高亮 */
+        QWidget#StepRow { border-bottom: 1px solid #2d2d30; }
+        QWidget#StepRow:hover { background-color: #26282b; }
+        /* 选中 / 悬停态统一 */
+        QTreeView::item:selected, QListView::item:selected,
+        QTableView::item:selected, QTableWidget::item:selected {
+            background-color: #0e639c; color: #ffffff; }
+        QTreeView::item:hover, QListView::item:hover,
+        QTableView::item:hover, QTableWidget::item:hover {
+            background-color: #2a2d2e; }
+        /* 输入焦点 */
+        QLineEdit:focus, QComboBox:focus, QSpinBox:focus,
+        QDoubleSpinBox:focus, QPlainTextEdit:focus, QTextEdit:focus {
+            border: 1px solid #0e639c; }
+        /* 按钮状态 */
+        QPushButton:pressed { background-color: #2f2f2f; }
+        QPushButton:checked { background-color: #0e639c;
+                              border-color: #1177bb; }
+        /* 滚动条:细身圆角,不抢视线 */
+        QScrollBar:vertical { background: transparent; width: 10px;
+                              margin: 2px 0 2px 0; }
+        QScrollBar:horizontal { background: transparent; height: 10px;
+                                margin: 0 2px 0 2px; }
+        QScrollBar::handle { background-color: #3c3c3c;
+                             border-radius: 4px;
+                             min-height: 28px; min-width: 28px; }
+        QScrollBar::handle:hover { background-color: #4d4d4d; }
+        QScrollBar::add-line, QScrollBar::sub-line {
+            width: 0; height: 0; background: transparent; }
+        QScrollBar::add-page, QScrollBar::sub-page {
+            background: transparent; }
+        QToolTip { padding: 4px 6px; border-radius: 4px; }
+        /* 0.2.199-补29hz-修2(方案 A):分区内部一律用卡片底色,
+           让「树 / 处理流程 / 日志 / 谱图」各自是一整块,而不是被
+           内容控件(滚动区/文本框/列表)切成深浅不一的小块。 */
+        QWidget#PanelCard QTreeWidget, QWidget#PanelCard QTableWidget,
+        QWidget#PanelCard QListWidget, QWidget#PanelCard QPlainTextEdit,
+        QWidget#PanelCard QTextEdit, QWidget#PanelCard QStackedWidget,
+        QWidget#PanelCard QScrollArea, QWidget#PanelCard QScrollArea > QWidget,
+        QWidget#PanelCard QScrollArea > QWidget > QWidget {
+            background-color: #202124; border: none; }
         """
         + _arrow_qss
     )

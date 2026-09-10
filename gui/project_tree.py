@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
     QAbstractItemDelegate,
     QHBoxLayout,
     QHeaderView,
+    QLabel,
     QLineEdit,
     QMenu,
     QTreeWidget,
@@ -206,8 +207,19 @@ class ProjectTreePanel(QWidget):
         # 0.2.199-补29hd:批量完成后逐数据状态叠加(成功/失败/跳过),刷新后保留
         self._batch_status: dict[tuple[str, str], str] = {}
 
+        # 0.2.199-补29hz-修2:分区卡片 + 标题栏,四个主分区一眼可分
+        self.setObjectName("PanelCard")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(8, 6, 8, 8)
+        layout.setSpacing(6)
+        header = QHBoxLayout()
+        header.setContentsMargins(2, 0, 2, 0)
+        panel_title = QLabel("项目 / 数据")
+        panel_title.setObjectName("PanelTitle")
+        header.addWidget(panel_title)
+        header.addStretch(1)
+        layout.addLayout(header)
         self.tree = QTreeWidget()
         self.tree.setColumnCount(2)
         self.tree.setHeaderLabels(["对象", "状态"])

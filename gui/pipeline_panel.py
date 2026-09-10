@@ -48,7 +48,7 @@ from gui.pipeline_state import (
     script_fingerprint,
 )
 from gui.processing import ProcessingController
-from gui.theme import TEXT_MUTED, TEXT_PRIMARY
+from gui.theme import STATUS_COLORS, TEXT_MUTED, TEXT_PRIMARY
 
 # 步骤定义:id / 名称 / 描述 / 前置步骤 id 列表
 PIPELINE_STEPS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
@@ -643,6 +643,9 @@ class PipelineStepRow(QWidget):
         self, step_id: str, label: str, description: str, parent: QWidget | None = None
     ) -> None:
         super().__init__(parent)
+        # 0.2.199-补29hz-修2:步骤行底部细线分隔 + 悬停高亮
+        self.setObjectName("StepRow")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.step_id = step_id
         outer = QVBoxLayout(self)
         outer.setContentsMargins(4, 2, 4, 2)
@@ -894,6 +897,12 @@ class PipelineStepRow(QWidget):
         icon = STATUS_ICON.get(status, "·")
         label = STATUS_TEXT.get(status, status)
         self.status_label.setText(f"{icon} {label}")
+        # 状态色(0.2.199-补29hz-修2):图标与文字按状态着色,扫一眼即知成败
+        _color = STATUS_COLORS.get(status, TEXT_MUTED)
+        self.status_label.setStyleSheet(
+            f"color: {_color}; font-weight: bold;"
+        )
+        self.icon_label.setStyleSheet(f"color: {_color};")
         tooltip = f"状态: {STATUS_TEXT.get(status, status)}"
         if reason:
             tooltip += f"\n{reason}"
@@ -989,7 +998,20 @@ class PipelinePanel(QWidget):
         self._analysis_ref_info: dict[str, str] | None = None
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setContentsMargins(10, 8, 10, 8)
+        layout.setSpacing(6)
+
+        # 0.2.199-补29hz-修2:标题栏(当前上下文作为副标题)
+        title_row = QHBoxLayout()
+        title_row.setContentsMargins(0, 0, 0, 0)
+        panel_title = QLabel("处理流程")
+        panel_title.setObjectName("PanelTitle")
+        title_row.addWidget(panel_title)
+        flow_hint = QLabel("导入 → FID → 谱图 → 峰挑选")
+        flow_hint.setObjectName("PanelSubtitle")
+        title_row.addWidget(flow_hint)
+        title_row.addStretch(1)
+        layout.addLayout(title_row)
 
         self.context_label = QLabel("未打开项目")
         self.context_label.setStyleSheet(
@@ -1058,7 +1080,11 @@ class PipelinePanel(QWidget):
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        # 0.2.199-补29hz-修2:滚动区不吃底色(否则中央分区与其它分区不同色)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.viewport().setAutoFillBackground(False)
         content = QWidget()
+        content.setAutoFillBackground(False)
         content.setLayout(steps_box)
         scroll.setWidget(content)
         layout.addWidget(scroll, 1)

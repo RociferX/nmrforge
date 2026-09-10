@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
+    QFrame,
     QHBoxLayout,
     QLabel,
     QPlainTextEdit,
@@ -40,11 +41,15 @@ class LogPanel(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        # 0.2.199-补29hz-修2:分区卡片 + 标题样式统一
+        self.setObjectName("PanelCard")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setContentsMargins(8, 6, 8, 8)
+        layout.setSpacing(6)
         header = QHBoxLayout()
         title = QLabel("Task / Log")
-        title.setStyleSheet("font-weight: bold;")
+        title.setObjectName("PanelTitle")
         header.addWidget(title)
         self.scope_label = QLabel("")
         self.scope_label.setStyleSheet(
@@ -64,6 +69,7 @@ class LogPanel(QWidget):
         layout.addLayout(header)
         self.text = QPlainTextEdit()
         self.text.setReadOnly(True)
+        self.text.setFrameShape(QFrame.Shape.NoFrame)
         self.text.setMaximumBlockCount(2000)
         layout.addWidget(self.text, 1)
         self._buffers: dict[str, list[str]] = {"global": []}

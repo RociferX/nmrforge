@@ -55,6 +55,9 @@ class CenterPanel(QWidget):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
+        # 0.2.199-补29hz-修2:中央区同样用卡片外观(与左/右/日志列分隔一致)
+        self.setObjectName("PanelCard")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self._manager = manager
 
         self.welcome_page = WelcomePage()

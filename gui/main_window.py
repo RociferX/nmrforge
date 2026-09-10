@@ -327,8 +327,8 @@ class MainWindow(QMainWindow):
         self.context_bar = QLabel("未打开项目")
         self.context_bar.setWordWrap(True)
         self.context_bar.setStyleSheet(
-            "background: #1e1e1e; padding: 4px 10px; "
-            "font-weight: bold; color: #ffffff;"
+            "background: #202124; border-left: 3px solid #0e639c; "
+            "padding: 6px 12px; font-weight: bold; color: #ffffff;"
         )
         # 0.2.141:日志为中间竖列(水平分隔条内),不再占用底部高度
         central_layout.addWidget(self.context_bar)

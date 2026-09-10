@@ -198,8 +198,19 @@ class SpectrumPanel(QWidget):
             "SN",
         )
 
+        # 0.2.199-补29hz-修2:分区卡片 + 标题栏
+        self.setObjectName("PanelCard")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(8, 6, 8, 8)
+        layout.setSpacing(6)
+        header = QHBoxLayout()
+        header.setContentsMargins(2, 0, 2, 0)
+        panel_title = QLabel("谱图")
+        panel_title.setObjectName("PanelTitle")
+        header.addWidget(panel_title)
+        header.addStretch(1)
+        layout.addLayout(header)
         self.viewer = SpectrumViewer()
         self._spectrum3d_panel = Spectrum3DPanel()
         self._spectrum3d_panel.setVisible(False)
@@ -212,6 +223,8 @@ class SpectrumPanel(QWidget):
         self.viewer.add_control_panel(self._spectrum3d_panel)
 
         self.file_list = QListWidget()
+        self.file_list.setAutoFillBackground(False)
+        self.viewer.layer_list.setAutoFillBackground(False)
         self.file_list.setMaximumWidth(190)
         self.file_list.itemClicked.connect(self._on_file_clicked)
 
