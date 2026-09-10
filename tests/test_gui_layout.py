@@ -534,7 +534,8 @@ def test_main_window_three_column_layout(
     assert window.center_panel.stack.currentIndex() == 2
     assert window.center_panel.experiment_page._exp_id == "exp_001"
     assert "demo" in window.windowTitle()
-    assert window.experiment_tree.topLevelItemCount() == 2  # 兼容表同步
+    # 扁平兼容表已删(0.2.199-补29hr):改为核对真实项目实验数
+    assert len([e for e in window.manager.project.experiments if not e.trashed]) == 2
     window.close()
 
 
@@ -848,7 +849,7 @@ def test_log_panel_explicit_scope_routes_group_batch(
 def test_main_window_empty_state(qapp: QApplication) -> None:
     window = MainWindow()
     assert window.project_tree.tree.topLevelItemCount() == 1  # Workspace 根
-    assert window.experiment_tree.topLevelItemCount() == 0
+    assert window.manager.project is None
     assert "欢迎" in window.windowTitle()
     assert window.pipeline.current_experiment_id() == ""
     window.close()

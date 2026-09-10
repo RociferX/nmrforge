@@ -9,6 +9,8 @@
   (exp,data)→最近运行状态缓存(_data_last_run_failed 由 O(数据×运行) 降为 O(运行));
   ③隐藏兼容扁平表改懒建(访问 experiment_tree 时才填充,刷新不再 infer_status);
 - 验证:MainWindow.refresh 200 数据 + 500 运行 ~1.4ms;相关 GUI 测试全绿,ruff 通过;
+- 追加(用户):删除遗留的隐藏扁平实验表(experiment_tree 仅测试引用、app 已不用);
+  相关测试改为核对真实项目/树;相关 GUI 测试全绿,ruff 通过。
 
 ## 0.2.199-补29hq(2026-09-09,设置「SMILE 线程预留数」改「SMILE 线程数」,默认2)
 - 用户:设置里预留线程数改成 SMILE 设置线程数,默认 2;最大=机器线程数-2,核数≤3 只能 1;

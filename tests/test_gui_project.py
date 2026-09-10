@@ -64,17 +64,16 @@ def test_window_shows_experiments_from_project(
 ) -> None:
     manager = _build_manager(tmp_path, monkeypatch)
     window = MainWindow(manager=manager)
-    assert window.experiment_tree.topLevelItemCount() == 2
-    first = window.experiment_tree.topLevelItem(0)
-    assert first.text(0) == "exp_001"
-    assert first.text(1) == "HSQC"
+    assert len(manager.project.experiments) == 2
+    first = manager.project.experiment("exp_001")
+    assert first is not None and first.title == "HSQC"
     assert "demo" in window.windowTitle()
     window.close()
 
 
 def test_window_empty_state(qapp: QApplication) -> None:
     window = MainWindow()
-    assert window.experiment_tree.topLevelItemCount() == 0
+    assert window.manager.project is None
     assert "欢迎" in window.windowTitle()
     assert window.center_panel.welcome_page is not None
     window.close()
@@ -113,7 +112,7 @@ def test_new_project_action(
     page._commit_name()
     assert window.manager.project is not None
     assert window.manager.project.name == "demo"
-    assert window.experiment_tree.topLevelItemCount() == 0
+    assert len(window.manager.project.experiments) == 0
     window.close()
 
 
@@ -211,10 +210,9 @@ def test_add_experiment_action(
     window.add_experiment()
     assert window.project_tree._pending_kind == "experiment"
     window.project_tree._commit_pending_create("3D HNCACB")
-    assert window.experiment_tree.topLevelItemCount() == 3
-    last = window.experiment_tree.topLevelItem(2)
-    assert last.text(0) == "exp_003"
-    assert last.text(1) == "3D HNCACB"
+    assert len(window.manager.project.experiments) == 3
+    last = window.manager.project.experiment("exp_003")
+    assert last is not None and last.title == "3D HNCACB"
     entry = manager.project.experiment("exp_003")
     assert entry is not None and len(entry.data) == 0  # 空白实验类型无样品数据
     window.close()
@@ -238,7 +236,8 @@ def test_delete_experiment_action_keeps_audit(
     window = MainWindow(manager=manager)
     window.project_tree.select_experiment("exp_001")
     window.delete_experiment()
-    assert window.experiment_tree.topLevelItemCount() == 1  # 报告树非本次刷新范围
+    # 扁平兼容表已删:核对仅剩 1 个未删除实验
+    assert len([e for e in manager.project.experiments if not e.trashed]) == 1
     assert manager.project.experiment("exp_001").trashed is True  # 软删除
     assert manager.project is not None
     assert len(manager.project.workflow_runs) == 1  # 审计保留
