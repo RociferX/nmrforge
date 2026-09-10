@@ -41,15 +41,6 @@ def _row_p0_raw(
     return float((-np.rad2deg(np.angle(vec))) % 360.0)
 
 
-def _circular_mean(angles: np.ndarray) -> float:
-    """角度(度)圆均值。"""
-    rad = np.deg2rad(np.asarray(angles, dtype=float))
-    return float(
-        (np.rad2deg(np.arctan2(np.mean(np.sin(rad)), np.mean(np.cos(rad)))))
-        % 360.0
-    )
-
-
 def _lock_trace_peaks(
     row: np.ndarray,
     *,

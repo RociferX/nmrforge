@@ -44,11 +44,7 @@ from gui.dialogs import (
     ScriptEditorDialog,
 )
 from gui.log_panel import LogPanel
-from gui.pipeline_panel import (
-    STEP_LABEL,
-    compute_data_step_statuses,
-    compute_step_statuses,
-)
+from gui.pipeline_panel import STEP_LABEL
 from gui.processing import ProcessingController
 from gui.project_tree import ProjectTreePanel
 from gui.spectrum_panel import SpectrumPanel
@@ -1039,13 +1035,6 @@ class MainWindow(QMainWindow):
             return
         self.refresh()
 
-    def _ask_note_fields(self, title: str, kind: str) -> dict:
-        """常规信息表单对话框:确定返回字段 dict,取消返回空 dict。"""
-        dialog = NotesDialog(self, title, kind)
-        if dialog.exec() == NotesDialog.DialogCode.Accepted:
-            return dialog.result_fields()
-        return {}
-
     def about(self) -> None:
         InfoDialog.show_info(
             self,
@@ -1063,50 +1052,8 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     # 处理动作
     # ------------------------------------------------------------------
-    def run_auto(self) -> None:
-        exp_id = self.project_tree.current_experiment_id()
-        if not exp_id:
-            InfoDialog.show_info(self, "提示", "请先在左侧选择一个实验")
-            return
-        if self.manager.project is None:
-            return
-        data_id = getattr(self.pipeline, "_current_data_id", "")
-        statuses = (
-            compute_data_step_statuses(self.manager, exp_id, data_id)
-            if data_id
-            else compute_step_statuses(self.manager, exp_id)
-        )
-        next_step = next(
-            (sid for sid, st in statuses.items() if st == "OUTDATED"), None
-        )
-        if next_step is None:
-            next_step = next(
-                (sid for sid, st in statuses.items() if st == "READY"), None
-            )
-        if next_step is None:
-            InfoDialog.show_info(self, "提示", "当前没有可运行的步骤")
-            return
-        self.center_panel.run_step(next_step)
-
-    def _show_run_history(self) -> None:
-        """打开运行历史对话框(全部 workflow_runs)。"""
-        from gui.dialogs import RunHistoryDialog
-
-        if self.manager.project is None:
-            InfoDialog.show_info(self, "提示", "请先打开项目")
-            return
-        runs = list(self.manager.project.workflow_runs)
-        dialog = RunHistoryDialog(
-            self, runs, self.manager.project.name,
-            project_root=self.manager.root,
-        )
-        dialog.exec()
-
     def _manual_script_editor_menu(self) -> None:
         self._open_manual_dialog("script")
-
-    def _manual_fid_menu(self) -> None:
-        self._open_manual_dialog("fid")
 
     def _on_view_step_log(self, step_id: str) -> None:
         """定位日志面板:追加标记行并展开(append 自动滚底)。"""
@@ -1827,23 +1774,6 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     # 查看动作
     # ------------------------------------------------------------------
-    def _show_viewer(self) -> None:
-        from viewer.app import SpectrumWindow
-
-        start_dir = ""
-        exp_id = self.project_tree.current_experiment_id()
-        if exp_id and self.manager.project is not None:
-            try:
-                data_id = self.spectrum_panel._current_data_id or ""
-                start_dir = str(self.manager.data_dir(exp_id, data_id, "spectra"))
-            except Exception:  # noqa: BLE001
-                start_dir = ""
-        self._viewer_window = SpectrumWindow(start_dir=start_dir)
-        self._viewer_window.show()
-
-    def _show_log(self) -> None:
-        self.log_panel.setVisible(True)
-
     def _toggle_left(self, checked: bool) -> None:
         self.project_tree.setVisible(checked)
 

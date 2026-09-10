@@ -29,14 +29,6 @@ DEFAULT_THREAD_OFFSET = 2
 DEFAULT_SMILE_THREADS = 2
 
 
-def _auto_nthread(config: dict[str, Any] | None = None) -> int:
-    """SMILE 默认线程 = 机器线程数 - offset(smile.thread_offset,缺省 2),
-    最小 1(0.2.199-补24:offset 可在设置里改)。"""
-    smile = load_config(config).get("smile") or {}
-    offset = _as_int(smile.get("thread_offset"), DEFAULT_THREAD_OFFSET)
-    return max(1, (os.cpu_count() or 4) - offset)
-
-
 def load_config(config: dict[str, Any] | None = None) -> dict[str, Any]:
     """读取 config/nmrforge.yaml,再用 config/nmrforge.local.yaml 覆盖
     (0.2.199-补24:设置对话框写入的本地项对后端生效);config 非空时

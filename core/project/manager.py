@@ -317,12 +317,6 @@ class ProjectManager:
             raise ProjectError(f"数据已移入回收站: {exp_id}/{data_id}")
         return data_entry
 
-    def active_experiments(self) -> list[ExperimentEntry]:
-        """未软删除的实验(树/统计/批处理用)。"""
-        return [
-            e for e in (self.project.experiments if self.project else []) if not e.trashed
-        ]
-
     def active_data(self, exp_id: str) -> list[DataEntry]:
         """实验下未软删除的数据条目。"""
         entry = self._require_experiment(exp_id)
@@ -799,16 +793,6 @@ class ProjectManager:
                 status = candidate
         return status
 
-    def update_experiment_status(self, exp_id: str, status: ExperimentStatus) -> None:
-        entry = self._require_experiment(exp_id)
-        old = entry.status
-        entry.status = status.value
-        self.add_history(
-            "experiment_status",
-            {"experiment_id": exp_id, "old_status": old, "new_status": status.value},
-        )
-
-    # ------------------------------------------------------------------
     # 样本
     # ------------------------------------------------------------------
     def add_sample(

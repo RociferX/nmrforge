@@ -7,8 +7,6 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
@@ -39,12 +37,6 @@ class PlanNode:
     quality_metrics: dict[str, float] = field(default_factory=dict)
     status: NodeStatus = NodeStatus.PENDING
     message: str = ""
-
-
-def make_cache_key(operation: str, params: dict[str, Any], input_hash: str = "") -> str:
-    """根据操作 + 参数 + 输入哈希生成缓存键。"""
-    payload = json.dumps([operation, params], sort_keys=True, default=str) + "|" + input_hash
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 
 
 @dataclass
