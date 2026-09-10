@@ -688,9 +688,12 @@ def scan_smile_parameters(
             arr = arr.real
         peaks = peak_detection.detect(arr)
         quality = spectrum_quality.evaluate(arr)
+        # 0.2.199-补29hz-修4:综合分在 QualityResult.score.overall 上,
+        # QualityResult 本身没有 overall(此前取值恒为 0)
+        _qscore = getattr(quality, "score", None)
         return {
             "peak_count": len(peaks),
-            "quality": float(getattr(quality, "overall", 0.0) or 0.0),
+            "quality": float(getattr(_qscore, "overall", 0.0) or 0.0),
             "peaks": [
                 {
                     "position": [float(v) for v in peak.position],
