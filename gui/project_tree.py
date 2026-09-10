@@ -28,6 +28,7 @@ from PyQt6.QtWidgets import (
 )
 
 from core.project import ProjectManager
+from gui.theme import TEXT_SECONDARY
 
 # 数据节点下真实目录(契约 v1.3 §9:raw/process/spectra/peaks/figures/report)
 DATA_SUBFOLDERS = ("raw", "process", "spectra", "peaks", "figures", "report")
@@ -762,7 +763,7 @@ class ProjectTreePanel(QWidget):
         pix = QPixmap(16, 16)
         pix.fill(QColor("transparent"))
         painter = QPainter(pix)
-        painter.setPen(QColor("#2c3e50"))
+        painter.setPen(QColor(TEXT_SECONDARY))
         font = QFont()
         font.setPointSize(8)
         font.setBold(True)
@@ -906,7 +907,11 @@ class ProjectTreePanel(QWidget):
             # 双击文件:谱图文件直接右侧显示,其它文件打开所在目录
             folder = data.get("folder", "")
             name = data.get("name", "")
-            if folder == "spectra" and name.lower().endswith((".ft2", ".ft3")):
+            # 0.2.199-补29hz:1D 终谱是 .ft1,右侧面板本就支持,
+            # 只匹配 .ft2/.ft3 会让 1D 用户双击谱图变成「打开所在目录」。
+            if folder == "spectra" and name.lower().endswith(
+                (".ft1", ".ft2", ".ft3")
+            ):
                 path = self._folder_path_for_item(item)
                 if path is not None and path.is_file():
                     self.open_spectrum_requested.emit(str(path))

@@ -1,0 +1,26 @@
+fix: 全项目审阅修复——暗色主题可读性 + 交互反馈 + 删除数据守卫(0.2.199-补29hz)
+
+用户:审查整个项目,找 bug、交互不合理与视觉问题,并修复。
+
+视觉(P1):软件强制暗色(窗口 #1e1e1e),但多处 QSS 仍是浅色主题的深色文字
+(#2c3e50 ≈1.5:1、#333/#444/#555/#666 ≤2.9:1),实际看不见——欢迎页 28px
+标题、Pipeline 面包屑、数据组/仪表盘/报告标题、步骤描述与提示、运行详情
+对话框;树图标同样用 #2c3e50 画在 #252526 上。新增 gui/theme.py 语义色
+(TEXT_PRIMARY/TEXT_SECONDARY/TEXT_MUTED/TEXT_ON_LIGHT/WINDOW_BACKGROUND),
+命中位置全部改用语义色;新增 tests/test_gui_theme.py 做对比度守卫。
+
+交互(P2):①树双击 .ft1 原来打开文件夹而非显示 1D 谱,现与 .ft2/.ft3 一致;
+②「直接维范围」写死 0-20 ppm(1H 口径),13C 直接检测(CANCO/NCACX/CANH/
+CCC 等)与 13C 1D 无法输入合法窗口,现按直接维核素分档并同步占位/说明;
+③打开谱图失败原来完全静默,现状态栏+日志提示(.ft3 异步失败同)。
+
+守卫(P3):①已删/回收站数据被界面写回复活——ui_state.json 写回会重建数据
+目录,recover_trashed 见到即还原;现 per_data_records 增 data_is_trashed
+守卫(log_panel 共用),真实产物判定改白名单(纯界面记录不算);
+②产物通配回退排除 3D 投影;③_outdated_reasons 变量覆盖清理。
+
+文档漂移:pick_peaks 阈值注释链与 docstring 对齐 35σ。
+
+验证:本地全量 pytest 全绿(exit 0);ruff 全仓仅剩 2 处历史告警
+(tests/test_gui_phase_c.py F841、tests/test_script_check.py I001);
+新增 tests/test_gui_theme.py、tests/test_review_fixes.py 全绿。

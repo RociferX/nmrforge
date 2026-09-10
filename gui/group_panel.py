@@ -27,6 +27,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from gui.theme import TEXT_MUTED, TEXT_PRIMARY, TEXT_SECONDARY
+
 # 截止步骤选项:值=BATCH_STEPS 子集
 STOP_STEP_OPTIONS: list[tuple[str, str]] = [
     ("fid", "生成 FID"),
@@ -68,21 +70,25 @@ class GroupBatchPanel(QWidget):
         layout.setContentsMargins(16, 16, 16, 16)
 
         title = QLabel("数据组批量处理")
-        title.setStyleSheet("font-size: 15px; font-weight: bold; color: #2c3e50;")
+        title.setStyleSheet(
+            f"font-size: 15px; font-weight: bold; color: {TEXT_PRIMARY};"
+        )
         layout.addWidget(title)
 
         self.context_label = QLabel("")
         self.context_label.setWordWrap(True)
-        self.context_label.setStyleSheet("color: #555;")
+        self.context_label.setStyleSheet(f"color: {TEXT_SECONDARY};")
         layout.addWidget(self.context_label)
 
         self.member_label = QLabel("")
         self.member_label.setWordWrap(True)
-        self.member_label.setStyleSheet("color: #555;")
+        self.member_label.setStyleSheet(f"color: {TEXT_SECONDARY};")
         layout.addWidget(self.member_label)
         # 0.2.199-补29gw:组内数据注释(字段×数据网格),置于"按参考数据处理"上方
         self.notes_label = QLabel("组内数据注释")
-        self.notes_label.setStyleSheet("font-weight: bold; color: #2c3e50;")
+        self.notes_label.setStyleSheet(
+            f"font-weight: bold; color: {TEXT_PRIMARY};"
+        )
         self.notes_label.setVisible(False)
         layout.addWidget(self.notes_label)
         self.notes_scroll = QScrollArea()
@@ -109,7 +115,7 @@ class GroupBatchPanel(QWidget):
             "应用到组内每个数据;可只处理到指定步骤(如仅生成 FID)。"
         )
         ref_hint.setWordWrap(True)
-        ref_hint.setStyleSheet("color: #666;")
+        ref_hint.setStyleSheet(f"color: {TEXT_MUTED};")
         ref_layout.addWidget(ref_hint)
 
         row1 = QHBoxLayout()
@@ -142,7 +148,7 @@ class GroupBatchPanel(QWidget):
             "单数据失败不中断整组。"
         )
         opt_hint.setWordWrap(True)
-        opt_hint.setStyleSheet("color: #666;")
+        opt_hint.setStyleSheet(f"color: {TEXT_MUTED};")
         opt_layout.addWidget(opt_hint)
         # 处理到某步骤
         opt_row = QHBoxLayout()
@@ -186,7 +192,7 @@ class GroupBatchPanel(QWidget):
 
         self.progress_label = QLabel("")
         self.progress_label.setWordWrap(True)
-        self.progress_label.setStyleSheet("color: #2c3e50;")
+        self.progress_label.setStyleSheet(f"color: {TEXT_PRIMARY};")
         self.progress_label.setVisible(False)
         layout.addWidget(self.progress_label)
         layout.addStretch(1)

@@ -14,26 +14,18 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from gui.theme import TEXT_MUTED
+
 
 def _data_is_trashed(manager: object, exp_id: str, data_id: str) -> bool:
-    """数据是否已删除/已入回收站(不存在也算),用于停写其日志。"""
-    proj = getattr(manager, "project", None)
-    if proj is None:
-        return False
-    exp = getattr(proj, "experiment", None)
-    if exp is None:
-        return False
-    entry = None
-    try:
-        entry = exp(exp_id)
-    except Exception:
-        entry = None
-    if entry is None:
-        return True
-    for d in getattr(entry, "data", None) or []:
-        if getattr(d, "id", "") == data_id:
-            return bool(getattr(d, "trashed", False))
-    return True
+    """数据是否已删除/已入回收站(不存在也算),用于停写其日志。
+
+    0.2.199-补29hz:判定逻辑与 gui/per_data_records.data_is_trashed
+    共用一处,避免日志与界面记录两套判定漂移。
+    """
+    from gui.per_data_records import data_is_trashed
+
+    return data_is_trashed(manager, exp_id, data_id)
 
 
 class LogPanel(QWidget):
@@ -55,7 +47,9 @@ class LogPanel(QWidget):
         title.setStyleSheet("font-weight: bold;")
         header.addWidget(title)
         self.scope_label = QLabel("")
-        self.scope_label.setStyleSheet("color: #7f8c8d; font-size: 11px;")
+        self.scope_label.setStyleSheet(
+            f"color: {TEXT_MUTED}; font-size: 11px;"
+        )
         header.addWidget(self.scope_label)
         header.addStretch(1)
         self.clear_button = QPushButton("清空")

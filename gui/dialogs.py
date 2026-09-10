@@ -40,6 +40,7 @@ from gui.notes import (
     experiment_type_options,
     note_fields,
 )
+from gui.theme import TEXT_MUTED, TEXT_PRIMARY
 
 
 def _center_on_screen(dialog: QDialog) -> None:
@@ -576,7 +577,7 @@ class RunHistoryDialog(QDialog):
 
         self.detail_label = QLabel("选择一行查看详情")
         self.detail_label.setWordWrap(True)
-        self.detail_label.setStyleSheet("color: #444;")
+        self.detail_label.setStyleSheet(f"color: {TEXT_PRIMARY};")
         layout.addWidget(self.detail_label)
         self.snapshot_button = QPushButton("打开快照目录")
         self.snapshot_button.setEnabled(False)
@@ -656,7 +657,7 @@ class BatchSummaryDialog(QDialog):
             self.list_widget.addItem(list_item)
         self.list_widget.itemDoubleClicked.connect(self._on_item_activated)
         hint = QLabel("双击条目可在左侧定位到对应数据(失败项)或查看状态。")
-        hint.setStyleSheet("color: #666;")
+        hint.setStyleSheet(f"color: {TEXT_MUTED};")
         layout.addWidget(hint)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         buttons.rejected.connect(self.reject)
@@ -771,7 +772,7 @@ class SettingsDialog(QDialog):
             f"保存到 {dest},重启后生效;未配置时显示默认值。"
         )
         hint.setWordWrap(True)
-        hint.setStyleSheet("color: #666;")
+        hint.setStyleSheet(f"color: {TEXT_MUTED};")
         layout.addWidget(hint)
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok

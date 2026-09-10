@@ -37,6 +37,7 @@ from gui.peaks_io import (
     normalize_poky_label,
 )
 from gui.processing import ProcessingController
+from gui.theme import TEXT_MUTED
 from viewer.spectrum3d_panel import Spectrum3DPanel
 from viewer.spectrum_viewer import SpectrumViewer
 
@@ -325,7 +326,7 @@ class SpectrumPanel(QWidget):
         )
         self.placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.placeholder.setWordWrap(True)
-        self.placeholder.setStyleSheet("color: #888;")
+        self.placeholder.setStyleSheet(f"color: {TEXT_MUTED};")
 
 
         # 上下布局:顶部文件/ Layers 行,中部查看器,下方峰操作+峰表
@@ -682,6 +683,15 @@ class SpectrumPanel(QWidget):
         return True
 
 
+    def open_with_peaks(self, path: Path, name: str | None = None) -> bool:
+        """打开谱图并加载其峰表(供主窗口调用,避免外部访问私有成员)。"""
+        target = Path(path)
+        if not self.open_spectrum(target, name=name):
+            return False
+        self._current_spectrum = target
+        self._load_peaks(target)
+        return True
+
     def _load_ft3_async(self, path: Path) -> None:
         """后台线程读取大 .ft3,完成后经信号回主线程绑定渲染。"""
         import threading
@@ -717,6 +727,9 @@ class SpectrumPanel(QWidget):
             return
         self._current_spectrum = None
         self.status_message.emit(f"3D 谱加载失败: {message}")
+        # 0.2.199-补29hz:失败不能只留状态栏一行(常被忽略),
+        # 同步写进任务日志面板。
+        self.log_message.emit(f"3D 谱加载失败 {path.name}: {message}")
 
     def _current_3d_nuclei(self) -> list[str] | None:
         """当前已加载 3D 谱每 F 轴(F1/F2/F3)的完整核名;核不可知返回 None。

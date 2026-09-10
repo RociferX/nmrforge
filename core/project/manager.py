@@ -326,16 +326,27 @@ class ProjectManager:
             raise ProjectError("未加载项目")
         return self.root / ".nmrforge_trash"
 
+    # 只有这些条目算「真实产物」:纯界面记录(report/log.txt、
+    # ui_state.json)不算——否则删除数据后任何一次界面写回都会让
+    # recover_trashed 误判为「用户从回收站恢复了数据」(0.2.199-补29hz)。
+    _REAL_ARTIFACT_NAMES = (
+        "raw",
+        "process",
+        "spectra",
+        "peaks",
+        "figures",
+        "smile_optimized",
+        "metadata.json",
+    )
+
     def _data_base_has_real_content(self, exp_id: str, data_id: str) -> bool:
-        """数据目录是否含真实产物(非仅遗留 report/log.txt)。"""
+        """数据目录是否含真实产物(纯界面记录 report/ui_state.json 不算)。"""
         base = self.data_base(exp_id, data_id)
         if not base.is_dir():
             return False
-        for child in base.iterdir():
-            if child.name == "report":
-                continue
-            return True
-        return False
+        return any(
+            (base / name).exists() for name in self._REAL_ARTIFACT_NAMES
+        )
 
     def recover_trashed(self) -> int:
         """把已恢复到原路径的软删除条目自动还原;返回还原数量。"""

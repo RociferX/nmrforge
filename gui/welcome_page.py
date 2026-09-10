@@ -20,6 +20,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from gui.theme import TEXT_PRIMARY, TEXT_SECONDARY
+
 
 class WelcomePage(QWidget):
     """首次启动/未打开项目时的欢迎页。"""
@@ -41,11 +43,13 @@ class WelcomePage(QWidget):
         layout.setContentsMargins(32, 32, 32, 32)
 
         title = QLabel("NMRForge")
-        title.setStyleSheet("font-size: 28px; font-weight: bold; color: #2c3e50;")
+        title.setStyleSheet(
+            f"font-size: 28px; font-weight: bold; color: {TEXT_PRIMARY};"
+        )
         layout.addWidget(title)
 
         subtitle = QLabel("面向 Bruker 2D/3D NMR 的自动化处理、参数优化与质量控制平台")
-        subtitle.setStyleSheet("color: #666;")
+        subtitle.setStyleSheet(f"color: {TEXT_SECONDARY};")
         layout.addWidget(subtitle)
         layout.addSpacing(18)
 

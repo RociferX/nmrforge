@@ -22,6 +22,7 @@ from PyQt6.QtWidgets import (
 )
 
 from core.project import ProjectManager
+from gui.theme import TEXT_MUTED, TEXT_PRIMARY
 
 REPORT_EXTS = (".html", ".pdf", ".json")
 
@@ -60,12 +61,14 @@ class ReportPanel(QWidget):
         layout.setContentsMargins(16, 16, 16, 16)
 
         title = QLabel("报告")
-        title.setStyleSheet("font-size: 15px; font-weight: bold; color: #2c3e50;")
+        title.setStyleSheet(
+            f"font-size: 15px; font-weight: bold; color: {TEXT_PRIMARY};"
+        )
         layout.addWidget(title)
 
         self.hint_label = QLabel("")
         self.hint_label.setWordWrap(True)
-        self.hint_label.setStyleSheet("color: #666;")
+        self.hint_label.setStyleSheet(f"color: {TEXT_MUTED};")
         layout.addWidget(self.hint_label)
 
         self.file_list = QListWidget()

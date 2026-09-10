@@ -1885,10 +1885,14 @@ class MainWindow(QMainWindow):
         """树中双击谱图文件:右侧谱图面板直接显示并加载峰表。"""
         target = Path(path)
         panel = self._ensure_spectrum_panel()
-        if panel.open_spectrum(target):
-            panel._current_spectrum = target
-            panel._load_peaks(target)
+        if panel.open_with_peaks(target):
             self.statusBar().showMessage(f"已打开: {target.name}")
+        else:
+            # 0.2.199-补29hz:原来静默失败,用户以为点击无效
+            self.statusBar().showMessage(f"无法打开谱图: {target.name}")
+            self._append_log(
+                f"无法打开谱图文件(格式不支持或文件损坏): {target}"
+            )
 
     def _open_terminal(self, path: str) -> None:
         """在终端中打开目录(优先 csh,便于直接运行 NMRPipe 命令)。"""

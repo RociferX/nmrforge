@@ -32,6 +32,7 @@ from PyQt6.QtWidgets import (
 
 from core.project import ProjectManager
 from gui.dialogs import InfoDialog
+from gui.theme import TEXT_MUTED, TEXT_PRIMARY
 
 
 def _active_data_of(exp) -> list:
@@ -73,14 +74,16 @@ class ProjectDashboard(QWidget):
         layout.setContentsMargins(16, 16, 16, 16)
 
         title = QLabel("项目")
-        title.setStyleSheet("font-size: 15px; font-weight: bold; color: #2c3e50;")
+        title.setStyleSheet(
+            f"font-size: 15px; font-weight: bold; color: {TEXT_PRIMARY};"
+        )
         layout.addWidget(title)
         self.context_label = QLabel("")
         layout.addWidget(self.context_label)
         layout.addSpacing(8)
 
         self.stats_label = QLabel("")
-        self.stats_label.setStyleSheet("color: #333;")
+        self.stats_label.setStyleSheet(f"color: {TEXT_PRIMARY};")
         layout.addWidget(self.stats_label)
         self.progress_label = QLabel("")
         layout.addWidget(self.progress_label)
@@ -195,7 +198,7 @@ class ExperimentImportPanel(QWidget):
             "子目录各含 acqus),导入后自动合并为一条样品数据"
         )
         segmented_hint.setWordWrap(True)
-        segmented_hint.setStyleSheet("color: #666;")
+        segmented_hint.setStyleSheet(f"color: {TEXT_MUTED};")
         segmented_layout.addWidget(segmented_hint)
         segmented_form = QHBoxLayout()
         self.segmented_source_edit = QLineEdit()
@@ -226,7 +229,7 @@ class ExperimentImportPanel(QWidget):
             "注:批量暂仅支持 2D 谱,3D 数据会跳过(可单个处理)"
         )
         batch_hint.setWordWrap(True)
-        batch_hint.setStyleSheet("color: #666;")
+        batch_hint.setStyleSheet(f"color: {TEXT_MUTED};")
         batch_layout.addWidget(batch_hint)
         self.batch_list = QListWidget()
         self.batch_list.setMaximumHeight(110)
@@ -431,7 +434,9 @@ class ImportDataDropdown(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
         title = QLabel("导入样品数据")
-        title.setStyleSheet("font-size: 14px; font-weight: bold; color: #2c3e50;")
+        title.setStyleSheet(
+            f"font-size: 14px; font-weight: bold; color: {TEXT_PRIMARY};"
+        )
         layout.addWidget(title)
         self.panel = ExperimentImportPanel(self)
         self.panel.import_options_requested.connect(self.import_options_requested.emit)
@@ -552,7 +557,9 @@ class ExperimentDashboard(QWidget):
         layout.setContentsMargins(16, 16, 16, 16)
 
         title = QLabel("实验")
-        title.setStyleSheet("font-size: 15px; font-weight: bold; color: #2c3e50;")
+        title.setStyleSheet(
+            f"font-size: 15px; font-weight: bold; color: {TEXT_PRIMARY};"
+        )
         layout.addWidget(title)
         self.context_label = QLabel("")
         layout.addWidget(self.context_label)

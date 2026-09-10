@@ -1,5 +1,38 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29hz(2026-09-10,全项目审阅修复:暗色主题可读性 + 交互反馈 + 删除守卫)
+- 用户:审查整个项目,找出 bug、交互不合理与视觉呈现问题 → 本轮修 P1/P2/P3;
+- 视觉(暗色主题可读性):软件自 0.2.199-补29am 起强制暗色(窗口 #1e1e1e),但多处
+  QSS 仍写浅色主题的深色文字(#2c3e50 ≈1.5:1、#333/#444/#555/#666 ≤2.9:1),
+  实际看不见——欢迎页 28px 标题、Pipeline 面包屑、数据组/仪表盘/报告标题、各步骤
+  描述与提示、运行详情对话框;
+  新增 gui/theme.py 语义色 TEXT_PRIMARY/TEXT_SECONDARY/TEXT_MUTED/TEXT_ON_LIGHT/
+  WINDOW_BACKGROUND,上述位置统一改用语义色;project_tree 树图标 pen 由 #2c3e50
+  改 TEXT_SECONDARY(原来画在暗色树上几乎不可见);
+- 交互:
+  ① 树中双击 1D 终谱(.ft1)原来打开所在目录,现与 .ft2/.ft3 一致直接显示谱图;
+  ② 「直接维范围」原把 0-20 ppm 写死(1H 口径),13C 直接检测的固体实验
+     (CANCO/CAN(CO)CA/CBCANCO/CCC/NCACX/NCOCX/CANH/NCACB)与 13C 1D 无法输入
+     合法窗口;现按直接维核素分档(1H 0-20、13C -20~220、15N 0~260、
+     31P -60~120、19F -300~100,未知核宽松),占位与说明文案同步按核素;
+  ③ 打开谱图失败原来完全静默(只有 if 分支),现状态栏 + 任务日志双提示;
+     大 .ft3 后台加载失败除状态栏外也写日志面板;
+- 修复(潜在 bug):
+  ① 已删除/回收站数据被界面写回「复活」——ui_state.json 写回(阈值/contour 调节)
+     会 mkdir 重建数据目录,recover_trashed 见到目录即还原;现 per_data_records
+     增 data_is_trashed 守卫(写入前判定),log_panel 与其共用同一判定;
+     recover_trashed 的「真实产物」判定改白名单(raw/process/spectra/peaks/
+     figures/smile_optimized/metadata.json),纯界面记录(report/log.txt、
+     ui_state.json)不再算产物;
+  ② 产物扫描把 3D 投影当主谱——通配回退排除 d_001_15N-1H.ft2 / d_001_proj_*.ft2;
+  ③ _outdated_reasons 覆盖参数 data_id 的写法改 node_data_id(消除隐患);
+- 文档漂移:pick_peaks 阈值注释链补 35σ;get_threshold/_threshold_for docstring 与
+  实际默认值(35σ)对齐;
+- 新增测试:tests/test_gui_theme.py(语义色对比度 + 退役深色字面量守卫)、
+  tests/test_review_fixes.py(范围分档/投影排除/删除守卫/双击 .ft1);
+- 验证:本地全量 pytest 全绿(exit 0),ruff 全仓仅剩 2 处历史告警
+  (tests/test_gui_phase_c.py F841、tests/test_script_check.py I001,非本轮引入);
+  VM ~/NMRForge 已同步并回归。
 ## 0.2.199-补29ht(2026-09-10,启动顺序调整:窗口先出现,重模块后台导入)
 - 用户:做一个「导入顺序」改变——其它先来、重的(谱图相关)后导入,用户正常用其它功能时
   后台导入不影响体验,且后面点谱图不会多加载时间;

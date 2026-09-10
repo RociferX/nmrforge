@@ -47,6 +47,7 @@ from gui.pipeline_state import (
     script_fingerprint,
 )
 from gui.processing import ProcessingController
+from gui.theme import TEXT_MUTED, TEXT_PRIMARY
 
 # 步骤定义:id / 名称 / 描述 / 前置步骤 id 列表
 PIPELINE_STEPS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
@@ -97,6 +98,81 @@ STEP_METHOD: dict[str, str] = {
     "peaks": "pick_peaks",
     # "analysis": "analyze",  # hidden from GUI (2026-09-03)
 }
+
+
+
+# 直接维范围输入约束(0.2.199-补29eg;补29hz 按核素分档)。
+# 原实现把范围写死 0-20 ppm(1H 口径):13C 直接检测的固体实验
+# (CANCO/CAN(CO)CA/CBCANCO/CCC/NCACX/NCOCX/CANH/NCACB 等)与 13C 1D
+# 的直接维在 0-200 ppm,原校验会直接拒绝合法窗口。
+_DIRECT_RANGE_PPM: dict[str, tuple[float, float]] = {
+    "1H": (0.0, 20.0),
+    "2H": (0.0, 20.0),
+    "13C": (-20.0, 220.0),
+    "15N": (0.0, 260.0),
+    "31P": (-60.0, 120.0),
+    "19F": (-300.0, 100.0),
+}
+_DIRECT_RANGE_FALLBACK = (-100.0, 320.0)
+# 各核素常用直接维窗口(仅用于对话框占位提示,留空即用处理默认)
+_DEFAULT_WINDOW_PPM: dict[str, tuple[str, str]] = {
+    "1H": ("10.5", "6.5"),
+    "13C": ("70", "20"),
+    "15N": ("130", "100"),
+}
+
+
+def _direct_dimension_range(nucleus: str) -> tuple[float, float]:
+    """直接维核素 → 允许输入的 ppm 范围(未知核给宽松范围)。"""
+    return _DIRECT_RANGE_PPM.get(str(nucleus or "").strip(), _DIRECT_RANGE_FALLBACK)
+
+
+def _default_window_ppm(nucleus: str) -> tuple[str, str]:
+    """直接维核素 → 占位提示的常用窗口(未知核留空)。"""
+    return _DEFAULT_WINDOW_PPM.get(str(nucleus or "").strip(), ("", ""))
+
+
+def validate_ext_range(lo_text: str, hi_text: str, nucleus: str = "") -> str:
+    """校验「直接维范围」输入:合法/留空返回 "",否则返回给用户看的错误文案。"""
+    lo_txt = str(lo_text or "").strip()
+    hi_txt = str(hi_text or "").strip()
+    try:
+        lo_f = float(lo_txt) if lo_txt else None
+        hi_f = float(hi_txt) if hi_txt else None
+    except ValueError:
+        return "请输入数字(ppm),或留空使用默认"
+    lo_min, hi_max = _direct_dimension_range(nucleus)
+    tag = f"{nucleus} " if nucleus else ""
+    for name, value in (("高场端", lo_f), ("低场端", hi_f)):
+        if value is not None and not (lo_min <= value <= hi_max):
+            return f"{name} ppm 应在 {lo_min:g}-{hi_max:g} 范围内({tag}直接维)"
+    if lo_f is not None and hi_f is not None and lo_f <= hi_f:
+        return "高场端 ppm 必须大于低场端 ppm(如 8.5-7.5)"
+    return ""
+
+
+def _is_projection_file(name: str, data_id: str) -> bool:
+    """3D 投影文件(不是主谱):d_001_proj_F1.ft2 / d_001_15N-1H.ft2。
+
+    主谱固定 <data_id>.ft2|ft3;投影由 stepwise.projection_filename 生成,
+    产物回退扫描时必须排除,否则「生成谱图」会被误判为已完成
+    (0.2.199-补29hz)。
+    """
+    stem = Path(str(name)).stem
+    if stem == str(data_id):
+        return False
+    if "_proj_" in stem:
+        return True
+    head, sep, tail = stem.rpartition("-")
+    if not sep:
+        return False
+
+    def _nucleus_tag(text: str) -> bool:
+        digits = "".join(ch for ch in text if ch.isdigit())
+        letters = "".join(ch for ch in text if ch.isalpha())
+        return bool(digits) and bool(letters) and len(letters) <= 2
+
+    return _nucleus_tag(head.rsplit("_", 1)[-1]) and _nucleus_tag(tail)
 
 
 def _data_nodes(manager: ProjectManager, exp_id: str) -> list:
@@ -173,7 +249,13 @@ def _node_artifacts(
             '*.ft2',
             '*.ft3',
         ):
-            matches = sorted(spectra.glob(pattern))
+            # 0.2.199-补29hz:通配回退必须排除 3D 投影
+            # (d_001_15N-1H.ft2 / d_001_proj_F1.ft2),
+            # 否则主谱丢失时会拿投影当「生成谱图」产物。
+            matches = [
+                p for p in sorted(spectra.glob(pattern))
+                if not _is_projection_file(p.name, data_id)
+            ]
             if matches:
                 artifacts['spectrum'] = matches[0]
                 break
@@ -353,17 +435,21 @@ def _outdated_reasons(
             continue
         reason = ''
         for node in nodes:
-            data_id = getattr(node, 'id', exp_id)
-            entry = load_pipeline_state(manager, exp_id, data_id)['steps'].get(
-                step_id
-            )
+            # 0.2.199-补29hz:不要复用/覆盖参数 data_id(原实现覆盖后
+            # 极易在后续修改里读错数据的状态)
+            node_data_id = getattr(node, 'id', exp_id)
+            entry = load_pipeline_state(
+                manager, exp_id, node_data_id
+            )['steps'].get(step_id)
             if entry and entry.get('input_hash'):
-                current = input_fingerprint(manager, exp_id, data_id, step_id)
+                current = input_fingerprint(
+                    manager, exp_id, node_data_id, step_id
+                )
                 if current is not None and current != entry['input_hash']:
                     reason = '输入已变化(上游重新运行或外部修改),请重新运行'
                     break
                 current_script = script_fingerprint(
-                    manager, exp_id, data_id, step_id
+                    manager, exp_id, node_data_id, step_id
                 )
                 if (
                     current_script is not None
@@ -593,7 +679,7 @@ class PipelineStepRow(QWidget):
         title_row.addWidget(self.status_label)
         text_box.addLayout(title_row)
         self.desc_label = QLabel(description)
-        self.desc_label.setStyleSheet("color: #666;")
+        self.desc_label.setStyleSheet(f"color: {TEXT_MUTED};")
         self.desc_label.setWordWrap(True)
         text_box.addWidget(self.desc_label)
         header.addLayout(text_box, 1)
@@ -743,7 +829,7 @@ class PipelineStepRow(QWidget):
         outer.addLayout(button_row)
 
         self.reason_label = QLabel("")
-        self.reason_label.setStyleSheet("color: #888;")
+        self.reason_label.setStyleSheet(f"color: {TEXT_MUTED};")
         self.reason_label.setWordWrap(True)
         self.reason_label.setVisible(False)
         outer.addWidget(self.reason_label)
@@ -790,7 +876,7 @@ class PipelineStepRow(QWidget):
         self.ext_range_button.setText(text)
 
     def get_threshold(self) -> float:
-        """峰挑选阈值(σ);非 peaks 步骤返回默认 25.0(0.2.199-补29gc)。"""
+        """峰挑选步骤阈值(σ);非 peaks 步骤返回默认 35.0(补29hn)。"""
         return self.threshold_spin.value() if self.step_id == "peaks" else 35.0
 
     def set_ref_text(self, text: str) -> None:
@@ -915,13 +1001,17 @@ class PipelinePanel(QWidget):
         self._nus_cache: dict[tuple[str, str], bool] = {}
         self._smile_step_visible = False
         self._ndim_cache: dict[tuple[str, str], int] = {}
+        # 0.2.199-补29hz:直接维核素缓存(直接维范围校验/占位提示用)
+        self._nucleus_cache: dict[tuple[str, str], str] = {}
         self._analysis_ref_info: dict[str, str] | None = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
 
         self.context_label = QLabel("未打开项目")
-        self.context_label.setStyleSheet("font-size: 13px; font-weight: bold; color: #2c3e50;")
+        self.context_label.setStyleSheet(
+            f"font-size: 13px; font-weight: bold; color: {TEXT_PRIMARY};"
+        )
         layout.addWidget(self.context_label)
 
         self.next_label = QLabel("")
@@ -1079,7 +1169,7 @@ class PipelinePanel(QWidget):
 
     def _threshold_for(self, exp_id: str, data_id: str) -> float:
         """该数据阈值:会话缓存优先,否则读 d_xxx/ui_state.json(补29ga);
-        旧默认 15(未显式自定义)迁移为 25(0.2.199-补29gc)。"""
+        旧默认 15/25σ(未显式自定义)迁移为 35σ(补29gc/补29hn)。"""
         key = (exp_id, data_id)
         if key not in self._threshold_by_data:
             value = 35.0
@@ -1145,6 +1235,22 @@ class PipelinePanel(QWidget):
             except Exception:  # noqa: BLE001 - 读取失败按 2D/3D 处理
                 self._ndim_cache[key] = 2
         return self._ndim_cache[key]
+
+    def _data_direct_nucleus(self, exp_id: str, data_id: str) -> str:
+        """当前数据直接维核素(读取失败返回空串,范围校验用宽松档)。"""
+        if not (exp_id and data_id):
+            return ""
+        key = (exp_id, data_id)
+        if key not in self._nucleus_cache:
+            try:
+                experiment = self.controller._read_experiment(exp_id, data_id)
+                dim = getattr(experiment, "direct_dimension", None)
+                self._nucleus_cache[key] = str(
+                    getattr(dim, "nucleus", "") or ""
+                )
+            except Exception:  # noqa: BLE001 - 读取失败按未知核处理
+                self._nucleus_cache[key] = ""
+        return self._nucleus_cache[key]
 
     def _set_peaks_visible(self, visible: bool) -> None:
         """按当前数据显隐峰挑选步骤行(1D 不需要选峰,补29gj)。"""
@@ -1308,21 +1414,24 @@ class PipelinePanel(QWidget):
             return
         key = (exp_id, data_id)
         current = self._final_ext.get(key, ("", "", True))
+        nucleus = self._data_direct_nucleus(exp_id, data_id)
+        lo_default, hi_default = _default_window_ppm(nucleus)
         dialog = QDialog(self)
         dialog.setWindowTitle("直接维范围")
         form = QFormLayout(dialog)
         lo_edit = QLineEdit(str(current[0]) if current[0] else "")
         hi_edit = QLineEdit(str(current[1]) if current[1] else "")
-        lo_edit.setPlaceholderText("10.5")
-        hi_edit.setPlaceholderText("6.5")
+        lo_edit.setPlaceholderText(lo_default)
+        hi_edit.setPlaceholderText(hi_default)
         form.addRow("高场端 ppm (EXT -x1):", lo_edit)
         form.addRow("低场端 ppm (EXT -xn):", hi_edit)
         tip = QLabel(
-            "留空=使用默认(10.5-6.5);窗口外峰不会出现在终谱中,\n"
+            f"留空=使用默认窗口(直接维核素 {nucleus or '未知'});"
+            "窗口外峰不会出现在终谱中,\n"
             "直接维线性相位 p1 会按窗口宽度自动重归一化。"
         )
         tip.setWordWrap(True)
-        tip.setStyleSheet("color: #666;")
+        tip.setStyleSheet(f"color: {TEXT_MUTED};")
         form.addRow(tip)
         apply_check = QCheckBox("应用此范围到优化过程")
         apply_check.setChecked(bool(current[2]))
@@ -1330,10 +1439,10 @@ class PipelinePanel(QWidget):
         apply_tip = QLabel(
             "默认开启:优化过程(首遍重构/相位搜索与基线/填零/窗函数评估)\n"
             "使用指定范围,与终谱一致,且可降低 SMILE 内存;\n"
-            "若优化效果不佳可尝试关闭,用默认 6.5-10.5 大范围优化。"
+            "若优化效果不佳可尝试关闭,用默认大范围优化。"
         )
         apply_tip.setWordWrap(True)
-        apply_tip.setStyleSheet("color: #666;")
+        apply_tip.setStyleSheet(f"color: {TEXT_MUTED};")
         form.addRow(apply_tip)
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok
@@ -1347,36 +1456,13 @@ class PipelinePanel(QWidget):
         lo = lo_edit.text().strip()
         hi = hi_edit.text().strip()
         apply_opt = apply_check.isChecked()
-        # 0.2.199-补29eg:输入约束——合理 ppm 范围(0-20),高场端必须大于低场端
+        # 0.2.199-补29eg/补29hz:输入约束按直接维核素分档(1H 0-20,
+        # 13C/15N/31P/19F 各自范围),高场端必须大于低场端
         from gui.dialogs import InfoDialog
 
-        try:
-            lo_f = float(lo) if lo else None
-            hi_f = float(hi) if hi else None
-        except ValueError:
-            InfoDialog.show_info(
-                self,
-                "直接维范围",
-                "请输入数字(ppm),或留空使用默认",
-            )
-            return
-        for _name, _v in (
-            ("高场端", lo_f),
-            ("低场端", hi_f),
-        ):
-            if _v is not None and not (0.0 <= _v <= 20.0):
-                InfoDialog.show_info(
-                    self,
-                    "直接维范围",
-                    f"{_name} ppm 应在 0-20 范围内",
-                )
-                return
-        if lo_f is not None and hi_f is not None and lo_f <= hi_f:
-            InfoDialog.show_info(
-                self,
-                "直接维范围",
-                "高场端 ppm 必须大于低场端 ppm(如 8.5-7.5)",
-            )
+        error = validate_ext_range(lo, hi, nucleus)
+        if error:
+            InfoDialog.show_info(self, "直接维范围", error)
             return
         if not lo and not hi:
             self._final_ext.pop(key, None)
