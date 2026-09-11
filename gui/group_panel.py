@@ -27,7 +27,12 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from gui.theme import TEXT_MUTED, TEXT_PRIMARY, TEXT_SECONDARY
+from gui.theme import (
+    TEXT_MUTED,
+    TEXT_PRIMARY,
+    TEXT_SECONDARY,
+    fit_combo_width,
+)
 
 # 截止步骤选项:值=BATCH_STEPS 子集
 STOP_STEP_OPTIONS: list[tuple[str, str]] = [
@@ -130,6 +135,7 @@ class GroupBatchPanel(QWidget):
         self.stop_combo = QComboBox()
         for _value, label in STOP_STEP_OPTIONS:
             self.stop_combo.addItem(label)
+        fit_combo_width(self.stop_combo)  # 修省略号(0.2.199-补29hz-修14)
         row2.addWidget(self.stop_combo)
         row2.addStretch(1)
         ref_layout.addLayout(row2)
@@ -156,6 +162,7 @@ class GroupBatchPanel(QWidget):
         self.opt_stop_combo = QComboBox()
         for _value, _label in STOP_STEP_OPTIONS:
             self.opt_stop_combo.addItem(_label)
+        fit_combo_width(self.opt_stop_combo)  # 修省略号(0.2.199-补29hz-修14)
         opt_row.addWidget(self.opt_stop_combo)
         opt_row.addStretch(1)
         opt_layout.addLayout(opt_row)

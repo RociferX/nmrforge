@@ -10,7 +10,13 @@ from __future__ import annotations
 from pathlib import Path
 
 from PyQt6.QtGui import QColor, QIcon, QPalette
-from PyQt6.QtWidgets import QApplication, QProxyStyle, QStyle
+from PyQt6.QtWidgets import (
+    QApplication,
+    QComboBox,
+    QProxyStyle,
+    QStyle,
+    QStyleOptionComboBox,
+)
 
 # ---------------------------------------------------------------------------
 # 暗色主题语义色(0.2.199-补29hz)
@@ -24,6 +30,41 @@ TEXT_SECONDARY = "#b0b0b0"     # 次级说明(≈7.7:1)
 TEXT_MUTED = "#8a8a8a"         # 提示/占位/灰字(≈4.8:1)
 TEXT_ON_LIGHT = "#222222"      # 浅色面板(白底详情框/内联编辑器)内的文字
 WINDOW_BACKGROUND = "#1e1e1e"  # 与 apply_dark_theme 的 Window 色一致
+
+
+def fit_combo_width(combo: QComboBox, extra: int = 18) -> None:
+    """按「最长项文字 + 下拉箭头 + 余量」给下拉框设最小宽度,避免省略号。
+
+    用户 2026-09-11:「优化程度和排序的下拉框内容很多省略号」——
+    系统/QSS 样式下 QComboBox 的 sizeHint 不含箭头与内边距,文本区只剩
+    2~3 px 余量(实测「净真峰优先」60 px 文字 / 62 px 文本区),字体渲染稍有
+    差异就被 Qt 省略号截断。设最小宽度即可(流式布局不会再压回去),
+    并同步给弹出列表最小宽度,避免列表项也被截。
+    """
+    metrics = combo.fontMetrics()
+    text_width = 0
+    for index in range(combo.count()):
+        text_width = max(
+            text_width, metrics.horizontalAdvance(combo.itemText(index))
+        )
+    arrow = 20
+    try:
+        option = QStyleOptionComboBox()
+        option.initFrom(combo)
+        arrow = combo.style().subControlRect(
+            QStyle.ComplexControl.CC_ComboBox,
+            option,
+            QStyle.SubControl.SC_ComboBoxArrow,
+            combo,
+        ).width()
+    except Exception:  # noqa: BLE001 - 取不到就用缺省箭头宽
+        pass
+    width = text_width + arrow + max(0, int(extra))
+    if width > combo.minimumWidth():
+        combo.setMinimumWidth(width)
+    view = combo.view()
+    if view is not None and width > view.minimumWidth():
+        view.setMinimumWidth(width)
 
 # 分区(面板)外观(0.2.199-补29hz-修2):四个主分区用卡片底色 + 边框区分,
 # 分隔条加宽并在悬停时高亮,让「树 / 处理流程 / 日志 / 谱图」一眼可分。

@@ -49,7 +49,12 @@ from gui.pipeline_state import (
     script_fingerprint,
 )
 from gui.processing import ProcessingController
-from gui.theme import STATUS_COLORS, TEXT_MUTED, TEXT_PRIMARY
+from gui.theme import (
+    STATUS_COLORS,
+    TEXT_MUTED,
+    TEXT_PRIMARY,
+    fit_combo_width,
+)
 
 # 步骤定义:id / 名称 / 描述 / 前置步骤 id 列表
 PIPELINE_STEPS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
@@ -746,6 +751,7 @@ class PipelineStepRow(QWidget):
         self.grid_combo.setToolTip(
             "SMILE 参数网格 n×n:越大越细、越慢(2x2≈4 组,5x5=25 组)"
         )
+        fit_combo_width(self.grid_combo)  # 修省略号(0.2.199-补29hz-修14)
         button_row.addWidget(self.grid_label)
         button_row.addWidget(self.grid_combo)
         self.rank_label = QLabel("排序")
@@ -757,6 +763,7 @@ class PipelineStepRow(QWidget):
         self.rank_combo.setToolTip(
             "排序口径:净真峰(稳定峰−疑伪峰)优先,或留出采样点残差(重建正确性)优先"
         )
+        fit_combo_width(self.rank_combo)  # 修省略号(0.2.199-补29hz-修14)
         button_row.addWidget(self.rank_label)
         button_row.addWidget(self.rank_combo)
         self.ref_button = QPushButton("参考谱")
