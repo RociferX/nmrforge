@@ -25,6 +25,16 @@
 - 顺带发现(未改,记入 problems.md 待拍板):峰表「可信度」列的数据源
   `smile_optimized/*_smile_reliability.json` 自 修3(方案 B 不替换活动谱)起已无人写入,
   该列实际恒为空;
+- 验证(VM 真机,2026-09-11,/tmp/vm_sample_2dnus):
+  * 2D NUS 扫描两种口径各 4 组全部成功;候选谱评估后**已删除**(目录内无 `cand*.ft2`),
+    排序表 CSV/JSON + rank1..3 脚本落盘(444/1621/≈1008 B);
+  * 一致性口径日志:`留出采样点: train=24 holdout=8` → `step1 2D 直接维: rc=0` →
+    `扫描运行方式:留出重建`,holdout_rmse 0.0705/0.0728、corr 0.8698(说明 2D 留出残差
+    真的算出来了,不是空列);净真峰口径日志 `扫描运行方式:全采样重建`;
+  * 修1 现场对比:同一 `phase_optimize_unified` 运行,旧硬编码 refs → `snapshot=''`,
+    新 `STEP_RUN_REFS["spectrum"]` → 写入 `.../runs/R-.../snapshot`;
+  * VM 全量:877 passed / 19 skipped(除 4 个纯 viewer 文件);4 个 viewer 文件单独跑
+    96 passed —— 合跑时段错误仍在 pyqtgraph `PlotItem.__init__`(已知环境级噪声,基线同样崩).
 - 测试:新增 `tests/test_run_refs_single_source.py`(单一来源 + 批量精确匹配)、
   `tests/test_2d_holdout_skip_log.py`(留出跳过日志正反两例);`tests/test_smile_optimize.py`
   精简到存活接口;本地全量 pytest 通过 + ruff 仅基线 2 条(不新增告警)。
