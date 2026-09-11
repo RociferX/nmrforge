@@ -1447,10 +1447,10 @@ class NMRPipeBackend:
                 if progress is not None:
                     progress(index, len(combos), f"扫描 {index}/{len(combos)}: {combo}")
                 _smile_log = scan_dir / "smile.log"
-                try:
-                    _log_offset = _smile_log.stat().st_size
-                except OSError:
-                    _log_offset = 0
+                # SMILE 每轮重写 smile.log(VM 实测:连跑 3 轮后文件里只有本轮
+                # 的 1024 行);先删旧日志,失败轮次就不会读到上一轮的指标
+                # (0.2.199-补29hz-修10)
+                _smile_log.unlink(missing_ok=True)
                 run2 = runtime.run(
                     ["csh", task.name], cwd=str(scan_dir), timeout=timeout
                 )
@@ -1464,11 +1464,11 @@ class NMRPipeBackend:
                 # 0.2.199-补29hz-修6:SMILE 每平面 RMS 报告 → 训练点拟合优度
                 # (FINAL/INITIAL 的中位数;无需平面↔网格映射,跨参数可比)
                 try:
-                    if _smile_log.stat().st_size < _log_offset:
-                        _log_offset = 0  # SMILE 每次重写日志(截断),从头读
-                    with _smile_log.open("r", encoding="utf-8", errors="ignore") as _fh:
-                        _fh.seek(_log_offset)
-                        _tail = _fh.read()
+                    _tail = _smile_log.read_text(encoding="utf-8", errors="ignore")
+                    # 兼容「追加」形态的 NMRPipe:只取最后一次运行块
+                    _marker = _tail.rfind("SMILE Version")
+                    if _marker > 0:
+                        _tail = _tail[_marker:]
                     _ratios: list[float] = []
                     for _line in _tail.splitlines():
                         if "INITIAL_RMS" not in _line or "FINAL_RMS" not in _line:
