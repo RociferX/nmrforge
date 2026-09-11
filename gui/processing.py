@@ -692,10 +692,10 @@ class ProcessingController:
 
                 grid_size = int(
                     (load_ui_state(self._manager, exp_id, data_id).get("smile") or {})
-                    .get("grid_size", 5)
+                    .get("grid_size", 4)
                 )
             except Exception:  # noqa: BLE001 - 读不到用默认
-                grid_size = 5
+                grid_size = 4
         work = self._manager.data_dir(exp_id, data_id, "process")
         work.mkdir(parents=True, exist_ok=True)
         # 候选谱评估完即删:中间目录优先放内存盘
@@ -709,7 +709,7 @@ class ProcessingController:
                 self._backend_instance(),
                 base_params,
                 scan_dir=scan_dir,
-                grid_size=int(grid_size or 5),
+                grid_size=int(grid_size or 4),
                 progress=_smile_progress,
             )
         finally:

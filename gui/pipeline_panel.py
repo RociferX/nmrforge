@@ -741,7 +741,7 @@ class PipelineStepRow(QWidget):
         self.grid_combo = QComboBox()
         for _n in (2, 3, 4, 5):
             self.grid_combo.addItem(f"{_n}x{_n}", _n)
-        self.grid_combo.setCurrentIndex(3)  # 默认 5x5
+        self.grid_combo.setCurrentIndex(2)  # 默认 4x4(0.2.199-补29hz-修5)
         self.grid_combo.setVisible(self.step_id == "smile")
         self.grid_combo.setToolTip(
             "SMILE 参数网格 n×n:越大越细、越慢(2x2≈4 组,5x5=25 组)"
@@ -1275,7 +1275,7 @@ class PipelinePanel(QWidget):
                 self._current_exp_id,
                 self._current_data_id,
                 "smile",
-                {"grid_size": int(row.grid_combo.currentData() or 5)},
+                {"grid_size": int(row.grid_combo.currentData() or 4)},
             )
         except Exception:  # noqa: BLE001 - 持久化失败不阻断
             pass
@@ -1288,13 +1288,13 @@ class PipelinePanel(QWidget):
         key = (self._current_exp_id, self._current_data_id)
         if key == getattr(self, "_grid_key", None):
             return
-        size = 5
+        size = 4
         try:
             from gui.per_data_records import load_ui_state
 
             size = int(
                 (load_ui_state(self.manager, key[0], key[1]).get("smile") or {})
-                .get("grid_size", 5)
+                .get("grid_size", 4)
             )
         except Exception:  # noqa: BLE001 - 读取失败用默认
             size = 5

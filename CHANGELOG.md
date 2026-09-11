@@ -1,5 +1,21 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29hz-修5(2026-09-11,用户):默认优化程度 4x4 + 留出采样点管线(A)
+- 用户:① 默认优化程度由 5x5 改为 **4x4(16 组)**;② 实现 A 方案(留出采样点做数据
+  一致性,无全采样参考);
+- 默认值:`SMILE_GRID_DEFAULT = 4`(smile_grid/scan_smile_parameters/gui 下拉默认/
+  ui_state 缺省一致);范围仍 2x2..5x5 可选;
+- A 方案管线(本轮完成的部分):
+  ① `reconstruct_nus` 的脚本生成支持覆盖采样表——`-sample` 取自 params 的
+     `nuslist_file`,`-sampleCount` 取自 params 的 `nuslist_count`(原来是硬编码
+     `nuslist`),2D/3D 两处脚本都改;
+  ② `smile_scan(holdout_ratio=…)`:按固定规则(每 1/ratio 行取 1 行)把采样表拆成
+     `nuslist_train` + `nuslist_holdout`,只用 train 重建,返回 `holdout_file`;
+     默认 holdout_ratio=0(不影响现有行为),需要时开启;
+- **待做**:留出点的残差度量(需先确认 `nus3d_rc/*.ft1`(2D 为 `nus2d/recon.ft1`)
+  是「间接维时域 + 完整网格」以及留出点→平面/平面内下标的映射;接上后把
+  `holdout_rmse`/`holdout_corr` 作为独立证据列进排序表,并支持按一致性优先排序;
+- 测试:Smile 相关测试对齐 4x4 默认(16 组);本地全量 pytest 全绿;ruff 仅 2 处历史告警。
 ## 0.2.199-补29hz-修4(2026-09-10,用户):SMILE 优化程度可选 + 耗时预计
 - 用户:① 加耗时预计——第一组 SMILE 跑之前按数据估算,第一组跑完用实测更新;
   ② 加用户可选优化程度(2x2..5x5);③ 继续排查质量分问题;

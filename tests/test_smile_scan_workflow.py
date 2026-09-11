@@ -9,7 +9,6 @@ from pathlib import Path
 from core.data.bruker_reader import read_dataset
 from core.project import ProjectManager
 from workflow.smile_optimize import (
-    default_smile_grid,
     scan_smile_parameters,
     write_smile_scan_output,
 )
@@ -78,15 +77,14 @@ def test_scan_ranks_and_deletes_candidates(tmp_path: Path) -> None:
     scan_dir = tmp_path / "scan"
     result = scan_smile_parameters(exp, backend, {}, scan_dir=scan_dir)
 
-    grid = default_smile_grid()
-    assert result["n_combos"] == len(grid) == 25
-    assert len(result["rows"]) == 25
-    assert len(backend.deleted) == 25          # 候选谱评估后即删
+    assert result["n_combos"] == 16  # 默认 4x4(0.2.199-补29hz-修5)
+    assert len(result["rows"]) == 16
+    assert len(backend.deleted) == 16          # 候选谱评估后即删
     assert not any(scan_dir.glob("*.ft2"))     # 扫描目录不留谱
 
     # 公共峰在 25 组都出现 → 每组稳定峰数≥1;排序按平均 S/N 降序
     ranks = [row["rank"] for row in result["rows"]]
-    assert ranks == list(range(1, 26))
+    assert ranks == list(range(1, 17))
     assert all(row["stable_count"] >= 1 for row in result["rows"])
     assert result["rows"][0]["mean_snr"] >= result["rows"][-1]["mean_snr"]
     assert "script" not in result["rows"][0]   # 脚本文本不外泄到排序表
@@ -116,9 +114,9 @@ def test_write_scan_output_layout(tmp_path: Path) -> None:
     assert json_path.is_file()
     with csv_path.open(encoding="utf-8") as fh:
         rows = list(csv.DictReader(fh))
-    assert len(rows) == 25
+    assert len(rows) == 16
     assert rows[0]["rank"] == "1"
-    assert json.loads(json_path.read_text(encoding="utf-8"))["count"] == 25
+    assert json.loads(json_path.read_text(encoding="utf-8"))["count"] == 16
 
     for rank in (1, 2, 3):
         script = manager.data_dir(exp.id, data.id, "process") / (

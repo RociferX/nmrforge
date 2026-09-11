@@ -63,6 +63,7 @@ class SmileParameterResult:
 _NSIGMA_FULL: tuple[float, ...] = (3.0, 4.0, 5.0, 6.0, 7.0)
 _THRESH_FULL: tuple[float, ...] = (0.90, 0.93, 0.95, 0.97, 0.99)
 SMILE_GRID_MIN, SMILE_GRID_MAX = 2, 5
+SMILE_GRID_DEFAULT = 4  # 0.2.199-补29hz-修5(用户):默认 4x4=16 组
 
 
 def _subsample(values: tuple[float, ...], count: int) -> tuple[float, ...]:
@@ -75,12 +76,12 @@ def _subsample(values: tuple[float, ...], count: int) -> tuple[float, ...]:
     return tuple(values[i] for i in dict.fromkeys(picked))
 
 
-def smile_grid(size: int = SMILE_GRID_MAX) -> list[dict[str, Any]]:
+def smile_grid(size: int = SMILE_GRID_DEFAULT) -> list[dict[str, Any]]:
     """按优化程度生成 n×n 网格(2x2..5x5,默认 5x5=25 组)。
 
     2x2 最快(4 组),5x5 最细(25 组);耗时大致与组数成正比。
     """
-    count = max(SMILE_GRID_MIN, min(SMILE_GRID_MAX, int(size or SMILE_GRID_MAX)))
+    count = max(SMILE_GRID_MIN, min(SMILE_GRID_MAX, int(size or SMILE_GRID_DEFAULT)))
     return default_smile_grid(
         _subsample(_NSIGMA_FULL, count), _subsample(_THRESH_FULL, count)
     )
@@ -713,7 +714,7 @@ def scan_smile_parameters(
     *,
     scan_dir: Path | str,
     grid: list[dict[str, Any]] | None = None,
-    grid_size: int = SMILE_GRID_MAX,
+    grid_size: int = SMILE_GRID_DEFAULT,
     cross_min: int = 2,
     peak_tol_pts: float = 4.0,
     keep_top: int = 3,

@@ -838,7 +838,7 @@ class NMRPipeBackend:
                 runtime,
                 logs,
                 params,
-                nuslist_count=nuslist_count,
+                nuslist_count=int(params.get("nuslist_count") or nuslist_count),
                 sampling=sampling,
             )
             if light_result is not None:
@@ -1022,10 +1022,10 @@ class NMRPipeBackend:
         script = script_fn(
             experiment,
             in_file=in_file,
-            nuslist="nuslist",
+            nuslist=str(params.get("nuslist_file") or "nuslist"),
             out_file=out_file,
             nthread=nthread,
-            nuslist_count=nuslist_count,
+            nuslist_count=int(params.get("nuslist_count") or nuslist_count),
             ext_lo=ext_lo,
             ext_hi=ext_hi,
             nsigma=nsigma,
@@ -1258,6 +1258,7 @@ class NMRPipeBackend:
         evaluate: Callable[[str], dict[str, Any]] | None = None,
         progress: Callable[[int, int, str], None] | None = None,
         delete_spectra: bool = True,
+        holdout_ratio: float = 0.0,
     ) -> dict[str, Any]:
         """SMILE 参数扫描:直接维跑一次,候选谱评估后即删(0.2.199-补29hz-修3)。
 
@@ -1277,6 +1278,31 @@ class NMRPipeBackend:
         scan_dir = Path(work_dir)
         scan_dir.mkdir(parents=True, exist_ok=True)
         logs: list[str] = []
+        holdout_file = ""
+        if holdout_ratio and float(holdout_ratio) > 0:
+            # A 方案(0.2.199-补29hz-修5):留出一部分**已采集**的采样点,
+            # 只用其余点重建;留出点用于数据一致性残差(无需全采样参考)
+            src = scan_dir / "nuslist"
+            if src.is_file():
+                lines = [
+                    ln.strip()
+                    for ln in src.read_text(encoding="utf-8").splitlines()
+                    if ln.strip() and not ln.strip().startswith("#")
+                ]
+                step = max(2, int(round(1.0 / float(holdout_ratio))))
+                holdout = [ln for i, ln in enumerate(lines) if i % step == step - 1]
+                train = [ln for i, ln in enumerate(lines) if i % step != step - 1]
+                if train and holdout:
+                    train_path = scan_dir / "nuslist_train"
+                    holdout_path = scan_dir / "nuslist_holdout"
+                    train_path.write_text("\n".join(train) + "\n", encoding="utf-8")
+                    holdout_path.write_text("\n".join(holdout) + "\n", encoding="utf-8")
+                    holdout_file = str(holdout_path)
+                    base["nuslist_file"] = "nuslist_train"
+                    base["nuslist_count"] = len(train)
+                    logs.append(
+                        f"留出采样点: train={len(train)} holdout={len(holdout)}"
+                    )
         old_work_dir = self.work_dir
         self.work_dir = str(scan_dir)
         try:
@@ -1364,6 +1390,7 @@ class NMRPipeBackend:
                 "logs": logs,
                 "candidates": candidates,
                 "scan_dir": str(scan_dir),
+                "holdout_file": holdout_file,
             }
         finally:
             self.work_dir = old_work_dir
@@ -1883,7 +1910,7 @@ class NMRPipeBackend:
         script = script_fn(
             experiment,
             in_file=in_file,
-            nuslist="nuslist",
+            nuslist=str(params.get("nuslist_file") or "nuslist"),
             out_file=out_light,
             nthread=nthread,
             nuslist_count=len(sub),
