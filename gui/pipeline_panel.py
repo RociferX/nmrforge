@@ -662,6 +662,7 @@ class PipelineStepRow(QWidget):
         self.icon_label = QLabel()
         self.icon_label.setFixedWidth(24)
         header.addWidget(self.icon_label)
+        header.addSpacing(4)  # 0.2.199-补29hz-修20:状态图标与标题不贴死(几何守卫)
         text_box = QVBoxLayout()
         title_row = QHBoxLayout()
         self.name_label = QLabel(label)

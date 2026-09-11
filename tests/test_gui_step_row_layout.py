@@ -86,3 +86,69 @@ def test_smile_gap_not_visible_for_other_steps(
 
     smile = PipelineStepRow("smile", "SMILE", "x", host)
     assert smile.smile_gap.isHidden() is False
+
+# ---------------------------------------------------------------------------
+# 几何守卫(0.2.199-补29hz-修20):所有步骤行 × 多种宽度
+# ---------------------------------------------------------------------------
+
+_STEPS = ("project", "fid", "spectrum", "smile", "peaks", "analysis")
+_WIDTHS = (320, 380, 440, 560, 760)
+
+
+def _visible_children(row: PipelineStepRow) -> list:
+    return [
+        child
+        for child in row.findChildren(QWidget)
+        if child.parent() is row and child.isVisible() and child.width() > 0
+    ]
+
+
+def _audit_row(row: PipelineStepRow, *, min_gap: int = 4) -> list[str]:
+    """返回几何问题列表:重叠 / 同行间距不足 / 超出可视宽度 / 被压成窄条。"""
+    problems: list[str] = []
+    kids = _visible_children(row)
+    for child in kids:
+        if child.x() < 0 or child.x() + child.width() > row.width() + 1:
+            problems.append(
+                f"{type(child).__name__} 超出行宽 x={child.x()} w={child.width()} "
+                f"row_w={row.width()}"
+            )
+    for i, left in enumerate(kids):
+        for right in kids[i + 1 :]:
+            lrect = left.geometry()
+            rrect = right.geometry()
+            if lrect.intersects(rrect):
+                problems.append(
+                    f"{type(left).__name__}{lrect} 与 {type(right).__name__}{rrect} 重叠"
+                )
+                continue
+            same_line = abs(left.y() - right.y()) <= 2
+            if not same_line:
+                continue
+            a, b = sorted((lrect, rrect), key=lambda r: r.x())
+            gap = b.x() - (a.x() + a.width())
+            if 0 <= gap < min_gap:
+                problems.append(
+                    f"同行间距 {gap}px < {min_gap}px:"
+                    f"{type(left).__name__} 与 {type(right).__name__}"
+                )
+    return problems
+
+
+@pytest.mark.parametrize("width", _WIDTHS)
+def test_step_rows_have_no_geometry_problems(
+    qapp: QApplication, host: QWidget, width: int
+) -> None:
+    """所有步骤行在常见宽度下:控件不重叠、同行间距≥4px、不超出行宽。"""
+    problems: list[str] = []
+    for step in _STEPS:
+        row = _hosted_row(host, step)
+        host.resize(width, 420)
+        host.show()
+        qapp.processEvents()
+        problems += [f"[{step}/{width}px] {p}" for p in _audit_row(row)]
+        host.layout().removeWidget(row)
+        row.setParent(None)
+        row.deleteLater()
+        qapp.processEvents()
+    assert not problems, problems
