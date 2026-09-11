@@ -1,5 +1,30 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29hz-修11(2026-09-11,用户):2D NUS 真机打通 + 造 NUS 工具 NusTD 单位修正
+- 用户澄清:bruker -AUTO 对 2D 本来就出单文件,不需要程序单独修;NUS 途径都应是单文件,
+  按 -AUTO 给的来;切片流只是 3D 在直接维处理之后才出现的东西;
+- **撤销 修9 的「2D 强制单文件」fid.com 改写**(force_2d_single_file_out 及其用例):
+  脚本一律以 -AUTO 为准,2D 若给切片式输出也原样保留;_MASK_STAGE_RE 仍支持管道式
+  `| nusExpand.tcl -mask`(既有「不生成 mask」意图不变);
+- **真根因(VM 实测)**:用 `scripts/vm_sample_make_nus.py` 从全采样 sampleA 造 25% 2D NUS
+  后,bruker -AUTO rc=0 且给出单文件 `-out ./test.fid`(与用户判断一致),但转换卡死
+  (nmrPipe -fn MULT 100% CPU 十几分钟)。逐项实测定位为 **nusExpand 崩溃**:造数据的工具
+  把 NusTD 写成了**复点**单位(TD/mult=128),程序按 `-yT NusTD//2 = 64` 传给 nusExpand,
+  小于 nuslist 最大索引 127 → 越界(verbose 报 `can not find channel named "stderr"`,
+  `-noverb` 直接 rc=139 段错误);ser_full 未生成 → bruk2pipe 读空 → MULT 无限流;
+- **真实 NUS 约定(实测标定)**:NusTD 是**行(增量)**单位 —— sampleJ acqu2s NusTD=292 ↔
+  nuslist 列 max 145(=292/2−1);sampleC 40↔19;sampleM 100↔49、acqu3s 90↔44;
+  修正:工具 NusTD = 全采样源 TD(行),nuslist 索引仍为复点(0..TD/mult−1),回归测试同步(256);
+- **兼容(用户「注意兼容」)**:`_finalize_converted_fid(ndim=2)` 若 bruker 把 2D 输出写进
+  `fid/`(名字带 %03d 之类),只有一个非空文件时按**单文件**归位 `{dataset_id}.fid`
+  (2D 只有一个平面);多于一个文件仍回退原切片流处理(不误吞);
+- **另修 Rank1 重跑缺采样表**:留出扫描把候选脚本原样存进排序表,脚本带着
+  `-sample nuslist_train -sampleCount 24`(该表只在扫描目录)→ 点「按 Rank1 重跑」rc=2。
+  现在候选 `script` 字段一律用**全采样基线**重新生成(留出集只用于评分);
+- 真机结果:sampleA 造 25% 2D NUS → 转换 rc=0 + 单文件、SMILE 11.2s 出终谱、控制器
+  `optimize_smile` 4 组扫描 2.2s + 排序表 CSV/JSON + 前三脚本、`rerun_smile_rank1`
+  出 `spectra/d_001.ft2`;旧合成 2D NUS(输出名含 %03d 的单文件)也按单文件路径通过;
+
 ## 0.2.199-补29hz-修10(2026-09-11,用户):2D 留出采样点残差 + 扫描链路接上 holdout
 - 用户:2D 按与 3D 同样的思路做,2D NUS 可以由全采样自造;约束「2D 应该不会有切片流」;
 - 修8/修9 之后 2D 单文件路径已有显式采样表,原先「2D 无采样表 → 留出残差不可定义」的
@@ -30,10 +55,11 @@
 - 根因(VM 实测 /tmp/nus2d_synth,稀疏 ser + nuslist 的 2D NUS):bruker -AUTO 生成 mask
   形态 fid.com(`-out ./fid/test%03d.fid`);2D 只有一个平面,bruk2pipe 不展开 %03d(写出
   字面名 test%03d.fid),下游 xyz2pipe Error getting file list → fid.com rc=1、转换直接失败;
-- 解决:`patch_fid_com` 在 ndim==2 时把切片式 `-out` 改回单文件 `./{dataset_id}.fid`
-  (2D 的 SMILE 只需要 nuslist 采样表);3D 切片流是正常形态,原样保留(有测试守);
-  `_MASK_STAGE_RE` 支持管道式 `| nusExpand.tcl -mask`(原先只匹配行首无 `|` 的形态,
-  2D 的 mask 阶段一直没被移除);
+- 当时解决:`patch_fid_com` 对 ndim==2 把切片式 `-out` 改回单文件;`_MASK_STAGE_RE` 支持
+  管道式 `| nusExpand.tcl -mask`(原先只匹配行首无 `|` 的形态,2D 的 mask 阶段一直没被移除);
+- **更正(补29hz-修11,用户裁定)**:上面的「2D 强制单文件」是**误判**——那份测试数据本身
+  不合规范(NusTD 写成复点单位);规范数据下 bruker -AUTO 直接给单文件,已撤销该改写,
+  脚本一律跟随 -AUTO。真根因、工具修正与 2D 兼容处理见 修11;mask 阶段移除保留(既有意图)。
 - 清理:删掉扫描切分遗留的死常量(_NUS_DIRECT_SLICE/_NUS_DIRECT_SLICE_IN/_TP_LINE),
   注释与实现对齐(2D 单文件无切片可切 → smile_scan 整脚本逐组跑、候选各自命名)。
 
