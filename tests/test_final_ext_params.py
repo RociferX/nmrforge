@@ -32,12 +32,15 @@ def test_partial_range_only_maps_given_side() -> None:
     assert note and "ext_hi" not in note
 
 
-def test_apply_ext_to_opt_off_keeps_default_window() -> None:
-    """「仅终跑」(apply_ext_to_opt=0):优化/重构保持默认窗口,不做映射。"""
+def test_apply_ext_to_opt_off_still_maps() -> None:
+    """即使「仅终跑」(apply_ext_to_opt=0),模板也用终跑范围——模板必须等于终跑脚本
+    (「参照终脚本只改 SMILE 参数」);该开关只管统一路线的首遍。"""
     params = {"final_ext_lo": "8.5", "final_ext_hi": "7.5", "apply_ext_to_opt": "0"}
 
-    assert apply_final_ext_params(params) is None
-    assert "ext_lo" not in params and "ext_hi" not in params
+    note = apply_final_ext_params(params)
+
+    assert params["ext_lo"] == "8.5" and params["ext_hi"] == "7.5"
+    assert note is not None
 
 
 def test_explicit_ext_wins() -> None:

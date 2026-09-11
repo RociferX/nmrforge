@@ -174,12 +174,10 @@ def apply_final_ext_params(params: dict[str, Any]) -> str | None:
     默认宽窗(10.5-6.5),内存护栏按宽窗估算,明明设了窄范围也报「内存不够」
 (VM 实测 sampleJ:默认窗峰值约 22692MB > 可用×0.85,被自动降直接维填零;用范围后不再降级)。
 
-    语义与 `workflow/phase_routes._split_final_ext`/`_apply_final_ext` 一致:
-    `apply_ext_to_opt` 关闭(「仅终跑」)时不动优化窗口;显式 `ext_lo`/`ext_hi` 优先。
-    就地改 params;返回日志行(未映射时为 None)。
+    语义:模板必须与终跑脚本一致(用户 2026-09-11:「参照终脚本只改 SMILE 参数」),
+    所以这里**不看** `apply_ext_to_opt` —— 那个开关只管统一路线的首遍重构/相位搜索;
+    显式 `ext_lo`/`ext_hi` 优先。就地改 params;返回日志行(未映射时为 None)。
     """
-    if str(params.get("apply_ext_to_opt", "1")).strip().lower() in ("0", "false", "no"):
-        return None
     lo = str(params.get("final_ext_lo", "") or "").strip()
     hi = str(params.get("final_ext_hi", "") or "").strip()
     if not lo and not hi:

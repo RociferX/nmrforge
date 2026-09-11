@@ -1,5 +1,26 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29hz-修18(2026-09-11,用户):SMILE 模板必须等于终跑脚本(基参数恒为空等三处偏差)
+- 用户:「我不是一开始说的是参照终脚本只改 smile 参数吗,怎么会改到这个,还有其它被改错的吗」;
+- 审计方法(留档):VM 上用控制器跑一次真实「生成谱图」(用户范围 8.5-7.5),把终跑脚本
+  `process/<data>_nus.com` 与「扫描用的模板 / 上榜脚本 / process 里的 rank1 文件」逐行 diff
+  (`/tmp/audit_ext2.py`,可反复复验);查出三处偏差并修掉:
+  ① **基参数恒为空**:`ProcessingController._last_spectrum_params` 只认 `process`/
+     `reconstruct_nus`,而正常统一路线登记的是 `phase_optimize_unified`(人工路径是
+     `manual_process`/`manual_nus`)→ 返回 `{}` → SMILE 模板从零重建(默认窗口/PS(0,0)/
+     POLY auto),既不等于终跑脚本,也按默认宽窗估内存而误报「内存不够」。改为复用
+     `gui.pipeline_state.STEP_RUN_REFS["spectrum"]`(单一来源)+ data_id 严格归属(与 修1 同口径);
+  ② **直接维相位丢失**:终跑把相位存进运行参数 `direct_phase`,而模板读 `direct_phase_override`
+     → 模板 PS(0,0);新增 `backend.nmrpipe_backend.direct_phase_override(params)`(显式优先,
+     否则认 `direct_phase`;形状不对返回 None 走原搜索流程),`reconstruct_nus` 四处统一使用;
+  ③ **直接维范围**:`final_ext_* → ext_lo/ext_hi`(修17)改为**一律**映射,不再被
+     `apply_ext_to_opt` 拦下 —— 该开关只管统一路线的首遍重构/相位搜索,模板必须跟终跑脚本一致;
+- 审计结果(2D NUS,用户范围 8.5-7.5,opt=1 与 opt=0 两种设置):终跑脚本 vs 上榜脚本的逐行差异
+  **只剩** `-nSigma` / `-thresh`(正是被扫描的 SMILE 参数)与 `-maxMem`(按实时可用内存算);
+  EXT 窗口、直接维相位(如 161.822/37.5)、间接维相位、POLY、采样表/点数全部一致;
+- 测试:新增 tests/test_smile_base_params.py(统一路线运行被采纳 / 别的数据忽略 / 非出谱步骤忽略 /
+  相位键 fallback),tests/test_final_ext_params.py 增「仅终跑也映射」用例;
+
 ## 0.2.199-补29hz-修17(2026-09-11,用户):SMILE 优化/扫描采用终跑直接维范围(final_ext_*)
 - 现象(用户):「smile 优化没有用终脚本的直接维范围吗,为什么会显示内存不够,我设置的范围是够的」;
 - 根因(VM 实测 sampleJ HNCA 3D NUS):SMILE 优化/扫描直接调 `reconstruct_nus`(不经
