@@ -196,6 +196,25 @@ def apply_final_ext_params(params: dict[str, Any]) -> str | None:
     return "直接维范围:终跑范围已用于优化/重构(" + ", ".join(mapped) + ")"
 
 
+def direct_phase_override(params: dict[str, Any]) -> tuple[float, float] | None:
+    """直接维相位覆盖:显式 `direct_phase_override` 优先,否则用运行记录里的 `direct_phase`。
+
+    0.2.199-补29hz-修18(用户):终跑把直接维相位存进运行参数的 `direct_phase` 键,
+    而脚本模板读 `direct_phase_override` —— 不认这个键,SMILE 优化的模板会退回
+    PS(0,0)(与终跑脚本的相位不一致,违背「以终跑脚本为模板、只改 SMILE 参数」)。
+    两处键都缺/形状不对时返回 None(按原来的搜索流程走)。
+    """
+    raw = params.get("direct_phase_override")
+    if raw is None:
+        raw = params.get("direct_phase")
+    if raw is None:
+        return None
+    try:
+        return (float(raw[0]), float(raw[1]))
+    except (TypeError, ValueError, IndexError):
+        return None
+
+
 def _nus_grid_from_points(
     points: list[tuple[int, ...]],
 ) -> list[int] | None:
@@ -986,9 +1005,9 @@ class NMRPipeBackend:
                 )
 
         direct_p0, direct_p1 = 0.0, 0.0
-        override = params.get("direct_phase_override")
+        override = direct_phase_override(params)
         if override is not None:
-            direct_p0, direct_p1 = float(override[0]), float(override[1])
+            direct_p0, direct_p1 = override
             logs.append(f"直接维相位覆盖: p0={direct_p0:g} p1={direct_p1:g}")
         sampling = params.get("sampling") or {}
         direct_phase_search = bool(params.get("direct_phase_search", True))
@@ -1003,7 +1022,7 @@ class NMRPipeBackend:
         if (
             direct_phase_search
             and not display_phase_search
-            and params.get("direct_phase_override") is None
+            and direct_phase_override(params) is None
             and light_phase
         ):
             light_result = self._light_phase_search(
@@ -1025,7 +1044,7 @@ class NMRPipeBackend:
             direct_phase_search
             and not display_phase_search
             and not light_phase
-            and params.get("direct_phase_override") is None
+            and direct_phase_override(params) is None
         ):
             phase_inputs: Path | list[Path]
             if experiment.segments:
@@ -1161,7 +1180,7 @@ class NMRPipeBackend:
         if (
             display_phase_search
             and direct_phase_search
-            and params.get("direct_phase_override") is None
+            and direct_phase_override(params) is None
         ):
             if (work / "phase.json").is_file():
                 try:
