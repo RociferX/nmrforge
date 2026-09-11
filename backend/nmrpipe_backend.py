@@ -1594,23 +1594,112 @@ class NMRPipeBackend:
                     }
             out_ext = {1: "ft1", 2: "ft2"}.get(experiment.ndim, "ft3")
             candidates: list[dict[str, Any]] = []
+            # A 方案(0.2.199-补29hz-修6):留出采样点的数据一致性残差。
+            # 索引映射由实物相关性实测确定(scale=1.0/offset=0):
+            #   留出 (k0,k1) → 平面内 [k1, k0](平面=直接维点,两轴=间接维)
+            if holdout_file and holdout_coords:
+                def _holdout_residual() -> dict[str, float]:
+                    import nmrglue as ng
+                    import numpy as np
+
+                    meas: list[complex] = []
+                    pred: list[complex] = []
+                    units = 0
+                    if experiment.ndim >= 3:
+                        acq_dir, rc_dir, name = (
+                            scan_dir / "nus3d_1",
+                            scan_dir / "nus3d_rc",
+                            "test%04d.ft1",
+                        )
+                        planes = [
+                            i for i in range(1, 1203) if i % 40 == 1
+                        ][:30]
+                        units = len(planes)
+                        for p in planes:
+                            fa = acq_dir / (name % p)
+                            fr = rc_dir / (name % p)
+                            if not (fa.is_file() and fr.is_file()):
+                                continue
+                            _da, A = ng.pipe.read(str(fa))
+                            _dr, R = ng.pipe.read(str(fr))
+                            A = np.asarray(A)
+                            R = np.asarray(R)
+                            for (k0, k1) in holdout_coords:
+                                if not (
+                                    0 <= k1 < A.shape[0]
+                                    and 0 <= k0 < A.shape[1]
+                                    and 0 <= k1 < R.shape[0]
+                                    and 0 <= k0 < R.shape[1]
+                                ):
+                                    continue
+                                meas.append(complex(A[k1, k0]))
+                                pred.append(complex(R[k1, k0]))
+                    elif direct_2d_file:
+                        # 2D:无切片流 → 直接维留档数组与 SMILE 输出的实测
+                        # 映射「复点 k → 行 2k(实)/2k+1(虚) ↔ recon 第 k 列」
+                        _dd, A2 = ng.pipe.read(direct_2d_file)
+                        _dr2, R2 = ng.pipe.read(
+                            str(scan_dir / "nus2d" / "recon.ft1")
+                        )
+                        A2 = np.asarray(A2)
+                        R2 = np.asarray(R2)
+                        for (k,) in holdout_coords:
+                            if 2 * k + 1 >= A2.shape[0] or k >= R2.shape[1]:
+                                continue
+                            m_vec = A2[2 * k] + 1j * A2[2 * k + 1]
+                            p_vec = R2[:, k]
+                            n = min(m_vec.shape[0], p_vec.shape[0])
+                            meas.extend(complex(v) for v in m_vec[:n])
+                            pred.extend(complex(v) for v in p_vec[:n])
+                            units += 1
+                    else:
+                        return {}
+                    if len(meas) < 10:
+                        return {}
+                    m = np.array(meas)
+                    q = np.array(pred)
+                    scale = float(np.sqrt(np.mean(np.abs(m) ** 2))) or 1.0
+                    resid = np.abs(q - m) / scale
+                    denom = float(np.linalg.norm(m) * np.linalg.norm(q))
+                    corr = (
+                        float(abs(np.vdot(m, q)) / denom) if denom else 0.0
+                    )
+                    return {
+                        "holdout_rmse": round(float(np.median(resid)), 4),
+                        "holdout_rmse_p90": round(float(np.percentile(resid, 90)), 4),
+                        "holdout_corr": round(corr, 4),
+                        "holdout_points": len(meas),
+                        "holdout_planes": units,
+                    }
+
+            def _scan_suffix(script_text: str, out_name: str) -> str:
+                """候选脚本 → 本次运行用的后缀(切片式只取 SMILE+间接维段)。"""
+                part = (
+                    split_nus_script(script_text)[1]
+                    if split_available
+                    else script_text
+                )
+                return rename_nus_scan_output(part, out_name)
+
             for index, (combo, script) in enumerate(
                 zip(combos, scripts), start=1
             ):
                 tag = f"cand{index:02d}"
-                if split_available:
-                    _, suffix = split_nus_script(script)
-                else:
-                    suffix = script
-                suffix = rename_nus_scan_output(suffix, f"{tag}.{out_ext}")
-                task = scan_dir / f"step2_{tag}.com"
-                task.write_text(suffix, encoding="utf-8", newline="\n")
                 if progress is not None:
                     progress(index, len(combos), f"扫描 {index}/{len(combos)}: {combo}")
+                metrics: dict[str, Any] = {}
                 _smile_log = scan_dir / "smile.log"
+
+                # ① 全采样重建:峰计数/质量分(用户 2026-09-11:「峰计数应该用全部点做
+                # smile,一致性才是留出部分」)——模板即终跑脚本(不再用 train 表)
+                task = scan_dir / f"step2_{tag}.com"
+                task.write_text(
+                    _scan_suffix(prod_scripts[index - 1], f"{tag}.{out_ext}"),
+                    encoding="utf-8",
+                    newline="\n",
+                )
                 # SMILE 每轮重写 smile.log(VM 实测:连跑 3 轮后文件里只有本轮
-                # 的 1024 行);先删旧日志,失败轮次就不会读到上一轮的指标
-                # (0.2.199-补29hz-修10)
+                # 的 1024 行);先删旧日志,失败轮次就不会读到上一轮的指标(修10)
                 _smile_log.unlink(missing_ok=True)
                 run2 = runtime.run(
                     ["csh", task.name], cwd=str(scan_dir), timeout=timeout
@@ -1621,7 +1710,6 @@ class NMRPipeBackend:
                     and spectrum.is_file()
                     and spectrum.stat().st_size > 0
                 )
-                metrics: dict[str, Any] = {}
                 # 0.2.199-补29hz-修6:SMILE 每平面 RMS 报告 → 训练点拟合优度
                 # (FINAL/INITIAL 的中位数;无需平面↔网格映射,跨参数可比)
                 try:
@@ -1649,88 +1737,6 @@ class NMRPipeBackend:
                         metrics["smile_planes"] = len(_ratios)
                 except OSError:
                     pass
-                # A 方案(0.2.199-补29hz-修6):留出采样点的数据一致性残差。
-                # 索引映射由实物相关性实测确定(scale=1.0/offset=0):
-                #   留出 (k0,k1) → 平面内 [k1, k0](平面=直接维点,两轴=间接维)
-                if holdout_file and holdout_coords:
-                    def _holdout_residual() -> dict[str, float]:
-                        import nmrglue as ng
-                        import numpy as np
-
-                        meas: list[complex] = []
-                        pred: list[complex] = []
-                        units = 0
-                        if experiment.ndim >= 3:
-                            acq_dir, rc_dir, name = (
-                                scan_dir / "nus3d_1",
-                                scan_dir / "nus3d_rc",
-                                "test%04d.ft1",
-                            )
-                            planes = [
-                                i for i in range(1, 1203) if i % 40 == 1
-                            ][:30]
-                            units = len(planes)
-                            for p in planes:
-                                fa = acq_dir / (name % p)
-                                fr = rc_dir / (name % p)
-                                if not (fa.is_file() and fr.is_file()):
-                                    continue
-                                _da, A = ng.pipe.read(str(fa))
-                                _dr, R = ng.pipe.read(str(fr))
-                                A = np.asarray(A)
-                                R = np.asarray(R)
-                                for (k0, k1) in holdout_coords:
-                                    if not (
-                                        0 <= k1 < A.shape[0]
-                                        and 0 <= k0 < A.shape[1]
-                                        and 0 <= k1 < R.shape[0]
-                                        and 0 <= k0 < R.shape[1]
-                                    ):
-                                        continue
-                                    meas.append(complex(A[k1, k0]))
-                                    pred.append(complex(R[k1, k0]))
-                        elif direct_2d_file:
-                            # 2D:无切片流 → 直接维留档数组与 SMILE 输出的实测
-                            # 映射「复点 k → 行 2k(实)/2k+1(虚) ↔ recon 第 k 列」
-                            _dd, A2 = ng.pipe.read(direct_2d_file)
-                            _dr2, R2 = ng.pipe.read(
-                                str(scan_dir / "nus2d" / "recon.ft1")
-                            )
-                            A2 = np.asarray(A2)
-                            R2 = np.asarray(R2)
-                            for (k,) in holdout_coords:
-                                if 2 * k + 1 >= A2.shape[0] or k >= R2.shape[1]:
-                                    continue
-                                m_vec = A2[2 * k] + 1j * A2[2 * k + 1]
-                                p_vec = R2[:, k]
-                                n = min(m_vec.shape[0], p_vec.shape[0])
-                                meas.extend(complex(v) for v in m_vec[:n])
-                                pred.extend(complex(v) for v in p_vec[:n])
-                                units += 1
-                        else:
-                            return {}
-                        if len(meas) < 10:
-                            return {}
-                        m = np.array(meas)
-                        q = np.array(pred)
-                        scale = float(np.sqrt(np.mean(np.abs(m) ** 2))) or 1.0
-                        resid = np.abs(q - m) / scale
-                        denom = float(np.linalg.norm(m) * np.linalg.norm(q))
-                        corr = (
-                            float(abs(np.vdot(m, q)) / denom) if denom else 0.0
-                        )
-                        return {
-                            "holdout_rmse": round(float(np.median(resid)), 4),
-                            "holdout_rmse_p90": round(float(np.percentile(resid, 90)), 4),
-                            "holdout_corr": round(corr, 4),
-                            "holdout_points": len(meas),
-                            "holdout_planes": units,
-                        }
-
-                    try:
-                        metrics.update(_holdout_residual())
-                    except Exception as exc:  # noqa: BLE001 - 残差失败不阻断扫描
-                        logs.append(f"留出残差计算失败: {exc}")
                 if ok and evaluate is not None:
                     try:
                         metrics.update(dict(evaluate(str(spectrum)) or {}))
@@ -1740,6 +1746,28 @@ class NMRPipeBackend:
                     metrics = {"error": f"重构失败(rc={run2.returncode})"}
                 if delete_spectra:
                     spectrum.unlink(missing_ok=True)
+                logs.append(f"{tag}: 全采样 rc={run2.returncode} 指标={metrics}")
+
+                # ② 留出重建:只用来算一致性残差(不参与峰计数),所以候选跑两次
+                if holdout_file and holdout_coords and ok:
+                    ho_task = scan_dir / f"step2_{tag}_holdout.com"
+                    ho_task.write_text(
+                        _scan_suffix(script, f"{tag}_ho.{out_ext}"),
+                        encoding="utf-8",
+                        newline="\n",
+                    )
+                    _smile_log.unlink(missing_ok=True)
+                    run_ho = runtime.run(
+                        ["csh", ho_task.name], cwd=str(scan_dir), timeout=timeout
+                    )
+                    try:
+                        metrics.update(_holdout_residual())
+                    except Exception as exc:  # noqa: BLE001 - 残差失败不阻断扫描
+                        logs.append(f"留出残差计算失败: {exc}")
+                    if delete_spectra:
+                        (scan_dir / f"{tag}_ho.{out_ext}").unlink(missing_ok=True)
+                    logs.append(f"{tag}: 留出 rc={run_ho.returncode}")
+
                 candidates.append(
                     {
                         "index": index,
@@ -1749,7 +1777,7 @@ class NMRPipeBackend:
                         "ok": bool(ok),
                     }
                 )
-                logs.append(f"{tag}: rc={run2.returncode} 指标={metrics}")
+
             return {
                 "success": True,
                 "message": f"完成 {len(candidates)} 组扫描",

@@ -65,7 +65,10 @@ _THRESH_FULL: tuple[float, ...] = (0.90, 0.93, 0.95, 0.97, 0.99)
 SMILE_GRID_MIN, SMILE_GRID_MAX = 2, 5
 SMILE_GRID_DEFAULT = 4  # 0.2.199-补29hz-修5(用户):默认 4x4=16 组
 # 0.2.199-补29hz-修10(用户):留出采样点残差默认每 4 个采样点留 1 个(25%),
-# 用于「没有全采样参考时判断真伪峰」的排序依据;扫描用留出集评分,最终重跑仍用全采样。
+# 用于「没有全采样参考时判断真伪峰」的排序依据。
+# 0.2.199-补29hz-修22(用户):**峰计数/质量分必须用全采样重建**(「峰计数应该用
+# 全部点做 smile,一致性才是留出部分」)——所以每个候选用全采样脚本跑一次出峰,
+# 再用留出(train)脚本跑一次算一致性残差;候选耗时约为原来的 2 倍。
 SMILE_HOLDOUT_RATIO = 0.25
 # 0.2.199-补29hz-修16(用户):这一步的目的是「尽量重构出更多真峰」,所以候选评估
 # 用**独立的低阈值**(3σ,峰检测算法默认档),与「峰挑选」步骤的阈值(默认 35σ,
@@ -783,7 +786,12 @@ def scan_smile_parameters(
     base = dict(base_params or {})
     sign_mode = smile_scan_sign_mode(experiment)
     edge_margin = smile_scan_edge_margin()
+    holdout_ratio = float(base.get("holdout_ratio", SMILE_HOLDOUT_RATIO) or 0.0)
     est_group, est_total = estimate_scan_seconds(experiment, len(combos))
+    if holdout_ratio > 0:
+        # 修22:候选跑两次(全采样出峰 + 留出算一致性),估算同步 ×2
+        est_group *= 2.0
+        est_total *= 2.0
     started = time.time()
     _first_done: list[float] = []
 
@@ -837,7 +845,6 @@ def scan_smile_parameters(
             ],
         }
 
-    holdout_ratio = float(base.get("holdout_ratio", SMILE_HOLDOUT_RATIO) or 0.0)
     # 口径写入日志,便于核对(与峰挑选步骤的阈值无关)
     _criteria_log = (
         f"候选评估口径:阈值 {SMILE_SCAN_SIGMA:g}σ(独立于选峰步骤)、"
