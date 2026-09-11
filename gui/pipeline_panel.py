@@ -604,6 +604,7 @@ class _FlowLayout(QLayout):
 
     def _do_layout(self, rect: QRect, test_only: bool = False) -> int:
         m = self.contentsMargins()
+        space = max(0, int(self.spacing()))  # 0.2.199-补29hz-修19:项与项之间也要留
         x = rect.x() + m.left()
         y = rect.y() + m.top()
         line_height = 0
@@ -615,12 +616,11 @@ class _FlowLayout(QLayout):
             next_x = x + hint.width()
             if line_height > 0 and next_x > rect.right() - m.right():
                 x = rect.x() + m.left()
-                y += line_height + self.spacing()
-                next_x = x + hint.width()
+                y += line_height + space
                 line_height = 0
             if not test_only:
                 item.setGeometry(QRect(QPoint(x, y), hint))
-            x = next_x
+            x = next_x + space
             line_height = max(line_height, hint.height())
         return y + line_height + m.bottom() - rect.y()
 
@@ -756,6 +756,13 @@ class PipelineStepRow(QWidget):
         fit_combo_width(self.grid_combo)  # 修省略号(0.2.199-补29hz-修14)
         button_row.addWidget(self.grid_label)
         button_row.addWidget(self.grid_combo)
+        # 0.2.199-补29hz-修19(用户):两组之间留出间隔(之前只有流式布局的 6px,
+        # 两个下拉框挨在一起显得挤);用可见性受控的间隔控件,其它步骤行不受影响
+        self.smile_gap = QFrame()
+        self.smile_gap.setFrameShape(QFrame.Shape.NoFrame)
+        self.smile_gap.setFixedSize(12, 1)
+        self.smile_gap.setVisible(self.step_id == "smile")
+        button_row.addWidget(self.smile_gap)
         self.rank_label = QLabel("排序")
         self.rank_label.setVisible(self.step_id == "smile")
         self.rank_combo = QComboBox()
