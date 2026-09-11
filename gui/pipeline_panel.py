@@ -748,6 +748,17 @@ class PipelineStepRow(QWidget):
         )
         button_row.addWidget(self.grid_label)
         button_row.addWidget(self.grid_combo)
+        self.rank_label = QLabel("排序")
+        self.rank_label.setVisible(self.step_id == "smile")
+        self.rank_combo = QComboBox()
+        self.rank_combo.addItem("净真峰优先", "true_peaks")
+        self.rank_combo.addItem("一致性优先", "consistency")
+        self.rank_combo.setVisible(self.step_id == "smile")
+        self.rank_combo.setToolTip(
+            "排序口径:净真峰(稳定峰−疑伪峰)优先,或留出采样点残差(重建正确性)优先"
+        )
+        button_row.addWidget(self.rank_label)
+        button_row.addWidget(self.rank_combo)
         self.ref_button = QPushButton("参考谱")
         self.ref_button.setToolTip(
             "选择参考谱(任意已有峰表的数据):选峰时只保留与参考峰表匹配的峰"
@@ -1114,6 +1125,9 @@ class PipelinePanel(QWidget):
             smile_row.grid_combo.currentIndexChanged.connect(
                 self._store_smile_grid_size
             )
+            smile_row.rank_combo.currentIndexChanged.connect(
+                self._store_smile_rank_mode
+            )
         steps_box.addStretch(1)
 
         scroll = QScrollArea()
@@ -1280,6 +1294,24 @@ class PipelinePanel(QWidget):
         except Exception:  # noqa: BLE001 - 持久化失败不阻断
             pass
 
+    def _store_smile_rank_mode(self, *_args) -> None:
+        """把当前数据的 SMILE 排序口径写进 ui_state。"""
+        row = self._rows.get("smile")
+        if row is None or not (self._current_exp_id and self._current_data_id):
+            return
+        try:
+            from gui.per_data_records import update_ui_state
+
+            update_ui_state(
+                self.manager,
+                self._current_exp_id,
+                self._current_data_id,
+                "smile",
+                {"rank_mode": str(row.rank_combo.currentData() or "true_peaks")},
+            )
+        except Exception:  # noqa: BLE001 - 持久化失败不阻断
+            pass
+
     def _sync_smile_grid_size(self) -> None:
         """按当前数据显示 SMILE 优化程度(读 ui_state;默认 5x5)。"""
         row = self._rows.get("smile")
@@ -1299,6 +1331,18 @@ class PipelinePanel(QWidget):
         except Exception:  # noqa: BLE001 - 读取失败用默认
             size = 5
         self._grid_key = key
+        try:
+            from gui.per_data_records import load_ui_state
+
+            mode = str(
+                (load_ui_state(self.manager, key[0], key[1]).get("smile") or {})
+                .get("rank_mode", "true_peaks")
+            )
+            r_index = row.rank_combo.findData(mode)
+            if r_index >= 0:
+                row.rank_combo.setCurrentIndex(r_index)
+        except Exception:  # noqa: BLE001 - 读取失败用默认
+            pass
         index = row.grid_combo.findData(max(2, min(5, size)))
         if index >= 0:
             row.grid_combo.setCurrentIndex(index)

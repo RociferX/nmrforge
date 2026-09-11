@@ -715,6 +715,7 @@ def scan_smile_parameters(
     scan_dir: Path | str,
     grid: list[dict[str, Any]] | None = None,
     grid_size: int = SMILE_GRID_DEFAULT,
+    rank_mode: str = "true_peaks",
     cross_min: int = 2,
     peak_tol_pts: float = 4.0,
     keep_top: int = 3,
@@ -852,17 +853,35 @@ def scan_smile_parameters(
         )
     # 用户目标(2026-09-10):尽量少伪峰 + 尽量多真峰 → 先按「净真峰」
     # (稳定峰 − 疑伪峰),再按稳定峰数、平均 S/N、质量分
-    rows.sort(
-        key=lambda r: (
-            r["net_peaks"],
-            r["stable_count"],
-            r["mean_snr"],
-            -float(r.get("holdout_rmse", 0.0) or 0.0),  # 留出残差越小越好
-            -float(r.get("smile_rms_ratio", 0.0) or 0.0),  # 拟合残差越小越好
-            r["quality"],
-        ),
-        reverse=True,
-    )
+    # 0.2.199-补29hz-修7(用户):两种排序口径——
+    #   "true_peaks"(默认):净真峰(稳定峰−疑伪峰)优先,再稳定峰/平均 S/N/残差;
+    #   "consistency":留出残差优先(对未参与重建的采样点预测更准),再拟合残差、
+    #                  净真峰、稳定峰、平均 S/N、质量分。
+    mode = str(rank_mode or "true_peaks").lower()
+    if mode == "consistency":
+        rows.sort(
+            key=lambda r: (
+                -float(r.get("holdout_rmse", 0.0) or 0.0),
+                -float(r.get("smile_rms_ratio", 0.0) or 0.0),
+                r["net_peaks"],
+                r["stable_count"],
+                r["mean_snr"],
+                r["quality"],
+            ),
+            reverse=True,
+        )
+    else:
+        rows.sort(
+            key=lambda r: (
+                r["net_peaks"],
+                r["stable_count"],
+                r["mean_snr"],
+                -float(r.get("holdout_rmse", 0.0) or 0.0),
+                -float(r.get("smile_rms_ratio", 0.0) or 0.0),
+                r["quality"],
+            ),
+            reverse=True,
+        )
     for rank, row in enumerate(rows, start=1):
         row["rank"] = rank
     scripts = {
@@ -879,6 +898,7 @@ def scan_smile_parameters(
         "scripts": scripts,
         "scan_dir": str(scan.get("scan_dir", scan_dir)),
         "n_combos": n_combos,
+        "rank_mode": mode,
     }
 
 

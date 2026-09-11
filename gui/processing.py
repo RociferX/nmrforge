@@ -658,6 +658,7 @@ class ProcessingController:
         data_id=None,
         progress: Callable[[str], None] | None = None,
         grid_size: int | None = None,
+        rank_mode: str | None = None,
     ) -> str:
         """SMILE 优化(可选):以终跑脚本为模板只换 SMILE 参数做扫描。
 
@@ -696,6 +697,16 @@ class ProcessingController:
                 )
             except Exception:  # noqa: BLE001 - 读不到用默认
                 grid_size = 4
+        if rank_mode is None:
+            try:
+                from gui.per_data_records import load_ui_state
+
+                rank_mode = str(
+                    (load_ui_state(self._manager, exp_id, data_id).get("smile") or {})
+                    .get("rank_mode", "true_peaks")
+                )
+            except Exception:  # noqa: BLE001 - 读不到用默认
+                rank_mode = "true_peaks"
         work = self._manager.data_dir(exp_id, data_id, "process")
         work.mkdir(parents=True, exist_ok=True)
         # 候选谱评估完即删:中间目录优先放内存盘
@@ -710,6 +721,7 @@ class ProcessingController:
                 base_params,
                 scan_dir=scan_dir,
                 grid_size=int(grid_size or 4),
+                rank_mode=str(rank_mode or "true_peaks"),
                 progress=_smile_progress,
             )
         finally:

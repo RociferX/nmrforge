@@ -86,6 +86,67 @@ def test_estimate_scan_seconds_scales() -> None:
     assert total_4 < total_25
 
 
+
+def test_rank_modes_differ(tmp_path) -> None:
+    """净真峰优先 与 一致性优先 会给出不同名次(0.2.199-补29hz-修7)。"""
+
+    class _Mode(tuple):
+        pass
+
+    class _Backend:
+        def smile_scan(
+            self, experiment, params, combos, *, work_dir, evaluate=None,
+            progress=None, delete_spectra=True, holdout_ratio=0.0,
+        ):
+            Path(work_dir).mkdir(parents=True, exist_ok=True)
+            cands = []
+            for i, combo in enumerate(combos, start=1):
+                # 候选1:峰多但留出残差差;候选2:峰少但残差好
+                peaks = (
+                    [
+                        {"position": [1.0, 1.0], "height": 1.0, "snr": 5.0},
+                        {"position": [2.0, 2.0], "height": 1.0, "snr": 4.0},
+                    ]
+                    if i == 1
+                    else [{"position": [1.0, 1.0], "height": 1.0, "snr": 3.0}]
+                )
+                cands.append(
+                    {
+                        "index": i,
+                        "params": dict(combo),
+                        "metrics": {
+                            "peak_count": len(peaks),
+                            "quality": 70.0,
+                            "holdout_rmse": 0.5 if i == 1 else 0.01,
+                            "holdout_corr": 0.3 if i == 1 else 0.9,
+                            "peaks": peaks,
+                        },
+                        "script": f"# s{i}\n",
+                        "ok": True,
+                    }
+                )
+            return {
+                "success": True,
+                "message": "fake",
+                "logs": [],
+                "candidates": cands,
+                "scan_dir": str(work_dir),
+            }
+
+    exp = read_dataset(BRUKER / "nus_3d")
+    peak_first = scan_smile_parameters(
+        exp, _Backend(), {}, scan_dir=tmp_path / "a",
+        grid=smile_grid(2)[:2], rank_mode="true_peaks",
+    )
+    cons_first = scan_smile_parameters(
+        exp, _Backend(), {}, scan_dir=tmp_path / "b",
+        grid=smile_grid(2)[:2], rank_mode="consistency",
+    )
+    assert peak_first["rank_mode"] == "true_peaks"
+    assert cons_first["rank_mode"] == "consistency"
+    assert peak_first["rows"][0]["index"] == 1   # 峰多的排第一
+    assert cons_first["rows"][0]["index"] == 2   # 残差好的排第一
+
 def test_eta_messages_and_single_combo_fallback() -> None:
     """初估→实测更新的提示;单组网格不做跨组合剔除(稳定峰不为 0)。"""
     exp = read_dataset(BRUKER / "nus_3d")
