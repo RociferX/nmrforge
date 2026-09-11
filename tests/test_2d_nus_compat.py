@@ -113,3 +113,151 @@ def test_build_2d_direct_only_script_rejects_unknown_shape() -> None:
     from backend.script_generator import build_2d_direct_only_script
 
     assert build_2d_direct_only_script("#!/bin/csh\necho hi\n") == ""
+
+def _make_2d_nus_dataset(
+    root: Path,
+    *,
+    rows: int,
+    keep: list[int],
+    x_n: int = 2048,
+    td_rows: int = 256,
+) -> Path:
+    """造 2D NUS 数据集(无 nuslist):ser 有 rows 行,keep 里的复点非零。"""
+    import numpy as np
+
+    ds = root / f"ds_{rows}_{len(keep)}"
+    ds.mkdir(parents=True, exist_ok=True)
+    (ds / "acqus").write_text(
+        f"##$TD= {x_n}\n##$FnMODE= 0\n##$NusAMOUNT= 25\n##$NusTD= 0\n",
+        encoding="utf-8",
+    )
+    (ds / "acqu2s").write_text(
+        f"##$TD= {td_rows}\n##$FnMODE= 5\n##$NusTD= {td_rows}\n##$NUC1= <15N>\n",
+        encoding="utf-8",
+    )
+    data = np.zeros((rows, x_n), dtype="<i4")
+    for k in keep:
+        if 2 * k + 1 < rows:
+            data[2 * k] = 7
+            data[2 * k + 1] = -3
+    data.tofile(ds / "ser")
+    return ds
+
+
+def _recover(ds: Path) -> tuple[list[int] | None, list[str]]:
+    from backend.nmrpipe_backend import NMRPipeBackend
+
+    exp = read_dataset(ds)
+    assert exp.sampling.mode.value == "nus", exp.sampling.mode
+    logs: list[str] = []
+    points = NMRPipeBackend(nmrpipe_bin="")._recover_dense_2d_nus(ds, exp, logs)
+    return points, logs
+
+
+def test_recover_dense_2d_nus_arbitrary_subset(tmp_path: Path) -> None:
+    """密集模型:采样点从零模式恢复,支持任意子集(不是「前 N 个」前缀)。"""
+    keep = [0, 5, 37, 64, 100, 127]
+    ds = _make_2d_nus_dataset(tmp_path, rows=256, keep=keep)
+
+    points, logs = _recover(ds)
+
+    assert points == keep
+    assert any("密集模型" in line for line in logs)
+    assert any("6/128" in line for line in logs)
+
+
+def test_recover_dense_2d_nus_prefix(tmp_path: Path) -> None:
+    """前缀子集(常见造数据方式)同样恢复成真实点集。"""
+    ds = _make_2d_nus_dataset(tmp_path, rows=256, keep=list(range(32)))
+
+    points, _logs = _recover(ds)
+
+    assert points == list(range(32))
+
+
+def test_recover_dense_2d_nus_sparse_is_refused(tmp_path: Path) -> None:
+    """真稀疏(行数 < 声明网格):采样位置不可知 → 返回 None(报缺 nuslist)。"""
+    ds = _make_2d_nus_dataset(tmp_path, rows=64, keep=list(range(32)))
+
+    points, logs = _recover(ds)
+
+    assert points is None
+    assert any("稀疏文件" in line for line in logs)
+
+
+def test_recover_dense_2d_nus_metadata_mismatch_is_refused(tmp_path: Path) -> None:
+    """行数 > 声明网格:元数据与文件不一致 → 返回 None。"""
+    ds = _make_2d_nus_dataset(tmp_path, rows=512, keep=[0, 1, 2])
+
+    points, logs = _recover(ds)
+
+    assert points is None
+    assert any("不一致" in line for line in logs)
+
+
+def test_recover_dense_2d_nus_all_nonzero(tmp_path: Path) -> None:
+    """全格无零行(NusAMOUNT 标注 NUS 但数据满采样)→ 返回全部复点。"""
+    ds = _make_2d_nus_dataset(tmp_path, rows=256, keep=list(range(128)))
+
+    points, logs = _recover(ds)
+
+    assert points == list(range(128))
+    assert any("满采样" in line for line in logs)
+
+def _finalize(raw: Path, work: Path, ndim: int) -> tuple[bool, list[str]]:
+    from backend.nmrpipe_backend import NMRPipeBackend
+
+    logs: list[str] = []
+    ok = NMRPipeBackend(nmrpipe_bin="")._finalize_converted_fid(
+        raw, work, "d_001", logs, ndim=ndim
+    )
+    return ok, logs
+
+
+def test_finalize_2d_single_file_in_fid_dir(tmp_path: Path) -> None:
+    """2D:bruker 把输出写进 fid/(名字带 %03d)也只是单平面 → 按单文件处理。"""
+    raw = tmp_path / "raw"
+    (raw / "fid").mkdir(parents=True)
+    (raw / "fid" / "test%03d.fid").write_bytes(b"x" * 1024)
+    work = tmp_path / "work"
+    work.mkdir()
+
+    ok, logs = _finalize(raw, work, 2)
+
+    assert ok is True
+    assert (work / "d_001.fid").is_file()
+    assert not (raw / "fid" / "test%03d.fid").exists()
+    assert any("单平面输出" in line for line in logs)
+
+
+def test_finalize_3d_keeps_slice_stream(tmp_path: Path) -> None:
+    """3D:真切片流(多文件)仍按切片目录归位,不改行为。"""
+    raw = tmp_path / "raw"
+    (raw / "fid").mkdir(parents=True)
+    for index in (1, 2):
+        (raw / "fid" / f"test{index:03d}.fid").write_bytes(b"x")
+    work = tmp_path / "work"
+    work.mkdir()
+
+    ok, logs = _finalize(raw, work, 3)
+
+    assert ok is True
+    assert (work / "fid").is_dir()
+    assert not (work / "d_001.fid").exists()
+    assert any("切片式 fid" in line for line in logs)
+
+
+def test_finalize_2d_multi_slice_falls_back_to_stream(tmp_path: Path) -> None:
+    """2D 但 fid/ 里多于一个文件:保守回退到原切片流处理(不误吞)。"""
+    raw = tmp_path / "raw"
+    (raw / "fid").mkdir(parents=True)
+    for index in (1, 2):
+        (raw / "fid" / f"test{index:03d}.fid").write_bytes(b"x")
+    work = tmp_path / "work"
+    work.mkdir()
+
+    ok, logs = _finalize(raw, work, 2)
+
+    assert ok is True
+    assert (work / "fid").is_dir()
+    assert any("切片式 fid" in line for line in logs)

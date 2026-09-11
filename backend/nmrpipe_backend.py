@@ -301,34 +301,102 @@ class NMRPipeBackend:
     def _bin_dir(self) -> Path | None:
         return find_nmrpipe_bin(self.nmrpipe_bin)
 
-    def _fid_indirect_points(self, fid_file: Path, experiment: Experiment) -> int:
-        """转换后 fid 的间接维复点数(2D 无采样表时用作 SMILE -sampleCount)。
+    def _recover_dense_2d_nus(
+        self,
+        raw_dir: Path,
+        experiment: Experiment,
+        logs: list[str],
+        fid_file: Path | None = None,
+    ) -> list[int] | None:
+        """2D 无采样表:判断是否「全格 + 零填充」的密集模型,并恢复真实采样点。
 
-        0.2.199-补29hz-修8:2D NUS 的密集输入模型里,ser/fid 的间接行数 =
-        复点数 × 2(States/TPPI 两分量,与 -yN = 2×-yT 同一约定),故取行数的一半;
-        头不可读时退化为 1(不让扫描整体失败)。
+        用户 2026-09-11:能判断任意子集的密集采样;真正没有采样表的才报缺失。
+        - 文件行数 == 声明网格行数 → 全格都在,采样点就是零模式里的非零行(任意子集),
+          直接按复点索引返回;
+        - 行数 < 声明网格 → 只留了采样行、位置不可知(真稀疏) → 返回 None;
+        - 行数 > 声明网格 / 读不出参数 → 元数据与文件不一致 → 返回 None。
+        ser 缺失时回退用已转换的 fid(同样保留全格行)。
         """
-        try:
+        from backend.script_generator import _fnmode, _mult_for, effective_td
+
+        td = effective_td(experiment)  # 2D:[直接维, 间接维复点网格]
+        grid_complex = max(1, int(td[1])) if len(td) > 1 else 0
+        mult = _mult_for(_fnmode(experiment, "F1"))
+        direct = next(
+            (d for d in experiment.dimensions if d.role.name.startswith("DIRECT")),
+            None,
+        )
+        x_n = int(direct.td) if direct is not None else 0
+        rows_declared = mult * grid_complex
+        if grid_complex <= 0 or mult <= 0 or x_n <= 0:
+            logs.append("2D NUS 判定:参数不足(直接维 TD/间接维网格),无法判断密集模型")
+            return None
+
+        import numpy as np
+
+        src = Path(raw_dir) / "ser"
+        if src.is_file():
+            size = src.stat().st_size
+            if size % (4 * x_n):
+                logs.append(
+                    f"2D NUS 判定:ser 大小 {size} 不是「直接维 {x_n} × int32」的整数倍,无法判断"
+                )
+                return None
+            rows = size // (4 * x_n)
+            if rows < rows_declared:
+                logs.append(
+                    f"2D NUS 判定:ser 只有 {rows} 行 < 声明网格 {rows_declared} 行 → "
+                    "稀疏文件(采样位置不可知),需要 nuslist 采样表"
+                )
+                return None
+            if rows > rows_declared:
+                logs.append(
+                    f"2D NUS 判定:ser {rows} 行 > 声明网格 {rows_declared} 行 → "
+                    "元数据与文件不一致,无法判断"
+                )
+                return None
+            table = np.fromfile(src, dtype="<i4").reshape(rows, x_n)
+        elif fid_file is not None and Path(fid_file).is_file():
             import nmrglue as ng
 
             _dic, data = ng.pipe.read(str(fid_file))
-            rows = int(data.shape[0]) if data.ndim >= 2 else 0
-            if rows <= 0:
-                rows = int(_dic.get("FDSPECNUM", 0) or 0)
-        except Exception:  # noqa: BLE001 - 读不出来时退化
-            return 1
-        grid_complex = max(1, rows // 2)
-        # 密集模型:文件保留全网格行数(尾部清零),真正的采样点数由
-        # NusAMOUNT(采样百分比)推出;=100 或缺省时按全网格处理
-        amount = 100
-        try:
-            acqus = (experiment.acquisition_parameters or {}).get("acqus", {})
-            amount = int(acqus.get("NusAMOUNT", 100) or 100)
-        except (TypeError, ValueError):
-            amount = 100
-        if 0 < amount < 100:
-            return max(1, int(round(grid_complex * amount / 100.0)))
-        return grid_complex
+            table = np.asarray(data)
+            if table.ndim < 2:
+                logs.append("2D NUS 判定:已转换 fid 不是二维,无法判断密集模型")
+                return None
+            rows = int(table.shape[0])
+            if rows != rows_declared:
+                logs.append(
+                    f"2D NUS 判定:fid {rows} 行 != 声明网格 {rows_declared} 行,无法判断"
+                )
+                return None
+        else:
+            logs.append("2D NUS 判定:既没有 ser 也没有已转换 fid,无法判断密集模型")
+            return None
+
+        energies = np.abs(table).sum(axis=1)
+        points: list[int] = []
+        for k in range(grid_complex):
+            lo, hi = mult * k, mult * k + mult
+            if lo >= rows:
+                break
+            if any(float(energies[i]) > 0.0 for i in range(lo, min(hi, rows))):
+                points.append(k)
+        if not points:
+            logs.append("2D NUS 判定:全格数据全为零,无法恢复采样点")
+            return None
+        if len(points) == grid_complex:
+            logs.append(
+                f"2D NUS 判定:全格 {rows} 行且无零行(NusAMOUNT 标注 NUS,但数据是满采样)"
+                f" → 按满采样表重建({grid_complex} 复点)"
+            )
+        else:
+            logs.append(
+                f"2D NUS 判定:密集模型(全格 {rows}/{rows_declared} 行),从零模式恢复"
+                f"采样点 {len(points)}/{grid_complex} 复点"
+                f"({100.0 * len(points) / grid_complex:.1f}%)"
+            )
+        return points
 
     def _work_path(self, experiment: Experiment) -> Path:
         raw = Path(experiment.source_path)
@@ -804,6 +872,23 @@ class NMRPipeBackend:
                 stale_slice = work / "fid"
                 if stale_slice.is_dir():
                     shutil.rmtree(stale_slice)
+            raw_nuslist = raw / "nuslist"
+            recovered_2d: list[int] | None = None
+            if not raw_nuslist.is_file() and experiment.ndim == 2:
+                # 0.2.199-补29hz-修12(用户):先判定再转换——真稀疏、采样位置不可知
+                # 的文件若当密集跑,会在转换阶段卡死(实测 nmrPipe -fn MULT 100% CPU)
+                recovered_2d = self._recover_dense_2d_nus(
+                    raw, experiment, logs, fid_file=fid_file
+                )
+                if recovered_2d is None:
+                    return {
+                        "success": False,
+                        "message": (
+                            "缺少 nuslist 采样表:该 2D 数据不是「全格+零填充」的密集模型,"
+                            "稀疏文件无法恢复采样位置,请提供 nuslist"
+                        ),
+                        "logs": logs,
+                    }
             if not fid_file.is_file():
                 converted, convert_logs = self._convert(runtime, experiment, raw, work)
                 logs += convert_logs
@@ -813,27 +898,23 @@ class NMRPipeBackend:
                         "message": "NUS 转换失败（bruker 原生识别失败）",
                         "logs": logs,
                     }
-            raw_nuslist = raw / "nuslist"
             if raw_nuslist.is_file():
                 shutil.copy2(raw_nuslist, work / "nuslist")
                 # 安全网:工作 nuslist 再校验(源头已清理时应为 0 坏点)
                 nuslist_count, _leftover = self._clean_work_nuslist(
                     work, experiment, logs
                 )
-            elif experiment.ndim == 2:
-                # 0.2.199-补29hz-修8(用户):2D NUS 的「密集输入 + 隐式网格」形态——
-                # 数据是密集的(只采到前 N 个复点)、没有采样表,也不该走切片流;
-                # 间接点数由转换后的 fid 推出,SMILE 仍按 -xT 目标网格重建。
-                nuslist_count = self._fid_indirect_points(fid_file, experiment)
-                # 显式写采样表(前 N 个复点),SMILE 才知道哪些点在网格上;
-                # 不做切片流,只交一张表(2D 单文件形态)
+            elif recovered_2d is not None:
+                # 0.2.199-补29hz-修12(用户):2D 无采样表但数据是「全格+零填充」——
+                # 采样点直接从零模式恢复(支持任意子集,不再假定「前 N 个复点」),
+                # 写进 work/nuslist 交给 SMILE;仍不走切片流(2D 单文件形态)。
                 (work / "nuslist").write_text(
-                    "\n".join(str(i) for i in range(nuslist_count)) + "\n",
+                    "\n".join(str(p) for p in recovered_2d) + "\n",
                     encoding="utf-8",
                 )
+                nuslist_count = len(recovered_2d)
                 logs.append(
-                    "2D NUS:无采样表,按密集输入重建并生成前 N 个复点的采样表"
-                    f"(间接复点 {nuslist_count})"
+                    f"2D NUS:无采样表,已从全格零模式恢复 {nuslist_count} 个采样复点"
                 )
             else:
                 return {"success": False, "message": "缺少 nuslist 采样表", "logs": logs}
