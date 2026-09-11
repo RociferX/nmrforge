@@ -43,7 +43,10 @@
   新增 `_fid_indirect_points`(从转换后的 fid 推间接维复点数);
 - 4ca4bd2:采样点数改由 acqus 的 `NusAMOUNT` 推(文件仍保留全网格行数、尾部清零);
 - 7736e65:2D 单文件脚本写显式采样表(前 N 个复点)→ `-sample nuslist` 取代 `-sample None`,
-  SMILE 不再报「内部错误:直接维需加窗」;没有采样表时仍是 None(行为不变)。
+  SMILE 不再报「内部错误:直接维需加窗」;没有采样表时仍是 None(行为不变);
+- 验证数据与复现脚本(VM,不入库):`/tmp/nus2d_dense2`(sampleF 造 25% 密集)
+  `/tmp/nus2d_synth`(稀疏 ser + nuslist);生成/探针脚本已归档到 VM
+  `~/nmrforge-test-artifacts/repro/2d_nus/`(make2dnus*.py、run2d*.py)。
 
 ## 0.2.199-补29hz-修7(2026-09-11,用户):SMILE 排序口径可选(净真峰 / 一致性)
 - 用户:排序模式要可切换;
