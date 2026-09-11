@@ -301,7 +301,7 @@ class NMRPipeBackend:
     def _bin_dir(self) -> Path | None:
         return find_nmrpipe_bin(self.nmrpipe_bin)
 
-    def _fid_indirect_points(self, fid_file: Path) -> int:
+    def _fid_indirect_points(self, fid_file: Path, experiment: Experiment) -> int:
         """转换后 fid 的间接维复点数(2D 无采样表时用作 SMILE -sampleCount)。
 
         0.2.199-补29hz-修8:2D NUS 的密集输入模型里,ser/fid 的间接行数 =
@@ -315,9 +315,20 @@ class NMRPipeBackend:
             rows = int(data.shape[0]) if data.ndim >= 2 else 0
             if rows <= 0:
                 rows = int(_dic.get("FDSPECNUM", 0) or 0)
-            return max(1, rows // 2)
         except Exception:  # noqa: BLE001 - 读不出来时退化
             return 1
+        grid_complex = max(1, rows // 2)
+        # 密集模型:文件保留全网格行数(尾部清零),真正的采样点数由
+        # NusAMOUNT(采样百分比)推出;=100 或缺省时按全网格处理
+        amount = 100
+        try:
+            acqus = (experiment.acquisition_parameters or {}).get("acqus", {})
+            amount = int(acqus.get("NusAMOUNT", 100) or 100)
+        except (TypeError, ValueError):
+            amount = 100
+        if 0 < amount < 100:
+            return max(1, int(round(grid_complex * amount / 100.0)))
+        return grid_complex
 
     def _work_path(self, experiment: Experiment) -> Path:
         raw = Path(experiment.source_path)
@@ -813,7 +824,7 @@ class NMRPipeBackend:
                 # 0.2.199-补29hz-修8(用户):2D NUS 的「密集输入 + 隐式网格」形态——
                 # 数据是密集的(只采到前 N 个复点)、没有采样表,也不该走切片流;
                 # 间接点数由转换后的 fid 推出,SMILE 仍按 -xT 目标网格重建。
-                nuslist_count = self._fid_indirect_points(fid_file)
+                nuslist_count = self._fid_indirect_points(fid_file, experiment)
                 logs.append(
                     "2D NUS:无 nuslist 采样表,按密集输入 + 隐式网格重建"
                     f"(间接复点 {nuslist_count})"
