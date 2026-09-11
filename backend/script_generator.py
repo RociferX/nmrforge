@@ -1099,17 +1099,15 @@ def generate_2d_nus_script(
 # 扫描时以终跑脚本为模板,只换 SMILE 参数:
 #   第一段(直接维 → 切片文件)只跑一次;
 #   第二段(SMILE + 间接维 → 终谱)按不同 SMILE 参数重复跑,候选谱评估后即删。
-# 3D 与 2D 多文件脚本已自带切片写出/读回,直接在两者之间切开;2D 单文件脚本
-# 没有独立切片,这里补一步显式切片写出(与 2D 多文件同构:写出用 -z、读回用 -x,
-# 读回后不再需要原来的 TP)。
+# 3D 与 2D 多文件脚本自带切片写出/读回,直接在两者之间切开。2D 单文件脚本
+# 没有切片流(直接维处理与 SMILE 在同一条管道内),切分返回空,调用方
+# (smile_scan)回退为「整脚本逐组跑、候选输出各自命名」——用户 2026-09-11
+# 约束「2D 应该不会有切片流,注意兼容」。
 # ---------------------------------------------------------------------------
 _NUS_SLICE_WRITES = (
     "pipe2xyz -out nus3d_1/test%04d.ft1 -z",
     "pipe2xyz -out nus2d/test%03d.ft1 -z",
 )
-_NUS_DIRECT_SLICE = "pipe2xyz -out nus2d/direct%03d.ft1 -z"
-_NUS_DIRECT_SLICE_IN = "xyz2pipe -in nus2d/direct%03d.ft1 -x \\"
-_TP_LINE = "| nmrPipe -fn TP \\"
 
 
 def rename_nus_scan_output(script: str, out_name: str) -> str:
@@ -1161,9 +1159,9 @@ def split_nus_script(script: str) -> tuple[str, str]:
                 prefix = "\n".join(lines[: write_index + 1]) + "\n"
                 return prefix, "\n".join(lines[j:])
         return "", ""
-    # 2D 单文件脚本没有独立切片(直接维与 SMILE 在同一管道内,且 SMILE 用
-    # `-sample None`),改成切片流会改变 SMILE 的采样语义,因此不在这里切;
-    # 调用方(smile_scan)对这种情况回退为「整脚本逐组跑、输出各自命名」。
+    # 2D 单文件脚本没有切片流(直接维处理与 SMILE 在同一条管道内),人为切成
+    # 切片流会改变 SMILE 的采样语义,因此不在这里切;调用方(smile_scan)对这种
+    # 情况回退为「整脚本逐组跑、输出各自命名」(用户 2026-09-11 约束)。
     return "", ""
 
 def _check_real_modes(experiment: Experiment) -> None:

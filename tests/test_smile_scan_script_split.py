@@ -51,7 +51,7 @@ def test_3d_script_splits_at_slice_boundary() -> None:
 
 
 def test_2d_single_file_has_no_split_and_falls_back() -> None:
-    """2D 单文件脚本没有独立切片(SMILE 用 -sample None),不做切分。"""
+    """2D 单文件脚本没有切片流(直接维处理与 SMILE 同管道),不做切分。"""
     prefix, suffix = split_nus_script(_script_2d())
     assert (prefix, suffix) == ("", "")
 
