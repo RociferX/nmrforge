@@ -301,6 +301,24 @@ class NMRPipeBackend:
     def _bin_dir(self) -> Path | None:
         return find_nmrpipe_bin(self.nmrpipe_bin)
 
+    def _fid_indirect_points(self, fid_file: Path) -> int:
+        """转换后 fid 的间接维复点数(2D 无采样表时用作 SMILE -sampleCount)。
+
+        0.2.199-补29hz-修8:2D NUS 的密集输入模型里,ser/fid 的间接行数 =
+        复点数 × 2(States/TPPI 两分量,与 -yN = 2×-yT 同一约定),故取行数的一半;
+        头不可读时退化为 1(不让扫描整体失败)。
+        """
+        try:
+            import nmrglue as ng
+
+            _dic, data = ng.pipe.read(str(fid_file))
+            rows = int(data.shape[0]) if data.ndim >= 2 else 0
+            if rows <= 0:
+                rows = int(_dic.get("FDSPECNUM", 0) or 0)
+            return max(1, rows // 2)
+        except Exception:  # noqa: BLE001 - 读不出来时退化
+            return 1
+
     def _work_path(self, experiment: Experiment) -> Path:
         raw = Path(experiment.source_path)
         if self.work_dir:
@@ -785,11 +803,23 @@ class NMRPipeBackend:
                         "logs": logs,
                     }
             raw_nuslist = raw / "nuslist"
-            if not raw_nuslist.is_file():
+            if raw_nuslist.is_file():
+                shutil.copy2(raw_nuslist, work / "nuslist")
+                # 安全网:工作 nuslist 再校验(源头已清理时应为 0 坏点)
+                nuslist_count, _leftover = self._clean_work_nuslist(
+                    work, experiment, logs
+                )
+            elif experiment.ndim == 2:
+                # 0.2.199-补29hz-修8(用户):2D NUS 的「密集输入 + 隐式网格」形态——
+                # 数据是密集的(只采到前 N 个复点)、没有采样表,也不该走切片流;
+                # 间接点数由转换后的 fid 推出,SMILE 仍按 -xT 目标网格重建。
+                nuslist_count = self._fid_indirect_points(fid_file)
+                logs.append(
+                    "2D NUS:无 nuslist 采样表,按密集输入 + 隐式网格重建"
+                    f"(间接复点 {nuslist_count})"
+                )
+            else:
                 return {"success": False, "message": "缺少 nuslist 采样表", "logs": logs}
-            shutil.copy2(raw_nuslist, work / "nuslist")
-            # 安全网:工作 nuslist 再校验(源头已清理时应为 0 坏点)
-            nuslist_count, _leftover = self._clean_work_nuslist(work, experiment, logs)
             # 0.2.199-补27:兼容 bruker 自动输出——单文件优先,找不到单文件
             # 回退切片流(fid/test%03d.fid 或 fid/{dataset_id}%03d.fid);
             # nus 脚本 xyz2pipe 两种输入都支持
