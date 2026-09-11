@@ -1282,7 +1282,16 @@ class NMRPipeBackend:
         if holdout_ratio and float(holdout_ratio) > 0:
             # A 方案(0.2.199-补29hz-修5):留出一部分**已采集**的采样点,
             # 只用其余点重建;留出点用于数据一致性残差(无需全采样参考)
-            src = scan_dir / "nuslist"
+            # 扫描目录里的 nuslist 由 reconstruct_nus 稍后拷入,这里必须先用原始数据的
+            src = None
+            for _cand in (
+                Path(str(experiment.source_path)) / "nuslist",
+                scan_dir / "nuslist",
+            ):
+                if _cand.is_file():
+                    src = _cand
+                    break
+            src = src or (scan_dir / "nuslist")
             if src.is_file():
                 lines = [
                     ln.strip()
