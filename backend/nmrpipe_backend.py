@@ -1406,7 +1406,7 @@ class NMRPipeBackend:
                     pass
                 if ok and evaluate is not None:
                     try:
-                        metrics = dict(evaluate(str(spectrum)) or {})
+                        metrics.update(dict(evaluate(str(spectrum)) or {}))
                     except Exception as exc:  # noqa: BLE001 - 单组失败不阻断其余
                         metrics = {"error": str(exc)}
                 elif not ok:
