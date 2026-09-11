@@ -3,7 +3,8 @@
 思路(与 3D NUS 真实数据同构):
 - 目录放 nuslist(sampling_detector 据此判 NUS);
 - ser 只保留采样点的 FID 对(States 超复数:每 t1 复点 2 个 FID);
-- acqu2s 设 NusTD(网格)、acqus 设 NusAMOUNT(<100)。
+- acqu2s 设 NusTD(单位:增量行,与真实 NUS 数据一致;nuslist 索引才是复点),
+  acqus 设 NusAMOUNT(<100)。
 
 用法(VM):
     ~/NMRForge/nmrforge/bin/python scripts/vm_sample_make_nus.py \
@@ -59,12 +60,18 @@ def main(argv: list[str] | None = None) -> int:
 
     acqu2s = (dst / "acqu2s").read_text(encoding="utf-8", errors="replace")
     acqus = (dst / "acqus").read_text(encoding="utf-8", errors="replace")
-    grid = _param(acqu2s, "TD")
+    td_rows = _param(acqu2s, "TD")  # 增量(行)总数
     fnmode = _param(acqu2s, "FnMODE")
     mult = 2 if fnmode in (0, 1, 2, 4, 5, 6) else 1  # States/TPPI 超复数分量
-    grid = grid // mult  # 间接维复点网格(NusTD 语义)
+    grid = td_rows // mult  # 间接维复点网格 = nuslist 索引范围
+    # 0.2.199-补29hz-修11(VM 实测):真实 NUS 数据的 NusTD 是**行(增量)**单位
+    # (sampleJ acqu2s NusTD=292 ↔ nuslist 列 max 145 = 292/2-1;sampleC NusTD=40 ↔ max 19)。
+    # 之前这里写成复点数(TD/mult),程序按 -yT NusTD//2 传给 nusExpand 就小于
+    # nuslist 的最大索引 → nusExpand 越界崩溃(实测 rc=139 / stderr 通道报错),
+    # 转换卡在 nmrPipe -fn MULT。
+    nus_td = grid * mult  # = td_rows(全采样源:整格都在)
     if grid <= 0:
-        print(f"acqu2s TD 无效: {grid}")
+        print(f"acqu2s TD 无效: {td_rows}")
         return 1
     if opts.points >= grid:
         print(f"采样点数 {opts.points} 需小于网格 {grid}")
@@ -85,7 +92,7 @@ def main(argv: list[str] | None = None) -> int:
         print("ser 字节数非偶")
         return 1
     complex_data = ser.reshape(-1, 2)[:, 0] + 1j * ser.reshape(-1, 2)[:, 1]
-    n_fids_total = mult * grid  # States 超复数
+    n_fids_total = nus_td  # = mult * grid:States 超复数的行总数
     points_per_fid = complex_data.size // n_fids_total
     if complex_data.size != n_fids_total * points_per_fid:
         print(f"ser 大小与网格不符: {complex_data.size} != {n_fids_total}×{points_per_fid}")
@@ -96,14 +103,17 @@ def main(argv: list[str] | None = None) -> int:
     interleaved = np.stack([new_fids.real, new_fids.imag], axis=-1)
     interleaved.astype("<i4").tofile(dst / "ser")
 
-    acqu2s = _set_param(acqu2s, "NusTD", grid)
+    acqu2s = _set_param(acqu2s, "NusTD", nus_td)
     acqus = _set_param(acqus, "NusAMOUNT", round(100 * opts.points / grid))
     (dst / "acqu2s").write_text(acqu2s, encoding="utf-8")
     (dst / "acqus").write_text(acqus, encoding="utf-8")
 
     new_size = (dst / "ser").stat().st_size
     print(f"构造完成: {dst}")
-    print(f"  网格={grid} 采样点={opts.points} ({100*opts.points/grid:.1f}%)")
+    print(
+        f"  复点网格={grid}(NusTD={nus_td} 行) 采样点={opts.points} "
+        f"({100*opts.points/grid:.1f}%)"
+    )
     print(f"  nuslist 前 8 行: {(dst / 'nuslist').read_text().splitlines()[:8]}")
     print(f"  ser: {len(rows)} FIDs × {points_per_fid} 点 = {new_size} 字节")
     return 0

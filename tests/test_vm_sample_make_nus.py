@@ -44,7 +44,7 @@ def _make_dataset(tmp_path: Path) -> Path:
 
 
 def test_make_nus_grid_td_div_mult(tmp_path: Path) -> None:
-    """NusTD=TD//mult(128),nuslist 首点 0,ser 仅保留采样点 FID。"""
+    """NusTD=TD(行单位,256),nuslist 首点 0,ser 仅保留采样点 FID。"""
     tool = _load_tool()
     src = _make_dataset(tmp_path)
     out = tmp_path / "nus"
@@ -52,7 +52,8 @@ def test_make_nus_grid_td_div_mult(tmp_path: Path) -> None:
 
     acqu2s = (out / "acqu2s").read_text(encoding="utf-8")
     acqus = (out / "acqus").read_text(encoding="utf-8")
-    assert tool._param(acqu2s, "NusTD") == 128
+    # 真实 NUS 约定:NusTD 是行(增量)单位(sampleJ: NusTD=292 ↔ nuslist max 145)
+    assert tool._param(acqu2s, "NusTD") == 256
     assert tool._param(acqus, "NusAMOUNT") == 25
     nuslist = (out / "nuslist").read_text(encoding="utf-8").splitlines()
     assert len(nuslist) == 32

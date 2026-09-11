@@ -229,16 +229,6 @@ def patch_fid_com(
         # 文件、TD>1 切片),程序兼容两种输入(见 reconstruct_nus 切片回退)
     patched, out_warnings = patch_fid_out_name(patched, experiment.dataset_id)
     warnings += out_warnings
-    if experiment.ndim == 2:
-        # 0.2.199-补29hz-修9(用户):2D 不存在切片流——bruker -AUTO 对带
-        # nuslist 的 2D NUS 仍写 mask 形态的切片输出(./fid/test%03d.fid),
-        # 2D 只有一个平面,bruk2pipe 不展开 %03d(实测写出字面名
-        # test%03d.fid),下游 xyz2pipe 找不到切片直接 rc=1;2D 的 SMILE
-        # 只需要 nuslist 采样表,不需要切片流,故强制改回单文件。
-        patched, single_warnings = force_2d_single_file_out(
-            patched, experiment.dataset_id
-        )
-        warnings += single_warnings
     return patched, warnings
 
 
@@ -353,23 +343,3 @@ def apply_fid_com_overrides(
         if key not in seen:
             warnings.append(f"{key}: fid.com 中未找到对应参数,已跳过")
     return patched, warnings
-
-
-def force_2d_single_file_out(text: str, dataset_id: str) -> tuple[str, list[str]]:
-    """把 2D fid.com 的切片式 -out 改回单文件 {dataset_id}.fid。
-
-    只对含 `%` 的输出名生效(即 bruker 的切片式写法);2D 数据不存在切片流,
-    保留会让 bruk2pipe 写出字面名 `test%03d.fid` 并让 xyz2pipe 找不到切片。
-    返回 (文本, 修正项列表)。
-    """
-    warnings: list[str] = []
-    desired = f"./{dataset_id}.fid"
-
-    def replace(match: re.Match) -> str:
-        current = match.group(2)
-        if "%" not in current:
-            return match.group(0)
-        warnings.append(f"out: {current} → {desired}（2D 无切片流,已修正）")
-        return f"{match.group(1)}{desired}"
-
-    return _OUT_RE.sub(replace, text), warnings
