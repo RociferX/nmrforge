@@ -14,7 +14,10 @@
   `-noverb` 直接 rc=139 段错误);ser_full 未生成 → bruk2pipe 读空 → MULT 无限流;
 - **真实 NUS 约定(实测标定)**:NusTD 是**行(增量)**单位 —— sampleJ acqu2s NusTD=292 ↔
   nuslist 列 max 145(=292/2−1);sampleC 40↔19;sampleM 100↔49、acqu3s 90↔44;
-  修正:工具 NusTD = 全采样源 TD(行),nuslist 索引仍为复点(0..TD/mult−1),回归测试同步(256);
+  修正(工具口径与程序一致):复点网格 = acqu2s TD / mult(程序 2D 的 `effective_td` 就是这么算的,
+  不采信 NusTD),NusTD 写**行**单位(= TD),nuslist 索引为复点(0..TD/mult−1);
+  并加一致性校验:ser 行数(= 字节/acqus TD)必须等于 acqu2s TD,否则直接报错、不产半成品
+  (实测 sampleI 的 ser 有 2048 行而 acqu2s TD=862,属元数据与文件不符 → 明确拒绝);
 - **兼容(用户「注意兼容」)**:`_finalize_converted_fid(ndim=2)` 若 bruker 把 2D 输出写进
   `fid/`(名字带 %03d 之类),只有一个非空文件时按**单文件**归位 `{dataset_id}.fid`
   (2D 只有一个平面);多于一个文件仍回退原切片流处理(不误吞);
