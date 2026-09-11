@@ -501,10 +501,10 @@ def test_pipeline_smile_step_hidden_for_uniform_data(
     panel.close()
 
 
-def test_pipeline_smile_step_shown_for_nus_data(
+def test_pipeline_smile_step_shown_for_2d_nus_data(
     tmp_path: Path, qapp: QApplication
 ) -> None:
-    """0.2.199-补29gd:检测为 NUS 的数据显示 SMILE 优化步骤。"""
+    """2D NUS 数据显示 SMILE 优化步骤(0.2.199-补29gd + 修21 限定 2D)。"""
     from types import SimpleNamespace
 
     from core.data.internal_data_model import SamplingMode
@@ -517,9 +517,33 @@ def test_pipeline_smile_step_shown_for_nus_data(
     panel = PipelinePanel(manager)
     panel.controller._read_experiment = (
         lambda *a, **k: SimpleNamespace(
-            sampling=SimpleNamespace(mode=SamplingMode.NUS)
+            ndim=2, sampling=SimpleNamespace(mode=SamplingMode.NUS)
         )
     )
     panel.set_selection("data", exp.id, d1.id)
     assert not panel._rows["smile"].isHidden()
+    panel.close()
+
+
+def test_pipeline_smile_step_hidden_for_3d_nus_data(
+    tmp_path: Path, qapp: QApplication
+) -> None:
+    """0.2.199-补29hz-修21(用户):3D NUS 暂时隐藏 SMILE 优化入口。"""
+    from types import SimpleNamespace
+
+    from core.data.internal_data_model import SamplingMode
+    from core.project import ProjectManager
+    from gui.pipeline_panel import PipelinePanel
+
+    manager = ProjectManager.create_project(tmp_path / "proj_s3", "demo")
+    exp = manager.create_experiment("HNCA")
+    d1 = manager.import_data(exp.id, "/fake/1")
+    panel = PipelinePanel(manager)
+    panel.controller._read_experiment = (
+        lambda *a, **k: SimpleNamespace(
+            ndim=3, sampling=SimpleNamespace(mode=SamplingMode.NUS)
+        )
+    )
+    panel.set_selection("data", exp.id, d1.id)
+    assert panel._rows["smile"].isHidden()
     panel.close()

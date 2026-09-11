@@ -60,7 +60,7 @@ from gui.theme import (
 PIPELINE_STEPS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ("fid", "生成 FID", "由原始数据转换为 fid(后端 bruker -AUTO/fid.com)", ()),
     ("spectrum", "生成谱图", "后端处理生成谱(自动包含 NUS SMILE 重构)", ("fid",)),
-    ("smile", "SMILE 优化", "可选:重构参数网格优化并采用最优谱(仅 NUS)", ("spectrum",)),
+    ("smile", "SMILE 优化", "可选:重构参数网格优化并采用最优谱(仅 2D NUS)", ("spectrum",)),
     ("peaks", "峰挑选", "自动峰检测与强度/SNR 评估", ("spectrum",)),
     ("analysis", "分析", "峰归属与结果分析", ("peaks",)),
 )
@@ -1400,6 +1400,16 @@ class PipelinePanel(QWidget):
             self._nus_cache[key] = bool(facts.get("is_nus", False))
         return self._nus_cache[key]
 
+    def _smile_supported(self, exp_id: str, data_id: str) -> bool:
+        """SMILE 优化是否可用 —— 仅 **2D** NUS(用户 2026-09-11)。
+
+        3D NUS 的 SMILE 优化暂时不理想,入口先隐藏(非 NUS 同样隐藏,0.2.199-补29gd)。
+        """
+        if not (exp_id and data_id):
+            return False
+        return self._data_is_nus(exp_id, data_id) and self._data_ndim(exp_id, data_id) == 2
+
+
     def _data_ndim(self, exp_id: str, data_id: str) -> int:
         """当前数据维度(读取失败按 2 处理,不影响 2D/3D 主流程)。"""
         if not (exp_id and data_id):
@@ -1477,9 +1487,10 @@ class PipelinePanel(QWidget):
             context_text += f" [Group {group.id}: {len(group.data_ids)} 数据]"
         self.context_label.setText(context_text)
         self._sync_reference_display()
-        # 0.2.199-补29gd:SMILE 优化仅 NUS 显示(非 NUS/uncertain 隐藏)
+        # 0.2.199-补29gd:SMILE 优化仅 NUS 显示(非 NUS/uncertain 隐藏);
+        # 修21(用户):仅 2D NUS —— 3D NUS 的 SMILE 优化暂时隐藏
         self._set_smile_visible(
-            self._data_is_nus(self._current_exp_id, self._current_data_id)
+            self._smile_supported(self._current_exp_id, self._current_data_id)
         )
         self._set_peaks_visible(
             self._data_ndim(self._current_exp_id, self._current_data_id) != 1
@@ -2156,12 +2167,12 @@ class PipelinePanel(QWidget):
         )
         if entry is None:
             return
-        # 0.2.199-补29gd:非 NUS 数据不提供 SMILE 优化(防御程序化入口)
-        if step_id == "smile" and not self._data_is_nus(
+        # 0.2.199-补29gd/修21:仅 2D NUS 提供 SMILE 优化(防御程序化入口)
+        if step_id == "smile" and not self._smile_supported(
             self._current_exp_id, self._current_data_id
         ):
             self.log_message.emit(
-                "SMILE 优化仅适用于 NUS 数据(当前非 NUS,步骤已隐藏)"
+                "SMILE 优化仅适用于 2D NUS 数据(当前不是,步骤已隐藏)"
             )
             return
         if self._run_active:

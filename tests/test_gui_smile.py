@@ -152,6 +152,22 @@ def test_optimize_smile_rejects_uniform(
         controller.optimize_smile(None, exp_id=exp_id, data_id=data_id)
 
 
+def test_optimize_smile_rejects_3d_nus(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.2.199-补29hz-修21(用户):3D NUS 暂时不提供 SMILE 优化(入口已隐藏,控制器也拦)。"""
+    from core.data.internal_data_model import SamplingMode
+
+    manager, exp_id, data_id, _ft2 = _manager_with_artifacts(tmp_path)
+    controller = ProcessingController(manager)
+    experiment = SimpleNamespace(
+        ndim=3, sampling=SimpleNamespace(mode=SamplingMode.NUS)
+    )
+    monkeypatch.setattr(controller, "_read_experiment", lambda *a, **k: experiment)
+    with pytest.raises(RuntimeError, match="2D NUS"):
+        controller.optimize_smile(None, exp_id=exp_id, data_id=data_id)
+
+
 def test_optimize_smile_progress_and_concise_return(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

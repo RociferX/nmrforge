@@ -693,6 +693,9 @@ class ProcessingController:
         experiment = self._read_experiment(exp_id, data_id)
         if experiment.sampling.mode is not SamplingMode.NUS:
             raise RuntimeError("SMILE 优化仅适用于 NUS 数据(当前为均匀采样)")
+        if int(getattr(experiment, "ndim", 2) or 2) != 2:
+            # 0.2.199-补29hz-修21(用户):3D NUS 的 SMILE 优化暂时不理想,入口隐藏
+            raise RuntimeError("SMILE 优化暂仅支持 2D NUS(3D NUS 暂时不提供)")
         base_params = self._last_spectrum_params(exp_id, data_id)
         def _smile_progress(index: int, total: int, msg: str) -> None:
             if progress is not None:
