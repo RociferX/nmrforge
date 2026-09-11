@@ -67,6 +67,50 @@ SMILE_GRID_DEFAULT = 4  # 0.2.199-补29hz-修5(用户):默认 4x4=16 组
 # 0.2.199-补29hz-修10(用户):留出采样点残差默认每 4 个采样点留 1 个(25%),
 # 用于「没有全采样参考时判断真伪峰」的排序依据;扫描用留出集评分,最终重跑仍用全采样。
 SMILE_HOLDOUT_RATIO = 0.25
+# 0.2.199-补29hz-修16(用户):这一步的目的是「尽量重构出更多真峰」,所以候选评估
+# 用**独立的低阈值**(3σ,峰检测算法默认档),与「峰挑选」步骤的阈值(默认 35σ,
+# 那是出峰表用的)无关 —— 阈值太高会把弱真峰一起漏掉,排序就没法反映重建好坏。
+# 伪峰由排序口径本身抑制:只在个别参数组合出现的峰算「疑伪峰」并扣分。
+SMILE_SCAN_SIGMA = 3.0
+
+
+def smile_scan_sign_mode(experiment: Any) -> str:
+    """SMILE 候选评估的峰符号模式 —— 与选峰步骤同源(presets peak_sign)。
+
+    mixed 实验(HNCACB/ CBCANCO 等正负共存)用 both,uniform/未知用 dominant
+(只留占多数符号的峰,不关心正负),避免把反相真峰当噪声漏掉。
+    """
+    from core.experiments.registry import get as get_template
+
+    etype = getattr(experiment, "experiment_type", None)
+    name = str(getattr(etype, "name", "") or "")
+    template = get_template(name) if name else None
+    peak_sign = str(getattr(template, "peak_sign", "uniform") or "uniform")
+    return "both" if peak_sign == "mixed" else "dominant"
+
+
+def smile_scan_edge_margin() -> int:
+    """候选评估排除上下边缘轴峰 —— 与选峰步骤同一常量(workflow.pick_peaks)。"""
+    from workflow.pick_peaks import _PICK_EDGE_MARGIN
+
+    return int(_PICK_EDGE_MARGIN)
+
+
+def evaluate_candidate_peaks(
+    arr: Any, *, sign_mode: str = "dominant"
+) -> list[Any]:
+    """候选谱峰检测:低阈值(SMILE_SCAN_SIGMA)+ 同源符号模式 + 排除轴峰。
+
+    用户 2026-09-11:「SMILE 这一步是为了尽量重构出多真峰」——所以这里刻意用低
+    阈值(3σ)尽量不漏真峰,候选之间的差别靠「稳定峰 − 疑伪峰」体现。
+    """
+    params = peak_detection.PeakDetectionParams(
+        sigma_multiplier=SMILE_SCAN_SIGMA,
+        min_snr=SMILE_SCAN_SIGMA,
+        sign_mode=sign_mode,
+        edge_margin=smile_scan_edge_margin(),
+    )
+    return peak_detection.detect(np.asarray(arr), params)
 
 
 def _subsample(values: tuple[float, ...], count: int) -> tuple[float, ...]:
@@ -737,6 +781,8 @@ def scan_smile_parameters(
     """
     combos = list(grid) if grid is not None else smile_grid(grid_size)
     base = dict(base_params or {})
+    sign_mode = smile_scan_sign_mode(experiment)
+    edge_margin = smile_scan_edge_margin()
     est_group, est_total = estimate_scan_seconds(experiment, len(combos))
     started = time.time()
     _first_done: list[float] = []
@@ -771,7 +817,9 @@ def scan_smile_parameters(
         arr = np.asarray(data)
         if np.iscomplexobj(arr):
             arr = arr.real
-        peaks = peak_detection.detect(arr)
+        # 低阈值 + 同源符号模式 + 排除轴峰(0.2.199-补29hz-修16);
+        # 不跟「峰挑选」步骤的阈值(默认 35σ)——那一步是出峰表,不是评候选。
+        peaks = evaluate_candidate_peaks(arr, sign_mode=sign_mode)
         quality = spectrum_quality.evaluate(arr)
         # 0.2.199-补29hz-修4:综合分在 QualityResult.score.overall 上,
         # QualityResult 本身没有 overall(此前取值恒为 0)
@@ -790,6 +838,11 @@ def scan_smile_parameters(
         }
 
     holdout_ratio = float(base.get("holdout_ratio", SMILE_HOLDOUT_RATIO) or 0.0)
+    # 口径写入日志,便于核对(与峰挑选步骤的阈值无关)
+    _criteria_log = (
+        f"候选评估口径:阈值 {SMILE_SCAN_SIGMA:g}σ(独立于选峰步骤)、"
+        f"符号模式 {sign_mode}、排除轴峰 {edge_margin} 点"
+    )
     scan = backend.smile_scan(
         experiment,
         base,
@@ -801,6 +854,7 @@ def scan_smile_parameters(
     )
     if not scan.get("success"):
         raise RuntimeError(str(scan.get("message", "SMILE 扫描失败")))
+    scan["logs"] = [_criteria_log] + list(scan.get("logs") or [])
     candidates = list(scan.get("candidates") or [])
     n_combos = len(candidates) or 1
     effective_cross = cross_min if n_combos >= cross_min else 1

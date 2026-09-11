@@ -50,6 +50,10 @@ def test_rank_tooltip_explains_both_modes(smile_row: PipelineStepRow) -> None:
     assert "稳定峰" in tip and "疑伪峰" in tip
     # 一致性:留出采样点残差 + 相关系数(可量化)
     assert "留出" in tip and "残差" in tip and "相关系数" in tip
+    # 候选评估阈值独立于选峰步骤(0.2.199-补29hz-修16):说明里要讲清,不能误导
+    assert "3σ" in tip and "35σ" in tip
+    assert "无关" in tip or "独立" in tip
+    assert "「峰挑选」步骤的阈值(σ)决定" not in tip
     # 多行可读:不是一行长文本;且没有超长行
     lines = tip.splitlines()
     assert len([ln for ln in lines if ln.strip()]) >= 8

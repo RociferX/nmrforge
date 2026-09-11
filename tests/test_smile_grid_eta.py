@@ -176,3 +176,77 @@ def test_eta_messages_and_single_combo_fallback() -> None:
         grid=smile_grid(2)[:1],
     )
     assert single["rows"][0]["stable_count"] > 0   # 单组回退(不再恒 0)
+
+# ---------------------------------------------------------------------------
+# SMILE 候选评估阈值(0.2.199-补29hz-修16)
+# ---------------------------------------------------------------------------
+
+
+def _two_peak_spectrum():
+    """一个强峰 + 一个弱真峰(约 5σ)的合成二维谱。"""
+    import numpy as np
+
+    rng = np.random.default_rng(3)
+    arr = rng.standard_normal((64, 64)) * 1.0  # 噪声 σ ≈ 1
+    arr[20, 30] = 50.0  # 强峰
+    arr[44, 12] = 5.5  # 弱真峰
+    return arr
+
+
+def test_smile_scan_uses_low_threshold() -> None:
+    """候选评估用低阈值(3σ):弱真峰也要检出,不能按选峰步骤的 35σ 漏掉。"""
+    import numpy as np
+
+    from core.qc import peak_detection
+    from workflow.smile_optimize import SMILE_SCAN_SIGMA, evaluate_candidate_peaks
+
+    arr = _two_peak_spectrum()
+    peaks = evaluate_candidate_peaks(arr, sign_mode="positive")
+    positions = {(int(round(p.position[0])), int(round(p.position[1]))) for p in peaks}
+
+    assert SMILE_SCAN_SIGMA <= 5.0  # 低阈值档
+    assert (20, 30) in positions  # 强峰
+    assert (44, 12) in positions  # 弱真峰(约 5σ)
+
+    # 对照:按选峰步骤的默认阈值(35σ)会把这个弱真峰漏掉
+    strict = peak_detection.detect(
+        np.asarray(arr),
+        peak_detection.PeakDetectionParams(
+            sigma_multiplier=35.0, min_snr=35.0, sign_mode="positive"
+        ),
+    )
+    strict_positions = {
+        (int(round(p.position[0])), int(round(p.position[1]))) for p in strict
+    }
+    assert (44, 12) not in strict_positions
+
+
+def test_smile_scan_sign_mode_follows_preset(monkeypatch) -> None:
+    """符号模式与选峰步骤同源:mixed 预设 → both,uniform/未知 → dominant。"""
+    from types import SimpleNamespace
+
+    import core.experiments.registry as registry
+    from workflow.smile_optimize import smile_scan_sign_mode
+
+    exp = SimpleNamespace(experiment_type=SimpleNamespace(name="X"))
+
+    monkeypatch.setattr(
+        registry, "get", lambda name: SimpleNamespace(peak_sign="mixed")
+    )
+    assert smile_scan_sign_mode(exp) == "both"
+
+    monkeypatch.setattr(
+        registry, "get", lambda name: SimpleNamespace(peak_sign="uniform")
+    )
+    assert smile_scan_sign_mode(exp) == "dominant"
+
+    monkeypatch.setattr(registry, "get", lambda name: None)
+    assert smile_scan_sign_mode(exp) == "dominant"
+
+
+def test_smile_scan_edge_margin_matches_pick_peaks() -> None:
+    """轴峰排除与选峰步骤同一常量(不各写一个数)。"""
+    from workflow.pick_peaks import _PICK_EDGE_MARGIN
+    from workflow.smile_optimize import smile_scan_edge_margin
+
+    assert smile_scan_edge_margin() == int(_PICK_EDGE_MARGIN)
