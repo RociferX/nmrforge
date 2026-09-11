@@ -1332,18 +1332,26 @@ class NMRPipeBackend:
         holdout_file = ""
         # 3D 是 (k0, k1);2D 是单列复点索引 (k,)(0.2.199-补29hz-修10)
         holdout_coords: list[tuple[int, ...]] = []
+        old_work_dir = self.work_dir
+        self.work_dir = str(scan_dir)
         if holdout_ratio and float(holdout_ratio) > 0:
             # A 方案(0.2.199-补29hz-修5):留出一部分**已采集**的采样点,
             # 只用其余点重建;留出点用于数据一致性残差(无需全采样参考)
-            # 扫描目录里的 nuslist 由 reconstruct_nus 稍后拷入,这里必须先用原始数据的
-            src = None
-            for _cand in (
-                Path(str(experiment.source_path)) / "nuslist",
-                scan_dir / "nuslist",
-            ):
-                if _cand.is_file():
-                    src = _cand
-                    break
+            # 扫描目录里的 nuslist 由 reconstruct_nus 生成/拷入;密集 2D 没有
+            # 采样表文件,先跑一次脚本生成把它写出来(0.2.199-补29hz-修10)
+            def _find_nuslist() -> Path | None:
+                for _cand in (
+                    Path(str(experiment.source_path)) / "nuslist",
+                    scan_dir / "nuslist",
+                ):
+                    if _cand.is_file():
+                        return _cand
+                return None
+
+            src = _find_nuslist()
+            if src is None:
+                self.reconstruct_nus(experiment, dict(base), script_only=True)
+                src = _find_nuslist()
             src = src or (scan_dir / "nuslist")
             if src.is_file():
                 lines = [
@@ -1372,8 +1380,6 @@ class NMRPipeBackend:
                         for ln in holdout
                         if ln.split()
                     ]
-        old_work_dir = self.work_dir
-        self.work_dir = str(scan_dir)
         try:
             scripts: list[str] = []
             for combo in combos:
