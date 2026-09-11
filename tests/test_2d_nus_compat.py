@@ -206,3 +206,56 @@ def test_finalize_2d_multi_slice_falls_back_to_stream(tmp_path: Path) -> None:
     assert ok is True
     assert (work / "fid").is_dir()
     assert any("切片式 fid" in line for line in logs)
+
+def test_smile_scan_hands_full_sample_list_to_rank_scripts(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """留出集只用于评分:候选 script 字段必须是全采样脚本(否则 Rank1 重跑缺表)。
+
+    VM 实测 bug:留出扫描把 base 改成 nuslist_train/len(train) 后,候选脚本
+    原样带上 train 表与 train 计数,「按 Rank1 重跑」在 process/ 下找不到
+    nuslist_train → rc=2。
+    """
+    from backend import nmrpipe_backend as nb
+    from backend.runtime import CompletedProcess
+
+    exp = read_dataset(BRUKER / "nus_2d")
+    calls: list[dict] = []
+
+    def _fake_reconstruct(self, experiment, params=None, **kwargs):
+        params = dict(params or {})
+        calls.append(params)
+        return {
+            "success": True,
+            "message": "fake script",
+            "logs": [],
+            "script": (
+                "# sample=" + str(params.get("nuslist_file"))
+                + " count=" + str(params.get("nuslist_count")) + "\n"
+            ),
+            "script_path": "",
+            "work_dir": "",
+        }
+
+    class _FakeCsh:
+        def run(self, argv, *, cwd=None, timeout=3600, on_line=None):
+            return CompletedProcess("", "", "", 1)
+
+    monkeypatch.setattr(nb.NMRPipeBackend, "reconstruct_nus", _fake_reconstruct)
+    monkeypatch.setattr(nb, "CshRuntime", lambda: _FakeCsh())
+
+    backend = nb.NMRPipeBackend(nmrpipe_bin="")
+    scan = backend.smile_scan(
+        exp,
+        {},
+        [{"nsigma": 3.0, "thresh": 0.9}],
+        work_dir=tmp_path / "scan",
+        holdout_ratio=0.5,
+    )
+
+    assert scan["success"] is True
+    # 扫描用 train 表;交给排序表的脚本必须回到全采样设置
+    assert any(c.get("nuslist_file") == "nuslist_train" for c in calls)
+    script = scan["candidates"][0]["script"]
+    assert "nuslist_train" not in script
+    assert "sample=None" in script

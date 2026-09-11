@@ -1326,6 +1326,11 @@ class NMRPipeBackend:
         runtime = CshRuntime()
         combos = list(combos or [])
         base = dict(params or {})
+        # 0.2.199-补29hz-修11:留出集只用于**评分**——交给排序表/重跑的脚本
+        # 必须是全采样基线(base_prod),否则 Rank1 脚本会引用只存在于扫描
+        # 目录的 nuslist_train(VM 实测:按 Rank1 重跑 rc=2、缺采样表)
+        base_prod = dict(base)
+        holdout_applied = False
         scan_dir = Path(work_dir)
         scan_dir.mkdir(parents=True, exist_ok=True)
         logs: list[str] = []
@@ -1370,6 +1375,7 @@ class NMRPipeBackend:
                     holdout_file = str(holdout_path)
                     base["nuslist_file"] = "nuslist_train"
                     base["nuslist_count"] = len(train)
+                    holdout_applied = True
                     logs.append(
                         f"留出采样点: train={len(train)} holdout={len(holdout)}"
                     )
@@ -1382,6 +1388,7 @@ class NMRPipeBackend:
                     ]
         try:
             scripts: list[str] = []
+            prod_scripts: list[str] = []
             for combo in combos:
                 resp = self.reconstruct_nus(
                     experiment, {**base, **combo}, script_only=True
@@ -1395,6 +1402,15 @@ class NMRPipeBackend:
                     }
                 scripts.append(str(resp["script"]))
                 logs.extend(str(line) for line in resp.get("logs", []))
+                if holdout_applied:
+                    prod = self.reconstruct_nus(
+                        experiment, {**base_prod, **combo}, script_only=True
+                    )
+                    prod_scripts.append(
+                        str(prod.get("script") or resp["script"])
+                    )
+                else:
+                    prod_scripts.append(str(resp["script"]))
             prefix, _ = split_nus_script(scripts[0])
             # 无切片切点(2D 单文件脚本)→ 回退:整脚本逐组跑,输出各自命名
             split_available = bool(prefix)
@@ -1584,7 +1600,7 @@ class NMRPipeBackend:
                         "index": index,
                         "params": dict(combo),
                         "metrics": metrics,
-                        "script": script,
+                        "script": prod_scripts[index - 1],
                         "ok": bool(ok),
                     }
                 )
