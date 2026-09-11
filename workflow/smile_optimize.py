@@ -839,6 +839,9 @@ def scan_smile_parameters(
                 "net_peaks": int(stable - suspect),
                 "mean_snr": round(mean_snr, 3),
                 "quality": round(quality, 2),
+                "smile_rms_ratio": float(
+                    metrics.get("smile_rms_ratio", 0.0) or 0.0
+                ),
                 "composite": round(stable - suspect + 0.01 * mean_snr + 0.01 * quality, 3),
                 "ok": bool(entry.get("ok")),
                 "error": str(metrics.get("error", "") or ""),
@@ -852,6 +855,7 @@ def scan_smile_parameters(
             r["net_peaks"],
             r["stable_count"],
             r["mean_snr"],
+            -float(r.get("smile_rms_ratio", 0.0) or 0.0),  # 拟合残差越小越好
             r["quality"],
         ),
         reverse=True,
@@ -900,7 +904,7 @@ def write_smile_scan_output(
     fields = [
         "rank", "index", "nsigma", "thresh", "net_peaks", "stable_count",
         "suspect_count", "peak_count",
-        "mean_snr", "quality", "composite", "ok", "error",
+        "mean_snr", "quality", "smile_rms_ratio", "composite", "ok", "error",
     ]
     with csv_path.open("w", encoding="utf-8", newline="") as fh:
         writer = csv.DictWriter(fh, fieldnames=fields)

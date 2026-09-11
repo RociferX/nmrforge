@@ -1364,6 +1364,11 @@ class NMRPipeBackend:
                 task.write_text(suffix, encoding="utf-8", newline="\n")
                 if progress is not None:
                     progress(index, len(combos), f"扫描 {index}/{len(combos)}: {combo}")
+                _smile_log = scan_dir / "smile.log"
+                try:
+                    _log_offset = _smile_log.stat().st_size
+                except OSError:
+                    _log_offset = 0
                 run2 = runtime.run(
                     ["csh", task.name], cwd=str(scan_dir), timeout=timeout
                 )
@@ -1374,6 +1379,31 @@ class NMRPipeBackend:
                     and spectrum.stat().st_size > 0
                 )
                 metrics: dict[str, Any] = {}
+                # 0.2.199-补29hz-修6:SMILE 每平面 RMS 报告 → 训练点拟合优度
+                # (FINAL/INITIAL 的中位数;无需平面↔网格映射,跨参数可比)
+                try:
+                    with _smile_log.open("r", encoding="utf-8", errors="ignore") as _fh:
+                        _fh.seek(_log_offset)
+                        _tail = _fh.read()
+                    _ratios: list[float] = []
+                    for _line in _tail.splitlines():
+                        if "INITIAL_RMS" not in _line or "FINAL_RMS" not in _line:
+                            continue
+                        try:
+                            _ini = float(_line.split("INITIAL_RMS")[1].split()[0])
+                            _fin = float(_line.split("FINAL_RMS")[1].split()[0])
+                        except (IndexError, ValueError):
+                            continue
+                        if _ini > 0:
+                            _ratios.append(_fin / _ini)
+                    if _ratios:
+                        _ratios.sort()
+                        metrics["smile_rms_ratio"] = round(
+                            _ratios[len(_ratios) // 2], 4
+                        )
+                        metrics["smile_planes"] = len(_ratios)
+                except OSError:
+                    pass
                 if ok and evaluate is not None:
                     try:
                         metrics = dict(evaluate(str(spectrum)) or {})
