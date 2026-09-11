@@ -757,11 +757,25 @@ class PipelineStepRow(QWidget):
         self.rank_label = QLabel("排序")
         self.rank_label.setVisible(self.step_id == "smile")
         self.rank_combo = QComboBox()
-        self.rank_combo.addItem("净真峰优先", "true_peaks")
-        self.rank_combo.addItem("一致性优先", "consistency")
+        # 0.2.199-补29hz-修15(用户):选项名点明差别 + 悬停说明把两种口径讲清楚
+        self.rank_combo.addItem("净真峰优先(少伪峰)", "true_peaks")
+        self.rank_combo.addItem("一致性优先(残差小)", "consistency")
         self.rank_combo.setVisible(self.step_id == "smile")
         self.rank_combo.setToolTip(
-            "排序口径:净真峰(稳定峰−疑伪峰)优先,或留出采样点残差(重建正确性)优先"
+            "排序口径:决定 25 组参数里挑哪三份终跑脚本。\n"
+            "\n"
+            "• 净真峰优先(默认):按「稳定峰 − 疑伪峰」排。\n"
+            "  稳定峰 = 在多数参数组合里都出现的峰;\n"
+            "  疑伪峰 = 只在个别参数组合里出现的峰。\n"
+            "  适合「尽量少伪峰、尽量多真峰」;\n"
+            "  峰的数量由当前选峰阈值(σ)决定。\n"
+            "\n"
+            "• 一致性优先:按留出采样点残差排。\n"
+            "  把一部分已采样的点留出来不参与重建,\n"
+            "  再比较重建值与实测值(残差越小越好,\n"
+            "  相关系数越接近 1 越好),与峰数无关。\n"
+            "  适合先要「谱形与强度可信」;\n"
+            "  没有可用留出表时退化为按拟合残差排。"
         )
         fit_combo_width(self.rank_combo)  # 修省略号(0.2.199-补29hz-修14)
         button_row.addWidget(self.rank_label)
