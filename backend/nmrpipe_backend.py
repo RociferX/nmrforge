@@ -1595,6 +1595,8 @@ class NMRPipeBackend:
             out_ext = {1: "ft1", 2: "ft2"}.get(experiment.ndim, "ft3")
             candidates: list[dict[str, Any]] = []
             # A 方案(0.2.199-补29hz-修6):留出采样点的数据一致性残差。
+            # 修23(用户):只有在「一致性优先」口径下调用方才会传 holdout_ratio,
+            # 此时候选用留出(train)脚本重建,这里按留出点比较实测/重建。
             # 索引映射由实物相关性实测确定(scale=1.0/offset=0):
             #   留出 (k0,k1) → 平面内 [k1, k0](平面=直接维点,两轴=间接维)
             if holdout_file and holdout_coords:
@@ -1690,11 +1692,13 @@ class NMRPipeBackend:
                 metrics: dict[str, Any] = {}
                 _smile_log = scan_dir / "smile.log"
 
-                # ① 全采样重建:峰计数/质量分(用户 2026-09-11:「峰计数应该用全部点做
-                # smile,一致性才是留出部分」)——模板即终跑脚本(不再用 train 表)
+                # 运行方式由调用方按**排序口径**决定(用户 2026-09-11:「应该按照需要的
+                # 排序方法去选择全跑还是留出一部分,而不是跑两次」):
+                #   净真峰优先 → 传进来的 script 是全采样脚本(峰数=终谱口径);
+                #   一致性优先 → 传进来的 script 带 nuslist_train(留出点不参与重建)。
                 task = scan_dir / f"step2_{tag}.com"
                 task.write_text(
-                    _scan_suffix(prod_scripts[index - 1], f"{tag}.{out_ext}"),
+                    _scan_suffix(script, f"{tag}.{out_ext}"),
                     encoding="utf-8",
                     newline="\n",
                 )
@@ -1744,29 +1748,18 @@ class NMRPipeBackend:
                         metrics = {"error": str(exc)}
                 elif not ok:
                     metrics = {"error": f"重构失败(rc={run2.returncode})"}
-                if delete_spectra:
-                    spectrum.unlink(missing_ok=True)
-                logs.append(f"{tag}: 全采样 rc={run2.returncode} 指标={metrics}")
-
-                # ② 留出重建:只用来算一致性残差(不参与峰计数),所以候选跑两次
-                if holdout_file and holdout_coords and ok:
-                    ho_task = scan_dir / f"step2_{tag}_holdout.com"
-                    ho_task.write_text(
-                        _scan_suffix(script, f"{tag}_ho.{out_ext}"),
-                        encoding="utf-8",
-                        newline="\n",
-                    )
-                    _smile_log.unlink(missing_ok=True)
-                    run_ho = runtime.run(
-                        ["csh", ho_task.name], cwd=str(scan_dir), timeout=timeout
-                    )
+                # 留出口径(一致性优先)才算:留出点比较实测 vs 重建
+                if holdout_file and holdout_coords:
                     try:
                         metrics.update(_holdout_residual())
                     except Exception as exc:  # noqa: BLE001 - 残差失败不阻断扫描
                         logs.append(f"留出残差计算失败: {exc}")
-                    if delete_spectra:
-                        (scan_dir / f"{tag}_ho.{out_ext}").unlink(missing_ok=True)
-                    logs.append(f"{tag}: 留出 rc={run_ho.returncode}")
+                if delete_spectra:
+                    spectrum.unlink(missing_ok=True)
+                logs.append(
+                    f"{tag}: rc={run2.returncode} "
+                    f"({'留出重建' if holdout_file else '全采样重建'}) 指标={metrics}"
+                )
 
                 candidates.append(
                     {
@@ -1778,6 +1771,10 @@ class NMRPipeBackend:
                     }
                 )
 
+            if holdout_file:
+                logs.append("扫描运行方式:留出重建(一致性口径;峰数/质量分来自留出重建)")
+            else:
+                logs.append("扫描运行方式:全采样重建(净真峰口径;峰数/质量分来自终谱口径)")
             return {
                 "success": True,
                 "message": f"完成 {len(candidates)} 组扫描",

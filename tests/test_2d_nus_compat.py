@@ -299,62 +299,72 @@ def test_recover_dense_2d_nus_unknown_dtype_refused(tmp_path: Path) -> None:
     assert points is None
     assert any("DTYPE" in line for line in logs)
 
-def test_smile_scan_runs_full_then_holdout(
-    tmp_path: Path, monkeypatch
-) -> None:
-    """候选跑两次:① 全采样重建出峰计数(排序依据)② 留出重建只算一致性。
+def test_smile_scan_runs_chosen_mode_once(tmp_path: Path, monkeypatch) -> None:
+    """按排序口径选运行方式:净真峰→全采样跑;一致性→留出跑;每候选只跑一次。
 
-    用户 2026-09-11:「峰计数应该用全部点做 smile,一致性才是留出部分」。
+    用户 2026-09-11:「应该按照需要的排序方法去选择全跑还是留出一部分,而不是跑两次」。
     """
     from backend import nmrpipe_backend as nb
     from backend.runtime import CompletedProcess
 
     exp = read_dataset(BRUKER / "nus_2d")
-    ran: list[str] = []
 
-    def _fake_reconstruct(self, experiment, params=None, **kwargs):
-        params = dict(params or {})
-        sample = str(params.get("nuslist_file") or "nuslist")
-        return {
-            "success": True,
-            "message": "fake",
-            "logs": [],
-            "script": (
-                "#!/bin/csh\nmkdir -p nus2d\n"
-                f"nmrPipe -in e.fid | nmrPipe -fn SMILE -nDim 2 \\\n"
-                f"  -sample {sample} -sampleCount 3 \\\n"
-                "| pipe2xyz -out nus2d/recon.ft1 -x -ov \\\n"
-                "  -out cand.ft2 -ov\n"
-            ),
-            "script_path": "",
-            "work_dir": "",
-        }
+    def _install(monkeypatch, ran: list[str]) -> None:
+        def _fake_reconstruct(self, experiment, params=None, **kwargs):
+            params = dict(params or {})
+            sample = str(params.get("nuslist_file") or "nuslist")
+            return {
+                "success": True,
+                "message": "fake",
+                "logs": [],
+                "script": (
+                    "#!/bin/csh\nmkdir -p nus2d\n"
+                    "nmrPipe -in e.fid | nmrPipe -fn SMILE -nDim 2 \\\n"
+                    f"  -sample {sample} -sampleCount 3 \\\n"
+                    "| pipe2xyz -out nus2d/recon.ft1 -x -ov \\\n"
+                    "  -out cand.ft2 -ov\n"
+                ),
+                "script_path": "",
+                "work_dir": "",
+            }
 
-    class _FakeCsh:
-        def run(self, argv, *, cwd=None, timeout=3600, on_line=None):
-            script = (Path(cwd) / argv[-1]).read_text(encoding="utf-8")
-            ran.append(script)
-            out = None
-            for line in script.splitlines():
-                if "-out " in line:
-                    out = line.split("-out ", 1)[1].split()[0]
-            if out:
-                (Path(cwd) / out).write_bytes(b"x")
-            return CompletedProcess("", "", "", 0)
+        class _FakeCsh:
+            def run(self, argv, *, cwd=None, timeout=3600, on_line=None):
+                script = (Path(cwd) / argv[-1]).read_text(encoding="utf-8")
+                ran.append(script)
+                out = None
+                for line in script.splitlines():
+                    if "-out " in line:
+                        out = line.split("-out ", 1)[1].split()[0]
+                if out:
+                    (Path(cwd) / out).write_bytes(b"x")
+                return CompletedProcess("", "", "", 0)
 
-    monkeypatch.setattr(nb.NMRPipeBackend, "reconstruct_nus", _fake_reconstruct)
-    monkeypatch.setattr(nb, "CshRuntime", lambda: _FakeCsh())
+        monkeypatch.setattr(nb.NMRPipeBackend, "reconstruct_nus", _fake_reconstruct)
+        monkeypatch.setattr(nb, "CshRuntime", lambda: _FakeCsh())
 
-    backend = nb.NMRPipeBackend(nmrpipe_bin="")
-    scan = backend.smile_scan(
-        exp, {}, [{"nsigma": 3.0, "thresh": 0.9}], work_dir=tmp_path / "scan",
-        holdout_ratio=0.5,
+    # 净真峰口径(holdout_ratio=0)→ 全采样跑一次
+    ran_full: list[str] = []
+    _install(monkeypatch, ran_full)
+    scan_full = nb.NMRPipeBackend(nmrpipe_bin="").smile_scan(
+        exp, {}, [{"nsigma": 3.0, "thresh": 0.9}],
+        work_dir=tmp_path / "scan_full", holdout_ratio=0.0,
     )
+    smile_full = [s for s in ran_full if "-fn SMILE" in s]
+    assert len(smile_full) == 1  # 每候选一次
+    assert "nuslist_train" not in smile_full[0]
 
-    assert scan["success"] is True
-    smile_runs = [s for s in ran if "-fn SMILE" in s]
-    assert len(smile_runs) == 2, ran  # 每候选两次:全采样 + 留出
-    assert "nuslist_train" not in smile_runs[0]  # 第一次=全采样(峰计数)
-    assert "nuslist_train" in smile_runs[1]  # 第二次=留出(一致性)
-    # 上榜脚本仍是全采样(重跑用)
-    assert "nuslist_train" not in scan["candidates"][0]["script"]
+    # 一致性口径(holdout_ratio>0)→ 留出跑一次
+    ran_ho: list[str] = []
+    _install(monkeypatch, ran_ho)
+    scan_ho = nb.NMRPipeBackend(nmrpipe_bin="").smile_scan(
+        exp, {}, [{"nsigma": 3.0, "thresh": 0.9}],
+        work_dir=tmp_path / "scan_ho", holdout_ratio=0.5,
+    )
+    smile_ho = [s for s in ran_ho if "-fn SMILE" in s]
+    assert len(smile_ho) == 1  # 每候选一次
+    assert "nuslist_train" in smile_ho[0]
+
+    # 两种口径下,上榜脚本都是全采样(重跑用)
+    for scan in (scan_full, scan_ho):
+        assert "nuslist_train" not in scan["candidates"][0]["script"]

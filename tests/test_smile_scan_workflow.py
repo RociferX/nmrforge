@@ -97,7 +97,18 @@ def test_scan_ranks_and_deletes_candidates(tmp_path: Path) -> None:
     assert len(result["scripts"]) == 3
     assert all(text for text in result["scripts"].values())
     # 0.2.199-补29hz-修10:扫描链路默认带留出集(无全采样参考时的真伪判据)
-    assert backend.holdout_ratio == SMILE_HOLDOUT_RATIO
+    assert backend.holdout_ratio == 0.0  # 净真峰口径 → 全采样跑
+
+    # 一致性口径 → 传留出比例(每组用留出后的点重建)
+    backend_consistency = _FakeBackend()
+    scan_smile_parameters(
+        exp,
+        backend_consistency,
+        {},
+        scan_dir=scan_dir / "consistency",
+        rank_mode="consistency",
+    )
+    assert backend_consistency.holdout_ratio == SMILE_HOLDOUT_RATIO
 
 
 def test_write_scan_output_layout(tmp_path: Path) -> None:

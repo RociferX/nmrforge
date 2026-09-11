@@ -66,9 +66,9 @@ SMILE_GRID_MIN, SMILE_GRID_MAX = 2, 5
 SMILE_GRID_DEFAULT = 4  # 0.2.199-补29hz-修5(用户):默认 4x4=16 组
 # 0.2.199-补29hz-修10(用户):留出采样点残差默认每 4 个采样点留 1 个(25%),
 # 用于「没有全采样参考时判断真伪峰」的排序依据。
-# 0.2.199-补29hz-修22(用户):**峰计数/质量分必须用全采样重建**(「峰计数应该用
-# 全部点做 smile,一致性才是留出部分」)——所以每个候选用全采样脚本跑一次出峰,
-# 再用留出(train)脚本跑一次算一致性残差;候选耗时约为原来的 2 倍。
+# 0.2.199-补29hz-修23(用户):按排序口径选运行方式(每候选一次)——
+#   净真峰优先:全采样重建,峰计数/质量分就是终谱口径(不做留出);
+#   一致性优先:留出重建,留出点不参与重建,残差作排序依据。
 SMILE_HOLDOUT_RATIO = 0.25
 # 0.2.199-补29hz-修16(用户):这一步的目的是「尽量重构出更多真峰」,所以候选评估
 # 用**独立的低阈值**(3σ,峰检测算法默认档),与「峰挑选」步骤的阈值(默认 35σ,
@@ -786,12 +786,16 @@ def scan_smile_parameters(
     base = dict(base_params or {})
     sign_mode = smile_scan_sign_mode(experiment)
     edge_margin = smile_scan_edge_margin()
-    holdout_ratio = float(base.get("holdout_ratio", SMILE_HOLDOUT_RATIO) or 0.0)
+    mode = str(rank_mode or "true_peaks").lower()
+    # 修23(用户):按需要的排序方法选运行方式(每候选只跑一次)——
+    #   净真峰优先 → 全采样跑(峰数/质量分即终谱口径,不留出);
+    #   一致性优先 → 留出跑(留出点不参与重建,残差作排序依据)。
+    holdout_ratio = 0.0
+    if mode == "consistency":
+        holdout_ratio = float(
+            base.get("holdout_ratio", SMILE_HOLDOUT_RATIO) or 0.0
+        )
     est_group, est_total = estimate_scan_seconds(experiment, len(combos))
-    if holdout_ratio > 0:
-        # 修22:候选跑两次(全采样出峰 + 留出算一致性),估算同步 ×2
-        est_group *= 2.0
-        est_total *= 2.0
     started = time.time()
     _first_done: list[float] = []
 
@@ -923,10 +927,8 @@ def scan_smile_parameters(
     #   "true_peaks"(默认):净真峰(稳定峰−疑伪峰)优先,再稳定峰/平均 S/N/残差;
     #   "consistency":留出残差优先(对未参与重建的采样点预测更准),再拟合残差、
     #                  净真峰、稳定峰、平均 S/N、质量分。
-    mode = str(rank_mode or "true_peaks").lower()
     if mode == "consistency":
-        rows.sort(
-            key=lambda r: (
+        rows.sort(            key=lambda r: (
                 -float(r.get("holdout_rmse", 0.0) or 0.0),
                 -float(r.get("smile_rms_ratio", 0.0) or 0.0),
                 r["net_peaks"],
