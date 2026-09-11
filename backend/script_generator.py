@@ -1060,7 +1060,7 @@ def generate_2d_nus_script(
             *direct_stages,
             "| nmrPipe -fn TP \\",
             "| nmrPipe -fn SMILE -nDim 2 \\",
-            f"           -sample None -nThread {nthread} \\",
+            f"           -sample {nuslist or 'None'} -nThread {nthread} \\",
             f"           -sampleCount {nuslist_count} -nSigma {nsigma:g} "
             f"-off 0 0 -report {smile_report} \\",
             *(

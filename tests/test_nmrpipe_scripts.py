@@ -255,7 +255,10 @@ def test_2d_nus_script(bruker_dir: Path) -> None:
     assert script.startswith("#!/bin/csh")
     assert "nmrPipe -in exp.fid \\" in script
     assert "| nmrPipe -fn SMILE -nDim 2" in script
-    assert "-sample None" in script
+    assert "-sample nuslist" in script   # 有采样表就显式交给 SMILE(2D 单文件同样)
+    assert "-sample None" in generate_2d_nus_script(
+        exp, in_file="exp.fid", nuslist="", out_file="exp.ft2"
+    )
     assert "-sampleCount 5" in script
     assert "-maxIter 1500" in script  # 5/128=3.9% -> 最低档 1500
     assert "-xCT" not in script  # 普通实验不加交叉项参数(仅 CT 实验加)

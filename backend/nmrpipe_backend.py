@@ -825,8 +825,14 @@ class NMRPipeBackend:
                 # 数据是密集的(只采到前 N 个复点)、没有采样表,也不该走切片流;
                 # 间接点数由转换后的 fid 推出,SMILE 仍按 -xT 目标网格重建。
                 nuslist_count = self._fid_indirect_points(fid_file, experiment)
+                # 显式写采样表(前 N 个复点),SMILE 才知道哪些点在网格上;
+                # 不做切片流,只交一张表(2D 单文件形态)
+                (work / "nuslist").write_text(
+                    "\n".join(str(i) for i in range(nuslist_count)) + "\n",
+                    encoding="utf-8",
+                )
                 logs.append(
-                    "2D NUS:无 nuslist 采样表,按密集输入 + 隐式网格重建"
+                    "2D NUS:无采样表,按密集输入重建并生成前 N 个复点的采样表"
                     f"(间接复点 {nuslist_count})"
                 )
             else:
@@ -1063,7 +1069,10 @@ class NMRPipeBackend:
         script = script_fn(
             experiment,
             in_file=in_file,
-            nuslist=str(params.get("nuslist_file") or "nuslist"),
+            nuslist=str(
+                params.get("nuslist_file")
+                or ("nuslist" if (work / "nuslist").is_file() else "")
+            ),
             out_file=out_file,
             nthread=nthread,
             nuslist_count=int(params.get("nuslist_count") or nuslist_count),
@@ -2060,7 +2069,10 @@ class NMRPipeBackend:
         script = script_fn(
             experiment,
             in_file=in_file,
-            nuslist=str(params.get("nuslist_file") or "nuslist"),
+            nuslist=str(
+                params.get("nuslist_file")
+                or ("nuslist" if (work / "nuslist").is_file() else "")
+            ),
             out_file=out_light,
             nthread=nthread,
             nuslist_count=len(sub),
