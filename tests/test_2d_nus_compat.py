@@ -121,21 +121,27 @@ def _make_2d_nus_dataset(
     keep: list[int],
     x_n: int = 2048,
     td_rows: int = 256,
+    dtype_code: int = 0,
 ) -> Path:
-    """造 2D NUS 数据集(无 nuslist):ser 有 rows 行,keep 里的复点非零。"""
+    """造 2D NUS 数据集(无 nuslist):ser 有 rows 行,keep 里的复点非零。
+
+    dtype_code:TopSpin DTYPE(0=int32 / 1=float64 / 2=float32),写入 acqus。
+    """
     import numpy as np
 
-    ds = root / f"ds_{rows}_{len(keep)}"
+    ds = root / f"ds_{rows}_{len(keep)}_{dtype_code}"
     ds.mkdir(parents=True, exist_ok=True)
     (ds / "acqus").write_text(
-        f"##$TD= {x_n}\n##$FnMODE= 0\n##$NusAMOUNT= 25\n##$NusTD= 0\n",
+        f"##$TD= {x_n}\n##$FnMODE= 0\n##$NusAMOUNT= 25\n##$NusTD= 0\n"
+        f"##$DTYPE= {dtype_code}\n",
         encoding="utf-8",
     )
     (ds / "acqu2s").write_text(
         f"##$TD= {td_rows}\n##$FnMODE= 5\n##$NusTD= {td_rows}\n##$NUC1= <15N>\n",
         encoding="utf-8",
     )
-    data = np.zeros((rows, x_n), dtype="<i4")
+    # 未知 DTYPE 用途例:数据按 int32 写,判定应因未知 DTYPE 直接拒绝
+    data = np.zeros((rows, x_n), dtype={0: "<i4", 1: "<f8", 2: "<f4"}.get(dtype_code, "<i4"))
     for k in keep:
         if 2 * k + 1 < rows:
             data[2 * k] = 7
@@ -261,3 +267,34 @@ def test_finalize_2d_multi_slice_falls_back_to_stream(tmp_path: Path) -> None:
     assert ok is True
     assert (work / "fid").is_dir()
     assert any("切片式 fid" in line for line in logs)
+
+def test_recover_dense_2d_nus_float64(tmp_path: Path) -> None:
+    """DTYPE=1(float64):按 8 字节/采样值算行数并读对(以前写死 int32 会误判行数)。"""
+    keep = [0, 3, 40, 127]
+    ds = _make_2d_nus_dataset(tmp_path, rows=256, keep=keep, dtype_code=1)
+
+    points, logs = _recover(ds)
+
+    assert points == keep
+    assert any("f8" in line for line in logs)
+
+
+def test_recover_dense_2d_nus_float32(tmp_path: Path) -> None:
+    """DTYPE=2(float32):同样按元素字节数判定。"""
+    keep = [1, 9, 64]
+    ds = _make_2d_nus_dataset(tmp_path, rows=256, keep=keep, dtype_code=2)
+
+    points, logs = _recover(ds)
+
+    assert points == keep
+    assert any("f4" in line for line in logs)
+
+
+def test_recover_dense_2d_nus_unknown_dtype_refused(tmp_path: Path) -> None:
+    """DTYPE 未知(9):不猜,判定失败 → 报缺采样表。"""
+    ds = _make_2d_nus_dataset(tmp_path, rows=256, keep=[0], dtype_code=9)
+
+    points, logs = _recover(ds)
+
+    assert points is None
+    assert any("DTYPE" in line for line in logs)

@@ -13,6 +13,7 @@ from pathlib import Path
 
 import numpy as np
 
+from core.data.bruker_dtype import UnknownBrukerDtype, point_bytes, sample_dtype
 from core.data.internal_data_model import (
     AxisRole,
     Dimension,
@@ -83,10 +84,9 @@ def _dim(experiment: Experiment, logical_axis: str) -> Dimension:
     raise BrukerDataError(f"数据模型缺少 {logical_axis} 维度")
 
 
-def _read_complex(path: Path, byterda: int) -> np.ndarray:
-    """读取 int32 实虚交错数据为复数组（Bruker DQD 存储）。"""
-    dt = np.dtype(("<" if byterda == 0 else ">") + "i4")
-    raw = np.fromfile(path, dtype=dt)
+def _read_complex(path: Path, dtype: np.dtype) -> np.ndarray:
+    """读取实虚交错数据为复数组（Bruker DQD 存储,元素类型由 DTYPE 决定）。"""
+    raw = np.fromfile(path, dtype=dtype)
     pairs = raw.reshape(-1, 2)
     return pairs[:, 0] + 1j * pairs[:, 1]
 
@@ -116,12 +116,18 @@ def read_data(experiment: Experiment) -> BrukerData:
     except (TypeError, ValueError):
         byterda = 0
     byte_order = "little" if byterda == 0 else "big"
+    try:
+        # DTYPE:0=int32 / 1=float64 / 2=float32(未知值不猜,显式报错)
+        dt = sample_dtype(acqus)
+        complex_bytes = point_bytes(acqus)
+    except UnknownBrukerDtype as exc:
+        raise BrukerDataError(str(exc)) from exc
     is_nus = experiment.sampling.mode is SamplingMode.NUS
 
     if ndim == 1:
         f2 = _dim(experiment, "F2")
-        _check_size(data_file, f2.td * 8, is_nus)
-        matrix = _read_complex(data_file, byterda).reshape(-1)
+        _check_size(data_file, f2.td * complex_bytes, is_nus)
+        matrix = _read_complex(data_file, dt).reshape(-1)
         layout = {"F2": DimensionLayout(td=f2.td, mult=1, fnmode=0, n_fids=1)}
         return BrukerData(
             matrix=matrix, layout=layout, data_file=data_file.name, byte_order=byte_order
@@ -133,8 +139,8 @@ def read_data(experiment: Experiment) -> BrukerData:
         m1 = _mult_for(_fnmode(experiment, "F1"))
         n_fids = f1.td * m1
         points = f2.td
-        _check_size(data_file, n_fids * points * 8, is_nus)
-        matrix = _read_complex(data_file, byterda).reshape(n_fids, points)
+        _check_size(data_file, n_fids * points * complex_bytes, is_nus)
+        matrix = _read_complex(data_file, dt).reshape(n_fids, points)
         layout = {
             "F1": DimensionLayout(
                 td=f1.td, mult=m1, fnmode=_fnmode(experiment, "F1"), n_fids=n_fids
@@ -156,9 +162,9 @@ def read_data(experiment: Experiment) -> BrukerData:
     n_f2 = f2.td * m2
     n_fids = n_f1 * n_f2
     points = f3.td
-    _check_size(data_file, n_fids * points * 8, is_nus)
+    _check_size(data_file, n_fids * points * complex_bytes, is_nus)
     matrix = np.transpose(
-        _read_complex(data_file, byterda).reshape(n_f2, n_f1, points),
+        _read_complex(data_file, dt).reshape(n_f2, n_f1, points),
         (1, 0, 2),
     )
     layout = {

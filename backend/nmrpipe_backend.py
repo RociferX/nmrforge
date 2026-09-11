@@ -318,6 +318,16 @@ class NMRPipeBackend:
         ser 缺失时回退用已转换的 fid(同样保留全格行)。
         """
         from backend.script_generator import _fnmode, _mult_for, effective_td
+        from core.data.bruker_dtype import UnknownBrukerDtype, sample_dtype
+
+        acqus = (experiment.acquisition_parameters or {}).get("acqus", {})
+        try:
+            # ser 元素类型由 DTYPE/BYTORDA 决定(int32/float64/float32),不能写死
+            dt = sample_dtype(acqus)
+        except UnknownBrukerDtype as exc:
+            logs.append(f"2D NUS 判定:{exc}")
+            return None
+        item_bytes = int(dt.itemsize)
 
         td = effective_td(experiment)  # 2D:[直接维, 间接维复点网格]
         grid_complex = max(1, int(td[1])) if len(td) > 1 else 0
@@ -337,12 +347,14 @@ class NMRPipeBackend:
         src = Path(raw_dir) / "ser"
         if src.is_file():
             size = src.stat().st_size
-            if size % (4 * x_n):
+            per_row = item_bytes * x_n
+            if size % per_row:
                 logs.append(
-                    f"2D NUS 判定:ser 大小 {size} 不是「直接维 {x_n} × int32」的整数倍,无法判断"
+                    f"2D NUS 判定:ser 大小 {size} 不是「直接维 {x_n} × {item_bytes} 字节"
+                    f"({dt.str[1:]})" + "」的整数倍,无法判断"
                 )
                 return None
-            rows = size // (4 * x_n)
+            rows = size // per_row
             if rows < rows_declared:
                 logs.append(
                     f"2D NUS 判定:ser 只有 {rows} 行 < 声明网格 {rows_declared} 行 → "
@@ -355,7 +367,7 @@ class NMRPipeBackend:
                     "元数据与文件不一致,无法判断"
                 )
                 return None
-            table = np.fromfile(src, dtype="<i4").reshape(rows, x_n)
+            table = np.fromfile(src, dtype=dt).reshape(rows, x_n)
         elif fid_file is not None and Path(fid_file).is_file():
             import nmrglue as ng
 
@@ -392,7 +404,7 @@ class NMRPipeBackend:
             )
         else:
             logs.append(
-                f"2D NUS 判定:密集模型(全格 {rows}/{rows_declared} 行),从零模式恢复"
+                f"2D NUS 判定:密集模型(全格 {rows}/{rows_declared} 行,{dt.str[1:]}),从零模式恢复"
                 f"采样点 {len(points)}/{grid_complex} 复点"
                 f"({100.0 * len(points) / grid_complex:.1f}%)"
             )

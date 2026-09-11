@@ -25,10 +25,23 @@ from pathlib import Path
 
 import numpy as np
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from core.data.bruker_dtype import sample_dtype  # noqa: E402
+
 
 def _param(text: str, key: str) -> int:
     match = re.search(r"^##\$\s*" + re.escape(key) + r"\s*=\s*(\S+)", text, re.M)
     return int(match.group(1)) if match else 0
+
+
+def _parse_acqus(text: str) -> dict[str, str]:
+    """从 acqus 文本取标量键值(DTYPE/BYTORDA 等)。"""
+    out: dict[str, str] = {}
+    for line in text.splitlines():
+        m = re.match(r"^##\$\s*([A-Za-z0-9_]+)\s*=\s*(\S+)", line)
+        if m:
+            out[m.group(1)] = m.group(2)
+    return out
 
 
 def _set_param(text: str, key: str, value: int) -> str:
@@ -64,17 +77,22 @@ def main(argv: list[str] | None = None) -> int:
     acqus = (dst / "acqus").read_text(encoding="utf-8", errors="replace")
     fnmode = _param(acqu2s, "FnMODE")
     mult = 2 if fnmode in (0, 1, 2, 4, 5, 6) else 1  # States/TPPI 超复数分量
-    # 直接维每行的 int32 数 = acqus TD(NMRPipe/bruk2pipe 的 xN 约定)
+    # 直接维每行的采样值个数 = acqus TD(NMRPipe/bruk2pipe 的 xN 约定);
+    # 每个采样值的字节数由 DTYPE/BYTORDA 决定(int32/float64/float32)
+    dt = sample_dtype(_parse_acqus(acqus))
     x_n = _param(acqus, "TD")
     if x_n <= 0:
         print(f"acqus TD 无效: {x_n}")
         return 1
-    ser = np.fromfile(src / "ser", dtype="<i4")
-    ser_int32 = ser.size  # ser 已按 int32 读出(下方复用)
-    if ser_int32 % x_n:
-        print(f"ser 大小与直接维 TD 不符: {ser_int32} 不是 {x_n} 的整数倍")
+    ser = np.fromfile(src / "ser", dtype=dt)
+    ser_points = int(ser.size)  # 采样值个数(不假定 int32)
+    if ser_points % x_n:
+        print(
+            f"ser 大小与直接维 TD 不符: {ser_points} 个采样值不是 {x_n} 的整数倍"
+            f"(元素类型 {dt.str[1:]})"
+        )
         return 1
-    rows_file = ser_int32 // x_n  # 文件里实际存在的增量(行)数
+    rows_file = ser_points // x_n  # 文件里实际存在的增量(行)数
     td_rows = _param(acqu2s, "TD")  # acqu2s TD:全采样源的增量(行)数
     # 0.2.199-补29hz-修11:网格用 **acqu2s TD**(与程序的 2D 约定一致:
     # `script_generator.effective_td` 对 2D 取 F1 TD // 超复数分量,不采信 NusTD);
@@ -111,7 +129,7 @@ def main(argv: list[str] | None = None) -> int:
 
     fids = ser.reshape(rows_file, x_n)  # (增量行, 直接维 int32)
     rows = [mult * p + k for p in points for k in range(mult)]
-    fids[np.array(rows, dtype=int)].astype("<i4").tofile(dst / "ser")
+    fids[np.array(rows, dtype=int)].astype(dt).tofile(dst / "ser")
 
     acqu2s = _set_param(acqu2s, "NusTD", nus_td)
     acqus = _set_param(acqus, "NusAMOUNT", round(100 * opts.points / grid))
@@ -125,7 +143,7 @@ def main(argv: list[str] | None = None) -> int:
         f"({100*opts.points/grid:.1f}%)"
     )
     print(f"  nuslist 前 8 行: {(dst / 'nuslist').read_text().splitlines()[:8]}")
-    print(f"  ser: {len(rows)} 增量行 × {x_n} int32 = {new_size} 字节")
+    print(f"  ser: {len(rows)} 增量行 × {x_n} {dt.str[1:]} = {new_size} 字节")
     return 0
 
 
