@@ -1,5 +1,20 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29hz-修17(2026-09-11,用户):SMILE 优化/扫描采用终跑直接维范围(final_ext_*)
+- 现象(用户):「smile 优化没有用终脚本的直接维范围吗,为什么会显示内存不够,我设置的范围是够的」;
+- 根因(VM 实测 sampleJ HNCA 3D NUS):SMILE 优化/扫描直接调 `reconstruct_nus`(不经
+  unified_route),参数里带的是 GUI 的 `final_ext_lo`/`final_ext_hi`(+`apply_ext_to_opt`),
+  而 `reconstruct_nus` 只读 `ext_lo`/`ext_hi` → 退回默认宽窗 10.5-6.5;护栏按宽窗估算:
+  峰值约 22692 MB > 可用 13495 MB×0.85 → 把直接维填零从 2×TD 降到 1×TD(内存更小的机器上
+  直接报「内存不够」)。同一问题也让扫描写出的 Rank1 脚本窗口与正常出谱不一致;
+- 解决:新增 `backend.nmrpipe_backend.apply_final_ext_params(params)` —— 语义与
+  `workflow/phase_routes` 的 `_split_final_ext`/`_apply_final_ext` 一致:`apply_ext_to_opt`
+  关闭(「仅终跑」)时不动优化窗口;显式 `ext_lo`/`ext_hi` 优先;`reconstruct_nus` 入口调用
+  并写日志「直接维范围:终跑范围已用于优化/重构(ext_lo=…, ext_hi=…)」;
+- 真机复测:`final_ext_lo/hi=8.5/7.5` → 脚本 EXT 8.5-7.5、护栏不再降直接维填零;
+  `apply_ext_to_opt=0` → 仍用默认窗口(符合「仅终跑」语义);显式 ext_* 与默认路径不变;
+- 测试:新增 tests/test_final_ext_params.py(映射 / 只填一端 / 仅终跑不映射 / 显式优先 / 空值 no-op);
+
 ## 0.2.199-补29hz-修16(2026-09-11,用户):SMILE 候选评估用独立低阈值(不跟选峰步骤的 35σ)
 - 用户:「SMILE 这一步的选峰阈值肯定不能设置这么高,因为这一步是为了尽量重构出多真峰」;
 - 核实:候选评估走 `peak_detection.detect(arr)` 的**默认档**(3σ、仅正峰、不排轴峰),
