@@ -1,5 +1,50 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29hz-修10(2026-09-11,用户):2D 留出采样点残差 + 扫描链路接上 holdout
+- 用户:2D 按与 3D 同样的思路做,2D NUS 可以由全采样自造;约束「2D 应该不会有切片流」;
+- 修8/修9 之后 2D 单文件路径已有显式采样表,原先「2D 无采样表 → 留出残差不可定义」的
+  限制解除,本轮补齐 2D 留出残差并接进排序链路;
+- 映射实测(VM,/tmp 自造 2D NUS):直接维留档 `nus2d/direct.ft1` 与 SMILE 输出
+  `nus2d/recon.ft1` 的对应是「复点 k → 行 2k(实)/2k+1(虚) ↔ recon 第 k 列」,
+  相关系数 1.000(留出点比对即用此);
+- `script_generator.build_2d_direct_only_script`:把 2D 终跑脚本截到「直接维处理」为止
+  (SMILE 前的 TP 换成 `pipe2xyz -out nus2d/direct.ft1 -x -ov`),2D 没有切片流靠它留档;
+- `smile_scan`:2D + 留出时先跑该留档脚本;留出点解析放宽到单列(2D nuslist = 复点索引);
+  `_holdout_residual` 增 2D 分支;`holdout_planes` 改记 units;密集 2D 没有采样表文件时
+  先跑一次 `reconstruct_nus(script_only=True)` 生成 `nuslist` 再拆留出点(否则整段被跳过);
+- `workflow/smile_optimize.SMILE_HOLDOUT_RATIO = 0.25`:扫描默认带留出集(此前 holdout_ratio
+  只是后端参数、工作流根本没传 → 排序表 holdout 列恒为 0);扫描用留出集评分,「按 Rank1
+  重跑」仍用全采样脚本;
+- 另修:**SMILE 扫描每轮 RMS 指标丢失**——SMILE 每轮重写 smile.log,且轮次间文件大小会涨
+  也会跌;原实现按「上一轮字节数」偏移读取、只在更小时才从头读,于是大小变大时就只读到尾部
+  (实测第 3 轮 smile_rms_ratio 缺失、smile_planes 只有 42/1024)。改为每轮开跑前先删旧日志、
+  跑完整读本轮(并以最后一次「SMILE Version」行切掉可能的追加残留);
+- 真机复核:2D 密集(/tmp/nus2d_dense2,4 组)nSigma3 留出 0.0797/corr 0.51、nSigma7
+  0.0949/0.003,RMS 比 0.9135/1.0 全在;2D 稀疏(/tmp/nus2d_synth)同样出指标;
+  3D sampleC(2 组,holdout 0.25)nSigma7 留出 0.0334、nSigma3 0.1157(与修6 结论一致,未回归);
+- 测试:新增 tests/test_2d_nus_compat.py(2D 强制单文件 / 3D 保留切片 / 直接维留档脚本);
+  tests/test_smile_scan_workflow.py 断言工作流默认传 holdout_ratio;两处假后端签名同步。
+
+## 0.2.199-补29hz-修9(2026-09-11,用户):2D 不存在切片流(用户约束)
+- 用户 2026-09-11:「2D 应该不会有切片流,注意兼容」;
+- 根因(VM 实测 /tmp/nus2d_synth,稀疏 ser + nuslist 的 2D NUS):bruker -AUTO 生成 mask
+  形态 fid.com(`-out ./fid/test%03d.fid`);2D 只有一个平面,bruk2pipe 不展开 %03d(写出
+  字面名 test%03d.fid),下游 xyz2pipe Error getting file list → fid.com rc=1、转换直接失败;
+- 解决:`patch_fid_com` 在 ndim==2 时把切片式 `-out` 改回单文件 `./{dataset_id}.fid`
+  (2D 的 SMILE 只需要 nuslist 采样表);3D 切片流是正常形态,原样保留(有测试守);
+  `_MASK_STAGE_RE` 支持管道式 `| nusExpand.tcl -mask`(原先只匹配行首无 `|` 的形态,
+  2D 的 mask 阶段一直没被移除);
+- 清理:删掉扫描切分遗留的死常量(_NUS_DIRECT_SLICE/_NUS_DIRECT_SLICE_IN/_TP_LINE),
+  注释与实现对齐(2D 单文件无切片可切 → smile_scan 整脚本逐组跑、候选各自命名)。
+
+## 0.2.199-补29hz-修8(2026-09-11,用户):2D NUS(无采样表的密集输入)重建打通
+- 用户:2D NUS 可以由全采样自造(用 sampleF 造 25% NUS 做验证数据);
+- 9809d36:2D NUS 放宽 nuslist 门槛——密集输入(ser 保留全网格行)+ 隐式网格,不做切片流;
+  新增 `_fid_indirect_points`(从转换后的 fid 推间接维复点数);
+- 4ca4bd2:采样点数改由 acqus 的 `NusAMOUNT` 推(文件仍保留全网格行数、尾部清零);
+- 7736e65:2D 单文件脚本写显式采样表(前 N 个复点)→ `-sample nuslist` 取代 `-sample None`,
+  SMILE 不再报「内部错误:直接维需加窗」;没有采样表时仍是 None(行为不变)。
+
 ## 0.2.199-补29hz-修7(2026-09-11,用户):SMILE 排序口径可选(净真峰 / 一致性)
 - 用户:排序模式要可切换;
 - 新增 `rank_mode`:`"true_peaks"`(默认,净真峰=稳定峰−疑伪峰 优先,再稳定峰/平均 S/N/
