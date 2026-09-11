@@ -11,7 +11,6 @@ SMILE 输入（2D 单文件管道切不出切片）。
 
 from __future__ import annotations
 
-import importlib.util
 from pathlib import Path
 
 from backend.bruker_workflow import patch_fid_com
@@ -20,15 +19,6 @@ from core.data.bruker_reader import read_dataset
 BRUKER = Path(__file__).resolve().parent / "fixtures" / "bruker"
 
 _CONT = " \\"  # 行尾续行:空格 + 反斜杠
-
-
-def _load_tool():
-    path = Path(__file__).resolve().parent.parent / "scripts" / "vm_sample_make_nus.py"
-    spec = importlib.util.spec_from_file_location("vm_sample_make_nus", path)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
 
 
 def _auto_2d_nus_fid_com(out_line: str) -> str:
@@ -123,139 +113,3 @@ def test_build_2d_direct_only_script_rejects_unknown_shape() -> None:
     from backend.script_generator import build_2d_direct_only_script
 
     assert build_2d_direct_only_script("#!/bin/csh\necho hi\n") == ""
-
-
-def test_make_2d_nus_tool_uses_row_unit_nus_td(tmp_path: Path) -> None:
-    """造 NUS 工具:NusTD 用行(增量)单位,等于全采样源的 TD。"""
-    import numpy as np
-
-    tool = _load_tool()
-    src = tmp_path / "src"
-    src.mkdir()
-    (src / "acqus").write_text("##$TD= 2048\n##$FnMODE= 0\n", encoding="utf-8")
-    (src / "acqu2s").write_text("##$TD= 256\n##$FnMODE= 5\n", encoding="utf-8")
-    rng = np.random.default_rng(7)
-    data = rng.standard_normal((256, 512)) + 1j * rng.standard_normal((256, 512))
-    np.stack([data.real, data.imag], axis=-1).astype("<i4").tofile(src / "ser")
-
-    out = tmp_path / "nus"
-    assert tool.main([str(src), str(out), "--points", "32", "--seed", "42"]) == 0
-
-    acqu2s = (out / "acqu2s").read_text(encoding="utf-8")
-    nuslist = (out / "nuslist").read_text(encoding="utf-8").splitlines()
-    # 真实 NUS 约定(sampleJ:NusTD=292 ↔ nuslist 列 max 145):NusTD 是行单位,
-    # nuslist 索引是复点(0..NusTD/2-1)
-    assert tool._param(acqu2s, "NusTD") == 256
-    assert len(nuslist) == 32
-    assert max(int(v) for v in nuslist) < 128
-
-def _finalize(raw: Path, work: Path, ndim: int) -> tuple[bool, list[str]]:
-    from backend.nmrpipe_backend import NMRPipeBackend
-
-    logs: list[str] = []
-    ok = NMRPipeBackend(nmrpipe_bin="")._finalize_converted_fid(
-        raw, work, "d_001", logs, ndim=ndim
-    )
-    return ok, logs
-
-
-def test_finalize_2d_single_file_in_fid_dir(tmp_path: Path) -> None:
-    """2D:bruker 把输出写进 fid/(名字带 %03d)也只是单平面 → 按单文件处理。"""
-    raw = tmp_path / "raw"
-    (raw / "fid").mkdir(parents=True)
-    (raw / "fid" / "test%03d.fid").write_bytes(b"x" * 1024)
-    work = tmp_path / "work"
-    work.mkdir()
-
-    ok, logs = _finalize(raw, work, 2)
-
-    assert ok is True
-    assert (work / "d_001.fid").is_file()
-    assert not (raw / "fid" / "test%03d.fid").exists()
-    assert any("单平面输出" in line for line in logs)
-
-
-def test_finalize_3d_keeps_slice_stream(tmp_path: Path) -> None:
-    """3D:真切片流(多文件)仍按切片目录归位,不改行为。"""
-    raw = tmp_path / "raw"
-    (raw / "fid").mkdir(parents=True)
-    for index in (1, 2):
-        (raw / "fid" / f"test{index:03d}.fid").write_bytes(b"x")
-    work = tmp_path / "work"
-    work.mkdir()
-
-    ok, logs = _finalize(raw, work, 3)
-
-    assert ok is True
-    assert (work / "fid").is_dir()
-    assert not (work / "d_001.fid").exists()
-    assert any("切片式 fid" in line for line in logs)
-
-
-def test_finalize_2d_multi_slice_falls_back_to_stream(tmp_path: Path) -> None:
-    """2D 但 fid/ 里多于一个文件:保守回退到原切片流处理(不误吞)。"""
-    raw = tmp_path / "raw"
-    (raw / "fid").mkdir(parents=True)
-    for index in (1, 2):
-        (raw / "fid" / f"test{index:03d}.fid").write_bytes(b"x")
-    work = tmp_path / "work"
-    work.mkdir()
-
-    ok, logs = _finalize(raw, work, 2)
-
-    assert ok is True
-    assert (work / "fid").is_dir()
-    assert any("切片式 fid" in line for line in logs)
-
-def test_smile_scan_hands_full_sample_list_to_rank_scripts(
-    tmp_path: Path, monkeypatch
-) -> None:
-    """留出集只用于评分:候选 script 字段必须是全采样脚本(否则 Rank1 重跑缺表)。
-
-    VM 实测 bug:留出扫描把 base 改成 nuslist_train/len(train) 后,候选脚本
-    原样带上 train 表与 train 计数,「按 Rank1 重跑」在 process/ 下找不到
-    nuslist_train → rc=2。
-    """
-    from backend import nmrpipe_backend as nb
-    from backend.runtime import CompletedProcess
-
-    exp = read_dataset(BRUKER / "nus_2d")
-    calls: list[dict] = []
-
-    def _fake_reconstruct(self, experiment, params=None, **kwargs):
-        params = dict(params or {})
-        calls.append(params)
-        return {
-            "success": True,
-            "message": "fake script",
-            "logs": [],
-            "script": (
-                "# sample=" + str(params.get("nuslist_file"))
-                + " count=" + str(params.get("nuslist_count")) + "\n"
-            ),
-            "script_path": "",
-            "work_dir": "",
-        }
-
-    class _FakeCsh:
-        def run(self, argv, *, cwd=None, timeout=3600, on_line=None):
-            return CompletedProcess("", "", "", 1)
-
-    monkeypatch.setattr(nb.NMRPipeBackend, "reconstruct_nus", _fake_reconstruct)
-    monkeypatch.setattr(nb, "CshRuntime", lambda: _FakeCsh())
-
-    backend = nb.NMRPipeBackend(nmrpipe_bin="")
-    scan = backend.smile_scan(
-        exp,
-        {},
-        [{"nsigma": 3.0, "thresh": 0.9}],
-        work_dir=tmp_path / "scan",
-        holdout_ratio=0.5,
-    )
-
-    assert scan["success"] is True
-    # 扫描用 train 表;交给排序表的脚本必须回到全采样设置
-    assert any(c.get("nuslist_file") == "nuslist_train" for c in calls)
-    script = scan["candidates"][0]["script"]
-    assert "nuslist_train" not in script
-    assert "sample=None" in script

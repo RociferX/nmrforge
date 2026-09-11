@@ -32,14 +32,14 @@ def _make_dataset(tmp_path: Path) -> Path:
     (src / "acqu2s").write_text(
         "##$TD= 256\n##$FnMODE= 5\n", encoding="utf-8"
     )
-    points_per_fid = 512
-    n_fids_total = 256  # Bruker TD 已含 States 超复数行(128 复点 × 2)
+    rows_total = 256  # 采集到的增量行(Bruker TD 语义;128 复点 × 2)
+    x_n = 2048  # acqus TD:直接维每行 int32 数
     rng = np.random.default_rng(7)
-    data = rng.standard_normal((n_fids_total, points_per_fid)) + 1j * rng.standard_normal(
-        (n_fids_total, points_per_fid)
+    data = rng.standard_normal((rows_total, x_n // 2)) + 1j * rng.standard_normal(
+        (rows_total, x_n // 2)
     )
     interleaved = np.stack([data.real, data.imag], axis=-1).astype("<i4")
-    interleaved.tofile(src / "ser")
+    interleaved.reshape(rows_total, x_n).tofile(src / "ser")
     return src
 
 
@@ -59,4 +59,4 @@ def test_make_nus_grid_td_div_mult(tmp_path: Path) -> None:
     assert len(nuslist) == 32
     assert nuslist[0] == "0"  # 首点 0:nusExpand -off 不偏移
     ser = np.fromfile(out / "ser", dtype="<i4")
-    assert ser.size == 32 * 2 * 512 * 2  # 采样点 × 超复数 × 点数 × 实虚
+    assert ser.size == 32 * 2 * 2048  # 采样点 × 超复数行 × 直接维 int32
