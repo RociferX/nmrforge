@@ -331,7 +331,15 @@ class SpectrumPanel(QWidget):
         self.lists_row.addWidget(self.expand_button)
         # 0.2.199-补29br:谱图查看器的「文件」「帮助」菜单移到放大按钮右边
         self.file_menu = QMenu(self)
-        self.file_menu.addAction("打开谱图...", self._on_menu_open_spectrum)
+        # 0.2.199-补29hz-修27(用户):「打开谱图」拆两条——第一条打开**当前数据**
+        # 的谱图(与 Pipeline「展示谱图」同一效果;没有谱时明确提示),
+        # 第二条保留原来的任意文件入口。
+        self.open_current_action = self.file_menu.addAction(
+            "打开当前数据谱图", self._on_menu_open_current_spectrum
+        )
+        self.open_any_action = self.file_menu.addAction(
+            "打开任意谱图...", self._on_menu_open_spectrum
+        )
         self.file_menu.addAction("清空谱图", self._on_menu_clear_spectrum)
         self.file_button = QPushButton("文件")
         self.file_button.setMenu(self.file_menu)
@@ -1656,8 +1664,20 @@ class SpectrumPanel(QWidget):
             finally:
                 self._syncing_table_selection = False
 
+    def _on_menu_open_current_spectrum(self) -> None:
+        """文件菜单:打开当前数据的谱图(与 Pipeline「展示谱图」同一效果)。
+
+        用户 2026-09-11:这个按钮很容易在没有谱的时候被点到,必须给明确提示
+        「当前数据还未生成谱图」,而不是默默没反应。
+        """
+        if not self._current_exp_id:
+            InfoDialog.show_info(self, "提示", "当前没有选中数据")
+            return
+        if not self.load_current_spectrum():
+            InfoDialog.show_info(self, "提示", "当前数据还未生成谱图")
+
     def _on_menu_open_spectrum(self) -> None:
-        """文件菜单:打开谱图文件到当前查看器(集成独立查看器入口)。"""
+        """文件菜单:打开任意谱图文件到当前查看器(独立查看器入口)。"""
         path, _ = QFileDialog.getOpenFileName(
             self,
             "打开 NMRPipe 谱图",
@@ -1739,6 +1759,13 @@ class SpectrumPanel(QWidget):
         hsplit.setSizes([max(400, self.width() - right_w), right_w])
         self._expand_splitter = hsplit
         outer.replaceWidget(self._panel_splitter, hsplit)
+        # 0.2.199-补29hz-修26(用户):放大后上方多出一块空白、里面只有「谱图」——
+        # 横向 splitter 只声明「水平可扩展」,面板垂直布局的剩余高度没人吃,
+        # 全被压给顶部标题行(VM 实测 18px → 311px,标题标签同高)。
+        # 显式把拉伸因子给它:标题行回到 sizeHint,绘图区吃满剩余高度。
+        _hsplit_index = outer.indexOf(hsplit)
+        if _hsplit_index >= 0:
+            outer.setStretch(_hsplit_index, 1)
         self._panel_splitter.setVisible(False)
         viewer.setVisible(False)  # 原小绘图区所在容器不显示
         self._expanded = True
@@ -1750,6 +1777,7 @@ class SpectrumPanel(QWidget):
         outer = self.layout()
         viewer = self.viewer
         outer.replaceWidget(self._expand_splitter, self._panel_splitter)
+        # 还原后该位置仍是拉伸项(垂直 splitter 本就会吃掉剩余高度,行为不变)
         self._expand_splitter.setVisible(False)
         self._expand_splitter = None
         self._expand_controls = None

@@ -9,7 +9,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import numpy as np
 import pytest
-from PyQt6.QtWidgets import QApplication, QDialog, QMenu
+from PyQt6.QtWidgets import QApplication, QDialog, QLabel, QMenu
 
 from core.project import ProjectManager
 from gui.log_panel import LogPanel
@@ -571,6 +571,22 @@ def test_main_window_spectrum_expand_toggle(
     assert panel.peak_toolbar_widget.parent() is panel._expand_controls
     assert panel.peak_table.parent() is panel._expand_controls
     assert panel.viewer.isHidden()
+    # 0.2.199-补29hz-修26:放大后顶部标题行不得被撑成空白块
+    window.resize(1200, 800)
+    window.show()
+    QApplication.processEvents()
+    btn.setChecked(False)
+    btn.setChecked(True)
+    QApplication.processEvents()
+    lay = panel.layout()
+    header_item = lay.itemAt(0)
+    title = next(
+        lb for lb in panel.findChildren(QLabel) if lb.text() == "谱图"
+    )
+    assert header_item.geometry().height() <= 40  # 原为 311px(空白块)
+    assert title.height() <= 40
+    assert panel._expand_splitter is not None
+    assert panel._expand_splitter.height() >= panel.height() - 80
     btn.setChecked(False)
     assert btn.text() == "放大"
     assert not window.project_tree.isHidden()
@@ -597,7 +613,8 @@ def test_spectrum_panel_file_help_menus(
     assert row.indexOf(panel.expand_button) < row.indexOf(panel.file_button)
     assert row.indexOf(panel.file_button) < row.indexOf(panel.help_button)
     file_texts = [a.text() for a in panel.file_menu.actions()]
-    assert "打开谱图..." in file_texts and "清空谱图" in file_texts
+    assert "打开当前数据谱图" in file_texts and "清空谱图" in file_texts
+    assert "打开任意谱图..." in file_texts
     help_texts = [a.text() for a in panel.help_menu.actions()]
     assert "操作说明" in help_texts
     panel._on_menu_clear_spectrum()  # 空状态下安全
@@ -1061,6 +1078,43 @@ class _SyncThread:
 
     def start(self) -> None:
         self._target()
+
+def test_spectrum_panel_open_current_data_spectrum(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.2.199-补29hz-修27:菜单拆两条 + 无谱/无数据要有明确提示。"""
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    panel = SpectrumPanel(manager)
+    texts = [a.text() for a in panel.file_menu.actions()]
+    assert texts[:3] == [
+        "打开当前数据谱图",
+        "打开任意谱图...",
+        "清空谱图",
+    ]
+
+    shown: list[str] = []
+    monkeypatch.setattr(
+        "gui.spectrum_panel.InfoDialog.show_info",
+        staticmethod(lambda _parent, _title, text: shown.append(text)),
+    )
+    # ① 没选数据
+    panel.set_context("", "")
+    panel._on_menu_open_current_spectrum()
+    assert shown[-1] == "当前没有选中数据"
+    # ② 选了数据但还没生成谱图(用户实际会点到的场景)
+    panel.set_context("exp_001", "d_001")
+    panel._on_menu_open_current_spectrum()
+    assert shown[-1] == "当前数据还未生成谱图"
+    # ③ 有谱图:与 Pipeline「展示谱图」同效果,直接加载且不弹提示
+    spectra_dir = manager.data_dir("exp_001", "d_001", "spectra")
+    spectra_dir.mkdir(parents=True, exist_ok=True)
+    _write_ft2(spectra_dir / "exp_001-d_001.ft2")
+    panel.set_context("exp_001", "d_001")
+    panel._on_menu_open_current_spectrum()
+    assert panel._current_spectrum is not None
+    assert len(shown) == 2
+    panel.close()
+
 
 def test_spectrum_panel_scans_data_dir_layout(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
