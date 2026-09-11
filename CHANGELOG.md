@@ -1,5 +1,17 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29hz-修25(2026-09-11,用户):移除峰表「可信度」列(无数据源)
+- 用户:「移除吧」——对 修24 记录的待决策项拍板:该列不再需要;
+- 背景:峰表「可信度」列读 `smile_optimized/*_smile_reliability.json`,而方案 B
+  (修3:扫描只出排序表 + 前三脚本,不替换活动谱)之后没有任何代码写这个文件,
+  该列自那时起恒为空、日志固定「未找到 SMILE 优化可靠性数据,跳过」;
+- 移除:`gui/spectrum_panel.py` 的 `_load_smile_reliability`、`_smile_match_tolerance`、
+  `_axis_step_ppm`、`_attach_smile_confidence`、`_nearest_smile_confidence` 与两处调用点、
+  以及「Reliability(%)」显示列追加逻辑;`core/peaks/peak_table.py` 的 `_NUMERIC_KEYS`
+  去掉该键;删除 `tests/test_gui_smile_confidence.py`(5 例);README/state 等文档同步;
+- 保留:`smile_optimized/` 目录仍存**排序表**(CSV/JSON)与前三脚本,与峰表无关;
+- 验证:本地全量 + ruff(仅基线 2 条);VM 全量(见下一条记录时的结果)。
+
 ## 0.2.199-补29hz-修24(2026-09-11,用户):全项目复查 6 项修复(1/3/4/5/7/8)
 - 用户:「前面说的1,34,5,7,8」= 全项目复查列出的问题清单(其中 2 已由 修23 解决);
 - ① 谱图快照 ref 清单:统一相位路线成功后 GUI 快照只认 (process, reconstruct_nus),
@@ -22,7 +34,7 @@
   → 改为公开 `PICK_EDGE_MARGIN`(旧私有名保留兼容);
 - 顺带修复:`gui/processing.py` 的 `_DATA_KEY_FILES` 在本轮死代码清理里被误删但仍在
   `resolve_import_source` 使用(分支触发即 NameError)→ 恢复,并去掉不再用的 `resource_path`;
-- 顺带发现(未改,记入 problems.md 待拍板):峰表「可信度」列的数据源
+- 顺带发现(已由 修25 按用户决定移除):峰表「可信度」列的数据源
   `smile_optimized/*_smile_reliability.json` 自 修3(方案 B 不替换活动谱)起已无人写入,
   该列实际恒为空;
 - 验证(VM 真机,2026-09-11,/tmp/vm_sample_2dnus):

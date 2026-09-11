@@ -118,46 +118,6 @@ class _AssignmentCell(QWidget):
         return "-".join(segs)
 
 
-def _nearest_smile_confidence(
-    peak: dict,
-    rel_peaks: list[dict],
-    keys: tuple[str, ...],
-    tol: dict[str, float],
-) -> float | None:
-    """SMILE 可靠性峰中找坐标最近的峰,返回 confidence(0-100)或 None。
-
-    0.2.199-补29cy:峰 ppm 与 smile_reliability 的 shifts 各轴容差内取
-    归一化距离最近者;无匹配返回 None(峰表该格留空)。
-    """
-    best_conf: float | None = None
-    best_dist: float | None = None
-    for rel_peak in rel_peaks:
-        shifts = rel_peak.get("shifts") or {}
-        dist = 0.0
-        ok = True
-        for key in keys:
-            try:
-                a = float(peak.get(key))
-                b = float(shifts.get(key))
-            except (TypeError, ValueError):
-                ok = False
-                break
-            if not (a == a and b == b):  # NaN
-                ok = False
-                break
-            t = tol.get(key, 0.5)
-            if abs(a - b) > t:
-                ok = False
-                break
-            dist += abs(a - b) / max(t, 1e-9)
-        if not ok:
-            continue
-        if best_dist is None or dist < best_dist:
-            best_dist = dist
-            best_conf = float(rel_peak.get("confidence", 0.0) or 0.0)
-    return best_conf
-
-
 class SpectrumPanel(QWidget):
     """谱图面板:查看器 + 文件列表 + 峰表(加/删/改/存)。"""
 
@@ -1106,115 +1066,6 @@ class SpectrumPanel(QWidget):
     # ------------------------------------------------------------------
     # 峰表(.list 为主,旧 CSV 兼容读取)与谱图双向联动 + 编辑回写
     # ------------------------------------------------------------------
-    def _load_smile_reliability(self) -> list[dict]:
-        """读取当前数据 SMILE 优化逐峰可靠性 JSON(未做优化/解析失败返回空)。"""
-        if not (self._current_exp_id and self._current_data_id):
-            return []
-        import json
-
-        out_dir = self.manager.data_dir(
-            self._current_exp_id, self._current_data_id, "smile_optimized"
-        )
-        if not out_dir.is_dir():
-            return []
-        base = f"{self._current_exp_id}-{self._current_data_id}_smile_reliability"
-        candidates = [out_dir / f"{base}.json"]
-        candidates += sorted(out_dir.glob(f"{base}_top*.json"))
-        for name in candidates:
-            try:
-                data = json.loads(Path(name).read_text(encoding="utf-8"))
-            except Exception:  # noqa: BLE001 - 单个文件损坏不影响
-                continue
-            peaks = data.get("peaks") or []
-            if peaks:
-                return peaks
-        return []
-
-    @staticmethod
-    def _axis_step_ppm(axis) -> float | None:
-        """轴 ppm/点(相邻正步长中位数);无有效轴返回 None。"""
-        import numpy as np
-
-        ppm = getattr(axis, "ppm", None)
-        if ppm is None:
-            return None
-        arr = np.asarray(ppm, dtype=float)
-        if arr.size < 2:
-            return None
-        diff = np.abs(np.diff(arr))
-        diff = diff[diff > 0]
-        return float(np.median(diff)) if diff.size else None
-
-    def _smile_match_tolerance(self) -> dict[str, float]:
-        """峰匹配容差(ppm):有谱轴时取 ±4 点,否则固定(1H 0.1/15N,13C 0.5)。"""
-        tol = {
-            "H_shift": 0.1,
-            "N_shift": 0.5,
-            "F1_shift": 0.5,
-            "F2_shift": 0.1,
-            "F3_shift": 0.5,
-        }
-        primary = self.viewer.primary_spectrum
-        axes = getattr(primary, "axes", None) if primary is not None else None
-        if axes:
-            if len(axes) > 1:
-                step = self._axis_step_ppm(axes[1])
-                if step:
-                    tol["H_shift"] = 4.0 * step
-            if len(axes) > 0:
-                step = self._axis_step_ppm(axes[0])
-                if step:
-                    tol["N_shift"] = 4.0 * step
-        s3d = self._spectrum3d_panel.spectrum3d
-        axes3 = getattr(s3d, "axes", None) if s3d is not None else None
-        if axes3:
-            for index, key in enumerate(("F1_shift", "F2_shift", "F3_shift")):
-                if index < len(axes3):
-                    step = self._axis_step_ppm(axes3[index])
-                    if step:
-                        tol[key] = 4.0 * step
-        return tol
-
-    def _attach_smile_confidence(self) -> None:
-        """把 SMILE 优化逐峰可信度匹配到当前峰表(0.2.199-补29cy/补29cz)。
-
-        匹配后写入 peak["Reliability(%)"],峰表显示列「可信度」;该列不写
-        .list(export_peaks_poky 固定列)。未做 SMILE 优化或无匹配留空;
-        匹配结果输出到任务日志(导入峰表/自动选峰/打开谱图均可看到)。
-        """
-        if not self._peaks:
-            return
-        rel_peaks = self._load_smile_reliability()
-        if not rel_peaks:
-            self.log_message.emit(
-                "可信度匹配:未找到 SMILE 优化可靠性数据(smile_optimized/),"
-                "跳过"
-            )
-            return
-        tol = self._smile_match_tolerance()
-        keys = (
-            ("H_shift", "N_shift")
-            if "H_shift" in self._peaks[0]
-            else ("F1_shift", "F2_shift", "F3_shift")
-        )
-        matched = 0
-        for peak in self._peaks:
-            confidence = _nearest_smile_confidence(peak, rel_peaks, keys, tol)
-            if confidence is not None:
-                peak["Reliability(%)"] = confidence
-                matched += 1
-        total = len(self._peaks)
-        if matched:
-            self.log_message.emit(
-                f"可信度匹配: {matched}/{total} 个峰匹配到 SMILE 优化可信度"
-                f"(未匹配 {total - matched} 个)"
-            )
-        else:
-            self.log_message.emit(
-                f"可信度匹配: {total} 个峰均未在 SMILE 优化结果中找到"
-                "对应峰,可信度留空"
-            )
-
     def _peak_file_path(self, spectrum_path: Path) -> Path | None:
         """峰表文件:.list 优先(峰表即 list),旧 CSV 兼容回退。"""
         if self.manager.project is None:
@@ -1253,8 +1104,6 @@ class SpectrumPanel(QWidget):
         if not peaks:
             return
         self._peaks = self._assign_peak_ids(peaks)
-        # 0.2.199-补29cy:有 SMILE 优化时把逐峰可信度匹配回填(不入 .list)
-        self._attach_smile_confidence()
         self._populate_peak_table()
         self.viewer.set_peaks(self._peaks)
         self.export_poky_button.setEnabled(True)
@@ -1299,11 +1148,6 @@ class SpectrumPanel(QWidget):
                     }
         else:
             keys = ["Peak_ID", "label", "H_shift", "N_shift", "Intensity", "SN"]
-        # 0.2.162-补4:峰带可靠性注释时追加显示列
-        if any(
-            str(p.get("Reliability(%)", "")).strip() for p in self._peaks
-        ) and "Reliability(%)" not in keys:
-            keys.append("Reliability(%)")
         tuple_keys = tuple(keys)
         if tuple_keys == self._peak_keys:
             return
@@ -1319,7 +1163,7 @@ class SpectrumPanel(QWidget):
                     else "Assignment ✗"
                 )
                 if k == "label"
-                else ("可信度" if k == "Reliability(%)" else header_map.get(k, k))
+                else header_map.get(k, k)
                 for k in tuple_keys
             ]
         )
@@ -1574,10 +1418,8 @@ class SpectrumPanel(QWidget):
             InfoDialog.show_info(self, "导入结果", "文件中没有可解析的峰行")
             return
         self._peaks = self._assign_peak_ids(peaks)
-        # 0.2.199-补29cy:导入峰表同样匹配 SMILE 可信度
-        self._attach_smile_confidence()
         self._populate_peak_table()
-        # 0.2.199-补29fu:viewer 与面板同源(补 Peak_ID/可信度后的列表)
+        # 0.2.199-补29fu:viewer 与面板同源(补 Peak_ID 后的列表)
         self.viewer.set_peaks(self._peaks)
         self.export_poky_button.setEnabled(True)
         self.save_peaks_button.setEnabled(True)

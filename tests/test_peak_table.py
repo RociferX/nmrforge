@@ -184,7 +184,7 @@ def test_pick_peaks_columns_match_poky(tmp_path: Path) -> None:
 
 def test_save_peaks_extra_columns_ignored_in_list(tmp_path: Path) -> None:
     """0.2.199-补29ar:Poky .list 无附加列(extra_columns 兼容忽略)。"""
-    path = tmp_path / "peaks_rel.list"
+    path = tmp_path / "peaks_extra.list"
     save_peaks(
         path,
         [
@@ -192,14 +192,14 @@ def test_save_peaks_extra_columns_ignored_in_list(tmp_path: Path) -> None:
                 "Peak_ID": 1,
                 "H_shift": 8.0,
                 "N_shift": 118.0,
-                "Reliability(%)": 100.0,
+                "Note": "x",
             }
         ],
-        extra_columns=("Reliability(%)",),
+        extra_columns=("Note",),
     )
     lines = path.read_text(encoding="utf-8").splitlines()
     assert lines[0] == "Assignment w1 w2 Data Height Volume"
-    assert "Reliability" not in "\n".join(lines)
+    assert "Note" not in "\n".join(lines)
 
 
 def test_normalize_poky_label() -> None:

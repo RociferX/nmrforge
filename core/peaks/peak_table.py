@@ -40,7 +40,6 @@ _NUMERIC_KEYS = {
     "F3_shift",
     "Intensity",
     "SN",
-    "Reliability(%)",
 }
 
 # Poky assignment 单字母氨基酸(0.2.199-补29cn/补29co,用户:格式按 Poky)。

@@ -352,7 +352,7 @@ class MainWindow(QMainWindow):
 
         panel = SpectrumPanel(self.manager, controller=self.controller)
         panel.peaks_saved.connect(self._on_peaks_saved)
-        # 0.2.199-补29cz:峰表可信度匹配等任务日志进 LogPanel
+        # 0.2.199-补29cz:峰表面板任务日志(3D 加载失败等)进 LogPanel
         panel.log_message.connect(self._append_log)
         panel.status_message.connect(self.statusBar().showMessage)
         # 0.2.199-补29bp:谱图放大/收起(收起左侧三部分)

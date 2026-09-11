@@ -144,7 +144,6 @@ def test_pick_peaks_writes_poky_list(tmp_path: Path) -> None:
     lines = path.read_text(encoding="utf-8").splitlines()
     assert lines[0] == "Assignment w1 w2 Data Height Volume"
     assert len(lines) >= 2
-    assert "Reliability" not in "\n".join(lines)
     assert "阈值" in result["logs"][0]
     assert "25.0σ" in result["logs"][0]  # 机制测试显式 25σ(默认 35σ,补29hn)
 
