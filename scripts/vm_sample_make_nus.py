@@ -3,8 +3,8 @@
 思路(与 3D NUS 真实数据同构):
 - 目录放 nuslist(sampling_detector 据此判 NUS);
 - ser 只保留采样点的 FID 行(States 超复数:每 t1 复点 mult 行);
-- 复点网格按**文件实际几何**推:行数 = ser_int32 / acqus TD,复点网格 = 行数 / mult
-  (元数据 TD 与文件不符时也不会越界;NusTD 写行单位);
+- 复点网格 = acqu2s TD / mult(与程序 2D 约定一致),NusTD 写行单位;
+- 先校验文件行数(ser 字节 / acqus TD)与 acqu2s TD 一致,不一致直接报错(不产半成品);
 - acqu2s 设 NusTD(单位:增量行,与真实 NUS 数据一致;nuslist 索引才是复点),
   acqus 设 NusAMOUNT(<100)。
 
@@ -74,16 +74,23 @@ def main(argv: list[str] | None = None) -> int:
     if ser_int32 % x_n:
         print(f"ser 大小与直接维 TD 不符: {ser_int32} 不是 {x_n} 的整数倍")
         return 1
-    td_rows = ser_int32 // x_n  # 文件里实际存在的增量(行)数 = 全采样源的全格
-    if td_rows % mult:
-        print(f"增量行数 {td_rows} 不是超复数分量 {mult} 的整数倍")
+    rows_file = ser_int32 // x_n  # 文件里实际存在的增量(行)数
+    td_rows = _param(acqu2s, "TD")  # acqu2s TD:全采样源的增量(行)数
+    # 0.2.199-补29hz-修11:网格用 **acqu2s TD**(与程序的 2D 约定一致:
+    # `script_generator.effective_td` 对 2D 取 F1 TD // 超复数分量,不采信 NusTD);
+    # 之前这里把 **NusTD** 写成 TD//mult(复点单位),程序按 -yT NusTD//2 传给 nusExpand,
+    # 小于 nuslist 最大索引 → nusExpand 越界崩溃(rc=139 / stderr 通道报错)→ 转换卡死。
+    # 真实 NUS 的 NusTD 是行单位(sampleJ 292↔145、sampleC 40↔19),这里写行单位。
+    if td_rows <= 0 or td_rows % mult:
+        print(f"acqu2s TD 无效: {td_rows}(须为超复数分量 {mult} 的整数倍)")
+        return 1
+    if rows_file != td_rows:
+        print(
+            f"ser 行数({rows_file}=字节/{x_n})与 acqu2s TD({td_rows})不一致:"
+            "不是规范的全采样 2D 数据(元数据与文件不符),先核对采集参数"
+        )
         return 1
     grid = td_rows // mult  # 间接维复点网格 = nuslist 索引范围
-    # 0.2.199-补29hz-修11(VM 实测):真实 NUS 数据的 NusTD 是**行(增量)**单位
-    # (sampleJ acqu2s NusTD=292 ↔ nuslist 列 max 145 = 292/2-1;sampleC NusTD=40 ↔ max 19);
-    # 之前这里写成复点数(TD/mult),程序按 -yT NusTD//2 传给 nusExpand 就小于
-    # nuslist 的最大索引 → nusExpand 越界崩溃(实测 rc=139 / stderr 通道报错),
-    # 转换卡在 nmrPipe -fn MULT。网格按**文件实际几何**推,元数据 TD 不一致也不误判。
     nus_td = td_rows
     if grid <= 0:
         print(f"复点网格无效: {grid}")
@@ -102,7 +109,7 @@ def main(argv: list[str] | None = None) -> int:
         "\n".join(str(p) for p in points) + "\n", encoding="utf-8"
     )
 
-    fids = ser.reshape(nus_td, x_n)  # (增量行, 直接维 int32)
+    fids = ser.reshape(rows_file, x_n)  # (增量行, 直接维 int32)
     rows = [mult * p + k for p in points for k in range(mult)]
     fids[np.array(rows, dtype=int)].astype("<i4").tofile(dst / "ser")
 
