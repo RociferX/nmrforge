@@ -61,8 +61,14 @@ def test_rank_tooltip_explains_both_modes(smile_row: PipelineStepRow) -> None:
 
 
 def test_grid_tooltip_explains_group_count(smile_row: PipelineStepRow) -> None:
-    """「优化程度」悬停说明给出组数与快慢关系。"""
+    """「优化程度」悬停说明给出精确组数与快慢关系(不能写「≈」)。"""
     tip = smile_row.grid_combo.toolTip()
 
     assert "n×n" in tip
     assert "组" in tip
+    # 组数是精确的 n×n(实测 2x2=4、3x3=9、4x4=16、5x5=25),不要「约」
+    assert "≈" not in tip and "约" not in tip
+    for text in ("2x2=4", "3x3=9", "4x4=16", "5x5=25"):
+        assert text in tip
+    assert "默认 4x4" in tip
+    assert all(len(ln) <= 40 for ln in tip.splitlines())

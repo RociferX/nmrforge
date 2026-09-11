@@ -749,7 +749,9 @@ class PipelineStepRow(QWidget):
         self.grid_combo.setCurrentIndex(2)  # 默认 4x4(0.2.199-补29hz-修5)
         self.grid_combo.setVisible(self.step_id == "smile")
         self.grid_combo.setToolTip(
-            "SMILE 参数网格 n×n:越大越细、越慢(2x2≈4 组,5x5=25 组)"
+            "优化程度 n×n:扫 n×n 组 nSigma×thresh 参数组合。\n"
+            "2x2=4、3x3=9、4x4=16、5x5=25 组;默认 4x4。\n"
+            "网格越细越慢(每组各做一次重建+评估)。"
         )
         fit_combo_width(self.grid_combo)  # 修省略号(0.2.199-补29hz-修14)
         button_row.addWidget(self.grid_label)
