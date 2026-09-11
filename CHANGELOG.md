@@ -1,5 +1,24 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29hz-修13(2026-09-11,用户):ser 元素类型按 DTYPE/BYTORDA 判定,不再写死 int32
+- 用户指出:「ser 文件似乎是动态字节输出,所以不一定是 int32」;
+- Bruker/TopSpin 约定:`##$DTYPE` 0=int32(最常用)/1=float64/2=float32,`##$BYTORDA`
+  0=小端/1=大端;每复点字节数 = 2 × 元素字节数(实虚交错);
+- 新增 `core/data/bruker_dtype.py`(`sample_dtype`/`sample_itemsize`/`point_bytes` +
+  `UnknownBrukerDtype`)作为**单一来源**,读取器、后端与 VM 工具共用;未知 DTYPE 不猜、
+  直接报错(读取器转成 `BrukerDataError` 暴露);
+- 改:`core/data/bruker_reader`(原来 `_read_complex` 写死 int32、尺寸校验写死 8 字节
+  → 现在按 DTYPE 取 dtype 与每复点字节数;float64/float32 数据不再被误判尺寸/读错);
+  `backend/nmrpipe_backend._recover_dense_2d_nus`(行数 = 字节/(直接维 × 元素字节),
+  读取用 DTYPE,日志标注 f8/f4);`scripts/vm_sample_make_nus.py`(按源 DTYPE 读/写,类型保持);
+- VM 真机实测:① float64(DTYPE=1)密集任意子集(随机 32/128 复点)→ 6.5 s 出谱,
+  恢复点与真值完全一致,日志 `密集模型(全格 256/256 行,f8)`;② float64 稀疏(64 行 < 256)
+  → 0.0 s 拒绝;③ 造 NUS 工具在 float64 全采样源上 → 产出 float64 NUS,保留行逐值一致;
+- 注:VM 现有 8 个真实数据集均无 DTYPE(默认 int32),所以此前未暴露;int32 路径行为不变;
+- 测试:新增 tests/test_bruker_dtype.py(DTYPE 0/1/2 × 大小端、缺省、未知值报错、
+  三种类型 read_data 读回值一致、未知 DTYPE 读取报错);tests/test_2d_nus_compat.py 增
+  float64/float32/未知 DTYPE 三例;
+
 ## 0.2.199-补29hz-修12(2026-09-11,用户):2D 无采样表 → 判定密集模型 + 从零模式恢复采样点
 - 用户:能不能判断任意子集的密集采样?真正没有 nuslist 的才报缺失;
 - 原实现(修8)在 2D 无 nuslist 时**不判定**、直接假定「密集 + 前 N 个复点」:
