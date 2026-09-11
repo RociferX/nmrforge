@@ -166,6 +166,36 @@ def _ser_point_layout(
     return None
 
 
+def apply_final_ext_params(params: dict[str, Any]) -> str | None:
+    """把「终跑直接维范围」(final_ext_* + apply_ext_to_opt)映射到 ext_lo/ext_hi。
+
+    0.2.199-补29hz-修17(用户):SMILE 优化/扫描直接调 `reconstruct_nus`(不经
+    unified_route),而范围参数是 GUI 的 `final_ext_lo`/`final_ext_hi` —— 不映射就会退回
+    默认宽窗(10.5-6.5),内存护栏按宽窗估算,明明设了窄范围也报「内存不够」
+(VM 实测 sampleJ:默认窗峰值约 22692MB > 可用×0.85,被自动降直接维填零;用范围后不再降级)。
+
+    语义与 `workflow/phase_routes._split_final_ext`/`_apply_final_ext` 一致:
+    `apply_ext_to_opt` 关闭(「仅终跑」)时不动优化窗口;显式 `ext_lo`/`ext_hi` 优先。
+    就地改 params;返回日志行(未映射时为 None)。
+    """
+    if str(params.get("apply_ext_to_opt", "1")).strip().lower() in ("0", "false", "no"):
+        return None
+    lo = str(params.get("final_ext_lo", "") or "").strip()
+    hi = str(params.get("final_ext_hi", "") or "").strip()
+    if not lo and not hi:
+        return None
+    mapped: list[str] = []
+    if lo and not str(params.get("ext_lo", "") or "").strip():
+        params["ext_lo"] = lo
+        mapped.append(f"ext_lo={lo}")
+    if hi and not str(params.get("ext_hi", "") or "").strip():
+        params["ext_hi"] = hi
+        mapped.append(f"ext_hi={hi}")
+    if not mapped:
+        return None
+    return "直接维范围:终跑范围已用于优化/重构(" + ", ".join(mapped) + ")"
+
+
 def _nus_grid_from_points(
     points: list[tuple[int, ...]],
 ) -> list[int] | None:
@@ -791,6 +821,9 @@ class NMRPipeBackend:
         参数扫描需要先拿到脚本文本再决定怎么跑），不执行 NMRPipe。
         """
         params = dict(params or {})
+        # 0.2.199-补29hz-修17:GUI 传的是终跑范围(final_ext_*),这里映射成 ext_lo/ext_hi,
+        # 让 SMILE 优化/扫描与终跑用同一窗口(否则退回默认宽窗 → 误报内存不够)
+        _ext_note = apply_final_ext_params(params)
         if experiment.sampling.mode is not SamplingMode.NUS:
             return {"success": False, "message": "非 NUS 数据，请使用 process()", "logs": []}
         bin_dir = self._bin_dir()
@@ -805,6 +838,8 @@ class NMRPipeBackend:
         work = self._work_path(experiment)
         work.mkdir(parents=True, exist_ok=True)
         logs: list[str] = []
+        if _ext_note:
+            logs.append(_ext_note)
 
         if experiment.segments:
             # 0.2.124:坏点在源头 ser/nuslist 删除并备份(用户要求)
