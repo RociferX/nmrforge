@@ -21,8 +21,9 @@ class _FakeBackend:
 
     def smile_scan(
         self, experiment, params, combos, *, work_dir, evaluate=None, progress=None,
-        delete_spectra=True,
+        delete_spectra=True, holdout_ratio=0.0,
     ):
+        self.holdout_ratio = holdout_ratio
         Path(work_dir).mkdir(parents=True, exist_ok=True)
         if progress is not None:
             progress(0, len(combos), "直接维处理(生成切片)…")

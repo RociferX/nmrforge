@@ -64,6 +64,9 @@ _NSIGMA_FULL: tuple[float, ...] = (3.0, 4.0, 5.0, 6.0, 7.0)
 _THRESH_FULL: tuple[float, ...] = (0.90, 0.93, 0.95, 0.97, 0.99)
 SMILE_GRID_MIN, SMILE_GRID_MAX = 2, 5
 SMILE_GRID_DEFAULT = 4  # 0.2.199-补29hz-修5(用户):默认 4x4=16 组
+# 0.2.199-补29hz-修10(用户):留出采样点残差默认每 4 个采样点留 1 个(25%),
+# 用于「没有全采样参考时判断真伪峰」的排序依据;扫描用留出集评分,最终重跑仍用全采样。
+SMILE_HOLDOUT_RATIO = 0.25
 
 
 def _subsample(values: tuple[float, ...], count: int) -> tuple[float, ...]:
@@ -786,6 +789,7 @@ def scan_smile_parameters(
             ],
         }
 
+    holdout_ratio = float(base.get("holdout_ratio", SMILE_HOLDOUT_RATIO) or 0.0)
     scan = backend.smile_scan(
         experiment,
         base,
@@ -793,6 +797,7 @@ def scan_smile_parameters(
         work_dir=scan_dir,
         evaluate=_evaluate,
         progress=_progress,
+        holdout_ratio=holdout_ratio,
     )
     if not scan.get("success"):
         raise RuntimeError(str(scan.get("message", "SMILE 扫描失败")))

@@ -1164,6 +1164,30 @@ def split_nus_script(script: str) -> tuple[str, str]:
     # 情况回退为「整脚本逐组跑、输出各自命名」(用户 2026-09-11 约束)。
     return "", ""
 
+
+_NUS_2D_DIRECT_OUT = "| pipe2xyz -out nus2d/direct.ft1 -x -ov"
+_NUS_2D_TP_MARKER = "-fn TP"
+
+
+def build_2d_direct_only_script(script: str) -> str:
+    """从 2D 终跑脚本截出「只做直接维处理」的脚本(2D 留出残差留档)。
+
+    2D 没有切片流:直接维处理与 SMILE 在同一条管道里,所以把 SMILE 及其后的
+    语句去掉,末尾接单文件输出 nus2d/direct.ft1(留档 SMILE 的输入)。
+    实测对应关系(VM 2026-09-11,sampleF 造的 2D NUS):复点 k → 行 2k(实)
+    /2k+1(虚) ↔ SMILE 输出 nus2d/recon.ft1 的第 k 列,相关系数 1.000。
+    截不出来(SMILE 前不是 TP 行)时返回空串,调用方跳过留出残差。
+    """
+    lines = script.split("\n")
+    smile = next((i for i, line in enumerate(lines) if "-fn SMILE" in line), None)
+    if smile is None:
+        return ""
+    prefix = lines[:smile]
+    if not prefix or _NUS_2D_TP_MARKER not in prefix[-1]:
+        return ""
+    prefix[-1] = _NUS_2D_DIRECT_OUT
+    return "\n".join(prefix) + "\n"
+
 def _check_real_modes(experiment: Experiment) -> None:
     """real/magnitude 间接维(FnMODE 1/2/3)显式报错,防止静默错脚本。
 

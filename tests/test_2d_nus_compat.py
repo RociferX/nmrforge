@@ -79,3 +79,31 @@ def test_2d_uniform_fid_com_out_name_unchanged() -> None:
 
     assert f"-out ./{exp.dataset_id}.fid" in patched
     assert not any("2D 无切片流" in w for w in warnings)
+
+def test_build_2d_direct_only_script_trims_before_smile() -> None:
+    """2D 直接维留档脚本:保留直接维处理、去掉 SMILE 及其后、末尾单文件输出。"""
+    from backend.script_generator import (
+        build_2d_direct_only_script,
+        generate_2d_nus_script,
+    )
+
+    exp = read_dataset(BRUKER / "nus_2d")
+    script = generate_2d_nus_script(
+        exp, in_file="e.fid", nuslist="nuslist", out_file="e.ft2"
+    )
+    direct = build_2d_direct_only_script(script)
+
+    assert direct.endswith("| pipe2xyz -out nus2d/direct.ft1 -x -ov\n")
+    assert "-fn SMILE" not in direct
+    assert "-out e.ft2" not in direct
+    assert "nus2d/recon.ft1" not in direct
+    assert "| nmrPipe -fn EXT" in direct  # 直接维处理阶段保留
+    assert "| nmrPipe -fn POLY -auto" in direct  # SMILE 前最后一步保留
+
+
+def test_build_2d_direct_only_script_rejects_unknown_shape() -> None:
+    """切不出来时返回空串(调用方跳过留出残差,不静默错切)。"""
+    from backend.script_generator import build_2d_direct_only_script
+
+    assert build_2d_direct_only_script("#!/bin/csh\necho hi\n") == ""
+

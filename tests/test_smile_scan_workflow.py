@@ -9,6 +9,7 @@ from pathlib import Path
 from core.data.bruker_reader import read_dataset
 from core.project import ProjectManager
 from workflow.smile_optimize import (
+    SMILE_HOLDOUT_RATIO,
     scan_smile_parameters,
     write_smile_scan_output,
 )
@@ -32,7 +33,9 @@ class _FakeBackend:
         evaluate=None,
         progress=None,
         delete_spectra=True,
+        holdout_ratio=0.0,
     ):
+        self.holdout_ratio = holdout_ratio
         Path(work_dir).mkdir(parents=True, exist_ok=True)
         candidates = []
         for index, combo in enumerate(combos, start=1):
@@ -93,6 +96,8 @@ def test_scan_ranks_and_deletes_candidates(tmp_path: Path) -> None:
     assert "holdout_corr" in result["rows"][0]
     assert len(result["scripts"]) == 3
     assert all(text for text in result["scripts"].values())
+    # 0.2.199-补29hz-修10:扫描链路默认带留出集(无全采样参考时的真伪判据)
+    assert backend.holdout_ratio == SMILE_HOLDOUT_RATIO
 
 
 def test_write_scan_output_layout(tmp_path: Path) -> None:

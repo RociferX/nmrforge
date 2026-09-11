@@ -1318,6 +1318,7 @@ class NMRPipeBackend:
         下的终跑脚本。返回 {success, message, logs, candidates}。
         """
         from backend.script_generator import (
+            build_2d_direct_only_script,
             rename_nus_scan_output,
             split_nus_script,
         )
@@ -1329,7 +1330,8 @@ class NMRPipeBackend:
         scan_dir.mkdir(parents=True, exist_ok=True)
         logs: list[str] = []
         holdout_file = ""
-        holdout_coords: list[tuple[int, int]] = []
+        # 3D 是 (k0, k1);2D 是单列复点索引 (k,)(0.2.199-补29hz-修10)
+        holdout_coords: list[tuple[int, ...]] = []
         if holdout_ratio and float(holdout_ratio) > 0:
             # A 方案(0.2.199-补29hz-修5):留出一部分**已采集**的采样点,
             # 只用其余点重建;留出点用于数据一致性残差(无需全采样参考)
@@ -1363,10 +1365,12 @@ class NMRPipeBackend:
                     logs.append(
                         f"留出采样点: train={len(train)} holdout={len(holdout)}"
                     )
+                    # 2D 的 nuslist 是单列(复点索引),3D 是两列;两种都收,
+                    # 按列数决定后面怎么用(0.2.199-补29hz-修10)
                     holdout_coords = [
                         tuple(int(v) for v in ln.split()[:2])
                         for ln in holdout
-                        if len(ln.split()) >= 2
+                        if ln.split()
                     ]
         old_work_dir = self.work_dir
         self.work_dir = str(scan_dir)
@@ -1389,6 +1393,22 @@ class NMRPipeBackend:
             # 无切片切点(2D 单文件脚本)→ 回退:整脚本逐组跑,输出各自命名
             split_available = bool(prefix)
             timeout = float(base.get("timeout_s", 7200))
+            # 2D 留出残差(0.2.199-补29hz-修10):2D 没有切片流,直接维段
+            # 切不出来,这里单独跑一次「到直接维为止」的管道留档 SMILE 输入
+            direct_2d_file = ""
+            if holdout_file and experiment.ndim == 2 and scripts:
+                direct_script = build_2d_direct_only_script(scripts[0])
+                if direct_script:
+                    task = scan_dir / "step1_direct2d.com"
+                    task.write_text(
+                        direct_script, encoding="utf-8", newline="\n"
+                    )
+                    run0 = runtime.run(
+                        ["csh", task.name], cwd=str(scan_dir), timeout=timeout
+                    )
+                    logs.append(f"step1 2D 直接维: rc={run0.returncode}")
+                    if run0.returncode == 0:
+                        direct_2d_file = str(scan_dir / "nus2d" / "direct.ft1")
             if split_available:
                 step1 = scan_dir / "step1_direct.com"
                 step1.write_text(prefix, encoding="utf-8", newline="\n")
@@ -1470,38 +1490,58 @@ class NMRPipeBackend:
                         import nmrglue as ng
                         import numpy as np
 
+                        meas: list[complex] = []
+                        pred: list[complex] = []
+                        units = 0
                         if experiment.ndim >= 3:
                             acq_dir, rc_dir, name = (
                                 scan_dir / "nus3d_1",
                                 scan_dir / "nus3d_rc",
                                 "test%04d.ft1",
                             )
+                            planes = [
+                                i for i in range(1, 1203) if i % 40 == 1
+                            ][:30]
+                            units = len(planes)
+                            for p in planes:
+                                fa = acq_dir / (name % p)
+                                fr = rc_dir / (name % p)
+                                if not (fa.is_file() and fr.is_file()):
+                                    continue
+                                _da, A = ng.pipe.read(str(fa))
+                                _dr, R = ng.pipe.read(str(fr))
+                                A = np.asarray(A)
+                                R = np.asarray(R)
+                                for (k0, k1) in holdout_coords:
+                                    if not (
+                                        0 <= k1 < A.shape[0]
+                                        and 0 <= k0 < A.shape[1]
+                                        and 0 <= k1 < R.shape[0]
+                                        and 0 <= k0 < R.shape[1]
+                                    ):
+                                        continue
+                                    meas.append(complex(A[k1, k0]))
+                                    pred.append(complex(R[k1, k0]))
+                        elif direct_2d_file:
+                            # 2D:无切片流 → 直接维留档数组与 SMILE 输出的实测
+                            # 映射「复点 k → 行 2k(实)/2k+1(虚) ↔ recon 第 k 列」
+                            _dd, A2 = ng.pipe.read(direct_2d_file)
+                            _dr2, R2 = ng.pipe.read(
+                                str(scan_dir / "nus2d" / "recon.ft1")
+                            )
+                            A2 = np.asarray(A2)
+                            R2 = np.asarray(R2)
+                            for (k,) in holdout_coords:
+                                if 2 * k + 1 >= A2.shape[0] or k >= R2.shape[1]:
+                                    continue
+                                m_vec = A2[2 * k] + 1j * A2[2 * k + 1]
+                                p_vec = R2[:, k]
+                                n = min(m_vec.shape[0], p_vec.shape[0])
+                                meas.extend(complex(v) for v in m_vec[:n])
+                                pred.extend(complex(v) for v in p_vec[:n])
+                                units += 1
                         else:
                             return {}
-                        planes = [
-                            i for i in range(1, 1203) if i % 40 == 1
-                        ][:30]
-                        meas: list[complex] = []
-                        pred: list[complex] = []
-                        for p in planes:
-                            fa = acq_dir / (name % p)
-                            fr = rc_dir / (name % p)
-                            if not (fa.is_file() and fr.is_file()):
-                                continue
-                            _da, A = ng.pipe.read(str(fa))
-                            _dr, R = ng.pipe.read(str(fr))
-                            A = np.asarray(A)
-                            R = np.asarray(R)
-                            for (k0, k1) in holdout_coords:
-                                if not (
-                                    0 <= k1 < A.shape[0]
-                                    and 0 <= k0 < A.shape[1]
-                                    and 0 <= k1 < R.shape[0]
-                                    and 0 <= k0 < R.shape[1]
-                                ):
-                                    continue
-                                meas.append(complex(A[k1, k0]))
-                                pred.append(complex(R[k1, k0]))
                         if len(meas) < 10:
                             return {}
                         m = np.array(meas)
@@ -1517,7 +1557,7 @@ class NMRPipeBackend:
                             "holdout_rmse_p90": round(float(np.percentile(resid, 90)), 4),
                             "holdout_corr": round(corr, 4),
                             "holdout_points": len(meas),
-                            "holdout_planes": len(planes),
+                            "holdout_planes": units,
                         }
 
                     try:
