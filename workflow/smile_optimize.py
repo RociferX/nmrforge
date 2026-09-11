@@ -857,6 +857,7 @@ def scan_smile_parameters(
             r["net_peaks"],
             r["stable_count"],
             r["mean_snr"],
+            -float(r.get("holdout_rmse", 0.0) or 0.0),  # 留出残差越小越好
             -float(r.get("smile_rms_ratio", 0.0) or 0.0),  # 拟合残差越小越好
             r["quality"],
         ),

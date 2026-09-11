@@ -1388,6 +1388,8 @@ class NMRPipeBackend:
                 # 0.2.199-补29hz-修6:SMILE 每平面 RMS 报告 → 训练点拟合优度
                 # (FINAL/INITIAL 的中位数;无需平面↔网格映射,跨参数可比)
                 try:
+                    if _smile_log.stat().st_size < _log_offset:
+                        _log_offset = 0  # SMILE 每次重写日志(截断),从头读
                     with _smile_log.open("r", encoding="utf-8", errors="ignore") as _fh:
                         _fh.seek(_log_offset)
                         _tail = _fh.read()
