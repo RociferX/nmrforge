@@ -177,3 +177,42 @@ def test_run_history_dialog_opens_snapshot(
     dialog._open_snapshot()
     assert opened and "snapshot" in opened[0]
     dialog.close()
+
+
+def test_snapshot_matches_unified_route_run(tmp_path: Path) -> None:
+    """修24(问题1):统一相位路线的运行记录也要能被快照匹配到。
+
+    原来 generate_spectrum 传的是硬编码 (process, reconstruct_nus),而统一路线
+    登记的是 phase_optimize_unified → snapshot_dir 恒空。
+    """
+    from core.project.run_refs import STEP_RUN_REFS
+
+    manager, exp_id, data_id = _manager_with_data(tmp_path)
+    run = manager.start_run(
+        exp_id,
+        workflow_ref="phase_optimize_unified",
+        inputs={"data_id": data_id},
+    )
+    manager.finish_run(run.run_id, "success", outputs={"spectrum": "x/ft2"})
+
+    controller = ProcessingController(manager)
+    snapshot = controller._snapshot_step(
+        exp_id,
+        data_id,
+        STEP_RUN_REFS["spectrum"],
+        {"process.com": "nmrPipe ..."},
+    )
+    assert snapshot
+    assert run.snapshot_dir
+    assert (manager.root / run.snapshot_dir / "process.com").is_file()
+
+
+def test_generate_spectrum_snapshot_uses_shared_ref_table() -> None:
+    """快照调用点必须用共享表(硬编码 ref 正是修的 bug,防回退)。"""
+    import inspect
+
+    from gui import processing
+
+    src = inspect.getsource(processing.ProcessingController.generate_spectrum)
+    assert 'STEP_RUN_REFS["spectrum"]' in src
+    assert '("process", "reconstruct_nus")' not in src
