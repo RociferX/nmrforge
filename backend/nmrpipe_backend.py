@@ -1279,6 +1279,7 @@ class NMRPipeBackend:
         scan_dir.mkdir(parents=True, exist_ok=True)
         logs: list[str] = []
         holdout_file = ""
+        holdout_coords: list[tuple[int, int]] = []
         if holdout_ratio and float(holdout_ratio) > 0:
             # A 方案(0.2.199-补29hz-修5):留出一部分**已采集**的采样点,
             # 只用其余点重建;留出点用于数据一致性残差(无需全采样参考)
@@ -1312,6 +1313,11 @@ class NMRPipeBackend:
                     logs.append(
                         f"留出采样点: train={len(train)} holdout={len(holdout)}"
                     )
+                    holdout_coords = [
+                        tuple(int(v) for v in ln.split()[:2])
+                        for ln in holdout
+                        if len(ln.split()) >= 2
+                    ]
         old_work_dir = self.work_dir
         self.work_dir = str(scan_dir)
         try:
@@ -1404,6 +1410,68 @@ class NMRPipeBackend:
                         metrics["smile_planes"] = len(_ratios)
                 except OSError:
                     pass
+                # A 方案(0.2.199-补29hz-修6):留出采样点的数据一致性残差。
+                # 索引映射由实物相关性实测确定(scale=1.0/offset=0):
+                #   留出 (k0,k1) → 平面内 [k1, k0](平面=直接维点,两轴=间接维)
+                if holdout_file and holdout_coords:
+                    def _holdout_residual() -> dict[str, float]:
+                        import nmrglue as ng
+                        import numpy as np
+
+                        if experiment.ndim >= 3:
+                            acq_dir, rc_dir, name = (
+                                scan_dir / "nus3d_1",
+                                scan_dir / "nus3d_rc",
+                                "test%04d.ft1",
+                            )
+                        else:
+                            return {}
+                        planes = [
+                            i for i in range(1, 1203) if i % 40 == 1
+                        ][:30]
+                        meas: list[complex] = []
+                        pred: list[complex] = []
+                        for p in planes:
+                            fa = acq_dir / (name % p)
+                            fr = rc_dir / (name % p)
+                            if not (fa.is_file() and fr.is_file()):
+                                continue
+                            _da, A = ng.pipe.read(str(fa))
+                            _dr, R = ng.pipe.read(str(fr))
+                            A = np.asarray(A)
+                            R = np.asarray(R)
+                            for (k0, k1) in holdout_coords:
+                                if not (
+                                    0 <= k1 < A.shape[0]
+                                    and 0 <= k0 < A.shape[1]
+                                    and 0 <= k1 < R.shape[0]
+                                    and 0 <= k0 < R.shape[1]
+                                ):
+                                    continue
+                                meas.append(complex(A[k1, k0]))
+                                pred.append(complex(R[k1, k0]))
+                        if len(meas) < 10:
+                            return {}
+                        m = np.array(meas)
+                        q = np.array(pred)
+                        scale = float(np.sqrt(np.mean(np.abs(m) ** 2))) or 1.0
+                        resid = np.abs(q - m) / scale
+                        denom = float(np.linalg.norm(m) * np.linalg.norm(q))
+                        corr = (
+                            float(abs(np.vdot(m, q)) / denom) if denom else 0.0
+                        )
+                        return {
+                            "holdout_rmse": round(float(np.median(resid)), 4),
+                            "holdout_rmse_p90": round(float(np.percentile(resid, 90)), 4),
+                            "holdout_corr": round(corr, 4),
+                            "holdout_points": len(meas),
+                            "holdout_planes": len(planes),
+                        }
+
+                    try:
+                        metrics.update(_holdout_residual())
+                    except Exception as exc:  # noqa: BLE001 - 残差失败不阻断扫描
+                        logs.append(f"留出残差计算失败: {exc}")
                 if ok and evaluate is not None:
                     try:
                         metrics.update(dict(evaluate(str(spectrum)) or {}))

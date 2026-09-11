@@ -35,6 +35,8 @@ class _FakeBackend:
             metrics = {
                 "peak_count": 3,
                 "quality": 70.0,
+                "holdout_rmse": 0.1 + index * 0.01,
+                "holdout_corr": 0.9 - index * 0.01,
                 "peaks": [
                     {"position": [1.0, 1.0], "height": 1.0, "snr": 5.0},
                     {"position": [2.0, 2.0], "height": 1.0, "snr": 4.0},

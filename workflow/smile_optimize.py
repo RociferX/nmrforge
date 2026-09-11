@@ -839,6 +839,8 @@ def scan_smile_parameters(
                 "net_peaks": int(stable - suspect),
                 "mean_snr": round(mean_snr, 3),
                 "quality": round(quality, 2),
+                "holdout_rmse": float(metrics.get("holdout_rmse", 0.0) or 0.0),
+                "holdout_corr": float(metrics.get("holdout_corr", 0.0) or 0.0),
                 "smile_rms_ratio": float(
                     metrics.get("smile_rms_ratio", 0.0) or 0.0
                 ),
@@ -904,7 +906,8 @@ def write_smile_scan_output(
     fields = [
         "rank", "index", "nsigma", "thresh", "net_peaks", "stable_count",
         "suspect_count", "peak_count",
-        "mean_snr", "quality", "smile_rms_ratio", "composite", "ok", "error",
+        "mean_snr", "quality", "smile_rms_ratio", "holdout_rmse", "holdout_corr",
+        "composite", "ok", "error",
     ]
     with csv_path.open("w", encoding="utf-8", newline="") as fh:
         writer = csv.DictWriter(fh, fieldnames=fields)

@@ -89,6 +89,8 @@ def test_scan_ranks_and_deletes_candidates(tmp_path: Path) -> None:
     assert result["rows"][0]["mean_snr"] >= result["rows"][-1]["mean_snr"]
     assert "script" not in result["rows"][0]   # 脚本文本不外泄到排序表
     assert "smile_rms_ratio" in result["rows"][0]
+    assert "holdout_rmse" in result["rows"][0]
+    assert "holdout_corr" in result["rows"][0]
     assert len(result["scripts"]) == 3
     assert all(text for text in result["scripts"].values())
 
