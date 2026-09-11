@@ -1901,6 +1901,7 @@ class NMRPipeBackend:
         dest_work: Path,
         dataset_id: str,
         logs: list[str],
+        ndim: int = 3,
     ) -> bool:
         """把 bruker 转换产物归位:单文件 {dataset_id}.fid(0.2.199-补16 统一)。
 
@@ -1920,6 +1921,19 @@ class NMRPipeBackend:
         slices = _slice_candidates(slice_dir, dataset_id)
         if not slices:
             return False
+        if ndim == 2:
+            # 0.2.199-补29hz-修11(用户「2D 应该不会有切片流,注意兼容」):
+            # 2D 只有一个平面——bruker 若把输出写进 fid/(名字里带 %03d 之类),
+            # 那也只是**一个**文件,按单文件处理;不改 fid.com(一律跟随 -AUTO)。
+            real = [p for p in slices if p.is_file() and p.stat().st_size > 0]
+            if len(real) == 1:
+                dest = dest_work / f"{dataset_id}.fid"
+                shutil.move(str(real[0]), dest)
+                logs.append(
+                    f"2D 单平面输出 {real[0].name} → {dest.name}"
+                    "(按单文件处理,2D 不走切片流)"
+                )
+                return True
         dest_slice = dest_work / "fid"
         if dest_slice.exists():
             shutil.rmtree(dest_slice)
@@ -2014,7 +2028,8 @@ class NMRPipeBackend:
                 if run_result.returncode != 0:
                     return False
             if not self._finalize_converted_fid(
-                convert_dir, dest_work, experiment.dataset_id, logs
+                convert_dir, dest_work, experiment.dataset_id, logs,
+                ndim=experiment.ndim,
             ):
                 return False
             # SMILE 只需 nuslist;ser_full/mask.fid/mask/ 等中间产物删除省空间

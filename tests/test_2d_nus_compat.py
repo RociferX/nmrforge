@@ -148,3 +148,61 @@ def test_make_2d_nus_tool_uses_row_unit_nus_td(tmp_path: Path) -> None:
     assert tool._param(acqu2s, "NusTD") == 256
     assert len(nuslist) == 32
     assert max(int(v) for v in nuslist) < 128
+
+def _finalize(raw: Path, work: Path, ndim: int) -> tuple[bool, list[str]]:
+    from backend.nmrpipe_backend import NMRPipeBackend
+
+    logs: list[str] = []
+    ok = NMRPipeBackend(nmrpipe_bin="")._finalize_converted_fid(
+        raw, work, "d_001", logs, ndim=ndim
+    )
+    return ok, logs
+
+
+def test_finalize_2d_single_file_in_fid_dir(tmp_path: Path) -> None:
+    """2D:bruker 把输出写进 fid/(名字带 %03d)也只是单平面 → 按单文件处理。"""
+    raw = tmp_path / "raw"
+    (raw / "fid").mkdir(parents=True)
+    (raw / "fid" / "test%03d.fid").write_bytes(b"x" * 1024)
+    work = tmp_path / "work"
+    work.mkdir()
+
+    ok, logs = _finalize(raw, work, 2)
+
+    assert ok is True
+    assert (work / "d_001.fid").is_file()
+    assert not (raw / "fid" / "test%03d.fid").exists()
+    assert any("单平面输出" in line for line in logs)
+
+
+def test_finalize_3d_keeps_slice_stream(tmp_path: Path) -> None:
+    """3D:真切片流(多文件)仍按切片目录归位,不改行为。"""
+    raw = tmp_path / "raw"
+    (raw / "fid").mkdir(parents=True)
+    for index in (1, 2):
+        (raw / "fid" / f"test{index:03d}.fid").write_bytes(b"x")
+    work = tmp_path / "work"
+    work.mkdir()
+
+    ok, logs = _finalize(raw, work, 3)
+
+    assert ok is True
+    assert (work / "fid").is_dir()
+    assert not (work / "d_001.fid").exists()
+    assert any("切片式 fid" in line for line in logs)
+
+
+def test_finalize_2d_multi_slice_falls_back_to_stream(tmp_path: Path) -> None:
+    """2D 但 fid/ 里多于一个文件:保守回退到原切片流处理(不误吞)。"""
+    raw = tmp_path / "raw"
+    (raw / "fid").mkdir(parents=True)
+    for index in (1, 2):
+        (raw / "fid" / f"test{index:03d}.fid").write_bytes(b"x")
+    work = tmp_path / "work"
+    work.mkdir()
+
+    ok, logs = _finalize(raw, work, 2)
+
+    assert ok is True
+    assert (work / "fid").is_dir()
+    assert any("切片式 fid" in line for line in logs)
