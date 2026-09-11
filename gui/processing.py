@@ -640,12 +640,23 @@ class ProcessingController:
         return mapping
 
     def _last_spectrum_params(self, exp_id: str, data_id: str) -> dict:
-        """最近一次成功生成谱图的运行参数(作为 SMILE 优化基参数)。"""
+        """最近一次成功生成谱图的运行参数(作为 SMILE 优化基参数)。
+
+        0.2.199-补29hz-修18(用户):原来只认 `process`/`reconstruct_nus`,而正常统一
+        路线登记的是 `phase_optimize_unified`(人工路径是 manual_process/manual_nus)
+        —— 于是 SMILE 优化的基参数**恒为空**,模板退回默认窗口/相位/基线:既不等于
+        终跑脚本(违背「以终跑脚本为模板、只改 SMILE 参数」),又会按默认宽窗估算内存
+        而误报「内存不够」。改为复用 `gui.pipeline_state.STEP_RUN_REFS["spectrum"]`
+(单一来源),data_id 严格归属(与 修1 同一口径)。
+        """
+        from gui.pipeline_state import STEP_RUN_REFS
+
+        refs = STEP_RUN_REFS.get("spectrum", ())
         for run in reversed(self._manager.project.workflow_runs):
             if (
                 run.experiment_id == exp_id
-                and run.workflow_ref in ("process", "reconstruct_nus")
-                and str((run.inputs or {}).get("data_id", "")) in ("", data_id)
+                and run.workflow_ref in refs
+                and str((run.inputs or {}).get("data_id", "")) == data_id
                 and run.status == "success"
             ):
                 return dict(run.params or {})
