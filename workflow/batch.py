@@ -37,6 +37,7 @@ from pathlib import Path
 from typing import Any
 
 from core.project import ProjectManager
+from core.project.run_refs import STEP_RUN_REFS
 
 # 支持的批处理步骤(与 gui/pipeline_panel.PIPELINE_STEPS 前五步一致;
 # Engine 不 import Qt,批量组语义通过读取状态文件对齐)
@@ -125,23 +126,22 @@ def _reference_spectrum_params(
 
     按 WorkflowRun 追加序取最后一个成功且 workflow_ref 属于谱图链的 run;
     无可用 run 返回空 dict(调用方回退默认统一自动处理)。
+
+    修24:ref 表与 Pipeline/项目树同源(core.project.run_refs),data_id 与
+    workflow_ref 都改**精确匹配**——原来的子串匹配会把名字相近的 ref 误当
+    谱图运行,且表里 finalize_nus/generate_spectrum 从来不是登记的 ref。
     """
     if manager.project is None:
         return {}
-    spectrum_refs = (
-        "process",
-        "reconstruct_nus",
-        "phase_optimize_unified",
-        "finalize_nus",
-        "generate_spectrum",
-    )
+    spectrum_refs = STEP_RUN_REFS["spectrum"]
+    wanted = str(data_id)
     matches = [
         run
         for run in manager.project.workflow_runs
         if run.experiment_id == exp_id
-        and (run.inputs or {}).get("data_id") == data_id
+        and str((run.inputs or {}).get("data_id", "")) == wanted
         and run.status == "success"
-        and any(ref in str(run.workflow_ref or "") for ref in spectrum_refs)
+        and run.workflow_ref in spectrum_refs
     ]
     if not matches:
         return {}

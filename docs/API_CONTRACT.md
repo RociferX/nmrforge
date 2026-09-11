@@ -88,9 +88,12 @@ class ProcessingController:
         # 经 stepwise.generate_spectrum → phase_routes.unified_route(统一相位优化)
     def manual_fid_com(...) / run_manual_fid_com(...) / manual_scripts(...) /
         run_manual_spectrum(...)   # 人工路径(workflow/manual,已实现)
-    def optimize_smile(self, data, exp_id=None, data_id=None) -> dict
-        # 可选 SMILE 优化(仅 NUS):网格搜索重构参数并采用最优谱,
-        # 归位 spectra/ 并登记 smile_optimize 运行
+    def optimize_smile(self, data, exp_id=None, data_id=None,
+                       progress=None, grid_size=None, rank_mode=None) -> str
+        # 可选 SMILE 优化(仅 2D NUS):扫描参数网格,候选谱评估后即删,
+        # 产物=排序表(CSV/JSON)+前三脚本,不替换活动谱(登记 smile_optimize 运行)
+    def rerun_smile_rank1(self, exp_id, data_id, progress=None) -> str
+        # 用 Rank1 脚本重跑终谱并采用(登记 smile_optimize_rank1 运行)
     def pick_peaks(self, data, exp_id=None, data_id=None, *,
                    sigma_multiplier=None, ref_peaks=None, ref_nuclei=None,
                    tolerance_ppm=None) -> dict

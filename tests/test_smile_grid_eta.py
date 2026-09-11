@@ -246,7 +246,53 @@ def test_smile_scan_sign_mode_follows_preset(monkeypatch) -> None:
 
 def test_smile_scan_edge_margin_matches_pick_peaks() -> None:
     """轴峰排除与选峰步骤同一常量(不各写一个数)。"""
-    from workflow.pick_peaks import _PICK_EDGE_MARGIN
+    from workflow.pick_peaks import PICK_EDGE_MARGIN
     from workflow.smile_optimize import smile_scan_edge_margin
 
-    assert smile_scan_edge_margin() == int(_PICK_EDGE_MARGIN)
+    assert smile_scan_edge_margin() == int(PICK_EDGE_MARGIN)
+
+
+def test_rank_mode_selects_run_mode(tmp_path) -> None:
+    """修23:排序口径决定运行方式(净真峰→全采样 holdout=0;一致性→留出)。"""
+    seen: list[float] = []
+
+    class _Backend:
+        def smile_scan(
+            self, experiment, params, combos, *, work_dir, evaluate=None,
+            progress=None, delete_spectra=True, holdout_ratio=0.0,
+        ):
+            seen.append(float(holdout_ratio))
+            Path(work_dir).mkdir(parents=True, exist_ok=True)
+            return {
+                "success": True,
+                "message": "fake",
+                "logs": [],
+                "candidates": [
+                    {
+                        "index": 1,
+                        "params": dict(combos[0]),
+                        "metrics": {"peak_count": 1, "quality": 50.0, "peaks": []},
+                        "script": "# s1" + chr(10),
+                        "ok": True,
+                    }
+                ],
+                "scan_dir": str(work_dir),
+            }
+
+    exp = read_dataset(BRUKER / "nus_3d")
+    scan_smile_parameters(
+        exp, _Backend(), {}, scan_dir=tmp_path / "p",
+        grid=smile_grid(2)[:1], rank_mode="true_peaks",
+    )
+    scan_smile_parameters(
+        exp, _Backend(), {"holdout_ratio": 0.25}, scan_dir=tmp_path / "c",
+        grid=smile_grid(2)[:1], rank_mode="consistency",
+    )
+    assert seen == [0.0, 0.25]
+
+
+def test_pick_edge_margin_is_public() -> None:
+    """修24:选峰/SMILE 共用常量公开(旧私有名保留兼容)。"""
+    from workflow.pick_peaks import _PICK_EDGE_MARGIN, PICK_EDGE_MARGIN
+
+    assert PICK_EDGE_MARGIN == _PICK_EDGE_MARGIN

@@ -11,18 +11,11 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from core.app_paths import resource_path
 from core.project import ExperimentEntry, ProjectManager
+from core.project.run_refs import MANUAL_SPECTRUM_RUN_REFS, STEP_RUN_REFS
 from gui.pipeline_state import record_step_success
 
-
-def _load_config() -> dict:
-    import yaml
-
-    path = resource_path("config/nmrforge.yaml")
-    return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-
-
+# 判定「子目录是否含数据文件」的关键文件(与 pipeline_state 输入指纹同源)
 _DATA_KEY_FILES = ('acqus', 'acqu2s', 'acqu3s', 'ser', 'fid', 'nuslist')
 
 
@@ -389,10 +382,12 @@ class ProcessingController:
         emit(f"生成谱图完成,相位途径: {label}")
         if data_id:
             record_step_success(self._manager, exp_id, data_id, "spectrum")
+            # 修24:统一用 STEP_RUN_REFS["spectrum"](含 phase_optimize_unified,
+            # 原来只认 process/reconstruct_nus → 统一路线下快照永远匹配不到)
             self._snapshot_step(
                 exp_id,
                 data_id,
-                ("process", "reconstruct_nus"),
+                STEP_RUN_REFS["spectrum"],
                 self._spectrum_scripts(exp_id, data_id),
             )
         self._manager.save()
@@ -543,7 +538,7 @@ class ProcessingController:
         if data_id:
             record_step_success(self._manager, exp_id, data_id, "spectrum")
             self._snapshot_step(
-                exp_id, data_id, ("manual_process", "manual_nus"), scripts
+                exp_id, data_id, MANUAL_SPECTRUM_RUN_REFS, scripts
             )
         self._manager.save()
         return result
@@ -649,7 +644,7 @@ class ProcessingController:
         而误报「内存不够」。改为复用 `gui.pipeline_state.STEP_RUN_REFS["spectrum"]`
 (单一来源),data_id 严格归属(与 修1 同一口径)。
         """
-        from gui.pipeline_state import STEP_RUN_REFS
+        from core.project.run_refs import STEP_RUN_REFS
 
         refs = STEP_RUN_REFS.get("spectrum", ())
         for run in reversed(self._manager.project.workflow_runs):
@@ -674,7 +669,7 @@ class ProcessingController:
         """SMILE 优化(可选):以终跑脚本为模板只换 SMILE 参数做扫描。
 
         grid_size: 优化程度 2..5(2x2..5x5);None 时读该数据 ui_state,
-        再缺省用 5x5(25 组)。
+        再缺省用 4x4(16 组)。
 
         0.2.199-补29hz-修3(用户方案):直接维跑一次得到切片 → 每组参数跑一次
         「SMILE + 间接维」得到终谱 → 立即评估指标 → 删除该谱(候选谱只短暂
@@ -835,70 +830,7 @@ class ProcessingController:
             record_step_success(self._manager, exp_id, data_id, "spectrum")
         self._manager.save()
         return str(target)
-    def _apply_smile_result(
-        self, exp_id: str, data_id: str, result, rank: int = 1
-    ) -> dict:
-        """候选谱归位 spectra/ + 稳定峰/评分写 smile_optimized/(与 raw 同级)。
 
-        rank=1 为活动谱(设置 data_spectrum + 运行记录 + 步骤状态);
-        rank>1 仅落盘(Top-N 保留谱,文件名带 _top{rank} 后缀,0.2.162-补9)。
-        返回输出路径 dict。"""
-        import shutil
-
-        from workflow.smile_optimize import write_smile_optimized_output
-
-        source = Path(getattr(result, "spectrum_path", ""))
-        spectra_dir = self._manager.data_dir(exp_id, data_id, "spectra")
-        spectra_dir.mkdir(parents=True, exist_ok=True)
-        if rank <= 1:
-            target = spectra_dir / source.name
-        else:
-            target = spectra_dir / f"{source.stem}_top{rank}{source.suffix}"
-        if source.is_file() and source.resolve() != target.resolve():
-            shutil.copy2(source, target)
-        peaks_path, report_path, reliability_path = write_smile_optimized_output(
-            self._manager, exp_id, data_id, source, result, rank=rank
-        )
-        result.peaks_path = str(peaks_path)
-        if rank <= 1:
-            self._manager.set_data_spectrum(exp_id, data_id, target)
-            run = self._manager.start_run(
-                exp_id,
-                workflow_ref="smile_optimize",
-                inputs={"data_id": data_id},
-                params=dict(getattr(result, "params", {}) or {}),
-            )
-            self._manager.finish_run(
-                run.run_id,
-                "success",
-                outputs={
-                    "spectrum_path": str(target),
-                    "peaks_path": str(peaks_path),
-                    "report_path": str(report_path),
-                    "reliability_path": str(reliability_path),
-                },
-                message=str(getattr(result, "message", "") or "SMILE 优化完成")
-                + f"(真峰 {getattr(result, 'true_peak_count', 0)} 个,"
-                f"稳定峰 {len(getattr(result, 'stable_peaks', []))} 个)",
-            )
-            record_step_success(self._manager, exp_id, data_id, "smile")
-            record_step_success(self._manager, exp_id, data_id, "spectrum")
-            self._snapshot_step(
-                exp_id,
-                data_id,
-                ("smile_optimize",),
-                self._spectrum_scripts(exp_id, data_id),
-            )
-        return {
-            "rank": rank,
-            "params": dict(getattr(result, "params", {}) or {}),
-            "spectrum_path": str(target),
-            "peaks_path": str(peaks_path),
-            "report_path": str(report_path),
-            "reliability_path": str(reliability_path),
-            "stable_count": len(getattr(result, "stable_peaks", [])),
-            "true_peak_count": getattr(result, "true_peak_count", 0),
-        }
 
     # ------------------------------------------------------------------
     # 脚本快照(GUI 接线):步骤成功后把执行的脚本/参数写入 WorkflowRun

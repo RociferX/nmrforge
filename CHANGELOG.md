@@ -1,5 +1,34 @@
 # 修改记录(历史条目)
 
+## 0.2.199-补29hz-修24(2026-09-11,用户):全项目复查 6 项修复(1/3/4/5/7/8)
+- 用户:「前面说的1,34,5,7,8」= 全项目复查列出的问题清单(其中 2 已由 修23 解决);
+- ① 谱图快照 ref 清单:统一相位路线成功后 GUI 快照只认 (process, reconstruct_nus),
+  而统一路线登记的是 `phase_optimize_unified` → **快照目录恒空**;改用单一来源表;
+- ③ 文档过期:3D NUS 已隐藏 SMILE(修21),`docs/gui/state.md`、`docs/API_CONTRACT.md`、
+  `docs/manager/decisions.md`、`docs/PROJECT_STATUS.md` 仍写「仅 NUS」→ 更正为仅 2D NUS
+  (历史条目加注;decisions 另加一条 修3/修23/修24 的当前口径);
+- ④ 死代码清理:旧两阶段 SMILE 评分链(`optimize_smile_parameters` /
+  `write_smile_optimized_output` / `_rank_by_true_peaks` / `_detect_peaks` /
+  `_score_candidate` 及只属于它的评分 helper,约 700 行)、`ProcessingController._apply_smile_result`、
+  `ProcessingController._load_config`、`PipelinePanel._run_group_step`(0.2.164-补1 起已被
+  `main_window._run_group_batch` 取代,全仓无调用点);`scripts/smile_optimize.py` 改调新扫描链;
+- ⑤ run ref 清单分叉:`gui/processing.py`(2 处)与 `workflow/batch.py` 各维护一份 →
+  下沉 `core/project/run_refs.py`(单一来源;`gui/pipeline_state.py` 继续 re-export);
+  批量参考参数同时**去掉子串匹配**(`"process" in ref` 会命中 `process_preview` 之类),
+  改精确 `workflow_ref in refs` + 严格 data_id(与 `last_run_for_data` 同口径);
+- ⑦ 2D 留出残差静默跳过:`build_2d_direct_only_script` 截不出直接维段(SMILE 前不是 TP 行)时
+  原来没有任何提示,排序表 `holdout_*` 空着无从判断 → 补日志;
+- ⑧ 跨模块私有常量:`workflow/smile_optimize` 直接 import `pick_peaks._PICK_EDGE_MARGIN`
+  → 改为公开 `PICK_EDGE_MARGIN`(旧私有名保留兼容);
+- 顺带修复:`gui/processing.py` 的 `_DATA_KEY_FILES` 在本轮死代码清理里被误删但仍在
+  `resolve_import_source` 使用(分支触发即 NameError)→ 恢复,并去掉不再用的 `resource_path`;
+- 顺带发现(未改,记入 problems.md 待拍板):峰表「可信度」列的数据源
+  `smile_optimized/*_smile_reliability.json` 自 修3(方案 B 不替换活动谱)起已无人写入,
+  该列实际恒为空;
+- 测试:新增 `tests/test_run_refs_single_source.py`(单一来源 + 批量精确匹配)、
+  `tests/test_2d_holdout_skip_log.py`(留出跳过日志正反两例);`tests/test_smile_optimize.py`
+  精简到存活接口;本地全量 pytest 通过 + ruff 仅基线 2 条(不新增告警)。
+
 ## 0.2.199-补29hz-修23(2026-09-11,用户):按排序口径选运行方式(取代 修22 的「每候选跑两次」)
 - 用户:「不对,应该按照需要的排序方法去选择全跑还是留出一部分,而不是跑两次」;
 - 规则(最终口径):

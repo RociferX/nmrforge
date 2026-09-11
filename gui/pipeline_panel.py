@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import time
 from pathlib import Path
 
 from PyQt6.QtCore import QPoint, QRect, QSize, Qt, pyqtSignal
@@ -2313,88 +2312,6 @@ class PipelinePanel(QWidget):
         clear_cancel()
         self._run_active = True
         threading.Thread(target=worker, daemon=True).start()
-
-    def _run_group_step(
-        self,
-        exp_id: str,
-        group_id: str,
-        step_id: str,
-        target_data_id: str,
-    ) -> None:
-        """批量组执行:统一委托新引擎(controller.run_group_batch -> workflow.batch)。
-
-        0.2.164-补1:删除面板内联逐数据循环;失败汇总由引擎按数据记录,
-        单数据失败不中断整组。
-        """
-        step_label = STEP_LABEL.get(step_id, step_id)
-        group_count = len(self.manager.group_data_ids(exp_id, group_id))
-        group_scope = self._run_log_scope(exp_id, "", group_id)
-        self.log_scoped.emit(
-            f"数据组 {group_id}: 对 {group_count} 个数据执行 {step_label}",
-            group_scope,
-        )
-        if step_id == "smile":
-            self.log_scoped.emit(
-                "SMILE 优化不支持批量组,请在单个数据上执行", group_scope
-            )
-            return
-        # 0.2.199-补5:组内各数据开始处理,左侧树显示「运行中」
-        for data_id in self.manager.group_data_ids(exp_id, group_id):
-            self.run_started.emit(exp_id, data_id)
-        # 0.2.199-补29hh:组内批量也要把每个数据的日志落到其自身数据作用域,
-        # 否则数据 log 界面看不到该数据的失败详情(如 SMILE 缺 nuslist)。
-        def on_data_done(per: dict) -> None:
-            data_id = per.get("data_id", "")
-            data_scope = self._run_log_scope(exp_id, data_id, "")
-            for _lg in per.get("logs") or []:
-                self.log_scoped.emit(_lg, data_scope)
-
-        _t0 = time.monotonic()
-        try:
-            kwargs: dict = {}
-            if step_id == "spectrum":
-                ext_params = self._spectrum_ext_params(target_data_id)
-                if ext_params:
-                    kwargs["params"] = ext_params
-            result = self.controller.run_group_batch(
-                exp_id,
-                group_id,
-                [step_id],
-                reference_data_id="",
-                progress=lambda msg: self.log_scoped.emit(
-                    f"{step_label}: {msg}", group_scope
-                ),
-                on_data_done=on_data_done,
-                **kwargs,
-            )
-        except Exception as exc:  # noqa: BLE001 - 引擎级失败
-            self.log_scoped.emit(
-                f"失败 {step_label}: {type(exc).__name__}: {exc}",
-                group_scope,
-            )
-            if "无法处理该谱" in str(exc):
-                self.memory_guard_requested.emit(str(exc))
-            return
-        summary = dict(result.get("summary") or {})
-        failed = list(result.get("failed") or [])
-        ok_count = int(summary.get("success", 0))
-        total = int(summary.get("total", 0))
-        info = (
-            f"数据组 {group_id} 批量处理完成: 成功 {ok_count},失败 {len(failed)},"
-            f"耗时 {time.monotonic() - _t0:.1f}s"
-        )
-        if total:
-            info += f"(共 {total})"
-        items = [
-            {
-                "data_id": data_id,
-                "step": step_label,
-                "ok": per.get("status") == "success",
-                "error": per.get("error", ""),
-            }
-            for data_id, per in (result.get("results") or {}).items()
-        ]
-        self.batch_summary_requested.emit({"info": info, "items": items})
 
     def _on_rerun_final_requested(self, step_id: str) -> None:
         """「重新运行终脚本」:直接在已有最终脚本上改直接维范围再运行。

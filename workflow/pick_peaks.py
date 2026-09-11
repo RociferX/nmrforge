@@ -39,7 +39,9 @@ class PickPeaksError(Exception):
 _PICK_THRESHOLD_SIGMA = 35.0
 # 轴峰排除边缘点数(0.2.199-补29at/补29bf,用户):上下边缘横条内的峰不选;
 # 补29bf 从 2 加到 5,靠近边缘的轴峰残余一并排除。
-_PICK_EDGE_MARGIN = 5
+# 轴峰排除边距(点):选峰与 SMILE 候选评估共用(修24 起为公开常量)
+PICK_EDGE_MARGIN = 5
+_PICK_EDGE_MARGIN = PICK_EDGE_MARGIN  # 兼容旧名
 # 谱面 mixed 证据(0.2.199-补29fc,用户):类型低置信/未知时,若谱面正负峰
 # 占比都高(少数符号 ≥ 主符号数 × 0.2 且 ≥3 个,总数 ≥6),按 mixed 正负都选;
 # 高置信 uniform 模板(如 HSQC)仍尊重模板,避免噪声负峰带偏。

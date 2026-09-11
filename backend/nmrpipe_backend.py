@@ -1565,6 +1565,12 @@ class NMRPipeBackend:
             direct_2d_file = ""
             if holdout_file and experiment.ndim == 2 and scripts:
                 direct_script = build_2d_direct_only_script(scripts[0])
+                if not direct_script:
+                    # 修24(问题7):别静默跳过 —— 排序表里 holdout_* 会空着
+                    logs.append(
+                        "2D 留出残差:无法从终跑脚本截出「直接维段」"
+                        "(SMILE 前不是 TP 行),跳过留出指标"
+                    )
                 if direct_script:
                     task = scan_dir / "step1_direct2d.com"
                     task.write_text(

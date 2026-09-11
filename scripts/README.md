@@ -9,7 +9,8 @@
 
 ## 处理/优化 CLI(可选)
 
-- smile_optimize.py:SMILE 参数网格优化 CLI(与 GUI smile 步骤同源)
+- smile_optimize.py:SMILE 参数网格扫描 CLI(与 GUI smile 步骤同源;
+  输出排序表 + 前三脚本,候选谱评估后删除)
 - param_optimize.py:后处理参数优化 CLI(相位/基线,只重构一次)
 
 ## VM 回归/验证(Architect 用)
