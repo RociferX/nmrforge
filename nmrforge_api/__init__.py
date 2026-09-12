@@ -25,7 +25,9 @@
         plan_sweep, run_sweep, position_uncertainty, write_records,
     )
 
-契约与设计说明见 ``docs/proposals/external-api/001-parameter-sweep-api.md``。
+对外文档(安装/上手/API 与 CLI 参考/输出记录/方法与指标/接入指南/边界与排查):
+``docs/external-api/README.md``;内部设计记录:
+``docs/proposals/external-api/001-parameter-sweep-api.md``。
 """
 
 from __future__ import annotations

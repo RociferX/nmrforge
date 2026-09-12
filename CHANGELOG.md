@@ -21,6 +21,10 @@
   并冻结),`run_parameter_study`/CLI 默认不走外部峰表(可选 `peaks=`/
   `--peak-table` 逃生口);峰表来源、SHA-256、峰数与选峰参数(sigma/max_peaks)
   写入 `reference.json` 与 `records/manifest.json`;
+- 新增对外文档目录 `docs/external-api/`(入口 README + 总览/快速上手/API 参考/
+  CLI 参考/输入与数据/输出与记录/方法与指标/接入指南/边界与路线/排查,共 11 篇
+  + `examples/` 可运行示例 + 接口 CHANGELOG),自成一套可整体拷给外部项目;
+  README、文档入口、项目地图与包 docstring 都指向该目录;
 - 测试:`tests/test_nmrforge_api.py` 15 项(网格/覆盖、亚像素精度、σ 与 Δδ
   公式、端到端 6 组合、断点续跑、NUS 边界、导入失败、CLI、不 import Qt、
   参考相位锁定、自动选峰默认路径);VM 冒烟固化 `scripts/vm_api_smoke.py`;

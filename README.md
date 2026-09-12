@@ -63,7 +63,9 @@ python -m nmrforge_api sweep     --study DIR --grid grid.yaml
 (要带自己的峰表时传 `peaks=` 即可);同一份 fid 只转一次;每个参数
 组合留下脚本、候选谱(不替换活动谱)与同一批峰的亚像素峰位;结果落成
 `manifest.json` / `runs.json` / `peak_positions.csv` / `uncertainty.csv`。
-契约与边界见[提案文档](docs/proposals/external-api/001-parameter-sweep-api.md)。
+完整对外文档(安装/快速上手/API 与 CLI 参考/输出记录/方法与指标/接入指南/边界与排查)
+见[接口文档目录](docs/external-api/README.md);内部设计记录见
+[提案文档](docs/proposals/external-api/001-parameter-sweep-api.md)。
 
 ## 开发
 
