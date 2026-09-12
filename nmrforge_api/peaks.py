@@ -84,11 +84,69 @@ class PeakMeasurement:
         )
 
 
+def _read_ppm_csv(path: Path) -> list[dict[str, Any]] | None:
+    """读「研究项目 CSV」格式(``peak_id,H_ppm,N_ppm[,height,linewidth,volume]``)。
+
+    下游研究项目从公开库导出的参考峰表常是这个格式;不是该格式时返回 None,
+    交给 Poky/旧 CSV 解析器处理。
+    """
+    import csv
+
+    try:
+        text = path.read_text(encoding="utf-8-sig")
+    except OSError:
+        return None
+    lines = [line for line in text.splitlines() if line.strip()]
+    if not lines:
+        return None
+    header = [cell.strip().lower() for cell in lines[0].split(",")]
+    if "h_ppm" not in header or "n_ppm" not in header:
+        return None
+    rows: list[dict[str, Any]] = []
+    for index, row in enumerate(csv.DictReader(lines), start=1):
+        normalized = {
+            str(key).strip().lower(): value
+            for key, value in row.items()
+            if key
+        }
+
+        def _num(name: str) -> str:
+            value = normalized.get(name, "")
+            return "" if value in (None, "") else str(value)
+
+        raw_id = str(normalized.get("peak_id", "") or "").strip()
+        label = raw_id.split(":", 1)[1] if ":" in raw_id else raw_id
+        rows.append(
+            {
+                "Peak_ID": index,
+                "label": label,
+                "H_shift": _num("h_ppm"),
+                "N_shift": _num("n_ppm"),
+                "Intensity": _num("height") or _num("intensity"),
+                "peak_id_raw": raw_id,
+            }
+        )
+    return rows
+
+
 def read_reference_peaks(path: Path | str) -> list[dict[str, Any]]:
-    """读参考峰表(.list / 旧 CSV),只保留至少有一个核位置的峰。"""
+    """读参考峰表,只保留至少有一个核位置的峰。
+
+    支持三种格式:
+
+    - Poky/Sparky ``.list``(NMRForge 写出的标准峰表);
+    - NMRForge 旧 CSV(``H_shift``/``N_shift`` 列);
+    - 研究项目 CSV(``peak_id,H_ppm,N_ppm,height,linewidth,volume``,
+      公开库导出的参考峰表)。
+    """
     from core.peaks.peak_table import load_peaks
 
-    peaks = load_peaks(Path(path))
+    target = Path(path)
+    if not target.is_file():
+        raise MeasurementError(f"参考峰表不存在: {target}")
+    peaks = _read_ppm_csv(target)
+    if peaks is None:
+        peaks = load_peaks(target)
     usable = [row for row in peaks if peak_coordinates(row, None)]
     if not usable:
         raise MeasurementError(f"参考峰表没有可测量的峰位: {path}")

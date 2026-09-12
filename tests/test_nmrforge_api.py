@@ -33,7 +33,11 @@ from nmrforge_api import (
     uncertainty_summary,
 )
 from nmrforge_api.cli import main as cli_main
-from nmrforge_api.peaks import PeakMeasurement
+from nmrforge_api.peaks import (
+    PeakMeasurement,
+    peak_coordinates,
+    read_reference_peaks,
+)
 from nmrforge_api.reference import load_reference, sanitize_sweep_params
 
 # 合成谱几何:数据轴 0 = 间接(15N,64 点),轴 1 = 直接(1H,128 点);
@@ -219,6 +223,21 @@ def test_measure_peak_positions_recovers_subpoint_shift(tmp_path: Path) -> None:
         assert not item.out_of_range
     # 整数截断会差整整 1 个点;这里必须明显好于它
     assert abs(measured[0].positions["15N"] - _n15_ppm(_PEAK_A[0])) > 0.5 * _n15_step()
+
+
+def test_read_reference_peaks_accepts_research_csv(tmp_path: Path) -> None:
+    """下游研究项目导出的 peak_id,H_ppm,N_ppm 峰表可直接使用。"""
+    path = tmp_path / "reference_peaks.csv"
+    path.write_text(
+        "peak_id,H_ppm,N_ppm,height,linewidth,volume\n"
+        "1:LEU10,8.211,122.733,0.0,0.0,0.0\n"
+        "2:GLY101,8.266,109.496,0.0,0.0,0.0\n",
+        encoding="utf-8-sig",
+    )
+    rows = read_reference_peaks(path)
+    assert len(rows) == 2
+    assert rows[0]["label"] == "LEU10"
+    assert peak_coordinates(rows[0], None) == {"1H": 8.211, "15N": 122.733}
 
 
 def test_measure_peak_positions_flags_out_of_range(tmp_path: Path) -> None:
