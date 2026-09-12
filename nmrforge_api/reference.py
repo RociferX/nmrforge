@@ -61,6 +61,8 @@ class ReferenceSpectrum:
     spectrum_sha256: str = ""
     params: dict[str, Any] = field(default_factory=dict)
     sweep_params: dict[str, Any] = field(default_factory=dict)
+    # 参考运行的各轴 PS(p0,p1):扫描时传给后端 direct_phase_override,
+    # 让候选谱与参考谱相位一致(后端该参数按轴生效,名字沿用后端 API)。
     direct_phase: dict[str, list[float]] = field(default_factory=dict)
     peak_table_path: str = ""
     created_at: str = field(default_factory=now_iso)
@@ -129,7 +131,13 @@ class ReferenceSpectrum:
         )
 
     def direct_phase_override(self) -> dict[str, tuple[float, float]] | None:
-        """参考相位 → 后端 ``direct_phase_override`` 参数(锁定相位用)。"""
+        """参考相位 → 后端 ``direct_phase_override`` 参数(锁定相位用)。
+
+        后端该参数按轴生效(见 ``script_generator._stage_lines`` 的 phase
+        分支),因此这里返回参考运行记录的全部轴 PS:直接维相位搜索被跳过,
+        间接维也沿用参考优化结果——否则候选谱与参考谱相位不同,峰位差里
+        会混进相位差异。
+        """
         if not self.direct_phase:
             return None
         return {
@@ -166,6 +174,19 @@ def normalize_direct_phase(raw: object) -> dict[str, list[float]]:
         except (TypeError, ValueError):
             continue
     return out
+
+
+def reference_phase(effective: dict[str, Any]) -> dict[str, list[float]]:
+    """参考运行的有效参数 → 锁定用的各轴 PS(p0,p1)。
+
+    统一路线把最终相位写在 ``phases``(各轴 PS;直接维搜索结果在
+    ``direct_phase``);两条来源都试,取先命中的一条。路由 phase_route=none
+    时只有 ``direct_phase``。
+    """
+    locked = normalize_direct_phase(effective.get("direct_phase"))
+    if locked:
+        return locked
+    return normalize_direct_phase(effective.get("phases"))
 
 
 def _find_reference_script(work: Path, data_id: str) -> Path:
@@ -272,7 +293,7 @@ def build_reference(
         spectrum_sha256=sha256_file(frozen_spectrum),
         params=effective,
         sweep_params=sanitize_sweep_params(effective),
-        direct_phase=normalize_direct_phase(effective.get("direct_phase")),
+        direct_phase=reference_phase(effective),
         peak_table_path="",
         software_version=software_version(),
         tool_versions=tool_versions(),
@@ -330,6 +351,7 @@ __all__ = [
     "build_reference",
     "load_reference",
     "normalize_direct_phase",
+    "reference_phase",
     "sanitize_sweep_params",
     "set_reference_peaks",
 ]

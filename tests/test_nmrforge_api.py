@@ -38,7 +38,12 @@ from nmrforge_api.peaks import (
     peak_coordinates,
     read_reference_peaks,
 )
-from nmrforge_api.reference import load_reference, sanitize_sweep_params
+from nmrforge_api.reference import (
+    ReferenceSpectrum,
+    load_reference,
+    reference_phase,
+    sanitize_sweep_params,
+)
 
 # 合成谱几何:数据轴 0 = 间接(15N,64 点),轴 1 = 直接(1H,128 点);
 # 头部用 CAR(ORIG=0),ppm[i] = CAR + (size/2 - i) * SW/(size*OBS)
@@ -352,6 +357,11 @@ def test_run_parameter_study_end_to_end(
         assert len(run.measurements) == 2
         assert all(m.found for m in run.measurements)
 
+    # 相位锁定:参考记录的 direct_phase 必须原样传给每个组合
+    assert all(run.phase_locked for run in result.runs)
+    locked_calls = [call for call in backend.process_calls if call["phase"]]
+    assert len(locked_calls) == len(result.runs)
+    assert locked_calls[0]["phase"] == {"F2": (0.0, 0.0)}
     # 参数 → 峰位:0.35 与 0.45 相差 2.5 点(15N),测量应还原
     by_off = {
         round(float(run.combo["window.F1.off"]), 3): run for run in result.runs
@@ -470,6 +480,29 @@ def test_api_does_not_import_qt() -> None:
         check=False,
     )
     assert proc.returncode == 0, proc.stderr
+
+
+def test_reference_phase_uses_all_axes_when_direct_missing() -> None:
+    """统一路线把相位写在 phases(各轴 PS),锁定时必须全部继承。"""
+    effective = {
+        "phases": {"F1": [172.5, 0.0], "F2": [27.5, 0.0]},
+    }
+    locked = reference_phase(effective)
+    assert locked == {"F1": [172.5, 0.0], "F2": [27.5, 0.0]}
+    ref = ReferenceSpectrum(
+        dataset_key="exp_001/d_001",
+        exp_id="exp_001",
+        data_id="d_001",
+        direct_phase=locked,
+    )
+    assert ref.direct_phase_override() == {
+        "F1": (172.5, 0.0),
+        "F2": (27.5, 0.0),
+    }
+    # direct_phase 存在时优先(phase_route=none 路线)
+    assert reference_phase(
+        {"direct_phase": {"F2": [1.0, 2.0]}, "phases": {"F1": [3.0, 0.0]}}
+    ) == {"F2": [1.0, 2.0]}
 
 
 def test_error_hierarchy() -> None:
