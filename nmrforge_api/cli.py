@@ -25,9 +25,13 @@ from pathlib import Path
 from typing import Any
 
 from nmrforge_api.errors import SensitivityError
-from nmrforge_api.peaks import pick_reference_peaks
 from nmrforge_api.records import write_records
-from nmrforge_api.reference import build_reference, load_reference, set_reference_peaks
+from nmrforge_api.reference import (
+    build_reference,
+    ensure_reference_peaks,
+    load_reference,
+    set_reference_peaks,
+)
 from nmrforge_api.session import add_dataset, open_study
 from nmrforge_api.study import reference_peaks
 from nmrforge_api.sweep import (
@@ -100,20 +104,34 @@ def cmd_peaks(args: argparse.Namespace) -> int:
     session = open_study(args.study, name=args.name)
     reference = load_reference(session)
     if args.peak_table:
+        # 可选:外部峰表(公开库/已指认)
         target = session.reference_dir_for() / "reference.list"
         target.write_text(
-            Path(args.peak_table).read_text(encoding="utf-8"), encoding="utf-8"
+            Path(args.peak_table).read_text(encoding="utf-8-sig"),
+            encoding="utf-8",
         )
-        reference = set_reference_peaks(session, target, reference)
+        reference = set_reference_peaks(
+            session, target, reference, source="external"
+        )
     else:
-        peak_path = pick_reference_peaks(
+        # 默认:让 NMRForge 在参考谱上自动选峰(不需要外部峰表)
+        reference = ensure_reference_peaks(
             session,
+            reference,
             sigma_multiplier=args.sigma,
-            out_path=session.reference_dir_for() / "reference.list",
+            max_peaks=args.max_peaks,
+            force=args.force,
         )
-        reference = set_reference_peaks(session, peak_path, reference)
     peaks = reference_peaks(session, reference)
-    _print({"peak_table": reference.peak_table_path, "count": len(peaks)})
+    _print(
+        {
+            "peak_table": reference.peak_table_path,
+            "sha256": reference.peak_table_sha256,
+            "source": reference.peak_source,
+            "params": reference.peak_params,
+            "count": len(peaks) or reference.peak_count,
+        }
+    )
     return 0
 
 
@@ -234,7 +252,13 @@ def build_parser() -> argparse.ArgumentParser:
     peaks = sub.add_parser("peaks", help="参考峰表:选峰或登记外部峰表")
     _common(peaks)
     peaks.add_argument("--sigma", type=float, default=None, help="选峰阈值(σ 倍数)")
-    peaks.add_argument("--peak-table", default="", help="外部峰表路径(.list)")
+    peaks.add_argument("--max-peaks", type=int, default=0, help="只保留强度前 N 个峰(0=全部)")
+    peaks.add_argument("--force", action="store_true", help="丢弃已有峰表重新选峰")
+    peaks.add_argument(
+        "--peak-table",
+        default="",
+        help="可选:外部峰表(.list 或 peak_id,H_ppm,N_ppm CSV);缺省由软件自动选峰",
+    )
     peaks.set_defaults(func=cmd_peaks)
 
     sweep = sub.add_parser("sweep", help="按网格扫描参数并落盘记录")

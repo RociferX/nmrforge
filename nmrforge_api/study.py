@@ -28,11 +28,11 @@ from pathlib import Path
 from typing import Any
 
 from nmrforge_api.errors import DatasetError
-from nmrforge_api.peaks import pick_reference_peaks
 from nmrforge_api.records import write_records
 from nmrforge_api.reference import (
     ReferenceSpectrum,
     build_reference,
+    ensure_reference_peaks,
     load_reference,
     sanitize_sweep_params,
     set_reference_peaks,
@@ -93,6 +93,7 @@ def run_parameter_study(
     phase_route: str | None = None,
     peaks: Path | str | None = None,
     sigma_multiplier: float | None = None,
+    max_peaks: int = 0,
     max_runs: int = DEFAULT_MAX_RUNS,
     window_pts: int = 3,
     sign: str = "abs",
@@ -105,8 +106,10 @@ def run_parameter_study(
 ) -> StudyResult:
     """建/开研究 → (可选)导入数据 → 参考谱 → 峰表 → 扫描 → 汇总。
 
-    ``dataset`` 只在首次建研究或换数据集时需要;``peaks`` 给定时用外部峰表
-    (公开库/已指认峰表),否则用 NMRForge 在参考谱上选峰。
+    ``dataset`` 只在首次建研究或换数据集时需要。
+    **默认不要求外部峰表**:参考谱与参考峰位都由 NMRForge 自动优化产生
+    (``build_reference`` 出参考谱/脚本,``ensure_reference_peaks`` 在参考谱上
+    自动选峰并冻结);``peaks`` 只在研究方另有公开库/指认峰表时才传。
     """
     session = open_study(root, name=name, backend=backend)
     rebuild = False
@@ -130,18 +133,22 @@ def run_parameter_study(
         force=rebuild,
     )
     if peaks is not None:
+        # 可选:研究方自带的峰表(公开库/已指认),同样冻结留档
         target = session.reference_dir_for() / "reference.list"
         target.write_text(
-            Path(peaks).read_text(encoding="utf-8"), encoding="utf-8"
+            Path(peaks).read_text(encoding="utf-8-sig"), encoding="utf-8"
         )
-        reference = set_reference_peaks(session, target, reference)
-    elif not reference.peak_table_path:
-        peak_path = pick_reference_peaks(
+        reference = set_reference_peaks(
+            session, target, reference, source="external"
+        )
+    else:
+        # 默认:NMRForge 在参考谱上自动选峰,峰位即研究的基准峰位
+        reference = ensure_reference_peaks(
             session,
+            reference,
             sigma_multiplier=sigma_multiplier,
-            out_path=session.reference_dir_for() / "reference.list",
+            max_peaks=max_peaks,
         )
-        reference = set_reference_peaks(session, peak_path, reference)
 
     # 扫描基底 = 参考谱的有效参数(相位/窗/填零/基线都是参考运行的结论),
     # 用户显式传入的 params 只作为局部覆盖,不整体替换参考。

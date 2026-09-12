@@ -92,7 +92,12 @@ def write_records(
         },
         "peaks": {
             "path": reference.peak_table_path,
-            "count": len(peaks) if peaks is not None else None,
+            "sha256": reference.peak_table_sha256,
+            "count": reference.peak_count
+            or (len(peaks) if peaks is not None else 0),
+            "source": reference.peak_source,
+            "params": reference.peak_params,
+            "created_at": reference.peak_created_at,
         },
         "runs": {
             "total": len(runs),

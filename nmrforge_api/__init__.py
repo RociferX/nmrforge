@@ -47,6 +47,7 @@ from nmrforge_api.records import write_records
 from nmrforge_api.reference import (
     ReferenceSpectrum,
     build_reference,
+    ensure_reference_peaks,
     load_reference,
     sanitize_sweep_params,
     set_reference_peaks,
@@ -95,6 +96,7 @@ __all__ = [
     "add_dataset",
     "build_reference",
     "dataset_info",
+    "ensure_reference_peaks",
     "expand_grid",
     "load_plan",
     "load_reference",

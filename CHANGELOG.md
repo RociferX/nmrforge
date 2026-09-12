@@ -17,9 +17,13 @@
 - 契约走 Proposal:`docs/proposals/external-api/001-parameter-sweep-api.md`,
   API_CONTRACT 新增 §11;v0.1 边界:只支持 uniform 扫描(NUS 需先给
   `reconstruct_nus` 加候选输出隔离);
-- 测试:`tests/test_nmrforge_api.py` 14 项(网格/覆盖、亚像素精度、σ 与 Δδ
+- 参考峰位默认由软件产生:新增 `ensure_reference_peaks()`(在参考谱上自动选峰
+  并冻结),`run_parameter_study`/CLI 默认不走外部峰表(可选 `peaks=`/
+  `--peak-table` 逃生口);峰表来源、SHA-256、峰数与选峰参数(sigma/max_peaks)
+  写入 `reference.json` 与 `records/manifest.json`;
+- 测试:`tests/test_nmrforge_api.py` 15 项(网格/覆盖、亚像素精度、σ 与 Δδ
   公式、端到端 6 组合、断点续跑、NUS 边界、导入失败、CLI、不 import Qt、
-  参考相位锁定);VM 冒烟固化 `scripts/vm_api_smoke.py`;
+  参考相位锁定、自动选峰默认路径);VM 冒烟固化 `scripts/vm_api_smoke.py`;
 - 真机端到端(VM，`bmr6980/n15hsqc.fid` + 该库 138 峰参考表，4 组合):
   48.9 s、4/4 组合成功、138/138 峰位测到、参考相位锁定
   (F1=172.5/F2=27.5)、records 六件套齐备;Δδ_std p90=0.046 ppm(仅链路验证)。

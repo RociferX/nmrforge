@@ -415,6 +415,38 @@ def test_run_parameter_study_end_to_end(
     assert load_reference(session2) is not None
 
 
+def test_run_parameter_study_auto_picks_reference_peaks(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """默认不需要外部峰表:参考峰位由 NMRForge 自动选峰产生并冻结。"""
+    root = tmp_path / "auto_peaks"
+    backend = _FakeSweepBackend()
+    result = run_parameter_study(
+        root,
+        bruker_dir / "hsqc_2d",
+        axes={"zero_fill": [1, 2]},
+        params={"phase_route": "none"},
+        backend=backend,
+    )
+    reference = result.reference
+    assert reference.peak_source == "auto"
+    assert reference.peak_table_path.endswith("reference.list")
+    assert Path(reference.peak_table_path).is_file()
+    assert reference.peak_table_sha256
+    assert reference.peak_count == 2  # 合成谱只有 2 个远高于 35σ 的峰
+    assert len(result.runs) == 2
+    assert all(run.status == "success" for run in result.runs)
+    assert all(len(run.measurements) == reference.peak_count for run in result.runs)
+    manifest = json.loads(
+        Path(result.records["manifest"]).read_text(encoding="utf-8")
+    )
+    assert manifest["peaks"]["source"] == "auto"
+    assert manifest["peaks"]["sha256"] == reference.peak_table_sha256
+    assert manifest["peaks"]["count"] == reference.peak_count
+    # 峰位不确定度基于自动选出的峰,而不是外部峰表
+    assert {item.peak_id for item in result.uncertainties} == {1, 2}
+
+
 def test_sweep_rejects_nus(tmp_path: Path, bruker_dir: Path) -> None:
     from nmrforge_api import add_dataset, plan_sweep, run_sweep
     from nmrforge_api.reference import ReferenceSpectrum

@@ -36,7 +36,11 @@ def main(argv: list[str] | None = None) -> int:
         help="研究根目录(会被复用/断点续跑)",
     )
     parser.add_argument("--data", required=True, help="Bruker 原始数据目录")
-    parser.add_argument("--peaks", default="", help="参考峰表(.list 或 peak_id,H_ppm,N_ppm CSV)")
+    parser.add_argument(
+        "--peaks",
+        default="",
+        help="可选:外部参考峰表(.list 或 peak_id,H_ppm,N_ppm CSV);缺省=软件自动选峰",
+    )
     parser.add_argument(
         "--axes",
         default='{"window.F1.off": [0.35, 0.45], "zero_fill": [1, 2]}',
@@ -44,6 +48,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--window-pts", type=int, default=3)
     parser.add_argument("--max-runs", type=int, default=8)
+    parser.add_argument("--max-peaks", type=int, default=0)
     parser.add_argument("--fresh", action="store_true", help="先删除研究目录再跑")
     args = parser.parse_args(argv)
 
@@ -64,6 +69,7 @@ def main(argv: list[str] | None = None) -> int:
         axes=axes,
         peaks=Path(args.peaks).expanduser() if args.peaks else None,
         max_runs=args.max_runs,
+        max_peaks=args.max_peaks,
         window_pts=args.window_pts,
         progress=log,
     )
@@ -77,6 +83,13 @@ def main(argv: list[str] | None = None) -> int:
             "phase_locked": bool(result.reference.direct_phase),
             "phases": result.reference.direct_phase,
             "sampling": result.reference.sampling,
+        },
+        "peaks": {
+            "path": result.reference.peak_table_path,
+            "sha256": result.reference.peak_table_sha256,
+            "source": result.reference.peak_source,
+            "params": result.reference.peak_params,
+            "count": result.reference.peak_count,
         },
         "runs": [
             {

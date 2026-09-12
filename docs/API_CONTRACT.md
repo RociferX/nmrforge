@@ -321,7 +321,7 @@ API_VERSION = "0.1"
 run_parameter_study(root, dataset=None, *, axes, peaks=None, params=None,
                     max_runs=256, window_pts=3, csp_n_weight=0.2, ...)
 open_study / add_dataset / dataset_info
-build_reference / load_reference / set_reference_peaks
+build_reference / load_reference / set_reference_peaks / ensure_reference_peaks
 pick_reference_peaks / read_reference_peaks / measure_peak_positions
 expand_grid / plan_sweep / run_sweep / load_plan / load_runs
 position_uncertainty / uncertainty_summary / write_records
@@ -333,7 +333,8 @@ CLI:`python -m nmrforge_api {init,reference,peaks,sweep,report,status}`。
 
 - `DatasetRef`(exp_id/data_id/ndim/nuclei/sampling/source/raw_dir);
 - `ReferenceSpectrum`(冻结谱与脚本路径 + 两个 SHA-256 + 有效参数 +
-  `direct_phase` + 版本表);
+  `direct_phase`(各轴 PS,锁定相位) + 峰表路径/SHA-256/峰数/来源(取峰
+  方式 auto|external)/选峰参数 + 版本表);
 - `SweepRun`(run_id/combo/params/脚本与谱哈希/峰位测量/日志尾部/status);
 - `PeakMeasurement`(每核 ppm、相对参考的 delta、intensity、found/
   window_edge/boundary/out_of_range);
@@ -343,7 +344,8 @@ CLI:`python -m nmrforge_api {init,reference,peaks,sweep,report,status}`。
 
 ### 11.3 强约束(破坏即视为契约破坏)
 
-1. 不 import Qt/gui;不修改 GUI 状态;
+1. 不 import Qt/gui;不修改 GUI 状态;参考谱、参考脚本与参考峰位默认全部由
+   NMRForge 自动优化/自动选峰产生,外部峰表只是可选输入;
 2. 扫描候选谱只写 `study/runs/`,不替换 `spectra/` 活动谱;
 3. 同一数据集内 fid 只转换一次;组合间只允许被扫参数不同(相位锁定);
 4. 峰位测量与选峰共用轴映射口径(`workflow.pick_peaks.read_spectrum_axes`);

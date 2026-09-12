@@ -23,6 +23,7 @@ from core.project.manager import sha256_file
 from core.project.run_refs import STEP_RUN_REFS
 from core.version import software_version, tool_versions
 from nmrforge_api.errors import ReferenceError
+from nmrforge_api.peaks import pick_reference_peaks
 from nmrforge_api.session import StudySession, now_iso
 
 # 运行期派生/仅 GUI 使用的键:不参与扫描(base 参数里必须剔掉,否则会改变
@@ -65,6 +66,11 @@ class ReferenceSpectrum:
     # 让候选谱与参考谱相位一致(后端该参数按轴生效,名字沿用后端 API)。
     direct_phase: dict[str, list[float]] = field(default_factory=dict)
     peak_table_path: str = ""
+    peak_table_sha256: str = ""
+    peak_count: int = 0
+    peak_source: str = ""          # auto(NMRForge 选峰) | external(外部峰表)
+    peak_params: dict[str, Any] = field(default_factory=dict)
+    peak_created_at: str = ""
     created_at: str = field(default_factory=now_iso)
     software_version: str = ""
     tool_versions: dict[str, str] = field(default_factory=dict)
@@ -93,6 +99,11 @@ class ReferenceSpectrum:
             "sweep_params": self.sweep_params,
             "direct_phase": self.direct_phase,
             "peak_table_path": self.peak_table_path,
+            "peak_table_sha256": self.peak_table_sha256,
+            "peak_count": int(self.peak_count),
+            "peak_source": self.peak_source,
+            "peak_params": self.peak_params,
+            "peak_created_at": self.peak_created_at,
             "created_at": self.created_at,
             "software_version": self.software_version,
             "tool_versions": self.tool_versions,
@@ -122,6 +133,11 @@ class ReferenceSpectrum:
                 if isinstance(v, (list, tuple)) and len(v) >= 2
             },
             peak_table_path=str(data.get("peak_table_path", "")),
+            peak_table_sha256=str(data.get("peak_table_sha256", "")),
+            peak_count=int(data.get("peak_count", 0) or 0),
+            peak_source=str(data.get("peak_source", "")),
+            peak_params=dict(data.get("peak_params") or {}),
+            peak_created_at=str(data.get("peak_created_at", "")),
             created_at=str(data.get("created_at", "")),
             software_version=str(data.get("software_version", "")),
             tool_versions={
@@ -327,9 +343,18 @@ def load_reference(session: StudySession) -> ReferenceSpectrum | None:
 
 
 def set_reference_peaks(
-    session: StudySession, peak_table: Path | str, reference: ReferenceSpectrum | None = None
+    session: StudySession,
+    peak_table: Path | str,
+    reference: ReferenceSpectrum | None = None,
+    *,
+    source: str = "external",
+    params: dict[str, Any] | None = None,
 ) -> ReferenceSpectrum:
-    """登记参考峰表路径(峰表本身由选峰或外部公开库提供)。"""
+    """登记参考峰表(记录路径、SHA-256、峰数、来源与选峰参数)。
+
+    ``source``:``auto`` = NMRForge 在参考谱上自动选峰;``external`` = 外部峰表
+    (公开库/既有指认)。两者都冻结进 ``reference.json``,记录里只认这份快照。
+    """
     ref = reference or load_reference(session)
     if ref is None:
         raise ReferenceError("还没有参考谱,先调用 build_reference()")
@@ -337,6 +362,11 @@ def set_reference_peaks(
     if not path.is_file():
         raise ReferenceError(f"峰表不存在: {path}")
     ref.peak_table_path = str(path)
+    ref.peak_table_sha256 = sha256_file(path)
+    ref.peak_count = _count_peaks(path)
+    ref.peak_source = str(source or "")
+    ref.peak_params = dict(params or {})
+    ref.peak_created_at = now_iso()
     state_file = session.reference_dir_for() / REFERENCE_FILENAME
     state_file.write_text(
         json.dumps(ref.to_dict(), ensure_ascii=False, indent=2) + "\n",
@@ -345,10 +375,71 @@ def set_reference_peaks(
     return ref
 
 
+def _count_peaks(path: Path) -> int:
+    """峰表行数(读不动按 0,不阻断流程)。"""
+    try:
+        from nmrforge_api.peaks import read_reference_peaks
+
+        return len(read_reference_peaks(path))
+    except Exception:  # noqa: BLE001 - 记录用途
+        return 0
+
+
+def ensure_reference_peaks(
+    session: StudySession,
+    reference: ReferenceSpectrum | None = None,
+    *,
+    sigma_multiplier: float | None = None,
+    max_peaks: int = 0,
+    force: bool = False,
+) -> ReferenceSpectrum:
+    """保证参考峰表存在:**默认由 NMRForge 在参考谱上自动选峰**。
+
+    - 已有峰表且文件在 → 直接复用(除非 ``force``);
+    - 否则调用 ``pick_reference_peaks()`` 选峰并冻结到
+      ``study/reference/<key>/reference.list``;
+    - ``max_peaks > 0`` 时按强度保留前 N 个峰(用于剔除明显弱峰/噪声峰)。
+    """
+    ref = reference or load_reference(session)
+    if ref is None:
+        raise ReferenceError("还没有参考谱,先调用 build_reference()")
+    if not force and ref.peak_table_path and Path(ref.peak_table_path).is_file():
+        return ref
+    target = session.reference_dir_for() / "reference.list"
+    pick_reference_peaks(
+        session,
+        sigma_multiplier=sigma_multiplier,
+        out_path=target,
+    )
+    if max_peaks and max_peaks > 0:
+        _keep_top_peaks(target, int(max_peaks))
+    return set_reference_peaks(
+        session,
+        target,
+        ref,
+        source="auto",
+        params={"sigma_multiplier": sigma_multiplier, "max_peaks": int(max_peaks)},
+    )
+
+
+def _keep_top_peaks(path: Path, keep: int) -> None:
+    """按 Intensity 保留前 keep 个峰(重写同一路径,保持 Poky .list 格式)。"""
+    from core.peaks.peak_table import export_peaks_poky, load_peaks
+
+    rows = load_peaks(path)
+    if len(rows) <= keep:
+        return
+    rows.sort(
+        key=lambda row: abs(float(row.get("Intensity") or 0.0)), reverse=True
+    )
+    export_peaks_poky(path, rows[:keep])
+
+
 __all__ = [
     "REFERENCE_FILENAME",
     "ReferenceSpectrum",
     "build_reference",
+    "ensure_reference_peaks",
     "load_reference",
     "normalize_direct_phase",
     "reference_phase",
