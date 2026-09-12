@@ -28,6 +28,11 @@
   (间接维 `phases` + 直接维扁平 `direct_phase` → 各轴 PS);可扫
   `nSigma`/`thresh`/`nthread`/`smile_scaling`。3D NUS 仍不支持(边界见
   docs/external-api/09-limitations-and-roadmap.md);
+- VM 真机复验 2D NUS 扫描(BMRB bmr6980 合成 25% NUS,分步 CLI 四进程):
+  参考谱走真实 SMILE 重构(质量 92.4)、自动选峰 99 个、`nsigma` 3/5/7 三组合
+  3/3 成功且候选谱 SHA-256 互不相同;Δδ_std median 0.0021 / p90 0.037 ppm。
+  过程中发现并修复两个缺陷:分步 CLI 的项目状态未落盘(下一进程看不到谱)、
+  SMILE 参数键 nsigma/nSigma 不一致导致候选谱相同(详见 CHANGELOG 相邻条目)。
 - 新增对外文档目录 `docs/external-api/`(入口 README + 总览/快速上手/API 参考/
   CLI 参考/输入与数据/输出与记录/方法与指标/接入指南/边界与路线/排查,共 11 篇
   + `examples/` 可运行示例 + 接口 CHANGELOG),自成一套可整体拷给外部项目;

@@ -32,6 +32,38 @@
 **仍未支持:3D NUS**。3D NUS 的终跑走切片流(`nus3d_*` 平面目录),候选隔离还
 需要按平面目录分桶与独立的 finalize 输出命名,属于下一项工作(见 9.4)。
 
+### VM 真机证据:2D NUS(2026-09-12)
+
+数据:公开库 BMRB bmr6980 的 15N-1H HSQC 全采样数据,用 NMRForge 自带工具
+合成 2D NUS(`scripts/vm_sample_make_nus.py`,复点网格 128、采样 32 点 = 25%)。
+流程:分步 CLI 四步(四个独立进程):
+
+```bash
+python -m nmrforge_api init      --study DIR --dataset <NUS 目录>
+python -m nmrforge_api reference --study DIR      # 真实 SMILE 重构
+python -m nmrforge_api peaks     --study DIR      # 软件自动选峰
+python -m nmrforge_api sweep     --study DIR --grid grid.yaml   # nsigma 3/5/7
+```
+
+结果:参考谱由统一路线 + SMILE 重构产生(综合质量分 92.4、相位=统一自动、
+`sampling=nus`、`sweep_supported=true`);自动选峰 99 个(`peak_source=auto`,
+峰表 SHA-256 入档);3/3 组合 success,每组合 99 个峰位全部测到;
+**三个候选谱 SHA-256 互不相同**(参数真的生效)。
+
+本次 3 组合的峰位不确定度(仅链路验证,不构成研究结论):
+`Δδ_std` min 0.00011 / median 0.0021 / p90 0.037 / max 0.072 ppm;
+逐核 σ:15N median 0.0089 / p90 0.185 / max 0.357 ppm,
+1H median 0.00071 / p90 0.0092 / max 0.0125 ppm。
+
+真机跑出的两个缺陷(均已修复,见 CHANGELOG):
+
+1. **分步 CLI 跨进程看不到已登记的谱**:`build_reference` 只改内存未写
+   `project.json`,下一进程的 `peaks` 报「谱图缺失」;现参考构建/自动选峰/
+   一步式流程都会落盘项目状态。
+2. **SMILE 参数键不一致**:后端输入键是小写 `nsigma`,而运行记录回写
+   `nSigma`;扫描轴写 `nSigma` 时被静默忽略,三个组合跑出**同一张谱**
+   (Δδ 全 0)。现在后端两者都接受,接口把驼峰别名归一成输入键。
+
 ## 9.3 长扫描怎么切分
 
 - 组合数上限默认 256(`max_runs`);超过请拆成多个研究根或分批网格;
