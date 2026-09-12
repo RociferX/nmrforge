@@ -87,7 +87,8 @@ def run_parameter_study(
     root: Path | str,
     dataset: Path | str | None = None,
     *,
-    axes: Mapping[str, Sequence[Any]],
+    axes: Mapping[str, Sequence[Any]] | None = None,
+    combos: Sequence[Mapping[str, Any]] | None = None,
     name: str = "",
     params: dict[str, Any] | None = None,
     phase_route: str | None = None,
@@ -105,6 +106,9 @@ def run_parameter_study(
     progress: Callable[[str], None] | None = None,
 ) -> StudyResult:
     """建/开研究 → (可选)导入数据 → 参考谱 → 峰表 → 扫描 → 汇总。
+
+    扫描设计二选一(必须且只能给一个):``axes``(接口展开全因子)或
+    ``combos``(外部给定的组合表:正交/部分因子/D-optimal/LHS/手挑,原样执行)。
 
     ``dataset`` 只在首次建研究或换数据集时需要。
     **默认不要求外部峰表**:参考谱与参考峰位都由 NMRForge 自动优化产生
@@ -156,7 +160,11 @@ def run_parameter_study(
     if params:
         base_params.update(sanitize_sweep_params(params))
     plan = plan_sweep(
-        reference, axes=axes, max_runs=max_runs, base_params=base_params
+        reference,
+        axes=axes,
+        combos=combos,
+        max_runs=max_runs,
+        base_params=base_params,
     )
     runs = run_sweep(
         session,

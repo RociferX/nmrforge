@@ -36,6 +36,7 @@ from nmrforge_api.session import add_dataset, open_study
 from nmrforge_api.study import reference_peaks
 from nmrforge_api.sweep import (
     DEFAULT_MAX_RUNS,
+    load_combo_table,
     load_plan,
     load_runs,
     plan_sweep,
@@ -138,18 +139,31 @@ def cmd_peaks(args: argparse.Namespace) -> int:
 def cmd_sweep(args: argparse.Namespace) -> int:
     session = open_study(args.study, name=args.name)
     reference = load_reference(session)
-    config = _load_mapping(args.grid)
-    axes = config.get("axes")
-    if not isinstance(axes, dict) or not axes:
-        raise SensitivityError(f"网格文件缺少 axes: {args.grid}")
-    max_runs = int(config.get("max_runs", args.max_runs or DEFAULT_MAX_RUNS))
-    base = config.get("base_params")
-    plan = plan_sweep(
-        reference,
-        axes=axes,
-        max_runs=max_runs,
-        base_params=base if isinstance(base, dict) else None,
-    )
+    if (args.grid is None) == (args.combos is None):
+        raise SensitivityError(
+            "必须且只能给一个:--grid(各轴候选值,接口展开全因子)或 "
+            "--combos(外部给定的组合表:正交/部分因子/LHS…)"
+        )
+    if args.combos:
+        combos = load_combo_table(args.combos)
+        plan = plan_sweep(
+            reference,
+            combos=combos,
+            max_runs=int(args.max_runs or DEFAULT_MAX_RUNS),
+        )
+    else:
+        config = _load_mapping(args.grid)
+        axes = config.get("axes")
+        if not isinstance(axes, dict) or not axes:
+            raise SensitivityError(f"网格文件缺少 axes: {args.grid}")
+        max_runs = int(config.get("max_runs", args.max_runs or DEFAULT_MAX_RUNS))
+        base = config.get("base_params")
+        plan = plan_sweep(
+            reference,
+            axes=axes,
+            max_runs=max_runs,
+            base_params=base if isinstance(base, dict) else None,
+        )
     runs = run_sweep(
         session,
         plan,
@@ -263,7 +277,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     sweep = sub.add_parser("sweep", help="按网格扫描参数并落盘记录")
     _common(sweep)
-    sweep.add_argument("--grid", required=True, help="网格 YAML/JSON")
+    sweep.add_argument(
+        "--grid",
+        default=None,
+        help="轴网格 YAML/JSON(各轴候选值,接口展开全因子)",
+    )
+    sweep.add_argument(
+        "--combos",
+        default=None,
+        help="显式组合表 CSV/TSV/YAML/JSON(外部设计:正交/部分因子/LHS…)",
+    )
     sweep.add_argument("--max-runs", type=int, default=0)
     sweep.add_argument("--window-pts", type=int, default=3)
     sweep.add_argument("--csp-n-weight", type=float, default=DEFAULT_CSP_N_WEIGHT)

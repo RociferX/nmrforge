@@ -79,8 +79,20 @@ peak_id,H_ppm,N_ppm,height,linewidth,volume
 | `baseline.F1.enabled` | 间接维基线开关(关=不加 POLY) | `[True, False]` |
 | `baseline.F1.mode` | 间接维基线模式(`auto`→`POLY -auto`;`order`→`POLY -ord N`) | `["auto", "order"]` |
 | `baseline.F1.order` | 仅 `mode="order"` 时生效的阶数 | `[1, 2, 3]` |
-| `extract` / `ext_lo` / `ext_hi` | 直接维提取窗口开关与边界(ppm) | `[True]` / `["10.5"]` |
-| `direct_poly_time` | 直接维 POLY `-time` 开关 | `[False, True]` |
+| `phase_delta.F2.p0` | **相位识别偏差**(相对参考相位,度) | `[-5, 0, 5]` |
+| `phase_delta.F1.p0` | 间接维相位偏差(度) | `[-5, 5]` |
+| `phase.F2.p0` | 相位绝对值(不想相对参考时用) | `[12, 17, 22]` |
+
+**确定性 / 策略参数(一般不进网格)**——接口会执行,但会在 `plan.notes` 里提示:
+
+| 键 | 为什么不建议进网格 |
+| --- | --- |
+| `extract` / `ext_lo` / `ext_hi` | 改了会**换峰集**(峰被裁掉/越界),不是位置不确定度的自由度 |
+| `points_per_line` | 数字点距目标,由填零与线宽决定的分辨率口径 |
+| `direct_poly_time` | 直接维 POLY `-time` 策略开关(首遍/终跑约定) |
+| `nuslist_file` / `nuslist_count` / `timeout_s` | 输入与运行参数,不是处理方法 |
+| `fid_noise` / `fid_noise_seed` | 专门用于「重复性/去伪峰」实验,不是常规扫描轴 |
+| `keep_direct_complex` / `keep_complex_all` | 特殊用途开关 |
 
 **NUS 2D 专用(SMILE 重构)**:
 
@@ -103,10 +115,11 @@ peak_id,H_ppm,N_ppm,height,linewidth,volume
 - 轴上写 `F1` 是**逻辑维**(F1 = 间接, F2 = 直接;3D 时 F3 = 直接);
 - 未列出的处理计划参数同样可以用点号路径覆盖(见
   `backend/script_generator.py::param_schema()` 的完整清单);
-- **不要**把 `phases` / `sampling.auto_phase` / `phase_route` 放进网格:它们
-  会破坏「相位锁定在参考值」的前提(接口不会阻止,但结果不可比);
-- 组合数 = 各轴长度之积,超过 `max_runs`(默认 256)直接报错。长扫描请分批,
-  同一研究根可以续跑。
+- **相位**:不要直接写 `phases` / `direct_phase`(接口会直接报错)——相位自由度
+  用 `phase_delta.<轴>.p0|p1`(相对参考,如 ±5°)或 `phase.<轴>.p0|p1`(绝对值);
+- `sampling.auto_phase` / `phase_route` 同样不能进网格(由参考运行决定);
+- 组合数 = 各轴长度之积(用 `axes` 时),超过 `max_runs`(默认 256)直接报错;
+  长扫描请分批,同一研究根可以续跑。
 
 ## 5.5 扫描参数口径(精确定义)
 
@@ -119,13 +132,36 @@ peak_id,H_ppm,N_ppm,height,linewidth,volume
    `phase_route`、`preview_axis`、`projections`、`backend_runs`、`diagnostics`、
    `fill`、`nus`、`final_ext_lo`、`final_ext_hi`、`segment_shift_hz`。
    → **没写进网格的参数,一律保持参考值**。
-2. **轴(axes)** = 点号键 → 候选值列表(构成全因子网格);
+2. **轴** = 二选一:
+   - `axes`:点号键 → 候选值列表,接口展开**全因子**(便捷路径);
+   - `combos`:**外部给定的组合表**——正交表/部分因子/D-optimal/LHS/手挑都行,
+     接口**原样按表序执行,不做任何设计决策**;
 3. **合并** = 每个组合在基底上做**深合并**(`window.F1.off` 只覆盖 `F1.off`,
    同层其它键保留),基底本身不被修改。
 
+### 设计由外部决定(接口只提供入口与核对)
+
+组合规模可能很大,所以**用什么设计由你们决定**,接口负责接收、校验、执行、留档:
+
+```python
+from nmrforge_api import load_combo_table, plan_sweep, design_diagnostics
+
+combos = load_combo_table("design.csv")   # CSV/TSV/YAML/JSON:一行一个组合
+plan = plan_sweep(reference, combos=combos)   # design="explicit",按表序执行
+print(plan.diagnostics)   # 水平计数 / 重复行 / 成对相关最大|r| / 缺失水平
+```
+
+- 外部工具(pyDOE2、Taguchi 正交表、LHS、D-optimal、手写表)只要能导出
+  「一行一个组合」的 CSV/TSV 或 YAML/JSON 列表即可直接跑;
+- 也可以先用 `axes` 全因子,再把 `plan.combos` 导出(`write_combo_table`)去筛选;
+- `design_diagnostics` 只做**信息性核对**(水平均衡、重复、两两因子相关),
+  不替你做设计决策;`grid_sha256` 让两次扫描可比对;
+- 显式组合表同样受 `max_runs` 上限与键校验约束。
+
 ### 网格语义
 
-- 组合数 = 各轴长度之积;顺序 = 轴按书写顺序、值按列表顺序(笛卡尔积);
+- 用 `axes` 时组合数 = 各轴长度之积,顺序 = 轴书写顺序 × 值列表顺序(笛卡尔积);
+  用 `combos` 时按表序执行,顺序即表格行序;
 - 超过 `max_runs`(默认 256)直接报错,不静默截断;
 - `grid_sha256` = 组合列表的规范 JSON 哈希(键排序),写入 `sweep_plan.json` 与
   `manifest.json`,可核对两次扫描是否同一网格。
@@ -158,13 +194,13 @@ peak_id,H_ppm,N_ppm,height,linewidth,volume
 | `fid_noise` / `fid_noise_seed` | 注入噪声重复性实验(特殊用途) |
 | `timeout_s` | 单次重构超时(秒) |
 
-### 锁定(不要放进网格)
+### 锁定(直接写会报错)
 
-| 键 | 原因 |
-| --- | --- |
-| `phases`(间接维 PS) / `direct_phase`(直接维 PS) | 相位必须锁定参考值,否则组合差异里混入相位差 |
-| `sampling.auto_phase` | 只在参考没有记录相位时才由接口自动置 `False` |
-| `light_phase_search` / `display_phase_search` | 仅影响参考构建;候选模式强制跳过重渲 |
+| 键 | 原因 | 正确做法 |
+| --- | --- | --- |
+| `phases` / `direct_phase` | 直接覆盖会破坏参考相位基准 | 用 `phase_delta.<轴>.p0\|p1`(偏差)或 `phase.<轴>.p0\|p1`(绝对值) |
+| `sampling.auto_phase` / `phase_route` | 由参考运行/接口决定 | — |
+| `light_phase_search` / `display_phase_search` | 仅影响参考构建;候选模式强制跳过重渲 | — |
 
 > **写错的键不会报错**(后端按缺省值处理),因此判断「参数是否真的生效」最可靠的
 > 办法是看候选谱的 SHA-256 是否不同(或看 `delta_std` 是否为 0)。例如 SMILE 的

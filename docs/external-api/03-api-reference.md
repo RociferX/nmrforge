@@ -15,10 +15,11 @@ run_parameter_study(
     root,                      # 研究根(不存在则创建项目)
     dataset=None,              # Bruker 目录;首次/换数据时给
     *,
-    axes,                      # 参数网格 {点号键: [候选值, ...]}
     name="",                   # 新建研究时的项目名
     params=None,               # 参考处理的输入参数(可选)
     phase_route=None,          # 参考运行的相位路线(默认按数据类型)
+    axes=None,                 # 与 combos 二选一:各轴候选值(接口展开全因子)
+    combos=None,               # 与 axes 二选一:外部给定的组合表
     peaks=None,                # 可选:外部峰表;默认 None=软件自动选峰
     sigma_multiplier=None,     # 自动选峰阈值(σ 倍数;默认 35)
     max_peaks=0,               # >0 时只保留强度前 N 个峰
@@ -139,15 +140,20 @@ run_parameter_study(
 把点号键覆盖合并进嵌套基底(不改原字典),如 `{"window.F1.off": 0.45}` 会更新
 `base["window"]["F1"]["off"]`。
 
-### `plan_sweep(reference, *, axes, max_runs=256, base_params=None, notes=None) -> SweepPlan`
+### `plan_sweep(reference, *, axes=None, combos=None, max_runs=256, base_params=None, notes=None) -> SweepPlan`
 
-组合数超过 `max_runs` 直接抛 `SweepError`(不静默截断)。`base_params` 缺省用
-`reference.sweep_params`。若参考没有记录相位,会关闭自动相位搜索并在
-`plan.notes` 里说明(`phase_locked=False`)。
+两个入口**必须且只能给一个**:`axes`(接口展开全因子)或 `combos`(外部给定
+组合表:正交/部分因子/D-optimal/LHS/手挑 → `design="explicit"`,原样按表序执行,
+接口不做设计决策)。组合数超过 `max_runs` 直接抛 `SweepError`(不静默截断)。
+键校验:锁定的键(`phases`/`direct_phase`/`sampling.auto_phase`/`phase_route`)
+抛错并提示改用 `phase_delta.*`;确定性/未知键写进 `plan.notes` 提示。
+`base_params` 缺省用 `reference.sweep_params`;若参考没有记录相位,会关闭自动
+相位搜索并在 `plan.notes` 里说明(`phase_locked=False`)。
 
 `SweepPlan`:`axes`、`combos`、`base_params`、`grid_sha256`、
-`reference_script_sha256`、`reference_spectrum_sha256`、`max_runs`、`phase_locked`、
-`notes`;属性 `n_combos`。
+`reference_script_sha256`、`reference_spectrum_sha256`、`max_runs`、`design`
+(`"full"`/`"explicit"`)、`n_full`、`diagnostics`(水平计数/重复行/两两相关最大
+\|r\|/缺失水平)、`phase_locked`、`notes`;属性 `n_combos`。
 
 ### `run_sweep(...) -> list[SweepRun]`
 
@@ -173,7 +179,18 @@ script_name="sNNNN.com", out_file="sNNNN.ft2")` → 把脚本与谱复制进
 
 `SweepRun`:`run_id`、`index`、`combo`、`params`、`status`、`message`、`run_dir`、
 `script_path`/`script_sha256`、`spectrum_path`/`spectrum_sha256`、`wall_time_s`、
-`phase_locked`、`logs_tail`、`measurements`。
+`phase_locked`、**`phase`(本次组合实际使用的各轴 PS)**、`logs_tail`、`measurements`。
+
+### 组合表与设计工具(接口不生成设计)
+
+| 函数 | 作用 |
+| --- | --- |
+| `infer_axes(combos)` | 从组合表推断各键出现过的取值(留档/校验) |
+| `combos_from_rows(rows, axes=None)` | 行表 → 组合列表;给了 `axes` 就校验键与水平 |
+| `load_combo_table(path)` | 读 CSV/TSV(表头=轴键)或 YAML/JSON(组合列表) |
+| `write_combo_table(path, combos)` | 写 CSV 组合表 |
+| `design_diagnostics(combos, axes=None)` | 信息性核对:水平计数/重复行/成对相关最大 \|r\|/缺失水平 |
+| `apply_phase_axes(base, part)` / `split_combo(combo)` | 相位轴运算(相位偏差/绝对值) |
 
 ### `load_plan(session)` / `load_runs(session)`
 

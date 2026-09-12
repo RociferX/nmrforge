@@ -348,6 +348,9 @@ CLI:`python -m nmrforge_api {init,reference,peaks,sweep,report,status}`。
    NMRForge 自动优化/自动选峰产生,外部峰表只是可选输入;
 1b. 扫描支持 uniform(任意维)与 **2D NUS**(走 `reconstruct_nus`,`out_file`/
     `script_name` 候选隔离;3D NUS 不支持);
+1c. 扫描设计二选一:`axes`(接口展开全因子)或 `combos`(外部给定组合表,
+    接口不做设计决策);相位自由度用 `phase_delta.<轴>.p0|p1`(相对参考)或
+    `phase.<轴>.p0|p1`(绝对值),直接写 `phases`/`direct_phase` 报错;
 2. 扫描候选谱只写 `study/runs/`,不替换 `spectra/` 活动谱;
 3. 同一数据集内 fid 只转换一次;组合间只允许被扫参数不同(相位锁定);
 4. 峰位测量与选峰共用轴映射口径(`workflow.pick_peaks.read_spectrum_axes`);

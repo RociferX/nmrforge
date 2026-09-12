@@ -31,6 +31,15 @@ CLI:`python -m nmrforge_api {init,reference,peaks,sweep,report,status}`。
 
 同版本内新增/修复(发布前):
 
+- **扫描口径与设计入口**:
+  - 相位识别偏差可扫:`phase_delta.<轴>.p0|p1`(相对参考)/
+    `phase.<轴>.p0|p1`(绝对值);直接写 `phases`/`direct_phase` 报错并提示;
+  - 显式组合表 `combos=`(正交/部分因子/D-optimal/LHS/手挑由外部决定,
+    接口原样按表序执行)+ `load_combo_table`/`write_combo_table`/
+    `combos_from_rows` + `design_diagnostics`;CLI `sweep --combos`;
+  - 确定性/策略参数与未知键写入 `plan.notes` 提示(锁定键直接报错);
+  - `SweepRun.phase`、`SweepPlan.design/n_full/diagnostics`。
+
 - **支持 2D NUS 扫描**:`reconstruct_nus` 增加 `out_file`/`script_name`
   (候选输出写 `_intermediate/`,不覆盖终谱),扫描按数据采样方式自动派发;
   参考相位锁定扩展到 NUS(间接维 `phases` + 直接维扁平 `direct_phase`);

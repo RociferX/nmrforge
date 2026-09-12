@@ -65,12 +65,17 @@ from nmrforge_api.study import StudyResult, run_parameter_study
 from nmrforge_api.sweep import (
     SweepPlan,
     SweepRun,
+    combos_from_rows,
+    design_diagnostics,
     expand_grid,
+    infer_axes,
+    load_combo_table,
     load_plan,
     load_runs,
     merge_overrides,
     plan_sweep,
     run_sweep,
+    write_combo_table,
 )
 from nmrforge_api.uncertainty import (
     PeakUncertainty,
@@ -99,7 +104,11 @@ __all__ = [
     "build_reference",
     "dataset_info",
     "ensure_reference_peaks",
+    "combos_from_rows",
+    "design_diagnostics",
     "expand_grid",
+    "infer_axes",
+    "load_combo_table",
     "load_plan",
     "load_reference",
     "load_runs",
@@ -115,5 +124,6 @@ __all__ = [
     "sanitize_sweep_params",
     "set_reference_peaks",
     "uncertainty_summary",
+    "write_combo_table",
     "write_records",
 ]

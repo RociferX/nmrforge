@@ -42,9 +42,16 @@ python -m nmrforge_api peaks --study DIR --peak-table external.list   # 可选:�
 ## sweep · 按网格扫描
 
 ```bash
+# 入口一:轴网格(接口展开全因子)
 python -m nmrforge_api sweep --study DIR --grid grid.yaml \
     [--max-runs 256] [--window-pts 3] [--csp-n-weight 0.2] [--no-resume]
+
+# 入口二:外部给定的组合表(正交表/部分因子/D-optimal/LHS/手挑,原样执行)
+python -m nmrforge_api sweep --study DIR --combos design.csv [--max-runs 256]
 ```
+
+`--grid` 与 `--combos` 必须且只能给一个。组合表格式:CSV/TSV(首行表头 =
+轴键)或 YAML/JSON(组合列表,或 `combos: [...]`)。
 
 网格文件(YAML;JSON 是 YAML 子集,可直接使用):
 
@@ -104,6 +111,6 @@ python -m nmrforge_api sweep     --study "$STUDY" --grid "$GRID"
 | `init` | `open_study` + `add_dataset` |
 | `reference` | `build_reference` |
 | `peaks` | `ensure_reference_peaks` / `set_reference_peaks` |
-| `sweep` | `plan_sweep` + `run_sweep` + `position_uncertainty` + `write_records` |
+| `sweep` | `plan_sweep`(`axes=` 全因子 / `combos=` 外部组合表)+ `run_sweep` + `position_uncertainty` + `write_records` |
 | `report` | `load_plan` + `load_runs` + 汇总 + `write_records` |
 | `status` | `load_reference` / `load_plan` / `load_runs` |

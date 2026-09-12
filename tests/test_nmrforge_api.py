@@ -22,6 +22,9 @@ from nmrforge_api import (
     DatasetError,
     SensitivityError,
     SweepError,
+    add_dataset,
+    build_reference,
+    ensure_reference_peaks,
     expand_grid,
     load_plan,
     load_runs,
@@ -572,9 +575,110 @@ def test_nus_param_key_alias_normalized() -> None:
     assert normalize_nus_params({"zero_fill": 2}) == {"zero_fill": 2}
 
 
+def test_plan_sweep_accepts_explicit_combos(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """设计由外部决定:显式组合表原样执行(顺序保留),接口不做设计决策。"""
+    from nmrforge_api.sweep import plan_sweep, run_sweep
+
+    backend = _FakeSweepBackend()
+    session = open_study(tmp_path / "combos", backend=backend)
+    session.dataset = add_dataset(session, bruker_dir / "hsqc_2d")
+    reference = build_reference(session, params={"phase_route": "none"})
+    reference = ensure_reference_peaks(session, reference)
+    rows = [
+        {"window.F1.off": 0.35, "zero_fill": 1},
+        {"window.F1.off": 0.35, "zero_fill": 2},
+        {"window.F1.off": 0.45, "zero_fill": 1},
+        {"window.F1.off": 0.45, "zero_fill": 2},
+    ]
+    plan = plan_sweep(reference, combos=rows)
+    assert plan.design == "explicit"
+    assert plan.n_full == 4
+    assert [dict(c) for c in plan.combos] == rows      # 原样、保序
+    assert plan.diagnostics["n_runs"] == 4
+    assert plan.diagnostics["duplicated_rows"] == 0
+    assert plan.diagnostics["max_abs_correlation"] == 0.0
+    assert plan.grid_sha256 == plan_sweep(reference, combos=rows).grid_sha256
+
+    calls_before = len(backend.process_calls)   # 参考运行本身已调用一次
+    runs = run_sweep(session, plan, reference=reference, resume=False)
+    assert [run.combo for run in runs] == rows
+    assert all(run.status == "success" for run in runs)
+    assert len(backend.process_calls) == calls_before + 4
+
+
+def test_plan_sweep_requires_exactly_one_design_input(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    from nmrforge_api.sweep import plan_sweep
+
+    session = open_study(tmp_path / "one_input", backend=_FakeSweepBackend())
+    session.dataset = add_dataset(session, bruker_dir / "hsqc_2d")
+    reference = build_reference(session, params={"phase_route": "none"})
+    with pytest.raises(SweepError, match="只能给一个"):
+        plan_sweep(reference)
+    with pytest.raises(SweepError, match="只能给一个"):
+        plan_sweep(reference, axes={"zero_fill": [1]}, combos=[{"zero_fill": 1}])
+
+
+def test_combo_table_roundtrip_and_validation(tmp_path: Path) -> None:
+    from nmrforge_api import combos_from_rows, load_combo_table, write_combo_table
+
+    rows = [
+        {"window.F1.off": 0.35, "zero_fill": 1, "phase_delta.F2.p0": -5},
+        {"window.F1.off": 0.45, "zero_fill": 2, "phase_delta.F2.p0": 5},
+    ]
+    table = write_combo_table(tmp_path / "design.csv", rows)
+    assert load_combo_table(table) == rows
+    with pytest.raises(SweepError, match="不在声明水平"):
+        combos_from_rows([{"a": 3}], axes={"a": [1, 2]})
+    with pytest.raises(SweepError, match="未在 axes 中声明"):
+        combos_from_rows([{"b": 1}], axes={"a": [1, 2]})
+
+
+def test_plan_sweep_axis_scope_guards(tmp_path: Path, bruker_dir: Path) -> None:
+    """锁定键报错;确定性/未知键只提示(确定性参数不必进网格)。"""
+    from nmrforge_api.sweep import plan_sweep
+
+    session = open_study(tmp_path / "scope", backend=_FakeSweepBackend())
+    session.dataset = add_dataset(session, bruker_dir / "hsqc_2d")
+    reference = build_reference(session, params={"phase_route": "none"})
+    with pytest.raises(SweepError, match="phase_delta"):
+        plan_sweep(reference, axes={"direct_phase": [[0.0, 0.0]]})
+    plan = plan_sweep(
+        reference,
+        axes={"ext_lo": ["10.5"], "bogus.key": [1], "zero_fill": [1]},
+    )
+    joined = "\n".join(plan.notes)
+    assert "确定性" in joined and "ext_lo" in joined
+    assert "不在后端读取" in joined and "bogus.key" in joined
+
+
+def test_phase_delta_axis_shifts_locked_phase(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """相位识别偏差(±5°)作为扫描轴:在参考相位上施加后传给后端。"""
+    from nmrforge_api.sweep import plan_sweep, run_sweep
+
+    backend = _FakeSweepBackend()
+    session = open_study(tmp_path / "phase", backend=backend)
+    session.dataset = add_dataset(session, bruker_dir / "hsqc_2d")
+    reference = build_reference(session, params={"phase_route": "none"})
+    reference = ensure_reference_peaks(session, reference)
+    assert reference.direct_phase == {"F2": [0.0, 0.0]}
+    plan = plan_sweep(reference, axes={"phase_delta.F2.p0": [-5, 5]})
+    runs = run_sweep(session, plan, reference=reference, resume=False)
+    assert [run.phase["F2"][0] for run in runs] == [-5.0, 5.0]
+    assert all(run.phase_locked for run in runs)
+    phases = [call["phase"] for call in backend.process_calls if call["phase"]]
+    assert phases[0] == {"F2": (-5.0, 0.0)}
+    assert phases[1] == {"F2": (5.0, 0.0)}
+
+
 def test_sweep_rejects_3d_nus(tmp_path: Path, bruker_dir: Path) -> None:
     """3D NUS 仍不支持:NUS 只开放 2D。"""
-    from nmrforge_api import add_dataset, plan_sweep, run_sweep
+    from nmrforge_api import plan_sweep, run_sweep
     from nmrforge_api.reference import ReferenceSpectrum
 
     session = open_study(tmp_path / "study", backend=_FakeSweepBackend())
@@ -593,7 +697,6 @@ def test_sweep_rejects_3d_nus(tmp_path: Path, bruker_dir: Path) -> None:
 
 
 def test_add_dataset_rejects_non_bruker(tmp_path: Path) -> None:
-    from nmrforge_api import add_dataset
 
     session = open_study(tmp_path / "study", backend=_FakeSweepBackend())
     bogus = tmp_path / "not_bruker"
