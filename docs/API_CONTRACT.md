@@ -307,3 +307,48 @@ class Spectrum3D:
 - SpectrumWindow 与 GUI 谱图面板均支持 .ft3(文件过滤器、拖放、双击),
   按维度数自动进入 2D/3D 模式;
 - 3D 峰表列(F1/F2/F3_shift)按当前切片平面轴标签映射,联动不受影响。
+
+## 11. 对外接口契约:`nmrforge_api`(v0.1,2026-09-12)
+
+状态:implemented(Proposal:`docs/proposals/external-api/001-parameter-sweep-api.md`)。
+给下游独立研究项目用的无 Qt 接口,当前服务「处理参数 → 2D 峰位不确定度
+(CSP 判据下限)」研究。
+
+### 11.1 公开面(`nmrforge_api/__init__.py`)
+
+```python
+API_VERSION = "0.1"
+run_parameter_study(root, dataset=None, *, axes, peaks=None, params=None,
+                    max_runs=256, window_pts=3, csp_n_weight=0.2, ...)
+open_study / add_dataset / dataset_info
+build_reference / load_reference / set_reference_peaks
+pick_reference_peaks / read_reference_peaks / measure_peak_positions
+expand_grid / plan_sweep / run_sweep / load_plan / load_runs
+position_uncertainty / uncertainty_summary / write_records
+```
+
+CLI:`python -m nmrforge_api {init,reference,peaks,sweep,report,status}`。
+
+### 11.2 稳定返回结构
+
+- `DatasetRef`(exp_id/data_id/ndim/nuclei/sampling/source/raw_dir);
+- `ReferenceSpectrum`(冻结谱与脚本路径 + 两个 SHA-256 + 有效参数 +
+  `direct_phase` + 版本表);
+- `SweepRun`(run_id/combo/params/脚本与谱哈希/峰位测量/日志尾部/status);
+- `PeakMeasurement`(每核 ppm、相对参考的 delta、intensity、found/
+  window_edge/boundary/out_of_range);
+- `PeakUncertainty`(mean/sigma/range/delta_std/delta_max/worst_run);
+- `records/` 文件名固定(manifest/sweep_plan/runs/peak_positions/
+  uncertainty/uncertainty_summary)。
+
+### 11.3 强约束(破坏即视为契约破坏)
+
+1. 不 import Qt/gui;不修改 GUI 状态;
+2. 扫描候选谱只写 `study/runs/`,不替换 `spectra/` 活动谱;
+3. 同一数据集内 fid 只转换一次;组合间只允许被扫参数不同(相位锁定);
+4. 峰位测量与选峰共用轴映射口径(`workflow.pick_peaks.read_spectrum_axes`);
+5. 每条记录必须带脚本/谱哈希与版本表;
+6. 单组合失败不中断整轮,状态与原因必须落盘。
+
+变更该契约需按 §4 流程走 Proposal;新增参数轴不需改契约(点号键通用)。
+

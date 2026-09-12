@@ -1,5 +1,25 @@
 # 修改记录(历史条目)
 
+## 未发布(2026-09-12):参数敏感性研究接口(nmrforge_api v0.1)
+- 新增顶层包 `nmrforge_api`:给下游独立研究项目的无 Qt 对外接口,当前服务
+  「不同处理参数组合对 2D 谱峰位置的影响 / CSP 判据下限」研究;公开面含
+  `run_parameter_study`(一步式)与 `open_study`/`add_dataset`/`build_reference`/
+  `pick_reference_peaks`/`plan_sweep`/`run_sweep`/`position_uncertainty`/
+  `write_records`(分步),外加 `python -m nmrforge_api` 六个子命令;
+- 研究语义:研究根=项目根,产物落 `study/{work,reference,runs,records}`;
+  同一 fid 只转一次、相位锁定参考值、候选谱只写 runs/(不替换活动谱)、
+  逐组合断点续跑、单组合失败不中断、每份脚本/谱带 SHA-256 与版本表;
+- 峰位测量:固定参考峰表,±window_pts 窗口取 |I| 极值 + 三点抛物线亚像素
+  refine,质量标记(window_edge/boundary/out_of_range/found);不确定度主指标
+  `Δδ_std = sqrt(Σ(w_n·σ_n)²)`(w(15N)=csp_n_weight,默认 0.2);
+- 复用而不复制既有口径:新增公开 `workflow.pick_peaks.read_spectrum_axes`
+  (ORIG/CAR + FDDIMORDER 轴映射)与 `workflow.stepwise.read_experiment`;
+- 契约走 Proposal:`docs/proposals/external-api/001-parameter-sweep-api.md`,
+  API_CONTRACT 新增 §11;v0.1 边界:只支持 uniform 扫描(NUS 需先给
+  `reconstruct_nus` 加候选输出隔离);
+- 测试:`tests/test_nmrforge_api.py` 12 项(网格/覆盖、亚像素精度、σ 与 Δδ
+  公式、端到端 6 组合、断点续跑、NUS 边界、导入失败、CLI、不 import Qt)。
+
 ## 未发布(2026-09-12):文档重组与全项目审查问题台账
 - 新增 `docs/README.md` 作为文档统一入口，区分当前事实、当前任务、长期记忆与历史档案；
 - 新增 `docs/reviews/2026-09-12-project-audit.md`，用稳定 ID 记录 17 项 bug、逻辑矛盾、设计分叉和残留，包含优先级、证据、修复方向与验收条件；

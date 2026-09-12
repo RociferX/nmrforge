@@ -16,6 +16,7 @@ peak_sign=uniform)只选占据主符号的峰(不关心正负,以候选峰计数
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -744,4 +745,79 @@ def pick_peaks(
     }
 
 
-__all__ = ["PickPeaksError", "pick_peaks"]
+# ---------------------------------------------------------------------------
+# 公开读谱入口(2026-09-12,参数敏感性接口复用)
+#
+# 选峰内部早已把「数据轴 ↔ 逻辑维 ↔ 核名 ↔ ppm」的口径收敛在这里;对外接口
+# (nmrforge_api)要按同一口径定位峰位,因此把这一层显式公开,避免出现第二套
+# 实现在 FDDIMORDER / ORIG-CAR 上再次分叉。
+
+
+@dataclass(frozen=True)
+class SpectrumAxes:
+    """一份 NMRPipe 谱的读谱结果(数据轴序)+ 轴映射。
+
+    - ``dic`` / ``data``:nmrglue 头部与数组(复型取实部);
+    - ``ppm``:数据轴序 ppm 轴(ORIG 优先回退 CAR,与 viewer 同源);
+    - ``nuclei``:数据轴序核名(无法判定为 ``""``);
+    - ``logical_to_storage``:逻辑维 F{k+1}(k=0..ndim-1) → 数据轴下标
+      (FDDIMORDER 非法时回退位置式)。
+    """
+
+    dic: dict[str, Any]
+    data: np.ndarray
+    ppm: list[np.ndarray]
+    nuclei: list[str]
+    logical_to_storage: list[int]
+
+    @property
+    def ndim(self) -> int:
+        return int(self.data.ndim)
+
+    def storage_of(self, nucleus: str) -> int | None:
+        """核名 → 数据轴下标(同核重复取第一个;未知返回 None)。"""
+        for axis, name in enumerate(self.nuclei):
+            if name and name == nucleus:
+                return axis
+        return None
+
+    def ppm_at_fraction(self, axis: int, fraction: float) -> float:
+        """数据轴 ``axis`` 的亚像素索引 → ppm(与选峰写表同源)。"""
+        return _ppm_at_fraction(self.ppm[axis], fraction)
+
+    def fraction_from_ppm(self, axis: int, ppm: float) -> float:
+        """ppm → 数据轴 ``axis`` 的分数索引(轴递增/递减均支持)。"""
+        axis_ppm = np.asarray(self.ppm[axis], dtype=float)
+        index = np.arange(axis_ppm.size, dtype=float)
+        if axis_ppm.size < 2:
+            return 0.0
+        if axis_ppm[0] <= axis_ppm[-1]:
+            return float(np.interp(float(ppm), axis_ppm, index))
+        return float(np.interp(-float(ppm), -axis_ppm, index))
+
+
+def read_spectrum_axes(path: Path | str) -> SpectrumAxes:
+    """读 NMRPipe 谱(ft1/ft2/ft3),返回与选峰同口径的轴映射。
+
+    与 ``pick_peaks`` 完全同源:同一 ORIG/CAR 公式、同一 FDDIMORDER 解析、
+    同一核名别名表;复型数据取实部。
+    """
+    import nmrglue as ng
+
+    dic, data = ng.pipe.read(str(path))
+    arr = np.asarray(data)
+    if np.iscomplexobj(arr):
+        arr = arr.real
+    ndim = int(arr.ndim)
+    prefixes = tuple(_fdf_prefix(dic, ndim, axis) for axis in range(ndim))
+    logical_to_storage = _logical_axis_indices(dic, ndim)
+    return SpectrumAxes(
+        dic=dict(dic),
+        data=arr,
+        ppm=_axes_ppm(dic, arr),
+        nuclei=_storage_nuclei(dic, prefixes),
+        logical_to_storage=list(logical_to_storage),
+    )
+
+
+__all__ = ["PickPeaksError", "SpectrumAxes", "pick_peaks", "read_spectrum_axes"]

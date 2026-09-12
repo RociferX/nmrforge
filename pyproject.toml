@@ -32,7 +32,14 @@ dev = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["core*", "backend*", "workflow*", "gui*", "viewer*"]
+include = [
+    "core*",
+    "backend*",
+    "workflow*",
+    "gui*",
+    "viewer*",
+    "nmrforge_api*",
+]
 
 [tool.setuptools.dynamic]
 version = {attr = "core.__version__"}

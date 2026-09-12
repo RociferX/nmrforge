@@ -608,10 +608,21 @@ def projection_filename(
 
 
 
+def read_experiment(manager: ProjectManager, exp_id: str, data_id: str) -> Any:
+    """公开读实验入口:按数据条目读取 Experiment(与处理链同一口径)。
+
+    2026-09-12 参数敏感性接口(nmrforge_api)需要与处理完全相同的实验对象
+    (含数据注释里的实验类型/峰符号覆盖),因此把内部实现显式公开,避免
+    对外接口出现第二套读取逻辑。
+    """
+    return _read_experiment(manager, exp_id, data_id)
+
+
 __all__ = [
     "ImportResult",
     "StepwiseError",
     "generate_fid",
     "generate_spectrum",
     "import_data",
+    "read_experiment",
 ]

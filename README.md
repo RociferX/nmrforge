@@ -36,6 +36,34 @@ core：项目模型、数据读取、实验识别、规划、处理原语、优�
 
 当前风险与待修复问题见[全项目审查问题台账](docs/reviews/2026-09-12-project-audit.md)，长期规划见[路线图](docs/roadmap.md)。
 
+## 给下游研究项目的接口(`nmrforge_api`)
+
+NMRForge 同时提供一个**无 Qt、可脚本化**的对外接口,供独立研究项目调用
+(当前服务「不同处理参数组合对 2D 谱峰位置的影响 / CSP 判据下限」这类研究)。
+
+```python
+from nmrforge_api import run_parameter_study
+
+result = run_parameter_study(
+    "~/studies/hsqc_params",            # 研究根(可复用/断点续跑)
+    "~/data/bmr12345/1",                # 公开库下载解压后的 Bruker 目录
+    axes={"zero_fill": [1, 2, 4], "window.F1.off": [0.35, 0.45, 0.55]},
+)
+print(result.summary["delta_std_ppm"])   # 峰位不确定度 → CSP 下限
+```
+
+```bash
+python -m nmrforge_api init      --study DIR --dataset BRUKER_DIR
+python -m nmrforge_api reference --study DIR
+python -m nmrforge_api peaks     --study DIR
+python -m nmrforge_api sweep     --study DIR --grid grid.yaml
+```
+
+要点:参考谱与参考脚本自动优化后冻结并带哈希;同一份 fid 只转一次;每个参数
+组合留下脚本、候选谱(不替换活动谱)与同一批峰的亚像素峰位;结果落成
+`manifest.json` / `runs.json` / `peak_positions.csv` / `uncertainty.csv`。
+契约与边界见[提案文档](docs/proposals/external-api/001-parameter-sweep-api.md)。
+
 ## 开发
 
 ```powershell
