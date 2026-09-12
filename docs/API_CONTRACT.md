@@ -57,7 +57,8 @@ class ProcessingBackend(Protocol):
 返回 dict 稳定键:`success: bool`、`message: str`、`logs: list[str]`、
 `spectrum_path: str | None`、`metrics: dict`。
 工厂:`backend/factory.create_backend(config) -> ProcessingBackend`
-(provider: nmrpipe | native)。
+(provider: 仅 `nmrpipe`,见 `SUPPORTED_PROVIDERS`;未实现的 `native` 骨架已于
+2026-09-12 删除,STUB-013)。
 
 ## 4. 谱图展示模型(viewer/spectrum.py)
 
@@ -252,7 +253,8 @@ figures, report, metadata.json}
 - spectra/    终谱(ft2/ft3)
 - peaks/      峰表 Poky/Sparky .list(旧 CSV 仅兼容读取,0.2.199-补29ar)
 - figures/    图
-- report/     报告
+- report/     日志与历史报告目录(当前唯一生产者是单数据/组日志 log.txt;
+              CSP 报告页与 Report 面板已于 2026-09-12 删除,REPORT-008)
 - metadata.json  数据元数据
 
 DataEntry 路径约定(相对项目根):raw_dir = <exp_id>/<data_id>/raw,

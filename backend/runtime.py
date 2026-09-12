@@ -9,6 +9,7 @@ csh/nmrPipe/SMILE 残留进程;超时同样先杀进程树再返回。
 from __future__ import annotations
 
 import os
+import re
 import shlex
 import shutil
 import signal
@@ -236,17 +237,53 @@ def _orphan_match(
 ) -> bool:
     """判定进程是否属于本工作区遗留的 NMRPipe 工具链。
 
-    工具可执行文件(nmrPipe/xyz2pipe/pipe2xyz/SMILE 等)按名字匹配;
-    csh/tcsh 包装进程必须命令行含工作区路径(避免误杀无关 shell)。
+    无论工具可执行文件还是 csh/tcsh 包装进程,命令行都必须明确包含当前
+    工作区路径。只按进程名匹配无法证明进程归本实例所有,不得作为终止依据。
     """
-    name = proc["name"]
-    args = proc["args"] or ""
+    name = str(proc.get("name") or "")
+    args = str(proc.get("args") or "")
     base = name.split(".")[0].lower()
-    if base in _NMRPIPE_TOOL_NAMES:
-        return True
-    if base in ("csh", "tcsh") and workspace and workspace in args:
-        return True
-    return False
+    if base not in _NMRPIPE_TOOL_NAMES and base not in ("csh", "tcsh"):
+        return False
+    if not _command_mentions_path(args, workspace):
+        return False
+    if base in _NMRPIPE_TOOL_NAMES and bin_dir:
+        return _command_mentions_path(args, bin_dir)
+    return True
+
+
+def _command_mentions_path(command: str, path: str | None) -> bool:
+    """命令行是否包含带路径边界的目标目录(跨平台分隔符兼容)。"""
+    if not command or not path:
+        return False
+    normalized_command = command.replace("\\", "/")
+    normalized_path = str(path).replace("\\", "/").rstrip("/")
+    if not normalized_path:
+        return False
+    if os.name == "nt":
+        normalized_command = normalized_command.casefold()
+        normalized_path = normalized_path.casefold()
+    # 允许目标目录后的子路径,但不把 /project 与 /project-copy 混为一谈。
+    before = r"(?<![\w.-])"
+    after = r"(?=$|[\s\"';|&)/])"
+    return re.search(before + re.escape(normalized_path) + after, normalized_command) is not None
+
+
+def _orphan_targets(
+    procs: list[dict[str, Any]], bin_dir: str | None, workspace: str | None
+) -> list[dict[str, Any]]:
+    """返回父进程已不存在且可证明属于当前工作区的工具链进程。"""
+    live_pids = {int(proc["pid"]) for proc in procs}
+    targets: list[dict[str, Any]] = []
+    for proc in procs:
+        try:
+            ppid = int(proc.get("ppid", 0))
+        except (TypeError, ValueError):
+            continue
+        parent_is_gone = ppid <= 1 or ppid not in live_pids
+        if parent_is_gone and _orphan_match(proc, bin_dir, workspace):
+            targets.append(proc)
+    return targets
 
 
 def cleanup_orphan_tasks(
@@ -259,7 +296,7 @@ def cleanup_orphan_tasks(
     Linux SIGKILL。返回清理数量(尽力而为,失败忽略)。
     """
     procs = _scan_processes()
-    targets = [p for p in procs if _orphan_match(p, bin_dir, workspace)]
+    targets = _orphan_targets(procs, bin_dir, workspace)
     killed = 0
     for proc in targets:
         pid = proc["pid"]

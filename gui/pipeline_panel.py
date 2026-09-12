@@ -1,9 +1,9 @@
 """中间 Pipeline 面板:围绕当前样品数据/实验类型显示处理步骤与状态。
 
-六步流程(契约 v1.2 / G2B-002,含可选 SMILE 优化):
+五步流程(契约 v1.2 / G2B-002,含可选 SMILE 优化):
 导入样品数据 → 生成 FID → 生成谱图(含 SMILE 重构)→ [SMILE 优化,可选] →
-峰挑选。分析(HSQC CSP)步骤按用户要求暂时隐藏,代码保留(恢复见
-VISIBLE_PIPELINE_STEPS 注释)。
+峰挑选。分析(HSQC CSP)已按用户决定删除(2026-09-12,REPORT-008),
+删除范围与恢复方法见 docs/tasks/archive/2026-09-12-analysis-removal.md。
 
 - 步骤状态依据前置依赖与产物文件推断(LOCKED/READY/RUNNING/SUCCESS/FAILED);
 - READY 步骤提供「运行」按钮,经 ProcessingController 对应方法执行;
@@ -31,7 +31,6 @@ from PyQt6.QtWidgets import (
     QLayout,
     QLayoutItem,
     QLineEdit,
-    QListWidget,
     QMenu,
     QPushButton,
     QScrollArea,
@@ -41,6 +40,7 @@ from PyQt6.QtWidgets import (
 )
 
 from core.project import ProjectManager
+from core.project.artifacts import find_primary_spectrum
 from gui.pipeline_state import (
     STEP_RUN_REFS,
     input_fingerprint,
@@ -59,17 +59,13 @@ from gui.theme import (
 PIPELINE_STEPS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ("fid", "生成 FID", "由原始数据转换为 fid(后端 bruker -AUTO/fid.com)", ()),
     ("spectrum", "生成谱图", "后端处理生成谱(自动包含 NUS SMILE 重构)", ("fid",)),
-    ("smile", "SMILE 优化", "可选:重构参数网格优化并采用最优谱(仅 2D NUS)", ("spectrum",)),
+    ("smile", "SMILE 优化", "可选:重构参数扫描排名(不自动替换活动谱;仅 2D NUS)", ("spectrum",)),
     ("peaks", "峰挑选", "自动峰检测与强度/SNR 评估", ("spectrum",)),
-    ("analysis", "分析", "峰归属与结果分析", ("peaks",)),
 )
 
-# 2026-09-03 user: analysis step hidden from GUI.  Full table kept for
-# backend/restore; GUI and status machine consume VISIBLE_PIPELINE_STEPS.
-_HIDDEN_GUI_STEPS = ("analysis",)
-VISIBLE_PIPELINE_STEPS = tuple(
-    s for s in PIPELINE_STEPS if s[0] not in _HIDDEN_GUI_STEPS
-)
+# 2026-09-12(REPORT-008):分析步骤已删除(含 workflow/analyze.py 与报告页)。
+# 步骤表只保留这一处,GUI 与状态机不得再各自过滤。
+VISIBLE_PIPELINE_STEPS = PIPELINE_STEPS
 
 def _visible_pipeline_steps():
     return VISIBLE_PIPELINE_STEPS
@@ -102,7 +98,6 @@ STEP_METHOD: dict[str, str] = {
     "spectrum": "generate_spectrum",
     "smile": "optimize_smile",
     "peaks": "pick_peaks",
-    # "analysis": "analyze",  # hidden from GUI (2026-09-03)
 }
 
 
@@ -157,30 +152,6 @@ def validate_ext_range(lo_text: str, hi_text: str, nucleus: str = "") -> str:
     return ""
 
 
-def _is_projection_file(name: str, data_id: str) -> bool:
-    """3D 投影文件(不是主谱):d_001_proj_F1.ft2 / d_001_15N-1H.ft2。
-
-    主谱固定 <data_id>.ft2|ft3;投影由 stepwise.projection_filename 生成,
-    产物回退扫描时必须排除,否则「生成谱图」会被误判为已完成
-    (0.2.199-补29hz)。
-    """
-    stem = Path(str(name)).stem
-    if stem == str(data_id):
-        return False
-    if "_proj_" in stem:
-        return True
-    head, sep, tail = stem.rpartition("-")
-    if not sep:
-        return False
-
-    def _nucleus_tag(text: str) -> bool:
-        digits = "".join(ch for ch in text if ch.isdigit())
-        letters = "".join(ch for ch in text if ch.isalpha())
-        return bool(digits) and bool(letters) and len(letters) <= 2
-
-    return _nucleus_tag(head.rsplit("_", 1)[-1]) and _nucleus_tag(tail)
-
-
 def _data_nodes(manager: ProjectManager, exp_id: str) -> list:
     """返回实验下的 Data 节点。
 
@@ -194,21 +165,6 @@ def _data_nodes(manager: ProjectManager, exp_id: str) -> list:
 
 
 
-def _first_report(directory: Path) -> Path | None:
-    """目录下第一个报告产物(html/pdf/json),无则 None。"""
-    if not directory.is_dir():
-        return None
-    try:
-        files = sorted(
-            p
-            for p in directory.iterdir()
-            if p.is_file() and p.suffix.lower() in ('.html', '.pdf', '.json')
-        )
-    except OSError:
-        return None
-    return files[0] if files else None
-
-
 def _node_artifacts(
     manager: ProjectManager, exp_id: str, data_id: str
 ) -> dict[str, Path | None]:
@@ -217,7 +173,6 @@ def _node_artifacts(
         'fid': None,
         'spectrum': None,
         'peaks': None,
-        'analysis': None,
     }
     data = manager.data(exp_id, data_id)
     fid_candidate = getattr(data, 'fid_path', '') or ''
@@ -240,31 +195,7 @@ def _node_artifacts(
             merged_fid = proc / 'merged' / 'fid'
             if merged_fid.is_dir():
                 artifacts['fid'] = merged_fid
-    spec_candidate = getattr(data, 'spectrum_path', '') or ''
-    if spec_candidate:
-        path = Path(spec_candidate)
-        if not path.is_absolute():
-            path = manager.root / path
-        if path.is_file():
-            artifacts['spectrum'] = path
-    if artifacts['spectrum'] is None:
-        spectra = manager.data_dir(exp_id, data_id, 'spectra')
-        for pattern in (
-            f'{exp_id}-{data_id}.ft2',
-            f'{exp_id}-{data_id}.ft3',
-            '*.ft2',
-            '*.ft3',
-        ):
-            # 0.2.199-补29hz:通配回退必须排除 3D 投影
-            # (d_001_15N-1H.ft2 / d_001_proj_F1.ft2),
-            # 否则主谱丢失时会拿投影当「生成谱图」产物。
-            matches = [
-                p for p in sorted(spectra.glob(pattern))
-                if not _is_projection_file(p.name, data_id)
-            ]
-            if matches:
-                artifacts['spectrum'] = matches[0]
-                break
+    artifacts['spectrum'] = find_primary_spectrum(manager, exp_id, data_id)
     for suffix in ('.list', '.csv'):
         candidate = (
             manager.data_dir(exp_id, data_id, 'peaks')
@@ -273,16 +204,13 @@ def _node_artifacts(
         if candidate.is_file():
             artifacts['peaks'] = candidate
             break
-    artifacts['analysis'] = _first_report(
-        manager.data_dir(exp_id, data_id, 'report')
-    )
     return artifacts
 
 
 def _upstream_artifact(
     step_id: str, artifacts: dict[str, Path | None]
 ) -> Path | None:
-    prev = {'spectrum': 'fid', 'peaks': 'spectrum', 'analysis': 'peaks'}.get(
+    prev = {'spectrum': 'fid', 'peaks': 'spectrum'}.get(
         step_id
     )
     return artifacts.get(prev) if prev else None
@@ -634,13 +562,10 @@ class PipelineStepRow(QWidget):
     run_requested = pyqtSignal(str)  # step_id
     rerun_final_requested = pyqtSignal(str)  # step_id:重新运行已有终跑脚本(不重新优化)
     manual_requested = pyqtSignal(str)  # step_id:打开脚本编辑器(已有脚本优先)
-    report_requested = pyqtSignal(str)  # step_id:分析完成后打开报告页
     show_spectrum_requested = pyqtSignal(str)  # step_id:生成谱图完成后展示谱图
     ext_range_requested = pyqtSignal(str)  # step_id:设置终跑直接维范围
     ref_spectrum_requested = pyqtSignal(str)  # step_id:选择参考谱(峰挑选)
     clear_ref_requested = pyqtSignal(str)  # step_id:清除参考谱约束
-    analysis_ref_requested = pyqtSignal(str)  # step_id:选择 CSP 比对谱(分析)
-    analysis_clear_ref_requested = pyqtSignal(str)  # step_id:清除 CSP 比对谱
     detail_toggled = pyqtSignal(str)  # step_id:点击行切换详情
     view_log_requested = pyqtSignal(str)  # step_id:定位日志面板
     rank1_run_requested = pyqtSignal(str)  # step_id:按 SMILE 扫描 Rank1 重跑终谱
@@ -811,28 +736,6 @@ class PipelineStepRow(QWidget):
             lambda: self.clear_ref_requested.emit(self.step_id)
         )
         button_row.addWidget(self.clear_ref_button)
-        # 0.2.199-补29er:CSP 分析比对谱(自由态 HSQC)——仅分析步骤显示
-        self.analysis_ref_button = QPushButton("比对谱")
-        self.analysis_ref_button.setToolTip(
-            "选择比对谱(自由态 HSQC):CSP 计算当前数据(扰动态)相对比对数据的"
-            "化学位移扰动,输出数据文件与两张 SVG 图"
-        )
-        self.analysis_ref_button.setVisible(self.step_id == "analysis")
-        self.analysis_ref_button.clicked.connect(
-            lambda: self.analysis_ref_requested.emit(self.step_id)
-        )
-        button_row.addWidget(self.analysis_ref_button)
-        self.analysis_ref_label = QLabel("")
-        self.analysis_ref_label.setVisible(self.step_id == "analysis")
-        self.analysis_ref_label.setStyleSheet("color: #16a085;")
-        button_row.addWidget(self.analysis_ref_label)
-        self.analysis_clear_ref_button = QPushButton("清除")
-        self.analysis_clear_ref_button.setVisible(False)
-        self.analysis_clear_ref_button.setToolTip("清除 CSP 比对谱")
-        self.analysis_clear_ref_button.clicked.connect(
-            lambda: self.analysis_clear_ref_requested.emit(self.step_id)
-        )
-        button_row.addWidget(self.analysis_clear_ref_button)
         self.run_button = QPushButton("运行")
         self.run_button.setVisible(False)
         self.run_button.clicked.connect(lambda: self.run_requested.emit(self.step_id))
@@ -847,13 +750,6 @@ class PipelineStepRow(QWidget):
             lambda: self.rerun_final_requested.emit(self.step_id)
         )
         button_row.addWidget(self.rerun_final_button)
-        self.report_button = QPushButton("报告")
-        self.report_button.setToolTip("查看当前数据的报告产物(report/ 目录)")
-        self.report_button.setVisible(False)
-        self.report_button.clicked.connect(
-            lambda: self.report_requested.emit(self.step_id)
-        )
-        button_row.addWidget(self.report_button)
         self.show_spectrum_button = QPushButton("展示谱图")
         self.show_spectrum_button.setToolTip(
             "在右侧谱图面板显示当前数据 spectra 文件夹的最终谱"
@@ -944,18 +840,6 @@ class PipelineStepRow(QWidget):
         self.ref_label.setText("")
         self.clear_ref_button.setVisible(False)
 
-    def set_analysis_ref_text(self, text: str) -> None:
-        """显示已选 CSP 比对谱(0.2.199-补29er)。"""
-        self.analysis_ref_label.setText(text)
-        self.analysis_clear_ref_button.setVisible(
-            bool(text) and self.step_id == "analysis"
-        )
-
-    def clear_analysis_ref_display(self) -> None:
-        """清除 CSP 比对谱显示。"""
-        self.analysis_ref_label.setText("")
-        self.analysis_clear_ref_button.setVisible(False)
-
     def set_detail(self, text: str, failed: bool = False) -> None:
         """填充详情文本。"""
         self.detail_label.setText(text)
@@ -1014,10 +898,6 @@ class PipelineStepRow(QWidget):
         self.rank1_button.setVisible(
             status == "SUCCESS" and self.step_id == "smile"
         )
-        # 分析步骤产物就绪后提供「报告」入口
-        self.report_button.setVisible(status == "SUCCESS" and self.step_id == "analysis")
-
-
 class PipelinePanel(QWidget):
     """Pipeline 功能区:上下文面包屑 + 下一步提示 + 步骤列表。"""
 
@@ -1027,7 +907,6 @@ class PipelinePanel(QWidget):
     run_finished = pyqtSignal()
     run_started = pyqtSignal(str, str)  # (exp_id, data_id):某数据开始处理,左侧状态显示运行中
     manual_open_requested = pyqtSignal(str)  # step_id:打开人工处理对话框
-    report_requested = pyqtSignal(str)  # step_id:打开报告页
     show_spectrum_requested = pyqtSignal(str)  # step_id:展示谱图
     view_log_requested = pyqtSignal(str)  # step_id:定位日志面板
     progress_updated = pyqtSignal(str)  # 批量进度文本(主线程更新标签)
@@ -1069,8 +948,6 @@ class PipelinePanel(QWidget):
         self._ndim_cache: dict[tuple[str, str], int] = {}
         # 0.2.199-补29hz:直接维核素缓存(直接维范围校验/占位提示用)
         self._nucleus_cache: dict[tuple[str, str], str] = {}
-        self._analysis_ref_info: dict[str, str] | None = None
-
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 8, 10, 8)
         layout.setSpacing(6)
@@ -1124,15 +1001,10 @@ class PipelinePanel(QWidget):
             row.run_requested.connect(self._on_run_requested)
             row.rerun_final_requested.connect(self._on_rerun_final_requested)
             row.manual_requested.connect(self.manual_open_requested.emit)
-            row.report_requested.connect(self.report_requested.emit)
             row.show_spectrum_requested.connect(self.show_spectrum_requested.emit)
             row.ext_range_requested.connect(self._on_ext_range_requested)
             row.ref_spectrum_requested.connect(self._on_pick_reference)
             row.clear_ref_requested.connect(self._on_clear_reference)
-            row.analysis_ref_requested.connect(self._on_pick_analysis_reference)
-            row.analysis_clear_ref_requested.connect(
-                self._on_clear_analysis_reference
-            )
             row.detail_toggled.connect(self._toggle_step_detail)
             row.view_log_requested.connect(self.view_log_requested.emit)
             row.rank1_run_requested.connect(self.rank1_run_requested.emit)
@@ -2004,96 +1876,6 @@ class PipelinePanel(QWidget):
             "path": str(path),
         }
 
-    def _analysis_ref_candidates(
-        self, exp_id: str, current_data_id: str
-    ) -> list[tuple[str, str, str]]:
-        """CSP 比对候选:同实验内、非当前数据、已有谱图+峰表的数据
-        (0.2.199-补29er)。"""
-        out: list[tuple[str, str, str]] = []
-        if self.manager is None or self.manager.project is None or not exp_id:
-            return out
-        exp = self.manager.project.experiment(exp_id)
-        if exp is None:
-            return out
-        for entry in getattr(exp, "data", []):
-            data_id = str(getattr(entry, "id", "") or "")
-            if not data_id or data_id == current_data_id:
-                continue
-            spectrum = str(getattr(entry, "spectrum_path", "") or "")
-            if not spectrum or not Path(spectrum).is_file():
-                continue
-            try:
-                peaks_dir = self.manager.data_dir(exp_id, data_id, "peaks")
-            except Exception:  # noqa: BLE001 - 单数据异常跳过
-                continue
-            has = any(
-                (peaks_dir / f"{exp_id}-{data_id}{suffix}").is_file()
-                for suffix in (".list", ".csv")
-            )
-            if not has:
-                continue
-            title = str(getattr(entry, "title", "") or "")
-            name = f"{exp_id}/{data_id}"
-            if title:
-                name += f" ({title})"
-            out.append((name, exp_id, data_id))
-        return out
-
-    def _on_pick_analysis_reference(self, step_id: str) -> None:
-        """「比对谱」按钮(分析):选择同实验内自由态 HSQC 数据做 CSP。"""
-        from gui.dialogs import InfoDialog
-
-        if self.manager is None or self.manager.project is None:
-            return
-        candidates = self._analysis_ref_candidates(
-            self._current_exp_id, self._current_data_id
-        )
-        if not candidates:
-            InfoDialog.show_info(
-                self,
-                "比对谱(CSP)",
-                "同实验内没有其它「已生成谱图+峰表」的数据,无法做 CSP。"
-                "请先处理两个 HSQC 数据(自由态与扰动态)并选峰",
-            )
-            return
-        dialog = QDialog(self)
-        dialog.setWindowTitle("选择 CSP 比对谱(自由态 HSQC)")
-        lay = QVBoxLayout(dialog)
-        tip = QLabel(
-            "选择比对数据(自由态/apo):CSP 计算当前数据(扰动态)相对比对数据的"
-            "化学位移扰动(Δδ = sqrt(ΔH² + (0.2·ΔN)²))"
-        )
-        tip.setWordWrap(True)
-        lay.addWidget(tip)
-        lst = QListWidget()
-        for name, _exp, _did in candidates:
-            lst.addItem(name)
-        lay.addWidget(lst)
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok
-            | QDialogButtonBox.StandardButton.Cancel
-        )
-        buttons.accepted.connect(dialog.accept)
-        buttons.rejected.connect(dialog.reject)
-        lay.addWidget(buttons)
-        if dialog.exec() != QDialog.DialogCode.Accepted or lst.currentRow() < 0:
-            return
-        _name, ref_exp, ref_data = candidates[lst.currentRow()]
-        self._analysis_ref_info = {"exp_id": ref_exp, "data_id": ref_data}
-        row = self._rows.get("analysis")
-        if row is not None:
-            row.set_analysis_ref_text(f"比对(自由态): {_name}")
-        self.log_message.emit(
-            f"CSP 比对谱已选择: {_name};运行「分析」后输出数据文件与 SVG 图"
-        )
-
-    def _on_clear_analysis_reference(self, step_id: str) -> None:
-        """清除 CSP 比对谱。"""
-        self._analysis_ref_info = None
-        row = self._rows.get("analysis")
-        if row is not None:
-            row.clear_analysis_ref_display()
-
     def _on_pick_reference(self, step_id: str) -> None:
         """「参考谱」按钮:按钮下方弹出下拉,列出项目内已有峰文件的数据
         (按 exp/data 编号排序)。选中后加载为选峰参考(对齐后剔除参考中
@@ -2260,16 +2042,6 @@ class PipelinePanel(QWidget):
                                 )
                                 or None
                             )
-                    if step_id == "analysis":
-                        ref = getattr(self, "_analysis_ref_info", None)
-                        if not ref or not ref.get("data_id"):
-                            self.log_scoped.emit(
-                                "分析(HSQC CSP): 请先在分析步骤点「比对谱」"
-                                "选择自由态数据",
-                                run_scope,
-                            )
-                            return
-                        kwargs["reference_data_id"] = ref["data_id"]
                     if "progress" in inspect.signature(method).parameters:
                         # 0.2.199-补29ec:进度消息不带步骤名前缀(开始/完成/失败
                         # 标记保留,具体进度由后端消息本身表达)

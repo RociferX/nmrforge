@@ -259,6 +259,66 @@ def test_edit_notes_saves(
     assert fields["experiment_type"] == "指认实验"
     assert "指认实验" in window.center_panel.notes_label.text()
     window.close()
+def test_edit_notes_only_applies_changed_data_type(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """META-002:原样保存不伪装成用户选择,真正改值时仍权威写回。"""
+    from PyQt6.QtWidgets import QDialog
+
+    from gui.main_window import MainWindow
+
+    manager, exp_id, data_id = _manager(tmp_path)
+    set_data_note_fields(
+        manager.project,
+        exp_id,
+        data_id,
+        {"dimension": "2D", "experiment_type": "HSQC"},
+    )
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+
+    class _Ws:
+        def __init__(self, root):
+            self.root = root
+
+        def ensure(self):
+            return self.root
+
+        def list_projects(self):
+            return []
+
+    class _FakeNotesDialog:
+        DialogCode = QDialog.DialogCode
+        result = {"dimension": "2D", "experiment_type": "HSQC"}
+
+        def __init__(self, parent, title, kind="", values=None):
+            pass
+
+        def exec(self):
+            return self.DialogCode.Accepted
+
+        def result_fields(self):
+            return dict(self.result)
+
+    applied: list[str] = []
+    monkeypatch.setattr("gui.main_window.WorkspaceManager", lambda: _Ws(workspace))
+    monkeypatch.setattr("core.workspace.WorkspaceManager", lambda *a, **k: _Ws(workspace))
+    monkeypatch.setattr("gui.main_window.NotesDialog", _FakeNotesDialog)
+    monkeypatch.setattr(
+        "workflow.import_workflow.apply_user_experiment_type",
+        lambda manager, exp_id, data_id, name: applied.append(name) or True,
+    )
+
+    window = MainWindow(manager=manager)
+    window._edit_notes("data", exp_id, data_id)
+    assert applied == []
+
+    _FakeNotesDialog.result = {"dimension": "2D", "experiment_type": "COSY"}
+    window._edit_notes("data", exp_id, data_id)
+    assert applied == ["COSY"]
+    window.close()
+
+
 def test_experiment_type_options_from_presets() -> None:
     """0.2.85:数据类型选项来自 presets,按维度过滤(排除 Generic 兜底)。"""
     options_1d = experiment_type_options("1D")
@@ -359,8 +419,45 @@ def test_notes_dialog_combos_dimension_then_type(
     dialog.close()
 
 
+def test_notes_dialog_blank_does_not_invent_values(qapp: QApplication) -> None:
+    """META-002:空白表单往返不得产生下拉框首项默认值。"""
+    from gui.dialogs import NotesDialog
+
+    data_dialog = NotesDialog(None, "样品数据注释", "data", {})
+    assert data_dialog.result_fields() == {}
+    dimension_items = [
+        data_dialog._combos["dimension"].itemText(i)
+        for i in range(data_dialog._combos["dimension"].count())
+    ]
+    assert "1D" in dimension_items
+    data_dialog.close()
+
+    experiment_dialog = NotesDialog(None, "实验类型注释", "experiment", {})
+    assert experiment_dialog.result_fields() == {}
+    experiment_dialog.close()
+
+
+def test_notes_dialog_preserves_1d_without_inventing_nuclei(
+    qapp: QApplication,
+) -> None:
+    """META-002:1D 备注打开后原样保存,不得丢维度或自动加二维核组合。"""
+    from gui.dialogs import NotesDialog
+
+    dialog = NotesDialog(
+        None,
+        "样品数据注释",
+        "data",
+        {"dimension": "1D", "experiment_type": "1H-1D"},
+    )
+    assert dialog.result_fields() == {
+        "dimension": "1D",
+        "experiment_type": "1H-1D",
+    }
+    dialog.close()
+
+
 def test_notes_dialog_experiment_category_options(qapp: QApplication) -> None:
-    """2026-08-18:实验类型注释仅「实验类型」字段,选项为指认实验/动力学实验。"""
+    """IMPORT-007 A:实验类别不再把禁止导入的动力学作为可选能力。"""
     from gui.dialogs import NotesDialog
 
     dialog = NotesDialog(
@@ -372,7 +469,8 @@ def test_notes_dialog_experiment_category_options(qapp: QApplication) -> None:
     type_combo = dialog._combos["experiment_type"]
     assert type_combo.currentText() == "指认实验"
     items = [type_combo.itemText(i) for i in range(type_combo.count())]
-    assert "指认实验" in items and "动力学实验" in items
+    assert "指认实验" in items
+    assert "动力学实验" not in items
     assert "dimension" not in dialog._combos
     assert dialog.result_fields() == {"experiment_type": "指认实验"}
     dialog.close()

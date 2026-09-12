@@ -19,13 +19,13 @@ from PyQt6.QtCore import Qt  # noqa: E402
 from PyQt6.QtWidgets import QApplication, QTreeWidgetItem  # noqa: E402
 
 from core.project import ProjectManager  # noqa: E402
+from core.project.artifacts import is_projection_spectrum_file  # noqa: E402
 from gui.per_data_records import (  # noqa: E402
     data_is_trashed,
     ui_state_path,
     update_ui_state,
 )
 from gui.pipeline_panel import (  # noqa: E402
-    _is_projection_file,
     _node_artifacts,
     validate_ext_range,
 )
@@ -82,11 +82,11 @@ def test_ext_range_unknown_nucleus_uses_wide_fallback() -> None:
 
 
 def test_projection_names_are_recognised() -> None:
-    assert _is_projection_file("d_001_15N-1H.ft2", "d_001") is True
-    assert _is_projection_file("d_001_proj_F1.ft2", "d_001") is True
-    assert _is_projection_file("d_001.ft3", "d_001") is False
+    assert is_projection_spectrum_file("d_001_15N-1H.ft2", "d_001") is True
+    assert is_projection_spectrum_file("d_001_proj_F1.ft2", "d_001") is True
+    assert is_projection_spectrum_file("d_001.ft3", "d_001") is False
     # 旧命名 <exp>-<data> 不是投影
-    assert _is_projection_file("exp_001-d_001.ft2", "d_001") is False
+    assert is_projection_spectrum_file("exp_001-d_001.ft2", "d_001") is False
 
 
 def test_node_artifacts_ignores_projection_only(tmp_path: Path) -> None:

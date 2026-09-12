@@ -4,7 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nmrforge"
-version = "0.1.0"
+# PROV-009:版本只有一处(core.__version__),避免 pyproject/包/AppImage 漂移
+dynamic = ["version"]
 description = "面向 Bruker 2D/3D NMR 数据的自动化处理、参数优化与质量控制平台"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -32,6 +33,9 @@ dev = [
 
 [tool.setuptools.packages.find]
 include = ["core*", "backend*", "workflow*", "gui*", "viewer*"]
+
+[tool.setuptools.dynamic]
+version = {attr = "core.__version__"}
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

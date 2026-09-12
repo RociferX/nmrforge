@@ -427,37 +427,6 @@ class ProcessingController:
         self._manager.save()
         return result
 
-    def analyze(
-        self,
-        data,
-        exp_id: str | None = None,
-        data_id: str | None = None,
-        reference_data_id: str = "",
-        progress: Callable[[str], None] | None = None,
-    ) -> dict:
-        """分析(HSQC CSP,0.2.199-补29er):当前数据(扰动态) vs 比对数据
-        (自由态);输出 csp_data.csv + csp_plot.svg + overlay_spectra.svg。"""
-        try:
-            from workflow.analyze import analyze as backend_analyze
-        except ImportError as exc:  # pragma: no cover - Backend 未落地
-            raise NotImplementedError("分析(workflow.analyze)待 Backend 实现") from exc
-        if self._manager is None:
-            raise RuntimeError("ProcessingController 未绑定项目(ProjectManager)")
-        exp_id = exp_id or getattr(data, "exp_id", "")
-        data_id = data_id or getattr(data, "id", "")
-        result = backend_analyze(
-            self._manager,
-            exp_id,
-            data_id,
-            reference_data_id=reference_data_id,
-            progress=progress,
-        )
-        if data_id and result.get("status") == "success":
-            record_step_success(self._manager, exp_id, data_id, "analysis")
-        self._manager.save()
-        return result
-
-    # ------------------------------------------------------------------
     # 人工路径(workflow/manual 接线)
     # ------------------------------------------------------------------
     def manual_fid_com(self, data, exp_id: str | None = None, data_id: str | None = None) -> str:
@@ -778,13 +747,15 @@ class ProcessingController:
         data_id: str,
         progress: Callable[[str], None] | None = None,
     ) -> str:
-        """用 SMILE 扫描选出的 Rank1 脚本重跑终谱并采用(方案 B 的落地入口)。
+        """运行并采用 SMILE Rank1，同时刷新全部伴生产物和溯源。"""
+        import json
 
-        0.2.199-补29hz-修3:SMILE 优化只出「排序表 + 前三脚本」,不替换活动谱;
-        用户点「按 Rank1 重跑」时才真正出谱——运行 `process/<data_id>_nus_rank1.com`,
-        产物归位 `spectra/` 并登记为活动谱。
-        """
         from backend.runtime import CshRuntime
+        from workflow.optimization_report import (
+            spectrum_quality_report_lines,
+            write_quality_record,
+        )
+        from workflow.ucsf_export import export_ucsf
 
         self._require_manager()
         proc = self._manager.data_dir(exp_id, data_id, "process")
@@ -793,43 +764,108 @@ class ProcessingController:
             raise RuntimeError("未找到 Rank1 脚本,请先运行 SMILE 优化")
         experiment = self._read_experiment(exp_id, data_id)
         ext = {1: "ft1", 2: "ft2"}.get(experiment.ndim, "ft3")
-        if progress is not None:
-            progress(f"按 Rank1 重跑终脚本: {script.name}")
-        run_result = CshRuntime().run(
-            ["csh", script.name], cwd=str(proc), timeout=7200.0
-        )
-        produced = proc / f"{data_id}.{ext}"
-        if (
-            run_result.returncode != 0
-            or not produced.is_file()
-            or produced.stat().st_size == 0
-        ):
-            raise RuntimeError(
-                f"Rank1 重跑失败(rc={run_result.returncode}),未生成 {produced.name}"
-            )
-        spectra = self._manager.data_dir(exp_id, data_id, "spectra")
-        spectra.mkdir(parents=True, exist_ok=True)
-        target = spectra / produced.name
-        if produced.resolve() != target.resolve():
-            import shutil
 
-            shutil.move(str(produced), str(target))
-        self._manager.set_data_spectrum(exp_id, data_id, target)
+        ranking_path = (
+            self._manager.data_dir(exp_id, data_id, "smile_optimized")
+            / f"{exp_id}-{data_id}_smile_ranking.json"
+        )
+        rank_params: dict = {}
+        try:
+            payload = json.loads(ranking_path.read_text(encoding="utf-8"))
+            rank_params = next(
+                (
+                    dict(row)
+                    for row in payload.get("rows", [])
+                    if int(row.get("rank", 0) or 0) == 1
+                ),
+                {},
+            )
+        except (OSError, ValueError, TypeError):
+            rank_params = {}
+
+        run_params = self._last_spectrum_params(exp_id, data_id)
+        run_params["smile_rank"] = 1
+        run_params["smile_candidate"] = rank_params
         run = self._manager.start_run(
             exp_id,
             workflow_ref="smile_optimize_rank1",
-            inputs={"data_id": data_id, "script": str(script)},
+            inputs={
+                "data_id": data_id,
+                "script": str(script),
+                "ranking_json": str(ranking_path) if ranking_path.is_file() else "",
+            },
+            params=run_params,
         )
-        self._manager.finish_run(
-            run.run_id,
-            "success",
-            outputs={"spectrum_path": str(target)},
-            message="按 Rank1(SMILE 扫描最优参数)重跑终谱",
-        )
-        if data_id:
+        try:
+            self._manager.snapshot_run(
+                run.run_id,
+                {script.name: script.read_text(encoding="utf-8", errors="replace")},
+                params=run_params,
+            )
+            if progress is not None:
+                progress(f"按 Rank1 重跑终脚本: {script.name}")
+            run_result = CshRuntime().run(
+                ["csh", script.name], cwd=str(proc), timeout=7200.0
+            )
+            produced = proc / f"{data_id}.{ext}"
+            if (
+                run_result.returncode != 0
+                or not produced.is_file()
+                or produced.stat().st_size == 0
+            ):
+                raise RuntimeError(
+                    f"Rank1 重跑失败(rc={run_result.returncode}),"
+                    f"未生成 {produced.name}"
+                )
+
+            spectra = self._manager.data_dir(exp_id, data_id, "spectra")
+            spectra.mkdir(parents=True, exist_ok=True)
+            target = spectra / produced.name
+            if produced.resolve() != target.resolve():
+                produced.replace(target)
+            self._manager.set_data_spectrum(exp_id, data_id, target)
+
+            ucsf_target = spectra / f"{target.stem}.ucsf"
+            ucsf_path, ucsf_message = export_ucsf(target, ucsf_target)
+            if progress is not None:
+                progress(ucsf_message)
+
+            quality_path = Path(f"{target}.quality.json")
+            quality_path.unlink(missing_ok=True)
+            try:
+                logs = str(run_result.stdout or "").splitlines()
+                quality_lines = spectrum_quality_report_lines(
+                    str(target), optimization_logs=logs, progress=progress
+                )
+                if quality_lines:
+                    write_quality_record(
+                        str(target), run_params, "\n".join(quality_lines)
+                    )
+            except Exception as exc:  # noqa: BLE001 - QC 缓存失败不撤销有效终谱
+                if progress is not None:
+                    progress(f"Rank1 质量记录生成失败,已跳过: {exc}")
+
+            outputs = {"spectrum_path": str(target)}
+            if ucsf_path:
+                outputs["ucsf_path"] = str(ucsf_path)
+            if quality_path.is_file():
+                outputs["quality_record"] = str(quality_path)
+            self._manager.finish_run(
+                run.run_id,
+                "success",
+                outputs=outputs,
+                message="按 Rank1(SMILE 扫描最优参数)重跑终谱并刷新伴生产物",
+            )
             record_step_success(self._manager, exp_id, data_id, "spectrum")
-        self._manager.save()
-        return str(target)
+            self._manager.save()
+            return str(target)
+        except Exception as exc:
+            if run.status == "running":
+                self._manager.finish_run(
+                    run.run_id, "failed", message=f"Rank1 重跑失败: {exc}"
+                )
+                self._manager.save()
+            raise
 
 
     # ------------------------------------------------------------------

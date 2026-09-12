@@ -44,7 +44,7 @@ _LIQUID_HINTS: tuple[str, ...] = (
 
 
 # 0.2.199-补29hm(用户):动力学/变延时系列(伪2D)识别——源目录有 vdlist、
-# acqus.VDLIST 非空、或 PULPROG 含动力学关键词;暂不支持自动处理。
+# acqus.VDLIST 非空、或 PULPROG 含动力学关键词；分类结果供导入策略拦截。
 _KINETICS_PULPROG_HINTS: tuple[str, ...] = (
     "kinetic", "relax", "t1ir", "t2ir", "vdlist", "pseudo2d",
 )
@@ -318,13 +318,13 @@ def _classify_base(experiment: Experiment) -> ExperimentType:
             + "核磁(PULPROG 特征)"
         )
 
-    # 0.2.199-补29hm(用户):动力学/变延时系列识别(暂不支持自动处理)
+    # 0.2.199-补29hm(用户):动力学/变延时系列识别
     if _is_kinetics(experiment):
         return ExperimentType(
             name="Kinetics",
             confidence=0.9,
             evidence=evidence
-            + ["检测到动力学/变延时系列(伪2D,VDLIST/相关 PULPROG),暂不支持自动处理"],
+            + ["检测到动力学/变延时系列(伪2D,VDLIST/相关 PULPROG)"],
         )
 
     candidates = _nuclei_candidates(experiment)

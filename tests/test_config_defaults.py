@@ -15,19 +15,6 @@ from backend.script_generator import effective_td, zero_fill_plan
 from core.data.bruker_reader import read_dataset
 
 
-def _auto_nthread_expected(config=None) -> int:
-    import os
-
-    # 0.2.199-补24 起 thread_offset 可配置(本地 config 可设非 2,如 VM 2 线程
-    # 约束);期望值必须与 backend.config._auto_nthread 同源——读同一
-    # load_config(config) 的 smile.thread_offset(0.2.199-补29ekb)。
-    from backend.config import DEFAULT_THREAD_OFFSET, _as_int, load_config
-
-    smile = load_config(config).get("smile") or {}
-    offset = _as_int(smile.get("thread_offset"), DEFAULT_THREAD_OFFSET)
-    return max(1, (os.cpu_count() or 4) - offset)
-
-
 def test_load_processing_defaults_empty_config() -> None:
     defaults = load_processing_defaults({})
     assert defaults["points_per_line"] == 2.0
@@ -118,6 +105,82 @@ def test_zero_fill_plan_uses_config_defaults(
     cfg_defaults["linewidth_hz"] = {"15N": 5.0}
     narrow = zero_fill_plan(exp)
     assert wide["F1"]["size"] <= narrow["F1"]["size"]
+
+
+def test_gui_saved_settings_are_loaded_by_backend(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CONF-004:GUI 保存规范 schema,Backend 从同一文件读取。"""
+    import yaml
+
+    from backend import config as backend_config
+    from gui import settings as gui_settings
+
+    local = tmp_path / "nmrforge.local.yaml"
+    monkeypatch.setattr(gui_settings, "_settings_path", lambda: local)
+    monkeypatch.setattr(
+        backend_config,
+        "local_config_path",
+        lambda filename="nmrforge.local.yaml": local,
+    )
+    gui_settings.save_settings(
+        {
+            "nmrpipe_path": "/opt/nmrpipe/bin",
+            "linewidth_hz": {"1H": 9.5},
+            "smile": {"nthread": 2},
+        }
+    )
+
+    raw = yaml.safe_load(local.read_text(encoding="utf-8"))
+    assert "nmrpipe_path" not in raw
+    assert "linewidth_hz" not in raw
+    assert raw["backend"]["nmrpipe"]["path"] == "/opt/nmrpipe/bin"
+    assert raw["processing"]["linewidth_hz"]["1H"] == 9.5
+
+    defaults = backend_config.load_processing_defaults(backend_config.load_config())
+    assert defaults["nmrpipe_path"] == "/opt/nmrpipe/bin"
+    assert defaults["linewidth_hz"]["1H"] == 9.5
+    assert defaults["nthread"] == 2
+
+
+def test_gui_settings_migrate_legacy_top_level_keys(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """旧配置可读,下一次保存移除旧共享键并写规范嵌套结构。"""
+    import yaml
+
+    from gui import settings as gui_settings
+
+    local = tmp_path / "nmrforge.local.yaml"
+    local.write_text(
+        "nmrpipe_path: /legacy/bin\nlinewidth_hz:\n  1H: 11\n"
+        "smile:\n  nthread: 2\n  thread_offset: 7\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(gui_settings, "_settings_path", lambda: local)
+    loaded = gui_settings.load_settings()
+    assert loaded["nmrpipe_path"] == "/legacy/bin"
+    assert loaded["linewidth_hz"]["1H"] == 11
+
+    from backend import config as backend_config
+
+    monkeypatch.setattr(
+        backend_config,
+        "local_config_path",
+        lambda filename="nmrforge.local.yaml": local,
+    )
+    backend_defaults = backend_config.load_processing_defaults(
+        backend_config.load_config()
+    )
+    assert backend_defaults["nmrpipe_path"] == "/legacy/bin"
+    assert backend_defaults["linewidth_hz"]["1H"] == 11
+
+    gui_settings.save_settings(loaded)
+    raw = yaml.safe_load(local.read_text(encoding="utf-8"))
+    assert "nmrpipe_path" not in raw and "linewidth_hz" not in raw
+    assert "thread_offset" not in raw["smile"]
+    assert raw["backend"]["nmrpipe"]["path"] == "/legacy/bin"
+    assert raw["processing"]["linewidth_hz"]["1H"] == 11
 
 
 def test_factory_passes_config_nmrpipe_path(tmp_path: Path) -> None:

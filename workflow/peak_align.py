@@ -346,7 +346,7 @@ def alignment_figure(
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    # SVG 文字保持文本(与 workflow/analyze 的可编辑 SVG 约定一致)
+    # SVG 文字保持文本(0.2.199 起统一的可编辑 SVG 约定)
     matplotlib.rcParams["svg.fonttype"] = "none"
 
     cur_c = [row_coords(r, cur_nuclei) for r in cur_rows]

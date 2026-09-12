@@ -308,7 +308,7 @@ class NotesDialog(QDialog):
     """三级注释表单:按层级字段列表逐行填写;仅有几种取值的字段用下拉。
 
     样品数据注释先选维度,再按 presets 过滤给出数据类型选项;
-    实验注释:「实验类型」为指认实验/动力学实验;核(组合)同样给常用选项。
+    实验注释只展示当前支持的实验类别；核(组合)同样给常用选项。
     其余字段保持文本输入。
     """
 
@@ -337,7 +337,9 @@ class NotesDialog(QDialog):
                 for option in DIMENSION_OPTIONS:
                     combo.addItem(option, option)
                 current = str(values.get("dimension", "") or "")
-                if current in DIMENSION_OPTIONS:
+                if current:
+                    if current not in DIMENSION_OPTIONS:
+                        combo.addItem(current, current)
                     combo.setCurrentText(current)
                 combo.currentIndexChanged.connect(self._on_dimension_changed)
                 self._combos[key] = combo
@@ -345,8 +347,9 @@ class NotesDialog(QDialog):
             elif key == "experiment_type":
                 combo = QComboBox()
                 combo.setEditable(True)
+                combo.addItem("", "")
                 if kind == "experiment":
-                    # 实验注释:实验类型仅指认实验 / 动力学实验
+                    # 实验注释只展示当前支持的实验类别
                     combo.addItems(EXPERIMENT_CATEGORY_OPTIONS)
                 else:
                     self._type_combo = combo
@@ -368,6 +371,7 @@ class NotesDialog(QDialog):
             elif key == "nuclei":
                 combo = QComboBox()
                 combo.setEditable(True)
+                combo.addItem("", "")
                 combo.addItems(NUCLEI_OPTIONS)
                 current = str(values.get("nuclei", "") or "")
                 if current:
@@ -410,6 +414,7 @@ class NotesDialog(QDialog):
         type_combo.blockSignals(True)
         try:
             type_combo.clear()
+            type_combo.addItem("", "")
             type_combo.addItems(options)
             if current in options:
                 type_combo.setCurrentText(current)

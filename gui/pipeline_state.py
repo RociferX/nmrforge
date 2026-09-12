@@ -20,9 +20,12 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import tempfile
 from pathlib import Path
 from typing import Any
+
+from core.project.artifacts import find_primary_spectrum
 
 # 步骤 → 可能的工作流 ref(查最近运行 / 判定失败用)。0.2.199-补29hz:Pipeline
 # 与项目树原来各存一份,统一到这里;修24:表本体下沉 core/project/run_refs.py
@@ -175,31 +178,8 @@ def _fid_file(manager: Any, exp_id: str, data_id: str) -> Path | None:
 
 
 def _spectrum_file(manager: Any, exp_id: str, data_id: str) -> Path | None:
-    try:
-        entry = manager.data(exp_id, data_id)
-    except Exception:  # noqa: BLE001
-        return None
-    candidate = getattr(entry, "spectrum_path", "") or ""
-    if candidate:
-        path = Path(candidate)
-        if not path.is_absolute():
-            path = manager.root / path
-        if path.is_file():
-            return path
-    spectra = manager.data_dir(exp_id, data_id, "spectra")
-    for ext in ("ft2", "ft3"):
-        path = spectra / f"{exp_id}-{data_id}.{ext}"
-        if path.is_file():
-            return path
-    # 后端终谱按 dataset_id 命名(如 hsqc_2d.ft2),按扩展名兜底扫描
-    for ext in ("ft2", "ft3"):
-        try:
-            matches = sorted(spectra.glob(f"*.{ext}"))
-        except OSError:
-            matches = []
-        if matches:
-            return matches[0]
-    return None
+    """兼容内部调用；主谱查找规则统一由 core.project 提供。"""
+    return find_primary_spectrum(manager, exp_id, data_id)
 
 
 def _peaks_file(manager: Any, exp_id: str, data_id: str) -> Path | None:
@@ -225,9 +205,6 @@ def input_fingerprint(
     if step_id in ("smile", "peaks"):
         spectrum = _spectrum_file(manager, exp_id, data_id)
         return file_fingerprint(spectrum) if spectrum is not None else None
-    if step_id == "analysis":
-        peaks = _peaks_file(manager, exp_id, data_id)
-        return file_fingerprint(peaks) if peaks is not None else None
     return None
 
 
@@ -248,7 +225,12 @@ def script_fingerprint(
     if step_id == "spectrum":
         proc = manager.data_dir(exp_id, data_id, "process")
         try:
-            coms = sorted(p for p in proc.glob("*.com") if p.name != "fid.com")
+            coms = sorted(
+                p
+                for p in proc.glob("*.com")
+                if p.name != "fid.com"
+                and re.search(r"_nus_rank\d+\.com$", p.name, re.IGNORECASE) is None
+            )
         except OSError:
             coms = []
         if not coms:

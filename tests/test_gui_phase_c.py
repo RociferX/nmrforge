@@ -109,7 +109,7 @@ def test_batch_progress_and_summary(
     entry = manager.create_experiment("batch")
     data1 = manager.import_data(entry.id, "/fake/1")
     data2 = manager.import_data(entry.id, "/fake/2")
-    group = manager.create_data_group(entry.id, data_ids=[data1.id, data2.id])
+    manager.create_data_group(entry.id, data_ids=[data1.id, data2.id])
     manager.save()
     # 0.2.163-补14:前置未完成不运行下一步——先让两组 fid 就绪
     from gui.pipeline_state import record_step_success

@@ -802,7 +802,6 @@ class MainWindow(QMainWindow):
             "fid": "已生成 FID",
             "spectrum": "已生成谱图",
             "peaks": "已选峰",
-            "analysis": "已分析",
         }
 
         def _status_label(status: str) -> str:
@@ -987,10 +986,11 @@ class MainWindow(QMainWindow):
         threading.Thread(target=worker, daemon=True).start()
 
     def _on_import_failed(self, message: str) -> None:
-        """主线程处理导入失败(弹窗 + 日志);动力学暂不支持走独立提示。"""
-        if "动力学" in message or "暂不支持" in message:
-            self._append_log(f"提示: {message}")
-            InfoDialog.show_info(self, "暂不支持", message)
+        """主线程处理导入失败；Kinetics 使用明确的拒绝导入提示。"""
+        if message.startswith("KineticsUnsupportedError:"):
+            detail = message.partition(":")[2].strip() or message
+            self._append_log(f"导入已拒绝: {detail}")
+            InfoDialog.show_info(self, "不支持导入", detail)
             return
         self._append_log(f"导入失败: {message}")
         InfoDialog.show_info(self, "导入失败", message)
@@ -1063,17 +1063,6 @@ class MainWindow(QMainWindow):
             conf = float(et.get("confidence", 0.0) or 0.0)
         except (TypeError, ValueError):
             conf = 0.0
-        # 0.2.199-补29hm(用户):动力学实验暂不支持,导入后明确提示
-        if name == "Kinetics":
-            self._append_log(
-                "  提示: 检测到动力学实验(变延时/时间系列),暂不支持自动处理"
-            )
-            InfoDialog.show_info(
-                self,
-                "暂不支持",
-                "检测到动力学实验,暂不支持自动处理。\n"
-                "数据已导入项目(可查看原始参数),但生成谱图/选峰等功能暂不可用。",
-            )
         # 0.2.199-补29fd-修:不管是否命中,一律提示检查数据类型
         self._append_log(
             f"数据类型识别: {name}(置信 {conf:.2f});"
@@ -1356,14 +1345,6 @@ class MainWindow(QMainWindow):
                 "峰表编辑",
                 "峰表添加/删除/编辑请在右侧谱图面板峰表操作,保存为 Poky .list 文件。",
             )
-        elif step_id == "analysis":
-            InfoDialog.show_info(
-                self,
-                "分析",
-                "分析为自动步骤(HSQC CSP):在分析步骤选「比对谱」(自由态数据)后"
-                "点运行;产物为分析目录 csp_data.csv 与当前数据 figures/ 下 "
-                "csp_plot.svg、overlay_spectra.svg。",
-            )
         else:
             InfoDialog.show_info(self, "人工处理", f"暂不支持该步骤的人工入口: {step_id}")
 
@@ -1635,7 +1616,7 @@ class MainWindow(QMainWindow):
         self.center_panel.refresh()
 
     def _on_manual_run_done(self) -> None:
-        """人工脚本运行完成后刷新 Pipeline/报告页(主线程)。"""
+        """人工脚本运行完成后刷新 Pipeline(主线程)。"""
         self.project_tree.clear_running()
         self.refresh()
         self.center_panel.refresh()
@@ -1869,7 +1850,10 @@ class MainWindow(QMainWindow):
         else:
             set_data_note_fields(self.manager.project, exp_id, data_id, fields)
             exptype = str((fields or {}).get("experiment_type", "") or "")
-            if exptype:
+            previous_exptype = str(
+                (current or {}).get("experiment_type", "") or ""
+            )
+            if exptype and exptype != previous_exptype:
                 from workflow.import_workflow import apply_user_experiment_type
 
                 if apply_user_experiment_type(

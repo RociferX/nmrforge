@@ -348,8 +348,8 @@ def test_auto_full_path(
     dataset: str, exp_title: str,
 ) -> None:
     """自动路径:导入 → 生成 FID → 生成谱图(unified,诊断+优化)→ 峰挑选。
-    分析步骤按用户要求从 GUI 隐藏(2026-09-03);workflow.analyze 由
-    test_analyze.py 独立覆盖。"""
+    分析(HSQC CSP)功能已按用户决定删除(2026-09-12,REPORT-008),
+    本条路径止于峰挑选。"""
     from workflow.pick_peaks import pick_peaks
     from workflow.stepwise import generate_fid, generate_spectrum
 

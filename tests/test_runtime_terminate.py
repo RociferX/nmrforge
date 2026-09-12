@@ -31,12 +31,22 @@ def test_cancel_flag_lifecycle() -> None:
 
 
 def test_orphan_match_scopes_by_name_and_workspace() -> None:
-    """0.2.199-补6:孤儿进程匹配只认 NMRPipe 工具与工作区内 csh。"""
+    """工具名本身不代表所有权;必须匹配当前工作区。"""
     from backend.runtime import _orphan_match
 
-    assert _orphan_match({"name": "nmrPipe.exe", "args": ""}, None, None)
-    assert _orphan_match({"name": "pipe2xyz", "args": ""}, None, None)
+    assert not _orphan_match({"name": "nmrPipe.exe", "args": ""}, None, None)
+    assert not _orphan_match({"name": "pipe2xyz", "args": ""}, None, "/x/ws")
     assert not _orphan_match({"name": "python", "args": ""}, None, None)
+    assert _orphan_match(
+        {"name": "nmrPipe", "args": "nmrPipe -in /x/ws/exp_001/d_001/a.fid"},
+        None,
+        "/x/ws",
+    )
+    assert not _orphan_match(
+        {"name": "nmrPipe", "args": "nmrPipe -in /x/ws-copy/a.fid"},
+        None,
+        "/x/ws",
+    )
     assert _orphan_match(
         {
             "name": "csh",
@@ -46,6 +56,45 @@ def test_orphan_match_scopes_by_name_and_workspace() -> None:
         "/x/ws",
     )
     assert not _orphan_match({"name": "csh", "args": "/bin/sh"}, None, "/x/ws")
+
+
+def test_orphan_match_honors_configured_bin_dir() -> None:
+    from backend.runtime import _orphan_match
+
+    proc = {
+        "name": "nmrPipe",
+        "args": "/opt/nmrpipe/bin/nmrPipe -in /x/ws/exp_001/d_001/a.fid",
+    }
+    assert _orphan_match(proc, "/opt/nmrpipe/bin", "/x/ws")
+    assert not _orphan_match(proc, "/other/nmrpipe/bin", "/x/ws")
+
+
+def test_orphan_targets_require_dead_parent_and_current_workspace() -> None:
+    from backend.runtime import _orphan_targets
+
+    procs = [
+        {"pid": 100, "ppid": 1, "name": "python", "args": "nmrforge"},
+        {
+            "pid": 101,
+            "ppid": 100,
+            "name": "csh",
+            "args": "csh -c cd /x/ws/exp_001/d_001/process",
+        },
+        {
+            "pid": 201,
+            "ppid": 999,
+            "name": "csh",
+            "args": "csh -c cd /x/ws/exp_001/d_001/process",
+        },
+        {
+            "pid": 202,
+            "ppid": 999,
+            "name": "nmrPipe",
+            "args": "nmrPipe -in /other/project/a.fid",
+        },
+    ]
+
+    assert [proc["pid"] for proc in _orphan_targets(procs, None, "/x/ws")] == [201]
 
 
 def _spawn_sleeper(seconds: int = 120) -> subprocess.Popen:

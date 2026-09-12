@@ -14,7 +14,6 @@ GUI Agent                            Backend Agent
 │  viewer/app  │                     │ core/{data,...}      │
 └──────────────┘                     │  processing/planning │
                                      │  optimization/qc     │
-                                     │  reporting           │
                                      └──────────────────────┘
 ```
 
@@ -30,12 +29,12 @@ Backend 不依赖 Qt。
 | `main.py` | GUI | 程序入口(venv 引导 + Qt 启动) |
 | `scripts/make_icon.py` | GUI | 图标 |
 | `backend/` | Backend | NMRPipe/SMILE 后端与运行时 |
-| `workflow/` | Backend | stepwise 步骤化 / phase_routes 统一相位 / manual 人工 / batch / 优化 |
+| `workflow/` | Backend | stepwise 步骤化 / phase_routes 统一相位 / manual 人工 / batch(2D-only) / 优化 |
 | `core/data/`(除 internal_data_model) | Backend | Bruker 读取/nus/pipe_io |
 | `core/experiment/`、`core/experiments/` | Backend | 解析/分类/模板 |
 | `core/processing/`、`core/planning/` | Backend | 处理原语/DAG |
 | `core/optimization/` | Backend | 参数空间/搜索/相位 |
-| `core/qc/` | Backend | QC(core/reporting 已于 0.2.164 清理删除) |
+| `core/qc/` | Backend | QC(core/reporting 已于 0.2.164 清理删除;CSP 分析 2026-09-12 删除) |
 | `scripts/{smile_optimize,param_optimize}.py` | Backend | 命令行工具(可选) |
 | `core/project/` | Shared | 项目管理模型(GUI 地基 + Backend 运行登记) |
 | `core/workspace.py` | Shared | 工作区容器(默认 ~/NMRForgeWorkspace,首次启动创建) |

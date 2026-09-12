@@ -16,7 +16,7 @@ from pathlib import Path
 from viewer.axis_labels import infer_nucleus
 
 # 各级注释字段(键 / 显示名),0.2.79 起按层级区分:
-# 项目=蛋白样品基本信息;实验类型=实验类型(指认实验/动力学实验);
+# 项目=蛋白样品基本信息;实验类型=当前支持的实验类别;
 # 样品数据=重复/条件/pH/温度 + 维度/数据类型(presets)/核。
 SAMPLE_FIELDS: tuple[tuple[str, str], ...] = (
     ("protein_name", "蛋白名称"),
@@ -51,8 +51,12 @@ _FIELD_BY_KIND: dict[str, tuple[tuple[str, str], ...]] = {
 }
 
 # 仅有几种取值的字段,表单直接给下拉选项(0.2.85)
-DIMENSION_OPTIONS: tuple[str, ...] = ("2D", "3D")
+DIMENSION_OPTIONS: tuple[str, ...] = ("1D", "2D", "3D")
 NUCLEI_OPTIONS: tuple[str, ...] = (
+    "1H",
+    "13C",
+    "19F",
+    "31P",
     "1H-15N",
     "1H-13C",
     "1H-1H",
@@ -62,8 +66,9 @@ NUCLEI_OPTIONS: tuple[str, ...] = (
     "1H-15N-1H",
     "13C-13C-1H",
 )
-# 实验注释:「实验类型」仅两种取值:指认实验 / 动力学实验
-EXPERIMENT_CATEGORY_OPTIONS: tuple[str, ...] = ("指认实验", "动力学实验")
+# IMPORT-007 方案 A:动力学数据禁止导入，不作为可选产品能力展示。
+# 可编辑下拉仍会保留旧项目中已有的自定义/动力学文本。
+EXPERIMENT_CATEGORY_OPTIONS: tuple[str, ...] = ("指认实验",)
 _GENERIC_PRESET_NAMES = {"Generic1D", "Generic2D", "Generic3D"}
 _PRESET_OPTIONS: list[tuple[str, int]] | None = None
 

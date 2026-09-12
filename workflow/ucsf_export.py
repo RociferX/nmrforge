@@ -28,6 +28,10 @@ def export_ucsf(
     target = Path(target)
     if not source.is_file():
         return None, f"源谱不存在,跳过 UCSF 转换: {source}"
+    try:
+        target.unlink(missing_ok=True)
+    except OSError as exc:
+        return None, f"无法清理旧 UCSF 文件,跳过转换: {exc}"
     if run is None:
         from backend.runtime import CshRuntime
 

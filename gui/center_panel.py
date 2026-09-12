@@ -25,7 +25,6 @@ from PyQt6.QtWidgets import (
 from gui.dashboards import ExperimentDashboard, ProjectDashboard
 from gui.group_panel import GroupBatchPanel
 from gui.pipeline_panel import PipelinePanel
-from gui.report_panel import ReportPanel
 from gui.welcome_page import WelcomePage
 
 
@@ -71,7 +70,6 @@ class CenterPanel(QWidget):
             self.memory_guard_requested.emit
         )
         self.pipeline.manual_open_requested.connect(self.manual_open_requested.emit)
-        self.pipeline.report_requested.connect(self.show_report)
 
         self.project_page = ProjectDashboard()
         self.project_page.create_experiment_requested.connect(
@@ -104,9 +102,7 @@ class CenterPanel(QWidget):
         self.stack.addWidget(self.project_page)  # index 1: Project
         self.stack.addWidget(self.experiment_page)  # index 2: Experiment
         self.stack.addWidget(self.pipeline)  # index 3: Data / folder
-        self.report_page = ReportPanel(manager)
-        self.stack.addWidget(self.report_page)  # index 4: 报告
-        self.stack.addWidget(self.group_page)  # index 5: 数据组
+        self.stack.addWidget(self.group_page)  # index 4: 数据组
 
         # 顶部注释条:项目/实验类型/样品数据三级注释展示 + 后补编辑入口
         self.notes_header = QHBoxLayout()
@@ -161,7 +157,7 @@ class CenterPanel(QWidget):
                 label = exp.title if exp is not None else exp_id
                 self.experiment_page.set_context(self._manager, exp_id, label)
         elif kind == "group":
-            self.stack.setCurrentIndex(5)
+            self.stack.setCurrentIndex(4)
             self.group_page.set_context(self._manager, exp_id, group_id)
         else:  # data / folder / 其它:显示 Pipeline
             self.stack.setCurrentIndex(3)
@@ -171,10 +167,6 @@ class CenterPanel(QWidget):
     def set_manager(self, manager) -> None:
         """绑定/更新 ProjectManager(切换项目时由主窗口调用)。"""
         self._manager = manager
-        try:
-            self.report_page.manager = manager
-        except Exception:  # noqa: BLE001 - 报告页缺 manager 时忽略
-            pass
 
     def update_notes(self, *args, **kwargs) -> None:
         """刷新注释页面(公开包装:_update_notes)。"""
@@ -328,8 +320,6 @@ class CenterPanel(QWidget):
         self.experiment_page.refresh()
         if self._exp_group_context():
             self.group_page.refresh()
-        self.report_page.manager = self._manager
-        self.report_page.refresh()
 
     def _exp_group_context(self) -> bool:
         """当前是否停留在数据组页面(供 refresh 刷新)。"""
@@ -337,14 +327,6 @@ class CenterPanel(QWidget):
             self.stack.currentWidget() is self.group_page
             and self.group_page.current_group_id
         )
-
-    def show_report(self, _step_id: str = "", exp_id: str = "", data_id: str = "") -> None:
-        """打开报告页(分析产物存在时);缺省用当前选中实验/数据。"""
-        exp_id = exp_id or self.pipeline.current_experiment_id()
-        data_id = data_id or self.pipeline.current_data_id
-        self.report_page.manager = self._manager
-        self.report_page.set_context(exp_id, data_id)
-        self.stack.setCurrentIndex(4)
 
     def run_step(self, step_id: str, data_id: str | None = None) -> None:
         self.pipeline.run_step(step_id, data_id=data_id)

@@ -51,10 +51,6 @@ class _FakeController:
         self.calls.append("pick_peaks")
         return {"status": "success", "peak_count": 1}
 
-    def analyze(self, data, exp_id=None, data_id=None) -> dict:
-        self.calls.append("analyze")
-        return {"status": "pending"}
-
 
 def _manager_with_artifacts(tmp_path: Path):
     """实验类型 + 样品数据 + 全套产物(fid/谱/峰表/报告),无指纹状态。"""

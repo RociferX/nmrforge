@@ -564,7 +564,7 @@ def test_read_dataset_container_not_segmented_experiment(
         read_dataset_container(container)
 
 def test_classify_kinetics_by_pulprog() -> None:
-    """29hm: kinetics PULPROG -> Kinetics(暂不支持)。"""
+    """29hm: kinetics PULPROG 被识别为 Kinetics。"""
     from core.experiment.experiment_classifier import classify
     exp = _experiment_with_nuclei(2, ["1H", "13C"], "kinetics-2d")
     result = classify(exp)
@@ -581,19 +581,37 @@ def test_classify_kinetics_by_vdlist() -> None:
     result = classify(exp)
     assert result.name == "Kinetics"
 
-def test_kinetics_import_blocked(tmp_path: Path) -> None:
-    """补29hm:动力学/变延时实验导入即拦截(KineticsUnsupportedError,不导入)。"""
-    import pytest
+def test_kinetics_import_blocked_before_project_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """IMPORT-007 A:识别后拒绝导入，且不创建数据条目、run 或 raw 副本。"""
+    from core.project import ProjectManager
+    from workflow.import_workflow import KineticsUnsupportedError, import_data
 
-    from workflow.import_workflow import KineticsUnsupportedError, _raise_if_kinetics
+    source = tmp_path / "kinetics"
+    source.mkdir()
+    (source / "acqus").write_text("##TITLE= kinetics", encoding="utf-8")
+    kinetic = _experiment_with_nuclei(2, ["1H", "13C"], "hsqc")
+    kinetic.acquisition_parameters["acqus"]["VDLIST"] = "vdlist"
+    monkeypatch.setattr("workflow.import_workflow.read_dataset", lambda _path: kinetic)
 
-    exp = _experiment_with_nuclei(2, ["1H", "13C"], "hsqc")
-    exp.acquisition_parameters["acqus"]["VDLIST"] = "vdlist"
-    with pytest.raises(KineticsUnsupportedError):
-        _raise_if_kinetics(exp)
+    manager = ProjectManager.create_project(tmp_path / "project", "demo")
+    entry = manager.create_experiment("Kinetics candidate")
+    with pytest.raises(KineticsUnsupportedError, match="不支持导入"):
+        import_data(manager, entry.id, source, copy=True)
+
+    assert entry.data == []
+    assert manager.project is not None
+    assert manager.project.workflow_runs == []
+    assert not (manager.root / entry.id).exists()
+
+
+def test_non_kinetics_passes_import_policy_guard() -> None:
+    """普通实验不被 Kinetics 策略误伤。"""
+    from workflow.import_workflow import _raise_if_kinetics
 
     normal = _experiment_with_nuclei(2, ["1H", "13C"], "hsqc")
-    _raise_if_kinetics(normal)  # 正常实验不抛
+    _raise_if_kinetics(normal)
 
 def test_vdlist_placeholder_not_kinetics() -> None:
     """补29hq-修:acqus.VDLIST 为纯 D 占位(Bruker 未设变延时)不判为动力学。"""

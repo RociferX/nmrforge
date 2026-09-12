@@ -1,5 +1,30 @@
 # 修改记录(历史条目)
 
+## 未发布(2026-09-12):文档重组与全项目审查问题台账
+- 新增 `docs/README.md` 作为文档统一入口，区分当前事实、当前任务、长期记忆与历史档案；
+- 新增 `docs/reviews/2026-09-12-project-audit.md`，用稳定 ID 记录 17 项 bug、逻辑矛盾、设计分叉和残留，包含优先级、证据、修复方向与验收条件；
+- 将原 `docs/tasks/current.md` 的 1750 行已完成历史原样归档，当前任务页缩减为本轮整改状态；
+- 重写 `docs/manager/handoff.md`，修正 README 的 1D/2D/3D 能力边界、SMILE Scheme B、Batch 2D-only、NativeBackend 未实现和普通 wheel 未完成等现状；
+- 标记 `docs/PROJECT_STATUS.md`、`docs/HANDOVER.md` 为历史档案，并为旧 Agent 规则增加现行优先级说明；
+- 文档整理阶段未修改业务代码和测试行为；校验使用 `git diff --check` 与 Markdown 相对链接检查。
+- `SAFE-001`：孤儿清理不再凭工具名终止进程；必须匹配当前工作区、可选 NMRPipe 目录，且父进程已不存在。新增跨项目、路径边界、工具目录和活父进程负向测试；专项 `7 passed`，目标文件 Ruff 全绿。
+- `META-002`：Notes 下拉框以空值起始，补齐 1D/单核选项并保留未知既有维度；原样保存不再把识别类型标成用户选择，真正改值仍权威写回。GUI 回归 `34 passed`，相关 Ruff 全绿。
+- `STATE-003`：活动谱脚本指纹排除 `*_nus_rankN.com` 候选模板；SMILE 扫描不再把 spectrum/smile/peaks 标为 `OUTDATED`，真实处理脚本变化仍会失效。专项 `25 passed`，相关 Ruff 全绿。
+- `CONF-004`：GUI/Backend 共用本地配置路径与规范磁盘 schema；旧 `nmrpipe_path`/`linewidth_hz` 顶层键首次读取即生效、保存时迁移。`nthread<=0` 固定回退安全默认 2，删除无效 `thread_offset`。回归 `42 passed`，核心文件 Ruff 全绿。
+- `SMILE-005`：Rank1 重跑统一刷新活动谱、UCSF、质量缓存、run 输出和脚本/参数快照；排名参数写入运行记录，失败 run 也留档。UCSF 启动失败先删旧目标。专项 `34 passed`，相关 Ruff 全绿。
+- 严重/高优先级批次全量回归：`999 passed, 1 skipped, 39 warnings`；标准 Ruff 仅余台账 `QA-017` 的两项既有告警。
+- `STATE-006`：新增核心主谱查找规则，Pipeline 面板、指纹状态、项目状态和项目树不再各自扫描；只有 3D 投影残留时统一判定为无主谱。专项 `62 passed`，相关 Ruff 全绿；全量回归 `1000 passed, 1 skipped, 39 warnings`。
+- `IMPORT-007`：按用户选择的方案 A 完全禁止 Kinetics 导入；保留识别但在任何项目写入前统一拒绝，GUI 删除不可达的只读成功分支并明确显示拒绝，Notes 移除动力学可选项。专项 `152 passed`，相关 Ruff 全绿；全量回归 `1002 passed, 1 skipped, 39 warnings`。
+- `REPORT-008`（用户：把分析删了，但是留档）：分析（HSQC CSP）功能删除——`workflow/analyze.py`、`gui/report_panel.py` 及其测试，Pipeline「分析」步骤 / CSP 比对谱入口 / 行内「报告」按钮、CenterPanel 报告页与 `show_report`、`ProcessingController.analyze`、`input_fingerprint` analysis 分支、`STEP_RUN_REFS["analysis"]`、`BATCH_STEPS` 的 analysis 全部移除；`infer_status` 不再按 `report/` 产物判定 `analyzed`。`analysis` 目录与 `ExperimentStatus.ANALYZED` 仅作旧项目兼容保留。删除范围、被删实现要点与恢复方法留档 `docs/tasks/archive/2026-09-12-analysis-removal.md`。
+- `PROV-009`：版本单一源 `core.__version__`（pyproject 改为 `dynamic`+`attr`，与 AppImage 构建脚本同源）；`WorkflowRun` 启动写 software_version/tool_versions/参数来源 decisions、结束写状态历史并合并 `backend/nmrpipe_version.py` 探测到的 NMRPipe/SMILE 版本。
+- `MIG-010`：`ProjectManager.open_project` 在 schema/默认标题迁移发生后立即原子落盘；写失败抛 `ProjectError` 且原文件不动，迁移结果与迁移历史不再丢失。
+- `LOG-011`：NUS 源头坏点清理按目录记录真实结果，只有所有副本都从源头删除过才记「已从源头 ser/nuslist 删除」；否则明确说明回退为生成 FID 时清零、原始文件未改动。
+- `BATCH-012`：批量能力边界正式定为仅 2D（`BATCH_SUPPORTED_NDIM = 2`），非 2D 数据 skipped 并写明原因；文档不再把它描述为覆盖四路径。
+- `STUB-013`：删除 `backend/native_backend.py` 与工厂 `native` 分支（`SUPPORTED_PROVIDERS = ("nmrpipe",)`，未知 provider 创建期即报错），删除从未实现的 `ExperimentTemplate.validate`。
+- `DEAD-014`：默认配置删除无消费者的 `app`/`optimization`/`qc`/`reporting`/`logging` 段；Pipeline SMILE 文案改为「重构参数扫描排名（不自动替换活动谱）」，与 Scheme B 一致。
+- `PACK-015`：发行策略定案——唯一受支持发行物为 AppImage，wheel/pip 仅用于开发；新增打包契约测试锁定 spec 的 `datas` 必须覆盖 `config`/`presets`/`gui/assets`。
+- `QA-017`：清除本仓库最后两项 Ruff 告警（未使用变量、导入顺序），`ruff check .` 全绿。
+
 ## 0.2.199-补29hz-修27(2026-09-11,用户):文件菜单拆「打开当前数据谱图 / 打开任意谱图」
 - 用户:文件下拉里把「打开谱图」拆成两条——「打开当前数据谱图」与 Pipeline 的
   「展示谱图」同效果;这个按钮很容易在没有谱的时候点到 → 提示「当前数据还未生成谱图」;

@@ -37,7 +37,11 @@ def now_iso() -> str:
 
 
 class ExperimentStatus(StrEnum):
-    """实验状态机:registered(仅登记) → imported → processed → picked → analyzed。"""
+    """实验状态机:registered → imported → processed → picked。
+
+    ANALYZED 仅作历史项目兼容(分析功能已于 2026-09-12 删除),
+    不再由 infer_status 推断,也不出现在新项目里。
+    """
 
     REGISTERED = "registered"
     IMPORTED = "imported"

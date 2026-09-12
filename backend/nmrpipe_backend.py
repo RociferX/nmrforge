@@ -41,6 +41,7 @@ from backend.config import (
 )
 from backend.memory_disk import INTERMEDIATE_SUBDIR
 from backend.nmrpipe_finder import find_nmrpipe_bin, find_tool
+from backend.nmrpipe_version import register_nmrpipe_versions
 from backend.runtime import CshRuntime, cancel_requested
 from backend.script_generator import (
     DEFAULT_POINTS_PER_LINE,
@@ -346,7 +347,12 @@ class NMRPipeBackend:
     )
 
     def _bin_dir(self) -> Path | None:
-        return find_nmrpipe_bin(self.nmrpipe_bin)
+        bin_dir = find_nmrpipe_bin(self.nmrpipe_bin)
+        if bin_dir is not None:
+            # PROV-009:解析到安装目录即探测一次版本,供 WorkflowRun 溯源;
+            # 探测失败不影响处理(见 backend/nmrpipe_version.py)。
+            register_nmrpipe_versions(bin_dir)
+        return bin_dir
 
     def _recover_dense_2d_nus(
         self,
@@ -3150,6 +3156,9 @@ class NMRPipeBackend:
             if point not in kept:
                 drop_by_dir.setdefault(dir_idx, set()).add(row_idx)
         removed_any = False
+        # LOG-011(2026-09-12):按目录记录真实清理结果,只有确实从源头
+        # 删除过的坏点才允许输出「已删除」结论。
+        cleaned_dirs: set[int] = set()
         for dir_idx, drop_rows in drop_by_dir.items():
             if not drop_rows:
                 continue
@@ -3211,6 +3220,7 @@ class NMRPipeBackend:
                 nus_tmp.write_text(text, encoding="utf-8", newline="\n")
                 os.replace(nus_tmp, nuslist_path)
                 removed_any = True
+                cleaned_dirs.add(dir_idx)
                 logs.append(
                     f"源头清理 {raw_dir.name}:nuslist {n_rows} → "
                     f"{n_rows - len(drop_rows)} 行,ser {data_size} → "
@@ -3219,10 +3229,19 @@ class NMRPipeBackend:
             except OSError as exc:  # noqa: BLE001 - 清理失败不阻断
                 logs.append(f"⚠ {raw_dir.name} 源头清理失败({exc}),回退生成 FID 清理")
         for point in bad:
-            logs.append(
-                f"⚠ 检测到采样坏点 {point}:{'、'.join(reasons.get(point, []) or ['未知'])},"
-                "已从源头 ser/nuslist 删除(备份 .bak)"
-            )
+            owners = {dir_idx for dir_idx, _row, value in entries if value == point}
+            detail = "、".join(reasons.get(point, []) or ["未知"])
+            if owners and owners <= cleaned_dirs:
+                logs.append(
+                    f"⚠ 检测到采样坏点 {point}:{detail},"
+                    "已从源头 ser/nuslist 删除(备份 .bak)"
+                )
+            else:
+                logs.append(
+                    f"⚠ 检测到采样坏点 {point}:{detail},"
+                    "源头未删除(ser 缺失/布局不可判定/写入失败),"
+                    "已回退为生成 FID 时清零;原始 ser/nuslist 未改动"
+                )
         return len(valid), bad, removed_any
 
     def _write_merged_nuslist(

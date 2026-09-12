@@ -15,10 +15,11 @@
 ## 测试
 
 - `pytest` 全量；GUI 测试用 `QT_QPA_PLATFORM=offscreen`。
-- **全路径回归(强制,0.2.163-补8)**:每次修改代码后必须运行
-  `python -m pytest tests/test_full_paths.py`——覆盖自动
-  (2D/3D uniform + NUS,含诊断与处理参数优化)、人工(fid.com/谱图脚本)、
-  批量(数据组)全部路径;新增/改动处理流程时必须同步更新该文件。
+- **全路径回归（强制，0.2.163-补8）**：每次修改代码后必须运行
+  `python -m pytest tests/test_full_paths.py`。该测试覆盖自动与人工入口的
+  2D/3D uniform + NUS 主路径（含诊断与处理参数优化）。Batch 当前仅支持 2D，
+  不应表述为覆盖全部四路径；该能力边界记录为审查项 `BATCH-012`。
+  新增或改动处理流程时必须同步更新该文件。
 - 不依赖真实 NMRPipe 的测试优先（FakeBackend/MockBackend 模式）。
 - Windows 沙箱默认 basetemp 被 ACL 锁死：pytest 必须带
   `--basetemp=<新临时目录>`（如 `$env:TEMP\pytest_nmrforge`）。

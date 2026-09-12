@@ -96,8 +96,8 @@ def test_tree_and_pipeline_agree(
 
 
 def test_step_refs_table_is_single_source(tmp_path: Path) -> None:
-    """步骤 ref 表只有一份,且覆盖四步 + 可选 SMILE + 分析。"""
-    assert set(STEP_RUN_REFS) == {"fid", "spectrum", "smile", "peaks", "analysis"}
+    """步骤 ref 表只有一份,且覆盖四步 + 可选 SMILE(分析已删除)。"""
+    assert set(STEP_RUN_REFS) == {"fid", "spectrum", "smile", "peaks"}
     assert "phase_optimize_unified" in STEP_RUN_REFS["spectrum"]
     assert set(ALL_STEP_RUN_REFS) == {
         ref for refs in STEP_RUN_REFS.values() for ref in refs

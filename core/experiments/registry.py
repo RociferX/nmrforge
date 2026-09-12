@@ -50,10 +50,6 @@ class ExperimentTemplate:
             processing_hints=dict(data.get("processing_hints") or {}),
         )
 
-    def validate(self, experiment_type: str) -> bool:
-        """检查模板是否适用于某实验类型。"""
-        raise NotImplementedError("Phase 2: 实现模板匹配")
-
 
 REGISTRY: dict[str, ExperimentTemplate] = {}
 

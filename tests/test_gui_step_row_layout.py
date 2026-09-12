@@ -80,7 +80,7 @@ def test_smile_gap_not_visible_for_other_steps(
     qapp: QApplication, host: QWidget
 ) -> None:
     """间隔控件只在 SMILE 行占位,其它步骤行不受影响。"""
-    for step in ("fid", "spectrum", "peaks", "analysis"):
+    for step in ("fid", "spectrum", "peaks"):
         row = PipelineStepRow(step, step, "x", host)
         assert row.smile_gap.isHidden() is True, step
 
@@ -91,7 +91,7 @@ def test_smile_gap_not_visible_for_other_steps(
 # 几何守卫(0.2.199-补29hz-修20):所有步骤行 × 多种宽度
 # ---------------------------------------------------------------------------
 
-_STEPS = ("project", "fid", "spectrum", "smile", "peaks", "analysis")
+_STEPS = ("project", "fid", "spectrum", "smile", "peaks")
 _WIDTHS = (320, 380, 440, 560, 760)
 
 

@@ -4,7 +4,7 @@
 - 按参考数据处理整组:选择实验内已运行过谱图的数据,取其最近成功谱图
   运行的有效参数应用到组内每个数据(可截止到 pipeline 某一步);
 - 依次优化组内数据:对组内每个数据依次执行完整自动处理流程
-  (fid → spectrum[统一自动优化] → peaks;analysis 已隐藏,2026-09-03)。
+  (fid → spectrum[统一自动优化] → peaks;分析步骤已删除,2026-09-12)。
 
 实际执行由 main_window 起后台线程调 ProcessingController.run_group_batch
 (workflow.batch.run_batch),本面板只负责参数选择与信号发出。
@@ -39,7 +39,6 @@ STOP_STEP_OPTIONS: list[tuple[str, str]] = [
     ("fid", "生成 FID"),
     ("spectrum", "生成谱图"),
     ("peaks", "峰挑选"),
-    # ("analysis", "分析"),  # hidden from GUI (2026-09-03)
 ]
 
 

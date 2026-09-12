@@ -11,6 +11,7 @@ import pytest
 from PyQt6.QtWidgets import QApplication
 
 from core.project import ProjectManager
+from core.project.artifacts import find_primary_spectrum
 from gui.pipeline_panel import PipelinePanel, compute_step_statuses
 from gui.pipeline_state import (
     file_fingerprint,
@@ -166,6 +167,59 @@ def test_upstream_regen_marks_downstream_outdated(
     statuses = compute_step_statuses(manager, exp_id)
     assert statuses["peaks"] == "SUCCESS"
 
+
+def test_smile_rank_scripts_do_not_invalidate_active_spectrum(
+    tmp_path: Path, qapp: QApplication
+) -> None:
+    """STATE-003:扫描只新增 Rank 模板时,活动谱及下游状态保持成功。"""
+    manager, exp_id, data_id, _artifacts = _manager_with_artifacts(tmp_path)
+    process = manager.data_dir(exp_id, data_id, "process")
+    spectrum_script = process / "spectrum.com"
+    spectrum_script.write_text("#!/bin/csh\nnmrPipe -fn FT\n", encoding="utf-8")
+    _record_all(manager, exp_id, data_id)
+
+    for rank in range(1, 4):
+        (process / f"{data_id}_nus_rank{rank}.com").write_text(
+            f"#!/bin/csh\n# candidate {rank}\n",
+            encoding="utf-8",
+        )
+
+    statuses = compute_step_statuses(manager, exp_id)
+    assert statuses["spectrum"] == "SUCCESS"
+    assert statuses["smile"] == "SUCCESS"
+    assert statuses["peaks"] == "SUCCESS"
+
+    spectrum_script.write_text("#!/bin/csh\nnmrPipe -fn FT -auto\n", encoding="utf-8")
+    statuses = compute_step_statuses(manager, exp_id)
+    assert statuses["spectrum"] == "OUTDATED"
+
+
+
+def test_projection_only_is_not_primary_spectrum(
+    tmp_path: Path, qapp: QApplication
+) -> None:
+    """STATE-006:投影残留不能让任何 Pipeline 口径认为主谱存在。"""
+    manager = ProjectManager.create_project(tmp_path / "proj_projection", "demo")
+    entry = manager.create_experiment("3D")
+    data = manager.import_data(entry.id, "/fake/bruker/1")
+    process = manager.data_dir(entry.id, data.id, "process")
+    process.mkdir(parents=True, exist_ok=True)
+    fid = process / f"{data.id}.fid"
+    fid.write_bytes(b"fid")
+    manager.set_data_fid(entry.id, data.id, fid)
+    spectra = manager.data_dir(entry.id, data.id, "spectra")
+    spectra.mkdir(parents=True, exist_ok=True)
+    (spectra / f"{data.id}_15N-1H.ft2").write_bytes(b"projection")
+
+    assert find_primary_spectrum(manager, entry.id, data.id) is None
+    statuses = compute_step_statuses(manager, entry.id)
+    assert statuses["fid"] == "SUCCESS"
+    assert statuses["spectrum"] == "READY"
+
+    main = spectra / f"{data.id}.ft3"
+    main.write_bytes(b"main")
+    assert find_primary_spectrum(manager, entry.id, data.id) == main
+    assert compute_step_statuses(manager, entry.id)["spectrum"] == "SUCCESS"
 
 def test_raw_change_marks_fid_outdated_and_propagates(
     tmp_path: Path, qapp: QApplication

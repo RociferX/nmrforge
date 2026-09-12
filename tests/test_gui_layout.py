@@ -382,7 +382,7 @@ def test_pipeline_ext_button_text_reflects_override(
 def test_pipeline_steps_include_optional_smile() -> None:
     ids = [step[0] for step in PIPELINE_STEPS]
     assert ids == [
-        "fid", "spectrum", "smile", "peaks", "analysis"
+        "fid", "spectrum", "smile", "peaks"
     ]
     deps = {step[0]: step[3] for step in PIPELINE_STEPS}
     # SMILE 优化为可选:峰挑选不依赖它
@@ -626,37 +626,6 @@ def test_spectrum_panel_file_help_menus(
     texts = [a.text() for a in view_menu.actions()]
     assert not any("谱图查看器" in t for t in texts)
     window.close()
-
-
-def test_analysis_ref_candidates_filters(tmp_path: Path, qapp: QApplication) -> None:
-    """0.2.199-补29er:分析参考候选 = 同实验内已有谱图+峰表、非当前的数据。"""
-    from gui.pipeline_panel import PipelinePanel
-
-    manager = ProjectManager.create_project(tmp_path / "proj", "demo")
-    entry = manager.create_experiment()
-    cur = manager.import_data(entry.id, "/data/cur")
-    ref = manager.import_data(entry.id, "/data/ref")
-    other = manager.import_data(entry.id, "/data/other")
-    for data, name in ((cur, "cur"), (ref, "ref")):
-        spec_dir = manager.data_dir(entry.id, data.id, "spectra")
-        spec_dir.mkdir(parents=True, exist_ok=True)
-        spec = spec_dir / f"{name}.ft2"
-        spec.write_bytes(b"x")
-        manager.set_data_spectrum(entry.id, data.id, str(spec))
-        peaks_dir = manager.data_dir(entry.id, data.id, "peaks")
-        peaks_dir.mkdir(parents=True, exist_ok=True)
-        (peaks_dir / f"{entry.id}-{data.id}.list").write_text(
-            "Assignment w1 w2 Data Height Volume\n?-?  110.0  8.0  0  1  0\n",
-            encoding="utf-8",
-        )
-    panel = PipelinePanel(manager)
-    panel._current_exp_id = entry.id
-    panel._current_data_id = cur.id
-    cands = panel._analysis_ref_candidates(entry.id, cur.id)
-    ids = [c[2] for c in cands]
-    assert ref.id in ids
-    assert cur.id not in ids
-    assert other.id not in ids
 
 
 def test_main_window_has_app_icon(
@@ -1069,6 +1038,32 @@ def test_import_failure_handled_on_main_thread(
     )
     assert messages and ("目录不存在" in messages[0] or "导入失败" in messages[0])
     assert "导入失败" in window.log_panel.text.toPlainText()
+    window.close()
+
+
+def test_kinetics_import_failure_is_explicit_rejection(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """IMPORT-007 A:Kinetics 使用“拒绝导入”提示，不暗示已只读导入。"""
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    messages: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        "gui.main_window.InfoDialog.show_info",
+        staticmethod(
+            lambda parent, title, text_: messages.append((title, text_))
+        ),
+    )
+    window = MainWindow(manager=manager)
+    window._on_import_failed(
+        "KineticsUnsupportedError: 检测到动力学实验，当前产品不支持导入"
+    )
+
+    assert messages == [
+        ("不支持导入", "检测到动力学实验，当前产品不支持导入")
+    ]
+    log = window.log_panel.text.toPlainText()
+    assert "导入已拒绝" in log
+    assert "数据已导入" not in log
     window.close()
 
 

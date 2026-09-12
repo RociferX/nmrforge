@@ -1,61 +1,58 @@
 # NMRForge
 
-面向 Bruker 2D/3D NMR 数据的自动化处理、参数优化与质量控制平台（重写版）。
+面向 Bruker 1D/2D/3D NMR 数据的自动化处理、参数优化、质量控制与谱图查看平台。
 
-> 定位：不是简单的 NMRPipe GUI，而是「软件自己知道这个谱是什么、应该怎么处理、
-> 为什么这样处理、结果是否足够好，以及下一步应该改变什么」的自动化平台。
+> NMRForge 的目标不只是为 NMRPipe 提供图形界面，而是让软件理解实验和采样方式，生成可解释的处理方案，并用质量指标与运行记录保存处理依据。
 
 ## 核心原则
 
-1. 先理解数据，再处理数据（实验识别与处理规划先于处理）。
-2. 实验类型识别使用多证据（pulse program → 核组合 → 维度顺序 → FnMODE → 参数 → 命名），不依赖文件名。
-3. 逻辑维度 / 物理维度 / 显示维度分离。
-4. 处理流程是依赖图（DAG），带缓存与 invalidates 语义。
-5. 昂贵的 NUS reconstruction 从普通参数优化循环中隔离（direct → reconstruction → indirect 分阶段）。
-6. 每次自动操作都有 QC、置信度、回滚与完整参数记录（provenance）。
+1. 先理解数据，再处理数据；实验识别与处理规划先于脚本执行。
+2. 实验类型识别使用 pulse program、核组合、维度顺序、FnMODE 和采集参数等多重证据，不依赖文件名。
+3. 逻辑维度、物理维度和显示维度分离。
+4. 处理流程使用带缓存和失效语义的依赖图。
+5. 昂贵的 NUS reconstruction 与普通参数优化分离。
+6. 自动处理以 QC、可回滚产物和可追踪参数为目标；完整 provenance 仍在补齐。
 
-## 架构分层
+## 架构
 
 ```text
-GUI（Dataset / Experiment / Plan / Viewer / Quality 面板）
-  │
-Workflow（stepwise 步骤化 + unified 相位优化：理解 → 规划 → 处理 → 优化 → QC → 报告）
-  │
-ProcessingBackend 协议（backend/base.py）
-  ├── NMRPipeBackend（NMRPipe 语义，仅此层接触）
-  └── NativeBackend（长期目标）
-  │
-core/（项目管理 project / 数据模型 / 实验理解 / 规划 DAG / 处理原语 / 优化 / QC / 实验模板 / 报告）
+GUI / Viewer
+    ↓
+Workflow：数据理解 → 规划 → 处理 → 优化 → QC → 产物
+    ↓
+ProcessingBackend
+    └── NMRPipeBackend（唯一生产后端；未实现的 native 骨架已删除）
+    ↓
+core：项目模型、数据读取、实验识别、规划、处理原语、优化与 QC
 ```
 
-## 当前状态
+## 当前能力边界
 
-- [x] 项目工作树（2026-08-11 初始化）
-- [x] 项目管理模块 core/project（项目/实验/样本/WorkflowRun/审计历史/最近项目）+ GUI 主窗口骨架
-- [x] 独立谱图查看模块 viewer（Poky/nmrDraw 风格:多级数等高线/峰标记/缩放拖拽/长宽比）,可通过 `nmrforge-viewer` 独立启动
-- [x] GUI 重构为流程化布局（借鉴 CryoSPARC）：导入/处理/查看/报告四步；处理分自动化与人工两条路径（人工已实现 0.2.163）
-- [ ] Phase 1：Bruker 解析 / 2D-3D 与 uniform-NUS 检测 / 轴映射 / 基础处理 / 自动相位 / 基线 QC / 噪声估计 / 质量评分
-- [ ] Phase 2：实验分类器 + HSQC/HNCA/HNCO/HNCACB/CBCANH 模板
-- [ ] Phase 3：NUS 管线（direct 优化 → reconstruction 优化 → indirect 优化 → 缓存）
-- [ ] Phase 4：peak stability / Bayesian 优化 / 处理报告
+- 已实现 Bruker 1D/2D/3D、uniform/NUS 识别，以及 NMRPipe 处理、自动/人工相位、基线、QC、峰挑选和谱图查看。
+- 已实现项目/实验/数据层级、运行记录、数据组、回收站和批量入口；**批量处理为 2D-only 能力边界**，非 2D 数据会被跳过并说明原因。
+- SMILE 参数扫描和“按 Rank1 重跑”当前只在 2D NUS 界面开放；扫描只出排名与候选脚本，不自动替换活动谱。
+- 3D NUS 处理可用，但 3D SMILE 参数优化入口暂时隐藏。
+- 分析（HSQC CSP）功能已于 2026-09-12 按用户决定删除（删除范围与恢复方法见[留档](docs/tasks/archive/2026-09-12-analysis-removal.md)）；13C 显示约定与谱中心调整仍待产品决策。
 
-详见 docs/roadmap.md。
+当前风险与待修复问题见[全项目审查问题台账](docs/reviews/2026-09-12-project-audit.md)，长期规划见[路线图](docs/roadmap.md)。
 
 ## 开发
 
-```bash
-python main.py          # 首次运行自动创建 venv 并安装
-pytest                  # 全量测试
-ruff check .            # 静态检查
+```powershell
+python main.py
+python -m pytest
+python -m ruff check .
 ```
 
-分支 `master`；提交风格 `feat:` / `fix:` / `refactor:` / `docs:` + 中文简述。
-详见 docs/development.md。
+发行物只有 Linux AppImage（`packaging/linux/`）；普通 wheel/pip 仅用于开发（`pip install -e .`），不作为发行方式——运行资源（`config/`、`presets/`、`gui/assets/`）由 PyInstaller 打进 AppImage。
 
-## 文档索引
+分支为 `master`；提交风格为 `feat:` / `fix:` / `refactor:` / `docs:` + 中文简述。详见[开发规范](docs/development.md)。
 
-- docs/architecture.md：新架构设计
-- docs/development.md：开发流程与 Windows 沙箱经验
-- docs/roadmap.md：路线图（Phase 1-4）
-- PROJECT_STATE.md：开发状态交接
-- CHANGELOG.md：变更史
+## 文档入口
+
+- [文档总入口](docs/README.md)
+- [当前项目状态](docs/manager/project_state.md)
+- [当前任务](docs/tasks/current.md)
+- [开放问题审查](docs/reviews/2026-09-12-project-audit.md)
+- [架构设计](docs/architecture.md)
+- [变更历史](CHANGELOG.md)

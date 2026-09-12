@@ -9,9 +9,11 @@
   (WorkflowRun.params)作为 spectrum 步骤参数基底,实现「按参考数据
   的处理脚本处理整组」;显式 params 覆盖参考参数;
 - ``targets`` 为 data_id 列表时按显式列表执行;
-- ``steps`` 按序执行 import(幂等确认)→ fid → spectrum → peaks → analysis;
+- ``steps`` 按序执行 import(幂等确认)→ fid → spectrum → peaks;
   fid/spectrum 复用 workflow.stepwise.generate_fid/generate_spectrum,peaks
-  复用 workflow.pick_peaks.pick_peaks,analysis 复用 workflow.analyze.analyze;
+  复用 workflow.pick_peaks.pick_peaks;
+- **能力边界(BATCH-012,2026-09-12 正式确定)**:批量只支持 2D 数据;
+  非 2D 数据标记 skipped 并给出原因(不跑任何步骤,不做隐式降级);
 - 单数据失败不中断整组:失败数据记录 failed_step/error 后继续下一数据,
   汇总含 failed 列表与 summary。
 
@@ -41,7 +43,14 @@ from core.project.run_refs import STEP_RUN_REFS
 
 # 支持的批处理步骤(与 gui/pipeline_panel.PIPELINE_STEPS 前五步一致;
 # Engine 不 import Qt,批量组语义通过读取状态文件对齐)
-BATCH_STEPS = ("import", "fid", "spectrum", "peaks", "analysis")
+# 批量步骤(与 gui/pipeline_panel.PIPELINE_STEPS 对齐;Engine 不 import Qt)
+BATCH_STEPS = ("import", "fid", "spectrum", "peaks")
+
+# BATCH-012:批量处理的正式能力边界 = 仅 2D。
+# 依据:3D(尤其 3D NUS/SMILE)在目标主机上的资源风险未解决(见
+# docs/problems.md 断电记录),原实现即按数据跳过;此处把「跳过」
+# 升格为正式、可测的边界,文档与测试同源。
+BATCH_SUPPORTED_NDIM = 2
 
 # 0.2.199-补29hd:批量相邻数据之间冷却秒数——连续 SMILE 背靠背高负载
 # 会顶到不稳定主机(电源/散热)断电(problems.md 记录);加间隔让主机冷却。
@@ -157,7 +166,7 @@ def _run_step(
     params: dict[str, Any],
     progress: Callable[[str], None] | None = None,
 ) -> Any:
-    """执行单个步骤,返回步骤产物(fid/spectrum 路径、peaks/analysis dict 等)。"""
+    """执行单个步骤,返回步骤产物(fid/spectrum 路径、peaks dict 等)。"""
     if step == "import":
         # 导入是批处理的输入:数据条目已存在即视为已导入(不重复建条目)
         data = manager.data(exp_id, data_id)
@@ -190,10 +199,6 @@ def _run_step(
         from workflow.pick_peaks import pick_peaks
 
         return pick_peaks(manager, exp_id, data_id, backend)
-    if step == "analysis":
-        from workflow.analyze import analyze
-
-        return analyze(manager, exp_id, data_id)
     raise BatchError(f"不支持的批处理步骤: {step}")
 
 
@@ -353,8 +358,8 @@ def run_batch(
                     if progress is not None:
                         progress(f"{data_id}: 跳过({reason})")
                     continue
-        # 0.2.199-补29hd:批量仅支持 2D 谱——1D/3D 数据(尤其 3D NUS/SMILE 在
-        # 不稳定主机易断电)直接跳过,不跑任何步骤。
+        # BATCH-012 能力边界:批量仅支持 2D 谱——1D/3D 数据(尤其 3D
+        # NUS/SMILE 在不稳定主机易断电)直接跳过,不跑任何步骤。
         try:
             from workflow.stepwise import _read_experiment
 
@@ -362,9 +367,12 @@ def run_batch(
             _ndim = int(getattr(_exp, "ndim", 2) or 2)
         except Exception:  # noqa: BLE001 - 读不到维度当作 2D 放宽(不误拦)
             _ndim = 2
-        if _ndim != 2:
+        if _ndim != BATCH_SUPPORTED_NDIM:
             per_data["status"] = "skipped"
-            _msg = f"批量暂仅支持 2D 谱,{_ndim}D 数据跳过"
+            _msg = (
+                f"批量仅支持 {BATCH_SUPPORTED_NDIM}D 谱,{_ndim}D 数据跳过"
+                "(能力边界见 docs/manager/architecture.md)"
+            )
             per_data["error"] = _msg
             per_data["logs"].append(_msg)
             results[data_id] = per_data
@@ -452,4 +460,4 @@ def run_batch(
     }
 
 
-__all__ = ["BATCH_STEPS", "BatchError", "run_batch"]
+__all__ = ["BATCH_STEPS", "BATCH_SUPPORTED_NDIM", "BatchError", "run_batch"]

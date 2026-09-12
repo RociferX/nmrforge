@@ -64,6 +64,22 @@ def test_export_ucsf_failure_returns_none_and_cleans_partial(tmp_path: Path) -> 
     assert not target.exists()
 
 
+def test_export_ucsf_exception_removes_stale_target(tmp_path: Path) -> None:
+    """SMILE-005:转换启动失败时不得留下旧 UCSF 冒充当前谱伴生产物。"""
+    source = tmp_path / "d_001.ft2"
+    target = tmp_path / "d_001.ucsf"
+    source.write_bytes(b"new-spectrum")
+    target.write_bytes(b"stale-ucsf")
+
+    def failed_run(*args, **kwargs):
+        raise OSError("pipe2ucsf missing")
+
+    path, message = export_ucsf(source, target, run=failed_run)
+    assert path is None
+    assert "执行失败" in message
+    assert not target.exists()
+
+
 def test_export_ucsf_missing_source_skips(tmp_path: Path) -> None:
     """源谱不存在:跳过,不调用工具。"""
     path, message = export_ucsf(

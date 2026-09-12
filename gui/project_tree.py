@@ -29,6 +29,10 @@ from PyQt6.QtWidgets import (
 )
 
 from core.project import ProjectManager
+from core.project.artifacts import (
+    find_primary_spectrum,
+    is_projection_spectrum_file,
+)
 from gui.pipeline_state import ALL_STEP_RUN_REFS
 from gui.theme import TEXT_SECONDARY
 
@@ -738,15 +742,20 @@ class ProjectTreePanel(QWidget):
             for suffix in (".list", ".csv"):
                 if (peaks_dir / f"{exp_id}-{data_id}{suffix}").is_file():
                     return "已选峰"
-            spec = str(getattr(entry, "spectrum_path", "") or "")
-            if spec and Path(spec).is_file():
+            if find_primary_spectrum(self.manager, exp_id, data_id) is not None:
                 return "已生成谱图"
             fid = str(getattr(entry, "fid_path", "") or "")
             if fid and Path(fid).is_file():
                 return "已生成 FID"
             work = self.manager.data_dir(exp_id, data_id, "process")
             if work.is_dir():
-                if list(work.glob("*.ft2")) or list(work.glob("*.ft3")):
+                work_spectra = [
+                    path
+                    for extension in ("ft2", "ft3")
+                    for path in work.glob(f"*.{extension}")
+                    if not is_projection_spectrum_file(path.name, data_id)
+                ]
+                if work_spectra:
                     return "已生成谱图"
                 if list(work.glob("*.fid")) or (work / "fid").is_dir():
                     return "已生成 FID"

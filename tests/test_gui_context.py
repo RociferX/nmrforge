@@ -193,7 +193,7 @@ def test_pipeline_buttons_gated_by_prerequisites(
     record_step_success(manager, exp_id, data_id, "spectrum")
     _ready("peaks", spec)
 
-    # 峰表 → peaks 完成(流程止于峰挑选,analysis 已隐藏)
+    # 峰表 → peaks 完成(分析步骤已删除,流程止于峰挑选)
     peaks = manager.data_dir(exp_id, data_id, "peaks")
     peaks.mkdir(parents=True, exist_ok=True)
     peaks_list = peaks / f"{exp_id}-{data_id}.list"

@@ -433,6 +433,13 @@ def test_infer_status_aggregates_data(tmp_path: Path) -> None:
         "{}", encoding="utf-8"
     )
     assert manager.infer_status(entry.id) is ExperimentStatus.IMPORTED
+    projection = (
+        manager.data_dir(entry.id, data.id, "spectra")
+        / f"{data.id}_15N-1H.ft2"
+    )
+    projection.parent.mkdir(parents=True, exist_ok=True)
+    projection.write_bytes(b"projection")
+    assert manager.infer_status(entry.id) is ExperimentStatus.IMPORTED
     spec = manager.data_dir(entry.id, data.id, "spectra") / f"{data.id}.ft2"
     spec.parent.mkdir(parents=True, exist_ok=True)
     spec.write_bytes(b"x")
@@ -441,10 +448,11 @@ def test_infer_status_aggregates_data(tmp_path: Path) -> None:
     peaks.parent.mkdir(parents=True, exist_ok=True)
     peaks.write_text("", encoding="utf-8")
     assert manager.infer_status(entry.id) is ExperimentStatus.PICKED
+    # REPORT-008(2026-09-12):分析功能已删除,report/ 产物不再驱动实验状态
     report = manager.data_dir(entry.id, data.id, "report") / f"{data.id}.json"
     report.parent.mkdir(parents=True, exist_ok=True)
     report.write_text("{}", encoding="utf-8")
-    assert manager.infer_status(entry.id) is ExperimentStatus.ANALYZED
+    assert manager.infer_status(entry.id) is ExperimentStatus.PICKED
 
 
 

@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from core.app_paths import resource_path
+from core.app_paths import local_config_path, resource_path
 
 # 核素默认估计线宽(Hz):配置 processing.linewidth_hz 可覆盖。
 DEFAULT_LINEWIDTH_HZ: dict[str, float] = {
@@ -23,16 +23,15 @@ DEFAULT_LINEWIDTH_HZ: dict[str, float] = {
 DEFAULT_POINTS_PER_LINE = 2.0
 DEFAULT_EXT_LO = "10.5"
 DEFAULT_EXT_HI = "6.5"
-# 0.2.199-补24:SMILE 自动线程 = 机器线程数 - thread_offset(可在设置改)
-DEFAULT_THREAD_OFFSET = 2
 # 0.2.199-补29hq(用户):SMILE 线程数默认 2(过高可能触发高负载关机);上限=机器核数-2。
 DEFAULT_SMILE_THREADS = 2
 
 
 def load_config(config: dict[str, Any] | None = None) -> dict[str, Any]:
-    """读取 config/nmrforge.yaml,再用 config/nmrforge.local.yaml 覆盖
-    (0.2.199-补24:设置对话框写入的本地项对后端生效);config 非空时
-    直接返回(测试/本地覆盖注入)。"""
+    """读取打包默认配置,再用 GUI/Backend 共用的用户配置覆盖。
+
+    旧 GUI 顶层共享键在读取时迁移;config 非空时直接返回,供测试或调用方注入。
+    """
     if config is not None:
         return config
     try:
@@ -46,33 +45,48 @@ def load_config(config: dict[str, Any] | None = None) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raw = {}
     try:
-        local_path = resource_path("config") / "nmrforge.local.yaml"
+        local_path = local_config_path("nmrforge.local.yaml")
         if local_path.is_file():
-            local = yaml.safe_load(
-                local_path.read_text(encoding="utf-8")
-            ) or {}
+            local = yaml.safe_load(local_path.read_text(encoding="utf-8")) or {}
             if isinstance(local, dict):
-                for key, value in local.items():
-                    if isinstance(value, dict) and isinstance(raw.get(key), dict):
-                        raw[key] = {**raw[key], **value}
-                    else:
-                        raw[key] = value
+                raw = _deep_merge(raw, _normalize_legacy_local(local))
     except Exception:  # noqa: BLE001 - 本地配置损坏不影响内置默认
         pass
     return raw
 
 
+def _normalize_legacy_local(local: dict[str, Any]) -> dict[str, Any]:
+    """把旧 GUI 顶层共享键转换为规范结构,首次 Backend 读取即生效。"""
+    normalized = dict(local)
+    legacy_path = normalized.pop("nmrpipe_path", None)
+    if legacy_path:
+        backend = dict(normalized.get("backend") or {})
+        nmrpipe = dict(backend.get("nmrpipe") or {})
+        nmrpipe.setdefault("path", legacy_path)
+        backend["nmrpipe"] = nmrpipe
+        normalized["backend"] = backend
+    legacy_linewidth = normalized.pop("linewidth_hz", None)
+    if isinstance(legacy_linewidth, dict):
+        processing = dict(normalized.get("processing") or {})
+        processing.setdefault("linewidth_hz", legacy_linewidth)
+        normalized["processing"] = processing
+    return normalized
+
+
+def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    """递归合并本地覆盖,保留未覆盖的嵌套默认项。"""
+    merged = dict(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _deep_merge(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
 def _as_float(value: Any, default: float) -> float:
     try:
         v = float(value)
-    except (TypeError, ValueError):
-        return default
-    return v if v > 0 else default
-
-
-def _as_int(value: Any, default: int) -> int:
-    try:
-        v = int(value)
     except (TypeError, ValueError):
         return default
     return v if v > 0 else default
@@ -89,8 +103,7 @@ def load_processing_defaults(config: dict[str, Any] | None = None) -> dict[str, 
     {
         "linewidth_hz": {核素: Hz},   # 无效值回退核素默认
         "points_per_line": float,     # 无效/非正回退 2.0
-        "nthread": int,               # SMILE 线程,缺省/0=自动(机器线程数-offset)
-        "thread_offset": int,         # 自动线程预留数(机器线程数 - offset)
+        "nthread": int,               # SMILE 线程,缺省/0=安全默认 2
         "nmrpipe_path": str,          # 显式 NMRPipe bin 目录/可执行文件,可空
     }
     """
@@ -112,9 +125,6 @@ def load_processing_defaults(config: dict[str, Any] | None = None) -> dict[str, 
             processing.get("points_per_line"), DEFAULT_POINTS_PER_LINE
         ),
         "nthread": resolve_nthread(smile.get("nthread"), cfg),
-        "thread_offset": _as_int(
-            smile.get("thread_offset"), DEFAULT_THREAD_OFFSET
-        ),
         "nmrpipe_path": _as_str(nmrpipe.get("path") or nmrpipe.get("nmrpipe_bin")),
         "ext_lo": _as_str(processing.get("ext_lo"), DEFAULT_EXT_LO),
         "ext_hi": _as_str(processing.get("ext_hi"), DEFAULT_EXT_HI),
@@ -146,7 +156,7 @@ def resolve_nthread(value: Any, config: dict[str, Any] | None = None) -> int:
     return min(DEFAULT_SMILE_THREADS, limit)
 
 
-def smile_thread_limit(config: dict[str, Any] | None = None) -> int:
+def smile_thread_limit(_config: dict[str, Any] | None = None) -> int:
     """SMILE 线程上限 = 机器核数-2;核数≤3 只允许 1(用户,2026-09-09)。"""
     cores = os.cpu_count() or 4
     if cores <= 3:
@@ -183,7 +193,6 @@ __all__ = [
     "DEFAULT_EXT_LO",
     "DEFAULT_EXT_HI",
     "DEFAULT_SMILE_THREADS",
-    "DEFAULT_THREAD_OFFSET",
     "load_config",
     "load_processing_defaults",
     "nmrpipe_path",

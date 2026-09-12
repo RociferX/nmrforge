@@ -37,7 +37,7 @@ class ImportWorkflowError(Exception):
 
 
 class KineticsUnsupportedError(ImportWorkflowError):
-    """动力学/变延时系列暂不支持,导入即拦截。"""
+    """动力学/变延时系列不在当前导入能力范围内。"""
 
 
 @dataclass
@@ -154,12 +154,12 @@ def _link_tree(src: Path, dst: Path, stats: dict[str, int]) -> None:
 
 
 def _raise_if_kinetics(experiment) -> None:
-    """动力学/变延时系列不支持自动处理,导入拦截(不创建条目/不拷贝)。"""
+    """动力学/变延时系列禁止导入；在创建条目和复制文件前拦截。"""
     from core.experiment.experiment_classifier import is_kinetics
 
     if is_kinetics(experiment):
         raise KineticsUnsupportedError(
-            "检测到动力学实验(变延时/时间系列),暂不支持导入"
+            "检测到动力学实验(变延时/时间系列)，当前产品不支持导入"
         )
 
 

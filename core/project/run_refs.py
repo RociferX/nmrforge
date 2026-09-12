@@ -15,10 +15,10 @@ STEP_RUN_REFS: dict[str, tuple[str, ...]] = {
         "manual_process",
         "manual_nus",
         "phase_optimize_unified",
+        "smile_optimize_rank1",
     ),
     "smile": ("smile_optimize",),
     "peaks": ("pick_peaks", "manual_peaks"),
-    "analysis": ("analyze",),
 }
 
 # 只属于人工路径的谱图 ref(手工跑脚本时登记)

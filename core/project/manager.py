@@ -2,7 +2,8 @@
 
 - create/open/save(project.json 原子写,tmp + os.replace)
 - 目录模板(raw/processing/spectra/peaks/analysis/figures/report/metadata)
-- 实验 CRUD、状态推断(registered → imported → processed → picked → analyzed)
+- 实验 CRUD、状态推断(registered → imported → processed → picked;
+  analyzed 已随分析功能删除,仅旧项目保留原状态字符串)
 - 样本 CRUD(S001 自动编号、删除引用保护)
 - 审计历史(processing_history 只追加)
 - WorkflowRun 生命周期(R-YYYYMMDD-NNN 只追加,脚本快照)
@@ -19,6 +20,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from core.project.artifacts import find_primary_spectrum
 from core.project.models import (
     DEFAULT_DIRECTORIES,
     SCHEMA_VERSION,
@@ -34,6 +36,7 @@ from core.project.models import (
     now_iso,
 )
 from core.trash import send_to_trash
+from core.version import software_version, tool_versions
 
 
 class ProjectError(Exception):
@@ -144,7 +147,7 @@ class ProjectManager:
         manager = cls(root_path)
         manager.project = ProjectInfo.from_dict(data)
         # 0.2.199-补29hf:迁移旧自动默认标题(数据组 G1/样品数据 d_001 → Group/Data)
-        manager._migrate_legacy_default_titles()
+        migrated = manager._migrate_legacy_default_titles()
         if manager.project.schema_version != SCHEMA_VERSION:
             # schema 1.0/1.1 → 1.2:旧 source/segments → data[0]
             # (ExperimentEntry.from_dict 已完成迁移)
@@ -153,6 +156,17 @@ class ProjectManager:
             manager.add_history(
                 "project_migrated", {"from": old, "to": SCHEMA_VERSION}
             )
+            migrated = True
+        if migrated:
+            # MIG-010(2026-09-12):迁移只改内存会让「打开后未做其它写操作
+            # 就关闭」丢掉迁移结果与迁移历史 —— 迁移成功后立即原子落盘;
+            # atomic_write_json 失败时原 project.json 保持不动。
+            try:
+                manager.save()
+            except OSError as exc:  # noqa: BLE001 - 明确报错,不静默丢迁移
+                raise ProjectError(
+                    f"项目迁移结果写入失败(原文件未改动): {exc}"
+                ) from exc
         # 0.2.199-补29ex:软删除条目若已从回收站恢复到原位,打开即自动还原
         manager.recover_trashed()
         return manager
@@ -200,7 +214,7 @@ class ProjectManager:
         """项目级目录解析(project.directories,默认项目根下同名目录)。
 
         schema 1.4 的产物在 <exp>/<data>/ 下;该映射只服务项目级目录,
-        如 processing/<exp>/runs 运行快照与 analysis 分析输出。
+        如 processing/<exp>/runs 运行快照。
         """
         if self.root is None or self.project is None:
             raise ProjectError("未加载项目")
@@ -230,7 +244,7 @@ class ProjectManager:
         return [
             self.root / exp_id,  # schema 1.4 数据基座 <exp>/<data>/...
             self.dir_path("processing") / exp_id,  # 运行脚本/参数快照
-            self.dir_path("analysis") / exp_id,  # CSP 分析输出
+            self.dir_path("analysis") / exp_id,  # 历史 CSP 输出(功能已删除)
         ]
 
 
@@ -238,7 +252,7 @@ class ProjectManager:
         """单个数据的全部产物路径(删除数据时清理)。"""
         return [
             self.data_base(exp_id, data_id),
-            self.dir_path("analysis") / exp_id / data_id,  # CSP 分析输出
+            self.dir_path("analysis") / exp_id / data_id,  # 历史 CSP 输出
         ]
 
 
@@ -717,7 +731,8 @@ class ProjectManager:
         """按数据条目与产物文件推断实验状态(schema 1.4 数据级布局)。
 
         registered(无数据)→ imported(metadata 存在)→ processed(谱存在)→
-        picked(峰表)→ analyzed(报告产物)。
+        picked(峰表)。analyzed 已随分析功能删除(2026-09-12),不再由产物推断;
+        旧项目里已有该字符串时按原值显示,不回写。
         """
         entry = self._require_experiment(exp_id)
         active = [d for d in entry.data if not d.trashed]
@@ -726,7 +741,6 @@ class ProjectManager:
         has_imported = False
         has_spectrum = False
         has_peaks = False
-        has_report = False
         for d in active:
             if self.data_metadata_path(exp_id, d.id).is_file():
                 has_imported = True
@@ -734,29 +748,15 @@ class ProjectManager:
                 rel = Path(d.metadata_path)
                 if not rel.is_absolute() and (self.root / rel).is_file():
                     has_imported = True
-            if not has_spectrum and d.spectrum_path:
-                candidate = Path(d.spectrum_path)
-                if not candidate.is_absolute():
-                    candidate = self.root / candidate
-                has_spectrum = candidate.is_file()
-            spectra = self.data_dir(exp_id, d.id, "spectra")
-            if not has_spectrum and (
-                any(spectra.glob("*.ft2")) or any(spectra.glob("*.ft3"))
-            ):
-                has_spectrum = True
+            if not has_spectrum:
+                has_spectrum = find_primary_spectrum(self, exp_id, d.id) is not None
             peaks = self.data_dir(exp_id, d.id, "peaks")
             if any(peaks.glob("*.list")) or any(peaks.glob("*.csv")):
                 has_peaks = True
-            report = self.data_dir(exp_id, d.id, "report")
-            for ext in ("pdf", "html", "json"):
-                if any(report.glob(f"*.{ext}")):
-                    has_report = True
-                    break
         checks: list[tuple[ExperimentStatus, bool]] = [
             (ExperimentStatus.IMPORTED, has_imported),
             (ExperimentStatus.PROCESSED, has_spectrum),
             (ExperimentStatus.PICKED, has_peaks),
-            (ExperimentStatus.ANALYZED, has_report),
         ]
         status = ExperimentStatus.REGISTERED
         order = ExperimentStatus.order()
@@ -862,9 +862,23 @@ class ProjectManager:
             inputs=dict(inputs or {}),
             scripts=list(scripts or []),
             params=dict(params or {}),
+            software_version=software_version(),
+            tool_versions=tool_versions(),
             started_at=started,
             status="running",
         )
+        # PROV-009(2026-09-12):run 自带生命周期历史与参数来源决策。
+        # 参数值本身在 run.params(必要时另存快照),这里记录来源与键集,
+        # 避免同一份参数在两处重复存储后互相漂移。
+        run.history = [{"at": started, "event": "started"}]
+        run.decisions = [
+            {
+                "at": started,
+                "kind": "params",
+                "source": "explicit" if params else "default",
+                "keys": sorted(str(key) for key in (params or {})),
+            }
+        ]
         self.project.workflow_runs.append(run)
         self.add_history(
             "run_started",
@@ -888,6 +902,17 @@ class ProjectManager:
         run.finished_at = now_iso()
         run.outputs = dict(outputs or {})
         run.message = message
+        # PROV-009:处理期间 backend 才可能探测到 NMRPipe/SMILE 版本
+        # (见 backend/nmrpipe_version.py),结束时合并进本次运行记录;
+        # 已在 start_run 写入的自身/依赖版本保持不变。
+        merged_versions = dict(run.tool_versions or {})
+        merged_versions.update(tool_versions())
+        run.tool_versions = merged_versions
+        if not run.software_version:
+            run.software_version = software_version()
+        run.history = list(run.history or []) + [
+            {"at": run.finished_at, "event": "finished", "status": status}
+        ]
         self.add_history(
             "run_finished",
             {"run_id": run_id, "status": status, "message": message},

@@ -1,10 +1,9 @@
 # NMRForge 默认配置（config/nmrforge.local.yaml 可本地覆盖，勿提交敏感信息）
-app:
-  name: NMRForge
-  version: 0.1.0
+# 只保留有运行时消费者的配置段(DEAD-014,2026-09-12):
+# backend / processing / smile 之外的无消费者段已删除。
 
 backend:
-  provider: nmrpipe            # nmrpipe | native
+  provider: nmrpipe            # 当前生产后端;未实现的 provider 不再列出
   nmrpipe:
     nmrpipe_bin: ""            # 留空自动查找（PATH → csh 环境 → 常见目录）
     path: ""                   # 显式 NMRPipe bin 目录/可执行文件(优先于 nmrpipe_bin;可空)
@@ -21,23 +20,4 @@ processing:
   memory_disk_path: ""           # 可选:内存盘根目录(默认 Linux /dev/shm;Windows 自建 RAM 盘后指定)
 
 smile:
-  nthread: 2                   # SMILE 线程数(默认 2;上限=机器核数-2,≤3核只能 1;0=自动旧行为)
-  thread_offset: 2             # 旧自动线程预留数(仅 nthread=0 时用;现在默认 2,0.2.199-补24)
-
-optimization:
-  budget:
-    max_candidates: 8
-    max_runtime_min: 15
-    early_stop_improvement: 0.01
-    max_no_improvement: 2
-
-qc:
-  contour_levels_sigma: [1.5, 2.0, 3.0, 5.0]
-  peak_min_snr: 3.0
-
-reporting:
-  formats: [json, html]
-  recipe: true
-
-logging:
-  level: INFO
+  nthread: 2                   # SMILE 线程数(默认 2;上限=机器核数-2,≤3核只能 1;0 同样回退安全默认 2)
