@@ -108,7 +108,69 @@ peak_id,H_ppm,N_ppm,height,linewidth,volume
 - 组合数 = 各轴长度之积,超过 `max_runs`(默认 256)直接报错。长扫描请分批,
   同一研究根可以续跑。
 
-## 5.5 资源与时长预期
+## 5.5 扫描参数口径(精确定义)
+
+一次扫描由三件事唯一确定:**基底、轴、合并**。
+
+1. **基底(base)** = 参考运行记录的有效参数(`reference.sweep_params`):自动优化
+   选出的 `window` / `baseline` / `zero_fill` / `linewidth_hz` / `points_per_line`、
+   提取窗口(`extract` / `ext_lo` / `ext_hi`)、NUS 的 SMILE 参数等。
+   接口先剥掉**运行期派生键**(不参与扫描):
+   `phase_route`、`preview_axis`、`projections`、`backend_runs`、`diagnostics`、
+   `fill`、`nus`、`final_ext_lo`、`final_ext_hi`、`segment_shift_hz`。
+   → **没写进网格的参数,一律保持参考值**。
+2. **轴(axes)** = 点号键 → 候选值列表(构成全因子网格);
+3. **合并** = 每个组合在基底上做**深合并**(`window.F1.off` 只覆盖 `F1.off`,
+   同层其它键保留),基底本身不被修改。
+
+### 网格语义
+
+- 组合数 = 各轴长度之积;顺序 = 轴按书写顺序、值按列表顺序(笛卡尔积);
+- 超过 `max_runs`(默认 256)直接报错,不静默截断;
+- `grid_sha256` = 组合列表的规范 JSON 哈希(键排序),写入 `sweep_plan.json` 与
+  `manifest.json`,可核对两次扫描是否同一网格。
+
+### 真正生效的参数键(必须与后端输入约定一致)
+
+**uniform(`process()` 读取)**
+
+| 键 | 说明 |
+| --- | --- |
+| `extract` / `ext_lo` / `ext_hi` | 直接维提取窗口开关与边界(ppm) |
+| `window` | 逐轴窗函数:`{轴: {type, off, end, pow, c, lb, g1, g2}}` |
+| `baseline` | 逐轴基线:`{轴: {enabled, mode("auto"/"order"), order}}` |
+| `zero_fill` | `0`=全自动;`k≥1`=间接维固定 k×TD;或 `{轴: {mode, size}}` |
+| `linewidth_hz` / `points_per_line` | 间接维自动填零的目标线宽/数字点距 |
+| `sampling` | `ft_neg` / `ft_alt` / `flip_f1` |
+| `direct_poly_time` | 直接维 POLY `-time` 开关 |
+| `keep_direct_complex` / `keep_complex_all` | 保留复型的特殊用途开关 |
+
+**2D NUS(`reconstruct_nus()` 读取)**
+
+| 键 | 说明 |
+| --- | --- |
+| `nsigma`(别名 `nSigma`) / `thresh` | SMILE 重构门限(接口会把别名归一成输入键) |
+| `nthread` / `smile_scaling` / `smile_report` | SMILE 线程、缩放、报告 |
+| `extract` / `ext_lo` / `ext_hi` / `window` / `baseline` / `zero_fill` | 同 uniform |
+| `linewidth_hz` / `points_per_line` | 同 uniform |
+| `direct_poly_time` / `sampling`(`ft_neg`/`ft_alt`/`flip_f1`) | 同 uniform |
+| `nuslist_file` / `nuslist_count` | 采样表与采样点数(一般不改) |
+| `fid_noise` / `fid_noise_seed` | 注入噪声重复性实验(特殊用途) |
+| `timeout_s` | 单次重构超时(秒) |
+
+### 锁定(不要放进网格)
+
+| 键 | 原因 |
+| --- | --- |
+| `phases`(间接维 PS) / `direct_phase`(直接维 PS) | 相位必须锁定参考值,否则组合差异里混入相位差 |
+| `sampling.auto_phase` | 只在参考没有记录相位时才由接口自动置 `False` |
+| `light_phase_search` / `display_phase_search` | 仅影响参考构建;候选模式强制跳过重渲 |
+
+> **写错的键不会报错**(后端按缺省值处理),因此判断「参数是否真的生效」最可靠的
+> 办法是看候选谱的 SHA-256 是否不同(或看 `delta_std` 是否为 0)。例如 SMILE 的
+> `nsigma` 写成后端不认的键时,三个组合会跑出同一张谱、Δδ 全为 0。
+
+## 5.6 资源与时长预期
 
 - 参考谱:一次完整自动优化(含统一相位优化),2D HSQC 量级约 30 s;
 - 每个组合:复用 fid + 锁定相位,约数秒(取决于数据规模与机器);
