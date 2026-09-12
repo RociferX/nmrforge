@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import inspect
 import itertools
 import json
 import shutil
@@ -241,6 +242,25 @@ def plan_sweep(
     return plan
 
 
+def _supports_nus_candidates(backend: Any) -> tuple[bool, str]:
+    """后端 ``reconstruct_nus`` 是否支持候选输出隔离(out_file/script_name)。"""
+    method = getattr(backend, "reconstruct_nus", None)
+    if method is None:
+        return False, "后端没有 reconstruct_nus(),无法扫描 NUS 数据"
+    try:
+        parameters = inspect.signature(method).parameters
+    except (TypeError, ValueError):
+        return True, ""
+    missing = [name for name in ("out_file", "script_name") if name not in parameters]
+    if missing:
+        return (
+            False,
+            f"后端 reconstruct_nus() 缺少参数 {missing},"
+            "无法隔离候选输出(需升级 NMRForge 后端或换用自带该参数的后端)",
+        )
+    return True, ""
+
+
 def _load_run(run_dir: Path) -> SweepRun | None:
     state_file = run_dir / "run.json"
     if not state_file.is_file():
@@ -277,17 +297,26 @@ def run_sweep(
     if ref is None:
         raise SweepError("还没有参考谱,先调用 build_reference()")
     if not ref.sweep_supported:
-        raise SweepError(
-            f"v0.1 的参数扫描只支持 uniform 数据,当前是 {ref.sampling};"
-            "NUS 需要后端支持候选输出隔离后再开放(见 docs/proposals/"
-            "external-api/001-parameter-sweep-api.md 未支持项)"
-        )
+        if str(ref.sampling) == "nus":
+            raise SweepError(
+                f"当前只支持 2D NUS 参数扫描,检测到 {ref.ndim}D NUS"
+                "(3D NUS 需要切片流与候选输出进一步改造,见 "
+                "docs/external-api/09-limitations-and-roadmap.md)"
+            )
+        raise SweepError(f"当前不支持 {ref.ndim}D/{ref.sampling} 数据的扫描")
     backend = session.backend
     if not hasattr(backend, "process"):
         raise SweepError("后端不支持 process(),无法扫描")
     experiment = read_experiment(session.manager, dataset.exp_id, dataset.data_id)
-    if str(experiment.sampling.mode) == "nus":
-        raise SweepError("检测到 NUS 数据,超出 v0.1 支持范围")
+    is_nus = str(experiment.sampling.mode) == "nus"
+    if is_nus:
+        if int(experiment.ndim) != 2:
+            raise SweepError(
+                f"当前只支持 2D NUS 参数扫描(检测到 {experiment.ndim}D NUS)"
+            )
+        ok, reason = _supports_nus_candidates(backend)
+        if not ok:
+            raise SweepError(reason)
     method_plan = select_method(experiment)
     peak_rows = list(peaks) if peaks is not None else (
         read_reference_peaks(ref.peak_table_path) if ref.peak_table_path else []
@@ -336,15 +365,33 @@ def run_sweep(
         started = time.perf_counter()
         _emit(f"[{run_id}] 开始 {combo}")
         try:
-            response = backend.process(
-                experiment,
-                method_plan,
-                params=params,
-                direct_phase_override=override,
-                script_name=f"{run_id}.com",
-                out_file=f"{run_id}.ft2",
-                progress=_log,
-            )
+            if is_nus:
+                nus_params = dict(params)
+                if override:
+                    direct_axis = f"F{experiment.ndim}"
+                    pair = override.get(direct_axis)
+                    if pair is not None:
+                        nus_params["direct_phase"] = [
+                            float(pair[0]),
+                            float(pair[1]),
+                        ]
+                response = backend.reconstruct_nus(
+                    experiment,
+                    nus_params,
+                    progress=_log,
+                    script_name=f"{run_id}.com",
+                    out_file=f"{run_id}.ft2",
+                )
+            else:
+                response = backend.process(
+                    experiment,
+                    method_plan,
+                    params=params,
+                    direct_phase_override=override,
+                    script_name=f"{run_id}.com",
+                    out_file=f"{run_id}.ft2",
+                    progress=_log,
+                )
         except Exception as exc:  # noqa: BLE001 - 单组合失败不中断整轮
             response = {
                 "success": False,

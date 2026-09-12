@@ -29,7 +29,12 @@ CLI:`python -m nmrforge_api {init,reference,peaks,sweep,report,status}`。
   uncertainty / uncertainty_summary;
 - 不 import Qt;有「不加载 Qt」与断点续跑的专项测试。
 
-同版本内修复(发布前):
+同版本内新增/修复(发布前):
+
+- **支持 2D NUS 扫描**:`reconstruct_nus` 增加 `out_file`/`script_name`
+  (候选输出写 `_intermediate/`,不覆盖终谱),扫描按数据采样方式自动派发;
+  参考相位锁定扩展到 NUS(间接维 `phases` + 直接维扁平 `direct_phase`);
+  可扫 `nSigma`/`thresh`/`nthread`/`smile_scaling`。3D NUS 仍不支持。
 
 - **相位锁定**:统一相位路线把相位记在 `phases`(各轴 PS),最初只读
   `direct_phase` 导致候选谱间接维相位回退默认值;现按 `reference_phase()`

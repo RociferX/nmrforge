@@ -837,11 +837,19 @@ class NMRPipeBackend:
         params: dict[str, Any] | None = None,
         progress: Callable[[str], None] | None = None,
         script_only: bool = False,
+        out_file: str | None = None,
+        script_name: str | None = None,
     ) -> dict[str, Any]:
         """NUS 数据：bruker 原生转换（单段/多段合并）+ SMILE 重构输出终谱。
 
         script_only=True 时只生成脚本并返回文本（0.2.199-补29hz-修3:SMILE
         参数扫描需要先拿到脚本文本再决定怎么跑），不执行 NMRPipe。
+
+        out_file / script_name（2026-09-12，参数敏感性接口）：显式给出时按
+        「候选输出」处理——脚本写 ``work/<script_name>``，谱写
+        ``work/_intermediate/<out_file>``（与 ``process()`` 同约定），
+        不覆盖工作目录里的终谱；此时跳过显示层相位搜索/重渲（候选必须
+        用 ``params['direct_phase']`` 锁定相位）。缺省行为与原来完全一致。
         """
         params = dict(params or {})
         # 0.2.199-补29hz-修17:GUI 传的是终跑范围(final_ext_*),这里映射成 ext_lo/ext_hi,
@@ -1216,7 +1224,21 @@ class NMRPipeBackend:
             )
             if noisy_in is not None:
                 in_file = noisy_in
-        out_file = f"{experiment.dataset_id}.{ext}"
+        candidate = out_file not in (None, "")
+        if candidate:
+            # 候选输出(API 扫描):写进 _intermediate/,与 process() 同约定,
+            # 便于内存盘接管与「不覆盖终谱」
+            render_dir = work / INTERMEDIATE_SUBDIR
+            render_dir.mkdir(parents=True, exist_ok=True)
+            out_file = f"{INTERMEDIATE_SUBDIR}/{out_file}"
+        else:
+            out_file = f"{experiment.dataset_id}.{ext}"
+        if candidate and run_display_search:
+            logs.append(
+                "候选输出模式:跳过显示层相位搜索/重渲(相位须由 "
+                "direct_phase 锁定;否则候选谱相位与参考不一致)"
+            )
+            run_display_search = False
         script = script_fn(
             experiment,
             in_file=in_file,
@@ -1245,7 +1267,7 @@ class NMRPipeBackend:
             sampling=sampling,
             direct_poly_time=bool(params.get("direct_poly_time", False)),
         )
-        nus_com = work / f"{experiment.dataset_id}_nus.com"
+        nus_com = work / (script_name or f"{experiment.dataset_id}_nus.com")
         nus_com.write_text(script, encoding="utf-8", newline="\n")
         if script_only:
             return {

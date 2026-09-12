@@ -11,6 +11,11 @@
         --peaks ~/nmr_corpus_work/bmr6980/reference_peaks.csv
 
 默认参数轴为 ``window.F1.off = [0.35, 0.45] x zero_fill = [1, 2]``(4 组合)。
+
+NUS 2D 数据同理,把轴换成 SMILE 参数即可::
+
+    ... scripts/vm_api_smoke.py --fresh --data <2D NUS 目录> \
+        --axes '{"nSigma": [3, 5, 7], "thresh": [0.95]}'
 """
 
 from __future__ import annotations

@@ -130,6 +130,7 @@ class _FakeSweepBackend:
     def __init__(self) -> None:
         self.work_dir = ""
         self.process_calls: list[dict] = []
+        self.reconstruct_calls: list[dict] = []
         self.convert_calls = 0
 
     def _work(self) -> Path:
@@ -149,6 +150,50 @@ class _FakeSweepBackend:
             "message": "ok",
             "logs": [],
             "effective_params": {},
+        }
+
+    def reconstruct_nus(
+        self,
+        experiment,
+        params=None,
+        progress=None,
+        script_only=False,
+        out_file=None,
+        script_name=None,
+    ) -> dict:
+        """模拟 NUS 重构:候选输出走 _intermediate,并按 nSigma 平移峰位。"""
+        params = dict(params or {})
+        self.reconstruct_calls.append(
+            {"params": params, "out_file": out_file, "script_name": script_name}
+        )
+        work = self._work()
+        script = work / (script_name or f"{experiment.dataset_id}_nus.com")
+        nsigma = float(params.get("nSigma", 5.0))
+        script.write_text(f"#!/bin/csh\n# nSigma={nsigma}\n", encoding="utf-8")
+        if script_only:
+            return {
+                "success": True,
+                "message": "script only",
+                "logs": [],
+                "script": script.read_text(encoding="utf-8"),
+                "script_path": str(script),
+            }
+        shift = (5.0 - nsigma) * 0.5
+        target = work / (out_file or f"{experiment.dataset_id}.ft2")
+        if out_file:
+            target = work / "_intermediate" / out_file
+        _write_ft2(target, shift_y=shift, shift_x=shift / 2.0)
+        return {
+            "success": True,
+            "message": "ok",
+            "spectrum_path": str(target),
+            "logs": ["fake nus"],
+            "effective_params": {
+                "nSigma": nsigma,
+                "thresh": float(params.get("thresh", 0.95)),
+                "direct_phase": [0.0, 0.0],
+                "phases": {"F1": [0.0, 0.0]},
+            },
         }
 
     def process(
@@ -447,7 +492,42 @@ def test_run_parameter_study_auto_picks_reference_peaks(
     assert {item.peak_id for item in result.uncertainties} == {1, 2}
 
 
-def test_sweep_rejects_nus(tmp_path: Path, bruker_dir: Path) -> None:
+def test_run_parameter_study_nus_2d(tmp_path: Path, bruker_dir: Path) -> None:
+    """2D NUS:参考与扫描都走 reconstruct_nus,候选隔离 + 相位锁定。"""
+    root = tmp_path / "nus_study"
+    backend = _FakeSweepBackend()
+    result = run_parameter_study(
+        root,
+        bruker_dir / "nus_2d",
+        axes={"nSigma": [3.0, 5.0, 7.0]},
+        params={"phase_route": "none"},
+        backend=backend,
+    )
+    reference = result.reference
+    assert reference.sampling == "nus"
+    assert reference.ndim == 2
+    assert reference.direct_phase == {"F1": [0.0, 0.0], "F2": [0.0, 0.0]}
+    assert reference.peak_source == "auto"
+    assert len(result.runs) == 3
+    assert all(run.status == "success" and run.phase_locked for run in result.runs)
+    assert all(
+        len(run.measurements) == reference.peak_count for run in result.runs
+    )
+    # 每个组合都通过 reconstruct_nus 的候选输出参数隔离产物
+    candidate_calls = [c for c in backend.reconstruct_calls if c["out_file"]]
+    assert len(candidate_calls) == 3
+    assert all(c["params"]["direct_phase"] == [0.0, 0.0] for c in candidate_calls)
+    assert all(c["script_name"].endswith(".com") for c in candidate_calls)
+    # 候选谱互不覆盖,且参考谱保持独立
+    assert len({run.spectrum_path for run in result.runs}) == 3
+    assert all(run.spectrum_sha256 for run in result.runs)
+    # SMILE 参数确实进入了网格
+    assert {round(run.combo["nSigma"], 1) for run in result.runs} == {3.0, 5.0, 7.0}
+    assert result.summary["n_peaks"] == reference.peak_count
+
+
+def test_sweep_rejects_3d_nus(tmp_path: Path, bruker_dir: Path) -> None:
+    """3D NUS 仍不支持:NUS 只开放 2D。"""
     from nmrforge_api import add_dataset, plan_sweep, run_sweep
     from nmrforge_api.reference import ReferenceSpectrum
 
@@ -457,11 +537,12 @@ def test_sweep_rejects_nus(tmp_path: Path, bruker_dir: Path) -> None:
         dataset_key="exp_001/d_001",
         exp_id="exp_001",
         data_id="d_001",
+        ndim=3,
         sampling="nus",
         sweep_params={"window": {"F1": {"off": 0.4}}},
     )
     plan = plan_sweep(reference, axes={"zero_fill": [1, 2]})
-    with pytest.raises(SweepError, match="只支持 uniform"):
+    with pytest.raises(SweepError, match="2D NUS"):
         run_sweep(session, plan, reference=reference, peaks=[{"N_shift": 1.0}])
 
 
@@ -531,10 +612,22 @@ def test_reference_phase_uses_all_axes_when_direct_missing() -> None:
         "F1": (172.5, 0.0),
         "F2": (27.5, 0.0),
     }
-    # direct_phase 存在时优先(phase_route=none 路线)
+    # direct_phase 与 phases 合并:直接维以 direct_phase 为准
     assert reference_phase(
         {"direct_phase": {"F2": [1.0, 2.0]}, "phases": {"F1": [3.0, 0.0]}}
-    ) == {"F2": [1.0, 2.0]}
+    ) == {"F1": [3.0, 0.0], "F2": [1.0, 2.0]}
+
+
+def test_reference_phase_handles_nus_flat_direct_phase() -> None:
+    """NUS 重构路线把直接维相位记成扁平 [p0, p1],需映射到 F{ndim}。"""
+    effective = {
+        "phases": {"F1": [172.5, 0.0]},
+        "direct_phase": [27.5, 0.0],
+    }
+    assert reference_phase(effective, ndim=2) == {
+        "F1": [172.5, 0.0],
+        "F2": [27.5, 0.0],
+    }
 
 
 def test_error_hierarchy() -> None:

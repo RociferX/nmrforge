@@ -29,7 +29,7 @@
 
 - 不做峰归属/指认(可用外部峰表叠加,但默认不参与);
 - 不做峰重叠解耦与去卷积(v0.1 只做局部极值 + 抛物线 refine);
-- 不做 NUS/SMILE 参数扫描(v0.1 仅 uniform,见
+- 不做 **3D NUS** 参数扫描(2D uniform 与 2D NUS 都支持,见
   [09-limitations-and-roadmap.md](09-limitations-and-roadmap.md));
 - 不做并行调度(串行 + 断点续跑;分片策略见第 9 节);
 - 不替代论文级的统计推断:σ 与 Δδ 下限是**描述性**指标,显著性检验请在你的

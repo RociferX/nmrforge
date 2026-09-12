@@ -21,6 +21,13 @@
   并冻结),`run_parameter_study`/CLI 默认不走外部峰表(可选 `peaks=`/
   `--peak-table` 逃生口);峰表来源、SHA-256、峰数与选峰参数(sigma/max_peaks)
   写入 `reference.json` 与 `records/manifest.json`;
+- `nmrforge_api` 支持 **2D NUS 参数扫描**:`backend.reconstruct_nus` 新增
+  `out_file`/`script_name`(候选谱写 `work/_intermediate/<run_id>.ft2`、脚本写
+  `work/<run_id>.com`,不覆盖终谱;候选模式跳过显示层相位重渲),扫描按数据采样
+  方式自动在 `process()` 与 `reconstruct_nus()` 间派发;参考相位锁定扩展到 NUS
+  (间接维 `phases` + 直接维扁平 `direct_phase` → 各轴 PS);可扫
+  `nSigma`/`thresh`/`nthread`/`smile_scaling`。3D NUS 仍不支持(边界见
+  docs/external-api/09-limitations-and-roadmap.md);
 - 新增对外文档目录 `docs/external-api/`(入口 README + 总览/快速上手/API 参考/
   CLI 参考/输入与数据/输出与记录/方法与指标/接入指南/边界与路线/排查,共 11 篇
   + `examples/` 可运行示例 + 接口 CHANGELOG),自成一套可整体拷给外部项目;

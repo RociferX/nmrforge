@@ -78,8 +78,10 @@ class ReferenceSpectrum:
 
     @property
     def sweep_supported(self) -> bool:
-        """v0.1 扫描只支持 uniform(见 proposal 未支持项)。"""
-        return self.sampling != "nus"
+        """扫描能力:uniform(任意维)与 **2D NUS**;3D NUS 未开放。"""
+        if str(self.sampling) == "nus" and int(self.ndim) != 2:
+            return False
+        return True
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -192,17 +194,38 @@ def normalize_direct_phase(raw: object) -> dict[str, list[float]]:
     return out
 
 
-def reference_phase(effective: dict[str, Any]) -> dict[str, list[float]]:
-    """参考运行的有效参数 → 锁定用的各轴 PS(p0,p1)。
+def _as_phase_pair(raw: object) -> list[float] | None:
+    """``[p0, p1]`` / ``(p0, p1)`` → 浮点对;形状不对返回 None。"""
+    if not isinstance(raw, (list, tuple)) or len(raw) < 2:
+        return None
+    try:
+        return [float(raw[0]), float(raw[1])]
+    except (TypeError, ValueError):
+        return None
 
-    统一路线把最终相位写在 ``phases``(各轴 PS;直接维搜索结果在
-    ``direct_phase``);两条来源都试,取先命中的一条。路由 phase_route=none
-    时只有 ``direct_phase``。
+
+def reference_phase(
+    effective: dict[str, Any], *, ndim: int = 2
+) -> dict[str, list[float]]:
+    """参考运行的有效参数 → 锁定用的各轴 PS(p0, p1)。
+
+- ``phases``:各轴 PS 字典(统一路线;间接维相位在这里);
+- ``direct_phase``:字典形式(统一路线直接维)或**扁平** ``[p0, p1]``
+      (NUS 重构路线;直接维 = ``F{ndim}``)。
+
+    两者合并,直接维以 ``direct_phase`` 为准。
     """
-    locked = normalize_direct_phase(effective.get("direct_phase"))
-    if locked:
-        return locked
-    return normalize_direct_phase(effective.get("phases"))
+    locked: dict[str, list[float]] = {}
+    phases = normalize_direct_phase(effective.get("phases"))
+    if phases:
+        locked.update(phases)
+    direct = normalize_direct_phase(effective.get("direct_phase"))
+    if not direct:
+        pair = _as_phase_pair(effective.get("direct_phase"))
+        if pair is not None:
+            direct = {f"F{int(ndim)}": pair}
+    locked.update(direct)
+    return locked
 
 
 def _find_reference_script(work: Path, data_id: str) -> Path:
@@ -309,7 +332,7 @@ def build_reference(
         spectrum_sha256=sha256_file(frozen_spectrum),
         params=effective,
         sweep_params=sanitize_sweep_params(effective),
-        direct_phase=reference_phase(effective),
+        direct_phase=reference_phase(effective, ndim=int(experiment.ndim)),
         peak_table_path="",
         software_version=software_version(),
         tool_versions=tool_versions(),

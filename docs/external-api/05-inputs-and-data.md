@@ -82,6 +82,19 @@ peak_id,H_ppm,N_ppm,height,linewidth,volume
 | `extract` / `ext_lo` / `ext_hi` | 直接维提取窗口开关与边界(ppm) | `[True]` / `["10.5"]` |
 | `direct_poly_time` | 直接维 POLY `-time` 开关 | `[False, True]` |
 
+**NUS 2D 专用(SMILE 重构)**:
+
+| 键 | 含义 | 取值示例 |
+| --- | --- | --- |
+| `nSigma` | SMILE 重构 nSigma(峰的稀疏/噪声门限) | `[3.0, 5.0, 7.0]` |
+| `thresh` | SMILE 重构 thresh(峰阈值) | `[0.90, 0.95, 0.99]` |
+| `nthread` | SMILE 线程数(受机器核数上限约束) | `[2, 4]` |
+| `smile_scaling` | SMILE 幅度缩放开关 | `[True, False]` |
+
+> NUS 数据必须是 **2D**(3D NUS 扫描未开放);需要目录里有 `nuslist`。
+> 参考谱与扫描共用同一份转换后的 fid,相位(间接维 `phases` + 直接维
+> `direct_phase`)全部锁定在参考值。
+
 说明:
 
 - 轴上写 `F1` 是**逻辑维**(F1 = 间接, F2 = 直接;3D 时 F3 = 直接);

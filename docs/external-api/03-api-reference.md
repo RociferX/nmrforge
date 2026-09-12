@@ -121,7 +121,7 @@ run_parameter_study(
 | `peak_source` / `peak_params` / `peak_created_at` | `auto`(软件选峰)/`external` |
 | `created_at` / `software_version` / `tool_versions` / `logs_tail` | 溯源 |
 
-属性/方法:`sweep_supported`(v0.1 仅 `uniform` 为 True)、
+属性/方法:`sweep_supported`(`uniform` 任意维与 **2D NUS** 为 True;3D NUS 为 False)、
 `direct_phase_override()`(后端 override 参数)、`normalized_direct_phase()`。
 
 辅助函数:`sanitize_sweep_params(params)`、`normalize_direct_phase(raw)`、
@@ -168,7 +168,8 @@ script_name="sNNNN.com", out_file="sNNNN.ft2")` → 把脚本与谱复制进
 - `resume=True`:已成功且有谱的组合直接跳过(断点续跑);
 - `on_run` 回调在每个组合结束时调用(便于增量上报)。
 
-NUS 数据会抛 `SweepError`(见第 9 节)。
+2D NUS 数据自动改走 `reconstruct_nus()`(候选输出隔离);**3D NUS** 会抛
+`SweepError`(见第 9 节)。
 
 `SweepRun`:`run_id`、`index`、`combo`、`params`、`status`、`message`、`run_dir`、
 `script_path`/`script_sha256`、`spectrum_path`/`spectrum_sha256`、`wall_time_s`、

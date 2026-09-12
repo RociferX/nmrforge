@@ -5,7 +5,8 @@
 | 项目 | v0.1 | 说明 |
 | --- | --- | --- |
 | uniform 1D/2D/3D 数据 | ✅ 扫描 | 走 NMRPipe `process()` 路径;研究以 2D 为主 |
-| NUS 数据 | ⚠️ 只能建参考谱 | 扫描会抛 `SweepError`(原因见下) |
+| NUS **2D** 数据 | ✅ 扫描 | 走 `reconstruct_nus()`(SMILE 重构),候选谱隔离输出;可扫 SMILE 参数 |
+| NUS 3D 数据 | ⚠️ 只能建参考谱 | 扫描会抛 `SweepError`(原因见 9.2) |
 | 3D 谱的峰位 | ✅ 可测 | 2D 峰表在 3D 谱上测量时,未参与测量的轴取最强平面 |
 | 峰重叠/去卷积 | ❌ | 只做窗口内极值 + 抛物线 refine |
 | 峰拟合(线宽/体积) | ❌ | 需要线宽误差请用你自己的拟合流程 |
@@ -13,28 +14,22 @@
 | 参数轴合法性校验 | 部分 | 仅校验组合数上限;键写错会被后端忽略,请对照参数清单 |
 | 重复采集/重复处理的噪声贡献 | ❌ | 结果只反映处理参数引入的离散度 |
 
-## 9.2 为什么 NUS 扫描暂不支持
+## 9.2 NUS 的支持范围
 
-NUS 的终谱由 `reconstruct_nus`(SMILE 重构)产生,该入口目前:
+**已支持:2D NUS**。做法与 uniform 一致,只是处理入口从 `process()` 换成
+`reconstruct_nus()`(SMILE 重构):
 
-- 不支持把候选谱写到独立文件名/目录(会覆盖工作目录里的终谱);
-- SMILE 参数(nSigma/threshold/nthread 等)与处理参数在同一段脚本里,需要先给
-  `reconstruct_nus` 加 `out_file`/`script_name` 隔离,才能做到「候选谱不替换
-  参考谱 + 每组合可留档」。
+- 参考谱仍由自动优化产生(`build_reference`);NUS 的相位记在运行参数里
+  (`phases` 间接维 + 扁平 `direct_phase` 直接维),扫描时两处都锁定;
+- 每个组合把候选谱写到 `work/_intermediate/<run_id>.ft2`、脚本写到
+  `work/<run_id>.com`,**不覆盖**工作目录里的终谱(后端新增 `out_file`/
+  `script_name` 语义,与 `process()` 一致);
+- 候选模式下后端会跳过「显示层相位搜索/重渲」,避免用未锁定的相位重渲候选谱;
+- 可扫的 SMILE 参数用顶层键:`nSigma`、`thresh`、`nthread`、`smile_scaling`
+  (见 [05-inputs-and-data.md](05-inputs-and-data.md) 的 NUS 参数表)。
 
-扩展路径(在 NMRForge 侧,约一天量级):
-
-1. `backend/nmrpipe_backend.reconstruct_nus` 增加 `out_file` / `script_name` 参数,
-   与 `process()` 语义一致;
-2. `nmrforge_api/sweep.py` 放宽 uniform 限制,按 `experiment.sampling.mode` 选择
-   `process()` 或 `reconstruct_nus()`;
-3. 参数轴加 `nus.nsigma` / `nus.thresh` / `nus.nthread` 等(点号键天然支持)。
-
-在扩展落地前,若你需要 NUS/SMILE 结论,建议:
-
-- 用本接口 NUS 数据的参考谱(参考优化仍然可用)作为基准;
-- 在 NMRForge GUI 的「SMILE 优化」入口做参数扫描(2D NUS),再把候选谱交给
-  `measure_peak_positions()` 测量峰位。
+**仍未支持:3D NUS**。3D NUS 的终跑走切片流(`nus3d_*` 平面目录),候选隔离还
+需要按平面目录分桶与独立的 finalize 输出命名,属于下一项工作(见 9.4)。
 
 ## 9.3 长扫描怎么切分
 
@@ -48,7 +43,7 @@ NUS 的终谱由 `reconstruct_nus`(SMILE 重构)产生,该入口目前:
 
 | 优先级 | 项 | 交付形态 |
 | --- | --- | --- |
-| 高 | NUS/SMILE 参数扫描 | 后端候选输出隔离 + 扫描支持 + 文档 |
+| 高 | 3D NUS 参数扫描 | 切片流按 `run_id` 分目录 + finalize 输出隔离 |
 | 高 | 峰拟合(2D Lorentzian/Gaussian) | `measure_peak_positions(fit=...)` 或独立函数 |
 | 中 | 参数轴校验 | 用 `param_schema()` 校验键与取值,报错而不是静默忽略 |
 | 中 | 增量上报/进度文件 | 每组合更新 `records/progress.json`,便于外部监控 |

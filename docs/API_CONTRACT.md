@@ -346,6 +346,8 @@ CLI:`python -m nmrforge_api {init,reference,peaks,sweep,report,status}`。
 
 1. 不 import Qt/gui;不修改 GUI 状态;参考谱、参考脚本与参考峰位默认全部由
    NMRForge 自动优化/自动选峰产生,外部峰表只是可选输入;
+1b. 扫描支持 uniform(任意维)与 **2D NUS**(走 `reconstruct_nus`,`out_file`/
+    `script_name` 候选隔离;3D NUS 不支持);
 2. 扫描候选谱只写 `study/runs/`,不替换 `spectra/` 活动谱;
 3. 同一数据集内 fid 只转换一次;组合间只允许被扫参数不同(相位锁定);
 4. 峰位测量与选峰共用轴映射口径(`workflow.pick_peaks.read_spectrum_axes`);
