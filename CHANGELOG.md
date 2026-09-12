@@ -24,6 +24,7 @@
 - `DEAD-014`：默认配置删除无消费者的 `app`/`optimization`/`qc`/`reporting`/`logging` 段；Pipeline SMILE 文案改为「重构参数扫描排名（不自动替换活动谱）」，与 Scheme B 一致。
 - `PACK-015`：发行策略定案——唯一受支持发行物为 AppImage，wheel/pip 仅用于开发；新增打包契约测试锁定 spec 的 `datas` 必须覆盖 `config`/`presets`/`gui/assets`。
 - `QA-017`：清除本仓库最后两项 Ruff 告警（未使用变量、导入顺序），`ruff check .` 全绿。
+- 验证证据（2026-09-12）：本地 Windows 全量 `1011 passed, 1 skipped`（收集 1012）、`ruff check .` 全绿、`scripts/check_ownership.py --owner all` 通过；VM 真机 `~/NMRForge`（HEAD `bd26ed6`，与 master 一致）`bash scripts/vm_test.sh` → `993 passed, 19 skipped, 39 warnings`（VM 侧 18 项为平台相关跳过，无失败），VM 端 `ruff check .` 全绿。
 
 ## 0.2.199-补29hz-修27(2026-09-11,用户):文件菜单拆「打开当前数据谱图 / 打开任意谱图」
 - 用户:文件下拉里把「打开谱图」拆成两条——「打开当前数据谱图」与 Pipeline 的
