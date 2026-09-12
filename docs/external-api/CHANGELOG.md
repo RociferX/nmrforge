@@ -38,7 +38,9 @@ CLI:`python -m nmrforge_api {init,reference,peaks,sweep,report,status}`。
     接口原样按表序执行)+ `load_combo_table`/`write_combo_table`/
     `combos_from_rows` + `design_diagnostics`;CLI `sweep --combos`;
   - 确定性/策略参数与未知键写入 `plan.notes` 提示(锁定键直接报错);
-  - `SweepRun.phase`、`SweepPlan.design/n_full/diagnostics`。
+  - `SweepRun.phase`、`SweepPlan.design/n_full/diagnostics`;
+  - VM 真机验证(bmr6980 uniform,4 行组合表):4/4 成功、152 峰全测到,
+    相位偏差精确为 F2=22.5/32.5(参考 27.5±5)、F1 保持 172.5。
 
 - **支持 2D NUS 扫描**:`reconstruct_nus` 增加 `out_file`/`script_name`
   (候选输出写 `_intermediate/`,不覆盖终谱),扫描按数据采样方式自动派发;

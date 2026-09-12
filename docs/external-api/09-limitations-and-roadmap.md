@@ -64,6 +64,28 @@ python -m nmrforge_api sweep     --study DIR --grid grid.yaml   # nsigma 3/5/7
    `nSigma`;扫描轴写 `nSigma` 时被静默忽略,三个组合跑出**同一张谱**
    (Δδ 全 0)。现在后端两者都接受,接口把驼峰别名归一成输入键。
 
+### VM 真机证据:显式组合表 + 相位偏差轴(2026-09-12)
+
+数据:BMRB bmr6980 的 15N-1H HSQC(uniform,真实 NMRPipe)。组合表 4 行:
+
+```text
+window.F1.off,zero_fill,phase_delta.F2.p0,baseline.F1.enabled
+0.35,1,-5,false
+0.35,2,5,true
+0.45,1,5,false
+0.45,2,-5,true
+```
+
+```bash
+python -m nmrforge_api sweep --study DIR --combos design.csv
+```
+
+结果:4/4 组合 success,每个组合 152 个峰位全部测到;**相位偏差精确生效**:
+F2 = 22.5°(-5°)与 32.5°(+5°),参考相位 27.5°,而 F1 保持参考的 172.5°;
+窗函数/填零/基线开关均按表执行(候选谱 SHA-256 互不相同)。
+本次 4 组合的峰位不确定度(仅链路验证):`Δδ_std` min 0.0008 / median 0.0013 /
+p90 0.0064 / max 0.038 ppm;15N σ median 0.0031 ppm。
+
 ## 9.3 长扫描怎么切分
 
 - 组合数上限默认 256(`max_runs`);超过请拆成多个研究根或分批网格;

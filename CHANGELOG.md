@@ -40,6 +40,9 @@
      超时、fid_noise 等)与未知键写进 `plan.notes` 提示(不阻断);
   4) `SweepRun.phase` 记录每个组合实际使用的各轴 PS;`SweepPlan` 增加
      `design`/`n_full`/`diagnostics`。
+- VM 真机复验「显式组合表 + 相位偏差轴」(bmr6980 uniform,4 行设计含
+  `phase_delta.F2.p0` ±5° 与基线开关):4/4 成功、152 峰全部测到,相位精确为
+  F2=22.5/32.5(参考 27.5±5)且 F1 保持 172.5;Δδ_std median 0.0013 ppm。
 - VM 真机复验 2D NUS 扫描(BMRB bmr6980 合成 25% NUS,分步 CLI 四进程):
   参考谱走真实 SMILE 重构(质量 92.4)、自动选峰 99 个、`nsigma` 3/5/7 三组合
   3/3 成功且候选谱 SHA-256 互不相同;Δδ_std median 0.0021 / p90 0.037 ppm。
