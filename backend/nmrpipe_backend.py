@@ -1100,7 +1100,14 @@ class NMRPipeBackend:
             script_fn = generate_2d_nus_script
         fraction = nuslist_count / grid if grid else 0.0
         tier_nsigma, tier_thresh = select_smile_params(fraction)
-        nsigma = float(params.get("nsigma", tier_nsigma))
+        # 参数键兼容(2026-09-12):输入约定是小写 nsigma(smile_optimize/
+        # 扫描脚本),而运行记录回写的是 effective_params 的 nSigma;两者都
+        # 接受——否则「以参考运行参数为扫描基底」时 nSigma 被静默忽略,
+        # 不同组合会跑出同一张谱(参数敏感性接口真机发现)。
+        _nsigma_raw = params.get("nsigma")
+        if _nsigma_raw is None:
+            _nsigma_raw = params.get("nSigma")
+        nsigma = float(_nsigma_raw if _nsigma_raw is not None else tier_nsigma)
         thresh = float(params.get("thresh", tier_thresh))
         smile_scaling = bool(params.get("smile_scaling", True))
         smile_report = int(params.get("smile_report", 1))

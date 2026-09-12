@@ -86,10 +86,13 @@ peak_id,H_ppm,N_ppm,height,linewidth,volume
 
 | 键 | 含义 | 取值示例 |
 | --- | --- | --- |
-| `nSigma` | SMILE 重构 nSigma(峰的稀疏/噪声门限) | `[3.0, 5.0, 7.0]` |
+| `nsigma`(别名 `nSigma`) | SMILE 重构 nSigma(峰的稀疏/噪声门限) | `[3.0, 5.0, 7.0]` |
 | `thresh` | SMILE 重构 thresh(峰阈值) | `[0.90, 0.95, 0.99]` |
-| `nthread` | SMILE 线程数(受机器核数上限约束) | `[2, 4]` |
+| `nthread`(别名 `nThread`) | SMILE 线程数(受机器核数上限约束) | `[2, 4]` |
 | `smile_scaling` | SMILE 幅度缩放开关 | `[True, False]` |
+
+> 键名说明:后端输入约定是小写 `nsigma`,而运行记录/结果里回写的是
+> `nSigma`;接口两者都接受并统一成输入键,所以写哪个都能生效。
 
 > NUS 数据必须是 **2D**(3D NUS 扫描未开放);需要目录里有 `nuslist`。
 > 参考谱与扫描共用同一份转换后的 fid,相位(间接维 `phases` + 直接维

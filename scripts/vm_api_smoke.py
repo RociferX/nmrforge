@@ -15,7 +15,7 @@
 NUS 2D 数据同理,把轴换成 SMILE 参数即可::
 
     ... scripts/vm_api_smoke.py --fresh --data <2D NUS 目录> \
-        --axes '{"nSigma": [3, 5, 7], "thresh": [0.95]}'
+        --axes '{"nsigma": [3, 5, 7], "thresh": [0.95]}'
 """
 
 from __future__ import annotations

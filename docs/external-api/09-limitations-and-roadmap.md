@@ -25,8 +25,9 @@
   `work/<run_id>.com`,**不覆盖**工作目录里的终谱(后端新增 `out_file`/
   `script_name` 语义,与 `process()` 一致);
 - 候选模式下后端会跳过「显示层相位搜索/重渲」,避免用未锁定的相位重渲候选谱;
-- 可扫的 SMILE 参数用顶层键:`nSigma`、`thresh`、`nthread`、`smile_scaling`
-  (见 [05-inputs-and-data.md](05-inputs-and-data.md) 的 NUS 参数表)。
+- 可扫的 SMILE 参数用顶层键:`nsigma`(别名 `nSigma`)、`thresh`、`nthread`、
+  `smile_scaling`(见 [05-inputs-and-data.md](05-inputs-and-data.md) 的 NUS 参数表);
+  接口会把驼峰别名归一成后端输入键,避免「参数写了但没生效」。
 
 **仍未支持:3D NUS**。3D NUS 的终跑走切片流(`nus3d_*` 平面目录),候选隔离还
 需要按平面目录分桶与独立的 finalize 输出命名,属于下一项工作(见 9.4)。

@@ -168,7 +168,7 @@ class _FakeSweepBackend:
         )
         work = self._work()
         script = work / (script_name or f"{experiment.dataset_id}_nus.com")
-        nsigma = float(params.get("nSigma", 5.0))
+        nsigma = float(params.get("nsigma", params.get("nSigma", 5.0)))
         script.write_text(f"#!/bin/csh\n# nSigma={nsigma}\n", encoding="utf-8")
         if script_only:
             return {
@@ -521,8 +521,10 @@ def test_run_parameter_study_nus_2d(tmp_path: Path, bruker_dir: Path) -> None:
     # 候选谱互不覆盖,且参考谱保持独立
     assert len({run.spectrum_path for run in result.runs}) == 3
     assert all(run.spectrum_sha256 for run in result.runs)
-    # SMILE 参数确实进入了网格
+    # SMILE 参数确实进入了网格,而且候选谱真的不同(键别名漏了会全同 → σ=0)
     assert {round(run.combo["nSigma"], 1) for run in result.runs} == {3.0, 5.0, 7.0}
+    assert len({run.spectrum_sha256 for run in result.runs}) == 3
+    assert result.summary["delta_std_ppm"]["max"] > 0
     assert result.summary["n_peaks"] == reference.peak_count
 
 
@@ -552,6 +554,22 @@ def test_reference_state_persists_across_sessions(
     assert any(
         run.workflow_ref == "pick_peaks" for run in session2.manager.project.workflow_runs
     )
+
+
+def test_nus_param_key_alias_normalized() -> None:
+    """nSigma/nsigma 两种写法都要落到后端输入键 nsigma。"""
+    from nmrforge_api.sweep import normalize_nus_params
+
+    assert normalize_nus_params({"nSigma": 5, "thresh": 0.95}) == {
+        "nsigma": 5,
+        "thresh": 0.95,
+    }
+    # 已用小写时保持原值(不覆盖)
+    assert normalize_nus_params({"nsigma": 3, "nSigma": 9}) == {
+        "nsigma": 3,
+        "nSigma": 9,
+    }
+    assert normalize_nus_params({"zero_fill": 2}) == {"zero_fill": 2}
 
 
 def test_sweep_rejects_3d_nus(tmp_path: Path, bruker_dir: Path) -> None:

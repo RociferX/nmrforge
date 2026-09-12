@@ -40,6 +40,19 @@ from workflow.stepwise import read_experiment
 
 DEFAULT_MAX_RUNS = 256
 
+# NUS(SMILE)参数键别名:后端输入约定为小写,运行记录回写的是 nSigma 等
+# 驼峰键;两者都接受,调用前统一成后端输入键。
+_NUS_ALIASES: dict[str, str] = {"nSigma": "nsigma", "nThread": "nthread"}
+
+
+def normalize_nus_params(params: Mapping[str, Any]) -> dict[str, Any]:
+    """把 NUS 参数键统一成后端输入约定(驼峰别名 → 小写)。"""
+    out = dict(params)
+    for camel, lower in _NUS_ALIASES.items():
+        if camel in out and lower not in out:
+            out[lower] = out.pop(camel)
+    return out
+
 
 @dataclass
 class SweepPlan:
@@ -366,7 +379,7 @@ def run_sweep(
         _emit(f"[{run_id}] 开始 {combo}")
         try:
             if is_nus:
-                nus_params = dict(params)
+                nus_params = normalize_nus_params(params)
                 if override:
                     direct_axis = f"F{experiment.ndim}"
                     pair = override.get(direct_axis)
@@ -505,6 +518,7 @@ __all__ = [
     "load_plan",
     "load_runs",
     "merge_overrides",
+    "normalize_nus_params",
     "plan_sweep",
     "run_sweep",
 ]

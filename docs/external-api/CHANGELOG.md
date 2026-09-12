@@ -34,7 +34,8 @@ CLI:`python -m nmrforge_api {init,reference,peaks,sweep,report,status}`。
 - **支持 2D NUS 扫描**:`reconstruct_nus` 增加 `out_file`/`script_name`
   (候选输出写 `_intermediate/`,不覆盖终谱),扫描按数据采样方式自动派发;
   参考相位锁定扩展到 NUS(间接维 `phases` + 直接维扁平 `direct_phase`);
-  可扫 `nSigma`/`thresh`/`nthread`/`smile_scaling`。3D NUS 仍不支持。
+  可扫 `nsigma`(别名 `nSigma`)/`thresh`/`nthread`/`smile_scaling`(驼峰别名
+  自动归一,避免参数未生效);3D NUS 仍不支持。
 
 - **相位锁定**:统一相位路线把相位记在 `phases`(各轴 PS),最初只读
   `direct_phase` 导致候选谱间接维相位回退默认值;现按 `reference_phase()`
