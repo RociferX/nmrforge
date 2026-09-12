@@ -1,7 +1,8 @@
 """NUS 间接维等价性验证:内存 rotate_real 评分 vs 逐候选后端 finalize。
 
 用法(VM):
-    PYTHONPATH=$PWD ~/nmr_venv/bin/python scripts/vm_validate_nus_indirect_equiv.py \
+    PYTHONPATH=$PWD ~/NMRForge/nmrforge/bin/python \
+        scripts/vm_validate_nus_indirect_equiv.py \
         <项目根> <exp_id> <data_id> [轴名,默认第一个间接轴]
 
 原理:同一 SMILE 重构平面(nus3d_rc,不重跑 SMILE)上,

@@ -1,5 +1,16 @@
 # 修改记录(历史条目)
 
+## 未发布(2026-09-13):工程约定与工作区清理
+- 记录强制原则(用户):**home 根目录不放测试**——测试产物进
+  `~/nmrforge-test-artifacts/`(VM)或 `$TMPDIR`;维护脚本进仓库 `scripts/`;
+  一次性脚本用完即删(留存归档 `~/archive/<日期>/`);venv 只用项目自带的
+  `~/NMRForge/nmrforge`。写入 `.codex/AGENTS.md`、`docs/development.md`、
+  `docs/manager/decisions.md`、项目地图 §8;
+- 清理 VM home:删除测试缓存(pytest temp 121M + pycache 41M)、我建的 4 个冒烟
+  研究(42M)、异常路径目录 `NMRForge/C:Users<user>`(41M)、11 个散落的一次性
+  脚本(归档到 `~/archive/scratch-2026-09/`)与无用 venv `~/nmr_venv`(450M);
+  `scripts/vm_validate_nus_indirect_equiv.py` 的解释器说明改用项目 venv;
+
 ## 未发布(2026-09-12):参数敏感性研究接口(nmrforge_api v0.1)
 - 新增顶层包 `nmrforge_api`:给下游独立研究项目的无 Qt 对外接口,当前服务
   「不同处理参数组合对 2D 谱峰位置的影响 / CSP 判据下限」研究;公开面含

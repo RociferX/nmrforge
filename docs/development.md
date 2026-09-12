@@ -24,6 +24,26 @@
 - Windows 沙箱默认 basetemp 被 ACL 锁死：pytest 必须带
   `--basetemp=<新临时目录>`（如 `$env:TEMP\pytest_nmrforge`）。
 
+### 测试/临时产物落点(强制,2026-09-13 用户)
+
+**home 根目录(~)不是工作区**:测试、脚本、venv、临时文件都不许放在那里,
+也不许散落到别的目录。约定如下:
+
+| 内容 | 该放哪 |
+| --- | --- |
+| 测试产物(pytest temp / pycache / ruff cache / 冒烟日志) | VM: `~/nmrforge-test-artifacts/`(`scripts/vm_test.sh` 已指向);本地: `--basetemp`/`$env:TEMP` |
+| 需要长期保留的脚本 | 仓库 `scripts/`(随 git 版本管理) |
+| 一次性排查脚本 | 用完即删;确需留存则归档到 `~/archive/<日期>/scripts/` 并写 README 说明来源 |
+| Python 环境 | 用项目自己的 venv(`~/NMRForge/nmrforge`);不要在 home 另建 venv |
+| 研究/数据产物 | 各自项目目录内(如 `~/nmr-uncertainty/studies/`),不要放 home 根 |
+
+清理检查(VM):
+
+```bash
+ls ~/*.py ~/*.sh ~/*.csv ~/*.yaml 2>/dev/null   # 应为空
+du -sh ~/* ~/.[!.]* 2>/dev/null | sort -h | tail
+```
+
 ## 处理流程改动覆盖原则(强制,0.2.163-补15)
 
 用户对处理流程(生成 FID/生成谱图/人工/批量等)提出的改动,默认必须
