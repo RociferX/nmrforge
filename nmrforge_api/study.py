@@ -188,6 +188,8 @@ def run_parameter_study(
             peaks=reference_peaks(session, reference),
         )
     session.save_state(reference=reference.to_dict(), records=records)
+    # 项目文件落盘:导入的数据集、fid/活动谱与运行记录在后续进程/会话可见
+    session.manager.save()
     return StudyResult(
         session=session,
         reference=reference,

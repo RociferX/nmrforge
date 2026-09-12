@@ -526,6 +526,34 @@ def test_run_parameter_study_nus_2d(tmp_path: Path, bruker_dir: Path) -> None:
     assert result.summary["n_peaks"] == reference.peak_count
 
 
+def test_reference_state_persists_across_sessions(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """分步 CLI(独立进程)能看到已登记的 fid/活动谱:项目状态必须落盘。"""
+    root = tmp_path / "persist"
+    backend = _FakeSweepBackend()
+    run_parameter_study(
+        root,
+        bruker_dir / "hsqc_2d",
+        axes={"zero_fill": [1]},
+        params={"phase_route": "none"},
+        backend=backend,
+    )
+    # 新会话 = 新进程视角:从 project.json 重新加载
+    session2 = open_study(root, backend=backend)
+    entry = session2.data_entry()
+    assert entry.fid_path and Path(entry.fid_path).exists()
+    assert entry.spectrum_path and Path(entry.spectrum_path).is_file()
+    reference = load_reference(session2)
+    assert reference is not None
+    assert reference.peak_source == "auto"
+    assert Path(reference.peak_table_path).is_file()
+    # 一条 pick_peaks 运行记录也已落盘
+    assert any(
+        run.workflow_ref == "pick_peaks" for run in session2.manager.project.workflow_runs
+    )
+
+
 def test_sweep_rejects_3d_nus(tmp_path: Path, bruker_dir: Path) -> None:
     """3D NUS 仍不支持:NUS 只开放 2D。"""
     from nmrforge_api import add_dataset, plan_sweep, run_sweep

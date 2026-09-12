@@ -343,6 +343,10 @@ def build_reference(
         encoding="utf-8",
     )
     session.save_state(reference=reference.to_dict())
+    # 项目状态必须落盘:参考构建登记了 fid/活动谱(与 WorkflowRun),
+    # 而 CLI 的 reference/peaks/sweep 是三个独立进程——不落盘时下一步
+    # 读到的 spectrum_path 为空,选峰会报「谱图缺失」。
+    session.manager.save()
     return reference
 
 
@@ -436,13 +440,16 @@ def ensure_reference_peaks(
     )
     if max_peaks and max_peaks > 0:
         _keep_top_peaks(target, int(max_peaks))
-    return set_reference_peaks(
+    updated = set_reference_peaks(
         session,
         target,
         ref,
         source="auto",
         params={"sigma_multiplier": sigma_multiplier, "max_peaks": int(max_peaks)},
     )
+    # 选峰会登记一条 pick_peaks 运行记录:同样要落盘(跨进程可见)
+    session.manager.save()
+    return updated
 
 
 def _keep_top_peaks(path: Path, keep: int) -> None:
