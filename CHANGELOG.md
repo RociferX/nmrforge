@@ -17,8 +17,12 @@
 - 契约走 Proposal:`docs/proposals/external-api/001-parameter-sweep-api.md`,
   API_CONTRACT 新增 §11;v0.1 边界:只支持 uniform 扫描(NUS 需先给
   `reconstruct_nus` 加候选输出隔离);
-- 测试:`tests/test_nmrforge_api.py` 12 项(网格/覆盖、亚像素精度、σ 与 Δδ
-  公式、端到端 6 组合、断点续跑、NUS 边界、导入失败、CLI、不 import Qt)。
+- 测试:`tests/test_nmrforge_api.py` 14 项(网格/覆盖、亚像素精度、σ 与 Δδ
+  公式、端到端 6 组合、断点续跑、NUS 边界、导入失败、CLI、不 import Qt、
+  参考相位锁定);VM 冒烟固化 `scripts/vm_api_smoke.py`;
+- 真机端到端(VM，`bmr6980/n15hsqc.fid` + 该库 138 峰参考表，4 组合):
+  48.9 s、4/4 组合成功、138/138 峰位测到、参考相位锁定
+  (F1=172.5/F2=27.5)、records 六件套齐备;Δδ_std p90=0.046 ppm(仅链路验证)。
 
 ## 未发布(2026-09-12):文档重组与全项目审查问题台账
 - 新增 `docs/README.md` 作为文档统一入口，区分当前事实、当前任务、长期记忆与历史档案；
