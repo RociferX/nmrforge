@@ -569,6 +569,7 @@ class PipelineStepRow(QWidget):
     detail_toggled = pyqtSignal(str)  # step_id:点击行切换详情
     view_log_requested = pyqtSignal(str)  # step_id:定位日志面板
     rank1_run_requested = pyqtSignal(str)  # step_id:按 SMILE 扫描 Rank1 重跑终谱
+    localization_changed = pyqtSignal(str)  # 峰定位方法变化(peaks 步骤)
 
     def __init__(
         self, step_id: str, label: str, description: str, parent: QWidget | None = None
@@ -664,6 +665,22 @@ class PipelineStepRow(QWidget):
         button_row.addWidget(self.threshold_label)
         button_row.addWidget(self.threshold_slider)
         button_row.addWidget(self.threshold_spin)
+        # 2026-09-13(用户需求):峰定位方法——抛物线(默认,既有算法)/
+        # 2D 高斯拟合。高斯仅 2D:非 2D 时该项禁用并显示明确提示。
+        self.localization_label = QLabel("峰定位")
+        self.localization_label.setVisible(self.step_id == "peaks")
+        self.localization_combo = QComboBox()
+        self.localization_combo.addItem("抛物线(默认)", "parabolic")
+        self.localization_combo.addItem("2D 高斯拟合", "gaussian")
+        self.localization_combo.setCurrentIndex(0)
+        self.localization_combo.setVisible(self.step_id == "peaks")
+        self.localization_combo.setToolTip(self._localization_tip(True))
+        self._localization_sync = False
+        self.localization_combo.currentIndexChanged.connect(
+            self._on_localization_changed
+        )
+        button_row.addWidget(self.localization_label)
+        button_row.addWidget(self.localization_combo)
         # 0.2.199-补29dl(用户):参考谱——选峰时只保留与参考峰表匹配的峰
         # 0.2.199-补29hz-修4:SMILE 优化程度 2x2..5x5(按数据记住)
         self.grid_label = QLabel("优化程度")
@@ -830,6 +847,51 @@ class PipelineStepRow(QWidget):
         """峰挑选步骤阈值(σ);非 peaks 步骤返回默认 35.0(补29hn)。"""
         return self.threshold_spin.value() if self.step_id == "peaks" else 35.0
 
+    def _localization_tip(self, supported: bool) -> str:
+        """峰定位下拉的说明/不支持提示(用户需求:必须明确告知)。"""
+        base = (
+            "峰位精修方法:\n"
+            "抛物线 = 既有 3 点抛物线顶点(默认,行为不变)\n"
+            "2D 高斯拟合 = 在候选峰附近拟合不旋转的 2D 高斯,给出中心/线宽/幅度\n"
+            "ROI 与参数在 config peaks.localization(ppm 物理宽度)"
+        )
+        if not supported:
+            from core.peaks.localize import GAUSSIAN_UNSUPPORTED_MESSAGE
+
+            return base + "\n" + GAUSSIAN_UNSUPPORTED_MESSAGE + "(当前谱不可用)"
+        return base
+
+    def get_localization_method(self) -> str:
+        """当前峰定位方法;非 peaks 步骤返回默认 parabolic。"""
+        if self.step_id != "peaks":
+            return "parabolic"
+        return str(self.localization_combo.currentData() or "parabolic")
+
+    def set_localization_method(self, method: str) -> None:
+        """程序化恢复某数据的峰定位方法(不触发持久化回调)。"""
+        index = self.localization_combo.findData(str(method or "parabolic"))
+        self._localization_sync = True
+        try:
+            self.localization_combo.setCurrentIndex(max(0, index))
+        finally:
+            self._localization_sync = False
+
+    def set_localization_supported(self, supported: bool) -> None:
+        """非 2D 禁用高斯选项(用户需求:不允许在非 2D 上调用)。"""
+        item_index = self.localization_combo.findData("gaussian")
+        if item_index >= 0:
+            item = self.localization_combo.model().item(item_index)
+            if item is not None:
+                item.setEnabled(bool(supported))
+        if not supported and self.get_localization_method() == "gaussian":
+            self.set_localization_method("parabolic")
+        self.localization_combo.setToolTip(self._localization_tip(bool(supported)))
+
+    def _on_localization_changed(self, *_args) -> None:
+        if self._localization_sync or self.step_id != "peaks":
+            return
+        self.localization_changed.emit(self.get_localization_method())
+
     def set_ref_text(self, text: str) -> None:
         """显示已选参考谱(0.2.199-补29dl)。"""
         self.ref_label.setText(text)
@@ -870,6 +932,7 @@ class PipelineStepRow(QWidget):
         if self.step_id == "peaks":
             self.threshold_slider.setEnabled(threshold_ok)
             self.threshold_spin.setEnabled(threshold_ok)
+            self.localization_combo.setEnabled(threshold_ok)
         if status == "OUTDATED":
             self.run_button.setText("重新运行")
             self.run_button.setVisible(True)
@@ -941,6 +1004,8 @@ class PipelinePanel(QWidget):
         self._threshold_by_data: dict[tuple[str, str], float] = {}
         # 0.2.199-补29gc:显式自定义标记(默认值迁移后仍尊重用户设置)
         self._threshold_custom_by_data: dict[tuple[str, str], bool] = {}
+        # 峰定位方法按数据缓存(ui_state 持久化,与阈值同分区)
+        self._localization_by_data: dict[tuple[str, str], str] = {}
         # 0.2.199-补29gd(用户):非 NUS(含误判为 NUS 但实际全采样)不显示
         # SMILE 优化——(exp_id, data_id) → 是否 NUS,检测一次缓存。
         self._nus_cache: dict[tuple[str, str], bool] = {}
@@ -1022,6 +1087,10 @@ class PipelinePanel(QWidget):
             )
             peaks_row.threshold_slider.sliderReleased.connect(
                 self._mark_current_threshold_custom
+            )
+            # 2026-09-13(用户需求):峰定位方法每次改动即按数据落 ui_state
+            peaks_row.localization_changed.connect(
+                self._store_current_localization
             )
         # 0.2.199-补29hz-修4:SMILE 优化程度按数据记入 ui_state
         smile_row = self._rows.get("smile")
@@ -1121,7 +1190,7 @@ class PipelinePanel(QWidget):
                 self._current_exp_id,
                 self._current_data_id,
                 "peaks",
-                {"threshold": float(value), "custom": custom},
+                self._peaks_ui_state(threshold=float(value), custom=custom),
             )
         except Exception:  # noqa: BLE001 - 持久化失败不阻断调节
             pass
@@ -1142,13 +1211,69 @@ class PipelinePanel(QWidget):
                 self._current_exp_id,
                 self._current_data_id,
                 "peaks",
-                {
-                    "threshold": self._threshold_by_data[key],
-                    "custom": True,
-                },
+                self._peaks_ui_state(
+                    threshold=self._threshold_by_data[key], custom=True
+                ),
             )
         except Exception:  # noqa: BLE001 - 持久化失败不阻断
             pass
+
+    def _peaks_ui_state(self, **extra: object) -> dict:
+        """peaks 分区 UI 状态(阈值 + 峰定位方法一起写,避免互相覆盖)。"""
+        row = self._rows.get("peaks")
+        key = (self._current_exp_id, self._current_data_id)
+        state: dict = {
+            "threshold": float(self._threshold_by_data.get(key, 35.0)),
+            "custom": bool(self._threshold_custom_by_data.get(key, False)),
+            "localization_method": (
+                row.get_localization_method() if row is not None else "parabolic"
+            ),
+        }
+        state.update(extra)
+        return state
+
+    def _store_current_localization(self, *_args) -> None:
+        """峰定位方法按数据写 ui_state(与阈值同分区,写前合并)。"""
+        row = self._rows.get("peaks")
+        if row is None or not (self._current_exp_id and self._current_data_id):
+            return
+        method = row.get_localization_method()
+        self._localization_by_data[
+            (self._current_exp_id, self._current_data_id)
+        ] = method
+        try:
+            from gui.per_data_records import update_ui_state
+
+            update_ui_state(
+                self.manager,
+                self._current_exp_id,
+                self._current_data_id,
+                "peaks",
+                self._peaks_ui_state(localization_method=method),
+            )
+        except Exception:  # noqa: BLE001 - 持久化失败不阻断调节
+            pass
+
+    def _localization_for(self, exp_id: str, data_id: str) -> str:
+        """该数据的峰定位方法(会话缓存优先,否则 ui_state;缺省 parabolic)。"""
+        key = (exp_id, data_id)
+        if key not in self._localization_by_data:
+            value = "parabolic"
+            try:
+                from core.peaks.localize import normalize_localization_method
+                from gui.per_data_records import load_ui_state
+
+                state = (
+                    load_ui_state(self.manager, exp_id, data_id).get("peaks")
+                    or {}
+                )
+                raw = str(state.get("localization_method", "") or "").strip()
+                if raw:
+                    value = normalize_localization_method(raw)
+            except Exception:  # noqa: BLE001 - 读取失败用默认
+                value = "parabolic"
+            self._localization_by_data[key] = value
+        return self._localization_by_data[key]
 
     def _threshold_for(self, exp_id: str, data_id: str) -> float:
         """该数据阈值:会话缓存优先,否则读 d_xxx/ui_state.json(补29ga);
@@ -1374,6 +1499,18 @@ class PipelinePanel(QWidget):
                 self._threshold_for(
                     self._current_exp_id, self._current_data_id
                 )
+            )
+            # 2026-09-13(用户需求):按数据恢复峰定位方法;高斯仅 2D 可选
+            peaks_row.set_localization_method(
+                self._localization_for(
+                    self._current_exp_id, self._current_data_id
+                )
+            )
+            peaks_row.set_localization_supported(
+                self._data_ndim(
+                    self._current_exp_id, self._current_data_id
+                )
+                == 2
             )
         # 样品数据层不提示/展示导入步骤(导入属于实验类型层动作)
         # 0.2.199-补29as:SMILE 优化为可选步骤——未做/过期不占「下一步」,
@@ -2024,6 +2161,15 @@ class PipelinePanel(QWidget):
                         kwargs["sigma_multiplier"] = self._rows[
                             step_id
                         ].get_threshold()
+                        # 2026-09-13(用户需求):峰定位方法(GUI 只传方法名,
+                        # 拟合数学在 core.peaks.localize)
+                        if (
+                            "localization_method"
+                            in inspect.signature(method).parameters
+                        ):
+                            kwargs["localization_method"] = self._rows[
+                                step_id
+                            ].get_localization_method()
                         ref = self._ref_info.get(
                             (exp_id, target_data_id)
                         )

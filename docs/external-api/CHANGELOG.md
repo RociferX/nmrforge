@@ -37,6 +37,24 @@
 自动选峰记录的边距为 0.5549 ppm → 11 点;2D NUS 的 `nsigma` 扫描同样通过。
 证据见 proposal 附录。
 
+同版本内新增(2026-09-13,**2D 高斯峰定位**;承接用户「加入高斯拟合作为 2D
+选峰的可选精细峰位确定算法,以后也可用于比较两种算法带来的峰位置差距」):
+
+- 新增 `core/peaks/gaussian_fit.py`(不旋转、轴向可分离 2D 高斯:
+  `A/x0/y0/sigma_x/sigma_y/B`,`scipy.optimize.least_squares` 带 bounds;
+  失败返回稳定原因串)与 `core/peaks/localize.py`(`localize_peak` 统一入口、
+  ROI 按 ppm 物理宽度换算点数、逐峰诊断 + 峰表附件读写、方法名规范化);
+- 参考峰表:`ensure_reference_peaks(..., localization_method=)` /
+  `pick_reference_peaks(..., localization_method=)`;CLI `peaks --localization`;
+- 候选谱测量:`measure_peak_positions(..., refine="gaussian")`(仅 2D)、
+  `run_sweep`/`run_parameter_study(..., refine=, roi_f1_ppm=, roi_f2_ppm=)`;
+  CLI `sweep --refine`。**两种方法对同一批峰独立运行**,可直接比较峰位差;
+- 逐峰诊断(方法/回退/QC)写入 `PeakMeasurement.localization`(随 `runs.json`)
+  与 `records/measurement.json` 的 `localization.actual_method_counts`;
+- config:`peaks.localization.{method,gaussian_roi_f1_ppm,gaussian_roi_f2_ppm}`;
+- 默认仍为 `parabolic`,既有抛物线与峰检测逻辑零改动;高斯仅 2D,失败回退
+  抛物线并记录 `requested_method`/`actual_method`/`fallback_reason`(不静默)。
+
 ## 0.1(2026-09-12)
 
 首个可用版本。公开面:

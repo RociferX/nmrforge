@@ -100,6 +100,11 @@ def run_parameter_study(
     window_ppm: float | None = None,
     sign: str = "abs",
     refine: str = "parabolic",
+    roi_f1_ppm: float | None = None,
+    roi_f2_ppm: float | None = None,
+    localization_method: str = "parabolic",
+    gaussian_roi_f1_ppm: float | None = None,
+    gaussian_roi_f2_ppm: float | None = None,
     csp_n_weight: float = DEFAULT_CSP_N_WEIGHT,
     resume: bool = True,
     backend: Any | None = None,
@@ -120,6 +125,11 @@ def run_parameter_study(
     1.5×该轴核素线宽折算 ppm,逐组合按该候选谱点数换算——零填零只改
     点距、不改变窗口覆盖宽度(用户方案 A,见 ``core.peaks.axis_units``)。
     ``window_pts`` 是显式点数的逃生口,跨分辨率不可比,不推荐。
+    峰定位方法两处可分别选(2026-09-13):参考峰表用 ``localization_method``
+    (``parabolic`` 默认 / ``gaussian`` 仅 2D),候选谱追踪用 ``refine``
+    (同上);两者都支持 ``gaussian`` 时即可直接比较两种算法的峰位差。
+    ``gaussian_roi_f1_ppm``/``roi_f1_ppm`` 等为 ppm 物理半径,缺省读
+    config ``peaks.localization``。
     """
     session = open_study(root, name=name, backend=backend)
     rebuild = False
@@ -158,6 +168,9 @@ def run_parameter_study(
             reference,
             sigma_multiplier=sigma_multiplier,
             max_peaks=max_peaks,
+            localization_method=localization_method,
+            gaussian_roi_f1_ppm=gaussian_roi_f1_ppm,
+            gaussian_roi_f2_ppm=gaussian_roi_f2_ppm,
         )
 
     # 扫描基底 = 参考谱的有效参数(相位/窗/填零/基线都是参考运行的结论),
@@ -180,6 +193,8 @@ def run_parameter_study(
         window_ppm=window_ppm,
         sign=sign,
         refine=refine,
+        roi_f1_ppm=roi_f1_ppm,
+        roi_f2_ppm=roi_f2_ppm,
         resume=resume,
         progress=progress,
     )

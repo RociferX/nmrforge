@@ -406,8 +406,16 @@ class ProcessingController:
         ref_nuclei: list[str] | None = None,
         tolerance_ppm: dict[str, float] | None = None,
         ref_name: str = "",
+        localization_method: str = "parabolic",
+        gaussian_roi_f1_ppm: float | None = None,
+        gaussian_roi_f2_ppm: float | None = None,
     ) -> dict:
-        """峰挑选:调 workflow.pick_peaks,返回 {status, peak_path, peak_count, logs}。"""
+        """峰挑选:调 workflow.pick_peaks,返回 {status, peak_path, peak_count, logs}。
+
+        ``localization_method``(2026-09-13):``parabolic``(默认,既有行为)
+        或 ``gaussian``(2D 高斯拟合,仅 2D);ROI 为 ppm 物理宽度,``None``
+        时读 config ``peaks.localization``。
+        """
         try:
             from workflow.pick_peaks import pick_peaks as backend_pick_peaks
         except ImportError as exc:  # pragma: no cover - Backend 未落地
@@ -421,6 +429,9 @@ class ProcessingController:
             ref_peaks=ref_peaks, ref_nuclei=ref_nuclei,
             tolerance_ppm=tolerance_ppm,
             ref_name=ref_name,
+            localization_method=localization_method,
+            gaussian_roi_f1_ppm=gaussian_roi_f1_ppm,
+            gaussian_roi_f2_ppm=gaussian_roi_f2_ppm,
         )
         if data_id and result.get("status") == "success":
             record_step_success(self._manager, exp_id, data_id, "peaks")

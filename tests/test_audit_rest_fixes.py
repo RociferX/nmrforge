@@ -311,7 +311,11 @@ def test_default_config_has_no_consumerless_sections() -> None:
     )
     for section in ("app", "optimization", "qc", "reporting", "logging"):
         assert section not in raw, section
-    assert set(raw) == {"backend", "processing", "smile"}
+    # peaks.localization(2026-09-13)的消费者是
+    # core/peaks/localize.py::load_localization_defaults(峰定位方法/高斯 ROI),
+    # 与 backend/processing/smile 一样属于「有运行时消费者」的配置段。
+    assert set(raw) == {"backend", "processing", "smile", "peaks"}
+    assert "localization" in raw["peaks"]
 
 
 def test_smile_wording_matches_scheme_b() -> None:

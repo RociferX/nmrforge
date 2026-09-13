@@ -32,6 +32,10 @@ class Peak:
     width: tuple[float, ...] = ()
     snr: float = 0.0
     sign: int = 1
+    # 峰定位诊断(2026-09-13,可选):记录实际用的定位方法/高斯拟合 QC。
+    # 检测本身不写该字段——由 core.peaks.localize 的调用方填入,旧代码
+    # 不受影响(None=未做定位诊断)。
+    localization: dict[str, Any] | None = None
 
 
 @dataclass
@@ -73,6 +77,15 @@ def _refined_index(value: np.ndarray, idx: np.ndarray, axis: int) -> float:
         return float(i)
     offset = 0.5 * (v0 - v2) / denom
     return float(i + float(np.clip(offset, -0.5, 0.5)))
+
+
+def refine_parabolic(value: np.ndarray, idx: Any, axis: int) -> float:
+    """公开的抛物线亚像素精修(与 ``_refined_index`` 同一实现)。
+
+    峰定位方法分派(``core.peaks.localize``)复用本函数,保证
+    ``method="parabolic"`` 与既有选峰结果**逐位一致**;不要在此加新逻辑。
+    """
+    return _refined_index(value, idx, axis)
 
 
 def _candidates(

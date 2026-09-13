@@ -714,6 +714,8 @@ def run_sweep(
     window_ppm: float | None = None,
     sign: str = "abs",
     refine: str = "parabolic",
+    roi_f1_ppm: float | None = None,
+    roi_f2_ppm: float | None = None,
     resume: bool = True,
     stop_on_error: bool = False,
     progress: Callable[[str], None] | None = None,
@@ -727,6 +729,10 @@ def run_sweep(
     「窗口口径随处理参数漂移」的成分(用户方案 A)。``window_ppm`` 显式
     给物理半径;``window_pts`` 强制点数(不推荐,跨分辨率不可比)。每个
     组合的换算结果(逐轴点数/ppm/点距)写进 ``run.json`` 的 ``window``。
+    ``refine``(2026-09-13):``parabolic``(默认,既有 3 点抛物线)或
+    ``gaussian``(2D 高斯拟合,仅 2D;ROI 半径 ``roi_f1_ppm``/``roi_f2_ppm``,
+    缺省读 config ``peaks.localization``;失败逐峰回退抛物线并留原因)。
+    两种方法对同一批峰独立运行,可直接比较峰位差。
     """
     dataset = session.dataset
     if dataset is None:
@@ -909,6 +915,8 @@ def run_sweep(
                 window_ppm=window_ppm,
                 sign=sign,
                 refine=refine,
+                roi_f1_ppm=roi_f1_ppm,
+                roi_f2_ppm=roi_f2_ppm,
             )
         except Exception as exc:  # noqa: BLE001 - 测量失败也算该组合失败
             run.status = "failed"

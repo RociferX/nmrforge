@@ -194,6 +194,38 @@ measure_peak_positions(spectrum, peaks, window_ppm=0.5, axes=axes)
 `window`、`records/measurement.json`、`manifest.json` 的 `measurement`,
 以及选峰运行参数里的 `detection`。
 
+### 峰定位方法:抛物线 / 2D 高斯拟合
+
+**检测**与**定位**是两步、彼此独立(检测阈值/噪声估计/符号模式一律不变):
+
+```text
+peak detection(阈值/局部极大) → candidate 整数格极大值
+        ↓ peak localization
+  ├── parabolic(默认,既有 3 点抛物线顶点;行为完全不变)
+  └── gaussian(2D 不旋转高斯拟合;仅 2D)
+```
+
+高斯模型 ``I(x,y) = B + A·exp(-(x-x0)²/2σx² - (y-y0)²/2σy²)``,x=F2(直接)、
+y=F1(间接);初值中心取**抛物线结果**(同一 candidate),`scipy.optimize.
+least_squares` 带 bounds 求解。ROI 是**物理半径(ppm)**,按当前谱点距换算点数
+——与窗口/边距同一口径,填零不改变 ROI 覆盖的 ppm 范围。
+
+| 口径 | 默认 | 覆盖方式 |
+| --- | --- | --- |
+| 方法 | `parabolic` | config `peaks.localization.method` / `localization_method=` / `refine=` |
+| 高斯 ROI F1(间接) | 1.5 ppm | config `peaks.localization.gaussian_roi_f1_ppm` / `roi_f1_ppm=` |
+| 高斯 ROI F2(直接) | 0.25 ppm | config `peaks.localization.gaussian_roi_f2_ppm` / `roi_f2_ppm=` |
+
+失败(ROI 太小/数据不足/NaN/平坦区/不收敛/中心或 σ 撞边界)一律:
+``fit_success=false`` + ``fallback_reason``,**回退抛物线**并在记录里写明
+``requested_method=gaussian`` / ``actual_method=parabolic``(不静默)。非 2D 谱
+调用高斯会直接报错 ``Gaussian peak fitting is currently supported only for 2D
+spectra.``(GUI 对应项在非 2D 上禁用)。
+
+留档位置:峰表附件 ``data/peaks/<exp>-<data>.list.localization.json``(逐峰
+中心/σ/FWHM/幅度/基线/RMSE/边界/原因)、`WorkflowRun.params["localization"]`
+(方法 + ROI + 成功/回退计数),研究接口侧另见 `measurement.json`。
+
 ### 网格语义
 
 - 用 `axes` 时组合数 = 各轴长度之积,顺序 = 轴书写顺序 × 值列表顺序(笛卡尔积);

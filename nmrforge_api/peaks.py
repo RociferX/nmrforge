@@ -57,6 +57,8 @@ class PeakMeasurement:
     window_edge: bool = False
     boundary: bool = False
     out_of_range: bool = False
+    # 峰定位诊断(2026-09-13):实际方法/是否回退/高斯拟合 QC;空=仅参考值
+    localization: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -70,6 +72,9 @@ class PeakMeasurement:
             "window_edge": bool(self.window_edge),
             "boundary": bool(self.boundary),
             "out_of_range": bool(self.out_of_range),
+            "localization": {
+                str(k): v for k, v in (self.localization or {}).items()
+            },
         }
 
     @classmethod
@@ -85,6 +90,7 @@ class PeakMeasurement:
             window_edge=bool(data.get("window_edge", False)),
             boundary=bool(data.get("boundary", False)),
             out_of_range=bool(data.get("out_of_range", False)),
+            localization=dict(data.get("localization") or {}),
         )
 
 
@@ -258,11 +264,16 @@ def measure_peak_positions(
     sign: str = "abs",
     refine: str = "parabolic",
     nuclei: Iterable[str] | None = None,
+    roi_f1_ppm: float | None = None,
+    roi_f2_ppm: float | None = None,
 ) -> list[PeakMeasurement]:
     """在 ``spectrum_path`` 上测量 ``peaks`` 的亚像素峰位。
 
     sign:``"abs"``(默认,正负峰都追)| ``"positive"`` | ``"negative"``;
-    refine:``"parabolic"``(默认)| ``"none"``(只取整数点极大值)。
+    refine:``"parabolic"``(默认,3 点抛物线)| ``"none"``(只取整数点极大
+    值)| ``"gaussian"``(2D 高斯拟合,**仅 2D**;ROI 为 ppm 物理宽度
+    ``roi_f1_ppm``/``roi_f2_ppm``,缺省读 config ``peaks.localization``;
+    拟合失败回退抛物线且逐峰记录 requested/actual/原因,不静默)。
     nuclei 非空时只测量这些核(其余核只保留参考值,不参与扫描统计)。
 
     搜索窗口:默认按物理宽度(该轴核素线宽 ×1.5 折算 ppm)逐轴换算成点数,
@@ -277,12 +288,17 @@ def measure_peak_positions(
         raise MeasurementError("window_pts 不能为负")
     if sign not in ("abs", "positive", "negative"):
         raise MeasurementError(f"未知 sign: {sign}")
-    if refine not in ("parabolic", "none"):
+    if refine not in ("parabolic", "none", "gaussian"):
         raise MeasurementError(f"未知 refine: {refine}")
 
     spectrum_axes = axes if axes is not None else read_spectrum_axes(path)
     axes = spectrum_axes
     data = np.asarray(axes.data, dtype=float)
+    # 高斯拟合仅 2D(读谱后再判维度:与峰定位同一口径,不静默降级)
+    if refine == "gaussian" and data.ndim != 2:
+        from core.peaks.localize import GAUSSIAN_UNSUPPORTED_MESSAGE
+
+        raise MeasurementError(GAUSSIAN_UNSUPPORTED_MESSAGE)
     window_by_axis = window_points_by_axis(
         axes, window_pts=window_pts, window_ppm=window_ppm
     )
@@ -371,7 +387,29 @@ def measure_peak_positions(
 
         # 逐个参与测量的轴做亚像素 refine(其余轴固定在最优点)
         fractions = [float(index_) for index_ in best]
-        if refine == "parabolic":
+        if refine == "gaussian":
+            # 2D 高斯定位(core.peaks.localize):ROI 物理宽度 + 失败回退
+            from core.peaks.localize import localize_peak
+
+            peak_sign = 1 if float(data[tuple(best)]) >= 0 else -1
+            if sign == "positive":
+                peak_sign = 1
+            elif sign == "negative":
+                peak_sign = -1
+            ppm_axes = [np.asarray(a, dtype=float) for a in axes.ppm]
+            loc = localize_peak(
+                data,
+                best,
+                method="gaussian",
+                sign=peak_sign,
+                ppm_axes=ppm_axes,
+                roi_f1_ppm=roi_f1_ppm,
+                roi_f2_ppm=roi_f2_ppm,
+                logical_axes=list(axes.logical_to_storage),
+            )
+            fractions = [float(v) for v in loc.position]
+            measurement.localization = loc.to_dict(ppm_axes)
+        elif refine == "parabolic":
             for axis in search_axes:
                 position = best[axis]
                 size = int(data.shape[axis])
@@ -411,6 +449,9 @@ def pick_reference_peaks(
     sigma_multiplier: float | None = None,
     out_path: Path | str | None = None,
     details: dict[str, Any] | None = None,
+    localization_method: str = "parabolic",
+    gaussian_roi_f1_ppm: float | None = None,
+    gaussian_roi_f2_ppm: float | None = None,
 ) -> Path:
     """在参考谱上用 NMRForge 选峰,得到固定峰表(供扫描追踪)。
 
@@ -428,9 +469,13 @@ def pick_reference_peaks(
         dataset.exp_id,
         dataset.data_id,
         sigma_multiplier=sigma_multiplier,
+        localization_method=localization_method,
+        gaussian_roi_f1_ppm=gaussian_roi_f1_ppm,
+        gaussian_roi_f2_ppm=gaussian_roi_f2_ppm,
     )
     if details is not None:
         details["detection"] = result.get("detection") or {}
+        details["localization"] = result.get("localization") or {}
         details["peak_count"] = int(result.get("peak_count", 0) or 0)
     peak_path = Path(str(result.get("peak_path", "")))
     if not peak_path.is_file():

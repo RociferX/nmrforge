@@ -64,6 +64,18 @@ def measurement_record(
     给出各轴在全部组合里出现过的点数集合——同一物理宽度在 1×/2×/4×
     填零下换成不同点数,这里一眼能看出「点数变了但 ppm 没变」。
     """
+    actual_counts: dict[str, int] = {}
+    fallback_reasons: dict[str, int] = {}
+    for run in runs:
+        for measurement in run.measurements or []:
+            record = dict(getattr(measurement, "localization", None) or {})
+            if not record:
+                continue
+            name = str(record.get("actual_method", "") or "unknown")
+            actual_counts[name] = actual_counts.get(name, 0) + 1
+            if record.get("fallback"):
+                reason = str(record.get("fallback_reason", "") or "")
+                fallback_reasons[reason] = fallback_reasons.get(reason, 0) + 1
     by_axis: dict[str, dict[str, Any]] = {}
     seen: dict[str, dict[str, Any]] = {}
     for run in runs:
@@ -96,6 +108,10 @@ def measurement_record(
         "window_by_axis": by_axis,
         "window_points_seen": seen,
         "edge_margin": detection,
+        "localization": {
+            "actual_method_counts": actual_counts,
+            "fallback_reasons": fallback_reasons,
+        },
     }
 
 

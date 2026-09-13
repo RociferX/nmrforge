@@ -19,5 +19,13 @@ processing:
   intermediate_memory: auto      # auto=内存余量充足时中间谱工作目录放内存盘;off=始终磁盘
   memory_disk_path: ""           # 可选:内存盘根目录(默认 Linux /dev/shm;Windows 自建 RAM 盘后指定)
 
+peaks:
+  # 峰定位(peak localization,2026-09-13):检测之后的亚格点精修方法。
+  # 消费者:core/peaks/localize.py::load_localization_defaults(选峰/GUI/API)。
+  localization:
+    method: parabolic           # parabolic(默认,既有 3 点抛物线) | gaussian(仅 2D)
+    gaussian_roi_f1_ppm: 1.5    # 高斯拟合 ROI 半径(间接维 F1,ppm,物理宽度)
+    gaussian_roi_f2_ppm: 0.25   # 高斯拟合 ROI 半径(直接维 F2,ppm,物理宽度)
+
 smile:
   nthread: 2                   # SMILE 线程数(默认 2;上限=机器核数-2,≤3核只能 1;0 同样回退安全默认 2)

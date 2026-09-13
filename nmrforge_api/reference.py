@@ -419,13 +419,18 @@ def ensure_reference_peaks(
     sigma_multiplier: float | None = None,
     max_peaks: int = 0,
     force: bool = False,
+    localization_method: str = "parabolic",
+    gaussian_roi_f1_ppm: float | None = None,
+    gaussian_roi_f2_ppm: float | None = None,
 ) -> ReferenceSpectrum:
     """保证参考峰表存在:**默认由 NMRForge 在参考谱上自动选峰**。
 
     - 已有峰表且文件在 → 直接复用(除非 ``force``);
     - 否则调用 ``pick_reference_peaks()`` 选峰并冻结到
       ``study/reference/<key>/reference.list``;
-    - ``max_peaks > 0`` 时按强度保留前 N 个峰(用于剔除明显弱峰/噪声峰)。
+    - ``max_peaks > 0`` 时按强度保留前 N 个峰(用于剔除明显弱峰/噪声峰);
+    - ``localization_method``(2026-09-13):``parabolic``(默认)或
+      ``gaussian``(2D 高斯拟合,仅 2D),写入 ``peak_params['localization']``。
     """
     ref = reference or load_reference(session)
     if ref is None:
@@ -439,6 +444,9 @@ def ensure_reference_peaks(
         sigma_multiplier=sigma_multiplier,
         out_path=target,
         details=details,
+        localization_method=localization_method,
+        gaussian_roi_f1_ppm=gaussian_roi_f1_ppm,
+        gaussian_roi_f2_ppm=gaussian_roi_f2_ppm,
     )
     if max_peaks and max_peaks > 0:
         _keep_top_peaks(target, int(max_peaks))
@@ -452,6 +460,8 @@ def ensure_reference_peaks(
             "max_peaks": int(max_peaks),
             # 选峰边距的物理宽度↔点数换算(用户方案 A):跨分辨率复算用
             "detection": details.get("detection") or {},
+            "localization_method": str(localization_method),
+            "localization": details.get("localization") or {},
         },
     )
     # 选峰会登记一条 pick_peaks 运行记录:同样要落盘(跨进程可见)

@@ -122,6 +122,9 @@ def cmd_peaks(args: argparse.Namespace) -> int:
             sigma_multiplier=args.sigma,
             max_peaks=args.max_peaks,
             force=args.force,
+            localization_method=args.localization,
+            gaussian_roi_f1_ppm=args.gaussian_roi_f1_ppm,
+            gaussian_roi_f2_ppm=args.gaussian_roi_f2_ppm,
         )
     peaks = reference_peaks(session, reference)
     _print(
@@ -170,6 +173,9 @@ def cmd_sweep(args: argparse.Namespace) -> int:
         reference=reference,
         window_pts=args.window_pts,
         window_ppm=args.window_ppm,
+        refine=args.refine,
+        roi_f1_ppm=args.gaussian_roi_f1_ppm,
+        roi_f2_ppm=args.gaussian_roi_f2_ppm,
         resume=not args.no_resume,
         progress=print,
     )
@@ -270,6 +276,20 @@ def build_parser() -> argparse.ArgumentParser:
     peaks.add_argument("--max-peaks", type=int, default=0, help="只保留强度前 N 个峰(0=全部)")
     peaks.add_argument("--force", action="store_true", help="丢弃已有峰表重新选峰")
     peaks.add_argument(
+        "--localization",
+        choices=("parabolic", "gaussian"),
+        default="parabolic",
+        help="峰定位方法:parabolic(默认)/ gaussian(2D 高斯拟合,仅 2D)",
+    )
+    peaks.add_argument(
+        "--gaussian-roi-f1-ppm", type=float, default=None,
+        help="高斯 ROI 半径(间接维 F1,ppm;缺省读 config)",
+    )
+    peaks.add_argument(
+        "--gaussian-roi-f2-ppm", type=float, default=None,
+        help="高斯 ROI 半径(直接维 F2,ppm;缺省读 config)",
+    )
+    peaks.add_argument(
         "--peak-table",
         default="",
         help="可选:外部峰表(.list 或 peak_id,H_ppm,N_ppm CSV);缺省由软件自动选峰",
@@ -300,6 +320,20 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=None,
         help="峰位搜索窗口半径(ppm;缺省=1.5×该轴核素线宽折算 ppm)",
+    )
+    sweep.add_argument(
+        "--refine",
+        choices=("parabolic", "none", "gaussian"),
+        default="parabolic",
+        help="峰位精修:parabolic(默认)/ none(整数格)/ gaussian(仅 2D)",
+    )
+    sweep.add_argument(
+        "--gaussian-roi-f1-ppm", type=float, default=None,
+        help="高斯 ROI 半径(间接维 F1,ppm;缺省读 config)",
+    )
+    sweep.add_argument(
+        "--gaussian-roi-f2-ppm", type=float, default=None,
+        help="高斯 ROI 半径(直接维 F2,ppm;缺省读 config)",
     )
     sweep.add_argument("--csp-n-weight", type=float, default=DEFAULT_CSP_N_WEIGHT)
     sweep.add_argument("--no-resume", action="store_true", help="不跳过已完成组合")

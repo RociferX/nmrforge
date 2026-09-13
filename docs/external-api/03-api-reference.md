@@ -27,7 +27,12 @@ run_parameter_study(
     window_ppm=None,           # 峰位搜索窗口半径(ppm;缺省按物理宽度自动)
     window_pts=None,           # 显式点数逃生口(不推荐:跨分辨率不可比)
     sign="abs",                # "abs" / "positive" / "negative"
-    refine="parabolic",        # "parabolic" / "none"
+    refine="parabolic",        # "parabolic" / "none" / "gaussian"(仅 2D)
+    roi_f1_ppm=None,           # 高斯 ROI 半径(F1,ppm;缺省读 config)
+    roi_f2_ppm=None,           # 高斯 ROI 半径(F2,ppm;缺省读 config)
+    localization_method="parabolic",  # 参考峰表定位方法(parabolic / gaussian)
+    gaussian_roi_f1_ppm=None,  # 参考峰表高斯 ROI 半径(F1,ppm)
+    gaussian_roi_f2_ppm=None,  # 参考峰表高斯 ROI 半径(F2,ppm)
     csp_n_weight=0.2,          # Δδ 公式里 15N 的权重
     resume=True,               # 跳过已成功的组合
     backend=None,              # 注入自定义后端(测试/特殊环境)
@@ -91,7 +96,7 @@ run_parameter_study(
 (`pick_reference_peaks`),冻结到 `study/reference/<key>/reference.list`,并把
 `peak_source="auto"`、峰表 SHA-256、峰数、选峰参数写进 `reference.json`。
 
-### `pick_reference_peaks(session, *, sigma_multiplier=None, out_path=None) -> Path`
+### `pick_reference_peaks(session, *, sigma_multiplier=None, out_path=None, details=None, localization_method="parabolic", gaussian_roi_f1_ppm=None, gaussian_roi_f2_ppm=None) -> Path`
 
 直接调用 NMRForge 选峰(`workflow.pick_peaks`),返回峰表路径;`out_path` 给定时
 额外复制一份。默认阈值 35σ。
@@ -163,6 +168,7 @@ run_sweep(
     session, plan,
     *, reference=None, peaks=None,
     window_ppm=None, window_pts=None, sign="abs", refine="parabolic",
+    roi_f1_ppm=None, roi_f2_ppm=None,
     resume=True, stop_on_error=False, progress=None, on_run=None,
 )
 ```
@@ -204,7 +210,13 @@ script_name="sNNNN.com", out_file="sNNNN.ft2")` → 把脚本与谱复制进
 
 ## 3.5 峰位测量
 
-### `measure_peak_positions(spectrum_path, peaks, *, window_ppm=None, window_pts=None, axes=None, sign="abs", refine="parabolic", nuclei=None) -> list[PeakMeasurement]`
+### `measure_peak_positions(spectrum_path, peaks, *, window_ppm=None, window_pts=None, axes=None, sign="abs", refine="parabolic", nuclei=None, roi_f1_ppm=None, roi_f2_ppm=None) -> list[PeakMeasurement]`
+
+``refine``:``"parabolic"``(默认,3 点抛物线)| ``"none"``(整数格)|
+``"gaussian"``(**2D 高斯拟合,仅 2D**)。高斯 ROI 是该轴的物理半径(ppm),
+缺省读 config ``peaks.localization``;拟合失败/撞边界时**回退抛物线**,并逐峰
+记录 ``requested_method``/``actual_method``/``fallback_reason`` 与高斯 QC
+(见 07 节)。同一张谱只换 ``refine`` 即可比较两种定位算法的峰位差。
 
 在一张谱上追踪给定峰表(算法与质量标记见
 [07-methods-and-metrics.md](07-methods-and-metrics.md))。可独立使用——例如只借
@@ -212,7 +224,7 @@ script_name="sNNNN.com", out_file="sNNNN.ft2")` → 把脚本与谱复制进
 
 `PeakMeasurement`:`peak_id`、`assignment`、`reference`(核→ppm)、`positions`、
 `deltas`(相对参考)、`intensity`、`found`、`window_edge`、`boundary`、
-`out_of_range`。
+`out_of_range`、``localization``(实际用的定位方法与高斯 QC;空=仅参考值)。
 
 搜索窗口缺省按**物理宽度**定义(1.5×该轴核素线宽折算 ppm),按该谱的点距
 换算成点数——零填零只改点距,不改变窗口覆盖的 ppm 宽度。`window_ppm` 显式给

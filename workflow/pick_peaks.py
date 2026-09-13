@@ -23,6 +23,15 @@ from typing import Any
 import numpy as np
 
 from core.peaks import axis_units
+from core.peaks.localize import (
+    DEFAULT_LOCALIZATION_METHOD,
+    load_localization_defaults,
+    localization_label,
+    localize_peak,
+    normalize_localization_method,
+    summarize_localization,
+    write_localization_records,
+)
 from core.peaks.peak_table import save_peaks
 from core.project import ProjectManager
 from core.qc import peak_detection
@@ -322,6 +331,21 @@ def _write_peaks_list(
     return path
 
 
+def _localization_records(
+    peaks: list[peak_detection.Peak],
+) -> list[dict[str, Any]]:
+    """峰表行 → 逐峰定位诊断(Poky .list 的 JSON 附件内容)。"""
+    rows: list[dict[str, Any]] = []
+    for index, peak in enumerate(peaks, start=1):
+        row: dict[str, Any] = {
+            "Peak_ID": int(index),
+            "label": str(getattr(peak, "label", "") or ""),
+        }
+        row.update(dict(peak.localization or {}))
+        rows.append(row)
+    return rows
+
+
 def _metadata_experiment_type(
     manager: ProjectManager, exp_id: str, data_id: str
 ) -> tuple[str, float]:
@@ -505,6 +529,9 @@ def pick_peaks(
     ref_name: str = "",
     edge_margin_ppm: float | None = None,
     edge_margin_points: int | None = None,
+    localization_method: str = DEFAULT_LOCALIZATION_METHOD,
+    gaussian_roi_f1_ppm: float | None = None,
+    gaussian_roi_f2_ppm: float | None = None,
 ) -> dict[str, Any]:
     """峰挑选:检测谱峰并写 Poky .list,登记 WorkflowRun。
 
@@ -516,8 +543,16 @@ def pick_peaks(
     ppm,或用默认(3×该轴核素线宽折算 ppm);运行时按当前谱点距换算成点数,
     因此零填零不会改变边距覆盖的 ppm 宽度(用户方案 A)。
     ``edge_margin_points`` 为显式点数逃生口(不推荐,跨分辨率不可比)。
-    返回 {"status", "peak_path", "peak_count", "detection", "logs"};
-    ``detection`` 记录边距来源、ppm/点数、各轴点距(供留档复算)。
+    峰定位 ``localization_method``(2026-09-13,用户需求):
+    ``"parabolic"``(默认,既有 3 点抛物线,行为完全不变)或 ``"gaussian"``
+(2D 高斯拟合,**仅 2D**;1D/3D 直接报错,不静默换算法)。高斯 ROI 用物理
+宽度定义(``gaussian_roi_f1_ppm``/``gaussian_roi_f2_ppm``,缺省读 config
+``peaks.localization``),按当前谱点距换算点数;拟合失败/撞边界回退抛物线,
+``requested_method``/``actual_method``/``fallback_reason`` 全部写进峰表附件
+``<峰表>.localization.json`` 与 ``run.params['localization']``。
+    返回 {"status", "peak_path", "peak_count", "detection",
+    "localization", "logs"};``detection`` 记录边距来源、ppm/点数、各轴
+    点距(供留档复算)。
     """
     data_entry = manager.data(exp_id, data_id)
     spectrum_path = data_entry.spectrum_path
@@ -635,6 +670,42 @@ def pick_peaks(
                 )
             else:
                 peaks = peak_detection.keep_dominant(peaks)
+        # 2026-09-13(用户需求):峰定位 = 检测之后的亚格点精修。抛物线与 2D
+        # 高斯对**同一批 candidate** 独立运行(便于比较两种算法的峰位差);
+        # 高斯仅 2D,ROI 按物理宽度(ppm)换算点数,失败回退抛物线并留原因。
+        method = normalize_localization_method(localization_method)
+        loc_defaults = load_localization_defaults()
+        roi_f1_ppm = (
+            float(gaussian_roi_f1_ppm)
+            if gaussian_roi_f1_ppm is not None
+            else float(loc_defaults["gaussian_roi_f1_ppm"])
+        )
+        roi_f2_ppm = (
+            float(gaussian_roi_f2_ppm)
+            if gaussian_roi_f2_ppm is not None
+            else float(loc_defaults["gaussian_roi_f2_ppm"])
+        )
+        logical_axes = _logical_axis_indices(dict(dic), arr.ndim)
+        for peak in peaks:
+            index = [int(round(float(v))) for v in peak.position]
+            loc = localize_peak(
+                arr,
+                index,
+                method=method,
+                sign=int(peak.sign),
+                ppm_axes=axes_ppm,
+                roi_f1_ppm=roi_f1_ppm,
+                roi_f2_ppm=roi_f2_ppm,
+                logical_axes=logical_axes,
+            )
+            peak.position = tuple(loc.position)
+            peak.localization = loc.to_dict(axes_ppm)
+        localization_summary = summarize_localization(
+            _localization_records(peaks),
+            method=method,
+            roi_f1_ppm=(roi_f1_ppm if method == "gaussian" else None),
+            roi_f2_ppm=(roi_f2_ppm if method == "gaussian" else None),
+        )
         # 0.2.199-补29dl/补29fw(用户):参考峰表约束。参考峰文件足够多时
         # (>=5)先整体平移对齐(不同采集间可能有偏移,2026-09-04 用户裁定),
         # 再剔除参考中找不到对应峰的峰;参考峰很少时整体平移不可靠,
@@ -783,6 +854,15 @@ def pick_peaks(
         peak_path = _write_peaks_list(
             manager, exp_id, data_id, arr, dict(dic), peaks,
         )
+        # 逐峰定位诊断写峰表附件(JSON;Poky .list 格式不变)+ 运行参数留档
+        records_path = write_localization_records(
+            peak_path,
+            _localization_records(peaks),
+            meta=localization_summary,
+        )
+        localization_summary["records_path"] = str(records_path)
+        localization_summary["peak_table_path"] = str(peak_path)
+        run.params["localization"] = localization_summary
     except Exception as exc:  # noqa: BLE001 - 统一失败登记
         manager.finish_run(run.run_id, "failed", message=str(exc))
         raise PickPeaksError(f"峰挑选失败: {exc}") from exc
@@ -810,6 +890,30 @@ def pick_peaks(
         f"(点距 {detection['axes'][0]['ppm_per_point']:.4f} ppm/点,"
         f"来源 {detection['edge_margin_source']})"
     )
+    if method == "gaussian":
+        logs.append(
+            f"峰定位: {localization_label(method)}(ROI F1 ±{roi_f1_ppm:g} ppm / "
+            f"F2 ±{roi_f2_ppm:g} ppm;成功 "
+            f"{localization_summary['gaussian_fit_success_count']}、回退 "
+            f"{localization_summary['gaussian_fallback_count']})"
+            + (
+                "回退原因: "
+                + ", ".join(
+                    f"{key}×{value}"
+                    for key, value in sorted(
+                        localization_summary["fallback_reasons"].items(),
+                        key=lambda item: -item[1],
+                    )[:3]
+                )
+                if localization_summary["fallback_reasons"]
+                else ""
+            )
+            + f"(逐峰诊断 {localization_summary['records_path']})"
+        )
+    else:
+        logs.append(
+            f"峰定位: {localization_label(method)}(3 点抛物线顶点,与既有算法一致)"
+        )
     if evidence_log:
         logs.append(evidence_log)
     if ref_log:
@@ -819,6 +923,7 @@ def pick_peaks(
         "peak_path": str(peak_path),
         "peak_count": len(peaks),
         "detection": detection,
+        "localization": localization_summary,
         "logs": logs,
     }
 

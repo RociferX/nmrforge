@@ -44,6 +44,38 @@
 | `boundary=true` | 极值贴谱边界 | 峰在谱边缘,可能被截断 |
 | `out_of_range=true` | 参考峰位落在谱范围外 | 峰表与处理窗口不一致(如提取窗口变了) |
 
+### 可选:2D 高斯定位(与抛物线并列)
+
+`refine="gaussian"`(仅 2D)在候选峰附近拟合不旋转、轴向可分离的 2D 高斯:
+
+```text
+I(x, y) = B + A·exp( -(x-x0)²/(2σx²) - (y-y0)²/(2σy²) )
+x = F2(直接), y = F1(间接);参数 (A, x0, y0, σx, σy, B)
+初始中心 = 抛物线结果;scipy.optimize.least_squares(bounds=…)
+FWHM = 2·sqrt(2 ln 2)·σ
+```
+
+- **ROI 按物理半径(ppm)**给出(缺省 F1 ±1.5 ppm / F2 ±0.25 ppm,config
+  `peaks.localization` 可改),运行时按当前谱点距换算点数 —— 与选峰边距/测量
+  窗口同口径,填零不改变 ROI 覆盖的 ppm 范围;
+- bounds:中心不出 ROI、σ∈[0.5 点, ROI 半径]、幅度 ≥0(负峰先按符号翻正再
+  拟合,幅度按原单位返回)、基线 ∈[ROI 最小值 − 动态范围, ROI 最大值];
+- 失败判定(全部带稳定 `fallback_reason`):`roi_too_small` /
+  `insufficient_data` / `non_finite` / `flat_region` / `no_peak` /
+  `optimizer_error` / `not_converged` / `center_at_boundary` /
+  `sigma_at_bound` / `poor_fit`;
+- 失败时**回退抛物线**并同时记录 `requested_method=gaussian`、
+  `actual_method=parabolic`、`gaussian_fit_success=false`;
+- 输出字段(`PeakMeasurement.localization` / 峰表附件):`fit_success`、
+  `center_f1`/`center_f2`(ppm)、`amplitude`、`sigma_f1`/`sigma_f2`(ppm)、
+  `fwhm_f1`/`fwhm_f2`、`baseline`、`fit_rmse`、`boundary_hit`、
+  `fit_failure_reason`、点数口径的 `sigma_points_f1`/`f2`。
+
+写论文时的口径建议:抛物线是**参考方法**(与既有选峰/测量一致);报告高斯结果时
+注明 ROI 半径、bounds 策略、回退计数(`measurement.json` 的
+`localization.actual_method_counts` 与 `fallback_reasons`)。两种方法对**同一批
+candidate**独立运行,可直接给出「算法带来的峰位差」分布。
+
 ## 7.3 不确定度指标
 
 对每个峰、每个核 n:

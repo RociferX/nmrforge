@@ -325,6 +325,8 @@ open_study / add_dataset / dataset_info
 build_reference / load_reference / set_reference_peaks / ensure_reference_peaks
 pick_reference_peaks / read_reference_peaks / measure_peak_positions /
 window_points_by_axis
+峰定位方法:localization_method="parabolic"|"gaussian"(仅 2D)、
+refine="parabolic"|"none"|"gaussian"、roi_f1_ppm / roi_f2_ppm
 expand_grid / plan_sweep / run_sweep / load_plan / load_runs
 position_uncertainty / uncertainty_summary / write_records
 ```
@@ -361,7 +363,10 @@ CLI:`python -m nmrforge_api {init,reference,peaks,sweep,report,status}`。
 2. 扫描候选谱只写 `study/runs/`,不替换 `spectra/` 活动谱;
 3. 同一数据集内 fid 只转换一次;组合间只允许被扫参数不同(相位锁定);
 4. 峰位测量与选峰共用轴映射口径(`workflow.pick_peaks.read_spectrum_axes`),
-   且窗口/边距等物理量按 `core.peaks.axis_units` 换算点数后留档;
+   且窗口/边距/高斯 ROI 等物理量按 `core.peaks.axis_units` 换算点数后留档;
+4b. 峰定位方法可选 `parabolic`(默认,行为不变)/ `gaussian`(2D 高斯,
+    **仅 2D**,非 2D 报错不降级);高斯失败必须回退抛物线并记录
+    `requested_method`/`actual_method`/`fallback_reason`,禁止静默;
 5. 每条记录必须带脚本/谱哈希与版本表;
 6. 单组合失败不中断整轮,状态与原因必须落盘。
 
