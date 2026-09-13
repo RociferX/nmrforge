@@ -81,49 +81,66 @@ def smile_scan_sign_mode(experiment: Any) -> str:
 
 
 def smile_scan_edge_margin(
-    experiment: Any | None = None, n_points: int | None = None
+    experiment: Any | None = None,
+    n_points: int | None = None,
+    *,
+    axis_ppm: Any | None = None,
+    nucleus: str = "",
+    obs_mhz: float = 0.0,
 ) -> int:
     """候选评估排除上下边缘轴峰 → 点数(**与选峰同一换算口径**)。
 
     2026-09-13(用户方案 A):边距是物理宽度(默认 3×该轴核素线宽折算 ppm),
     必须按当前候选谱的点距换算成点数;固定点数会随零填零改变覆盖宽度。
-    给了 ``experiment``(取间接维核素与观测频率)且 ``n_points``(候选谱第 0 轴
-    点数)时按物理宽度换算;否则回退旧点数常量(workflow.pick_peaks)。
+    优先使用候选谱头解析出的 ``axis_ppm``/``nucleus``/``obs_mhz``；这能
+    正确覆盖 EXT 裁剪、填零和轴重排。只有没有实际谱轴时才用
+    ``experiment`` + ``n_points`` 估算；再失败则回退旧点数常量。
     """
     from workflow.pick_peaks import PICK_EDGE_MARGIN
 
-    if experiment is None or not n_points or int(n_points) < 2:
-        return int(PICK_EDGE_MARGIN)
     try:
+        from backend.config import load_processing_defaults
         from core.peaks import axis_units
 
-        nucleus = ""
-        obs = 0.0
+        try:
+            linewidths = load_processing_defaults().get("linewidth_hz") or {}
+        except Exception:  # noqa: BLE001 - 配置不可读用内置默认
+            linewidths = {}
+        actual_axis = np.asarray(axis_ppm, dtype=float) if axis_ppm is not None else None
+        if actual_axis is not None and actual_axis.size >= 2:
+            width_ppm = axis_units.edge_margin_ppm(
+                nucleus,
+                float(obs_mhz or 0.0),
+                linewidth_hz_by_nucleus=linewidths,
+            )
+            points = axis_units.points_for_ppm(actual_axis, width_ppm)
+            if points > 0:
+                return int(points)
+        if experiment is None or not n_points or int(n_points) < 2:
+            return int(PICK_EDGE_MARGIN)
+        estimated_nucleus = ""
+        estimated_obs = 0.0
         for dim in getattr(experiment, "dimensions", None) or []:
             if str(getattr(dim, "logical_axis", "")) == "F1":
-                nucleus = str(getattr(dim, "nucleus", "") or "")
-                obs = float(getattr(dim, "sf", 0.0) or 0.0)
+                estimated_nucleus = str(getattr(dim, "nucleus", "") or "")
+                estimated_obs = float(getattr(dim, "sf", 0.0) or 0.0)
                 break
         sw_hz = 0.0
         for dim in getattr(experiment, "dimensions", None) or []:
             if str(getattr(dim, "logical_axis", "")) == "F1":
                 sw_hz = float(getattr(dim, "sw", 0.0) or 0.0)
                 break
-        if obs <= 0 or sw_hz <= 0:
+        if estimated_obs <= 0 or sw_hz <= 0:
             return int(PICK_EDGE_MARGIN)
-        axis_ppm = sw_hz / (int(n_points) * obs) * (
-            int(n_points) / 2 - __import__("numpy").arange(int(n_points))
+        estimated_axis = sw_hz / (int(n_points) * estimated_obs) * (
+            int(n_points) / 2 - np.arange(int(n_points))
         )
-        try:
-            from backend.config import load_processing_defaults
-
-            linewidths = load_processing_defaults().get("linewidth_hz") or {}
-        except Exception:  # noqa: BLE001
-            linewidths = {}
         width_ppm = axis_units.edge_margin_ppm(
-            nucleus, obs, linewidth_hz_by_nucleus=linewidths
+            estimated_nucleus,
+            estimated_obs,
+            linewidth_hz_by_nucleus=linewidths,
         )
-        points = axis_units.points_for_ppm(axis_ppm, width_ppm)
+        points = axis_units.points_for_ppm(estimated_axis, width_ppm)
         return int(points) if points > 0 else int(PICK_EDGE_MARGIN)
     except Exception:  # noqa: BLE001 - 换算失败回退点数常量
         return int(PICK_EDGE_MARGIN)
@@ -206,13 +223,6 @@ def default_smile_grid(
         for nsigma in nsigma_values
         for thresh in thresh_values
     ]
-
-
-def _read_spectrum(path: str):
-    """读取终谱(dic, data)。"""
-    import nmrglue as ng
-
-    return ng.pipe.read(str(path))
 
 
 def _snap_key(position: tuple[float, ...], tol_pts: float) -> tuple[float, ...]:
@@ -298,14 +308,18 @@ def scan_smile_parameters(
 
     def _evaluate(path: str) -> dict[str, Any]:
         """候选谱评估:峰 + 质量分(此刻谱还在,评完即被删)。"""
-        _dic, data = _read_spectrum(path)
-        arr = np.asarray(data)
-        if np.iscomplexobj(arr):
-            arr = arr.real
+        from workflow.pick_peaks import read_spectrum_axes
+
+        spectrum = read_spectrum_axes(path)
+        arr = spectrum.data
         # 低阈值 + 同源符号模式 + 排除轴峰(0.2.199-补29hz-修16);
         # 不跟「峰挑选」步骤的阈值(默认 35σ)——那一步是出峰表,不是评候选。
         edge_margin_points = smile_scan_edge_margin(
-            experiment, int(arr.shape[0])
+            experiment,
+            int(arr.shape[0]),
+            axis_ppm=spectrum.ppm[0],
+            nucleus=(spectrum.nuclei[0] if spectrum.nuclei else ""),
+            obs_mhz=(spectrum.obs[0] if spectrum.obs else 0.0),
         )
         edge_margin_seen.append(int(edge_margin_points))
         peaks = evaluate_candidate_peaks(
@@ -328,17 +342,6 @@ def scan_smile_parameters(
             ],
         }
 
-    # 口径写入日志,便于核对(与峰挑选步骤的阈值无关)
-    _criteria_log = (
-        f"候选评估口径:阈值 {SMILE_SCAN_SIGMA:g}σ(独立于选峰步骤)、"
-        f"符号模式 {sign_mode}、排除轴峰 "
-        + (
-            f"{min(edge_margin_seen)}–{max(edge_margin_seen)} 点"
-            "(按各候选谱点数换算,物理宽度一致)"
-            if edge_margin_seen
-            else "(未评估,沿用点数常量)"
-        )
-    )
     scan = backend.smile_scan(
         experiment,
         base,
@@ -350,6 +353,18 @@ def scan_smile_parameters(
     )
     if not scan.get("success"):
         raise RuntimeError(str(scan.get("message", "SMILE 扫描失败")))
+    # 必须在 backend.smile_scan 调用 _evaluate **之后**生成，否则列表恒为空、
+    # 日志会把实际已评估误报为“未评估”。
+    _criteria_log = (
+        f"候选评估口径:阈值 {SMILE_SCAN_SIGMA:g}σ(独立于选峰步骤)、"
+        f"符号模式 {sign_mode}、排除轴峰 "
+        + (
+            f"{min(edge_margin_seen)}–{max(edge_margin_seen)} 点"
+            "(按候选谱实际轴换算,物理宽度一致)"
+            if edge_margin_seen
+            else "(后端未返回可评估候选谱)"
+        )
+    )
     scan["logs"] = [_criteria_log] + list(scan.get("logs") or [])
     candidates = list(scan.get("candidates") or [])
     n_combos = len(candidates) or 1

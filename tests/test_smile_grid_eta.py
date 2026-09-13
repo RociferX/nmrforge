@@ -252,6 +252,70 @@ def test_smile_scan_edge_margin_matches_pick_peaks() -> None:
     assert smile_scan_edge_margin() == int(PICK_EDGE_MARGIN)
 
 
+def test_smile_scan_uses_candidate_axis_and_reports_evaluated_margin(
+    tmp_path, monkeypatch
+) -> None:
+    """裁剪/填零后的实际谱轴决定边距，日志必须在评估后写实际点数。"""
+    from types import SimpleNamespace
+
+    import numpy as np
+
+    from workflow.smile_optimize import smile_scan_edge_margin
+
+    axis0 = np.linspace(4.0, -3.75, 32)  # 0.25 ppm/点
+    spectrum = SimpleNamespace(
+        data=np.zeros((32, 64), dtype=float),
+        ppm=[axis0, np.linspace(10.0, 0.0, 64)],
+        nuclei=["15N", "1H"],
+        obs=[60.0, 600.0],
+    )
+    monkeypatch.setattr(
+        "workflow.pick_peaks.read_spectrum_axes", lambda _path: spectrum
+    )
+    monkeypatch.setattr(
+        "workflow.smile_optimize.evaluate_candidate_peaks",
+        lambda *_args, **_kwargs: [],
+    )
+
+    class _EvaluatingBackend:
+        def smile_scan(
+            self, experiment, params, combos, *, work_dir, evaluate=None,
+            progress=None, delete_spectra=True, holdout_ratio=0.0,
+        ):
+            assert evaluate is not None
+            metrics = evaluate("candidate.ft2")
+            return {
+                "success": True,
+                "message": "ok",
+                "logs": [],
+                "candidates": [
+                    {
+                        "index": 1,
+                        "params": dict(combos[0]),
+                        "metrics": metrics,
+                        "script": "# candidate\n",
+                        "ok": True,
+                    }
+                ],
+                "scan_dir": str(work_dir),
+            }
+
+    exp = read_dataset(BRUKER / "nus_2d")
+    expected = smile_scan_edge_margin(
+        axis_ppm=axis0, nucleus="15N", obs_mhz=60.0
+    )
+    assert expected == 3
+    result = scan_smile_parameters(
+        exp,
+        _EvaluatingBackend(),
+        {},
+        scan_dir=tmp_path / "actual-axis",
+        grid=[{"nsigma": 5.0, "thresh": 0.95}],
+    )
+    assert f"{expected}–{expected} 点" in result["logs"][0]
+    assert "未评估" not in result["logs"][0]
+
+
 def test_rank_mode_selects_run_mode(tmp_path) -> None:
     """修23:排序口径决定运行方式(净真峰→全采样 holdout=0;一致性→留出)。"""
     seen: list[float] = []

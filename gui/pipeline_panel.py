@@ -1220,14 +1220,13 @@ class PipelinePanel(QWidget):
 
     def _peaks_ui_state(self, **extra: object) -> dict:
         """peaks 分区 UI 状态(阈值 + 峰定位方法一起写,避免互相覆盖)。"""
-        row = self._rows.get("peaks")
         key = (self._current_exp_id, self._current_data_id)
         state: dict = {
             "threshold": float(self._threshold_by_data.get(key, 35.0)),
             "custom": bool(self._threshold_custom_by_data.get(key, False)),
-            "localization_method": (
-                row.get_localization_method() if row is not None else "parabolic"
-            ),
+            # 切换数据时 threshold_spin.setValue 会先发 valueChanged；此处必须
+            # 按当前数据读取缓存/持久化值，不能读取控件里上一数据的旧值。
+            "localization_method": self._localization_for(*key),
         }
         state.update(extra)
         return state

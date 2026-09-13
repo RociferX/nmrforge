@@ -541,8 +541,14 @@ class ProcessingController:
         ndim = 3 if peaks and "F1_shift" in peaks[0] else 2
         peaks_dir = self._manager.data_dir(exp_id, data_id, "peaks")
         peaks_dir.mkdir(parents=True, exist_ok=True)
+        target_path = peaks_dir / f"{exp_id}-{data_id}.list"
+        # 手工增删/移动/导入峰会让自动定位附件的行序与坐标失效。先删派生
+        # 诊断，再覆盖主峰表；若附件被占用无法删除则中止，避免留下伪匹配。
+        from core.peaks.localize import localization_records_path
+
+        localization_records_path(target_path).unlink(missing_ok=True)
         list_path = export_peaks_poky(
-            peaks_dir / f"{exp_id}-{data_id}.list", peaks,
+            target_path, peaks,
             ndim=ndim, nuclei=nuclei,
         )
         if data_id:

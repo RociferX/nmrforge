@@ -151,6 +151,18 @@ def test_save_peaks_manual_writes_list_and_registers_run(
     """人工峰表保存:写 data/peaks Poky .list + 登记 manual_peaks 运行。"""
     manager = _manager_with_experiment(tmp_path)
     controller = ProcessingController(manager)
+    from core.peaks.localize import (
+        localization_records_path,
+        write_localization_records,
+    )
+
+    target = manager.data_dir("exp_001", "d_001", "peaks") / "exp_001-d_001.list"
+    sidecar = write_localization_records(
+        target,
+        [{"Peak_ID": 1, "actual_method": "gaussian"}],
+    )
+    assert sidecar == localization_records_path(target)
+    assert sidecar.is_file()
     peaks = [
         {
             "Peak_ID": 1,
@@ -174,6 +186,7 @@ def test_save_peaks_manual_writes_list_and_registers_run(
     )
     assert Path(list_path).suffix == ".list"
     assert Path(list_path).is_file()
+    assert not sidecar.exists()  # 手工覆盖后旧自动定位诊断必须失效
     content = Path(list_path).read_text(encoding="utf-8")
     assert "Assignment w1 w2" in content
     assert "G1" in content and "8.0" in content and "118.0" in content

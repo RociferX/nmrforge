@@ -117,3 +117,38 @@ def test_localization_restored_from_ui_state_for_2d(
     panel.set_selection("data", exp_id, data_id)
     assert panel._rows["peaks"].get_localization_method() == "gaussian"
     panel.close()
+
+
+def test_switching_data_does_not_copy_previous_localization(
+    tmp_path: Path, qapp: QApplication
+) -> None:
+    """切换时阈值信号不能把上一数据的定位方法覆盖到当前数据。"""
+    from gui.per_data_records import load_ui_state, update_ui_state
+
+    manager = ProjectManager.create_project(tmp_path / "switch", "demo")
+    entry = manager.create_experiment("HSQC")
+    first = manager.import_data(entry.id, "/fake/bruker/1")
+    second = manager.import_data(entry.id, "/fake/bruker/2")
+    update_ui_state(
+        manager,
+        entry.id,
+        first.id,
+        "peaks",
+        {"threshold": 20.0, "custom": True, "localization_method": "gaussian"},
+    )
+    update_ui_state(
+        manager,
+        entry.id,
+        second.id,
+        "peaks",
+        {"threshold": 25.0, "custom": True, "localization_method": "parabolic"},
+    )
+
+    panel = PipelinePanel(manager, _FakeController(2))
+    panel.set_selection("data", entry.id, first.id)
+    assert panel._rows["peaks"].get_localization_method() == "gaussian"
+    panel.set_selection("data", entry.id, second.id)
+    assert panel._rows["peaks"].get_localization_method() == "parabolic"
+    state = load_ui_state(manager, entry.id, second.id).get("peaks") or {}
+    assert state["localization_method"] == "parabolic"
+    panel.close()
