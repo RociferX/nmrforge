@@ -44,6 +44,7 @@ from nmrforge_api.peaks import (
     measure_peak_positions,
     pick_reference_peaks,
     read_reference_peaks,
+    window_points_by_axis,
 )
 from nmrforge_api.records import write_records
 from nmrforge_api.reference import (
@@ -125,5 +126,6 @@ __all__ = [
     "set_reference_peaks",
     "uncertainty_summary",
     "write_combo_table",
+    "window_points_by_axis",
     "write_records",
 ]

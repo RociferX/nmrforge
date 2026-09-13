@@ -24,7 +24,8 @@ run_parameter_study(
     sigma_multiplier=None,     # 自动选峰阈值(σ 倍数;默认 35)
     max_peaks=0,               # >0 时只保留强度前 N 个峰
     max_runs=256,              # 组合数上限(超出直接报错,不静默截断)
-    window_pts=3,              # 峰位搜索窗口(数据点)
+    window_ppm=None,           # 峰位搜索窗口半径(ppm;缺省按物理宽度自动)
+    window_pts=None,           # 显式点数逃生口(不推荐:跨分辨率不可比)
     sign="abs",                # "abs" / "positive" / "negative"
     refine="parabolic",        # "parabolic" / "none"
     csp_n_weight=0.2,          # Δδ 公式里 15N 的权重
@@ -161,7 +162,7 @@ run_parameter_study(
 run_sweep(
     session, plan,
     *, reference=None, peaks=None,
-    window_pts=3, sign="abs", refine="parabolic",
+    window_ppm=None, window_pts=None, sign="abs", refine="parabolic",
     resume=True, stop_on_error=False, progress=None, on_run=None,
 )
 ```
@@ -172,14 +173,19 @@ script_name="sNNNN.com", out_file="sNNNN.ft2")` → 把脚本与谱复制进
 
 - 单组合失败:状态 `failed` + 原因,继续下一组合(`stop_on_error=True` 改为中断);
 - `resume=True`:已成功且有谱的组合直接跳过(断点续跑);
-- `on_run` 回调在每个组合结束时调用(便于增量上报)。
+- `on_run` 回调在每个组合结束时调用(便于增量上报);
+- 峰位搜索窗口缺省按**物理宽度**定义(1.5×该轴核素线宽折算 ppm),逐组合按
+  该候选谱的点距换算成点数:零填零只改点距、不改变窗口覆盖的 ppm 宽度。换算
+  结果(逐轴点数/ppm/点距/来源)写进 `run.json` 的 `window` 字段;`window_ppm`
+  显式给物理半径,`window_pts` 是点数逃生口(不推荐,跨分辨率不可比)。
 
 2D NUS 数据自动改走 `reconstruct_nus()`(候选输出隔离);**3D NUS** 会抛
 `SweepError`(见第 9 节)。
 
 `SweepRun`:`run_id`、`index`、`combo`、`params`、`status`、`message`、`run_dir`、
 `script_path`/`script_sha256`、`spectrum_path`/`spectrum_sha256`、`wall_time_s`、
-`phase_locked`、**`phase`(本次组合实际使用的各轴 PS)**、`logs_tail`、`measurements`。
+`phase_locked`、**`phase`(本次组合实际使用的各轴 PS)**、**`window`(本次组合的
+窗口换算:逐轴点数/ppm/点距/来源)**、`logs_tail`、`measurements`。
 
 ### 组合表与设计工具(接口不生成设计)
 
@@ -198,7 +204,7 @@ script_name="sNNNN.com", out_file="sNNNN.ft2")` → 把脚本与谱复制进
 
 ## 3.5 峰位测量
 
-### `measure_peak_positions(spectrum_path, peaks, *, window_pts=3, sign="abs", refine="parabolic", nuclei=None) -> list[PeakMeasurement]`
+### `measure_peak_positions(spectrum_path, peaks, *, window_ppm=None, window_pts=None, axes=None, sign="abs", refine="parabolic", nuclei=None) -> list[PeakMeasurement]`
 
 在一张谱上追踪给定峰表(算法与质量标记见
 [07-methods-and-metrics.md](07-methods-and-metrics.md))。可独立使用——例如只借
@@ -207,6 +213,17 @@ script_name="sNNNN.com", out_file="sNNNN.ft2")` → 把脚本与谱复制进
 `PeakMeasurement`:`peak_id`、`assignment`、`reference`(核→ppm)、`positions`、
 `deltas`(相对参考)、`intensity`、`found`、`window_edge`、`boundary`、
 `out_of_range`。
+
+搜索窗口缺省按**物理宽度**定义(1.5×该轴核素线宽折算 ppm),按该谱的点距
+换算成点数——零填零只改点距,不改变窗口覆盖的 ppm 宽度。`window_ppm` 显式给
+物理半径(ppm);`window_pts` 强制点数(跨分辨率不可比,只作逃生口);`axes`
+可传已读好的谱轴,避免重复读谱。
+
+### `window_points_by_axis(axes, *, window_pts=None, window_ppm=None) -> dict[int, dict]`
+
+逐轴给出窗口换算:`points`(点数)、`ppm`(请求宽度)、`effective_ppm`(取整后
+实际覆盖宽度)、`source`(口径来源),以及 `nucleus`、`obs_mhz`、`ppm_per_point`
+(点距)。用于在外部脚本里先看清「这次的分辨率下窗口等于多少点」。
 
 ### `peak_coordinates(row, axes=None) -> dict[str, float]`
 
@@ -233,7 +250,7 @@ median/p90/max)、`n_peaks`、`n_runs`、`definition`(公式说明)。
 
 ### `write_records(session, *, reference, plan, runs, uncertainties=None, summary=None, peaks=None) -> dict[str, str]`
 
-写 `study/records/` 的六个产物(字段见
+写 `study/records/` 的全部产物(字段见
 [06-outputs-and-records.md](06-outputs-and-records.md)),返回文件名 → 路径。
 
 ## 3.8 异常
@@ -243,7 +260,7 @@ SensitivityError(RuntimeError)
 ├── DatasetError      数据集导入/识别失败(非 Bruker、Kinetics 被拒、路径不存在)
 ├── ReferenceError    参考谱/脚本构建或加载失败、峰表不存在
 ├── SweepError        网格非法、组合超上限、NUS 不支持、缺参考峰表
-└── MeasurementError  谱不可读、峰表为空、参数非法(window_pts/sign/refine)
+└── MeasurementError  谱不可读、峰表为空、参数非法(window_ppm/window_pts/sign/refine)
 ```
 
 建议在外部脚本里 `except SensitivityError as exc:` 统一处理并打印 `exc`。

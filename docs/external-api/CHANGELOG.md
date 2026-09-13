@@ -2,6 +2,37 @@
 
 版本口径:新增功能/新增字段保持同一 minor;破坏性改动升 minor 并给出迁移说明。
 
+## 0.1.1(2026-09-13)
+
+**峰位窗口/选峰边距改为「物理宽度(ppm)」口径**(用户方案 A)。动机:填零 k 倍
+只让网格变密(点距 1/k),同一个「5 点」覆盖的 ppm 宽度就随处理参数漂移,而填零
+正是研究的自变量之一。
+
+- 新增 `core/peaks/axis_units.py`(`ppm_per_point` / `points_for_ppm` /
+  `ppm_for_points` / `edge_margin_ppm` / `measurement_window_ppm` /
+  `describe_axis`),缺省宽度 = 该轴核素线宽(`processing.linewidth_hz`)的倍数:
+  选峰边距 3×、峰位窗口 1.5×;
+- `pick_peaks(..., edge_margin_ppm=, edge_margin_points=)`、
+  `smile_scan_edge_margin(experiment=, n_points=)`、
+  `measure_peak_positions(..., window_ppm=, window_pts=, axes=)`、
+  `run_sweep/run_parameter_study(window_ppm=)`、CLI `sweep --window-ppm`;
+- 新公开函数 `window_points_by_axis(axes, *, window_pts=, window_ppm=)`:
+  逐轴给出 `points`/`ppm`/`effective_ppm`/`source`/`nucleus`/`obs_mhz`/
+  `ppm_per_point`;
+- 新增记录:`run.json` 的 `window`、`records/measurement.json`、
+  `manifest.json` 的 `measurement`、选峰运行参数 `detection`;
+- **结构性点数不换算**(局部极大 3 点邻域、抛物线 ±1 点模板)——它们必须等于
+  网格步长本身。
+
+迁移说明:`window_pts` 的**缺省值**由 `3` 改为 `None`(=按物理宽度自动)。显式
+传 `window_pts=3` 的老脚本行为不变;想让结果跨填零可比,改用 `window_ppm`。
+缺省窗口只有 1.5×线宽,若参数引起的位移超过它,测量会如实标
+`window_edge=true`(不是 bug)。
+
+验证:同一合成谱 1×/4× 网格、同一 1.0 ppm 窗口 → 点数 2↔8、覆盖宽度均
+≈1.0 ppm、峰位差 < 0.02 点(`tests/test_nmrforge_api.py` 新增两条用例);
+本地全量 1037 passed / 1 skipped。
+
 ## 0.1(2026-09-12)
 
 首个可用版本。公开面:

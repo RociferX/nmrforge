@@ -16,12 +16,13 @@ peak_sign=uniform)只选占据主符号的峰(不关心正负,以候选峰计数
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
+from core.peaks import axis_units
 from core.peaks.peak_table import save_peaks
 from core.project import ProjectManager
 from core.qc import peak_detection
@@ -43,6 +44,9 @@ _PICK_THRESHOLD_SIGMA = 35.0
 # 轴峰排除边距(点):选峰与 SMILE 候选评估共用(修24 起为公开常量)
 PICK_EDGE_MARGIN = 5
 _PICK_EDGE_MARGIN = PICK_EDGE_MARGIN  # 兼容旧名
+# 2026-09-13(用户方案 A):边距默认按**物理宽度**定义(见 core.peaks.axis_units:
+# 默认 = 3×该轴核素线宽(Hz) 折算 ppm),运行时按当前谱点距换算成点数;
+# 上面的 PICK_EDGE_MARGIN(点数)只在无法换算(缺 OBS/点距)时作回退。
 # 谱面 mixed 证据(0.2.199-补29fc,用户):类型低置信/未知时,若谱面正负峰
 # 占比都高(少数符号 ≥ 主符号数 × 0.2 且 ≥3 个,总数 ≥6),按 mixed 正负都选;
 # 高置信 uniform 模板(如 HSQC)仍尊重模板,避免噪声负峰带偏。
@@ -499,6 +503,8 @@ def pick_peaks(
     ref_nuclei: list[str] | None = None,
     tolerance_ppm: dict[str, float] | None = None,
     ref_name: str = "",
+    edge_margin_ppm: float | None = None,
+    edge_margin_points: int | None = None,
 ) -> dict[str, Any]:
     """峰挑选:检测谱峰并写 Poky .list,登记 WorkflowRun。
 
@@ -506,7 +512,12 @@ def pick_peaks(
     min_snr 同步);ref_peaks/ref_nuclei/tolerance_ppm 为参考峰表约束
     (0.2.199-补29dl,用户):只保留与参考峰表按核名匹配的峰——2D 参考匹配
     全部核;3D 当前谱 + 2D 参考时第三维自由,一个参考峰可保留多个峰。
-    返回 {"status", "peak_path", "peak_count", "logs"}。
+    轴峰排除边距(第 0 轴上下)按**物理宽度**定义:``edge_margin_ppm`` 显式给
+    ppm,或用默认(3×该轴核素线宽折算 ppm);运行时按当前谱点距换算成点数,
+    因此零填零不会改变边距覆盖的 ppm 宽度(用户方案 A)。
+    ``edge_margin_points`` 为显式点数逃生口(不推荐,跨分辨率不可比)。
+    返回 {"status", "peak_path", "peak_count", "detection", "logs"};
+    ``detection`` 记录边距来源、ppm/点数、各轴点距(供留档复算)。
     """
     data_entry = manager.data(exp_id, data_id)
     spectrum_path = data_entry.spectrum_path
@@ -531,6 +542,65 @@ def pick_peaks(
         arr = np.asarray(data)
         if np.iscomplexobj(arr):
             arr = arr.real
+        # 2026-09-13(用户方案 A):边距按物理宽度(ppm)换算点数——固定点数会随
+        # 零填零改变覆盖宽度,使峰集口径跟着处理参数漂移。
+        prefixes = tuple(
+            _fdf_prefix(dict(dic), arr.ndim, i) for i in range(arr.ndim)
+        )
+        storage_nuclei = _storage_nuclei(dict(dic), prefixes)
+        axes_ppm = _axes_ppm(dict(dic), arr)
+        axis0_nucleus = storage_nuclei[0] if storage_nuclei else ""
+        axis0_obs = (
+            float(dic.get(prefixes[0] + "OBS", 0.0) or 0.0)
+            if prefixes
+            else 0.0
+        )
+        try:
+            from backend.config import load_processing_defaults
+
+            _linewidths = load_processing_defaults().get("linewidth_hz") or {}
+        except Exception:  # noqa: BLE001 - 配置不可读时用内置默认
+            _linewidths = {}
+        if edge_margin_points is not None:
+            edge_points = max(0, int(edge_margin_points))
+            edge_width_ppm = axis_units.ppm_for_points(axes_ppm[0], edge_points)
+            edge_source = "points(显式)"
+        else:
+            edge_width_ppm = (
+                float(edge_margin_ppm)
+                if edge_margin_ppm is not None
+                else axis_units.edge_margin_ppm(
+                    axis0_nucleus,
+                    axis0_obs,
+                    linewidth_hz_by_nucleus=_linewidths,
+                )
+            )
+            edge_points = axis_units.points_for_ppm(axes_ppm[0], edge_width_ppm)
+            edge_source = "ppm(物理宽度)"
+            if edge_points <= 0:
+                edge_points = int(_PICK_EDGE_MARGIN)
+                edge_width_ppm = axis_units.ppm_for_points(
+                    axes_ppm[0], edge_points
+                )
+                edge_source = "points(回退:无法换算)"
+        detection = {
+            "edge_margin_source": edge_source,
+            "edge_margin_ppm": round(float(edge_width_ppm), 6),
+            "edge_margin_points": int(edge_points),
+            "axis0_nucleus": axis0_nucleus,
+            "linewidth_hz_by_nucleus": {
+                str(k): float(v) for k, v in (_linewidths or {}).items()
+            },
+            "axes": [
+                axis_units.describe_axis(
+                    axes_ppm[i],
+                    nucleus=(storage_nuclei[i] if i < len(storage_nuclei) else ""),
+                    width_ppm=(edge_width_ppm if i == 0 else None),
+                )
+                for i in range(arr.ndim)
+            ],
+        }
+        run.params["detection"] = detection
         sign_mode = _sign_mode_for(manager, exp_id, data_id)
         threshold = (
             float(sigma_multiplier)
@@ -546,7 +616,7 @@ def pick_peaks(
                 sign_mode="both",
                 sigma_multiplier=threshold,
                 min_snr=threshold,
-                edge_margin=_PICK_EDGE_MARGIN,
+                edge_margin=edge_points,
             ),
         )
         if sign_mode == "both":
@@ -733,6 +803,13 @@ def pick_peaks(
         f"峰挑选: {len(peaks)} 个峰 → {peak_path}"
         f"(符号模式: {sign_label},阈值: {threshold:.1f}σ)"
     ]
+    logs.append(
+        f"轴峰排除边距: {detection['edge_margin_ppm']:.3f} ppm"
+        f"({detection['axis0_nucleus'] or '轴0'}) = "
+        f"{detection['edge_margin_points']} 点"
+        f"(点距 {detection['axes'][0]['ppm_per_point']:.4f} ppm/点,"
+        f"来源 {detection['edge_margin_source']})"
+    )
     if evidence_log:
         logs.append(evidence_log)
     if ref_log:
@@ -741,6 +818,7 @@ def pick_peaks(
         "status": "success",
         "peak_path": str(peak_path),
         "peak_count": len(peaks),
+        "detection": detection,
         "logs": logs,
     }
 
@@ -769,6 +847,7 @@ class SpectrumAxes:
     ppm: list[np.ndarray]
     nuclei: list[str]
     logical_to_storage: list[int]
+    obs: list[float] = field(default_factory=list)  # 数据轴序观测频率(MHz)
 
     @property
     def ndim(self) -> int:
@@ -800,7 +879,8 @@ def read_spectrum_axes(path: Path | str) -> SpectrumAxes:
     """读 NMRPipe 谱(ft1/ft2/ft3),返回与选峰同口径的轴映射。
 
     与 ``pick_peaks`` 完全同源:同一 ORIG/CAR 公式、同一 FDDIMORDER 解析、
-    同一核名别名表;复型数据取实部。
+    同一核名别名表;复型数据取实部。``obs`` 为数据轴序观测频率(MHz),
+    供「物理宽度 ↔ 点数」换算(见 core.peaks.axis_units)。
     """
     import nmrglue as ng
 
@@ -817,6 +897,7 @@ def read_spectrum_axes(path: Path | str) -> SpectrumAxes:
         ppm=_axes_ppm(dic, arr),
         nuclei=_storage_nuclei(dic, prefixes),
         logical_to_storage=list(logical_to_storage),
+        obs=[float(dic.get(prefix + "OBS", 0.0) or 0.0) for prefix in prefixes],
     )
 
 

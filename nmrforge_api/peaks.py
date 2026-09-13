@@ -10,7 +10,10 @@
 1. 参考峰表给出每个峰的核素位置(ppm)与 assignment;
 2. ppm → 该谱数据轴上的分数索引(与选峰同源:ORIG 优先、回退 CAR,
    并按 FDDIMORDER 把逻辑维映射到数据轴,见 ``workflow.pick_peaks``);
-3. 在 ±``window_pts`` 点的窗口内取 ``|强度|``(默认)极值,得到整数索引;
+3. 在**物理宽度**定义的窗口内取 ``|强度|``(默认)极值,得到整数索引——
+   窗口默认按该轴核素线宽折算 ppm(``core.peaks.axis_units``),再按当前谱
+   点距换算成点数;也可用 ``window_ppm`` 显式给 ppm,或用 ``window_pts``
+   强制点数(点数口径会随零填零改变覆盖宽度,不推荐跨分辨率比较);
 4. 每个参与测量的轴用 ±1 点三点抛物线求顶点偏移 δ∈[-0.5, 0.5],
    分数索引 = 整数索引 + δ;
 5. 分数索引 → ppm(轴数组线性插值)。
@@ -28,6 +31,7 @@ from typing import Any
 
 import numpy as np
 
+from core.peaks import axis_units
 from nmrforge_api.errors import MeasurementError
 from workflow.pick_peaks import SpectrumAxes, read_spectrum_axes
 
@@ -189,11 +193,68 @@ def _parabolic_offset(y_minus: float, y_zero: float, y_plus: float) -> float:
     return float(max(-0.5, min(0.5, offset)))
 
 
+DEFAULT_WINDOW_PTS_FALLBACK = 3  # 无法按 ppm 换算时的点数回退
+
+
+def window_points_by_axis(
+    axes: SpectrumAxes,
+    *,
+    window_pts: int | None = None,
+    window_ppm: float | None = None,
+) -> dict[int, dict[str, Any]]:
+    """每轴搜索窗口 → {轴: {points, ppm, source, nucleus, obs_mhz, ppm_per_point}}。
+
+    优先级:``window_ppm``(物理宽度,逐轴换算)> ``window_pts``(显式点数,
+    跨分辨率不可比)> 自动(该轴核素线宽 ×
+    ``axis_units.MEASUREMENT_WINDOW_LINEWIDTH_FACTOR`` 折算 ppm)。
+    每轴返回 ``ppm``(请求宽度)与 ``effective_ppm``(换算后实际覆盖宽度,
+    受整数点数取整影响),以及该轴点距 ``ppm_per_point``——跨分辨率对照用。
+    """
+    out: dict[int, dict[str, Any]] = {}
+    for axis in range(axes.ndim):
+        nucleus = axes.nuclei[axis] if axis < len(axes.nuclei) else ""
+        obs = axes.obs[axis] if axis < len(axes.obs) else 0.0
+        axis_ppm = axes.ppm[axis]
+        step = axis_units.ppm_per_point(axis_ppm)
+        if window_pts is not None:
+            points = max(0, int(window_pts))
+            width = axis_units.ppm_for_points(axis_ppm, points)
+            source = "points(显式)"
+        else:
+            width = (
+                float(window_ppm)
+                if window_ppm is not None
+                else axis_units.measurement_window_ppm(nucleus, obs)
+            )
+            source = (
+                "ppm(显式)" if window_ppm is not None else "ppm(自动:1.5×线宽)"
+            )
+            points = axis_units.points_for_ppm(axis_ppm, width)
+            if points <= 0:
+                points = int(DEFAULT_WINDOW_PTS_FALLBACK)
+                width = axis_units.ppm_for_points(axis_ppm, points)
+                source = "points(回退:无法换算)"
+        out[axis] = {
+            "points": int(points),
+            "ppm": round(float(width), 6),
+            "effective_ppm": round(
+                axis_units.ppm_for_points(axis_ppm, points), 6
+            ),
+            "source": source,
+            "nucleus": nucleus,
+            "obs_mhz": round(float(obs), 4),
+            "ppm_per_point": round(step, 6),
+        }
+    return out
+
+
 def measure_peak_positions(
     spectrum_path: Path | str,
     peaks: Sequence[dict[str, Any]],
     *,
-    window_pts: int = 3,
+    window_pts: int | None = None,
+    window_ppm: float | None = None,
+    axes: SpectrumAxes | None = None,
     sign: str = "abs",
     refine: str = "parabolic",
     nuclei: Iterable[str] | None = None,
@@ -203,19 +264,28 @@ def measure_peak_positions(
     sign:``"abs"``(默认,正负峰都追)| ``"positive"`` | ``"negative"``;
     refine:``"parabolic"``(默认)| ``"none"``(只取整数点极大值)。
     nuclei 非空时只测量这些核(其余核只保留参考值,不参与扫描统计)。
+
+    搜索窗口:默认按物理宽度(该轴核素线宽 ×1.5 折算 ppm)逐轴换算成点数,
+    因此**零填零不会改变窗口覆盖的 ppm 宽度**;``window_ppm`` 显式给物理
+    宽度,``window_pts`` 强制点数(不推荐)。``axes`` 可传入已读好的谱轴
+(避免重复读谱)。
     """
     path = Path(spectrum_path)
     if not path.is_file():
         raise MeasurementError(f"谱图不存在: {path}")
-    if window_pts < 0:
+    if window_pts is not None and int(window_pts) < 0:
         raise MeasurementError("window_pts 不能为负")
     if sign not in ("abs", "positive", "negative"):
         raise MeasurementError(f"未知 sign: {sign}")
     if refine not in ("parabolic", "none"):
         raise MeasurementError(f"未知 refine: {refine}")
 
-    axes = read_spectrum_axes(path)
+    spectrum_axes = axes if axes is not None else read_spectrum_axes(path)
+    axes = spectrum_axes
     data = np.asarray(axes.data, dtype=float)
+    window_by_axis = window_points_by_axis(
+        axes, window_pts=window_pts, window_ppm=window_ppm
+    )
     wanted = {str(n) for n in nuclei} if nuclei else None
     results: list[PeakMeasurement] = []
     for index, row in enumerate(peaks, start=1):
@@ -257,8 +327,9 @@ def measure_peak_positions(
         bounds: dict[int, tuple[int, int]] = {}
         for axis, center in zip(search_axes, centers):
             size = int(data.shape[axis])
+            half = int(window_by_axis.get(axis, {}).get("points", 0))
             bounds[axis] = (
-                max(0, center - window_pts), min(size - 1, center + window_pts)
+                max(0, center - half), min(size - 1, center + half)
             )
         slices = tuple(
             slice(bounds[axis][0], bounds[axis][1] + 1)
@@ -339,10 +410,13 @@ def pick_reference_peaks(
     *,
     sigma_multiplier: float | None = None,
     out_path: Path | str | None = None,
+    details: dict[str, Any] | None = None,
 ) -> Path:
     """在参考谱上用 NMRForge 选峰,得到固定峰表(供扫描追踪)。
 
-    ``out_path`` 非空时把峰表复制一份到该路径(研究目录内留档)。
+    ``out_path`` 非空时把峰表复制一份到该路径(研究目录内留档);
+    ``details`` 非空时把选峰口径(``detection``:边距物理宽度/点数/
+    各轴点距)写进该字典,供研究记录留档。
     """
     from workflow.pick_peaks import pick_peaks
 
@@ -355,6 +429,9 @@ def pick_reference_peaks(
         dataset.data_id,
         sigma_multiplier=sigma_multiplier,
     )
+    if details is not None:
+        details["detection"] = result.get("detection") or {}
+        details["peak_count"] = int(result.get("peak_count", 0) or 0)
     peak_path = Path(str(result.get("peak_path", "")))
     if not peak_path.is_file():
         raise MeasurementError(f"选峰没有产出峰表: {result}")
@@ -367,9 +444,11 @@ def pick_reference_peaks(
 
 
 __all__ = [
+    "DEFAULT_WINDOW_PTS_FALLBACK",
     "PeakMeasurement",
     "measure_peak_positions",
     "peak_coordinates",
     "pick_reference_peaks",
     "read_reference_peaks",
+    "window_points_by_axis",
 ]

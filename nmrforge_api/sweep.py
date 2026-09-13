@@ -33,9 +33,11 @@ from nmrforge_api.peaks import (
     PeakMeasurement,
     measure_peak_positions,
     read_reference_peaks,
+    window_points_by_axis,
 )
 from nmrforge_api.reference import ReferenceSpectrum, load_reference
 from nmrforge_api.session import StudySession, now_iso
+from workflow.pick_peaks import read_spectrum_axes
 from workflow.stepwise import read_experiment
 
 DEFAULT_MAX_RUNS = 256
@@ -254,6 +256,8 @@ class SweepRun:
     wall_time_s: float = 0.0
     phase_locked: bool = True
     phase: dict[str, list[float]] = field(default_factory=dict)
+    # 本组合的峰位测量窗口换算记录(逐轴 points/ppm/点距/来源)
+    window: dict[str, Any] = field(default_factory=dict)
     logs_tail: list[str] = field(default_factory=list)
     measurements: list[PeakMeasurement] = field(default_factory=list)
 
@@ -273,6 +277,7 @@ class SweepRun:
             "wall_time_s": float(self.wall_time_s),
             "phase_locked": bool(self.phase_locked),
             "phase": {str(k): [float(v[0]), float(v[1])] for k, v in self.phase.items()},
+            "window": {str(k): dict(v) for k, v in self.window.items()},
             "logs_tail": list(self.logs_tail),
             "measurements": [m.to_dict() for m in self.measurements],
         }
@@ -297,6 +302,11 @@ class SweepRun:
                 str(k): [float(v[0]), float(v[1])]
                 for k, v in (data.get("phase") or {}).items()
                 if isinstance(v, (list, tuple)) and len(v) >= 2
+            },
+            window={
+                str(k): dict(v)
+                for k, v in (data.get("window") or {}).items()
+                if isinstance(v, dict)
             },
             logs_tail=[str(x) for x in (data.get("logs_tail") or [])],
             measurements=[
@@ -700,7 +710,8 @@ def run_sweep(
     *,
     reference: ReferenceSpectrum | None = None,
     peaks: Sequence[dict[str, Any]] | None = None,
-    window_pts: int = 3,
+    window_pts: int | None = None,
+    window_ppm: float | None = None,
     sign: str = "abs",
     refine: str = "parabolic",
     resume: bool = True,
@@ -708,7 +719,15 @@ def run_sweep(
     progress: Callable[[str], None] | None = None,
     on_run: Callable[[SweepRun], None] | None = None,
 ) -> list[SweepRun]:
-    """执行扫描计划,返回逐组合运行记录(成功/失败都在列表里)。"""
+    """执行扫描计划,返回逐组合运行记录(成功/失败都在列表里)。
+
+    峰位测量窗口按**物理宽度**定义(默认 1.5×该轴核素线宽折算 ppm,
+    见 ``core.peaks.axis_units``),逐组合按该候选谱的实际点数换算:
+    零填零 k 倍只改点距、不改变窗口覆盖的 ppm 宽度,峰位差里因此不混入
+    「窗口口径随处理参数漂移」的成分(用户方案 A)。``window_ppm`` 显式
+    给物理半径;``window_pts`` 强制点数(不推荐,跨分辨率不可比)。每个
+    组合的换算结果(逐轴点数/ppm/点距)写进 ``run.json`` 的 ``window``。
+    """
     dataset = session.dataset
     if dataset is None:
         raise SweepError("研究里还没有数据集")
@@ -873,10 +892,21 @@ def run_sweep(
         run.spectrum_path = str(target_spectrum)
         run.spectrum_sha256 = sha256_file(target_spectrum)
         try:
+            spectrum_axes = read_spectrum_axes(target_spectrum)
+            run.window = {
+                str(axis): dict(spec)
+                for axis, spec in window_points_by_axis(
+                    spectrum_axes,
+                    window_pts=window_pts,
+                    window_ppm=window_ppm,
+                ).items()
+            }
             run.measurements = measure_peak_positions(
                 target_spectrum,
                 peak_rows,
+                axes=spectrum_axes,
                 window_pts=window_pts,
+                window_ppm=window_ppm,
                 sign=sign,
                 refine=refine,
             )

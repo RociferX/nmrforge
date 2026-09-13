@@ -96,7 +96,8 @@ def run_parameter_study(
     sigma_multiplier: float | None = None,
     max_peaks: int = 0,
     max_runs: int = DEFAULT_MAX_RUNS,
-    window_pts: int = 3,
+    window_pts: int | None = None,
+    window_ppm: float | None = None,
     sign: str = "abs",
     refine: str = "parabolic",
     csp_n_weight: float = DEFAULT_CSP_N_WEIGHT,
@@ -114,6 +115,11 @@ def run_parameter_study(
     **默认不要求外部峰表**:参考谱与参考峰位都由 NMRForge 自动优化产生
     (``build_reference`` 出参考谱/脚本,``ensure_reference_peaks`` 在参考谱上
     自动选峰并冻结);``peaks`` 只在研究方另有公开库/指认峰表时才传。
+
+    峰位测量窗口 ``window_ppm``(物理半径,ppm)缺省按物理宽度自动:
+    1.5×该轴核素线宽折算 ppm,逐组合按该候选谱点数换算——零填零只改
+    点距、不改变窗口覆盖宽度(用户方案 A,见 ``core.peaks.axis_units``)。
+    ``window_pts`` 是显式点数的逃生口,跨分辨率不可比,不推荐。
     """
     session = open_study(root, name=name, backend=backend)
     rebuild = False
@@ -171,6 +177,7 @@ def run_parameter_study(
         plan,
         reference=reference,
         window_pts=window_pts,
+        window_ppm=window_ppm,
         sign=sign,
         refine=refine,
         resume=resume,

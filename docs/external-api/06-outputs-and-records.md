@@ -26,13 +26,14 @@
 (`WorkflowRun`,编号 `R-YYYYMMDD-NNN`)记在 `project.json`,用于追溯导入/参考
 处理这一步。
 
-## 6.2 `records/` 六个产物
+## 6.2 `records/` 产物
 
 | 文件 | 内容 |
 | --- | --- |
 | `manifest.json` | 复算所需的全部来源:数据集、参考谱/脚本/峰表(含哈希)、扫描网格与哈希、组合数、版本表 |
 | `sweep_plan.json` | 扫描计划(`SweepPlan`):轴、组合列表、基底参数、网格哈希、`phase_locked`、notes |
-| `runs.json` | 全部组合的完整记录(`SweepRun` 列表,含逐峰测量) |
+| `runs.json` | 全部组合的完整记录(`SweepRun` 列表,含逐峰测量与窗口换算) |
+| `measurement.json` | 测量口径:峰位窗口逐轴换算(点数/ppm/点距/来源)、跨组合点数集合、选峰边距 |
 | `peak_positions.csv` | 长表:每组合 × 每峰 × 每核一行(最常用于画「参数 → 峰位」) |
 | `uncertainty.csv` | 逐峰:σ、极差、Δδ 下限、最差组合 |
 | `uncertainty_summary.json` | 数据集级:Δδ 下限分布与逐核 σ 分布 |
@@ -67,6 +68,7 @@
 | `spectrum_path` / `spectrum_sha256` | 候选谱与其哈希 |
 | `wall_time_s` | 处理耗时(秒) |
 | `phase_locked` | 是否用了参考相位(应恒为 `true`) |
+| `window` | 本次组合的峰位窗口换算:逐轴 `points`/`ppm`/`effective_ppm`/`ppm_per_point`/`source`/`nucleus` |
 | `logs_tail` | NMRPipe 日志尾部(最多 40 行) |
 | `measurements` | 逐峰测量(见 6.5) |
 | `updated` / `software_version` | 写入时间与 NMRForge 版本 |

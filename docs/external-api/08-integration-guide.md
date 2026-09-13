@@ -48,7 +48,8 @@ peaks = read_reference_peaks(reference.peak_table_path)
 my_runs: list[SweepRun] = []
 for index, combo in enumerate(my_combos, start=1):
     spectrum = my_pipeline(combo)                     # 你的处理路径
-    measurements = measure_peak_positions(spectrum, peaks, window_pts=3)
+    # 窗口给**物理宽度**(ppm):缺省 1.5×该轴线宽折算 ppm,跨填零可比
+    measurements = measure_peak_positions(spectrum, peaks, window_ppm=0.5)
     my_runs.append(
         SweepRun(
             run_id=f"m{index:04d}",
@@ -98,8 +99,10 @@ print(reference.script_sha256, reference.direct_phase)   # 溯源与相位
 ## 8.5 可复现建议
 
 - 一个网格一个研究根;换网格不要复用同一个 `runs/`(组合编号会撞);
-- 固定 `peak_source`、`sigma_multiplier`、`max_peaks`、`window_pts`、`sign`、
-  `refine`、`csp_n_weight`,把它们的取值写进论文材料;
+- 固定 `peak_source`、`sigma_multiplier`、`max_peaks`、`window_ppm`(窗口物理
+  半径)、`sign`、`refine`、`csp_n_weight`,把它们的取值写进论文材料;
+  (用 `window_pts` 点数口径时必须额外注明点数不随填零换算:同一「N 点」在
+  不同填零下覆盖的 ppm 宽度不同)
 - 把 `records/manifest.json` 与研究根一起归档(体积很小,足以重建全部结论);
 - 记录 NMRForge/NMRPipe 版本(manifest 里已有);升级版本后若要比较结果,
   建议在同一研究根上重跑并注明版本变化。

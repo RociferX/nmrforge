@@ -158,6 +158,42 @@ print(plan.diagnostics)   # 水平计数 / 重复行 / 成对相关最大|r| / �
   不替你做设计决策;`grid_sha256` 让两次扫描可比对;
 - 显式组合表同样受 `max_runs` 上限与键校验约束。
 
+### 峰位窗口与边距:物理宽度(ppm)口径
+
+选峰的边缘排除、峰位测量的搜索窗口都是**物理量**,缺省按该轴核素线宽定义,
+运行时按当前谱的点距换算成点数:
+
+| 量 | 缺省物理宽度 | 换算 |
+| --- | --- | --- |
+| 选峰轴峰排除边距(第 0 轴上下) | 3 × 该轴核素线宽(Hz) 折算 ppm | 按参考谱点距 |
+| 峰位搜索窗口半径 | 1.5 × 该轴核素线宽(Hz) 折算 ppm | 逐组合按候选谱点距 |
+
+线宽(Hz)取自 `config/nmrforge.yaml` 的 `processing.linewidth_hz`(与自动填零
+用的是同一张表),因此口径一致、可改。换算:`points = round(width_ppm /
+ppm_per_point)`,实现见 `core/peaks/axis_units.py`。
+
+```python
+from nmrforge_api import measure_peak_positions, window_points_by_axis
+from workflow.pick_peaks import read_spectrum_axes
+
+axes = read_spectrum_axes(spectrum)
+print(window_points_by_axis(axes))            # 缺省:1.5×线宽
+print(window_points_by_axis(axes, window_ppm=0.5))   # 显式物理半径
+measure_peak_positions(spectrum, peaks, window_ppm=0.5, axes=axes)
+```
+
+为什么要这样:填零 k 倍只让网格变密(点距 1/k)。同一个「5 点」在 1× 与 4×
+下覆盖的 ppm 宽度差 4 倍,峰集与测量窗口口径就会随处理参数漂移——而填零正是
+研究的自变量之一。**结构性点数**(局部极大 3 点邻域、抛物线 ±1 点模板)不换算:
+它们必须等于网格步长本身。
+
+逃生口:`edge_margin_ppm=` / `edge_margin_points=`(`pick_peaks`)、
+`window_ppm=` / `window_pts=`(`measure_peak_positions`、`run_sweep`、
+`run_parameter_study`、CLI `sweep --window-ppm/--window-pts`)。
+每次换算的实际值(点数 + 等效 ppm + 点距 + 来源)都会留档:`run.json` 的
+`window`、`records/measurement.json`、`manifest.json` 的 `measurement`,
+以及选峰运行参数里的 `detection`。
+
 ### 网格语义
 
 - 用 `axes` 时组合数 = 各轴长度之积,顺序 = 轴书写顺序 × 值列表顺序(笛卡尔积);

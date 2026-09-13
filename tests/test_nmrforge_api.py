@@ -34,6 +34,7 @@ from nmrforge_api import (
     position_uncertainty,
     run_parameter_study,
     uncertainty_summary,
+    window_points_by_axis,
 )
 from nmrforge_api.cli import main as cli_main
 from nmrforge_api.peaks import (
@@ -74,15 +75,30 @@ def _h1_ppm(index: float) -> float:
 
 def _write_ft2(path: Path, *, shift_y: float = 0.0, shift_x: float = 0.0) -> Path:
     """写一张可被 nmrglue 读取的 2D 谱,峰位按 shift_y/shift_x 平移(点)。"""
+    return _write_ft2_grid(path, 1, shift_y=shift_y, shift_x=shift_x)
+
+
+def _write_ft2_grid(
+    path: Path, factor: int, *, shift_y: float = 0.0, shift_x: float = 0.0
+) -> Path:
+    """同一张谱的 ``factor`` 倍网格版本(填零:点距 1/factor,物理峰位不变)。
+
+    ``shift_y``/``shift_x`` 以 **1× 网格**点数计,内部乘 ``factor`` 换算;
+    头部 SW/OBS/CAR/ORIG 不变,因此 ppm 轴按点数自动变密。
+    """
     from nmrglue.fileio import pipe
 
-    shape = (_N15_SIZE, _H1_SIZE)
+    factor = max(1, int(factor))
+    shape = (_N15_SIZE * factor, _H1_SIZE * factor)
     yy, xx = np.mgrid[0 : shape[0], 0 : shape[1]]
     arr = np.zeros(shape, dtype=float)
     for index, (y, x) in enumerate((_PEAK_A, _PEAK_B), start=1):
-        cy, cx = y + shift_y, x + shift_x
+        cy, cx = (y + shift_y) * factor, (x + shift_x) * factor
         arr += (120.0 - 20.0 * (index - 1)) * np.exp(
-            -(((yy - cy) ** 2) / (2 * 1.2**2) + ((xx - cx) ** 2) / (2 * 1.4**2))
+            -(
+                ((yy - cy) ** 2) / (2 * (1.2 * factor) ** 2)
+                + ((xx - cx) ** 2) / (2 * (1.4 * factor) ** 2)
+            )
         )
     rng = np.random.default_rng(20260912)
     arr = gaussian_filter(arr, sigma=0.5) + rng.normal(0.0, 0.5, shape)
@@ -221,10 +237,16 @@ class _FakeSweepBackend:
         )
         # 0.40 为「参考」;偏离 0.01 平移 0.25 点(非整数 → 必须亚像素才能还原)
         shift = (0.40 - off) * 25.0
+        # 模拟填零(方案 A 的动机):zero_fill=k → k 倍网格、点距 1/k,
+        # 峰的**物理位置(ppm)不变**;真后端同样只改数字分辨率。
+        try:
+            factor = max(1, int(params.get("zero_fill") or 1))
+        except (TypeError, ValueError):
+            factor = 1
         target = work / (out_file or f"{experiment.dataset_id}.ft2")
         if out_file:
             target = work / "_intermediate" / out_file
-        _write_ft2(target, shift_y=shift, shift_x=shift / 2.0)
+        _write_ft2_grid(target, factor, shift_y=shift, shift_x=shift / 2.0)
         return {
             "success": True,
             "message": "ok",
@@ -276,6 +298,76 @@ def test_measure_peak_positions_recovers_subpoint_shift(tmp_path: Path) -> None:
         assert not item.out_of_range
     # 整数截断会差整整 1 个点;这里必须明显好于它
     assert abs(measured[0].positions["15N"] - _n15_ppm(_PEAK_A[0])) > 0.5 * _n15_step()
+
+
+def test_physical_window_is_scale_invariant_across_zero_fill(
+    tmp_path: Path,
+) -> None:
+    """方案 A:窗口/边距按物理宽度定义 → 填零只改点数,不改覆盖 ppm。
+
+    用户 2026-09-13 的问题:「选峰里说的点数会不会随填零变化?不变是不对付」。
+    结论:结构性点数(3 点邻域/抛物线 ±1 点)不变;**物理宽度**点数必须随点距
+    换算。这里用同一张谱的 1× 与 4× 网格验证:点数变 4 倍,覆盖 ppm 不变,
+    测出的峰位 ppm 也一致(差异远小于 1× 的一个点距)。
+    """
+    from core.peaks.peak_table import load_peaks
+    from workflow.pick_peaks import read_spectrum_axes
+
+    _write_ft2(tmp_path / "zf1.ft2")
+    _write_ft2_grid(tmp_path / "zf4.ft2", 4)
+    axes_one = read_spectrum_axes(tmp_path / "zf1.ft2")
+    axes_four = read_spectrum_axes(tmp_path / "zf4.ft2")
+
+    auto_one = window_points_by_axis(axes_one)
+    auto_four = window_points_by_axis(axes_four)
+    # 默认物理半径 = 1.5×该轴核素线宽折算 ppm(15N 15 Hz / 60.8 MHz)
+    assert auto_one[0]["ppm"] == pytest.approx(1.5 * 15.0 / _N15_OBS, rel=0.02)
+    assert auto_one[1]["ppm"] == pytest.approx(1.5 * 8.0 / _H1_OBS, rel=0.02)
+    for axis in (0, 1):
+        assert auto_four[axis]["ppm"] == pytest.approx(
+            auto_one[axis]["ppm"], rel=0.02
+        )
+        assert auto_four[axis]["nucleus"] == auto_one[axis]["nucleus"]
+        # 点距随填零变密 → 点数按点距换算
+        assert auto_four[axis]["ppm_per_point"] == pytest.approx(
+            auto_one[axis]["ppm_per_point"] / 4.0, rel=0.05
+        )
+
+    # 显式 1 ppm 窗口:1× 与 4× 的**点数**不同、覆盖宽度相同
+    win_one = window_points_by_axis(axes_one, window_ppm=1.0)
+    win_four = window_points_by_axis(axes_four, window_ppm=1.0)
+    for axis in (0, 1):
+        assert win_one[axis]["source"] == "ppm(显式)"
+        assert win_four[axis]["points"] == pytest.approx(
+            4 * win_one[axis]["points"], rel=0.15
+        )
+        assert win_four[axis]["effective_ppm"] == pytest.approx(
+            win_one[axis]["effective_ppm"], rel=0.15
+        )
+        assert win_one[axis]["effective_ppm"] == pytest.approx(1.0, rel=0.1)
+
+    # 峰位:同一物理窗口 → 两个分辨率给出同一 ppm
+    rows = load_peaks(_write_peak_table(tmp_path / "reference.list"))
+    measured_one = measure_peak_positions(
+        tmp_path / "zf1.ft2", rows, window_ppm=1.0
+    )
+    measured_four = measure_peak_positions(
+        tmp_path / "zf4.ft2", rows, window_ppm=1.0
+    )
+    assert len(measured_one) == len(measured_four) == 2
+    for thin, fine in zip(measured_one, measured_four):
+        assert abs(thin.positions["15N"] - fine.positions["15N"]) < 0.2 * _n15_step()
+        assert abs(thin.positions["1H"] - fine.positions["1H"]) < 0.2 * _h1_step()
+
+    # 点数口径(逃生口)仍然是「点数即点数」,不随填零换算 —— 这正是它不适合
+    # 跨分辨率比较的原因
+    pts_one = window_points_by_axis(axes_one, window_pts=3)
+    pts_four = window_points_by_axis(axes_four, window_pts=3)
+    for axis in (0, 1):
+        assert pts_one[axis]["points"] == pts_four[axis]["points"] == 3
+        assert pts_four[axis]["effective_ppm"] == pytest.approx(
+            pts_one[axis]["effective_ppm"] / 4.0, rel=0.05
+        )
 
 
 def test_read_reference_peaks_accepts_research_csv(tmp_path: Path) -> None:
@@ -381,6 +473,10 @@ def test_run_parameter_study_end_to_end(
         axes={"window.F1.off": [0.35, 0.40, 0.45], "zero_fill": [1, 2]},
         params={"phase_route": "none"},
         peaks=peaks,
+        # 本合成谱很粗(15N 只有 64 点):默认物理窗口(1.5×线宽≈0.37 ppm)
+        # 只有 1 点,而这里人为位移有 1.25 点(0.64 ppm),必须显式给
+        # 覆盖位移的物理窗口 —— 否则测量会如实标 window_edge(见下)。
+        window_ppm=1.0,
         backend=backend,
     )
     assert len(result.runs) == 6
@@ -397,6 +493,13 @@ def test_run_parameter_study_end_to_end(
     from core.project.manager import sha256_file
 
     assert sha256_file(active) == reference.spectrum_sha256
+
+    # 窗口换算留档:物理宽度 1.0 ppm,点数按各组合点距换算
+    for run in result.runs:
+        assert run.window["0"]["source"] == "ppm(显式)"
+        assert run.window["0"]["ppm"] == pytest.approx(1.0, rel=0.02)
+        assert not any(m.window_edge for m in run.measurements)
+    assert len({run.window['0']['points'] for run in result.runs}) > 1
 
     # 每个组合都留下脚本 + 谱 + 两个峰的测量
     for run in result.runs:
@@ -451,6 +554,7 @@ def test_run_parameter_study_end_to_end(
         axes={"window.F1.off": [0.35, 0.40, 0.45], "zero_fill": [1, 2]},
         params={"phase_route": "none"},
         peaks=peaks,
+        window_ppm=1.0,
         backend=backend,
     )
     assert len(backend.process_calls) == calls_before
@@ -493,6 +597,66 @@ def test_run_parameter_study_auto_picks_reference_peaks(
     assert manifest["peaks"]["count"] == reference.peak_count
     # 峰位不确定度基于自动选出的峰,而不是外部峰表
     assert {item.peak_id for item in result.uncertainties} == {1, 2}
+
+
+def test_zero_fill_keeps_physical_edge_margin_and_window(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """端到端:选峰边距与逐组合测量窗口都按物理宽度换算并留档(方案 A)。"""
+    root = tmp_path / "zf_study"
+    backend = _FakeSweepBackend()
+    result = run_parameter_study(
+        root,
+        bruker_dir / "hsqc_2d",
+        axes={"zero_fill": [1, 4]},
+        params={"phase_route": "none"},
+        backend=backend,
+    )
+    assert len(result.runs) == 2
+    assert all(run.status == "success" for run in result.runs)
+
+    # 参考谱选峰:边距 = 3×该轴(15N)线宽折算 ppm,并记下等效点数与点距
+    detection = result.reference.peak_params["detection"]
+    assert detection["edge_margin_source"] == "ppm(物理宽度)"
+    assert detection["axis0_nucleus"] == "15N"
+    assert detection["edge_margin_ppm"] == pytest.approx(
+        3 * 15.0 / _N15_OBS, rel=0.02
+    )
+    assert detection["edge_margin_points"] >= 1
+    assert detection["axes"][0]["ppm_per_point"] > 0
+
+    # 逐组合:物理窗口一致,点数随填零变密
+    by_fill = {
+        int(round(float(run.combo["zero_fill"]))): run.window
+        for run in result.runs
+    }
+    for factor in (1, 4):
+        spec = by_fill[factor]["0"]
+        assert spec["source"] == "ppm(自动:1.5×线宽)"
+        assert spec["nucleus"] == "15N"
+        assert spec["ppm"] == pytest.approx(1.5 * 15.0 / _N15_OBS, rel=0.02)
+    assert by_fill[4]["0"]["points"] == pytest.approx(
+        4 * by_fill[1]["0"]["points"], rel=0.5
+    )
+    assert (
+        by_fill[4]["0"]["ppm_per_point"]
+        == pytest.approx(by_fill[1]["0"]["ppm_per_point"] / 4.0, rel=0.05)
+    )
+
+    # 记录:manifest 与 measurement.json 里能直接读到换算过程
+    manifest = json.loads(
+        Path(result.records["manifest"]).read_text(encoding="utf-8")
+    )
+    measurement = manifest["measurement"]
+    assert measurement["edge_margin"] == detection
+    seen = measurement["window_points_seen"]["0"]
+    assert seen["nucleus"] == "15N"
+    assert max(seen["points"]) > min(seen["points"])  # 点数确实随填零变
+    assert seen["ppm"][0] == pytest.approx(1.5 * 15.0 / _N15_OBS, rel=0.02)
+    assert measurement["window_by_axis"]["0"]["source"] == "ppm(自动:1.5×线宽)"
+    assert Path(result.records["measurement"]).is_file()
+    runs_json = json.loads(Path(result.records["runs"]).read_text(encoding="utf-8"))
+    assert all(run["window"] for run in runs_json)
 
 
 def test_run_parameter_study_nus_2d(tmp_path: Path, bruker_dir: Path) -> None:

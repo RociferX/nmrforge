@@ -45,8 +45,10 @@ def main() -> int:
     measurements: dict[str, list[PeakMeasurement]] = {}
     for index, combo in enumerate(combos, start=1):
         spectrum = my_pipeline(combo)                  # ← 你的谱
+        # 窗口给**物理宽度**(ppm):缺省 1.5×该轴线宽折算 ppm;这样即使
+        # 你的 pipeline 改了填零(数字分辨率),窗口覆盖的 ppm 也不变。
         measurements[f"m{index:04d}"] = measure_peak_positions(
-            spectrum, peaks, window_pts=3
+            spectrum, peaks, window_ppm=0.5
         )
 
     uncertainties = position_uncertainty(measurements, csp_n_weight=0.2)

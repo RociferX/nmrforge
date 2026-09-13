@@ -169,6 +169,7 @@ def cmd_sweep(args: argparse.Namespace) -> int:
         plan,
         reference=reference,
         window_pts=args.window_pts,
+        window_ppm=args.window_ppm,
         resume=not args.no_resume,
         progress=print,
     )
@@ -288,7 +289,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="显式组合表 CSV/TSV/YAML/JSON(外部设计:正交/部分因子/LHS…)",
     )
     sweep.add_argument("--max-runs", type=int, default=0)
-    sweep.add_argument("--window-pts", type=int, default=3)
+    sweep.add_argument(
+        "--window-pts",
+        type=int,
+        default=None,
+        help="峰位搜索窗口半径(数据点;显式口径,跨分辨率不可比,不推荐)",
+    )
+    sweep.add_argument(
+        "--window-ppm",
+        type=float,
+        default=None,
+        help="峰位搜索窗口半径(ppm;缺省=1.5×该轴核素线宽折算 ppm)",
+    )
     sweep.add_argument("--csp-n-weight", type=float, default=DEFAULT_CSP_N_WEIGHT)
     sweep.add_argument("--no-resume", action="store_true", help="不跳过已完成组合")
     sweep.set_defaults(func=cmd_sweep)

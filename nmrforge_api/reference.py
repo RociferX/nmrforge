@@ -433,10 +433,12 @@ def ensure_reference_peaks(
     if not force and ref.peak_table_path and Path(ref.peak_table_path).is_file():
         return ref
     target = session.reference_dir_for() / "reference.list"
+    details: dict[str, Any] = {}
     pick_reference_peaks(
         session,
         sigma_multiplier=sigma_multiplier,
         out_path=target,
+        details=details,
     )
     if max_peaks and max_peaks > 0:
         _keep_top_peaks(target, int(max_peaks))
@@ -445,7 +447,12 @@ def ensure_reference_peaks(
         target,
         ref,
         source="auto",
-        params={"sigma_multiplier": sigma_multiplier, "max_peaks": int(max_peaks)},
+        params={
+            "sigma_multiplier": sigma_multiplier,
+            "max_peaks": int(max_peaks),
+            # 选峰边距的物理宽度↔点数换算(用户方案 A):跨分辨率复算用
+            "detection": details.get("detection") or {},
+        },
     )
     # 选峰会登记一条 pick_peaks 运行记录:同样要落盘(跨进程可见)
     session.manager.save()

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import csv
 import json
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -47,6 +47,58 @@ def _fmt(value: Any) -> str:
         return str(value)
 
 
+WINDOW_POLICY = (
+    "峰位搜索窗口半径按物理宽度定义:缺省 = 1.5×该轴核素线宽(Hz)折算 "
+    "ppm,运行时按该候选谱的点距换算成点数(core.peaks.axis_units);"
+    "零填零 k 倍只改点距,不改变窗口覆盖的 ppm 宽度"
+)
+
+
+def measurement_record(
+    reference: ReferenceSpectrum,
+    runs: Sequence[SweepRun],
+) -> dict[str, Any]:
+    """测量口径留档:峰位窗口的逐轴换算(点数/ppm/点距)+ 选峰边距。
+
+    ``window_by_axis`` 给出每个轴最后一次实际用到的口径;``window_points_seen``
+    给出各轴在全部组合里出现过的点数集合——同一物理宽度在 1×/2×/4×
+    填零下换成不同点数,这里一眼能看出「点数变了但 ppm 没变」。
+    """
+    by_axis: dict[str, dict[str, Any]] = {}
+    seen: dict[str, dict[str, Any]] = {}
+    for run in runs:
+        for axis, spec in (run.window or {}).items():
+            if not isinstance(spec, Mapping):
+                continue
+            key = str(axis)
+            by_axis[key] = dict(spec)
+            bucket = seen.setdefault(
+                key,
+                {
+                    "nucleus": str(spec.get("nucleus", "")),
+                    "points": [],
+                    "ppm": [],
+                    "effective_ppm": [],
+                    "ppm_per_point": [],
+                },
+            )
+            for field in ("points", "ppm", "effective_ppm", "ppm_per_point"):
+                value = spec.get(field)
+                if value is not None and value not in bucket[field]:
+                    bucket[field].append(value)
+    detection = (reference.peak_params or {}).get("detection") or None
+    return {
+        "peak_position_method": (
+            "在参考峰位附近窗口内取 |强度| 极值,再对每个参与轴做 ±1 点 "
+            "抛物线亚像素 refine"
+        ),
+        "window_policy": WINDOW_POLICY,
+        "window_by_axis": by_axis,
+        "window_points_seen": seen,
+        "edge_margin": detection,
+    }
+
+
 def write_records(
     session: StudySession,
     *,
@@ -61,6 +113,7 @@ def write_records(
     out_dir = session.records_dir
     out_dir.mkdir(parents=True, exist_ok=True)
     written: dict[str, str] = {}
+    measurement = measurement_record(reference, runs)
     manifest = {
         "api_version": "0.1",
         "created": now_iso(),
@@ -104,6 +157,7 @@ def write_records(
             "success": sum(1 for r in runs if r.status == "success"),
             "failed": sum(1 for r in runs if r.status != "success"),
         },
+        "measurement": measurement,
     }
     written["manifest"] = str(_write_json(out_dir / "manifest.json", manifest))
     written["sweep_plan"] = str(
@@ -111,6 +165,9 @@ def write_records(
     )
     written["runs"] = str(
         _write_json(out_dir / "runs.json", [r.to_dict() for r in runs])
+    )
+    written["measurement"] = str(
+        _write_json(out_dir / "measurement.json", measurement)
     )
 
     positions_path = out_dir / "peak_positions.csv"

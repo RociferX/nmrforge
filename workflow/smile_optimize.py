@@ -80,15 +80,57 @@ def smile_scan_sign_mode(experiment: Any) -> str:
     return "both" if peak_sign == "mixed" else "dominant"
 
 
-def smile_scan_edge_margin() -> int:
-    """候选评估排除上下边缘轴峰 —— 与选峰步骤同一常量(workflow.pick_peaks)。"""
+def smile_scan_edge_margin(
+    experiment: Any | None = None, n_points: int | None = None
+) -> int:
+    """候选评估排除上下边缘轴峰 → 点数(**与选峰同一换算口径**)。
+
+    2026-09-13(用户方案 A):边距是物理宽度(默认 3×该轴核素线宽折算 ppm),
+    必须按当前候选谱的点距换算成点数;固定点数会随零填零改变覆盖宽度。
+    给了 ``experiment``(取间接维核素与观测频率)且 ``n_points``(候选谱第 0 轴
+    点数)时按物理宽度换算;否则回退旧点数常量(workflow.pick_peaks)。
+    """
     from workflow.pick_peaks import PICK_EDGE_MARGIN
 
-    return int(PICK_EDGE_MARGIN)
+    if experiment is None or not n_points or int(n_points) < 2:
+        return int(PICK_EDGE_MARGIN)
+    try:
+        from core.peaks import axis_units
+
+        nucleus = ""
+        obs = 0.0
+        for dim in getattr(experiment, "dimensions", None) or []:
+            if str(getattr(dim, "logical_axis", "")) == "F1":
+                nucleus = str(getattr(dim, "nucleus", "") or "")
+                obs = float(getattr(dim, "sf", 0.0) or 0.0)
+                break
+        sw_hz = 0.0
+        for dim in getattr(experiment, "dimensions", None) or []:
+            if str(getattr(dim, "logical_axis", "")) == "F1":
+                sw_hz = float(getattr(dim, "sw", 0.0) or 0.0)
+                break
+        if obs <= 0 or sw_hz <= 0:
+            return int(PICK_EDGE_MARGIN)
+        axis_ppm = sw_hz / (int(n_points) * obs) * (
+            int(n_points) / 2 - __import__("numpy").arange(int(n_points))
+        )
+        try:
+            from backend.config import load_processing_defaults
+
+            linewidths = load_processing_defaults().get("linewidth_hz") or {}
+        except Exception:  # noqa: BLE001
+            linewidths = {}
+        width_ppm = axis_units.edge_margin_ppm(
+            nucleus, obs, linewidth_hz_by_nucleus=linewidths
+        )
+        points = axis_units.points_for_ppm(axis_ppm, width_ppm)
+        return int(points) if points > 0 else int(PICK_EDGE_MARGIN)
+    except Exception:  # noqa: BLE001 - 换算失败回退点数常量
+        return int(PICK_EDGE_MARGIN)
 
 
 def evaluate_candidate_peaks(
-    arr: Any, *, sign_mode: str = "dominant"
+    arr: Any, *, sign_mode: str = "dominant", edge_margin: int | None = None
 ) -> list[Any]:
     """候选谱峰检测:低阈值(SMILE_SCAN_SIGMA)+ 同源符号模式 + 排除轴峰。
 
@@ -99,7 +141,11 @@ def evaluate_candidate_peaks(
         sigma_multiplier=SMILE_SCAN_SIGMA,
         min_snr=SMILE_SCAN_SIGMA,
         sign_mode=sign_mode,
-        edge_margin=smile_scan_edge_margin(),
+        edge_margin=(
+            int(edge_margin)
+            if edge_margin is not None
+            else smile_scan_edge_margin()
+        ),
     )
     return peak_detection.detect(np.asarray(arr), params)
 
@@ -210,7 +256,9 @@ def scan_smile_parameters(
     combos = list(grid) if grid is not None else smile_grid(grid_size)
     base = dict(base_params or {})
     sign_mode = smile_scan_sign_mode(experiment)
-    edge_margin = smile_scan_edge_margin()
+    # 边距按**实际候选谱点数**换算(物理宽度不变);收集每次实际取值供
+    # 汇总日志/记录使用(拿不到上下文时 smile_scan_edge_margin 回退点数常量)。
+    edge_margin_seen: list[int] = []
     mode = str(rank_mode or "true_peaks").lower()
     # 修23(用户):按需要的排序方法选运行方式(每候选只跑一次)——
     #   净真峰优先 → 全采样跑(峰数/质量分即终谱口径,不留出);
@@ -256,7 +304,13 @@ def scan_smile_parameters(
             arr = arr.real
         # 低阈值 + 同源符号模式 + 排除轴峰(0.2.199-补29hz-修16);
         # 不跟「峰挑选」步骤的阈值(默认 35σ)——那一步是出峰表,不是评候选。
-        peaks = evaluate_candidate_peaks(arr, sign_mode=sign_mode)
+        edge_margin_points = smile_scan_edge_margin(
+            experiment, int(arr.shape[0])
+        )
+        edge_margin_seen.append(int(edge_margin_points))
+        peaks = evaluate_candidate_peaks(
+            arr, sign_mode=sign_mode, edge_margin=edge_margin_points
+        )
         quality = spectrum_quality.evaluate(arr)
         # 0.2.199-补29hz-修4:综合分在 QualityResult.score.overall 上,
         # QualityResult 本身没有 overall(此前取值恒为 0)
@@ -277,7 +331,13 @@ def scan_smile_parameters(
     # 口径写入日志,便于核对(与峰挑选步骤的阈值无关)
     _criteria_log = (
         f"候选评估口径:阈值 {SMILE_SCAN_SIGMA:g}σ(独立于选峰步骤)、"
-        f"符号模式 {sign_mode}、排除轴峰 {edge_margin} 点"
+        f"符号模式 {sign_mode}、排除轴峰 "
+        + (
+            f"{min(edge_margin_seen)}–{max(edge_margin_seen)} 点"
+            "(按各候选谱点数换算,物理宽度一致)"
+            if edge_margin_seen
+            else "(未评估,沿用点数常量)"
+        )
     )
     scan = backend.smile_scan(
         experiment,

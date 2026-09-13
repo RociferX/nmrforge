@@ -319,10 +319,12 @@ class Spectrum3D:
 ```python
 API_VERSION = "0.1"
 run_parameter_study(root, dataset=None, *, axes, peaks=None, params=None,
-                    max_runs=256, window_pts=3, csp_n_weight=0.2, ...)
+                    max_runs=256, window_ppm=None, window_pts=None,
+                    csp_n_weight=0.2, ...)
 open_study / add_dataset / dataset_info
 build_reference / load_reference / set_reference_peaks / ensure_reference_peaks
-pick_reference_peaks / read_reference_peaks / measure_peak_positions
+pick_reference_peaks / read_reference_peaks / measure_peak_positions /
+window_points_by_axis
 expand_grid / plan_sweep / run_sweep / load_plan / load_runs
 position_uncertainty / uncertainty_summary / write_records
 ```
@@ -335,12 +337,17 @@ CLI:`python -m nmrforge_api {init,reference,peaks,sweep,report,status}`。
 - `ReferenceSpectrum`(冻结谱与脚本路径 + 两个 SHA-256 + 有效参数 +
   `direct_phase`(各轴 PS,锁定相位) + 峰表路径/SHA-256/峰数/来源(取峰
   方式 auto|external)/选峰参数 + 版本表);
-- `SweepRun`(run_id/combo/params/脚本与谱哈希/峰位测量/日志尾部/status);
+- `SweepRun`(run_id/combo/params/脚本与谱哈希/峰位测量/窗口换算/日志尾部/
+  status);
 - `PeakMeasurement`(每核 ppm、相对参考的 delta、intensity、found/
   window_edge/boundary/out_of_range);
 - `PeakUncertainty`(mean/sigma/range/delta_std/delta_max/worst_run);
 - `records/` 文件名固定(manifest/sweep_plan/runs/peak_positions/
-  uncertainty/uncertainty_summary)。
+  uncertainty/uncertainty_summary/measurement);
+- 峰位窗口与选峰边距按**物理宽度**(ppm)定义、运行时按当前谱点距换算点数
+  (`core.peaks.axis_units`):零填零只改点距、不改变覆盖宽度;结构性点数
+  (局部极大 3 点邻域、抛物线 ±1 点模板)不换算;换算结果必须留档
+  (`run.json.window`、`records/measurement.json`、选峰 `detection`)。
 
 ### 11.3 强约束(破坏即视为契约破坏)
 
@@ -353,7 +360,8 @@ CLI:`python -m nmrforge_api {init,reference,peaks,sweep,report,status}`。
     `phase.<轴>.p0|p1`(绝对值),直接写 `phases`/`direct_phase` 报错;
 2. 扫描候选谱只写 `study/runs/`,不替换 `spectra/` 活动谱;
 3. 同一数据集内 fid 只转换一次;组合间只允许被扫参数不同(相位锁定);
-4. 峰位测量与选峰共用轴映射口径(`workflow.pick_peaks.read_spectrum_axes`);
+4. 峰位测量与选峰共用轴映射口径(`workflow.pick_peaks.read_spectrum_axes`),
+   且窗口/边距等物理量按 `core.peaks.axis_units` 换算点数后留档;
 5. 每条记录必须带脚本/谱哈希与版本表;
 6. 单组合失败不中断整轮,状态与原因必须落盘。
 
