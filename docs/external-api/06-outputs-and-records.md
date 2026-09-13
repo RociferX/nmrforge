@@ -1,119 +1,127 @@
-# 06 · 输出目录与记录字段
+# 06 · 输出与记录(v0.2)
 
 ## 6.1 目录布局
 
 ```text
-<研究根>/
-├── project.json                 NMRForge 项目(schema 1.4:数据集与运行记录)
-├── <exp_id>/<data_id>/          项目数据(raw/process/spectra/peaks/…)
-│   └── spectra/<data_id>.ft2    参考谱(活动谱;扫描不替换它)
-└── study/
-    ├── study.json               研究状态(数据集引用 + 参考谱摘要 + records 路径)
-    ├── work/                    处理工作目录:转换后的 fid(所有组合共享)
-    ├── reference/<exp>_<data>/
-    │   ├── reference.ft2        参考谱冻结副本
-    │   ├── process.com          参考运行实际执行的脚本
-    │   ├── reference.list       参考峰表(自动选峰或外部)
-    │   └── reference.json       参考谱/脚本/峰表的参数与哈希(见 6.3)
-    ├── runs/<run_id>/
-    │   ├── process.com          该组合实际执行的脚本
-    │   ├── spectrum.ft2         该组合的候选谱
-    │   └── run.json             该组合的参数/哈希/峰位/日志(见 6.4)
-    └── records/                 汇总产物(见 6.2)
+<root>/
+  project.json                    NMRForge 项目(数据与 WorkflowRun 登记)
+  study/
+    study.json                    条件数据集 + 参考摘要
+    work/                         共享 fid 与每次运行的脚本/候选谱
+    reference/<exp>_<data>/
+        reference.json            参考状态(参数/哈希/两张峰表/版本)
+        process.com               参考运行实际执行的完整脚本
+        reference.ft2             冻结参考谱
+        reference.list            参考峰**身份**表(Poky,含 R0001…)
+        reference_peak_table_parabolic.csv
+        reference_peak_table_gaussian.csv
+    workflows/W0001/
+        workflow.json             组合级记录(见 6.3)
+        log.txt                   组合级完整日志(各条件日志串接)
+        <条件 A|B>/
+            process.com           该条件实际执行的完整处理脚本
+            spectrum.ft2          候选谱(不替换活动谱)
+            peak_table_parabolic.csv
+            peak_table_gaussian.csv
+            log.txt               该条件的完整运行日志(不是尾部)
+            run.json              该条件的完整溯源记录
+    records/
+        manifest.json             数据/参考/计划/峰身份/版本/边界声明
+        sweep_plan.json           workflow 计划(含 workflow_ids)
+        runs.json                 逐 (workflow, 条件) 扁平记录
+        workflows.json            逐 workflow 汇总记录
+        measurement.json          测量口径与定位 QC 汇总
+        peak_table_parabolic.csv  全部 workflow × 条件的长表
+        peak_table_gaussian.csv   同上(Gaussian 定位)
 ```
 
-`run_id` 为 `s0001`、`s0002`…(按网格顺序)。项目自身的运行记录
-(`WorkflowRun`,编号 `R-YYYYMMDD-NNN`)记在 `project.json`,用于追溯导入/参考
-处理这一步。
-
-## 6.2 `records/` 产物
-
-| 文件 | 内容 |
-| --- | --- |
-| `manifest.json` | 复算所需的全部来源:数据集、参考谱/脚本/峰表(含哈希)、扫描网格与哈希、组合数、版本表 |
-| `sweep_plan.json` | 扫描计划(`SweepPlan`):轴、组合列表、基底参数、网格哈希、`phase_locked`、notes |
-| `runs.json` | 全部组合的完整记录(`SweepRun` 列表,含逐峰测量与窗口换算) |
-| `measurement.json` | 测量口径:峰位窗口逐轴换算(点数/ppm/点距/来源)、跨组合点数集合、选峰边距、定位方法计数(`localization.actual_method_counts` / `fallback_reasons`) |
-| `peak_positions.csv` | 长表:每组合 × 每峰 × 每核一行(最常用于画「参数 → 峰位」) |
-| `uncertainty.csv` | 逐峰:σ、极差、Δδ 下限、最差组合 |
-| `uncertainty_summary.json` | 数据集级:Δδ 下限分布与逐核 σ 分布 |
-
-重算汇总不需要重跑处理:`python -m nmrforge_api report --study DIR`。
-
-## 6.3 `reference.json` 字段
-
-| 字段 | 说明 |
-| --- | --- |
-| `dataset_key` / `exp_id` / `data_id` | 归属 |
-| `run_id` | 参考运行号 |
-| `phase_route` / `ndim` / `sampling` | 运行路线、维度、采样方式 |
-| `spectrum_path` / `frozen_spectrum` / `spectrum_sha256` | 项目内活动谱与冻结副本 |
-| `script_path` / `script_sha256` | 参考脚本副本与哈希 |
-| `params` | 参考运行的有效参数(含 `phases`、`baseline`、`zero_fill`、`window` 等) |
-| `sweep_params` | 扫描基底参数(剔除运行期派生键) |
-| `direct_phase` | 各轴 PS(p0,p1):扫描时锁定用 |
-| `peak_table_path` / `peak_table_sha256` / `peak_count` | 参考峰表 |
-| `peak_source` / `peak_params` / `peak_created_at` | `auto`(软件选峰)/`external` |
-| `created_at` / `software_version` / `tool_versions` / `logs_tail` | 溯源 |
-
-## 6.4 `runs/<run_id>/run.json` 字段
-
-| 字段 | 说明 |
-| --- | --- |
-| `run_id` / `index` | 组合编号(如 `s0003` / 3) |
-| `combo` | 该组合的覆盖项(点号键 → 值) |
-| `params` | 合并后的完整处理参数 |
-| `status` / `message` | `success` / `failed`(或 `cancelled`)与说明 |
-| `script_path` / `script_sha256` | 本次执行脚本与其哈希 |
-| `spectrum_path` / `spectrum_sha256` | 候选谱与其哈希 |
-| `wall_time_s` | 处理耗时(秒) |
-| `phase_locked` | 是否用了参考相位(应恒为 `true`) |
-| `window` | 本次组合的峰位窗口换算:逐轴 `points`/`ppm`/`effective_ppm`/`ppm_per_point`/`source`/`nucleus` |
-| `logs_tail` | NMRPipe 日志尾部(最多 40 行) |
-| `measurements` | 逐峰测量(见 6.5);每峰带 `localization`(实际定位方法 / 是否回退 / 高斯 QC:center/sigma/FWHM/amplitude/baseline/RMSE) |
-| `updated` / `software_version` | 写入时间与 NMRForge 版本 |
-
-## 6.5 `peak_positions.csv` 列
-
-| 列 | 说明 |
-| --- | --- |
-| `run_id` / `combo_index` / `status` | 组合标识与状态 |
-| `peak_id` / `assignment` | 峰编号(参考峰表内)与指认标签(若有) |
-| `nucleus` | 核名(`1H`/`15N`/`13C`…) |
-| `ppm` | 测量的峰位(亚像素) |
-| `reference_ppm` | 参考峰位 |
-| `delta_ppm` | `ppm - reference_ppm` |
-| `intensity` | 极值处强度(实部值,可为负) |
-| `found` | 是否测到(`0/1`) |
-| `window_edge` | 极值落在搜索窗口边界(真峰可能在窗外) |
-| `boundary` | 极值贴谱边界 |
-| `out_of_range` | 参考峰位落在谱范围外 |
-
-## 6.6 `uncertainty.csv` 列
-
-`peak_id`、`assignment`、`n_runs`、`missing_runs`,随后逐核三组列
-`mean_{核}`、`sigma_{核}`、`range_{核}`,最后
-`delta_std_ppm`(主指标)、`delta_max_ppm`、`worst_run`。
-
-## 6.7 `uncertainty_summary.json` 字段
-
-| 字段 | 说明 |
-| --- | --- |
-| `csp_n_weight` / `n_runs` / `n_peaks` / `n_peaks_unmeasured` | 口径与样本量 |
-| `delta_std_ppm` | 各峰 Δδ 下限的 `min`/`median`/`p90`/`max` |
-| `sigma_ppm` | 逐核 σ 的 `median`/`p90`/`max` |
-| `definition` | 指标的算式与权重说明(可直接引用到方法部分) |
-
-## 6.8 复算与引用
-
-复算一次研究的完整链条:
+## 6.2 统一峰表字段
 
 ```text
-manifest.json        → 数据来源、参考脚本/谱/峰表哈希、网格哈希、版本
-sweep_plan.json      → 每个组合覆盖了哪些参数
-runs/<run_id>/run.json → 该组合实际执行的脚本与谱(可单独重跑比对)
+workflow_id, condition, dataset, reference_peak_id, assignment,
+H_ppm, N_ppm, intensity, SNR, detected, localization_method,
+localization_requested, fallback, fallback_reason,
+fit_success, FWHM_H, FWHM_N, fit_rmse, boundary_hit
 ```
 
-引用建议:给出 NMRForge 版本(`nmrforge_version`)、NMRPipe 版本
-(`tool_versions`)、参考脚本与谱的 SHA-256、网格哈希,以及峰表来源
-(`auto`/`external` + 选峰参数)。
+- **两种算法表结构完全一致**;parabolic 不适用的 Gaussian 字段写 `NaN`
+  (不是 false/0);
+- `reference_peak_id`(`R0001`…)在参考峰表建立,所有条件与 workflow 沿用;
+  某条件/workflow 没测到该峰 → 保留行,`detected=false`;
+- `intensity` 为峰强(带符号),`SNR = |intensity| / σ`,σ 为该谱噪声
+  (`core.qc.noise` 的 robust MAD),σ 同时写进
+  `run.json.parameters_resolved.spectrum_noise_sigma`;
+- Gaussian 列:`fit_success`(拟合是否成功)、`FWHM_H`/`FWHM_N`(按**核名**映射
+  的 FWHM,ppm)、`fit_rmse`(残差 RMS)、`boundary_hit`(中心/宽度撞拟合边界);
+  `fallback`/`fallback_reason` 记录失败回退(禁止静默);
+- `condition`/`dataset` 便于下游把 A/B 表按条件分组;`assignment` 取自参考峰表。
+
+## 6.3 `workflow.json` / `run.json`
+
+`workflow.json`(组合级):
+
+```json
+{
+  "workflow_id": "W0001",
+  "status": "success_with_warning",
+  "parameters_requested": {"zero_fill": 2},
+  "conditions": ["A", "B"],
+  "condition_records": [{"condition": "A", "status": "...",
+                         "parameters_used": {}, "parameters_resolved": {},
+                         "phase": {}, "warnings": [], "script_path": "...",
+                         "script_sha256": "...", "spectrum_path": "...",
+                         "spectrum_sha256": "...", "log_path": "...",
+                         "peak_tables": {}, "peak_localization": {},
+                         "window": {}, "run_json": "...", "versions": {}}],
+  "warnings": [], "versions": {}, "base_script": {}, "grid_sha256": "..."
+}
+```
+
+`run.json`(每 workflow × 条件)关键字段:
+
+| 字段 | 内容 |
+| --- | --- |
+| `workflow_id` / `index` / `condition` / `dataset` | 身份与数据来源 |
+| `parameters_requested` | 用户原样给的一行(规范 D2) |
+| `parameters_used` | 实际喂给后端的完整参数(参考基底 + 覆盖) |
+| `parameters_resolved` | `phase`(phase_mode + actual_p0/p1)、`smile`(实际 nSigma/thresh)、`spectrum_noise_sigma`、`window`、`effective_params_backend` |
+| `phase` | 逐轴 `phase_mode`(`auto_reference_locked` / `manual_delta_from_reference` / `manual_absolute`)+ `actual_p0/actual_p1` |
+| `base_script` | 参考脚本路径 + SHA-256(以参考脚本为模板的证据) |
+| `script_path` / `script_sha256` / `spectrum_path` / `spectrum_sha256` | 产物与哈希 |
+| `peak_tables` | 两张峰表路径 + SHA-256 + 行数 + detected 数 |
+| `peak_localization` | 两方法 n_peaks/n_detected/n_missing/n_fallback/fallback_reasons/n_boundary_hit |
+| `window` | 逐轴物理宽度、等效点数、点距、来源 |
+| `log_path` | 完整日志路径 |
+| `versions` | nmrforge / python / 依赖 / NMRPipe / SMILE(真机登记后) |
+| `status` / `warnings` / `message` | 三值状态 + 警告码与计数 |
+
+## 6.4 状态与警告码
+
+| 状态 | 含义 |
+| --- | --- |
+| `success` | 处理 + 两种定位 + 两张峰表全部完成,无警告 |
+| `success_with_warning` | 完成但有待注意项(见下,结果可用但需复核) |
+| `failed` | 处理/测量失败;原因写入 `message` 与日志,不静默 |
+
+| 警告码 | 触发 |
+| --- | --- |
+| `peak_not_detected` | 有参考峰未测到(`detected=false`,行保留) |
+| `peak_window_edge` | 极值落在搜索窗口边界(真峰可能在窗外) |
+| `peak_out_of_range` | 参考峰位置落在谱范围外 |
+| `gaussian_fallback` | 高斯拟合失败/回退抛物线(逐峰原因落表) |
+| `gaussian_boundary_hit` | 高斯中心/宽度撞拟合边界 |
+| `gaussian_unsupported_ndim` | 非 2D 数据:高斯不适用,位置回退抛物线 |
+| `window_points_fallback` | 窗口无法按物理宽度换算,回退固定点数 |
+
+## 6.5 `records/` 与边界
+
+`manifest.json` 汇总:数据条件、逐条件参考(脚本/谱/两张峰表哈希)、计划与网格
+哈希、峰身份方案、workflow 状态计数、软件/依赖/外部工具版本,以及**边界声明**
+(`manifest["boundary"]`:软件只执行处理与留档;CSP/robustness/统计由下游独立
+分析程序完成)。
+
+软件**不产出**任何 CSP/robustness/统计/显著性产物:旧版的
+`uncertainty.csv`/`uncertainty_summary.json` 已从 `records/` 移除。
+σ/Δδ 汇总代码保留为**测试/检测辅助**(`nmrforge_api.uncertainty`,处理链
+不调用),下游需要时读 `records/peak_table_*.csv` 自行计算或复用该助手;
+留档见 `docs/tasks/archive/2026-09-13-csp-statistics-boundary.md`。

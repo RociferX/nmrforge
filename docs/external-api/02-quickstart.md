@@ -1,116 +1,92 @@
-# 02 · 安装与上手
+# 02 · 快速上手(v0.2)
 
-## 1. 安装
-
-NMRForge 以源码工作区方式使用(发行物只有 AppImage,见其 README):
-
-```bash
-git clone <NMRForge 仓库> ~/NMRForge        # 或使用已有的工作副本
-cd ~/NMRForge
-python -m venv nmrforge                     # 若还没有虚拟环境
-~/NMRForge/nmrforge/bin/pip install -e .
-```
-
-> **重要**:接口包是新增的顶层包。若你之前已经装过 editable 版本,需**重跑一次
-> `pip install -e .`**,否则 `import nmrforge_api` 会报 `ModuleNotFoundError`
-> (editable 安装的包索引是安装时生成的)。
-
-验证:
-
-```bash
-~/NMRForge/nmrforge/bin/python -c "import nmrforge_api as a; print(a.API_VERSION)"
-# 0.1
-```
-
-真实处理需要 NMRPipe(`nmrPipe` 可执行文件,通常通过 `~/.cshrc` 提供环境)。
-接口在**解析到 NMRPipe 安装目录时**会探测一次 `nmrPipe`/`smile` 版本并写进记录;
-探测失败不影响运行(记录里就没有该版本)。
-
-## 2. 准备数据
-
-需要**Bruker 原始数据目录**:含 `acqus`,以及 `ser`(或 `fid`)/`acqu2s` 等。
-
-```text
-bmrXXXXX/1/
-  acqus  acqu2s  ser  ...        ← 处理参数研究的输入
-```
-
-从公开库(BMRB、PDB 等)下载后解压即可,无需预处理。已处理过的谱(ft2/UCSF)
-不能用于本接口,因为无法重跑处理。
-
-## 3. 第一次运行(一步式)
+## 1. 一步跑完(推荐)
 
 ```python
 from nmrforge_api import run_parameter_study
 
 result = run_parameter_study(
-    "~/studies/hsqc_params",                  # 研究根(不存在会自动创建)
-    "~/bruker_data/bmrXXXXX/1",               # 首次必须给;之后可省略
-    axes={
-        "window.F1.off": [0.35, 0.45, 0.55],  # 间接维窗函数
-        "zero_fill": [1, 2, 4],               # 填零(数字分辨率)
-    },
+    "~/studies/hsqc_params",                 # 研究根(可复用/断点续跑)
+    datasets={"A": "~/data/bmr12345/1"},     # 条件 A(原始 Bruker 目录)
+    combos=[                                  # 用户参数组合表(原样执行)
+        {"zero_fill": 1},
+        {"zero_fill": 2},
+        {"zero_fill": 1, "window.F1.off": 0.45},
+    ],
 )
 
-print(result.summary["delta_std_ppm"])
+print(result.summary["workflow_ids"])         # ['W0001', 'W0002', 'W0003']
+print(result.summary["status_counts"])        # {'n_runs': 3, 'success': 3, ...}
+for run in result.runs:
+    print(run.workflow_id, run.condition, run.status,
+          run.peak_table_path("parabolic"), run.peak_table_path("gaussian"))
 ```
 
-产出(研究根下):
+第一次运行会:导入数据 → 自动优化出参考谱与参考脚本 → 在参考谱上自动选峰并
+写两张参考峰表 → 对每个组合跑处理 + 两种定位 → 写 `study/records/` 汇总。
+不需要外部峰表;`peaks=<外部峰表>` 只在研究方另有公开库/已指认峰表时才用。
+
+## 2. 两条件(A/B)同参数
+
+```python
+result = run_parameter_study(
+    "~/studies/titration",
+    datasets={"A": "~/data/titr/apo", "B": "~/data/titr/holo"},
+    combos=[{"zero_fill": 2, "window.F1.off": 0.45}],
+)
+```
+
+同一个 `W0001` 对 A、B 使用**同一份**用户参数,各自输出峰值表:
 
 ```text
-study/reference/<exp>_<data>/   参考谱、参考脚本、参考峰表、reference.json
-study/runs/s0001/               每个组合:process.com + spectrum.ft2 + run.json
-study/records/                  manifest / runs / peak_positions / uncertainty ...
+study/workflows/W0001/A/peak_table_parabolic.csv
+study/workflows/W0001/A/peak_table_gaussian.csv
+study/workflows/W0001/B/peak_table_parabolic.csv
+study/workflows/W0001/B/peak_table_gaussian.csv
 ```
 
-## 4. 用命令行(适合集群/批处理)
+两张表用同一个 `reference_peak_id` 标识同一个峰,`detected=false` 表示该条件下
+没测到但**保留记录**。CSP/统计由你**自己的分析程序**读这两张表计算。
 
-```bash
-python -m nmrforge_api init      --study ~/studies/hsqc_params --dataset ~/bruker_data/bmrXXXXX/1
-python -m nmrforge_api reference --study ~/studies/hsqc_params
-python -m nmrforge_api peaks     --study ~/studies/hsqc_params
-cat > grid.yaml <<'YAML'
-axes:
-  "window.F1.off": [0.35, 0.45, 0.55]
-  zero_fill: [1, 2, 4]
-max_runs: 64
-YAML
-python -m nmrforge_api sweep     --study ~/studies/hsqc_params --grid grid.yaml
-python -m nmrforge_api status    --study ~/studies/hsqc_params
-```
-
-## 5. 常见操作
-
-**续跑**:同一命令重跑即可,已成功的组合不会重算(除非 `--no-resume` /
-`resume=False`)。每个组合的状态在 `study/runs/<run_id>/run.json`。
-
-**换数据集**:再传一次 `dataset=<新目录>`(或 CLI `--dataset`),参考谱会自动重建;
-旧参考谱与运行记录保留在 `study/` 内(按 `exp_id_data_id` 分目录)。
-
-**换网格**:改 `axes` 重跑。网格哈希写进 `records/manifest.json`;两次不同网格的
-结果不要混在同一个 `runs/` 里比较——建议一个网格一个研究根。
-
-**只重算汇总**(不重跑处理):
-
-```bash
-python -m nmrforge_api report --study DIR
-```
-
-**控制选峰**:默认在参考谱上自动选峰(阈值 35σ)。
+## 3. 分步用法(需要精细控制时)
 
 ```python
-result = run_parameter_study(..., sigma_multiplier=25.0, max_peaks=100)
+from nmrforge_api import (
+    add_dataset, build_reference, ensure_reference_peaks, open_study,
+    plan_sweep, run_sweep, write_records,
+)
+
+session = open_study("~/studies/step_by_step")          # 或名称
+add_dataset(session, "~/data/bmr12345/1", condition="A")
+reference = build_reference(session)                     # 参考谱 + 参考脚本
+reference = ensure_reference_peaks(session, reference)   # 峰身份 + 两张参考峰表
+
+plan = plan_sweep(reference, combos=[{"zero_fill": 1}, {"zero_fill": 2}])
+runs = run_sweep(session, plan, reference=reference, window_ppm=0.5)
+records = write_records(session, references={reference.dataset_key: reference},
+                        plan=plan, runs=runs)
+print(records)
 ```
 
-**用自己的峰表(可选)**:若你另有公开库指认表,传 `peaks=` 即可(会被冻结留档);
-支持 Poky `.list` 或 `peak_id,H_ppm,N_ppm,...` 的 CSV。
+## 4. 命令行
 
-```python
-run_parameter_study(..., peaks="~/data/bmrXXXXX/reference_peaks.csv")
+```bash
+python -m nmrforge_api init      --study ~/studies/s1 --dataset ~/data/a --condition A
+python -m nmrforge_api init      --study ~/studies/s1 --dataset ~/data/b --condition B
+python -m nmrforge_api reference --study ~/studies/s1
+python -m nmrforge_api peaks     --study ~/studies/s1
+python -m nmrforge_api sweep     --study ~/studies/s1 --combos design.csv
+python -m nmrforge_api status    --study ~/studies/s1
+python -m nmrforge_api report    --study ~/studies/s1
 ```
 
-## 6. 典型耗时(参考量级)
+## 5. 看什么文件
 
-VM 实测(2D 15N-HSQC,间接维 TD=256,uniform):参考谱(含统一相位优化)
-约 30 s;每个参数组合约 5 s(复用 fid,相位已锁定);峰位测量 150 峰量级为
-亚秒级。具体取决于数据规模与 NMRPipe 机器性能。
+| 想知道 | 看 |
+| --- | --- |
+| 每个组合是什么、状态如何 | `study/workflows/<id>/workflow.json` |
+| 实际用了哪些参数 | `run.json.parameters_used` + `parameters_resolved` |
+| 峰表(下游分析入口) | `study/workflows/<id>/<条件>/peak_table_*.csv`;长表见 `study/records/peak_table_*.csv` |
+| 处理脚本 / 谱 | `study/workflows/<id>/<条件>/process.com` / `spectrum.ft2` |
+| 日志 | `study/workflows/<id>/<条件>/log.txt`(完整)+ `workflows/<id>/log.txt` |
+| 版本与哈希 | `run.json.versions` / `manifest.json` |

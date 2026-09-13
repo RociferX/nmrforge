@@ -1,14 +1,24 @@
-"""参数扫描:同一份 fid、同一参考相位,只改被扫的处理参数,逐组合出谱。
+"""参数组合批量执行:参考工作流为模板,每个 workflow 跑全部条件。
 
-研究设计要点(直接决定结论是否可用):
+语义(2026-09-13 用户 API 规范):
 
-- **fid 只转一次**:``build_reference`` 已经把 fid 落在 ``study/work/``;
-  扫描复用同一份 fid,参数变化是唯一变量;
-- **相位锁定在参考值**:每组合传入 ``direct_phase_override``,否则每个组合
-  会各自重跑相位搜索,峰位差里就混进相位差(不是处理参数的分辨率效应);
-- **不替换活动谱**:候选谱写到 ``study/runs/<run_id>/``,项目的参考谱不动;
-- **可断点续跑**:每个组合成功即写 ``run.json``;重跑时跳过已成功的组合;
-- **单组合失败不中断**:状态记 ``failed`` + 原因,继续下一组合(与批量一致)。
+- **workflow_id = W0001…**:用户参数组合表里每行一个 workflow,编号唯一;
+- **以参考脚本为模板**:该条件的扫描基底 = 该条件参考运行的有效参数(相位锁定
+  在参考值),组合表只覆盖它显式指定的键;
+- **参数三层留档**:``parameters_requested``(用户原样给的行)/``parameters_used``
+  (实际喂给后端的完整参数)/``parameters_resolved``(自动参数的**实际结果**:
+  自动相位的 actual_p0/actual_p1、SMILE 自动分档的 nSigma/thresh、谱噪声 σ);
+- **同一张谱两种定位**:每个条件各跑一次处理,再对同一张候选谱分别做
+  parabolic 与 2D gaussian 定位,输出两张结构一致的峰表;
+- **多条件(A/B)同参数**:同一个 workflow 对全部条件用同一份
+  ``parameters_requested``;每个条件各有一份参考(相位/噪声来自该条件自身),
+  但峰身份(``reference_peak_id``)全条件共享;
+- **状态三值**:``success`` / ``success_with_warning`` / ``failed``;单条件失败
+  不静默、不中断整轮(写入 ``failed`` + 原因后继续);
+- **不替换活动谱**:候选谱只写 ``study/workflows/<workflow_id>/<条件>/``。
+
+软件边界(规范 J):这里只产出**谱 + 峰表 + 处理记录**;不做 CSP、不做
+robustness、不做统计推断与显著性判断——那些由下游独立分析程序从峰表计算。
 """
 
 from __future__ import annotations
@@ -27,20 +37,45 @@ from typing import Any
 
 from core.planning.method_selector import select_method
 from core.project.manager import sha256_file
-from core.version import software_version
+from core.version import software_version, tool_versions
 from nmrforge_api.errors import SweepError
+from nmrforge_api.peak_tables import (
+    gaussian_fallback_rows,
+    peak_table_digest,
+    peak_table_rows,
+    write_peak_table,
+)
 from nmrforge_api.peaks import (
     PeakMeasurement,
     measure_peak_positions,
     read_reference_peaks,
     window_points_by_axis,
 )
-from nmrforge_api.reference import ReferenceSpectrum, load_reference
-from nmrforge_api.session import StudySession, now_iso
+from nmrforge_api.reference import (
+    GAUSSIAN_UNSUPPORTED_NDIM_REASON,
+    ReferenceSpectrum,
+    load_reference,
+)
+from nmrforge_api.session import DatasetRef, StudySession, now_iso
 from workflow.pick_peaks import read_spectrum_axes
 from workflow.stepwise import read_experiment
 
 DEFAULT_MAX_RUNS = 256
+
+#: workflow 状态(规范 D9)
+STATUS_SUCCESS = "success"
+STATUS_WARNING = "success_with_warning"
+STATUS_FAILED = "failed"
+SUCCESS_STATUSES: frozenset[str] = frozenset({STATUS_SUCCESS, STATUS_WARNING})
+
+#: 警告码(规范 D9/G3:任何影响判读的情况都要显式落盘,不静默)
+WARN_PEAK_NOT_DETECTED = "peak_not_detected"
+WARN_PEAK_WINDOW_EDGE = "peak_window_edge"
+WARN_PEAK_OUT_OF_RANGE = "peak_out_of_range"
+WARN_GAUSSIAN_FALLBACK = "gaussian_fallback"
+WARN_GAUSSIAN_BOUNDARY_HIT = "gaussian_boundary_hit"
+WARN_GAUSSIAN_UNSUPPORTED = "gaussian_unsupported_ndim"
+WARN_WINDOW_FALLBACK = "window_points_fallback"
 
 # 相位轴(保留前缀):phase.<轴>.p0|p1 为绝对值,phase_delta.<轴>.p0|p1 为
 # 相对参考相位的偏差(人工相位识别偏差 ±5° 之类)。
@@ -111,6 +146,11 @@ _LOCKED_AXIS_KEYS: frozenset[str] = frozenset(
 )
 
 
+def workflow_id_for(index: int) -> str:
+    """组合序号 → workflow_id(规范 C4:W0001、W0002…)。"""
+    return f"W{int(index):04d}"
+
+
 def is_phase_axis(key: str) -> bool:
     """是否相位轴(phase./phase_delta. 前缀)。"""
     return str(key).startswith(PHASE_PREFIXES)
@@ -123,7 +163,9 @@ def parse_phase_axis(key: str) -> tuple[str, str, str]:
     """
     kind, _, rest = str(key).partition(".")
     if kind not in ("phase", "phase_delta") or not rest:
-        raise SweepError(f"相位轴写法不对: {key}(应为 phase.<轴>.p0 或 phase_delta.<轴>.p1)")
+        raise SweepError(
+            f"相位轴写法不对: {key}(应为 phase.<轴>.p0 或 phase_delta.<轴>.p1)"
+        )
     axis, _, comp = rest.partition(".")
     if axis not in ("F1", "F2", "F3") or comp not in ("p0", "p1"):
         raise SweepError(f"相位轴写法不对: {key}(轴取 F1/F2/F3,分量取 p0/p1)")
@@ -184,7 +226,7 @@ def normalize_nus_params(params: Mapping[str, Any]) -> dict[str, Any]:
 
 @dataclass
 class SweepPlan:
-    """扫描计划:参数轴 → 组合网格 + 参考基底参数。"""
+    """workflow 计划:参数轴 → 组合表 + 参考基底参数。"""
 
     axes: dict[str, list[Any]] = field(default_factory=dict)
     combos: list[dict[str, Any]] = field(default_factory=list)
@@ -192,6 +234,7 @@ class SweepPlan:
     grid_sha256: str = ""
     reference_script_sha256: str = ""
     reference_spectrum_sha256: str = ""
+    reference_peak_table_sha256: str = ""
     max_runs: int = DEFAULT_MAX_RUNS
     design: str = "full"      # "full"(接口展开全因子) | "explicit"(外部给组合表)
     n_full: int = 0           # 全因子规模(对照用;显式设计等于组合数)
@@ -203,6 +246,13 @@ class SweepPlan:
     def n_combos(self) -> int:
         return len(self.combos)
 
+    @property
+    def n_workflows(self) -> int:
+        return len(self.combos)
+
+    def workflow_ids(self) -> list[str]:
+        return [workflow_id_for(index) for index in range(1, self.n_combos + 1)]
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "axes": self.axes,
@@ -211,6 +261,7 @@ class SweepPlan:
             "grid_sha256": self.grid_sha256,
             "reference_script_sha256": self.reference_script_sha256,
             "reference_spectrum_sha256": self.reference_spectrum_sha256,
+            "reference_peak_table_sha256": self.reference_peak_table_sha256,
             "max_runs": int(self.max_runs),
             "design": self.design,
             "n_full": int(self.n_full),
@@ -218,6 +269,8 @@ class SweepPlan:
             "phase_locked": bool(self.phase_locked),
             "notes": list(self.notes),
             "n_combos": self.n_combos,
+            "n_workflows": self.n_workflows,
+            "workflow_ids": self.workflow_ids(),
         }
 
     @classmethod
@@ -229,6 +282,9 @@ class SweepPlan:
             grid_sha256=str(data.get("grid_sha256", "")),
             reference_script_sha256=str(data.get("reference_script_sha256", "")),
             reference_spectrum_sha256=str(data.get("reference_spectrum_sha256", "")),
+            reference_peak_table_sha256=str(
+                data.get("reference_peak_table_sha256", "")
+            ),
             max_runs=int(data.get("max_runs", DEFAULT_MAX_RUNS) or DEFAULT_MAX_RUNS),
             design=str(data.get("design", "full")),
             n_full=int(data.get("n_full", 0) or 0),
@@ -240,80 +296,141 @@ class SweepPlan:
 
 @dataclass
 class SweepRun:
-    """一个参数组合的运行记录。"""
+    """一个 (workflow, 条件) 的运行记录 = 一次处理 + 两张峰表 + 溯源。
 
-    run_id: str
+    ``measurements`` 只在内存里(写盘的是两张峰表 CSV 与 run.json);
+    加载历史记录时该字段为空,峰表以 CSV 为准。
+    """
+
+    workflow_id: str
     index: int
-    combo: dict[str, Any] = field(default_factory=dict)
-    params: dict[str, Any] = field(default_factory=dict)
+    condition: str = ""
+    dataset: dict[str, Any] = field(default_factory=dict)
+    parameters_requested: dict[str, Any] = field(default_factory=dict)
+    parameters_used: dict[str, Any] = field(default_factory=dict)
+    parameters_resolved: dict[str, Any] = field(default_factory=dict)
+    phase: dict[str, Any] = field(default_factory=dict)
     status: str = "pending"
+    warnings: list[dict[str, Any]] = field(default_factory=list)
     message: str = ""
     run_dir: str = ""
     script_path: str = ""
     script_sha256: str = ""
     spectrum_path: str = ""
     spectrum_sha256: str = ""
+    log_path: str = ""
+    base_script: dict[str, Any] = field(default_factory=dict)
+    peak_tables: dict[str, dict[str, Any]] = field(default_factory=dict)
+    peak_localization: dict[str, Any] = field(default_factory=dict)
+    window: dict[str, Any] = field(default_factory=dict)
     wall_time_s: float = 0.0
     phase_locked: bool = True
-    phase: dict[str, list[float]] = field(default_factory=dict)
-    # 本组合的峰位测量窗口换算记录(逐轴 points/ppm/点距/来源)
-    window: dict[str, Any] = field(default_factory=dict)
     logs_tail: list[str] = field(default_factory=list)
-    measurements: list[PeakMeasurement] = field(default_factory=list)
+    versions: dict[str, str] = field(default_factory=dict)
+    measurements_by_method: dict[str, list[PeakMeasurement]] = field(
+        default_factory=dict
+    )
+
+    @property
+    def run_id(self) -> str:
+        """旧名(兼容):workflow_id 即原来的 run_id。"""
+        return self.workflow_id
+
+    @property
+    def combo(self) -> dict[str, Any]:
+        """旧名(兼容):用户给的参数组合行。"""
+        return self.parameters_requested
+
+    @property
+    def params(self) -> dict[str, Any]:
+        """旧名(兼容):实际使用的完整参数。"""
+        return self.parameters_used
+
+    @property
+    def measurements(self) -> list[PeakMeasurement]:
+        """旧名(兼容):抛物线定位的测量(参考方法)。"""
+        return list(self.measurements_by_method.get("parabolic") or [])
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "run_id": self.run_id,
+            "workflow_id": self.workflow_id,
+            "run_id": self.workflow_id,          # 旧字段,值相同
             "index": int(self.index),
-            "combo": self.combo,
-            "params": self.params,
+            "condition": self.condition,
+            "dataset": self.dataset,
+            "parameters_requested": self.parameters_requested,
+            "parameters_used": self.parameters_used,
+            "parameters_resolved": self.parameters_resolved,
+            "phase": self.phase,
             "status": self.status,
+            "warnings": self.warnings,
             "message": self.message,
             "run_dir": self.run_dir,
             "script_path": self.script_path,
             "script_sha256": self.script_sha256,
             "spectrum_path": self.spectrum_path,
             "spectrum_sha256": self.spectrum_sha256,
+            "log_path": self.log_path,
+            "base_script": self.base_script,
+            "peak_tables": self.peak_tables,
+            "peak_localization": self.peak_localization,
+            "window": self.window,
             "wall_time_s": float(self.wall_time_s),
             "phase_locked": bool(self.phase_locked),
-            "phase": {str(k): [float(v[0]), float(v[1])] for k, v in self.phase.items()},
-            "window": {str(k): dict(v) for k, v in self.window.items()},
             "logs_tail": list(self.logs_tail),
-            "measurements": [m.to_dict() for m in self.measurements],
+            "versions": self.versions,
         }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> SweepRun:
         return cls(
-            run_id=str(data.get("run_id", "")),
+            workflow_id=str(data.get("workflow_id") or data.get("run_id") or ""),
             index=int(data.get("index", 0) or 0),
-            combo=dict(data.get("combo") or {}),
-            params=dict(data.get("params") or {}),
+            condition=str(data.get("condition", "")),
+            dataset=dict(data.get("dataset") or {}),
+            parameters_requested=dict(
+                data.get("parameters_requested") or data.get("combo") or {}
+            ),
+            parameters_used=dict(
+                data.get("parameters_used") or data.get("params") or {}
+            ),
+            parameters_resolved=dict(data.get("parameters_resolved") or {}),
+            phase=dict(data.get("phase") or {}),
             status=str(data.get("status", "pending")),
+            warnings=[
+                dict(item)
+                for item in (data.get("warnings") or [])
+                if isinstance(item, dict)
+            ],
             message=str(data.get("message", "")),
             run_dir=str(data.get("run_dir", "")),
             script_path=str(data.get("script_path", "")),
             script_sha256=str(data.get("script_sha256", "")),
             spectrum_path=str(data.get("spectrum_path", "")),
             spectrum_sha256=str(data.get("spectrum_sha256", "")),
-            wall_time_s=float(data.get("wall_time_s", 0.0) or 0.0),
-            phase_locked=bool(data.get("phase_locked", True)),
-            phase={
-                str(k): [float(v[0]), float(v[1])]
-                for k, v in (data.get("phase") or {}).items()
-                if isinstance(v, (list, tuple)) and len(v) >= 2
+            log_path=str(data.get("log_path", "")),
+            base_script=dict(data.get("base_script") or {}),
+            peak_tables={
+                str(k): dict(v)
+                for k, v in (data.get("peak_tables") or {}).items()
+                if isinstance(v, dict)
             },
+            peak_localization=dict(data.get("peak_localization") or {}),
             window={
                 str(k): dict(v)
                 for k, v in (data.get("window") or {}).items()
                 if isinstance(v, dict)
             },
+            wall_time_s=float(data.get("wall_time_s", 0.0) or 0.0),
+            phase_locked=bool(data.get("phase_locked", True)),
             logs_tail=[str(x) for x in (data.get("logs_tail") or [])],
-            measurements=[
-                PeakMeasurement.from_dict(m)
-                for m in (data.get("measurements") or [])
-            ],
+            versions={
+                str(k): str(v) for k, v in (data.get("versions") or {}).items()
+            },
         )
+
+    def peak_table_path(self, method: str) -> str:
+        return str((self.peak_tables.get(str(method)) or {}).get("path", ""))
 
 
 def expand_grid(axes: Mapping[str, Sequence[Any]]) -> list[dict[str, Any]]:
@@ -349,7 +466,7 @@ def validate_axes(
 ) -> list[str]:
     """检查网格键:锁定的键报错;确定性/未知键返回提示(不阻断)。
 
-    - 锁定键(`phases`/`direct_phase`/`phase_route`/`sampling.auto_phase`):
+    - 锁定键(``phases``/``direct_phase``/``phase_route``/``sampling.auto_phase``):
       会破坏相位锁定语义或被后端静默忽略 → 抛 `SweepError`,并提示改用
       `phase_delta.<轴>.p0|p1` / `phase.<轴>.p0|p1`;
     - 确定性/策略参数(提取窗口、目标点距、采样表、超时等):提示「一般不必进网格」;
@@ -552,7 +669,7 @@ def load_combo_table(path: Path | str) -> list[dict[str, Any]]:
     """读组合表:CSV/TSV(首行表头 = 轴键)或 YAML/JSON(组合列表)。
 
     外部设计工具(pyDOE2、Taguchi 正交表、LHS、手写表)能导出成这两种形式之一
-    即可直接扫描。
+    即可直接执行。
     """
     target = Path(path)
     if not target.is_file():
@@ -611,13 +728,13 @@ def plan_sweep(
     base_params: Mapping[str, Any] | None = None,
     notes: Iterable[str] | None = None,
 ) -> SweepPlan:
-    """由参数轴 + 参考谱生成扫描计划(校验键、检查组合数上限)。
+    """由参数轴 + 参考谱生成 workflow 计划(校验键、检查组合数上限)。
 
     两种入口(必须且只能给一个):
 
     - ``axes``:各轴候选值 → 接口做全因子展开(便捷路径);
     - ``combos``:**外部给定的组合表**(正交表/部分因子/D-optimal/LHS/手挑都行),
-      接口原样按表序执行,**不做任何设计决策**。
+      接口原样按表序执行,**不做任何设计决策**(规范 H2)。
 
     进网格的应当是「人工处理时会动的参数」:窗函数与窗参数、基线(开关/程度)、
     填零倍数、相位识别偏差(`phase_delta.*`)、NUS 重构参数;确定性/策略参数
@@ -640,8 +757,10 @@ def plan_sweep(
             f"参数组合 {len(resolved)} 个超过上限 max_runs={max_runs};"
             "请减小网格/组合表或显式提高上限(长跑请分批)"
         )
-    base = dict(base_params) if base_params is not None else dict(
-        reference.sweep_params
+    base = (
+        dict(base_params)
+        if base_params is not None
+        else dict(reference.sweep_params)
     )
     phase_locked = reference.direct_phase_override() is not None
     if not phase_locked:
@@ -656,6 +775,7 @@ def plan_sweep(
         grid_sha256=_grid_sha256(resolved),
         reference_script_sha256=reference.script_sha256,
         reference_spectrum_sha256=reference.spectrum_sha256,
+        reference_peak_table_sha256=reference.peak_table_sha256,
         max_runs=int(max_runs),
         design=design,
         n_full=n_full,
@@ -665,7 +785,7 @@ def plan_sweep(
     )
     if not phase_locked:
         plan.notes.append(
-            "参考运行没有记录 direct_phase,扫描改为关闭自动相位搜索"
+            "参考运行没有记录 direct_phase,workflow 改为关闭自动相位搜索"
             "(sampling.auto_phase=False),相位取预设默认值"
         )
     return plan
@@ -675,7 +795,7 @@ def _supports_nus_candidates(backend: Any) -> tuple[bool, str]:
     """后端 ``reconstruct_nus`` 是否支持候选输出隔离(out_file/script_name)。"""
     method = getattr(backend, "reconstruct_nus", None)
     if method is None:
-        return False, "后端没有 reconstruct_nus(),无法扫描 NUS 数据"
+        return False, "后端没有 reconstruct_nus(),无法处理 NUS 数据"
     try:
         parameters = inspect.signature(method).parameters
     except (TypeError, ValueError):
@@ -688,6 +808,250 @@ def _supports_nus_candidates(backend: Any) -> tuple[bool, str]:
             "无法隔离候选输出(需升级 NMRForge 后端或换用自带该参数的后端)",
         )
     return True, ""
+
+
+def _phase_entries(
+    effective_phase: Mapping[str, Sequence[float]],
+    phase_part: Mapping[str, float],
+    reference: ReferenceSpectrum,
+) -> dict[str, Any]:
+    """相位溯源(规范 G1):每轴 phase_mode + actual_p0/actual_p1。"""
+    touched_axes = {parse_phase_axis(key)[1] for key in phase_part}
+    overridden = {
+        axis: sorted(
+            {
+                parse_phase_axis(key)[1]
+                for key in phase_part
+                if parse_phase_axis(key)[1] == axis
+            }
+        )
+        for axis in touched_axes
+    }
+    entries: dict[str, Any] = {}
+    for axis, values in effective_phase.items():
+        kinds = {
+            parse_phase_axis(key)[0]
+            for key in phase_part
+            if parse_phase_axis(key)[1] == axis
+        }
+        if kinds == {"phase"}:
+            mode = "manual_absolute"
+        elif "phase_delta" in kinds:
+            mode = "manual_delta_from_reference"
+        else:
+            mode = "auto_reference_locked"
+        entries[str(axis)] = {
+            "phase_mode": mode,
+            "actual_p0": float(values[0]),
+            "actual_p1": float(values[1]),
+            "source": (
+                f"reference_run:{reference.run_id}"
+                if reference.run_id
+                else "reference_run"
+            ),
+            "overridden_components": overridden.get(str(axis), []),
+        }
+    return entries
+
+
+def _smile_entries(
+    params: Mapping[str, Any],
+    requested: Mapping[str, Any],
+    effective: Mapping[str, Any],
+) -> dict[str, Any]:
+    """SMILE 自动分档的实际结果(规范 G2):requested vs actual + 来源。"""
+    entries: dict[str, Any] = {}
+    for key, record_key in (("nsigma", "nSigma"), ("thresh", "thresh")):
+        actual = effective.get(record_key, effective.get(key))
+        if actual is None:
+            actual = params.get(key, params.get(record_key))
+        user_key = None
+        for candidate in (key, record_key):
+            if candidate in requested:
+                user_key = candidate
+                break
+        if actual is None and user_key is None:
+            continue
+        entries[key] = {
+            "requested": (
+                requested[user_key] if user_key is not None else "auto(smile_tier)"
+            ),
+            "actual": actual,
+            "source": "user" if user_key is not None else "auto(smile_tier)",
+        }
+    return entries
+
+
+def _warnings_for(
+    measurements: Sequence[PeakMeasurement],
+    *,
+    method: str,
+    window: Mapping[str, Any],
+    fallback_reason: str = "",
+) -> list[dict[str, Any]]:
+    """把逐峰 QC 汇总成 workflow 警告(规范 D9/G3,不静默)。"""
+    warnings: list[dict[str, Any]] = []
+
+    def _add(code: str, message: str, peaks: Sequence[str], **extra: Any) -> None:
+        warnings.append(
+            {
+                "code": code,
+                "message": message,
+                "count": len(peaks),
+                "peaks": list(peaks[:20]),
+                **extra,
+            }
+        )
+
+    missing = [
+        m.reference_peak_id or f"R{m.peak_id:04d}"
+        for m in measurements
+        if not m.found
+    ]
+    if missing:
+        _add(
+            WARN_PEAK_NOT_DETECTED,
+            f"{len(missing)} 个参考峰在该谱上未检测到(detected=false,记录保留)",
+            missing,
+            localization_method=str(method),
+        )
+    edges = [
+        m.reference_peak_id or f"R{m.peak_id:04d}"
+        for m in measurements
+        if m.found and m.window_edge
+    ]
+    if edges:
+        _add(
+            WARN_PEAK_WINDOW_EDGE,
+            f"{len(edges)} 个峰落在搜索窗口边界(真峰可能在窗外,可加大 window_ppm)",
+            edges,
+            localization_method=str(method),
+        )
+    outside = [
+        m.reference_peak_id or f"R{m.peak_id:04d}"
+        for m in measurements
+        if m.out_of_range
+    ]
+    if outside:
+        _add(
+            WARN_PEAK_OUT_OF_RANGE,
+            f"{len(outside)} 个参考峰位置落在谱范围外",
+            outside,
+            localization_method=str(method),
+        )
+    for spec in (window or {}).values():
+        if not isinstance(spec, Mapping):
+            continue
+        if str(spec.get("source", "")).startswith("points(回退"):
+            _add(
+                WARN_WINDOW_FALLBACK,
+                "窗口无法按物理宽度换算,已回退固定点数",
+                [],
+                axis=str(spec.get("nucleus", "")),
+            )
+            break
+    if str(method) == "gaussian":
+        if fallback_reason:
+            _add(
+                WARN_GAUSSIAN_UNSUPPORTED,
+                f"高斯定位不适用({fallback_reason}),位置回退抛物线并留档",
+                [m.reference_peak_id for m in measurements],
+                localization_method="gaussian",
+            )
+        fallback = [
+            m.reference_peak_id or f"R{m.peak_id:04d}"
+            for m in measurements
+            if (m.localization or {}).get("fallback")
+        ]
+        if fallback:
+            reasons: dict[str, int] = {}
+            for m in measurements:
+                record = m.localization or {}
+                if not record.get("fallback"):
+                    continue
+                reason = str(record.get("fallback_reason", "") or "")
+                reasons[reason] = reasons.get(reason, 0) + 1
+            _add(
+                WARN_GAUSSIAN_FALLBACK,
+                f"{len(fallback)} 个峰高斯拟合失败/回退抛物线(原因已落盘)",
+                fallback,
+                reasons=reasons,
+            )
+        boundary = [
+            m.reference_peak_id or f"R{m.peak_id:04d}"
+            for m in measurements
+            if (m.localization or {}).get("boundary_hit")
+        ]
+        if boundary:
+            _add(
+                WARN_GAUSSIAN_BOUNDARY_HIT,
+                f"{len(boundary)} 个峰的高斯中心/宽度撞到拟合边界",
+                boundary,
+            )
+    return warnings
+
+
+def _localization_summary(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    total = len(rows)
+    detected = sum(1 for row in rows if row.get("detected"))
+    fallback = sum(1 for row in rows if row.get("fallback"))
+    reasons: dict[str, int] = {}
+    for row in rows:
+        if not row.get("fallback"):
+            continue
+        reason = str(row.get("fallback_reason", "") or "")
+        reasons[reason] = reasons.get(reason, 0) + 1
+    return {
+        "n_peaks": int(total),
+        "n_detected": int(detected),
+        "n_missing": int(total - detected),
+        "n_fallback": int(fallback),
+        "fallback_reasons": reasons,
+        "n_boundary_hit": sum(1 for row in rows if row.get("boundary_hit")),
+    }
+
+
+def _write_log(
+    path: Path,
+    *,
+    header: Mapping[str, Any],
+    logs: Sequence[str],
+    warnings: Sequence[Mapping[str, Any]] = (),
+) -> Path:
+    """写完整运行日志(不是只有尾部;规范 D7)。"""
+    lines = ["# NMRForge workflow run log", ""]
+    for key, value in header.items():
+        if isinstance(value, (dict, list)):
+            rendered = json.dumps(value, ensure_ascii=False, sort_keys=True)
+        else:
+            rendered = str(value)
+        lines.append(f"{key}: {rendered}")
+    lines.append("")
+    lines.append("--- processing log ---")
+    lines.extend(str(line) for line in logs)
+    if warnings:
+        lines.append("")
+        lines.append("--- warnings ---")
+        for warning in warnings:
+            lines.append(
+                f"[{warning.get('code')}] {warning.get('message')} "
+                f"(count={warning.get('count')})"
+            )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return path
+
+
+def _write_run(run: SweepRun) -> None:
+    target = Path(run.run_dir) / "run.json"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    payload = run.to_dict()
+    payload["updated"] = now_iso()
+    payload["software_version"] = software_version()
+    payload["versions"] = dict(run.versions or tool_versions())
+    target.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
 
 
 def _load_run(run_dir: Path) -> SweepRun | None:
@@ -704,16 +1068,124 @@ def _load_run(run_dir: Path) -> SweepRun | None:
     return run
 
 
+
+def _condition_references(
+    session: StudySession,
+    datasets: Sequence[DatasetRef],
+    reference: ReferenceSpectrum | None,
+) -> dict[str, ReferenceSpectrum]:
+    """每个条件 → 参考谱(显式传入的参考覆盖对应条件)。"""
+    refs: dict[str, ReferenceSpectrum] = {}
+    for ref in datasets:
+        if reference is not None and reference.dataset_key == ref.key:
+            refs[ref.key] = reference
+            continue
+        loaded = load_reference(session, ref)
+        if loaded is None:
+            raise SweepError(
+                f"条件 {ref.condition or ref.key} 还没有参考谱:先调用 "
+                "build_reference()/ensure_reference_peaks()"
+            )
+        refs[ref.key] = loaded
+    return refs
+
+
+def _workflow_record(runs: Sequence[SweepRun], plan: SweepPlan) -> dict[str, Any]:
+    """一个 workflow 的汇总记录(workflow.json)。"""
+    ordered = sorted(runs, key=lambda run: str(run.condition))
+    statuses = {run.status for run in ordered}
+    if STATUS_FAILED in statuses:
+        status = STATUS_FAILED
+    elif STATUS_WARNING in statuses:
+        status = STATUS_WARNING
+    else:
+        status = STATUS_SUCCESS
+    first = ordered[0] if ordered else None
+    warnings = [warning for run in ordered for warning in run.warnings]
+    return {
+        "workflow_id": first.workflow_id if first else "",
+        "index": int(first.index) if first else 0,
+        "status": status,
+        "message": "; ".join(
+            f"{run.condition or run.dataset.get('key', '')}: {run.status}"
+            for run in ordered
+        ),
+        "parameters_requested": dict(first.parameters_requested) if first else {},
+        "conditions": [run.condition for run in ordered],
+        "condition_records": [
+            {
+                "condition": run.condition,
+                "dataset": run.dataset,
+                "status": run.status,
+                "message": run.message,
+                "parameters_used": run.parameters_used,
+                "parameters_resolved": run.parameters_resolved,
+                "phase": run.phase,
+                "warnings": run.warnings,
+                "script_path": run.script_path,
+                "script_sha256": run.script_sha256,
+                "spectrum_path": run.spectrum_path,
+                "spectrum_sha256": run.spectrum_sha256,
+                "log_path": run.log_path,
+                "peak_tables": run.peak_tables,
+                "peak_localization": run.peak_localization,
+                "window": run.window,
+                "run_json": str(Path(run.run_dir) / "run.json"),
+                "versions": run.versions,
+                "wall_time_s": run.wall_time_s,
+            }
+            for run in ordered
+        ],
+        "warnings": warnings,
+        "versions": dict(first.versions) if first else {},
+        "base_script": dict(first.base_script) if first else {},
+        "grid_sha256": plan.grid_sha256,
+        "updated": now_iso(),
+    }
+
+
+def write_workflow_record(
+    session: StudySession, workflow_id: str, plan: SweepPlan
+) -> dict[str, Any]:
+    """写 ``study/workflows/<workflow_id>/workflow.json`` + 组合级日志。"""
+    workflow_dir = session.workflows_dir / workflow_id
+    runs = [run for run in load_runs(session) if run.workflow_id == workflow_id]
+    record = _workflow_record(runs, plan)
+    workflow_dir.mkdir(parents=True, exist_ok=True)
+    (workflow_dir / "workflow.json").write_text(
+        json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    logs: list[str] = []
+    for run in sorted(runs, key=lambda item: str(item.condition)):
+        log_path = Path(run.log_path) if run.log_path else None
+        if log_path is not None and log_path.is_file():
+            logs.append(f"===== {run.condition or run.dataset.get('key', '')} =====")
+            logs.append(log_path.read_text(encoding="utf-8").rstrip())
+    _write_log(
+        workflow_dir / "log.txt",
+        header={
+            "workflow_id": workflow_id,
+            "status": record["status"],
+            "parameters_requested": record["parameters_requested"],
+            "conditions": record["conditions"],
+        },
+        logs=logs,
+        warnings=record["warnings"],
+    )
+    return record
+
+
 def run_sweep(
     session: StudySession,
     plan: SweepPlan,
     *,
     reference: ReferenceSpectrum | None = None,
+    datasets: Sequence[DatasetRef] | None = None,
     peaks: Sequence[dict[str, Any]] | None = None,
     window_pts: int | None = None,
     window_ppm: float | None = None,
     sign: str = "abs",
-    refine: str = "parabolic",
+    refine: str | None = None,
     roi_f1_ppm: float | None = None,
     roi_f2_ppm: float | None = None,
     resume: bool = True,
@@ -721,60 +1193,40 @@ def run_sweep(
     progress: Callable[[str], None] | None = None,
     on_run: Callable[[SweepRun], None] | None = None,
 ) -> list[SweepRun]:
-    """执行扫描计划,返回逐组合运行记录(成功/失败都在列表里)。
+    """执行 workflow 计划:每个组合对**全部条件**跑一遍处理 + 两种定位。
 
-    峰位测量窗口按**物理宽度**定义(默认 1.5×该轴核素线宽折算 ppm,
-    见 ``core.peaks.axis_units``),逐组合按该候选谱的实际点数换算:
-    零填零 k 倍只改点距、不改变窗口覆盖的 ppm 宽度,峰位差里因此不混入
-    「窗口口径随处理参数漂移」的成分(用户方案 A)。``window_ppm`` 显式
-    给物理半径;``window_pts`` 强制点数(不推荐,跨分辨率不可比)。每个
-    组合的换算结果(逐轴点数/ppm/点距)写进 ``run.json`` 的 ``window``。
-    ``refine``(2026-09-13):``parabolic``(默认,既有 3 点抛物线)或
-    ``gaussian``(2D 高斯拟合,仅 2D;ROI 半径 ``roi_f1_ppm``/``roi_f2_ppm``,
-    缺省读 config ``peaks.localization``;失败逐峰回退抛物线并留原因)。
-    两种方法对同一批峰独立运行,可直接比较峰位差。
+    返回逐 (workflow, 条件) 的运行记录(成功/警告/失败都在列表里)。
+
+    - ``datasets`` 缺省用会话里的全部条件(A/B);``reference`` 可显式传入该
+      条件的参考(按 dataset_key 匹配);
+    - ``peaks`` 可显式给参考峰表行(否则读各条件参考冻结的身份表,峰身份一致);
+    - 峰位搜索窗口按**物理宽度**定义(默认 1.5×该轴核素线宽折算 ppm),逐组合按
+      候选谱的实际点距换算点数,换算结果写进 ``run.json`` 的 ``window``;
+    - ``refine`` 参数已废弃(两种定位方法现在**始终都要跑**),仅为兼容保留。
     """
-    dataset = session.dataset
-    if dataset is None:
-        raise SweepError("研究里还没有数据集")
-    ref = reference or load_reference(session)
-    if ref is None:
-        raise SweepError("还没有参考谱,先调用 build_reference()")
-    if not ref.sweep_supported:
-        if str(ref.sampling) == "nus":
-            raise SweepError(
-                f"当前只支持 2D NUS 参数扫描,检测到 {ref.ndim}D NUS"
-                "(3D NUS 需要切片流与候选输出进一步改造,见 "
-                "docs/external-api/09-limitations-and-roadmap.md)"
-            )
-        raise SweepError(f"当前不支持 {ref.ndim}D/{ref.sampling} 数据的扫描")
+    if refine not in (None, "parabolic", "gaussian", "none"):
+        raise SweepError(f"未知 refine: {refine!r}")
+    targets = list(datasets) if datasets is not None else list(session.datasets)
+    if not targets:
+        raise SweepError("研究里还没有数据集:先调用 add_dataset()")
+    references = _condition_references(session, targets, reference)
     backend = session.backend
     if not hasattr(backend, "process"):
-        raise SweepError("后端不支持 process(),无法扫描")
-    experiment = read_experiment(session.manager, dataset.exp_id, dataset.data_id)
-    is_nus = str(experiment.sampling.mode) == "nus"
-    if is_nus:
-        if int(experiment.ndim) != 2:
-            raise SweepError(
-                f"当前只支持 2D NUS 参数扫描(检测到 {experiment.ndim}D NUS)"
-            )
-        ok, reason = _supports_nus_candidates(backend)
-        if not ok:
-            raise SweepError(reason)
-    method_plan = select_method(experiment)
-    peak_rows = list(peaks) if peaks is not None else (
-        read_reference_peaks(ref.peak_table_path) if ref.peak_table_path else []
-    )
-    if not peak_rows:
-        raise SweepError(
-            "没有参考峰表:先用 pick_reference_peaks() 选峰,或把公开库峰表登记到 "
-            "reference.peak_table_path"
-        )
+        raise SweepError("后端不支持 process(),无法执行 workflow")
+    for target in targets:
+        ref = references[target.key]
+        if not ref.sweep_supported:
+            if str(ref.sampling) == "nus":
+                raise SweepError(
+                    f"当前只支持 2D NUS 参数组合,检测到 {ref.ndim}D NUS"
+                    "(3D NUS 需要切片流与候选输出进一步改造,见 "
+                    "docs/external-api/09-limitations-and-roadmap.md)"
+                )
+            raise SweepError(f"当前不支持 {ref.ndim}D/{ref.sampling} 数据的参数组合")
 
-    base_override = ref.direct_phase_override()
-    reference_phase = {
-        axis: [float(pair[0]), float(pair[1])]
-        for axis, pair in (base_override or {}).items()
+    experiments = {
+        target.key: read_experiment(session.manager, target.exp_id, target.data_id)
+        for target in targets
     }
     results: list[SweepRun] = []
 
@@ -782,165 +1234,386 @@ def run_sweep(
         if progress is not None:
             progress(message)
 
-    session.runs_dir.mkdir(parents=True, exist_ok=True)
+    session.workflows_dir.mkdir(parents=True, exist_ok=True)
     for index, combo in enumerate(plan.combos, start=1):
-        run_id = f"s{index:04d}"
-        run_dir = session.runs_dir / run_id
-        run_dir.mkdir(parents=True, exist_ok=True)
-        if resume:
-            cached = _load_run(run_dir)
-            if cached is not None and cached.status == "success":
-                results.append(cached)
-                _emit(f"[{run_id}] 已存在,跳过(断点续跑)")
-                if on_run is not None:
-                    on_run(cached)
-                continue
-        param_part, phase_part = split_combo(combo)
-        params = merge_overrides(plan.base_params, param_part)
-        effective_phase = apply_phase_axes(reference_phase, phase_part)
-        override = (
-            {
-                axis: (values[0], values[1])
-                for axis, values in effective_phase.items()
-            }
-            if effective_phase
-            else None
-        )
-        run = SweepRun(
-            run_id=run_id,
-            index=index,
-            combo={str(k): v for k, v in combo.items()},
-            params=params,
-            run_dir=str(run_dir),
-            phase_locked=override is not None,
-            phase={axis: list(values) for axis, values in effective_phase.items()},
-        )
-        logs: list[str] = []
-
-        def _log(message: str, _logs: list[str] = logs) -> None:
-            _logs.append(str(message))
-            _emit(f"[{run_id}] {message}")
-
-        started = time.perf_counter()
-        _emit(f"[{run_id}] 开始 {combo}")
-        try:
-            if is_nus:
-                nus_params = normalize_nus_params(params)
-                if override:
-                    direct_axis = f"F{experiment.ndim}"
-                    pair = effective_phase.get(direct_axis)
-                    if pair is not None:
-                        nus_params["direct_phase"] = [
-                            float(pair[0]),
-                            float(pair[1]),
-                        ]
-                if effective_phase:
-                    nus_params["phases"] = {
-                        axis: [values[0], values[1]]
-                        for axis, values in effective_phase.items()
-                    }
-                response = backend.reconstruct_nus(
-                    experiment,
-                    nus_params,
-                    progress=_log,
-                    script_name=f"{run_id}.com",
-                    out_file=f"{run_id}.ft2",
-                )
-            else:
-                response = backend.process(
-                    experiment,
-                    method_plan,
-                    params=params,
-                    direct_phase_override=override,
-                    script_name=f"{run_id}.com",
-                    out_file=f"{run_id}.ft2",
-                    progress=_log,
-                )
-        except Exception as exc:  # noqa: BLE001 - 单组合失败不中断整轮
-            response = {
-                "success": False,
-                "message": f"{type(exc).__name__}: {exc}",
-                "logs": logs,
-            }
-        run.wall_time_s = round(time.perf_counter() - started, 3)
-        run.logs_tail = logs[-40:]
-        if not response.get("success"):
-            run.status = "failed"
-            run.message = str(response.get("message", "处理失败"))
-            _emit(f"[{run_id}] 失败: {run.message}")
-            _write_run(run)
-            results.append(run)
-            if on_run is not None:
-                on_run(run)
-            if stop_on_error:
-                break
-            continue
-
-        script_src = session.work_dir / f"{run_id}.com"
-        spectrum_src = Path(str(response.get("spectrum_path", "")))
-        if script_src.is_file():
-            target = run_dir / "process.com"
-            shutil.copy2(script_src, target)
-            run.script_path = str(target)
-            run.script_sha256 = sha256_file(target)
-        if not spectrum_src.is_file():
-            run.status = "failed"
-            run.message = f"后端返回的谱不存在: {spectrum_src}"
-            _write_run(run)
-            results.append(run)
-            if on_run is not None:
-                on_run(run)
-            if stop_on_error:
-                break
-            continue
-        target_spectrum = run_dir / f"spectrum{spectrum_src.suffix}"
-        shutil.copy2(spectrum_src, target_spectrum)
-        run.spectrum_path = str(target_spectrum)
-        run.spectrum_sha256 = sha256_file(target_spectrum)
-        try:
-            spectrum_axes = read_spectrum_axes(target_spectrum)
-            run.window = {
-                str(axis): dict(spec)
-                for axis, spec in window_points_by_axis(
-                    spectrum_axes,
-                    window_pts=window_pts,
-                    window_ppm=window_ppm,
-                ).items()
-            }
-            run.measurements = measure_peak_positions(
-                target_spectrum,
-                peak_rows,
-                axes=spectrum_axes,
+        workflow_id = workflow_id_for(index)
+        workflow_dir = session.workflows_dir / workflow_id
+        workflow_dir.mkdir(parents=True, exist_ok=True)
+        for target in targets:
+            ref = references[target.key]
+            experiment = experiments[target.key]
+            run_dir = workflow_dir / target.token
+            run_dir.mkdir(parents=True, exist_ok=True)
+            if resume:
+                cached = _load_run(run_dir)
+                if cached is not None and cached.status in SUCCESS_STATUSES:
+                    results.append(cached)
+                    _emit(
+                        f"[{workflow_id}/{target.condition}] 已存在,跳过(断点续跑)"
+                    )
+                    if on_run is not None:
+                        on_run(cached)
+                    continue
+            run = _run_condition(
+                session,
+                plan=plan,
+                combo=combo,
+                workflow_id=workflow_id,
+                index=index,
+                target=target,
+                reference=ref,
+                experiment=experiment,
+                run_dir=run_dir,
+                peaks=peaks,
                 window_pts=window_pts,
                 window_ppm=window_ppm,
                 sign=sign,
-                refine=refine,
                 roi_f1_ppm=roi_f1_ppm,
                 roi_f2_ppm=roi_f2_ppm,
+                emit=_emit,
             )
-        except Exception as exc:  # noqa: BLE001 - 测量失败也算该组合失败
-            run.status = "failed"
-            run.message = f"峰位测量失败: {type(exc).__name__}: {exc}"
-        else:
-            run.status = "success"
-            run.message = f"完成,{len(run.measurements)} 个峰位"
-        finally:
-            # 中间产物目录可能被内存盘接管:复制成功即清理,避免磁盘/内存膨胀
-            try:
-                if spectrum_src.is_file():
-                    spectrum_src.unlink()
-            except OSError:
-                pass
-        _write_run(run)
-        results.append(run)
-        _emit(f"[{run_id}] {run.status}: {run.message}")
-        if on_run is not None:
-            on_run(run)
+            results.append(run)
+            if on_run is not None:
+                on_run(run)
+            if stop_on_error:
+                break
+        write_workflow_record(session, workflow_id, plan)
+        if stop_on_error and any(
+            run.workflow_id == workflow_id and run.status == STATUS_FAILED
+            for run in results
+        ):
+            break
     return results
 
 
+def _run_condition(
+    session: StudySession,
+    *,
+    plan: SweepPlan,
+    combo: Mapping[str, Any],
+    workflow_id: str,
+    index: int,
+    target: DatasetRef,
+    reference: ReferenceSpectrum,
+    experiment: Any,
+    run_dir: Path,
+    peaks: Sequence[dict[str, Any]] | None,
+    window_pts: int | None,
+    window_ppm: float | None,
+    sign: str,
+    roi_f1_ppm: float | None,
+    roi_f2_ppm: float | None,
+    emit: Callable[[str], None],
+) -> SweepRun:
+    """跑单个 (workflow, 条件):处理 → 两种定位 → 两张峰表 + 完整记录。"""
+    logs: list[str] = []
+
+    def _log(message: str) -> None:
+        logs.append(str(message))
+        emit(f"[{workflow_id}/{target.condition}] {message}")
+
+    param_part, phase_part = split_combo(combo)
+    params = merge_overrides(dict(reference.sweep_params), param_part)
+    base_phase = reference.direct_phase_override() or {}
+    effective_phase = apply_phase_axes(
+        {axis: list(pair) for axis, pair in base_phase.items()}, phase_part
+    )
+    override = (
+        {axis: (values[0], values[1]) for axis, values in effective_phase.items()}
+        if effective_phase
+        else None
+    )
+    dataset_label = f"{target.key}"
+    run = SweepRun(
+        workflow_id=workflow_id,
+        index=int(index),
+        condition=target.condition,
+        dataset={
+            "key": target.key,
+            "exp_id": target.exp_id,
+            "data_id": target.data_id,
+            "title": target.title,
+            "condition": target.condition,
+            "ndim": int(target.ndim),
+            "nuclei": list(target.nuclei),
+            "sampling": target.sampling,
+            "source": target.source,
+        },
+        parameters_requested={str(k): v for k, v in combo.items()},
+        parameters_used=params,
+        phase=_phase_entries(effective_phase, phase_part, reference),
+        run_dir=str(run_dir),
+        phase_locked=override is not None,
+        versions=tool_versions(),
+        base_script={
+            "path": reference.script_path,
+            "sha256": reference.script_sha256,
+            "spectrum_path": reference.frozen_spectrum,
+            "spectrum_sha256": reference.spectrum_sha256,
+        },
+    )
+    is_nus = str(getattr(experiment.sampling, "mode", "")) == "nus"
+    started = time.perf_counter()
+    _log(f"开始 {workflow_id}: {dict(combo)}")
+    try:
+        if is_nus:
+            ok, reason = _supports_nus_candidates(session.backend)
+            if not ok:
+                raise SweepError(reason)
+            nus_params = normalize_nus_params(params)
+            if override:
+                pair = effective_phase.get(f"F{experiment.ndim}")
+                if pair is not None:
+                    nus_params["direct_phase"] = [float(pair[0]), float(pair[1])]
+            if effective_phase:
+                nus_params["phases"] = {
+                    axis: [values[0], values[1]]
+                    for axis, values in effective_phase.items()
+                }
+            response = session.backend.reconstruct_nus(
+                experiment,
+                nus_params,
+                progress=_log,
+                script_name=f"{workflow_id}_{target.token}.com",
+                out_file=f"{workflow_id}_{target.token}.ft2",
+            )
+        else:
+            method_plan = select_method(experiment)
+            response = session.backend.process(
+                experiment,
+                method_plan,
+                params=params,
+                direct_phase_override=override,
+                script_name=f"{workflow_id}_{target.token}.com",
+                out_file=f"{workflow_id}_{target.token}.ft2",
+                progress=_log,
+            )
+    except Exception as exc:  # noqa: BLE001 - 单条件失败不中断整轮
+        response = {
+            "success": False,
+            "message": f"{type(exc).__name__}: {exc}",
+            "logs": logs,
+        }
+    run.wall_time_s = round(time.perf_counter() - started, 3)
+    logs.extend(str(line) for line in (response.get("logs") or []))
+    run.logs_tail = logs[-40:]
+    if not response.get("success"):
+        run.status = STATUS_FAILED
+        run.message = str(response.get("message", "处理失败"))
+        run.log_path = str(
+            _write_log(
+                run_dir / "log.txt",
+                header={
+                    "workflow_id": workflow_id,
+                    "condition": target.condition,
+                    "dataset": dataset_label,
+                    "status": run.status,
+                    "parameters_requested": run.parameters_requested,
+                    "parameters_used": run.parameters_used,
+                    "message": run.message,
+                },
+                logs=logs,
+            )
+        )
+        _write_run(run)
+        _log(f"失败: {run.message}")
+        return run
+
+    script_src = session.work_dir / f"{workflow_id}_{target.token}.com"
+    spectrum_src = Path(str(response.get("spectrum_path", "")))
+    if script_src.is_file():
+        target_script = run_dir / "process.com"
+        shutil.copy2(script_src, target_script)
+        run.script_path = str(target_script)
+        run.script_sha256 = sha256_file(target_script)
+    if not spectrum_src.is_file():
+        run.status = STATUS_FAILED
+        run.message = f"后端返回的谱不存在: {spectrum_src}"
+        run.log_path = str(
+            _write_log(
+                run_dir / "log.txt",
+                header={
+                    "workflow_id": workflow_id,
+                    "condition": target.condition,
+                    "dataset": dataset_label,
+                    "status": run.status,
+                    "message": run.message,
+                },
+                logs=logs,
+            )
+        )
+        _write_run(run)
+        return run
+    target_spectrum = run_dir / f"spectrum{spectrum_src.suffix}"
+    shutil.copy2(spectrum_src, target_spectrum)
+    run.spectrum_path = str(target_spectrum)
+    run.spectrum_sha256 = sha256_file(target_spectrum)
+
+    try:
+        spectrum_axes = read_spectrum_axes(target_spectrum)
+        run.window = {
+            str(axis): dict(spec)
+            for axis, spec in window_points_by_axis(
+                spectrum_axes,
+                window_pts=window_pts,
+                window_ppm=window_ppm,
+            ).items()
+        }
+        peak_rows = (
+            [dict(row) for row in peaks]
+            if peaks is not None
+            else read_reference_peaks(reference.peak_table_path)
+        )
+        parabolic = measure_peak_positions(
+            target_spectrum,
+            peak_rows,
+            axes=spectrum_axes,
+            window_pts=window_pts,
+            window_ppm=window_ppm,
+            sign=sign,
+            refine="parabolic",
+        )
+    except Exception as exc:  # noqa: BLE001 - 测量失败也算该条件失败
+        run.status = STATUS_FAILED
+        run.message = f"峰位测量失败: {type(exc).__name__}: {exc}"
+        run.log_path = str(
+            _write_log(
+                run_dir / "log.txt",
+                header={
+                    "workflow_id": workflow_id,
+                    "condition": target.condition,
+                    "dataset": dataset_label,
+                    "status": run.status,
+                    "message": run.message,
+                },
+                logs=logs,
+            )
+        )
+        _write_run(run)
+        return run
+
+    run.measurements_by_method["parabolic"] = list(parabolic)
+    parabolic_rows = peak_table_rows(
+        parabolic,
+        workflow_id=workflow_id,
+        condition=target.condition,
+        dataset=dataset_label,
+        method="parabolic",
+    )
+    warnings = _warnings_for(parabolic, method="parabolic", window=run.window)
+    if int(getattr(experiment, "ndim", 2)) == 2:
+        gaussian = measure_peak_positions(
+            target_spectrum,
+            peak_rows,
+            axes=spectrum_axes,
+            window_pts=window_pts,
+            window_ppm=window_ppm,
+            sign=sign,
+            refine="gaussian",
+            roi_f1_ppm=roi_f1_ppm,
+            roi_f2_ppm=roi_f2_ppm,
+        )
+        run.measurements_by_method["gaussian"] = list(gaussian)
+        gaussian_rows = peak_table_rows(
+            gaussian,
+            workflow_id=workflow_id,
+            condition=target.condition,
+            dataset=dataset_label,
+            method="gaussian",
+        )
+        warnings.extend(_warnings_for(gaussian, method="gaussian", window=run.window))
+    else:
+        gaussian_rows = gaussian_fallback_rows(
+            parabolic,
+            workflow_id=workflow_id,
+            condition=target.condition,
+            dataset=dataset_label,
+            reason=GAUSSIAN_UNSUPPORTED_NDIM_REASON,
+        )
+        run.measurements_by_method["gaussian"] = list(parabolic)
+        warnings.extend(
+            _warnings_for(
+                parabolic,
+                method="gaussian",
+                window=run.window,
+                fallback_reason=GAUSSIAN_UNSUPPORTED_NDIM_REASON,
+            )
+        )
+    run.peak_tables = {
+        "parabolic": peak_table_digest(
+            write_peak_table(run_dir / "peak_table_parabolic.csv", parabolic_rows)
+        ),
+        "gaussian": peak_table_digest(
+            write_peak_table(run_dir / "peak_table_gaussian.csv", gaussian_rows)
+        ),
+    }
+    run.peak_localization = {
+        "parabolic": _localization_summary(parabolic_rows),
+        "gaussian": _localization_summary(gaussian_rows),
+    }
+    run.parameters_resolved = {
+        "phase": run.phase,
+        "smile": (
+            _smile_entries(params, combo, response.get("effective_params") or {})
+            if is_nus
+            else {}
+        ),
+        "spectrum_noise_sigma": {
+            "value": (
+                float(getattr(parabolic[0], "noise_sigma", 0.0)) if parabolic else 0.0
+            ),
+            "source": "core.qc.noise(robust MAD)",
+            "used_for": "SNR",
+        },
+        "window": run.window,
+        "effective_params_backend": response.get("effective_params") or {},
+    }
+    run.warnings = warnings
+    if warnings:
+        run.status = STATUS_WARNING
+        run.message = (
+            f"完成但有待注意项:{', '.join(str(w.get('code')) for w in warnings)}"
+        )
+    else:
+        run.status = STATUS_SUCCESS
+        run.message = (
+            f"完成,{len(parabolic)} 个参考峰 × 2 种定位 "
+            f"(detected {sum(1 for m in parabolic if m.found)})"
+        )
+    run.log_path = str(
+        _write_log(
+            run_dir / "log.txt",
+            header={
+                "workflow_id": workflow_id,
+                "condition": target.condition,
+                "dataset": dataset_label,
+                "status": run.status,
+                "parameters_requested": run.parameters_requested,
+                "parameters_used": run.parameters_used,
+                "parameters_resolved": run.parameters_resolved,
+                "phase": run.phase,
+                "base_script": run.base_script,
+                "script_sha256": run.script_sha256,
+                "spectrum_sha256": run.spectrum_sha256,
+                "peak_tables": run.peak_tables,
+                "versions": run.versions,
+                "wall_time_s": run.wall_time_s,
+            },
+            logs=logs,
+            warnings=warnings,
+        )
+    )
+    try:
+        spectrum_src.unlink()
+    except OSError:
+        pass
+    _write_run(run)
+    _log(f"{run.status}: {run.message}")
+    return run
+
+
 def load_plan(session: StudySession) -> SweepPlan | None:
-    """读取研究目录里的扫描计划(``records/sweep_plan.json``)。"""
+    """读取研究目录里的 workflow 计划(``records/sweep_plan.json``)。"""
     path = session.records_dir / "sweep_plan.json"
     if not path.is_file():
         return None
@@ -952,32 +1625,67 @@ def load_plan(session: StudySession) -> SweepPlan | None:
 
 
 def load_runs(session: StudySession) -> list[SweepRun]:
-    """读取已记录的扫描运行(按 run_id 排序;损坏记录跳过)。"""
+    """读取全部 (workflow, 条件) 运行记录(按 workflow_id、条件排序)。"""
     runs: list[SweepRun] = []
-    if not session.runs_dir.is_dir():
+    root = session.workflows_dir
+    if not root.is_dir():
         return runs
-    for run_dir in sorted(p for p in session.runs_dir.iterdir() if p.is_dir()):
-        run = _load_run(run_dir)
-        if run is not None:
-            runs.append(run)
+    for workflow_dir in sorted(path for path in root.iterdir() if path.is_dir()):
+        for condition_dir in sorted(
+            path for path in workflow_dir.iterdir() if path.is_dir()
+        ):
+            run = _load_run(condition_dir)
+            if run is not None:
+                runs.append(run)
     return runs
 
 
-def _write_run(run: SweepRun) -> None:
-    target = Path(run.run_dir) / "run.json"
-    target.parent.mkdir(parents=True, exist_ok=True)
-    payload = run.to_dict()
-    payload["updated"] = now_iso()
-    payload["software_version"] = software_version()
-    target.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-    )
+def load_workflows(session: StudySession) -> list[dict[str, Any]]:
+    """读取组合级记录(``workflows/<id>/workflow.json``;损坏项跳过)。"""
+    records: list[dict[str, Any]] = []
+    root = session.workflows_dir
+    if not root.is_dir():
+        return records
+    for workflow_dir in sorted(path for path in root.iterdir() if path.is_dir()):
+        path = workflow_dir / "workflow.json"
+        if not path.is_file():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(payload, dict):
+            records.append(payload)
+    return records
+
+
+def workflow_summary(runs: Sequence[SweepRun]) -> dict[str, Any]:
+    """workflow 状态计数(success / success_with_warning / failed)。"""
+    return {
+        "n_runs": len(runs),
+        "success": sum(1 for run in runs if run.status == STATUS_SUCCESS),
+        "success_with_warning": sum(
+            1 for run in runs if run.status == STATUS_WARNING
+        ),
+        "failed": sum(1 for run in runs if run.status == STATUS_FAILED),
+    }
 
 
 __all__ = [
     "DEFAULT_MAX_RUNS",
+    "STATUS_FAILED",
+    "STATUS_SUCCESS",
+    "STATUS_WARNING",
+    "SUCCESS_STATUSES",
     "SweepPlan",
     "SweepRun",
+    "WARN_GAUSSIAN_BOUNDARY_HIT",
+    "WARN_GAUSSIAN_FALLBACK",
+    "WARN_GAUSSIAN_UNSUPPORTED",
+    "WARN_PEAK_NOT_DETECTED",
+    "WARN_PEAK_OUT_OF_RANGE",
+    "WARN_PEAK_WINDOW_EDGE",
+    "WARN_WINDOW_FALLBACK",
     "apply_phase_axes",
     "combos_from_rows",
     "design_diagnostics",
@@ -987,6 +1695,7 @@ __all__ = [
     "load_combo_table",
     "load_plan",
     "load_runs",
+    "load_workflows",
     "merge_overrides",
     "normalize_nus_params",
     "parse_phase_axis",
@@ -994,5 +1703,8 @@ __all__ = [
     "run_sweep",
     "split_combo",
     "validate_axes",
+    "workflow_id_for",
+    "workflow_summary",
     "write_combo_table",
+    "write_workflow_record",
 ]

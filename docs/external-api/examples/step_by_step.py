@@ -1,62 +1,67 @@
-"""分步示例:逐段控制,便于接入自建流程或调试。
+"""示例 2:分步执行(参考 → 峰表 → plan → 批量 → 记录)。
 
-顺序:open_study → add_dataset → build_reference → ensure_reference_peaks
-      → plan_sweep → run_sweep → position_uncertainty → write_records
+用法::
+
+    python docs/external-api/examples/step_by_step.py --study ~/studies/s2 \
+        --dataset ~/data/apo --combos combos.csv
 """
 
 from __future__ import annotations
 
-import json
-import os
+import argparse
 from pathlib import Path
 
 from nmrforge_api import (
     add_dataset,
     build_reference,
     ensure_reference_peaks,
-    load_reference,
+    load_combo_table,
     open_study,
     plan_sweep,
-    position_uncertainty,
     run_sweep,
-    uncertainty_summary,
     write_records,
 )
 
-STUDY = Path(os.environ.get("NMRFORGE_API_STUDY", "~/studies/hsqc_params")).expanduser()
-DATA = os.environ.get("NMRFORGE_API_DATA", "")
-AXES = {"window.F1.off": [0.35, 0.45], "zero_fill": [1, 2]}
 
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="nmrforge_api 分步示例")
+    parser.add_argument("--study", required=True, help="研究根目录")
+    parser.add_argument("--dataset", required=True, help="Bruker 目录")
+    parser.add_argument("--condition", default="A", help="条件标签(缺省 A)")
+    parser.add_argument("--combos", required=True, help="组合表")
+    parser.add_argument("--window-ppm", type=float, default=None)
+    args = parser.parse_args(argv)
 
-def log(message: str) -> None:
-    print(message, flush=True)
+    session = open_study(args.study)
+    if session.dataset_by_condition(args.condition) is None:
+        add_dataset(session, args.dataset, condition=args.condition)
 
+    reference = build_reference(session, progress=print)
+    reference = ensure_reference_peaks(session, reference)
+    print("参考脚本:", reference.script_path)
+    print("参考峰表:", reference.peak_table_parabolic_path,
+          "|", reference.peak_table_gaussian_path)
+    print("自动相位实际值:", reference.phase_record())
 
-def main() -> int:
-    session = open_study(STUDY)
-    if DATA:
-        dataset = add_dataset(session, DATA)
-        print("数据集:", json.dumps(dataset.to_dict(), ensure_ascii=False))
-
-    reference = load_reference(session) or build_reference(session, progress=log)
-    reference = ensure_reference_peaks(session, reference)   # 软件自动选峰
-    print(f"参考峰表 {reference.peak_count} 峰(来源 {reference.peak_source})")
-
-    plan = plan_sweep(reference, axes=AXES)
-    print(f"组合 {plan.n_combos} 个,网格哈希 {plan.grid_sha256[:12]},相位锁定 {plan.phase_locked}")
-
-    runs = run_sweep(session, plan, reference=reference, progress=log)
-    uncertainties = position_uncertainty(runs, csp_n_weight=0.2)
-    summary = uncertainty_summary(
-        uncertainties, csp_n_weight=0.2,
-        n_runs=sum(1 for run in runs if run.status == "success"),
+    plan = plan_sweep(reference, combos=load_combo_table(args.combos))
+    print("workflow_ids:", plan.workflow_ids())
+    runs = run_sweep(
+        session,
+        plan,
+        reference=reference,
+        window_ppm=args.window_ppm,
+        progress=print,
     )
     records = write_records(
-        session, reference=reference, plan=plan, runs=runs,
-        uncertainties=uncertainties, summary=summary,
+        session,
+        references={reference.dataset_key: reference},
+        plan=plan,
+        runs=runs,
     )
-    print(json.dumps(summary, ensure_ascii=False, indent=2))
-    print("记录:", json.dumps(records, ensure_ascii=False, indent=2))
+    for run in runs:
+        table = Path(run.peak_table_path("parabolic"))
+        print(f"{run.workflow_id} {run.condition} {run.status} {table}")
+    print("records:", records)
     return 0
 
 

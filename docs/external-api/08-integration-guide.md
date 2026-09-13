@@ -1,108 +1,68 @@
-# 08 · 接入现有 pipeline
+# 08 · 向下游分析程序交接(v0.2)
 
-本接口不要求你放弃现有分析代码。按需要选择三种接法。
+本软件止于「谱 + 峰表 + 处理记录」。**CSP、robustness、统计推断与显著性判断
+属于你的独立分析程序**,请按下述契约读取产物。
 
-## 8.1 全套接管(推荐起步)
+## 8.1 交接面
 
-处理参数网格、候选谱、峰位测量都由本接口完成,你的项目只负责读结果与统计/画图。
-
-```python
-from nmrforge_api import run_parameter_study
-
-result = run_parameter_study(
-    "~/studies/hsqc_params",
-    "~/bruker_data/bmrXXXXX/1",
-    axes={"window.F1.off": [0.35, 0.45, 0.55], "zero_fill": [1, 2, 4]},
-)
-
-# 逐峰长表(推荐直接喂 pandas)
-import pandas as pd
-positions = pd.read_csv(result.records["peak_positions"])
-uncertainty = pd.read_csv(result.records["uncertainty"])
-summary = result.summary            # 也可读 records/uncertainty_summary.json
-```
-
-统计/画图仍在你自己的项目里做(热图、敏感性排序、稳健参数区等)。
-
-## 8.2 最小侵入(只借参考与峰位测量)
-
-你的 pipeline 继续自己生成 `.com` 并运行,只把两件事交给本接口:
-
-1. **参考**:用 NMRForge 自动优化一次,拿到参考谱 + 参考脚本(冻结、可哈希);
-2. **峰位**:用同一套口径在你产出的谱上测量同一批峰(自动选出的参考峰表)。
-
-```python
-from nmrforge_api import (
-    SweepRun, add_dataset, build_reference, ensure_reference_peaks,
-    measure_peak_positions, open_study, position_uncertainty,
-    read_reference_peaks, uncertainty_summary,
-)
-
-session = open_study("~/studies/hsqc_params")
-add_dataset(session, "~/bruker_data/bmrXXXXX/1")     # 只需一次
-reference = build_reference(session)                  # 参考谱 + 参考脚本(冻结)
-reference = ensure_reference_peaks(session, reference)  # 软件自动选峰
-peaks = read_reference_peaks(reference.peak_table_path)
-
-# ↓ 你自己的 runner:每个参数组合产出一张谱,记下 run_id 与路径
-my_runs: list[SweepRun] = []
-for index, combo in enumerate(my_combos, start=1):
-    spectrum = my_pipeline(combo)                     # 你的处理路径
-    # 窗口给**物理宽度**(ppm):缺省 1.5×该轴线宽折算 ppm,跨填零可比
-    measurements = measure_peak_positions(spectrum, peaks, window_ppm=0.5)
-    my_runs.append(
-        SweepRun(
-            run_id=f"m{index:04d}",
-            index=index,
-            combo=combo,
-            params=combo,
-            status="success",
-            spectrum_path=str(spectrum),
-            measurements=measurements,
-        )
-    )
-
-uncertainties = position_uncertainty(my_runs, csp_n_weight=0.2)
-summary = uncertainty_summary(uncertainties, csp_n_weight=0.2)
-```
-
-要点:只要 `peaks` 与参考谱同源(都用本接口选出的 `reference.list`),你现有的
-`PPM_error` 类指标就能与本接口的 σ/Δδ 口径对齐。
-
-## 8.3 只借参考脚本(把 NMRForge 当脚本生成器)
-
-如果你的 runner 需要按行改写脚本(例如自己插 SMILE 行):
-
-```python
-from nmrforge_api import open_study, add_dataset, build_reference
-
-session = open_study("~/studies/hsqc_params")
-add_dataset(session, "~/bruker_data/bmrXXXXX/1")
-reference = build_reference(session)
-
-script_text = Path(reference.script_path).read_text(encoding="utf-8")
-print(reference.script_sha256, reference.direct_phase)   # 溯源与相位
-```
-
-`reference.direct_phase`(各轴 PS)可直接写进你生成的脚本,保证相位与参考一致。
-
-## 8.4 与现有指标的对应关系
-
-| 你的指标 | 用本接口怎么算 |
+| 你的分析需要 | 读什么 |
 | --- | --- |
-| 峰位误差 / PPM error | `peak_positions.csv` 的 `delta_ppm`(或按核加权后 `Δδ`) |
-| 强度/线宽误差 | 本接口只给极值处 `intensity`;强度/线宽请在候选谱上按你的方法测 |
-| TP/FP/FN | 本接口给的是固定峰集的 `found` 标记,不含新峰检测;TP/FP/FN 建议用你的选峰流程单独算 |
-| 稳健参数区 | 用 `uncertainty.csv`(逐峰 σ)或逐组合指标做阈值筛选 |
-| 敏感性排序 | `peak_positions.csv` + 你自己的统计(方差分析/回归/相关性) |
+| 每个参数组合的峰位(两种算法) | `study/records/peak_table_parabolic.csv` / `peak_table_gaussian.csv`(长表),或逐 workflow 的 `study/workflows/<id>/<条件>/peak_table_*.csv` |
+| 峰身份(跨条件/跨组合对齐) | `reference_peak_id`(R0001…) |
+| 条件 A/B | `condition` / `dataset` 列(或按目录/条件分组) |
+| 参数与自动参数实际值 | `workflows/<id>/workflow.json` 与 `runs.json` 的 `parameters_requested`/`parameters_used`/`parameters_resolved` |
+| 峰的可用性 | `detected`(=false 时该组合/条件没测到,**行仍在**)、`SNR`、`fit_success`、`boundary_hit`、`fallback` |
+| 参考基准 | `records/manifest.json` 的 `references`(脚本/谱/两张峰表哈希)与 `peak_identity` |
+| 复算与引用 | 脚本/谱 SHA-256、`grid_sha256`、`versions`、完整 `log.txt` |
 
-## 8.5 可复现建议
+## 8.2 最小读取示例(只读,不计算)
 
-- 一个网格一个研究根;换网格不要复用同一个 `runs/`(组合编号会撞);
-- 固定 `peak_source`、`sigma_multiplier`、`max_peaks`、`window_ppm`(窗口物理
-  半径)、`sign`、`refine`、`csp_n_weight`,把它们的取值写进论文材料;
-  (用 `window_pts` 点数口径时必须额外注明点数不随填零换算:同一「N 点」在
-  不同填零下覆盖的 ppm 宽度不同)
-- 把 `records/manifest.json` 与研究根一起归档(体积很小,足以重建全部结论);
-- 记录 NMRForge/NMRPipe 版本(manifest 里已有);升级版本后若要比较结果,
-  建议在同一研究根上重跑并注明版本变化。
+```python
+import csv
+from pathlib import Path
+
+records = Path("~/studies/hsqc_params/study/records").expanduser()
+
+def load(method: str) -> list[dict]:
+    with (records / f"peak_table_{method}.csv").open(encoding="utf-8") as fh:
+        return list(csv.DictReader(fh))
+
+parabolic = load("parabolic")      # 列: workflow_id, condition, reference_peak_id,
+gaussian = load("gaussian")        #     H_ppm, N_ppm, intensity, SNR, detected, ...
+
+# 例:取某个峰在所有组合下的 15N 峰位(是否可用由 detected 判定)
+peak = "R0007"
+values = [
+    float(row["N_ppm"])
+    for row in parabolic
+    if row["reference_peak_id"] == peak
+    and row["condition"] == "A"
+    and row["detected"].lower() == "true"
+]
+print(len(values), values[:3])
+```
+
+> 上面只做**读取与筛选**。σ、Δδ、robustness、显著性检验请在你的分析代码里
+> 按自己的统计假设实现(样本量、分布、缺失峰的处理都要写明)。若只想快速
+> 自检,可复用测试/检测辅助 `nmrforge_api.uncertainty`(处理链不调用它,
+> 也不出现在 records 里)。
+
+## 8.3 建议的处理约定
+
+1. **峰对齐**:以 `reference_peak_id` 为主键;同一峰在 A/B 或不同组合下
+   都要先过滤 `detected=true`,并记录被排除的峰数;
+2. **算法选择**:parabolic 与 gaussian 是两套独立观测;比较两者差异时,
+   Gaussian 侧应排除 `fit_success=false`(或把它们作为缺失处理),
+   并保留 `fallback_reason` 作为审计线索;
+3. **权重/缺失**:`detected=false` 的峰**不要静默删除**——在分析里明确标注
+   (缺失机制可能与被扫参数相关);
+4. **可复算**:分析产物里附上 `records/manifest.json` 里的脚本/谱哈希与
+   `grid_sha256`,以及所用软件的 `versions`;
+5. **不要回写研究根**:分析结果请落在你自己的目录(软件产物是执行记录,
+   分析不应改写它们)。
+
+## 8.4 分片与并行(可选)
+
+组合数上限 `max_runs`(缺省 256);要并行请按**参数轴**拆分(各机器跑不同子
+网格、各自一个研究根),最后在分析侧按键合并长表——同一参考与峰身份保证可比。
+要点:分片时把 `records/manifest.json` 一起归档,便于核对是否同一参考。

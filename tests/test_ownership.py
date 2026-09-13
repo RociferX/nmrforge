@@ -35,6 +35,8 @@ def test_backend_paths() -> None:
     assert module.owner_of("core/processing/phase.py") == "backend"
     assert module.owner_of("core/experiment/bruker_parser.py") == "backend"
     assert module.owner_of("scripts/smile_optimize.py") == "backend"
+    assert module.owner_of("nmrforge_api/peak_tables.py") == "backend"
+    assert module.owner_of("nmrforge_api/sweep.py") == "backend"
     assert module.owner_of("tests/test_bruker_parser.py") == "backend"
 
 

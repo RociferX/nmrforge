@@ -1,5 +1,24 @@
 # 修改记录(历史条目)
 
+## 未发布(2026-09-13):对外接口规范更新(nmrforge_api v0.2)
+- 按用户 2026-09-13 规范重做对外接口的输出模型:参考工作流 = 1 脚本 +
+  2 张参考峰表;每个参数组合 = `workflow_id`(`W0001…`),目录
+  `study/workflows/<id>/<条件>/`,含完整脚本、候选谱、两张统一峰表、完整
+  `log.txt`、`run.json`(参数三层 + 相位实际值 + 版本)与 `workflow.json`;
+- 统一峰表 19 列(两算法结构一致;parabolic 不适用列写 `NaN`),稳定峰身份
+  `reference_peak_id`,未检测到的峰保留 `detected=false`;新增 `SNR` 列;
+- 两条件 A/B:同一 workflow 同参数、共享峰身份,各自输出峰值表;
+- 状态三值(`success`/`success_with_warning`/`failed`)+ 警告码;
+- **边界**:σ/Δδ(CSP 判据)汇总移出处理契约——`run_parameter_study`/
+  `run_sweep`/CLI/`records/` 不再调用或产出;按用户裁定保留
+  `nmrforge_api/uncertainty.py` 作为**测试/检测辅助**(处理链不调用);
+  CSP/robustness/统计/显著性由下游独立分析程序完成
+  (留档 `docs/tasks/archive/2026-09-13-csp-statistics-boundary.md`);
+- 新增 `nmrforge_api/peak_tables.py`;`docs/external-api/` 全面重写;
+  符合性台账 `docs/reviews/2026-09-13-api-spec-compliance.md`;
+  测试 `tests/test_nmrforge_api.py` 重写(36 项,含边界守护);
+- 本地全量回归全绿、`ruff check .` 全绿(VM 真机回归见后续提交)。
+
 ## 未发布(2026-09-13):工程约定与工作区清理
 - 记录强制原则(用户):**home 根目录不放测试**——测试产物进
   `~/nmrforge-test-artifacts/`(VM)或 `$TMPDIR`;维护脚本进仓库 `scripts/`;

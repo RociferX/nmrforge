@@ -21,6 +21,8 @@ GUI_PREFIXES = ("gui/", "viewer/", "main.py", "scripts/make_icon.py")
 BACKEND_PREFIXES = (
     "backend/",
     "workflow/",
+    # 对外接口包:无 Qt、处理侧实现(2026-09-13 v0.2 纳入归属表)
+    "nmrforge_api/",
     "core/data/",
     "core/experiment/",
     "core/experiments/",

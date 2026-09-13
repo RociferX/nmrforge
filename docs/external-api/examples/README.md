@@ -1,20 +1,20 @@
 # 示例
 
-| 文件 | 说明 |
+| 文件 | 内容 |
 | --- | --- |
-| `run_study.py` | 一步式:导入数据 → 参考谱 → 自动选峰 → 参数扫描 → 汇总 |
-| `step_by_step.py` | 分步:逐段控制,打印每步产物与统计 |
-| `measure_only.py` | 最小侵入:只借「参考峰表 + 峰位测量」,谱来自你自己的 pipeline |
-| `grid.yaml` | 参数网格示例(命令行 `sweep --grid` 用,接口展开全因子) |
-| `combos.csv` | 显式组合表示例(命令行 `sweep --combos` 用;正交/部分因子表直接放这里) |
+| `run_study.py` | 一步式:数据 + 组合表 → 参考 + 全部 workflow + records(支持 A/B) |
+| `step_by_step.py` | 分步:open_study → add_dataset → build_reference → ensure_reference_peaks → plan_sweep → run_sweep → write_records |
+| `measure_only.py` | 只用测量层:对已有谱按同一批参考峰出 parabolic / gaussian 两张统一峰表 |
+| `combos.csv` | 显式组合表示例(每行一个 workflow) |
+| `grid.yaml` | 轴网格示例(接口展开全因子) |
 
-运行前把脚本里的 `STUDY`、`DATA` 改成你的路径,或按脚本里的说明用环境变量覆盖:
+运行前请确认数据是解压后的 Bruker 目录;真机处理需要 NMRPipe。
 
 ```bash
-export NMRFORGE_API_STUDY=~/studies/hsqc_params
-export NMRFORGE_API_DATA=~/bruker_data/bmrXXXXX/1
-~/NMRForge/nmrforge/bin/python run_study.py
+python docs/external-api/examples/run_study.py \
+    --study ~/studies/s1 --a ~/data/apo --b ~/data/holo \
+    --combos docs/external-api/examples/combos.csv
 ```
 
-真实运行需要 NMRPipe 环境;若只想看链路形状,可先用一个 fake 后端(见
-NMRForge 仓库里的测试实现 `tests/test_nmrforge_api.py::_FakeSweepBackend`)。
+输出(节选):workflow 列表、逐 workflow × 条件状态、两张峰表路径,以及
+`study/records/` 下的清单与长表。

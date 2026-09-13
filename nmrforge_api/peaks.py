@@ -43,16 +43,34 @@ _NAMED_KEYS: tuple[tuple[str, str], ...] = (
 )
 
 
+def reference_peak_id(peak_id: Any) -> str:
+    """峰序号 → 稳定身份 ``R0001``(参考峰表建立后不再变化)。
+
+    参考峰表给每个峰建立 reference_peak_id;后续所有 workflow 的峰表都带这一
+    列(未检测到的峰 detected=false 但保留记录),下游据此把峰匹配回同一身份。
+    """
+    try:
+        number = int(peak_id)
+    except (TypeError, ValueError):
+        return str(peak_id or "")
+    return f"R{number:04d}"
+
+
 @dataclass
 class PeakMeasurement:
     """一个参考峰在一张谱上的位置测量结果。"""
 
     peak_id: int
     assignment: str
+    # 稳定峰身份(参考峰表建立的 reference_peak_id,如 R0001)
+    reference_peak_id: str = ""
     reference: dict[str, float] = field(default_factory=dict)
     positions: dict[str, float] = field(default_factory=dict)
     deltas: dict[str, float] = field(default_factory=dict)
     intensity: float = 0.0
+    # 该谱噪声 σ(robust MAD)与逐峰 SNR = |intensity| / σ(留档可复算)
+    noise_sigma: float = 0.0
+    snr: float = 0.0
     found: bool = True
     window_edge: bool = False
     boundary: bool = False
@@ -64,10 +82,13 @@ class PeakMeasurement:
         return {
             "peak_id": int(self.peak_id),
             "assignment": self.assignment,
+            "reference_peak_id": self.reference_peak_id,
             "reference": {k: float(v) for k, v in self.reference.items()},
             "positions": {k: float(v) for k, v in self.positions.items()},
             "deltas": {k: float(v) for k, v in self.deltas.items()},
             "intensity": float(self.intensity),
+            "noise_sigma": float(self.noise_sigma),
+            "snr": float(self.snr),
             "found": bool(self.found),
             "window_edge": bool(self.window_edge),
             "boundary": bool(self.boundary),
@@ -82,10 +103,16 @@ class PeakMeasurement:
         return cls(
             peak_id=int(data.get("peak_id", 0) or 0),
             assignment=str(data.get("assignment", "")),
+            reference_peak_id=str(
+                data.get("reference_peak_id")
+                or reference_peak_id(data.get("peak_id", 0))
+            ),
             reference={k: float(v) for k, v in (data.get("reference") or {}).items()},
             positions={k: float(v) for k, v in (data.get("positions") or {}).items()},
             deltas={k: float(v) for k, v in (data.get("deltas") or {}).items()},
             intensity=float(data.get("intensity", 0.0) or 0.0),
+            noise_sigma=float(data.get("noise_sigma", 0.0) or 0.0),
+            snr=float(data.get("snr", 0.0) or 0.0),
             found=bool(data.get("found", True)),
             window_edge=bool(data.get("window_edge", False)),
             boundary=bool(data.get("boundary", False)),
@@ -157,6 +184,12 @@ def read_reference_peaks(path: Path | str) -> list[dict[str, Any]]:
     peaks = _read_ppm_csv(target)
     if peaks is None:
         peaks = load_peaks(target)
+    # 稳定峰身份:参考峰表建立 reference_peak_id,后续 workflow 峰表沿用
+    for position, row in enumerate(peaks, start=1):
+        if not row.get('reference_peak_id'):
+            row['reference_peak_id'] = reference_peak_id(
+                row.get('Peak_ID') or position
+            )
     usable = [row for row in peaks if peak_coordinates(row, None)]
     if not usable:
         raise MeasurementError(f"参考峰表没有可测量的峰位: {path}")
@@ -186,6 +219,34 @@ def peak_coordinates(
         if value is not None and str(value) != "":
             coords.setdefault(nucleus, float(value))
     return coords
+
+
+def _add_nucleus_localization(
+    record: dict[str, Any], axes: SpectrumAxes
+) -> None:
+    """把高斯诊断按**核名**补进记录(FWHM_H/FWHM_N 不能按数据轴序猜)。
+
+    ``core.peaks.localize`` 的派生量按数据轴序给出(``fwhm_f1`` = 轴 0),
+    而统一峰表的 H/N 列按核名取值:这里按 ``axes.nuclei`` 显式映射,未知核
+    名不写(表里回落 NaN),不猜。
+    """
+    if str(record.get('actual_method', '')) != 'gaussian':
+        return
+    fwhm: dict[str, float] = {}
+    sigma: dict[str, float] = {}
+    for index, nucleus in enumerate(axes.nuclei[:2]):
+        if not nucleus:
+            continue
+        value = record.get(f'fwhm_f{index + 1}')
+        if value is not None:
+            fwhm[nucleus] = float(value)
+        value = record.get(f'sigma_f{index + 1}')
+        if value is not None:
+            sigma[nucleus] = float(value)
+    if fwhm:
+        record['fwhm_by_nucleus'] = fwhm
+    if sigma:
+        record['sigma_by_nucleus'] = sigma
 
 
 def _parabolic_offset(y_minus: float, y_zero: float, y_plus: float) -> float:
@@ -266,6 +327,7 @@ def measure_peak_positions(
     nuclei: Iterable[str] | None = None,
     roi_f1_ppm: float | None = None,
     roi_f2_ppm: float | None = None,
+    noise_sigma: float | None = None,
 ) -> list[PeakMeasurement]:
     """在 ``spectrum_path`` 上测量 ``peaks`` 的亚像素峰位。
 
@@ -280,6 +342,10 @@ def measure_peak_positions(
     因此**零填零不会改变窗口覆盖的 ppm 宽度**;``window_ppm`` 显式给物理
     宽度,``window_pts`` 强制点数(不推荐)。``axes`` 可传入已读好的谱轴
 (避免重复读谱)。
+
+    ``noise_sigma``:该谱噪声 σ。缺省用 ``core.qc.noise`` 的 robust MAD 估计;
+    每峰的 ``SNR = |intensity| / σ`` 与 σ 一起写进测量结果(统一峰表 SNR 列),
+    便于下游复算「峰强是否足以判定 detected」。
     """
     path = Path(spectrum_path)
     if not path.is_file():
@@ -302,6 +368,13 @@ def measure_peak_positions(
     window_by_axis = window_points_by_axis(
         axes, window_pts=window_pts, window_ppm=window_ppm
     )
+    from core.qc import noise as _noise
+
+    sigma = (
+        float(noise_sigma)
+        if noise_sigma is not None
+        else float(_noise.estimate(data).global_sigma)
+    )
     wanted = {str(n) for n in nuclei} if nuclei else None
     results: list[PeakMeasurement] = []
     for index, row in enumerate(peaks, start=1):
@@ -311,7 +384,13 @@ def measure_peak_positions(
             assignment = ""
         coords = peak_coordinates(row, axes)
         measurement = PeakMeasurement(
-            peak_id=peak_id, assignment=assignment, reference=coords
+            peak_id=peak_id,
+            assignment=assignment,
+            reference_peak_id=str(
+                row.get('reference_peak_id') or reference_peak_id(peak_id)
+            ),
+            reference=coords,
+            noise_sigma=sigma,
         )
         search_axes: list[int] = []
         centers: list[int] = []
@@ -375,6 +454,9 @@ def measure_peak_positions(
         measurement.intensity = float(
             data[tuple(best)] if np.isfinite(data[tuple(best)]) else 0.0
         )
+        measurement.snr = (
+            abs(measurement.intensity) / sigma if sigma > 0 else 0.0
+        )
         for axis in search_axes:
             lo, hi = bounds[axis]
             size = int(data.shape[axis])
@@ -409,6 +491,7 @@ def measure_peak_positions(
             )
             fractions = [float(v) for v in loc.position]
             measurement.localization = loc.to_dict(ppm_axes)
+            _add_nucleus_localization(measurement.localization, axes)
         elif refine == "parabolic":
             for axis in search_axes:
                 position = best[axis]
@@ -452,16 +535,18 @@ def pick_reference_peaks(
     localization_method: str = "parabolic",
     gaussian_roi_f1_ppm: float | None = None,
     gaussian_roi_f2_ppm: float | None = None,
+    dataset: Any | None = None,
 ) -> Path:
     """在参考谱上用 NMRForge 选峰,得到固定峰表(供扫描追踪)。
 
     ``out_path`` 非空时把峰表复制一份到该路径(研究目录内留档);
     ``details`` 非空时把选峰口径(``detection``:边距物理宽度/点数/
-    各轴点距)写进该字典,供研究记录留档。
+    各轴点距)写进该字典,供研究记录留档;``dataset`` 指定条件数据集
+    (缺省用会话主条件)。
     """
     from workflow.pick_peaks import pick_peaks
 
-    dataset = session.dataset
+    dataset = dataset or session.dataset
     if dataset is None:
         raise MeasurementError("研究里还没有数据集")
     result = pick_peaks(
@@ -495,5 +580,6 @@ __all__ = [
     "peak_coordinates",
     "pick_reference_peaks",
     "read_reference_peaks",
+    "reference_peak_id",
     "window_points_by_axis",
 ]

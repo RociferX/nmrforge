@@ -1,116 +1,88 @@
-# 04 · 命令行参考
+# 04 · 命令行参考(v0.2)
+
+入口:`python -m nmrforge_api <命令> --study <研究根>`。
+公共参数:`--study`(必填)、`--name`(新建研究名)、`--condition <A|B|…>`
+(缺省 = 全部条件)。
+
+## init — 建研究并导入数据集
 
 ```bash
-python -m nmrforge_api <命令> [参数]
+python -m nmrforge_api init --study ~/studies/s1 --dataset ~/data/apo --condition A
+python -m nmrforge_api init --study ~/studies/s1 --dataset ~/data/holo --condition B
+python -m nmrforge_api init --study ~/studies/s1            # 只看已登记条件
 ```
 
-所有命令都接受 `--study DIR`(研究根)与 `--name NAME`(新建研究时的项目名)。
-输出为 JSON(便于 `jq`/脚本消费)。退出码:`0` 成功;`2` 接口异常
-(`SensitivityError` 及其子类,打印为 `错误: …`);参数错误也是 `2`。
+输出:研究根 + 条件 + 数据集摘要(ndim/核/采样/来源/raw_dir/文件数)。
+同一条件标签不能绑定两份数据(报错,不覆盖)。
 
-## init · 建研究并导入数据集
+## reference — 参考工作流(每个条件一份)
 
 ```bash
-python -m nmrforge_api init --study DIR --dataset BRUKER_DIR [--title T]
+python -m nmrforge_api reference --study ~/studies/s1
+python -m nmrforge_api reference --study ~/studies/s1 --condition A --force
+python -m nmrforge_api reference --study ~/studies/s1 --params auto.yaml
 ```
 
-`--dataset` 省略时只建/打开研究并打印当前数据集。导入只做 raw 链接 +
-metadata + 导入运行记录:不转换、不处理。
+`--params` 是自动流程的输入覆盖(YAML/JSON);`--phase-route` 显式指定相位
+路线;`--force` 重建。输出冻结谱/参考脚本路径与 SHA-256、相位来源、采样方式、
+该条件是否支持参数组合。
 
-## reference · 自动优化并冻结参考谱/脚本
+## peaks — 参考峰表(身份 + 两张统一峰表)
 
 ```bash
-python -m nmrforge_api reference --study DIR [--params params.yaml] \
-    [--phase-route unified] [--force]
+python -m nmrforge_api peaks --study ~/studies/s1
+python -m nmrforge_api peaks --study ~/studies/s1 --sigma 25 --max-peaks 60
+python -m nmrforge_api peaks --study ~/studies/s1 --peak-table external.list
+python -m nmrforge_api peaks --study ~/studies/s1 --localization gaussian \
+    --gaussian-roi-f1-ppm 1.5 --gaussian-roi-f2-ppm 0.25
 ```
 
-- `--params`:YAML/JSON,参考处理的输入参数(如 `ext_lo`、`window` 初值);
-- `--force`:丢弃已有参考谱重建;
-- 输出含 `spectrum`、`script`、`script_sha256`、`phase_route`、`sampling`、
-  `sweep_supported`。
+主条件自动选峰(或登记外部峰表)建立 `reference.list`;其他条件共享同一峰身份;
+随后写两张参考峰表。输出峰表路径/哈希/来源/峰数 + 两张表的摘要与定位 QC。
 
-## peaks · 参考峰表(默认软件自动选峰)
+## sweep(= workflows)— 批量执行参数组合
 
 ```bash
-python -m nmrforge_api peaks --study DIR [--sigma 35] [--max-peaks 100] [--force]
-python -m nmrforge_api peaks --study DIR --peak-table external.list   # 可选:外部峰表
+python -m nmrforge_api sweep --study ~/studies/s1 --combos design.csv
+python -m nmrforge_api sweep --study ~/studies/s1 --grid grid.yaml
+python -m nmrforge_api sweep --study ~/studies/s1 --combos design.csv \
+    --window-ppm 0.5 --no-resume
 ```
 
-输出含 `peak_table`、`sha256`、`source`(`auto`/`external`)、`params`、`count`。
-不需要外部峰表;`--peak-table` 只是逃生口(公开库/已指认表,同样冻结留档)。
-
-## sweep · 按网格扫描
-
-```bash
-# 入口一:轴网格(接口展开全因子)
-python -m nmrforge_api sweep --study DIR --grid grid.yaml \
-    [--max-runs 256] [--window-pts 3] [--csp-n-weight 0.2] [--no-resume]
-
-# 入口二:外部给定的组合表(正交表/部分因子/D-optimal/LHS/手挑,原样执行)
-python -m nmrforge_api sweep --study DIR --combos design.csv [--max-runs 256]
-```
-
-`--grid` 与 `--combos` 必须且只能给一个。组合表格式:CSV/TSV(首行表头 =
-轴键)或 YAML/JSON(组合列表,或 `combos: [...]`)。
-
-网格文件(YAML;JSON 是 YAML 子集,可直接使用):
-
-```yaml
-axes:
-  zero_fill: [1, 2, 4]
-  "window.F1.off": [0.35, 0.45, 0.55]
-  "baseline.F1.order": [1, 2]
-max_runs: 128          # 可选;也可用命令行 --max-runs
-base_params:           # 可选;缺省用参考运行的有效参数
-  points_per_line: 4.0
-```
-
-- 键支持点号路径,值是该参数的候选列表;组合数 = 各轴长度之积;
-- 组合数超过上限直接报错(不静默截断),提示减小网格或提高 `max_runs`;
-- 每个组合单独跑一次处理;失败组合记入结果但不中断整轮;
-- `--no-resume` 重算已有组合(默认跳过已成功的)。
-
-## report · 只重算汇总(不重跑处理)
-
-```bash
-python -m nmrforge_api report --study DIR [--csp-n-weight 0.2]
-```
-
-用已有 `runs/*/run.json` 重算逐峰 σ/Δδ 与数据集级汇总,并重写 `records/`。
-换 `csp_n_weight` 口径时用这个命令,避免重跑 NMRPipe。
-
-## status · 打印研究现状
-
-```bash
-python -m nmrforge_api status --study DIR
-```
-
-输出数据集、参考谱(含哈希)、组合数与运行统计(成功/失败)、`records/` 路径。
-
-## 典型集群用法
-
-```bash
-#!/bin/bash
-set -e
-STUDY=$1
-GRID=$2
-DATA=$3
-python -m nmrforge_api init      --study "$STUDY" --dataset "$DATA"
-python -m nmrforge_api reference --study "$STUDY"
-python -m nmrforge_api peaks     --study "$STUDY"
-python -m nmrforge_api sweep     --study "$STUDY" --grid "$GRID"
-```
-
-长任务建议 `nohup … &` 后台运行并轮询 `status`:每个组合成功即落盘,被抢占后
-重跑同一命令即可继续。
-
-## 与 Python API 的对应
-
-| CLI | Python |
+| 选项 | 含义 |
 | --- | --- |
-| `init` | `open_study` + `add_dataset` |
-| `reference` | `build_reference` |
-| `peaks` | `ensure_reference_peaks` / `set_reference_peaks` |
-| `sweep` | `plan_sweep`(`axes=` 全因子 / `combos=` 外部组合表)+ `run_sweep` + `position_uncertainty` + `write_records` |
-| `report` | `load_plan` + `load_runs` + 汇总 + `write_records` |
-| `status` | `load_reference` / `load_plan` / `load_runs` |
+| `--combos` | **用户参数组合表**(CSV/TSV/YAML/JSON,一行一个组合,原样按序执行) |
+| `--grid` | 各轴候选值(YAML/JSON 的 `axes:`,接口展开全因子) |
+| `--max-runs` | 组合数上限(缺省 256) |
+| `--window-ppm` | 峰位搜索窗口半径(ppm;缺省 1.5×核素线宽) |
+| `--window-pts` | 窗口半径(点数,跨分辨率不可比,不推荐) |
+| `--gaussian-roi-f1-ppm` / `--gaussian-roi-f2-ppm` | 高斯 ROI 物理半径(ppm) |
+| `--no-resume` | 不跳过已完成 workflow |
+
+`--combos` 与 `--grid` 必须且只能给一个。每个组合 = 一个 `workflow_id`
+(`W0001`…);对全部条件跑处理,再对同一张谱跑两种定位,输出两张峰表 + 完整
+日志 + 参数三层 + 版本。输出:workflow 数、条件列表、状态计数、records 路径。
+
+## report — 用已有记录重算汇总(不重跑处理)
+
+```bash
+python -m nmrforge_api report --study ~/studies/s1
+```
+
+重新拼装 `study/records/`(长表/manifest/workflows/runs/measurement),
+不调用后端。输出 workflow 数与状态计数。
+
+## status — 现状
+
+```bash
+python -m nmrforge_api status --study ~/studies/s1
+```
+
+输出:条件数据集、逐条件参考(脚本/谱哈希、峰数、峰表)、计划的 workflow 数与
+ID、已记录 workflow 数、运行状态计数、records 目录。
+
+## 退出码
+
+- `0` 成功;
+- `2` `SensitivityError`(参数/数据/参考/测量/组合表问题),错误写入 stderr
+  (`错误: ...`),可被脚本判定。

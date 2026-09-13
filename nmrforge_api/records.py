@@ -1,29 +1,50 @@
-"""结果落盘:把一次研究写成可复算、可引用的表与清单。
+"""结果落盘:workflow 记录、统一峰表长表与清单(不含 CSP / 统计推断)。
 
 产物(研究根 ``study/records/``):
 
-- ``manifest.json``:数据来源、参考谱(参数+脚本/谱哈希+版本)、扫描网格哈希、
-  组合数、峰表路径——论文/复算只需要这一个文件就能说清「怎么算出来的」;
-- ``runs.json``:逐组合的完整记录(参数、脚本/谱哈希、峰位测量、日志尾部);
-- ``peak_positions.csv``:长表(run × peak × 核),画「参数 → 峰位」散点直接用;
-- ``uncertainty.csv``:逐峰 σ/极差/Δδ 下限;
-- ``uncertainty_summary.json``:数据集级下限汇总(中位数/p90/最大)。
+- ``manifest.json``:条件数据集、每个条件的参考(脚本/谱/两张峰表哈希)、
+  计划与网格哈希、峰身份、软件/工具版本、workflow 状态计数、软件边界声明;
+- ``workflows.json``:逐 workflow 的完整记录(``parameters_requested`` /
+  ``parameters_used`` / ``parameters_resolved``、状态、警告、两张峰表、
+  运行日志、版本);
+- ``runs.json``:逐 (workflow, 条件) 的扁平记录;
+- ``peak_table_parabolic.csv`` / ``peak_table_gaussian.csv``:全部
+  workflow × 条件的**长表**(统一字段),下游独立分析程序直接读这两张表;
+- ``measurement.json``:测量口径(窗口物理宽度↔点数换算、定位方法、QC 计数)。
+
+边界(规范 J):这里**只**汇总处理产物与溯源;σ、Δδ 下限、robustness、
+显著性判断等一律不在此计算。
 """
 
 from __future__ import annotations
 
-import csv
 import json
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
 from core.version import software_version, tool_versions
-from nmrforge_api.peaks import PeakMeasurement
+from nmrforge_api.peak_tables import read_peak_table, write_peak_table
 from nmrforge_api.reference import ReferenceSpectrum
 from nmrforge_api.session import StudySession, now_iso
-from nmrforge_api.sweep import SweepPlan, SweepRun
-from nmrforge_api.uncertainty import PeakUncertainty
+from nmrforge_api.sweep import (
+    SweepPlan,
+    SweepRun,
+    load_workflows,
+    workflow_summary,
+)
+
+WINDOW_POLICY = (
+    "峰位搜索窗口半径按物理宽度定义:缺省 = 1.5×该轴核素线宽(Hz)折算 "
+    "ppm,运行时按该候选谱的点距换算成点数(core.peaks.axis_units);"
+    "零填零 k 倍只改点距,不改变窗口覆盖的 ppm 宽度"
+)
+
+BOUNDARY_STATEMENT = (
+    "本软件只执行处理,并输出谱、峰表与处理记录(provenance + QC)。"
+    "CSP 计算、robustness 计算、统计分析与显著性判断、科学结论均不在本软件"
+    "范围内,由下游独立分析程序基于统一峰表完成。"
+)
 
 
 def _write_json(path: Path, payload: Any) -> Path:
@@ -34,48 +55,49 @@ def _write_json(path: Path, payload: Any) -> Path:
     return path
 
 
-def _run_measurements(run: SweepRun) -> Sequence[PeakMeasurement]:
-    return list(run.measurements or [])
-
-
-def _fmt(value: Any) -> str:
-    if value is None:
-        return ""
-    try:
-        return f"{float(value):.6g}"
-    except (TypeError, ValueError):
-        return str(value)
-
-
-WINDOW_POLICY = (
-    "峰位搜索窗口半径按物理宽度定义:缺省 = 1.5×该轴核素线宽(Hz)折算 "
-    "ppm,运行时按该候选谱的点距换算成点数(core.peaks.axis_units);"
-    "零填零 k 倍只改点距,不改变窗口覆盖的 ppm 宽度"
-)
+def _reference_record(
+    reference: ReferenceSpectrum, include_peak_tables: bool = True
+) -> dict[str, Any]:
+    record: dict[str, Any] = {
+        "dataset_key": reference.dataset_key,
+        "condition": reference.condition,
+        "ndim": reference.ndim,
+        "sampling": reference.sampling,
+        "run_id": reference.run_id,
+        "phase_route": reference.phase_route,
+        "script_path": reference.script_path,
+        "script_sha256": reference.script_sha256,
+        "spectrum_path": reference.frozen_spectrum,
+        "spectrum_sha256": reference.spectrum_sha256,
+        "params": reference.params,
+        "direct_phase": reference.direct_phase,
+        "phase": reference.phase_record(),
+        "created_at": reference.created_at,
+        "peak_list_path": reference.peak_table_path,
+        "peak_list_sha256": reference.peak_table_sha256,
+        "peak_count": reference.peak_count,
+        "peak_source": reference.peak_source,
+        "peak_params": reference.peak_params,
+    }
+    if include_peak_tables:
+        record["peak_tables"] = reference.peak_tables
+        record["peak_localization"] = reference.peak_localization
+    return record
 
 
 def measurement_record(
-    reference: ReferenceSpectrum,
+    references: Mapping[str, ReferenceSpectrum] | Sequence[ReferenceSpectrum],
     runs: Sequence[SweepRun],
 ) -> dict[str, Any]:
-    """测量口径留档:峰位窗口的逐轴换算(点数/ppm/点距)+ 选峰边距。
+    """测量口径留档:定位方法、窗口逐轴换算、逐峰 QC 计数。
 
     ``window_by_axis`` 给出每个轴最后一次实际用到的口径;``window_points_seen``
-    给出各轴在全部组合里出现过的点数集合——同一物理宽度在 1×/2×/4×
-    填零下换成不同点数,这里一眼能看出「点数变了但 ppm 没变」。
+    给出各轴在全部组合里出现过的点数集合——同一物理宽度在 1×/2×/4× 填零下
+    换成不同点数,这里一眼能看出「点数变了但 ppm 没变」。
     """
-    actual_counts: dict[str, int] = {}
-    fallback_reasons: dict[str, int] = {}
-    for run in runs:
-        for measurement in run.measurements or []:
-            record = dict(getattr(measurement, "localization", None) or {})
-            if not record:
-                continue
-            name = str(record.get("actual_method", "") or "unknown")
-            actual_counts[name] = actual_counts.get(name, 0) + 1
-            if record.get("fallback"):
-                reason = str(record.get("fallback_reason", "") or "")
-                fallback_reasons[reason] = fallback_reasons.get(reason, 0) + 1
+    refs = list(references.values()) if isinstance(references, Mapping) else list(
+        references
+    )
     by_axis: dict[str, dict[str, Any]] = {}
     seen: dict[str, dict[str, Any]] = {}
     for run in runs:
@@ -98,57 +120,90 @@ def measurement_record(
                 value = spec.get(field)
                 if value is not None and value not in bucket[field]:
                     bucket[field].append(value)
-    detection = (reference.peak_params or {}).get("detection") or None
+    localization: dict[str, Any] = {}
+    for method in ("parabolic", "gaussian"):
+        totals = {"n_peaks": 0, "n_detected": 0, "n_fallback": 0, "n_boundary_hit": 0}
+        reasons: dict[str, int] = {}
+        for run in runs:
+            summary = (run.peak_localization or {}).get(method) or {}
+            for key in totals:
+                totals[key] += int(summary.get(key, 0) or 0)
+            for reason, count in (summary.get("fallback_reasons") or {}).items():
+                reasons[str(reason)] = reasons.get(str(reason), 0) + int(count)
+        localization[method] = {**totals, "fallback_reasons": reasons}
     return {
-        "peak_position_method": (
-            "在参考峰位附近窗口内取 |强度| 极值,再对每个参与轴做 ±1 点 "
-            "抛物线亚像素 refine"
-        ),
+        "peak_position_method": {
+            "parabolic": "窗口内 |强度| 极值 + ±1 点三点抛物线亚像素 refine",
+            "gaussian": "同一 candidate 上的 2D 高斯最小二乘拟合(仅 2D;失败回退抛物线并记原因)",
+        },
         "window_policy": WINDOW_POLICY,
         "window_by_axis": by_axis,
         "window_points_seen": seen,
-        "edge_margin": detection,
-        "localization": {
-            "actual_method_counts": actual_counts,
-            "fallback_reasons": fallback_reasons,
-        },
+        "reference": [
+            {
+                "condition": ref.condition,
+                "peak_localization": ref.peak_localization,
+                "edge_margin": (ref.peak_params or {}).get("detection"),
+            }
+            for ref in refs
+        ],
+        "workflow_localization": localization,
     }
+
+
+def combined_peak_table(
+    runs: Sequence[SweepRun], method: str
+) -> list[dict[str, Any]]:
+    """把各 workflow/条件的峰表拼成长表(同一套统一字段)。"""
+    rows: list[dict[str, Any]] = []
+    for run in runs:
+        path = run.peak_table_path(method)
+        if not path:
+            continue
+        rows.extend(read_peak_table(path))
+    return rows
 
 
 def write_records(
     session: StudySession,
     *,
-    reference: ReferenceSpectrum,
+    reference: ReferenceSpectrum | None = None,
+    references: Mapping[str, ReferenceSpectrum] | Sequence[ReferenceSpectrum] | None = None,
     plan: SweepPlan,
     runs: Sequence[SweepRun],
-    uncertainties: Sequence[PeakUncertainty] | None = None,
-    summary: dict[str, Any] | None = None,
     peaks: Sequence[dict[str, Any]] | None = None,
 ) -> dict[str, str]:
     """写出全部汇总产物,返回 {名称: 路径}。"""
     out_dir = session.records_dir
     out_dir.mkdir(parents=True, exist_ok=True)
     written: dict[str, str] = {}
-    measurement = measurement_record(reference, runs)
+    if references is None:
+        ref_list: list[ReferenceSpectrum] = [reference] if reference else []
+    elif isinstance(references, Mapping):
+        ref_list = list(references.values())
+    else:
+        ref_list = list(references)
+    workloads = workflow_summary(runs)
     manifest = {
-        "api_version": "0.1",
+        "api_version": "0.2",
         "created": now_iso(),
         "nmrforge_version": software_version(),
         "tool_versions": tool_versions(),
         "research_root": str(session.root),
-        "dataset": session.dataset.to_dict() if session.dataset else None,
-        "reference": {
-            "run_id": reference.run_id,
-            "phase_route": reference.phase_route,
-            "ndim": reference.ndim,
-            "sampling": reference.sampling,
-            "script_path": reference.script_path,
-            "script_sha256": reference.script_sha256,
-            "spectrum_path": reference.frozen_spectrum,
-            "spectrum_sha256": reference.spectrum_sha256,
-            "params": reference.params,
-            "direct_phase": reference.direct_phase,
-            "created_at": reference.created_at,
+        "boundary": BOUNDARY_STATEMENT,
+        "datasets": [ref.to_dict() for ref in session.datasets],
+        "references": [_reference_record(ref) for ref in ref_list],
+        "plan": {
+            "axes": plan.axes,
+            "base_params": plan.base_params,
+            "n_workflows": plan.n_workflows,
+            "n_combos": plan.n_combos,
+            "workflow_ids": plan.workflow_ids(),
+            "grid_sha256": plan.grid_sha256,
+            "max_runs": plan.max_runs,
+            "design": plan.design,
+            "phase_locked": plan.phase_locked,
+            "notes": plan.notes,
         },
         "sweep": {
             "axes": plan.axes,
@@ -159,110 +214,94 @@ def write_records(
             "phase_locked": plan.phase_locked,
             "notes": plan.notes,
         },
-        "peaks": {
-            "path": reference.peak_table_path,
-            "sha256": reference.peak_table_sha256,
-            "count": reference.peak_count
-            or (len(peaks) if peaks is not None else 0),
-            "source": reference.peak_source,
-            "params": reference.peak_params,
-            "created_at": reference.peak_created_at,
+        "peak_identity": {
+            "reference_peak_id_scheme": "R0001…(参考峰表行序;所有条件与 "
+            "workflow 共享同一身份)",
+            "reference": [
+                {
+                    "condition": ref.condition,
+                    "peak_list_path": ref.peak_table_path,
+                    "peak_list_sha256": ref.peak_table_sha256,
+                    "peak_count": ref.peak_count,
+                    "source": ref.peak_source,
+                }
+                for ref in ref_list
+            ],
         },
-        "runs": {
-            "total": len(runs),
-            "success": sum(1 for r in runs if r.status == "success"),
-            "failed": sum(1 for r in runs if r.status != "success"),
-        },
-        "measurement": measurement,
+        "peaks": (
+            {
+                "path": ref_list[0].peak_table_path if ref_list else "",
+                "sha256": ref_list[0].peak_table_sha256 if ref_list else "",
+                "count": ref_list[0].peak_count if ref_list else 0,
+                "source": ref_list[0].peak_source if ref_list else "",
+                "params": ref_list[0].peak_params if ref_list else {},
+                "created_at": ref_list[0].peak_created_at if ref_list else "",
+            }
+        ),
+        "workflows": workloads,
+        "runs": workloads,
+        "measurement": measurement_record(ref_list, runs),
     }
     written["manifest"] = str(_write_json(out_dir / "manifest.json", manifest))
     written["sweep_plan"] = str(
         _write_json(out_dir / "sweep_plan.json", plan.to_dict())
     )
     written["runs"] = str(
-        _write_json(out_dir / "runs.json", [r.to_dict() for r in runs])
+        _write_json(out_dir / "runs.json", [run.to_dict() for run in runs])
     )
     written["measurement"] = str(
-        _write_json(out_dir / "measurement.json", measurement)
+        _write_json(out_dir / "measurement.json", manifest["measurement"])
     )
-
+    stored = load_workflows(session)
+    written["workflows"] = str(
+        _write_json(
+            out_dir / "workflows.json",
+            stored
+            or [
+                _workflow_record_from_runs(runs, workflow_id)
+                for workflow_id in _workflow_ids(runs)
+            ],
+        )
+    )
+    for method in ("parabolic", "gaussian"):
+        path = write_peak_table(
+            out_dir / f"peak_table_{method}.csv",
+            combined_peak_table(runs, method),
+        )
+        written[f"peak_table_{method}"] = str(path)
+    # 兼容旧名:峰位长表(列 = 统一字段)
     positions_path = out_dir / "peak_positions.csv"
-    with positions_path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.writer(handle)
-        writer.writerow(
-            [
-                "run_id",
-                "combo_index",
-                "status",
-                "peak_id",
-                "assignment",
-                "nucleus",
-                "ppm",
-                "reference_ppm",
-                "delta_ppm",
-                "intensity",
-                "found",
-                "window_edge",
-                "boundary",
-                "out_of_range",
-            ]
-        )
-        for run in runs:
-            for measurement in _run_measurements(run):
-                nuclei = sorted(
-                    set(measurement.positions) | set(measurement.reference)
-                )
-                for nucleus in nuclei:
-                    writer.writerow(
-                        [
-                            run.run_id,
-                            run.index,
-                            run.status,
-                            measurement.peak_id,
-                            measurement.assignment,
-                            nucleus,
-                            _fmt(measurement.positions.get(nucleus)),
-                            _fmt(measurement.reference.get(nucleus)),
-                            _fmt(measurement.deltas.get(nucleus)),
-                            _fmt(measurement.intensity),
-                            int(bool(measurement.found)),
-                            int(bool(measurement.window_edge)),
-                            int(bool(measurement.boundary)),
-                            int(bool(measurement.out_of_range)),
-                        ]
-                    )
+    positions_path.write_text(
+        Path(written["peak_table_parabolic"]).read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
     written["peak_positions"] = str(positions_path)
-
-    if uncertainties is not None:
-        nuclei = sorted({n for u in uncertainties for n in u.sigma})
-        uncertainty_path = out_dir / "uncertainty.csv"
-        with uncertainty_path.open("w", encoding="utf-8", newline="") as handle:
-            writer = csv.writer(handle)
-            writer.writerow(
-                ["peak_id", "assignment", "n_runs", "missing_runs"]
-                + [f"mean_{n}" for n in nuclei]
-                + [f"sigma_{n}" for n in nuclei]
-                + [f"range_{n}" for n in nuclei]
-                + ["delta_std_ppm", "delta_max_ppm", "worst_run"]
-            )
-            for item in uncertainties:
-                writer.writerow(
-                    [item.peak_id, item.assignment, item.n_runs, item.missing_runs]
-                    + [_fmt(item.mean.get(n)) for n in nuclei]
-                    + [_fmt(item.sigma.get(n)) for n in nuclei]
-                    + [_fmt(item.value_range.get(n)) for n in nuclei]
-                    + [
-                        f"{item.delta_std:.6g}",
-                        f"{item.delta_max:.6g}",
-                        item.worst_run,
-                    ]
-                )
-        written["uncertainty"] = str(uncertainty_path)
-    if summary is not None:
-        written["uncertainty_summary"] = str(
-            _write_json(out_dir / "uncertainty_summary.json", summary)
-        )
     return written
 
 
-__all__ = ["write_records"]
+def _workflow_ids(runs: Sequence[SweepRun]) -> list[str]:
+    seen: list[str] = []
+    for run in runs:
+        if run.workflow_id not in seen:
+            seen.append(run.workflow_id)
+    return seen
+
+
+def _workflow_record_from_runs(
+    runs: Sequence[SweepRun], workflow_id: str
+) -> dict[str, Any]:
+    """按 workflow 分组(盘上的 workflow.json 是权威;这里给出汇总副本)。"""
+    from nmrforge_api.sweep import _workflow_record
+
+    selected = [run for run in runs if run.workflow_id == workflow_id]
+    plan = SweepPlan(grid_sha256="")
+    return _workflow_record(selected, plan)
+
+
+__all__ = [
+    "BOUNDARY_STATEMENT",
+    "WINDOW_POLICY",
+    "combined_peak_table",
+    "measurement_record",
+    "write_records",
+]

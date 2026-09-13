@@ -1,29 +1,40 @@
-"""研究会话:一个目录 = 一个研究项目(数据集 + 参考谱 + 扫描记录)。
+"""研究会话:一个目录 = 一个研究项目(一个或多个条件数据集 + 参考 + workflow)。
 
 目录布局(全部相对研究根 ``root``)::
 
     root/
-      project.json            NMRForge 项目(schema 1.4,登记数据集与运行)
+      project.json            NMRForge 项目(登记数据与运行)
       <exp_id>/<data_id>/     项目数据(raw/ process/ spectra/ peaks/ ...)
       study/
-        study.json            研究状态(数据集引用、参考谱摘要)
-        work/                 处理工作目录:共享 fid + 每次运行的脚本/候选谱
-        reference/<key>/      冻结的参考谱与参考脚本 + reference.json
-        runs/<run_id>/        每个参数组合的脚本、谱、峰位记录(run.json)
-        records/              汇总产物(manifest/runs/peak_positions/...)
+        study.json            研究状态(条件数据集列表、参考谱摘要)
+        work/                 处理工作目录(共享 fid + 每次运行的脚本/候选谱)
+        reference/<key>/      冻结的参考谱/参考脚本 + 参考峰表 + reference.json
+        workflows/W0001/      每个参数组合一个目录
+            workflow.json     组合级记录(parameters_requested/used、状态、版本)
+            log.txt           组合级完整日志
+            <condition>/      每个条件一个子目录(A/B)
+                process.com   该条件实际执行的完整处理脚本
+                spectrum.ft2  该条件候选谱(不替换活动谱)
+                peak_table_parabolic.csv / peak_table_gaussian.csv
+                log.txt      该条件的完整运行日志
+                run.json     该条件的完整溯源记录
+        records/              汇总产物(manifest/workflows/runs/峰表长表)
 
 设计约束(与 GUI 完全解耦):
 
 - 不 import Qt;可在无显示环境/集群上运行;
-- 不修改项目里「活动谱」以外的任何状态;扫描候选谱只写到 study/runs/,
-  绝不替换 ``spectra/`` 下的参考谱(与 SMILE Scheme B 同精神);
+- 不修改项目里「活动谱」以外的任何状态;workflow 候选谱只写到 study/ 内,
+  绝不替换 ``spectra/`` 下的活动谱;
 - 数据集只读:导入走 ``workflow.import_workflow.import_data``(含 Kinetics
-  等策略守卫),不绕过策略。
+  等策略守卫),不绕过策略;
+- 多条件(A/B):每个条件一份参考(相位/噪声按该条件自身数据自动优化),
+  **参考峰身份与用户参数组合全条件共享**——CSP 需要同一批峰、同一组参数。
 """
 
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -35,20 +46,29 @@ from nmrforge_api.errors import DatasetError
 
 STUDY_DIRNAME = "study"
 STUDY_STATE_FILENAME = "study.json"
-API_VERSION = "0.1"
+API_VERSION = "0.2"
+#: 条件标签自动分配顺序(A/B/C…)
+CONDITION_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
 
 def now_iso() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
 
+def condition_token(label: str, fallback: str = "condition") -> str:
+    """条件标签 → 目录安全 token(去掉路径分隔符与空白)。"""
+    text = re.sub(r"[^0-9A-Za-z_.-]+", "_", str(label or "")).strip("_.")
+    return text or fallback
+
+
 @dataclass
 class DatasetRef:
-    """一次导入到研究项目里的数据集引用。"""
+    """一次导入到研究项目里的数据集引用(可带条件标签 A/B)。"""
 
     exp_id: str
     data_id: str
     title: str = ""
+    condition: str = ""
     ndim: int = 2
     nuclei: list[str] = field(default_factory=list)
     sampling: str = "uniform"
@@ -61,11 +81,19 @@ class DatasetRef:
     def key(self) -> str:
         return f"{self.exp_id}/{self.data_id}"
 
+    @property
+    def token(self) -> str:
+        """workflow 目录里的条件子目录名(缺条件标签时用数据 key)。"""
+        return condition_token(
+            self.condition, fallback=f"{self.exp_id}_{self.data_id}"
+        )
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "exp_id": self.exp_id,
             "data_id": self.data_id,
             "title": self.title,
+            "condition": self.condition,
             "ndim": int(self.ndim),
             "nuclei": list(self.nuclei),
             "sampling": self.sampling,
@@ -81,6 +109,7 @@ class DatasetRef:
             exp_id=str(data.get("exp_id", "")),
             data_id=str(data.get("data_id", "")),
             title=str(data.get("title", "")),
+            condition=str(data.get("condition", "")),
             ndim=int(data.get("ndim", 2) or 2),
             nuclei=[str(n) for n in (data.get("nuclei") or [])],
             sampling=str(data.get("sampling", "uniform")),
@@ -93,13 +122,56 @@ class DatasetRef:
 
 @dataclass
 class StudySession:
-    """研究会话句柄:项目 + 后端 + 研究目录。"""
+    """研究会话句柄:项目 + 后端 + 研究目录(可含多个条件数据集)。"""
 
     root: Path
     manager: ProjectManager
     backend: Any
-    dataset: DatasetRef | None = None
+    datasets: list[DatasetRef] = field(default_factory=list)
     created: str = field(default_factory=now_iso)
+
+    # ---- 数据集(条件) -------------------------------------------------
+    @property
+    def dataset(self) -> DatasetRef | None:
+        """主(第一个)条件的数据集;兼容单数据集调用方。"""
+        return self.datasets[0] if self.datasets else None
+
+    @dataset.setter
+    def dataset(self, value: DatasetRef | None) -> None:
+        if value is None:
+            self.datasets = []
+        elif not self.datasets:
+            self.datasets = [value]
+        else:
+            self.datasets[0] = value
+
+    @property
+    def conditions(self) -> list[str]:
+        return [ref.condition for ref in self.datasets]
+
+    def dataset_by_condition(self, label: str) -> DatasetRef | None:
+        wanted = str(label or "")
+        for ref in self.datasets:
+            if ref.condition == wanted:
+                return ref
+        return None
+
+    def add_dataset_ref(self, ref: DatasetRef) -> DatasetRef:
+        """登记一个已导入的数据集引用(条件标签唯一)。"""
+        if ref.condition and self.dataset_by_condition(ref.condition) is not None:
+            raise DatasetError(f"条件标签重复: {ref.condition}")
+        if any(existing.key == ref.key for existing in self.datasets):
+            raise DatasetError(f"数据集已登记: {ref.key}")
+        self.datasets.append(ref)
+        self.save_state()
+        return ref
+
+    def next_condition_label(self) -> str:
+        used = {ref.condition for ref in self.datasets}
+        for letter in CONDITION_LETTERS:
+            if letter not in used:
+                return letter
+        return f"C{len(self.datasets) + 1}"
 
     # ---- 目录 ---------------------------------------------------------
     @property
@@ -119,8 +191,13 @@ class StudySession:
         return self.study_dir / "reference"
 
     @property
+    def workflows_dir(self) -> Path:
+        return self.study_dir / "workflows"
+
+    @property
     def runs_dir(self) -> Path:
-        return self.study_dir / "runs"
+        """旧名(兼容):每个 workflow 的目录所在位置。"""
+        return self.workflows_dir
 
     @property
     def records_dir(self) -> Path:
@@ -131,7 +208,7 @@ class StudySession:
             self.study_dir,
             self.work_dir,
             self.reference_dir,
-            self.runs_dir,
+            self.workflows_dir,
             self.records_dir,
         ):
             path.mkdir(parents=True, exist_ok=True)
@@ -154,6 +231,8 @@ class StudySession:
             "created": self.created,
             "updated": now_iso(),
             "root": str(self.root),
+            "datasets": [ref.to_dict() for ref in self.datasets],
+            # 旧读兼容:第一条件仍是 dataset
             "dataset": self.dataset.to_dict() if self.dataset else None,
         }
         state.update(extra)
@@ -170,14 +249,30 @@ class StudySession:
             return {}
         return raw if isinstance(raw, dict) else {}
 
-    def data_entry(self) -> Any:
-        if self.dataset is None:
+    def data_entry(self, dataset: DatasetRef | None = None) -> Any:
+        ref = dataset or self.dataset
+        if ref is None:
             raise DatasetError("研究里还没有数据集,先调用 add_dataset()")
-        return self.manager.data(self.dataset.exp_id, self.dataset.data_id)
+        return self.manager.data(ref.exp_id, ref.data_id)
 
     def save(self) -> None:
         self.manager.save()
         self.save_state()
+
+
+def _datasets_from_state(state: dict[str, Any]) -> list[DatasetRef]:
+    """研究状态 → 条件数据集列表(兼容只有 ``dataset`` 的旧状态)。"""
+    raw = state.get("datasets")
+    if isinstance(raw, list) and raw:
+        refs = [DatasetRef.from_dict(item) for item in raw if isinstance(item, dict)]
+        return [ref for ref in refs if ref.data_id]
+    legacy = state.get("dataset")
+    if isinstance(legacy, dict) and legacy.get("data_id"):
+        ref = DatasetRef.from_dict(legacy)
+        if not ref.condition:
+            ref.condition = "A"
+        return [ref]
+    return []
 
 
 def open_study(
@@ -193,7 +288,7 @@ def open_study(
     - ``root/project.json`` 存在则打开,否则在 ``create=True`` 时新建项目;
     - ``backend`` 显式传入时直接使用(测试/集群可注入);否则按默认配置
       构造 NMRPipe 后端(``backend.factory.create_backend``);
-    - 研究状态(数据集引用)从 ``study/study.json`` 恢复。
+    - 研究状态(条件数据集列表)从 ``study/study.json`` 恢复。
     """
     root_path = Path(root).expanduser().resolve()
     project_file = root_path / "project.json"
@@ -209,10 +304,7 @@ def open_study(
 
         backend = create_backend(load_config(config))
     session = StudySession(root=root_path, manager=manager, backend=backend)
-    state = session.load_state()
-    dataset = state.get("dataset")
-    if isinstance(dataset, dict) and dataset.get("data_id"):
-        session.dataset = DatasetRef.from_dict(dataset)
+    session.datasets = _datasets_from_state(session.load_state())
     session.ensure_dirs()
     return session
 
@@ -221,17 +313,28 @@ def add_dataset(
     session: StudySession,
     source: Path | str,
     *,
+    condition: str = "",
     exp_id: str = "",
     title: str = "",
     make_default: bool = True,
 ) -> DatasetRef:
-    """导入一个 Bruker 原始数据集(公开库下载目录)并登记为研究数据。
+    """导入一个 Bruker 原始数据集并登记为研究数据(可带条件标签 A/B)。
 
     只做导入(链接 raw + metadata + import 运行记录),不做转换/处理;
     失败信息统一包成 :class:`DatasetError`(含原始异常文本)。
+    ``condition`` 缺省时自动分配下一个未用字母(A/B/C…);多条件研究用不同
+    标签区分同一 workflow 的两组数据(A_raw → W0037 → A_peak_table)。
+    ``make_default`` 只在会话里第一个数据集时决定「主条件」。
     """
     from workflow.import_workflow import import_data
 
+    label = str(condition or "").strip() or session.next_condition_label()
+    existing = session.dataset_by_condition(label)
+    if existing is not None:
+        raise DatasetError(
+            f"条件标签 {label!r} 已被 {existing.key} 占用;"
+            "多条件请给不同标签(如 A / B)"
+        )
     src = Path(source).expanduser()
     if not src.exists():
         raise DatasetError(f"数据集路径不存在: {src}")
@@ -271,6 +374,7 @@ def add_dataset(
         exp_id=target_exp,
         data_id=data_id,
         title=str(getattr(experiment.experiment_type, "name", "") or ""),
+        condition=label,
         ndim=int(experiment.ndim),
         nuclei=[dim.nucleus for dim in experiment.dimensions],
         sampling=str(experiment.sampling.mode),
@@ -279,13 +383,14 @@ def add_dataset(
         file_count=int(result.file_count),
         total_bytes=int(result.total_bytes),
     )
-    if make_default:
-        session.dataset = ref
-        session.save_state()
+    session.datasets.append(ref)
+    session.save_state()
     return ref
 
 
-def dataset_info(session: StudySession, dataset: DatasetRef | None = None) -> dict[str, Any]:
+def dataset_info(
+    session: StudySession, dataset: DatasetRef | None = None
+) -> dict[str, Any]:
     """数据集摘要(维度/核/采样方式/来源),供下游项目写进论文材料。"""
     ref = dataset or session.dataset
     if ref is None:
@@ -294,6 +399,7 @@ def dataset_info(session: StudySession, dataset: DatasetRef | None = None) -> di
     info.update(
         {
             "research_root": str(session.root),
+            "conditions": session.conditions,
             "nmrforge_version": software_version(),
             "tool_versions": tool_versions(),
         }
@@ -303,10 +409,12 @@ def dataset_info(session: StudySession, dataset: DatasetRef | None = None) -> di
 
 __all__ = [
     "API_VERSION",
+    "CONDITION_LETTERS",
     "DatasetRef",
     "STUDY_DIRNAME",
     "StudySession",
     "add_dataset",
+    "condition_token",
     "dataset_info",
     "now_iso",
     "open_study",

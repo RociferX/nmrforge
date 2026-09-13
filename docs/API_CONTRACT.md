@@ -308,67 +308,135 @@ class Spectrum3D:
   按维度数自动进入 2D/3D 模式;
 - 3D 峰表列(F1/F2/F3_shift)按当前切片平面轴标签映射,联动不受影响。
 
-## 11. 对外接口契约:`nmrforge_api`(v0.1,2026-09-12)
+## 11. 对外接口契约:`nmrforge_api`(v0.2,2026-09-13 规范更新)
 
-状态:implemented(Proposal:`docs/proposals/external-api/001-parameter-sweep-api.md`)。
-给下游独立研究项目用的无 Qt 接口,当前服务「处理参数 → 2D 峰位不确定度
-(CSP 判据下限)」研究。
+状态:implemented。规范来源:用户 2026-09-13「API 规范更新」;符合性台账
+`docs/reviews/2026-09-13-api-spec-compliance.md`;对外文档 `docs/external-api/`。
 
-### 11.1 公开面(`nmrforge_api/__init__.py`)
+定位:**参数组合处理执行器**。输入原始 NMR 数据 + 用户参数组合表,输出可追溯的
+峰表与处理记录;软件只负责执行处理,**不做** CSP、robustness、统计推断与结论。
 
-```python
-API_VERSION = "0.1"
-run_parameter_study(root, dataset=None, *, axes, peaks=None, params=None,
-                    max_runs=256, window_ppm=None, window_pts=None,
-                    csp_n_weight=0.2, ...)
-open_study / add_dataset / dataset_info
-build_reference / load_reference / set_reference_peaks / ensure_reference_peaks
-pick_reference_peaks / read_reference_peaks / measure_peak_positions /
-window_points_by_axis
-峰定位方法:localization_method="parabolic"|"gaussian"(仅 2D)、
-refine="parabolic"|"none"|"gaussian"、roi_f1_ppm / roi_f2_ppm
-expand_grid / plan_sweep / run_sweep / load_plan / load_runs
-position_uncertainty / uncertainty_summary / write_records
+### 11.1 工作流语义
+
+```text
+Raw data(A/B…)
+    ↓  参考工作流(自动优化):1 个 reference 处理脚本 + 2 张 reference 峰表
+Reference workflow
+    ↓  用户参数组合表:每行 = 一个 workflow_id(W0001、W0002…)
+User-defined workflow ensemble
+    ↓  以参考脚本为模板,只替换该组合指定的参数,自动运行处理
+Processed spectra(每 workflow × 每条件)
+    ↓  对同一张谱分别做 parabolic 与 2D gaussian 定位
+Parabolic / Gaussian peak tables
+    ↓
+Complete provenance + QC(参数三层、脚本/谱哈希、完整日志、版本、状态)
 ```
 
-CLI:`python -m nmrforge_api {init,reference,peaks,sweep,report,status}`。
+- 参考只作后续参数扰动的基准,**不声称全局最优**;
+- 两条件数据:同一 workflow 对 A/B 用**同一份** `parameters_requested`;
+  峰身份(`reference_peak_id`)全条件共享,各自输出峰值表
+  (`A_raw → W0037 → A_peak_table`,`B_raw → W0037 → B_peak_table`);
+- 软件最终边界:**不加入** CSP 计算、robustness 计算、statistical analysis、
+  significance 判断、scientific conclusion(这些由下游独立分析程序基于统一
+  峰表完成)。σ/Δδ 汇总**不进入处理契约与 records 产物**,但代码
+  (`nmrforge_api/uncertainty.py`)按用户 2026-09-13 裁定保留为**测试/检测
+  辅助**:处理链(study/sweep/records/CLI)不调用它。留档见
+  `docs/tasks/archive/2026-09-13-csp-statistics-boundary.md`。
 
-### 11.2 稳定返回结构
+### 11.2 公开面(`nmrforge_api/__init__.py`,`API_VERSION = "0.2"`)
 
-- `DatasetRef`(exp_id/data_id/ndim/nuclei/sampling/source/raw_dir);
-- `ReferenceSpectrum`(冻结谱与脚本路径 + 两个 SHA-256 + 有效参数 +
-  `direct_phase`(各轴 PS,锁定相位) + 峰表路径/SHA-256/峰数/来源(取峰
-  方式 auto|external)/选峰参数 + 版本表);
-- `SweepRun`(run_id/combo/params/脚本与谱哈希/峰位测量/窗口换算/日志尾部/
-  status);
-- `PeakMeasurement`(每核 ppm、相对参考的 delta、intensity、found/
-  window_edge/boundary/out_of_range);
-- `PeakUncertainty`(mean/sigma/range/delta_std/delta_max/worst_run);
-- `records/` 文件名固定(manifest/sweep_plan/runs/peak_positions/
-  uncertainty/uncertainty_summary/measurement);
-- 峰位窗口与选峰边距按**物理宽度**(ppm)定义、运行时按当前谱点距换算点数
-  (`core.peaks.axis_units`):零填零只改点距、不改变覆盖宽度;结构性点数
-  (局部极大 3 点邻域、抛物线 ±1 点模板)不换算;换算结果必须留档
-  (`run.json.window`、`records/measurement.json`、选峰 `detection`)。
+```python
+run_parameter_study(root, dataset=None, *, datasets=None, axes=None, combos=None,
+                    name="", params=None, phase_route=None, peaks=None,
+                    sigma_multiplier=None, max_peaks=0, max_runs=256,
+                    window_pts=None, window_ppm=None, sign="abs",
+                    roi_f1_ppm=None, roi_f2_ppm=None,
+                    localization_method="parabolic",
+                    gaussian_roi_f1_ppm=None, gaussian_roi_f2_ppm=None,
+                    resume=True, backend=None, write=True, progress=None)
+open_study / add_dataset(session, source, condition="A") / dataset_info
+build_reference / load_reference / load_references / set_reference_peaks
+ensure_reference_peaks / build_reference_peak_tables / pick_reference_peaks
+measure_peak_positions / read_reference_peaks / window_points_by_axis
+plan_sweep / run_sweep / load_plan / load_runs / load_workflows
+write_records / write_peak_table / read_peak_table / peak_table_rows
+expand_grid / combos_from_rows / load_combo_table / write_combo_table
+design_diagnostics / infer_axes / merge_overrides / sanitize_sweep_params
+workflow_id_for / workflow_summary / reference_peak_id
+```
 
-### 11.3 强约束(破坏即视为契约破坏)
+CLI:`python -m nmrforge_api {init,reference,peaks,sweep(=workflows),report,status}`。
 
-1. 不 import Qt/gui;不修改 GUI 状态;参考谱、参考脚本与参考峰位默认全部由
-   NMRForge 自动优化/自动选峰产生,外部峰表只是可选输入;
-1b. 扫描支持 uniform(任意维)与 **2D NUS**(走 `reconstruct_nus`,`out_file`/
-    `script_name` 候选隔离;3D NUS 不支持);
-1c. 扫描设计二选一:`axes`(接口展开全因子)或 `combos`(外部给定组合表,
-    接口不做设计决策);相位自由度用 `phase_delta.<轴>.p0|p1`(相对参考)或
-    `phase.<轴>.p0|p1`(绝对值),直接写 `phases`/`direct_phase` 报错;
-2. 扫描候选谱只写 `study/runs/`,不替换 `spectra/` 活动谱;
-3. 同一数据集内 fid 只转换一次;组合间只允许被扫参数不同(相位锁定);
-4. 峰位测量与选峰共用轴映射口径(`workflow.pick_peaks.read_spectrum_axes`),
-   且窗口/边距/高斯 ROI 等物理量按 `core.peaks.axis_units` 换算点数后留档;
-4b. 峰定位方法可选 `parabolic`(默认,行为不变)/ `gaussian`(2D 高斯,
-    **仅 2D**,非 2D 报错不降级);高斯失败必须回退抛物线并记录
-    `requested_method`/`actual_method`/`fallback_reason`,禁止静默;
-5. 每条记录必须带脚本/谱哈希与版本表;
-6. 单组合失败不中断整轮,状态与原因必须落盘。
+### 11.3 稳定返回结构
 
-变更该契约需按 §4 流程走 Proposal;新增参数轴不需改契约(点号键通用)。
+- `DatasetRef`(exp_id/data_id/**condition**/ndim/nuclei/sampling/source/raw_dir);
+- `ReferenceSpectrum`(条件、冻结谱与脚本路径 + SHA-256、有效参数 +
+  `direct_phase`(各轴 PS,自动相位识别的**实际结果**)+ 参考峰身份表
+  (`reference.list` + SHA-256 + 峰数 + 来源 auto|external|shared:<条件>)+
+  **两张参考峰表** `reference_peak_table_parabolic.csv` /
+  `reference_peak_table_gaussian.csv`(路径 + SHA-256 + 行数/detected 计数)+
+  定位 QC + 版本表);
+- `SweepPlan`(axes/combos/base_params/grid_sha256 与参考哈希/design/
+  diagnostics/`workflow_ids()`);
+- `SweepRun`(一个 workflow × 一个条件):`workflow_id`、`condition`、
+  `parameters_requested`、`parameters_used`、`parameters_resolved`
+  (phase 的 `phase_mode`/`actual_p0`/`actual_p1`、SMILE 实际 `nsigma`/`thresh`、
+  谱噪声 σ)、`base_script`(参考脚本路径 + SHA-256)、脚本/谱路径 + SHA-256、
+  `peak_tables`(parabolic/gaussian 路径 + SHA-256 + 行数)、`peak_localization`
+  (detected/回退/撞边界计数)、`window`(逐轴物理宽度↔点数换算)、`log_path`
+  (完整日志)、`versions`(nmrforge/python/依赖/NMRPipe/SMILE)、`status`∈
+  {`success`, `success_with_warning`, `failed`}、`warnings`(码 + 计数 + 峰);
+- `StudyResult`(session/plan/references/runs/workflows/summary/records)。
 
+### 11.4 峰表字段(两算法结构一致)
+
+```text
+workflow_id, condition, dataset, reference_peak_id, assignment,
+H_ppm, N_ppm, intensity, SNR, detected, localization_method,
+localization_requested, fallback, fallback_reason,
+fit_success, FWHM_H, FWHM_N, fit_rmse, boundary_hit
+```
+
+- `reference_peak_id`(R0001…)由参考峰表建立,后续所有 workflow/条件沿用;
+  未检测到的峰**保留记录**(`detected=false`),不删行;
+- Gaussian 额外列在 parabolic 表里写 `NaN`(不是 false/0),保证两表结构一致;
+- 拟合失败/回退(`fallback`/`fallback_reason`/`fit_success`)必须逐峰落表,
+  禁止静默。
+
+### 11.5 产物布局(相对研究根)
+
+```text
+study/
+  reference/<exp>_<data>/   reference.json、process.com、reference.list、
+                            reference_peak_table_{parabolic,gaussian}.csv
+  workflows/W0001/
+      workflow.json         组合级记录(参数三层/状态/警告/两条件产物/版本)
+      log.txt               组合级完整日志
+      <条件 A|B>/           process.com、spectrum.ft2、
+                            peak_table_{parabolic,gaussian}.csv、
+                            log.txt、run.json
+  records/                  manifest.json、sweep_plan.json、runs.json、
+                            workflows.json、measurement.json、
+                            peak_table_{parabolic,gaussian}.csv(长表)
+```
+
+### 11.6 强约束(破坏即视为契约破坏)
+
+1. 不 import Qt/gui;不修改 GUI 状态;
+2. 不替换项目活动谱:候选谱只写 `study/workflows/`;
+3. 同一条件内 fid 只转换一次(参考运行);workflow 之间只允许被扫参数不同
+   (相位默认锁定在参考值,偏差用 `phase_delta.<轴>.p0|p1`);
+4. 以参考脚本为模板:该条件的 `parameters_used` 基底 = 该条件参考运行的有效
+   参数,组合表只覆盖它显式指定的键;
+5. 每 workflow × 每条件必须留:完整脚本、两张统一峰表、完整日志、参数三层、
+   版本、状态(三值)与警告;
+6. 自动参数必须记录**实际结果**(`actual_p0/actual_p1`、SMILE 实际
+   `nsigma`/`thresh` 与谱噪声 σ),Gaussian 失败/回退必须显式记录;
+7. 单条件失败不中断整轮:状态 `failed` + 原因落盘;
+8. **不做** CSP / robustness / 统计 / 显著性 / 结论;不自动生成参数空间
+   (`combos=` 原样执行,`axes` 只是便捷入口);
+9. 参数非法给 error/warning:锁定键报错,确定性/未知键写 `notes`;
+10. 峰位窗口/高斯 ROI 按**物理宽度**(ppm)定义,运行时按当前谱点距换算点数,
+    换算结果必须留档(`run.json.window`、`records/measurement.json`)。
+
+变更该契约需按 §7 流程走 Proposal;新增参数轴不需改契约(点号键通用)。

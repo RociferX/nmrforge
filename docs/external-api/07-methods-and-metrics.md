@@ -1,143 +1,93 @@
-# 07 · 方法与指标(可直接写进论文方法部分)
+# 07 · 方法与 QC 口径(v0.2)
 
-## 7.1 研究设计的三个控制点
+> 本页描述软件**执行**了什么、留下了哪些 QC 记录。任何跨组合/跨条件的统计
+> (σ、Δδ、robustness、显著性)都不在本软件范围内,由下游独立分析程序基于
+> 统一峰表计算。
 
-1. **同一份 fid**:参考处理阶段转换一次 fid,所有组合复用(日志会显示
-   「复用已转换 fid」);
-2. **同一相位**:参考运行的各轴 PS(p0,p1)被冻结,扫描时按轴覆盖,直接维跳过
-   相位搜索、间接维沿用参考优化值(`phase_locked: true`);
-3. **同一批峰**:参考峰位(SHA-256 冻结)在每张候选谱上被追踪,不重新选峰。
+## 7.1 参考工作流
 
-这三点保证「组合之间的差异 = 被扫处理参数的效应」。
+1. `generate_fid`(bruker `-AUTO`/fid.com 转换)→ `generate_spectrum`
+   (NMRPipe 管道 + 统一相位路线;NUS 走 SMILE 重构);
+2. 冻结**参考谱**与**参考脚本**(`process.com`,带 SHA-256)——参考脚本是该条件
+   后续所有 workflow 的模板;
+3. 参考峰位:软件在参考谱上自动选峰(阈值 `sigma_multiplier`,默认 35σ;
+   轴峰按物理边距剔除),或使用外部峰表;峰按行序获得稳定身份 `R0001…`;
+4. 在同一条参考谱上分别用 **parabolic** 与 **2D gaussian** 定位,写两张
+   参考峰表;
+5. 参考只作参数扰动的基准,**不声称全局最优**。
 
-## 7.2 峰位测量算法
+## 7.2 参数扰动(workflow)
 
-输入:一张谱(ft1/ft2/ft3)、一份参考峰表、窗口半径(**物理宽度**,缺省
-1.5×该轴核素线宽折算 ppm,按该谱点距换算成点数;`window_ppm` 可显式给,
-`window_pts` 是点数逃生口)。
+- 每个组合的 `parameters_used` = 该条件参考运行的有效参数(基底)+ 组合表覆盖;
+- 相位默认**锁定在参考值**(直接维跳过相位搜索、间接维沿用参考优化相位);
+  人工偏差用 `phase_delta.<轴>.p0|p1`(相对参考)或 `phase.<轴>.p0|p1`(绝对值),
+  实际值写进 `phase.<轴>.actual_p0/actual_p1`;
+- 同一个条件内 fid 只转换一次(参考运行),候选谱写
+  `study/workflows/<id>/<条件>/`,不替换活动谱;
+- 相位/窗函数/填零/基线/NUS 参数全部按表执行,所有影响结果的参数三层落档。
 
-1. **ppm → 分数索引**。每个峰的核位置按数据轴定位:`ORIG` 优先、回退 `CAR`
-   的 ppm 公式(与 NMRForge 选峰、viewer 同源),逻辑维按 `FDDIMORDER` 映射到
-   数据轴;ppm 经轴数组线性插值转成分数索引。
-2. **窗口内取极值**。在参考位置 ±`window_points_by_axis()` 换算出的点数范围内
-   按 `sign` 取极值(同一物理窗口在不同填零下点数不同、覆盖 ppm 相同):
-   - `abs`(默认):`|I|`,正负峰都追;
-   - `positive` / `negative`:只追正峰 / 只追负峰。
-3. **亚像素 refine**。每个参与测量的轴,在极值点两侧各取 1 点,用三点抛物线
-   求顶点偏移 δ:
+## 7.3 两种峰定位
 
-   ```text
-   δ = 0.5 · (y₋₁ − y₊₁) / (y₋₁ − 2y₀ + y₊₁)      δ ∈ [−0.5, +0.5]
-   ```
-
-   分数索引 = 整数极值点 + δ(分母接近 0 或端点处不做 refine,δ=0)。
-   这一步是必需的:填零等参数改变数字点距,只取整数极值会把「半个数字点」的
-   抖动当成峰位变化(实测对已知 +1.25 点平移,本方法误差 < 0.2 点)。
-4. **分数索引 → ppm**(轴数组线性插值),写入记录。
-
-### 质量标记
-
-| 标记 | 含义 | 建议处理 |
+| 方法 | 做法 | 适用范围 |
 | --- | --- | --- |
-| `found=false` | 窗口内没有有效数据 | 该峰该组合不进入统计 |
-| `window_edge=true` | 极值落在窗口边界 | 真峰可能在窗外;考虑加大 `window_ppm`(物理半径) |
-| `boundary=true` | 极值贴谱边界 | 峰在谱边缘,可能被截断 |
-| `out_of_range=true` | 参考峰位落在谱范围外 | 峰表与处理窗口不一致(如提取窗口变了) |
+| `parabolic`(参考方法) | 在参考峰位附近的窗口内取 \|强度\| 极值,再对每个参与轴做 ±1 点三点抛物线亚像素 refine | 任意维 |
+| `gaussian` | 以抛物线的整数格结果为中心,对**同一 candidate** 做 2D 高斯最小二乘拟合(不旋转、轴向可分离,含局部常数基线),给出中心/FWHM/幅度/rmse | **仅 2D** |
 
-### 可选:2D 高斯定位(与抛物线并列)
+两者对**完全相同的 candidate** 独立运行,结果可直接比较(峰位差即算法差异);
+同一张谱两张表使用同一批 `reference_peak_id`。
 
-`refine="gaussian"`(仅 2D)在候选峰附近拟合不旋转、轴向可分离的 2D 高斯:
+高斯失败(ROI 太小/不收敛/撞边界/病态)时:回退抛物线位置,并在峰表
+`fallback`/`fallback_reason`/`fit_success` 与 `run.json.peak_localization`
+中逐峰记录原因,workflow 状态升为 `success_with_warning`——**不允许静默**。
 
-```text
-I(x, y) = B + A·exp( -(x-x0)²/(2σx²) - (y-y0)²/(2σy²) )
-x = F2(直接), y = F1(间接);参数 (A, x0, y0, σx, σy, B)
-初始中心 = 抛物线结果;scipy.optimize.least_squares(bounds=…)
-FWHM = 2·sqrt(2 ln 2)·σ
+## 7.4 峰位测量窗口(物理宽度口径)
+
+- 窗口半径默认 = **1.5×该轴核素线宽(Hz)折算 ppm**
+  (`core.peaks.axis_units`),`window_ppm` 可显式给物理半径;
+  `window_pts` 是显式点数逃生口(跨分辨率不可比,不推荐);
+- 运行时按**当前候选谱的点距**换算点数:零填零 k 倍只改点距,不改变窗口覆盖
+  的 ppm 宽度;
+- 换算结果逐组合留档:`run.json.window`(逐轴 points/ppm/effective_ppm/
+  ppm_per_point/source)与 `records/measurement.json`;
+- 高斯 ROI 同样按物理宽度(ppm)定义(`peaks.localization.gaussian_roi_f1_ppm`
+  / `_f2_ppm`,或函数/CLI 参数),按点距换算点数;
+- 结构性点数(局部极大 3 点邻域、抛物线 ±1 点)不换算——它们与分辨率无关。
+
+## 7.5 逐峰 QC(落表字段)
+
+| 字段 | 含义 |
+| --- | --- |
+| `detected` | 该谱上是否测到该参考峰(false 仍保留行) |
+| `intensity` / `SNR` | 极值处的峰强与 `|峰强|/σ`(σ = 该谱 robust MAD 噪声) |
+| `fit_success` / `fit_rmse` / `FWHM_H` / `FWHM_N` / `boundary_hit` | 高斯拟合 QC(parabolic 表写 NaN) |
+| `fallback` / `fallback_reason` | 是否回退与原因 |
+
+内部 `PeakMeasurement` 另带 `window_edge`(极值贴窗口边界)、`boundary`
+(贴谱边界)、`out_of_range`(参考位置在谱范围外)与 `deltas`(相对参考峰位),
+汇总进 `run.json.peak_localization` 与 `records/measurement.json`。
+
+## 7.6 测试/检测辅助(不属于处理契约)
+
+`nmrforge_api.uncertainty`(`position_uncertainty` / `uncertainty_summary` /
+`PeakUncertainty`)计算同一批峰在多个组合间的 σ、极差与 Δδ 下限。它**不参与**
+处理链,也不会出现在 `records/` 里;用途是:
+
+- **回归检测**:σ/Δδ 全 0 说明被扫参数被静默忽略(真机历史上出现过该缺陷);
+- **算法对比**:同一批 candidate 下 parabolic 与 gaussian 的峰位差;
+- **下游参考实现**:分析侧可直接复用或照此实现。
+
+```python
+from nmrforge_api import position_uncertainty, uncertainty_summary
+
+items = position_uncertainty(runs, csp_n_weight=0.2)
+summary = uncertainty_summary(items, n_runs=len(runs))
 ```
 
-- **ROI 按物理半径(ppm)**给出(缺省 F1 ±1.5 ppm / F2 ±0.25 ppm,config
-  `peaks.localization` 可改),运行时按当前谱点距换算点数 —— 与选峰边距/测量
-  窗口同口径,填零不改变 ROI 覆盖的 ppm 范围;
-- bounds:中心不出 ROI、σ∈[0.5 点, ROI 半径]、幅度 ≥0(负峰先按符号翻正再
-  拟合,幅度按原单位返回)、基线 ∈[ROI 最小值 − 动态范围, ROI 最大值];
-- 失败判定(全部带稳定 `fallback_reason`):`roi_too_small` /
-  `insufficient_data` / `non_finite` / `flat_region` / `no_peak` /
-  `optimizer_error` / `not_converged` / `center_at_boundary` /
-  `sigma_at_bound` / `poor_fit`;
-- 失败时**回退抛物线**并同时记录 `requested_method=gaussian`、
-  `actual_method=parabolic`、`gaussian_fit_success=false`;
-- 输出字段(`PeakMeasurement.localization` / 峰表附件):`fit_success`、
-  `center_f1`/`center_f2`(ppm)、`amplitude`、`sigma_f1`/`sigma_f2`(ppm)、
-  `fwhm_f1`/`fwhm_f2`、`baseline`、`fit_rmse`、`boundary_hit`、
-  `fit_failure_reason`、点数口径的 `sigma_points_f1`/`f2`。
+正式统计与显著性判断请在你的分析代码里按自己的假设完成。
 
-写论文时的口径建议:抛物线是**参考方法**(与既有选峰/测量一致);报告高斯结果时
-注明 ROI 半径、bounds 策略、回退计数(`measurement.json` 的
-`localization.actual_method_counts` 与 `fallback_reasons`)。两种方法对**同一批
-candidate**独立运行,可直接给出「算法带来的峰位差」分布。
+## 7.7 版本与可复算
 
-## 7.3 不确定度指标
-
-对每个峰、每个核 n:
-
-```text
-σ_n        = 峰位在全部组合上的样本标准差(分母 n−1)
-range_n    = max − min
-mean_n     = 峰位均值
-```
-
-**CSP 下限(主指标)**:
-
-```text
-Δδ_std = sqrt( Σ_n (w_n · σ_n)² )
-w(1H) = 1, w(15N) = csp_n_weight(默认 0.2),其余核 = 1
-```
-
-即 ¹⁵N-HSQC 常用的 1/5 加权口径;`csp_n_weight` 可通过参数/命令行调整。
-另外给出经验最坏情形:
-
-```text
-Δδ_max = max_over_runs sqrt( Σ_n (w_n · (ppm_n(run) − mean_n))² )
-worst_run = 取到最大值的组合
-```
-
-**只有所有被测核都测到的组合进入统计**(避免「只有一个核测到」的半边数据
-把 σ 拉偏);被排除的组合数记在 `missing_runs`。
-
-数据集级汇总(`uncertainty_summary.json`):各峰 Δδ_std 的
-min/median/p90/max,以及逐核 σ 的 median/p90/max。
-
-## 7.4 假设与边界(写方法部分时要声明)
-
-1. **独立性假设**:Δδ_std 由各核 σ 平方和开方得到,等价于假设核间位置误差
-   不相关;若两核误差强相关(如同一维的相位误差同时移动两个方向),该式是
-   近似。
-2. **描述性指标**:σ 与 Δδ 下限是「处理引入的位置离散程度」,不做显著性检验、
-   不外推为浓度依赖的物理结论。
-3. **不含其它误差源**:采样噪声、峰重叠/去卷积、指认错误、谱仪漂移、温度与
-   pH 等实验条件都不在其中;这是**下限**,不是全部误差预算。
-4. **峰集依赖**:参考峰集来源(`auto` vs `external`)与阈值会改变估计(同数据
-   实测中位 Δδ 可差数倍)。同一研究内必须固定 `peak_source`、阈值与**窗口物理
-   宽度**(`window_ppm`;若用 `window_pts` 点数口径,必须声明「点数不随填零
-   换算」这一差异)。
-5. **参数独立性**:网格是逐点扫描,不做因子交互建模;要研究交互效应请自行在
-   `axes` 里构造组合(一个轴就是一组候选,可组合出任意网格)。
-6. **单谱测量**:每个组合只跑一次处理(不做重复采集/重复处理);若需要噪声贡献,
-   可在网格里加入等价重复(patch 不同但物理等价),或对同一组合重复运行。
-
-## 7.5 建议的报告口径
-
-报告不确定度时至少给出:
-
-```text
-NMRForge 版本 / NMRPipe 版本
-数据集来源与 SHA 指纹(manifest.json)
-参考脚本与参考谱 SHA-256
-参考峰表来源(auto/external + 阈值/max_peaks)与 SHA-256
-扫描网格(轴与取值)与 grid_sha256
-每个核的 σ 分布(median/p90)+ Δδ_std 分布(min/median/p90/max)
-排除/缺失的峰与组合(peak_positions.csv 的 found 列 + missing_runs)
-```
-
-这些字段全部在 `records/manifest.json`、`records/uncertainty.csv`、
-`records/uncertainty_summary.json` 里,可直接引用。
+每条记录带:软件版本(`core.__version__`)、Python 与关键依赖版本、真机登记的
+NMRPipe/SMILE 版本、参考脚本与候选脚本 SHA-256、参考谱与候选谱 SHA-256、
+网格哈希(`grid_sha256`)、参数三层、窗口换算记录、完整日志。凭
+`records/manifest.json` + `workflows/<id>/` 即可复算并核对。

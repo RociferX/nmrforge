@@ -1,13 +1,18 @@
-"""参考谱与参考脚本:用 NMRForge 的自动优化跑一次,并冻结下来当基准。
+"""参考谱、参考脚本与两张参考峰表:用 NMRForge 的自动优化跑一次并冻结。
 
-参考谱是整项研究的零点:后续所有参数组合都相对于它测量峰位移。因此这里做三件事:
+参考是整项研究的零点(2026-09-13 规范):
 
-1. 走完整自动链(``generate_fid`` → ``generate_spectrum``,含统一相位优化),
-   拿到「软件认为最好」的谱与**它实际执行的那个脚本**;
-2. 把谱、脚本、有效参数、软件/工具版本一起冻结到 ``study/reference/<key>/``,
-   并记录脚本与谱的 SHA-256(下游报告可直接引用);
-3. 抽出「扫描基础参数」——把运行期派生的键(诊断/预览/投影等)剔除,只留下
-   可再次喂给后端 ``process()`` 的处理参数,保证扫描以参考为起点、只改被扫的轴。
+1. 自动链(``generate_fid`` → ``generate_spectrum``,含统一相位优化)跑一次,
+   拿到「软件认为最好」的谱与**它实际执行的脚本**(``process.com`` + SHA-256);
+2. 参考峰表:**由软件自动选峰**(或外部峰表)得到稳定的
+   ``reference_peak_id``(R0001…),再在同一条参考谱上分别用
+   **parabolic** 与 **2D gaussian** 定位写出**两张结构一致的峰表**;
+3. 抽出「扫描基底参数」——剔除运行期派生键,只留可再次喂给后端 ``process()``
+   的处理参数,保证 workflow 以参考为起点、只改被扫的轴。
+
+多条件(A/B)语义:每个条件各有一份参考(相位/噪声按该条件自身数据决定),
+但**峰身份共享**——非主条件的参考峰表由主条件的峰表复制而来,因此同一个
+``reference_peak_id`` 在所有条件、所有 workflow 里指向同一个峰。
 """
 
 from __future__ import annotations
@@ -23,8 +28,21 @@ from core.project.manager import sha256_file
 from core.project.run_refs import STEP_RUN_REFS
 from core.version import software_version, tool_versions
 from nmrforge_api.errors import ReferenceError
-from nmrforge_api.peaks import pick_reference_peaks
-from nmrforge_api.session import StudySession, now_iso
+from nmrforge_api.peak_tables import (
+    REFERENCE_WORKFLOW_ID,
+    gaussian_fallback_rows,
+    peak_table_digest,
+    peak_table_rows,
+    write_peak_table,
+)
+from nmrforge_api.peaks import (
+    measure_peak_positions,
+    pick_reference_peaks,
+    read_reference_peaks,
+    window_points_by_axis,
+)
+from nmrforge_api.session import DatasetRef, StudySession, now_iso
+from workflow.pick_peaks import read_spectrum_axes
 
 # 运行期派生/仅 GUI 使用的键:不参与扫描(base 参数里必须剔掉,否则会改变
 # 后端分支行为——例如 preview_axis 会把 process() 切到预览渲染)
@@ -42,15 +60,22 @@ _NON_SWEEP_KEYS: tuple[str, ...] = (
 )
 
 REFERENCE_FILENAME = "reference.json"
+REFERENCE_PEAK_LIST_FILENAME = "reference.list"
+REFERENCE_TABLE_FILENAMES = {
+    "parabolic": "reference_peak_table_parabolic.csv",
+    "gaussian": "reference_peak_table_gaussian.csv",
+}
+GAUSSIAN_UNSUPPORTED_NDIM_REASON = "gaussian_unsupported_ndim"
 
 
 @dataclass
 class ReferenceSpectrum:
-    """冻结的参考谱 + 参考脚本 + 有效参数。"""
+    """冻结的参考谱 + 参考脚本 + 有效参数 + 两张参考峰表。"""
 
     dataset_key: str
     exp_id: str
     data_id: str
+    condition: str = ""
     run_id: str = ""
     phase_route: str = ""
     ndim: int = 2
@@ -63,14 +88,17 @@ class ReferenceSpectrum:
     params: dict[str, Any] = field(default_factory=dict)
     sweep_params: dict[str, Any] = field(default_factory=dict)
     # 参考运行的各轴 PS(p0,p1):扫描时传给后端 direct_phase_override,
-    # 让候选谱与参考谱相位一致(后端该参数按轴生效,名字沿用后端 API)。
+    # 让候选谱与参考谱相位一致(自动相位识别的**实际结果**)。
     direct_phase: dict[str, list[float]] = field(default_factory=dict)
+    # 参考峰表:reference.list 是身份表(Poky),两张 CSV 是两种定位算法表
     peak_table_path: str = ""
     peak_table_sha256: str = ""
     peak_count: int = 0
-    peak_source: str = ""          # auto(NMRForge 选峰) | external(外部峰表)
+    peak_source: str = ""          # auto(NMRForge 选峰)| external | shared:<条件>
     peak_params: dict[str, Any] = field(default_factory=dict)
     peak_created_at: str = ""
+    peak_tables: dict[str, dict[str, Any]] = field(default_factory=dict)
+    peak_localization: dict[str, Any] = field(default_factory=dict)
     created_at: str = field(default_factory=now_iso)
     software_version: str = ""
     tool_versions: dict[str, str] = field(default_factory=dict)
@@ -83,11 +111,20 @@ class ReferenceSpectrum:
             return False
         return True
 
+    @property
+    def peak_table_parabolic_path(self) -> str:
+        return str((self.peak_tables.get("parabolic") or {}).get("path", ""))
+
+    @property
+    def peak_table_gaussian_path(self) -> str:
+        return str((self.peak_tables.get("gaussian") or {}).get("path", ""))
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "dataset_key": self.dataset_key,
             "exp_id": self.exp_id,
             "data_id": self.data_id,
+            "condition": self.condition,
             "run_id": self.run_id,
             "phase_route": self.phase_route,
             "ndim": int(self.ndim),
@@ -106,6 +143,8 @@ class ReferenceSpectrum:
             "peak_source": self.peak_source,
             "peak_params": self.peak_params,
             "peak_created_at": self.peak_created_at,
+            "peak_tables": self.peak_tables,
+            "peak_localization": self.peak_localization,
             "created_at": self.created_at,
             "software_version": self.software_version,
             "tool_versions": self.tool_versions,
@@ -118,6 +157,7 @@ class ReferenceSpectrum:
             dataset_key=str(data.get("dataset_key", "")),
             exp_id=str(data.get("exp_id", "")),
             data_id=str(data.get("data_id", "")),
+            condition=str(data.get("condition", "")),
             run_id=str(data.get("run_id", "")),
             phase_route=str(data.get("phase_route", "")),
             ndim=int(data.get("ndim", 2) or 2),
@@ -140,6 +180,12 @@ class ReferenceSpectrum:
             peak_source=str(data.get("peak_source", "")),
             peak_params=dict(data.get("peak_params") or {}),
             peak_created_at=str(data.get("peak_created_at", "")),
+            peak_tables={
+                str(k): dict(v)
+                for k, v in (data.get("peak_tables") or {}).items()
+                if isinstance(v, dict)
+            },
+            peak_localization=dict(data.get("peak_localization") or {}),
             created_at=str(data.get("created_at", "")),
             software_version=str(data.get("software_version", "")),
             tool_versions={
@@ -168,6 +214,24 @@ class ReferenceSpectrum:
             axis: [float(values[0]), float(values[1])]
             for axis, values in self.direct_phase.items()
         }
+
+    def phase_record(self) -> dict[str, Any]:
+        """相位溯源(规范 G1):``phase_mode`` + 实际使用的 ``actual_p0/p1``。
+
+        自动相位识别(``phase_mode="auto"``)的实际结果就是参考运行记录的
+        PS 值;workflow 里相位从参考锁定,偏移经 ``phase_delta.*`` 施加。
+        """
+        record: dict[str, Any] = {}
+        for axis, values in self.direct_phase.items():
+            record[str(axis)] = {
+                "phase_mode": "auto",
+                "actual_p0": float(values[0]),
+                "actual_p1": float(values[1]),
+                "source": (
+                    f"reference_run:{self.run_id}" if self.run_id else "reference_run"
+                ),
+            }
+        return record
 
 
 def sanitize_sweep_params(params: dict[str, Any]) -> dict[str, Any]:
@@ -209,8 +273,8 @@ def reference_phase(
 ) -> dict[str, list[float]]:
     """参考运行的有效参数 → 锁定用的各轴 PS(p0, p1)。
 
-- ``phases``:各轴 PS 字典(统一路线;间接维相位在这里);
-- ``direct_phase``:字典形式(统一路线直接维)或**扁平** ``[p0, p1]``
+    - ``phases``:各轴 PS 字典(统一路线;间接维相位在这里);
+    - ``direct_phase``:字典形式(统一路线直接维)或**扁平** ``[p0, p1]``
       (NUS 重构路线;直接维 = ``F{ndim}``)。
 
     两者合并,直接维以 ``direct_phase`` 为准。
@@ -226,6 +290,16 @@ def reference_phase(
             direct = {f"F{int(ndim)}": pair}
     locked.update(direct)
     return locked
+
+
+def dataset_for_reference(
+    session: StudySession, reference: ReferenceSpectrum
+) -> DatasetRef | None:
+    """参考 → 会话里的条件数据集(找不到返回 None)。"""
+    for ref in session.datasets:
+        if ref.key == reference.dataset_key:
+            return ref
+    return session.dataset
 
 
 def _find_reference_script(work: Path, data_id: str) -> Path:
@@ -257,8 +331,20 @@ def _find_reference_script(work: Path, data_id: str) -> Path:
     raise ReferenceError(f"参考运行没有留下可用的处理脚本: {work}")
 
 
+def save_reference(session: StudySession, reference: ReferenceSpectrum) -> Path:
+    """把参考状态写到 ``study/reference/<key>/reference.json``。"""
+    target = session.reference_dir_for(dataset_for_reference(session, reference))
+    state_file = target / REFERENCE_FILENAME
+    state_file.write_text(
+        json.dumps(reference.to_dict(), ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return state_file
+
+
 def build_reference(
     session: StudySession,
+    dataset: DatasetRef | None = None,
     *,
     params: dict[str, Any] | None = None,
     phase_route: str | None = None,
@@ -269,16 +355,20 @@ def build_reference(
 
     ``params`` 只用于覆盖自动流程的输入(例如 ``ext_lo``);``phase_route``
     缺省走数据类型的默认路线(uniform 通常 ``unified``,自动相位)。
+    自动相位识别的**实际结果**(各轴 PS)记进 ``direct_phase``,供 workflow
+    锁定相位并留档 ``actual_p0/actual_p1``。
     """
     from workflow.stepwise import generate_fid, generate_spectrum, read_experiment
 
-    dataset = session.dataset
-    if dataset is None:
+    target_ref = dataset or session.dataset
+    if target_ref is None:
         raise ReferenceError("研究里还没有数据集,先调用 add_dataset()")
-    target_dir = session.reference_dir_for()
+    target_dir = session.reference_dir_for(target_ref)
     state_file = target_dir / REFERENCE_FILENAME
     if state_file.is_file() and not force:
-        return load_reference(session)  # type: ignore[return-value]
+        existing = load_reference(session, target_ref)
+        if existing is not None:
+            return existing
 
     logs: list[str] = []
 
@@ -288,17 +378,17 @@ def build_reference(
             progress(str(message))
 
     manager = session.manager
-    exp_id, data_id = dataset.exp_id, dataset.data_id
+    exp_id, data_id = target_ref.exp_id, target_ref.data_id
     run_params = dict(params or {})
     if phase_route:
         run_params["phase_route"] = phase_route
 
-    _log("参考谱:生成 FID(转换 Bruker 原始数据)")
+    _log(f"参考谱[{target_ref.condition}]:生成 FID(转换 Bruker 原始数据)")
     generate_fid(
         manager, exp_id, data_id, session.backend,
         work_dir=session.work_dir, progress=_log,
     )
-    _log("参考谱:生成谱图(自动优化)")
+    _log(f"参考谱[{target_ref.condition}]:生成谱图(自动优化)")
     spectrum_path = generate_spectrum(
         manager, exp_id, data_id, session.backend,
         params=run_params, work_dir=session.work_dir, progress=_log,
@@ -318,9 +408,10 @@ def build_reference(
 
     experiment = read_experiment(manager, exp_id, data_id)
     reference = ReferenceSpectrum(
-        dataset_key=dataset.key,
+        dataset_key=target_ref.key,
         exp_id=exp_id,
         data_id=data_id,
+        condition=target_ref.condition,
         run_id=run.run_id,
         phase_route=str(effective.get("phase_route", "") or ""),
         ndim=int(experiment.ndim),
@@ -338,24 +429,22 @@ def build_reference(
         tool_versions=tool_versions(),
         logs_tail=logs[-40:],
     )
-    state_file.write_text(
-        json.dumps(reference.to_dict(), ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    save_reference(session, reference)
     session.save_state(reference=reference.to_dict())
     # 项目状态必须落盘:参考构建登记了 fid/活动谱(与 WorkflowRun),
-    # 而 CLI 的 reference/peaks/sweep 是三个独立进程——不落盘时下一步
-    # 读到的 spectrum_path 为空,选峰会报「谱图缺失」。
+    # 而 CLI 的 reference/workflows 是独立进程——不落盘时下一步读不到。
     session.manager.save()
     return reference
 
 
-def load_reference(session: StudySession) -> ReferenceSpectrum | None:
-    """读取已冻结的参考谱(缺失返回 None;文件缺失报错)。"""
-    dataset = session.dataset
-    if dataset is None:
+def load_reference(
+    session: StudySession, dataset: DatasetRef | None = None
+) -> ReferenceSpectrum | None:
+    """读取某条件的参考谱(缺失返回 None;产物缺失报错)。"""
+    target_ref = dataset or session.dataset
+    if target_ref is None:
         return None
-    state_file = session.reference_dir_for() / REFERENCE_FILENAME
+    state_file = session.reference_dir_for(target_ref) / REFERENCE_FILENAME
     if not state_file.is_file():
         return None
     try:
@@ -363,10 +452,22 @@ def load_reference(session: StudySession) -> ReferenceSpectrum | None:
     except (OSError, json.JSONDecodeError) as exc:
         raise ReferenceError(f"参考谱状态文件损坏: {state_file} ({exc})") from exc
     reference = ReferenceSpectrum.from_dict(raw)
+    if not reference.condition:
+        reference.condition = target_ref.condition
     for path in (reference.frozen_spectrum, reference.script_path):
         if not path or not Path(path).is_file():
             raise ReferenceError(f"参考谱产物缺失,请重建(force=True): {path}")
     return reference
+
+
+def load_references(session: StudySession) -> dict[str, ReferenceSpectrum]:
+    """读取全部条件的参考(尚未建参考的条件不出现在结果里)。"""
+    out: dict[str, ReferenceSpectrum] = {}
+    for ref in session.datasets:
+        reference = load_reference(session, ref)
+        if reference is not None:
+            out[ref.key] = reference
+    return out
 
 
 def set_reference_peaks(
@@ -377,10 +478,11 @@ def set_reference_peaks(
     source: str = "external",
     params: dict[str, Any] | None = None,
 ) -> ReferenceSpectrum:
-    """登记参考峰表(记录路径、SHA-256、峰数、来源与选峰参数)。
+    """登记参考身份峰表(记录路径、SHA-256、峰数、来源与选峰参数)。
 
-    ``source``:``auto`` = NMRForge 在参考谱上自动选峰;``external`` = 外部峰表
-    (公开库/既有指认)。两者都冻结进 ``reference.json``,记录里只认这份快照。
+    ``source``:``auto`` = NMRForge 在参考谱上自动选峰;``external`` = 外部峰表;
+    ``shared:<条件>`` = 沿用主条件峰身份(多条件研究)。三者都冻结进
+    ``reference.json``,记录里只认这份快照。
     """
     ref = reference or load_reference(session)
     if ref is None:
@@ -394,22 +496,129 @@ def set_reference_peaks(
     ref.peak_source = str(source or "")
     ref.peak_params = dict(params or {})
     ref.peak_created_at = now_iso()
-    state_file = session.reference_dir_for() / REFERENCE_FILENAME
-    state_file.write_text(
-        json.dumps(ref.to_dict(), ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    save_reference(session, ref)
     return ref
 
 
 def _count_peaks(path: Path) -> int:
     """峰表行数(读不动按 0,不阻断流程)。"""
     try:
-        from nmrforge_api.peaks import read_reference_peaks
-
         return len(read_reference_peaks(path))
     except Exception:  # noqa: BLE001 - 记录用途
         return 0
+
+
+def build_reference_peak_tables(
+    session: StudySession,
+    reference: ReferenceSpectrum,
+    *,
+    window_pts: int | None = None,
+    window_ppm: float | None = None,
+    roi_f1_ppm: float | None = None,
+    roi_f2_ppm: float | None = None,
+) -> ReferenceSpectrum:
+    """在同一条参考谱上写两张参考峰表(parabolic + gaussian)。
+
+    两张表行集完全一致(同一条 ``reference.list``、同一 ``reference_peak_id``),
+    列结构由 ``peak_tables.PEAK_TABLE_COLUMNS`` 保证一致;非 2D 数据的高斯表
+    写 ``fallback=true`` / ``fallback_reason=gaussian_unsupported_ndim``
+    (位置回退抛物线),不静默跳过。
+    """
+    dataset = dataset_for_reference(session, reference)
+    condition = dataset.condition if dataset is not None else reference.condition
+    dataset_label = dataset.key if dataset is not None else reference.dataset_key
+    spectrum_path = Path(reference.frozen_spectrum)
+    rows = read_reference_peaks(reference.peak_table_path)
+    axes = read_spectrum_axes(spectrum_path)
+    parabolic = measure_peak_positions(
+        spectrum_path,
+        rows,
+        axes=axes,
+        window_pts=window_pts,
+        window_ppm=window_ppm,
+        refine="parabolic",
+    )
+    parabolic_rows = peak_table_rows(
+        parabolic,
+        workflow_id=REFERENCE_WORKFLOW_ID,
+        condition=condition,
+        dataset=dataset_label,
+        method="parabolic",
+    )
+    if int(reference.ndim) == 2 and int(axes.ndim) == 2:
+        gaussian = measure_peak_positions(
+            spectrum_path,
+            rows,
+            axes=axes,
+            window_pts=window_pts,
+            window_ppm=window_ppm,
+            refine="gaussian",
+            roi_f1_ppm=roi_f1_ppm,
+            roi_f2_ppm=roi_f2_ppm,
+        )
+        gaussian_rows = peak_table_rows(
+            gaussian,
+            workflow_id=REFERENCE_WORKFLOW_ID,
+            condition=condition,
+            dataset=dataset_label,
+            method="gaussian",
+        )
+    else:
+        gaussian_rows = gaussian_fallback_rows(
+            parabolic,
+            workflow_id=REFERENCE_WORKFLOW_ID,
+            condition=condition,
+            dataset=dataset_label,
+            reason=GAUSSIAN_UNSUPPORTED_NDIM_REASON,
+        )
+    target_dir = session.reference_dir_for(dataset)
+    written: dict[str, Path] = {}
+    for method, table_rows in (
+        ("parabolic", parabolic_rows),
+        ("gaussian", gaussian_rows),
+    ):
+        written[method] = write_peak_table(
+            target_dir / REFERENCE_TABLE_FILENAMES[method], table_rows
+        )
+    reference.peak_tables = {
+        method: peak_table_digest(path) for method, path in written.items()
+    }
+    reference.peak_localization = {
+        "parabolic": _localization_summary(parabolic_rows),
+        "gaussian": _localization_summary(gaussian_rows),
+        "window_by_axis": {
+            str(axis): dict(spec)
+            for axis, spec in window_points_by_axis(
+                axes, window_pts=window_pts, window_ppm=window_ppm
+            ).items()
+        },
+        "window_ppm": window_ppm,
+        "window_pts": window_pts,
+    }
+    save_reference(session, reference)
+    session.save_state(reference=reference.to_dict())
+    return reference
+
+
+def _localization_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """峰表行 → 定位 QC 计数(detected / 回退 / 撞边界)。"""
+    total = len(rows)
+    detected = sum(1 for row in rows if row.get("detected"))
+    fallback = sum(1 for row in rows if row.get("fallback"))
+    reasons: dict[str, int] = {}
+    for row in rows:
+        if not row.get("fallback"):
+            continue
+        reason = str(row.get("fallback_reason", "") or "")
+        reasons[reason] = reasons.get(reason, 0) + 1
+    return {
+        "n_peaks": int(total),
+        "n_detected": int(detected),
+        "n_missing": int(total - detected),
+        "n_fallback": int(fallback),
+        "fallback_reasons": reasons,
+        "n_boundary_hit": sum(1 for row in rows if row.get("boundary_hit")),
+    }
 
 
 def ensure_reference_peaks(
@@ -423,50 +632,99 @@ def ensure_reference_peaks(
     gaussian_roi_f1_ppm: float | None = None,
     gaussian_roi_f2_ppm: float | None = None,
 ) -> ReferenceSpectrum:
-    """保证参考峰表存在:**默认由 NMRForge 在参考谱上自动选峰**。
+    """保证参考峰身份表与两张参考峰表都存在(默认由软件自动选峰)。
 
-    - 已有峰表且文件在 → 直接复用(除非 ``force``);
-    - 否则调用 ``pick_reference_peaks()`` 选峰并冻结到
-      ``study/reference/<key>/reference.list``;
-    - ``max_peaks > 0`` 时按强度保留前 N 个峰(用于剔除明显弱峰/噪声峰);
-    - ``localization_method``(2026-09-13):``parabolic``(默认)或
-      ``gaussian``(2D 高斯拟合,仅 2D),写入 ``peak_params['localization']``。
+    - 主条件:调用 ``pick_reference_peaks()`` 选峰并冻结为 ``reference.list``;
+    - 其他条件:复制主条件的身份表(峰身份共享),再在本条件参考谱上测两张表;
+    - 已有身份表 + 两张表且文件在 → 直接复用(除非 ``force``);
+    - ``localization_method`` 只决定**参考峰位**的取法(默认抛物线,与既有
+      行为一致);两张参考峰表始终同时生成(2026-09-13 规范 B2)。
     """
     ref = reference or load_reference(session)
     if ref is None:
         raise ReferenceError("还没有参考谱,先调用 build_reference()")
-    if not force and ref.peak_table_path and Path(ref.peak_table_path).is_file():
+    if (
+        not force
+        and ref.peak_table_path
+        and Path(ref.peak_table_path).is_file()
+        and ref.peak_tables
+        and all(
+            Path(str((ref.peak_tables.get(method) or {}).get("path", ""))).is_file()
+            for method in ("parabolic", "gaussian")
+        )
+    ):
         return ref
-    target = session.reference_dir_for() / "reference.list"
-    details: dict[str, Any] = {}
-    pick_reference_peaks(
-        session,
-        sigma_multiplier=sigma_multiplier,
-        out_path=target,
-        details=details,
-        localization_method=localization_method,
-        gaussian_roi_f1_ppm=gaussian_roi_f1_ppm,
-        gaussian_roi_f2_ppm=gaussian_roi_f2_ppm,
+    dataset = dataset_for_reference(session, ref)
+    primary = load_reference(session, session.dataset) if session.dataset else None
+    is_primary = (
+        primary is None
+        or dataset is None
+        or session.dataset is None
+        or dataset.key == session.dataset.key
+        or primary.dataset_key == ref.dataset_key
     )
-    if max_peaks and max_peaks > 0:
-        _keep_top_peaks(target, int(max_peaks))
-    updated = set_reference_peaks(
-        session,
-        target,
-        ref,
-        source="auto",
-        params={
-            "sigma_multiplier": sigma_multiplier,
-            "max_peaks": int(max_peaks),
-            # 选峰边距的物理宽度↔点数换算(用户方案 A):跨分辨率复算用
-            "detection": details.get("detection") or {},
-            "localization_method": str(localization_method),
-            "localization": details.get("localization") or {},
-        },
-    )
-    # 选峰会登记一条 pick_peaks 运行记录:同样要落盘(跨进程可见)
+    target = session.reference_dir_for(dataset) / REFERENCE_PEAK_LIST_FILENAME
+    if is_primary:
+        details: dict[str, Any] = {}
+        pick_reference_peaks(
+            session,
+            sigma_multiplier=sigma_multiplier,
+            out_path=target,
+            details=details,
+            localization_method=localization_method,
+            gaussian_roi_f1_ppm=gaussian_roi_f1_ppm,
+            gaussian_roi_f2_ppm=gaussian_roi_f2_ppm,
+            dataset=dataset,
+        )
+        if max_peaks and max_peaks > 0:
+            _keep_top_peaks(target, int(max_peaks))
+        ref = set_reference_peaks(
+            session,
+            target,
+            ref,
+            source="auto",
+            params={
+                "sigma_multiplier": sigma_multiplier,
+                "max_peaks": int(max_peaks),
+                # 选峰边距的物理宽度↔点数换算(用户方案 A):跨分辨率复算用
+                "detection": details.get("detection") or {},
+                "localization_method": str(localization_method),
+                "localization": details.get("localization") or {},
+            },
+        )
+    else:
+        assert primary is not None  # is_primary=False 时主参考必然存在
+        source_list = Path(primary.peak_table_path)
+        if not source_list.is_file():
+            raise ReferenceError(
+                "非主条件的参考峰身份需要主条件先选峰:请先对主条件调用 "
+                "ensure_reference_peaks()"
+            )
+        target.write_text(
+            source_list.read_text(encoding="utf-8"), encoding="utf-8"
+        )
+        ref = set_reference_peaks(
+            session,
+            target,
+            ref,
+            source=f"shared:{primary.condition}",
+            params={
+                "sigma_multiplier": sigma_multiplier,
+                "max_peaks": int(max_peaks),
+                "localization_method": str(localization_method),
+                "shared_from": primary.dataset_key,
+                "shared_peak_count": int(primary.peak_count),
+                "shared_peak_table_sha256": primary.peak_table_sha256,
+            },
+        )
+    # 选峰/复制都会登记运行记录:落盘保证跨进程可见
     session.manager.save()
-    return updated
+    return build_reference_peak_tables(
+        session,
+        ref,
+        roi_f1_ppm=gaussian_roi_f1_ppm,
+        roi_f2_ppm=gaussian_roi_f2_ppm,
+    )
 
 
 def _keep_top_peaks(path: Path, keep: int) -> None:
@@ -480,7 +738,7 @@ def _keep_top_peaks(path: Path, keep: int) -> None:
         key=lambda row: abs(float(row.get("Intensity") or 0.0)), reverse=True
     )
     export_peaks_poky(path, rows[:keep])
-    # 被裁的是冻结参考表(通常没有附件);若该路径恰好有定位附件,一并按
+    # 被裁的是冻结身份表(通常没有附件);若该路径恰好有定位附件,一并按
     # 行序截断,避免附件与峰表不一致(防御性,正常流程是 no-op)。
     from core.peaks.localize import trim_localization_records
 
@@ -488,13 +746,20 @@ def _keep_top_peaks(path: Path, keep: int) -> None:
 
 
 __all__ = [
+    "GAUSSIAN_UNSUPPORTED_NDIM_REASON",
     "REFERENCE_FILENAME",
+    "REFERENCE_PEAK_LIST_FILENAME",
+    "REFERENCE_TABLE_FILENAMES",
     "ReferenceSpectrum",
     "build_reference",
+    "build_reference_peak_tables",
+    "dataset_for_reference",
     "ensure_reference_peaks",
     "load_reference",
+    "load_references",
     "normalize_direct_phase",
     "reference_phase",
     "sanitize_sweep_params",
+    "save_reference",
     "set_reference_peaks",
 ]

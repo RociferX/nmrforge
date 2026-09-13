@@ -1,127 +1,51 @@
-# 10 · 排查与常见问题
+# 10 · 排查(v0.2)
 
-## 安装/导入
+## 10.1 常见错误与处理
 
-**`ModuleNotFoundError: No module named 'nmrforge_api'`**
-接口包是新增顶层包,editable 安装需要刷新:
+| 现象 | 原因 | 处理 |
+| --- | --- | --- |
+| `DatasetError: 无法识别为 Bruker 原始数据集` | 传了压缩包/已处理格式 | 解压出含 `acqus`(2D 还需 `acqu2s`)与 `ser` 的目录 |
+| `DatasetError: 条件标签 'A' 已被 … 占用` | 同一条件标签绑了两份数据 | 换标签(B/C…)或另建研究根 |
+| `ReferenceError: 参考谱产物缺失,请重建(force=True)` | `study/reference/<key>/` 被移动/删除 | 删掉该目录或 `build_reference(..., force=True)` |
+| `ReferenceError: 非主条件的参考峰身份需要主条件先选峰` | 只给 B 选峰,主条件 A 还没选 | 先对主条件(A)调用 `ensure_reference_peaks` |
+| `MeasurementError: Gaussian peak fitting is currently supported only for 2D spectra.` | 非 2D 直接调用 `measure_peak_positions(refine="gaussian")` | 参数组合执行里不报错(写 fallback 的 Gaussian 表);直接调用请用 `refine="parabolic"` |
+| `SweepError: …超过上限 max_runs` | 组合数超限 | 减网格/显式提高 `max_runs`,或分批 |
+| `SweepError: 网格里的 'phases'/'direct_phase' 会破坏相位锁定` | 直接写相位字典 | 改用 `phase_delta.<轴>.p0|p1` 或 `phase.<轴>.p0|p1` |
+| `SweepError: 当前只支持 2D NUS 参数组合` | 3D NUS | 先只建参考;组合执行待 roadmap |
+| `plan.notes` 里出现「不在后端读取的参数清单内」 | 键名拼错 | 对照 05 的键表;notes 只是提示,不会让运行失败 |
+
+## 10.2 状态是 `success_with_warning` 怎么办
+
+看 `run.json.warnings` 的 `code` 与 `peaks` 列表(以及 `log.txt` 的
+`--- warnings ---` 段):
+
+| 码 | 处理建议 |
+| --- | --- |
+| `peak_not_detected` | 加大 `window_ppm`,或确认该峰在该条件确实消失(保留 `detected=false` 记录是对的) |
+| `peak_window_edge` | 加大 `window_ppm`(窗口太窄,真峰可能在窗外) |
+| `peak_out_of_range` | 参考峰位置超出该谱范围(条件间谱宽/中心不同),检查参考与条件的可比性 |
+| `gaussian_fallback` | 看 `fallback_reason`(roi_too_small / not_converged / center_at_boundary / sigma_at_bound …);调大 ROI 或接受抛物线回退 |
+| `gaussian_boundary_hit` | 峰太宽/太窄或 ROI 不合适;调 ROI 半径 |
+| `gaussian_unsupported_ndim` | 非 2D 数据的预期行为(Gaussian 表位置=抛物线) |
+| `window_points_fallback` | 谱头缺 OBS/SW,无法按物理宽度换算;补全头部或用 `--window-pts` 显式口径 |
+
+## 10.3 断点续跑与重跑
+
+- 已 `success`/`success_with_warning` 的 workflow × 条件会被跳过;
+- 想重跑某个组合:删掉 `study/workflows/<id>/` 下该条件目录(或整个 `<id>/`)
+  再跑同一 plan;
+- 想重跑参考:`build_reference(..., force=True)` 或删 `study/reference/<key>/`;
+- 换了参数表:重新 `plan_sweep`(会得到新的 `grid_sha256`);同一研究根内
+  重新跑会覆盖相应 workflow 目录(`W0001…` 按表序编号)。
+
+## 10.4 找不到东西时
 
 ```bash
-~/NMRForge/nmrforge/bin/pip install -e ~/NMRForge
+python -m nmrforge_api status --study <root>     # 条件/参考/workflow 概览
+cat <root>/study/workflows/W0001/workflow.json   # 组合级记录
+cat <root>/study/workflows/W0001/A/log.txt       # 该条件完整日志
+cat <root>/study/records/manifest.json           # 全局清单与边界声明
 ```
 
-若用系统 python,同样重跑 `pip install -e <NMRForge 路径>`。
-
-**`import nmrforge_api` 报 Qt 相关错误**
-不应该发生:接口不 import Qt(有专项测试守护)。若出现,说明环境里的 `nmrforge_api`
-不是本仓库的版本,检查 `python -c "import nmrforge_api; print(nmrforge_api.__file__)"`。
-
-## 数据与导入
-
-**`DatasetError: 无法识别为 Bruker 原始数据集`**
-目录里缺 `acqus`(常见于压缩包多套了一层目录),或拿到的是已处理谱。
-
-```bash
-ls <data_dir>/acqus
-```
-
-**`DatasetError: 导入失败: KineticsUnsupportedError`**
-动力学实验被策略守卫拒绝(产品决策:不支持导入),换数据集。
-
-## 参考谱/参考脚本
-
-**`ReferenceError: 参考运行没有留下可用的处理脚本`**
-参考运行没有产出脚本文件。检查 `study/work/` 是否有 `*.com`,以及日志里是否有
-NMRPipe 报错;必要时 `--force` 重建参考谱。
-
-**`未找到 nmrPipe（csh: which nmrPipe）`**
-处理需要 NMRPipe 且通过 csh 提供环境(通常写在 `~/.cshrc`):
-
-```bash
-csh -c 'source ~/.cshrc; which nmrPipe'
-```
-
-也可在 NMRForge 设置里显式指定 NMRPipe 路径(`backend.nmrpipe.path`)。
-
-**记录里没有 `nmrpipe` / `smile` 版本**
-接口只在解析到 NMRPipe 安装目录时探测一次版本;探测失败(不可执行/超时)不影响
-运行,记录里就没有该项。其它版本(NMRForge/Python/numpy/…)始终记录。
-
-## 选峰
-
-**自动选峰数量异常(太多/太少)**
-默认阈值 35σ。
-
-- 太多(含噪声/弱峰):提高阈值或 `max_peaks` 限强峰:
-  `run_parameter_study(..., sigma_multiplier=50, max_peaks=80)`;
-- 太少:降低阈值(如 25),或确认实验类型识别是否正确(峰符号规则依赖模板)。
-
-**想固定峰集做对照**
-先用一次自动选峰,然后用 `set_reference_peaks(session, 你的.list,
-source="external")` 登记;之后 `ensure_reference_peaks` 会复用已有峰表。
-
-## 扫描
-
-**`SweepError: v0.1 的参数扫描只支持 uniform 数据`**
-NUS 数据超出了 v0.1 范围(见第 9 节)。
-
-**`SweepError: 参数组合 N 个超过上限 max_runs=256`**
-减小网格或提高上限;长扫描建议分批(同一研究根可续跑)。
-
-**某些组合 `status=failed`**
-看该组合的 `run.json`:
-
-- `message`:失败原因(后端返回);
-- `logs_tail`:NMRPipe 日志尾部(最多 40 行);
-- 常见原因:参数取值非法(窗函数 off/end 组合、填零过大)、内存不足、NMRPipe
-  报 data in Frequency Domain 等。
-修正后重跑同一命令即可(成功的组合会跳过;要重算失败组合,把它的
-`study/runs/<run_id>/` 目录删掉再跑,或整轮加 `resume=False`/`--no-resume`)。
-
-**结果与预期不符?先看 `phase_locked`**
-应为 `true`。若为 `false`(参考运行没记录相位),说明参考相位没有被锁定,
-组合间差异会混入相位差——请重建参考谱(`--force`)或检查运行日志。
-
-## 峰位测量
-
-**大量 `window_edge=true`**
-窗口太小,或该峰位置本身随参数移动较远。用 `window_ppm` 显式给更宽的**物理**
-半径(例如 `window_ppm=0.5`)重跑测量阶段(可用最小侵入接法只重跑测量,不必
-重跑 NMRPipe)。
-注意缺省窗口只有 1.5×线宽(≈0.02 ppm(1H)/0.37 ppm(15N)):故意设置的
-±5° 相位偏差、大窗函数改动等带来的位移可能已经超出它——这时
-`window_edge=true` 是**如实报告**,不是 bug。
-
-**大量 `out_of_range=true`**
-参考峰位落在候选谱范围外:通常是被扫参数改变了提取窗口(`ext_lo`/`ext_hi`)
-或谱宽。请固定提取窗口,或换一组峰。
-
-**`found=false`**
-该组合上窗口内无有效数据(峰消失/被裁掉)。该组合不进入该峰的统计
-(`missing_runs` 会 +1)。
-
-**怀疑测量精度**
-接口自带数值守卫测试:对已知 +1.25 点平移,测量误差 < 0.2 点;若怀疑实现,
-可运行 `pytest tests/test_nmrforge_api.py -k subpoint`。
-
-## 运行与性能
-
-**耗时估算**
-参考谱(含统一相位优化)2D HSQC 约 30 s;每个组合约数秒(复用 fid、锁定相位)。
-3D 数据更慢,但 v0.1 不做 3D/NUS 扫描。
-
-**中断后怎么继续**
-重跑同一命令即可(默认跳过已成功组合)。若换了网格,请换研究根。
-
-**磁盘占用**
-每个组合保留候选谱副本(`study/runs/<run_id>/spectrum.ft2`)。谱很大时注意余量;
-不需要候选谱时可在分析后自行删除,但那样就无法复算该组合。
-
-**日志里的 UCSF 提示**
-`pipe2ucsf` 缺失只影响参考谱的 Sparky 导出,不影响研究流程。
-
-## 报问题时请附上
-
-1. `python -m nmrforge_api status --study DIR` 的输出;
-2. `study/records/manifest.json`;
-3. 失败组合的 `study/runs/<run_id>/run.json`(含 `logs_tail`);
-4. NMRForge 版本与 NMRPipe 版本(manifest 里有)。
+报告问题请附:研究根路径、`records/manifest.json`、涉及的 `run.json` 与
+`log.txt`、以及 `python -m nmrforge_api status` 输出。

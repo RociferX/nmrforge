@@ -2,6 +2,63 @@
 
 版本口径:新增功能/新增字段保持同一 minor;破坏性改动升 minor 并给出迁移说明。
 
+## 0.2.0(2026-09-13)规范更新(破坏性:输出模型与公开面变更)
+
+规范来源:用户 2026-09-13「API 规范更新」;逐条符合性见
+`docs/reviews/2026-09-13-api-spec-compliance.md`。
+
+**新增/变更**
+
+- 参考工作流 = 1 个参考脚本 + **2 张参考峰表**
+  (`reference_peak_table_parabolic.csv` / `_gaussian.csv`);
+- 每个参数组合 = 一个 **workflow_id**(`W0001…`),目录
+  `study/workflows/<id>/<条件 A|B>/`,产物含完整脚本、候选谱、两张统一峰表、
+  完整 `log.txt`、`run.json`(`parameters_requested`/`parameters_used`/
+  `parameters_resolved`/`phase`/`base_script`/`peak_tables`/`versions`)与
+  组合级 `workflow.json`;
+- **统一峰表 19 列**(两算法结构一致):`workflow_id, condition, dataset,
+  reference_peak_id, assignment, H_ppm, N_ppm, intensity, SNR, detected,
+  localization_method, localization_requested, fallback, fallback_reason,
+  fit_success, FWHM_H, FWHM_N, fit_rmse, boundary_hit`;parabolic 不适用列写
+  `NaN`;未检测到的峰保留行(`detected=false`);
+- **稳定峰身份** `reference_peak_id`(R0001…),跨条件、跨 workflow 共享;
+- 每个 workflow 对**同一张谱**跑 parabolic 与 2D gaussian 两种定位(不再由
+  `refine=` 二选一;`refine` 参数保留但已废弃);
+- **两条件 A/B**:`StudySession.datasets` + `add_dataset(..., condition=)`;
+  同一 workflow 对全部条件用同一份用户参数,各自输出峰值表;
+- 状态三值 `success` / `success_with_warning` / `failed` + 警告码
+  (`peak_not_detected` / `peak_window_edge` / `peak_out_of_range` /
+  `gaussian_fallback` / `gaussian_boundary_hit` / `gaussian_unsupported_ndim`
+  / `window_points_fallback`);
+- 自动参数实际结果落档:自动相位 `actual_p0/actual_p1`、SMILE 自动分档的
+  requested/actual `nsigma`/`thresh`、谱噪声 σ(SNR 用);
+- `SNR` 列入峰表(`core.qc.noise` robust MAD);
+- `records/` 改为 `manifest.json` / `sweep_plan.json` / `runs.json` /
+  `workflows.json` / `measurement.json` + 两张长表;
+- `API_VERSION = "0.2"`;`_workflow_record`/`workflow_summary`/`load_workflows`
+  等新公开函数。
+
+**边界调整(σ/Δδ 移出处理契约,保留为测试/检测辅助)**
+
+- 移除自动汇总:`run_parameter_study(..., csp_n_weight=)`、CLI
+  `--csp-n-weight` 与 `records/uncertainty.csv`/`uncertainty_summary.json`
+  不再存在;
+- **保留** `nmrforge_api/uncertainty.py`(`PeakUncertainty`/
+  `position_uncertainty`/`uncertainty_summary`/`DEFAULT_CSP_N_WEIGHT`,包根
+  仍可导入),定位为**测试/检测辅助**:回归时确认参数真的生效、比较两种定位
+  算法的峰位差,或作为下游统计实现的参考;
+- σ/Δδ 下限、robustness 与统计推断的**结论**仍由下游独立分析程序从统一峰表
+  计算。留档:`docs/tasks/archive/2026-09-13-csp-statistics-boundary.md`。
+
+**迁移**
+
+1. 旧研究根(`study/runs/s0001…`)不再被读取:重新 `plan_sweep` + `run_sweep`
+   (参考谱/参考脚本仍可复用,`reference.json` 兼容;新表会在首次
+   `ensure_reference_peaks` 时补齐);
+2. 下游分析改读 `records/peak_table_{parabolic,gaussian}.csv`(长表)或逐
+   workflow 的 CSV,按 `reference_peak_id` 与 `condition` 分组;
+3. 只想要某一种算法时,读对应表即可(另一张表同时存在,不影响)。
+
 ## 0.1.1(2026-09-13)
 
 **峰位窗口/选峰边距改为「物理宽度(ppm)」口径**(用户方案 A)。动机:填零 k 倍
