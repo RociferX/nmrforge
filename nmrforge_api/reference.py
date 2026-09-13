@@ -480,7 +480,8 @@ def _keep_top_peaks(path: Path, keep: int) -> None:
         key=lambda row: abs(float(row.get("Intensity") or 0.0)), reverse=True
     )
     export_peaks_poky(path, rows[:keep])
-    # 峰表被裁剪:峰定位附件同步截断,避免记录比峰表多(行序一致)
+    # 被裁的是冻结参考表(通常没有附件);若该路径恰好有定位附件,一并按
+    # 行序截断,避免附件与峰表不一致(防御性,正常流程是 no-op)。
     from core.peaks.localize import trim_localization_records
 
     trim_localization_records(path, keep)

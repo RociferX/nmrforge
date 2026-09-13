@@ -427,10 +427,13 @@ def write_localization_records(
 
 
 def trim_localization_records(peak_path: Path | str, keep: int) -> bool:
-    """峰表被裁剪(如 ``max_peaks``)后同步截断附件,保持行序对齐。
+    """**同一路径**的峰表被就地裁剪后,同步截断附件(保持行序对齐)。
 
-    附件行序与峰表行序一致(都按 |Intensity| 降序),所以保留前 ``keep`` 行
-    即可;附件不存在/损坏返回 False(不抛异常)。
+    附件行序与峰表行序一致(都按 |Intensity| 降序),保留前 ``keep`` 行即可。
+    注意:接口的 ``max_peaks`` 裁的是**冻结参考表**(``reference.list``,从
+    data 侧 `.list` 复制而来、本身没有附件),因此正常流程下本函数是防御性
+    的 no-op——真机核对:data 侧 `.list` 76 峰 / 附件 76 条、参考表 60 峰,
+    两边本来就各自自洽。附件不存在/损坏返回 False(不抛异常)。
     """
     target = localization_records_path(peak_path)
     if not target.is_file():
