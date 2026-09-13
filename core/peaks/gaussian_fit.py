@@ -148,7 +148,7 @@ def fit_gaussian_2d(
     roi: tuple[float, float],
     sign: int = 1,
     max_rmse_ratio: float = 0.0,
-    max_nfev: int = 200,
+    max_nfev: int = 400,
 ) -> GaussianFitResult:
     """在 ``seed``(数据轴序分数索引)附近拟合 2D 高斯。
 

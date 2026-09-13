@@ -254,7 +254,7 @@ def localize_peak_gaussian_2d(
     roi_f2_ppm: float | None = None,
     logical_axes: Sequence[int] | None = None,
     max_rmse_ratio: float = 0.0,
-    max_nfev: int = 200,
+    max_nfev: int = 400,
 ) -> PeakLocalization:
     """2D 高斯定位:ROI(ppm)→点数 → 以抛物线结果为初值做局部拟合。
 
@@ -373,7 +373,7 @@ def localize_peak(
     roi_f2_ppm: float | None = None,
     logical_axes: Sequence[int] | None = None,
     max_rmse_ratio: float = 0.0,
-    max_nfev: int = 200,
+    max_nfev: int = 400,
 ) -> PeakLocalization:
     """统一峰定位入口:``method="parabolic"``(默认)或 ``"gaussian"``(仅 2D)。
 
