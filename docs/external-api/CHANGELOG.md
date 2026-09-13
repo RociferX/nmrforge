@@ -31,7 +31,11 @@
 
 验证:同一合成谱 1×/4× 网格、同一 1.0 ppm 窗口 → 点数 2↔8、覆盖宽度均
 ≈1.0 ppm、峰位差 < 0.02 点(`tests/test_nmrforge_api.py` 新增两条用例);
-本地全量 1037 passed / 1 skipped。
+本地全量 1037 passed / 1 skipped;VM 全量 1019 passed / 19 skipped。
+真机(真实 NMRPipe,800 MHz HSQC + 合成 25% NUS):`zero_fill=[1,4]` 下 15N
+窗口 5↔19 点而覆盖宽度恒为 0.5 ppm(1H 73 点不变),66/66 与 60/60 峰全测到;
+自动选峰记录的边距为 0.5549 ppm → 11 点;2D NUS 的 `nsigma` 扫描同样通过。
+证据见 proposal 附录。
 
 ## 0.1(2026-09-12)
 
