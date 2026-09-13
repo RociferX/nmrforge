@@ -33,6 +33,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from dataclasses import dataclass, field
@@ -56,9 +57,19 @@ def now_iso() -> str:
 
 
 def condition_token(label: str, fallback: str = "condition") -> str:
-    """条件标签 → 目录安全 token(去掉路径分隔符与空白)。"""
-    text = re.sub(r"[^0-9A-Za-z_.-]+", "_", str(label or "")).strip("_.")
-    return text or fallback
+    """条件标签 → 唯一且目录安全的 token。
+
+    已经安全的 ASCII 标签保持不变；清洗过的标签追加原文短哈希，避免
+    ``A/B`` 与 ``A_B``、不同非 ASCII 标签映射到同一目录。
+    """
+    raw = str(label or "")
+    if re.fullmatch(r"[0-9A-Za-z][0-9A-Za-z_.-]*", raw):
+        return raw
+    if not raw:
+        return condition_token(str(fallback or "condition"), "condition")
+    stem = re.sub(r"[^0-9A-Za-z_.-]+", "_", raw).strip("_.") or "condition"
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:10]
+    return f"{stem[:48]}-{digest}"
 
 
 @dataclass
@@ -162,6 +173,7 @@ class StudySession:
             raise DatasetError(f"条件标签重复: {ref.condition}")
         if any(existing.key == ref.key for existing in self.datasets):
             raise DatasetError(f"数据集已登记: {ref.key}")
+        _validate_dataset_tokens([*self.datasets, ref])
         self.datasets.append(ref)
         self.save_state()
         return ref
@@ -275,6 +287,21 @@ def _datasets_from_state(state: dict[str, Any]) -> list[DatasetRef]:
     return []
 
 
+def _validate_dataset_tokens(refs: list[DatasetRef]) -> None:
+    """拒绝在大小写不敏感文件系统上会共用目录的数据集标签。"""
+    seen: dict[str, DatasetRef] = {}
+    for ref in refs:
+        key = ref.token.casefold()
+        previous = seen.get(key)
+        if previous is not None and previous.key != ref.key:
+            raise DatasetError(
+                "条件目录 token 冲突: "
+                f"{previous.condition or previous.key!r} 与 "
+                f"{ref.condition or ref.key!r} 都映射为 {ref.token!r}"
+            )
+        seen[key] = ref
+
+
 def open_study(
     root: Path | str,
     *,
@@ -305,6 +332,7 @@ def open_study(
         backend = create_backend(load_config(config))
     session = StudySession(root=root_path, manager=manager, backend=backend)
     session.datasets = _datasets_from_state(session.load_state())
+    _validate_dataset_tokens(session.datasets)
     session.ensure_dirs()
     return session
 
@@ -383,9 +411,7 @@ def add_dataset(
         file_count=int(result.file_count),
         total_bytes=int(result.total_bytes),
     )
-    session.datasets.append(ref)
-    session.save_state()
-    return ref
+    return session.add_dataset_ref(ref)
 
 
 def dataset_info(

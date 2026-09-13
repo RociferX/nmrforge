@@ -258,8 +258,15 @@ def run_parameter_study(
             )
             references[primary.key] = primary_reference
             for ref in session.datasets[1:]:
-                references[ref.key] = build_reference_peak_tables(
-                    session, references[ref.key]
+                references[ref.key] = ensure_reference_peaks(
+                    session,
+                    references[ref.key],
+                    sigma_multiplier=sigma_multiplier,
+                    max_peaks=max_peaks,
+                    force=True,
+                    localization_method=localization_method,
+                    gaussian_roi_f1_ppm=gaussian_roi_f1_ppm,
+                    gaussian_roi_f2_ppm=gaussian_roi_f2_ppm,
                 )
 
         # 扫描基底 = 主条件参考运行的有效参数(用户 params 只作局部覆盖)

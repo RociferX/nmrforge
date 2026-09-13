@@ -26,9 +26,11 @@ from nmrforge_api import (
     STATUS_SUCCESS,
     STATUS_WARNING,
     DatasetError,
+    DatasetRef,
     SweepError,
     add_dataset,
     build_reference,
+    condition_token,
     ensure_reference_peaks,
     expand_grid,
     load_plan,
@@ -732,6 +734,43 @@ def test_records_are_written_with_unified_peak_tables(
     assert len(_backend_calls(again)) == calls_before
 
 
+def test_resume_invalidates_changed_plan_and_hides_stale_workflows(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """W0001 输入改变必须重跑；缩短计划后旧 W0002 不得混入汇总。"""
+    root = tmp_path / "resume_changed"
+    backend = _FakeSweepBackend()
+    peaks = _write_peak_table(tmp_path / "resume.list")
+    first = run_parameter_study(
+        root,
+        bruker_dir / "hsqc_2d",
+        combos=[{"zero_fill": 1}, {"zero_fill": 2}],
+        params={"phase_route": "none"},
+        peaks=peaks,
+        backend=backend,
+    )
+    calls_before = len(backend.process_calls)
+    assert all(run.resume_fingerprint for run in first.runs)
+
+    second = run_parameter_study(
+        root,
+        None,
+        combos=[{"zero_fill": 4}],
+        params={"phase_route": "none"},
+        peaks=peaks,
+        backend=backend,
+        resume=True,
+    )
+    assert len(backend.process_calls) == calls_before + 1
+    assert [run.workflow_id for run in second.runs] == ["W0001"]
+    assert second.runs[0].parameters_requested == {"zero_fill": 4}
+    assert len(load_runs(second.session)) == 1
+    workflows = load_workflows(second.session)
+    assert [item["workflow_id"] for item in workflows] == ["W0001"]
+    stored = json.loads(Path(second.records["workflows"]).read_text(encoding="utf-8"))
+    assert [item["workflow_id"] for item in stored] == ["W0001"]
+
+
 def _backend_calls(result) -> list:
     return list(getattr(result.session.backend, "process_calls", []))
 
@@ -818,6 +857,58 @@ def test_gaussian_fallback_is_recorded_not_silent(
         "forced_test_failure": len(table)
     }
 
+
+def test_gaussian_measurement_exception_becomes_failed_run(
+    tmp_path: Path, bruker_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Gaussian 测量异常必须落成 failed run.json，而不是终止整轮。"""
+    import nmrforge_api.sweep as sweep_module
+
+    backend = _FakeSweepBackend()
+    session = open_study(tmp_path / "gaussian_error", backend=backend)
+    add_dataset(session, bruker_dir / "hsqc_2d")
+    reference = build_reference(session, params={"phase_route": "none"})
+    reference = ensure_reference_peaks(session, reference)
+    plan = plan_sweep(reference, axes={"zero_fill": [1]})
+    real_measure = sweep_module.measure_peak_positions
+
+    def explode_gaussian(*args, **kwargs):
+        if kwargs.get("refine") == "gaussian":
+            raise RuntimeError("forced gaussian error")
+        return real_measure(*args, **kwargs)
+
+    monkeypatch.setattr(sweep_module, "measure_peak_positions", explode_gaussian)
+    runs = run_sweep(session, plan, reference=reference, resume=False)
+    assert len(runs) == 1
+    assert runs[0].status == "failed"
+    assert "forced gaussian error" in runs[0].message
+    payload = json.loads(
+        Path(runs[0].run_dir, "run.json").read_text(encoding="utf-8")
+    )
+    assert payload["status"] == "failed"
+    assert payload["resume_fingerprint"]
+
+
+def test_non_2d_gaussian_fallback_rows_set_flag() -> None:
+    """非 2D 的显式 fallback_reason 同时必须令 fallback=true。"""
+    from nmrforge_api.peak_tables import gaussian_fallback_rows
+
+    measurement = PeakMeasurement(
+        peak_id=1,
+        assignment="G1",
+        reference={"1H": 8.0},
+        positions={"1H": 8.01},
+        found=True,
+    )
+    rows = gaussian_fallback_rows(
+        [measurement],
+        workflow_id="W0001",
+        condition="A",
+        reason="not_2d",
+    )
+    assert rows[0]["fallback"] is True
+    assert rows[0]["fallback_reason"] == "not_2d"
+
 def test_two_conditions_share_parameters_and_peak_identity(
     tmp_path: Path, bruker_dir: Path
 ) -> None:
@@ -862,6 +953,70 @@ def test_two_conditions_share_parameters_and_peak_identity(
     assert shared[0].peak_count == 2
     # 每条件各转换一次 fid(参考)
     assert backend.convert_calls == 2
+
+
+def test_external_peak_identity_is_propagated_to_all_conditions(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """外部峰表替换主条件身份后，次条件必须重新复制同一份身份表。"""
+    external = tmp_path / "one-reference.list"
+    export_peaks_poky(
+        external,
+        [
+            {
+                "N_shift": _n15_ppm(_PEAK_B[0]),
+                "H_shift": _h1_ppm(_PEAK_B[1]),
+                "Intensity": 100.0,
+                "label": "ONLY",
+            }
+        ],
+    )
+    result = run_parameter_study(
+        tmp_path / "external_ab",
+        datasets={
+            "A": bruker_dir / "hsqc_2d",
+            "B": bruker_dir / "hsqc_small",
+        },
+        combos=[{"zero_fill": 1}],
+        params={"phase_route": "none"},
+        peaks=external,
+        backend=_FakeSweepBackend(),
+    )
+    refs = list(result.references.values())
+    assert [ref.peak_count for ref in refs] == [1, 1]
+    assert len({ref.peak_table_sha256 for ref in refs}) == 1
+    assert refs[1].peak_source == "shared:A"
+    for run in result.runs:
+        rows = read_peak_table(Path(run.peak_table_path("parabolic")))
+        assert [(row["reference_peak_id"], row["assignment"]) for row in rows] == [
+            ("R0001", "ONLY")
+        ]
+
+
+def test_stop_on_error_keeps_running_successful_conditions(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """stop_on_error 只在失败时停止，成功的 A 后仍必须执行 B。"""
+    result = run_parameter_study(
+        tmp_path / "stop_success",
+        datasets={
+            "A": bruker_dir / "hsqc_2d",
+            "B": bruker_dir / "hsqc_small",
+        },
+        combos=[{"zero_fill": 1}],
+        params={"phase_route": "none"},
+        backend=_FakeSweepBackend(),
+    )
+    plan = plan_sweep(result.reference, combos=[{"zero_fill": 2}])
+    runs = run_sweep(
+        result.session,
+        plan,
+        reference=result.reference,
+        resume=False,
+        stop_on_error=True,
+    )
+    assert {run.condition for run in runs} == {"A", "B"}
+    assert all(run.status in (STATUS_SUCCESS, STATUS_WARNING) for run in runs)
 
 
 def test_run_parameter_study_nus_2d(tmp_path: Path, bruker_dir: Path) -> None:
@@ -1090,6 +1245,19 @@ def test_add_dataset_rejects_duplicate_condition(
     add_dataset(session, bruker_dir / "hsqc_2d", condition="A")
     with pytest.raises(DatasetError, match="条件标签"):
         add_dataset(session, bruker_dir / "hsqc_small", condition="A")
+
+
+def test_condition_tokens_do_not_alias_and_reject_case_collisions(
+    tmp_path: Path,
+) -> None:
+    assert condition_token("A") == "A"
+    assert condition_token("A/B") != condition_token("A_B")
+    assert condition_token("条件一") != condition_token("条件二")
+
+    session = open_study(tmp_path / "token_collision", backend=_FakeSweepBackend())
+    session.add_dataset_ref(DatasetRef("exp_001", "d_001", condition="A"))
+    with pytest.raises(DatasetError, match="token 冲突"):
+        session.add_dataset_ref(DatasetRef("exp_002", "d_002", condition="a"))
 
 
 def test_cli_status_and_report(

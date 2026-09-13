@@ -238,7 +238,7 @@ def peak_table_row(
         "detected": bool(getattr(measurement, "found", False)),
         "localization_method": str(method),
         "localization_requested": requested,
-        "fallback": bool(record.get("fallback")),
+        "fallback": bool(record.get("fallback") or fallback_reason),
         "fallback_reason": str(
             record.get("fallback_reason") or fallback_reason or ""
         ),

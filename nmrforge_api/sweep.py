@@ -327,6 +327,7 @@ class SweepRun:
     phase_locked: bool = True
     logs_tail: list[str] = field(default_factory=list)
     versions: dict[str, str] = field(default_factory=dict)
+    resume_fingerprint: str = ""
     measurements_by_method: dict[str, list[PeakMeasurement]] = field(
         default_factory=dict
     )
@@ -379,6 +380,7 @@ class SweepRun:
             "phase_locked": bool(self.phase_locked),
             "logs_tail": list(self.logs_tail),
             "versions": self.versions,
+            "resume_fingerprint": self.resume_fingerprint,
         }
 
     @classmethod
@@ -427,6 +429,7 @@ class SweepRun:
             versions={
                 str(k): str(v) for k, v in (data.get("versions") or {}).items()
             },
+            resume_fingerprint=str(data.get("resume_fingerprint", "")),
         )
 
     def peak_table_path(self, method: str) -> str:
@@ -1068,6 +1071,67 @@ def _load_run(run_dir: Path) -> SweepRun | None:
     return run
 
 
+def _resume_fingerprint(
+    *,
+    combo: Mapping[str, Any],
+    target: DatasetRef,
+    reference: ReferenceSpectrum,
+    peaks: Sequence[dict[str, Any]] | None,
+    window_pts: int | None,
+    window_ppm: float | None,
+    sign: str,
+    roi_f1_ppm: float | None,
+    roi_f2_ppm: float | None,
+) -> str:
+    """计算会改变单条件运行结果的规范化输入指纹。"""
+    param_part, phase_part = split_combo(combo)
+    params = merge_overrides(dict(reference.sweep_params), param_part)
+    effective_phase = apply_phase_axes(
+        {
+            axis: list(pair)
+            for axis, pair in (reference.direct_phase_override() or {}).items()
+        },
+        phase_part,
+    )
+    peak_identity: Any = (
+        [dict(row) for row in peaks]
+        if peaks is not None
+        else {
+            "path": reference.peak_table_path,
+            "sha256": reference.peak_table_sha256,
+        }
+    )
+    payload = {
+        "schema": "nmrforge_api.resume.v1",
+        "dataset": target.to_dict(),
+        "combo": dict(combo),
+        "parameters_used": params,
+        "phase": effective_phase,
+        "reference": {
+            "dataset_key": reference.dataset_key,
+            "script_sha256": reference.script_sha256,
+            "spectrum_sha256": reference.spectrum_sha256,
+            "peak_table_sha256": reference.peak_table_sha256,
+        },
+        "peaks": peak_identity,
+        "measurement": {
+            "window_pts": window_pts,
+            "window_ppm": window_ppm,
+            "sign": sign,
+            "roi_f1_ppm": roi_f1_ppm,
+            "roi_f2_ppm": roi_f2_ppm,
+        },
+    }
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 
 def _condition_references(
     session: StudySession,
@@ -1145,18 +1209,25 @@ def _workflow_record(runs: Sequence[SweepRun], plan: SweepPlan) -> dict[str, Any
 
 
 def write_workflow_record(
-    session: StudySession, workflow_id: str, plan: SweepPlan
+    session: StudySession,
+    workflow_id: str,
+    plan: SweepPlan,
+    runs: Sequence[SweepRun] | None = None,
 ) -> dict[str, Any]:
     """写 ``study/workflows/<workflow_id>/workflow.json`` + 组合级日志。"""
     workflow_dir = session.workflows_dir / workflow_id
-    runs = [run for run in load_runs(session) if run.workflow_id == workflow_id]
-    record = _workflow_record(runs, plan)
+    current_runs = [
+        run
+        for run in (runs if runs is not None else load_runs(session))
+        if run.workflow_id == workflow_id
+    ]
+    record = _workflow_record(current_runs, plan)
     workflow_dir.mkdir(parents=True, exist_ok=True)
     (workflow_dir / "workflow.json").write_text(
         json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
     logs: list[str] = []
-    for run in sorted(runs, key=lambda item: str(item.condition)):
+    for run in sorted(current_runs, key=lambda item: str(item.condition)):
         log_path = Path(run.log_path) if run.log_path else None
         if log_path is not None and log_path.is_file():
             logs.append(f"===== {run.condition or run.dataset.get('key', '')} =====")
@@ -1244,9 +1315,24 @@ def run_sweep(
             experiment = experiments[target.key]
             run_dir = workflow_dir / target.token
             run_dir.mkdir(parents=True, exist_ok=True)
+            fingerprint = _resume_fingerprint(
+                combo=combo,
+                target=target,
+                reference=ref,
+                peaks=peaks,
+                window_pts=window_pts,
+                window_ppm=window_ppm,
+                sign=sign,
+                roi_f1_ppm=roi_f1_ppm,
+                roi_f2_ppm=roi_f2_ppm,
+            )
             if resume:
                 cached = _load_run(run_dir)
-                if cached is not None and cached.status in SUCCESS_STATUSES:
+                if (
+                    cached is not None
+                    and cached.status in SUCCESS_STATUSES
+                    and cached.resume_fingerprint == fingerprint
+                ):
                     results.append(cached)
                     _emit(
                         f"[{workflow_id}/{target.condition}] 已存在,跳过(断点续跑)"
@@ -1270,14 +1356,15 @@ def run_sweep(
                 sign=sign,
                 roi_f1_ppm=roi_f1_ppm,
                 roi_f2_ppm=roi_f2_ppm,
+                resume_fingerprint=fingerprint,
                 emit=_emit,
             )
             results.append(run)
             if on_run is not None:
                 on_run(run)
-            if stop_on_error:
+            if stop_on_error and run.status == STATUS_FAILED:
                 break
-        write_workflow_record(session, workflow_id, plan)
+        write_workflow_record(session, workflow_id, plan, runs=results)
         if stop_on_error and any(
             run.workflow_id == workflow_id and run.status == STATUS_FAILED
             for run in results
@@ -1303,6 +1390,7 @@ def _run_condition(
     sign: str,
     roi_f1_ppm: float | None,
     roi_f2_ppm: float | None,
+    resume_fingerprint: str,
     emit: Callable[[str], None],
 ) -> SweepRun:
     """跑单个 (workflow, 条件):处理 → 两种定位 → 两张峰表 + 完整记录。"""
@@ -1345,6 +1433,7 @@ def _run_condition(
         run_dir=str(run_dir),
         phase_locked=override is not None,
         versions=tool_versions(),
+        resume_fingerprint=resume_fingerprint,
         base_script={
             "path": reference.script_path,
             "sha256": reference.script_sha256,
@@ -1502,17 +1591,38 @@ def _run_condition(
     )
     warnings = _warnings_for(parabolic, method="parabolic", window=run.window)
     if int(getattr(experiment, "ndim", 2)) == 2:
-        gaussian = measure_peak_positions(
-            target_spectrum,
-            peak_rows,
-            axes=spectrum_axes,
-            window_pts=window_pts,
-            window_ppm=window_ppm,
-            sign=sign,
-            refine="gaussian",
-            roi_f1_ppm=roi_f1_ppm,
-            roi_f2_ppm=roi_f2_ppm,
-        )
+        try:
+            gaussian = measure_peak_positions(
+                target_spectrum,
+                peak_rows,
+                axes=spectrum_axes,
+                window_pts=window_pts,
+                window_ppm=window_ppm,
+                sign=sign,
+                refine="gaussian",
+                roi_f1_ppm=roi_f1_ppm,
+                roi_f2_ppm=roi_f2_ppm,
+            )
+        except Exception as exc:  # noqa: BLE001 - 单条件测量失败不中断整轮
+            run.status = STATUS_FAILED
+            run.message = f"Gaussian 峰位测量失败: {type(exc).__name__}: {exc}"
+            logs.append(run.message)
+            run.logs_tail = logs[-40:]
+            run.log_path = str(
+                _write_log(
+                    run_dir / "log.txt",
+                    header={
+                        "workflow_id": workflow_id,
+                        "condition": target.condition,
+                        "dataset": dataset_label,
+                        "status": run.status,
+                        "message": run.message,
+                    },
+                    logs=logs,
+                )
+            )
+            _write_run(run)
+            return run
         run.measurements_by_method["gaussian"] = list(gaussian)
         gaussian_rows = peak_table_rows(
             gaussian,
@@ -1630,7 +1740,11 @@ def load_runs(session: StudySession) -> list[SweepRun]:
     root = session.workflows_dir
     if not root.is_dir():
         return runs
+    plan = load_plan(session)
+    active = set(plan.workflow_ids()) if plan is not None else None
     for workflow_dir in sorted(path for path in root.iterdir() if path.is_dir()):
+        if active is not None and workflow_dir.name not in active:
+            continue
         for condition_dir in sorted(
             path for path in workflow_dir.iterdir() if path.is_dir()
         ):
@@ -1646,7 +1760,11 @@ def load_workflows(session: StudySession) -> list[dict[str, Any]]:
     root = session.workflows_dir
     if not root.is_dir():
         return records
+    plan = load_plan(session)
+    active = set(plan.workflow_ids()) if plan is not None else None
     for workflow_dir in sorted(path for path in root.iterdir() if path.is_dir()):
+        if active is not None and workflow_dir.name not in active:
+            continue
         path = workflow_dir / "workflow.json"
         if not path.is_file():
             continue

@@ -16,10 +16,14 @@
   (留档 `docs/tasks/archive/2026-09-13-csp-statistics-boundary.md`);
 - 新增 `nmrforge_api/peak_tables.py`;`docs/external-api/` 全面重写;
   符合性台账 `docs/reviews/2026-09-13-api-spec-compliance.md`;
-  测试 `tests/test_nmrforge_api.py` 重写(36 项,含边界守护);
-- 本地全量回归全绿、`ruff check .` 全绿;VM 全量 `1045 passed, 19 skipped`,
-  真机冒烟通过(uniform 4 组合 / NUS 2 组合 / A/B 两条件;σ/Δδ 助手检测到参数
-  确实生效);master = VM HEAD = `5467af0`。
+  测试 `tests/test_nmrforge_api.py` 扩充到 41 项(含边界守护);
+- 最新变更复审修复 7 项:断点续跑增加输入指纹并隔离活动计划外的陈旧 workflow;
+  条件目录 token 防碰撞;外部峰身份同步到全部条件;`stop_on_error` 只在失败时
+  停止;Gaussian 测量异常落成 failed 记录;非 2D Gaussian 回退显式
+  `fallback=true`;提交/验证文档口径校正;
+- 本轮本地 `1069 passed, 1 skipped`、`ruff check .` 全绿。既有 VM 全量
+  `1045 passed, 19 skipped` 与真机冒烟验证的是代码提交 `5467af0`;证据回填
+  提交为 `e4680af`;上述最新修复随本次变更提交，尚未在 VM 复验。
 
 ## 未发布(2026-09-13):工程约定与工作区清理
 - 记录强制原则(用户):**home 根目录不放测试**——测试产物进
