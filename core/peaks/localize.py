@@ -426,6 +426,30 @@ def write_localization_records(
     return target
 
 
+def trim_localization_records(peak_path: Path | str, keep: int) -> bool:
+    """峰表被裁剪(如 ``max_peaks``)后同步截断附件,保持行序对齐。
+
+    附件行序与峰表行序一致(都按 |Intensity| 降序),所以保留前 ``keep`` 行
+    即可;附件不存在/损坏返回 False(不抛异常)。
+    """
+    target = localization_records_path(peak_path)
+    if not target.is_file():
+        return False
+    try:
+        payload = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    peaks = payload.get("peaks") if isinstance(payload, dict) else None
+    if not isinstance(peaks, list) or len(peaks) <= int(keep):
+        return False
+    payload["peaks"] = peaks[: int(keep)]
+    target.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return True
+
+
 def read_localization_records(peak_path: Path | str) -> list[dict[str, Any]]:
     """读逐峰定位诊断;不存在/损坏返回空表(不抛异常)。"""
     target = localization_records_path(peak_path)
@@ -512,5 +536,6 @@ __all__ = [
     "ppm_from_point",
     "read_localization_records",
     "summarize_localization",
+    "trim_localization_records",
     "write_localization_records",
 ]

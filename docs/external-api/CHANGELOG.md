@@ -55,6 +55,14 @@
 - 默认仍为 `parabolic`,既有抛物线与峰检测逻辑零改动;高斯仅 2D,失败回退
   抛物线并记录 `requested_method`/`actual_method`/`fallback_reason`(不静默)。
 
+  真机验证(VM `0764707`,真实 NMRPipe,800 MHz HSQC,同类网格 4 组合 × 60 峰):
+  参考峰表 76 检出/60 保留 → 高斯成功 73、回退 3(`not_converged`,均是最弱峰);
+  候选谱测量 480 次 → `{gaussian: 222, parabolic: 18}`(回退原因
+  `sigma_at_bound` 12 / `not_converged` 6);两种算法的峰位差(同一批候选谱,
+  `spectrum_sha256` 一致)15N 中位 0.0030 ppm/max 0.217、1H 中位 0.00017/max 0.0082,
+  与「只改填零」的参数效应同量级——算法选择本身是需控制的不确定度来源。
+  详见 `docs/proposals/external-api/001-parameter-sweep-api.md` 附录 B。
+
 ## 0.1(2026-09-12)
 
 首个可用版本。公开面:
