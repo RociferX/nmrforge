@@ -50,6 +50,15 @@
 - σ/Δδ 下限、robustness 与统计推断的**结论**仍由下游独立分析程序从统一峰表
   计算。留档:`docs/tasks/archive/2026-09-13-csp-statistics-boundary.md`。
 
+**验证(2026-09-13)**
+
+- 本地全量 pytest 全绿、`ruff check .` 全绿;VM 全量 `1045 passed, 19 skipped`;
+- VM 真机(真实 NMRPipe + SMILE):uniform 4 组合(参考 1 脚本 + 2 峰表 76 峰;
+  4 workflow `success_with_warning`)、NUS 2 组合(实际 nsigma 3.0/7.0;
+  `success` + `success_with_warning`)、A/B 两条件(共享 `reference_peak_id`,
+  长表含两条件)全部通过;σ/Δδ 助手用于检测参数是否生效。证据见
+  `docs/reviews/2026-09-13-api-spec-compliance.md` 的「VM 真机证据」。
+
 **迁移**
 
 1. 旧研究根(`study/runs/s0001…`)不再被读取:重新 `plan_sweep` + `run_sweep`

@@ -17,7 +17,9 @@
 - 新增 `nmrforge_api/peak_tables.py`;`docs/external-api/` 全面重写;
   符合性台账 `docs/reviews/2026-09-13-api-spec-compliance.md`;
   测试 `tests/test_nmrforge_api.py` 重写(36 项,含边界守护);
-- 本地全量回归全绿、`ruff check .` 全绿(VM 真机回归见后续提交)。
+- 本地全量回归全绿、`ruff check .` 全绿;VM 全量 `1045 passed, 19 skipped`,
+  真机冒烟通过(uniform 4 组合 / NUS 2 组合 / A/B 两条件;σ/Δδ 助手检测到参数
+  确实生效);master = VM HEAD = `5467af0`。
 
 ## 未发布(2026-09-13):工程约定与工作区清理
 - 记录强制原则(用户):**home 根目录不放测试**——测试产物进
