@@ -51,7 +51,18 @@ def main(argv: list[str] | None = None) -> int:
         default='{"window.F1.off": [0.35, 0.45], "zero_fill": [1, 2]}',
         help="参数网格 JSON(点号键)",
     )
-    parser.add_argument("--window-pts", type=int, default=3)
+    parser.add_argument(
+        "--window-ppm",
+        type=float,
+        default=None,
+        help="峰位搜索窗口半径(ppm);缺省=1.5×该轴核素线宽折算 ppm",
+    )
+    parser.add_argument(
+        "--window-pts",
+        type=int,
+        default=None,
+        help="峰位搜索窗口半径(数据点;显式口径,跨分辨率不可比,不推荐)",
+    )
     parser.add_argument("--max-runs", type=int, default=8)
     parser.add_argument("--max-peaks", type=int, default=0)
     parser.add_argument("--fresh", action="store_true", help="先删除研究目录再跑")
@@ -76,6 +87,7 @@ def main(argv: list[str] | None = None) -> int:
         max_runs=args.max_runs,
         max_peaks=args.max_peaks,
         window_pts=args.window_pts,
+        window_ppm=args.window_ppm,
         progress=log,
     )
     payload = {
@@ -103,11 +115,22 @@ def main(argv: list[str] | None = None) -> int:
                 "status": run.status,
                 "measured": len(run.measurements),
                 "found": sum(1 for item in run.measurements if item.found),
+                "window_edge": sum(
+                    1 for item in run.measurements if item.window_edge
+                ),
                 "wall_s": run.wall_time_s,
+                "window": run.window,
             }
             for run in result.runs
         ],
         "summary": result.summary,
+        "measurement": (
+            json.loads(Path(result.records["measurement"]).read_text(
+                encoding="utf-8"
+            ))
+            if result.records.get("measurement")
+            else None
+        ),
         "records": result.records,
     }
     print("RESULT_JSON " + json.dumps(payload, ensure_ascii=False), flush=True)
