@@ -41,7 +41,12 @@ from nmrforge_api.peaks import (
     read_reference_peaks,
     window_points_by_axis,
 )
-from nmrforge_api.session import DatasetRef, StudySession, now_iso
+from nmrforge_api.session import (
+    DatasetRef,
+    StudySession,
+    now_iso,
+    open_study,
+)
 from workflow.pick_peaks import read_spectrum_axes
 
 # 运行期派生/仅 GUI 使用的键:不参与扫描(base 参数里必须剔掉,否则会改变
@@ -79,7 +84,10 @@ class ReferenceSpectrum:
     run_id: str = ""
     phase_route: str = ""
     ndim: int = 2
+    # 有效采样模式:满采样(含「标注 NUS 但实际满采样」)会降级为 uniform
     sampling: str = "uniform"
+    sampling_schedule: str = ""      # 来源:nuslist/params/full_sampling/…
+    sampling_evidence: list[str] = field(default_factory=list)
     spectrum_path: str = ""            # 项目 spectra/ 下的活动谱
     frozen_spectrum: str = ""          # 研究目录内的副本
     script_path: str = ""              # 研究目录内的参考脚本副本
@@ -129,6 +137,8 @@ class ReferenceSpectrum:
             "phase_route": self.phase_route,
             "ndim": int(self.ndim),
             "sampling": self.sampling,
+            "sampling_schedule": self.sampling_schedule,
+            "sampling_evidence": self.sampling_evidence,
             "spectrum_path": self.spectrum_path,
             "frozen_spectrum": self.frozen_spectrum,
             "script_path": self.script_path,
@@ -162,6 +172,10 @@ class ReferenceSpectrum:
             phase_route=str(data.get("phase_route", "")),
             ndim=int(data.get("ndim", 2) or 2),
             sampling=str(data.get("sampling", "uniform")),
+            sampling_schedule=str(data.get("sampling_schedule", "")),
+            sampling_evidence=[
+                str(x) for x in (data.get("sampling_evidence") or [])
+            ],
             spectrum_path=str(data.get("spectrum_path", "")),
             frozen_spectrum=str(data.get("frozen_spectrum", "")),
             script_path=str(data.get("script_path", "")),
@@ -232,6 +246,109 @@ class ReferenceSpectrum:
                 ),
             }
         return record
+
+
+@dataclass(frozen=True)
+class ReferenceHandle:
+    """组合模式**显式**指定的参考(研究根 + 条件,或直接给 reference.json)。
+
+    写法:
+
+    - ``"~/studies/s1"``                → 该研究主条件的参考;
+    - ``"~/studies/s1#B"``              → 该研究条件 B 的参考;
+    - ``".../study/reference/<key>/reference.json"`` → 直接给参考文件
+      (研究根由路径反推)。
+    """
+
+    root: str
+    condition: str = ""
+    reference_json: str = ""
+
+    def describe(self) -> str:
+        if self.reference_json:
+            return self.reference_json
+        if self.condition:
+            return f"{self.root}#{self.condition}"
+        return self.root
+
+
+def parse_reference_spec(spec: Any) -> ReferenceHandle:
+    """外部参考写法 → :class:`ReferenceHandle`(空/非法直接报错)。"""
+    if isinstance(spec, ReferenceHandle):
+        return spec
+    text = str(spec or "").strip()
+    if not text:
+        raise ReferenceError(
+            "组合模式必须显式指定参考:传研究根(<root> 或 <root>#<条件>)或 "
+            "reference.json 路径;参考由参考模式生成"
+            "(run_reference_study / CLI reference + peaks)"
+        )
+    path = Path(text).expanduser()
+    if path.is_file() and path.name == REFERENCE_FILENAME:
+        # <root>/study/reference/<key>/reference.json → 反推研究根
+        root = path.parent.parent.parent.parent
+        return ReferenceHandle(
+            root=str(root), condition="", reference_json=str(path)
+        )
+    condition = ""
+    if "#" in text:
+        text, _, condition = text.partition("#")
+        path = Path(text).expanduser()
+    if not str(path).strip():
+        raise ReferenceError(f"组合模式指定的参考写法不对: {spec!r}")
+    return ReferenceHandle(root=str(path), condition=condition.strip())
+
+
+def resolve_reference(
+    spec: Any, *, backend: Any | None = None
+) -> tuple[StudySession, DatasetRef, ReferenceSpectrum]:
+    """外部参考写法 → (会话, 条件数据集, 参考谱);参考未建好时明确报错。"""
+    handle = parse_reference_spec(spec)
+    root = Path(handle.root).expanduser().resolve()
+    if not (root / "project.json").is_file():
+        raise ReferenceError(
+            f"组合模式指定的参考不可用:{handle.describe()} "
+            "不是 NMRForge 研究根(缺 project.json)"
+        )
+    session = open_study(root, backend=backend)
+    if session.dataset is None:
+        raise ReferenceError(f"研究 {root} 里还没有数据:先跑参考模式导入条件数据")
+    target: DatasetRef | None = None
+    if handle.reference_json:
+        try:
+            payload = json.loads(
+                Path(handle.reference_json).read_text(encoding="utf-8")
+            )
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ReferenceError(f"参考文件读不动: {handle.reference_json} ({exc})")
+        key = str(payload.get("dataset_key", ""))
+        target = next((ref for ref in session.datasets if ref.key == key), None)
+        if target is None:
+            raise ReferenceError(
+                f"参考文件 {handle.reference_json} 指向的数据集 {key!r} "
+                f"不在研究 {root} 里"
+            )
+    elif handle.condition:
+        target = session.dataset_by_condition(handle.condition)
+        if target is None:
+            raise ReferenceError(
+                f"研究 {root} 里没有条件 {handle.condition!r}:"
+                f"可用条件 {session.conditions}"
+            )
+    else:
+        target = session.dataset
+    reference = load_reference(session, target)
+    if reference is None:
+        raise ReferenceError(
+            f"组合模式必须显式指定已建好的参考:{root}(条件 {target.condition})"
+            "还没有参考谱;先跑参考模式(run_reference_study / CLI reference + peaks)"
+        )
+    if not (reference.peak_table_path and Path(reference.peak_table_path).is_file()):
+        raise ReferenceError(
+            f"参考峰表缺失:{root}(条件 {target.condition});"
+            "先在参考模式里选峰(ensure_reference_peaks / CLI peaks)"
+        )
+    return session, target, reference
 
 
 def sanitize_sweep_params(params: dict[str, Any]) -> dict[str, Any]:
@@ -407,6 +524,9 @@ def build_reference(
     )
 
     experiment = read_experiment(manager, exp_id, data_id)
+    # 有效采样:采样检测已把「标注 NUS 但实际满采样」降级为 uniform
+    # (满采样走 uniform 常规 FT,不跑 SMILE;证据一并留档)。
+    sampling = experiment.sampling
     reference = ReferenceSpectrum(
         dataset_key=target_ref.key,
         exp_id=exp_id,
@@ -415,7 +535,9 @@ def build_reference(
         run_id=run.run_id,
         phase_route=str(effective.get("phase_route", "") or ""),
         ndim=int(experiment.ndim),
-        sampling=str(experiment.sampling.mode),
+        sampling=str(sampling.mode),
+        sampling_schedule=str(sampling.schedule_type or ""),
+        sampling_evidence=[str(item) for item in (sampling.evidence or [])],
         spectrum_path=str(spectrum_path),
         frozen_spectrum=str(frozen_spectrum),
         script_path=str(frozen_script),
@@ -794,6 +916,7 @@ def _keep_top_peaks(path: Path, keep: int) -> None:
 
 __all__ = [
     "GAUSSIAN_UNSUPPORTED_NDIM_REASON",
+    "ReferenceHandle",
     "REFERENCE_FILENAME",
     "REFERENCE_PEAK_LIST_FILENAME",
     "REFERENCE_TABLE_FILENAMES",
@@ -805,7 +928,9 @@ __all__ = [
     "load_reference",
     "load_references",
     "normalize_direct_phase",
+    "parse_reference_spec",
     "reference_phase",
+    "resolve_reference",
     "sanitize_sweep_params",
     "save_reference",
     "set_reference_peaks",

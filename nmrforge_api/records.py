@@ -63,6 +63,8 @@ def _reference_record(
         "condition": reference.condition,
         "ndim": reference.ndim,
         "sampling": reference.sampling,
+        "sampling_schedule": reference.sampling_schedule,
+        "sampling_evidence": reference.sampling_evidence,
         "run_id": reference.run_id,
         "phase_route": reference.phase_route,
         "script_path": reference.script_path,
@@ -164,6 +166,41 @@ def combined_peak_table(
     return rows
 
 
+def write_reference_records(
+    session: StudySession,
+    references: Mapping[str, ReferenceSpectrum] | Sequence[ReferenceSpectrum],
+    *,
+    reference_spec: str = "",
+) -> dict[str, str]:
+    """参考模式产物:``records/reference.json``。
+
+    记录每个条件的参考谱/参考脚本/两张参考峰表(路径 + SHA-256)、有效参数、采样
+    口径(含「实际满采样」证据)、选峰阈值与版本表;组合模式只在 manifest 里引用
+    这些哈希(参考由外部显式指定)。
+    """
+    out_dir = session.records_dir
+    out_dir.mkdir(parents=True, exist_ok=True)
+    refs = (
+        list(references.values())
+        if isinstance(references, Mapping)
+        else list(references)
+    )
+    payload = {
+        "api_version": "0.2",
+        "created": now_iso(),
+        "nmrforge_version": software_version(),
+        "tool_versions": tool_versions(),
+        "research_root": str(session.root),
+        "mode": "reference",
+        "reference_spec": reference_spec,
+        "boundary": BOUNDARY_STATEMENT,
+        "datasets": [ref.to_dict() for ref in session.datasets],
+        "references": [_reference_record(ref) for ref in refs],
+    }
+    return {"reference": str(_write_json(out_dir / "reference.json", payload))}
+
+
+
 def write_records(
     session: StudySession,
     *,
@@ -172,6 +209,7 @@ def write_records(
     plan: SweepPlan,
     runs: Sequence[SweepRun],
     peaks: Sequence[dict[str, Any]] | None = None,
+    reference_spec: str = "",
 ) -> dict[str, str]:
     """写出全部汇总产物,返回 {名称: 路径}。"""
     out_dir = session.records_dir
@@ -190,6 +228,8 @@ def write_records(
         "nmrforge_version": software_version(),
         "tool_versions": tool_versions(),
         "research_root": str(session.root),
+        "mode": "combination",
+        "reference_spec": str(reference_spec),
         "boundary": BOUNDARY_STATEMENT,
         "datasets": [ref.to_dict() for ref in session.datasets],
         "references": [_reference_record(ref) for ref in ref_list],
@@ -301,6 +341,7 @@ def _workflow_record_from_runs(
 __all__ = [
     "BOUNDARY_STATEMENT",
     "WINDOW_POLICY",
+    "write_reference_records",
     "combined_peak_table",
     "measurement_record",
     "write_records",

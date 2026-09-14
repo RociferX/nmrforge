@@ -1,5 +1,26 @@
 # 修改记录(历史条目)
 
+## 未发布(2026-09-14):对外接口拆成参考模式 / 组合模式
+- 新增 `run_reference_study()`(参考模式:参考谱 + 脚本 + 两张参考峰表,
+  写 `records/reference.json`;选峰阈值在此确定并锁定)与
+  `run_combination_study(reference, ...)`(组合模式:**必须显式指定参考**,
+  `<root>` / `<root>#<条件>` / `reference.json` 路径);
+- 组合模式不生成参考:参考或峰表缺失报 `ReferenceError` 并提示先跑参考模式;
+  记录 `manifest.mode="combination"` + `reference_spec`,每条 run 带参考哈希;
+- CLI `sweep` 新增必填 `--reference`;`run_parameter_study` 保留为一键便利入口;
+- 文档 02/03/04/06/README + API_CONTRACT §11.2 同步;测试 +3。
+
+## 未发布(2026-09-14):满采样(含标注 NUS)按 uniform 处理
+- 采样检测新增实际采样判定:`nuslist` 覆盖全格,或 2D `ser` 全格无零行 →
+  `sampling=uniform` + `schedule=full_sampling` + 证据;处理走常规 FT,不跑 SMILE;
+- 前后端共用 `core.data.nus_reader.scan_dense_2d`(backend
+  `_recover_dense_2d_nus` 改为调用它,日志文案不变);网格用 mode 无关的
+  `indirect_grid_2d`;
+- API 跟进:`ReferenceSpectrum.sampling_schedule` / `sampling_evidence`,
+  `run.json.parameters_resolved.sampling`,manifest 参考记录同步;
+- 测试:`tests/test_2d_nus_compat.py` 新增满采样/nuslist 全格/子集用例,
+  `tests/test_nmrforge_api.py` 新增「伪装成 NUS 的满采样走 uniform」端到端用例。
+
 ## 未发布(2026-09-14):选峰阈值(生成参考时可选,随后锁定)
 - 参考峰表选峰阈值(噪声 σ 倍数,缺省 35σ)在**生成参考时**可由外部指定:
   API `pick_reference_peaks`/`ensure_reference_peaks`/`run_parameter_study` 的

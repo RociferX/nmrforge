@@ -30,15 +30,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from nmrforge_api.errors import DatasetError, SensitivityError
-from nmrforge_api.records import write_records
+from nmrforge_api.errors import DatasetError
+from nmrforge_api.records import write_records, write_reference_records
 from nmrforge_api.reference import (
     ReferenceSpectrum,
     build_reference,
+    build_reference_peak_tables,
     ensure_reference_peaks,
     load_reference,
     load_references,
-    sanitize_sweep_params,
+    parse_reference_spec,
+    resolve_reference,
     set_reference_peaks,
 )
 from nmrforge_api.session import (
@@ -164,6 +166,222 @@ def _register_conditions(
         )
 
 
+@dataclass
+class ReferenceResult:
+    """参考模式结果:每个条件一份参考(参考谱 + 脚本 + 两张峰表)。"""
+
+    session: StudySession
+    references: dict[str, ReferenceSpectrum] = field(default_factory=dict)
+    records: dict[str, str] = field(default_factory=dict)
+
+    @property
+    def root(self) -> Path:
+        return self.session.root
+
+    @property
+    def conditions(self) -> list[str]:
+        return self.session.conditions
+
+    def reference(self, condition: str = "") -> ReferenceSpectrum | None:
+        """按条件取参考(缺省主条件)。"""
+        if condition:
+            dataset = self.session.dataset_by_condition(condition)
+            return self.references.get(dataset.key) if dataset else None
+        primary = self.session.dataset
+        return self.references.get(primary.key) if primary else None
+
+    @property
+    def peak_tables(self) -> dict[str, str]:
+        """主条件的两张参考峰表路径(parabolic / gaussian)。"""
+        reference = self.reference()
+        if reference is None:
+            return {}
+        return {
+            "parabolic": reference.peak_table_parabolic_path,
+            "gaussian": reference.peak_table_gaussian_path,
+        }
+
+
+def run_reference_study(
+    root: Path | str,
+    dataset: Path | str | None = None,
+    *,
+    datasets: Mapping[str, str] | Sequence[Any] | None = None,
+    name: str = "",
+    params: dict[str, Any] | None = None,
+    phase_route: str | None = None,
+    peaks: Path | str | None = None,
+    sigma_multiplier: float | None = None,
+    max_peaks: int = 0,
+    localization_method: str = "parabolic",
+    gaussian_roi_f1_ppm: float | None = None,
+    gaussian_roi_f2_ppm: float | None = None,
+    backend: Any | None = None,
+    write: bool = True,
+    progress: Callable[[str], None] | None = None,
+) -> ReferenceResult:
+    """**参考模式**:导入条件数据 → 自动优化参考谱/参考脚本 → 两张参考峰表。
+
+    只做参考,不跑任何参数组合。组合模式(:func:`run_combination_study`)必须
+    **显式引用**本模式建好的参考。选峰阈值 ``sigma_multiplier`` 在本模式指定,
+    随后与参考一起锁定(参考定了以后所有 workflow 只能沿用)。
+    """
+    session = open_study(root, name=name, backend=backend)
+    conditions = _resolve_conditions(datasets, dataset)
+    _register_conditions(session, conditions)
+    if not session.datasets:
+        raise DatasetError(
+            "研究里还没有数据集:首次运行请传 datasets=<{条件: 目录}> 或 "
+            "dataset=<Bruker 目录>"
+        )
+    references: dict[str, ReferenceSpectrum] = {}
+    for ref in session.datasets:
+        reference = load_reference(session, ref)
+        if reference is None:
+            reference = build_reference(
+                session,
+                ref,
+                params=params,
+                phase_route=phase_route,
+                progress=progress,
+            )
+        references[ref.key] = reference
+    # 峰身份与两张参考峰表:主条件先选峰,其余条件共享峰身份
+    for ref in session.datasets:
+        references[ref.key] = ensure_reference_peaks(
+            session,
+            references[ref.key],
+            sigma_multiplier=sigma_multiplier,
+            max_peaks=max_peaks,
+            localization_method=localization_method,
+            gaussian_roi_f1_ppm=gaussian_roi_f1_ppm,
+            gaussian_roi_f2_ppm=gaussian_roi_f2_ppm,
+        )
+    if peaks is not None:
+        # 可选:研究方自带的峰表(公开库/已指认),作为主条件的峰身份并重建两张表
+        primary = session.datasets[0]
+        target = session.reference_dir_for(primary) / "reference.list"
+        target.write_text(
+            Path(peaks).read_text(encoding="utf-8-sig"), encoding="utf-8"
+        )
+        primary_reference = set_reference_peaks(
+            session, target, references[primary.key], source="external"
+        )
+        references[primary.key] = build_reference_peak_tables(
+            session, primary_reference
+        )
+        # 非主条件:强制重新复制主条件的(新)身份表,保证峰身份跨条件一致
+        for ref in session.datasets[1:]:
+            references[ref.key] = ensure_reference_peaks(
+                session,
+                references[ref.key],
+                force=True,
+                sigma_multiplier=sigma_multiplier,
+                max_peaks=max_peaks,
+                localization_method=localization_method,
+                gaussian_roi_f1_ppm=gaussian_roi_f1_ppm,
+                gaussian_roi_f2_ppm=gaussian_roi_f2_ppm,
+            )
+    records: dict[str, str] = {}
+    if write:
+        records = write_reference_records(session, references)
+    primary_reference = references[session.datasets[0].key]
+    session.save_state(reference=primary_reference.to_dict(), records=records)
+    session.manager.save()
+    return ReferenceResult(session=session, references=references, records=records)
+
+
+def run_combination_study(
+    reference: Any,
+    *,
+    combos: Sequence[Mapping[str, Any]] | None = None,
+    axes: Mapping[str, Sequence[Any]] | None = None,
+    max_runs: int = DEFAULT_MAX_RUNS,
+    window_pts: int | None = None,
+    window_ppm: float | None = None,
+    sign: str = "abs",
+    roi_f1_ppm: float | None = None,
+    roi_f2_ppm: float | None = None,
+    resume: bool = True,
+    backend: Any | None = None,
+    write: bool = True,
+    progress: Callable[[str], None] | None = None,
+) -> StudyResult:
+    """**组合模式**:显式指定参考,按用户参数组合表跑 workflow(不生成参考)。
+
+    ``reference`` **必需**:研究根(``<root>`` 或 ``<root>#<条件>``)或
+    ``reference.json`` 路径。组合在该参考上执行:
+
+    - 参数基底 = 该参考运行的有效参数(相位锁定),组合表只覆盖它显式指定的键;
+    - 选峰阈值随参考锁定(与参考一致,不能在这里改);
+    - 指定了条件就只跑该条件;只给研究根则跑该研究的全部条件(各自已有参考);
+    - 候选谱与两张峰表写到 ``study/workflows/<workflow_id>/<条件>/``。
+    """
+    handle = parse_reference_spec(reference)
+    session, target, ref = resolve_reference(reference, backend=backend)
+    targets = (
+        [target]
+        if (handle.condition or handle.reference_json)
+        else list(session.datasets)
+    )
+    references: dict[str, ReferenceSpectrum] = {}
+    for item in targets:
+        if item.key == target.key:
+            references[item.key] = ref
+            continue
+        other = load_reference(session, item)
+        if other is None or not other.peak_table_path:
+            raise ReferenceError(
+                f"条件 {item.condition or item.key} 还没有可用的参考:"
+                "先跑参考模式(run_reference_study)把每个条件的参考建好"
+            )
+        references[item.key] = other
+    plan = plan_sweep(
+        ref,
+        axes=axes,
+        combos=combos,
+        max_runs=max_runs,
+        base_params=dict(ref.sweep_params),
+    )
+    runs = run_sweep(
+        session,
+        plan,
+        reference=ref,
+        datasets=targets,
+        window_pts=window_pts,
+        window_ppm=window_ppm,
+        sign=sign,
+        roi_f1_ppm=roi_f1_ppm,
+        roi_f2_ppm=roi_f2_ppm,
+        resume=resume,
+        progress=progress,
+    )
+    summary = _summary(plan, runs, references)
+    summary["reference_spec"] = handle.describe()
+    records: dict[str, str] = {}
+    if write:
+        records = write_records(
+            session,
+            references=references,
+            plan=plan,
+            runs=runs,
+            peaks=reference_peaks(session, ref),
+            reference_spec=handle.describe(),
+        )
+    workflows = load_workflows(session)
+    session.save_state(reference=ref.to_dict(), records=records)
+    session.manager.save()
+    return StudyResult(
+        session=session,
+        plan=plan,
+        references=references,
+        runs=runs,
+        workflows=workflows,
+        summary=summary,
+        records=records,
+    )
+
+
 def run_parameter_study(
     root: Path | str,
     dataset: Path | str | None = None,
@@ -191,133 +409,51 @@ def run_parameter_study(
     write: bool = True,
     progress: Callable[[str], None] | None = None,
 ) -> StudyResult:
-    """建/开研究 → 导入条件数据 → 每个条件建参考 → 参考峰表 → workflow → 记录。
+    """一步式便捷入口 = **参考模式 + 组合模式**(内部把参考显式传给组合模式)。
 
-    - 参数组合二选一(必须且只能给一个):``axes``(接口展开全因子)或
-      ``combos``(**用户给定的组合表**,原样按表序执行,接口不做设计决策);
-    - ``datasets`` 给多条件(``{"A": path, "B": path}``);同一 workflow 对全部
-      条件使用**同一份用户参数**,各条件各有一份参考(相位/噪声按该条件数据),
-      峰身份(``reference_peak_id``)全条件共享;
-    - 默认不要求外部峰表:参考谱与参考峰位都由 NMRForge 自动优化/自动选峰产生
-      (``peaks`` 只在研究方另有公开库/指认峰表时才传);
-    - 峰位搜索窗口 ``window_ppm``(物理半径,ppm)缺省按物理宽度自动;
-    - 每个 workflow × 条件产出:完整脚本、候选谱、parabolic 与 gaussian 两张
-      峰表、完整日志、版本与状态(success / success_with_warning / failed)。
+    2026-09-14 起两种模式已分开:参考由 :func:`run_reference_study` 生成、组合由
+    :func:`run_combination_study` 执行且**必须显式给参考**;本函数保留为一键便利
+    入口与向后兼容(内部先跑参考模式,再用 ``<root>#<主条件>`` 显式调用组合模式)。
     """
-    session = open_study(root, name=name, backend=backend)
-    try:
-        conditions = _resolve_conditions(datasets, dataset)
-        _register_conditions(session, conditions)
-        if not session.datasets:
-            raise DatasetError(
-                "研究里还没有数据集:首次运行请传 datasets=<{条件: 目录}> 或 "
-                "dataset=<Bruker 目录>"
-            )
-
-        primary = session.datasets[0]
-        # 参考:每个条件各建一份(缺则建;已有则复用)
-        references: dict[str, ReferenceSpectrum] = {}
-        for ref in session.datasets:
-            reference = load_reference(session, ref)
-            if reference is None:
-                reference = build_reference(
-                    session,
-                    ref,
-                    params=params,
-                    phase_route=phase_route,
-                    progress=progress,
-                )
-            references[ref.key] = reference
-        # 参考峰身份与两张参考峰表:主条件先选峰,其余条件共享峰身份
-        for ref in session.datasets:
-            references[ref.key] = ensure_reference_peaks(
-                session,
-                references[ref.key],
-                sigma_multiplier=sigma_multiplier,
-                max_peaks=max_peaks,
-                localization_method=localization_method,
-                gaussian_roi_f1_ppm=gaussian_roi_f1_ppm,
-                gaussian_roi_f2_ppm=gaussian_roi_f2_ppm,
-            )
-
-        primary_reference = references[primary.key]
-        if peaks is not None:
-            # 可选:研究方自带的峰表(公开库/已指认),登记到主条件参考并
-            # 重新生成两张参考峰表;非主条件沿用同一身份表。
-            target = session.reference_dir_for(primary) / "reference.list"
-            target.write_text(
-                Path(peaks).read_text(encoding="utf-8-sig"), encoding="utf-8"
-            )
-            primary_reference = set_reference_peaks(
-                session, target, primary_reference, source="external"
-            )
-            from nmrforge_api.reference import build_reference_peak_tables
-
-            primary_reference = build_reference_peak_tables(
-                session, primary_reference
-            )
-            references[primary.key] = primary_reference
-            for ref in session.datasets[1:]:
-                references[ref.key] = ensure_reference_peaks(
-                    session,
-                    references[ref.key],
-                    sigma_multiplier=sigma_multiplier,
-                    max_peaks=max_peaks,
-                    force=True,
-                    localization_method=localization_method,
-                    gaussian_roi_f1_ppm=gaussian_roi_f1_ppm,
-                    gaussian_roi_f2_ppm=gaussian_roi_f2_ppm,
-                )
-
-        # 扫描基底 = 主条件参考运行的有效参数(用户 params 只作局部覆盖)
-        base_params = dict(primary_reference.sweep_params)
-        if params:
-            base_params.update(sanitize_sweep_params(params))
-        plan = plan_sweep(
-            primary_reference,
-            axes=axes,
-            combos=combos,
-            max_runs=max_runs,
-            base_params=base_params,
-        )
-        runs = run_sweep(
-            session,
-            plan,
-            reference=references[primary.key],
-            window_pts=window_pts,
-            window_ppm=window_ppm,
-            sign=sign,
-            roi_f1_ppm=roi_f1_ppm,
-            roi_f2_ppm=roi_f2_ppm,
-            resume=resume,
-            progress=progress,
-        )
-        summary = _summary(plan, runs, references)
-        records: dict[str, str] = {}
-        if write:
-            records = write_records(
-                session,
-                references=references,
-                plan=plan,
-                runs=runs,
-                peaks=reference_peaks(session, primary_reference),
-            )
-        workflows = load_workflows(session)
-        session.save_state(reference=primary_reference.to_dict(), records=records)
-        # 项目文件落盘:导入的数据集、fid/活动谱与运行记录在后续进程/会话可见
-        session.manager.save()
-    except SensitivityError:
-        raise
-    return StudyResult(
-        session=session,
-        plan=plan,
-        references=references,
-        runs=runs,
-        workflows=workflows,
-        summary=summary,
-        records=records,
+    reference_result = run_reference_study(
+        root,
+        dataset,
+        datasets=datasets,
+        name=name,
+        params=params,
+        phase_route=phase_route,
+        peaks=peaks,
+        sigma_multiplier=sigma_multiplier,
+        max_peaks=max_peaks,
+        localization_method=localization_method,
+        gaussian_roi_f1_ppm=gaussian_roi_f1_ppm,
+        gaussian_roi_f2_ppm=gaussian_roi_f2_ppm,
+        backend=backend,
+        write=write,
+        progress=progress,
     )
-
+    # 组合模式:显式给参考(研究根);只给研究根 → 跑该研究的全部条件
+    spec = str(reference_result.session.root)
+    result = run_combination_study(
+        spec,
+        combos=combos,
+        axes=axes,
+        max_runs=max_runs,
+        window_pts=window_pts,
+        window_ppm=window_ppm,
+        sign=sign,
+        roi_f1_ppm=roi_f1_ppm,
+        roi_f2_ppm=roi_f2_ppm,
+        resume=resume,
+        backend=backend,
+        write=write,
+        progress=progress,
+    )
+    result.references = reference_result.references
+    merged = dict(reference_result.records)
+    merged.update(result.records)
+    result.records = merged
+    return result
 
 def _summary(
     plan: SweepPlan,
@@ -411,9 +547,12 @@ __all__ = [
     "STATUS_SUCCESS",
     "STATUS_WARNING",
     "DatasetRef",
+    "ReferenceResult",
     "StudyResult",
     "copy_peak_table",
     "load_references",
     "reference_peaks",
+    "run_combination_study",
     "run_parameter_study",
+    "run_reference_study",
 ]

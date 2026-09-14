@@ -1,30 +1,43 @@
 # 02 · 快速上手(v0.2)
 
-## 1. 一步跑完(推荐)
+## 1. 两个模式(2026-09-14 起)
+
+接口把工作拆成两个模式:**参考模式**(生成参考)与**组合模式**(按参数组合跑
+处理),组合模式**必须显式指定参考**。
 
 ```python
-from nmrforge_api import run_parameter_study
+from nmrforge_api import run_reference_study, run_combination_study
 
-result = run_parameter_study(
-    "~/studies/hsqc_params",                 # 研究根(可复用/断点续跑)
-    datasets={"A": "~/data/bmr12345/1"},     # 条件 A(原始 Bruker 目录)
-    combos=[                                  # 用户参数组合表(原样执行)
+# 1) 参考模式:导入数据 + 自动优化参考谱/脚本 + 两张参考峰表
+reference = run_reference_study(
+    "~/studies/hsqc_params",              # 研究根(可复用/断点续跑)
+    datasets={"A": "~/data/bmr12345/1"},  # 条件 A(原始 Bruker 目录)
+    sigma_multiplier=25,                   # 选峰阈值:只在参考模式指定
+)
+
+# 2) 组合模式:显式给参考(这里用研究根 = 主条件参考)
+result = run_combination_study(
+    "~/studies/hsqc_params",              # 或 ".../study/reference/<key>/reference.json"
+    combos=[                               # 用户参数组合表(原样执行)
         {"zero_fill": 1},
         {"zero_fill": 2},
         {"zero_fill": 1, "window.F1.off": 0.45},
     ],
 )
 
-print(result.summary["workflow_ids"])         # ['W0001', 'W0002', 'W0003']
-print(result.summary["status_counts"])        # {'n_runs': 3, 'success': 3, ...}
+print(result.summary["workflow_ids"])      # ['W0001', 'W0002', 'W0003']
+print(result.summary["reference_spec"])    # 显式指定的参考
 for run in result.runs:
     print(run.workflow_id, run.condition, run.status,
           run.peak_table_path("parabolic"), run.peak_table_path("gaussian"))
 ```
 
-第一次运行会:导入数据 → 自动优化出参考谱与参考脚本 → 在参考谱上自动选峰并
-写两张参考峰表 → 对每个组合跑处理 + 两种定位 → 写 `study/records/` 汇总。
-不需要外部峰表;`peaks=<外部峰表>` 只在研究方另有公开库/已指认峰表时才用。
+- 参考模式只建参考(1 个脚本 + 2 张峰表),不跑任何组合;
+- 组合模式不生成参考:参数基底取参考的有效参数,组合表只覆盖它显式指定的键;
+  参考不存在或峰表缺失 → `ReferenceError`(提示先跑参考模式);
+- `run_parameter_study(...)` 仍是一键便利入口(内部 = 参考模式 + 用研究根显式
+  调用组合模式),快速试用与向后兼容用;
+- 不需要外部峰表;`peaks=<外部峰表>` 只在研究方另有公开库/已指认峰表时才用。
 
 ## 2. 两条件(A/B)同参数
 

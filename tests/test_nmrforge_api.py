@@ -43,7 +43,9 @@ from nmrforge_api import (
     open_study,
     plan_sweep,
     read_peak_table,
+    run_combination_study,
     run_parameter_study,
+    run_reference_study,
     run_sweep,
     window_points_by_axis,
 )
@@ -1284,7 +1286,21 @@ def test_cli_status_and_report(
     assert cli_main(["report", "--study", str(root)]) == 0
     report = json.loads(capsys.readouterr().out)
     assert report["status"]["n_runs"] == 1
-    assert cli_main(["sweep", "--study", str(root), "--grid", "missing.yaml"]) == 2
+    # 组合模式必须显式给参考:--reference 必填
+    assert (
+        cli_main(
+            [
+                "sweep",
+                "--study",
+                str(root),
+                "--reference",
+                str(root),
+                "--grid",
+                "missing.yaml",
+            ]
+        )
+        == 2
+    )
 
 
 def test_api_does_not_import_qt() -> None:
@@ -1572,3 +1588,133 @@ def test_workflow_records_reference_locked_threshold(
         ]
         is True
     )
+
+
+def _write_bruker_full_sampling_as_nus(tmp_path: Path) -> Path:
+    """Bruker 2D 数据:标注 NUS(NusAMOUNT=25)但 ser 全格无零行 = 实际满采样。"""
+    ds = tmp_path / "full_as_nus"
+    ds.mkdir(parents=True, exist_ok=True)
+    x_n, td_rows = 64, 16            # FnMODE=5 → 复点网格 8,声明全格 16 行
+    (ds / "acqus").write_text(
+        f"##$TD= {x_n}\n##$FnMODE= 0\n##$NusAMOUNT= 25\n##$NusTD= 0\n"
+        "##$DTYPE= 0\n",
+        encoding="utf-8",
+    )
+    (ds / "acqu2s").write_text(
+        f"##$TD= {td_rows}\n##$FnMODE= 5\n##$NusTD= {td_rows}\n##$NUC1= <15N>\n",
+        encoding="utf-8",
+    )
+    data = np.full((td_rows, x_n), 5.0, dtype="<i4")
+    data.tofile(ds / "ser")
+    return ds
+
+
+def test_disguised_full_sampling_is_processed_as_uniform(tmp_path: Path) -> None:
+    """标注 NUS 但实际满采样 → API 按 uniform 处理,并留档有效采样(2026-09-14)。"""
+    dataset = _write_bruker_full_sampling_as_nus(tmp_path)
+    backend = _FakeSweepBackend()
+    result = run_parameter_study(
+        tmp_path / "fs_study",
+        dataset,
+        combos=[{"zero_fill": 1}],
+        params={"phase_route": "none"},
+        backend=backend,
+    )
+    reference = result.reference
+    assert reference is not None
+    assert reference.sampling == "uniform"
+    assert reference.sampling_schedule == "full_sampling"
+    assert any("满采样" in line for line in reference.sampling_evidence)
+    # 全程走 uniform:候选谱由 process() 产出,没有 SMILE 重建调用
+    assert backend.process_calls
+    assert not backend.reconstruct_calls
+    run = result.runs[0]
+    mapping = run.parameters_resolved["sampling"]
+    assert mapping["effective"] == "uniform"
+    assert mapping["route"] == "process"
+    assert mapping["schedule"] == "full_sampling"
+    assert any("满采样" in line for line in mapping["evidence"])
+    payload = json.loads(Path(run.run_dir, "run.json").read_text(encoding="utf-8"))
+    assert payload["parameters_resolved"]["sampling"]["effective"] == "uniform"
+    manifest = json.loads(Path(result.records["manifest"]).read_text(encoding="utf-8"))
+    assert manifest["references"][0]["sampling"] == "uniform"
+    assert manifest["references"][0]["sampling_schedule"] == "full_sampling"
+
+
+def test_combination_mode_requires_explicit_reference(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """组合模式必须显式指定参考:空参考、未建参考都明确报错(不隐式兜底)。"""
+    with pytest.raises(ReferenceError, match="显式指定参考"):
+        run_combination_study("", combos=[{"zero_fill": 1}])
+    root = tmp_path / "no_reference"
+    backend = _FakeSweepBackend()
+    session = open_study(root, backend=backend)
+    add_dataset(session, bruker_dir / "hsqc_2d")
+    with pytest.raises(ReferenceError, match="参考模式"):
+        run_combination_study(str(root), combos=[{"zero_fill": 1}])
+
+
+def test_reference_mode_then_combination_mode_with_explicit_reference(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """参考模式只建参考;组合模式显式给参考才跑 workflow,且不重建参考。"""
+    root = tmp_path / "two_modes"
+    backend = _FakeSweepBackend()
+    reference_result = run_reference_study(
+        root, bruker_dir / "hsqc_2d", backend=backend
+    )
+    assert reference_result.conditions == ["A"]
+    reference = reference_result.reference()
+    assert reference is not None
+    assert Path(reference.peak_table_parabolic_path).is_file()
+    assert Path(reference.peak_table_gaussian_path).is_file()
+    assert Path(reference_result.records["reference"]).is_file()
+    frozen_script = reference.script_sha256
+    frozen_peaks = reference.peak_table_sha256
+
+    def _picks() -> int:
+        return sum(
+            1
+            for run in reference_result.session.manager.project.workflow_runs
+            if run.workflow_ref == "pick_peaks"
+        )
+
+    picks = _picks()
+    result = run_combination_study(
+        f"{root}#A", combos=[{"zero_fill": 1}], backend=backend
+    )
+    assert [run.workflow_id for run in result.runs] == ["W0001"]
+    assert result.summary["reference_spec"] == f"{root}#A"
+    manifest = json.loads(Path(result.records["manifest"]).read_text(encoding="utf-8"))
+    assert manifest["mode"] == "combination"
+    assert manifest["reference_spec"] == f"{root}#A"
+    # 组合模式不重建参考(选峰与参考哈希都不变)
+    assert _picks() == picks
+    after = load_reference(result.session, result.session.dataset)
+    assert after is not None
+    assert after.script_sha256 == frozen_script
+    assert after.peak_table_sha256 == frozen_peaks
+    # 参考也可用 reference.json 路径显式指定
+    spec = str(Path(reference.peak_table_path).parent / "reference.json")
+    again = run_combination_study(spec, combos=[{"zero_fill": 1}], backend=backend)
+    assert again.summary["reference_spec"] == spec
+
+
+def test_reference_mode_reports_both_peak_tables(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """参考模式产物:1 脚本 + 2 张参考峰表,并写 records/reference.json。"""
+    result = run_reference_study(
+        tmp_path / "reference_mode",
+        bruker_dir / "hsqc_2d",
+        backend=_FakeSweepBackend(),
+    )
+    reference = result.reference()
+    assert reference is not None
+    tables = result.peak_tables
+    assert Path(tables["parabolic"]).is_file() and Path(tables["gaussian"]).is_file()
+    payload = json.loads(Path(result.records["reference"]).read_text(encoding="utf-8"))
+    assert payload["mode"] == "reference"
+    assert payload["references"][0]["peak_tables"]["parabolic"]["path"]
+    assert payload["references"][0]["sampling"] == "uniform"

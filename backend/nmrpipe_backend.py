@@ -370,94 +370,59 @@ class NMRPipeBackend:
         - 行数 > 声明网格 / 读不出参数 → 元数据与文件不一致 → 返回 None。
         ser 缺失时回退用已转换的 fid(同样保留全格行)。
         """
-        from backend.script_generator import _fnmode, _mult_for, effective_td
-        from core.data.bruker_dtype import UnknownBrukerDtype, sample_dtype
+        from core.data.nus_reader import indirect_grid_2d, scan_dense_2d
 
         acqus = (experiment.acquisition_parameters or {}).get("acqus", {})
-        try:
-            # ser 元素类型由 DTYPE/BYTORDA 决定(int32/float64/float32),不能写死
-            dt = sample_dtype(acqus)
-        except UnknownBrukerDtype as exc:
-            logs.append(f"2D NUS 判定:{exc}")
-            return None
-        item_bytes = int(dt.itemsize)
-
-        td = effective_td(experiment)  # 2D:[直接维, 间接维复点网格]
-        grid_complex = max(1, int(td[1])) if len(td) > 1 else 0
-        mult = _mult_for(_fnmode(experiment, "F1"))
-        direct = next(
-            (d for d in experiment.dimensions if d.role.name.startswith("DIRECT")),
-            None,
-        )
-        x_n = int(direct.td) if direct is not None else 0
+        # 注意:不能再用 effective_td —— 满采样数据读入时已降级为 uniform,
+        # effective_td 只在 mode=NUS 时折算复点;这里用 mode 无关的网格。
+        grid_complex, mult, x_n = indirect_grid_2d(experiment)
         rows_declared = mult * grid_complex
         if grid_complex <= 0 or mult <= 0 or x_n <= 0:
-            logs.append("2D NUS 判定:参数不足(直接维 TD/间接维网格),无法判断密集模型")
+            logs.append(
+                "2D NUS 判定:网格参数(直接维 TD/间接维网格)非法,无法判断密集模型"
+            )
             return None
-
-        import numpy as np
-
-        src = Path(raw_dir) / "ser"
-        if src.is_file():
-            size = src.stat().st_size
-            per_row = item_bytes * x_n
-            if size % per_row:
-                logs.append(
-                    f"2D NUS 判定:ser 大小 {size} 不是「直接维 {x_n} × {item_bytes} 字节"
-                    f"({dt.str[1:]})" + "」的整数倍,无法判断"
-                )
-                return None
-            rows = size // per_row
-            if rows < rows_declared:
-                logs.append(
-                    f"2D NUS 判定:ser 只有 {rows} 行 < 声明网格 {rows_declared} 行 → "
-                    "稀疏文件(采样位置不可知),需要 nuslist 采样表"
-                )
-                return None
-            if rows > rows_declared:
-                logs.append(
-                    f"2D NUS 判定:ser {rows} 行 > 声明网格 {rows_declared} 行 → "
-                    "元数据与文件不一致,无法判断"
-                )
-                return None
-            table = np.fromfile(src, dtype=dt).reshape(rows, x_n)
-        elif fid_file is not None and Path(fid_file).is_file():
-            import nmrglue as ng
-
-            _dic, data = ng.pipe.read(str(fid_file))
-            table = np.asarray(data)
-            if table.ndim < 2:
-                logs.append("2D NUS 判定:已转换 fid 不是二维,无法判断密集模型")
-                return None
-            rows = int(table.shape[0])
-            if rows != rows_declared:
-                logs.append(
-                    f"2D NUS 判定:fid {rows} 行 != 声明网格 {rows_declared} 行,无法判断"
-                )
-                return None
-        else:
+        scan = scan_dense_2d(
+            raw_dir,
+            acqus=acqus,
+            grid_complex=grid_complex,
+            mult=mult,
+            direct_points=x_n,
+            fid_file=fid_file,
+        )
+        kind = str(scan["kind"])
+        rows = int(scan["rows"])
+        if kind in ("bad_layout", "unknown_dtype"):
+            logs.append(f"2D NUS 判定:{scan['detail']}")
+            return None
+        if kind == "missing":
             logs.append("2D NUS 判定:既没有 ser 也没有已转换 fid,无法判断密集模型")
             return None
-
-        energies = np.abs(table).sum(axis=1)
-        points: list[int] = []
-        for k in range(grid_complex):
-            lo, hi = mult * k, mult * k + mult
-            if lo >= rows:
-                break
-            if any(float(energies[i]) > 0.0 for i in range(lo, min(hi, rows))):
-                points.append(k)
-        if not points:
+        if kind == "sparse":
+            logs.append(
+                f"2D NUS 判定:{scan['source']} 只有 {rows} 行 < 声明网格 "
+                f"{rows_declared} 行 → 稀疏文件(采样位置不可知),需要 nuslist 采样表"
+            )
+            return None
+        if kind == "mismatch":
+            logs.append(
+                f"2D NUS 判定:{scan['source']} {rows} 行 != 声明网格 {rows_declared} 行 → "
+                "元数据与文件不一致,无法判断"
+            )
+            return None
+        if kind == "all_zero":
             logs.append("2D NUS 判定:全格数据全为零,无法恢复采样点")
             return None
-        if len(points) == grid_complex:
+        points = [int(point) for point in scan["points"]]
+        if kind == "full":
             logs.append(
                 f"2D NUS 判定:全格 {rows} 行且无零行(NusAMOUNT 标注 NUS,但数据是满采样)"
                 f" → 按满采样表重建({grid_complex} 复点)"
             )
         else:
             logs.append(
-                f"2D NUS 判定:密集模型(全格 {rows}/{rows_declared} 行,{dt.str[1:]}),从零模式恢复"
+                f"2D NUS 判定:密集模型(全格 {rows}/{rows_declared} 行,"
+                f"{scan['dtype']}),从零模式恢复"
                 f"采样点 {len(points)}/{grid_complex} 复点"
                 f"({100.0 * len(points) / grid_complex:.1f}%)"
             )

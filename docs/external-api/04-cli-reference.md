@@ -44,17 +44,25 @@ python -m nmrforge_api peaks --study ~/studies/s1 --localization gaussian \
 指定 = 生成参考时选阈值;参考已冻结后再指定不同阈值会被拒绝(退出码 2,
 报错说明「阈值已锁定在参考」),因为后续参数扰动只能沿用参考的阈值。
 
-## sweep(= workflows)— 批量执行参数组合
+## sweep(= workflows)— 组合模式:按参数组合表批量执行
+
+**`--reference` 必填**(组合模式必须显式指定参考):
 
 ```bash
-python -m nmrforge_api sweep --study ~/studies/s1 --combos design.csv
-python -m nmrforge_api sweep --study ~/studies/s1 --grid grid.yaml
-python -m nmrforge_api sweep --study ~/studies/s1 --combos design.csv \
-    --window-ppm 0.5 --no-resume
+python -m nmrforge_api sweep --study ~/studies/s1 \
+    --reference ~/studies/s1 --combos design.csv
+python -m nmrforge_api sweep --study ~/studies/s1 \
+    --reference ~/studies/s1#B --grid grid.yaml
+python -m nmrforge_api sweep --study ~/studies/s1 \
+    --reference ~/studies/s1/study/reference/exp_001_d_001/reference.json \
+    --combos design.csv --window-ppm 0.5 --no-resume
 ```
+
+参考模式 = `reference`(参考谱/脚本)+ `peaks`(两张参考峰表)两个命令;参考不存在时 `sweep` 会报错并提示先跑这两个命令。
 
 | 选项 | 含义 |
 | --- | --- |
+| `--reference` | **必填**:参考写法(`<研究根>` / `<研究根>#<条件>` / `reference.json`) |
 | `--combos` | **用户参数组合表**(CSV/TSV/YAML/JSON,一行一个组合,原样按序执行) |
 | `--grid` | 各轴候选值(YAML/JSON 的 `axes:`,接口展开全因子) |
 | `--max-runs` | 组合数上限(缺省 256) |

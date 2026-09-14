@@ -151,6 +151,61 @@ write_records(session, *, reference=None, references=None, plan, runs,
 `runs.json`、`workflows.json`、`measurement.json`、两张长表
 `peak_table_{parabolic,gaussian}.csv`。
 
+## 3.9 两种模式:参考模式 / 组合模式(2026-09-14)
+
+接口把「生成参考」和「按参数组合跑处理」拆成**两个模式**,组合模式必须由外部
+**显式指定参考**。
+
+### 参考模式
+
+```python
+run_reference_study(root, datasets={"A": "~/data/a"},
+                    params=None, phase_route=None, peaks=None,
+                    sigma_multiplier=25,              # 选峰阈值(仅此模式可定)
+                    max_peaks=0, localization_method="parabolic",
+                    gaussian_roi_f1_ppm=None, gaussian_roi_f2_ppm=None,
+                    backend=None, write=True, progress=None) -> ReferenceResult
+```
+
+- 导入条件数据(可选)→ 自动优化参考谱与参考脚本 → 两张参考峰表;不做任何参数
+  组合;
+- 选峰阈值、参考峰表(外部峰表)、localization 都在这阶段确定,之后**锁定**;
+- 产物:`study/reference/<key>/`(脚本/谱/两张峰表)+ `study/records/reference.json`;
+- `ReferenceResult`:`session` / `references`(key → `ReferenceSpectrum`)、
+  `conditions`、`reference(condition="")`、`peak_tables`、`records`。
+
+### 组合模式
+
+```python
+run_combination_study(reference,                  # ← 必填:显式指定参考
+                      combos=[{"zero_fill": 1}],  # 或 axes=...
+                      max_runs=256, window_pts=None, window_ppm=None,
+                      sign="abs", roi_f1_ppm=None, roi_f2_ppm=None,
+                      resume=True, backend=None, write=True,
+                      progress=None) -> StudyResult
+```
+
+`reference` 的写法(字符串/Path,或 `ReferenceHandle`):
+
+| 写法 | 含义 |
+| --- | --- |
+| `"~/studies/s1"` | 该研究**主条件**的参考;组合跑该研究的全部条件 |
+| `"~/studies/s1#B"` | 该研究**条件 B** 的参考;只跑条件 B |
+| `"~/studies/s1/study/reference/<key>/reference.json"` | 直接给参考文件(研究根由路径反推;只跑该参考对应条件) |
+
+- 组合**不生成参考**:参数基底 = 该参考的有效参数(相位锁定),组合表只覆盖它
+  显式指定的键;选峰阈值随参考锁定;
+- 参考不存在/峰表缺失 → `ReferenceError`,错误信息指明先跑参考模式;
+- 每条运行记录写明参考:`run.json.base_script`(脚本/谱哈希)、
+  `parameters_resolved.reference`(参考峰表哈希等),`manifest.json` 记
+  `mode="combination"` 与 `reference_spec`;
+- 一步式便利入口 `run_parameter_study(...)` 仍然可用:内部先跑参考模式,再用
+  `str(root)` 显式调用组合模式(向后兼容)。
+
+辅助函数:`parse_reference_spec(spec) -> ReferenceHandle`、
+`resolve_reference(spec, backend=None) -> (session, DatasetRef, ReferenceSpectrum)`。
+
+
 ## 3.7 错误类型
 
 | 异常 | 何时 |

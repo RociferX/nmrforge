@@ -26,7 +26,8 @@
             log.txt               该条件的完整运行日志(不是尾部)
             run.json              该条件的完整溯源记录
     records/
-        manifest.json             数据/参考/计划/峰身份/版本/边界声明
+        reference.json            参考模式产物(参考谱/脚本/两张峰表/采样/阈值)
+        manifest.json             组合模式产物(数据/参考/计划/峰身份/版本)
         sweep_plan.json           workflow 计划(含 workflow_ids)
         runs.json                 逐 (workflow, 条件) 扁平记录
         workflows.json            逐 workflow 汇总记录
@@ -55,6 +56,10 @@ fit_success, FWHM_H, FWHM_N, fit_rmse, boundary_hit
   的 FWHM,ppm)、`fit_rmse`(残差 RMS)、`boundary_hit`(中心/宽度撞拟合边界);
   `fallback`/`fallback_reason` 记录失败回退(禁止静默);
 - `condition`/`dataset` 便于下游把 A/B 表按条件分组;`assignment` 取自参考峰表;
+- 采样口径留档:`reference.json` 的 `sampling`(有效模式)、`sampling_schedule`
+  (`nuslist` / `params` / `full_sampling`)、`sampling_evidence`;每条 `run.json`
+  的 `parameters_resolved.sampling`(`effective` / `schedule` / `route` /
+  `evidence`)说明该 workflow 走的是 `process()` 还是 `reconstruct_nus()`;
 - 选峰阈值留档(参考定义的一部分,后续 workflow 只能沿用):
   `reference.json.peak_params` 的 `sigma_multiplier`(生成参考时选定的值)、
   `previous_sigma_multiplier`(force 重建时的上一版)、
@@ -121,7 +126,8 @@ fit_success, FWHM_H, FWHM_N, fit_rmse, boundary_hit
 
 ## 6.5 `records/` 与边界
 
-`manifest.json` 汇总:数据条件、逐条件参考(脚本/谱/两张峰表哈希)、计划与网格
+`manifest.json`(组合模式)汇总:数据条件、逐条件参考(脚本/谱/两张峰表哈希)、
+显式指定的参考写法(`reference_spec`)与 `mode="combination"`、计划与网格
 哈希、峰身份方案、workflow 状态计数、软件/依赖/外部工具版本,以及**边界声明**
 (`manifest["boundary"]`:软件只执行处理与留档;CSP/robustness/统计由下游独立
 分析程序完成)。

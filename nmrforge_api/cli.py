@@ -34,15 +34,16 @@ from nmrforge_api.reference import (
     set_reference_peaks,
 )
 from nmrforge_api.session import add_dataset, open_study
-from nmrforge_api.study import reference_peaks
+from nmrforge_api.study import (
+    reference_peaks,
+    run_combination_study,
+)
 from nmrforge_api.sweep import (
     DEFAULT_MAX_RUNS,
     load_combo_table,
     load_plan,
     load_runs,
     load_workflows,
-    plan_sweep,
-    run_sweep,
     workflow_summary,
 )
 
@@ -185,26 +186,27 @@ def cmd_peaks(args: argparse.Namespace) -> int:
 
 
 def cmd_sweep(args: argparse.Namespace) -> int:
-    session = open_study(args.study, name=args.name)
-    targets = _selected_datasets(session, args.condition)
-    references = {}
-    for target in targets:
-        reference = load_reference(session, target)
-        if reference is None:
-            raise SensitivityError(f"条件 {target.condition!r} 还没有参考谱")
-        references[target.key] = reference
-    primary = references[targets[0].key]
+    """**组合模式**:显式指定参考,按参数组合表跑 workflow(不生成参考)。"""
     if (args.grid is None) == (args.combos is None):
         raise SensitivityError(
             "必须且只能给一个:--grid(各轴候选值,接口展开全因子)或 "
             "--combos(外部给定的组合表:正交/部分因子/LHS…)"
         )
+    spec = str(args.reference)
+    if args.condition and "#" not in spec and not spec.endswith("reference.json"):
+        spec = f"{spec}#{args.condition}"
     if args.combos:
         combos = load_combo_table(args.combos)
-        plan = plan_sweep(
-            primary,
+        result = run_combination_study(
+            spec,
             combos=combos,
             max_runs=int(args.max_runs or DEFAULT_MAX_RUNS),
+            window_pts=args.window_pts,
+            window_ppm=args.window_ppm,
+            roi_f1_ppm=args.gaussian_roi_f1_ppm,
+            roi_f2_ppm=args.gaussian_roi_f2_ppm,
+            resume=not args.no_resume,
+            progress=print,
         )
     else:
         config = _load_mapping(args.grid)
@@ -212,40 +214,25 @@ def cmd_sweep(args: argparse.Namespace) -> int:
         if not isinstance(axes, dict) or not axes:
             raise SensitivityError(f"网格文件缺少 axes: {args.grid}")
         max_runs = int(config.get("max_runs", args.max_runs or DEFAULT_MAX_RUNS))
-        base = config.get("base_params")
-        plan = plan_sweep(
-            primary,
+        result = run_combination_study(
+            spec,
             axes=axes,
             max_runs=max_runs,
-            base_params=base if isinstance(base, dict) else None,
+            window_pts=args.window_pts,
+            window_ppm=args.window_ppm,
+            roi_f1_ppm=args.gaussian_roi_f1_ppm,
+            roi_f2_ppm=args.gaussian_roi_f2_ppm,
+            resume=not args.no_resume,
+            progress=print,
         )
-    runs = run_sweep(
-        session,
-        plan,
-        reference=primary,
-        datasets=targets,
-        window_pts=args.window_pts,
-        window_ppm=args.window_ppm,
-        roi_f1_ppm=args.gaussian_roi_f1_ppm,
-        roi_f2_ppm=args.gaussian_roi_f2_ppm,
-        resume=not args.no_resume,
-        progress=print,
-    )
-    records = write_records(
-        session,
-        references=references,
-        plan=plan,
-        runs=runs,
-        peaks=reference_peaks(session, primary),
-    )
-    session.save_state(reference=primary.to_dict(), records=records)
-    session.manager.save()
     _print(
         {
-            "workflows": plan.n_workflows,
-            "conditions": [ref.condition for ref in targets],
-            "status": workflow_summary(runs),
-            "records": records,
+            "mode": "combination",
+            "reference": result.summary.get("reference_spec", spec),
+            "workflows": result.plan.n_workflows,
+            "conditions": [ref.condition for ref in result.references.values()],
+            "status": result.summary.get("status_counts", {}),
+            "records": result.records,
         }
     )
     return 0
@@ -375,6 +362,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--grid",
         default=None,
         help="轴网格 YAML/JSON(各轴候选值,接口展开全因子)",
+    )
+    sweep.add_argument(
+        "--reference",
+        required=True,
+        help="组合模式必须显式指定参考:<研究根> 或 <研究根>#<条件>,"
+        "或 reference.json 路径(由参考模式 reference + peaks 生成)",
     )
     sweep.add_argument(
         "--combos",

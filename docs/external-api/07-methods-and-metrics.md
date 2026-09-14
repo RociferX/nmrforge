@@ -29,6 +29,14 @@
   `study/workflows/<id>/<条件>/`,不替换活动谱;
 - 相位/窗函数/填零/基线/NUS 参数全部按表执行,所有影响结果的参数三层落档。
 
+## 7.2b 采样路由(满采样 → uniform)
+
+读数据阶段判定有效采样:标注 NUS 但 `nuslist` 覆盖全格,或 2D `ser` 是「全格+
+零填充」且**无零行** → 判为**实际满采样**,`sampling="uniform"`,
+`sampling_schedule="full_sampling"`,并记录证据;处理走 `process()` 常规 FT,
+**不跑 SMILE**。真 NUS(采样表只覆盖子集、或稀疏文件无采样表)仍走
+`reconstruct_nus()`;3D NUS 维持原状(只支持建参考)。
+
 ## 7.3 两种峰定位
 
 | 方法 | 做法 | 适用范围 |

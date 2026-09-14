@@ -5,7 +5,9 @@
 - **Bruker 原始数据集目录**(下载/解压后含 `acqus`/`ser`);压缩包与已处理格式
   不支持,报错信息会说明;
 - 导入只做链接 raw + 写 metadata + 登记 import 运行;不做转换/处理;
-- 采样方式:uniform 任意维、**2D NUS**(SMILE 重构)、3D NUS 目前只支持建参考。
+- 采样方式:uniform 任意维、**2D NUS**(SMILE 重构)、3D NUS 目前只支持建参考;
+- **满采样优先**:标注 NUS 但实际满采样(`nuslist` 覆盖全格,或 2D `ser` 全格
+  无零行)→ 按 uniform 处理,理由见 `reference.sampling_evidence`;
 
 ## 5.2 条件(A/B…)
 

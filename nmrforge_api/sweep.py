@@ -1676,6 +1676,13 @@ def _run_condition(
     reference_detection = dict(reference.peak_params.get("detection") or {})
     run.parameters_resolved = {
         "phase": run.phase,
+        # 有效采样:满采样(含「标注 NUS 但实际满采样」)按 uniform 处理
+        "sampling": {
+            "effective": str(reference.sampling),
+            "schedule": str(reference.sampling_schedule or ""),
+            "route": "reconstruct_nus" if str(reference.sampling) == "nus" else "process",
+            "evidence": list(reference.sampling_evidence or [])[:5],
+        },
         # 选峰阈值:只在生成参考时选定,此处逐 workflow 留档「与参考一致」
         "peak_picking_threshold": {
             "sigma_multiplier_requested": reference.peak_params.get(

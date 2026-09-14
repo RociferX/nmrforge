@@ -333,6 +333,9 @@ Complete provenance + QC(参数三层、脚本/谱哈希、完整日志、版本
 ```
 
 - 参考只作后续参数扰动的基准,**不声称全局最优**;
+- 采样路由:**实际满采样**(标注 NUS 但 `nuslist` 覆盖全格,或 2D `ser` 全格
+  无零行)按 **uniform** 处理(不跑 SMILE),有效采样与证据写入参考/运行记录;
+  真 NUS 走 `reconstruct_nus`;
 - 两条件数据:同一 workflow 对 A/B 用**同一份** `parameters_requested`;
   峰身份(`reference_peak_id`)全条件共享,各自输出峰值表
   (`A_raw → W0037 → A_peak_table`,`B_raw → W0037 → B_peak_table`);
@@ -346,6 +349,20 @@ Complete provenance + QC(参数三层、脚本/谱哈希、完整日志、版本
 ### 11.2 公开面(`nmrforge_api/__init__.py`,`API_VERSION = "0.2"`)
 
 ```python
+# 两种模式(2026-09-14):参考模式生成参考;组合模式必须显式给参考
+run_reference_study(root, dataset=None, *, datasets=None, params=None,
+                    phase_route=None, peaks=None, sigma_multiplier=None,
+                    max_peaks=0, localization_method="parabolic",
+                    gaussian_roi_f1_ppm=None, gaussian_roi_f2_ppm=None,
+                    backend=None, write=True, progress=None) -> ReferenceResult
+run_combination_study(reference, *, combos=None, axes=None, max_runs=256,
+                      window_pts=None, window_ppm=None, sign="abs",
+                      roi_f1_ppm=None, roi_f2_ppm=None, resume=True,
+                      backend=None, write=True, progress=None) -> StudyResult
+parse_reference_spec(spec) -> ReferenceHandle
+resolve_reference(spec, *, backend=None) -> (StudySession, DatasetRef, ReferenceSpectrum)
+write_reference_records(session, references) -> dict[str, str]
+# 一步式便利入口(内部 = 参考模式 + 组合模式,参考显式传研究根)
 run_parameter_study(root, dataset=None, *, datasets=None, axes=None, combos=None,
                     name="", params=None, phase_route=None, peaks=None,
                     sigma_multiplier=None, max_peaks=0, max_runs=256,

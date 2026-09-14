@@ -44,11 +44,18 @@ python -m nmrforge_api --help
 ## 一分钟示例
 
 ```python
-from nmrforge_api import run_parameter_study
+from nmrforge_api import run_reference_study, run_combination_study
 
-result = run_parameter_study(
+# 参考模式:参考谱 + 脚本 + 两张参考峰表(选峰阈值在这里定,之后锁定)
+run_reference_study(
     "~/studies/hsqc_params",
     datasets={"A": "~/data/apo", "B": "~/data/holo"},
+    sigma_multiplier=25,
+)
+
+# 组合模式:显式指定参考(必填),按组合表跑处理
+result = run_combination_study(
+    "~/studies/hsqc_params",
     combos=[{"zero_fill": 1}, {"zero_fill": 2}],
 )
 print(result.summary["status_counts"])

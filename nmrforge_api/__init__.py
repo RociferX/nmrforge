@@ -73,14 +73,18 @@ from nmrforge_api.records import (
     WINDOW_POLICY,
     combined_peak_table,
     write_records,
+    write_reference_records,
 )
 from nmrforge_api.reference import (
+    ReferenceHandle,
     ReferenceSpectrum,
     build_reference,
     build_reference_peak_tables,
     ensure_reference_peaks,
     load_reference,
     load_references,
+    parse_reference_spec,
+    resolve_reference,
     sanitize_sweep_params,
     set_reference_peaks,
 )
@@ -93,7 +97,13 @@ from nmrforge_api.session import (
     dataset_info,
     open_study,
 )
-from nmrforge_api.study import StudyResult, run_parameter_study
+from nmrforge_api.study import (
+    ReferenceResult,
+    StudyResult,
+    run_combination_study,
+    run_parameter_study,
+    run_reference_study,
+)
 from nmrforge_api.sweep import (
     STATUS_FAILED,
     STATUS_SUCCESS,
@@ -132,6 +142,8 @@ API_VERSION = "0.2"
 __all__ = [
     "API_VERSION",
     "BOUNDARY_STATEMENT",
+    "ReferenceHandle",
+    "ReferenceResult",
     "CONDITION_LETTERS",
 "DEFAULT_CSP_N_WEIGHT",
     "DatasetError",
@@ -183,8 +195,12 @@ __all__ = [
 "position_uncertainty",
     "read_peak_table",
     "read_reference_peaks",
+    "parse_reference_spec",
     "reference_peak_id",
+    "resolve_reference",
+    "run_combination_study",
     "run_parameter_study",
+    "run_reference_study",
     "run_sweep",
     "sanitize_sweep_params",
     "set_reference_peaks",
@@ -195,4 +211,5 @@ __all__ = [
     "write_combo_table",
     "write_peak_table",
     "write_records",
+    "write_reference_records",
 ]

@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from backend.bruker_workflow import patch_fid_com
 from core.data.bruker_reader import read_dataset
 
@@ -154,7 +156,8 @@ def _recover(ds: Path) -> tuple[list[int] | None, list[str]]:
     from backend.nmrpipe_backend import NMRPipeBackend
 
     exp = read_dataset(ds)
-    assert exp.sampling.mode.value == "nus", exp.sampling.mode
+    # 满采样数据在读入阶段就已降级为 uniform(2026-09-14);恢复函数仍可直接调用
+    assert exp.sampling.mode.value in ("nus", "uniform"), exp.sampling.mode
     logs: list[str] = []
     points = NMRPipeBackend(nmrpipe_bin="")._recover_dense_2d_nus(ds, exp, logs)
     return points, logs
@@ -202,13 +205,46 @@ def test_recover_dense_2d_nus_metadata_mismatch_is_refused(tmp_path: Path) -> No
 
 
 def test_recover_dense_2d_nus_all_nonzero(tmp_path: Path) -> None:
-    """全格无零行(NusAMOUNT 标注 NUS 但数据满采样)→ 返回全部复点。"""
+    """全格无零行(NusAMOUNT 标注 NUS 但数据满采样)→ 读入即判 uniform。
+
+    2026-09-14(用户「满采样应该走 uniform」):降级发生在读数据阶段;恢复函数
+    作为防御性入口仍可直接调用,并留下「满采样」日志。
+    """
     ds = _make_2d_nus_dataset(tmp_path, rows=256, keep=list(range(128)))
+    exp = read_dataset(ds)
+    assert exp.sampling.mode.value == "uniform", exp.sampling.mode
+    assert exp.sampling.schedule_type == "full_sampling"
+    assert exp.sampling.sampling_fraction == pytest.approx(1.0)
+    assert any("满采样" in line for line in exp.sampling.evidence)
 
     points, logs = _recover(ds)
 
     assert points == list(range(128))
     assert any("满采样" in line for line in logs)
+
+
+def test_full_nuslist_is_uniform(tmp_path: Path) -> None:
+    """nuslist 覆盖全格 → 实际满采样 → uniform(不再走 SMILE)。"""
+    ds = _make_2d_nus_dataset(tmp_path, rows=256, keep=list(range(128)))
+    (ds / "nuslist").write_text(
+        "\n".join(str(k) for k in range(128)) + "\n", encoding="utf-8"
+    )
+    exp = read_dataset(ds)
+    assert exp.sampling.mode.value == "uniform"
+    assert exp.sampling.schedule_type == "full_sampling"
+    assert exp.sampling.sampling_fraction == pytest.approx(1.0)
+    assert any("nuslist 覆盖全部 128" in line for line in exp.sampling.evidence)
+
+
+def test_partial_nuslist_stays_nus(tmp_path: Path) -> None:
+    """采样表只覆盖部分复点 → 仍是 NUS(SMILE 路径不变)。"""
+    ds = _make_2d_nus_dataset(tmp_path, rows=256, keep=[0, 5, 37])
+    (ds / "nuslist").write_text("0\n5\n37\n", encoding="utf-8")
+    exp = read_dataset(ds)
+    assert exp.sampling.mode.value == "nus"
+    assert exp.sampling.schedule_type == "nuslist"
+    assert not any("满采样" in line for line in exp.sampling.evidence)
+
 
 def _finalize(raw: Path, work: Path, ndim: int) -> tuple[bool, list[str]]:
     from backend.nmrpipe_backend import NMRPipeBackend

@@ -6,8 +6,60 @@ metadata 矛盾时返回 uncertain（安全模式，不强行处理，框架 §6
 
 from __future__ import annotations
 
-from core.data.internal_data_model import Experiment, Sampling, SamplingMode
-from core.data.nus_reader import read_nuslist
+from core.data.internal_data_model import (
+    Experiment,
+    Sampling,
+    SamplingMode,
+)
+from core.data.nus_reader import (
+    indirect_grid_2d,
+    read_nuslist,
+    scan_dense_2d,
+)
+
+
+def full_sampling_evidence(
+    experiment: Experiment,
+    *,
+    nus_list: list[tuple[int, ...]],
+    has_nuslist: bool,
+) -> str | None:
+    """标注为 NUS 时判断「实际满采样」→ 证据字符串;否则 None。
+
+    - ``nuslist`` 行数 >= 间接维复点网格 → 采样表覆盖全格 = 满采样;
+    - 无 ``nuslist``(2D)且 ``ser``/fid 是「全格+零填充」密集模型、无零行
+      → 满采样(数据里所有复点都采了)。
+
+    只做判定,不改数据;调用方据此把 mode 降级为 uniform(用户 2026-09-14:
+    满采样应走 uniform)。
+    """
+    grid, mult, direct_points = indirect_grid_2d(experiment)
+    if grid <= 0:
+        return None
+    if has_nuslist:
+        if len(nus_list) >= grid:
+            return (
+                f"实际满采样:nuslist 覆盖全部 {grid} 个间接维复点"
+                "(标注 NUS,实际是满采样)→ 按 uniform 处理"
+            )
+        return None
+    if int(experiment.ndim) != 2:
+        return None
+    scan = scan_dense_2d(
+        experiment.source_path,
+        acqus=(experiment.acquisition_parameters or {}).get("acqus", {}),
+        grid_complex=grid,
+        mult=mult,
+        direct_points=direct_points,
+    )
+    if scan["kind"] == "full":
+        return (
+            f"实际满采样:{scan['source']} 全格 {scan['rows']} 行且无零行"
+            f"(标注 NUS,实际是满采样;网格 {grid} 复点)→ 按 uniform 处理"
+        )
+    return None
+
+
 
 
 def _int_param(block: dict, key: str, default: int) -> int:
@@ -53,6 +105,19 @@ def detect(experiment: Experiment) -> Sampling:
     if has_nuslist or nus_params:
         fraction = max(nus_amount, 1) / 100.0
         nus_list = read_nuslist(nuslist_path) if has_nuslist else []
+        # 2026-09-14(用户):标注 NUS 但实际满采样 → 按 uniform 处理(证据留档)
+        full_evidence = full_sampling_evidence(
+            experiment, nus_list=nus_list, has_nuslist=has_nuslist
+        )
+        if full_evidence is not None:
+            evidence.append(full_evidence)
+            return Sampling(
+                mode=SamplingMode.UNIFORM,
+                sampling_fraction=1.0,
+                schedule_type="full_sampling",
+                confidence=0.9,
+                evidence=evidence,
+            )
         return Sampling(
             mode=SamplingMode.NUS,
             nus_list=nus_list,

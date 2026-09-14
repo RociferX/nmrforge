@@ -2,6 +2,41 @@
 
 版本口径:新增功能/新增字段保持同一 minor;破坏性改动升 minor 并给出迁移说明。
 
+## 0.2.3(2026-09-14)
+
+**API 拆成参考模式 / 组合模式**(用户:加入参考模式和组合模式,组合模式下外部要
+显式指定参考)。
+
+- 新增 `run_reference_study(root, ...) -> ReferenceResult`:导入条件数据 + 自动
+  优化参考谱/参考脚本 + 两张参考峰表,写 `study/records/reference.json`;选峰阈值
+  在此确定并随参考锁定;
+- 新增 `run_combination_study(reference, combos|axes, ...) -> StudyResult`:
+  **`reference` 必填**(`<root>` / `<root>#<条件>` / `reference.json` 路径 /
+  `ReferenceHandle`),只按该参考跑组合,不再隐式兜底;参考或峰表缺失 →
+  `ReferenceError`(提示先跑参考模式);
+- 公开 `parse_reference_spec()` / `resolve_reference()` / `ReferenceHandle`;
+- 运行记录:`manifest.mode="combination"` + `manifest.reference_spec`,每条
+  `run.json` 带参考脚本/谱哈希(`base_script`)与 `parameters_resolved.reference`;
+- CLI:`sweep` 新增**必填** `--reference`;参考模式 = `reference` + `peaks`;
+- `run_parameter_study` 保留为一键便利入口(内部 = 参考模式 + 用研究根显式调用
+  组合模式),向后兼容;外部峰表跨条件传播沿用主条件身份;
+- 文档 02/03/04/06/README 与 API_CONTRACT §11.2 同步;测试 +3。
+
+## 0.2.2(2026-09-14)
+
+**满采样(含伪装成 NUS)走 uniform**(用户:「满采样应该走 uniform」,API 跟进)。
+
+- 采样检测(读数据阶段)新增实际采样判定:`nuslist` 覆盖全格,或 2D `ser` 是
+  「全格+零填充」且无零行 → `sampling="uniform"`,
+  `sampling_schedule="full_sampling"`,证据写入 `sampling.evidence`;
+- 处理线随之走 `process()` 常规 FT,**不再跑 SMILE**(参考与全部 workflow 一致);
+- API 留档:`ReferenceSpectrum.sampling_schedule` / `sampling_evidence`,
+  `run.json.parameters_resolved.sampling`(`effective`/`schedule`/`route`/
+  `evidence`),manifest 的参考记录同步;
+- 稀疏/子集采样仍为 NUS(SMILE);3D NUS 维持只支持建参考;
+- 后端「全格+零填充」扫描下沉到 `core.data.nus_reader.scan_dense_2d`(前后端
+  共用一份实现),`_recover_dense_2d_nus` 改为调用它(日志文案不变)。
+
 ## 0.2.1(2026-09-14)
 
 **选峰阈值:生成参考时可选,随后与参考一起锁定**

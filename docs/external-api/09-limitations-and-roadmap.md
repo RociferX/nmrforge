@@ -11,6 +11,7 @@
 | workflow_id 批量执行 | ✅ | `W0001…`;两条件 A/B 同参数同峰身份 |
 | 峰定位:parabolic / 2D gaussian | ✅ | 同一 candidate 两法都跑,两张同结构峰表 |
 | 多条件(A/B) | ✅ | 每条件一份参考;峰身份与用户参数共享 |
+| **实际满采样但标注 NUS** | ✅ 按 uniform 处理 | `nuslist` 覆盖全格,或 2D `ser` 是「全格+零填充」且无零行 → 视为满采样,走常规 FT(不跑 SMILE),证据写入 `sampling_evidence` |
 | 峰重叠/去卷积 | ❌ | 只做窗口内极值 + 抛物线/单峰高斯 |
 | Lorentzian / Voigt / 多峰分解 | ❌ | 路线图项 |
 | 并行/集群调度 | ❌ | 串行 + 断点续跑;按参数轴分片(见 8.4) |
@@ -18,6 +19,11 @@
 | CSP / robustness / 统计 / 显著性 | ❌ **(不属本软件)** | 由下游独立分析程序从统一峰表计算 |
 
 ## 9.2 NUS 的支持范围
+
+> **满采样优先**:检测到「标注 NUS 但实际满采样」(nuslist 列满全格,或 2D `ser`
+> 全格且无零行)时,按 **uniform** 处理并留档(`sampling="uniform"`,
+> `sampling_schedule="full_sampling"`,证据在 `sampling_evidence`);真 NUS
+> (采样子集/稀疏文件)才走下面的 SMILE 路径。
 
 **已支持:2D NUS**。参考与 workflow 都走 `reconstruct_nus()`,差别只是工作流
 批量执行会为每个组合隔离候选输出:
