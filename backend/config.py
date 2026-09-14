@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from typing import Any
 
 from core.app_paths import local_config_path, resource_path
@@ -131,8 +132,25 @@ def load_processing_defaults(config: dict[str, Any] | None = None) -> dict[str, 
     }
 
 
-def resolve_points_per_line(value: Any, config: dict[str, Any] | None = None) -> float:
-    """显式值优先,否则配置默认;无效/非正回退 2.0。"""
+def resolve_points_per_line(
+    value: Any, config: dict[str, Any] | None = None
+) -> Any:
+    """显式值优先,否则配置默认;无效/非正回退 2.0。
+
+    支持**逐轴**写法 ``{"F1": 2.0, "F2": 4.0}``(2026-09-14 用户「参数组合表
+    按两个维度分别指定」):映射原样透传,逐轴取值/回退由 ``zero_fill_plan`` 决定。
+    """
+    if isinstance(value, Mapping):
+        cleaned: dict[str, float] = {}
+        for axis, item in value.items():
+            try:
+                number = float(item)
+            except (TypeError, ValueError):
+                continue
+            if number > 0:
+                cleaned[str(axis)] = number
+        if cleaned:
+            return cleaned
     if value is not None:
         try:
             v = float(value)

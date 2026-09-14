@@ -196,3 +196,36 @@ def test_factory_passes_config_nmrpipe_path(tmp_path: Path) -> None:
         }
     )
     assert backend.nmrpipe_bin == str(tmp_path)
+
+
+def test_zero_fill_plan_per_axis(bruker_dir: Path) -> None:
+    """逐轴填零:裸标量 = k×TD(与全局同义);显式 size / 关闭逐轴生效。"""
+    exp = read_dataset(bruker_dir / "hsqc_2d")
+    scalar_two = zero_fill_plan(exp, 2)
+    per_axis_two = zero_fill_plan(exp, {"F1": 2})
+    assert per_axis_two["F1"]["size"] == scalar_two["F1"]["size"]
+    assert per_axis_two["F2"]["size"] == scalar_two["F2"]["size"]
+
+    explicit = zero_fill_plan(exp, {"F1": {"mode": "size", "size": 512}})
+    assert explicit["F1"]["size"] == 512
+
+    off = zero_fill_plan(exp, {"F1": {"mode": "none"}})
+    assert off["F1"]["mode"] == "none" and off["F1"]["size"] is None
+    assert off["F2"]["size"] is not None  # 只关 F1,直接维仍按默认
+
+    auto_f1 = zero_fill_plan(exp, {"F1": {"mode": "auto"}})
+    assert auto_f1["F1"]["mode"] == "auto"
+
+
+def test_zero_fill_plan_per_axis_points_per_line(bruker_dir: Path) -> None:
+    """目标数字分辨率可逐轴给:points_per_line.F1 只影响该维 SI。"""
+    exp = read_dataset(bruker_dir / "hsqc_2d")
+    base = zero_fill_plan(exp, points_per_line=2.0)
+    fine = zero_fill_plan(exp, points_per_line={"F1": 4.0})
+    assert fine["F1"]["size"] >= base["F1"]["size"]
+    assert fine["F2"]["size"] == base["F2"]["size"]  # 直接维不随 ppl 变
+    coarse = zero_fill_plan(exp, points_per_line={"F1": 1.0})
+    assert coarse["F1"]["size"] <= base["F1"]["size"]
+    # 非法值回退默认,不崩
+    fallback = zero_fill_plan(exp, points_per_line={"F1": "abc"})
+    assert fallback["F1"]["size"] == base["F1"]["size"]

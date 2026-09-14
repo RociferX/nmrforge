@@ -84,7 +84,9 @@ plan_sweep(reference, *, axes=None, combos=None, max_runs=256,
 
 - `axes` 与 `combos` 必须且只能给一个;`combos` 原样按表序执行,接口**不做**
   设计决策(正交表/部分因子/D-optimal/LHS 由外部工具生成);
-- 键支持点号路径(`window.F1.off`);相位轴 `phase.<轴>.p0|p1`(绝对值)/
+- 键支持点号路径(`window.F1.off`、`baseline.F2.enabled`、`zero_fill.F1`、
+  `linewidth_hz.F1`、`points_per_line.F1`),两个维度可分别指定;详见
+  [05-inputs §5.9](05-inputs-and-data.md)。相位轴 `phase.<轴>.p0|p1`(绝对值)/
   `phase_delta.<轴>.p0|p1`(相对参考的偏差);
 - 锁定键(`phases`/`direct_phase`/`phase_route`/`sampling.auto_phase`)报错;
   确定性参数(提取窗口、点距目标、采样表、超时、`fid_noise*`)与未知键写

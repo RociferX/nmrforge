@@ -105,6 +105,34 @@ run_parameter_study(..., peaks="library.list")   # 或 peak_id,H_ppm,N_ppm CSV
 - 一切影响结果的参数都必须可追溯:`parameters_requested` →
   `parameters_used` → `parameters_resolved`(自动参数实际结果)。
 
+## 5.9 按维指定参数(组合表)
+
+组合表/网格键支持**点号路径**,因此两个维度(以及 3D 的第三维)可以分别指定;
+`parameters_requested` 保留用户原样的键,`parameters_used` 是合并后的逐轴结构。
+
+| 处理环节 | 逐轴写法(示例) | 语义 |
+| --- | --- | --- |
+| 窗函数 | `window.F1.off`、`window.F2.off`、`window.F1.type` | 每个逻辑维一套(类型/端值) |
+| 基线 | `baseline.F1.enabled`、`baseline.F2.mode`、`baseline.F1.order` | 每维开关/模式/阶数 |
+| 填零 | `zero_fill.F1=2`、`zero_fill.F1.size=512`、`zero_fill.F1.mode=none` | 裸标量 = **k×TD**(与全局 `zero_fill=k` 同义);显式 SI 用 `.size` |
+| 线宽(Hz) | `linewidth_hz.F1=12`、`linewidth_hz.F2=9` | 每维线宽:影响自动填零目标与物理宽度换算 |
+| 目标数字分辨率 | `points_per_line.F1=4`、`points_per_line.F2=2` | 每维“每线宽点数”(自动 SI 的目标) |
+| 相位 | `phase.F1.p0`、`phase_delta.F2.p0` | 逐轴绝对相位 / 相对参考的偏差 |
+| 采样开关 | `sampling.*` | 锁定键(相位锁定语义),写进组合表会报错 |
+
+```csv
+window.F1.off,window.F2.off,zero_fill.F1,baseline.F2.enabled,points_per_line.F1
+0.35,0.45,2,false,4
+0.45,0.45,4,true,2
+```
+
+- 直接维范围 `ext_lo`/`ext_hi` 只作用于**直接维**;3D 数据请用 `window.F3.*` 等
+  逐轴键(若该轴是直接维);
+- 参考层的逐轴参数(参考谱定义)用参考模式的 `params=`/`direct_range=` 指定,
+  组合表里的键只覆盖**该组合**;
+- 未知轴的键(如 `window.F9.off`)不会报错,但也不会生效:请对照上表核对轴名。
+
+
 ## 5.8 直接维范围(可由外部指定)
 
 直接维提取窗口用 **ppm** 指定,与 NMRPipe `EXT -x1/-xn` 及 config

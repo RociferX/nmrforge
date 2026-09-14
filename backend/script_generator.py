@@ -16,6 +16,7 @@ SMILE 重构参数可经 reconstruct_nus params 覆盖（nSigma/thresh/scaling/r
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from typing import Any
 
 from core.data.internal_data_model import Experiment, SamplingMode
@@ -202,19 +203,54 @@ def _indirect_si(
     )
 
 
+def _points_per_line_for(points_per_line: Any, axis: str) -> float:
+    """目标点数/线宽:标量或逐轴映射 ``{"F1": 2.0}``;非法回退默认。"""
+    if isinstance(points_per_line, Mapping):
+        value = points_per_line.get(axis)
+    else:
+        value = points_per_line
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return float(DEFAULT_POINTS_PER_LINE)
+    return number if number > 0 else float(DEFAULT_POINTS_PER_LINE)
+
+
+def _scalar_points_per_line(value: Any, default: float) -> float:
+    """取标量(逐轴映射时取 F1/F2/F3 中第一个有效值),供不改逐轴语义的路径。"""
+    if isinstance(value, Mapping):
+        for axis in ("F1", "F2", "F3"):
+            if axis in value:
+                try:
+                    number = float(value[axis])
+                except (TypeError, ValueError):
+                    continue
+                if number > 0:
+                    return number
+        return float(default)
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return float(default)
+    return number if number > 0 else float(default)
+
+
 def zero_fill_plan(
     experiment: Experiment,
     zero_fill: dict[str, Any] | int | None = None,
     *,
     linewidth_hz: dict[str, float] | None = None,
-    points_per_line: float | None = None,
+    points_per_line: Any = None,
 ) -> dict[str, dict[str, Any]]:
     """逐维填零计划:{轴: {"mode", "size", "note"}}。
 
     zero_fill 覆盖(可空):
     - None 或 0 → 全部 auto(直接维 2×TD、间接维按数字分辨率动态);
     - int k≥1 → 直接维保持 2×TD,间接维固定 k×TD(旧 schema 语义);
-    - {轴: {"mode": "none"|"auto", "size": N}} → 逐轴覆盖。
+    - {轴: {"mode": "none"|"auto"|"size"|"factor", "size"| "factor": N}}
+      → 逐轴覆盖;``{轴: k}`` 的裸标量与全局 ``zero_fill=k`` 同义(k×TD),
+      显式 SI 请写 ``{轴: {"mode": "size", "size": N}}``。
+    ``points_per_line`` 可以是标量或逐轴映射(``{"F1": 2.0, "F2": 4.0}``)。
     auto 模式返回选定的 SI;mode=none 时 size=None。
     linewidth_hz/points_per_line 未显式传参时读取 config/nmrforge.yaml
     (processing.linewidth_hz/points_per_line,显式 params 优先)。
@@ -225,6 +261,11 @@ def zero_fill_plan(
         linewidth_hz = _config_linewidth_by_axis(experiment)
     if points_per_line is None:
         points_per_line = float(load_processing_defaults()["points_per_line"])
+    elif not isinstance(points_per_line, Mapping):
+        try:
+            points_per_line = float(points_per_line)
+        except (TypeError, ValueError):
+            points_per_line = float(load_processing_defaults()["points_per_line"])
     axes = [dim.logical_axis for dim in experiment.dimensions]
     td = effective_td(experiment)
     direct_axis = axes[0] if axes else ''
@@ -253,7 +294,8 @@ def zero_fill_plan(
             if isinstance(cfg, dict):
                 override[axis] = dict(cfg)
             else:
-                override[axis] = {"mode": "size", "size": int(cfg)}
+                # 逐轴裸标量 = 倍数 k×TD(与全局 zero_fill=k 同义)。
+                override[axis] = {"mode": "factor", "factor": int(cfg)}
 
     for index, axis in enumerate(axes):
         n = max(int(td[index]) if index < len(td) else 0, 1)
@@ -262,6 +304,16 @@ def zero_fill_plan(
         mode = cfg.get("mode", "auto")
         if mode == "none":
             plan[axis] = {"mode": "none", "size": None, "note": "填零关闭"}
+            continue
+        if mode == "factor":
+            factor = max(int(cfg.get("factor", 1) or 1), 1)
+            if axis == direct_axis:
+                size = _next_pow2(direct_factor * n)
+                note = f"直接维 {direct_factor}×TD({n}→{size})"
+            else:
+                size = _next_pow2(max(factor * n, n))
+                note = f"间接维 {factor}×TD({n}→{size})"
+            plan[axis] = {"mode": "size", "size": size, "note": note}
             continue
         if mode in ("auto", ""):
             if cfg.get("size") is not None:
@@ -275,7 +327,9 @@ def zero_fill_plan(
                 lw = _linewidth_for(axis, linewidth_hz) or _default_linewidth(
                     experiment, axis
                 )
-                size, note = _indirect_si(n, sw, lw, points_per_line)
+                size, note = _indirect_si(
+                    n, sw, lw, _points_per_line_for(points_per_line, axis)
+                )
             plan[axis] = {"mode": "auto", "size": size, "note": note}
         else:
             size = int(cfg.get("size", mode))
@@ -1542,7 +1596,9 @@ def render_scripts(
             "direct_poly_time": _as_bool(params.get("direct_poly_time", False)),
             "zero_fill": params.get("zero_fill"),
             "linewidth_hz": params.get("linewidth_hz"),
-            "points_per_line": float(params.get("points_per_line", 4.0)),
+            "points_per_line": _scalar_points_per_line(
+                params.get("points_per_line"), 4.0
+            ),
         }
         if experiment.ndim >= 3:
             scripts["nus.com"] = generate_3d_nus_script(experiment, **kwargs)
@@ -1564,7 +1620,9 @@ def render_scripts(
             baseline=expand_baseline(experiment, params.get("baseline")),
             zero_fill=params.get("zero_fill"),
             linewidth_hz=params.get("linewidth_hz"),
-            points_per_line=float(params.get("points_per_line", 4.0)),
+            points_per_line=_scalar_points_per_line(
+                params.get("points_per_line"), 4.0
+            ),
             ext_lo=str(params.get("ext_lo", "10.5")),
             ext_hi=str(params.get("ext_hi", "6.5")),
             extract=_as_bool(params.get("extract", True)),

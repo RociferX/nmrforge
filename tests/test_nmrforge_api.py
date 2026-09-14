@@ -1848,3 +1848,41 @@ def test_empty_combo_cells_mean_unspecified(tmp_path: Path, bruker_dir: Path) ->
     second = by_id["W0002"].parameters_resolved["direct_range"]
     assert str(second["ext_lo"]) == "9" and str(second["ext_hi"]) == "7"
     assert second["source"] == "combo"
+
+
+def test_combo_table_supports_per_dimension_keys(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """组合表按维指定:window/baseline/zero_fill 的点号键逐轴生效并留档。"""
+    root = tmp_path / "per_axis"
+    backend = _FakeSweepBackend()
+    result = run_parameter_study(
+        root,
+        bruker_dir / "hsqc_2d",
+        combos=[
+            {
+                "window.F1.off": 0.35,
+                "window.F2.off": 0.45,
+                "zero_fill.F1": 2,
+                "baseline.F2.enabled": False,
+            }
+        ],
+        params={"phase_route": "none"},
+        backend=backend,
+    )
+    run = result.runs[0]
+    # requested 保留用户原样的点号键;used 是合并后的逐轴结构
+    assert run.parameters_requested["window.F1.off"] == pytest.approx(0.35)
+    used = run.parameters_used
+    assert used["window"]["F1"]["off"] == pytest.approx(0.35)
+    assert used["window"]["F2"]["off"] == pytest.approx(0.45)
+    assert used["zero_fill"]["F1"] == 2
+    assert used["baseline"]["F2"]["enabled"] is False
+    # 后端真的收到逐轴参数(而不是被拍平)
+    sent = backend.process_calls[-1]["params"]
+    assert sent["window"]["F1"]["off"] == pytest.approx(0.35)
+    assert sent["window"]["F2"]["off"] == pytest.approx(0.45)
+    assert sent["zero_fill"]["F1"] == 2
+    assert sent["baseline"]["F2"]["enabled"] is False
+    payload = json.loads(Path(run.run_dir, "run.json").read_text(encoding="utf-8"))
+    assert payload["parameters_used"]["zero_fill"]["F1"] == 2
