@@ -1974,12 +1974,17 @@ def test_combination_localization_selection_and_per_combo_override(
         combos=[{"zero_fill": 1}],
         params={"phase_route": "none"},
         localization="both",
+        edge_margin_ppm=0.5,          # 显式物理边距(ppm)
         backend=_FakeSweepBackend(),
     )
     run = both.runs[0]
     assert Path(run.peak_table_path("parabolic")).is_file()
     assert Path(run.peak_table_path("gaussian")).is_file()
     assert run.parameters_resolved["detection"]["methods"] == ["parabolic", "gaussian"]
+    # 边距由外部指定:显式 ppm 口径逐 workflow 留档
+    detection = run.parameters_resolved["detection"]
+    assert detection["edge_margin_source"] == "ppm(显式)"
+    assert detection["edge_margin_ppm"] == pytest.approx(0.5, rel=0.3)
 
 
 def test_combination_detection_keys_do_not_reach_backend_params(

@@ -466,6 +466,7 @@ def run_parameter_study(
     roi_f1_ppm: float | None = None,
     roi_f2_ppm: float | None = None,
     localization: Any = "parabolic",        # 组合模式精修方式(含 both)
+    edge_margin_ppm: float | None = None,   # 组合模式选峰边距(物理宽度)
     localization_method: str = "parabolic",  # 参考峰位取法
     gaussian_roi_f1_ppm: float | None = None,
     gaussian_roi_f2_ppm: float | None = None,
@@ -481,7 +482,8 @@ def run_parameter_study(
     :func:`run_combination_study` 执行且**必须显式给参考**;本函数保留为一键便利
     入口与向后兼容(内部先跑参考模式,再用研究根显式调用组合模式)。
     直接维范围(``direct_range=`` / ``ext_lo`` / ``ext_hi``)在参考层生效;
-    localization 传给组合模式(parabolic 默认 / gaussian / both)。
+    localization / edge_margin_ppm 传给组合模式(parabolic 默认 / gaussian /
+    both;边距缺省 3×核素线宽)。
     """
     reference_result = run_reference_study(
         root,
@@ -512,6 +514,7 @@ def run_parameter_study(
         axes=axes,
         max_runs=max_runs,
         localization=localization,
+        edge_margin_ppm=edge_margin_ppm,
         roi_f1_ppm=roi_f1_ppm,
         roi_f2_ppm=roi_f2_ppm,
         resume=resume,
