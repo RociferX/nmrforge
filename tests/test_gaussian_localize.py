@@ -397,3 +397,91 @@ def test_pick_peaks_default_and_explicit_parabolic_identical(
     text_explicit = Path(explicit["peak_path"]).read_text(encoding="utf-8")
     assert text_default == text_explicit
     assert default["peak_count"] == explicit["peak_count"]
+
+
+def test_gaussian_fit_recovers_known_peak_with_analytic_jacobian() -> None:
+    """解析式雅可比下的拟合仍准确还原已知中心/宽度(2026-09-14 提速改动)。"""
+    shape = (64, 128)
+    arr = _synth(shape, _TRUE_CENTER, _TRUE_SIGMA, amp=100.0, base=3.0)
+    result = lz.localize_peak_gaussian_2d(
+        arr,
+        [int(round(_TRUE_CENTER[0])), int(round(_TRUE_CENTER[1]))],
+        sign=1,
+        ppm_axes=_ppm_axes(shape),
+        roi_f1_ppm=_ROI_F1_PPM,
+        roi_f2_ppm=_ROI_F2_PPM,
+    )
+    assert result.success and result.actual_method == "gaussian"
+    fit = result.gaussian
+    assert fit is not None
+    assert fit.center[0] == pytest.approx(_TRUE_CENTER[0], abs=0.05)
+    assert fit.center[1] == pytest.approx(_TRUE_CENTER[1], abs=0.05)
+    assert fit.sigma[0] == pytest.approx(_TRUE_SIGMA[0], rel=0.05)
+    assert fit.sigma[1] == pytest.approx(_TRUE_SIGMA[1], rel=0.05)
+    assert fit.amplitude == pytest.approx(100.0, rel=0.05)
+    assert fit.baseline == pytest.approx(3.0, abs=0.5)
+
+
+def test_gaussian_roi_points_are_capped_and_recorded() -> None:
+    """细网格(填零)下拟合窗口半宽受上限约束,并在记录里留档。"""
+    shape = (256, 512)
+    center = (150.4, 300.3)
+    arr = _synth(shape, center, (6.0, 7.0), amp=80.0, base=2.0)
+    result = lz.localize_peak_gaussian_2d(
+        arr,
+        [int(round(center[0])), int(round(center[1]))],
+        sign=1,
+        ppm_axes=_ppm_axes(shape),
+        roi_f1_ppm=_ROI_F1_PPM,
+        roi_f2_ppm=_ROI_F2_PPM,
+        roi_max_points=8,
+    )
+    meta = result.fit_meta
+    assert meta["roi_capped"] is True
+    assert "F1" in meta["roi_capped_axes"] or "F2" in meta["roi_capped_axes"]
+    assert max(meta["roi_half_points"]) <= 8
+    assert max(meta["roi_half_points_uncapped"]) > 8
+    assert meta["max_nfev"] == lz.DEFAULT_GAUSSIAN_MAX_NFEV
+    # 上限放宽时不截断
+    loose = lz.localize_peak_gaussian_2d(
+        arr,
+        [int(round(center[0])), int(round(center[1]))],
+        sign=1,
+        ppm_axes=_ppm_axes(shape),
+        roi_f1_ppm=_ROI_F1_PPM,
+        roi_f2_ppm=_ROI_F2_PPM,
+        roi_max_points=10_000,
+    )
+    assert loose.fit_meta["roi_capped"] is False
+
+
+def test_localization_defaults_expose_fit_budget_keys() -> None:
+    """拟合预算可配置:gaussian_roi_max_points / gaussian_max_nfev。"""
+    defaults = lz.load_localization_defaults()
+    assert defaults["gaussian_roi_max_points"] == lz.DEFAULT_GAUSSIAN_ROI_MAX_POINTS
+    assert defaults["gaussian_max_nfev"] == lz.DEFAULT_GAUSSIAN_MAX_NFEV
+    custom = lz.load_localization_defaults(
+        {
+            "peaks": {
+                "localization": {
+                    "gaussian_roi_max_points": 24,
+                    "gaussian_max_nfev": 60,
+                }
+            }
+        }
+    )
+    assert custom["gaussian_roi_max_points"] == 24
+    assert custom["gaussian_max_nfev"] == 60
+    # 非法值回退默认,不抛异常
+    broken = lz.load_localization_defaults(
+        {
+            "peaks": {
+                "localization": {
+                    "gaussian_roi_max_points": -3,
+                    "gaussian_max_nfev": "abc",
+                }
+            }
+        }
+    )
+    assert broken["gaussian_roi_max_points"] == lz.DEFAULT_GAUSSIAN_ROI_MAX_POINTS
+    assert broken["gaussian_max_nfev"] == lz.DEFAULT_GAUSSIAN_MAX_NFEV

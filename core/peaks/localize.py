@@ -47,6 +47,11 @@ GAUSSIAN_UNSUPPORTED_MESSAGE = (
 #: 实际值可通过 config `peaks.localization` 或函数参数覆盖。
 DEFAULT_GAUSSIAN_ROI_F1_PPM = 1.5
 DEFAULT_GAUSSIAN_ROI_F2_PPM = 0.25
+#: 拟合窗口每轴**最大半宽(点)**:细网格(填零)下限制拟合规模,
+#: 使单峰拟合成本不再随点数线性增长(2026-09-14 用户:填零翻倍后高斯拟合 26×)。
+DEFAULT_GAUSSIAN_ROI_MAX_POINTS = 48
+#: 单峰最小二乘最大函数求值次数:失败拟合不再跑满(默认 400 → 200)。
+DEFAULT_GAUSSIAN_MAX_NFEV = 200
 FWHM_FACTOR = 2.3548200450309493  # 2*sqrt(2 ln 2)
 
 LOCALIZATION_LABELS: dict[str, str] = {
@@ -76,6 +81,8 @@ class PeakLocalization:
     ppm: dict[str, float] = field(default_factory=dict)
     # 预计算的中心/宽度(ppm):按 F1/F2 逻辑轴给出,避免 to_dict 再猜轴序
     derived: dict[str, float] = field(default_factory=dict)
+    # 拟合规模留档(ROI 点数/是否被上限截断/迭代预算)
+    fit_meta: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self, ppm_axes: Sequence[Any] | None = None) -> dict[str, Any]:
         """记录用字典:方法溯源 + 高斯诊断(用户需求 §8 的字段名)。"""
@@ -89,6 +96,8 @@ class PeakLocalization:
             "fallback": bool(self.fallback),
             "fallback_reason": str(self.reason),
         }
+        if self.fit_meta:
+            out.update({str(k): v for k, v in self.fit_meta.items()})
         if self.ppm:
             out.update({f"position_ppm_{k}": float(v) for k, v in self.ppm.items()})
         if self.position:
@@ -208,7 +217,23 @@ def load_localization_defaults(config: dict[str, Any] | None = None) -> dict[str
         "gaussian_roi_f2_ppm": _positive(
             "gaussian_roi_f2_ppm", DEFAULT_GAUSSIAN_ROI_F2_PPM
         ),
+        "gaussian_roi_max_points": _positive_int(
+            section.get("gaussian_roi_max_points"),
+            DEFAULT_GAUSSIAN_ROI_MAX_POINTS,
+        ),
+        "gaussian_max_nfev": _positive_int(
+            section.get("gaussian_max_nfev"), DEFAULT_GAUSSIAN_MAX_NFEV
+        ),
     }
+
+
+def _positive_int(value: Any, fallback: int) -> int:
+    """正值整数(非法/非正回退 fallback)。"""
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return int(fallback)
+    return number if number > 0 else int(fallback)
 
 
 def _finite_position(
@@ -254,7 +279,8 @@ def localize_peak_gaussian_2d(
     roi_f2_ppm: float | None = None,
     logical_axes: Sequence[int] | None = None,
     max_rmse_ratio: float = 0.0,
-    max_nfev: int = 400,
+    max_nfev: int = DEFAULT_GAUSSIAN_MAX_NFEV,
+    roi_max_points: int | None = None,
 ) -> PeakLocalization:
     """2D 高斯定位:ROI(ppm)→点数 → 以抛物线结果为初值做局部拟合。
 
@@ -300,6 +326,18 @@ def localize_peak_gaussian_2d(
         axis_units.points_for_ppm(ppm_axes[axis_f1], roi1, minimum=1),
         axis_units.points_for_ppm(ppm_axes[axis_f2], roi2, minimum=1),
     ]
+    # 拟合规模上限:细网格(填零)下 ROI 点数随点距换算线性增长 → 单峰成本线性增长;
+    # 每轴半宽设上限(默认 48 点),只影响比上限更细的网格(留档 roi_capped)。
+    cap = int(
+        roi_max_points
+        if roi_max_points is not None
+        else defaults["gaussian_roi_max_points"]
+    )
+    fit_points = [min(int(p), max(cap, 1)) for p in roi_points]
+    roi_capped = [
+        int(capped) != int(raw)
+        for capped, raw in zip(fit_points, roi_points)
+    ]
     if min(roi_points) <= 0:
         return PeakLocalization(
             requested_method="gaussian",
@@ -310,8 +348,8 @@ def localize_peak_gaussian_2d(
             reason="roi_unavailable",
         )
     roi_by_axis = [0.0, 0.0]
-    roi_by_axis[axis_f1] = float(roi_points[0])
-    roi_by_axis[axis_f2] = float(roi_points[1])
+    roi_by_axis[axis_f1] = float(fit_points[0])
+    roi_by_axis[axis_f2] = float(fit_points[1])
     fit = fit_gaussian_2d(
         real,
         seed=seed,
@@ -359,7 +397,26 @@ def localize_peak_gaussian_2d(
         gaussian=fit,
         ppm=ppm,
         derived=derived,
+        fit_meta=_fit_meta(fit_points, roi_points, roi_capped, max_nfev),
     )
+
+
+def _fit_meta(
+    fit_points: list[int],
+    roi_points: list[int],
+    roi_capped: list[bool],
+    max_nfev: int,
+) -> dict[str, Any]:
+    """拟合规模留档:实际半宽点数、被上限截断的轴、迭代预算。"""
+    return {
+        "roi_half_points": [int(p) for p in fit_points],
+        "roi_half_points_uncapped": [int(p) for p in roi_points],
+        "roi_capped": bool(any(roi_capped)),
+        "roi_capped_axes": [
+            axis for axis, flag in zip(("F1", "F2"), roi_capped) if flag
+        ],
+        "max_nfev": int(max_nfev),
+    }
 
 
 def localize_peak(
@@ -373,7 +430,8 @@ def localize_peak(
     roi_f2_ppm: float | None = None,
     logical_axes: Sequence[int] | None = None,
     max_rmse_ratio: float = 0.0,
-    max_nfev: int = 400,
+    max_nfev: int = DEFAULT_GAUSSIAN_MAX_NFEV,
+    roi_max_points: int | None = None,
 ) -> PeakLocalization:
     """统一峰定位入口:``method="parabolic"``(默认)或 ``"gaussian"``(仅 2D)。
 
@@ -396,6 +454,7 @@ def localize_peak(
             logical_axes=logical_axes,
             max_rmse_ratio=max_rmse_ratio,
             max_nfev=max_nfev,
+            roi_max_points=roi_max_points,
         )
     return localize_peak_parabolic(real, index)
 
@@ -517,7 +576,10 @@ def summarize_localization(
 
 
 __all__ = [
+    "DEFAULT_GAUSSIAN_MAX_NFEV",
     "DEFAULT_GAUSSIAN_ROI_F1_PPM",
+    "DEFAULT_GAUSSIAN_ROI_F2_PPM",
+    "DEFAULT_GAUSSIAN_ROI_MAX_POINTS",
     "DEFAULT_GAUSSIAN_ROI_F2_PPM",
     "DEFAULT_LOCALIZATION_METHOD",
     "FWHM_FACTOR",

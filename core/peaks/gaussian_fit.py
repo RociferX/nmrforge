@@ -148,7 +148,7 @@ def fit_gaussian_2d(
     roi: tuple[float, float],
     sign: int = 1,
     max_rmse_ratio: float = 0.0,
-    max_nfev: int = 400,
+    max_nfev: int = 200,
 ) -> GaussianFitResult:
     """在 ``seed``(数据轴序分数索引)附近拟合 2D 高斯。
 
@@ -265,11 +265,38 @@ def fit_gaussian_2d(
     def residual(params: np.ndarray) -> np.ndarray:
         return (_model(params, row_grid, col_grid) - value).ravel()
 
+    def jacobian(params: np.ndarray) -> np.ndarray:
+        """解析雅可比(2026-09-14):默认数值差分每迭代约 7 次残差,这里 1 次。
+
+        I = B + A·exp(-d0²/(2 s0²) - d1²/(2 s1²)),d0 = r-c0,d1 = c-c1;
+        对 (A, c0, c1, s0, s1, B) 求偏导,形状 (m, 6)。
+        """
+        amp, c0, c1, s0, s1, _base = (float(v) for v in params)
+        d0 = row_grid - c0
+        d1 = col_grid - c1
+        e = np.exp(
+            -(d0 * d0) / (2.0 * s0 * s0) - (d1 * d1) / (2.0 * s1 * s1)
+        )
+        return np.column_stack(
+            [
+                e.ravel(),
+                (amp * e * d0 / (s0 * s0)).ravel(),
+                (amp * e * d1 / (s1 * s1)).ravel(),
+                (amp * e * d0 * d0 / (s0**3)).ravel(),
+                (amp * e * d1 * d1 / (s1**3)).ravel(),
+                np.ones(e.size),
+            ]
+        )
+
     try:
         from scipy.optimize import least_squares
 
         fit = least_squares(
-            residual, p0, bounds=(lower, upper), max_nfev=int(max_nfev)
+            residual,
+            p0,
+            bounds=(lower, upper),
+            max_nfev=int(max_nfev),
+            jac=jacobian,
         )
     except Exception as exc:  # noqa: BLE001 - 优化器异常统一记原因
         result.reason = f"{REASON_OPTIMIZER_ERROR}: {type(exc).__name__}: {exc}"
