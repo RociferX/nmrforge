@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from nmrforge_api.errors import SensitivityError
-from nmrforge_api.records import write_records
+from nmrforge_api.records import write_records, write_reference_records
 from nmrforge_api.reference import (
     build_reference,
     ensure_reference_peaks,
@@ -181,7 +181,20 @@ def cmd_peaks(args: argparse.Namespace) -> int:
                 "params": reference.peak_params,
             }
         )
-    _print(out if len(out) > 1 else out[0])
+    # 参考模式产物:把参考谱/脚本/两张峰表/采样/阈值写成 records/reference.json
+    references = load_references(session)
+    records = write_reference_records(session, references)
+    primary = session.dataset
+    if primary is not None and primary.key in references:
+        session.save_state(reference=references[primary.key].to_dict())
+    session.manager.save()
+    _print(
+        {
+            "mode": "reference",
+            "conditions": out,
+            "records": records,
+        }
+    )
     return 0
 
 

@@ -1535,9 +1535,10 @@ def test_cli_peaks_applies_external_threshold_when_reference_is_built(
     # 参考峰表尚未生成 → 此时指定阈值 = 生成参考时选阈值
     assert cli_main(["peaks", "--study", str(root), "--sigma", "20"]) == 0
     payload = json.loads(capsys.readouterr().out)
-    assert payload["params"]["sigma_multiplier"] == pytest.approx(20.0)
-    assert payload["params"]["detection"]["sigma_multiplier"] == pytest.approx(20.0)
-    assert payload["params"]["detection"]["threshold_source"] == "user"
+    assert payload["conditions"][0]["params"]["sigma_multiplier"] == pytest.approx(20.0)
+    detection = payload["conditions"][0]["params"]["detection"]
+    assert detection["sigma_multiplier"] == pytest.approx(20.0)
+    assert payload["conditions"][0]["params"]["detection"]["threshold_source"] == "user"
     # 参考已定(20σ)→ 再改阈值报错(退出码 2)
     assert cli_main(["peaks", "--study", str(root), "--sigma", "60"]) == 2
     assert "锁定" in capsys.readouterr().out
