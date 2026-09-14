@@ -2024,3 +2024,34 @@ def test_detect_and_localize_gaussian_rejects_non_2d(tmp_path: Path) -> None:
         detect_and_localize(spectrum, method="gaussian", axes=_Fake3DAxes())
     with pytest.raises(MeasurementError, match="未知峰定位方法"):
         detect_and_localize(spectrum, method="lorentzian", axes=_Fake3DAxes())
+
+
+def test_combination_zero_peak_warning_is_explicit(
+    tmp_path: Path, bruker_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """组合在锁定阈值下一个峰都没检出 → 明确警告 peak_count_zero(不静默当成功)。"""
+    import nmrforge_api.peaks as api_peaks
+
+    backend = _FakeSweepBackend()
+    session = open_study(tmp_path / "zero_peaks", backend=backend)
+    add_dataset(session, bruker_dir / "hsqc_2d")
+    reference = build_reference(session, params={"phase_route": "none"})
+    reference = ensure_reference_peaks(session, reference)
+    plan = plan_sweep(reference, combos=[{"zero_fill": 1}])
+    real = api_peaks.detect_and_localize
+
+    def empty_detection(*args, **kwargs):
+        rows, meta = real(*args, **kwargs)
+        meta = dict(meta)
+        meta.update({"n_peaks": 0, "n_fallback": 0, "n_boundary_hit": 0})
+        return [], meta
+
+    monkeypatch.setattr(api_peaks, "detect_and_localize", empty_detection)
+    runs = run_sweep(session, plan, reference=reference, resume=False)
+    run = runs[0]
+    assert run.status == STATUS_WARNING
+    assert any(w["code"] == "peak_count_zero" for w in run.warnings)
+    # 空峰表仍然写出(只有表头):产物不静默消失
+    assert read_peak_table(Path(run.peak_table_path("parabolic"))) == []
+    assert run.parameters_resolved["peak_counts"]["parabolic"] == 0
+    assert run.peak_localization["parabolic"]["n_peaks"] == 0
