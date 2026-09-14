@@ -52,6 +52,9 @@ fit_success, FWHM_H, FWHM_N, fit_rmse, boundary_hit
 - `intensity` 为峰强(带符号),`SNR = |intensity| / σ`,σ 为该谱噪声
   (`core.qc.noise` 的 robust MAD),σ 同时写进
   `run.json.parameters_resolved.spectrum_noise_sigma`;
+- 逐峰定位记录(`<峰表>.localization.json`、`run.json` 的 `measurements[]`)
+  另有拟合规模留档:`roi_half_points`、`roi_half_points_uncapped`、`roi_capped`、
+  `roi_capped_axes`、`max_nfev`(用于解释“同样峰在更细网格上耗时变化”);
 - Gaussian 列:`fit_success`(拟合是否成功)、`FWHM_H`/`FWHM_N`(按**核名**映射
   的 FWHM,ppm)、`fit_rmse`(残差 RMS)、`boundary_hit`(中心/宽度撞拟合边界);
   `fallback`/`fallback_reason` 记录失败回退(禁止静默);
