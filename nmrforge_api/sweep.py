@@ -653,7 +653,13 @@ def combos_from_rows(
     for index, row in enumerate(rows, start=1):
         if not isinstance(row, Mapping):
             raise SweepError(f"组合表第 {index} 行不是键值表: {row!r}")
-        combo = {str(key): value for key, value in row.items()}
+        # 空单元格 / null = **未指定**(沿用基底),不是「覆盖成空值」:
+        # CSV 里某列留空表示这一行不覆盖该参数。
+        combo = {
+            str(key): value
+            for key, value in row.items()
+            if value is not None and str(value).strip() != ""
+        }
         if not combo:
             raise SweepError(f"组合表第 {index} 行为空")
         if axes is not None:

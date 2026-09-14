@@ -35,6 +35,7 @@ from nmrforge_api import (
     condition_token,
     ensure_reference_peaks,
     expand_grid,
+    load_combo_table,
     load_plan,
     load_runs,
     load_workflows,
@@ -1823,3 +1824,27 @@ def test_combination_mode_direct_range_override(
     after = load_reference(result.session, result.session.dataset)
     assert after is not None and after.script_sha256 == frozen_script
     assert result.summary["direct_range"]["ext_lo"] == 10.0
+
+
+def test_empty_combo_cells_mean_unspecified(tmp_path: Path, bruker_dir: Path) -> None:
+    """组合表留空 = 不覆盖该参数(真机发现的「空值当成覆盖」修正)。"""
+    root = tmp_path / "empty_cells"
+    backend = _FakeSweepBackend()
+    run_reference_study(
+        root, bruker_dir / "hsqc_2d", direct_range=(10.0, 6.5), backend=backend
+    )
+    table = tmp_path / "combos.csv"
+    table.write_text(
+        "zero_fill,ext_lo,ext_hi\n1,,\n1,9,7\n", encoding="utf-8"
+    )
+    result = run_combination_study(
+        str(root), combos=load_combo_table(table), backend=backend
+    )
+    by_id = {run.workflow_id: run for run in result.runs}
+    first = by_id["W0001"].parameters_resolved["direct_range"]
+    # 空单元格 → 沿用参考基底(10 / 6.5),且来源不是 combo
+    assert first["ext_lo"] == "10" and first["ext_hi"] == "6.5"
+    assert first["source"] == "reference_or_base"
+    second = by_id["W0002"].parameters_resolved["direct_range"]
+    assert str(second["ext_lo"]) == "9" and str(second["ext_hi"]) == "7"
+    assert second["source"] == "combo"

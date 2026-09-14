@@ -1,5 +1,9 @@
 # 修改记录(历史条目)
 
+## 未发布(2026-09-14):组合表空单元格 = 未指定
+- 参数组合表 CSV 留空 / YAML-JSON 写 `null` → 该行不覆盖该参数(沿用参考基底),
+  不再被当成「覆盖成空值」(真机发现:基值被清空且标成 source=combo)。
+
 ## 未发布(2026-09-14):直接维范围可由外部指定
 - 对外接口两个模式都支持 `direct_range=(high_ppm, low_ppm)`(反序自动换回)、
   dict 写法或显式 `ext_lo=`/`ext_hi=`;公开 `parse_direct_range()`/`DirectRange`;
