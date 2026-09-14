@@ -4,18 +4,24 @@
 
 ## 0.2.1(2026-09-14)
 
-**选峰阈值可由外部指定**(用户:之前都默认用默认阈值,现在要求可以被外部指定)。
+**选峰阈值:生成参考时可选,随后与参考一起锁定**
+
+用户澄清:阈值只在**生成参考**时选择;参考一旦定了,后面所有参数扰动只能按
+与参考一致的选峰阈值。
 
 - 阈值 = 噪声 σ 倍数(`sigma_multiplier`,内部同时作为 `min_snr`);缺省仍为
   35σ(行为向后兼容);
-- 外部入口:`pick_reference_peaks(session, sigma_multiplier=N)` /
+- 生成参考时的外部入口:`pick_reference_peaks(session, sigma_multiplier=N)` /
   `ensure_reference_peaks(..., sigma_multiplier=N)` /
-  `run_parameter_study(..., sigma_multiplier=N)` / CLI `peaks --sigma N`;
-- **按该阈值选峰**:显式给的阈值与已冻结的不同时自动重新选峰(此前一律复用
-  默认阈值冻结的峰表,外部指定等于没生效);相同则复用,不给则沿用;
+  `run_parameter_study(..., sigma_multiplier=N)` / CLI `peaks --sigma N`
+  (参考峰表尚未生成时指定即为「生成参考时选阈值」);
+- **参考冻结后阈值锁定**:再给与参考不同的阈值 → `ReferenceError`(CLI 退出码
+  2),不会悄悄重选峰;与参考一致则复用;想换阈值须**重建参考**
+  (`force=True` 或删除该条件的 `study/reference/<key>/`);
 - 留档:`peak_params.sigma_multiplier` / `previous_sigma_multiplier` /
-  `detection.sigma_multiplier` / `detection.threshold_source`;
-- 阈值写进 workflow 组合表时在 `plan.notes` 提示「选峰阈值应在选峰步骤指定」;
+  `detection.sigma_multiplier` / `detection.threshold_source`;每条 workflow
+  记录 `parameters_resolved.peak_picking_threshold.locked_to_reference=true`;
+- 阈值写进 workflow 组合表 → `SweepError`(阈值不是参数扰动自由度);
 - 阈值高到选不出峰 → 明确报错(不静默产出空峰表)。
 
 ## 0.2.0(2026-09-13)规范更新(破坏性:输出模型与公开面变更)

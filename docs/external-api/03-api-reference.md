@@ -50,9 +50,11 @@ build_reference_peak_tables(session, reference, *, window_pts=None,
 - `ensure_reference_peaks`:主条件自动选峰(或外部峰表)建立峰身份
   `reference.list`;其他条件复制同一身份表;**随后总是**写两张参考峰表
   (`reference_peak_table_parabolic.csv` / `_gaussian.csv`);
-- `sigma_multiplier`(选峰阈值,σ 倍数)**可由外部指定**:缺省 35σ;给了就按
-  该阈值选峰,与已冻结的不同会自动重新选峰,实际用量写进
-  `peak_params.sigma_multiplier` / `peak_params.previous_sigma_multiplier` /
+- `sigma_multiplier`(选峰阈值,σ 倍数)**在生成参考时可外部指定**:缺省 35σ;
+  参考峰表一旦冻结,后续所有 workflow 只能沿用参考阈值——再给不同阈值抛
+  `ReferenceError`(改阈值属于重建参考:`force=True` 或删除该条件的
+  `study/reference/<key>/`);实际用量写进 `peak_params.sigma_multiplier` /
+  `peak_params.previous_sigma_multiplier` /
   `peak_params.detection.sigma_multiplier` /
   `peak_params.detection.threshold_source`;
 - `localization_method` 只决定参考峰位取法(默认抛物线);高斯在非 2D 数据上

@@ -499,13 +499,12 @@ def validate_axes(
             continue
         root = _axis_root(key)
         if key in _PEAK_PICKING_KEYS or root in _PEAK_PICKING_KEYS:
-            notes.append(
-                f"提示: {key} 是**选峰阈值**(参考峰表建立时生效),不是 workflow"
-                " 处理参数:请在选峰步骤指定(CLI `peaks --sigma N`,或 API"
-                " `ensure_reference_peaks(sigma_multiplier=N)` /"
-                " `run_parameter_study(sigma_multiplier=N)`)"
+            raise SweepError(
+                f"网格里的 {key!r} 是**选峰阈值**:阈值只在生成参考时选择,"
+                "参考定了以后所有 workflow 必须与参考一致,不能作为参数扰动。"
+                "要改阈值请重建参考(CLI `peaks --sigma N`,或删掉该条件的"
+                " study/reference/<key>/ 后重跑)。"
             )
-            continue
         if key in _DETERMINISTIC_KEYS or root in _DETERMINISTIC_KEYS:
             notes.append(
                 f"提示: {key} 属确定性/策略参数,一般不必进网格"
@@ -1674,8 +1673,20 @@ def _run_condition(
         "parabolic": _localization_summary(parabolic_rows),
         "gaussian": _localization_summary(gaussian_rows),
     }
+    reference_detection = dict(reference.peak_params.get("detection") or {})
     run.parameters_resolved = {
         "phase": run.phase,
+        # 选峰阈值:只在生成参考时选定,此处逐 workflow 留档「与参考一致」
+        "peak_picking_threshold": {
+            "sigma_multiplier_requested": reference.peak_params.get(
+                "sigma_multiplier"
+            ),
+            "sigma_multiplier_effective": reference_detection.get(
+                "sigma_multiplier"
+            ),
+            "source": reference_detection.get("threshold_source", ""),
+            "locked_to_reference": True,
+        },
         "smile": (
             _smile_entries(params, combo, response.get("effective_params") or {})
             if is_nus

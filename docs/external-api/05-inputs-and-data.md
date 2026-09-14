@@ -102,13 +102,14 @@ run_parameter_study(..., peaks="library.list")   # 或 peak_id,H_ppm,N_ppm CSV
 - 一切影响结果的参数都必须可追溯:`parameters_requested` →
   `parameters_used` → `parameters_resolved`(自动参数实际结果)。
 
-## 5.7 选峰阈值(可由外部指定)
+## 5.7 选峰阈值(生成参考时可选,随后锁定)
 
 参考峰表的选峰阈值 = **噪声 σ 倍数**(`sigma_multiplier`,内部同时作为
-`min_snr` 传给检测)。缺省 35σ(既有默认,行为不变),也可由外部指定:
+`min_snr` 传给检测)。缺省 35σ(既有默认,行为不变);**在生成参考时可以
+由外部指定**:
 
 ```python
-pick_reference_peaks(session, sigma_multiplier=20)          # 选峰并冻结
+pick_reference_peaks(session, sigma_multiplier=20)          # 生成参考峰表
 ensure_reference_peaks(session, reference, sigma_multiplier=20)
 run_parameter_study(root, datasets=..., combos=..., sigma_multiplier=20)
 ```
@@ -117,12 +118,17 @@ run_parameter_study(root, datasets=..., combos=..., sigma_multiplier=20)
 python -m nmrforge_api peaks --study ~/studies/s1 --sigma 20
 ```
 
-- 给了阈值就**按该阈值选峰**;与研究里已冻结的阈值不同时,会自动**重新选峰**
-  (旧行为是不管给什么都复用默认阈值冻结下来的峰表,外部指定等于没生效);
-- 不给阈值 → 沿用上次(或默认 35σ);阈值相同 → 复用,不重复选峰;
-- 实际用量落档:`reference.json.peak_params.sigma_multiplier`(外部给的)、
-  `previous_sigma_multiplier`(上一版)、`detection.sigma_multiplier` +
-  `detection.threshold_source`(`user` / `default(35sigma)`);
+- **阈值是参考定义的一部分**:参考峰表一旦冻结,后续所有 workflow/参数扰动
+  只能沿用参考的阈值;此时再给**不同**阈值会直接报 `ReferenceError`(CLI
+  退出码 2),不会悄悄重选峰;
+- 与参考一致(或与参考默认 35σ 一致)的阈值可以显式给 → 复用,不重复选峰;
+- 想换阈值属于**重建参考**:显式 `force=True`,或删掉该条件的
+  `study/reference/<key>/` 后重跑参考;
+- 实际用量落档:`reference.json.peak_params.sigma_multiplier`(生成参考时
+  选定的值)、`previous_sigma_multiplier`(force 重建时的上一版)、
+  `detection.sigma_multiplier` 与 `detection.threshold_source`
+  (`user` / `default(35sigma)`);每条 workflow 记录另记
+  `parameters_resolved.peak_picking_threshold`(`locked_to_reference=true`);
 - 阈值过高导致选不出峰 → 明确报错(不静默产出空峰表);
-- 阈值是**参考峰表建立时**的参数,不是 workflow 处理参数:写进参数组合表
-  会在 `plan.notes` 里提示应改在选峰步骤指定。
+- 阈值写进 workflow 参数组合表 → 直接报错(`SweepError`),提示应改在生成参考
+  时指定。

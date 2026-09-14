@@ -636,12 +636,14 @@ def ensure_reference_peaks(
 
     - 主条件:调用 ``pick_reference_peaks()`` 选峰并冻结为 ``reference.list``;
     - 其他条件:复制主条件的身份表(峰身份共享),再在本条件参考谱上测两张表;
-    - 已有身份表 + 两张表且文件在 → 直接复用(除非 ``force``,或外部给的
-      ``sigma_multiplier`` 与上次不同);
-    - **选峰阈值可由外部指定**:``sigma_multiplier``(σ 倍数,缺省 35σ)不写则
-      沿用上次/默认;显式给了就**按该阈值重新选峰**(旧行为是一律复用默认阈值
-      的冻结峰表,外部指定等于没生效),实际用量写进 ``peak_params``:
-      ``sigma_multiplier`` / ``previous_sigma_multiplier`` /
+    - 已有身份表 + 两张表且文件在 → 直接复用(除非 ``force``);
+    - **选峰阈值在生成参考时选择,随后锁定**:``sigma_multiplier``(σ 倍数,
+      缺省 35σ)可在还没有参考峰表时(即生成参考时)由外部指定;参考一旦定了,
+      再给**不同**阈值会直接报 ``ReferenceError``——参数扰动阶段所有 workflow
+      只能沿用参考的阈值。改阈值属于重建参考:显式 ``force=True`` 或删掉该条件
+      的 ``study/reference/<key>/`` 后重跑;
+    - 实际用量写进 ``peak_params``:``sigma_multiplier``(参考选定值)/
+      ``previous_sigma_multiplier``(force 重建时的上一版)/
       ``detection.sigma_multiplier`` / ``detection.threshold_source``;
     - ``localization_method`` 只决定**参考峰位**的取法(默认抛物线,与既有
       行为一致);两张参考峰表始终同时生成(2026-09-13 规范 B2)。
@@ -658,14 +660,37 @@ def ensure_reference_peaks(
     stored_sigma_value = (
         float(stored_sigma) if stored_sigma not in (None, "") else None
     )
-    # 2026-09-14(用户「阈值可以由外部指定」):显式给了阈值且与上次不同 →
-    # 重新选峰;否则(没给/与上次相同)复用冻结的参考峰表。
-    threshold_changed = (
-        requested_sigma is not None and requested_sigma != stored_sigma_value
+    stored_detection = dict(ref.peak_params.get("detection") or {})
+    # 参考峰表的**有效阈值**:没显式记过就是选峰默认值(35σ);用来判断
+    # 「参考已冻结」时外部给的阈值是否与参考一致。
+    effective_stored_sigma = stored_detection.get("sigma_multiplier")
+    if effective_stored_sigma is None:
+        effective_stored_sigma = stored_sigma_value
+    else:
+        effective_stored_sigma = float(effective_stored_sigma)
+    reference_peaks_frozen = bool(
+        ref.peak_table_path
+        and Path(ref.peak_table_path).is_file()
+        and ref.peak_tables
     )
+    # 2026-09-14(用户):选峰阈值**只在生成参考时选择**;参考一旦定了,后续所有
+    # 参数扰动必须沿用参考的阈值 → 显式给不同阈值直接报错,不悄悄重选峰。
+    # 要换阈值属于「重建参考」,须显式 force=True(或删掉该条件的 reference/)。
+    if (
+        requested_sigma is not None
+        and effective_stored_sigma is not None
+        and requested_sigma != effective_stored_sigma
+        and reference_peaks_frozen
+        and not force
+    ):
+        raise ReferenceError(
+            f"选峰阈值已锁定在参考峰表({effective_stored_sigma:g}σ;"
+            "参考一旦确定,后续所有参数扰动必须使用与参考一致的选峰阈值):"
+            f"收到 {requested_sigma:g}σ。要改阈值属于重建参考,请显式 "
+            "force=True,或删除该条件的 study/reference/<key>/ 后重跑参考。"
+        )
     if (
         not force
-        and not threshold_changed
         and ref.peak_table_path
         and Path(ref.peak_table_path).is_file()
         and ref.peak_tables
