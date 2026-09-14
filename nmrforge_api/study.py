@@ -329,6 +329,9 @@ def run_combination_study(
     combos: Sequence[Mapping[str, Any]] | None = None,
     axes: Mapping[str, Sequence[Any]] | None = None,
     max_runs: int = DEFAULT_MAX_RUNS,
+    localization: Any = "parabolic",
+    edge_margin_ppm: float | None = None,
+    # window_pts/window_ppm/sign:历史参数(组合模式独立选峰后不再使用)
     window_pts: int | None = None,
     window_ppm: float | None = None,
     sign: str = "abs",
@@ -348,12 +351,20 @@ def run_combination_study(
     ``reference.json`` 路径。组合在该参考上执行:
 
     - 参数基底 = 该参考运行的有效参数(相位锁定),组合表只覆盖它显式指定的键;
-    - 选峰阈值随参考锁定(与参考一致,不能在这里改);
+    - **组合独立选峰**(2026-09-14 规范):选峰阈值随参考锁定(与参考一致,不能在
+      这里改;组合表里写阈值键——sigma_multiplier / min_snr / threshold_sigma /
+      detection.sigma_multiplier——直接报错)。每个组合在**自己的候选谱**上用该
+      锁定阈值独立选峰,输出该组合自己的完整峰表;reference_peak_id / assignment
+      留空,**与参考峰表的匹配由外部(下游分析)完成**;
+    - localization = parabolic(默认)/ gaussian / both:只输出被选中的峰表
+      (逐组合可用组合表 localization 键覆盖);
     - 直接维范围(``ext_lo``/``ext_hi``,ppm)可用 ``direct_range=`` 覆盖**本批
       workflow 的基值**(参考谱不重建),逐组合还可以用 ``ext_lo``/``ext_hi``
       再覆盖;实际取值逐 workflow 记进 ``parameters_resolved.direct_range``;
     - 指定了条件就只跑该条件;只给研究根则跑该研究的全部条件(各自已有参考);
-    - 候选谱与两张峰表写到 ``study/workflows/<workflow_id>/<条件>/``。
+    - 候选谱与峰表写到 ``study/workflows/<workflow_id>/<条件>/``;
+    - window_pts / window_ppm / sign 为历史参数:组合模式不再有「峰位搜索窗口」,
+      只用物理宽度排除边缘轴峰(edge_margin_ppm)。
     """
     handle = parse_reference_spec(reference)
     session, target, ref = resolve_reference(reference, backend=backend)
@@ -397,9 +408,8 @@ def run_combination_study(
         plan,
         reference=ref,
         datasets=targets,
-        window_pts=window_pts,
-        window_ppm=window_ppm,
-        sign=sign,
+        localization=localization,
+        edge_margin_ppm=edge_margin_ppm,
         roi_f1_ppm=roi_f1_ppm,
         roi_f2_ppm=roi_f2_ppm,
         resume=resume,
@@ -450,12 +460,13 @@ def run_parameter_study(
     sigma_multiplier: float | None = None,
     max_peaks: int = 0,
     max_runs: int = DEFAULT_MAX_RUNS,
-    window_pts: int | None = None,
-    window_ppm: float | None = None,
+    window_pts: int | None = None,          # 历史参数(组合模式不再使用)
+    window_ppm: float | None = None,        # 历史参数(组合模式不再使用)
     sign: str = "abs",
     roi_f1_ppm: float | None = None,
     roi_f2_ppm: float | None = None,
-    localization_method: str = "parabolic",
+    localization: Any = "parabolic",        # 组合模式精修方式(含 both)
+    localization_method: str = "parabolic",  # 参考峰位取法
     gaussian_roi_f1_ppm: float | None = None,
     gaussian_roi_f2_ppm: float | None = None,
     force: bool = False,
@@ -469,7 +480,8 @@ def run_parameter_study(
     2026-09-14 起两种模式已分开:参考由 :func:`run_reference_study` 生成、组合由
     :func:`run_combination_study` 执行且**必须显式给参考**;本函数保留为一键便利
     入口与向后兼容(内部先跑参考模式,再用研究根显式调用组合模式)。
-    直接维范围(``direct_range=`` / ``ext_lo`` / ``ext_hi``)在参考层生效。
+    直接维范围(``direct_range=`` / ``ext_lo`` / ``ext_hi``)在参考层生效;
+    localization 传给组合模式(parabolic 默认 / gaussian / both)。
     """
     reference_result = run_reference_study(
         root,
@@ -499,9 +511,7 @@ def run_parameter_study(
         combos=combos,
         axes=axes,
         max_runs=max_runs,
-        window_pts=window_pts,
-        window_ppm=window_ppm,
-        sign=sign,
+        localization=localization,
         roi_f1_ppm=roi_f1_ppm,
         roi_f2_ppm=roi_f2_ppm,
         resume=resume,

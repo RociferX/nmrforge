@@ -92,7 +92,8 @@ run_parameter_study(..., peaks="library.list")   # 或 peak_id,H_ppm,N_ppm CSV
 
 - 缺省不用给:软件自动选峰并建立峰身份 `R0001…`;
 - 给了外部峰表:作为主条件的峰身份表冻结(`peak_source="external"`),其他条件
-  沿用同一身份;
+  的**参考峰表**沿用同一身份(组合模式的峰表不跟踪它——组合峰表独立选峰、
+  `reference_peak_id` 留空);
 - 接受格式:Poky/Sparky `.list`、NMRForge 旧 CSV、研究项目
   `peak_id,H_ppm,N_ppm,height,linewidth,volume`。
 
@@ -196,7 +197,9 @@ python -m nmrforge_api peaks --study ~/studies/s1 --sigma 20
   选定的值)、`previous_sigma_multiplier`(force 重建时的上一版)、
   `detection.sigma_multiplier` 与 `detection.threshold_source`
   (`user` / `default(35sigma)`);每条 workflow 记录另记
-  `parameters_resolved.peak_picking_threshold`(`locked_to_reference=true`);
+  `parameters_resolved.detection`(`source="reference(locked)"`、实际 σ、边距、
+  噪声 σ、精修方法列表;`independent=true`、`reference_matching="external"`);
 - 阈值过高导致选不出峰 → 明确报错(不静默产出空峰表);
-- 阈值写进 workflow 参数组合表 → 直接报错(`SweepError`),提示应改在生成参考
-  时指定。
+- 阈值写进 workflow 参数组合表 → 直接报错(`SweepError`),提示「要改阈值请重建
+  参考」;
+- 组合模式**没有** `max_peaks`:该组合在锁定阈值下检出多少峰就是多少峰。

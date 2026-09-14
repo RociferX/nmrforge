@@ -63,7 +63,9 @@ from nmrforge_api.peak_tables import (
     write_peak_table,
 )
 from nmrforge_api.peaks import (
+    DEFAULT_DETECTION_SIGMA,
     PeakMeasurement,
+    detect_and_localize,
     measure_peak_positions,
     pick_reference_peaks,
     read_reference_peaks,
@@ -148,6 +150,7 @@ __all__ = [
     "ReferenceResult",
     "CONDITION_LETTERS",
 "DEFAULT_CSP_N_WEIGHT",
+    "DEFAULT_DETECTION_SIGMA",
     "DatasetError",
     "DatasetRef",
     "GAUSSIAN_ONLY_COLUMNS",
@@ -176,6 +179,7 @@ __all__ = [
     "condition_token",
     "dataset_info",
     "design_diagnostics",
+    "detect_and_localize",
     "ensure_reference_peaks",
     "expand_grid",
     "gaussian_fallback_rows",

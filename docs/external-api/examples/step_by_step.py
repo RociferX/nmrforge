@@ -29,7 +29,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dataset", required=True, help="Bruker 目录")
     parser.add_argument("--condition", default="A", help="条件标签(缺省 A)")
     parser.add_argument("--combos", required=True, help="组合表")
-    parser.add_argument("--window-ppm", type=float, default=None)
+    parser.add_argument(
+        "--localization",
+        choices=("parabolic", "gaussian", "both"),
+        default="parabolic",
+        help="组合模式峰位精修方式(both = 两张峰表都出)",
+    )
     args = parser.parse_args(argv)
 
     session = open_study(args.study)
@@ -49,7 +54,7 @@ def main(argv: list[str] | None = None) -> int:
         session,
         plan,
         reference=reference,
-        window_ppm=args.window_ppm,
+        localization=args.localization,
         progress=print,
     )
     records = write_records(

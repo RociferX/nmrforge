@@ -35,9 +35,10 @@ from nmrforge_api.sweep import (
 )
 
 WINDOW_POLICY = (
-    "峰位搜索窗口半径按物理宽度定义:缺省 = 1.5×该轴核素线宽(Hz)折算 "
-    "ppm,运行时按该候选谱的点距换算成点数(core.peaks.axis_units);"
-    "零填零 k 倍只改点距,不改变窗口覆盖的 ppm 宽度"
+    "组合模式(2026-09-14 规范)不做参考峰跟踪:每个组合在**自己的候选谱**上,用"
+    "参考锁定的 detection 阈值独立选峰;边缘轴峰按物理宽度排除(缺省 = 3×该轴 "
+    "核素线宽折算 ppm,core.peaks.axis_units),运行时按候选谱点距换算点数:"
+    "零填零 k 倍只改点距,不改变边距覆盖的 ppm 宽度"
 )
 
 BOUNDARY_STATEMENT = (
@@ -91,11 +92,12 @@ def measurement_record(
     references: Mapping[str, ReferenceSpectrum] | Sequence[ReferenceSpectrum],
     runs: Sequence[SweepRun],
 ) -> dict[str, Any]:
-    """测量口径留档:定位方法、窗口逐轴换算、逐峰 QC 计数。
+    """选峰/定位口径留档:锁定阈值来源、边距逐轴换算、逐峰 QC 计数。
 
-    ``window_by_axis`` 给出每个轴最后一次实际用到的口径;``window_points_seen``
-    给出各轴在全部组合里出现过的点数集合——同一物理宽度在 1×/2×/4× 填零下
-    换成不同点数,这里一眼能看出「点数变了但 ppm 没变」。
+    2026-09-14 起组合模式独立选峰(不跟踪参考峰表):``window_by_axis`` 给的是
+    最后一次实际用到的**边缘轴峰排除边距**(物理宽度口径);
+    ``window_points_seen`` 给出各轴在全部组合里出现过的点数集合——同一物理宽度
+    在 1×/2×/4× 填零下换成不同点数,一眼能看出「点数变了但 ppm 没变」。
     """
     refs = list(references.values()) if isinstance(references, Mapping) else list(
         references
@@ -255,8 +257,9 @@ def write_records(
             "notes": plan.notes,
         },
         "peak_identity": {
-            "reference_peak_id_scheme": "R0001…(参考峰表行序;所有条件与 "
-            "workflow 共享同一身份)",
+            "reference_peak_id_scheme": "R0001…(参考峰表行序;只属于参考峰表)",
+            "matching": "外部:组合峰表 reference_peak_id/assignment 留空,"
+            "由下游分析把各组合的峰匹配回参考峰身份(本软件不做匹配、不做 CSP)",
             "reference": [
                 {
                     "condition": ref.condition,

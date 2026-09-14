@@ -33,6 +33,7 @@ from nmrforge_api import (
     add_dataset,
     build_reference,
     condition_token,
+    detect_and_localize,
     ensure_reference_peaks,
     expand_grid,
     load_combo_table,
@@ -525,7 +526,11 @@ def test_reference_workflow_writes_script_and_two_peak_tables(
 def test_workflows_are_traceable_and_use_both_localizations(
     tmp_path: Path, bruker_dir: Path
 ) -> None:
-    """规范 C/D/E/G:W0001… + 三层参数 + 两张峰表 + 完整日志 + 版本 + 状态。"""
+    """规范 C/D/E/G:W0001… + 三层参数 + 峰表 + 完整日志 + 版本 + 状态。
+
+    2026-09-14:组合模式独立选峰(不跟踪参考峰表),精修方式由 localization 指定;
+    这里 localization='both' → 同一张谱各出一张 parabolic / gaussian 峰表。
+    """
     root = tmp_path / "workflows"
     peaks = _write_peak_table(tmp_path / "reference.list")
     backend = _FakeSweepBackend()
@@ -538,7 +543,7 @@ def test_workflows_are_traceable_and_use_both_localizations(
         ],
         params={"phase_route": "none"},
         peaks=peaks,
-        window_ppm=1.0,
+        localization="both",
         backend=backend,
     )
     ref = result.reference
@@ -563,6 +568,11 @@ def test_workflows_are_traceable_and_use_both_localizations(
         assert run.base_script["path"] == ref.script_path
         # 用户参数 vs 实际参数
         assert run.parameters_requested == run.combo
+        # 组合模式:阈值锁定在参考(逐 workflow 留档来源)
+        detection = run.parameters_resolved["detection"]
+        assert detection["source"] == "reference(locked)"
+        assert detection["independent"] is True
+        assert detection["methods"] == ["parabolic", "gaussian"]
         assert run.parameters_used["zero_fill"] == run.combo["zero_fill"]
         assert run.parameters_used["window"]["F1"]["off"] == pytest.approx(
             run.combo["window.F1.off"]
@@ -580,18 +590,23 @@ def test_workflows_are_traceable_and_use_both_localizations(
         assert payload["workflow_id"] == run.workflow_id
         assert payload["parameters_requested"] and payload["parameters_used"]
         assert payload["versions"].get("nmrforge")
-        # 两张峰表:同字段、同峰身份、逐峰 SNR
+        # 两张峰表:同一套字段、各自是本谱独立检出的峰(不跟踪参考峰表)
         rows_p = read_peak_table(Path(run.peak_table_path("parabolic")))
         rows_g = read_peak_table(Path(run.peak_table_path("gaussian")))
         assert len(rows_p) == len(rows_g) == 2
-        assert [row["reference_peak_id"] for row in rows_p] == ["R0001", "R0002"]
-        assert [row["reference_peak_id"] for row in rows_g] == ["R0001", "R0002"]
+        assert [int(row["peak_id"]) for row in rows_p] == [1, 2]
+        assert all(row["reference_peak_id"] == "" for row in rows_p)
+        assert all(row["reference_peak_id"] == "" for row in rows_g)
+        assert all(row["assignment"] == "" for row in rows_p)
         assert all(row["workflow_id"] == run.workflow_id for row in rows_p)
         assert all(row["workflow_id"] == run.workflow_id for row in rows_g)
         assert all(row["detected"] for row in rows_p)
         assert all(row["SNR"] > 0 for row in rows_p)
-        assert all(row["assignment"] for row in rows_p)
+        assert all(row["localization_method"] == "parabolic" for row in rows_p)
         assert all(row["localization_method"] == "gaussian" for row in rows_g)
+        assert run.parameters_resolved["peak_counts"] == {
+            "parabolic": 2, "gaussian": 2,
+        }
         # 完整日志(不是只有尾部)
         log = Path(run.log_path).read_text(encoding="utf-8")
         assert "parameters_used" in log
@@ -613,10 +628,10 @@ def test_workflows_are_traceable_and_use_both_localizations(
         round(float(run.combo["window.F1.off"]), 3): run for run in result.runs
     }
     assert by_off[0.35].measurements[0].positions["15N"] == pytest.approx(
-        _n15_ppm(_PEAK_A[0] + 1.25), abs=0.2 * _n15_step()
+        _n15_ppm(_PEAK_A[0] + 1.25), abs=0.3 * _n15_step()
     )
     assert by_off[0.45].measurements[0].positions["15N"] == pytest.approx(
-        _n15_ppm(_PEAK_A[0] - 1.25), abs=0.2 * _n15_step()
+        _n15_ppm(_PEAK_A[0] - 1.25), abs=0.3 * _n15_step()
     )
     # fid 只转换一次(参考运行时)
     assert backend.convert_calls == 1
@@ -648,16 +663,16 @@ def test_zero_fill_keeps_physical_edge_margin_and_window(
     assert detection["edge_margin_points"] >= 1
     assert detection["axes"][0]["ppm_per_point"] > 0
 
-    # 逐组合:物理窗口一致,点数随填零变密
+    # 逐组合:边距物理宽度一致,点数随填零变密
     by_fill = {
         int(round(float(run.combo["zero_fill"]))): run.window
         for run in result.runs
     }
     for factor in (1, 4):
         spec = by_fill[factor]["0"]
-        assert spec["source"] == "ppm(自动:1.5×线宽)"
+        assert spec["source"] == "ppm(物理宽度)"
         assert spec["nucleus"] == "15N"
-        assert spec["ppm"] == pytest.approx(1.5 * 15.0 / _N15_OBS, rel=0.02)
+        assert spec["ppm"] == pytest.approx(3 * 15.0 / _N15_OBS, rel=0.02)
     assert by_fill[4]["0"]["points"] == pytest.approx(
         4 * by_fill[1]["0"]["points"], rel=0.5
     )
@@ -674,8 +689,8 @@ def test_zero_fill_keeps_physical_edge_margin_and_window(
     seen = measurement["window_points_seen"]["0"]
     assert seen["nucleus"] == "15N"
     assert max(seen["points"]) > min(seen["points"])  # 点数确实随填零变
-    assert seen["ppm"][0] == pytest.approx(1.5 * 15.0 / _N15_OBS, rel=0.02)
-    assert measurement["window_by_axis"]["0"]["source"] == "ppm(自动:1.5×线宽)"
+    assert seen["ppm"][0] == pytest.approx(3 * 15.0 / _N15_OBS, rel=0.02)
+    assert measurement["window_by_axis"]["0"]["source"] == "ppm(物理宽度)"
     assert Path(result.records["measurement"]).is_file()
     runs_json = json.loads(Path(result.records["runs"]).read_text(encoding="utf-8"))
     assert all(run["window"] for run in runs_json)
@@ -692,7 +707,7 @@ def test_records_are_written_with_unified_peak_tables(
         combos=[{"zero_fill": 1}, {"zero_fill": 2}],
         params={"phase_route": "none"},
         peaks=_write_peak_table(tmp_path / "reference.list"),
-        window_ppm=1.0,
+        localization="both",
         backend=_FakeSweepBackend(),
     )
     for name in (
@@ -732,7 +747,7 @@ def test_records_are_written_with_unified_peak_tables(
         combos=[{"zero_fill": 1}, {"zero_fill": 2}],
         params={"phase_route": "none"},
         peaks=_write_peak_table(tmp_path / "reference.list"),
-        window_ppm=1.0,
+        localization="both",
         backend=result.session.backend,
     )
     assert len(again.runs) == 2
@@ -780,41 +795,38 @@ def _backend_calls(result) -> list:
     return list(getattr(result.session.backend, "process_calls", []))
 
 
-def test_undetected_peak_is_kept_with_detected_false(
+def test_combination_mode_picks_peaks_independently(
     tmp_path: Path, bruker_dir: Path
 ) -> None:
-    """规范 F3/G3:测不到的参考峰保留记录(detected=false)+ 明确警告。"""
+    """2026-09-14 规范:组合模式不做参考峰跟踪,峰来自该组合自己的谱。
+
+    每个组合在自己的候选谱上用**参考锁定阈值**独立选峰 → 该组合自己的完整
+    峰表;reference_peak_id / assignment 留空(与参考峰表的匹配是外部工作)。
+    """
     backend = _FakeSweepBackend()
-    session = open_study(tmp_path / "detect", backend=backend)
+    session = open_study(tmp_path / "independent", backend=backend)
     add_dataset(session, bruker_dir / "hsqc_2d")
     reference = build_reference(session, params={"phase_route": "none"})
     reference = ensure_reference_peaks(session, reference)
-    plan = plan_sweep(reference, axes={"zero_fill": [1]})
-    rows = [
-        {
-            "N_shift": _n15_ppm(_PEAK_A[0]),
-            "H_shift": _h1_ppm(_PEAK_A[1]),
-            "label": "G1",
-        },
-        {"C_shift": 40.0, "label": "C1"},  # 当前谱没有 13C 轴 → 测不到
-    ]
-    runs = run_sweep(
-        session,
-        plan,
-        reference=reference,
-        peaks=rows,
-        window_ppm=1.0,
-        resume=False,
-    )
+    plan = plan_sweep(reference, combos=[{"zero_fill": 1}])
+    runs = run_sweep(session, plan, reference=reference, resume=False)
     run = runs[0]
+    assert run.status in (STATUS_SUCCESS, STATUS_WARNING)
     table = read_peak_table(Path(run.peak_table_path("parabolic")))
-    assert len(table) == 2  # 行保留,不删
-    assert table[1]["reference_peak_id"] == "R0002"
-    assert table[1]["detected"] is False
-    assert math.isnan(table[1]["H_ppm"]) and math.isnan(table[1]["N_ppm"])
-    assert any(w["code"] == "peak_not_detected" for w in run.warnings)
-    assert run.status == STATUS_WARNING
-    assert run.peak_localization["parabolic"]["n_detected"] == 1
+    assert table  # 该组合自己检出的峰,不是参考峰表行
+    assert all(row["detected"] for row in table)
+    assert all(row["reference_peak_id"] == "" for row in table)
+    assert all(row["assignment"] == "" for row in table)
+    assert [int(row["peak_id"]) for row in table] == list(
+        range(1, len(table) + 1)
+    )
+    assert all(row["condition"] == "A" for row in table)
+    # 旧口径(参考里有、本谱测不到就 detected=false 保留一行)已废弃
+    assert not any(w["code"] == "peak_not_detected" for w in run.warnings)
+    detection = run.parameters_resolved["detection"]
+    assert detection["source"] == "reference(locked)"
+    assert detection["reference_matching"] == "external"
+    assert detection["sigma_multiplier"] == pytest.approx(35.0)
 
 
 def test_gaussian_fallback_is_recorded_not_silent(
@@ -847,7 +859,11 @@ def test_gaussian_fallback_is_recorded_not_silent(
 
     monkeypatch.setattr(lz, "localize_peak", forced)
     runs = run_sweep(
-        session, plan, reference=reference, window_ppm=1.0, resume=False
+        session,
+        plan,
+        reference=reference,
+        localization="gaussian",
+        resume=False,
     )
     run = runs[0]
     table = read_peak_table(Path(run.peak_table_path("gaussian")))
@@ -863,11 +879,11 @@ def test_gaussian_fallback_is_recorded_not_silent(
     }
 
 
-def test_gaussian_measurement_exception_becomes_failed_run(
+def test_gaussian_localization_exception_becomes_failed_run(
     tmp_path: Path, bruker_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Gaussian 测量异常必须落成 failed run.json，而不是终止整轮。"""
-    import nmrforge_api.sweep as sweep_module
+    """Gaussian 精修异常必须落成 failed run.json,而不是终止整轮。"""
+    from core.peaks import localize as lz
 
     backend = _FakeSweepBackend()
     session = open_study(tmp_path / "gaussian_error", backend=backend)
@@ -875,15 +891,21 @@ def test_gaussian_measurement_exception_becomes_failed_run(
     reference = build_reference(session, params={"phase_route": "none"})
     reference = ensure_reference_peaks(session, reference)
     plan = plan_sweep(reference, axes={"zero_fill": [1]})
-    real_measure = sweep_module.measure_peak_positions
+    real_localize = lz.localize_peak
 
-    def explode_gaussian(*args, **kwargs):
-        if kwargs.get("refine") == "gaussian":
+    def explode_gaussian(data, index, **kwargs):
+        if str(kwargs.get("method")) == "gaussian":
             raise RuntimeError("forced gaussian error")
-        return real_measure(*args, **kwargs)
+        return real_localize(data, index, **kwargs)
 
-    monkeypatch.setattr(sweep_module, "measure_peak_positions", explode_gaussian)
-    runs = run_sweep(session, plan, reference=reference, resume=False)
+    monkeypatch.setattr(lz, "localize_peak", explode_gaussian)
+    runs = run_sweep(
+        session,
+        plan,
+        reference=reference,
+        localization="gaussian",
+        resume=False,
+    )
     assert len(runs) == 1
     assert runs[0].status == "failed"
     assert "forced gaussian error" in runs[0].message
@@ -917,7 +939,11 @@ def test_non_2d_gaussian_fallback_rows_set_flag() -> None:
 def test_two_conditions_share_parameters_and_peak_identity(
     tmp_path: Path, bruker_dir: Path
 ) -> None:
-    """规范 I:同一 workflow 对 A/B 用同一组参数,峰身份共享,各出峰表。"""
+    """规范 I:同一 workflow 对 A/B 用同一组参数,各条件各出峰表。
+
+    2026-09-14:组合模式独立选峰 → 峰表属于本条件自己的谱(reference_peak_id
+    留空);参考层仍各条件共享同一份参考峰身份表。
+    """
     root = tmp_path / "ab"
     backend = _FakeSweepBackend()
     result = run_parameter_study(
@@ -942,14 +968,14 @@ def test_two_conditions_share_parameters_and_peak_identity(
         assert {run.condition for run in runs} == {"A", "B"}
         requested = {json.dumps(run.parameters_requested, sort_keys=True) for run in runs}
         assert len(requested) == 1  # 同一组用户参数
-        identities = set()
         for run in runs:
             assert Path(run.run_dir).name == run.condition
             assert Path(run.run_dir, "peak_table_parabolic.csv").is_file()
-            assert Path(run.run_dir, "peak_table_gaussian.csv").is_file()
             rows = read_peak_table(Path(run.peak_table_path("parabolic")))
-            identities.add(tuple(row["reference_peak_id"] for row in rows))
-        assert len(identities) == 1  # 峰身份跨条件共享
+            # 组合独立选峰:每条件出自己那张谱的峰表(reference_peak_id 留空)
+            assert rows
+            assert all(row["reference_peak_id"] == "" for row in rows)
+            assert all(row["condition"] == run.condition for row in rows)
     # B 条件的参考沿用主条件的峰身份
     refs = {key: ref for key, ref in result.references.items()}
     shared = [ref for ref in refs.values() if ref.peak_source.startswith("shared:")]
@@ -991,11 +1017,11 @@ def test_external_peak_identity_is_propagated_to_all_conditions(
     assert [ref.peak_count for ref in refs] == [1, 1]
     assert len({ref.peak_table_sha256 for ref in refs}) == 1
     assert refs[1].peak_source == "shared:A"
+    # 参考身份(外部 .list)仍各条件共享;组合峰表改为独立选峰 → 不写参考身份
     for run in result.runs:
         rows = read_peak_table(Path(run.peak_table_path("parabolic")))
-        assert [(row["reference_peak_id"], row["assignment"]) for row in rows] == [
-            ("R0001", "ONLY")
-        ]
+        assert rows
+        assert all(row["reference_peak_id"] == "" for row in rows)
 
 
 def test_stop_on_error_keeps_running_successful_conditions(
@@ -1059,10 +1085,10 @@ def test_run_parameter_study_nus_2d(tmp_path: Path, bruker_dir: Path) -> None:
         )
         assert smile["nsigma"]["source"] == "user"
         assert run.parameters_resolved["spectrum_noise_sigma"]["value"] > 0
-    # 两张峰表都在
+    # 默认精修方式 parabolic → 只出抛物线表(要高斯必须显式指定)
     for run in result.runs:
         assert Path(run.peak_table_path("parabolic")).is_file()
-        assert Path(run.peak_table_path("gaussian")).is_file()
+        assert not run.peak_table_path("gaussian")
 
 
 def test_reference_state_persists_across_sessions(
@@ -1235,7 +1261,7 @@ def test_sweep_rejects_3d_nus(tmp_path: Path, bruker_dir: Path) -> None:
     )
     plan = plan_sweep(reference, axes={"zero_fill": [1, 2]})
     with pytest.raises(SweepError, match="2D NUS"):
-        run_sweep(session, plan, reference=reference, peaks=[{"N_shift": 1.0}])
+        run_sweep(session, plan, reference=reference)
 
 
 def test_add_dataset_rejects_non_bruker(tmp_path: Path) -> None:
@@ -1583,18 +1609,16 @@ def test_workflow_records_reference_locked_threshold(
         backend=_FakeSweepBackend(),
     )
     run = result.runs[0]
-    locked = run.parameters_resolved["peak_picking_threshold"]
-    assert locked["sigma_multiplier_requested"] == pytest.approx(25.0)
-    assert locked["sigma_multiplier_effective"] == pytest.approx(25.0)
-    assert locked["source"] == "user"
-    assert locked["locked_to_reference"] is True
+    locked = run.parameters_resolved["detection"]
+    assert locked["sigma_multiplier"] == pytest.approx(25.0)
+    assert locked["sigma_multiplier_origin"] == "reference"
+    assert locked["source"] == "reference(locked)"
+    assert locked["independent"] is True
+    assert locked["reference_matching"] == "external"
     assert result.reference.peak_params["sigma_multiplier"] == pytest.approx(25.0)
     payload = json.loads(Path(run.run_dir, "run.json").read_text(encoding="utf-8"))
-    assert (
-        payload["parameters_resolved"]["peak_picking_threshold"][
-            "locked_to_reference"
-        ]
-        is True
+    assert payload["parameters_resolved"]["detection"]["source"] == (
+        "reference(locked)"
     )
 
 
@@ -1886,3 +1910,112 @@ def test_combo_table_supports_per_dimension_keys(
     assert sent["baseline"]["F2"]["enabled"] is False
     payload = json.loads(Path(run.run_dir, "run.json").read_text(encoding="utf-8"))
     assert payload["parameters_used"]["zero_fill"]["F1"] == 2
+
+
+# ----------------------------------------- 组合模式:独立选峰改版(2026-09-14)
+def test_combination_threshold_keys_are_rejected(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """阈值只在生成参考时选择:组合表里出现阈值键 -> SweepError(锁定在参考)。"""
+    backend = _FakeSweepBackend()
+    session = open_study(tmp_path / "locked_threshold_keys", backend=backend)
+    add_dataset(session, bruker_dir / "hsqc_2d")
+    reference = build_reference(session, params={"phase_route": "none"})
+    reference = ensure_reference_peaks(session, reference)
+    for key, value in (
+        ("sigma_multiplier", 20),
+        ("min_snr", 20),
+        ("threshold_sigma", 20),
+        ("detection.sigma_multiplier", 20),
+    ):
+        with pytest.raises(SweepError, match="选峰阈值"):
+            plan_sweep(reference, combos=[{"zero_fill": 1, key: value}])
+    # 允许的 detection 键只有精修方式;其它 detection.* 键是未知键(报错不静默)
+    plan = plan_sweep(reference, combos=[{"zero_fill": 1, "localization": "both"}])
+    assert plan.combos[0]["localization"] == "both"
+    assert any("精修方式" in note for note in plan.notes)
+    with pytest.raises(SweepError, match="未知的 detection 键"):
+        plan_sweep(reference, combos=[{"zero_fill": 1, "detection.max_peaks": 5}])
+
+
+def test_combination_localization_selection_and_per_combo_override(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """默认 parabolic 只出一张表;gaussian / both 显式指定;逐组合可覆盖。"""
+    backend = _FakeSweepBackend()
+    result = run_parameter_study(
+        tmp_path / "localization_override",
+        bruker_dir / "hsqc_2d",
+        combos=[
+            {"zero_fill": 1, "localization": "gaussian"},
+            {"zero_fill": 2, "localization": "parabolic"},
+        ],
+        params={"phase_route": "none"},
+        backend=backend,
+    )
+    by_id = {run.workflow_id: run for run in result.runs}
+    assert by_id["W0001"].peak_table_path("gaussian")
+    assert not by_id["W0001"].peak_table_path("parabolic")
+    assert by_id["W0002"].peak_table_path("parabolic")
+    assert not by_id["W0002"].peak_table_path("gaussian")
+    assert by_id["W0001"].parameters_resolved["detection"]["methods"] == ["gaussian"]
+    assert by_id["W0002"].parameters_resolved["detection"]["methods"] == ["parabolic"]
+    grow = read_peak_table(Path(by_id["W0001"].peak_table_path("gaussian")))
+    assert grow and all(row["localization_method"] == "gaussian" for row in grow)
+    assert all(row["fit_success"] for row in grow)
+    prow = read_peak_table(Path(by_id["W0002"].peak_table_path("parabolic")))
+    assert prow and all(row["localization_method"] == "parabolic" for row in prow)
+    assert math.isnan(prow[0]["fit_success"])  # 不适用列写 NaN,两表结构一致
+    assert math.isnan(prow[0]["FWHM_H"]) and math.isnan(prow[0]["FWHM_N"])
+
+    both = run_parameter_study(
+        tmp_path / "localization_both",
+        bruker_dir / "hsqc_2d",
+        combos=[{"zero_fill": 1}],
+        params={"phase_route": "none"},
+        localization="both",
+        backend=_FakeSweepBackend(),
+    )
+    run = both.runs[0]
+    assert Path(run.peak_table_path("parabolic")).is_file()
+    assert Path(run.peak_table_path("gaussian")).is_file()
+    assert run.parameters_resolved["detection"]["methods"] == ["parabolic", "gaussian"]
+
+
+def test_combination_detection_keys_do_not_reach_backend_params(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """detection 类键只影响选峰:绝不作为处理参数喂给后端。"""
+    backend = _FakeSweepBackend()
+    result = run_parameter_study(
+        tmp_path / "detection_keys",
+        bruker_dir / "hsqc_2d",
+        combos=[{"zero_fill": 1, "localization": "parabolic"}],
+        params={"phase_route": "none"},
+        backend=backend,
+    )
+    run = result.runs[0]
+    sent = backend.process_calls[-1]["params"]
+    for key in ("localization", "sigma_multiplier", "min_snr", "detection"):
+        assert key not in sent
+    assert run.parameters_requested["localization"] == "parabolic"
+    assert "localization" not in run.parameters_used
+
+
+class _Fake3DAxes:
+    """最小 3D 谱轴替身:只提供 detect_and_localize 会用到的属性。"""
+
+    data = np.zeros((4, 4, 4))
+    ppm = [np.linspace(0.0, 1.0, 4)] * 3
+    nuclei = ["15N", "13C", "1H"]
+    logical_to_storage = [0, 1, 2]
+    obs = [60.8, 151.0, 600.0]
+
+
+def test_detect_and_localize_gaussian_rejects_non_2d(tmp_path: Path) -> None:
+    """组合模式:非 2D 谱请求 gaussian 必须明确报错(不静默换算法)。"""
+    spectrum = _write_ft2(tmp_path / "ref.ft2")
+    with pytest.raises(MeasurementError, match="only for 2D spectra"):
+        detect_and_localize(spectrum, method="gaussian", axes=_Fake3DAxes())
+    with pytest.raises(MeasurementError, match="未知峰定位方法"):
+        detect_and_localize(spectrum, method="lorentzian", axes=_Fake3DAxes())

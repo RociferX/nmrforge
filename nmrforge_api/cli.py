@@ -50,6 +50,12 @@ from nmrforge_api.sweep import (
 
 #: 峰定位方法(参考峰位取法/高斯 ROI 走同一套 config 缺省)
 LOCALIZATION_CHOICES: tuple[str, ...] = ("parabolic", "gaussian")
+#: 组合模式的精修方式:可两种都要(both -> 两张峰表)
+COMBINATION_LOCALIZATION_CHOICES: tuple[str, ...] = (
+    "parabolic",
+    "gaussian",
+    "both",
+)
 
 
 def _load_mapping(path: Path | str) -> dict[str, Any]:
@@ -233,8 +239,8 @@ def cmd_sweep(args: argparse.Namespace) -> int:
             combos=combos,
             direct_range=getattr(args, "direct_range", None),
             max_runs=int(args.max_runs or DEFAULT_MAX_RUNS),
-            window_pts=args.window_pts,
-            window_ppm=args.window_ppm,
+            localization=args.localization,
+            edge_margin_ppm=args.edge_margin_ppm,
             roi_f1_ppm=args.gaussian_roi_f1_ppm,
             roi_f2_ppm=args.gaussian_roi_f2_ppm,
             resume=not args.no_resume,
@@ -251,8 +257,8 @@ def cmd_sweep(args: argparse.Namespace) -> int:
             axes=axes,
             direct_range=getattr(args, "direct_range", None),
             max_runs=max_runs,
-            window_pts=args.window_pts,
-            window_ppm=args.window_ppm,
+            localization=args.localization,
+            edge_margin_ppm=args.edge_margin_ppm,
             roi_f1_ppm=args.gaussian_roi_f1_ppm,
             roi_f2_ppm=args.gaussian_roi_f2_ppm,
             resume=not args.no_resume,
@@ -425,16 +431,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sweep.add_argument("--max-runs", type=int, default=0)
     sweep.add_argument(
-        "--window-pts",
-        type=int,
-        default=None,
-        help="峰位搜索窗口半径(数据点;显式口径,跨分辨率不可比,不推荐)",
+        "--localization",
+        choices=COMBINATION_LOCALIZATION_CHOICES,
+        default="parabolic",
+        help="组合模式峰位精修方式:parabolic(默认)/ gaussian(仅 2D)/ both(两张表都出)",
     )
     sweep.add_argument(
-        "--window-ppm",
+        "--edge-margin-ppm",
         type=float,
         default=None,
-        help="峰位搜索窗口半径(ppm;缺省=1.5×该轴核素线宽折算 ppm)",
+        help="选峰排除边缘轴峰的物理宽度(ppm;缺省=3×该轴核素线宽)",
     )
     sweep.add_argument(
         "--gaussian-roi-f1-ppm", type=float, default=None,

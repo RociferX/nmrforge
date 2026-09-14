@@ -11,7 +11,8 @@ Qt、可在无显示环境或集群上运行。输入原始 NMR 数据与**用�
 - 处理:同一套 NMRPipe 脚本生成与执行(统一相位优化、SMILE 重构等);
 - 峰位:与 NMRForge 选峰**同一套** ppm 轴映射(ORIG 优先、回退 CAR,按
   FDDIMORDER 把逻辑维映射到数据轴);
-- 记录:每个 workflow 都带完整脚本、两张峰表、完整日志、参数三层与版本表。
+- 记录:每个 workflow 都带完整脚本、峰表(按选定的精修方式)、完整日志、
+  参数三层与版本表。
 
 ## 它做什么(规范流程)
 
@@ -23,8 +24,8 @@ Reference workflow
 User-defined workflow ensemble
     ↓  以参考脚本为模板,只替换该组合指定的参数,自动运行处理
 Processed spectra
-    ↓  同一张谱分别做 parabolic 与 2D gaussian 定位
-Parabolic / Gaussian peak tables
+    ↓  每个组合用**参考锁定阈值**在自己的谱上独立选峰,再按 localization 精修
+Parabolic / Gaussian peak tables(parabolic 默认 / gaussian / both)
     ↓
 Complete provenance + QC
 ```
@@ -56,13 +57,13 @@ Complete provenance + QC
 | 参考谱 | NMRForge 自动优化跑出的谱,冻结在 `study/reference/<key>/reference.ft2` |
 | 参考脚本 | 参考运行**实际执行**的 NMRPipe 脚本,冻结为 `process.com`(带 SHA-256) |
 | 参考峰表 | `reference.list`(峰身份 R0001…)+ 两张统一峰表(parabolic / gaussian),都由软件自动选峰产生(或外部峰表) |
-| `reference_peak_id` | 稳定峰身份 `R0001`…;所有条件与 workflow 共享,未检测到也保留记录 |
+| `reference_peak_id` | **参考峰表**里的稳定峰身份 `R0001`…;组合峰表留空(组合独立选峰),把峰匹配回参考身份是**下游分析**的工作 |
 | workflow_id | 参数组合表一行 = 一个 workflow,编号 `W0001`、`W0002`… |
 | `parameters_requested` | 用户原样给的那一行参数 |
 | `parameters_used` | 实际喂给后端的完整参数(参考基底 + 组合覆盖) |
 | `parameters_resolved` | 自动参数的**实际结果**(`actual_p0/actual_p1`、SMILE 实际 nSigma/thresh、谱噪声 σ) |
 | 候选谱 | 某 workflow × 某条件跑出的谱,存 `study/workflows/<id>/<条件>/spectrum.ft2`,**不替换**活动谱 |
-| 峰表 | `peak_table_parabolic.csv` / `peak_table_gaussian.csv`,字段统一(见 06) |
+| 峰表 | `peak_table_parabolic.csv` / `peak_table_gaussian.csv`(按 `localization` 输出;结构统一、含本谱峰序号 `peak_id`;见 06) |
 | 状态 | `success` / `success_with_warning` / `failed` |
 
 ## 运行语义(硬约束)

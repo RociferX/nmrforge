@@ -32,6 +32,7 @@ PEAK_TABLE_COLUMNS: tuple[str, ...] = (
     "workflow_id",
     "condition",
     "dataset",
+    "peak_id",
     "reference_peak_id",
     "assignment",
     "H_ppm",
@@ -66,6 +67,7 @@ _BOOL_COLUMNS: frozenset[str] = frozenset(
 #: 数值列(缺失写 NaN;读回 float,NaN 保留)
 _FLOAT_COLUMNS: frozenset[str] = frozenset(
     {
+        "peak_id",
         "H_ppm",
         "N_ppm",
         "intensity",

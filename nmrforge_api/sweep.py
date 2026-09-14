@@ -1,6 +1,6 @@
 """参数组合批量执行:参考工作流为模板,每个 workflow 跑全部条件。
 
-语义(2026-09-13 用户 API 规范):
+语义(2026-09-13 用户 API 规范;2026-09-14 组合独立选峰改版):
 
 - **workflow_id = W0001…**:用户参数组合表里每行一个 workflow,编号唯一;
 - **以参考脚本为模板**:该条件的扫描基底 = 该条件参考运行的有效参数(相位锁定
@@ -8,11 +8,13 @@
 - **参数三层留档**:``parameters_requested``(用户原样给的行)/``parameters_used``
   (实际喂给后端的完整参数)/``parameters_resolved``(自动参数的**实际结果**:
   自动相位的 actual_p0/actual_p1、SMILE 自动分档的 nSigma/thresh、谱噪声 σ);
-- **同一张谱两种定位**:每个条件各跑一次处理,再对同一张候选谱分别做
-  parabolic 与 2D gaussian 定位,输出两张结构一致的峰表;
+- **组合独立选峰**(2026-09-14 规范):每个组合在**自己的候选谱**上,用**参考
+  锁定**的 detection 阈值独立选峰 → 该组合自己的完整峰表;``reference_peak_id``
+  / ``assignment`` 留空(峰与参考峰表的匹配是**外部**工作);
+- **精修方式外部指定**:``localization`` = ``parabolic``(默认)/ ``gaussian`` /
+  ``both``,只输出被选中的峰表;
 - **多条件(A/B)同参数**:同一个 workflow 对全部条件用同一份
-  ``parameters_requested``;每个条件各有一份参考(相位/噪声来自该条件自身),
-  但峰身份(``reference_peak_id``)全条件共享;
+  ``parameters_requested``;每个条件各有一份参考(相位/噪声/阈值来自该条件自身);
 - **状态三值**:``success`` / ``success_with_warning`` / ``failed``;单条件失败
   不静默、不中断整轮(写入 ``failed`` + 原因后继续);
 - **不替换活动谱**:候选谱只写 ``study/workflows/<workflow_id>/<条件>/``。
@@ -28,6 +30,7 @@ import hashlib
 import inspect
 import itertools
 import json
+import math
 import shutil
 import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -35,24 +38,20 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from core.peaks import axis_units
 from core.planning.method_selector import select_method
 from core.project.manager import sha256_file
 from core.version import software_version, tool_versions
 from nmrforge_api.errors import SweepError
 from nmrforge_api.peak_tables import (
-    gaussian_fallback_rows,
     peak_table_digest,
-    peak_table_rows,
     write_peak_table,
 )
 from nmrforge_api.peaks import (
+    DEFAULT_DETECTION_SIGMA,
     PeakMeasurement,
-    measure_peak_positions,
-    read_reference_peaks,
-    window_points_by_axis,
 )
 from nmrforge_api.reference import (
-    GAUSSIAN_UNSUPPORTED_NDIM_REASON,
     ReferenceSpectrum,
     load_reference,
 )
@@ -69,13 +68,12 @@ STATUS_FAILED = "failed"
 SUCCESS_STATUSES: frozenset[str] = frozenset({STATUS_SUCCESS, STATUS_WARNING})
 
 #: 警告码(规范 D9/G3:任何影响判读的情况都要显式落盘,不静默)
-WARN_PEAK_NOT_DETECTED = "peak_not_detected"
-WARN_PEAK_WINDOW_EDGE = "peak_window_edge"
-WARN_PEAK_OUT_OF_RANGE = "peak_out_of_range"
+# 2026-09-14(组合独立选峰):峰跟踪类警告已不存在
+# (peak_not_detected / peak_window_edge / peak_out_of_range /
+# window_points_fallback 不再产出);组合模式只报该组合自己的定位 QC。
 WARN_GAUSSIAN_FALLBACK = "gaussian_fallback"
 WARN_GAUSSIAN_BOUNDARY_HIT = "gaussian_boundary_hit"
 WARN_GAUSSIAN_UNSUPPORTED = "gaussian_unsupported_ndim"
-WARN_WINDOW_FALLBACK = "window_points_fallback"
 
 # 相位轴(保留前缀):phase.<轴>.p0|p1 为绝对值,phase_delta.<轴>.p0|p1 为
 # 相对参考相位的偏差(人工相位识别偏差 ±5° 之类)。
@@ -201,18 +199,123 @@ def apply_phase_axes(
     return effective
 
 
+#: 组合表里**唯一允许**的 detection(选峰/定位)键:逐组合覆盖精修方式。
+#: 这些键不进后端处理参数(2026-09-14 规范:组合独立选峰)。
+DETECTION_KEYS: frozenset[str] = frozenset(
+    {
+        "localization",
+        "localizations",
+        "localization_method",
+    }
+)
+
+#: 阈值类键(σ 倍数 / 最小 SNR):阈值只在生成参考时选择,**组合表里一律报错**
+#: (用户 2026-09-14:「阈值来源是运行参考模式后就固定了……这个要锁定」)。
+_THRESHOLD_KEYS: frozenset[str] = frozenset(
+    {"sigma_multiplier", "min_snr", "threshold_sigma", "peak_threshold"}
+)
+
+
+def _detection_subkey(key: Any) -> str | None:
+    """网格/组合键 → detection 子键名;不是 detection 类键时返回 None。"""
+    name = str(key)
+    if name.startswith("detection."):
+        return name.split(".", 1)[1]
+    if name in DETECTION_KEYS or name in _THRESHOLD_KEYS:
+        return name
+    return None
+
+
+def _locked_threshold_error(key: Any) -> SweepError:
+    """组合表里改阈值 → 统一报错:阈值锁定在参考(不在组合阶段可动)。"""
+    return SweepError(
+        f"组合表的 {key!r} 是**选峰阈值**:阈值只在生成参考时选择"
+        "(CLI `peaks --sigma N` 或 ensure_reference_peaks(sigma_multiplier=…)),"
+        "参考定了以后所有 workflow 必须与参考一致,不能作为参数扰动。"
+        "要改阈值请重建参考(force=True,或删掉该条件的 "
+        "study/reference/<key>/ 后重跑参考)。"
+    )
+
+
+def _detection_note(key: Any) -> str:
+    """detection 类键的提示(不阻断)。"""
+    return (
+        f"提示: {key} 逐组合覆盖**精修方式**(parabolic / gaussian / both);"
+        "峰表只输出被选中的方法(选峰阈值仍锁定在参考)"
+    )
+
+
+def locked_detection_sigma(
+    reference: ReferenceSpectrum,
+) -> tuple[float, str]:
+    """参考**锁定**的选峰阈值(σ 倍数)与来源说明。
+
+    阈值只在参考模式确定:优先取参考峰表记录的
+    ``peak_params['detection']['sigma_multiplier']``,其次顶层
+    ``sigma_multiplier``;都没有时回落到选峰默认 35σ(仍标注为参考默认)。
+    """
+    detection = dict(reference.peak_params.get("detection") or {})
+    value = detection.get("sigma_multiplier")
+    if value in (None, ""):
+        value = reference.peak_params.get("sigma_multiplier")
+    if value in (None, ""):
+        return float(DEFAULT_DETECTION_SIGMA), "reference(default:35sigma)"
+    return float(value), "reference"
+
+
+def _localization_methods(value: Any) -> list[str]:
+    """定位方式写法 → 方法列表:parabolic / gaussian / both(两种都要)。"""
+    if value is None:
+        return []
+    items = value if isinstance(value, (list, tuple)) else [value]
+    out: list[str] = []
+    for item in items:
+        name = str(item).strip().lower()
+        if name in ("", "none"):
+            continue
+        if name in ("both", "all"):
+            for method in ("parabolic", "gaussian"):
+                if method not in out:
+                    out.append(method)
+            continue
+        if name not in ("parabolic", "gaussian"):
+            raise SweepError(
+                f"未知定位方式: {value!r}(可用 parabolic / gaussian / both)"
+            )
+        if name not in out:
+            out.append(name)
+    return out
+
+
 def split_combo(
     combo: Mapping[str, Any]
-) -> tuple[dict[str, Any], dict[str, float]]:
-    """组合 → (处理参数覆盖, 相位轴覆盖)。"""
+) -> tuple[dict[str, Any], dict[str, float], dict[str, Any]]:
+    """组合 → (处理参数覆盖, 相位轴覆盖, detection 参数覆盖)。
+
+    detection 类键里只允许 **精修方式**(``localization``);这些键从处理参数里
+    剥离,不进后端。阈值类键(σ/min_snr/…)在组合表里一律报错(阈值锁定参考)。
+    """
     params: dict[str, Any] = {}
     phases: dict[str, float] = {}
+    detection: dict[str, Any] = {}
     for key, value in combo.items():
-        if is_phase_axis(key):
-            phases[str(key)] = float(value)
-        else:
-            params[str(key)] = value
-    return params, phases
+        name = str(key)
+        if is_phase_axis(name):
+            phases[name] = float(value)
+            continue
+        sub = _detection_subkey(name)
+        if sub is not None:
+            if sub in _THRESHOLD_KEYS:
+                raise _locked_threshold_error(name)
+            if sub in DETECTION_KEYS:
+                detection["methods"] = _localization_methods(value)
+                continue
+            raise SweepError(
+                f"未知的 detection 键: {name!r}(组合表只允许 localization = "
+                "parabolic / gaussian / both)"
+            )
+        params[name] = value
+    return params, phases, detection
 
 
 # NUS(SMILE)参数键别名:后端输入约定为小写,运行记录回写的是 nSigma 等
@@ -498,6 +601,17 @@ def validate_axes(
             parse_phase_axis(key)
             continue
         root = _axis_root(key)
+        sub = _detection_subkey(key)
+        if sub is not None:
+            if sub in _THRESHOLD_KEYS:
+                raise _locked_threshold_error(key)
+            if sub in DETECTION_KEYS:
+                notes.append(_detection_note(key))
+                continue
+            raise SweepError(
+                f"未知的 detection 键: {key!r}(只允许 localization = "
+                "parabolic / gaussian / both)"
+            )
         if key in ("ext_lo", "ext_hi"):
             notes.append(
                 f"提示: {key} 是**直接维范围**(ppm):逐组合覆盖会改变提取窗口,"
@@ -506,12 +620,7 @@ def validate_axes(
             )
             continue
         if key in _PEAK_PICKING_KEYS or root in _PEAK_PICKING_KEYS:
-            raise SweepError(
-                f"网格里的 {key!r} 是**选峰阈值**:阈值只在生成参考时选择,"
-                "参考定了以后所有 workflow 必须与参考一致,不能作为参数扰动。"
-                "要改阈值请重建参考(CLI `peaks --sigma N`,或删掉该条件的"
-                " study/reference/<key>/ 后重跑)。"
-            )
+            raise _locked_threshold_error(key)
         if key in _DETERMINISTIC_KEYS or root in _DETERMINISTIC_KEYS:
             notes.append(
                 f"提示: {key} 属确定性/策略参数,一般不必进网格"
@@ -910,133 +1019,6 @@ def _smile_entries(
     return entries
 
 
-def _warnings_for(
-    measurements: Sequence[PeakMeasurement],
-    *,
-    method: str,
-    window: Mapping[str, Any],
-    fallback_reason: str = "",
-) -> list[dict[str, Any]]:
-    """把逐峰 QC 汇总成 workflow 警告(规范 D9/G3,不静默)。"""
-    warnings: list[dict[str, Any]] = []
-
-    def _add(code: str, message: str, peaks: Sequence[str], **extra: Any) -> None:
-        warnings.append(
-            {
-                "code": code,
-                "message": message,
-                "count": len(peaks),
-                "peaks": list(peaks[:20]),
-                **extra,
-            }
-        )
-
-    missing = [
-        m.reference_peak_id or f"R{m.peak_id:04d}"
-        for m in measurements
-        if not m.found
-    ]
-    if missing:
-        _add(
-            WARN_PEAK_NOT_DETECTED,
-            f"{len(missing)} 个参考峰在该谱上未检测到(detected=false,记录保留)",
-            missing,
-            localization_method=str(method),
-        )
-    edges = [
-        m.reference_peak_id or f"R{m.peak_id:04d}"
-        for m in measurements
-        if m.found and m.window_edge
-    ]
-    if edges:
-        _add(
-            WARN_PEAK_WINDOW_EDGE,
-            f"{len(edges)} 个峰落在搜索窗口边界(真峰可能在窗外,可加大 window_ppm)",
-            edges,
-            localization_method=str(method),
-        )
-    outside = [
-        m.reference_peak_id or f"R{m.peak_id:04d}"
-        for m in measurements
-        if m.out_of_range
-    ]
-    if outside:
-        _add(
-            WARN_PEAK_OUT_OF_RANGE,
-            f"{len(outside)} 个参考峰位置落在谱范围外",
-            outside,
-            localization_method=str(method),
-        )
-    for spec in (window or {}).values():
-        if not isinstance(spec, Mapping):
-            continue
-        if str(spec.get("source", "")).startswith("points(回退"):
-            _add(
-                WARN_WINDOW_FALLBACK,
-                "窗口无法按物理宽度换算,已回退固定点数",
-                [],
-                axis=str(spec.get("nucleus", "")),
-            )
-            break
-    if str(method) == "gaussian":
-        if fallback_reason:
-            _add(
-                WARN_GAUSSIAN_UNSUPPORTED,
-                f"高斯定位不适用({fallback_reason}),位置回退抛物线并留档",
-                [m.reference_peak_id for m in measurements],
-                localization_method="gaussian",
-            )
-        fallback = [
-            m.reference_peak_id or f"R{m.peak_id:04d}"
-            for m in measurements
-            if (m.localization or {}).get("fallback")
-        ]
-        if fallback:
-            reasons: dict[str, int] = {}
-            for m in measurements:
-                record = m.localization or {}
-                if not record.get("fallback"):
-                    continue
-                reason = str(record.get("fallback_reason", "") or "")
-                reasons[reason] = reasons.get(reason, 0) + 1
-            _add(
-                WARN_GAUSSIAN_FALLBACK,
-                f"{len(fallback)} 个峰高斯拟合失败/回退抛物线(原因已落盘)",
-                fallback,
-                reasons=reasons,
-            )
-        boundary = [
-            m.reference_peak_id or f"R{m.peak_id:04d}"
-            for m in measurements
-            if (m.localization or {}).get("boundary_hit")
-        ]
-        if boundary:
-            _add(
-                WARN_GAUSSIAN_BOUNDARY_HIT,
-                f"{len(boundary)} 个峰的高斯中心/宽度撞到拟合边界",
-                boundary,
-            )
-    return warnings
-
-
-def _localization_summary(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
-    total = len(rows)
-    detected = sum(1 for row in rows if row.get("detected"))
-    fallback = sum(1 for row in rows if row.get("fallback"))
-    reasons: dict[str, int] = {}
-    for row in rows:
-        if not row.get("fallback"):
-            continue
-        reason = str(row.get("fallback_reason", "") or "")
-        reasons[reason] = reasons.get(reason, 0) + 1
-    return {
-        "n_peaks": int(total),
-        "n_detected": int(detected),
-        "n_missing": int(total - detected),
-        "n_fallback": int(fallback),
-        "fallback_reasons": reasons,
-        "n_boundary_hit": sum(1 for row in rows if row.get("boundary_hit")),
-    }
 
 
 def _write_log(
@@ -1101,16 +1083,18 @@ def _resume_fingerprint(
     combo: Mapping[str, Any],
     target: DatasetRef,
     reference: ReferenceSpectrum,
-    peaks: Sequence[dict[str, Any]] | None,
-    window_pts: int | None,
-    window_ppm: float | None,
-    sign: str,
     roi_f1_ppm: float | None,
     roi_f2_ppm: float | None,
+    localization_methods: Sequence[str] | None = None,
+    edge_margin_ppm: float | None = None,
     base_params: Mapping[str, Any] | None = None,
 ) -> str:
-    """计算会改变单条件运行结果的规范化输入指纹。"""
-    param_part, phase_part = split_combo(combo)
+    """计算会改变单条件运行结果的规范化输入指纹。
+
+    组合模式不再跟踪参考峰表,所以指纹带的是「锁定阈值 + 精修方式 + 边距」
+    (2026-09-14 规范):改了精修方式不会复用旧 run。
+    """
+    param_part, phase_part, detection = split_combo(combo)
     base_params = dict(base_params or {}) or dict(reference.sweep_params)
     params = merge_overrides(base_params, param_part)
     effective_phase = apply_phase_axes(
@@ -1120,16 +1104,12 @@ def _resume_fingerprint(
         },
         phase_part,
     )
-    peak_identity: Any = (
-        [dict(row) for row in peaks]
-        if peaks is not None
-        else {
-            "path": reference.peak_table_path,
-            "sha256": reference.peak_table_sha256,
-        }
+    sigma_locked, sigma_origin = locked_detection_sigma(reference)
+    methods = list(
+        detection.get("methods") or localization_methods or ["parabolic"]
     )
     payload = {
-        "schema": "nmrforge_api.resume.v1",
+        "schema": "nmrforge_api.resume.v2",
         "dataset": target.to_dict(),
         "combo": dict(combo),
         "parameters_used": params,
@@ -1138,13 +1118,12 @@ def _resume_fingerprint(
             "dataset_key": reference.dataset_key,
             "script_sha256": reference.script_sha256,
             "spectrum_sha256": reference.spectrum_sha256,
-            "peak_table_sha256": reference.peak_table_sha256,
         },
-        "peaks": peak_identity,
-        "measurement": {
-            "window_pts": window_pts,
-            "window_ppm": window_ppm,
-            "sign": sign,
+        "detection": {
+            "sigma_multiplier": sigma_locked,
+            "sigma_origin": sigma_origin,
+            "localization": methods,
+            "edge_margin_ppm": edge_margin_ppm,
             "roi_f1_ppm": roi_f1_ppm,
             "roi_f2_ppm": roi_f2_ppm,
         },
@@ -1279,11 +1258,9 @@ def run_sweep(
     *,
     reference: ReferenceSpectrum | None = None,
     datasets: Sequence[DatasetRef] | None = None,
-    peaks: Sequence[dict[str, Any]] | None = None,
-    window_pts: int | None = None,
-    window_ppm: float | None = None,
+    localization: Any = "parabolic",
+    edge_margin_ppm: float | None = None,
     sign: str = "abs",
-    refine: str | None = None,
     roi_f1_ppm: float | None = None,
     roi_f2_ppm: float | None = None,
     resume: bool = True,
@@ -1291,19 +1268,22 @@ def run_sweep(
     progress: Callable[[str], None] | None = None,
     on_run: Callable[[SweepRun], None] | None = None,
 ) -> list[SweepRun]:
-    """执行 workflow 计划:每个组合对**全部条件**跑一遍处理 + 两种定位。
+    """执行 workflow 计划:每个组合对**全部条件**跑一遍处理 + 独立选峰。
 
     返回逐 (workflow, 条件) 的运行记录(成功/警告/失败都在列表里)。
 
     - ``datasets`` 缺省用会话里的全部条件(A/B);``reference`` 可显式传入该
       条件的参考(按 dataset_key 匹配);
-    - ``peaks`` 可显式给参考峰表行(否则读各条件参考冻结的身份表,峰身份一致);
-    - 峰位搜索窗口按**物理宽度**定义(默认 1.5×该轴核素线宽折算 ppm),逐组合按
-      候选谱的实际点距换算点数,换算结果写进 ``run.json`` 的 ``window``;
-    - ``refine`` 参数已废弃(两种定位方法现在**始终都要跑**),仅为兼容保留。
+    - **组合独立选峰**(2026-09-14 规范):峰由该组合**自己的候选谱** + 参考锁定
+      阈值检出(不再跟踪参考峰表);``reference_peak_id`` / ``assignment`` 留空,
+      与参考峰表的匹配由**外部**下游分析完成;
+    - ``localization`` = ``parabolic``(默认)/ ``gaussian`` / ``both``:逐组合可用
+      组合表的 ``localization`` 键覆盖;只输出被选中的峰表;
+    - ``edge_margin_ppm``:选峰时排除边缘轴峰的**物理宽度**(缺省 = 3×该轴核素
+      线宽折算 ppm),逐组合按候选谱点距换算点数,换算结果写进 ``run.window``;
+    - ``sign`` 为历史参数(组合模式检测符号口径固定 dominant),不再使用。
     """
-    if refine not in (None, "parabolic", "gaussian", "none"):
-        raise SweepError(f"未知 refine: {refine!r}")
+    methods = _localization_methods(localization) or ["parabolic"]
     targets = list(datasets) if datasets is not None else list(session.datasets)
     if not targets:
         raise SweepError("研究里还没有数据集:先调用 add_dataset()")
@@ -1347,10 +1327,8 @@ def run_sweep(
                 combo=combo,
                 target=target,
                 reference=ref,
-                peaks=peaks,
-                window_pts=window_pts,
-                window_ppm=window_ppm,
-                sign=sign,
+                localization_methods=methods,
+                edge_margin_ppm=edge_margin_ppm,
                 roi_f1_ppm=roi_f1_ppm,
                 roi_f2_ppm=roi_f2_ppm,
             )
@@ -1378,10 +1356,8 @@ def run_sweep(
                 reference=ref,
                 experiment=experiment,
                 run_dir=run_dir,
-                peaks=peaks,
-                window_pts=window_pts,
-                window_ppm=window_ppm,
-                sign=sign,
+                localization_methods=methods,
+                edge_margin_ppm=edge_margin_ppm,
                 roi_f1_ppm=roi_f1_ppm,
                 roi_f2_ppm=roi_f2_ppm,
                 resume_fingerprint=fingerprint,
@@ -1412,23 +1388,21 @@ def _run_condition(
     reference: ReferenceSpectrum,
     experiment: Any,
     run_dir: Path,
-    peaks: Sequence[dict[str, Any]] | None,
-    window_pts: int | None,
-    window_ppm: float | None,
-    sign: str,
     roi_f1_ppm: float | None,
     roi_f2_ppm: float | None,
     resume_fingerprint: str,
-    emit: Callable[[str], None],
+    localization_methods: Sequence[str] | None = None,
+    edge_margin_ppm: float | None = None,
+    emit: Callable[[str], None] | None = None,
 ) -> SweepRun:
-    """跑单个 (workflow, 条件):处理 → 两种定位 → 两张峰表 + 完整记录。"""
+    """跑单个 (workflow, 条件):处理 → 组合独立选峰 → 峰表 + 完整记录。"""
     logs: list[str] = []
 
     def _log(message: str) -> None:
         logs.append(str(message))
         emit(f"[{workflow_id}/{target.condition}] {message}")
 
-    param_part, phase_part = split_combo(combo)
+    param_part, phase_part, detection_part = split_combo(combo)
     # 基值 = 计划基值(参考有效参数 + 组合模式显式覆盖,如直接维范围);
     # 组合表只覆盖它显式指定的键。
     base_from_plan = dict(plan.base_params) or dict(reference.sweep_params)
@@ -1569,33 +1543,57 @@ def _run_condition(
     run.spectrum_path = str(target_spectrum)
     run.spectrum_sha256 = sha256_file(target_spectrum)
 
+    # 组合模式(2026-09-14 规范):每个组合在**自己的谱**上,用**参考锁定**的
+    # detection 阈值**独立选峰** → 该组合自己的完整峰表;峰与参考峰表的匹配是
+    # **外部**工作(表里 reference_peak_id / assignment 留空)。
+    from nmrforge_api.peaks import detect_and_localize
+
+    sigma_locked, sigma_origin = locked_detection_sigma(reference)
+    methods = list(detection_part.get("methods") or localization_methods or ["parabolic"])
     try:
         spectrum_axes = read_spectrum_axes(target_spectrum)
-        run.window = {
-            str(axis): dict(spec)
-            for axis, spec in window_points_by_axis(
-                spectrum_axes,
-                window_pts=window_pts,
-                window_ppm=window_ppm,
-            ).items()
-        }
-        peak_rows = (
-            [dict(row) for row in peaks]
-            if peaks is not None
-            else read_reference_peaks(reference.peak_table_path)
-        )
-        parabolic = measure_peak_positions(
-            target_spectrum,
-            peak_rows,
-            axes=spectrum_axes,
-            window_pts=window_pts,
-            window_ppm=window_ppm,
-            sign=sign,
-            refine="parabolic",
-        )
-    except Exception as exc:  # noqa: BLE001 - 测量失败也算该条件失败
+        tables: dict[str, list[dict[str, Any]]] = {}
+        metas: dict[str, dict[str, Any]] = {}
+        measurements: dict[str, list[PeakMeasurement]] = {}
+        for method in methods:
+            rows, meta = detect_and_localize(
+                target_spectrum,
+                axes=spectrum_axes,
+                sigma_multiplier=sigma_locked,
+                edge_margin_ppm=edge_margin_ppm,
+                method=method,
+                roi_f1_ppm=roi_f1_ppm,
+                roi_f2_ppm=roi_f2_ppm,
+            )
+            for row in rows:
+                row["workflow_id"] = workflow_id
+                row["condition"] = target.condition
+                row["dataset"] = dataset_label
+            tables[method] = rows
+            metas[method] = meta
+            measurements[method] = [
+                PeakMeasurement(
+                    peak_id=int(row["peak_id"]),
+                    assignment="",
+                    reference_peak_id="",
+                    positions={
+                        nucleus: float(row[key])
+                        for nucleus, key in (("1H", "H_ppm"), ("15N", "N_ppm"))
+                        if isinstance(row.get(key), float)
+                        and not math.isnan(row[key])
+                    },
+                    intensity=float(row["intensity"]),
+                    noise_sigma=float(meta["noise_sigma"]),
+                    snr=float(row["SNR"]),
+                    found=True,
+                )
+                for row in rows
+            ]
+    except Exception as exc:  # noqa: BLE001 - 选峰失败也算该条件失败
         run.status = STATUS_FAILED
-        run.message = f"峰位测量失败: {type(exc).__name__}: {exc}"
+        run.message = f"独立选峰失败: {type(exc).__name__}: {exc}"
+        logs.append(run.message)
+        run.logs_tail = logs[-40:]
         run.log_path = str(
             _write_log(
                 run_dir / "log.txt",
@@ -1612,91 +1610,105 @@ def _run_condition(
         _write_run(run)
         return run
 
-    run.measurements_by_method["parabolic"] = list(parabolic)
-    parabolic_rows = peak_table_rows(
-        parabolic,
-        workflow_id=workflow_id,
-        condition=target.condition,
-        dataset=dataset_label,
-        method="parabolic",
-    )
-    warnings = _warnings_for(parabolic, method="parabolic", window=run.window)
-    if int(getattr(experiment, "ndim", 2)) == 2:
-        try:
-            gaussian = measure_peak_positions(
-                target_spectrum,
-                peak_rows,
-                axes=spectrum_axes,
-                window_pts=window_pts,
-                window_ppm=window_ppm,
-                sign=sign,
-                refine="gaussian",
-                roi_f1_ppm=roi_f1_ppm,
-                roi_f2_ppm=roi_f2_ppm,
+    run.measurements_by_method = measurements
+    warnings: list[dict[str, Any]] = []
+    for method in methods:
+        meta = metas[method]
+        if int(meta.get("n_peaks", 0)) == 0:
+            warnings.append(
+                {
+                    "code": "peak_count_zero",
+                    "message": (
+                        f"{method}: 该组合在 σ={meta.get('sigma_multiplier'):g} "
+                        "阈值下未检出峰(检查阈值/数据)"
+                    ),
+                    "count": 0,
+                    "peaks": [],
+                    "localization_method": method,
+                }
             )
-        except Exception as exc:  # noqa: BLE001 - 单条件测量失败不中断整轮
-            run.status = STATUS_FAILED
-            run.message = f"Gaussian 峰位测量失败: {type(exc).__name__}: {exc}"
-            logs.append(run.message)
-            run.logs_tail = logs[-40:]
-            run.log_path = str(
-                _write_log(
-                    run_dir / "log.txt",
-                    header={
-                        "workflow_id": workflow_id,
-                        "condition": target.condition,
-                        "dataset": dataset_label,
-                        "status": run.status,
-                        "message": run.message,
-                    },
-                    logs=logs,
-                )
+        if int(meta.get("n_fallback", 0)):
+            warnings.append(
+                {
+                    "code": WARN_GAUSSIAN_FALLBACK,
+                    "message": (
+                        f"{method}: {meta['n_fallback']} 个峰高斯拟合失败/回退抛物线"
+                        f"(原因 {meta.get('fallback_reasons')})"
+                    ),
+                    "count": int(meta["n_fallback"]),
+                    "peaks": [],
+                    "localization_method": method,
+                }
             )
-            _write_run(run)
-            return run
-        run.measurements_by_method["gaussian"] = list(gaussian)
-        gaussian_rows = peak_table_rows(
-            gaussian,
-            workflow_id=workflow_id,
-            condition=target.condition,
-            dataset=dataset_label,
-            method="gaussian",
-        )
-        warnings.extend(_warnings_for(gaussian, method="gaussian", window=run.window))
-    else:
-        gaussian_rows = gaussian_fallback_rows(
-            parabolic,
-            workflow_id=workflow_id,
-            condition=target.condition,
-            dataset=dataset_label,
-            reason=GAUSSIAN_UNSUPPORTED_NDIM_REASON,
-        )
-        run.measurements_by_method["gaussian"] = list(parabolic)
-        warnings.extend(
-            _warnings_for(
-                parabolic,
-                method="gaussian",
-                window=run.window,
-                fallback_reason=GAUSSIAN_UNSUPPORTED_NDIM_REASON,
+        if int(meta.get("n_boundary_hit", 0)):
+            warnings.append(
+                {
+                    "code": WARN_GAUSSIAN_BOUNDARY_HIT,
+                    "message": f"{method}: {meta['n_boundary_hit']} 个峰撞拟合边界",
+                    "count": int(meta["n_boundary_hit"]),
+                    "peaks": [],
+                    "localization_method": method,
+                }
             )
+    for method in methods:
+        path = write_peak_table(
+            run_dir / f"peak_table_{method}.csv", tables[method]
         )
-    run.peak_tables = {
-        "parabolic": peak_table_digest(
-            write_peak_table(run_dir / "peak_table_parabolic.csv", parabolic_rows)
-        ),
-        "gaussian": peak_table_digest(
-            write_peak_table(run_dir / "peak_table_gaussian.csv", gaussian_rows)
-        ),
-    }
+        run.peak_tables[method] = peak_table_digest(path)
     run.peak_localization = {
-        "parabolic": _localization_summary(parabolic_rows),
-        "gaussian": _localization_summary(gaussian_rows),
+        method: {
+            "n_peaks": int(metas[method]["n_peaks"]),
+            "n_detected": int(metas[method]["n_peaks"]),
+            "n_missing": 0,
+            "n_fallback": int(metas[method]["n_fallback"]),
+            "fallback_reasons": dict(metas[method]["fallback_reasons"]),
+            "n_boundary_hit": int(metas[method]["n_boundary_hit"]),
+        }
+        for method in methods
     }
-    reference_detection = dict(reference.peak_params.get("detection") or {})
+    first_meta = metas[methods[0]]
+    axis0_ppm = spectrum_axes.ppm[0] if spectrum_axes.ppm else None
+    run.window = (
+        {
+            "0": {
+                "points": int(first_meta["edge_margin_points"]),
+                "ppm": float(first_meta["edge_margin_ppm"]),
+                "effective_ppm": float(first_meta["edge_margin_ppm"]),
+                "source": str(first_meta["edge_margin_source"]),
+                "nucleus": (
+                    spectrum_axes.nuclei[0] if spectrum_axes.nuclei else ""
+                ),
+                "obs_mhz": (
+                    float(spectrum_axes.obs[0]) if spectrum_axes.obs else 0.0
+                ),
+                "ppm_per_point": (
+                    round(axis_units.ppm_per_point(axis0_ppm), 6)
+                    if axis0_ppm is not None
+                    else 0.0
+                ),
+            }
+        }
+        if axis0_ppm is not None
+        else {}
+    )
     run.parameters_resolved = {
         "phase": run.phase,
-        # 有效采样:满采样(含「标注 NUS 但实际满采样」)按 uniform 处理
-        # 直接维范围(ext_lo = 高端, ext_hi = 低端):逐 workflow 实际取值来源
+        # 选峰阈值:只在生成参考时选定 → 组合模式逐 workflow 留档「锁定在参考」
+        "detection": {
+            "sigma_multiplier": float(first_meta["sigma_multiplier"]),
+            "sigma_multiplier_origin": sigma_origin,
+            "source": "reference(locked)",
+            "min_snr": float(first_meta["min_snr"]),
+            "sign_mode": str(first_meta["sign_mode"]),
+            "edge_margin_points": int(first_meta["edge_margin_points"]),
+            "edge_margin_ppm": float(first_meta["edge_margin_ppm"]),
+            "edge_margin_source": str(first_meta["edge_margin_source"]),
+            "noise_sigma": float(first_meta["noise_sigma"]),
+            "methods": list(methods),
+            "independent": True,
+            "reference_matching": "external",
+        },
+        "peak_counts": {m: int(metas[m]["n_peaks"]) for m in methods},
         "direct_range": {
             "ext_lo": params.get("ext_lo"),
             "ext_hi": params.get("ext_hi"),
@@ -1709,33 +1721,25 @@ def _run_condition(
         "sampling": {
             "effective": str(reference.sampling),
             "schedule": str(reference.sampling_schedule or ""),
-            "route": "reconstruct_nus" if str(reference.sampling) == "nus" else "process",
+            "route": (
+                "reconstruct_nus"
+                if str(reference.sampling) == "nus"
+                else "process"
+            ),
             "evidence": list(reference.sampling_evidence or [])[:5],
         },
-        # 选峰阈值:只在生成参考时选定,此处逐 workflow 留档「与参考一致」
-        "peak_picking_threshold": {
-            "sigma_multiplier_requested": reference.peak_params.get(
-                "sigma_multiplier"
-            ),
-            "sigma_multiplier_effective": reference_detection.get(
-                "sigma_multiplier"
-            ),
-            "source": reference_detection.get("threshold_source", ""),
-            "locked_to_reference": True,
-        },
+        # 自动参数的**实际结果**(规范 G1/G2):SMILE 自动分档的 nSigma/thresh
         "smile": (
             _smile_entries(params, combo, response.get("effective_params") or {})
             if is_nus
             else {}
         ),
+        # 该组合自己那张谱的噪声 σ(robust MAD):SNR 的分母,留档可复算
         "spectrum_noise_sigma": {
-            "value": (
-                float(getattr(parabolic[0], "noise_sigma", 0.0)) if parabolic else 0.0
-            ),
+            "value": float(first_meta["noise_sigma"]),
             "source": "core.qc.noise(robust MAD)",
             "used_for": "SNR",
         },
-        "window": run.window,
         "effective_params_backend": response.get("effective_params") or {},
     }
     run.warnings = warnings
@@ -1747,8 +1751,9 @@ def _run_condition(
     else:
         run.status = STATUS_SUCCESS
         run.message = (
-            f"完成,{len(parabolic)} 个参考峰 × 2 种定位 "
-            f"(detected {sum(1 for m in parabolic if m.found)})"
+            f"完成:独立选峰 σ={first_meta['sigma_multiplier']:g}"
+            f"({sigma_origin} 锁定),峰数 "
+            + ", ".join(f"{m}={metas[m]['n_peaks']}" for m in methods)
         )
     run.log_path = str(
         _write_log(
@@ -1860,10 +1865,7 @@ __all__ = [
     "WARN_GAUSSIAN_BOUNDARY_HIT",
     "WARN_GAUSSIAN_FALLBACK",
     "WARN_GAUSSIAN_UNSUPPORTED",
-    "WARN_PEAK_NOT_DETECTED",
-    "WARN_PEAK_OUT_OF_RANGE",
-    "WARN_PEAK_WINDOW_EDGE",
-    "WARN_WINDOW_FALLBACK",
+    "locked_detection_sigma",
     "apply_phase_axes",
     "combos_from_rows",
     "design_diagnostics",

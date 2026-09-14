@@ -573,9 +573,192 @@ def pick_reference_peaks(
     return peak_path
 
 
+#: 组合模式独立选峰的默认 detection 阈值(σ 倍数);参考层给了就用参考的实际值
+DEFAULT_DETECTION_SIGMA = 35.0
+
+
+def detect_and_localize(
+    spectrum_path: Path | str,
+    *,
+    sigma_multiplier: float | None = None,
+    edge_margin_ppm: float | None = None,
+    edge_margin_points: int | None = None,
+    method: str = "parabolic",
+    roi_f1_ppm: float | None = None,
+    roi_f2_ppm: float | None = None,
+    sign_mode: str = "dominant",
+    axes: SpectrumAxes | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """在**该组合自己的谱**上按给定 detection 阈值独立选峰(2026-09-14 规范)。
+
+    - 检测口径与项目选峰同源:物理边距(`axis_units`)+ `peak_detection.detect`
+      (`sigma_multiplier` 同时作为 `min_snr`)+ dominant 符号口径;
+    - 精修 `method`:`"parabolic"`(用检测阶段的三点抛物线位置)| `"gaussian"`
+      (逐峰 2D 高斯拟合,仅 2D);
+    - 返回 `(rows, meta)`:`rows` 是该谱自己的峰(``peak_id`` = 本谱序号,
+      ``reference_peak_id`` 留空——与参考峰表的匹配是**外部**工作);`meta` 记录
+      实际阈值/边距/符号口径/噪声 σ/峰数/定位 QC。
+
+    没有 `max_peaks`:锁定阈值下检出多少峰就写多少峰(用户 2026-09-14)。
+    """
+    from core.qc import noise as _noise
+    from core.qc import peak_detection as _detect
+    from workflow.pick_peaks import read_spectrum_axes as _read_axes
+
+    path = Path(spectrum_path)
+    if not path.is_file():
+        raise MeasurementError(f"谱图不存在: {path}")
+    spectrum_axes = axes if axes is not None else _read_axes(path)
+    data = np.asarray(spectrum_axes.data, dtype=float)
+    threshold = (
+        float(sigma_multiplier)
+        if sigma_multiplier is not None and float(sigma_multiplier) > 0
+        else float(DEFAULT_DETECTION_SIGMA)
+    )
+    # 精修方式先校验(不支持的算法/维度直接报错,不静默换算法)
+    wanted = str(method).strip().lower() or "parabolic"
+    if wanted not in ("parabolic", "gaussian"):
+        raise MeasurementError(f"未知峰定位方法: {method!r}(parabolic / gaussian)")
+    if wanted == "gaussian" and data.ndim != 2:
+        from core.peaks.localize import GAUSSIAN_UNSUPPORTED_MESSAGE as _msg
+
+        raise MeasurementError(_msg)
+    nuclei = list(spectrum_axes.nuclei)
+    axis0_nucleus = nuclei[0] if nuclei else ""
+    obs0 = float(spectrum_axes.obs[0]) if spectrum_axes.obs else 0.0
+    try:
+        from backend.config import load_processing_defaults
+
+        linewidths = load_processing_defaults().get("linewidth_hz") or {}
+    except Exception:  # noqa: BLE001 - 配置不可读用内置默认
+        linewidths = {}
+    if edge_margin_points is not None:
+        edge_points = max(0, int(edge_margin_points))
+        edge_ppm = axis_units.ppm_for_points(spectrum_axes.ppm[0], edge_points)
+        edge_source = "points(显式)"
+    else:
+        if edge_margin_ppm is not None:
+            edge_ppm = float(edge_margin_ppm)
+            edge_source = "ppm(显式)"
+        else:
+            edge_ppm = axis_units.edge_margin_ppm(
+                axis0_nucleus, obs0, linewidth_hz_by_nucleus=linewidths
+            )
+            edge_source = "ppm(物理宽度)"
+        edge_points = axis_units.points_for_ppm(spectrum_axes.ppm[0], edge_ppm)
+        if edge_points <= 0:
+            edge_points = 1
+            edge_ppm = axis_units.ppm_for_points(spectrum_axes.ppm[0], edge_points)
+            edge_source = "points(回退:无法换算)"
+    sigma = float(_noise.estimate(data).global_sigma)
+    peaks = _detect.detect(
+        data,
+        _detect.PeakDetectionParams(
+            sign_mode="both",
+            sigma_multiplier=threshold,
+            min_snr=threshold,
+            edge_margin=edge_points,
+        ),
+    )
+    resolved_sign = str(sign_mode or "dominant")
+    if resolved_sign in ("dominant", "auto"):
+        peaks = _detect.keep_dominant(peaks)
+        resolved_sign = "dominant"
+    axis_h = spectrum_axes.storage_of("1H")
+    axis_n = spectrum_axes.storage_of("15N")
+    rows: list[dict[str, Any]] = []
+    fallback_reasons: dict[str, int] = {}
+    n_fallback = 0
+    n_boundary = 0
+    for index, peak in enumerate(peaks, start=1):
+        position = tuple(float(v) for v in peak.position)
+        record: dict[str, Any] = {}
+        if wanted == "gaussian":
+            from core.peaks.localize import localize_peak as _localize
+
+            loc = _localize(
+                data,
+                [int(round(v)) for v in peak.position],
+                method="gaussian",
+                sign=int(peak.sign),
+                ppm_axes=list(spectrum_axes.ppm),
+                roi_f1_ppm=roi_f1_ppm,
+                roi_f2_ppm=roi_f2_ppm,
+                logical_axes=list(spectrum_axes.logical_to_storage),
+            )
+            position = tuple(float(v) for v in loc.position)
+            record = loc.to_dict(spectrum_axes.ppm)
+            _add_nucleus_localization(record, spectrum_axes)
+            if record.get("fallback"):
+                n_fallback += 1
+                reason = str(record.get("fallback_reason", "") or "")
+                fallback_reasons[reason] = fallback_reasons.get(reason, 0) + 1
+            if record.get("boundary_hit"):
+                n_boundary += 1
+        h_ppm = (
+            float(spectrum_axes.ppm_at_fraction(axis_h, position[axis_h]))
+            if axis_h is not None
+            else float("nan")
+        )
+        n_ppm = (
+            float(spectrum_axes.ppm_at_fraction(axis_n, position[axis_n]))
+            if axis_n is not None
+            else float("nan")
+        )
+        fwhm_map = {
+            str(k): float(v) for k, v in (record.get("fwhm_by_nucleus") or {}).items()
+        }
+        rows.append(
+            {
+                "peak_id": int(index),
+                "reference_peak_id": "",
+                "assignment": "",
+                "H_ppm": h_ppm,
+                "N_ppm": n_ppm,
+                "intensity": float(peak.height),
+                "SNR": float(peak.snr),
+                "detected": True,
+                "localization_method": wanted,
+                "localization_requested": str(record.get("requested_method") or wanted),
+                "fallback": bool(record.get("fallback")),
+                "fallback_reason": str(record.get("fallback_reason", "") or ""),
+                "fit_success": (
+                    bool(record.get("fit_success")) if wanted == "gaussian" else None
+                ),
+                "FWHM_H": fwhm_map.get("1H") if wanted == "gaussian" else None,
+                "FWHM_N": fwhm_map.get("15N") if wanted == "gaussian" else None,
+                "fit_rmse": (
+                    float(record["fit_rmse"])
+                    if wanted == "gaussian" and record.get("fit_rmse") is not None
+                    else None
+                ),
+                "boundary_hit": (
+                    bool(record.get("boundary_hit")) if wanted == "gaussian" else None
+                ),
+            }
+        )
+    meta = {
+        "sigma_multiplier": threshold,
+        "min_snr": threshold,
+        "sign_mode": resolved_sign,
+        "edge_margin_ppm": round(float(edge_ppm), 6),
+        "edge_margin_points": int(edge_points),
+        "edge_margin_source": edge_source,
+        "noise_sigma": sigma,
+        "localization_method": wanted,
+        "n_peaks": len(rows),
+        "n_fallback": int(n_fallback),
+        "fallback_reasons": fallback_reasons,
+        "n_boundary_hit": int(n_boundary),
+    }
+    return rows, meta
+
+
 __all__ = [
+    "DEFAULT_DETECTION_SIGMA",
     "DEFAULT_WINDOW_PTS_FALLBACK",
     "PeakMeasurement",
+    "detect_and_localize",
     "measure_peak_positions",
     "peak_coordinates",
     "pick_reference_peaks",

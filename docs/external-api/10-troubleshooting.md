@@ -21,19 +21,17 @@
 
 | 码 | 处理建议 |
 | --- | --- |
-| `peak_not_detected` | 加大 `window_ppm`,或确认该峰在该条件确实消失(保留 `detected=false` 记录是对的) |
-| `peak_window_edge` | 加大 `window_ppm`(窗口太窄,真峰可能在窗外) |
-| `peak_out_of_range` | 参考峰位置超出该谱范围(条件间谱宽/中心不同),检查参考与条件的可比性 |
+| `peak_count_zero` | 该组合在锁定阈值下一个峰都没检出:确认该组合的谱没坏,或重建参考改阈值 |
 | `gaussian_fallback` | 看 `fallback_reason`(roi_too_small / not_converged / center_at_boundary / sigma_at_bound …);调大 ROI 或接受抛物线回退 |
 | `gaussian_boundary_hit` | 峰太宽/太窄或 ROI 不合适;调 ROI 半径 |
-| `gaussian_unsupported_ndim` | 非 2D 数据的预期行为(Gaussian 表位置=抛物线) |
-| `window_points_fallback` | 谱头缺 OBS/SW,无法按物理宽度换算;补全头部或用 `--window-pts` 显式口径 |
+| (已移除) | `peak_not_detected` / `peak_window_edge` / `peak_out_of_range` / `window_points_fallback`:2026-09-14 起组合模式独立选峰,不再产出 |
 
 ## 10.3 断点续跑与重跑
 
 成功运行只有在执行指纹一致时才会复用。指纹包括条件数据集、参数组合与实际
-参数、锁定相位、参考脚本/谱/峰表哈希、显式峰身份以及窗口、符号和 Gaussian
-ROI 选项；旧版无指纹记录或任一输入改变都会安全重跑。缩短组合表后，活动计划
+参数、锁定相位、参考脚本/谱/峰表哈希,以及**锁定阈值、精修方式
+(`localization`)与选峰边距**、Gaussian ROI 选项；旧版无指纹记录或任一输入
+改变都会安全重跑。缩短组合表后，活动计划
 之外的旧 `Wxxxx` 目录可以保留作历史，但不会再进入当前汇总记录。
 
 - 已 `success`/`success_with_warning` 的 workflow × 条件会被跳过;

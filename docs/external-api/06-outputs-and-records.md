@@ -39,7 +39,7 @@
 ## 6.2 统一峰表字段
 
 ```text
-workflow_id, condition, dataset, reference_peak_id, assignment,
+workflow_id, condition, dataset, peak_id, reference_peak_id, assignment,
 H_ppm, N_ppm, intensity, SNR, detected, localization_method,
 localization_requested, fallback, fallback_reason,
 fit_success, FWHM_H, FWHM_N, fit_rmse, boundary_hit
@@ -47,8 +47,10 @@ fit_success, FWHM_H, FWHM_N, fit_rmse, boundary_hit
 
 - **两种算法表结构完全一致**;parabolic 不适用的 Gaussian 字段写 `NaN`
   (不是 false/0);
-- `reference_peak_id`(`R0001`…)在参考峰表建立,所有条件与 workflow 沿用;
-  某条件/workflow 没测到该峰 → 保留行,`detected=false`;
+- `peak_id` 是**本谱**的峰序号(该组合自己那张谱的检出顺序);
+- `reference_peak_id`(`R0001`…)只属于**参考峰表**;组合模式 2026-09-14 起独立
+  选峰,组合峰表里该列与 `assignment` **留空**(`detected` 恒 true——表里只有该
+  组合检出的峰);把组合峰匹配回参考峰身份由下游分析完成;
 - `intensity` 为峰强(带符号),`SNR = |intensity| / σ`,σ 为该谱噪声
   (`core.qc.noise` 的 robust MAD),σ 同时写进
   `run.json.parameters_resolved.spectrum_noise_sigma`;
@@ -58,7 +60,7 @@ fit_success, FWHM_H, FWHM_N, fit_rmse, boundary_hit
 - Gaussian 列:`fit_success`(拟合是否成功)、`FWHM_H`/`FWHM_N`(按**核名**映射
   的 FWHM,ppm)、`fit_rmse`(残差 RMS)、`boundary_hit`(中心/宽度撞拟合边界);
   `fallback`/`fallback_reason` 记录失败回退(禁止静默);
-- `condition`/`dataset` 便于下游把 A/B 表按条件分组;`assignment` 取自参考峰表;
+- `condition`/`dataset` 便于下游把 A/B 表按条件分组;
 - 直接维范围留档:`reference.json.params.ext_lo/ext_hi`(参考层);每条
   `run.json.parameters_resolved.direct_range`(`ext_lo`/`ext_hi` + `source`:
   `reference_or_base` / `combo`);
@@ -101,13 +103,13 @@ fit_success, FWHM_H, FWHM_N, fit_rmse, boundary_hit
 | `workflow_id` / `index` / `condition` / `dataset` | 身份与数据来源 |
 | `parameters_requested` | 用户原样给的一行(规范 D2) |
 | `parameters_used` | 实际喂给后端的完整参数(参考基底 + 覆盖) |
-| `parameters_resolved` | `phase`(phase_mode + actual_p0/p1)、`smile`(实际 nSigma/thresh)、`spectrum_noise_sigma`、`window`、`effective_params_backend` |
+| `parameters_resolved` | `phase`(phase_mode + actual_p0/p1)、`detection`(锁定阈值来源/边距/噪声 σ/精修方法)、`peak_counts`、`smile`(实际 nSigma/thresh)、`spectrum_noise_sigma`、`direct_range`、`sampling`、`effective_params_backend` |
 | `phase` | 逐轴 `phase_mode`(`auto_reference_locked` / `manual_delta_from_reference` / `manual_absolute`)+ `actual_p0/actual_p1` |
 | `base_script` | 参考脚本路径 + SHA-256(以参考脚本为模板的证据) |
 | `script_path` / `script_sha256` / `spectrum_path` / `spectrum_sha256` | 产物与哈希 |
-| `peak_tables` | 两张峰表路径 + SHA-256 + 行数 + detected 数 |
-| `peak_localization` | 两方法 n_peaks/n_detected/n_missing/n_fallback/fallback_reasons/n_boundary_hit |
-| `window` | 逐轴物理宽度、等效点数、点距、来源 |
+| `peak_tables` | 被选中精修方式的峰表路径 + SHA-256 + 行数 + detected 数 |
+| `peak_localization` | 各方法 n_peaks/n_detected/n_missing/n_fallback/fallback_reasons/n_boundary_hit |
+| `window` | 选峰边距:物理宽度、等效点数、点距、来源 |
 | `log_path` | 完整日志路径 |
 | `versions` | nmrforge / python / 依赖 / NMRPipe / SMILE(真机登记后) |
 | `status` / `warnings` / `message` | 三值状态 + 警告码与计数 |
@@ -116,25 +118,27 @@ fit_success, FWHM_H, FWHM_N, fit_rmse, boundary_hit
 
 | 状态 | 含义 |
 | --- | --- |
-| `success` | 处理 + 两种定位 + 两张峰表全部完成,无警告 |
+| `success` | 处理 + 所选精修方式 + 对应峰表全部完成,无警告 |
 | `success_with_warning` | 完成但有待注意项(见下,结果可用但需复核) |
 | `failed` | 处理/测量失败;原因写入 `message` 与日志,不静默 |
 
 | 警告码 | 触发 |
 | --- | --- |
-| `peak_not_detected` | 有参考峰未测到(`detected=false`,行保留) |
-| `peak_window_edge` | 极值落在搜索窗口边界(真峰可能在窗外) |
-| `peak_out_of_range` | 参考峰位置落在谱范围外 |
+| `peak_count_zero` | 该组合在锁定阈值下一个峰都没检出(检查阈值/数据) |
 | `gaussian_fallback` | 高斯拟合失败/回退抛物线(逐峰原因落表) |
 | `gaussian_boundary_hit` | 高斯中心/宽度撞拟合边界 |
-| `gaussian_unsupported_ndim` | 非 2D 数据:高斯不适用,位置回退抛物线 |
-| `window_points_fallback` | 窗口无法按物理宽度换算,回退固定点数 |
+
+> 2026-09-14 起组合模式独立选峰(不跟踪参考峰表),因此不再产出
+> `peak_not_detected` / `peak_window_edge` / `peak_out_of_range` /
+> `window_points_fallback`;非 2D 请求高斯直接报错(`MeasurementError`),
+> 不会再产出 `gaussian_unsupported_ndim` 表。
 
 ## 6.5 `records/` 与边界
 
 `manifest.json`(组合模式)汇总:数据条件、逐条件参考(脚本/谱/两张峰表哈希)、
 显式指定的参考写法(`reference_spec`)与 `mode="combination"`、计划与网格
-哈希、峰身份方案、workflow 状态计数、软件/依赖/外部工具版本,以及**边界声明**
+哈希、峰身份方案(`peak_identity.matching`:组合峰与参考峰的匹配在**外部**)、
+workflow 状态计数、软件/依赖/外部工具版本,以及**边界声明**
 (`manifest["boundary"]`:软件只执行处理与留档;CSP/robustness/统计由下游独立
 分析程序完成)。
 

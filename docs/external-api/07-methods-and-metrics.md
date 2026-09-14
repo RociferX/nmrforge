@@ -44,8 +44,13 @@
 | `parabolic`(参考方法) | 在参考峰位附近的窗口内取 \|强度\| 极值,再对每个参与轴做 ±1 点三点抛物线亚像素 refine | 任意维 |
 | `gaussian` | 以抛物线的整数格结果为中心,对**同一 candidate** 做 2D 高斯最小二乘拟合(不旋转、轴向可分离,含局部常数基线),给出中心/FWHM/幅度/rmse | **仅 2D** |
 
-两者对**完全相同的 candidate** 独立运行,结果可直接比较(峰位差即算法差异);
-同一张谱两张表使用同一批 `reference_peak_id`。
+两者对**完全相同的 candidate** 独立运行,结果可直接比较(峰位差即算法差异)。
+
+- **参考模式**:对参考峰表里的每个峰分别做两种定位,两张参考峰表用同一批
+  `reference_peak_id`;
+- **组合模式**(2026-09-14):每个组合在**自己的候选谱**上先用参考锁定阈值
+  独立选峰,再按 `localization` 精修(parabolic 默认 / gaussian / both),
+  峰表里 `reference_peak_id` 留空——两种方法、不同组合之间的峰匹配由下游完成。
 
 高斯失败(ROI 太小/不收敛/撞边界/病态)时:回退抛物线位置,并在峰表
 `fallback`/`fallback_reason`/`fit_success` 与 `run.json.peak_localization`
@@ -73,15 +78,20 @@
 若把 `gaussian_roi_max_points` 设为 48(可选):4× 1.73×、两维 2× 1.84×,但代价是
 上面列出的峰位改变(留档可审计)。
 
-## 7.4 峰位测量窗口(物理宽度口径)
+## 7.4 选峰阈值与边距(物理宽度口径)
 
-- 窗口半径默认 = **1.5×该轴核素线宽(Hz)折算 ppm**
-  (`core.peaks.axis_units`),`window_ppm` 可显式给物理半径;
-  `window_pts` 是显式点数逃生口(跨分辨率不可比,不推荐);
-- 运行时按**当前候选谱的点距**换算点数:零填零 k 倍只改点距,不改变窗口覆盖
+- 选峰阈值 = **噪声 σ 倍数**(`sigma_multiplier`,内部同时作为 `min_snr`):
+  参考模式确定(缺省 35σ),组合模式**锁定沿用**,逐 workflow 留档
+  `parameters_resolved.detection`(`source="reference(locked)"`);
+- 边缘轴峰排除边距默认 = **3×该轴核素线宽(Hz)折算 ppm**
+  (`core.peaks.axis_units`);`edge_margin_ppm` 可显式给物理宽度;
+  运行时按**当前候选谱的点距**换算点数:零填零 k 倍只改点距,不改变边距覆盖
   的 ppm 宽度;
-- 换算结果逐组合留档:`run.json.window`(逐轴 points/ppm/effective_ppm/
+- 换算结果逐组合留档:`run.json.window`(points/ppm/effective_ppm/
   ppm_per_point/source)与 `records/measurement.json`;
+- 组合模式**没有** `max_peaks`,也没有「参考峰位搜索窗口」(不跟踪参考峰表);
+  参考模式/低层 `measure_peak_positions` 仍保留 `window_ppm`(缺省 1.5×线宽)
+  与 `window_pts` 逃生口;
 - 高斯 ROI 同样按物理宽度(ppm)定义(`peaks.localization.gaussian_roi_f1_ppm`
   / `_f2_ppm`,或函数/CLI 参数),按点距换算点数;
 - 结构性点数(局部极大 3 点邻域、抛物线 ±1 点)不换算——它们与分辨率无关。
@@ -90,14 +100,17 @@
 
 | 字段 | 含义 |
 | --- | --- |
-| `detected` | 该谱上是否测到该参考峰(false 仍保留行) |
+| `detected` | 该谱上是否检到该峰(组合模式:表里只有检出的峰 → 恒 true;参考峰表
+跟踪模式下未测到的参考峰会保留行且 `detected=false`) |
 | `intensity` / `SNR` | 极值处的峰强与 `|峰强|/σ`(σ = 该谱 robust MAD 噪声) |
 | `fit_success` / `fit_rmse` / `FWHM_H` / `FWHM_N` / `boundary_hit` | 高斯拟合 QC(parabolic 表写 NaN) |
 | `fallback` / `fallback_reason` | 是否回退与原因 |
 
-内部 `PeakMeasurement` 另带 `window_edge`(极值贴窗口边界)、`boundary`
-(贴谱边界)、`out_of_range`(参考位置在谱范围外)与 `deltas`(相对参考峰位),
-汇总进 `run.json.peak_localization` 与 `records/measurement.json`。
+内部 `PeakMeasurement`(参考峰跟踪/低层测量路径)另带 `window_edge`(极值贴窗口
+边界)、`boundary`(贴谱边界)、`out_of_range`(参考位置在谱范围外)与 `deltas`
+(相对参考峰位),汇总进 `run.json.peak_localization` 与
+`records/measurement.json`;组合模式改用本谱检出的峰 → 逐峰 QC 为
+`fit_success`/`fit_rmse`/`FWHM_*`/`boundary_hit`/`fallback`。
 
 ## 7.6 测试/检测辅助(不属于处理契约)
 

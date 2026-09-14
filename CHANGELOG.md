@@ -1,5 +1,19 @@
 # 修改记录(历史条目)
 
+## 未发布(2026-09-14):组合模式改为独立选峰(阈值锁定参考 + 精修方式外部选)
+- 组合模式不再按参考峰表逐峰跟踪:每个组合在自己的候选谱上用**参考锁定阈值**
+  独立选峰 → 该组合自己的完整峰表(`peak_id` = 本谱序号;`reference_peak_id` /
+  `assignment` 留空,匹配交给下游);旧口径(`detected=false` 保留行、峰位搜索
+  窗口、`max_peaks`)作废;
+- 阈值锁定:组合表里出现阈值键 → `SweepError`(要改阈值请重建参考);逐 workflow
+  留档 `parameters_resolved.detection.source="reference(locked)"`;
+- `localization` = parabolic(默认)/ gaussian(仅 2D)/ both:只输出被选中的峰表,
+  可逐组合覆盖;新增公开函数 `detect_and_localize()`;
+- 破坏性:`run_sweep` 去掉 `peaks/window_pts/window_ppm/refine/sigma_multiplier/`
+  `max_peaks`,改用 `localization/edge_margin_ppm`;CLI `sweep --localization /`
+  `--edge-margin-ppm`;
+- 文档 01-08/10 + 对外接口 CHANGELOG + API_CONTRACT 同步;本地全量 + ruff 全绿。
+
 ## 未发布(2026-09-14):逐峰 2D 高斯拟合提速
 - 解析式雅可比(迭代成本约 1/7,数学等价);拟合窗口每轴半宽上限
   (`peaks.localization.gaussian_roi_max_points`,默认 48 点,触发留档);

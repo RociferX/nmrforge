@@ -96,22 +96,27 @@ plan_sweep(reference, *, axes=None, combos=None, max_runs=256,
 ## 3.4 批量执行
 
 ```python
-run_sweep(session, plan, *, reference=None, datasets=None, peaks=None,
-          window_pts=None, window_ppm=None, sign="abs", refine=None,
+run_sweep(session, plan, *, reference=None, datasets=None,
+          localization="parabolic", edge_margin_ppm=None,
+          sign="abs",            # 历史参数(检测符号口径固定 dominant)
           roi_f1_ppm=None, roi_f2_ppm=None, resume=True,
           stop_on_error=False, progress=None, on_run=None) -> list[SweepRun]
 ```
 
-- 每个组合对**全部条件**(缺省 = 会话里所有条件)跑一遍处理,再对同一张谱跑
-  parabolic 与 Gaussian 两种定位;返回逐 (workflow, 条件) 记录;
+- 每个组合对**全部条件**(缺省 = 会话里所有条件)跑一遍处理,再在**该组合自己的
+  候选谱**上用参考锁定阈值独立选峰;返回逐 (workflow, 条件) 记录;
 - `parameters_used` 基底 = 该条件参考运行的有效参数(相位锁定),组合表只覆盖
-  它显式指定的键;`peaks` 可显式给参考峰行(默认读条件参考的身份表);
-- `refine` 已废弃(两种方法现在始终都跑),仅为兼容签名保留;
-- 窗口按物理宽度定义:缺省 1.5×该轴核素线宽折算 ppm,逐谱按点距换算点数并
-  写入 `run.json.window`。
+  它显式指定的键;阈值类键(`sigma_multiplier`/`min_snr`/`threshold_sigma`/
+  `detection.sigma_multiplier`)写进组合表 → `SweepError`(阈值锁定在参考);
+- `localization` = `parabolic`(默认)/ `gaussian`(仅 2D)/ `both`:只输出被选中的
+  峰表;逐组合可用组合表的 `localization` 键覆盖;
+- `edge_margin_ppm` = 选峰时排除边缘轴峰的物理宽度(缺省 3×该轴核素线宽),
+  逐谱按点距换算点数并写进 `run.json.window`;
+- 组合峰表**不跟踪参考峰表**:`reference_peak_id`/`assignment` 留空,`detected`
+  恒为 true(表里只有该组合检出的峰)。
 
 `SweepRun` 关键字段与方法见 06;`run.peak_table_path("parabolic"|"gaussian")`
-给出两张峰表路径。
+给出被选中方法的峰表路径(未选中的方法返回空串)。
 
 ## 3.5 峰位测量(低层)
 
@@ -120,10 +125,18 @@ measure_peak_positions(spectrum_path, peaks, *, window_pts=None,
                        window_ppm=None, axes=None, sign="abs",
                        refine="parabolic", nuclei=None, roi_f1_ppm=None,
                        roi_f2_ppm=None, noise_sigma=None) -> list[PeakMeasurement]
+detect_and_localize(spectrum_path, *, method="parabolic",
+                    sigma_multiplier=None, edge_margin_ppm=None,
+                    edge_margin_points=None, roi_f1_ppm=None,
+                    roi_f2_ppm=None, sign_mode="dominant", axes=None)
+    -> (list[dict], dict)     # 组合模式的独立选峰:peak_id=本谱序号,reference_peak_id=""
 read_reference_peaks(path) -> list[dict]      # 补 reference_peak_id
 window_points_by_axis(axes, *, window_pts=None, window_ppm=None) -> dict
 ```
 
+- `detect_and_localize` 是组合模式的选峰入口:物理边距 + `sigma_multiplier`
+  (同时作 `min_snr`)+ dominant 符号口径,再按 `method` 精修;没有 `max_peaks`
+  (锁定阈值下检出多少峰就写多少峰);非 2D 请求 `gaussian` 抛 `MeasurementError`;
 - `refine`:`parabolic`(默认)|`none`|`gaussian`(**仅 2D**,非 2D 抛
   `MeasurementError("Gaussian peak fitting is currently supported only for
   2D spectra.")`,不降级);
@@ -138,7 +151,7 @@ window_points_by_axis(axes, *, window_pts=None, window_ppm=None) -> dict
 ## 3.6 统一峰表与记录
 
 ```python
-write_peak_table(path, rows) -> Path       # 表头 = PEAK_TABLE_COLUMNS
+write_peak_table(path, rows) -> Path       # 表头 = PEAK_TABLE_COLUMNS(含 peak_id)
 read_peak_table(path) -> list[dict]        # NaN → float("nan")
 peak_table_rows(measurements, *, workflow_id, condition="", dataset="",
                 method="parabolic") -> list[dict]
@@ -182,8 +195,9 @@ run_reference_study(root, datasets={"A": "~/data/a"},
 ```python
 run_combination_study(reference,                  # ← 必填:显式指定参考
                       combos=[{"zero_fill": 1}],  # 或 axes=...
-                      max_runs=256, window_pts=None, window_ppm=None,
-                      sign="abs",
+                      max_runs=256,
+                      localization="parabolic",       # parabolic / gaussian / both
+                      edge_margin_ppm=None,             # 缺省 3×核素线宽(物理宽度)
                       direct_range=(10.0, 6.5),        # 覆盖本批 workflow 基值
                       roi_f1_ppm=None, roi_f2_ppm=None,
                       resume=True, backend=None, write=True,
@@ -199,7 +213,13 @@ run_combination_study(reference,                  # ← 必填:显式指定参�
 | `"~/studies/s1/study/reference/<key>/reference.json"` | 直接给参考文件(研究根由路径反推;只跑该参考对应条件) |
 
 - 组合**不生成参考**:参数基底 = 该参考的有效参数(相位锁定),组合表只覆盖它
-  显式指定的键;选峰阈值随参考锁定;
+  显式指定的键;**选峰阈值随参考锁定**(阈值键写进组合表 → `SweepError`,
+  提示「要改阈值请重建参考」);
+- **组合独立选峰**:每个组合在自己的候选谱上独立检出该组合自己的完整峰表
+  (`peak_id` = 本谱序号,`reference_peak_id`/`assignment` 留空),峰与参考峰表的
+  匹配由下游分析完成;逐组合记录 `parameters_resolved.detection`(锁定阈值来源
+  `source="reference(locked)"`、边距、噪声 σ、精修方法列表);
+- `localization` 只输出被选中的峰表;逐组合可用组合表 `localization` 键覆盖;
 - 参考不存在/峰表缺失 → `ReferenceError`,错误信息指明先跑参考模式;
 - 每条运行记录写明参考:`run.json.base_script`(脚本/谱哈希)、
   `parameters_resolved.reference`(参考峰表哈希等),`manifest.json` 记

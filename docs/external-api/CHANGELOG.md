@@ -2,6 +2,35 @@
 
 版本口径:新增功能/新增字段保持同一 minor;破坏性改动升 minor 并给出迁移说明。
 
+## 0.3.0(2026-09-14)
+
+**组合模式改为「独立选峰 + 阈值锁定参考 + 精修方式外部选择」(破坏性)。**
+
+- **组合独立选峰**:每个组合在自己的候选谱上用**参考锁定阈值**独立选峰 → 该
+  组合自己的完整峰表;`peak_id` 为该谱峰序号,`reference_peak_id`/`assignment`
+  **留空**(峰与参考峰表的匹配由下游分析完成)。旧的「按参考峰表逐峰跟踪 +
+  `detected=false` 保留行」口径作废;
+- **阈值锁定**:阈值只在参考模式确定(缺省 35σ);组合表里出现
+  `sigma_multiplier`/`min_snr`/`threshold_sigma`/`detection.sigma_multiplier`
+  → `SweepError`(提示「要改阈值请重建参考」);逐 workflow 留档
+  `parameters_resolved.detection.source="reference(locked)"`;
+- **精修方式外部选择**:`localization` = `parabolic`(默认)/ `gaussian`(仅 2D)/
+  `both`,只输出被选中的峰表;逐组合可用组合表 `localization` 键覆盖;
+- **去掉 `max_peaks`**(组合模式没有该参数);**不新增**峰匹配提示列;
+- **破坏性签名/CLI 变更**:`run_sweep(..., peaks=, window_pts=, window_ppm=,
+  refine=, sigma_multiplier=, max_peaks=)` 移除,改为 `localization=` /
+  `edge_margin_ppm=`;`run_combination_study` 增加同名参数(`window_pts` /
+  `window_ppm` / `sign` 保留但不再使用);CLI `sweep` 的 `--window-ppm` /
+  `--window-pts` 换成 `--localization` / `--edge-margin-ppm`;
+- 断点续跑指纹改为包含「锁定阈值 + 精修方式 + 边距」(改精修方式不会复用旧 run);
+- 新公开函数 `detect_and_localize(spectrum, *, method=, sigma_multiplier=,
+  edge_margin_ppm=, edge_margin_points=, roi_f1_ppm=, roi_f2_ppm=,
+  sign_mode="dominant", axes=) -> (rows, meta)`;
+- 文档 01/02/03/04/05/06/07/08/10 + API_CONTRACT 同步;测试改写 + 新增 4 例。
+
+> `API_VERSION` 仍为 `"0.2"`(对外常量由 2026-09-13 规范固定);本次破坏性
+> 仅限组合模式的峰表口径与 sweep 参数。
+
 ## 0.2.8(2026-09-14)
 
 **拟合窗口上限改为默认关闭**(真机对照发现 4× / 两维 2× 上会改结果)。

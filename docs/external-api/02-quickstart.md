@@ -23,6 +23,7 @@ result = run_combination_study(
         {"zero_fill": 2},
         {"zero_fill": 1, "window.F1.off": 0.45},
     ],
+    localization="both",                   # parabolic(默认)/ gaussian / both
 )
 
 print(result.summary["workflow_ids"])      # ['W0001', 'W0002', 'W0003']
@@ -32,9 +33,15 @@ for run in result.runs:
           run.peak_table_path("parabolic"), run.peak_table_path("gaussian"))
 ```
 
-- 参考模式只建参考(1 个脚本 + 2 张峰表),不跑任何组合;
+- 参考模式只建参考(1 个脚本 + 2 张峰表),不跑任何组合;选峰阈值在这里确定,
+  之后**全程锁定**(组合表里写阈值键直接报错,要改阈值请重建参考);
 - 组合模式不生成参考:参数基底取参考的有效参数,组合表只覆盖它显式指定的键;
   参考不存在或峰表缺失 → `ReferenceError`(提示先跑参考模式);
+- **组合独立选峰**(2026-09-14):每个组合在自己的候选谱上用参考的锁定阈值独立
+  选峰 → 该组合自己的完整峰表;`reference_peak_id`/`assignment` 留空,峰与参考
+  峰表的匹配由下游分析完成;
+- 精修方式外部指定:`localization="parabolic"`(默认)/ `"gaussian"`(仅 2D)/
+  `"both"`(两张峰表都出);
 - `run_parameter_study(...)` 仍是一键便利入口(内部 = 参考模式 + 用研究根显式
   调用组合模式),快速试用与向后兼容用;
 - 不需要外部峰表;`peaks=<外部峰表>` 只在研究方另有公开库/已指认峰表时才用。
@@ -52,14 +59,16 @@ result = run_parameter_study(
 同一个 `W0001` 对 A、B 使用**同一份**用户参数,各自输出峰值表:
 
 ```text
-study/workflows/W0001/A/peak_table_parabolic.csv
-study/workflows/W0001/A/peak_table_gaussian.csv
+study/workflows/W0001/A/peak_table_parabolic.csv      # 默认精修方式
 study/workflows/W0001/B/peak_table_parabolic.csv
-study/workflows/W0001/B/peak_table_gaussian.csv
 ```
 
-两张表用同一个 `reference_peak_id` 标识同一个峰,`detected=false` 表示该条件下
-没测到但**保留记录**。CSP/统计由你**自己的分析程序**读这两张表计算。
+(要高斯表显式写 `localization="gaussian"`,或 `"both"` 同时出
+`peak_table_gaussian.csv`。)
+
+组合模式的峰表是**该组合自己那张谱**的峰表:`peak_id` 是本谱峰序号,
+`reference_peak_id`/`assignment` 留空——把峰匹配回参考峰身份由你的分析程序做。
+CSP/统计同样由你**自己的分析程序**读这些表计算。
 
 ## 3. 分步用法(需要精细控制时)
 
@@ -75,7 +84,7 @@ reference = build_reference(session)                     # 参考谱 + 参考脚
 reference = ensure_reference_peaks(session, reference)   # 峰身份 + 两张参考峰表
 
 plan = plan_sweep(reference, combos=[{"zero_fill": 1}, {"zero_fill": 2}])
-runs = run_sweep(session, plan, reference=reference, window_ppm=0.5)
+runs = run_sweep(session, plan, reference=reference, localization="both")
 records = write_records(session, references={reference.dataset_key: reference},
                         plan=plan, runs=runs)
 print(records)
@@ -88,7 +97,8 @@ python -m nmrforge_api init      --study ~/studies/s1 --dataset ~/data/a --condi
 python -m nmrforge_api init      --study ~/studies/s1 --dataset ~/data/b --condition B
 python -m nmrforge_api reference --study ~/studies/s1
 python -m nmrforge_api peaks     --study ~/studies/s1
-python -m nmrforge_api sweep     --study ~/studies/s1 --combos design.csv
+python -m nmrforge_api sweep     --study ~/studies/s1 --reference ~/studies/s1 \
+    --combos design.csv --localization both
 python -m nmrforge_api status    --study ~/studies/s1
 python -m nmrforge_api report    --study ~/studies/s1
 ```

@@ -326,7 +326,7 @@ Reference workflow
 User-defined workflow ensemble
     ↓  以参考脚本为模板,只替换该组合指定的参数,自动运行处理
 Processed spectra(每 workflow × 每条件)
-    ↓  对同一张谱分别做 parabolic 与 2D gaussian 定位
+    ↓  每个组合用参考锁定阈值在自己的谱上独立选峰,再按 localization 精修
 Parabolic / Gaussian peak tables
     ↓
 Complete provenance + QC(参数三层、脚本/谱哈希、完整日志、版本、状态)
@@ -336,9 +336,13 @@ Complete provenance + QC(参数三层、脚本/谱哈希、完整日志、版本
 - 采样路由:**实际满采样**(标注 NUS 但 `nuslist` 覆盖全格,或 2D `ser` 全格
   无零行)按 **uniform** 处理(不跑 SMILE),有效采样与证据写入参考/运行记录;
   真 NUS 走 `reconstruct_nus`;
-- 两条件数据:同一 workflow 对 A/B 用**同一份** `parameters_requested`;
-  峰身份(`reference_peak_id`)全条件共享,各自输出峰值表
-  (`A_raw → W0037 → A_peak_table`,`B_raw → W0037 → B_peak_table`);
+- 两条件数据:同一 workflow 对 A/B 用**同一份** `parameters_requested`,各自输出
+  峰值表(`A_raw → W0037 → A_peak_table`,`B_raw → W0037 → B_peak_table`);
+- **组合独立选峰**(2026-09-14):每个组合在**自己的候选谱**上用参考锁定阈值
+  独立选峰 → 该组合自己的完整峰表;`reference_peak_id`/`assignment` 留空,
+  与参考峰表的匹配由外部(下游分析)完成;阈值只在参考模式确定并全程锁定
+  (组合表写阈值键 → `SweepError`);精修方式由 `localization` 选择
+  (parabolic 默认 / gaussian 仅 2D / both);组合模式没有 `max_peaks`;
 - 软件最终边界:**不加入** CSP 计算、robustness 计算、statistical analysis、
   significance 判断、scientific conclusion(这些由下游独立分析程序基于统一
   峰表完成)。σ/Δδ 汇总**不进入处理契约与 records 产物**,但代码
@@ -356,9 +360,10 @@ run_reference_study(root, dataset=None, *, datasets=None, params=None,
                     gaussian_roi_f1_ppm=None, gaussian_roi_f2_ppm=None,
                     backend=None, write=True, progress=None) -> ReferenceResult
 run_combination_study(reference, *, combos=None, axes=None, max_runs=256,
-                      window_pts=None, window_ppm=None, sign="abs",
+                      localization="parabolic", edge_margin_ppm=None,
                       roi_f1_ppm=None, roi_f2_ppm=None, resume=True,
                       backend=None, write=True, progress=None) -> StudyResult
+                      # window_pts/window_ppm/sign 保留但不再使用(兼容)
 parse_reference_spec(spec) -> ReferenceHandle
 resolve_reference(spec, *, backend=None) -> (StudySession, DatasetRef, ReferenceSpectrum)
 write_reference_records(session, references) -> dict[str, str]
@@ -368,6 +373,7 @@ run_parameter_study(root, dataset=None, *, datasets=None, axes=None, combos=None
                     sigma_multiplier=None, max_peaks=0, max_runs=256,
                     window_pts=None, window_ppm=None, sign="abs",
                     roi_f1_ppm=None, roi_f2_ppm=None,
+                    localization="parabolic",        # 组合模式精修方式
                     localization_method="parabolic",
                     gaussian_roi_f1_ppm=None, gaussian_roi_f2_ppm=None,
                     resume=True, backend=None, write=True, progress=None)
@@ -375,6 +381,7 @@ open_study / add_dataset(session, source, condition="A") / dataset_info
 build_reference / load_reference / load_references / set_reference_peaks
 ensure_reference_peaks / build_reference_peak_tables / pick_reference_peaks
 measure_peak_positions / read_reference_peaks / window_points_by_axis
+detect_and_localize        # 组合模式独立选峰(rows: peak_id 本谱序号, reference_peak_id="")
 plan_sweep / run_sweep / load_plan / load_runs / load_workflows
 write_records / write_peak_table / read_peak_table / peak_table_rows
 expand_grid / combos_from_rows / load_combo_table / write_combo_table
@@ -399,7 +406,7 @@ CLI:`python -m nmrforge_api {init,reference,peaks,sweep(=workflows),report,statu
   `parameters_requested`、`parameters_used`、`parameters_resolved`
   (phase 的 `phase_mode`/`actual_p0`/`actual_p1`、SMILE 实际 `nsigma`/`thresh`、
   谱噪声 σ)、`base_script`(参考脚本路径 + SHA-256)、脚本/谱路径 + SHA-256、
-  `peak_tables`(parabolic/gaussian 路径 + SHA-256 + 行数)、`peak_localization`
+  `peak_tables`(被选中精修方式的路径 + SHA-256 + 行数)、`peak_localization`
   (detected/回退/撞边界计数)、`window`(逐轴物理宽度↔点数换算)、`log_path`
   (完整日志)、`versions`(nmrforge/python/依赖/NMRPipe/SMILE)、`status`∈
   {`success`, `success_with_warning`, `failed`}、`warnings`(码 + 计数 + 峰);
@@ -408,14 +415,16 @@ CLI:`python -m nmrforge_api {init,reference,peaks,sweep(=workflows),report,statu
 ### 11.4 峰表字段(两算法结构一致)
 
 ```text
-workflow_id, condition, dataset, reference_peak_id, assignment,
+workflow_id, condition, dataset, peak_id, reference_peak_id, assignment,
 H_ppm, N_ppm, intensity, SNR, detected, localization_method,
 localization_requested, fallback, fallback_reason,
 fit_success, FWHM_H, FWHM_N, fit_rmse, boundary_hit
 ```
 
-- `reference_peak_id`(R0001…)由参考峰表建立,后续所有 workflow/条件沿用;
-  未检测到的峰**保留记录**(`detected=false`),不删行;
+- `peak_id` 是本谱(该 workflow × 该条件)的峰序号;
+- `reference_peak_id`(R0001…)由参考峰表建立(参考峰表里未检测到的峰保留
+  `detected=false` 行);组合模式 2026-09-14 起独立选峰,组合峰表该列与
+  `assignment` 留空,匹配由下游完成;
 - Gaussian 额外列在 parabolic 表里写 `NaN`(不是 false/0),保证两表结构一致;
 - 拟合失败/回退(`fallback`/`fallback_reason`/`fit_success`)必须逐峰落表,
   禁止静默。

@@ -18,7 +18,7 @@
 | [04-cli-reference.md](04-cli-reference.md) | `python -m nmrforge_api` 六个命令 |
 | [05-inputs-and-data.md](05-inputs-and-data.md) | 数据、条件、参数键、组合表 |
 | [06-outputs-and-records.md](06-outputs-and-records.md) | 目录布局、统一峰表字段、状态与警告码 |
-| [07-methods-and-metrics.md](07-methods-and-metrics.md) | 参考工作流、两种定位、窗口口径、QC |
+| [07-methods-and-metrics.md](07-methods-and-metrics.md) | 参考工作流、两种定位、选峰阈值/边距口径、QC |
 | [08-integration-guide.md](08-integration-guide.md) | 向下游分析程序交接(读什么、怎么读) |
 | [09-limitations-and-roadmap.md](09-limitations-and-roadmap.md) | 支持矩阵、NUS 边界、分片、roadmap |
 | [10-troubleshooting.md](10-troubleshooting.md) | 常见错误、warning 处理、断点续跑 |

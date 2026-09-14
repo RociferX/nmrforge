@@ -56,7 +56,7 @@ python -m nmrforge_api sweep --study ~/studies/s1 \
     --reference ~/studies/s1#B --grid grid.yaml
 python -m nmrforge_api sweep --study ~/studies/s1 \
     --reference ~/studies/s1/study/reference/exp_001_d_001/reference.json \
-    --combos design.csv --window-ppm 0.5 --no-resume
+    --combos design.csv --localization both --no-resume
 ```
 
 参考模式 = `reference`(参考谱/脚本)+ `peaks`(两张参考峰表)两个命令;参考不存在时 `sweep` 会报错并提示先跑这两个命令。
@@ -68,14 +68,17 @@ python -m nmrforge_api sweep --study ~/studies/s1 \
 | `--grid` | 各轴候选值(YAML/JSON 的 `axes:`,接口展开全因子) |
 | `--direct-range` | 直接维范围 `HIGH_PPM LOW_PPM`(覆盖本批 workflow 基值) |
 | `--max-runs` | 组合数上限(缺省 256) |
-| `--window-ppm` | 峰位搜索窗口半径(ppm;缺省 1.5×核素线宽) |
-| `--window-pts` | 窗口半径(点数,跨分辨率不可比,不推荐) |
+| `--localization` | 峰位精修方式:`parabolic`(默认)/ `gaussian`(仅 2D)/ `both`(两张表都出) |
+| `--edge-margin-ppm` | 选峰排除边缘轴峰的物理宽度(ppm;缺省 3×该轴核素线宽) |
 | `--gaussian-roi-f1-ppm` / `--gaussian-roi-f2-ppm` | 高斯 ROI 物理半径(ppm) |
 | `--no-resume` | 不跳过已完成 workflow |
 
 `--combos` 与 `--grid` 必须且只能给一个。每个组合 = 一个 `workflow_id`
-(`W0001`…);对全部条件跑处理,再对同一张谱跑两种定位,输出两张峰表 + 完整
-日志 + 参数三层 + 版本。输出:workflow 数、条件列表、状态计数、records 路径。
+(`W0001`…);对全部条件跑处理,再在**该组合自己的谱**上用参考锁定阈值独立选峰,
+按 `--localization` 输出峰表(parabolic 默认;`both` 出两张)+ 完整日志 + 参数三层
++ 版本。阈值键(`sigma_multiplier`/`min_snr`/`threshold_sigma`/
+`detection.sigma_multiplier`)写进组合表会直接报错(阈值锁定在参考)。
+输出:workflow 数、条件列表、状态计数、records 路径。
 
 ## report — 用已有记录重算汇总(不重跑处理)
 
