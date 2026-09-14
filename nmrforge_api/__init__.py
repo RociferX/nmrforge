@@ -5,9 +5,9 @@
 1. 读原始 NMR 数据与**用户定义的参数组合表**;
 2. 自动优化生成**参考工作流**:1 个参考处理脚本 + 2 张参考峰表
    (parabolic / 2D gaussian);参考只作后续参数扰动的基准,不声称全局最优;
-3. 每个参数组合 = 一个 **workflow_id**(W0001…):以参考脚本为模板、只替换该
-   组合指定的参数、自动跑处理,并对**同一张谱**分别做 parabolic 与
-   gaussian 定位,输出两张结构一致的峰表;
+3. 每个参数组合 = 一个 **workflow_id**(W0001…):每个条件从自己的参考有效
+   参数起步,应用批次覆盖和组合参数后自动处理;按外部选择的 parabolic /
+   gaussian / both 定位,只输出实际选择的方法峰表;
 4. 保存完整 provenance:``parameters_requested`` / ``parameters_used`` /
    自动参数的**实际结果**(``actual_p0``/``actual_p1``、SMILE 实际 nSigma 与
    噪声 σ)、完整脚本与日志、软件/NMRPipe/SMILE 版本、状态

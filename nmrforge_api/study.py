@@ -386,10 +386,10 @@ def run_combination_study(
             )
         references[item.key] = other
     direct = parse_direct_range(direct_range, ext_lo=ext_lo, ext_hi=ext_hi)
-    base_params = dict(ref.sweep_params)
+    base_overrides: dict[str, Any] = {}
     notes: list[str] = []
     if direct is not None:
-        base_params.update(direct.params())
+        base_overrides.update(direct.params())
         notes.append(
             "直接维范围由组合模式指定:"
             f" ext_lo={direct.lo:g} ext_hi={direct.hi:g} ppm"
@@ -400,7 +400,7 @@ def run_combination_study(
         axes=axes,
         combos=combos,
         max_runs=max_runs,
-        base_params=base_params,
+        base_overrides=base_overrides,
         notes=notes,
     )
     runs = run_sweep(

@@ -79,7 +79,7 @@ write_combo_table(path, combos) -> Path
 design_diagnostics(combos, *, axes=None) -> dict
 infer_axes(combos) -> dict / merge_overrides(base, overrides) -> dict
 plan_sweep(reference, *, axes=None, combos=None, max_runs=256,
-           base_params=None, notes=None) -> SweepPlan
+           base_overrides=None, notes=None) -> SweepPlan
 ```
 
 - `axes` 与 `combos` 必须且只能给一个;`combos` 原样按表序执行,接口**不做**
@@ -91,6 +91,8 @@ plan_sweep(reference, *, axes=None, combos=None, max_runs=256,
 - 锁定键(`phases`/`direct_phase`/`phase_route`/`sampling.auto_phase`)报错;
   确定性参数(提取窗口、点距目标、采样表、超时、`fid_noise*`)与未知键写
   `plan.notes` 提示但不阻断;
+- `base_overrides` 是批次级覆盖;执行每个条件时按“该条件的参考有效参数 →
+  `base_overrides` → 当前组合”合并。旧的绝对 `base_params` 入口已删除;
 - `SweepPlan.workflow_ids()` → `["W0001", ...]`。
 
 ## 3.4 批量执行
@@ -105,8 +107,12 @@ run_sweep(session, plan, *, reference=None, datasets=None,
 
 - 每个组合对**全部条件**(缺省 = 会话里所有条件)跑一遍处理,再在**该组合自己的
   候选谱**上用参考锁定阈值独立选峰;返回逐 (workflow, 条件) 记录;
-- `parameters_used` 基底 = 该条件参考运行的有效参数(相位锁定),组合表只覆盖
-  它显式指定的键;阈值类键(`sigma_multiplier`/`min_snr`/`threshold_sigma`/
+- **与参考共用处理输入**:参考的运行期自动决定(`params.diagnostics`,如直接维
+  DC 纠正 `POLY -time`)一并进入组合基底,且候选运行在参考的**条件工作目录**里
+  执行——复用参考已转换的 fid,脚本与参考脚本同目录;每个运行目录都保存完整
+  `process.com` + SHA-256(找不到时报 `processing_script_not_found`);
+- `parameters_used` 基底 = 该条件参考运行的有效参数(相位锁定),随后应用批次
+  `base_overrides`,组合表最后只覆盖它显式指定的键;阈值类键(`sigma_multiplier`/`min_snr`/`threshold_sigma`/
   `detection.sigma_multiplier`)写进组合表 → `SweepError`(阈值锁定在参考);
 - `localization` = `parabolic`(默认)/ `gaussian`(仅 2D)/ `both`:只输出被选中的
   峰表;逐组合可用组合表的 `localization` 键覆盖;

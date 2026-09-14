@@ -15,7 +15,7 @@
             <condition>/      每个条件一个子目录(A/B)
                 process.com   该条件实际执行的完整处理脚本
                 spectrum.ft2  该条件候选谱(不替换活动谱)
-                peak_table_parabolic.csv / peak_table_gaussian.csv
+                peak_table_<所选方法>.csv
                 log.txt      该条件的完整运行日志
                 run.json     该条件的完整溯源记录
         records/              汇总产物(manifest/workflows/runs/峰表长表)

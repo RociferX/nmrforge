@@ -37,7 +37,19 @@ def full_sampling_evidence(
     if grid <= 0:
         return None
     if has_nuslist:
-        if len(nus_list) >= grid:
+        # 2D nuslist 应只有一个间接维坐标。支持 0-based / 1-based 写法，
+        # 但所有行必须有效且唯一坐标集合恰好覆盖全格。
+        if not nus_list or any(len(point) != 1 for point in nus_list):
+            return None
+        coordinates = [int(point[0]) for point in nus_list]
+        unique = set(coordinates)
+        zero_based = set(range(grid))
+        one_based = set(range(1, grid + 1))
+        valid_full_grid = (
+            len(coordinates) == len(unique)
+            and (unique == zero_based or unique == one_based)
+        )
+        if valid_full_grid:
             return (
                 f"实际满采样:nuslist 覆盖全部 {grid} 个间接维复点"
                 "(标注 NUS,实际是满采样)→ 按 uniform 处理"

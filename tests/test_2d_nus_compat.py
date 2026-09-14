@@ -246,6 +246,25 @@ def test_partial_nuslist_stays_nus(tmp_path: Path) -> None:
     assert not any("满采样" in line for line in exp.sampling.evidence)
 
 
+@pytest.mark.parametrize(
+    "coordinates",
+    [list(range(127)) + [0], list(range(127)) + [999]],
+    ids=["duplicate_missing", "out_of_range_missing"],
+)
+def test_malformed_full_length_nuslist_stays_nus(
+    tmp_path: Path, coordinates: list[int]
+) -> None:
+    """行数达到网格但坐标重复/越界时不算覆盖全格，必须继续走 NUS。"""
+    ds = _make_2d_nus_dataset(tmp_path, rows=256, keep=list(range(128)))
+    (ds / "nuslist").write_text(
+        "\n".join(str(value) for value in coordinates) + "\n", encoding="utf-8"
+    )
+    exp = read_dataset(ds)
+    assert exp.sampling.mode.value == "nus"
+    assert exp.sampling.schedule_type == "nuslist"
+    assert not any("满采样" in line for line in exp.sampling.evidence)
+
+
 def _finalize(raw: Path, work: Path, ndim: int) -> tuple[bool, list[str]]:
     from backend.nmrpipe_backend import NMRPipeBackend
 

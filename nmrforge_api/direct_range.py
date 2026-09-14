@@ -85,32 +85,34 @@ def parse_direct_range(
     ext_hi: Any = None,
     params: Mapping[str, Any] | None = None,
 ) -> DirectRange | None:
-    """解析直接维范围;没给任何输入返回 ``None``,非法抛 :class:`SweepError`。"""
-    raw_lo = ext_lo
-    raw_hi = ext_hi
-    requested: tuple[float, float] = ()
+    """解析直接维范围;没给任何输入返回 ``None``,非法抛 :class:`SweepError`。
+
+    输入优先级为 ``params``(兼容) < ``direct_range`` < 显式
+    ``ext_lo``/``ext_hi``。
+    """
+    raw_lo = params.get("ext_lo") if params else None
+    raw_hi = params.get("ext_hi") if params else None
     if value is not None:
         if isinstance(value, Mapping):
-            raw_lo = value.get("ext_lo", value.get("lo", raw_lo))
-            raw_hi = value.get("ext_hi", value.get("hi", raw_hi))
+            if "ext_lo" in value or "lo" in value:
+                raw_lo = value.get("ext_lo", value.get("lo"))
+            if "ext_hi" in value or "hi" in value:
+                raw_hi = value.get("ext_hi", value.get("hi"))
         elif isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
             if len(value) != 2:
                 raise SweepError(
                     f"direct_range 需要两个 ppm 值(high, low),收到 {value!r}"
                 )
-            requested = (_as_float(value[0], "第 1 个值"), _as_float(value[1], "第 2 个值"))
-            raw_lo, raw_hi = requested
+            raw_lo, raw_hi = value
         else:
             raise SweepError(
                 "direct_range 写法不对:用 (high_ppm, low_ppm) 或 "
                 "{'lo': …, 'hi': …}"
             )
-    elif params:
-        # 兼容旧写法:params={"ext_lo": …, "ext_hi": …}
-        if raw_lo is None and params.get("ext_lo") not in (None, ""):
-            raw_lo = params.get("ext_lo")
-        if raw_hi is None and params.get("ext_hi") not in (None, ""):
-            raw_hi = params.get("ext_hi")
+    if ext_lo is not None:
+        raw_lo = ext_lo
+    if ext_hi is not None:
+        raw_hi = ext_hi
     if raw_lo is None and raw_hi is None:
         return None
     if raw_lo is None or raw_hi is None:
@@ -123,9 +125,7 @@ def parse_direct_range(
         raise SweepError(f"直接维范围两端相同({first:g} ppm),不是有效范围")
     swapped = first < second
     lo, hi = (second, first) if swapped else (first, second)
-    if not requested:
-        requested = (first, second)
-    return DirectRange(lo=lo, hi=hi, requested=requested, swapped=swapped)
+    return DirectRange(lo=lo, hi=hi, requested=(first, second), swapped=swapped)
 
 
 __all__ = ["DirectRange", "parse_direct_range"]

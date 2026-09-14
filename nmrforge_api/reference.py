@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import json
 import shutil
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -64,6 +64,14 @@ _NON_SWEEP_KEYS: tuple[str, ...] = (
     "segment_shift_hz",
 )
 
+#: 参考运行里由**自动诊断/路由**做出、又必须被组合运行沿用的行为决定:
+#: 它们只写在 ``params['diagnostics']`` 里,不提升成顶层键,组合就会落到
+#: 后端默认值 → 组合脚本与参考脚本在**没人指定**的参数上不同(真机实例:
+#: 直接维 DC 偏置 → 参考脚本含 ``nmrPipe -fn POLY -time``,组合脚本没有)。
+_RUNTIME_DECISION_KEYS: tuple[tuple[str, str], ...] = (
+    ("direct_poly_time", "apply_poly_time"),
+)
+
 REFERENCE_FILENAME = "reference.json"
 REFERENCE_PEAK_LIST_FILENAME = "reference.list"
 REFERENCE_TABLE_FILENAMES = {
@@ -95,6 +103,9 @@ class ReferenceSpectrum:
     spectrum_sha256: str = ""
     params: dict[str, Any] = field(default_factory=dict)
     sweep_params: dict[str, Any] = field(default_factory=dict)
+    # 该条件的处理工作目录(参考与全部 workflow 共用:复用同一份 fid,
+    # 候选脚本与参考脚本同目录);旧参考为空时按数据级目录回退。
+    work_dir: str = ""
     # 参考运行的各轴 PS(p0,p1):扫描时传给后端 direct_phase_override,
     # 让候选谱与参考谱相位一致(自动相位识别的**实际结果**)。
     direct_phase: dict[str, list[float]] = field(default_factory=dict)
@@ -146,6 +157,7 @@ class ReferenceSpectrum:
             "spectrum_sha256": self.spectrum_sha256,
             "params": self.params,
             "sweep_params": self.sweep_params,
+            "work_dir": self.work_dir,
             "direct_phase": self.direct_phase,
             "peak_table_path": self.peak_table_path,
             "peak_table_sha256": self.peak_table_sha256,
@@ -183,6 +195,7 @@ class ReferenceSpectrum:
             spectrum_sha256=str(data.get("spectrum_sha256", "")),
             params=dict(data.get("params") or {}),
             sweep_params=dict(data.get("sweep_params") or {}),
+            work_dir=str(data.get("work_dir", "")),
             direct_phase={
                 str(k): [float(v[0]), float(v[1])]
                 for k, v in (data.get("direct_phase") or {}).items()
@@ -351,13 +364,34 @@ def resolve_reference(
     return session, target, reference
 
 
-def sanitize_sweep_params(params: dict[str, Any]) -> dict[str, Any]:
-    """有效参数 → 可再次传给后端 process() 的扫描基础参数。"""
+def reference_runtime_decisions(params: Mapping[str, Any]) -> dict[str, Any]:
+    """参考有效参数 → 组合必须沿用的运行期行为决定(顶层键形式)。
+
+    这些决定来自参考运行的自动诊断/路由,只写在 ``diagnostics`` 里;
+    不提升就会让组合运行退回后端默认值,于是「没指定的参数」也变了。
+    """
+    diagnostics = dict((params or {}).get("diagnostics") or {})
     return {
+        key: bool(diagnostics[source])
+        for key, source in _RUNTIME_DECISION_KEYS
+        if source in diagnostics
+    }
+
+
+def sanitize_sweep_params(params: dict[str, Any]) -> dict[str, Any]:
+    """有效参数 → 可再次传给后端 process() 的扫描基础参数。
+
+    剔除运行期派生/仅 GUI 的键,但把 ``reference_runtime_decisions()``
+    里的行为决定提升为顶层键(顶层已显式给值时不覆盖)。
+    """
+    cleaned = {
         str(key): value
         for key, value in dict(params or {}).items()
         if key not in _NON_SWEEP_KEYS
     }
+    for key, value in reference_runtime_decisions(params).items():
+        cleaned.setdefault(key, value)
+    return cleaned
 
 
 def normalize_direct_phase(raw: object) -> dict[str, list[float]]:
@@ -417,6 +451,19 @@ def dataset_for_reference(
         if ref.key == reference.dataset_key:
             return ref
     return session.dataset
+
+
+def reference_work_dir(session: Any, dataset: Any) -> Path:
+    """参考/组合共用的**条件级**工作目录 ``study/work/<exp>_<data>/``。
+
+    参考阶段的 fid 转换、自动优化脚本,以及随后每个 workflow 的候选脚本都
+    落在这里:组合运行复用参考转换好的 fid(不再重复转换),候选脚本与参考
+    脚本同目录;多条件之间也不会因为 ``<data_id>.fid`` 同名而互相覆盖。
+    """
+    key = f"{getattr(dataset, 'exp_id', '')}_{getattr(dataset, 'data_id', '')}"
+    work = session.work_dir / str(key).strip("_")
+    work.mkdir(parents=True, exist_ok=True)
+    return work
 
 
 def _find_reference_script(work: Path, data_id: str) -> Path:
@@ -500,21 +547,23 @@ def build_reference(
     if phase_route:
         run_params["phase_route"] = phase_route
 
+    # 条件级工作目录:参考与它的全部 workflow 共用(脚本/fid 同源)
+    work = reference_work_dir(session, target_ref)
     _log(f"参考谱[{target_ref.condition}]:生成 FID(转换 Bruker 原始数据)")
     generate_fid(
         manager, exp_id, data_id, session.backend,
-        work_dir=session.work_dir, progress=_log,
+        work_dir=work, progress=_log,
     )
     _log(f"参考谱[{target_ref.condition}]:生成谱图(自动优化)")
     spectrum_path = generate_spectrum(
         manager, exp_id, data_id, session.backend,
-        params=run_params, work_dir=session.work_dir, progress=_log,
+        params=run_params, work_dir=work, progress=_log,
     )
     run = manager.last_run_for_data(exp_id, data_id, STEP_RUN_REFS["spectrum"])
     if run is None or run.status != "success":
         raise ReferenceError("参考谱运行没有成功的 WorkflowRun 记录")
     effective = dict(run.params or {})
-    script = _find_reference_script(session.work_dir, data_id)
+    script = _find_reference_script(work, data_id)
 
     frozen_spectrum = target_dir / f"reference{Path(spectrum_path).suffix}"
     frozen_script = target_dir / "process.com"
@@ -545,6 +594,7 @@ def build_reference(
         spectrum_sha256=sha256_file(frozen_spectrum),
         params=effective,
         sweep_params=sanitize_sweep_params(effective),
+        work_dir=str(work),
         direct_phase=reference_phase(effective, ndim=int(experiment.ndim)),
         peak_table_path="",
         software_version=software_version(),
@@ -930,6 +980,8 @@ __all__ = [
     "normalize_direct_phase",
     "parse_reference_spec",
     "reference_phase",
+    "reference_runtime_decisions",
+    "reference_work_dir",
     "resolve_reference",
     "sanitize_sweep_params",
     "save_reference",

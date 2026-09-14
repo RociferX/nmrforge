@@ -1,5 +1,30 @@
 # nmrforge_api 变更记录
 
+
+## 0.4.1(2026-09-15)
+
+**组合运行与参考“同一份输入、同一份脚本差异”。**
+
+- 参考的运行期自动决定进入组合基底(`direct_poly_time` 等,来自
+  `params.diagnostics.apply_poly_time`):组合表没写的参数与参考脚本逐行一致;
+- 每个 workflow 运行目录保存完整 `process.com` + SHA-256;脚本按
+  `response.script_path → 参考工作目录 → study/work → <data>.nmrpipe` 定位,
+  找不到发警告码 `processing_script_not_found`(状态 `success_with_warning`);
+- 参考与它的 workflow 共用条件级工作目录 `study/work/<exp>_<data>/`:
+  复用参考已转换 fid(不再二次转换),多条件不互相覆盖;
+- `ReferenceSpectrum.work_dir` 落档(参考工作目录),`reference.json` 可追溯。
+
+## 0.4.0(2026-09-15)
+
+**多条件处理基底统一，删除旧绝对基底入口(破坏性)。**
+
+- 每个条件从自己的参考有效参数起步,再应用批次 `base_overrides` 和组合覆盖;
+- `SweepPlan` / `plan_sweep()` 删除旧 `base_params` 字段/参数,旧计划不兼容;
+- 满采样 `nuslist` 必须以唯一有效坐标严格覆盖全格;
+- 直接维范围优先级固定为 `params` < `direct_range` < 显式 `ext_lo/ext_hi`;
+- workflow 与 `records/` 只保留所选定位方法的峰表,重跑会清理旧方法残留;
+- 删除旧 `records/peak_positions.csv` 汇总别名。
+
 版本口径:新增功能/新增字段保持同一 minor;破坏性改动升 minor 并给出迁移说明。
 
 ## 0.3.0(2026-09-14)
@@ -90,7 +115,7 @@
   `source`);非法输入(只给一端/两端相同/非数值)抛 `SweepError`;
 - CLI:`reference --direct-range HIGH LOW`、`sweep --direct-range HIGH LOW`;
 - 顺带修复:workflow 参数基值此前取 `reference.sweep_params`,**忽略**
-  `plan.base_params` —— 组合模式对基值的覆盖(如直接维范围)现在真正生效;
+  当时由 `plan.base_params` 生效;0.4.0 已破坏性替换为逐条件 `base_overrides`;
   断点续跑指纹同步纳入基值。
 
 ## 0.2.3(2026-09-14)

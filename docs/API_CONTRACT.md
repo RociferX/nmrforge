@@ -400,7 +400,7 @@ CLI:`python -m nmrforge_api {init,reference,peaks,sweep(=workflows),report,statu
   **两张参考峰表** `reference_peak_table_parabolic.csv` /
   `reference_peak_table_gaussian.csv`(路径 + SHA-256 + 行数/detected 计数)+
   定位 QC + 版本表);
-- `SweepPlan`(axes/combos/base_params/grid_sha256 与参考哈希/design/
+- `SweepPlan`(axes/combos/base_overrides/grid_sha256 与参考哈希/design/
   diagnostics/`workflow_ids()`);
 - `SweepRun`(一个 workflow × 一个条件):`workflow_id`、`condition`、
   `parameters_requested`、`parameters_used`、`parameters_resolved`
@@ -438,12 +438,11 @@ study/
   workflows/W0001/
       workflow.json         组合级记录(参数三层/状态/警告/两条件产物/版本)
       log.txt               组合级完整日志
-      <条件 A|B>/           process.com、spectrum.ft2、
-                            peak_table_{parabolic,gaussian}.csv、
+      <条件 A|B>/           process.com、spectrum.ft2、所选方法的 peak_table_*.csv、
                             log.txt、run.json
   records/                  manifest.json、sweep_plan.json、runs.json、
                             workflows.json、measurement.json、
-                            peak_table_{parabolic,gaussian}.csv(长表)
+                            所选方法的 peak_table_*.csv(长表)
 ```
 
 ### 11.6 强约束(破坏即视为契约破坏)
@@ -452,9 +451,9 @@ study/
 2. 不替换项目活动谱:候选谱只写 `study/workflows/`;
 3. 同一条件内 fid 只转换一次(参考运行);workflow 之间只允许被扫参数不同
    (相位默认锁定在参考值,偏差用 `phase_delta.<轴>.p0|p1`);
-4. 以参考脚本为模板:该条件的 `parameters_used` 基底 = 该条件参考运行的有效
-   参数,组合表只覆盖它显式指定的键;
-5. 每 workflow × 每条件必须留:完整脚本、两张统一峰表、完整日志、参数三层、
+4. 以参考脚本为模板:每个条件按“自己的参考有效参数 → 批次
+   `base_overrides` → 组合显式键”生成 `parameters_used`;不得复制其它条件的基底;
+5. 每 workflow × 每条件必须留:完整脚本、所选定位方法的统一峰表、完整日志、参数三层,
    版本、状态(三值)与警告;
 6. 自动参数必须记录**实际结果**(`actual_p0/actual_p1`、SMILE 实际
    `nsigma`/`thresh` 与谱噪声 σ),Gaussian 失败/回退必须显式记录;

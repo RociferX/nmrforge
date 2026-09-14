@@ -54,6 +54,7 @@ from nmrforge_api.peaks import (
 from nmrforge_api.reference import (
     ReferenceSpectrum,
     load_reference,
+    reference_runtime_decisions,
 )
 from nmrforge_api.session import DatasetRef, StudySession, now_iso
 from workflow.pick_peaks import read_spectrum_axes
@@ -74,6 +75,8 @@ SUCCESS_STATUSES: frozenset[str] = frozenset({STATUS_SUCCESS, STATUS_WARNING})
 WARN_GAUSSIAN_FALLBACK = "gaussian_fallback"
 WARN_GAUSSIAN_BOUNDARY_HIT = "gaussian_boundary_hit"
 WARN_GAUSSIAN_UNSUPPORTED = "gaussian_unsupported_ndim"
+#: 找不到该 workflow 的完整处理脚本(规范 D1:每个 workflow 必须留完整脚本)
+WARN_SCRIPT_NOT_FOUND = "processing_script_not_found"
 
 # 相位轴(保留前缀):phase.<轴>.p0|p1 为绝对值,phase_delta.<轴>.p0|p1 为
 # 相对参考相位的偏差(人工相位识别偏差 ±5° 之类)。
@@ -338,7 +341,8 @@ class SweepPlan:
 
     axes: dict[str, list[Any]] = field(default_factory=dict)
     combos: list[dict[str, Any]] = field(default_factory=list)
-    base_params: dict[str, Any] = field(default_factory=dict)
+    # 每个条件都从自己的参考参数起步，再应用这份批次级覆盖。
+    base_overrides: dict[str, Any] = field(default_factory=dict)
     grid_sha256: str = ""
     reference_script_sha256: str = ""
     reference_spectrum_sha256: str = ""
@@ -365,7 +369,7 @@ class SweepPlan:
         return {
             "axes": self.axes,
             "combos": self.combos,
-            "base_params": self.base_params,
+            "base_overrides": self.base_overrides,
             "grid_sha256": self.grid_sha256,
             "reference_script_sha256": self.reference_script_sha256,
             "reference_spectrum_sha256": self.reference_spectrum_sha256,
@@ -383,10 +387,14 @@ class SweepPlan:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> SweepPlan:
+        if "base_overrides" not in data:
+            raise SweepError(
+                "旧版 SweepPlan(base_params)已不再兼容，请用当前版本重新生成计划"
+            )
         return cls(
             axes=dict(data.get("axes") or {}),
             combos=[dict(c) for c in (data.get("combos") or [])],
-            base_params=dict(data.get("base_params") or {}),
+            base_overrides=dict(data.get("base_overrides") or {}),
             grid_sha256=str(data.get("grid_sha256", "")),
             reference_script_sha256=str(data.get("reference_script_sha256", "")),
             reference_spectrum_sha256=str(data.get("reference_spectrum_sha256", "")),
@@ -404,9 +412,9 @@ class SweepPlan:
 
 @dataclass
 class SweepRun:
-    """一个 (workflow, 条件) 的运行记录 = 一次处理 + 两张峰表 + 溯源。
+    """一个 (workflow, 条件) 的运行记录 = 一次处理 + 所选峰表 + 溯源。
 
-    ``measurements`` 只在内存里(写盘的是两张峰表 CSV 与 run.json);
+    ``measurements`` 只在内存里(写盘的是所选方法峰表 CSV 与 run.json);
     加载历史记录时该字段为空,峰表以 CSV 为准。
     """
 
@@ -862,7 +870,7 @@ def plan_sweep(
     axes: Mapping[str, Sequence[Any]] | None = None,
     combos: Sequence[Mapping[str, Any]] | None = None,
     max_runs: int = DEFAULT_MAX_RUNS,
-    base_params: Mapping[str, Any] | None = None,
+    base_overrides: Mapping[str, Any] | None = None,
     notes: Iterable[str] | None = None,
 ) -> SweepPlan:
     """由参数轴 + 参考谱生成 workflow 计划(校验键、检查组合数上限)。
@@ -876,6 +884,9 @@ def plan_sweep(
     进网格的应当是「人工处理时会动的参数」:窗函数与窗参数、基线(开关/程度)、
     填零倍数、相位识别偏差(`phase_delta.*`)、NUS 重构参数;确定性/策略参数
     (提取窗口、目标点距、采样表、超时等)会写进 `notes` 提示。
+
+    ``base_overrides`` 是批次级覆盖;运行时每个条件从自己的参考有效参数起步,
+    再应用它和当前组合。旧的绝对 ``base_params`` 入口不再支持。
     """
     if (axes is None) == (combos is None):
         raise SweepError("必须且只能给一个:axes(全因子)或 combos(显式组合表)")
@@ -894,11 +905,9 @@ def plan_sweep(
             f"参数组合 {len(resolved)} 个超过上限 max_runs={max_runs};"
             "请减小网格/组合表或显式提高上限(长跑请分批)"
         )
-    base = (
-        dict(base_params)
-        if base_params is not None
-        else dict(reference.sweep_params)
-    )
+    # 每个条件从自己的参考有效参数起步；这里只保存批次级覆盖。
+    condition_overrides = dict(base_overrides or {})
+    base = merge_overrides(reference.sweep_params, condition_overrides)
     phase_locked = reference.direct_phase_override() is not None
     if not phase_locked:
         sampling = dict(base.get("sampling") or {})
@@ -908,7 +917,7 @@ def plan_sweep(
     plan = SweepPlan(
         axes=inferred,
         combos=resolved,
-        base_params=base,
+        base_overrides=condition_overrides,
         grid_sha256=_grid_sha256(resolved),
         reference_script_sha256=reference.script_sha256,
         reference_spectrum_sha256=reference.spectrum_sha256,
@@ -1138,6 +1147,57 @@ def _resume_fingerprint(
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _condition_base_params(
+    plan: SweepPlan, reference: ReferenceSpectrum
+) -> dict[str, Any]:
+    """按“条件参考参数 → 批次覆盖”解析单条件处理基底。
+
+    参考运行里由自动诊断/路由做出的行为决定(如直接维 DC 纠正 POLY -time)
+    必须一并继承:它们只写在参考 ``params.diagnostics`` 里,漏掉就会让
+    「组合没指定的参数」也偏离参考脚本。组合表显式给值仍然优先。
+    """
+    base = merge_overrides(reference.sweep_params, plan.base_overrides)
+    for key, value in reference_runtime_decisions(reference.params).items():
+        base.setdefault(key, value)
+    if reference.direct_phase_override() is None:
+        sampling = dict(base.get("sampling") or {})
+        if sampling.get("auto_phase") is not False:
+            sampling["auto_phase"] = False
+            base["sampling"] = sampling
+    return base
+
+
+def _candidate_script_paths(
+    session: StudySession,
+    target: DatasetRef,
+    reference: ReferenceSpectrum,
+    workflow_id: str,
+    response: Mapping[str, Any],
+) -> list[Path]:
+    """候选处理脚本的可能落点(按可靠性排序;取第一个存在的)。
+
+    1. 后端直接返回的 ``script_path``(部分路由给出);
+    2. 参考记录的条件工作目录(参考与组合共用,首选);
+    3. ``study/work/``(旧参考/旧后端的落点);
+    4. 数据级 ``<data>.nmrpipe/``(新建后端时的默认落点)。
+    """
+    name = f"{workflow_id}_{target.token}.com"
+    paths: list[Path] = []
+    raw = str((response or {}).get("script_path") or "")
+    if raw:
+        paths.append(Path(raw))
+    if reference.work_dir:
+        paths.append(Path(reference.work_dir) / name)
+    paths.append(session.work_dir / name)
+    paths.append(
+        session.root
+        / target.exp_id
+        / target.data_id
+        / f"{target.data_id}.nmrpipe"
+        / name
+    )
+    return paths
+
 
 def _condition_references(
     session: StudySession,
@@ -1282,6 +1342,10 @@ def run_sweep(
     - ``edge_margin_ppm``:选峰时排除边缘轴峰的**物理宽度**(缺省 = 3×该轴核素
       线宽折算 ppm),逐组合按候选谱点距换算点数,换算结果写进 ``run.window``;
     - ``sign`` 为历史参数(组合模式检测符号口径固定 dominant),不再使用。
+    - 每个 workflow 的**完整处理脚本**复制进 ``<run_dir>/process.com``
+      (含 SHA-256);脚本与参考共用该条件的处理工作目录,因此复用的是参考
+      已转换的 fid(不再重复转换)。找不到脚本时发
+      ``processing_script_not_found`` 警告,不静默。
     """
     methods = _localization_methods(localization) or ["parabolic"]
     targets = list(datasets) if datasets is not None else list(session.datasets)
@@ -1322,8 +1386,24 @@ def run_sweep(
             experiment = experiments[target.key]
             run_dir = workflow_dir / target.token
             run_dir.mkdir(parents=True, exist_ok=True)
+            # 与参考共用该条件的工作目录:复用参考转换好的 fid(不再重复
+            # 转换),候选脚本落在参考脚本同目录,候选谱仍写 _intermediate/。
+            # 旧参考没记工作目录时回落到数据级目录(多条件不互相覆盖)。
+            if ref.work_dir:
+                work_dir = Path(ref.work_dir)
+            else:
+                work_dir = (
+                    session.root
+                    / target.exp_id
+                    / target.data_id
+                    / f"{target.data_id}.nmrpipe"
+                )
+            work_dir.mkdir(parents=True, exist_ok=True)
+            if hasattr(session.backend, "work_dir"):
+                session.backend.work_dir = str(work_dir)
+            condition_base = _condition_base_params(plan, ref)
             fingerprint = _resume_fingerprint(
-                base_params=plan.base_params,
+                base_params=condition_base,
                 combo=combo,
                 target=target,
                 reference=ref,
@@ -1356,6 +1436,7 @@ def run_sweep(
                 reference=ref,
                 experiment=experiment,
                 run_dir=run_dir,
+                base_params=condition_base,
                 localization_methods=methods,
                 edge_margin_ppm=edge_margin_ppm,
                 roi_f1_ppm=roi_f1_ppm,
@@ -1388,6 +1469,7 @@ def _run_condition(
     reference: ReferenceSpectrum,
     experiment: Any,
     run_dir: Path,
+    base_params: Mapping[str, Any],
     roi_f1_ppm: float | None,
     roi_f2_ppm: float | None,
     resume_fingerprint: str,
@@ -1403,10 +1485,16 @@ def _run_condition(
         emit(f"[{workflow_id}/{target.condition}] {message}")
 
     param_part, phase_part, detection_part = split_combo(combo)
-    # 基值 = 计划基值(参考有效参数 + 组合模式显式覆盖,如直接维范围);
-    # 组合表只覆盖它显式指定的键。
-    base_from_plan = dict(plan.base_params) or dict(reference.sweep_params)
-    params = merge_overrides(base_from_plan, param_part)
+    methods = list(
+        detection_part.get("methods") or localization_methods or ["parabolic"]
+    )
+    # 指纹变化后属于重跑:先清掉上一轮峰表，避免方法切换/失败留下假产物。
+    for method in ("parabolic", "gaussian"):
+        table = run_dir / f"peak_table_{method}.csv"
+        table.unlink(missing_ok=True)
+        table.with_name(table.name + ".localization.json").unlink(missing_ok=True)
+    # 基值已按条件解析:条件参考有效参数 → 批次覆盖 → 当前组合覆盖。
+    params = merge_overrides(base_params, param_part)
     base_phase = reference.direct_phase_override() or {}
     effective_phase = apply_phase_axes(
         {axis: list(pair) for axis, pair in base_phase.items()}, phase_part
@@ -1513,13 +1601,38 @@ def _run_condition(
         _log(f"失败: {run.message}")
         return run
 
-    script_src = session.work_dir / f"{workflow_id}_{target.token}.com"
-    spectrum_src = Path(str(response.get("spectrum_path", "")))
-    if script_src.is_file():
+    script_src = next(
+        (
+            path
+            for path in _candidate_script_paths(
+                session, target, reference, workflow_id, response
+            )
+            if path.is_file() and path.stat().st_size > 0
+        ),
+        None,
+    )
+    script_warning: dict[str, Any] | None = None
+    if script_src is not None:
         target_script = run_dir / "process.com"
         shutil.copy2(script_src, target_script)
         run.script_path = str(target_script)
         run.script_sha256 = sha256_file(target_script)
+        logs.append(f"处理脚本 → {target_script}(源 {script_src})")
+    else:
+        script_warning = {
+            "code": WARN_SCRIPT_NOT_FOUND,
+            "message": (
+                f"未找到该 workflow 的完整处理脚本({workflow_id}_"
+                f"{target.token}.com):已尝试后端返回值 / 参考工作目录 / "
+                f"study/work / 数据级 {target.data_id}.nmrpipe;脚本未留档"
+                "(处理结果与峰表仍有效)"
+            ),
+            "count": 1,
+            "peaks": [],
+            "localization_method": ",".join(methods),
+        }
+        logs.append(script_warning["message"])
+    spectrum_src = Path(str(response.get("spectrum_path", "")))
     if not spectrum_src.is_file():
         run.status = STATUS_FAILED
         run.message = f"后端返回的谱不存在: {spectrum_src}"
@@ -1549,7 +1662,6 @@ def _run_condition(
     from nmrforge_api.peaks import detect_and_localize
 
     sigma_locked, sigma_origin = locked_detection_sigma(reference)
-    methods = list(detection_part.get("methods") or localization_methods or ["parabolic"])
     try:
         spectrum_axes = read_spectrum_axes(target_spectrum)
         tables: dict[str, list[dict[str, Any]]] = {}
@@ -1612,6 +1724,8 @@ def _run_condition(
 
     run.measurements_by_method = measurements
     warnings: list[dict[str, Any]] = []
+    if script_warning is not None:
+        warnings.append(script_warning)
     for method in methods:
         meta = metas[method]
         if int(meta.get("n_peaks", 0)) == 0:
@@ -1865,6 +1979,7 @@ __all__ = [
     "WARN_GAUSSIAN_BOUNDARY_HIT",
     "WARN_GAUSSIAN_FALLBACK",
     "WARN_GAUSSIAN_UNSUPPORTED",
+    "WARN_SCRIPT_NOT_FOUND",
     "locked_detection_sigma",
     "apply_phase_axes",
     "combos_from_rows",

@@ -21,8 +21,7 @@
         <条件 A|B>/
             process.com           该条件实际执行的完整处理脚本
             spectrum.ft2          候选谱(不替换活动谱)
-            peak_table_parabolic.csv
-            peak_table_gaussian.csv
+            peak_table_<所选方法>.csv  只出现 localization 实际选择的方法
             log.txt               该条件的完整运行日志(不是尾部)
             run.json              该条件的完整溯源记录
     records/
@@ -32,11 +31,14 @@
         runs.json                 逐 (workflow, 条件) 扁平记录
         workflows.json            逐 workflow 汇总记录
         measurement.json          测量口径与定位 QC 汇总
-        peak_table_parabolic.csv  全部 workflow × 条件的长表
-        peak_table_gaussian.csv   同上(Gaussian 定位)
+        peak_table_<所选方法>.csv  各实际方法的 workflow × 条件长表
 ```
 
 ## 6.2 统一峰表字段
+
+组合模式只写 `localization` 实际选择的方法。用 `resume=False` 重跑时会删除
+上一轮未选方法的峰表和定位附件;`records/` 也会删除未选方法的旧汇总。旧版
+`peak_positions.csv` 别名不再生成,升级运行时会清除残留。
 
 ```text
 workflow_id, condition, dataset, peak_id, reference_peak_id, assignment,
@@ -125,6 +127,7 @@ fit_success, FWHM_H, FWHM_N, fit_rmse, boundary_hit
 | 警告码 | 触发 |
 | --- | --- |
 | `peak_count_zero` | 该组合在锁定阈值下一个峰都没检出(检查阈值/数据) |
+| `processing_script_not_found` | 没找到该 workflow 的完整处理脚本(运行目录里 `process.com` 缺失);处理结果与峰表仍有效,但脚本溯源不完整,需检查后端落盘位置 |
 | `gaussian_fallback` | 高斯拟合失败/回退抛物线(逐峰原因落表) |
 | `gaussian_boundary_hit` | 高斯中心/宽度撞拟合边界 |
 

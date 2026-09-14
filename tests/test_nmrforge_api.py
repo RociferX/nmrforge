@@ -1,8 +1,8 @@
 """nmrforge_api(v0.2,2026-09-13 规范)回归。
 
-覆盖:参考工作流(1 脚本 + 2 峰表)、workflow_id、三层参数留档、同一张谱两种
-定位的两张峰表、detected=false 保留、状态三值、完整日志与版本、两条件 A/B
-同参数同峰身份、自动参数实际值、软件边界(不做 CSP/统计)、CLI 与「不依赖 Qt」。
+覆盖:参考工作流(1 脚本 + 2 峰表)、workflow_id、三层参数留档、组合模式按
+外部选择输出定位峰表、状态三值、完整日志与版本、多条件独立参考基底、自动参数
+实际值、软件边界(不做 CSP/统计)、CLI 与「不依赖 Qt」。
 
 规范符合性台账:``docs/reviews/2026-09-13-api-spec-compliance.md``。
 """
@@ -30,6 +30,7 @@ from nmrforge_api import (
     MeasurementError,
     ReferenceError,
     SweepError,
+    SweepPlan,
     add_dataset,
     build_reference,
     condition_token,
@@ -986,6 +987,48 @@ def test_two_conditions_share_parameters_and_peak_identity(
     assert backend.convert_calls == 2
 
 
+def test_two_conditions_use_their_own_reference_parameter_bases(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """A/B 共享组合覆盖，但未覆盖参数必须分别继承各自参考。"""
+    from nmrforge_api.reference import save_reference
+
+    root = tmp_path / "ab_reference_bases"
+    backend = _FakeSweepBackend()
+    references = run_reference_study(
+        root,
+        datasets={
+            "A": bruker_dir / "hsqc_2d",
+            "B": bruker_dir / "hsqc_small",
+        },
+        params={"phase_route": "none"},
+        backend=backend,
+    )
+    expected = {"A": 0.31, "B": 0.77}
+    for condition, off in expected.items():
+        reference = references.reference(condition)
+        assert reference is not None
+        reference.sweep_params = merge_overrides(
+            reference.sweep_params, {"window.F1.off": off}
+        )
+        save_reference(references.session, reference)
+
+    result = run_combination_study(
+        str(root),
+        combos=[{"zero_fill": 2}],
+        direct_range=(10.0, 6.5),
+        backend=backend,
+    )
+    assert {run.condition for run in result.runs} == {"A", "B"}
+    for run in result.runs:
+        assert run.parameters_used["window"]["F1"]["off"] == pytest.approx(
+            expected[run.condition]
+        )
+        assert run.parameters_used["zero_fill"] == 2
+        assert run.parameters_used["ext_lo"] == "10"
+        assert run.parameters_used["ext_hi"] == "6.5"
+
+
 def test_external_peak_identity_is_propagated_to_all_conditions(
     tmp_path: Path, bruker_dir: Path
 ) -> None:
@@ -1121,9 +1164,16 @@ def test_reference_state_persists_across_sessions(
         for run in session2.manager.project.workflow_runs
     )
     # 计划与运行记录可读回
-    assert load_plan(session2) is not None
+    loaded_plan = load_plan(session2)
+    assert loaded_plan is not None
+    assert "base_params" not in loaded_plan.to_dict()
     assert len(load_runs(session2)) == 1
     assert len(load_workflows(session2)) == 1
+
+
+def test_old_absolute_base_sweep_plan_is_rejected() -> None:
+    with pytest.raises(SweepError, match="旧版 SweepPlan"):
+        SweepPlan.from_dict({"combos": [{"zero_fill": 1}], "base_params": {}})
 
 
 def test_nus_param_key_alias_normalized() -> None:
@@ -1779,6 +1829,18 @@ def test_direct_range_parser_normalises_order() -> None:
         "ext_hi": "6",
     }
     assert parse_direct_range(params={"ext_lo": "11", "ext_hi": "7"}).lo == 11.0
+    # 多入口同时给时:显式参数覆盖 direct_range，direct_range 覆盖 params。
+    explicit = parse_direct_range(
+        (10.5, 6.5), ext_lo="9.5", ext_hi="7.0",
+        params={"ext_lo": "12", "ext_hi": "5"},
+    )
+    assert explicit is not None
+    assert explicit.params() == {"ext_lo": "9.5", "ext_hi": "7"}
+    partial = parse_direct_range(
+        {"lo": 10.0}, ext_hi=6.0, params={"ext_lo": 12.0, "ext_hi": 5.0}
+    )
+    assert partial is not None
+    assert partial.params() == {"ext_lo": "10", "ext_hi": "6"}
     assert parse_direct_range(None) is None
     # 非法:两端相同 / 只给一端 / 非数值
     with pytest.raises(SweepError):
@@ -1987,6 +2049,57 @@ def test_combination_localization_selection_and_per_combo_override(
     assert detection["edge_margin_ppm"] == pytest.approx(0.5, rel=0.3)
 
 
+def test_localization_rerun_removes_unselected_run_and_record_tables(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """both→单方法重跑时，运行目录和汇总目录都只保留当前选择。"""
+    root = tmp_path / "localization_cleanup"
+    backend = _FakeSweepBackend()
+    first = run_parameter_study(
+        root,
+        bruker_dir / "hsqc_2d",
+        combos=[{"zero_fill": 1}],
+        params={"phase_route": "none"},
+        localization="both",
+        backend=backend,
+    )
+    run_dir = Path(first.runs[0].run_dir)
+    stale_sidecar = run_dir / "peak_table_parabolic.csv.localization.json"
+    stale_sidecar.write_text("{}\n", encoding="utf-8")
+
+    gaussian = run_combination_study(
+        str(root),
+        combos=[{"zero_fill": 1}],
+        localization="gaussian",
+        resume=False,
+        backend=backend,
+    )
+    run_dir = Path(gaussian.runs[0].run_dir)
+    assert (run_dir / "peak_table_gaussian.csv").is_file()
+    assert not (run_dir / "peak_table_parabolic.csv").exists()
+    assert not stale_sidecar.exists()
+    assert "peak_table_gaussian" in gaussian.records
+    assert "peak_table_parabolic" not in gaussian.records
+    records_dir = gaussian.session.records_dir
+    assert not (records_dir / "peak_table_parabolic.csv").exists()
+    assert "peak_positions" not in gaussian.records
+    assert not (records_dir / "peak_positions.csv").exists()
+
+    parabolic = run_combination_study(
+        str(root),
+        combos=[{"zero_fill": 1}],
+        localization="parabolic",
+        resume=False,
+        backend=backend,
+    )
+    run_dir = Path(parabolic.runs[0].run_dir)
+    assert (run_dir / "peak_table_parabolic.csv").is_file()
+    assert not (run_dir / "peak_table_gaussian.csv").exists()
+    assert "peak_table_parabolic" in parabolic.records
+    assert "peak_table_gaussian" not in parabolic.records
+    assert not (parabolic.session.records_dir / "peak_table_gaussian.csv").exists()
+
+
 def test_combination_detection_keys_do_not_reach_backend_params(
     tmp_path: Path, bruker_dir: Path
 ) -> None:
@@ -2055,3 +2168,140 @@ def test_combination_zero_peak_warning_is_explicit(
     assert read_peak_table(Path(run.peak_table_path("parabolic"))) == []
     assert run.parameters_resolved["peak_counts"]["parabolic"] == 0
     assert run.peak_localization["parabolic"]["n_peaks"] == 0
+
+
+# --------------------------------- 参考运行期决定继承 + workflow 脚本留档(2026-09-15)
+def test_combination_inherits_reference_runtime_decisions(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """参考的自动决定(如直接维 POLY -time)必须被组合继承;组合显式给值优先。"""
+    from nmrforge_api.reference import (
+        reference_runtime_decisions,
+        sanitize_sweep_params,
+        save_reference,
+    )
+
+    cleaned = sanitize_sweep_params(
+        {
+            "window": {"F1": {"type": "none"}},
+            "phase_route": "unified",
+            "diagnostics": {"apply_poly_time": True},
+        }
+    )
+    assert cleaned == {"window": {"F1": {"type": "none"}}, "direct_poly_time": True}
+    assert reference_runtime_decisions({}) == {}
+    # 顶层已显式给值时不覆盖
+    assert sanitize_sweep_params(
+        {"direct_poly_time": False, "diagnostics": {"apply_poly_time": True}}
+    ) == {"direct_poly_time": False}
+
+    backend = _FakeSweepBackend()
+    session = open_study(tmp_path / "runtime_decisions", backend=backend)
+    add_dataset(session, bruker_dir / "hsqc_2d")
+    reference = build_reference(session, params={"phase_route": "none"})
+    reference = ensure_reference_peaks(session, reference)
+    # 模拟参考峰表建立时的老记录:决定只在 params.diagnostics 里
+    reference.params["diagnostics"] = {"apply_poly_time": True}
+    reference.sweep_params.pop("direct_poly_time", None)
+    save_reference(session, reference)
+
+    plan = plan_sweep(reference, combos=[{"zero_fill": 2}])
+    runs = run_sweep(session, plan, reference=reference, resume=False)
+    used = runs[0].parameters_used
+    assert used["direct_poly_time"] is True      # 参考的决定被继承
+    assert used["zero_fill"] == 2                # 组合指定的仍然生效
+
+    plan2 = plan_sweep(reference, combos=[{"direct_poly_time": False}])
+    runs2 = run_sweep(session, plan2, reference=reference, resume=False)
+    assert runs2[0].parameters_used["direct_poly_time"] is False
+
+
+def test_workflow_script_is_saved_in_run_dir_and_reference_work_dir(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """规范 D1:每个 workflow 存完整脚本;脚本与参考共用该条件的工作目录。"""
+    from core.project.manager import sha256_file
+
+    backend = _FakeSweepBackend()
+    result = run_parameter_study(
+        tmp_path / "script_saved",
+        bruker_dir / "hsqc_2d",
+        combos=[{"zero_fill": 2, "window.F1.off": 0.45}],
+        params={"phase_route": "none"},
+        backend=backend,
+    )
+    reference = result.reference
+    assert reference is not None and reference.work_dir
+    work = Path(reference.work_dir)
+    assert work.is_dir()
+    assert (work / "W0001_A.com").is_file()      # 候选脚本与参考同目录
+
+    run = result.runs[0]
+    saved = Path(run.script_path)
+    assert saved.is_file()
+    assert saved.parent == Path(run.run_dir) and saved.name == "process.com"
+    assert run.script_sha256 == sha256_file(saved)
+    log = Path(run.log_path).read_text(encoding="utf-8")
+    assert "处理脚本" in log and "W0001_A.com" in log
+    payload = json.loads(Path(run.run_dir, "run.json").read_text(encoding="utf-8"))
+    assert payload["script_path"] == run.script_path and payload["script_sha256"]
+
+
+def test_legacy_reference_script_found_in_data_level_dir(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """旧参考没有 work_dir 时,组合脚本仍能从数据级 <data>.nmrpipe 找到并留档。"""
+    from nmrforge_api.reference import save_reference
+
+    backend = _FakeSweepBackend()
+    session = open_study(tmp_path / "legacy_script", backend=backend)
+    add_dataset(session, bruker_dir / "hsqc_2d")
+    reference = build_reference(session, params={"phase_route": "none"})
+    reference = ensure_reference_peaks(session, reference)
+    reference.work_dir = ""                      # 模拟旧参考(未记录工作目录)
+    save_reference(session, reference)
+
+    plan = plan_sweep(reference, combos=[{"zero_fill": 1}])
+    runs = run_sweep(session, plan, reference=reference, resume=False)
+    run = runs[0]
+    assert run.status in (STATUS_SUCCESS, STATUS_WARNING)
+    assert Path(run.script_path).is_file()
+    dataset = run.dataset
+    data_level = (
+        session.root
+        / str(dataset["exp_id"])
+        / str(dataset["data_id"])
+        / f"{dataset['data_id']}.nmrpipe"
+    )
+    assert (data_level / "W0001_A.com").is_file()
+
+
+def test_missing_workflow_script_is_reported_not_silent(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """找不到脚本时必须给 processing_script_not_found 警告(不静默留空)。"""
+    backend = _FakeSweepBackend()
+    session = open_study(tmp_path / "script_missing", backend=backend)
+    add_dataset(session, bruker_dir / "hsqc_2d")
+    reference = build_reference(session, params={"phase_route": "none"})
+    reference = ensure_reference_peaks(session, reference)
+    plan = plan_sweep(reference, combos=[{"zero_fill": 1}])
+
+    real_process = backend.process
+
+    def process_with_relocated_script(*args, **kwargs):
+        out = real_process(*args, **kwargs)
+        name = str(kwargs.get("script_name") or "")
+        if name:
+            src = Path(str(backend.work_dir)) / name
+            if src.is_file():
+                src.rename(src.with_name(f"moved_{name}"))
+        return out
+
+    backend.process = process_with_relocated_script
+    runs = run_sweep(session, plan, reference=reference, resume=False)
+    run = runs[0]
+    assert run.status == STATUS_WARNING
+    assert any(w["code"] == "processing_script_not_found" for w in run.warnings)
+    assert run.script_path == "" and run.script_sha256 == ""
+    assert Path(run.peak_table_path("parabolic")).is_file()   # 峰表仍然产出

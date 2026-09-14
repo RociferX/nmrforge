@@ -145,7 +145,7 @@ window.F1.off,window.F2.off,zero_fill.F1,baseline.F2.enabled,points_per_line.F1
 - `ext_lo` = 直接维**高端**(较大 ppm,对应 `EXT -x1`);
 - `ext_hi` = 直接维**低端**(较小 ppm,对应 `EXT -xn`)。
 
-三种写法(等价,后者覆盖前者):
+三种写法可组合,优先级为 `params` < `direct_range` < 显式 `ext_lo/ext_hi`:
 
 ```python
 run_reference_study(root, dataset, direct_range=(10.5, 6.5))       # (high, low)
@@ -161,8 +161,9 @@ python -m nmrforge_api sweep --study ~/studies/s1 --reference ~/studies/s1 \
 
 - **参考模式**:范围是参考谱的定义之一;与已建参考不一致时会**重建参考谱并重测
   两张参考峰表**(日志说明),`force=True` 无条件重建;
-- **组合模式**:`direct_range=` 覆盖**本批 workflow 的基值**(参考谱不重建),
-  逐组合还可用 `ext_lo`/`ext_hi` 再覆盖(`plan.notes` 会说明口径);
+- **组合模式**:`direct_range=` 写入本批 `base_overrides`(参考谱不重建),每个
+  条件仍先使用自己的参考有效参数,逐组合还可用 `ext_lo`/`ext_hi` 最后覆盖
+  (`plan.notes` 会说明口径);
 - 留档:参考记录 `params.ext_lo/ext_hi`;每条 `run.json` 的
   `parameters_resolved.direct_range`(`ext_lo`/`ext_hi` + `source`:
   `reference_or_base` / `combo`);

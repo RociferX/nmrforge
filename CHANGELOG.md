@@ -1,5 +1,29 @@
 # 修改记录(历史条目)
 
+
+## 未发布(2026-09-15):组合等同“人工只改脚本里那个参数”
+- 参考运行期决定继承:参考 `params.diagnostics.apply_poly_time`(直接维 DC 偏置
+  → 脚本 `nmrPipe -fn POLY -time`)提升为参考基底顶层键 `direct_poly_time`;
+  老参考自动补齐,组合显式给值仍优先;
+- workflow 脚本留档:每个运行目录写 `process.com` + SHA-256,按
+  `response.script_path → 参考工作目录 → study/work → <data>.nmrpipe` 多级回退
+  定位;找不到发新警告码 `processing_script_not_found`(不再静默留空);
+- 条件级工作目录 `study/work/<exp>_<data>/`:参考与它的全部 workflow 共用,
+  复用参考已转换 fid(不再二次转换),多条件不会因 `<data_id>.fid` 同名互串;
+- 真机:组合只写与参考相同的值时脚本与参考逐行一致(仅候选输出名不同),
+  改一个参数时差异恰好只有那一行;VM 全量 `1090 passed, 19 skipped`。
+
+## 未发布(2026-09-15):最新 API 复核问题 1–4
+- 多条件组合不再复制主条件的处理基底:每个条件按“自己的参考有效参数 →
+  批次 `base_overrides` → 当前组合”合并,续跑指纹使用同一份最终输入;
+- 满采样 `nuslist` 改为校验唯一的一维坐标集合是否严格覆盖 0-based 或 1-based
+  全格,重复、越界、缺失及错误维数继续按 NUS 处理;
+- 直接维范围统一优先级:`params` < `direct_range` < 显式 `ext_lo/ext_hi`;
+- 重跑和汇总只保留实际请求的定位峰表,删除未选方法旧文件及旧版
+  `peak_positions.csv` 汇总别名;
+- 破坏性收口:`SweepPlan` / `plan_sweep()` 删除绝对 `base_params`,只保留逐条件
+  叠加的 `base_overrides`;旧计划文件与旧调用签名不保证兼容。
+
 ## 未发布(2026-09-14):组合模式改为独立选峰(阈值锁定参考 + 精修方式外部选)
 - 组合模式不再按参考峰表逐峰跟踪:每个组合在自己的候选谱上用**参考锁定阈值**
   独立选峰 → 该组合自己的完整峰表(`peak_id` = 本谱序号;`reference_peak_id` /

@@ -5,11 +5,11 @@
 - ``manifest.json``:条件数据集、每个条件的参考(脚本/谱/两张峰表哈希)、
   计划与网格哈希、峰身份、软件/工具版本、workflow 状态计数、软件边界声明;
 - ``workflows.json``:逐 workflow 的完整记录(``parameters_requested`` /
-  ``parameters_used`` / ``parameters_resolved``、状态、警告、两张峰表、
+  ``parameters_used`` / ``parameters_resolved``、状态、警告、所选方法峰表、
   运行日志、版本);
 - ``runs.json``:逐 (workflow, 条件) 的扁平记录;
-- ``peak_table_parabolic.csv`` / ``peak_table_gaussian.csv``:全部
-  workflow × 条件的**长表**(统一字段),下游独立分析程序直接读这两张表;
+- ``peak_table_<method>.csv``:实际选择方法的 workflow × 条件**长表**
+  (统一字段);未选方法的旧汇总会被删除;
 - ``measurement.json``:测量口径(窗口物理宽度↔点数换算、定位方法、QC 计数)。
 
 边界(规范 J):这里**只**汇总处理产物与溯源;σ、Δδ 下限、robustness、
@@ -237,7 +237,7 @@ def write_records(
         "references": [_reference_record(ref) for ref in ref_list],
         "plan": {
             "axes": plan.axes,
-            "base_params": plan.base_params,
+            "base_overrides": plan.base_overrides,
             "n_workflows": plan.n_workflows,
             "n_combos": plan.n_combos,
             "workflow_ids": plan.workflow_ids(),
@@ -249,7 +249,7 @@ def write_records(
         },
         "sweep": {
             "axes": plan.axes,
-            "base_params": plan.base_params,
+            "base_overrides": plan.base_overrides,
             "n_combos": plan.n_combos,
             "grid_sha256": plan.grid_sha256,
             "max_runs": plan.max_runs,
@@ -306,19 +306,21 @@ def write_records(
             ],
         )
     )
-    for method in ("parabolic", "gaussian"):
-        path = write_peak_table(
-            out_dir / f"peak_table_{method}.csv",
-            combined_peak_table(runs, method),
-        )
-        written[f"peak_table_{method}"] = str(path)
-    # 兼容旧名:峰位长表(列 = 统一字段)
-    positions_path = out_dir / "peak_positions.csv"
-    positions_path.write_text(
-        Path(written["peak_table_parabolic"]).read_text(encoding="utf-8"),
-        encoding="utf-8",
-    )
-    written["peak_positions"] = str(positions_path)
+    known_methods = ("parabolic", "gaussian")
+    methods = [
+        method
+        for method in known_methods
+        if any((run.peak_tables or {}).get(method) for run in runs)
+    ]
+    for method in known_methods:
+        path = out_dir / f"peak_table_{method}.csv"
+        if method in methods:
+            write_peak_table(path, combined_peak_table(runs, method))
+            written[f"peak_table_{method}"] = str(path)
+        else:
+            path.unlink(missing_ok=True)
+    # 旧版汇总别名不再属于当前契约；升级运行时主动清掉残留。
+    (out_dir / "peak_positions.csv").unlink(missing_ok=True)
     return written
 
 
