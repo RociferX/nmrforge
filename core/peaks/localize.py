@@ -47,9 +47,10 @@ GAUSSIAN_UNSUPPORTED_MESSAGE = (
 #: 实际值可通过 config `peaks.localization` 或函数参数覆盖。
 DEFAULT_GAUSSIAN_ROI_F1_PPM = 1.5
 DEFAULT_GAUSSIAN_ROI_F2_PPM = 0.25
-#: 拟合窗口每轴**最大半宽(点)**:细网格(填零)下限制拟合规模,
-#: 使单峰拟合成本不再随点数线性增长(2026-09-14 用户:填零翻倍后高斯拟合 26×)。
-DEFAULT_GAUSSIAN_ROI_MAX_POINTS = 48
+#: 拟合窗口每轴**最大半宽(点)**:0 = 不限制(默认,结果与旧版一致)。
+#: 设为正值(如 48)可限制细网格(填零)下的拟合规模、换取速度;触发时逐峰留档
+#: (roi_capped),失败会自动用完整 ROI 重试(见 localize_peak_gaussian_2d)。
+DEFAULT_GAUSSIAN_ROI_MAX_POINTS = 0
 #: 单峰最小二乘最大函数求值次数:失败拟合不再跑满(默认 400 → 200)。
 DEFAULT_GAUSSIAN_MAX_NFEV = 200
 FWHM_FACTOR = 2.3548200450309493  # 2*sqrt(2 ln 2)
@@ -217,7 +218,7 @@ def load_localization_defaults(config: dict[str, Any] | None = None) -> dict[str
         "gaussian_roi_f2_ppm": _positive(
             "gaussian_roi_f2_ppm", DEFAULT_GAUSSIAN_ROI_F2_PPM
         ),
-        "gaussian_roi_max_points": _positive_int(
+        "gaussian_roi_max_points": _nonnegative_int(
             section.get("gaussian_roi_max_points"),
             DEFAULT_GAUSSIAN_ROI_MAX_POINTS,
         ),
@@ -234,6 +235,15 @@ def _positive_int(value: Any, fallback: int) -> int:
     except (TypeError, ValueError):
         return int(fallback)
     return number if number > 0 else int(fallback)
+
+
+def _nonnegative_int(value: Any, fallback: int) -> int:
+    """非负整数(0 合法 = 不限制;非法/负数回退 fallback)。"""
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return int(fallback)
+    return number if number >= 0 else int(fallback)
 
 
 def _finite_position(
@@ -333,7 +343,11 @@ def localize_peak_gaussian_2d(
         if roi_max_points is not None
         else defaults["gaussian_roi_max_points"]
     )
-    fit_points = [min(int(p), max(cap, 1)) for p in roi_points]
+    fit_points = (
+        [int(p) for p in roi_points]
+        if cap <= 0
+        else [min(int(p), cap) for p in roi_points]
+    )
     roi_capped = [
         int(capped) != int(raw)
         for capped, raw in zip(fit_points, roi_points)
@@ -350,6 +364,9 @@ def localize_peak_gaussian_2d(
     roi_by_axis = [0.0, 0.0]
     roi_by_axis[axis_f1] = float(fit_points[0])
     roi_by_axis[axis_f2] = float(fit_points[1])
+    roi_by_axis_raw = [0.0, 0.0]
+    roi_by_axis_raw[axis_f1] = float(roi_points[0])
+    roi_by_axis_raw[axis_f2] = float(roi_points[1])
     fit = fit_gaussian_2d(
         real,
         seed=seed,
@@ -358,6 +375,49 @@ def localize_peak_gaussian_2d(
         max_rmse_ratio=float(max_rmse_ratio or 0.0),
         max_nfev=int(max_nfev),
     )
+    if not fit.success and any(roi_capped):
+        # 上限可能缩小了 ROI → 用完整 ROI 重试一次(成本只在难收敛峰上付);
+        # 仍失败才回退抛物线,并把两次尝试都留在 fit_meta 里。
+        retry = fit_gaussian_2d(
+            real,
+            seed=seed,
+            roi=(roi_by_axis_raw[0], roi_by_axis_raw[1]),
+            sign=1 if int(sign) >= 0 else -1,
+            max_rmse_ratio=float(max_rmse_ratio or 0.0),
+            max_nfev=int(max_nfev),
+        )
+        if retry.success:
+            position = tuple(
+                retry.center[axis] if axis in (0, 1) else parabolic.position[axis]
+                for axis in range(real.ndim)
+            )
+            ppm = {
+                "F1": ppm_from_point(ppm_axes[axis_f1], position[axis_f1]),
+                "F2": ppm_from_point(ppm_axes[axis_f2], position[axis_f2]),
+            }
+            meta = _fit_meta(fit_points, roi_points, roi_capped, max_nfev)
+            meta["fit_retry_uncapped"] = True
+            meta["roi_half_points"] = [int(p) for p in roi_points]
+            meta["retry_n_iter"] = int(retry.n_iter)
+            step_f1 = axis_units.ppm_per_point(ppm_axes[axis_f1])
+            step_f2 = axis_units.ppm_per_point(ppm_axes[axis_f2])
+            return PeakLocalization(
+                requested_method="gaussian",
+                actual_method="gaussian",
+                position=position,
+                success=True,
+                gaussian=retry,
+                ppm=ppm,
+                derived={
+                    "center_f1": ppm["F1"],
+                    "center_f2": ppm["F2"],
+                    "sigma_f1": float(retry.sigma[axis_f1]) * step_f1,
+                    "sigma_f2": float(retry.sigma[axis_f2]) * step_f2,
+                    "fwhm_f1": float(retry.sigma[axis_f1]) * step_f1 * FWHM_FACTOR,
+                    "fwhm_f2": float(retry.sigma[axis_f2]) * step_f2 * FWHM_FACTOR,
+                },
+                fit_meta=meta,
+            )
     if not fit.success:
         # 回退抛物线:位置仍可用,但 requested/actual/原因全部留档(不静默)
         return PeakLocalization(

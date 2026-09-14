@@ -26,8 +26,10 @@ peaks:
     method: parabolic           # parabolic(默认,既有 3 点抛物线) | gaussian(仅 2D)
     gaussian_roi_f1_ppm: 1.5    # 高斯拟合 ROI 半径(间接维 F1,ppm,物理宽度)
     gaussian_roi_f2_ppm: 0.25   # 高斯拟合 ROI 半径(直接维 F2,ppm,物理宽度)
-    gaussian_roi_max_points: 48 # 拟合窗口每轴**最大半宽(点)**:细网格(填零)下限制
-                                # 拟合规模,单峰成本不再随点数线性增长(留档 roi_capped)
+    gaussian_roi_max_points: 0  # 拟合窗口每轴**最大半宽(点)**:0 = 不限制(默认,
+                                # 结果与旧版一致);设 48 等正值可限制细网格(填零)
+                                # 下的拟合规模、显著提速(触发时逐峰留档 roi_capped,
+                                # 拟合失败会自动用完整 ROI 重试)
     gaussian_max_nfev: 200      # 单峰最小二乘最大函数求值次数(失败拟合硬上限)
 
 smile:
