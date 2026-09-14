@@ -127,8 +127,8 @@ window.F1.off,window.F2.off,zero_fill.F1,baseline.F2.enabled,points_per_line.F1
 ```
 
 - 高斯拟合预算(config `peaks.localization`,2026-09-14):`gaussian_roi_max_points`
-  (每轴半宽点数上限,默认 48)、`gaussian_max_nfev`(单峰求值上限,默认 200);
-  两者只影响**成本**,触发截断时会留档;
+  (每轴半宽点数上限,**默认 0 = 不限制**,结果与旧版一致;设 48 等正值可提速,
+  但细网格上会改结果并逐峰留档)、`gaussian_max_nfev`(单峰求值上限,默认 200);
 - 直接维范围 `ext_lo`/`ext_hi` 只作用于**直接维**;3D 数据请用 `window.F3.*` 等
   逐轴键(若该轴是直接维);
 - 参考层的逐轴参数(参考谱定义)用参考模式的 `params=`/`direct_range=` 指定,
