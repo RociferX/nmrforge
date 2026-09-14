@@ -161,6 +161,7 @@ write_records(session, *, reference=None, references=None, plan, runs,
 ```python
 run_reference_study(root, datasets={"A": "~/data/a"},
                     params=None, phase_route=None, peaks=None,
+                    direct_range=(10.5, 6.5),         # 直接维范围(high, low;ppm)
                     sigma_multiplier=25,              # 选峰阈值(仅此模式可定)
                     max_peaks=0, localization_method="parabolic",
                     gaussian_roi_f1_ppm=None, gaussian_roi_f2_ppm=None,
@@ -180,7 +181,9 @@ run_reference_study(root, datasets={"A": "~/data/a"},
 run_combination_study(reference,                  # ← 必填:显式指定参考
                       combos=[{"zero_fill": 1}],  # 或 axes=...
                       max_runs=256, window_pts=None, window_ppm=None,
-                      sign="abs", roi_f1_ppm=None, roi_f2_ppm=None,
+                      sign="abs",
+                      direct_range=(10.0, 6.5),        # 覆盖本批 workflow 基值
+                      roi_f1_ppm=None, roi_f2_ppm=None,
                       resume=True, backend=None, write=True,
                       progress=None) -> StudyResult
 ```
@@ -202,7 +205,14 @@ run_combination_study(reference,                  # ← 必填:显式指定参�
 - 一步式便利入口 `run_parameter_study(...)` 仍然可用:内部先跑参考模式,再用
   `str(root)` 显式调用组合模式(向后兼容)。
 
+直接维范围(ppm)在两个模式都可给:`direct_range=(high, low)`(反序自动换回)、
+`direct_range={"lo": …, "hi": …}` 或显式 `ext_lo=/ext_hi=`;参考模式里范围与
+已建参考不一致会重建参考谱;组合模式里它覆盖 workflow 基值(参考不重建),逐组合
+可用 `ext_lo`/`ext_hi` 再覆盖。逐 workflow 留档在
+`parameters_resolved.direct_range`。非法输入抛 `SweepError`。
+
 辅助函数:`parse_reference_spec(spec) -> ReferenceHandle`、
+`parse_direct_range(value=None, *, ext_lo=None, ext_hi=None, params=None)`、
 `resolve_reference(spec, backend=None) -> (session, DatasetRef, ReferenceSpectrum)`。
 
 

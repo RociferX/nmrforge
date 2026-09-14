@@ -498,6 +498,13 @@ def validate_axes(
             parse_phase_axis(key)
             continue
         root = _axis_root(key)
+        if key in ("ext_lo", "ext_hi"):
+            notes.append(
+                f"提示: {key} 是**直接维范围**(ppm):逐组合覆盖会改变提取窗口,"
+                "峰位/峰集随窗口变;参考层范围请用参考模式 "
+                "(`direct_range=` / CLI `reference --direct-range`)"
+            )
+            continue
         if key in _PEAK_PICKING_KEYS or root in _PEAK_PICKING_KEYS:
             raise SweepError(
                 f"网格里的 {key!r} 是**选峰阈值**:阈值只在生成参考时选择,"
@@ -1094,10 +1101,12 @@ def _resume_fingerprint(
     sign: str,
     roi_f1_ppm: float | None,
     roi_f2_ppm: float | None,
+    base_params: Mapping[str, Any] | None = None,
 ) -> str:
     """计算会改变单条件运行结果的规范化输入指纹。"""
     param_part, phase_part = split_combo(combo)
-    params = merge_overrides(dict(reference.sweep_params), param_part)
+    base_params = dict(base_params or {}) or dict(reference.sweep_params)
+    params = merge_overrides(base_params, param_part)
     effective_phase = apply_phase_axes(
         {
             axis: list(pair)
@@ -1328,6 +1337,7 @@ def run_sweep(
             run_dir = workflow_dir / target.token
             run_dir.mkdir(parents=True, exist_ok=True)
             fingerprint = _resume_fingerprint(
+                base_params=plan.base_params,
                 combo=combo,
                 target=target,
                 reference=ref,
@@ -1413,7 +1423,10 @@ def _run_condition(
         emit(f"[{workflow_id}/{target.condition}] {message}")
 
     param_part, phase_part = split_combo(combo)
-    params = merge_overrides(dict(reference.sweep_params), param_part)
+    # 基值 = 计划基值(参考有效参数 + 组合模式显式覆盖,如直接维范围);
+    # 组合表只覆盖它显式指定的键。
+    base_from_plan = dict(plan.base_params) or dict(reference.sweep_params)
+    params = merge_overrides(base_from_plan, param_part)
     base_phase = reference.direct_phase_override() or {}
     effective_phase = apply_phase_axes(
         {axis: list(pair) for axis, pair in base_phase.items()}, phase_part
@@ -1677,6 +1690,16 @@ def _run_condition(
     run.parameters_resolved = {
         "phase": run.phase,
         # 有效采样:满采样(含「标注 NUS 但实际满采样」)按 uniform 处理
+        # 直接维范围(ext_lo = 高端, ext_hi = 低端):逐 workflow 实际取值来源
+        "direct_range": {
+            "ext_lo": params.get("ext_lo"),
+            "ext_hi": params.get("ext_hi"),
+            "source": (
+                "combo"
+                if ("ext_lo" in param_part or "ext_hi" in param_part)
+                else "reference_or_base"
+            ),
+        },
         "sampling": {
             "effective": str(reference.sampling),
             "schedule": str(reference.sampling_schedule or ""),

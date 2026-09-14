@@ -1184,10 +1184,16 @@ def test_plan_sweep_axis_scope_guards(tmp_path: Path, bruker_dir: Path) -> None:
         plan_sweep(reference, axes={"direct_phase": [[0.0, 0.0]]})
     plan = plan_sweep(
         reference,
-        axes={"ext_lo": ["10.5"], "bogus.key": [1], "zero_fill": [1]},
+        axes={
+            "ext_lo": ["10.5"],
+            "points_per_line": [2.0],
+            "bogus.key": [1],
+            "zero_fill": [1],
+        },
     )
     joined = "\n".join(plan.notes)
-    assert "确定性" in joined and "ext_lo" in joined
+    assert "确定性" in joined and "points_per_line" in joined
+    assert "直接维范围" in joined and "ext_lo" in joined
     assert "不在后端读取" in joined and "bogus.key" in joined
 
 
@@ -1719,3 +1725,101 @@ def test_reference_mode_reports_both_peak_tables(
     assert payload["mode"] == "reference"
     assert payload["references"][0]["peak_tables"]["parabolic"]["path"]
     assert payload["references"][0]["sampling"] == "uniform"
+
+
+def test_direct_range_parser_normalises_order() -> None:
+    """直接维范围:(high, low) 与反序都规范成 ext_lo=高端 / ext_hi=低端。"""
+    from nmrforge_api import parse_direct_range
+
+    direct = parse_direct_range((10.5, 6.5))
+    assert direct is not None
+    assert (direct.lo, direct.hi) == (10.5, 6.5)
+    assert direct.swapped is False
+    assert direct.params() == {"ext_lo": "10.5", "ext_hi": "6.5"}
+    assert direct.to_dict()["requested"] == [10.5, 6.5]
+
+    swapped = parse_direct_range((6.5, 10.5))
+    assert swapped is not None
+    assert swapped.params() == {"ext_lo": "10.5", "ext_hi": "6.5"}
+    assert swapped.swapped is True
+    assert swapped.to_dict()["swapped_to_nmrpipe_order"] is True
+
+    # dict 写法与显式 ext_lo/ext_hi;params 兼容旧写法
+    assert parse_direct_range({"lo": 10.0, "hi": 7.0}).params() == {
+        "ext_lo": "10",
+        "ext_hi": "7",
+    }
+    assert parse_direct_range(ext_lo="9.5", ext_hi="6.0").params() == {
+        "ext_lo": "9.5",
+        "ext_hi": "6",
+    }
+    assert parse_direct_range(params={"ext_lo": "11", "ext_hi": "7"}).lo == 11.0
+    assert parse_direct_range(None) is None
+    # 非法:两端相同 / 只给一端 / 非数值
+    with pytest.raises(SweepError):
+        parse_direct_range((7.0, 7.0))
+    with pytest.raises(SweepError):
+        parse_direct_range(ext_lo="9.5")
+    with pytest.raises(SweepError):
+        parse_direct_range(("a", "b"))
+
+
+def test_reference_mode_accepts_direct_range(tmp_path: Path, bruker_dir: Path) -> None:
+    """参考模式可指定直接维范围:落到后端参数并留档;变化时重建参考。"""
+    root = tmp_path / "direct_range_reference"
+    backend = _FakeSweepBackend()
+    result = run_reference_study(
+        root,
+        bruker_dir / "hsqc_2d",
+        direct_range=(10.5, 6.5),
+        backend=backend,
+    )
+    reference = result.reference()
+    assert reference is not None
+    assert str(reference.params.get("ext_lo")) == "10.5"
+    assert str(reference.params.get("ext_hi")) == "6.5"
+    calls = [call["params"] for call in backend.process_calls]
+    assert calls and str(calls[-1].get("ext_lo")) == "10.5"
+    assert str(calls[-1].get("ext_hi")) == "6.5"
+    first_run_id = reference.run_id
+    # 改成另一个范围 → 自动重建参考(不是静默复用)
+    again = run_reference_study(
+        root, direct_range=(11.0, 6.0), backend=backend
+    )
+    rebuilt = again.reference()
+    assert rebuilt is not None
+    assert str(rebuilt.params.get("ext_lo")) == "11"
+    assert str(rebuilt.params.get("ext_hi")) == "6"
+    assert rebuilt.run_id != first_run_id  # 真的重跑了参考
+
+
+def test_combination_mode_direct_range_override(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """组合模式可覆盖直接维范围(基值 + 逐组合),参考谱不重建。"""
+    root = tmp_path / "direct_range_combos"
+    backend = _FakeSweepBackend()
+    run_reference_study(root, bruker_dir / "hsqc_2d", backend=backend)
+    frozen = load_reference(open_study(root, backend=backend), None)
+    assert frozen is not None
+    frozen_script = frozen.script_sha256
+    result = run_combination_study(
+        str(root),
+        combos=[
+            {"zero_fill": 1},
+            {"zero_fill": 1, "ext_lo": "9", "ext_hi": "7"},
+        ],
+        direct_range=(10.0, 6.5),
+        backend=backend,
+    )
+    by_id = {run.workflow_id: run for run in result.runs}
+    base = by_id["W0001"].parameters_resolved["direct_range"]
+    assert base["ext_lo"] == "10" and base["ext_hi"] == "6.5"
+    assert base["source"] == "reference_or_base"
+    combo = by_id["W0002"].parameters_resolved["direct_range"]
+    assert combo["ext_lo"] == "9" and combo["ext_hi"] == "7"
+    assert combo["source"] == "combo"
+    # 参考谱不受组合模式影响
+    after = load_reference(result.session, result.session.dataset)
+    assert after is not None and after.script_sha256 == frozen_script
+    assert result.summary["direct_range"]["ext_lo"] == 10.0

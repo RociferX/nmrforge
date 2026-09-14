@@ -2,6 +2,23 @@
 
 版本口径:新增功能/新增字段保持同一 minor;破坏性改动升 minor 并给出迁移说明。
 
+## 0.2.4(2026-09-14)
+
+**直接维范围(ppm)成为一等外部输入**(用户:「api 可以指定直接维范围吗,没有就加入」)。
+
+- 两个模式都可用 `direct_range=(high, low)`(反序自动换回)、
+  `direct_range={"lo":…, "hi":…}` 或显式 `ext_lo=`/`ext_hi=`;兼容
+  `params={"ext_lo":…}`;公开 `parse_direct_range()` / `DirectRange`;
+- 参考模式:范围与已建参考不一致 → 重建参考谱并重测两张参考峰表(留档);
+- 组合模式:`direct_range=` 覆盖本批 workflow 基值(参考不重建),逐组合可用
+  `ext_lo`/`ext_hi` 再覆盖;`plan.notes` 说明口径;
+- 逐 workflow 留档 `parameters_resolved.direct_range`(`ext_lo`/`ext_hi`/
+  `source`);非法输入(只给一端/两端相同/非数值)抛 `SweepError`;
+- CLI:`reference --direct-range HIGH LOW`、`sweep --direct-range HIGH LOW`;
+- 顺带修复:workflow 参数基值此前取 `reference.sweep_params`,**忽略**
+  `plan.base_params` —— 组合模式对基值的覆盖(如直接维范围)现在真正生效;
+  断点续跑指纹同步纳入基值。
+
 ## 0.2.3(2026-09-14)
 
 **API 拆成参考模式 / 组合模式**(用户:加入参考模式和组合模式,组合模式下外部要

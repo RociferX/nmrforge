@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from nmrforge_api.direct_range import parse_direct_range
 from nmrforge_api.errors import DatasetError
 from nmrforge_api.records import write_records, write_reference_records
 from nmrforge_api.reference import (
@@ -211,11 +212,15 @@ def run_reference_study(
     params: dict[str, Any] | None = None,
     phase_route: str | None = None,
     peaks: Path | str | None = None,
+    direct_range: Any = None,
+    ext_lo: Any = None,
+    ext_hi: Any = None,
     sigma_multiplier: float | None = None,
     max_peaks: int = 0,
     localization_method: str = "parabolic",
     gaussian_roi_f1_ppm: float | None = None,
     gaussian_roi_f2_ppm: float | None = None,
+    force: bool = False,
     backend: Any | None = None,
     write: bool = True,
     progress: Callable[[str], None] | None = None,
@@ -225,6 +230,12 @@ def run_reference_study(
     只做参考,不跑任何参数组合。组合模式(:func:`run_combination_study`)必须
     **显式引用**本模式建好的参考。选峰阈值 ``sigma_multiplier`` 在本模式指定,
     随后与参考一起锁定(参考定了以后所有 workflow 只能沿用)。
+
+    直接维范围(**ppm**,``ext_lo`` = 高端 / ``ext_hi`` = 低端)可用
+    ``direct_range=(high, low)``(也接受反序,自动换回)、``direct_range={"lo":…,
+    "hi":…}``、或显式 ``ext_lo=/ext_hi=``;也兼容 ``params={"ext_lo":…}``。
+    范围与已建参考不一致时会**重建参考谱并重测两张参考峰表**(留档在参数里);
+    ``force=True`` 无条件重建。
     """
     session = open_study(root, name=name, backend=backend)
     conditions = _resolve_conditions(datasets, dataset)
@@ -234,16 +245,36 @@ def run_reference_study(
             "研究里还没有数据集:首次运行请传 datasets=<{条件: 目录}> 或 "
             "dataset=<Bruker 目录>"
         )
+    direct = parse_direct_range(
+        direct_range, ext_lo=ext_lo, ext_hi=ext_hi, params=params
+    )
+    run_params = dict(params or {})
+    if direct is not None:
+        run_params.update(direct.params())
     references: dict[str, ReferenceSpectrum] = {}
+    rebuilt: list[str] = []
     for ref in session.datasets:
-        reference = load_reference(session, ref)
+        reference = None if force else load_reference(session, ref)
+        if reference is not None and direct is not None:
+            # 直接维范围是参考谱的定义之一:与已建参考不一致 → 重建参考
+            if not direct.matches_params(reference.params):
+                reference = None
+                rebuilt.append(ref.condition or ref.key)
         if reference is None:
+            if progress is not None and rebuilt:
+                progress(
+                    "直接维范围与已建参考不一致,重建参考:"
+                    f" ext_lo={direct.lo:g} ext_hi={direct.hi:g} ppm"
+                    if direct is not None
+                    else "重建参考"
+                )
             reference = build_reference(
                 session,
                 ref,
-                params=params,
+                params=run_params or None,
                 phase_route=phase_route,
                 progress=progress,
+                force=True,
             )
         references[ref.key] = reference
     # 峰身份与两张参考峰表:主条件先选峰,其余条件共享峰身份
@@ -256,6 +287,7 @@ def run_reference_study(
             localization_method=localization_method,
             gaussian_roi_f1_ppm=gaussian_roi_f1_ppm,
             gaussian_roi_f2_ppm=gaussian_roi_f2_ppm,
+            force=bool(rebuilt),
         )
     if peaks is not None:
         # 可选:研究方自带的峰表(公开库/已指认),作为主条件的峰身份并重建两张表
@@ -300,6 +332,9 @@ def run_combination_study(
     window_pts: int | None = None,
     window_ppm: float | None = None,
     sign: str = "abs",
+    direct_range: Any = None,
+    ext_lo: Any = None,
+    ext_hi: Any = None,
     roi_f1_ppm: float | None = None,
     roi_f2_ppm: float | None = None,
     resume: bool = True,
@@ -314,6 +349,9 @@ def run_combination_study(
 
     - 参数基底 = 该参考运行的有效参数(相位锁定),组合表只覆盖它显式指定的键;
     - 选峰阈值随参考锁定(与参考一致,不能在这里改);
+    - 直接维范围(``ext_lo``/``ext_hi``,ppm)可用 ``direct_range=`` 覆盖**本批
+      workflow 的基值**(参考谱不重建),逐组合还可以用 ``ext_lo``/``ext_hi``
+      再覆盖;实际取值逐 workflow 记进 ``parameters_resolved.direct_range``;
     - 指定了条件就只跑该条件;只给研究根则跑该研究的全部条件(各自已有参考);
     - 候选谱与两张峰表写到 ``study/workflows/<workflow_id>/<条件>/``。
     """
@@ -336,12 +374,23 @@ def run_combination_study(
                 "先跑参考模式(run_reference_study)把每个条件的参考建好"
             )
         references[item.key] = other
+    direct = parse_direct_range(direct_range, ext_lo=ext_lo, ext_hi=ext_hi)
+    base_params = dict(ref.sweep_params)
+    notes: list[str] = []
+    if direct is not None:
+        base_params.update(direct.params())
+        notes.append(
+            "直接维范围由组合模式指定:"
+            f" ext_lo={direct.lo:g} ext_hi={direct.hi:g} ppm"
+            "(参考谱不重建;逐组合可用 ext_lo/ext_hi 再覆盖)"
+        )
     plan = plan_sweep(
         ref,
         axes=axes,
         combos=combos,
         max_runs=max_runs,
-        base_params=dict(ref.sweep_params),
+        base_params=base_params,
+        notes=notes,
     )
     runs = run_sweep(
         session,
@@ -358,6 +407,8 @@ def run_combination_study(
     )
     summary = _summary(plan, runs, references)
     summary["reference_spec"] = handle.describe()
+    if direct is not None:
+        summary["direct_range"] = direct.to_dict()
     records: dict[str, str] = {}
     if write:
         records = write_records(
@@ -393,6 +444,9 @@ def run_parameter_study(
     params: dict[str, Any] | None = None,
     phase_route: str | None = None,
     peaks: Path | str | None = None,
+    direct_range: Any = None,
+    ext_lo: Any = None,
+    ext_hi: Any = None,
     sigma_multiplier: float | None = None,
     max_peaks: int = 0,
     max_runs: int = DEFAULT_MAX_RUNS,
@@ -404,6 +458,7 @@ def run_parameter_study(
     localization_method: str = "parabolic",
     gaussian_roi_f1_ppm: float | None = None,
     gaussian_roi_f2_ppm: float | None = None,
+    force: bool = False,
     resume: bool = True,
     backend: Any | None = None,
     write: bool = True,
@@ -413,7 +468,8 @@ def run_parameter_study(
 
     2026-09-14 起两种模式已分开:参考由 :func:`run_reference_study` 生成、组合由
     :func:`run_combination_study` 执行且**必须显式给参考**;本函数保留为一键便利
-    入口与向后兼容(内部先跑参考模式,再用 ``<root>#<主条件>`` 显式调用组合模式)。
+    入口与向后兼容(内部先跑参考模式,再用研究根显式调用组合模式)。
+    直接维范围(``direct_range=`` / ``ext_lo`` / ``ext_hi``)在参考层生效。
     """
     reference_result = run_reference_study(
         root,
@@ -423,11 +479,15 @@ def run_parameter_study(
         params=params,
         phase_route=phase_route,
         peaks=peaks,
+        direct_range=direct_range,
+        ext_lo=ext_lo,
+        ext_hi=ext_hi,
         sigma_multiplier=sigma_multiplier,
         max_peaks=max_peaks,
         localization_method=localization_method,
         gaussian_roi_f1_ppm=gaussian_roi_f1_ppm,
         gaussian_roi_f2_ppm=gaussian_roi_f2_ppm,
+        force=force,
         backend=backend,
         write=write,
         progress=progress,

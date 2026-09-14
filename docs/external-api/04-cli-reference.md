@@ -24,8 +24,9 @@ python -m nmrforge_api reference --study ~/studies/s1 --params auto.yaml
 ```
 
 `--params` 是自动流程的输入覆盖(YAML/JSON);`--phase-route` 显式指定相位
-路线;`--force` 重建。输出冻结谱/参考脚本路径与 SHA-256、相位来源、采样方式、
-该条件是否支持参数组合。
+路线;`--force` 重建;`--direct-range HIGH_PPM LOW_PPM` 指定**直接维范围**
+(ext_lo 高端 / ext_hi 低端),与已建参考不一致时自动重建参考谱。输出冻结谱/
+参考脚本路径与 SHA-256、相位来源、采样方式、该条件是否支持参数组合。
 
 ## peaks — 参考峰表(身份 + 两张统一峰表)
 
@@ -65,6 +66,7 @@ python -m nmrforge_api sweep --study ~/studies/s1 \
 | `--reference` | **必填**:参考写法(`<研究根>` / `<研究根>#<条件>` / `reference.json`) |
 | `--combos` | **用户参数组合表**(CSV/TSV/YAML/JSON,一行一个组合,原样按序执行) |
 | `--grid` | 各轴候选值(YAML/JSON 的 `axes:`,接口展开全因子) |
+| `--direct-range` | 直接维范围 `HIGH_PPM LOW_PPM`(覆盖本批 workflow 基值) |
 | `--max-runs` | 组合数上限(缺省 256) |
 | `--window-ppm` | 峰位搜索窗口半径(ppm;缺省 1.5×核素线宽) |
 | `--window-pts` | 窗口半径(点数,跨分辨率不可比,不推荐) |

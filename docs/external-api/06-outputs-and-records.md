@@ -56,6 +56,9 @@ fit_success, FWHM_H, FWHM_N, fit_rmse, boundary_hit
   的 FWHM,ppm)、`fit_rmse`(残差 RMS)、`boundary_hit`(中心/宽度撞拟合边界);
   `fallback`/`fallback_reason` 记录失败回退(禁止静默);
 - `condition`/`dataset` 便于下游把 A/B 表按条件分组;`assignment` 取自参考峰表;
+- 直接维范围留档:`reference.json.params.ext_lo/ext_hi`(参考层);每条
+  `run.json.parameters_resolved.direct_range`(`ext_lo`/`ext_hi` + `source`:
+  `reference_or_base` / `combo`);
 - 采样口径留档:`reference.json` 的 `sampling`(有效模式)、`sampling_schedule`
   (`nuslist` / `params` / `full_sampling`)、`sampling_evidence`;每条 `run.json`
   的 `parameters_resolved.sampling`(`effective` / `schedule` / `route` /

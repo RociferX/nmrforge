@@ -104,6 +104,40 @@ run_parameter_study(..., peaks="library.list")   # 或 peak_id,H_ppm,N_ppm CSV
 - 一切影响结果的参数都必须可追溯:`parameters_requested` →
   `parameters_used` → `parameters_resolved`(自动参数实际结果)。
 
+## 5.8 直接维范围(可由外部指定)
+
+直接维提取窗口用 **ppm** 指定,与 NMRPipe `EXT -x1/-xn` 及 config
+`processing.ext_lo/ext_hi` 同序:
+
+- `ext_lo` = 直接维**高端**(较大 ppm,对应 `EXT -x1`);
+- `ext_hi` = 直接维**低端**(较小 ppm,对应 `EXT -xn`)。
+
+三种写法(等价,后者覆盖前者):
+
+```python
+run_reference_study(root, dataset, direct_range=(10.5, 6.5))       # (high, low)
+run_reference_study(root, dataset, direct_range=(6.5, 10.5))       # 反序:自动换回
+run_reference_study(root, dataset, ext_lo="10.5", ext_hi="6.5")    # 显式
+```
+
+```bash
+python -m nmrforge_api reference --study ~/studies/s1 --direct-range 10.5 6.5
+python -m nmrforge_api sweep --study ~/studies/s1 --reference ~/studies/s1 \
+    --combos design.csv --direct-range 9 7
+```
+
+- **参考模式**:范围是参考谱的定义之一;与已建参考不一致时会**重建参考谱并重测
+  两张参考峰表**(日志说明),`force=True` 无条件重建;
+- **组合模式**:`direct_range=` 覆盖**本批 workflow 的基值**(参考谱不重建),
+  逐组合还可用 `ext_lo`/`ext_hi` 再覆盖(`plan.notes` 会说明口径);
+- 留档:参考记录 `params.ext_lo/ext_hi`;每条 `run.json` 的
+  `parameters_resolved.direct_range`(`ext_lo`/`ext_hi` + `source`:
+  `reference_or_base` / `combo`);
+- 非法输入(只给一端、两端相同、非数值)直接报 `SweepError`;
+- 也在 config/`params` 里生效:`params={"ext_lo": "10.5", "ext_hi": "6.5"}` 会被
+  解析成同一份范围并统一留档。
+
+
 ## 5.7 选峰阈值(生成参考时可选,随后锁定)
 
 参考峰表的选峰阈值 = **噪声 σ 倍数**(`sigma_multiplier`,内部同时作为

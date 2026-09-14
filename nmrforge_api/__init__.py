@@ -42,6 +42,7 @@
 
 from __future__ import annotations
 
+from nmrforge_api.direct_range import DirectRange, parse_direct_range
 from nmrforge_api.errors import (
     DatasetError,
     MeasurementError,
@@ -141,6 +142,7 @@ API_VERSION = "0.2"
 
 __all__ = [
     "API_VERSION",
+    "DirectRange",
     "BOUNDARY_STATEMENT",
     "ReferenceHandle",
     "ReferenceResult",
@@ -187,6 +189,7 @@ __all__ = [
     "measure_peak_positions",
     "merge_overrides",
     "open_study",
+    "parse_direct_range",
     "peak_table_digest",
     "peak_table_row",
     "peak_table_rows",

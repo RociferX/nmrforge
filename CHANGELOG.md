@@ -1,5 +1,15 @@
 # 修改记录(历史条目)
 
+## 未发布(2026-09-14):直接维范围可由外部指定
+- 对外接口两个模式都支持 `direct_range=(high_ppm, low_ppm)`(反序自动换回)、
+  dict 写法或显式 `ext_lo=`/`ext_hi=`;公开 `parse_direct_range()`/`DirectRange`;
+- 参考模式:范围变化 → 重建参考谱 + 重测两张参考峰表;组合模式:范围覆盖 workflow
+  基值(参考不重建),逐组合可再覆盖;留档 `parameters_resolved.direct_range`;
+- 修 workflow 基值取 `plan.base_params`(此前忽略,基值覆盖不生效),断点续跑
+  指纹同步;
+- CLI:`reference/sweep --direct-range HIGH LOW`;文档 03/04/05/06 + CHANGELOG;
+  测试 +3。
+
 ## 未发布(2026-09-14):对外接口拆成参考模式 / 组合模式
 - 新增 `run_reference_study()`(参考模式:参考谱 + 脚本 + 两张参考峰表,
   写 `records/reference.json`;选峰阈值在此确定并锁定)与

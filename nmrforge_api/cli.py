@@ -24,6 +24,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from nmrforge_api.direct_range import parse_direct_range
 from nmrforge_api.errors import SensitivityError
 from nmrforge_api.records import write_records, write_reference_records
 from nmrforge_api.reference import (
@@ -108,15 +109,32 @@ def cmd_init(args: argparse.Namespace) -> int:
 def cmd_reference(args: argparse.Namespace) -> int:
     session = open_study(args.study, name=args.name)
     params = _load_mapping(args.params) if args.params else None
+    direct = parse_direct_range(
+        getattr(args, "direct_range", None), params=params
+    )
+    if direct is not None:
+        params = dict(params or {})
+        params.update(direct.params())
     out: list[dict[str, Any]] = []
     for target in _selected_datasets(session, args.condition):
+        existing = load_reference(session, target)
+        rebuild = bool(args.force) or (
+            direct is not None
+            and existing is not None
+            and not direct.matches_params(existing.params)
+        )
+        if rebuild and direct is not None:
+            print(
+                "直接维范围与已建参考不一致,重建参考:"
+                f" ext_lo={direct.lo:g} ext_hi={direct.hi:g} ppm"
+            )
         reference = build_reference(
             session,
             target,
             params=params,
             phase_route=args.phase_route,
             progress=print,
-            force=args.force,
+            force=rebuild,
         )
         out.append(
             {
@@ -213,6 +231,7 @@ def cmd_sweep(args: argparse.Namespace) -> int:
         result = run_combination_study(
             spec,
             combos=combos,
+            direct_range=getattr(args, "direct_range", None),
             max_runs=int(args.max_runs or DEFAULT_MAX_RUNS),
             window_pts=args.window_pts,
             window_ppm=args.window_ppm,
@@ -230,6 +249,7 @@ def cmd_sweep(args: argparse.Namespace) -> int:
         result = run_combination_study(
             spec,
             axes=axes,
+            direct_range=getattr(args, "direct_range", None),
             max_runs=max_runs,
             window_pts=args.window_pts,
             window_ppm=args.window_ppm,
@@ -334,6 +354,14 @@ def build_parser() -> argparse.ArgumentParser:
     _common(reference)
     reference.add_argument("--params", help="自动处理的输入参数(YAML/JSON)")
     reference.add_argument("--phase-route", default=None)
+    reference.add_argument(
+        "--direct-range",
+        nargs=2,
+        type=float,
+        default=None,
+        metavar=("HIGH_PPM", "LOW_PPM"),
+        help="直接维范围(ext_lo 高端 / ext_hi 低端,ppm);与已建参考不一致时重建参考",
+    )
     reference.add_argument("--force", action="store_true", help="重建参考谱")
     reference.set_defaults(func=cmd_reference)
 
@@ -386,6 +414,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--combos",
         default=None,
         help="显式组合表 CSV/TSV/YAML/JSON(外部设计:正交/部分因子/LHS…)",
+    )
+    sweep.add_argument(
+        "--direct-range",
+        nargs=2,
+        type=float,
+        default=None,
+        metavar=("HIGH_PPM", "LOW_PPM"),
+        help="直接维范围(ext_lo 高端 / ext_hi 低端,ppm):覆盖本批 workflow 基值",
     )
     sweep.add_argument("--max-runs", type=int, default=0)
     sweep.add_argument(
