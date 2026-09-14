@@ -30,8 +30,14 @@ import json
 import os
 import time
 from pathlib import Path
+from typing import Any
 
-from nmrforge_api import load_combo_table, run_parameter_study
+from nmrforge_api import (
+    PEAK_TABLE_COLUMNS,
+    load_combo_table,
+    read_peak_table,
+    run_parameter_study,
+)
 
 
 def _default(name: str, fallback: str) -> str:
@@ -66,16 +72,16 @@ def main(argv: list[str] | None = None) -> int:
         help="显式组合表 CSV/TSV/YAML/JSON(与 --axes 二选一)",
     )
     parser.add_argument(
-        "--window-ppm",
-        type=float,
-        default=None,
-        help="峰位搜索窗口半径(ppm);缺省=1.5×该轴核素线宽折算 ppm",
+        "--localization",
+        choices=("parabolic", "gaussian", "both"),
+        default="parabolic",
+        help="组合模式精修方式:parabolic(默认)/ gaussian(仅 2D)/ both",
     )
     parser.add_argument(
-        "--window-pts",
-        type=int,
+        "--edge-margin-ppm",
+        type=float,
         default=None,
-        help="峰位搜索窗口半径(数据点;显式口径,跨分辨率不可比,不推荐)",
+        help="选峰排除边缘轴峰的物理宽度(ppm;缺省=3×该轴核素线宽)",
     )
     parser.add_argument("--max-runs", type=int, default=8)
     parser.add_argument("--max-peaks", type=int, default=0)
@@ -109,13 +115,41 @@ def main(argv: list[str] | None = None) -> int:
         study,
         peaks=Path(args.peaks).expanduser() if args.peaks else None,
         max_peaks=args.max_peaks,
-        window_pts=args.window_pts,
-        window_ppm=args.window_ppm,
+        localization=args.localization,
+        edge_margin_ppm=args.edge_margin_ppm,
         progress=log,
         **kwargs,
     )
+    def _table_report(run: Any, method: str) -> dict:
+        """峰表结构核对:列头、行数、reference_peak_id 是否留空。"""
+        path = run.peak_table_path(method)
+        if not path:
+            return {"method": method, "present": False}
+        rows = read_peak_table(path)
+        return {
+            "method": method,
+            "present": True,
+            "path": path,
+            "n_rows": len(rows),
+            "columns_ok": list(rows[0].keys()) == list(PEAK_TABLE_COLUMNS)
+            if rows
+            else None,
+            "reference_peak_id_all_empty": all(
+                str(row.get("reference_peak_id", "")) == "" for row in rows
+            ),
+            "detected_all_true": all(bool(row.get("detected")) for row in rows),
+            "peak_ids": [
+                None if row.get("peak_id") != row.get("peak_id") else int(row["peak_id"])
+                for row in rows
+            ],
+            "localization_methods": sorted(
+                {str(row.get("localization_method", "")) for row in rows}
+            ),
+        }
+
     payload = {
         "elapsed_s": round(time.time() - started, 1),
+        "localization_requested": args.localization,
         "references": [
             {
                 "condition": reference.condition,
@@ -150,6 +184,10 @@ def main(argv: list[str] | None = None) -> int:
                 "peak_localization": run.peak_localization,
                 "wall_s": run.wall_time_s,
                 "window": run.window,
+                "detection": (run.parameters_resolved or {}).get("detection"),
+                "peak_tables_report": [
+                    _table_report(run, method) for method in ("parabolic", "gaussian")
+                ],
             }
             for run in result.runs
         ],
