@@ -122,6 +122,11 @@ _NUS_KEYS: frozenset[str] = _UNIFORM_KEYS | frozenset(
 
 # 确定性/策略参数:不是「人工调参」的自由度(改了会换峰集或只是口径),
 # 进网格时只提示、不阻断。
+#: 选峰阈值相关键:属参考峰表建立时的参数,不是 workflow 处理参数
+_PEAK_PICKING_KEYS: frozenset[str] = frozenset(
+    {"sigma_multiplier", "min_snr", "peak_threshold", "threshold_sigma"}
+)
+
 _DETERMINISTIC_KEYS: frozenset[str] = frozenset(
     {
         "extract",
@@ -493,6 +498,14 @@ def validate_axes(
             parse_phase_axis(key)
             continue
         root = _axis_root(key)
+        if key in _PEAK_PICKING_KEYS or root in _PEAK_PICKING_KEYS:
+            notes.append(
+                f"提示: {key} 是**选峰阈值**(参考峰表建立时生效),不是 workflow"
+                " 处理参数:请在选峰步骤指定(CLI `peaks --sigma N`,或 API"
+                " `ensure_reference_peaks(sigma_multiplier=N)` /"
+                " `run_parameter_study(sigma_multiplier=N)`)"
+            )
+            continue
         if key in _DETERMINISTIC_KEYS or root in _DETERMINISTIC_KEYS:
             notes.append(
                 f"提示: {key} 属确定性/策略参数,一般不必进网格"

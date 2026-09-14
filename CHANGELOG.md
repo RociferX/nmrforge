@@ -1,5 +1,15 @@
 # 修改记录(历史条目)
 
+## 未发布(2026-09-14):选峰阈值可由外部指定
+- 参考峰表选峰阈值(噪声 σ 倍数,缺省 35σ)改为一等外部输入:API
+  `pick_reference_peaks`/`ensure_reference_peaks`/`run_parameter_study` 的
+  `sigma_multiplier=`,CLI `peaks --sigma N`;
+- **按该阈值选峰**:显式阈值与已冻结的不同时自动重新选峰并记录
+  `previous_sigma_multiplier`(此前一律复用默认阈值的峰表,外部指定不生效);
+- 阈值留档 `peak_params.detection.sigma_multiplier` / `threshold_source`;
+  组合表里出现阈值键时提示应改在选峰步骤;阈值过高无峰时明确报错;
+- 新增 5 项回归(`tests/test_nmrforge_api.py`),文档 03/04/05/06/07 同步。
+
 ## 未发布(2026-09-14):API 改造对软件本体影响审计
 - 以 API 引入前提交 `2670108` 为基线复核本体改动;确认本体不依赖
   `nmrforge_api`,候选输出隔离、`nSigma` 别名、公开读取封装、峰定位扩展和打包

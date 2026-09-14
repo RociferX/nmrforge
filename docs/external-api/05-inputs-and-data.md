@@ -101,3 +101,28 @@ run_parameter_study(..., peaks="library.list")   # 或 peak_id,H_ppm,N_ppm CSV
 - 参数非法给 **error 或 warning**:锁定键报错、确定性/未知键写 `plan.notes`;
 - 一切影响结果的参数都必须可追溯:`parameters_requested` →
   `parameters_used` → `parameters_resolved`(自动参数实际结果)。
+
+## 5.7 选峰阈值(可由外部指定)
+
+参考峰表的选峰阈值 = **噪声 σ 倍数**(`sigma_multiplier`,内部同时作为
+`min_snr` 传给检测)。缺省 35σ(既有默认,行为不变),也可由外部指定:
+
+```python
+pick_reference_peaks(session, sigma_multiplier=20)          # 选峰并冻结
+ensure_reference_peaks(session, reference, sigma_multiplier=20)
+run_parameter_study(root, datasets=..., combos=..., sigma_multiplier=20)
+```
+
+```bash
+python -m nmrforge_api peaks --study ~/studies/s1 --sigma 20
+```
+
+- 给了阈值就**按该阈值选峰**;与研究里已冻结的阈值不同时,会自动**重新选峰**
+  (旧行为是不管给什么都复用默认阈值冻结下来的峰表,外部指定等于没生效);
+- 不给阈值 → 沿用上次(或默认 35σ);阈值相同 → 复用,不重复选峰;
+- 实际用量落档:`reference.json.peak_params.sigma_multiplier`(外部给的)、
+  `previous_sigma_multiplier`(上一版)、`detection.sigma_multiplier` +
+  `detection.threshold_source`(`user` / `default(35sigma)`);
+- 阈值过高导致选不出峰 → 明确报错(不静默产出空峰表);
+- 阈值是**参考峰表建立时**的参数,不是 workflow 处理参数:写进参数组合表
+  会在 `plan.notes` 里提示应改在选峰步骤指定。

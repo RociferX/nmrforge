@@ -2,6 +2,22 @@
 
 版本口径:新增功能/新增字段保持同一 minor;破坏性改动升 minor 并给出迁移说明。
 
+## 0.2.1(2026-09-14)
+
+**选峰阈值可由外部指定**(用户:之前都默认用默认阈值,现在要求可以被外部指定)。
+
+- 阈值 = 噪声 σ 倍数(`sigma_multiplier`,内部同时作为 `min_snr`);缺省仍为
+  35σ(行为向后兼容);
+- 外部入口:`pick_reference_peaks(session, sigma_multiplier=N)` /
+  `ensure_reference_peaks(..., sigma_multiplier=N)` /
+  `run_parameter_study(..., sigma_multiplier=N)` / CLI `peaks --sigma N`;
+- **按该阈值选峰**:显式给的阈值与已冻结的不同时自动重新选峰(此前一律复用
+  默认阈值冻结的峰表,外部指定等于没生效);相同则复用,不给则沿用;
+- 留档:`peak_params.sigma_multiplier` / `previous_sigma_multiplier` /
+  `detection.sigma_multiplier` / `detection.threshold_source`;
+- 阈值写进 workflow 组合表时在 `plan.notes` 提示「选峰阈值应在选峰步骤指定」;
+- 阈值高到选不出峰 → 明确报错(不静默产出空峰表)。
+
 ## 0.2.0(2026-09-13)规范更新(破坏性:输出模型与公开面变更)
 
 规范来源:用户 2026-09-13「API 规范更新」;逐条符合性见

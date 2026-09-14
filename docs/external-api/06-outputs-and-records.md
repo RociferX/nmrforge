@@ -54,7 +54,10 @@ fit_success, FWHM_H, FWHM_N, fit_rmse, boundary_hit
 - Gaussian 列:`fit_success`(拟合是否成功)、`FWHM_H`/`FWHM_N`(按**核名**映射
   的 FWHM,ppm)、`fit_rmse`(残差 RMS)、`boundary_hit`(中心/宽度撞拟合边界);
   `fallback`/`fallback_reason` 记录失败回退(禁止静默);
-- `condition`/`dataset` 便于下游把 A/B 表按条件分组;`assignment` 取自参考峰表。
+- `condition`/`dataset` 便于下游把 A/B 表按条件分组;`assignment` 取自参考峰表;
+- 选峰阈值留档:`reference.json.peak_params` 的 `sigma_multiplier`(外部指定的值)、
+  `previous_sigma_multiplier`(上一版)、`detection.sigma_multiplier` 与
+  `detection.threshold_source`(`user` / `default(35sigma)`);
 
 ## 6.3 `workflow.json` / `run.json`
 

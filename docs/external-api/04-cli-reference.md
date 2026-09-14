@@ -40,6 +40,9 @@ python -m nmrforge_api peaks --study ~/studies/s1 --localization gaussian \
 主条件自动选峰(或登记外部峰表)建立 `reference.list`;其他条件共享同一峰身份;
 随后写两张参考峰表。输出峰表路径/哈希/来源/峰数 + 两张表的摘要与定位 QC。
 
+`--sigma N` 是**选峰阈值**(噪声 σ 倍数,缺省 35σ):给了就按 N 选峰;若与
+研究里已冻结的阈值不同,会重新选峰并记录 `previous_sigma_multiplier`。
+
 ## sweep(= workflows)— 批量执行参数组合
 
 ```bash

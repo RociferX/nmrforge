@@ -535,8 +535,10 @@ def pick_peaks(
 ) -> dict[str, Any]:
     """峰挑选:检测谱峰并写 Poky .list,登记 WorkflowRun。
 
-    backend 保留为接口占位;sigma_multiplier 为噪声倍数阈值(默认 35σ,
-    min_snr 同步);ref_peaks/ref_nuclei/tolerance_ppm 为参考峰表约束
+    backend 保留为接口占位;``sigma_multiplier`` 为噪声倍数阈值(默认 35σ,
+    min_snr 同步)——**外部输入**:不给用默认,给了就按该阈值选峰,实际值写进
+    返回的 ``detection``(``sigma_multiplier``/``threshold_source``)。
+    ref_peaks/ref_nuclei/tolerance_ppm 为参考峰表约束
     (0.2.199-补29dl,用户):只保留与参考峰表按核名匹配的峰——2D 参考匹配
     全部核;3D 当前谱 + 2D 参考时第三维自由,一个参考峰可保留多个峰。
     轴峰排除边距(第 0 轴上下)按**物理宽度**定义:``edge_margin_ppm`` 显式给
@@ -635,12 +637,21 @@ def pick_peaks(
                 for i in range(arr.ndim)
             ],
         }
-        run.params["detection"] = detection
         sign_mode = _sign_mode_for(manager, exp_id, data_id)
         threshold = (
             float(sigma_multiplier)
             if sigma_multiplier and float(sigma_multiplier) > 0
             else _PICK_THRESHOLD_SIGMA
+        )
+        detection["sigma_multiplier_requested"] = (
+            float(sigma_multiplier) if sigma_multiplier else None
+        )
+        detection["sigma_multiplier"] = float(threshold)
+        detection["min_snr"] = float(threshold)
+        detection["threshold_source"] = (
+            "user"
+            if sigma_multiplier and float(sigma_multiplier) > 0
+            else "default(35sigma)"
         )
         # 0.2.199-补29fc(用户):谱面回补——未知/低置信类型时先用 both 检出,
         # 若正负峰占比都高则按 mixed 正负都选;否则按模板规则(dominant 过滤)。
@@ -670,6 +681,7 @@ def pick_peaks(
                 )
             else:
                 peaks = peak_detection.keep_dominant(peaks)
+        run.params["detection"] = detection
         # 2026-09-13(用户需求):峰定位 = 检测之后的亚格点精修。抛物线与 2D
         # 高斯对**同一批 candidate** 独立运行(便于比较两种算法的峰位差);
         # 高斯仅 2D,ROI 按物理宽度(ppm)换算点数,失败回退抛物线并留原因。
@@ -881,7 +893,8 @@ def pick_peaks(
     }.get(sign_mode, sign_mode)
     logs = [
         f"峰挑选: {len(peaks)} 个峰 → {peak_path}"
-        f"(符号模式: {sign_label},阈值: {threshold:.1f}σ)"
+        f"(符号模式: {sign_label},阈值: {threshold:.1f}σ,"
+        f"来源: {detection.get('threshold_source', '')})"
     ]
     logs.append(
         f"轴峰排除边距: {detection['edge_margin_ppm']:.3f} ppm"

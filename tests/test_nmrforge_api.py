@@ -27,6 +27,7 @@ from nmrforge_api import (
     STATUS_WARNING,
     DatasetError,
     DatasetRef,
+    MeasurementError,
     SweepError,
     add_dataset,
     build_reference,
@@ -1420,3 +1421,103 @@ def test_helper_detects_parameter_effect_in_end_to_end_run(
     assert summary["delta_std_ppm"]["max"] > 0
     # 助手不进处理产物:records 里没有不确定度文件
     assert not any("uncertainty" in name for name in result.records)
+
+
+def test_peak_threshold_is_externally_specifiable(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """2026-09-14(用户):选峰阈值可由外部指定,并真的按它选峰。
+
+    之前阈值一律用默认 35σ;现在显式给 σ 倍数就按它选峰并留档,改阈值会在既有
+    研究上**重新选峰**(不再静默复用默认阈值冻结下来的旧表)。
+    """
+    backend = _FakeSweepBackend()
+    session = open_study(tmp_path / "threshold", backend=backend)
+    add_dataset(session, bruker_dir / "hsqc_2d")
+    reference = build_reference(session, params={"phase_route": "none"})
+    reference = ensure_reference_peaks(session, reference, sigma_multiplier=20)
+    detection = reference.peak_params["detection"]
+    assert reference.peak_params["sigma_multiplier"] == pytest.approx(20.0)
+    assert detection["sigma_multiplier"] == pytest.approx(20.0)
+    assert detection["min_snr"] == pytest.approx(20.0)
+    assert detection["threshold_source"] == "user"
+
+    def _picks() -> int:
+        return sum(
+            1
+            for run in session.manager.project.workflow_runs
+            if run.workflow_ref == "pick_peaks"
+        )
+
+    picks_before = _picks()
+    # 外部改成另一个阈值 → 重新选峰
+    reference = ensure_reference_peaks(session, reference, sigma_multiplier=120)
+    detection = reference.peak_params["detection"]
+    assert reference.peak_params["sigma_multiplier"] == pytest.approx(120.0)
+    assert reference.peak_params["previous_sigma_multiplier"] == pytest.approx(20.0)
+    assert detection["sigma_multiplier"] == pytest.approx(120.0)
+    picks_after = _picks()
+    assert picks_after > picks_before
+    # 同一阈值再调用 → 复用,不重复选峰
+    reference = ensure_reference_peaks(session, reference, sigma_multiplier=120)
+    assert _picks() == picks_after
+    # 不给阈值 → 沿用已冻结的峰表(阈值不变)
+    ensure_reference_peaks(session, reference)
+    assert _picks() == picks_after
+    assert reference.peak_params["sigma_multiplier"] == pytest.approx(120.0)
+
+
+def test_peak_threshold_defaults_to_35_sigma(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """不指定阈值时仍是既有默认 35σ(行为向后兼容)。"""
+    session = open_study(tmp_path / "default_threshold", backend=_FakeSweepBackend())
+    add_dataset(session, bruker_dir / "hsqc_2d")
+    reference = build_reference(session, params={"phase_route": "none"})
+    reference = ensure_reference_peaks(session, reference)
+    detection = reference.peak_params["detection"]
+    assert reference.peak_params["sigma_multiplier"] is None
+    assert detection["sigma_multiplier"] == pytest.approx(35.0)
+    assert detection["threshold_source"].startswith("default")
+
+
+def test_peak_threshold_too_high_reports_error_instead_of_silence(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """阈值高到选不出峰时明确报错(不静默产出空峰表当成功)。"""
+    session = open_study(tmp_path / "bad_threshold", backend=_FakeSweepBackend())
+    add_dataset(session, bruker_dir / "hsqc_2d")
+    reference = build_reference(session, params={"phase_route": "none"})
+    with pytest.raises(MeasurementError):
+        ensure_reference_peaks(session, reference, sigma_multiplier=100000)
+
+
+def test_peak_picking_keys_in_grid_get_pointer_hint(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """阈值写进 workflow 组合表时明确提示写在哪里(不静默无效)。"""
+    session = open_study(tmp_path / "grid_hint", backend=_FakeSweepBackend())
+    add_dataset(session, bruker_dir / "hsqc_2d")
+    reference = build_reference(session, params={"phase_route": "none"})
+    plan = plan_sweep(reference, axes={"sigma_multiplier": [20], "zero_fill": [1]})
+    joined = "\n".join(plan.notes)
+    assert "选峰阈值" in joined and "sigma_multiplier" in joined
+
+
+def test_cli_peaks_applies_external_threshold(
+    tmp_path: Path, bruker_dir: Path, capsys
+) -> None:
+    """CLI:`peaks --sigma N` 按外部阈值选峰并留档。"""
+    root = tmp_path / "cli_threshold"
+    run_parameter_study(
+        root,
+        bruker_dir / "hsqc_2d",
+        combos=[{"zero_fill": 1}],
+        params={"phase_route": "none"},
+        backend=_FakeSweepBackend(),
+    )
+    assert cli_main(["peaks", "--study", str(root), "--sigma", "20"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["params"]["sigma_multiplier"] == pytest.approx(20.0)
+    assert payload["params"]["detection"]["sigma_multiplier"] == pytest.approx(20.0)
+    assert payload["params"]["detection"]["threshold_source"] == "user"

@@ -636,15 +636,36 @@ def ensure_reference_peaks(
 
     - 主条件:调用 ``pick_reference_peaks()`` 选峰并冻结为 ``reference.list``;
     - 其他条件:复制主条件的身份表(峰身份共享),再在本条件参考谱上测两张表;
-    - 已有身份表 + 两张表且文件在 → 直接复用(除非 ``force``);
+    - 已有身份表 + 两张表且文件在 → 直接复用(除非 ``force``,或外部给的
+      ``sigma_multiplier`` 与上次不同);
+    - **选峰阈值可由外部指定**:``sigma_multiplier``(σ 倍数,缺省 35σ)不写则
+      沿用上次/默认;显式给了就**按该阈值重新选峰**(旧行为是一律复用默认阈值
+      的冻结峰表,外部指定等于没生效),实际用量写进 ``peak_params``:
+      ``sigma_multiplier`` / ``previous_sigma_multiplier`` /
+      ``detection.sigma_multiplier`` / ``detection.threshold_source``;
     - ``localization_method`` 只决定**参考峰位**的取法(默认抛物线,与既有
       行为一致);两张参考峰表始终同时生成(2026-09-13 规范 B2)。
     """
     ref = reference or load_reference(session)
     if ref is None:
         raise ReferenceError("还没有参考谱,先调用 build_reference()")
+    requested_sigma = (
+        float(sigma_multiplier)
+        if sigma_multiplier and float(sigma_multiplier) > 0
+        else None
+    )
+    stored_sigma = ref.peak_params.get("sigma_multiplier")
+    stored_sigma_value = (
+        float(stored_sigma) if stored_sigma not in (None, "") else None
+    )
+    # 2026-09-14(用户「阈值可以由外部指定」):显式给了阈值且与上次不同 →
+    # 重新选峰;否则(没给/与上次相同)复用冻结的参考峰表。
+    threshold_changed = (
+        requested_sigma is not None and requested_sigma != stored_sigma_value
+    )
     if (
         not force
+        and not threshold_changed
         and ref.peak_table_path
         and Path(ref.peak_table_path).is_file()
         and ref.peak_tables
@@ -685,6 +706,7 @@ def ensure_reference_peaks(
             source="auto",
             params={
                 "sigma_multiplier": sigma_multiplier,
+                "previous_sigma_multiplier": stored_sigma_value,
                 "max_peaks": int(max_peaks),
                 # 选峰边距的物理宽度↔点数换算(用户方案 A):跨分辨率复算用
                 "detection": details.get("detection") or {},

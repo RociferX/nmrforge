@@ -360,6 +360,9 @@ def _summary(
                 "condition": ref.condition,
                 "peak_count": ref.peak_count,
                 "peak_source": ref.peak_source,
+                "sigma_multiplier": (ref.peak_params or {}).get(
+                    "sigma_multiplier"
+                ),
                 "peak_tables": ref.peak_tables,
                 "script_sha256": ref.script_sha256,
                 "spectrum_sha256": ref.spectrum_sha256,
