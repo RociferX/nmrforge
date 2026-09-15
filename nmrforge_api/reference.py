@@ -62,6 +62,8 @@ _NON_SWEEP_KEYS: tuple[str, ...] = (
     "final_ext_lo",
     "final_ext_hi",
     "segment_shift_hz",
+    # 参考阶段的优化开关(仅测试/复现用;不是处理参数,不进组合基底)
+    "reference_optimize",
 )
 
 #: 参考运行里由**自动诊断/路由**做出、又必须被组合运行沿用的行为决定:

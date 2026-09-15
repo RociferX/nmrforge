@@ -181,7 +181,8 @@ write_records(session, *, reference=None, references=None, plan, runs,
 
 ```python
 run_reference_study(root, datasets={"A": "~/data/a"},
-                    params=None, phase_route=None, peaks=None,
+                    params=None,                  # 可含 reference_optimize(**仅测试用**,见 05 §5.10)
+                    phase_route=None, peaks=None,
                     direct_range=(10.5, 6.5),         # 直接维范围(high, low;ppm)
                     sigma_multiplier=25,              # 选峰阈值(仅此模式可定)
                     max_peaks=0, localization_method="parabolic",
@@ -192,6 +193,8 @@ run_reference_study(root, datasets={"A": "~/data/a"},
 - 导入条件数据(可选)→ 自动优化参考谱与参考脚本 → 两张参考峰表;不做任何参数
   组合;
 - 选峰阈值、参考峰表(外部峰表)、localization 都在这阶段确定,之后**锁定**;
+- 参考阶段的窗/基线**自动优化**默认开启;`params["reference_optimize"]` 可关闭或
+  限定候选(仅测试/复现/审计;真实实验不可用,用后必须在记录里说明);
 - 产物:`study/reference/<key>/`(脚本/谱/两张峰表)+ `study/records/reference.json`;
 - `ReferenceResult`:`session` / `references`(key → `ReferenceSpectrum`)、
   `conditions`、`reference(condition="")`、`peak_tables`、`records`。

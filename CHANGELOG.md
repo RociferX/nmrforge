@@ -1,6 +1,23 @@
 # 修改记录(历史条目)
 
 
+## 未发布(2026-09-16):频域基线真正生效 + 外部开关 + 轴效果按条件自检
+- **POLY 口径修正**:NMRPipe 裸 `POLY -ord N` 默认 `-nc 0` 且无 `-first/-last`
+  → 无基线节点 → **恒等操作**(真机逐位验证:no_poly 与 `-ord 3` md5 相同);
+  现在 `mode=order` 渲染 `POLY -ord N -auto`(真机:`-auto -ord 1/3` 都改数,
+  且 `-ord` 生效;`-first -last` 会把基线质量从 99.96 拉到 81.66,弃用);
+  与参考的基线优化器评分(内存稳健多项式)口径一致;
+- **参考优化外部开关**(`params.reference_optimize`):`baseline`/`window` 可
+  `off`(跳过优化、直接用给定配置)或限定候选(`grid` / `*_candidates`);
+  开关落档 `reference.json.params.reference_optimize`、不进组合基底;
+  **API 使用指南明确:仅供测试/复现/审计,真实实验不可用,用后必须说明**;
+- **窗型与窗参数必须成对**:该轴 `type=none/off` 时写 `window.<轴>.off/end/…`
+  → `SweepError`(历史上会静默空转;基底无 type 时按 sine_bell 渲染并给提示);
+  `baseline.<轴>.order` 而 `mode≠order` → 提示该 order 不生效;
+- **轴效果按条件报**:逐 (workflow, 条件) 比较候选谱与参考谱 SHA-256,逐位相同
+  发 `no_spectrum_change` 警告;run.json 另记 `script_diff`(参考脚本 vs 本脚本,
+  `n_changed` + diff 行)以审计“只改指定行”。
+
 ## 未发布(2026-09-15):组合等同“人工只改脚本里那个参数”
 - 参考运行期决定继承:参考 `params.diagnostics.apply_poly_time`(直接维 DC 偏置
   → 脚本 `nmrPipe -fn POLY -time`)提升为参考基底顶层键 `direct_poly_time`;

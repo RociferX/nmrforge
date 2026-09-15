@@ -355,6 +355,8 @@ Complete provenance + QC(参数三层、脚本/谱哈希、完整日志、版本
 ```python
 # 两种模式(2026-09-14):参考模式生成参考;组合模式必须显式给参考
 run_reference_study(root, dataset=None, *, datasets=None, params=None,
+                    # params 可含 reference_optimize(**仅测试/复现用**,
+                    # 真实实验禁用;见 external-api/05 §5.10)
                     phase_route=None, peaks=None, sigma_multiplier=None,
                     max_peaks=0, localization_method="parabolic",
                     gaussian_roi_f1_ppm=None, gaussian_roi_f2_ppm=None,
@@ -406,7 +408,8 @@ CLI:`python -m nmrforge_api {init,reference,peaks,sweep(=workflows),report,statu
   `parameters_requested`、`parameters_used`、`parameters_resolved`
   (phase 的 `phase_mode`/`actual_p0`/`actual_p1`、SMILE 实际 `nsigma`/`thresh`、
   谱噪声 σ)、`base_script`(参考脚本路径 + SHA-256)、脚本/谱路径 + SHA-256、
-  `peak_tables`(被选中精修方式的路径 + SHA-256 + 行数)、`peak_localization`
+  `peak_tables`(被选中精修方式的路径 + SHA-256 + 行数)、`peak_localization`、
+  `script_diff`(参考脚本 vs 本 workflow 脚本的差异留档),
   (detected/回退/撞边界计数)、`window`(逐轴物理宽度↔点数换算)、`log_path`
   (完整日志)、`versions`(nmrforge/python/依赖/NMRPipe/SMILE)、`status`∈
   {`success`, `success_with_warning`, `failed`}、`warnings`(码 + 计数 + 峰);

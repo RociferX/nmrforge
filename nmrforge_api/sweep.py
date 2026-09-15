@@ -26,6 +26,7 @@ robustness、不做统计推断与显著性判断——那些由下游独立分�
 from __future__ import annotations
 
 import copy
+import difflib
 import hashlib
 import inspect
 import itertools
@@ -77,6 +78,8 @@ WARN_GAUSSIAN_BOUNDARY_HIT = "gaussian_boundary_hit"
 WARN_GAUSSIAN_UNSUPPORTED = "gaussian_unsupported_ndim"
 #: 找不到该 workflow 的完整处理脚本(规范 D1:每个 workflow 必须留完整脚本)
 WARN_SCRIPT_NOT_FOUND = "processing_script_not_found"
+#: 该组合在该条件下没有改变谱(与参考谱逐位相同)→ 参数被忽略或本就无效果
+WARN_NO_SPECTRUM_CHANGE = "no_spectrum_change"
 
 # 相位轴(保留前缀):phase.<轴>.p0|p1 为绝对值,phase_delta.<轴>.p0|p1 为
 # 相对参考相位的偏差(人工相位识别偏差 ±5° 之类)。
@@ -439,6 +442,8 @@ class SweepRun:
     peak_tables: dict[str, dict[str, Any]] = field(default_factory=dict)
     peak_localization: dict[str, Any] = field(default_factory=dict)
     window: dict[str, Any] = field(default_factory=dict)
+    # 参考脚本 vs 本 workflow 脚本的差异(可审计“只改指定行”)
+    script_diff: dict[str, Any] = field(default_factory=dict)
     wall_time_s: float = 0.0
     phase_locked: bool = True
     logs_tail: list[str] = field(default_factory=list)
@@ -492,6 +497,7 @@ class SweepRun:
             "peak_tables": self.peak_tables,
             "peak_localization": self.peak_localization,
             "window": self.window,
+            "script_diff": self.script_diff,
             "wall_time_s": float(self.wall_time_s),
             "phase_locked": bool(self.phase_locked),
             "logs_tail": list(self.logs_tail),
@@ -539,6 +545,7 @@ class SweepRun:
                 for k, v in (data.get("window") or {}).items()
                 if isinstance(v, dict)
             },
+            script_diff=dict(data.get("script_diff") or {}),
             wall_time_s=float(data.get("wall_time_s", 0.0) or 0.0),
             phase_locked=bool(data.get("phase_locked", True)),
             logs_tail=[str(x) for x in (data.get("logs_tail") or [])],
@@ -900,6 +907,10 @@ def plan_sweep(
     n_full = len(resolved)
     inferred = infer_axes(resolved)
     axis_notes = validate_axes(inferred, sampling=reference.sampling)
+    gate_notes, gate_errors = _axis_gate_check(reference, resolved)
+    if gate_errors:
+        raise SweepError("; ".join(gate_errors))
+    axis_notes.extend(gate_notes)
     if len(resolved) > int(max_runs):
         raise SweepError(
             f"参数组合 {len(resolved)} 个超过上限 max_runs={max_runs};"
@@ -1085,6 +1096,88 @@ def _load_run(run_dir: Path) -> SweepRun | None:
     if run.spectrum_path and not Path(run.spectrum_path).is_file():
         return None
     return run
+
+
+#: 窗函数子参数:只有该轴 ``type`` 不是 none/off 时才会渲染(2026-09-16 真机)
+_WINDOW_GATE_SUBKEYS: frozenset[str] = frozenset(
+    {"off", "end", "pow", "c", "lb", "g1", "g2", "g3", "size", "start"}
+)
+
+
+def _script_diff(reference_script: str, candidate_script: Path) -> dict[str, Any]:
+    """参考脚本 vs 本 workflow 脚本的差异留档(审计“只改指定行”这条不变量)。"""
+    try:
+        ref_lines = (
+            Path(str(reference_script)).read_text(encoding="utf-8").splitlines()
+            if reference_script
+            else []
+        )
+        cand_lines = candidate_script.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return {}
+    diff = [
+        line
+        for line in difflib.unified_diff(ref_lines, cand_lines, lineterm="")
+        if line[:1] in "+-" and line[:3] not in ("+++", "---")
+    ]
+    return {
+        "reference_script": str(reference_script),
+        "n_changed": len(diff),
+        "changed_lines": diff[:20],
+    }
+
+
+def _axis_gate_check(
+    reference: ReferenceSpectrum, combos: Sequence[Mapping[str, Any]]
+) -> tuple[list[str], list[str]]:
+    """检查“子参数与门控不匹配”的组合键;返回 (notes, errors)。
+
+    - ``window.<轴>.<子参数>``(off/end/pow/lb/g1/g2…)没带 ``type``,而该轴
+      有效窗型为 ``none``/``off`` → 子参数必然不生效(真机实例:参考窗型为
+      none 时 ``window.F1.off`` 全程空转)→ 报错,要求与窗型成对写;
+      基底没有 ``type`` 时提示(将按默认 sine_bell 渲染)。
+    - ``baseline.<轴>.order`` 而该轴有效 ``mode`` ≠ order → 该 order 不生效
+      (``mode=auto`` 渲染 ``POLY -auto``)→ 提示。
+    """
+    base_window = dict((reference.sweep_params or {}).get("window") or {})
+    base_baseline = dict((reference.sweep_params or {}).get("baseline") or {})
+    notes: list[str] = []
+    errors: list[str] = []
+    for index, combo in enumerate(combos, start=1):
+        keys = {str(key) for key in combo}
+        for key in sorted(keys):
+            parts = key.split(".")
+            if len(parts) != 3:
+                continue
+            root, axis, sub = parts
+            if root == "window" and sub in _WINDOW_GATE_SUBKEYS:
+                if f"window.{axis}.type" in keys:
+                    continue
+                wtype = str((base_window.get(axis) or {}).get("type", "") or "")
+                if wtype in ("none", "off"):
+                    errors.append(
+                        f"组合 {index} 的 {key}: 该轴当前无窗(window.{axis}.type="
+                        f"{wtype}),off/end/pow/lb/g1/g2 不会生效;请写 "
+                        f"window.{axis}.type=… 与参数成对(想无窗就保持 none)"
+                    )
+                elif not wtype:
+                    notes.append(
+                        f"提示: 组合 {index} 只给 {key} 未给 window.{axis}.type,"
+                        "将按默认 sine_bell 渲染(想无窗请显式写 type=none)"
+                    )
+            elif root == "baseline" and sub == "order":
+                combo_mode = combo.get(f"baseline.{axis}.mode")
+                mode = str(
+                    combo_mode
+                    if combo_mode is not None
+                    else (base_baseline.get(axis) or {}).get("mode", "auto")
+                ) or "auto"
+                if mode != "order":
+                    notes.append(
+                        f"提示: 组合 {index} 给了 {key} 但 baseline.{axis}.mode="
+                        f"{mode} ≠ order,该 order 不会生效"
+                    )
+    return notes, errors
 
 
 def _resume_fingerprint(
@@ -1618,6 +1711,16 @@ def _run_condition(
         run.script_path = str(target_script)
         run.script_sha256 = sha256_file(target_script)
         logs.append(f"处理脚本 → {target_script}(源 {script_src})")
+        run.script_diff = _script_diff(reference.script_path, target_script)
+        if run.script_diff.get("n_changed"):
+            logs.append(
+                "脚本差异(参考 → 本 workflow): "
+                f"{run.script_diff['n_changed']} 行; "
+                + " | ".join(
+                    str(line)
+                    for line in (run.script_diff.get("changed_lines") or [])[:6]
+                )
+            )
     else:
         script_warning = {
             "code": WARN_SCRIPT_NOT_FOUND,
@@ -1655,6 +1758,9 @@ def _run_condition(
     shutil.copy2(spectrum_src, target_spectrum)
     run.spectrum_path = str(target_spectrum)
     run.spectrum_sha256 = sha256_file(target_spectrum)
+    # 轴效果按条件报(2026-09-16 用户):与**该条件参考谱**逐位比较
+    reference_sha = str(reference.spectrum_sha256 or "")
+    no_spectrum_change = bool(reference_sha) and run.spectrum_sha256 == reference_sha
 
     # 组合模式(2026-09-14 规范):每个组合在**自己的谱**上,用**参考锁定**的
     # detection 阈值**独立选峰** → 该组合自己的完整峰表;峰与参考峰表的匹配是
@@ -1726,6 +1832,22 @@ def _run_condition(
     warnings: list[dict[str, Any]] = []
     if script_warning is not None:
         warnings.append(script_warning)
+    if no_spectrum_change:
+        warnings.append(
+            {
+                "code": WARN_NO_SPECTRUM_CHANGE,
+                "message": (
+                    f"该组合在条件 {target.condition} 没有改变谱(与参考谱逐位"
+                    f"相同 sha256={reference_sha[:12]}…):该条件这几个参数可能"
+                    "被忽略(如窗型/门控不匹配)或对该数据本来无效果"
+                ),
+                "count": 1,
+                "peaks": [],
+                "localization_method": ",".join(methods),
+                "reference_spectrum_sha256": reference_sha,
+                "spectrum_sha256": run.spectrum_sha256,
+            }
+        )
     for method in methods:
         meta = metas[method]
         if int(meta.get("n_peaks", 0)) == 0:
@@ -1980,6 +2102,7 @@ __all__ = [
     "WARN_GAUSSIAN_FALLBACK",
     "WARN_GAUSSIAN_UNSUPPORTED",
     "WARN_SCRIPT_NOT_FOUND",
+    "WARN_NO_SPECTRUM_CHANGE",
     "locked_detection_sigma",
     "apply_phase_axes",
     "combos_from_rows",

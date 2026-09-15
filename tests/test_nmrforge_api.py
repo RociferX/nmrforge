@@ -2305,3 +2305,126 @@ def test_missing_workflow_script_is_reported_not_silent(
     assert any(w["code"] == "processing_script_not_found" for w in run.warnings)
     assert run.script_path == "" and run.script_sha256 == ""
     assert Path(run.peak_table_path("parabolic")).is_file()   # 峰表仍然产出
+
+
+# ---------------------------------- 2026-09-16:基线渲染口径 + 参考优化开关 + 生效自检
+def test_baseline_order_renders_with_auto_flag(bruker_dir: Path, tmp_path: Path) -> None:
+    """mode=order 必须渲染 ``POLY -ord N -auto``:裸 -ord N 在 NMRPipe 里是恒等。"""
+    from backend.script_generator import generate_process_script
+    from core.planning.method_selector import select_method
+    from nmrforge_api import add_dataset, open_study
+    from workflow.stepwise import read_experiment
+
+    session = open_study(tmp_path / "poly_render", backend=_FakeSweepBackend())
+    add_dataset(session, bruker_dir / "hsqc_2d")
+    experiment = read_experiment(session.manager, "exp_001", "d_001")
+    plan = select_method(experiment)
+    script = generate_process_script(
+        experiment,
+        plan,
+        in_file="d_001.fid",
+        out_file="out.ft2",
+        baseline={
+            "F1": {"enabled": True, "mode": "order", "order": 3},
+            "F2": {"enabled": True, "mode": "auto", "order": 0},
+        },
+    )
+    assert "| nmrPipe -fn POLY -ord 3 -auto" in script      # 频域 order 模式
+    assert "| nmrPipe -fn POLY -auto \\" in script          # auto 模式保持
+    assert "| nmrPipe -fn POLY -ord 3 \\" not in script     # 不允许裸 -ord
+    off = generate_process_script(
+        experiment,
+        plan,
+        in_file="d_001.fid",
+        out_file="out.ft2",
+        baseline={"F1": {"enabled": False, "mode": "order", "order": 3},
+                  "F2": {"enabled": False, "mode": "auto", "order": 0}},
+    )
+    assert "POLY -ord" not in off and "POLY -auto" not in off
+
+
+def test_reference_optimize_switch_is_external_and_recorded(
+    tmp_path: Path, bruker_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """参考优化可用 params.reference_optimize 关闭(仅测试用),且落档、不进组合基底。"""
+    import workflow.baseline_optimize as baseline_optimize
+
+    def explode(*args, **kwargs):
+        raise AssertionError("外部关闭后不应再调用基线优化")
+
+    monkeypatch.setattr(baseline_optimize, "optimize_baseline", explode)
+    backend = _FakeSweepBackend()
+    result = run_reference_study(
+        tmp_path / "ref_opt_off",
+        bruker_dir / "hsqc_2d",
+        params={
+            "phase_route": "none",
+            "baseline": {"F1": {"enabled": False, "mode": "auto", "order": 0}},
+            "reference_optimize": {"baseline": "off", "window": "off"},
+        },
+        backend=backend,
+    )
+    reference = result.reference()
+    assert reference is not None
+    # 开关被记录(可审计),且沿用调用方给的 baseline
+    assert reference.params["reference_optimize"] == {
+        "baseline": "off", "window": "off",
+    }
+    assert reference.params["baseline"]["F1"]["enabled"] is False
+    # 参考阶段的开关不属于处理参数,不得进入组合基底
+    assert "reference_optimize" not in reference.sweep_params
+    assert Path(reference.script_path).is_file()   # 参考脚本照常冻结
+
+
+def test_window_subparam_without_type_is_rejected(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """窗子参数必须与窗型成对:该轴 type=none 时写 off/end/… 直接报错(曾全程空转)。"""
+    from nmrforge_api.reference import save_reference
+
+    backend = _FakeSweepBackend()
+    session = open_study(tmp_path / "window_gate", backend=backend)
+    add_dataset(session, bruker_dir / "hsqc_2d")
+    reference = build_reference(session, params={"phase_route": "none"})
+    reference = ensure_reference_peaks(session, reference)
+    reference.sweep_params["window"] = {"F1": {"type": "none"}, "F2": {"type": "none"}}
+    save_reference(session, reference)
+
+    with pytest.raises(SweepError, match="不会生效"):
+        plan_sweep(reference, combos=[{"window.F1.off": 0.35}])
+    # 成对写 type 就允许
+    plan = plan_sweep(
+        reference,
+        combos=[{"window.F1.type": "sine_bell", "window.F1.off": 0.35}],
+    )
+    assert plan.combos[0]["window.F1.type"] == "sine_bell"
+    # baseline.order 而 mode≠order → 提示(不阻断)
+    plan2 = plan_sweep(reference, combos=[{"baseline.F1.order": 3}])
+    assert any("order 不会生效" in note for note in plan2.notes)
+
+
+def test_no_spectrum_change_warning_and_script_diff(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """参数没改谱 → no_spectrum_change 警告 + script_diff 留档(按条件)。"""
+    backend = _FakeSweepBackend()
+    session = open_study(tmp_path / "no_change", backend=backend)
+    add_dataset(session, bruker_dir / "hsqc_2d")
+    reference = build_reference(session, params={"phase_route": "none"})
+    reference = ensure_reference_peaks(session, reference)
+    # 假后端只按 window.F1.off / zero_fill 改谱 → 这两个都不写就是“没改谱”
+    plan = plan_sweep(reference, combos=[{"baseline.F1.order": 3}])
+    runs = run_sweep(session, plan, reference=reference, resume=False)
+    run = runs[0]
+    assert any(w["code"] == "no_spectrum_change" for w in run.warnings)
+    assert run.status == STATUS_WARNING
+    assert run.script_diff  # 有留档
+    payload = json.loads(Path(run.run_dir, "run.json").read_text(encoding="utf-8"))
+    assert payload["script_diff"]
+
+    # 真的改了参数(假后端按 off 平移峰位)→ 谱变化 → 不再报该警告
+    plan2 = plan_sweep(reference, combos=[{"window.F1.off": 0.45, "zero_fill": 2}])
+    runs2 = run_sweep(session, plan2, reference=reference, resume=False)
+    run2 = runs2[0]
+    assert not any(w["code"] == "no_spectrum_change" for w in run2.warnings)
+    assert run2.script_diff and run2.script_diff["n_changed"] > 0

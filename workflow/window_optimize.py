@@ -582,6 +582,7 @@ def optimize_direct_window_from_work(
     *,
     current: dict[str, Any] | None = None,
     zf_size: int | None = None,
+    candidates: list[dict[str, Any]] | None = None,
 ) -> WindowOptimizeResult:
     """从转换后 fid(work 目录,支持切片流)加载并优化直接维窗,
     不重跑 SMILE/process。SW(谱宽)从 fid 头读取,供 GM/EM 精确建模。"""
@@ -605,6 +606,7 @@ def optimize_direct_window_from_work(
     return optimize_direct_window(
         fid,
         zf_size=zf_size,
+        candidates=candidates,
         current=current,
         sw=_axis_sw(dic, direct_axis, experiment),
     )
@@ -616,6 +618,7 @@ def optimize_indirect_windows_from_work(
     experiment: Experiment,
     *,
     current: dict[str, dict[str, Any]] | None = None,
+    candidates: list[dict[str, Any]] | None = None,
 ) -> MultiWindowOptimizeResult:
     """从转换后 fid 优化 uniform 各间接维窗(内存评分,不重跑 process)。
     各轴 SW 从 fid 头读取,供 GM/EM 精确建模。"""
@@ -638,7 +641,7 @@ def optimize_indirect_windows_from_work(
     axis_map = _uniform_axis_map(experiment)
     sw_map = {axis: _axis_sw(dic, axis, experiment) for axis in axis_map}
     return optimize_indirect_windows(
-        fid, axis_map, current=current, sw_map=sw_map
+        fid, axis_map, candidates=candidates, current=current, sw_map=sw_map
     )
 
 
@@ -648,6 +651,7 @@ def optimize_indirect_windows_from_recon(
     experiment: Experiment,
     *,
     current: dict[str, dict[str, Any]] | None = None,
+    candidates: list[dict[str, Any]] | None = None,
 ) -> MultiWindowOptimizeResult:
     """从 SMILE 重构平面优化 NUS 各间接维窗(内存评分,不重跑 SMILE)。
     各轴 SW 从平面头部读取,供 GM/EM 精确建模。"""
@@ -670,7 +674,7 @@ def optimize_indirect_windows_from_recon(
     axis_map = _nus_axis_map(experiment)
     sw_map = {axis: _axis_sw(dic, axis, experiment) for axis in axis_map}
     return optimize_indirect_windows(
-        planes, axis_map, current=current, sw_map=sw_map
+        planes, axis_map, candidates=candidates, current=current, sw_map=sw_map
     )
 
 

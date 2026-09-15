@@ -1,6 +1,17 @@
 # nmrforge_api 变更记录
 
 
+## 0.5.0(2026-09-16)
+
+**频域基线真正生效 + 参考优化外部开关(仅测试用)+ 轴效果按条件自检。**
+
+- `baseline.<轴>.mode=order` 渲染 `POLY -ord N -auto`(此前裸 `-ord N` 在 NMRPipe
+  里是恒等操作,频域基线实际没做);
+- `params["reference_optimize"]`(`baseline`/`window` = `off`/`auto`/候选集合):
+  关闭或限定参考阶段的自动优化,**仅供测试/复现/审计**;
+- 窗子参数与 `type` 不匹配 → `SweepError`;`baseline.order` 在 `mode≠order` 时给提示;
+- 新警告码 `no_spectrum_change`(该条件参数没改谱);`run.json.script_diff` 留档。
+
 ## 0.4.1(2026-09-15)
 
 **组合运行与参考“同一份输入、同一份脚本差异”。**

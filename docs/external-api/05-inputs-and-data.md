@@ -58,8 +58,9 @@ max_runs: 128
 | 键 | 含义 |
 | --- | --- |
 | `zero_fill` | 填零倍数(只改点距,不改物理峰位) |
-| `window.<轴>.off/end` | 窗函数参数(`window.F1.off` 等) |
-| `baseline` | 基线校正(`{enabled, mode: auto|order, order, axes}`) |
+| `window.<轴>.type` + `off/end/pow/c/lb/g1/g2` | 窗函数:**必须成对给**——`type=none/off` 时该轴不插窗行,子参数会被忽略(API 直接报错);`sine_bell`(`off/end/pow/c`)、`sine_bell_squared`、`gaussian`(`g1/g2`)、`exp`(`lb`) |
+| `baseline` | 基线校正(`{enabled, mode: auto|order, order, axes}`):`mode=order` 渲染 `POLY -ord N -auto`(NMRPipe `-auto` 自动挑基线点,2026-09-16 起真实生效);`mode=auto` 渲染 `POLY -auto`;`mode≠order` 时 `order` 被忽略(API 提示) |
+| `reference_optimize` | **仅测试/复现/审计**用的参考优化开关(见 §5.10);真实实验不要使用 |
 | `ext_lo`/`ext_hi`/`extract` | 提取窗口(确定性参数,一般不必进网格) |
 | `points_per_line` | 目标点距/线宽点数(确定性参数) |
 | `linewidth_hz` | 各核线宽(Hz),影响物理宽度换算的缺省 |
@@ -134,7 +135,37 @@ window.F1.off,window.F2.off,zero_fill.F1,baseline.F2.enabled,points_per_line.F1
   逐轴键(若该轴是直接维);
 - 参考层的逐轴参数(参考谱定义)用参考模式的 `params=`/`direct_range=` 指定,
   组合表里的键只覆盖**该组合**;
-- 未知轴的键(如 `window.F9.off`)不会报错,但也不会生效:请对照上表核对轴名。
+- 未知轴的键(如 `window.F9.off`)不会报错,但也不会生效:请对照上表核对轴名;
+- **窗型与窗参数必须成对**:该轴有效 `type=none/off` 时写 `window.<轴>.off/end/…`
+  会被 `SweepError` 拒绝(真机实例:参考窗型选到 none 后,`window.F1.off`
+  全程没有渲染出任何窗函数行);基底没有 `type` 时给提示(会按默认 sine_bell 渲染)。
+
+## 5.10 参考优化开关(**仅测试/复现/审计;真实实验不可用**)
+
+> ⚠️ **真实实验请保持默认(参考自动优化)**。下面这些开关会关掉/限定参考阶段的
+> 自动优化,使参考不再“自动优化生成”;一旦使用,必须在处理记录与论文方法里
+> 明确写出“参考未做自动优化/优化被限定”,否则参考的合法性不成立。
+
+```python
+run_reference_study(
+    root, dataset,
+    params={
+        "reference_optimize": {
+            "baseline": "off",            # off / auto / {"grid": [["off",0],["auto",1],["order",2],["order",3]]}
+            "window": "off",              # off / auto / {"direct_candidates": [...], "indirect_candidates": [...]}
+        },
+        "baseline": {"F1": {"enabled": False}},   # 关掉优化时,这份配置被终跑直接使用
+        "window": {"F1": {"type": "sine_bell", "off": 0.45, "end": 0.98}},
+    },
+)
+```
+
+- `baseline="off"` / `window="off"`:跳过对应优化器,参考终跑直接用你给的
+  `baseline` / `window` 配置;`{"grid": …}` / `{…_candidates: …}` 只限定候选集合,
+  仍由评分挑最优;
+- 开关原样落档在 `reference.json.params.reference_optimize`(可审计),**不会**
+  进入组合基底(sweep_params);
+- 组合模式(参数扰动阶段)本来就逐组合显式控制窗/基线,不需要这个开关。
 
 
 ## 5.8 直接维范围(可由外部指定)

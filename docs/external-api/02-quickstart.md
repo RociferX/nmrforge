@@ -44,7 +44,11 @@ for run in result.runs:
   `"both"`(两张峰表都出);
 - `run_parameter_study(...)` 仍是一键便利入口(内部 = 参考模式 + 用研究根显式
   调用组合模式),供快速试用;
-- 不需要外部峰表;`peaks=<外部峰表>` 只在研究方另有公开库/已指认峰表时才用。
+- 不需要外部峰表;`peaks=<外部峰表>` 只在研究方另有公开库/已指认峰表时才用;
+- **窗函数与参数必须成对**:`window.<轴>.type` + `off/end/pow/lb/g1/g2`;
+  窗型为 `none` 时写这些子参数会被拒绝(历史上会静默空转);
+- 基线:`baseline.<轴>.mode=order` 现在真实渲染 `POLY -ord N -auto`;
+  `mode=auto` 渲染 `POLY -auto`;某条件没有变化时软件会报 `no_spectrum_change`。
 
 ## 2. 两条件(A/B)同参数
 

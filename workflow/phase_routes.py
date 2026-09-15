@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import shutil
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +22,47 @@ from backend.memory_disk import INTERMEDIATE_SUBDIR
 from backend.runtime import cancel_requested
 from core.data.internal_data_model import Experiment, SamplingMode
 from core.planning.method_selector import select_method
+
+
+def reference_optimize_switches(params: Mapping[str, Any] | None) -> dict[str, Any]:
+    """参考模式优化开关(**仅供测试/复现/审计,正式实验保持默认**)。
+
+    ``params['reference_optimize']``:
+
+    - ``baseline``:``"auto"``(默认)/ ``False`` / ``"off"``(不优化,
+      终跑直接用调用方给的 ``baseline``)/ ``{"grid": [[mode, order], …]}``;
+    - ``window``:``"auto"``(默认)/ ``False`` / ``"off"``(不优化,
+      终跑直接用调用方给的 ``window``)/ ``{"direct_candidates": […],
+      "indirect_candidates": […]}``。
+
+    关闭优化后参考不再“自动优化”,必须在记录/论文里说明(API 使用指南
+    要求真实实验不要使用这些开关)。
+    """
+    return dict((params or {}).get("reference_optimize") or {})
+
+
+def baseline_grid_from_switch(switch: Any) -> list[tuple[str, int]] | None:
+    """``reference_optimize.baseline`` → optimize_baseline(grid=…)。"""
+    if isinstance(switch, Mapping) and switch.get("grid"):
+        grid: list[tuple[str, int]] = []
+        for item in switch["grid"]:
+            grid.append((str(item[0]), int(item[1])))
+        return grid
+    return None
+
+
+def window_candidates_from_switch(
+    switch: Any,
+) -> tuple[list[dict[str, Any]] | None, list[dict[str, Any]] | None]:
+    """``reference_optimize.window`` → (直接维候选, 间接维候选)。"""
+    if isinstance(switch, Mapping):
+        direct = switch.get("direct_candidates")
+        indirect = switch.get("indirect_candidates")
+        return (
+            [dict(c) for c in direct] if direct else None,
+            [dict(c) for c in indirect] if indirect else None,
+        )
+    return None, None
 
 
 def _unlink_quiet(path) -> None:
@@ -982,6 +1023,7 @@ def _optimize_uniform_processing(
     out_logs: list[str] = []
     baseline_cfg = dict(base.get("baseline") or {})
     window_cfg = base.get("window")
+    opt_switches = reference_optimize_switches(base)
     # 1) 联合复核谱:最终相位 + 完整填零,作基线评分基底(process 一次);
     #    窗函数走 FID 内存评分,不消费该谱(0.2.199-补29fg 移除 2.1 重渲);
     #    开启「应用此范围到优化过程」时(0.2.199-补3)评估谱用用户直接维范围
@@ -1010,58 +1052,87 @@ def _optimize_uniform_processing(
         }
     base_path = Path(resp["spectrum_path"])
     # 2) 基线:每轴内存评分(off/auto/order1-3),写回终跑
+    #    外部可用 params.reference_optimize.baseline 关闭/限定候选
+    #    (**仅供测试/复现/审计;正式实验保持默认自动优化**)
     opt = None
-    try:
-        from workflow.baseline_optimize import optimize_baseline
-
-        if progress is not None:
-            progress("基线优化中(内存评分)")
-        opt = optimize_baseline(
-            experiment,
-            base_path,
-            progress=progress,
-            cancel=cancel_requested,
+    baseline_switch = opt_switches.get("baseline", "auto")
+    if baseline_switch in (False, "off"):
+        out_logs.append(
+            "基线优化: 已被外部关闭(params.reference_optimize.baseline=off),"
+            "沿用调用方给的 baseline 配置(仅测试/复现用)"
         )
-        baseline_cfg = dict(opt.baseline)
-        out_logs += opt.logs
-    except Exception as exc:  # noqa: BLE001 - 基线评估失败不影响相位/终跑
-        out_logs.append(f"基线优化(嵌入)失败: {exc}")
+    else:
+        try:
+            from workflow.baseline_optimize import optimize_baseline
+
+            if progress is not None:
+                progress("基线优化中(内存评分)")
+            opt = optimize_baseline(
+                experiment,
+                base_path,
+                grid=baseline_grid_from_switch(baseline_switch),
+                progress=progress,
+                cancel=cancel_requested,
+            )
+            baseline_cfg = dict(opt.baseline)
+            out_logs += opt.logs
+        except Exception as exc:  # noqa: BLE001 - 基线评估失败不影响相位/终跑
+            out_logs.append(f"基线优化(嵌入)失败: {exc}")
     # 0.2.199-补29fk-修:joint/base 谱只作基线评分基底,评分完即删
     _unlink_quiet(base_path)
     # 2.5) 直接维窗函数:FID 直接维迹内存评分(不重跑 process),写回终跑
-    try:
-        from workflow.window_optimize import optimize_direct_window_from_work
-
-        if progress is not None:
-            progress("直接维窗函数优化中(FID 内存评分)")
-        wres = optimize_direct_window_from_work(
-            work, experiment, current=(window_cfg or {}).get(direct_axis)
+    #      外部可用 params.reference_optimize.window 关闭/限定候选
+    #      (**仅供测试/复现/审计;正式实验保持默认自动优化**)
+    window_switch = opt_switches.get("window", "auto")
+    direct_candidates, indirect_candidates = window_candidates_from_switch(
+        window_switch
+    )
+    if window_switch in (False, "off"):
+        out_logs.append(
+            "窗优化: 已被外部关闭(params.reference_optimize.window=off),"
+            "沿用调用方给的 window 配置(仅测试/复现用)"
         )
-        if wres.changed:
-            win = dict(window_cfg or {})
-            win[direct_axis] = wres.choice
-            window_cfg = win
-        out_logs += wres.logs
-    except Exception as exc:  # noqa: BLE001 - 窗优化失败不影响相位/终跑
-        out_logs.append(f"直接维窗优化失败: {exc}")
+    else:
+        try:
+            from workflow.window_optimize import optimize_direct_window_from_work
+
+            if progress is not None:
+                progress("直接维窗函数优化中(FID 内存评分)")
+            win_kwargs: dict[str, Any] = {
+                "current": (window_cfg or {}).get(direct_axis)
+            }
+            if direct_candidates:
+                win_kwargs["candidates"] = direct_candidates
+            wres = optimize_direct_window_from_work(work, experiment, **win_kwargs)
+            if wres.changed:
+                win = dict(window_cfg or {})
+                win[direct_axis] = wres.choice
+                window_cfg = win
+            out_logs += wres.logs
+        except Exception as exc:  # noqa: BLE001 - 窗优化失败不影响相位/终跑
+            out_logs.append(f"直接维窗优化失败: {exc}")
     # 3) 间接维窗函数:FID 间接维时间轴内存评分(候选含无窗,分辨率受限
     #    间接维加分辨率保留因子),写回每轴最优;直接维窗已由 2.5 单独
     #    优化。0.2.190:恢复真实选窗(0.2.189 硬编码固定无窗是对需求的误读)。
-    try:
-        from workflow.window_optimize import optimize_indirect_windows_from_work
+    if window_switch not in (False, "off"):
+        try:
+            from workflow.window_optimize import (
+                optimize_indirect_windows_from_work,
+            )
 
-        if progress is not None:
-            progress("间接维窗函数优化中(FID 内存评分,不重跑 process)")
-        ires = optimize_indirect_windows_from_work(
-            work, experiment, current=window_cfg
-        )
-        if ires.changed:
-            win = dict(window_cfg or {})
-            win.update(ires.choice)
-            window_cfg = win
-        out_logs += ires.logs
-    except Exception as exc:  # noqa: BLE001 - 窗优化失败不影响相位/终跑
-        out_logs.append(f"间接维窗优化失败: {exc}")
+            if progress is not None:
+                progress("间接维窗函数优化中(FID 内存评分,不重跑 process)")
+            win_kwargs = {"current": window_cfg}
+            if indirect_candidates:
+                win_kwargs["candidates"] = indirect_candidates
+            ires = optimize_indirect_windows_from_work(work, experiment, **win_kwargs)
+            if ires.changed:
+                win = dict(window_cfg or {})
+                win.update(ires.choice)
+                window_cfg = win
+            out_logs += ires.logs
+        except Exception as exc:  # noqa: BLE001 - 窗优化失败不影响相位/终跑
+            out_logs.append(f"间接维窗优化失败: {exc}")
 
     return {
         "baseline": baseline_cfg,
@@ -1102,6 +1173,7 @@ def _optimize_nus_processing(
     out_logs: list[str] = []
     baseline_cfg = dict(base.get("baseline") or {})
     window_cfg = base.get("window")
+    opt_switches = reference_optimize_switches(base)
     # 1) 联合复核谱:间接维最终相位 + 完整填零,作基线评分基底
     #    (窗函数走 recon/FID 内存评分,不消费该谱;0.2.199-补29fg 移除 2.1 重渲)
     joint_file = f"{experiment.dataset_id}_joint.{ext}"
@@ -1128,62 +1200,95 @@ def _optimize_nus_processing(
         }
     base_path = Path(resp["spectrum_path"])
     # 2) 基线:每轴内存评分(off/auto/order1-3),写回终跑完整脚本
+    #    外部可用 params.reference_optimize.baseline 关闭/限定候选
+    #    (**仅供测试/复现/审计;正式实验保持默认自动优化**)
     opt = None
-    try:
-        from workflow.baseline_optimize import optimize_baseline
-
-        if progress is not None:
-            progress("基线优化中(内存评分)")
-        opt = optimize_baseline(
-            experiment,
-            base_path,
-            progress=progress,
-            cancel=cancel_requested,
+    baseline_switch = opt_switches.get("baseline", "auto")
+    if baseline_switch in (False, "off"):
+        out_logs.append(
+            "基线优化: 已被外部关闭(params.reference_optimize.baseline=off),"
+            "沿用调用方给的 baseline 配置(仅测试/复现用)"
         )
-        baseline_cfg = dict(opt.baseline)
-        out_logs += opt.logs
-    except Exception as exc:  # noqa: BLE001 - 基线评估失败不影响相位/终跑
-        out_logs.append(f"基线优化(嵌入)失败: {exc}")
+    else:
+        try:
+            from workflow.baseline_optimize import optimize_baseline
+
+            if progress is not None:
+                progress("基线优化中(内存评分)")
+            opt = optimize_baseline(
+                experiment,
+                base_path,
+                grid=baseline_grid_from_switch(baseline_switch),
+                progress=progress,
+                cancel=cancel_requested,
+            )
+            baseline_cfg = dict(opt.baseline)
+            out_logs += opt.logs
+        except Exception as exc:  # noqa: BLE001 - 基线评估失败不影响相位/终跑
+            out_logs.append(f"基线优化(嵌入)失败: {exc}")
     # 0.2.199-补29fk-修:joint/base 谱只作基线评分基底,评分完即删
     _unlink_quiet(base_path)
     # 2.5) 直接维窗函数:FID 直接维迹内存评分(不重跑 SMILE 重构),
     #      分辨率优先 + 信噪比/线形平衡,写回终跑 step1 SP
-    try:
-        from workflow.window_optimize import optimize_direct_window_from_work
-
-        if progress is not None:
-            progress("直接维窗函数优化中(FID 内存评分,不重跑 SMILE)")
-        wres = optimize_direct_window_from_work(
-            work, experiment, current=(window_cfg or {}).get(direct_axis)
+    #      外部可用 params.reference_optimize.window 关闭/限定候选
+    #      (**仅供测试/复现/审计;正式实验保持默认自动优化**)
+    window_switch = opt_switches.get("window", "auto")
+    direct_candidates, indirect_candidates = window_candidates_from_switch(
+        window_switch
+    )
+    if window_switch in (False, "off"):
+        out_logs.append(
+            "窗优化: 已被外部关闭(params.reference_optimize.window=off),"
+            "沿用调用方给的 window 配置(仅测试/复现用)"
         )
-        out_logs += wres.logs
-        if wres.changed:
-            # 0.2.199-补11:NUS 直接维窗固定 SP(SMILE 要求直接维加窗且尾部
-            # 衰减),窗候选不覆盖直接维;结果仅 uniform 路径使用
-            out_logs.append(
-                "直接维窗: NUS SMILE 要求直接维加窗(SP),候选不覆盖直接维,"
-                "保持默认 SP"
+    else:
+        try:
+            from workflow.window_optimize import (
+                optimize_direct_window_from_work,
             )
-    except Exception as exc:  # noqa: BLE001 - 窗优化失败不影响相位/终跑
-        out_logs.append(f"直接维窗优化失败: {exc}")
+
+            if progress is not None:
+                progress("直接维窗函数优化中(FID 内存评分,不重跑 SMILE)")
+            win_kwargs: dict[str, Any] = {
+                "current": (window_cfg or {}).get(direct_axis)
+            }
+            if direct_candidates:
+                win_kwargs["candidates"] = direct_candidates
+            wres = optimize_direct_window_from_work(work, experiment, **win_kwargs)
+            out_logs += wres.logs
+            if wres.changed:
+                # 0.2.199-补11:NUS 直接维窗固定 SP(SMILE 要求直接维加窗且尾部
+                # 衰减),窗候选不覆盖直接维;结果仅 uniform 路径使用
+                out_logs.append(
+                    "直接维窗: NUS SMILE 要求直接维加窗(SP),候选不覆盖直接维,"
+                    "保持默认 SP"
+                )
+        except Exception as exc:  # noqa: BLE001 - 窗优化失败不影响相位/终跑
+            out_logs.append(f"直接维窗优化失败: {exc}")
     # 3) 间接维窗函数:SMILE 重构平面(F1/F2 时间域)内存评分,候选含无窗,
     #    不重跑 SMILE;直接维窗已由 2.5 单独优化。0.2.190:恢复真实选窗
     #    (0.2.189 硬编码固定无窗是对需求的误读)。
-    try:
-        from workflow.window_optimize import optimize_indirect_windows_from_recon
+    if window_switch not in (False, "off"):
+        try:
+            from workflow.window_optimize import (
+                optimize_indirect_windows_from_recon,
+            )
 
-        if progress is not None:
-            progress("间接维窗函数优化中(重构平面内存评分,不重跑 SMILE)")
-        ires = optimize_indirect_windows_from_recon(
-            work, experiment, current=window_cfg
-        )
-        if ires.changed:
-            win = dict(window_cfg or {})
-            win.update(ires.choice)
-            window_cfg = win
-        out_logs += ires.logs
-    except Exception as exc:  # noqa: BLE001 - 窗优化失败不影响相位/终跑
-        out_logs.append(f"间接维窗优化失败: {exc}")
+            if progress is not None:
+                progress("间接维窗函数优化中(重构平面内存评分,不重跑 SMILE)")
+            win_kwargs = {"current": window_cfg}
+            if indirect_candidates:
+                win_kwargs["candidates"] = indirect_candidates
+            ires = optimize_indirect_windows_from_recon(
+                work, experiment, **win_kwargs
+            )
+            if ires.changed:
+                win = dict(window_cfg or {})
+                win.update(ires.choice)
+                window_cfg = win
+            out_logs += ires.logs
+        except Exception as exc:  # noqa: BLE001 - 窗优化失败不影响相位/终跑
+            out_logs.append(f"间接维窗优化失败: {exc}")
 
     return {
         "baseline": baseline_cfg,

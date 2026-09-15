@@ -112,6 +112,7 @@ fit_success, FWHM_H, FWHM_N, fit_rmse, boundary_hit
 | `peak_tables` | 被选中精修方式的峰表路径 + SHA-256 + 行数 + detected 数 |
 | `peak_localization` | 各方法 n_peaks/n_detected/n_missing/n_fallback/fallback_reasons/n_boundary_hit |
 | `window` | 选峰边距:物理宽度、等效点数、点距、来源 |
+| `script_diff` | 参考脚本 vs 本 workflow 脚本的差异(`n_changed` + 前 20 行 diff):用于审计“只改组合表指定的那几行” |
 | `log_path` | 完整日志路径 |
 | `versions` | nmrforge / python / 依赖 / NMRPipe / SMILE(真机登记后) |
 | `status` / `warnings` / `message` | 三值状态 + 警告码与计数 |
@@ -128,6 +129,7 @@ fit_success, FWHM_H, FWHM_N, fit_rmse, boundary_hit
 | --- | --- |
 | `peak_count_zero` | 该组合在锁定阈值下一个峰都没检出(检查阈值/数据) |
 | `processing_script_not_found` | 没找到该 workflow 的完整处理脚本(运行目录里 `process.com` 缺失);处理结果与峰表仍有效,但脚本溯源不完整,需检查后端落盘位置 |
+| `no_spectrum_change` | 该组合在**该条件**下没有改变谱(与参考谱逐位相同):说明这几个参数在该数据上被忽略(窗型/门控不匹配等)或本来无效果;正式 plan 不应把该轴当成真实扰动 |
 | `gaussian_fallback` | 高斯拟合失败/回退抛物线(逐峰原因落表) |
 | `gaussian_boundary_hit` | 高斯中心/宽度撞拟合边界 |
 

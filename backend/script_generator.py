@@ -710,7 +710,10 @@ def _stage_lines(
                 continue
             if str(cfg.get("mode", "auto")) == "order":
                 order = max(1, int(cfg.get("order", 1) or 1))
-                lines.append(f"| nmrPipe -fn POLY -ord {order} \\")
+                # 2026-09-16(真机):NMRPipe 裸 ``POLY -ord N`` 没有基线节点
+                # (-nc 0 且无 -first/-last)→ 恒等操作;必须带 -auto 才会
+                # 自动挑基线点拟合,且 -ord N 生效。
+                lines.append(f"| nmrPipe -fn POLY -ord {order} -auto \\")
             else:
                 lines.append("| nmrPipe -fn POLY -auto \\")
         else:
@@ -1788,7 +1791,8 @@ def _baseline_line(
         return []
     if str(cfg.get("mode", "auto")) == "order":
         order = max(1, int(cfg.get("order", 1) or 1))
-        return [f"| nmrPipe -fn POLY -ord {order} \\"]
+        # 与 uniform 同一口径:裸 -ord N 恒等,必须 -auto(2026-09-16)。
+        return [f"| nmrPipe -fn POLY -ord {order} -auto \\"]
     return ["| nmrPipe -fn POLY -auto \\"]
 
 
