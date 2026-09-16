@@ -1,7 +1,51 @@
-# 修改记录(历史条目)
+# 变更记录 (Changelog)
+
+格式自 2026-09-16 起按 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 组织;
+版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
+
+- `## [Unreleased]` 汇总公开发布准备周期的工作;
+- 其下的 `### 未发布(日期)` 条目为按期保留的开发历史,不重写、不合并;
+- `## [x.y.z]` 为历史版本条目。
+
+命名说明:仓库目录与早期记录使用 "旧名",发行包名、AppImage 与 `pyproject.toml`
+使用 "NMRForge"。命名统一是公开发布前的待决事项,见 `PUBLIC_RELEASE_AUDIT.md`。
+
+## [Unreleased]
+
+### Added
+
+- 公开发布准备文档:`PUBLIC_RELEASE_AUDIT.md`(审计报告)、`THIRD_PARTY.md`(第三方依赖与
+  许可清单,含 PyQt6 GPL-3.0-only 阻塞项)、`LICENSE_OPTIONS.md`(许可证候选分析,不代替
+  决策)、`CONTRIBUTING.md`、`SECURITY.md`、`CODE_OF_CONDUCT.md`、
+  `RELEASE_CHECKLIST_v0.9.0.md`、`.zenodo.json`、`CITATION.cff`(作者信息待定);
+- CI 与协作模板:`.github/workflows/ci.yml`(静态检查 + Python 3.12/3.13 测试矩阵 +
+  发布就绪检查;真机 NMRPipe 验证保留为自托管作业)、Issue 模板(缺陷/功能/数据处理问题)
+  与 PR 模板;
+- 可运行示例:`examples/make_synthetic_dataset.py`(生成 2D/3D 合成 Bruker 数据集)、
+  `examples/quickstart.py`(不依赖 NMRPipe 的数据理解与 QC 走查);
+- 公开文档:`docs/` 下的 getting-started / installation / gui / cli / python-api /
+  processing-model / qc-system / peak-picking / batch-processing / troubleshooting /
+  external-dependencies / faq;
+- `tests/test_release_readiness.py`:锁定单一版本源、公共文档链接可解析、运行期包内无开发机
+  绝对路径、CI 配置有效、模板齐备、示例可编译、许可证状态显式、第三方清单可追溯、
+  fixtures 无原始 NMR 二进制数据;
+- `benchmarks/`:基准框架(运行时/可靠性/测量质量三类指标与 CSV 输出约定),不含编造结果。
+
+### Changed
+
+- `README.md` 重写为公开发布口径:AppImage 为用户推荐安装方式,pip 安装明确为开发用途;
+  补充能力边界、流程示意(Mermaid)、QC 与溯源说明;
+- `docs/README.md` 增加公开文档入口;
+- `.gitignore` 补充虚拟环境、构建产物、打包产物、覆盖率、编辑器临时文件等条目
+  (不删除任何已跟踪的测试 fixture);
+- `pyproject.toml` 增加可选依赖分组与项目链接元数据(不改变运行期依赖与入口点)。
+
+### Fixed
+
+- 公开发布准备周期内未改动处理行为;本周期内的处理修复见下方按期条目。
 
 
-## 未发布(2026-09-16):频域基线真正生效 + 外部开关 + 轴效果按条件自检
+### 未发布(2026-09-16):频域基线真正生效 + 外部开关 + 轴效果按条件自检
 - **POLY 口径修正**:NMRPipe 裸 `POLY -ord N` 默认 `-nc 0` 且无 `-first/-last`
   → 无基线节点 → **恒等操作**(真机逐位验证:no_poly 与 `-ord 3` md5 相同);
   现在 `mode=order` 渲染 `POLY -ord N -auto`(真机:`-auto -ord 1/3` 都改数,
@@ -18,7 +62,7 @@
   发 `no_spectrum_change` 警告;run.json 另记 `script_diff`(参考脚本 vs 本脚本,
   `n_changed` + diff 行)以审计“只改指定行”。
 
-## 未发布(2026-09-15):组合等同“人工只改脚本里那个参数”
+### 未发布(2026-09-15):组合等同“人工只改脚本里那个参数”
 - 参考运行期决定继承:参考 `params.diagnostics.apply_poly_time`(直接维 DC 偏置
   → 脚本 `nmrPipe -fn POLY -time`)提升为参考基底顶层键 `direct_poly_time`;
   老参考自动补齐,组合显式给值仍优先;
@@ -30,7 +74,7 @@
 - 真机:组合只写与参考相同的值时脚本与参考逐行一致(仅候选输出名不同),
   改一个参数时差异恰好只有那一行;VM 全量 `1090 passed, 19 skipped`。
 
-## 未发布(2026-09-15):最新 API 复核问题 1–4
+### 未发布(2026-09-15):最新 API 复核问题 1–4
 - 多条件组合不再复制主条件的处理基底:每个条件按“自己的参考有效参数 →
   批次 `base_overrides` → 当前组合”合并,续跑指纹使用同一份最终输入;
 - 满采样 `nuslist` 改为校验唯一的一维坐标集合是否严格覆盖 0-based 或 1-based
@@ -41,7 +85,7 @@
 - 破坏性收口:`SweepPlan` / `plan_sweep()` 删除绝对 `base_params`,只保留逐条件
   叠加的 `base_overrides`;旧计划文件与旧调用签名不保证兼容。
 
-## 未发布(2026-09-14):组合模式改为独立选峰(阈值锁定参考 + 精修方式外部选)
+### 未发布(2026-09-14):组合模式改为独立选峰(阈值锁定参考 + 精修方式外部选)
 - 组合模式不再按参考峰表逐峰跟踪:每个组合在自己的候选谱上用**参考锁定阈值**
   独立选峰 → 该组合自己的完整峰表(`peak_id` = 本谱序号;`reference_peak_id` /
   `assignment` 留空,匹配交给下游);旧口径(`detected=false` 保留行、峰位搜索
@@ -55,25 +99,25 @@
   `--edge-margin-ppm`;
 - 文档 01-08/10 + 对外接口 CHANGELOG + API_CONTRACT 同步;本地全量 + ruff 全绿。
 
-## 未发布(2026-09-14):逐峰 2D 高斯拟合提速
+### 未发布(2026-09-14):逐峰 2D 高斯拟合提速
 - 解析式雅可比(迭代成本约 1/7,数学等价);拟合窗口每轴半宽上限
   (`peaks.localization.gaussian_roi_max_points`,默认 48 点,触发留档);
   `gaussian_max_nfev` 默认 400→200(解析雅可比下 ≈200 迭代,比原 ~57 迭代更宽松);
 - 真机(248 峰):1× 2.04→1.52 s、2× 3.93→2.28 s,峰位差 ≤3e-05 ppm、回退计数不变;
   文档 05/06/07 + 对外接口 CHANGELOG;测试 +3。
 
-## 未发布(2026-09-14):逐维参数(填零/目标数字分辨率)
+### 未发布(2026-09-14):逐维参数(填零/目标数字分辨率)
 - `zero_fill.<轴>=k` 语义修正为 **k×TD**(与全局 zero_fill=k 同义;此前被当成
   显式 SI=k);显式 SI 用 `zero_fill.<轴>.size=N`;
 - `points_per_line` 支持逐轴映射 `{"F1": 2.0, "F2": 4.0}`(resolve 透传,
   zero_fill_plan 逐轴取值);script-only 路径对映射取标量不崩;
 - 文档 05-inputs §5.9「按维指定参数」;测试 +4。
 
-## 未发布(2026-09-14):组合表空单元格 = 未指定
+### 未发布(2026-09-14):组合表空单元格 = 未指定
 - 参数组合表 CSV 留空 / YAML-JSON 写 `null` → 该行不覆盖该参数(沿用参考基底),
   不再被当成「覆盖成空值」(真机发现:基值被清空且标成 source=combo)。
 
-## 未发布(2026-09-14):直接维范围可由外部指定
+### 未发布(2026-09-14):直接维范围可由外部指定
 - 对外接口两个模式都支持 `direct_range=(high_ppm, low_ppm)`(反序自动换回)、
   dict 写法或显式 `ext_lo=`/`ext_hi=`;公开 `parse_direct_range()`/`DirectRange`;
 - 参考模式:范围变化 → 重建参考谱 + 重测两张参考峰表;组合模式:范围覆盖 workflow
@@ -83,7 +127,7 @@
 - CLI:`reference/sweep --direct-range HIGH LOW`;文档 03/04/05/06 + CHANGELOG;
   测试 +3。
 
-## 未发布(2026-09-14):对外接口拆成参考模式 / 组合模式
+### 未发布(2026-09-14):对外接口拆成参考模式 / 组合模式
 - 新增 `run_reference_study()`(参考模式:参考谱 + 脚本 + 两张参考峰表,
   写 `records/reference.json`;选峰阈值在此确定并锁定)与
   `run_combination_study(reference, ...)`(组合模式:**必须显式指定参考**,
@@ -93,7 +137,7 @@
 - CLI `sweep` 新增必填 `--reference`;`run_parameter_study` 保留为一键便利入口;
 - 文档 02/03/04/06/README + API_CONTRACT §11.2 同步;测试 +3。
 
-## 未发布(2026-09-14):满采样(含标注 NUS)按 uniform 处理
+### 未发布(2026-09-14):满采样(含标注 NUS)按 uniform 处理
 - 采样检测新增实际采样判定:`nuslist` 覆盖全格,或 2D `ser` 全格无零行 →
   `sampling=uniform` + `schedule=full_sampling` + 证据;处理走常规 FT,不跑 SMILE;
 - 前后端共用 `core.data.nus_reader.scan_dense_2d`(backend
@@ -104,7 +148,7 @@
 - 测试:`tests/test_2d_nus_compat.py` 新增满采样/nuslist 全格/子集用例,
   `tests/test_nmrforge_api.py` 新增「伪装成 NUS 的满采样走 uniform」端到端用例。
 
-## 未发布(2026-09-14):选峰阈值(生成参考时可选,随后锁定)
+### 未发布(2026-09-14):选峰阈值(生成参考时可选,随后锁定)
 - 参考峰表选峰阈值(噪声 σ 倍数,缺省 35σ)在**生成参考时**可由外部指定:
   API `pick_reference_peaks`/`ensure_reference_peaks`/`run_parameter_study` 的
   `sigma_multiplier=`,CLI `peaks --sigma N`;
@@ -117,7 +161,7 @@
   阈值写进 workflow 组合表 → `SweepError`;阈值过高无峰时明确报错;
 - 新增/改写 6 项回归(`tests/test_nmrforge_api.py`),文档 03/04/05/06/07 同步。
 
-## 未发布(2026-09-14):API 改造对软件本体影响审计
+### 未发布(2026-09-14):API 改造对软件本体影响审计
 - 以 API 引入前提交 `2670108` 为基线复核本体改动;确认本体不依赖
   `nmrforge_api`,候选输出隔离、`nSigma` 别名、公开读取封装、峰定位扩展和打包
   清单等改动边界成立;
@@ -132,7 +176,7 @@
   完成、60 个参考峰在两种定位中全部检出;真实 2D NUS API 的 nSigma 3/7 两组
   均完成、4 个参考峰全部检出;GUI 同源 SMILE 排名入口完成 2/2 候选并产出排名。
 
-## 未发布(2026-09-13):对外接口规范更新(nmrforge_api v0.2)
+### 未发布(2026-09-13):对外接口规范更新(nmrforge_api v0.2)
 - 按用户 2026-09-13 规范重做对外接口的输出模型:参考工作流 = 1 脚本 +
   2 张参考峰表;每个参数组合 = `workflow_id`(`W0001…`),目录
   `study/workflows/<id>/<条件>/`,含完整脚本、候选谱、两张统一峰表、完整
@@ -158,7 +202,7 @@
   提交为 `e4680af`;上述 7 项修复后续提交为 `b3e9e84`,并与本体修复
   `9c8ffeb` 一起完成 VM 复验(见 2026-09-14 条目)。
 
-## 未发布(2026-09-13):工程约定与工作区清理
+### 未发布(2026-09-13):工程约定与工作区清理
 - 记录强制原则(用户):**home 根目录不放测试**——测试产物进
   `~/nmrforge-test-artifacts/`(VM)或 `$TMPDIR`;维护脚本进仓库 `scripts/`;
   一次性脚本用完即删(留存归档 `~/archive/<日期>/`);venv 只用项目自带的
@@ -169,7 +213,7 @@
   脚本(归档到 `~/archive/scratch-2026-09/`)与无用 venv `~/nmr_venv`(450M);
   `scripts/vm_validate_nus_indirect_equiv.py` 的解释器说明改用项目 venv;
 
-## 未发布(2026-09-12):参数敏感性研究接口(nmrforge_api v0.1)
+### 未发布(2026-09-12):参数敏感性研究接口(nmrforge_api v0.1)
 - 新增顶层包 `nmrforge_api`:给下游独立研究项目的无 Qt 对外接口,当前服务
   「不同处理参数组合对 2D 谱峰位置的影响 / CSP 判据下限」研究;公开面含
   `run_parameter_study`(一步式)与 `open_study`/`add_dataset`/`build_reference`/
@@ -231,7 +275,7 @@
   测到,`peaks.source=auto` + 峰表哈希进 manifest;Δδ_std median 0.00059 ppm
 (与公开库 138 峰指认表的 0.0035 ppm 对比,说明峰集来源会影响下限估计)。
 
-## 未发布(2026-09-12):文档重组与全项目审查问题台账
+### 未发布(2026-09-12):文档重组与全项目审查问题台账
 - 新增 `docs/README.md` 作为文档统一入口，区分当前事实、当前任务、长期记忆与历史档案；
 - 新增 `docs/reviews/2026-09-12-project-audit.md`，用稳定 ID 记录 17 项 bug、逻辑矛盾、设计分叉和残留，包含优先级、证据、修复方向与验收条件；
 - 将原 `docs/tasks/current.md` 的 1750 行已完成历史原样归档，当前任务页缩减为本轮整改状态；
