@@ -1667,7 +1667,9 @@ def _run_condition(
         response = {
             "success": False,
             "message": f"{type(exc).__name__}: {exc}",
-            "logs": logs,
+            # 快照而非别名:下面 logs.extend(response["logs"]) 若拿到同一个列表
+            # 会自我追加无限增长(Phase 12 失败隔离回归发现的 MemoryError)。
+            "logs": list(logs),
         }
     run.wall_time_s = round(time.perf_counter() - started, 3)
     logs.extend(str(line) for line in (response.get("logs") or []))

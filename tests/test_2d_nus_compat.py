@@ -423,3 +423,27 @@ def test_smile_scan_runs_chosen_mode_once(tmp_path: Path, monkeypatch) -> None:
     # 两种口径下,上榜脚本都是全采样(重跑用)
     for scan in (scan_full, scan_ho):
         assert "nuslist_train" not in scan["candidates"][0]["script"]
+
+
+# ---------------------------------------- Phase 12:采样检测回归(metadata vs 实际)
+def test_metadata_nus_full_cartesian_degrades_to_uniform(
+    tmp_path: Path,
+) -> None:
+    """metadata 声称 NUS、实际 complete Cartesian → 降级 uniform。
+
+    同一份 Bruker 元数据(NusAMOUNT=25 / NusTD)只改 ``ser`` 是否全格非零:
+    全格 → 判定满采样走 uniform;少一个复点 → 仍按 NUS(不能把「有数据」
+    当成满采样,这是 2026-09-14 用户裁定的边界)。
+    """
+    complete = _make_2d_nus_dataset(tmp_path, rows=256, keep=list(range(128)))
+    exp_dense = read_dataset(complete)
+    assert exp_dense.sampling.mode.value == "uniform"
+    assert exp_dense.sampling.schedule_type == "full_sampling"
+    assert exp_dense.sampling.sampling_fraction == pytest.approx(1.0)
+    assert any("满采样" in line for line in exp_dense.sampling.evidence)
+
+    incomplete = _make_2d_nus_dataset(tmp_path, rows=256, keep=list(range(127)))
+    exp_sparse = read_dataset(incomplete)
+    assert exp_sparse.sampling.mode.value == "nus"
+    assert exp_sparse.sampling.schedule_type == "params"
+    assert not any("满采样" in line for line in exp_sparse.sampling.evidence)

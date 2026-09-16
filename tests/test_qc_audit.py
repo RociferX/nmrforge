@@ -230,3 +230,42 @@ def test_source_clean_without_bad_points_records_nothing(
     log = QcAuditLog(tmp_path)
     _record_source_clean(log, experiment, [bruker_dir / "nus_2d"], 146, [], False)
     assert read_audit(tmp_path) == []
+
+
+def test_bad_point_repair_writes_audit_file_end_to_end(
+    tmp_path: Path, nmrpipe_fid_template: Path, bruker_dir: Path
+) -> None:
+    """端到端:诊断真正改盘时,处理工作目录里出现 qc_audit.jsonl(Phase 10 核心承诺)。
+
+    与 ``test_direct_diagnostics.py`` 共用 ``nmrpipe_fid_template`` 夹具,因此
+    这条链路在任何机器(含 VM/CI)都会执行。
+    """
+    import numpy as np
+
+    from core.data.bruker_reader import read_dataset
+    from workflow.direct_diagnostics import _read_fid_raw, run_direct_diagnostics
+
+    fid = tmp_path / "nus_2d.fid"
+    fid.write_bytes(nmrpipe_fid_template.read_bytes())
+    got = _read_fid_raw(fid)
+    assert got is not None
+    data, fdsize, _specnum, header = got
+    row = int(np.argmax(np.sum(np.abs(data) ** 2, axis=1)))
+    raw = bytearray(fid.read_bytes())
+    re_off = header + row * fdsize * 8 + 128 * 4
+    spike = complex(data[row, 128]) * 40.0
+    np.frombuffer(raw, dtype="<f4", offset=re_off, count=1)[0] = spike.real
+    np.frombuffer(raw, dtype="<f4", offset=re_off + fdsize * 4, count=1)[0] = spike.imag
+    fid.write_bytes(bytes(raw))
+
+    experiment = read_dataset(bruker_dir / "nus_2d")
+    result = run_direct_diagnostics(tmp_path, experiment)
+    assert result.repaired_badpoints >= 1
+    assert audit_path(tmp_path).is_file(), "改动必须落结构化记录"
+
+    actions = read_audit(tmp_path)
+    action = next(a for a in actions if a.extra.get("row") == row)
+    assert action.action_taken == "neighbour_interpolation"
+    assert action.before_state["count"] >= 1
+    assert action.detection_rule
+    assert action.timestamp and action.software_version

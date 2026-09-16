@@ -37,6 +37,14 @@
 | Python 环境 | 用项目自己的 venv(`~/NMRForge/nmrforge`);不要在 home 另建 venv |
 | 研究/数据产物 | 各自项目目录内(如 `~/nmr-uncertainty/studies/`),不要放 home 根 |
 
+**测试夹具纪律(强制,2026-09-16,Phase 12)**:测试**不得**依赖开发机上的绝对路径文件
+(例如某个开发机上的绝对路径)。这类依赖不会报错,只会让整组
+用例在 VM/CI 上被 `skipif` 静默跳过,等于没有测试。需要真实文件布局时,在
+`tests/conftest.py` 里用合成数据复刻布局,并在夹具内部断言解析器确实接受它。示例:
+`nmrpipe_fid_template`(2D NMRPipe fid:`FDDIMCOUNT=2`、`FDQUADFLAG=0`、
+**`FDF2QUADFLAG=0`**、2048 字节头 + 每迹实部块/虚部块),触点清单见
+`docs/manager/project_map.md` §5.16。
+
 清理检查(VM):
 
 ```bash

@@ -2429,3 +2429,61 @@ def test_no_spectrum_change_warning_and_script_diff(
     run2 = runs2[0]
     assert not any(w["code"] == "no_spectrum_change" for w in run2.warnings)
     assert run2.script_diff and run2.script_diff["n_changed"] > 0
+
+
+# ------------------------------------- Phase 12:批量失败隔离 + requested vs actual
+def test_sweep_failure_is_isolated_and_parameters_recorded(
+    tmp_path: Path, bruker_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """单个 workflow 失败不吞掉其它 workflow;失败/成功两类都留 requested/actual。
+
+    Phase 12「Batch: failure isolation + requested vs actual parameters」:
+    第一个 workflow 的后端处理抛错,第二个必须继续跑;run.json 里 requested
+    始终是用户原样参数,used 是合并后的实际参数(两类运行都要能审计)。
+    """
+    backend = _FakeSweepBackend()
+    session = open_study(tmp_path / "isolation", backend=backend)
+    add_dataset(session, bruker_dir / "hsqc_2d")
+    reference = build_reference(session, params={"phase_route": "none"})
+    reference = ensure_reference_peaks(session, reference)
+    plan = plan_sweep(
+        reference, combos=[{"zero_fill.F1": 1}, {"zero_fill.F1": 2}]
+    )
+
+    real_process = backend.process
+    calls = {"n": 0}
+
+    def flaky_process(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("forced workflow failure")
+        return real_process(*args, **kwargs)
+
+    monkeypatch.setattr(backend, "process", flaky_process)
+    runs = run_sweep(session, plan, reference=reference, resume=False)
+
+    assert len(runs) == 2
+    assert calls["n"] == 2, "失败后必须继续执行后面的 workflow(隔离)"
+    failed, ok = runs
+    assert failed.status == "failed"
+    assert "forced workflow failure" in failed.message
+    assert ok.status in ("success", "success_with_warning")
+
+    # requested = 用户原样;used = 合并后的实际参数(失败也保留)
+    assert failed.parameters_requested == {"zero_fill.F1": 1}
+    assert ok.parameters_requested == {"zero_fill.F1": 2}
+    assert failed.parameters_used["zero_fill"]["F1"] == 1
+    assert ok.parameters_used["zero_fill"]["F1"] == 2
+
+    failed_payload = json.loads(
+        Path(failed.run_dir, "run.json").read_text(encoding="utf-8")
+    )
+    assert failed_payload["status"] == "failed"
+    assert failed_payload["parameters_requested"] == {"zero_fill.F1": 1}
+    assert failed_payload["parameters_used"]["zero_fill"]["F1"] == 1
+    assert not failed.peak_table_path("parabolic")
+
+    ok_payload = json.loads(Path(ok.run_dir, "run.json").read_text(encoding="utf-8"))
+    assert ok_payload["status"] in ("success", "success_with_warning")
+    assert ok_payload["parameters_used"]["zero_fill"]["F1"] == 2
+    assert Path(ok.peak_table_path("parabolic")).is_file()

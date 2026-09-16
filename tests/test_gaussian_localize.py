@@ -485,3 +485,42 @@ def test_localization_defaults_expose_fit_budget_keys() -> None:
     )
     assert broken["gaussian_roi_max_points"] == lz.DEFAULT_GAUSSIAN_ROI_MAX_POINTS
     assert broken["gaussian_max_nfev"] == lz.DEFAULT_GAUSSIAN_MAX_NFEV
+
+
+# ------------------------------------------------ Phase 12:弱峰定位边界
+@pytest.mark.parametrize("amp", [2.0, 1.0])
+def test_weak_peak_never_silently_fabricates_a_fit(amp: float) -> None:
+    """弱峰(峰高与噪声 σ=0.5 同量级):要么成功并给出正宽度,要么回退写明原因。
+
+    1.0 高度时检测极大值可能落在噪声点上,拟合必然失败——此时必须回退抛物线
+    并把 ``fallback_reason`` 留档,绝不能返回一个看起来正常的窄高斯结果。
+    """
+    shape = (64, 128)
+    arr = _synth(
+        shape, _TRUE_CENTER, _TRUE_SIGMA, amp=amp, base=3.0, noise=0.5, seed=11
+    )
+    axes = _ppm_axes(shape)
+    index = _argmax(arr)
+
+    result = lz.localize_peak(
+        arr,
+        index,
+        method="gaussian",
+        ppm_axes=axes,
+        roi_f1_ppm=_ROI_F1_PPM,
+        roi_f2_ppm=_ROI_F2_PPM,
+    )
+
+    assert np.isfinite(result.position).all()
+    assert result.actual_method in ("gaussian", "parabolic")
+    record = result.to_dict(axes)
+    assert record["gaussian_fit_success"] is (result.actual_method == "gaussian")
+    if result.actual_method == "gaussian":
+        assert record["fwhm_f1"] > 0 and record["fwhm_f2"] > 0
+        assert np.isfinite(record["fit_rmse"])
+        assert not result.fallback
+    else:
+        assert result.fallback is True
+        assert result.reason, "回退必须写明原因(不静默)"
+        assert record["fallback"] is True
+        assert record["fallback_reason"] == result.reason

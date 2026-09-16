@@ -58,6 +58,14 @@
   采样网格 NusTD 收缩、源头删除(后端另两处调用点已透传 audit 参数)。不传审计对象时行为
   与之前完全一致。测试 `tests/test_qc_audit.py` 共 16 项;
 
+### Added
+
+- **Phase 12 点名的回归测试**:采样元数据声称 NUS 而实际满采样 → 降级 uniform
+  (`tests/test_2d_nus_compat.py`);弱峰定位边界——拟合失败必须回退并留档原因,不得静默给出
+  假高斯结果(`tests/test_gaussian_localize.py`);组合扫描单 workflow 失败隔离 + failed/
+  success 两类 run 的 requested-vs-actual 参数留档(`tests/test_nmrforge_api.py`);坏点修复
+  写盘 → `qc_audit.jsonl` 端到端(`tests/test_qc_audit.py`)。
+
 ### Changed
 
 - **AppImage 构建 + 冒烟完成(Stage 4)**:在用户 VM 上构建成功(`BUILD_EXIT=0`,产物约 134MB),
@@ -97,6 +105,20 @@
 ### Fixed
 
 - 公开发布准备周期内未改动处理行为;本周期内的处理修复见下方按期条目。
+- **单条件失败的日志自追加(MemoryError)**:`nmrforge_api` 组合扫描里后端处理抛错时,失败
+  run 的 `logs` 与外层累积列表是同一对象,`logs.extend(response["logs"])` 自我追加导致无限
+  增长并抛 `MemoryError`。改为写入列表快照:单条件失败只落一条 `failed` run,同批其它
+  workflow 照常执行(Phase 12 失败隔离回归发现);
+- **`tests/test_direct_diagnostics.py` 的机器专属依赖**:去掉硬编码开发者绝对路径模板与
+  `skipif`,改用 `tests/conftest.py` 新增的共享夹具 `nmrpipe_fid_template`(nmrglue 合成,
+  布局与真实 2D fid 一致:`FDDIMCOUNT=2`/`FDQUADFLAG=0`/**`FDF2QUADFLAG=0`**,2048 字节头 +
+  每迹实部块/虚部块,夹具内断言 `_read_fid_raw` 接受)。诊断用例现在在 VM/CI 上真正执行,
+  并补齐首点、宽带峰、漂移三项覆盖;
+- **记录更正**:此前 `docs/tasks/2026-09-16-release-readiness-phase10.md` 把「1 skipped」写成
+  「诊断测试在任何机器上都被跳过」——不成立:该模板在开发机**存在**、诊断测试在开发机**有
+  跑**;1 skipped 是平台跳过(`tests/test_memory_disk.py`,需要 POSIX 内存盘);真正的问题是
+  硬编码路径让测试在 **VM/CI** 被跳过(已修)。同时更正「`_read_fid_raw` 二维分支可能从未被
+  执行」的推断:分支与真实文件一致,合成失败的配方原因是 `FDF2QUADFLAG`;
 
 
 ### 未发布(2026-09-16):频域基线真正生效 + 外部开关 + 轴效果按条件自检

@@ -33,6 +33,56 @@ def hsqc_experiment() -> Experiment:
 
 FIXTURES_BRUKER = Path(__file__).parent / "fixtures" / "bruker"
 
+NMRPIPE_FID_FDSIZE = 1024
+NMRPIPE_FID_SPECNUM = 120
+
+
+@pytest.fixture(scope="session")
+def nmrpipe_fid_template(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """真实 NMRPipe 2D 单文件 fid 布局的模板(不依赖任何开发机文件)。
+
+    真实转换产物是「2048 字节参数头 + 每迹实部块 / 虚部块」:头里
+    ``FDDIMCOUNT=2``、``FDSIZE``=直接维复数点数、``FDSPECNUM``=迹数、
+    ``FDQUADFLAG=0``。关键细节:nmrglue 只有在 ``FDF2QUADFLAG=0`` 时才把
+    ``(specnum, 2*fdsize)`` 的实型数据解回 ``(specnum, fdsize)`` 复型;
+    保持 ``create_empty_dic()`` 的默认值 1 会读成实型,而
+    ``workflow.direct_diagnostics._read_fid_raw`` 的二维分支要求复型
+    ——这正是此前合成模板始终不被接受的原因(与解析器无关)。
+
+    数据用 complex64 交给 ``ng.pipe.write``:它按实部/虚部块展开成
+    「2048 字节头 + float32」,与真实文件逐字节同布局(尺寸取小是为了
+    测试速度,布局与 862 迹的真实文件一致)。
+    """
+    import nmrglue as ng
+    import numpy as np
+
+    path = tmp_path_factory.mktemp("nmrpipe_fid") / "template.fid"
+    fdsize, specnum = NMRPIPE_FID_FDSIZE, NMRPIPE_FID_SPECNUM
+    dic = ng.pipe.create_empty_dic()
+    dic["FDDIMCOUNT"] = 2
+    dic["FDSIZE"] = fdsize
+    dic["FDSPECNUM"] = specnum
+    dic["FDQUADFLAG"] = 0
+    dic["FDF2QUADFLAG"] = 0
+    rng = np.random.default_rng(20260916)
+    t = np.arange(fdsize, dtype=float)
+    signal = np.exp(-t / 150.0) * np.exp(2j * np.pi * 0.12 * t)
+    data = np.tile(signal, (specnum, 1)) * rng.uniform(0.5, 2.0, (specnum, 1))
+    data = data + rng.normal(0.0, 0.02, (specnum, fdsize))
+    data = data + 1j * rng.normal(0.0, 0.02, (specnum, fdsize))
+    ng.pipe.write(str(path), dic, data.astype(np.complex64), overwrite=True)
+
+    # 模板必须真的能被诊断解析器接受,否则夹具本身就是错的(此前合成写法两次失败)
+    from workflow.direct_diagnostics import _read_fid_raw
+
+    parsed = _read_fid_raw(path)
+    assert parsed is not None, "合成 fid 模板必须能被 _read_fid_raw 解析(真实布局)"
+    _data, got_fdsize, got_specnum, header = parsed
+    assert (got_fdsize, got_specnum) == (fdsize, specnum)
+    assert header == 2048, header
+    return path
+
+
 
 @pytest.fixture
 def bruker_dir(tmp_path: Path) -> Path:

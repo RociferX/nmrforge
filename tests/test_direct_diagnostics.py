@@ -1,6 +1,9 @@
 """直接维诊断门控测试:直流偏置→POLY -time、坏点→自动替换、渲染插入。
 
-使用本地真实转换 fid(exp_001.fid)作字节布局模板;文件缺失时跳过。
+fid 模板来自 ``tests/conftest.py`` 的 ``nmrpipe_fid_template``:2048 字节头 +
+每迹实部块/虚部块,与真实转换产物同布局。此前本文件用开发机绝对路径作模板,
+在 VM/CI 上整个文件被跳过(每台机器是否执行取决于那个路径是否存在),现在夹具
+随测试生成,任何机器都会真正执行这些诊断用例。
 """
 
 from __future__ import annotations
@@ -16,13 +19,11 @@ from workflow.direct_diagnostics import (
     run_direct_diagnostics,
 )
 
-TEMPLATE = Path(
-    r"某个开发机上的绝对路径"
-)
 
-pytestmark = pytest.mark.skipif(
-    not TEMPLATE.is_file(), reason="需要本地真实转换 fid 模板"
-)
+@pytest.fixture
+def template(nmrpipe_fid_template: Path) -> Path:
+    """诊断用 fid 模板(= 共享夹具,布局与真实转换产物一致)。"""
+    return nmrpipe_fid_template
 
 
 @pytest.fixture
@@ -47,9 +48,41 @@ def _synth_like(template: Path) -> np.ndarray:
     return arr.astype(np.complex64)
 
 
+def _write_data_region(dst: Path, array: np.ndarray) -> None:
+    """把复型数组写回 fid 数据区(头不动;每迹实部块 + 虚部块)。"""
+    got = _read_fid_raw(dst)
+    assert got is not None
+    _data, fdsize, specnum, header = got
+    assert array.shape == (specnum, fdsize), (array.shape, specnum, fdsize)
+    flat = (
+        np.frombuffer(
+            dst.read_bytes(), dtype="<f4", count=specnum * fdsize * 2, offset=header
+        )
+        .astype(np.float32)
+        .reshape(specnum, fdsize * 2)
+    )
+    flat[:, :fdsize] = array.real.reshape(specnum, fdsize)
+    flat[:, fdsize:] = array.imag.reshape(specnum, fdsize)
+    dst.write_bytes(dst.read_bytes()[:header] + flat.tobytes())
+
+
+def _signal(
+    template: Path, *, decay: float = 150.0, freq: float = 0.12
+) -> np.ndarray:
+    """模板尺寸的干净单频复型衰减信号(无噪声,便于构造边界条件)。"""
+    got = _read_fid_raw(template)
+    assert got is not None
+    _data, fdsize, specnum, _header = got
+    t = np.arange(fdsize, dtype=float)
+    sig = np.exp(-t / decay) * np.exp(2j * np.pi * freq * t)
+    return np.tile(sig, (specnum, 1)).astype(np.complex64)
+
+
 def _stage(
+    template: Path,
     tmp_path: Path,
     *,
+    array: np.ndarray | None = None,
     synthetic: bool = False,
     dc_amp: float = 0.0,
     spike: tuple[int, int, float] | None = None,
@@ -57,23 +90,16 @@ def _stage(
     zero_rows: list[int] | None = None,
     high_energy_row: int | None = None,
 ) -> Path:
-    """从真实模板导出 fid 副本;synthetic=True 时数据区替换为合成数据。"""
+    """从共享模板复制一份 fid;可替换数据区(array)或注入缺陷。"""
     dst = tmp_path / "nus_2d.fid"
-    dst.write_bytes(TEMPLATE.read_bytes())
-    if synthetic:
-        arr = _synth_like(TEMPLATE)
+    dst.write_bytes(template.read_bytes())
+    if array is not None:
+        _write_data_region(dst, np.asarray(array, dtype=np.complex64))
+    elif synthetic:
+        arr = _synth_like(template)
         if dc_amp:
             arr = (arr.real + dc_amp).astype(np.float32) + 1j * arr.imag
-        got = _read_fid_raw(dst)
-        assert got is not None
-        data_, fdsize, specnum, header = got
-        assert arr.shape == (specnum, fdsize)
-        flat = np.frombuffer(
-            dst.read_bytes(), dtype="<f4", count=specnum * fdsize * 2, offset=header
-        ).astype(np.float32).reshape(specnum, fdsize * 2)
-        flat[:, :fdsize] = arr.real.reshape(specnum, fdsize)
-        flat[:, fdsize:] = arr.imag.reshape(specnum, fdsize)
-        dst.write_bytes(dst.read_bytes()[:header] + flat.tobytes())
+        _write_data_region(dst, arr)
     if spike:
         row, col, mag = spike
         got = _read_fid_raw(dst)
@@ -120,19 +146,23 @@ def _stage(
     return dst
 
 
-def test_parse_real_fid_layout(tmp_path: Path, exp_fixture) -> None:
-    fid = _stage(tmp_path)
+def test_parse_template_fid_layout(template: Path, tmp_path: Path, exp_fixture) -> None:
+    """模板本身就是「真实布局」:2048 字节头 + 实/虚块,解析器接受。"""
+    fid = _stage(template, tmp_path)
     got = _read_fid_raw(fid)
     assert got is not None
     data, fdsize, specnum, header = got
     assert fdsize == 1024
     assert specnum > 100
     assert header in (512, 1024, 2048)
+    assert np.isfinite(data).all()
 
 
-def test_dc_offset_enables_poly_time(tmp_path: Path, exp_fixture) -> None:
+def test_dc_offset_enables_poly_time(
+    template: Path, tmp_path: Path, exp_fixture
+) -> None:
     """显著直流偏置:自动启用 POLY -time 并报告(0.2.199-补29cw 阈值 0.25)。"""
-    _stage(tmp_path, synthetic=True, dc_amp=1.0)
+    _stage(template, tmp_path, synthetic=True, dc_amp=1.0)
     res = run_direct_diagnostics(tmp_path, exp_fixture)
     assert isinstance(res, DirectDiagnosticsResult)
     assert res.apply_poly_time is True
@@ -140,27 +170,71 @@ def test_dc_offset_enables_poly_time(tmp_path: Path, exp_fixture) -> None:
     assert res.metrics["dc_ratio"] > 0.0
 
 
-def test_dc_small_stays_off(tmp_path: Path, exp_fixture) -> None:
+def test_dc_small_stays_off(template: Path, tmp_path: Path, exp_fixture) -> None:
     """去直流后的数据:不启用 POLY -time。"""
-    _stage(tmp_path, synthetic=True)
+    _stage(template, tmp_path, synthetic=True)
     res = run_direct_diagnostics(tmp_path, exp_fixture)
     assert res.apply_poly_time is False
 
 
-def test_dc_small_offset_stays_off(tmp_path: Path, exp_fixture) -> None:
+def test_dc_small_offset_stays_off(
+    template: Path, tmp_path: Path, exp_fixture
+) -> None:
     """小幅 FID 均值(常规谱常见水平)不触发 POLY -time(0.2.199-补29cw)。"""
-    _stage(tmp_path, synthetic=True, dc_amp=0.08)
+    _stage(template, tmp_path, synthetic=True, dc_amp=0.08)
     res = run_direct_diagnostics(tmp_path, exp_fixture)
     assert res.apply_poly_time is False
 
 
-def test_run_fid_diagnostics_paths_file(tmp_path: Path) -> None:
+def test_first_point_ratio_reported(
+    template: Path, tmp_path: Path, exp_fixture
+) -> None:
+    """首点幅度远高于次点(群延迟/首点重建问题):报告并给出 acqus 检查建议。"""
+    arr = _synth_like(template)
+    arr[:, 0] *= 20.0
+    _stage(template, tmp_path, array=arr)
+    res = run_direct_diagnostics(tmp_path, exp_fixture)
+    assert res.metrics["first_point_ratio"] > 1.6
+    assert any("首点" in r for r in res.reports)
+
+
+def test_broad_solvent_peak_reported(
+    template: Path, tmp_path: Path, exp_fixture
+) -> None:
+    """宽带包峰(FWHM 超谱宽 8%):报告 solvent/化学交换并建议核对压制条件。"""
+    arr = _signal(template, decay=3.0, freq=0.05)
+    _stage(template, tmp_path, array=arr)
+    res = run_direct_diagnostics(tmp_path, exp_fixture)
+    assert bool(res.metrics["broad_peak"]) is True  # metrics 统一转 float
+    assert res.metrics["fwhm_pts"] > 0.08 * res.metrics["n_direct"]
+    assert any("宽带包峰" in r for r in res.reports)
+
+
+def test_drift_reported(template: Path, tmp_path: Path, exp_fixture) -> None:
+    """采样前/后周期频率漂移超一个线宽:报告「数据处理无法消除 + 建议重采」。"""
+    got = _read_fid_raw(template)
+    assert got is not None
+    _data, fdsize, specnum, _header = got
+    arr = np.zeros((specnum, fdsize), dtype=np.complex64)
+    head_rows = max(int(specnum * 0.2), 4)
+    t = np.arange(fdsize, dtype=float)
+    early = 2.0 * np.exp(-t / 150.0) * np.exp(2j * np.pi * 0.10 * t)
+    late = np.exp(-t / 150.0) * np.exp(2j * np.pi * 0.25 * t)
+    arr[:head_rows] = early
+    arr[head_rows:] = late
+    _stage(template, tmp_path, array=arr)
+    res = run_direct_diagnostics(tmp_path, exp_fixture)
+    assert res.metrics["drift_pts"] > res.metrics["fwhm_pts"]
+    assert any("漂移" in r and "重新采谱" in r for r in res.reports)
+
+
+def test_run_fid_diagnostics_paths_file(template: Path, tmp_path: Path) -> None:
     """独立入口:直接给 fid 文件路径即可诊断
     (默认只检测不修复,不产生备份。
     """
     from workflow.direct_diagnostics import run_fid_diagnostics_paths
 
-    fid = _stage(tmp_path, synthetic=True)
+    fid = _stage(template, tmp_path, synthetic=True)
     res = run_fid_diagnostics_paths([fid])
     assert isinstance(res, DirectDiagnosticsResult)
     assert res.reports
@@ -168,11 +242,11 @@ def test_run_fid_diagnostics_paths_file(tmp_path: Path) -> None:
     assert not (tmp_path / "fid_diag_bak").exists()
 
 
-def test_run_fid_diagnostics_paths_folder(tmp_path: Path) -> None:
+def test_run_fid_diagnostics_paths_folder(template: Path, tmp_path: Path) -> None:
     """独立入口:文件夹自动收集 *.fid / test*.fid。"""
     from workflow.direct_diagnostics import run_fid_diagnostics_paths
 
-    _stage(tmp_path, synthetic=True)
+    _stage(template, tmp_path, synthetic=True)
     res = run_fid_diagnostics_paths([tmp_path])
     assert isinstance(res, DirectDiagnosticsResult)
     assert res.reports
@@ -202,9 +276,11 @@ def test_dc_ratio_time_metric_unit() -> None:
     assert r_dc > 0.30
 
 
-def test_badpoint_repaired_with_backup(tmp_path: Path, exp_fixture) -> None:
+def test_badpoint_repaired_with_backup(
+    template: Path, tmp_path: Path, exp_fixture
+) -> None:
     """孤立尖峰:自动替换、写回磁盘、备份目录生成。"""
-    fid = _stage(tmp_path, synthetic=True, spike=(-1, 128, 40.0))
+    fid = _stage(template, tmp_path, synthetic=True, spike=(-1, 128, 40.0))
     before = _read_fid_raw(fid)
     assert before is not None
     data_before, _, _, _ = before
@@ -227,9 +303,11 @@ def test_badpoint_repaired_with_backup(tmp_path: Path, exp_fixture) -> None:
     assert np.isclose(np.asarray(orig[0])[row, 128], orig_val)
 
 
-def test_nan_inf_reported_not_fixed(tmp_path: Path, exp_fixture) -> None:
+def test_nan_inf_reported_not_fixed(
+    template: Path, tmp_path: Path, exp_fixture
+) -> None:
     """0.2.196:NaN/Inf 值只报告不自动处理。"""
-    fid = _stage(tmp_path, synthetic=True, nan_point=(-1, 64))
+    fid = _stage(template, tmp_path, synthetic=True, nan_point=(-1, 64))
     got = _read_fid_raw(fid)
     assert got is not None  # NaN 不再导致布局解析失败
     res = run_direct_diagnostics(tmp_path, exp_fixture)
@@ -237,28 +315,34 @@ def test_nan_inf_reported_not_fixed(tmp_path: Path, exp_fixture) -> None:
     assert res.metrics.get("nan_inf_count", 0) >= 1
 
 
-def test_uniform_zero_trace_reported(tmp_path: Path, bruker_dir) -> None:
+def test_uniform_zero_trace_reported(
+    template: Path, tmp_path: Path, bruker_dir
+) -> None:
     """0.2.196:均匀采样全零迹线只报告不自动处理。"""
     from core.data.bruker_reader import read_dataset
 
     exp = read_dataset(bruker_dir / "hsqc_2d")
-    fid = _stage(tmp_path, synthetic=True, zero_rows=[0])
+    fid = _stage(template, tmp_path, synthetic=True, zero_rows=[0])
     fid.rename(tmp_path / f"{exp.dataset_id}.fid")
     res = run_direct_diagnostics(tmp_path, exp)
     assert any("全零迹线" in r and "未自动处理" in r for r in res.reports)
     assert res.metrics.get("zero_traces", 0) >= 1
 
 
-def test_high_energy_reported_not_fixed(tmp_path: Path, exp_fixture) -> None:
+def test_high_energy_reported_not_fixed(
+    template: Path, tmp_path: Path, exp_fixture
+) -> None:
     """0.2.196:持续异常高能量迹线只报告不自动处理。"""
-    _stage(tmp_path, synthetic=True, high_energy_row=1)
+    _stage(template, tmp_path, synthetic=True, high_energy_row=1)
     res = run_direct_diagnostics(tmp_path, exp_fixture)
     assert any("能量异常偏高" in r and "未自动处理" in r for r in res.reports)
     assert res.metrics.get("high_energy_traces", 0) >= 1
 
 
-def test_repair_false_leaves_data(tmp_path: Path, exp_fixture) -> None:
-    _stage(tmp_path, synthetic=True, spike=(-1, 200, 40.0))
+def test_repair_false_leaves_data(
+    template: Path, tmp_path: Path, exp_fixture
+) -> None:
+    _stage(template, tmp_path, synthetic=True, spike=(-1, 200, 40.0))
     res = run_direct_diagnostics(tmp_path, exp_fixture, repair=False)
     assert res.repaired_badpoints == 0
     assert not (tmp_path / "fid_diag_bak").exists()
