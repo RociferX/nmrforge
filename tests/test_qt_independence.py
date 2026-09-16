@@ -1,15 +1,13 @@
-"""Qt-independence guards for the PySide6 migration target architecture.
+"""Qt-independence guards for the architecture.
 
 Target architecture (see ``docs/pyside6-migration/migration-plan.md``):
 
     core/ backend/ workflow/ nmrforge_api/   Qt-free, importable headless
-    gui/  viewer/                            Qt users, but never import a binding directly
-    qtcompat/                                the single place a binding is named
-    ui_support/                              shared theme/colours; Qt part goes through qtcompat
+    gui/  viewer/ ui_support/                Qt users, but never import a binding directly
+    qtcompat/                                the single place a binding is named (PySide6)
 
-Each property below is easy to break with one careless lazy import, so each one is asserted rather
-than documented. The tests assert the *shape*, not the binding, so the same file passes whether the
-project runs on PyQt6 (today) or PySide6 (after the port).
+PyQt6 is gone: the project depends on PySide6 only, and the port is complete. Each property below
+is easy to break with one careless lazy import, so each one is asserted rather than documented.
 """
 
 from __future__ import annotations
@@ -30,27 +28,12 @@ QT_BINDINGS = ("PyQt6", "PySide6", "PyQt5", "PySide2")
 CORE_LAYERS = ("core", "backend", "workflow", "nmrforge_api")
 
 #: Layers allowed to use Qt, but only through ``qtcompat``.
-UI_LAYERS = ("gui", "viewer")
+UI_LAYERS = ("gui", "viewer", "ui_support")
 
 #: The single module permitted to name a binding.
 COMPAT_LAYER = "qtcompat"
 
-#: Directories making up the application and its tests. ``scripts/pyside6_*`` are excluded
-#: deliberately: they are migration tooling that has to be able to name both bindings, and they
-#: only ever run in the PySide6 environment. A later test makes that exclusion explicit.
-SCANNED_ROOTS = UI_LAYERS + CORE_LAYERS + (COMPAT_LAYER, "ui_support", "tests", "examples")
-
-#: Migration tooling allowed to reference the target binding.
-MIGRATION_TOOLING_PREFIX = "scripts/pyside6_"
-
-#: Known leftover at the repository root that still imports PyQt6 directly: a one-off development
-#: script with no importer, no test and no documentation reference. PUBLIC_RELEASE_AUDIT.md
-#: recommends deleting it, which needs the repository owner's approval. It is named explicitly, so
-#: that any *new* offender still fails this test.
-KNOWN_UNMIGRATED_FILES = {".measure_gap.py"}
-
-#: Directories that are not project source: virtual environments (the project keeps two, one per Qt
-#: binding), caches and build output.
+#: Directories that are not project source: the virtual environment, caches and build output.
 IGNORED_DIR_NAMES = {"nmrforge", "build", "dist", "nmrforge.egg-info"}
 
 
@@ -59,12 +42,7 @@ def _relative(path: Path) -> str:
 
 
 def _iter_repository_python_files() -> list[Path]:
-    """All project ``*.py`` files, pruning non-source directories *during* the walk.
-
-    ``Path.rglob`` would descend into the two virtual environments (``nmrforge/`` for PyQt6,
-    ``.venv-pyside/`` for PySide6) before any filter could reject them, which adds thousands of
-    files and minutes of I/O to the suite. ``os.walk`` with pruned ``dirnames`` never enters them.
-    """
+    """All project ``*.py`` files, pruning non-source directories *during* the walk."""
     files: list[Path] = []
     for current, dirnames, filenames in os.walk(ROOT, topdown=True):
         dirnames[:] = sorted(
@@ -92,7 +70,6 @@ def _qt_binding_of(node: ast.AST) -> str | None:
 
 
 def _imported_bindings(path: Path) -> set[str]:
-    """Bindings imported anywhere in one file (static, includes function-local imports)."""
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     found: set[str] = set()
     for node in ast.walk(tree):
@@ -103,7 +80,6 @@ def _imported_bindings(path: Path) -> set[str]:
 
 
 def _imported_modules(path: Path) -> set[str]:
-    """Top-level module names imported by one file (``qtcompat``, ``gui``, ...)."""
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     found: set[str] = set()
     for node in ast.walk(tree):
@@ -115,7 +91,6 @@ def _imported_modules(path: Path) -> set[str]:
 
 
 def _declared_bindings() -> list[str]:
-    """Qt bindings declared as runtime dependencies in pyproject.toml."""
     data = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     dependencies = data["project"]["dependencies"]
     return sorted(
@@ -158,7 +133,6 @@ def test_core_imports_load_no_qt_module() -> None:
 
 
 def test_ui_and_test_layers_import_qt_only_through_qtcompat() -> None:
-    """``gui/``, ``viewer/`` and ``tests/`` must not name a binding: they go through qtcompat."""
     offenders: list[str] = []
     for layer in UI_LAYERS + ("tests",):
         for path in sorted((ROOT / layer).rglob("*.py")):
@@ -171,58 +145,63 @@ def test_ui_and_test_layers_import_qt_only_through_qtcompat() -> None:
     )
 
 
-def test_the_binding_is_named_only_by_the_compat_layer() -> None:
-    """Only ``qtcompat/`` (and the migration tooling) may name a binding anywhere."""
+def test_only_qtcompat_names_a_binding() -> None:
+    """Across the whole repository, exactly one module may import a Qt binding."""
     offenders: list[str] = []
     for path in _iter_repository_python_files():
-        relative = path.relative_to(ROOT)
-        if relative.parts[0] == COMPAT_LAYER:
-            continue
-        as_posix = str(relative).replace("\\", "/")
-        if as_posix.startswith(MIGRATION_TOOLING_PREFIX):
-            continue
-        if as_posix in KNOWN_UNMIGRATED_FILES:
+        if path.relative_to(ROOT).parts[0] == COMPAT_LAYER:
             continue
         bindings = sorted(_imported_bindings(path))
         if bindings:
             offenders.append(f"{_relative(path)}: {bindings}")
     assert not offenders, (
-        f"only {COMPAT_LAYER}/ may import a Qt binding directly; offending files: "
-        + "; ".join(offenders)
+        f"only {COMPAT_LAYER}/ may import a Qt binding; offending files: " + "; ".join(offenders)
     )
 
 
 def test_qtcompat_is_the_boundary_the_ui_uses() -> None:
-    """Sanity check the other direction: the UI layers really do go through the boundary."""
     importers = [
         _relative(path)
         for layer in UI_LAYERS
         for path in sorted((ROOT / layer).rglob("*.py"))
-        if COMPAT_LAYER in _imported_modules(path) or "ui_support" in _imported_modules(path)
+        if COMPAT_LAYER in _imported_modules(path)
     ]
-    assert importers, "expected gui/ and viewer/ to import qtcompat or ui_support"
+    assert importers, "expected gui/, viewer/ or ui_support/ to import qtcompat"
 
 
 def test_viewer_does_not_import_the_gui_package() -> None:
-    """``viewer/`` must not depend on ``gui/``: the two UI packages are siblings.
-
-    Before this rule, ``viewer/app.py`` imported ``gui.theme`` for its startup theme, which made the
-    standalone viewer unable to exist without the project-management GUI.
-    """
-    offenders: list[str] = []
-    for path in sorted((ROOT / "viewer").rglob("*.py")):
-        if "gui" in _imported_modules(path):
-            offenders.append(_relative(path))
+    """``viewer/`` must not depend on ``gui/``: the two UI packages are siblings."""
+    offenders = [
+        _relative(path)
+        for path in sorted((ROOT / "viewer").rglob("*.py"))
+        if "gui" in _imported_modules(path)
+    ]
     assert not offenders, "viewer/ must not import gui/: " + "; ".join(offenders)
 
 
 def test_packaging_declares_exactly_one_qt_binding() -> None:
     declared = _declared_bindings()
-    assert len(declared) == 1, f"expected exactly one Qt binding in dependencies, got {declared}"
+    assert declared == ["PySide6"], f"expected PySide6 as the only Qt binding, got {declared}"
+
+
+def test_declared_binding_matches_qtcompat() -> None:
+    """The dependency and the code must not disagree about which binding this project uses."""
+    import qtcompat
+
+    assert _declared_bindings() == [qtcompat.BINDING_MODULE]
+
+
+def test_appimage_spec_collects_the_binding_plugins() -> None:
+    """The PyInstaller spec must collect the plugin of the binding that is actually declared."""
+    import qtcompat
+
+    spec = (ROOT / "packaging" / "linux" / "NMRForge.spec").read_text(encoding="utf-8")
+    assert f"{qtcompat.BINDING_MODULE}.QtSvg" in spec, (
+        "the spec's hiddenimports must name the declared binding's QtSvg module"
+    )
 
 
 def test_new_packages_are_declared_for_packaging() -> None:
-    """``qtcompat`` and ``ui_support`` must be installed, not only importable from a checkout."""
     data = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     include = data["tool"]["setuptools"]["packages"]["find"]["include"]
     for package in (COMPAT_LAYER, "ui_support"):

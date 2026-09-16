@@ -167,8 +167,8 @@ def test_licence_state_is_explicit() -> None:
 
     options = _read("LICENSE_OPTIONS.md")
     readme = _read("README.md")
-    assert "PyQt6" in options, "LICENSE_OPTIONS.md must record the PyQt6 constraint"
-    assert "GPL" in options
+    assert "PySide6" in options, "LICENSE_OPTIONS.md must record the Qt binding dependency"
+    assert "LGPL" in options
     assert "No licence has been chosen" in readme, (
         "while no LICENSE exists, README.md must state that the licence is undecided"
     )
@@ -176,7 +176,7 @@ def test_licence_state_is_explicit() -> None:
 
 def test_third_party_inventory_names_external_engines() -> None:
     text = _read("THIRD_PARTY.md")
-    for name in ("NMRPipe", "SMILE", "PyQt6", "nmrglue"):
+    for name in ("NMRPipe", "SMILE", "PySide6", "nmrglue"):
         assert name in text, f"THIRD_PARTY.md does not mention {name}"
 
 
