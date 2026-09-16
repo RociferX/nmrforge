@@ -1,7 +1,10 @@
 # Licence Options
 
-**No licence has been chosen. No `LICENSE` file is committed. This document only prepares the
-decision.**
+**DECIDED on 2026-09-16: nmrForge is released under the GNU Lesser General Public License
+version 3 only (`LGPL-3.0-only`).** The text is committed as [LICENSE](LICENSE); the copyright
+holder is recorded there as "NMRForge contributors" (the owner does not publish a personal name
+yet, and no author list is invented). Sections 3-5 below are kept as the record of the analysis
+that led to the decision.
 
 Read this together with [THIRD_PARTY.md](THIRD_PARTY.md), which records the dependency facts
 that constrain the choice. This is not legal advice.
@@ -10,11 +13,11 @@ that constrain the choice. This is not legal advice.
 
 | Check | Result |
 | --- | --- |
-| Existing `LICENSE` / `COPYING` file | None. The repository is currently "all rights reserved" by default. |
+| Existing `LICENSE` / `COPYING` file | **`LICENSE` (added 2026-09-16): GNU LGPL-3.0-only text + project notice; SPDX `LGPL-3.0-only`.** Before that date the repository was "all rights reserved" by default. |
 | Institutional or laboratory copyright notice in the tree | None found. No `Copyright (c)` header in any source file. |
 | Per-file licence headers | None. |
 | Third-party components that constrain the choice | **Yes, but no longer fatally.** The GUI uses PySide6 (`LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only`), which leaves a permissive licence open in principle. See section 2. |
-| Copyright holder named in packaging metadata | None (`pyproject.toml` has no `authors`/`license` field). |
+| Copyright holder named in packaging metadata | None: the `LICENSE` notice names "NMRForge contributors" (the owner asks that no personal data be published yet), and `pyproject.toml` declares the licence SPDX id but no `authors` field. |
 | Git author identity used so far | `Xuanfeng Li <330249944+RociferX@users.noreply.github.com>` (the identity used in the public history); no personal email address is published |
 
 ## 2. What constrains the choice now
@@ -72,7 +75,19 @@ obligations follow the library, so they bite when a binary you distribute contai
   documented replace/relink route), but **not yet reviewed by the IP owner**, and no AppImage has
   been built since the migration.
 
-No `LICENSE` file has been committed, by the owner's instruction.
+A `LICENSE` file **has now been committed** (`LGPL-3.0-only`) on the owner's instruction of
+2026-09-16. The remaining open points are the LGPL distribution review (section 6 of
+[docs/pyside6-migration/migration-plan.md](docs/pyside6-migration/migration-plan.md)) and the
+author list / IP ownership (the owner asks for no personal data for now).
+
+## 2.1 What the chosen licence means for this project
+
+LGPL-3.0 is a *weak* copyleft licence: it lets other programs link nmrForge while keeping their own
+terms, but nmrForge itself - and any modified version of it - must be distributed under LGPL-3.0
+with its corresponding source, and recipients must be able to relink the LGPL-covered parts. In
+practice, for an application that *is* the licensed work, the source-disclosure obligation is close
+to that of GPL-3.0; what LGPL adds is the permission for proprietary code to link it. That is a
+deliberate choice by the owner on 2026-09-16, not an accident of the PySide6 dependency.
 
 ## 3. Candidate licences compared
 

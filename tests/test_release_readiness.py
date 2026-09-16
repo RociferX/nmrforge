@@ -162,16 +162,28 @@ def test_licence_state_is_explicit() -> None:
          if (ROOT / name).is_file()),
         None,
     )
-    if licence_file is not None:
-        return  # a licence was chosen; nothing to assert about the pending state
-
     options = _read("LICENSE_OPTIONS.md")
     readme = _read("README.md")
-    assert "PySide6" in options, "LICENSE_OPTIONS.md must record the Qt binding dependency"
-    assert "LGPL" in options
-    assert "No licence has been chosen" in readme, (
-        "while no LICENSE exists, README.md must state that the licence is undecided"
+    assert "LGPL" in options, "LICENSE_OPTIONS.md must record the LGPL situation"
+    if licence_file is None:
+        assert "PySide6" in options, "LICENSE_OPTIONS.md must record the Qt binding dependency"
+        assert "No licence has been chosen" in readme, (
+            "while no LICENSE exists, README.md must state that the licence is undecided"
+        )
+        return
+
+    # A licence was chosen: the places that state it must not drift apart.
+    text = licence_file.read_text(encoding="utf-8")
+    assert "GNU LESSER GENERAL PUBLIC LICENSE" in text.upper(), (
+        "LICENSE must contain the full LGPL-3.0 text, not just a one-line reference"
     )
+    assert "LGPL-3.0-only" in text, "LICENSE must state the SPDX identifier it is released under"
+    declared = str(tomllib.loads(_read("pyproject.toml"))["project"].get("license", ""))
+    assert "LGPL-3.0-only" in declared, (
+        "pyproject.toml must declare the same licence as LICENSE"
+    )
+    assert "LGPL-3.0-only" in readme, "README.md must state the licence that applies"
+    assert "LICENSE_OPTIONS.md" in readme, "README.md must link the licence reasoning"
 
 
 def test_third_party_inventory_names_external_engines() -> None:

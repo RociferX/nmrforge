@@ -243,8 +243,10 @@ def main(argv: list[str] | None = None) -> int:
         print("must ship the licence texts and allow the library to be replaced or relinked.")
     if own:
         print()
-        print("This project's own distribution declares no licence, which is the pending decision")
-        print("documented in LICENSE_OPTIONS.md (not a third-party finding):")
+        print("This project's own distribution metadata declares no licence - it is stale:")
+        print("the project is LGPL-3.0-only since 2026-09-16 (see LICENSE_OPTIONS.md), so an")
+        print("install made before that date keeps the old, empty metadata; reinstall to refresh.")
+        print("Not a third-party finding:")
         for row in own:
             print(f"  - {row['package']} {row['version']}: {row['licence_expression']}")
     if blocked:

@@ -299,22 +299,26 @@ request.
 
 ## Licence
 
-**No licence has been chosen yet.** No `LICENSE` file is committed, which means the default
-"all rights reserved" applies, and no licence may be assumed by anyone reading this repository.
+nmrForge is released under the **GNU Lesser General Public License, version 3 only**
+(`LGPL-3.0-only`, SPDX). The full text is in [LICENSE](LICENSE); the copyright holder is
+recorded there as "NMRForge contributors".
 
-The dependency situation that constrains the choice is in [LICENSE_OPTIONS.md](LICENSE_OPTIONS.md)
-and [THIRD_PARTY.md](THIRD_PARTY.md). In short:
+Because LGPL-3.0 is a set of additional permissions on top of GPL-3.0, the GNU General Public
+License version 3 text that it incorporates by reference is shipped alongside it
+(`packaging/linux/THIRD_PARTY_LICENSES/GPL-3.0.txt`, and inside every AppImage).
 
-- the GUI depends on **PySide6**, whose licence options include `LGPL-3.0-only`. The earlier
-  `GPL-3.0-only` obstacle (PyQt6) has been removed by the completed PySide6 migration, so a
-  permissive licence for this project is now *possible* in principle;
-- it is not yet *recommended*: the full third-party audit has to be rerun after the migration, and
-  the owner still has to choose. LGPL obligations apply to any binary that bundles Qt - including
-  the AppImage - and those are not resolved by this change.
+What this means in practice:
 
-Publishing this repository is itself a distribution of the program, so the decision has to be made
-before the repository becomes visible to anyone else. Do not redistribute this repository before
-then.
+- if you **use or modify** nmrForge, your redistribution must stay under LGPL-3.0 (with the
+  corresponding source), and you must not add restrictions on top of it;
+- if you **bundle** nmrForge in a binary (including the AppImage), the LGPL obligations for the
+  bundled Qt/PySide6 libraries apply as well: ship the licence texts and notices (the AppImage does,
+  via `--licenses`) and let the recipient replace or relink those libraries;
+- third-party components keep their own licences; see [THIRD_PARTY.md](THIRD_PARTY.md) and, for
+  binaries, `packaging/linux/THIRD_PARTY_LICENSES/NOTICE.md`.
+
+The reasoning behind the choice, and what it obliges, is recorded in
+[LICENSE_OPTIONS.md](LICENSE_OPTIONS.md). Nothing here is legal advice.
 
 ## 中文简介
 
@@ -335,9 +339,12 @@ nmrForge 面向 Bruker 1D/2D/3D NMR 数据,提供自动化处理、参数优化�
 安装与快速上手见上文 Installation / Quick start;完整中文文档入口见
 [docs/README.md](docs/README.md)。
 
-**许可状态:尚未选择许可证**,在决定之前请勿再分发,也不要把本仓库当作任何许可证下的作品。
+**许可:本项目采用 GNU LGPL v3(仅该版本,SPDX `LGPL-3.0-only`)**,正文见
+[LICENSE](LICENSE),版权人记为 "NMRForge contributors"。
 
-约束条件已经变化:GUI 依赖已从 PyQt6(GPL-3.0-only)迁到 **PySide6**(许可选项含
-`LGPL-3.0-only`),因此「整体采用 MIT/BSD/Apache」在原则上**已经可行**,但尚未被推荐——
-迁移后必须重跑完整第三方许可审计,并由权利人做出选择;打包 Qt 的二进制(含 AppImage)
-仍需满足 LGPL 的分发义务。详见 [LICENSE_OPTIONS.md](LICENSE_OPTIONS.md)。
+LGPL-3.0 是在 GPL-3.0 之上的附加许可,因此 GPL-3.0 正文一并随仓库与 AppImage 分发
+(`packaging/linux/THIRD_PARTY_LICENSES/GPL-3.0.txt`)。需要一并遵守的还有打包进二进制的
+Qt/PySide6 的 LGPL 义务(许可正文与声明随 AppImage 分发,`--licenses` 可自查,并提供替换/
+重链接路径);第三方组件各自保留其许可,见 [THIRD_PARTY.md](THIRD_PARTY.md)。
+
+选择依据与随之而来的义务记录在 [LICENSE_OPTIONS.md](LICENSE_OPTIONS.md)。以上不构成法律意见。

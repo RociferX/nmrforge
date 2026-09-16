@@ -19,7 +19,7 @@ privacy decisions. Do not change the repository visibility yet.**
 | --- | --- |
 | READY | section E (16 items) |
 | WARNINGS | section F (12 items) |
-| BLOCKERS | section G (5 items). G.2's nature changed: the GPL obstacle is removed, the licence decision and the LGPL distribution questions are not |
+| BLOCKERS | section G (5 items). G.2: the licence is **decided (LGPL-3.0-only, 2026-09-16)** - what remains there is the owner's review of the LGPL distribution obligations; G.1 and G.3-G.5 are unchanged |
 | MANUAL ACTIONS | section H (12 items) |
 
 ---
@@ -112,7 +112,7 @@ privacy decisions. Do not change the repository visibility yet.**
 | --- | --- | --- |
 | Version definition | `core/__init__.py::__version__` (already single-source) | unchanged; the `v0.9.0` bump is deferred to the release step |
 | Packaging | AppImage (PyInstaller spec + build script + desktop/icon) | unchanged; contract still locked by a test |
-| LICENSE | absent | **still absent** (decision pending) |
+| LICENSE | absent | **added 2026-09-16**: GNU LGPL-3.0-only text + project notice (holder "NMRForge contributors"); `pyproject.toml` declares the same SPDX id |
 | CITATION | absent | `CITATION.cff` with explicit placeholders |
 | CI | absent | `.github/workflows/ci.yml` + issue/PR templates |
 | Security policy | absent | `SECURITY.md` (contact is a placeholder) |
@@ -487,8 +487,21 @@ redistribution conditions? `CITATION.cff` currently contains a placeholder autho
 (`TODO: author list and order not yet confirmed`) and no institution, and no source file carries a
 copyright header. **Nothing about authorship was invented.**
 
-### G.2 [BLOCKER] Licence selection - the obstacle is gone, the decision is not made
+### G.2 [BLOCKER] Licence - **decided 2026-09-16: LGPL-3.0-only**; the distribution review is not
 
+**Decision (2026-09-16, owner):** nmrForge is licensed under the GNU Lesser General Public License,
+version 3 only (`LGPL-3.0-only`). `LICENSE` is committed at the repository root (LGPL text plus a
+project notice), `pyproject.toml` declares the same SPDX expression and the LGPLv3 classifier, and
+`README.md` / [LICENSE_OPTIONS.md](LICENSE_OPTIONS.md) state it in both languages. The copyright
+holder is recorded as "NMRForge contributors": the owner asked that no personal data be published
+for now, and no author list was invented. What is *consequence*, not decoration: LGPL-3.0 is weak
+copyleft, so the project's own source must stay available under LGPL-3.0 to anyone who receives a
+binary, and recipients must be able to replace/relink the LGPL-covered parts - the same mechanism
+already implemented for the bundled Qt/PySide6 (`packaging/linux/THIRD_PARTY_LICENSES/`,
+`PYSIDE6_REQUIREMENT`). The item stays a blocker only because the owner has not yet reviewed those
+obligations (see the checklist).
+
+**History (unchanged analysis below):** the GPL obstacle was removed by the PySide6 migration.
 **Status changed on 2026-09-16.** The GUI no longer uses PyQt6: the PySide6 migration is complete on
 the branch `codex/pyside6-migration-feasibility` (Stage 5), `pyproject.toml` declares `PySide6`, and
 nothing outside `qtcompat/` imports a Qt binding. PySide6 is offered under

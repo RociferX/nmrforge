@@ -18,9 +18,11 @@ Working notes:
 - [ ] **IP ownership confirmed.** Who owns the copyright, and does the institute/laboratory claim
       it? Funding-agreement redistribution conditions checked.
 - [ ] **Author list, order and affiliation confirmed**, and each author agrees to be listed.
-- [ ] **LICENSE selected and committed.** Blocked by the PyQt6 GPL-3.0-only constraint: choose
-      GPL-3.0-only for the whole project, or migrate the GUI to PySide6 first. See
-      [LICENSE_OPTIONS.md](LICENSE_OPTIONS.md).
+- [x] **LICENSE selected and committed (2026-09-16): GNU LGPL-3.0-only.** Root `LICENSE` holds
+      the licence text plus a project notice ("Copyright (C) 2026 NMRForge contributors");
+      `pyproject.toml` declares the SPDX id and the LGPLv3 classifier; README (EN/ZH), `CITATION.cff`,
+      `.zenodo.json`, `THIRD_PARTY.md` and [LICENSE_OPTIONS.md](LICENSE_OPTIONS.md) state the same.
+      The PyQt6 GPL-3.0-only obstacle had already been removed by the PySide6 migration.
 - [x] **Third-party licences checked** against the actual installed versions, including what is
       bundled into the AppImage: `scripts/audit_third_party.py` (28 permissive, 4 weak copyleft,
       0 strong-copyleft-only on 2026-09-16) with the full inventory in

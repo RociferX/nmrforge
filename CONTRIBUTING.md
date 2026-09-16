@@ -109,10 +109,11 @@ project avoids behaviour that cannot be justified or audited.
 
 ## Licensing of contributions
 
-No licence has been chosen for this project yet (see
-[LICENSE_OPTIONS.md](LICENSE_OPTIONS.md)). Until that decision is made, contributions cannot be
-accepted under explicit terms. If you want to contribute before then, please open an issue to
-discuss - do not assume a licence.
+nmrForge is released under the **GNU LGPL v3, version 3 only** (`LGPL-3.0-only`; see
+[LICENSE](LICENSE) and [LICENSE_OPTIONS.md](LICENSE_OPTIONS.md)). By opening a pull request you
+agree that your contribution may be distributed under those terms. Please open an issue before
+starting substantial work, so the change can be scoped against the project's "no unauditable
+behaviour" rule.
 
 ## The laboratory workflow
 

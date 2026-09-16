@@ -20,6 +20,6 @@
     "reproducibility"
   ],
   "access_right": "open",
-  "license": "TODO-select-before-upload",
-  "notes": "The license field must be replaced with the chosen license id before upload. nmrForge's GUI depends on PyQt6, which is GPL-3.0-only, so the license choice is constrained - see LICENSE_OPTIONS.md. No Zenodo record has been created, no DOI has been reserved, and nothing has been uploaded."
+  "license": "LGPL-3.0-only",
+  "notes": "Licence: GNU LGPL v3, version 3 only (LGPL-3.0-only; see LICENSE and LICENSE_OPTIONS.md). The creator list is still a placeholder: the owner asked that no personal data be published for now and no author list has been invented - fill it in before uploading. No Zenodo record has been created, no DOI has been reserved, and nothing has been uploaded."
 }

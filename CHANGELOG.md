@@ -69,6 +69,17 @@
   `VM_TEST_EXIT=0`;**VM 跳过量 19 → 4**,减少的 15 项即此前在 VM 上被整文件 `skipif` 掉的诊断
   测试,现在真正执行。
 
+### Added
+
+- **许可证:LGPL-3.0-only(2026-09-16 权利人决定)**:新增根目录 `LICENSE`(GNU LGPL-3.0 正文 +
+  项目声明;SPDX `LGPL-3.0-only`;版权人记为 "NMRForge contributors",按要求不写个人信息、
+  不编造作者名单);`pyproject.toml` 声明同一 SPDX 表达式并加 LGPLv3 classifier;README(中/英)、
+  `LICENSE_OPTIONS.md`、`THIRD_PARTY.md`、`PUBLIC_RELEASE_AUDIT.md`(G.2 改为已决定)、
+  `RELEASE_CHECKLIST_v0.9.0.md`、`CONTRIBUTING.md`、`CITATION.cff`、`.zenodo.json` 同步;
+  `tests/test_release_readiness.py` 的许可证守卫改为「有 LICENSE 时 LICENSE / pyproject.toml /
+  README.md 三处声明必须一致」,`scripts/audit_third_party.py` 的本项目提示同步更新。
+  作者名单与机构仍未公开(见 `PUBLIC_RELEASE_AUDIT.md` G.1)。
+
 ### Changed
 
 - **AppImage 构建 + 冒烟完成(Stage 4)**:在用户 VM 上构建成功(`BUILD_EXIT=0`,产物约 134MB),

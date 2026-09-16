@@ -99,6 +99,16 @@ What this means for distribution:
 3. The **full** third-party audit must be rerun after the migration, before recommending MIT,
    BSD-3-Clause or Apache-2.0. See [LICENSE_OPTIONS.md](LICENSE_OPTIONS.md) section 2.
 
+### This project's own licence (decided 2026-09-16)
+
+nmrForge itself is licensed under the **GNU Lesser General Public License, version 3 only**
+(`LGPL-3.0-only`, SPDX); the text is at the repository root as [LICENSE](LICENSE) and
+`pyproject.toml` declares the same expression. The copyright holder is recorded as
+"NMRForge contributors" - the owner does not publish a personal name yet, and no author list has
+been invented. LGPL-3.0 sits on top of GPL-3.0, whose text ships next to the LGPL text in
+`packaging/linux/THIRD_PARTY_LICENSES/`. This choice does not change any third-party obligation in
+the inventory below; bundling Qt/PySide6 still triggers the LGPL obligations described next.
+
 ### [BLOCKER] Author list, affiliation, and IP ownership not confirmed
 
 `CITATION.cff` contains placeholders (see the `TODO` entries). The owner must confirm:
