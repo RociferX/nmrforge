@@ -52,6 +52,19 @@ ls ~/*.py ~/*.sh ~/*.csv ~/*.yaml 2>/dev/null   # 应为空
 du -sh ~/* ~/.[!.]* 2>/dev/null | sort -h | tail
 ```
 
+## 用户可见错误与调试信息(强制,2026-09-17,Phase 21)
+
+用户看到的消息必须能照着改:
+
+- **前端/CLI 出口**把路径、权限、输入格式、缺字段这类问题翻译成「错误: <怎么修>」;
+  已知接口错误(`nmrforge_api.errors.SensitivityError` 家族)的消息本身就是给用户写的,直接用;
+- **禁止**只显示 `KeyError` / `IndexError` / `TypeError` / `NoneType` 之类的类型名或裸 traceback;
+- 完整 traceback 只走 debug 通道:CLI 用 `--debug` 或 `NMRFORGE_DEBUG=1`(打印到 **stderr**),
+  GUI/后端写进运行日志,不进对话框正文;
+- 未知异常保留类型名 + 原文(不吞信息、不编造原因),但同样加一句可执行提示。
+
+参考实现:`nmrforge_api/cli.py::describe_exception` / `_report_unexpected`。
+
 ## 处理流程改动覆盖原则(强制,0.2.163-补15)
 
 用户对处理流程(生成 FID/生成谱图/人工/批量等)提出的改动,默认必须

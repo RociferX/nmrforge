@@ -2487,3 +2487,47 @@ def test_sweep_failure_is_isolated_and_parameters_recorded(
     assert ok_payload["status"] in ("success", "success_with_warning")
     assert ok_payload["parameters_used"]["zero_fill"]["F1"] == 2
     assert Path(ok.peak_table_path("parabolic")).is_file()
+
+
+# ------------------------------------- Phase 21:用户可见错误信息(CLI 出口)
+def test_cli_unexpected_error_is_actionable_not_a_traceback(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """非预期异常不能只甩类型名/堆栈:给一句可执行的提示 + debug 通道(Phase 21)。"""
+    from nmrforge_api.cli import DEBUG_ENV, describe_exception
+
+    bad = tmp_path / "not_a_dir.txt"
+    bad.write_text("x", encoding="utf-8")
+    assert cli_main(["status", "--study", str(bad)]) == 2
+    out = capsys.readouterr().out
+    assert "错误:" in out and "提示:" in out and DEBUG_ENV in out
+    assert "Traceback" not in out, "默认不能把裸 traceback 甩给用户"
+
+    # 异常 → 提示的映射:路径、缺字段、内容非法各自有可照做的说法
+    assert "找不到文件或目录" in describe_exception(
+        FileNotFoundError(2, "no such file", "x.json")
+    )
+    assert "缺少必需字段" in describe_exception(KeyError("peak_id"))
+    assert "输入内容不合法" in describe_exception(ValueError("bad axis spec"))
+    # 结构不符类:保留原始文本,但必须带一句解释(不能只出现 NoneType/KeyError 之名)
+    structure = describe_exception(AttributeError("'NoneType' object has no attribute 'x'"))
+    assert structure.startswith("输入数据与预期结构不符")
+
+
+def test_cli_debug_flag_and_env_show_the_traceback(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """--debug / NMRFORGE_DEBUG=1 才打印完整堆栈(默认只给提示)。"""
+    from nmrforge_api.cli import DEBUG_ENV
+
+    bad = tmp_path / "not_a_dir.txt"
+    bad.write_text("x", encoding="utf-8")
+
+    assert cli_main(["status", "--study", str(bad), "--debug"]) == 2
+    captured = capsys.readouterr()
+    assert "完整堆栈(debug)" in captured.out
+    assert "Traceback" in captured.err, "堆栈走 stderr(debug 通道),不混进给用户看的 stdout"
+
+    monkeypatch.setenv(DEBUG_ENV, "1")
+    assert cli_main(["status", "--study", str(bad)]) == 2
+    assert "Traceback" in capsys.readouterr().err

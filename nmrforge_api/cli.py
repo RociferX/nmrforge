@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import traceback
 from pathlib import Path
 from typing import Any
 
@@ -56,6 +58,53 @@ COMBINATION_LOCALIZATION_CHOICES: tuple[str, ...] = (
     "gaussian",
     "both",
 )
+
+
+#: 设置后(任意非空值)打印完整堆栈,便于排查;等价于每个子命令的 --debug(Phase 21)
+DEBUG_ENV = "NMRFORGE_DEBUG"
+
+
+def _debug_enabled(args: argparse.Namespace | None = None) -> bool:
+    """--debug 或 NMRFORGE_DEBUG=1 时打印完整堆栈(用户默认只看可执行的提示)。"""
+    if getattr(args, "debug", False):
+        return True
+    return bool(str(os.environ.get(DEBUG_ENV, "")).strip())
+
+
+def describe_exception(exc: BaseException) -> str:
+    """把常见异常翻译成用户能照着改的提示(Phase 21:用户可见错误信息系统化)。
+
+    只映射**用户可修**的几类:路径/权限、输入内容不合法、缺少必需字段、
+    结构与预期不符。未知异常保留类型名,既不吞掉信息也不编造原因。
+    """
+    if isinstance(exc, FileNotFoundError):
+        return f"找不到文件或目录: {exc.filename or exc}"
+    if isinstance(exc, NotADirectoryError):
+        return f"路径不是目录: {exc.filename or exc}"
+    if isinstance(exc, IsADirectoryError):
+        return f"路径是目录,但这里需要文件: {exc.filename or exc}"
+    if isinstance(exc, PermissionError):
+        return f"没有权限访问: {exc.filename or exc}"
+    if isinstance(exc, KeyError):
+        return f"缺少必需字段 {exc}(输入文件或运行记录与当前版本不匹配?)"
+    if isinstance(exc, (IndexError, TypeError, AttributeError)):
+        return f"输入数据与预期结构不符({type(exc).__name__}): {exc}"
+    if isinstance(exc, ValueError):
+        return f"输入内容不合法: {exc}"
+    if isinstance(exc, OSError):
+        return f"文件/系统操作失败: {exc}"
+    return f"{type(exc).__name__}: {exc}"
+
+
+def _report_unexpected(exc: BaseException, *, debug: bool) -> int:
+    """非预期异常的用户可见出口:一句可执行的提示 + debug 通道里的完整堆栈。"""
+    print(f"错误: {describe_exception(exc)}")
+    if debug:
+        print("完整堆栈(debug):")
+        traceback.print_exc()
+    else:
+        print(f"提示: 加 --debug 或设置 {DEBUG_ENV}=1 可打印完整堆栈,便于排查。")
+    return 2
 
 
 def _load_mapping(path: Path | str) -> dict[str, Any]:
@@ -341,8 +390,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
+    parser.add_argument(
+        "--debug", action="store_true", help="出错时打印完整堆栈(等价于 NMRFORGE_DEBUG=1)"
+    )
+
     def _common(handler: argparse.ArgumentParser) -> None:
         handler.add_argument("--study", required=True, help="研究根目录")
+        handler.add_argument(
+            "--debug", action="store_true", help="出错时打印完整堆栈(等价于 NMRFORGE_DEBUG=1)"
+        )
         handler.add_argument("--name", default="", help="新建研究时的项目名")
         handler.add_argument(
             "--condition",
@@ -469,8 +525,18 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return int(args.func(args))
     except SensitivityError as exc:
+        # 已知的接口错误:消息本身就是给用户看的(带修正建议)
         print(f"错误: {exc}")
+        if _debug_enabled(args):
+            print("完整堆栈(debug):")
+            traceback.print_exc()
         return 2
+    except KeyboardInterrupt:
+        print("已取消(收到中断);未完成的 workflow 不会被登记为成功。")
+        return 130
+    except (OSError, ValueError, KeyError, IndexError, TypeError, AttributeError) as exc:
+        # 非预期异常也要给用户一句能执行的提示,详细堆栈走 debug 通道
+        return _report_unexpected(exc, debug=_debug_enabled(args))
 
 
 __all__ = ["build_parser", "main"]
