@@ -59,7 +59,18 @@ toolkit version is recorded by the GUI layer instead of hard-coded in the core's
 | `QtGui` | 15 |
 | `QtTest` | 2 (test helper only) |
 
-### 3.2 Distinct imported symbols (44)
+### 3.2 Distinct imported symbols
+
+Authoritative count, from the AST pass in `scripts/pyside6_symbol_parity.py`:
+**74 distinct Qt symbols** across `QtCore`, `QtGui`, `QtWidgets` and `QtTest`. All 74 resolve under
+PySide6, together with 126 nested attribute paths (section 10).
+
+> Correction: an earlier revision of this audit reported 44 symbols. That figure came from a
+> single-line regex, which undercounts multi-line `from PyQt6.X import (...)` blocks. The AST figure
+> of 74 is the correct one, and the totals in section 2 (116 import statements, 18 files) are
+> unaffected because they were counted per statement.
+
+The listing below is a sample of the single-line imports, not the full set:
 
 ```text
 QtCore    QEvent  QEventLoop  QItemSelectionModel  QObject  QPoint  QPointF  QProcess
@@ -199,18 +210,65 @@ and `viewer` may depend on.
 - 30 test files import PyQt6 directly; the GUI tests build the `QApplication` fixture in
   `tests/conftest.py`.
 
-## 9. What this audit could NOT verify
+## 9. Stage 1 results (PySide6 installed and probed)
+
+Stage 1 of the plan is done. PySide6 was installed into a **separate** environment
+(`.venv-pyside/`, git-ignored) precisely so that no process can ever see both bindings.
+
+| Item | Result |
+| --- | --- |
+| Installed | `PySide6 6.11.2`, `PySide6_Essentials 6.11.2`, `PySide6_Addons 6.11.2`, `shiboken6 6.11.2` (Qt 6.11.2) |
+| **Licence (from wheel metadata)** | `LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only` - for all four distributions |
+| Licence files actually shipped | only `dist-info/licenses/LicenseRef-Qt-Commercial.txt`; **no LGPL-3.0 text is bundled** (see the compliance note below) |
+| `requires-python` | `>=3.10,<3.15` (the project requires `>=3.12`: compatible) |
+| PyQt6 importable in that environment | no - single binding per process holds by construction |
+| Imported-symbol parity | **74 / 74** resolve (`scripts/pyside6_symbol_parity.py`) |
+| Nested attribute-path parity | **126 / 126** resolve, e.g. `QPalette.ColorRole.Window`, `QStyle.StyleHint.SH_ToolTip_WakeUpDelay`, `Qt.ItemDataRole.UserRole`, `Qt.MouseButton.MiddleButton`, `QtGui.QPainter.RenderHint.Antialiasing` |
+| Binding-pattern smoke test | **25 / 25** pass (`scripts/pyside6_smoke_test.py`): QProxyStyle subclassing, palette + global QSS, `Signal` definition/connect/emit with multiple arguments, `QAction` from `QtGui` in a `QMenu`, `QSplitter` + `QTreeWidget` + `QTreeWidgetItem.setData(UserRole, dict)`, `QFontMetrics.horizontalAdvance`, `QSignalBlocker`, `QProcess`, `QTimer`, `QDesktopServices`, `QUrl`, `QTest`, offscreen `show()` |
+| `pyqtgraph` behaviour | picks `PySide6` by itself when PyQt6 is absent (`QT_LIB=PySide6`) |
+
+### 9.1 pyqtgraph returns a proxy module, not the binding module
+
+Worth recording because it changes how a migration should read `from pyqtgraph.Qt import QtCore`:
+
+```text
+pyqtgraph.Qt.QtCore.__name__          -> pyqtgraph.Qt.QtCore     (a proxy module)
+pgc.QObject is PySide6.QtCore.QObject -> True                     (same class objects)
+pgc.Qt is PySide6.QtCore.Qt           -> True
+```
+
+pyqtgraph builds a compatibility proxy that re-exports the real classes and normalises some API
+differences. Object identity is preserved, so `isinstance` checks, signals and enums behave as
+expected - which is why the viewer's 126 attribute paths resolve unchanged. The practical
+consequence is the opposite of a hazard: the three viewer modules that go through
+`pyqtgraph.Qt` are partly insulated from binding differences.
+
+### 9.2 LGPL compliance note (for the post-migration audit)
+
+The PySide6 wheels declare `LGPL-3.0-only` as an option, which is what makes a permissive
+application licence possible at all. But the wheels ship **only** `LicenseRef-Qt-Commercial.txt`:
+no LGPL-3.0 text, and no relinking material. A distribution that relies on the LGPL option must
+therefore supply, on its own:
+
+1. the LGPL-3.0 (and, for the Qt libraries, the applicable Qt LGPL notices) licence text;
+2. the Qt/PySide6 copyright notices;
+3. a way for a recipient to replace or relink the LGPL libraries - non-trivial for a read-only
+   single-file AppImage and therefore a legal question, not a packaging preference.
+
+This is recorded as a task in the post-migration audit, not resolved here.
+
+## 10. What this audit still could NOT verify
 
 Honest limitations, so the feasibility assessment is not read as stronger than it is:
 
-1. **PySide6 is not installed on this machine, and PySide6 could not be installed** (the sandbox has
-   no network access). Every PySide6-side claim in this document is therefore based on the binding's
-   documented API surface and on the symbol set actually used here - it is **not** a demonstrated
-   run. Stage 1 of the plan is precisely "install PySide6 in an isolated environment and prove it".
-2. The number of Qt call sites that behave *subtly* differently cannot be counted statically. The
-   audit removes the known large hazards (3.4); it cannot prove there is none left.
-3. The exact licence metadata of the PySide6 wheel (LGPL-3.0 vs GPL/commercial, and the shiboken6
-   wheel's terms) must be read from the installed distribution during Stage 1, exactly as was done
-   for PyQt6 in `THIRD_PARTY.md`.
-4. GUI behaviour was not re-verified on this branch: the branch adds documentation and a guard test
-   only, and the existing suite result (1127 passing on `master`) is unchanged by it.
+1. **API surface is verified; behaviour is not.** The 74 symbols, the 126 attribute paths and the 25
+   binding patterns are demonstrated, but no project module has been run under PySide6 yet - by
+   design, that is Stage 2/3. Anything that breaks when switching bindings, and is not visible in a
+   static API check or in the smoke patterns, remains unknown.
+2. The 126 attribute paths are those that can be resolved statically. A path built at runtime (for
+   example by `getattr` on a value computed elsewhere) is invisible to this method.
+3. The 25 smoke patterns are the patterns the audit identified as representative, not an enumeration
+   of every Qt call in the project. They cover the known hazard list in 3.4 and the specific APIs the
+   GUI's theme, panels, viewer and tests use.
+4. GUI behaviour was not re-verified against the `master` suite on this branch: the existing suite
+   result (1131 passing / 1 skipped) is unchanged by this branch's additions.

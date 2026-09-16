@@ -107,6 +107,34 @@ Possible resolutions (owner decision, see LICENSE_OPTIONS.md):
 
 Until the owner decides, no `LICENSE` file is committed.
 
+### Candidate replacement: PySide6 (audited, NOT yet a dependency)
+
+Recorded here so the licensing consequence of the planned migration is stated with real metadata
+rather than assumed. PySide6 was installed into an isolated environment (`.venv-pyside/`,
+git-ignored) for the feasibility work; it is **not** a dependency of this project, and PyQt6
+remains the binding in use.
+
+| Item | Verified value (2026-09-16) |
+| --- | --- |
+| Distributions | `PySide6 6.11.2`, `PySide6_Essentials 6.11.2`, `PySide6_Addons 6.11.2`, `shiboken6 6.11.2` (Qt 6.11.2) |
+| Licence expression | `LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only` |
+| Licence text shipped in the wheel | **only** `dist-info/licenses/LicenseRef-Qt-Commercial.txt` - no LGPL-3.0 text |
+| `requires-python` | `>=3.10,<3.15` |
+| API-surface parity with the current code | 74/74 imported symbols and 126/126 nested attribute paths resolve |
+
+Consequences if the migration proceeds:
+
+1. `LGPL-3.0-only` is an available option, which is what makes a permissive application licence
+   possible in principle - the GPL-3.0-only constraint of PyQt6 does not carry over.
+2. A distributing party must supply the LGPL-3.0 text and the Qt/PySide6 notices itself, because the
+   wheel does not.
+3. The LGPL obligation to allow replacement/relinking of the LGPL libraries has to be answered for
+   the distribution shape. A single-file AppImage bundles Qt inside a read-only squashfs, so this is
+   a legal question, not a packaging preference.
+4. The **full** third-party audit must be rerun after migration, before recommending MIT,
+   BSD-3-Clause or Apache-2.0. See
+   [docs/pyside6-migration/migration-plan.md](docs/pyside6-migration/migration-plan.md) section 6.
+
 ### [BLOCKER] Author list, affiliation, and IP ownership not confirmed
 
 `CITATION.cff` contains placeholders (see the `TODO` entries). The owner must confirm:

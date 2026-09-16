@@ -88,15 +88,18 @@ would trade a licensing problem for an unreleased, unvalidated GUI.
 
 | Stage | Work | Exit criterion |
 | --- | --- | --- |
-| 0 | Qt dependency audit; core Qt-independence guard test | this branch: audit written, guard test green |
-| 1 | Create an isolated environment with PySide6 installed; record the real wheel metadata (licences, versions) | `import PySide6` works, licence metadata captured in `THIRD_PARTY.md` |
+| 0 | Qt dependency audit; core Qt-independence guard test | **done**: audit written, guard test green |
+| 1 | Create an isolated environment with PySide6 installed; record the real wheel metadata; verify API-surface parity | **done**: `.venv-pyside/` with PySide6 6.11.2; licence metadata captured; 74/74 symbols and 126/126 attribute paths resolve; 25/25 binding-pattern smoke checks pass (audit section 9) |
 | 2 | Add `qtcompat`, move the ~44 symbols and the 101 `pyqtSignal` sites behind it; force `PYQTGRAPH_QT_LIB` | GUI starts under PySide6; no module imports PyQt6 in that environment |
 | 3 | Port the tests (30 files) and the `QApplication` fixture to `qtcompat` | full suite green in the PySide6 environment |
 | 4 | Port packaging: `NMRForge.spec` hiddenimports, AppImage smoke test, desktop integration | AppImage builds and starts on a clean machine |
 | 5 | Remove the PyQt6 path from `qtcompat`, drop `PyQt6` from dependencies, delete the leftover `.measure_gap.py`, update the docs that name PyQt6, then merge to `master` | all gates in section 5 pass, on `master` |
 
-Stage 1 cannot be started in this environment: PySide6 is not installed and the sandbox has no
-network access. Stages 2-5 are therefore planned, not attempted.
+Stage 1 has been executed (see the audit, section 9): PySide6 6.11.2 is installed in an isolated
+`.venv-pyside/` environment and the static API surface the project uses is fully present.
+Stages 2-5 are planned but not attempted: they require modifying `gui/` and `viewer/`, porting
+30 test files and rebuilding the AppImage, and they must be done as one reviewable change with the
+full suite green under PySide6.
 
 ## 5. Acceptance gates (required before PyQt6 leaves `master`)
 
@@ -127,25 +130,85 @@ The migration **replaces one licensing problem with a smaller one**; it does not
 2. Rerun the **full** third-party audit (every runtime dependency, not just Qt) before recommending
    MIT, BSD-3-Clause or Apache-2.0. The conclusion must be written into `LICENSE_OPTIONS.md` and
    `THIRD_PARTY.md`, and the licence decision remains the repository owner's.
-3. Settle the LGPL question for the distribution shape: a single-file AppImage bundles Qt. Meeting
-   the LGPL's library-replacement obligation for a bundled Qt inside a read-only squashfs needs an
-   explicit answer (licence texts, ability to relink, or shipping Qt/PySide6 sources), and that is a
-   legal question, not a packaging preference.
+3. Settle the LGPL question for the distribution shape: a single-file AppImage bundles Qt. The
+   PySide6 wheels ship **no LGPL-3.0 text at all** (only `LicenseRef-Qt-Commercial.txt`), so the
+   distributor must supply the LGPL text, the Qt/PySide6 notices, and a way to replace or relink the
+   LGPL libraries - non-trivial inside a read-only squashfs. That is a legal question, not a
+   packaging preference; see audit section 9.2.
 4. Only after 1-3: revisit `pyproject.toml`'s licence field, add the `LICENSE` file, and update
    `README.md`, `CITATION.cff` and `.zenodo.json`.
 
-## 7. What this branch does and does not do
+## 7. Where the theme lives (resolving the `viewer -> gui.theme` edge)
+
+`viewer/app.py` imports `gui.theme` for the standalone viewer's startup theme and window icon. That
+single edge makes the two UI packages mutually dependent, and it means `viewer` cannot be Qt-free
+even in principle. The question is whether `gui.theme` can be replaced; the answer is that it can,
+but not by making it Qt-free - applying a Qt palette is genuinely Qt work. What changes is *where it
+lives*.
+
+`gui/theme.py` (264 lines) mixes three separable things:
+
+| Concern | Content | Qt needed? | Consumers |
+| --- | --- | --- | --- |
+| Colour/state data | `TEXT_PRIMARY`, `TEXT_SECONDARY`, `TEXT_MUTED`, `TEXT_ON_LIGHT`, `WINDOW_BACKGROUND`, `PANEL_BACKGROUND`, `PANEL_BORDER`, `SURFACE_ALT`, `STATUS_COLORS` | **no** - plain hex strings | ~10 `gui/` modules, `tests/test_gui_theme.py` |
+| Asset lookup | `_theme_assets_dir()` (a `Path` decision, uses `core.app_paths`) | **no** | `apply_dark_theme` |
+| Qt objects | `app_icon() -> QIcon`, `fit_combo_width(QComboBox)`, `apply_dark_theme(QApplication)` (palette, QSS, `QProxyStyle`) | **yes** | `gui/main_window.py`, `viewer/app.py`, two tests |
+
+Options considered:
+
+| Option | How it works | Verdict |
+| --- | --- | --- |
+| **A. Move the Qt-using helpers into the shared UI layer** (`ui_support/` next to `qtcompat/`), and keep the colour data in a Qt-free module | Direction becomes `gui -> ui_support <- viewer`; the reverse edge disappears; the theme still has one implementation | **recommended** - smallest change that actually fixes the architecture, and the natural home for PySide6-specific theme code |
+| B. Inject the theme from the caller (viewer takes an `apply_theme` callable / icon provider) | Removes the import edge without moving files | rejected on its own: the *standalone* viewer entry point is a first-class feature, so it would have to ship its own theme implementation - duplicated code, divergent themes |
+| C. Registry/entry-point indirection (`importlib.metadata` entry point for a theme provider) | Decouples dynamically | over-engineered for one consumer, and adds packaging metadata that the AppImage must carry |
+| D. Keep the edge, keep it lazy | Today's state: the import is inside `main()`, so it never runs at import time | acceptable as a stopgap, but leaves `viewer` unable to exist without `gui`, and the cycle will migrate to PySide6 unchanged |
+
+Recommended shape (option A, with the Qt-free half maximally split out):
+
+```text
+ui_support/
+├── colors.py        # hex constants + STATUS_COLORS  (Qt-free, reusable, testable without Qt)
+├── assets.py        # app icon path / theme asset dir lookup (Qt-free; core.app_paths)
+└── theme.py         # apply_dark_theme(app), app_icon() -> QIcon, fit_combo_width(combo)
+```
+
+- `ui_support/colors.py` and `ui_support/assets.py` import no Qt at all, so they can even live
+  under the existing `tests/test_qt_independence.py` guard for the *core-compatible* subset if it is
+  later extended.
+- `ui_support/theme.py` imports its Qt names from `qtcompat`, like the rest of the UI layer.
+- `gui/theme.py` can remain as a re-export shim for one release if that keeps the diff reviewable,
+  then be deleted; the 13 `gui/` call sites and 3 test imports move with it.
+- Rule to add to `docs/development.md` when this lands: **`viewer/` must not import `gui/`**, and
+  shared UI helpers live in `ui_support/`.
+
+This is a Stage 2 task. It is planned here rather than executed, because it touches 16+ files and
+belongs in the same change as the binding port, so it can be reviewed and regression-tested as a
+whole.
+
+## 8. What this branch does and does not do
 
 Done on this branch:
 
-- the Qt dependency audit (evidence-based, with counts and queries);
+- the Qt dependency audit (evidence-based, with queries and counts);
 - this plan, including the target architecture, the stages and the acceptance gates;
-- `tests/test_qt_independence.py`, which locks the property the target architecture rests on.
+- `tests/test_qt_independence.py`, which locks the properties the target architecture rests on
+  (Qt-free core, one binding per process, one binding in packaging metadata);
+- **Stage 1 execution**: an isolated `.venv-pyside/` environment with PySide6 6.11.2, its real
+  licence metadata, and two migration instruments that produce repeatable evidence -
+  `scripts/pyside6_symbol_parity.py` (74/74 symbols, 126/126 nested attribute paths) and
+  `scripts/pyside6_smoke_test.py` (25/25 binding-pattern checks, including pyqtgraph's binding
+  choice).
 
 Deliberately **not** done:
 
 - no PyQt6 removal, no dependency change, no code change in `gui/` or `viewer/`;
-- no `qtcompat` module yet (Stage 2 depends on Stage 1, which needs PySide6 installed);
-- no test modified or ported;
-- no `LICENSE` added, no licence recommended - the third-party audit must be rerun first;
+- no `qtcompat` module and no theme move yet (Stage 2);
+- no test modified or ported (Stage 3);
+- no `LICENSE` added, no licence recommended - the full third-party audit must be rerun after the
+  port, and the LGPL questions in section 6 answered first;
 - nothing merged to `master`, and nothing pushed to any remote.
+
+Two files in `scripts/` (`pyside6_symbol_parity.py`, `pyside6_smoke_test.py`) name PySide6 on
+purpose. They are migration tooling, they run in the PySide6 environment only, and the guard test
+asserts that nothing outside `scripts/pyside6_*` names a second binding - so they cannot be mistaken
+for application code.
