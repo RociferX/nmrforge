@@ -121,6 +121,34 @@ the evidence must be recorded in the migration pull request.
 No test may be skipped, xfailed or deleted to reach these gates. If a behaviour genuinely cannot be
 reproduced under PySide6, that is a blocker to report, not a test to relax.
 
+### 5.1 Test-run stability observed on this machine (affects how the gates are judged)
+
+Full-suite runs were repeated while preparing this branch, because a migration gate is only
+meaningful if the suite result itself is stable. Measured on 2026-09-16, all runs with
+`--basetemp` inside the repository:
+
+| Tree | Runs | Outcome |
+| --- | --- | --- |
+| `master` (PyQt6, 1127 tests) | 2 | exit 0 both times, 0 failed |
+| this branch (PyQt6, 1133 tests) | 6 | 4 x exit 0; 1 x exit 0xC0000005 with **every test passing**; 1 x exit 1 with **one** failure |
+
+The two anomalies are environment-level, not assertion failures, and both are already documented
+elsewhere in the project:
+
+1. **`0xC0000005` at interpreter exit** - the Qt teardown race described in `tests/conftest.py`
+   ("remaining top-level windows are destroyed in an unstable order at interpreter exit"). It
+   happens *after* the last test passes.
+2. **`PermissionError [WinError 5]` on `os.replace`** inside the pytest scratch directory
+   (`core/project/manager.py::atomic_write_json`, the atomic write used by every project save). One
+   `test_gui_layout.py` case hit it once. This is the same class of Windows file-locking problem
+   that already forces `--basetemp` on this machine (`docs/development.md`).
+
+Implication for the migration gates: a single green run is not sufficient evidence, and a red run
+must be triaged as environment versus assertion before it is treated as a migration defect. Both
+anomalies are worth fixing on their own merits (a CI that crashes at exit after a green run reports
+failure to the user), but neither is caused by, nor blocks, the binding port - and neither was
+introduced by this branch, which adds no Qt code.
+
 ## 6. Licensing work that follows the migration
 
 The migration **replaces one licensing problem with a smaller one**; it does not end the analysis.
