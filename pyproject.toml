@@ -9,13 +9,15 @@ dynamic = ["version"]
 description = "面向 Bruker 2D/3D NMR 数据的自动化处理、参数优化与质量控制平台"
 readme = "README.md"
 requires-python = ">=3.12"
-# 许可证:LGPL-3.0-only(2026-09-16 权利人决定,正文见根目录 LICENSE)。
+# 许可证:源码 Apache-2.0(2026-09-16 权利人决定,正文见根目录 LICENSE)。
+# LGPL 只适用于打包分发里被捆绑的第三方库(Linux AppImage 内的 Qt/PySide6,
+# 其许可正文与声明随产物分发),不适用于本项目源码。
 # 版权人记为 "NMRForge contributors"(权利人暂不公开个人信息)。
 # 说明:这里用 license 表形式是为了兼容 build-system 声明的 setuptools>=68;
-# 若构建要求升到 setuptools>=77,应改为 PEP 639 的字符串形式 license = "LGPL-3.0-only"。
-license = { text = "LGPL-3.0-only" }
+# 若构建要求升到 setuptools>=77,应改为 PEP 639 的字符串形式 license = "Apache-2.0"。
+license = { text = "Apache-2.0" }
 classifiers = [
-    "License :: OSI Approved :: GNU Lesser General Public License v3 (LGPLv3)",
+    "License :: OSI Approved :: Apache Software License",
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
     "Operating System :: POSIX :: Linux",

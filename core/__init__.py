@@ -1,4 +1,4 @@
-"""旧名 核心领域层：数据理解、规划、处理原语、优化、QC、实验模板。
+"""nmrforge 核心领域层：数据理解、规划、处理原语、优化、QC、实验模板。
 
 ``__version__`` 是唯一版本源:pyproject.toml 通过``dynamic = ["version"]``
 + ``attr = "core.__version__"`` 取同一属性,packaging/linux/

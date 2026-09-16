@@ -101,13 +101,13 @@ What this means for distribution:
 
 ### This project's own licence (decided 2026-09-16)
 
-nmrForge itself is licensed under the **GNU Lesser General Public License, version 3 only**
-(`LGPL-3.0-only`, SPDX); the text is at the repository root as [LICENSE](LICENSE) and
-`pyproject.toml` declares the same expression. The copyright holder is recorded as
-"NMRForge contributors" - the owner does not publish a personal name yet, and no author list has
-been invented. LGPL-3.0 sits on top of GPL-3.0, whose text ships next to the LGPL text in
-`packaging/linux/THIRD_PARTY_LICENSES/`. This choice does not change any third-party obligation in
-the inventory below; bundling Qt/PySide6 still triggers the LGPL obligations described next.
+nmrforge's own code is licensed under the **Apache License 2.0** (`Apache-2.0`, SPDX); the text is at
+the repository root as [LICENSE](LICENSE) and `pyproject.toml` declares the same expression. The
+copyright holder is recorded as "NMRForge contributors" - the owner does not publish a personal name
+yet, and no author list has been invented. **LGPL is used only for what a packaged distribution
+bundles**: the AppImage's Qt/PySide6 libraries (see the next section). Installing from source pulls
+Qt in as a separate package and triggers no LGPL obligation on this project. Third-party components
+keep their own licences regardless of the project licence above.
 
 ### [BLOCKER] Author list, affiliation, and IP ownership not confirmed
 

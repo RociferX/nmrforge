@@ -1,6 +1,6 @@
 # Citation metadata for nmrForge.
 #
-# STATUS: PARTIAL. The licence is decided (LGPL-3.0-only, 2026-09-16) and recorded below; the
+# STATUS: PARTIAL. The licence is decided (Apache-2.0 for the source, 2026-09-16) and recorded below; the
 # author list, author order and affiliation are still unconfirmed - the owner asked that no personal
 # data be published for now - so this file is NOT yet a citable record. Until it is filled in, cite
 # the repository URL. Blocking items are listed in PUBLIC_RELEASE_AUDIT.md (section BLOCKERS) and
@@ -17,11 +17,12 @@
 # and add:
 #   repository-code: "https://github.com/<owner>/<repo>"
 #   doi: "10.5281/zenodo.XXXXXXX"  # only after a Zenodo release exists
-# The licence is already set below (LGPL-3.0-only) and must not be changed without updating
-# LICENSE, pyproject.toml, README.md and LICENSE_OPTIONS.md together.
+# The licence is already set below (Apache-2.0 for the source; LGPL-3.0 applies only to the Qt/PySide6
+# bundled in the AppImage) and must not be changed without updating LICENSE, pyproject.toml,
+# README.md and LICENSE_OPTIONS.md together.
 
 cff-version: 1.2.0
-message: "This file is incomplete: the licence is LGPL-3.0-only, but the author list of nmrForge is not finalised. Please cite the repository URL instead, and check this file before using it."
+message: "This file is incomplete: the source licence is Apache-2.0, but the author list of nmrforge is not finalised. Please cite the repository URL instead, and check this file before using it."
 title: "nmrForge: automation, parameter optimisation and quality control for Bruker multidimensional NMR data"
 abstract: >-
   nmrForge is a platform for automating Bruker multidimensional NMR data processing. It reads
@@ -33,7 +34,7 @@ type: software
 authors:
   - name: "TODO: author list and order not yet confirmed (see PUBLIC_RELEASE_AUDIT.md)"
 version: 0.2.199
-license: "LGPL-3.0-only"
+license: "Apache-2.0"
 keywords:
   - NMR
   - NMRPipe

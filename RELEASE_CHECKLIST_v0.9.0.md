@@ -18,11 +18,13 @@ Working notes:
 - [ ] **IP ownership confirmed.** Who owns the copyright, and does the institute/laboratory claim
       it? Funding-agreement redistribution conditions checked.
 - [ ] **Author list, order and affiliation confirmed**, and each author agrees to be listed.
-- [x] **LICENSE selected and committed (2026-09-16): GNU LGPL-3.0-only.** Root `LICENSE` holds
-      the licence text plus a project notice ("Copyright (C) 2026 NMRForge contributors");
-      `pyproject.toml` declares the SPDX id and the LGPLv3 classifier; README (EN/ZH), `CITATION.cff`,
-      `.zenodo.json`, `THIRD_PARTY.md` and [LICENSE_OPTIONS.md](LICENSE_OPTIONS.md) state the same.
-      The PyQt6 GPL-3.0-only obstacle had already been removed by the PySide6 migration.
+- [x] **LICENSE selected and committed (2026-09-16): source Apache-2.0, LGPL only for the bundled
+      Qt/PySide6.** Root `LICENSE` holds the Apache-2.0 text plus a project notice ("Copyright 2026
+      NMRForge contributors"); `pyproject.toml` declares `Apache-2.0` with the Apache classifier;
+      README (EN/ZH), `CITATION.cff`, `.zenodo.json`, `THIRD_PARTY.md` and
+      [LICENSE_OPTIONS.md](LICENSE_OPTIONS.md) state the same, and the guard test fails if the
+      project's own licence claims LGPL or if the AppImage stops shipping the LGPL text. The PyQt6
+      GPL-3.0-only obstacle had already been removed by the PySide6 migration.
 - [x] **Third-party licences checked** against the actual installed versions, including what is
       bundled into the AppImage: `scripts/audit_third_party.py` (28 permissive, 4 weak copyleft,
       0 strong-copyleft-only on 2026-09-16) with the full inventory in

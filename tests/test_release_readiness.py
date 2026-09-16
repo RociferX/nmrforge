@@ -172,18 +172,33 @@ def test_licence_state_is_explicit() -> None:
         )
         return
 
-    # A licence was chosen: the places that state it must not drift apart.
+    # A licence was chosen: the places that state it must not drift apart, and the
+    # LGPL must stay confined to the packaged distribution (its Qt/PySide6 libraries).
     text = licence_file.read_text(encoding="utf-8")
-    assert "GNU LESSER GENERAL PUBLIC LICENSE" in text.upper(), (
-        "LICENSE must contain the full LGPL-3.0 text, not just a one-line reference"
+    assert "Apache License" in text and "Version 2.0, January 2004" in text, (
+        "LICENSE must contain the full Apache-2.0 text, not just a one-line reference"
     )
-    assert "LGPL-3.0-only" in text, "LICENSE must state the SPDX identifier it is released under"
+    assert "Apache-2.0" in text, "LICENSE must state the SPDX identifier it is released under"
+    grant = text.split("=====")[0]
+    assert "SPDX-License-Identifier: Apache-2.0" in grant
+    assert "SPDX-License-Identifier: LGPL" not in grant, (
+        "the project's own licence must not be LGPL: LGPL applies only to bundled third-party "
+        "libraries (see packaging/linux/THIRD_PARTY_LICENSES/NOTICE.md)"
+    )
+    assert "under the terms of the GNU Lesser General Public License" not in grant, (
+        "the licence grant must not be phrased as an LGPL grant"
+    )
     declared = str(tomllib.loads(_read("pyproject.toml"))["project"].get("license", ""))
-    assert "LGPL-3.0-only" in declared, (
-        "pyproject.toml must declare the same licence as LICENSE"
+    assert "Apache-2.0" in declared, "pyproject.toml must declare the same licence as LICENSE"
+    assert "Apache-2.0" in readme, "README.md must state the licence that applies to the source"
+    assert "LGPL" in readme, (
+        "README.md must state that LGPL applies to the bundled Qt/PySide6 in the AppImage"
     )
-    assert "LGPL-3.0-only" in readme, "README.md must state the licence that applies"
     assert "LICENSE_OPTIONS.md" in readme, "README.md must link the licence reasoning"
+    bundled = ROOT / "packaging" / "linux" / "THIRD_PARTY_LICENSES" / "LGPL-3.0.txt"
+    assert bundled.is_file(), (
+        "the AppImage must keep shipping the LGPL text for the Qt/PySide6 libraries it bundles"
+    )
 
 
 def test_third_party_inventory_names_external_engines() -> None:

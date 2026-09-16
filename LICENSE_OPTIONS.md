@@ -1,10 +1,16 @@
 # Licence Options
 
-**DECIDED on 2026-09-16: nmrForge is released under the GNU Lesser General Public License
-version 3 only (`LGPL-3.0-only`).** The text is committed as [LICENSE](LICENSE); the copyright
-holder is recorded there as "NMRForge contributors" (the owner does not publish a personal name
-yet, and no author list is invented). Sections 3-5 below are kept as the record of the analysis
-that led to the decision.
+**DECIDED on 2026-09-16: the source is released under the Apache License 2.0
+(`Apache-2.0`); LGPL is used only where a packaged distribution bundles an LGPL library (the
+AppImage's Qt/PySide6).** The text is committed as [LICENSE](LICENSE); the copyright holder is
+recorded there as "NMRForge contributors" (the owner does not publish a personal name yet, and no
+author list is invented). Sections 3-5 below are kept as the record of the analysis that led to the
+decision; the Apache-2.0 option analysed there was chosen.
+
+> Note (same day, after the first decision): the licence was first set to LGPL-3.0-only for the
+> whole project. The owner then clarified the intent - **source code Apache-2.0, LGPL only for what
+> the packaged distribution bundles** - and that is what is now in force. The LGPL mechanism for the
+> AppImage is unchanged and still required; only the project's own terms changed.
 
 Read this together with [THIRD_PARTY.md](THIRD_PARTY.md), which records the dependency facts
 that constrain the choice. This is not legal advice.
@@ -13,7 +19,7 @@ that constrain the choice. This is not legal advice.
 
 | Check | Result |
 | --- | --- |
-| Existing `LICENSE` / `COPYING` file | **`LICENSE` (added 2026-09-16): GNU LGPL-3.0-only text + project notice; SPDX `LGPL-3.0-only`.** Before that date the repository was "all rights reserved" by default. |
+| Existing `LICENSE` / `COPYING` file | **`LICENSE` (added 2026-09-16): Apache License 2.0 text + project notice; SPDX `Apache-2.0`.** Before that date the repository was "all rights reserved" by default. |
 | Institutional or laboratory copyright notice in the tree | None found. No `Copyright (c)` header in any source file. |
 | Per-file licence headers | None. |
 | Third-party components that constrain the choice | **Yes, but no longer fatally.** The GUI uses PySide6 (`LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only`), which leaves a permissive licence open in principle. See section 2. |
@@ -75,19 +81,28 @@ obligations follow the library, so they bite when a binary you distribute contai
   documented replace/relink route), but **not yet reviewed by the IP owner**, and no AppImage has
   been built since the migration.
 
-A `LICENSE` file **has now been committed** (`LGPL-3.0-only`) on the owner's instruction of
-2026-09-16. The remaining open points are the LGPL distribution review (section 6 of
-[docs/pyside6-migration/migration-plan.md](docs/pyside6-migration/migration-plan.md)) and the
-author list / IP ownership (the owner asks for no personal data for now).
+A `LICENSE` file **has now been committed** (`Apache-2.0`, 2026-09-16, on the owner's
+instruction) with the LGPL confined to the packaged AppImage's Qt/PySide6. The remaining open points
+are the owner's review of those distribution obligations (section 6 of
+[docs/pyside6-migration/migration-plan.md](docs/pyside6-migration/migration-plan.md)) and the author
+list / IP ownership (the owner asks for no personal data for now).
 
 ## 2.1 What the chosen licence means for this project
 
-LGPL-3.0 is a *weak* copyleft licence: it lets other programs link nmrForge while keeping their own
-terms, but nmrForge itself - and any modified version of it - must be distributed under LGPL-3.0
-with its corresponding source, and recipients must be able to relink the LGPL-covered parts. In
-practice, for an application that *is* the licensed work, the source-disclosure obligation is close
-to that of GPL-3.0; what LGPL adds is the permission for proprietary code to link it. That is a
-deliberate choice by the owner on 2026-09-16, not an accident of the PySide6 dependency.
+**The project's own code is Apache-2.0.** That is permissive: anyone may use, modify and redistribute
+it, including inside closed products, provided they keep the copyright/licence notices, state which
+files they changed, and respect the patent-termination clause. Contributions are covered by section
+5 (inbound = outbound) and by `CONTRIBUTING.md`.
+
+**LGPL-3.0 applies only to the packaged distribution, and only to what it bundles.** The AppImage
+contains Qt and PySide6, distributed under Qt's `LGPL-3.0-only` option, so that *binary* must carry
+the LGPL-3.0/GPL-3.0 texts and the Qt notices and must let a recipient replace or relink those
+libraries (implemented in `packaging/linux/THIRD_PARTY_LICENSES/` and `build_appimage.sh`). This is
+an obligation about those libraries, not about nmrforge's source: a user who installs from source
+installs Qt themselves, as a separate package, and no LGPL obligation attaches to the nmrforge code.
+
+The one place to keep honest is therefore the AppImage: nothing in the source tree may claim that the
+project is LGPL, and nothing in the AppImage may drop the Qt/PySide6 notices.
 
 ## 3. Candidate licences compared
 

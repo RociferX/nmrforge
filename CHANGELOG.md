@@ -7,8 +7,11 @@
 - 其下的 `### 未发布(日期)` 条目为按期保留的开发历史,不重写、不合并;
 - `## [x.y.z]` 为历史版本条目。
 
-命名说明:仓库目录与早期记录使用 "旧名",发行包名、AppImage 与 `pyproject.toml`
-使用 "NMRForge"。命名统一是公开发布前的待决事项,见 `PUBLIC_RELEASE_AUDIT.md`。
+命名说明:项目名为 **nmrforge**(显示 "nmrforge"),发行包名、AppImage 与 `pyproject.toml`
+已一致。**项目旧名不再使用**,只保留在 2026-09-16 之前的记录里(本文件旧条目、
+`docs/problems.md`、`docs/tasks/archive/`、`docs/HANDOVER.md`、`docs/DECISIONS.md`、
+`docs/AGENT_PROMPTS.md`),不作为新材料的命名;本地检出目录名仍是历史名称,属本机操作。
+决定见 `PUBLIC_RELEASE_AUDIT.md` F.1。
 
 ## [Unreleased]
 
@@ -71,17 +74,19 @@
 
 ### Added
 
-- **许可证:LGPL-3.0-only(2026-09-16 权利人决定)**:新增根目录 `LICENSE`(GNU LGPL-3.0 正文 +
-  项目声明;SPDX `LGPL-3.0-only`;版权人记为 "NMRForge contributors",按要求不写个人信息、
-  不编造作者名单);`pyproject.toml` 声明同一 SPDX 表达式并加 LGPLv3 classifier;README(中/英)、
-  `LICENSE_OPTIONS.md`、`THIRD_PARTY.md`、`PUBLIC_RELEASE_AUDIT.md`(G.2 改为已决定)、
-  `RELEASE_CHECKLIST_v0.9.0.md`、`CONTRIBUTING.md`、`CITATION.cff`、`.zenodo.json` 同步;
-  `tests/test_release_readiness.py` 的许可证守卫改为「有 LICENSE 时 LICENSE / pyproject.toml /
-  README.md 三处声明必须一致」,`scripts/audit_third_party.py` 的本项目提示同步更新。
-  本地全量 `1190` 收集 / `1189 passed, 1 skipped`(平台跳过);VM(`69cf755`)
-  `bash scripts/vm_test.sh` → `1186 passed, 4 skipped`,`VM_TEST_EXIT=0`。
+- **许可证:源码 Apache-2.0,LGPL 只随打包产物(2026-09-16 权利人决定)**:根目录 `LICENSE`
+  改为 Apache-2.0 正文 + 项目声明(SPDX `Apache-2.0`;版权人 "NMRForge contributors",按要求不写
+  个人信息、不编造作者名单);`pyproject.toml` 声明同一 SPDX 与 Apache classifier;README(中/英)、
+  `LICENSE_OPTIONS.md`、`THIRD_PARTY.md`、`packaging/linux/THIRD_PARTY_LICENSES/NOTICE.md`、
+  `PUBLIC_RELEASE_AUDIT.md`(G.2)、`RELEASE_CHECKLIST_v0.9.0.md`、`CONTRIBUTING.md`、
+  `CITATION.cff`、`.zenodo.json` 同步。LGPL 仅适用于 Linux AppImage 里捆绑的 Qt/PySide6
+  (`LGPL-3.0-only` 选项),其正文/声明仍随产物分发并提供替换/重链接路径。守卫测试改为:声明
+  漂移、本项目许可自称 LGPL、或 AppImage 不再随附 LGPL 正文 —— 任一出现即失败。
+  本地全量 `1190` 收集 / `1189 passed, 1 skipped`(平台跳过);VM(`69cf755` 起)回归见交接记录。
   作者名单与机构仍未公开(见 `PUBLIC_RELEASE_AUDIT.md` G.1)。
-
+- **命名统一:项目名为 `nmrforge`**(2026-09-16 权利人决定):旧名仅作为 2026-09-16 之前的
+  历史名称保留在旧记录中,不再用于新材料;`core` 包 docstring、本文件的命名说明、审计 F.1 与发布
+  清单同步。本地检出目录名仍是历史名称(本机操作,见 `PUBLIC_RELEASE_AUDIT.md` F.1)。
 ### Changed
 
 - **AppImage 构建 + 冒烟完成(Stage 4)**:在用户 VM 上构建成功(`BUILD_EXIT=0`,产物约 134MB),

@@ -19,7 +19,7 @@ privacy decisions. Do not change the repository visibility yet.**
 | --- | --- |
 | READY | section E (16 items) |
 | WARNINGS | section F (12 items) |
-| BLOCKERS | section G (5 items). G.2: the licence is **decided (LGPL-3.0-only, 2026-09-16)** - what remains there is the owner's review of the LGPL distribution obligations; G.1 and G.3-G.5 are unchanged |
+| BLOCKERS | section G (5 items). G.2: the licence is **decided (source Apache-2.0; LGPL only for the bundled Qt/PySide6, 2026-09-16)** - what remains there is the owner's review of the AppImage's distribution obligations; G.1 and G.3-G.5 are unchanged |
 | MANUAL ACTIONS | section H (12 items) |
 
 ---
@@ -112,7 +112,7 @@ privacy decisions. Do not change the repository visibility yet.**
 | --- | --- | --- |
 | Version definition | `core/__init__.py::__version__` (already single-source) | unchanged; the `v0.9.0` bump is deferred to the release step |
 | Packaging | AppImage (PyInstaller spec + build script + desktop/icon) | unchanged; contract still locked by a test |
-| LICENSE | absent | **added 2026-09-16**: GNU LGPL-3.0-only text + project notice (holder "NMRForge contributors"); `pyproject.toml` declares the same SPDX id |
+| LICENSE | absent | **added 2026-09-16**: Apache-2.0 text + project notice (holder "NMRForge contributors"); `pyproject.toml` declares the same SPDX id; LGPL stays confined to the AppImage's bundled Qt/PySide6 |
 | CITATION | absent | `CITATION.cff` with explicit placeholders |
 | CI | absent | `.github/workflows/ci.yml` + issue/PR templates |
 | Security policy | absent | `SECURITY.md` (contact is a placeholder) |
@@ -380,14 +380,19 @@ These are done, verified, and need no decision from you:
 
 Publishable, but worth fixing later. None of these should delay the release if you accept them.
 
-### F.1 Naming: 旧名 vs NMRForge
+### F.1 Naming: 旧名 vs nmrforge - **RESOLVED 2026-09-16 (name: nmrforge)**
 
-The repository directory and much of the documentation say **旧名** (`CHANGELOG.md` was
-historically titled "旧名 修改记录", the `core` docstring, legacy headings). The package name,
-the AppImage, the console script and the README say **NMRForge**. For a software paper this needs
-one canonical name. It was not renamed here, because renaming a package touches imports, packaging,
-history and user expectations - a decision, not a mechanical edit. `CHANGELOG.md` now states the
-discrepancy explicitly.
+**Decision (2026-09-16, owner): the project name is `nmrforge` (display "nmrforge"); "旧名" is
+legacy and must not be used for new material.** What was updated in this round: the `core` package
+docstring, the naming note in `CHANGELOG.md`, this audit and the release checklist. What is kept as
+history and must *not* be rewritten: the pre-2026-09-16 `CHANGELOG.md` entries, `docs/problems.md`,
+`docs/tasks/archive/**`, `docs/HANDOVER.md`, `docs/DECISIONS.md` and `docs/AGENT_PROMPTS.md` - they
+record the state of the time (and several of them quote the local checkout path, see below).
+
+One manual step remains for the owner: the local checkout folder is still
+`C:\<user>\<user>\Documents\旧名` (the VM is already `~/NMRForge`). Renaming it is a local
+operation and was deliberately not done from inside the running workspace; a fresh `git clone` into
+`nmrforge/` achieves the same result. Nothing in the repository depends on the folder name.
 
 ### F.2 Test layout is flat
 
@@ -487,19 +492,25 @@ redistribution conditions? `CITATION.cff` currently contains a placeholder autho
 (`TODO: author list and order not yet confirmed`) and no institution, and no source file carries a
 copyright header. **Nothing about authorship was invented.**
 
-### G.2 [BLOCKER] Licence - **decided 2026-09-16: LGPL-3.0-only**; the distribution review is not
+### G.2 [BLOCKER] Licence - **decided 2026-09-16: source Apache-2.0, LGPL only for bundled Qt**
 
-**Decision (2026-09-16, owner):** nmrForge is licensed under the GNU Lesser General Public License,
-version 3 only (`LGPL-3.0-only`). `LICENSE` is committed at the repository root (LGPL text plus a
-project notice), `pyproject.toml` declares the same SPDX expression and the LGPLv3 classifier, and
-`README.md` / [LICENSE_OPTIONS.md](LICENSE_OPTIONS.md) state it in both languages. The copyright
-holder is recorded as "NMRForge contributors": the owner asked that no personal data be published
-for now, and no author list was invented. What is *consequence*, not decoration: LGPL-3.0 is weak
-copyleft, so the project's own source must stay available under LGPL-3.0 to anyone who receives a
-binary, and recipients must be able to replace/relink the LGPL-covered parts - the same mechanism
-already implemented for the bundled Qt/PySide6 (`packaging/linux/THIRD_PARTY_LICENSES/`,
-`PYSIDE6_REQUIREMENT`). The item stays a blocker only because the owner has not yet reviewed those
-obligations (see the checklist).
+**Decision (2026-09-16, owner):** the project's own source code is licensed under the **Apache
+License 2.0** (`Apache-2.0`); **LGPL applies only to what a packaged distribution bundles** - the
+Linux AppImage's Qt/PySide6 (`LGPL-3.0-only` option). The first decision that day was to put the
+whole project under LGPL-3.0-only; the owner then clarified that this was not the intent, and the
+split above is what is in force.
+
+What was changed: `LICENSE` (root) now holds the Apache-2.0 text plus a project notice,
+`pyproject.toml` declares `Apache-2.0` with the Apache classifier, and `README.md` (both languages),
+[LICENSE_OPTIONS.md](LICENSE_OPTIONS.md), `THIRD_PARTY.md`, `CONTRIBUTING.md`, `CITATION.cff` and
+`.zenodo.json` state the same. `tests/test_release_readiness.py` fails if the source licence drifts
+or if the project's own licence text claims LGPL, and it also fails if the AppImage's shipped LGPL
+text disappears. The LGPL machinery is unchanged and still required for the AppImage
+(`packaging/linux/THIRD_PARTY_LICENSES/`, `PYSIDE6_REQUIREMENT` et al.).
+
+The item stays a blocker only because the owner (or whoever owns the IP) has not yet reviewed those
+distribution obligations - the relink/replace requirement for a single-file AppImage is the open
+legal question.
 
 **History (unchanged analysis below):** the GPL obstacle was removed by the PySide6 migration.
 **Status changed on 2026-09-16.** The GUI no longer uses PyQt6: the PySide6 migration is complete on
@@ -559,11 +570,11 @@ Things only you can do. Suggested order:
 2. **Confirm the author list, order and affiliation**, and get each author's agreement; then fill in
    `CITATION.cff` (and later `.zenodo.json`).
 3. **Rerun the audit in the AppImage build environment**
-   (`python scripts/audit_third_party.py --csv /tmp/audit.csv`), have the LGPL mechanism reviewed by
-   whoever owns the IP, then choose the licence - a permissive one is now open, and this audit does
-   not recommend one.
-4. **Add the `LICENSE` file** for the chosen licence, and set the `license` field and classifier in
-   `pyproject.toml`.
+   (`python scripts/audit_third_party.py --csv /tmp/audit.csv`) and have the LGPL mechanism reviewed
+   by whoever owns the IP. *(The licence itself is decided: source Apache-2.0, LGPL only for the
+   bundled Qt/PySide6 - see G.2.)*
+4. ~~Add the `LICENSE` file and set the `license` field and classifier~~ **done 2026-09-16**
+   (Apache-2.0, root `LICENSE` + `pyproject.toml`).
 5. **Add the private contacts** for `SECURITY.md` and `CODE_OF_CONDUCT.md`.
 6. **Review the privacy findings** in B.3, G.3 and G.4: sample identifier, study paths, dataset
    shorthand, internal host references. Decide keep / sanitise / remove per occurrence.
@@ -574,8 +585,8 @@ Things only you can do. Suggested order:
    and whether `scripts/vm_*.py` should be sanitised.
 9. **Take a real GUI screenshot** with publishable data, no user name, no sample name and no
    laboratory path, and add it to the README.
-10. **Resolve the naming question** (旧名 vs NMRForge) before the first public release, because it
-    affects the title of the software paper.
+10. ~~Resolve the naming question~~ **done 2026-09-16**: the name is `nmrforge`; "旧名" is legacy
+    (see F.1). Remaining manual step: rename the local checkout folder, which is a local operation.
 11. **Create the GitHub repository yourself, choose its visibility, add the remote and push.** This
     preparation deliberately did none of that.
 12. **After the repository exists:** enable branch protection, add CI status badges to the README,

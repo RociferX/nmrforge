@@ -109,9 +109,10 @@ project avoids behaviour that cannot be justified or audited.
 
 ## Licensing of contributions
 
-nmrForge is released under the **GNU LGPL v3, version 3 only** (`LGPL-3.0-only`; see
-[LICENSE](LICENSE) and [LICENSE_OPTIONS.md](LICENSE_OPTIONS.md)). By opening a pull request you
-agree that your contribution may be distributed under those terms. Please open an issue before
+nmrforge is released under the **Apache License 2.0** (see [LICENSE](LICENSE) and
+[LICENSE_OPTIONS.md](LICENSE_OPTIONS.md)). By opening a pull request you agree that your
+contribution may be distributed under those terms (Apache-2.0 section 5: contributions are
+inbound under the same licence, with the patent grant it carries). Please open an issue before
 starting substantial work, so the change can be scoped against the project's "no unauditable
 behaviour" rule.
 

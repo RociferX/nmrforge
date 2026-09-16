@@ -10,6 +10,13 @@ or ask the application to print them:
 
     ./NMRForge-<version>-x86_64.AppImage --licenses
 
+## Scope of the LGPL obligations in this directory
+
+nmrforge's own source code is licensed under **Apache-2.0** (root `LICENSE`). The LGPL-3.0 text in
+this directory, and the obligations that come with it, apply to the **third-party libraries bundled
+into this AppImage** - Qt and PySide6/shiboken6, distributed under Qt's `LGPL-3.0-only` option -
+and not to the project's own code. Everything below is the notice for those libraries.
+
 ## What the AppImage bundles, and under which licence
 
 | Component | Version bundled | Licence option relied on | Copyright |
