@@ -64,7 +64,10 @@
   (`tests/test_2d_nus_compat.py`);弱峰定位边界——拟合失败必须回退并留档原因,不得静默给出
   假高斯结果(`tests/test_gaussian_localize.py`);组合扫描单 workflow 失败隔离 + failed/
   success 两类 run 的 requested-vs-actual 参数留档(`tests/test_nmrforge_api.py`);坏点修复
-  写盘 → `qc_audit.jsonl` 端到端(`tests/test_qc_audit.py`)。
+  写盘 → `qc_audit.jsonl` 端到端(`tests/test_qc_audit.py`)。本机全量 `1189 passed, 1 skipped`
+  (平台跳过),VM(`bd83c19`)`bash scripts/vm_test.sh` → `1186 passed, 4 skipped`,
+  `VM_TEST_EXIT=0`;**VM 跳过量 19 → 4**,减少的 15 项即此前在 VM 上被整文件 `skipif` 掉的诊断
+  测试,现在真正执行。
 
 ### Changed
 
