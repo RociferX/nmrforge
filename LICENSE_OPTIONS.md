@@ -62,10 +62,15 @@ obligations follow the library, so they bite when a binary you distribute contai
   and `tests/test_qt_independence.py` fails if any module outside `qtcompat/` names a binding).
 - Rebuilding and smoke-testing the AppImage against PySide6: **not done** - it needs a Linux build
   machine (Stage 4).
-- The full third-party audit has **not** been rerun since the migration. It must be, before any
-  permissive licence is recommended: every runtime dependency, not just Qt.
-- The LGPL distribution obligations for the AppImage (texts, notices, relink/replace) are
-  **unresolved**.
+- The full third-party audit **has** been rerun since the migration
+  (`scripts/audit_third_party.py`: 28 permissive, 4 weak copyleft, 0 strong-copyleft-only; inventory
+  in `THIRD_PARTY.md` section 7). It must be rerun again inside the AppImage **build** environment
+  before a release, because that set is what ships.
+- The LGPL distribution obligations for the AppImage are **implemented and enforced**
+  (`packaging/linux/THIRD_PARTY_LICENSES/`, hash-checked by
+  `scripts/check_third_party_licenses.py`, copied into the AppDir, exposed as `--licenses`, with a
+  documented replace/relink route), but **not yet reviewed by the IP owner**, and no AppImage has
+  been built since the migration.
 
 No `LICENSE` file has been committed, by the owner's instruction.
 

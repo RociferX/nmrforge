@@ -487,10 +487,16 @@ be GPL is gone.
 
 It is not **recommended** yet, and this remains a blocker because:
 
-1. the full third-party audit has not been rerun on the post-migration dependency set;
-2. the LGPL obligations for a *binary* distribution are unresolved — the AppImage bundles Qt, and
-   the PySide6 wheels ship no LGPL text at all, so the distributor must supply the licence text,
-   notices and a way to replace/relink the library;
+1. the full third-party audit **has now been rerun** (`scripts/audit_third_party.py`:
+   28 permissive, 4 weak copyleft, 0 strong-copyleft-only; inventory in `THIRD_PARTY.md` section 7),
+   but it must be rerun again *in the build environment* before a release, because the build
+   machine's set is what actually ships;
+2. the LGPL obligations for a *binary* distribution are **implemented but not reviewed**: the
+   AppImage bundles Qt, so it now ships hash-checked LGPL-3.0 and GPL-3.0 texts, a notice naming the
+   licence option relied on, and a documented route for a recipient to replace or relink the
+   libraries (`packaging/linux/THIRD_PARTY_LICENSES/`, enforced by
+   `scripts/check_third_party_licenses.py`, documented in `docs/packaging.md`). What is missing is a
+   review of that mechanism by whoever owns the IP - the notice is not legal advice;
 3. the AppImage has not been rebuilt or smoke-tested against PySide6 (Stage 4; needs a Linux build
    machine);
 4. the owner still has to choose the licence.
@@ -528,8 +534,10 @@ Things only you can do. Suggested order:
 1. **Confirm IP ownership** (institution, funding terms, who holds copyright).
 2. **Confirm the author list, order and affiliation**, and get each author's agreement; then fill in
    `CITATION.cff` (and later `.zenodo.json`).
-3. **Rerun the full third-party audit** on the post-migration dependency set, then choose the
-   licence (a permissive one is now open) and confirm the LGPL obligations for any bundled binary.
+3. **Rerun the audit in the AppImage build environment**
+   (`python scripts/audit_third_party.py --csv /tmp/audit.csv`), have the LGPL mechanism reviewed by
+   whoever owns the IP, then choose the licence - a permissive one is now open, and this audit does
+   not recommend one.
 4. **Add the `LICENSE` file** for the chosen licence, and set the `license` field and classifier in
    `pyproject.toml`.
 5. **Add the private contacts** for `SECURITY.md` and `CODE_OF_CONDUCT.md`.

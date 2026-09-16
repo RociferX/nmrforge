@@ -31,6 +31,23 @@
   fixtures 无原始 NMR 二进制数据;
 - `benchmarks/`:基准框架(运行时/可靠性/测量质量三类指标与 CSV 输出约定),不含编造结果。
 
+### Added
+
+- **AppImage 的 LGPL 合规机制**:`packaging/linux/THIRD_PARTY_LICENSES/` 收录 LGPL-3.0 与
+  GPL-3.0 正文(记录来源 URL/字节数/SHA-256 于 `PROVENANCE.txt`)与 `NOTICE.md`(列出被打包
+  组件、所用许可选项、对应源码获取方式、替换/重链接步骤);构建脚本在打包前调用
+  `scripts/check_third_party_licenses.py` 校验正文与声明,并把该目录与 `BUILD_INFO.txt`
+  (版本、git 提交、工作区脏标记、构建时间、依赖版本)复制进 AppDir;生成的 AppRun 新增
+  `--licenses` 供用户自查;构建脚本支持 `PYSIDE6_REQUIREMENT`/`SHIBOKEN6_REQUIREMENT`/
+  `EXTRA_PIP_ARGS`,以便用自建或修改过的 Qt 绑定重建产物(即 LGPL 的可替换/重链接路径);
+- **第三方许可审计脚本** `scripts/audit_third_party.py`:审计「会被打包进去的整套依赖」,
+  按许可表达式里**可用的最好选项**分类(permissive / weak-copyleft / strong-copyleft /
+  未知),对本项目自身的无许可状态单独提示;本机实测 33 个发行包 = 28 宽松 + 4 弱 copyleft
+  (PySide6/shiboken6 系列) + 0 强 copyleft;结果清单写入 `THIRD_PARTY.md` §7;
+- `tests/test_third_party_licenses.py`:锁定两个脚本——正文被篡改或 NOTICE 关键内容被删
+  必须失败,分类逻辑覆盖 LGPL/GPL/AGPL/含糊字段等 11 种表达式(含首次实现时的两个真实
+  缺陷:选项排序写反、只信含糊的 `License: Dual License` 而忽略精确 classifier)。
+
 ### Changed
 
 - **GUI 依赖由 PyQt6 切换为 PySide6(Stage 5)**:`pyproject.toml` 运行期依赖改为

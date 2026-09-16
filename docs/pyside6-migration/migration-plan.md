@@ -344,3 +344,22 @@ Python 3.12+, `appimagetool` and `mksquashfs`. Until that is done, the packaging
    single-file AppImage.
 3. Only then decide the licence. **No `LICENSE` has been added, and this work does not recommend
    one.**
+
+
+### 10.4 Stage 4 progress that does not need the build machine
+
+The compliance mechanism asked for by the LGPL is now in place, and it is enforced rather than
+documented:
+
+| Item | Where | Enforced by |
+| --- | --- | --- |
+| LGPL-3.0 and GPL-3.0 texts vendored with a recorded source URL, size and SHA-256 | `packaging/linux/THIRD_PARTY_LICENSES/` | `scripts/check_third_party_licenses.py` (fails the build) |
+| Notice describing bundled components, the licence option relied on, corresponding source, and the replace/relink route | `THIRD_PARTY_LICENSES/NOTICE.md` | the same checker, which fails if the notice stops saying any of it |
+| Texts, notice and `BUILD_INFO.txt` (version, git commit, dirty flag, build time, resolved versions) copied into the AppDir | `build_appimage.sh` step 2.5 | the build script fails before building if the checker fails |
+| `--licenses` in the generated AppRun | `build_appimage.sh` | the checker asserts the option still exists |
+| Replacing/relinking the LGPL libraries: rebuild with `PYSIDE6_REQUIREMENT` / `SHIBOKEN6_REQUIREMENT` / `EXTRA_PIP_ARGS` | `build_appimage.sh` | documented in `NOTICE.md`; the same script ships with the sources |
+| Full dependency audit of the *build* environment | `scripts/audit_third_party.py` | `tests/test_third_party_licenses.py` asserts no strong-copyleft-only dependency is present |
+
+What still cannot be done here: building the AppImage and running it. There is no WSL distribution,
+no Docker and no `appimagetool`/`mksquashfs` on this machine, so the Linux steps remain for the build
+host (commands are in `docs/packaging.md`).

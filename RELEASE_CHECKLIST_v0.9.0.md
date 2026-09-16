@@ -21,8 +21,18 @@ Working notes:
 - [ ] **LICENSE selected and committed.** Blocked by the PyQt6 GPL-3.0-only constraint: choose
       GPL-3.0-only for the whole project, or migrate the GUI to PySide6 first. See
       [LICENSE_OPTIONS.md](LICENSE_OPTIONS.md).
-- [ ] **Third-party licences checked** against the actual pinned versions, including whether
-      anything is bundled into the AppImage. See [THIRD_PARTY.md](THIRD_PARTY.md).
+- [x] **Third-party licences checked** against the actual installed versions, including what is
+      bundled into the AppImage: `scripts/audit_third_party.py` (28 permissive, 4 weak copyleft,
+      0 strong-copyleft-only on 2026-09-16) with the full inventory in
+      [THIRD_PARTY.md](THIRD_PARTY.md) section 7.
+- [x] **LGPL texts and notice shipped**: `packaging/linux/THIRD_PARTY_LICENSES/` is hash-checked by
+      `scripts/check_third_party_licenses.py`, copied into the AppDir by the build script, and
+      readable from the built AppImage with `--licenses`.
+- [x] **Replace/relink route documented and supported** (`PYSIDE6_REQUIREMENT` et al. in
+      `build_appimage.sh`, see `NOTICE.md`).
+- [ ] **LGPL obligations reviewed by the IP owner** - the notice states the mechanism, not legal
+      advice, and Qt's licensing FAQ is the authority on the relink obligation for a single-file
+      AppImage.
 - [ ] **`SECURITY.md` has a real private contact** (currently a placeholder).
 - [ ] **`CODE_OF_CONDUCT.md` has a real reporting contact** (currently a placeholder).
 - [ ] **`CITATION.cff` placeholders replaced** with real authors, repository URL and licence.
@@ -54,7 +64,9 @@ Working notes:
 - [ ] `tests/test_release_readiness.py` green.
 - [ ] `python -m ruff check .` green.
 - [ ] `python -m pip install -e ".[test]"` works from a clean clone.
-- [ ] AppImage builds from the release commit and starts on a clean machine.
+- [ ] AppImage builds from the release commit and starts on a clean machine (**not yet done**:
+      needs a Linux host with `appimagetool`; the spec and the licence staging are configured and
+      checked, but no AppImage has been produced since the PyQt6 removal).
 - [ ] AppImage smoke test: launches, `--remove-desktop` works, `NMRFORGE_NO_DESKTOP=1` works.
 - [ ] GUI launches (`python main.py`); CLI launches (`python -m nmrforge_api --help`).
 - [ ] Core API imports without Qt (`import core, nmrforge_api`).
