@@ -1,0 +1,44 @@
+# Citation metadata for nmrForge.
+#
+# STATUS: PLACEHOLDER. The author list, author order, affiliation and licence are not confirmed
+# yet, so this file is NOT a citable record. Until it is filled in, cite the repository URL.
+# Blocking items are listed in PUBLIC_RELEASE_AUDIT.md (section BLOCKERS) and
+# LICENSE_OPTIONS.md.
+#
+# When the author list is confirmed, replace the single placeholder entry with real entries, e.g.
+#
+#   authors:
+#     - family-names: "Family"
+#       given-names: "Given"
+#       orcid: "https://orcid.org/0000-0000-0000-0000"
+#       affiliation: "Institute"
+#
+# and add:
+#   repository-code: "https://github.com/<owner>/<repo>"
+#   license: "BSD-3-Clause"      # or whichever licence is selected
+#   doi: "10.5281/zenodo.XXXXXXX"  # only after a Zenodo release exists
+
+cff-version: 1.2.0
+message: "This file is a placeholder: the author list and licence of nmrForge are not finalised. Please cite the repository URL instead, and check this file before using it."
+title: "nmrForge: automation, parameter optimisation and quality control for Bruker multidimensional NMR data"
+abstract: >-
+  nmrForge is a platform for automating Bruker multidimensional NMR data processing. It reads
+  Bruker acquisition parameters, identifies the experiment type and the sampling scheme, plans a
+  processing strategy, drives NMRPipe (and SMILE for non-uniform sampling reconstruction) to
+  execute it, performs quality control on the result, and records the resolved parameters,
+  external tool versions and warnings so that a run can be reproduced and audited.
+type: software
+authors:
+  - name: "TODO: author list and order not yet confirmed (see PUBLIC_RELEASE_AUDIT.md)"
+version: 0.2.199
+keywords:
+  - NMR
+  - NMRPipe
+  - Bruker
+  - non-uniform sampling
+  - NUS
+  - SMILE
+  - spectrum processing
+  - quality control
+  - reproducibility
+  - scientific software
