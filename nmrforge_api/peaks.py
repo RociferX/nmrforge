@@ -346,6 +346,47 @@ def measure_peak_positions(
     ``noise_sigma``:该谱噪声 σ。缺省用 ``core.qc.noise`` 的 robust MAD 估计;
     每峰的 ``SNR = |intensity| / σ`` 与 σ 一起写进测量结果(统一峰表 SNR 列),
     便于下游复算「峰强是否足以判定 detected」。
+
+    Parameters
+    ----------
+    spectrum_path : Path | str
+        要测量的谱(2D ``.ft2``;高斯精修仅支持 2D)。
+    peaks : Sequence[dict[str, Any]]
+        候选峰(统一峰表字段:``N_shift``/``H_shift``/``label``…)。
+    window_pts : int, optional
+        测量窗口半宽(点);与 ``window_ppm`` 二选一。
+    window_ppm : float, optional
+        测量窗口半宽(ppm)。物理量优先——按当前谱点距换算,填零后不漂移。
+    axes : SpectrumAxes, optional
+        预先读好的轴(多峰复用,省重复读谱)。
+    sign : str, default "abs"
+        取峰符号口径。
+    refine : str, default "parabolic"
+        ``parabolic`` 或 ``gaussian``;非 2D 给 ``gaussian`` 直接报错,不静默降级。
+    nuclei : Iterable[str], optional
+        轴核名;缺省按谱头推断。
+    roi_f1_ppm, roi_f2_ppm : float, optional
+        高斯拟合 ROI 半径(ppm)。
+    noise_sigma : float, optional
+        已知噪声 σ;缺省从谱估计。
+
+    Returns
+    -------
+    list[PeakMeasurement]
+        逐峰结果:位置、强度/SNR、是否检出、实际定位方法与拟合诊断。
+
+    Raises
+    ------
+    MeasurementError
+        谱不可读、非 2D 却要求高斯,或峰参数非法。
+
+    Side effects
+    ------------
+    只读谱,不写文件(记录由调用方写)。
+
+    Examples
+    --------
+        rows = measure_peak_positions("spectra/a.ft2", peaks, window_ppm=1.0)
     """
     path = Path(spectrum_path)
     if not path.is_file():
@@ -543,6 +584,42 @@ def pick_reference_peaks(
     ``details`` 非空时把选峰口径(``detection``:边距物理宽度/点数/
     各轴点距)写进该字典,供研究记录留档;``dataset`` 指定条件数据集
     (缺省用会话主条件)。
+
+    Parameters
+    ----------
+    session : StudySession
+        会话。
+    sigma_multiplier : float, optional
+        选峰阈值(σ 倍数);缺省取 config 默认。
+    out_path : Path | str, optional
+        目标 ``.list`` 路径;缺省写在参考目录。
+    details : dict[str, Any], optional
+        传入的空字典会填入选峰细节(峰数、阈值来源、定位方法)。
+    localization_method : str, default "parabolic"
+        亚格点精修方式(``gaussian`` 仅 2D)。
+    gaussian_roi_f1_ppm, gaussian_roi_f2_ppm : float, optional
+        高斯 ROI 半径(ppm)。
+    dataset : Any, optional
+        指定数据集(多条件时)。
+
+    Returns
+    -------
+    Path
+        生成的 Poky ``.list`` 路径。
+
+    Raises
+    ------
+    MeasurementError
+        选峰失败或参数非法;不静默产出空峰表。
+
+    Side effects
+    ------------
+    写峰表并登记 ``pick_peaks`` 运行记录;不修改谱。
+
+    Examples
+    --------
+        details: dict = {}
+        path = pick_reference_peaks(study, sigma_multiplier=35, details=details)
     """
     from workflow.pick_peaks import pick_peaks
 
@@ -600,6 +677,43 @@ def detect_and_localize(
       实际阈值/边距/符号口径/噪声 σ/峰数/定位 QC。
 
     没有 `max_peaks`:锁定阈值下检出多少峰就写多少峰(用户 2026-09-14)。
+
+    Parameters
+    ----------
+    spectrum_path : Path | str
+        要选峰的谱。
+    sigma_multiplier : float, optional
+        选峰阈值(σ 倍数);缺省取 config。
+    edge_margin_ppm : float, optional
+        边缘排除半径(物理宽度);与 ``edge_margin_points`` 二选一。
+    edge_margin_points : int, optional
+        边缘排除半径(点)。
+    method : str, default "parabolic"
+        亚格点精修方式(``gaussian`` 仅 2D)。
+    roi_f1_ppm, roi_f2_ppm : float, optional
+        高斯 ROI 半径(ppm)。
+    sign_mode : str, default "dominant"
+        峰符号口径。
+    axes : SpectrumAxes, optional
+        预先读好的轴。
+
+    Returns
+    -------
+    tuple[list[dict[str, Any]], dict[str, Any]]
+        ``(rows, details)``:峰行(与统一峰表同字段口径)与选峰细节(阈值/边距/方法/计数)。
+
+    Raises
+    ------
+    MeasurementError
+        谱不可读或参数非法。
+
+    Side effects
+    ------------
+    只读谱;是否写峰表由调用方决定。
+
+    Examples
+    --------
+        rows, details = detect_and_localize("spectra/a.ft2", sigma_multiplier=35)
     """
     from core.qc import noise as _noise
     from core.qc import peak_detection as _detect

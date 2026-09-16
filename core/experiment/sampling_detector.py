@@ -83,7 +83,33 @@ def _int_param(block: dict, key: str, default: int) -> int:
 
 
 def detect(experiment: Experiment) -> Sampling:
-    """返回采样方式（含 evidence 与 confidence）。"""
+    """返回采样方式（含 evidence 与 confidence）。
+
+    Parameters
+    ----------
+    experiment : Experiment
+        已读取的数据集(需要 ``source_path`` 与 ``acquisition_parameters``)。
+
+    Returns
+    -------
+    Sampling
+        ``mode``(uniform/nus/uncertain)、``nus_list``、``sampling_fraction``、
+        ``schedule_type``、``confidence`` 与 ``evidence``(判定依据,逐条留档)。
+
+    Raises
+    ------
+    - 不抛异常:元数据矛盾时返回 ``uncertain``(安全模式),不猜采样方式。
+
+    Side effects
+    ------------
+    只读:可能读取 ``nuslist`` 与 ``ser`` 头部用于判定,不改动任何文件。
+
+    Examples
+    --------
+        sampling = detect(experiment)
+        if sampling.schedule_type == "full_sampling":
+            ...  # 标注 NUS 但实际满采样 → 已降级为 uniform
+    """
     params = experiment.acquisition_parameters
     acqus = params.get("acqus", {})
     evidence: list[str] = []

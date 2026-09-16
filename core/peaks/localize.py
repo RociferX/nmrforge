@@ -498,6 +498,50 @@ def localize_peak(
     ``index`` 为候选峰的整数格极大值(每轴一个);抛物线方法逐轴独立精修,
     高斯方法把抛物线结果作为初值做 2D 局部拟合。两者对完全相同的 candidate
     独立运行,结果可直接比较。
+
+    Parameters
+    ----------
+    data : Any
+        2D 谱数据(实部用于精修);轴 0 = 间接维,轴 1 = 直接维。
+    index : Sequence[int]
+        候选峰的整数格极大值位置(逐轴一个)。
+    method : Any, default "parabolic"
+        ``parabolic``(默认)或 ``gaussian``;大小写与中文别名均可,未知方法报错。
+    sign : int, default 1
+        峰符号(``+1`` 正峰 / ``-1`` 负峰),只影响高斯拟合。
+    ppm_axes : Sequence[Any], optional
+        各数据轴的 ppm 轴数组;高斯方法**必需**(抛物线方法不用)。
+    roi_f1_ppm, roi_f2_ppm : float, optional
+        高斯拟合 ROI 半径(物理宽度 ppm;按当前谱点距换算点数)。
+    logical_axes : Sequence[int], optional
+        数据轴 → 逻辑轴映射(非默认轴序时给出)。
+    max_rmse_ratio : float, default 0.0
+        拟合残差上限比例(0 = 不启用)。
+    max_nfev : int, default 200
+        单峰最小二乘最大函数求值次数。
+    roi_max_points : int | None, optional
+        每轴 ROI 半宽点数上限(0/None = 不限制;限制后失败会用完整 ROI 重试一次)。
+
+    Returns
+    -------
+    PeakLocalization
+        ``requested_method``/``actual_method``/``position``/``success``/``fallback``/
+        ``reason`` 与高斯诊断(中心、σ、FWHM、RMSE、是否撞边界)。
+
+    Raises
+    ------
+    LocalizationError
+        未知方法,或非 2D 数据要求高斯(不静默降级到抛物线)。
+
+    Side effects
+    ------------
+    纯计算:不写文件、不改谱。
+
+    Examples
+    --------
+        refined = localize_peak(data, (30, 60), method="gaussian", ppm_axes=axes)
+        if refined.fallback:
+            ...  # 拟合失败:actual_method 是 parabolic,reason 说明原因
     """
     name = normalize_localization_method(method)
     real = np.real(np.asarray(data))

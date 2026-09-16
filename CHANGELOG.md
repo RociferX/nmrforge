@@ -100,6 +100,16 @@
   本地全量 `1216` 收集 / `1215 passed, 1 skipped`;VM(HEAD `f97699a`)
   `bash scripts/vm_test.sh` → 1212 passed, 4 skipped, `VM_TEST_EXIT=0`。
 
+### Added
+
+- **公开 API docstring(Phase 19)**:`nmrforge_api` 的 13 个公开入口(session/reference/peaks/
+  sweep/study/direct_range)与 `workflow.batch.run_batch`、`core.peaks.localize.localize_peak`、
+  QC API(`evaluate`/`read_audit`/`run_direct_diagnostics`/`run_fid_diagnostics_paths`)、
+  sampling API(`detect`/`read_nuslist`/`indirect_grid_2d`/`scan_dense_2d`)统一补上
+  `Parameters`(含类型)/`Returns`/`Raises`/`Side effects`/`Examples` 五节;原散文说明保留。
+  签名与行为零改动。守卫 `tests/test_api_docstrings.py`(46 项)锁定清单,新增公开入口必须
+  同步补文档。
+
 ### Changed
 
 - **用户可见错误信息(Phase 21,CLI 出口)**:`python -m nmrforge_api` 不再把路径写错、YAML

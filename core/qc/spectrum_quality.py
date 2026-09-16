@@ -60,6 +60,34 @@ def evaluate(
     正常,不再误报。
 
     min_shape 非 None 时按各维最低点数施加分辨率惩罚(如填零后 SI 下限)。
+
+    Parameters
+    ----------
+    data : Any
+        2D+ 谱数据(复数或实数数组;取模参与评分)。
+    min_shape : tuple[int, ...], optional
+        允许的最小形状;小于该形状直接判不合格。
+    sign_mode : str, default "uniform"
+        峰符号口径(``uniform`` 单符号 / ``mixed`` 正负混排),用于一致性检查。
+
+    Returns
+    -------
+    QualityResult
+        评分(0–100)与逐项指标:峰形/基线/条纹/伪影分数、是否合格、说明列表。
+
+    Raises
+    ------
+    - 不抛异常:数据不可用时以低分与说明表达(调用方按分数决定是否阻断)。
+
+    Side effects
+    ------------
+    纯计算:不写文件、不改谱。
+
+    Examples
+    --------
+        quality = evaluate(spectrum.data)
+        if not quality.passed:
+            ...  # quality.messages 里有具体原因
     """
     arr = np.asarray(data)
     sigma = noise.estimate(arr).global_sigma

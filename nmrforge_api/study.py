@@ -236,6 +236,62 @@ def run_reference_study(
     "hi":…}``、或显式 ``ext_lo=/ext_hi=``;也兼容 ``params={"ext_lo":…}``。
     范围与已建参考不一致时会**重建参考谱并重测两张参考峰表**(留档在参数里);
     ``force=True`` 无条件重建。
+
+    Parameters
+    ----------
+    root : Path | str
+        研究根目录(新建或复用)。
+    dataset : Path | str, optional
+        单条件数据目录;多条件改用 ``datasets={条件: 目录}``。
+    datasets : Mapping[str, str] | Sequence[Any], optional
+        条件 → 数据目录(A/B…);与 ``dataset`` 二选一。
+    name : str, optional
+        新建研究时写入的名称。
+    params : dict[str, Any], optional
+        处理参数覆盖(键与组合表同一口径)。
+    phase_route : str, optional
+        相位路线;测试与复现用 ``"none"``。
+    peaks : Path | str, optional
+        外部参考峰表(``.list``):给了就登记为参考峰身份,不再自动选峰。
+    direct_range, ext_lo, ext_hi : Any, optional
+        直接维范围(``(high, low)`` 或字典);三者优先级见
+        :func:`nmrforge_api.direct_range.parse_direct_range`。
+    sigma_multiplier : float, optional
+        参考选峰阈值(σ 倍数)——**参考在此确定并锁定**,之后组合不得再改。
+    max_peaks : int, default 0
+        参考峰表峰数上限(0 = 不裁剪)。
+    localization_method : str, default "parabolic"
+        参考峰表的精修方式(``gaussian`` 仅 2D)。
+    gaussian_roi_f1_ppm, gaussian_roi_f2_ppm : float, optional
+        高斯拟合 ROI 半径(ppm),缺省取 config。
+    force : bool, default False
+        已有参考时是否重建(重建才允许改阈值)。
+    backend : Any, optional
+        处理后端;缺省按配置创建(测试注入假后端)。
+    write : bool, default True
+        False 时只计算不落盘(自检用)。
+    progress : Callable[[str], None], optional
+        进度回调,逐条日志行。
+
+    Returns
+    -------
+    ReferenceResult
+        参考模式结果:``session``、``references``(条件 → 参考)、``records``(落盘路径)。
+
+    Raises
+    ------
+    DatasetError
+        数据目录无效、实验类型不可识别,或条件重复。
+
+    Side effects
+    ------------
+    导入/登记数据、跑参考处理并冻结参考(写 ``study/reference/`` 与 ``records/``);
+    不生成参数组合。
+
+    Examples
+    --------
+        result = run_reference_study("study/", "path/to/bruker", sigma_multiplier=35)
+        reference = result.reference()
     """
     session = open_study(root, name=name, backend=backend)
     conditions = _resolve_conditions(datasets, dataset)
@@ -365,6 +421,58 @@ def run_combination_study(
     - 候选谱与峰表写到 ``study/workflows/<workflow_id>/<条件>/``;
     - window_pts / window_ppm / sign 为历史参数:组合模式不再有「峰位搜索窗口」,
       只用物理宽度排除边缘轴峰(edge_margin_ppm)。
+
+    Parameters
+    ----------
+    reference : Any
+        参考的定位方式:``<root>``、``<root>#<条件>``、``reference.json`` 路径,
+        或 :class:`ReferenceHandle`;组合模式**必须显式给参考**。
+    combos : Sequence[Mapping[str, Any]], optional
+        显式组合表(键即脚本参数);与 ``axes`` 二选一。
+    axes : Mapping[str, Sequence[Any]], optional
+        便捷写法:每个轴给候选值,内部展开成组合。
+    max_runs : int, default 256
+        组合数上限,超过报错。
+    localization : Any, default "parabolic"
+        ``parabolic``/``gaussian``/``both``;逐组合可被组合表覆盖。
+    edge_margin_ppm : float, optional
+        选峰边缘排除半径(ppm)。
+    window_pts, window_ppm : int | float, optional
+        峰位测量窗口(点/ppm);物理量优先。
+    sign : str, default "abs"
+        历史参数;组合模式按主符号检测。
+    direct_range, ext_lo, ext_hi : Any, optional
+        直接维范围覆盖(不重建参考)。
+    roi_f1_ppm, roi_f2_ppm : float, optional
+        高斯 ROI 半径(ppm)。
+    resume : bool, default True
+        命中相同指纹的成功 run 跳过(断点续跑)。
+    backend : Any, optional
+        处理后端(测试注入)。
+    write : bool, default True
+        False 时只计算不落盘。
+    progress : Callable[[str], None], optional
+        进度回调。
+
+    Returns
+    -------
+    StudyResult
+        ``session``、``plan``、``references``、``runs``(逐 workflow × 条件)、
+        ``workflows``、``summary``、``records``。
+
+    Raises
+    ------
+    ReferenceError
+        未给参考、参考不可用(缺参考谱或参考峰表),或参考与组合不匹配。
+
+    Side effects
+    ------------
+    写 ``study/workflows/<W0001…>/<条件>/``(候选谱、脚本、峰表、``log.txt``、``run.json``)
+    与汇总记录;不生成新参考、不替换活动谱。
+
+    Examples
+    --------
+        result = run_combination_study("study/", axes={"zero_fill": [1, 2]})
     """
     handle = parse_reference_spec(reference)
     session, target, ref = resolve_reference(reference, backend=backend)
@@ -484,6 +592,40 @@ def run_parameter_study(
     直接维范围(``direct_range=`` / ``ext_lo`` / ``ext_hi``)在参考层生效;
     localization / edge_margin_ppm 传给组合模式(parabolic 默认 / gaussian /
     both;边距缺省 3×核素线宽)。
+
+    Parameters
+    ----------
+    root, dataset, datasets, name, params, phase_route, peaks, sigma_multiplier,
+    max_peaks, localization_method, gaussian_roi_f1_ppm, gaussian_roi_f2_ppm, force
+        与 :func:`run_reference_study` 同名参数一致(参考模式部分)。
+    axes, combos, max_runs
+        与 :func:`run_combination_study` 同名参数一致(组合模式部分)。
+    direct_range, ext_lo, ext_hi, window_pts, window_ppm, sign, roi_f1_ppm,
+    roi_f2_ppm, localization, edge_margin_ppm, resume, backend, write, progress
+        两个模式共用;``direct_range`` 在参考模式定义参考谱,在组合模式覆盖基值。
+
+    Returns
+    -------
+    StudyResult
+        与 :func:`run_combination_study` 相同的结果句柄(参考 + 全部 workflow run)。
+
+    Raises
+    ------
+    DatasetError, ReferenceError, SweepError
+        由内部的参考模式与组合模式转出(数据无效 / 参考不可用 / 组合非法)。
+
+    Side effects
+    ------------
+    等价于「参考模式 + 组合模式」两步:writes ``study/reference/``、``study/workflows/``
+    与汇总记录;不替换活动谱。
+
+    Examples
+    --------
+        一步跑完参考与组合(便利入口)::
+
+            result = run_parameter_study(
+                "study/", "path/to/bruker", axes={"zero_fill": [1, 2]}
+            )
     """
     reference_result = run_reference_study(
         root,

@@ -898,6 +898,39 @@ def plan_sweep(
 
     ``base_overrides`` 是批次级覆盖;运行时每个条件从自己的参考有效参数起步,
     再应用它和当前组合。旧的绝对 ``base_params`` 入口不再支持。
+
+    Parameters
+    ----------
+    reference : ReferenceSpectrum
+        参考:提供锁定的选峰阈值与逐条件基底;组合不重新选阈值。
+    axes : Mapping[str, Sequence[Any]], optional
+        便捷写法——每个键给候选值,内部展开成组合;与 ``combos`` 二选一。
+    combos : Sequence[Mapping[str, Any]], optional
+        显式组合表,原样执行(键即脚本参数,如 ``"window.F1.off"``)。
+    max_runs : int, default 256
+        组合数上限,超过直接报错(防误跑成千上万次)。
+    base_overrides : Mapping[str, Any], optional
+        批次级覆盖:合并优先级 = 条件基底 < 批次覆盖 < 组合覆盖。
+    notes : Iterable[str], optional
+        写入计划的备注(如生成来源)。
+
+    Returns
+    -------
+    SweepPlan
+        组合计划(不含绝对 ``base_params``;基底在执行时逐条件解析)。
+
+    Raises
+    ------
+    SweepError
+        既没给 ``axes`` 也没给 ``combos``、组合数超限,或出现非法键(如选峰阈值)。
+
+    Side effects
+    ------------
+    纯计算:不写盘、不跑处理。
+
+    Examples
+    --------
+        plan = plan_sweep(reference, axes={"zero_fill": [1, 2]})
     """
     if (axes is None) == (combos is None):
         raise SweepError("必须且只能给一个:axes(全因子)或 combos(显式组合表)")
@@ -1443,6 +1476,52 @@ def run_sweep(
       (含 SHA-256);脚本与参考共用该条件的处理工作目录,因此复用的是参考
       已转换的 fid(不再重复转换)。找不到脚本时发
       ``processing_script_not_found`` 警告,不静默。
+
+    Parameters
+    ----------
+    session : StudySession
+        会话(项目与条件)。
+    plan : SweepPlan
+        :func:`plan_sweep` 产出的组合计划。
+    reference : ReferenceSpectrum, optional
+        指定参考;多条件时按条件匹配,缺省用会话里的参考。
+    datasets : Sequence[DatasetRef], optional
+        只跑这些条件(缺省全部)。
+    localization : Any, default "parabolic"
+        ``parabolic``/``gaussian``/``both``;逐组合可用组合表的 ``localization`` 覆盖。
+    edge_margin_ppm : float, optional
+        选峰边缘排除半径(ppm),逐组合按候选谱点距换算成点数。
+    sign : str, default "abs"
+        历史参数;组合模式固定按主符号检测。
+    roi_f1_ppm, roi_f2_ppm : float, optional
+        高斯 ROI 半径(ppm)。
+    resume : bool, default True
+        命中相同输入指纹的成功 run 直接跳过(断点续跑)。
+    stop_on_error : bool, default False
+        True 时某个 run 失败即停止(同批已成功的不受影响);False 时整批跑完。
+    progress : Callable[[str], None], optional
+        进度回调。
+    on_run : Callable[[SweepRun], None], optional
+        每个 run 结束(含跳过)时回调,便于增量汇总。
+
+    Returns
+    -------
+    list[SweepRun]
+        逐 (workflow, 条件) 的运行记录,含失败项与警告码。
+
+    Raises
+    ------
+    SweepError
+        计划/参考/条件不匹配,或后端不支持所选路径(如 3D NUS 组合)。
+
+    Side effects
+    ------------
+    写逐 run 目录(候选谱、脚本、峰表、``log.txt``、``run.json``,失败时另有 ``run.log``);
+    **不替换活动谱**。
+
+    Examples
+    --------
+        runs = run_sweep(session, plan, reference=reference, progress=print)
     """
     methods = _localization_methods(localization) or ["parabolic"]
     targets = list(datasets) if datasets is not None else list(session.datasets)

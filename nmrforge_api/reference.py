@@ -523,6 +523,40 @@ def build_reference(
     缺省走数据类型的默认路线(uniform 通常 ``unified``,自动相位)。
     自动相位识别的**实际结果**(各轴 PS)记进 ``direct_phase``,供 workflow
     锁定相位并留档 ``actual_p0/actual_p1``。
+
+    Parameters
+    ----------
+    session : StudySession
+        会话(需先 :func:`add_dataset`)。
+    dataset : DatasetRef, optional
+        要建参考的条件;缺省用会话里的默认条件。
+    params : dict[str, Any], optional
+        处理参数覆盖(键与组合表同一口径)。
+    phase_route : str, optional
+        相位路线(``"auto"``/``"none"``…);测试与复现用 ``"none"``。
+    progress : Callable[[str], None], optional
+        进度回调,逐条日志行。
+    force : bool, default False
+        已有参考时是否重建(重建会重跑自动优化)。
+
+    Returns
+    -------
+    ReferenceSpectrum
+        冻结参考:参考谱路径与哈希、完整脚本、有效参数、相位与工作目录。
+
+    Raises
+    ------
+    ReferenceError
+        后端失败、数据缺失或参考不可用;失败不写半成品参考。
+
+    Side effects
+    ------------
+    写 ``study/reference/<条件>/``(脚本、参考谱、``reference.json``)并登记运行记录;
+    **不替换活动谱**。
+
+    Examples
+    --------
+        reference = build_reference(study, params={"phase_route": "none"})
     """
     from workflow.stepwise import generate_fid, generate_spectrum, read_experiment
 
@@ -821,6 +855,41 @@ def ensure_reference_peaks(
       ``detection.sigma_multiplier`` / ``detection.threshold_source``;
     - ``localization_method`` 只决定**参考峰位**的取法(默认抛物线,与既有
       行为一致);两张参考峰表始终同时生成(2026-09-13 规范 B2)。
+
+    Parameters
+    ----------
+    session : StudySession
+        会话。
+    reference : ReferenceSpectrum, optional
+        已有参考;``None`` 时用会话里已冻结的参考。
+    sigma_multiplier : float, optional
+        选峰阈值(σ 倍数)。**只在生成参考时可指定**;冻结后再给不同值会报错。
+    max_peaks : int, default 0
+        参考峰表保留峰数上限(0 = 不裁剪)。
+    force : bool, default False
+        已有参考峰表时是否重建(重建才允许改阈值,并记录原值)。
+    localization_method : str, default "parabolic"
+        ``parabolic`` 或 ``gaussian``(高斯仅 2D)。
+    gaussian_roi_f1_ppm, gaussian_roi_f2_ppm : float, optional
+        高斯拟合 ROI 半径(ppm),缺省取 config。
+
+    Returns
+    -------
+    ReferenceSpectrum
+        带参考峰表路径与峰数的参考;冻结阈值写入 ``reference.json``。
+
+    Raises
+    ------
+    ReferenceError
+        参考尚未冻结、阈值与已冻结参考冲突,或选峰失败。
+
+    Side effects
+    ------------
+    写两张参考峰表(parabolic/gaussian)与 ``reference.json``;不重跑处理。
+
+    Examples
+    --------
+        reference = ensure_reference_peaks(reference, sigma_multiplier=20)
     """
     ref = reference or load_reference(session)
     if ref is None:

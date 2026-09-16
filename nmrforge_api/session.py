@@ -316,6 +316,41 @@ def open_study(
     - ``backend`` 显式传入时直接使用(测试/集群可注入);否则按默认配置
       构造 NMRPipe 后端(``backend.factory.create_backend``);
     - 研究状态(条件数据集列表)从 ``study/study.json`` 恢复。
+
+    Parameters
+    ----------
+    root : Path | str
+        研究根目录;不存在时按 ``create=True`` 新建。
+    name : str, optional
+        新建研究写入的名称(已存在的研究忽略该参数)。
+    backend : Any, optional
+        处理后端;缺省按配置选 NMRPipe,测试可注入假后端。
+    config : dict[str, Any], optional
+        本次会话的配置覆盖(不写盘)。
+    create : bool, default True
+        False 时目录不存在直接报错,不隐式创建。
+
+    Returns
+    -------
+    StudySession
+        会话对象:``manager``(项目)、``datasets``(条件)、``root``。
+
+    Raises
+    ------
+    DatasetError
+        目录不存在且 ``create=False``,或目录不是合法研究根。
+
+    Side effects
+    ------------
+    新建时会创建 ``study.json``/``records/``/``workflows/`` 目录结构并落盘;
+    不导入数据、不跑处理。
+
+    Examples
+    --------
+    最小用法(完整示例见 ``examples/quickstart.py``)::
+
+        study = open_study("study/", name="demo")
+        add_dataset(study, "path/to/bruker/dataset")
     """
     root_path = Path(root).expanduser().resolve()
     project_file = root_path / "project.json"
@@ -353,6 +388,37 @@ def add_dataset(
     ``condition`` 缺省时自动分配下一个未用字母(A/B/C…);多条件研究用不同
     标签区分同一 workflow 的两组数据(A_raw → W0037 → A_peak_table)。
     ``make_default`` 只在会话里第一个数据集时决定「主条件」。
+
+    Parameters
+    ----------
+    session : StudySession
+        由 :func:`open_study` 返回的会话。
+    source : Path | str
+        Bruker 数据目录(含 ``acqus``);只读导入,不改动原始文件。
+    condition : str, optional
+        条件标签(``A``/``B``…);不同条件共享同一份用户参数。
+    exp_id, title : str, optional
+        实验 id 与标题;缺省按数据目录名生成。
+    make_default : bool, default True
+        是否设为会话默认数据集(单条件研究保持默认)。
+
+    Returns
+    -------
+    DatasetRef
+        条件引用(``key``/``exp_id``/``data_id``/``condition``/``ndim``/``nuclei``/``sampling``)。
+
+    Raises
+    ------
+    DatasetError
+        缺少 ``acqus``、实验类型无法识别,或同一条件已有数据。
+
+    Side effects
+    ------------
+    在项目里登记实验/数据条目并写 ``project.json``;原始数据保持只读。
+
+    Examples
+    --------
+        ref = add_dataset(study, "path/to/bruker", condition="A")
     """
     from workflow.import_workflow import import_data
 

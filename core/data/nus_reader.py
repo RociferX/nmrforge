@@ -12,7 +12,30 @@ from core.data.bruker_dtype import UnknownBrukerDtype, sample_dtype
 
 
 def read_nuslist(path: Path) -> list[tuple[int, ...]]:
-    """读取 nuslist 采样点（每行若干整数索引，跳过注释/空行）。"""
+    """读取 nuslist 采样点（每行若干整数索引，跳过注释/空行）。
+
+    Parameters
+    ----------
+    path : Path
+        ``nuslist`` 文件路径。
+
+    Returns
+    -------
+    list[tuple[int, ...]]
+        逐行采样坐标(每行一个或多个整数;空行跳过)。
+
+    Raises
+    ------
+    - 不抛异常:文件不存在或不可读时返回空列表(调用方据此走安全分支)。
+
+    Side effects
+    ------------
+    只读文件。
+
+    Examples
+    --------
+        points = read_nuslist(raw_dir / "nuslist")
+    """
     points: list[tuple[int, ...]] = []
     for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
         line = line.strip()
@@ -42,6 +65,28 @@ def indirect_grid_2d(experiment: Any) -> tuple[int, int, int]:
     与 ``backend.script_generator.effective_td`` 的 2D 规则一致(间接维
     复点 = TD // 超复数分量),但**不依赖 sampling.mode** —— 满采样降级后
     mode 已是 uniform,仍要按复点网格判断(2026-09-14 用户:满采样走 uniform)。
+
+    Parameters
+    ----------
+    experiment : Any
+        已读取的 2D 数据集(读取 ``acqus``/``acqu2s`` 的 TD 与 FnMODE)。
+
+    Returns
+    -------
+    tuple[int, int, int]
+        ``(grid, mult, direct_points)``:间接维复点网格数、每复点行数(1 或 2)、直接维点数。
+
+    Raises
+    ------
+    - 不抛异常:参数缺失时按已知默认回退,由调用方结合 evidence 判断。
+
+    Side effects
+    ------------
+    纯计算(只读实验对象)。
+
+    Examples
+    --------
+        grid, mult, direct = indirect_grid_2d(experiment)
     """
     if int(getattr(experiment, "ndim", 0)) != 2:
         return 0, 0, 0
@@ -96,6 +141,41 @@ def scan_dense_2d(
 
     只读数据、不做处理决策:是否按 uniform 处理由 ``sampling_detector`` 与
     backend 依据本结果决定(2026-09-14 用户:满采样应走 uniform)。
+
+    Parameters
+    ----------
+    raw_dir : Path
+        含 ``ser`` 的 Bruker 原始目录。
+    acqus : Mapping[str, Any], optional
+        已解析的 ``acqus``(缺省重新读取,避免重复解析可显式传入)。
+    grid_complex : int
+        间接维复点网格数(由 :func:`indirect_grid_2d` 给出)。
+    mult : int
+        每复点行数(1 或 2)。
+    direct_points : int
+        直接维点数。
+    fid_file : Path, optional
+        直接指定要扫描的文件(缺省 ``ser`` → ``ser_full``)。
+
+    Returns
+    -------
+    dict[str, Any]
+        ``kind``(``full`` 满采样 / ``dense`` 密集子集 / ``sparse`` / ``mismatch``)、
+        ``rows``、``points``(非零复点坐标)、``source`` 与 ``reason``。
+
+    Raises
+    ------
+    - 不抛异常:行数/类型不符时以 ``kind`` + ``reason`` 表达,由调用方决定回退。
+
+    Side effects
+    ------------
+    只读:只按需扫描文件头与零模式,不改写原始数据。
+
+    Examples
+    --------
+        scan = scan_dense_2d(raw_dir, grid_complex=128, mult=2, direct_points=2048)
+        if scan["kind"] == "full":
+            ...  # 实际满采样
     """
     raw = Path(raw_dir)
     declared_rows = int(mult) * int(grid_complex)

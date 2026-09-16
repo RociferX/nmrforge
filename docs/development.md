@@ -52,6 +52,20 @@ ls ~/*.py ~/*.sh ~/*.csv ~/*.yaml 2>/dev/null   # 应为空
 du -sh ~/* ~/.[!.]* 2>/dev/null | sort -h | tail
 ```
 
+## 公开 API 的 docstring(强制,2026-09-17,Phase 19)
+
+公开入口必须写清五节,缺一节 `tests/test_api_docstrings.py` 就失败:
+
+```text
+Parameters(含类型与物理含义)/ Returns / Raises / Side effects / Examples
+```
+
+覆盖范围:对外 `nmrforge_api` 的处理与研究入口、`workflow/batch.run_batch`、
+`core.peaks.localize.localize_peak`、QC API(`core.qc.spectrum_quality.evaluate`、
+`core.audit.qc_audit.read_audit`、`workflow.direct_diagnostics.*`)、sampling API
+(`core.experiment.sampling_detector.detect`、`core.data.nus_reader.*`)。
+**内部私有函数不要求**完整用户文档;新增公开入口时要把它加进守卫清单并补文档。
+
 ## 日志(Phase 22,强制)
 
 - 库代码(`core/` `backend/` `workflow/` `viewer/` `gui/`)只做

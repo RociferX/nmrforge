@@ -151,6 +151,30 @@ def read_audit(work_dir: Path | str) -> list[QcAction]:
 
     A malformed line is skipped rather than raising: an audit file that cannot be fully parsed must
     not make a finished run unreadable, and the remaining records are still evidence.
+
+    Parameters
+    ----------
+    work_dir : Path | str
+        处理工作目录(一级条目就是它下面的 ``qc_audit.jsonl``)。
+
+    Returns
+    -------
+    list[QcAction]
+        追加顺序的记录列表;文件不存在时返回空列表(等价于「没有改动」)。
+
+    Raises
+    ------
+    - 不抛异常:损坏行被跳过,不影响其余记录读取。
+
+    Side effects
+    ------------
+    只读文件:不创建、不修改 ``qc_audit.jsonl``。
+
+    Examples
+    --------
+        actions = read_audit(work_dir)          # [] 表示没有任何自动改动
+        for action in actions:
+            print(action.issue_detected, action.action_taken)
     """
     path = audit_path(work_dir)
     if not path.is_file():

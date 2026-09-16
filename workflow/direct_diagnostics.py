@@ -256,7 +256,39 @@ def run_direct_diagnostics(
     *,
     repair: bool = True,
 ) -> DirectDiagnosticsResult:
-    """Generate-spectrum direct-dimension diagnostic gate."""
+    """Generate-spectrum direct-dimension diagnostic gate.
+
+    Parameters
+    ----------
+    work_dir : Path | str
+        处理工作目录(转换后 fid 就在其下,单文件或 ``fid/test*.fid`` 切片流)。
+    experiment : Experiment
+        数据理解结果;用于定位 fid 并区分 uniform/NUS 门控。
+    repair : bool, default True
+        是否自动修复可纠正问题(坏点替换,修复前备份到 ``fid_diag_bak/``)。
+
+    Returns
+    -------
+    DirectDiagnosticsResult
+        ``reports``(给用户看的诊断行)、``metrics``(直流/首点/宽带/漂移/坏点计数)、
+        ``apply_poly_time``(是否启用直接维 POLY -time)、``repaired_badpoints``、
+        ``backup_dir``。
+
+    Raises
+    ------
+    - 不抛异常:布局无法解析或没有 fid 时以 ``reports`` 说明并跳过(不阻断处理)。
+
+    Side effects
+    ------------
+    ``repair=True`` 时**会改写工作目录内的 fid**(先备份到 ``fid_diag_bak/``),并把每条改动
+    写进 ``qc_audit.jsonl``;另写 ``diagnostics.json`` 摘要。
+
+    Examples
+    --------
+        result = run_direct_diagnostics(work_dir, experiment)
+        if result.apply_poly_time:
+            ...  # 终跑脚本需要插入 POLY -time
+    """
     work = Path(work_dir)
     paths = _collect_fid_paths(work, experiment)
     return _diagnose_paths(
@@ -273,7 +305,33 @@ def run_fid_diagnostics_paths(
     repair: bool = False,
 ) -> DirectDiagnosticsResult:
     """Standalone FID diagnostics for arbitrary fid files/folders
-    (no Experiment needed; detect-only by default)."""
+    (no Experiment needed; detect-only by default).
+
+    Parameters
+    ----------
+    paths : list[Path | str]
+        待诊断的 fid 文件或目录(目录自动收集 ``*.fid`` / ``test*.fid``)。
+    repair : bool, default False
+        是否自动修复坏点;独立入口默认**只检测不修改**。
+
+    Returns
+    -------
+    DirectDiagnosticsResult
+        与 :func:`run_direct_diagnostics` 同结构(``reports``/``metrics``/``apply_poly_time``…)。
+
+    Raises
+    ------
+    - 不抛异常:路径不存在时 ``reports`` 里给出「未找到」说明。
+
+    Side effects
+    ------------
+    目录/文件都只读(``repair=False``);开启 repair 时行为与
+    :func:`run_direct_diagnostics` 一致(备份 + 审计记录)。
+
+    Examples
+    --------
+        result = run_fid_diagnostics_paths(["process/exp_001.fid"])
+    """
     files: list[Path] = []
     for _p in paths:
         _pp = Path(_p)

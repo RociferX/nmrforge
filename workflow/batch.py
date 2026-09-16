@@ -284,6 +284,49 @@ def run_batch(
     (convert_to_fid / process / reconstruct_nus / pick_peaks);失败数据
     记录 failed_step/error,整组继续。返回逐数据结果与汇总(见模块 docstring)。
     progress:每数据每步骤消息回调(如 "d_001: 开始 spectrum")。
+
+    Parameters
+    ----------
+    manager : ProjectManager
+        已加载项目的管理器。
+    exp_id : str
+        实验 id。
+    targets : str | Iterable[str]
+        单个数据 id、数据 id 列表,或数据组 id(``B1`` 之类,按 ``.pipeline_state.json`` 解析)。
+    steps : Iterable[str]
+        要执行的步骤子集(``["fid", "spectrum"]`` 等),按给定顺序执行。
+    backend : Any
+        处理后端。
+    params : dict[str, Any], optional
+        处理参数(逐数据同一份;参考数据参数复用见 ``reference_data_id``)。
+    progress : Callable[[str], None], optional
+        进度回调:每个数据开始前输出 ``[x/y] 开始处理数据 <id>``。
+    reference_data_id : str | None, optional
+        「按参考数据处理」:复用该数据的有效参数;类型/条件不匹配的成员会被跳过并写明原因。
+    on_data_done : Callable[[dict[str, Any]], None], optional
+        每个数据结束时回调其分步结果(含失败)。
+
+    Returns
+    -------
+    dict[str, Any]
+        ``summary``(total/success/failed)、``results``(逐数据分步与状态)、``failed``
+        (失败数据 id 列表)、``skipped``(组内被跳过的成员与原因)。
+
+    Raises
+    ------
+    BatchError
+        步骤名非法、数据 id 不存在,或组解析失败。
+
+    Side effects
+    ------------
+    逐数据执行处理并登记 ``WorkflowRun``;产物落该数据的 ``process/``、``spectra/``、
+    ``peaks/``;单个数据失败不中断整组(见 ``summary``)。
+
+    Examples
+    --------
+        result = run_batch(manager, "exp_001", ["d_001"], ["fid", "spectrum"], backend)
+        if result["failed"]:
+            ...  # 失败数据与原因在 result["results"][data_id]["error"]
     """
     if manager.project is None:
         raise BatchError("未加载项目,无法批量处理")

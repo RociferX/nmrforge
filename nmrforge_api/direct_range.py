@@ -89,6 +89,34 @@ def parse_direct_range(
 
     输入优先级为 ``params``(兼容) < ``direct_range`` < 显式
     ``ext_lo``/``ext_hi``。
+
+    Parameters
+    ----------
+    value : Any, optional
+        ``(high, low)`` 元组/列表、``{"high": …, "low": …}`` 字典,或 None。
+    ext_lo, ext_hi : Any, optional
+        显式上下限(优先级高于 ``value``)。
+    params : Mapping[str, Any], optional
+        兼容写法:从 ``params["ext_lo"]``/``["ext_hi"]`` 取值(优先级最低)。
+
+    Returns
+    -------
+    DirectRange | None
+        规范化后的范围(``high``/``low`` 为 ppm 字符串);三个来源都没给时返回 None。
+
+    Raises
+    ------
+    SweepError
+        上下限顺序颠倒且无法自动换回、值不是数字,或 high == low。
+
+    Side effects
+    ------------
+    纯解析,无副作用。
+
+    Examples
+    --------
+        parse_direct_range((10.5, 6.5))
+        parse_direct_range({"high": 10.5, "low": 6.5})
     """
     raw_lo = params.get("ext_lo") if params else None
     raw_hi = params.get("ext_hi") if params else None
