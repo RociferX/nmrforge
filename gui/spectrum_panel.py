@@ -29,6 +29,7 @@ from qtcompat.QtWidgets import (
 )
 
 from core.project import ProjectManager
+from core.user_errors import describe_exception
 from gui.dialogs import InfoDialog
 from gui.peaks_io import (
     export_peaks_poky,
@@ -685,7 +686,7 @@ class SpectrumPanel(QWidget):
                 spectrum3d = Spectrum3D.load_from_ft3(path, lazy=True)
                 self._ft3_ready.emit(path, spectrum3d)
             except Exception as exc:  # noqa: BLE001 - 错误统一回主线程提示
-                self._ft3_failed.emit(path, f"{type(exc).__name__}: {exc}")
+                self._ft3_failed.emit(path, describe_exception(exc))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -1461,7 +1462,7 @@ class SpectrumPanel(QWidget):
                 nuclei=self._current_3d_nuclei(),
             )
         except Exception as exc:  # noqa: BLE001 - 错误统一提示
-            InfoDialog.show_info(self, "保存失败", f"{type(exc).__name__}: {exc}")
+            InfoDialog.show_info(self, "保存失败", describe_exception(exc))
             return
         self._peaks = peaks
         self.viewer.set_peaks(peaks)

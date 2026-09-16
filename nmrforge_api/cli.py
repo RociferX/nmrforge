@@ -26,6 +26,7 @@ import traceback
 from pathlib import Path
 from typing import Any
 
+from core.user_errors import describe_exception
 from nmrforge_api.direct_range import parse_direct_range
 from nmrforge_api.errors import SensitivityError
 from nmrforge_api.records import write_records, write_reference_records
@@ -69,31 +70,6 @@ def _debug_enabled(args: argparse.Namespace | None = None) -> bool:
     if getattr(args, "debug", False):
         return True
     return bool(str(os.environ.get(DEBUG_ENV, "")).strip())
-
-
-def describe_exception(exc: BaseException) -> str:
-    """把常见异常翻译成用户能照着改的提示(Phase 21:用户可见错误信息系统化)。
-
-    只映射**用户可修**的几类:路径/权限、输入内容不合法、缺少必需字段、
-    结构与预期不符。未知异常保留类型名,既不吞掉信息也不编造原因。
-    """
-    if isinstance(exc, FileNotFoundError):
-        return f"找不到文件或目录: {exc.filename or exc}"
-    if isinstance(exc, NotADirectoryError):
-        return f"路径不是目录: {exc.filename or exc}"
-    if isinstance(exc, IsADirectoryError):
-        return f"路径是目录,但这里需要文件: {exc.filename or exc}"
-    if isinstance(exc, PermissionError):
-        return f"没有权限访问: {exc.filename or exc}"
-    if isinstance(exc, KeyError):
-        return f"缺少必需字段 {exc}(输入文件或运行记录与当前版本不匹配?)"
-    if isinstance(exc, (IndexError, TypeError, AttributeError)):
-        return f"输入数据与预期结构不符({type(exc).__name__}): {exc}"
-    if isinstance(exc, ValueError):
-        return f"输入内容不合法: {exc}"
-    if isinstance(exc, OSError):
-        return f"文件/系统操作失败: {exc}"
-    return f"{type(exc).__name__}: {exc}"
 
 
 def _report_unexpected(exc: BaseException, *, debug: bool) -> int:

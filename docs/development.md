@@ -63,7 +63,9 @@ du -sh ~/* ~/.[!.]* 2>/dev/null | sort -h | tail
   GUI/后端写进运行日志,不进对话框正文;
 - 未知异常保留类型名 + 原文(不吞信息、不编造原因),但同样加一句可执行提示。
 
-参考实现:`nmrforge_api/cli.py::describe_exception` / `_report_unexpected`。
+参考实现:`core/user_errors.py::describe_exception`(GUI/CLI 共用的翻译,Qt-free 叶子模块)与
+`nmrforge_api/cli.py::_report_unexpected`(CLI 出口)。守卫测试 `tests/test_user_errors.py`
+会扫描 `gui/`、`viewer/`,一旦出现 `type(exc).__name__` 形式的用户可见文本即失败。
 
 ## 处理流程改动覆盖原则(强制,0.2.163-补15)
 

@@ -30,6 +30,8 @@ BACKEND_PREFIXES = (
     "core/planning/",
     # 自动改动数据的结构化审计记录(Phase 10;处理侧写入)
     "core/audit/",
+    # 用户可见错误信息翻译(Phase 21;GUI/CLI 只读引用,改动归处理侧)
+    "core/user_errors.py",
     "core/optimization/",
     "core/qc/",
     "core/reporting/",

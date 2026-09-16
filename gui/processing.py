@@ -13,6 +13,7 @@ from pathlib import Path
 
 from core.project import ExperimentEntry, ProjectManager
 from core.project.run_refs import MANUAL_SPECTRUM_RUN_REFS, STEP_RUN_REFS
+from core.user_errors import describe_exception
 from gui.pipeline_state import record_step_success
 
 # 判定「子目录是否含数据文件」的关键文件(与 pipeline_state 输入指纹同源)
@@ -216,7 +217,7 @@ class ProcessingController:
                     self._manager.add_to_group(exp_id, batch, data_id)
                 item["ok"] = True
             except Exception as exc:  # noqa: BLE001 - 单个失败不阻断整批
-                item["error"] = f"{type(exc).__name__}: {exc}"
+                item["error"] = describe_exception(exc)
             results.append(item)
             if on_progress is not None:
                 on_progress(

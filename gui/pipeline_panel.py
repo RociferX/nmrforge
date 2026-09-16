@@ -41,6 +41,7 @@ from qtcompat.QtWidgets import (
 
 from core.project import ProjectManager
 from core.project.artifacts import find_primary_spectrum
+from core.user_errors import describe_exception
 from gui.pipeline_state import (
     STEP_RUN_REFS,
     input_fingerprint,
@@ -2206,7 +2207,7 @@ class PipelinePanel(QWidget):
                     self.log_scoped.emit(f"完成 {step_label}: {message}", run_scope)
                 except Exception as exc:  # noqa: BLE001 - 单数据失败
                     self.log_scoped.emit(
-                        f"失败 {step_label}: {type(exc).__name__}: {exc}",
+                        f"失败 {step_label}: {describe_exception(exc)}",
                         run_scope,
                     )
                     if "无法处理该谱" in str(exc):
@@ -2332,7 +2333,7 @@ class PipelinePanel(QWidget):
                 )
             except Exception as exc:  # noqa: BLE001 - 错误统一回传 UI
                 self.log_scoped.emit(
-                    f"重新运行终脚本失败: {type(exc).__name__}: {exc}",
+                    f"重新运行终脚本失败: {describe_exception(exc)}",
                     run_scope,
                 )
             finally:

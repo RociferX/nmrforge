@@ -35,6 +35,7 @@ from core.project import (
     ProjectError,
     ProjectManager,
 )
+from core.user_errors import describe_exception
 from core.workspace import WorkspaceManager
 from gui.center_panel import CenterPanel
 from gui.dialogs import (
@@ -454,7 +455,7 @@ class MainWindow(QMainWindow):
             InfoDialog.show_info(self, "新建项目失败", str(exc))
             return
         except Exception as exc:  # noqa: BLE001 - WorkspaceError 等统一提示
-            InfoDialog.show_info(self, "新建项目失败", f"{type(exc).__name__}: {exc}")
+            InfoDialog.show_info(self, "新建项目失败", describe_exception(exc))
             return
         if self.manager.project is not None:
             from gui.notes import set_sample_note_fields
@@ -585,7 +586,7 @@ class MainWindow(QMainWindow):
                         )
                     )
             except Exception as exc:  # noqa: BLE001 - 错误统一回主线程
-                self.import_failed.emit(f"{type(exc).__name__}: {exc}")
+                self.import_failed.emit(describe_exception(exc))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -876,7 +877,7 @@ class MainWindow(QMainWindow):
                     {"info": info, "items": items}
                 )
             except Exception as exc:  # noqa: BLE001 - 错误统一回主线程
-                self.import_failed.emit(f"{type(exc).__name__}: {exc}")
+                self.import_failed.emit(describe_exception(exc))
             finally:
                 # 0.2.199-补29c:不再在 worker 里 set_progress/refresh(跨线程
                 # 碰控件);全部移到 _on_batch_run_done(队列信号,主线程)
@@ -982,7 +983,7 @@ class MainWindow(QMainWindow):
                 self.manager.save()
                 self.import_finished.emit(result)  # 回主线程刷新 UI
             except Exception as exc:  # noqa: BLE001 - 错误统一回主线程提示
-                self.import_failed.emit(f"{type(exc).__name__}: {exc}")
+                self.import_failed.emit(describe_exception(exc))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -1244,8 +1245,7 @@ class MainWindow(QMainWindow):
                 )
             except Exception as exc:  # noqa: BLE001
                 self.log_append_requested.emit(
-                    "检测失败: "
-                    f"{type(exc).__name__}: {exc}",
+                    f"检测失败: {describe_exception(exc)}",
                     scope,
                 )
 
@@ -1371,7 +1371,7 @@ class MainWindow(QMainWindow):
             )
         except Exception as exc:  # noqa: BLE001 - 后端缺失统一提示
             InfoDialog.show_info(
-                self, "fid.com", f"无法获取 fid.com: {type(exc).__name__}: {exc}"
+                self, "fid.com", f"无法获取 fid.com: {describe_exception(exc)}"
             )
             return
         save_dir = None
@@ -1405,7 +1405,7 @@ class MainWindow(QMainWindow):
                 InfoDialog.show_info(self, "请先生成 FID", str(exc))
             else:
                 InfoDialog.show_info(
-                    self, "加载脚本失败", f"{type(exc).__name__}: {exc}"
+                    self, "加载脚本失败", describe_exception(exc)
                 )
             return
         script_key = _pick_script_key(scripts, data_id)
@@ -1529,7 +1529,7 @@ class MainWindow(QMainWindow):
                     message = f"{script_name} 运行完成: {result}"
             except Exception as exc:  # noqa: BLE001 - 错误统一回主线程
                 self.log_append_requested.emit(
-                    f"人工运行失败: {type(exc).__name__}: {exc}", manual_scope
+                    f"人工运行失败: {describe_exception(exc)}", manual_scope
                 )
                 self.manual_run_done.emit()
                 return
@@ -1649,7 +1649,7 @@ class MainWindow(QMainWindow):
                 InfoDialog.show_info(self, "重命名项目失败", str(exc2))
                 return
         except Exception as exc:  # noqa: BLE001 - WorkspaceError 等统一提示
-            InfoDialog.show_info(self, "重命名项目失败", f"{type(exc).__name__}: {exc}")
+            InfoDialog.show_info(self, "重命名项目失败", describe_exception(exc))
             return
         self._rebind_shared_manager()
         self.refresh()
@@ -1675,7 +1675,7 @@ class MainWindow(QMainWindow):
                 self, "删除项目", f"{exc}\n当前仅关闭项目,目录保留。"
             )
         except Exception as exc:  # noqa: BLE001 - WorkspaceError 等统一提示
-            InfoDialog.show_info(self, "删除项目失败", f"{type(exc).__name__}: {exc}")
+            InfoDialog.show_info(self, "删除项目失败", describe_exception(exc))
             return
         if hasattr(self.recent, "remove") and self.manager.root is not None:
             self.recent.remove(str(self.manager.root))
