@@ -4,6 +4,10 @@ name: CI
 # the suite mocks the engine boundary (FakeBackend/MockBackend), so an NMRPipe
 # licence or download is never required to gate a pull request.
 #
+# The GUI stack is PySide6: `pip install -e ".[test]"` installs it (it is the
+# declared runtime dependency), so the matrix jobs below exercise the same
+# binding users get. PyQt6 is no longer a dependency of this project.
+#
 # Real-engine validation runs through the "external engine" job, which is only
 # enabled when a runner with NMRPipe is available (repository variable
 # NMRFORGE_SELF_HOSTED_CI=true). The laboratory workflow for that is
@@ -65,37 +69,6 @@ jobs:
         run: python -c "import core, nmrforge_api, gui, viewer, backend, workflow; print('imports ok')"
       - name: Tests
         run: python -m pytest -q --basetemp="$RUNNER_TEMP/pytest"
-
-  tests-pyside6:
-    name: tests on PySide6
-    runs-on: ubuntu-latest
-    env:
-      QT_QPA_PLATFORM: offscreen
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-      - name: Install Qt runtime system libraries
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            libgl1 libegl1 libxkbcommon0 libxkbcommon-x11-0 \
-            libdbus-1-3 libfontconfig1 libxcb-cursor0
-      - name: Install the dependencies explicitly, WITHOUT PyQt6
-        # `pip install -e .` would pull the declared PyQt6 dependency and put two bindings in one
-        # environment, which qtcompat refuses (by design). The project is importable from the
-        # checkout because pyproject.toml sets pytest's pythonpath, so the binding can be installed
-        # on its own here.
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install PySide6 pyqtgraph numpy scipy pandas matplotlib \
-            PyYAML nmrglue reportlab send2trash pytest
-      - name: Confirm exactly one binding is present
-        run: python -c "import qtcompat; print('binding =', qtcompat.BINDING); assert qtcompat.BINDING == 'PySide6'"
-      - name: Tests
-        run: python -m pytest -q --basetemp="$RUNNER_TEMP/pytest-pyside"
 
   release-readiness:
     name: release readiness
