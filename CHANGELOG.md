@@ -94,7 +94,9 @@
   写坏、记录与版本不匹配这类问题的裸 traceback 打在终端——统一翻译成「错误: <怎么修>」并返回
   码 2;完整堆栈只在 `--debug` / `NMRFORGE_DEBUG=1` 时打印,且走 stderr;`Ctrl-C` 明确说明并
   返回 130。`SensitivityError` 家族文案不变。GUI 对话框的同类收敛留作下一步
-  (`docs/tasks/2026-09-17-phase21-error-messages.md`)。
+  (`docs/tasks/2026-09-17-phase21-error-messages.md`)。本地全量 `1192` 收集 / `1191 passed,
+  1 skipped`;VM(HEAD `5569050`)`bash scripts/vm_test.sh` → 1188 passed, 4 skipped,
+  `VM_TEST_EXIT=0`。
 - **AppImage 构建 + 冒烟完成(Stage 4)**:在用户 VM 上构建成功(`BUILD_EXIT=0`,产物约 134MB),
   产物内含 `LGPL-3.0.txt`/`GPL-3.0.txt`/`NOTICE.md`/`PROVENANCE.txt` 与 `BUILD_INFO.txt`;
   冒烟(隔离 HOME)验证 `--licenses` 自述、启动进入事件循环、桌面入口自动安装与
