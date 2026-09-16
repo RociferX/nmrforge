@@ -64,9 +64,13 @@ Working notes:
 - [ ] `tests/test_release_readiness.py` green.
 - [ ] `python -m ruff check .` green.
 - [ ] `python -m pip install -e ".[test]"` works from a clean clone.
-- [ ] AppImage builds from the release commit and starts on a clean machine (**not yet done**:
-      needs a Linux host with `appimagetool`; the spec and the licence staging are configured and
-      checked, but no AppImage has been produced since the PyQt6 removal).
+- [x] AppImage builds from the release commit and starts (2026-09-16, user's Linux VM):
+      `BUILD_EXIT=0`, `NMRForge-0.2.199-x86_64.AppImage` (~134 MB); smoke test with an isolated
+      `HOME` passed: `--licenses` prints the shipped LGPL/GPL texts, NOTICE, PROVENANCE and
+      BUILD_INFO; the application starts and stays in its event loop; the desktop entry is
+      installed and `--remove-desktop` removes it. Remaining nuance: this was the build host,
+      not a freshly provisioned third machine - a distribution test on an untouched machine is
+      still worth doing before announcing.
 - [ ] AppImage smoke test: launches, `--remove-desktop` works, `NMRFORGE_NO_DESKTOP=1` works.
 - [ ] GUI launches (`python main.py`); CLI launches (`python -m nmrforge_api --help`).
 - [ ] Core API imports without Qt (`import core, nmrforge_api`).

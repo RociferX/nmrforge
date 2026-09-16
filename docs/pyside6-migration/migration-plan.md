@@ -329,7 +329,7 @@ QT_QPA_PLATFORM=offscreen .venv-pyside/Scripts/python -m pytest -q     # run fro
 | Docs updated | Every page that stated the toolkit as a current fact: README (+Chinese section), docs/README, development, faq, installation, packaging, python-api, manager/project_map, manager/project_state, AGENT_PROMPTS, the external-API proposal, plus THIRD_PARTY, LICENSE_OPTIONS and PUBLIC_RELEASE_AUDIT. Historical records (CHANGELOG entries, `docs/problems.md`, archived tasks) were left untouched on purpose - they are evidence of what was observed under PyQt6. |
 | CI | The separate PySide6 job was removed because the main matrix now installs PySide6 through `pip install -e ".[test]"`. |
 
-### 10.2 Stage 4 (packaging) is now the only outstanding engineering step
+### 10.2 Stage 4 (packaging) - **DONE 2026-09-16 on the user's VM**
 
 The AppImage has **not** been rebuilt or smoke-tested against PySide6. The spec was edited, which is
 necessary for the build to work at all, but that edit is unverified: it needs a Linux machine with

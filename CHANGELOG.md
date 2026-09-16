@@ -60,6 +60,14 @@
 
 ### Changed
 
+- **AppImage 构建 + 冒烟完成(Stage 4)**:在用户 VM 上构建成功(`BUILD_EXIT=0`,产物约 134MB),
+  产物内含 `LGPL-3.0.txt`/`GPL-3.0.txt`/`NOTICE.md`/`PROVENANCE.txt` 与 `BUILD_INFO.txt`;
+  冒烟(隔离 HOME)验证 `--licenses` 自述、启动进入事件循环、桌面入口自动安装与
+  `--remove-desktop` 移除均正常。运维记录:VM 无法访问 GitHub,appimagetool 需由本机
+  scp 过去(本机下载 14.39MB)。`pyqtgraph.opengl` 收集告警经确认良性
+  (`viewer.spectrum3d_panel` 无 PyOpenGL 亦可导入)。
+
+
 - **GUI 依赖由 PyQt6 切换为 PySide6(Stage 5)**:`pyproject.toml` 运行期依赖改为
   `PySide6>=6.6`;`qtcompat` 收敛为 PySide6 专用(移除绑定选择开关、`NMRFORGE_QT_LIB`
   与 PyQt6 的工厂名,保留 `PYQTGRAPH_QT_LIB` 强制与矛盾时报错);PyInstaller spec 的
