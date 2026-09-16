@@ -9,6 +9,18 @@ dynamic = ["version"]
 description = "面向 Bruker 2D/3D NMR 数据的自动化处理、参数优化与质量控制平台"
 readme = "README.md"
 requires-python = ">=3.12"
+# 许可证尚未选择(见 LICENSE_OPTIONS.md):此处刻意不写 license 字段,
+# 避免在决策前对外声明一个未经确认的许可证。
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Chemistry",
+    "Topic :: Scientific/Engineering :: Physics",
+]
 dependencies = [
     "PyQt6>=6.5",
     "pyqtgraph>=0.13",
@@ -25,10 +37,23 @@ dependencies = [
 [project.scripts]
 nmrforge-viewer = "viewer.app:main"
 
+# 可选依赖分组(PEP 621)。说明:
+# - 没有 `gui` 分组:PyQt6/pyqtgraph 是当前设计的运行期必需依赖,不是可选组件;
+#   要装 GUI 就是装本包本身。
+# - `installer`/`wheel` 不是受支持的发行方式(发行物只有 Linux AppImage,
+#   见 docs/packaging.md PACK-015):`pip install -e .` 仅供开发与脚本化使用。
+# - `docs` 分组为将来的文档站点准备;当前 docs/ 下的 Markdown 可直接阅读。
 [project.optional-dependencies]
+test = [
+    "pytest>=7.4",
+]
 dev = [
     "pytest>=7.4",
     "ruff>=0.4",
+]
+docs = [
+    "mkdocs>=1.6",
+    "mkdocs-material>=9.5",
 ]
 
 [tool.setuptools.packages.find]
