@@ -6,8 +6,8 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtWidgets import (
+from qtcompat.QtCore import Qt
+from qtcompat.QtWidgets import (
     QApplication,
     QDoubleSpinBox,
     QHBoxLayout,
@@ -18,11 +18,13 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from qtcompat import Signal
+
 
 class PhasePanel(QWidget):
     """P0/P1 相位滑块;``phase_changed(final)`` 调整时发出(final=False 实时,True 松手)。"""
 
-    phase_changed = pyqtSignal(bool)
+    phase_changed = Signal(bool)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)

@@ -9,7 +9,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import numpy as np
 import pytest
-from PyQt6.QtWidgets import QApplication, QDialog, QLabel, QMenu
+from qtcompat.QtWidgets import QApplication, QDialog, QLabel, QMenu
 
 from core.project import ProjectManager
 from gui.log_panel import LogPanel
@@ -523,7 +523,7 @@ def test_main_window_three_column_layout(
     assert window.log_panel.maximumWidth() >= 10000
     assert window.project_tree.minimumWidth() <= 1  # 不再强制 330
     # 默认初始列宽固定 [420,600,300,600](合计 1920),窄屏由 splitter 收窄
-    from PyQt6.QtGui import QGuiApplication
+    from qtcompat.QtGui import QGuiApplication
 
     screen = window.screen() or QGuiApplication.primaryScreen()
     if screen is not None:
@@ -632,7 +632,7 @@ def test_main_window_has_app_icon(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """0.2.199-补29eq:主窗口设置了应用图标(gui/assets/nmrforge.png)。"""
-    from gui.theme import app_icon
+    from ui_support.theme import app_icon
 
     manager = _manager_with_experiment(tmp_path, monkeypatch)
     window = MainWindow(manager=manager)
@@ -676,7 +676,7 @@ def test_tools_run_jumps_to_workspace_log(
     if child is not None:
         tree.setCurrentItem(child)
     monkeypatch.setattr(
-        "PyQt6.QtWidgets.QFileDialog.getOpenFileName",
+        "qtcompat.QtWidgets.QFileDialog.getOpenFileName",
         lambda *a, **k: (str(tmp_path / "nope.fid"), ""),
     )
     window._run_standalone_fid_diagnostics()
@@ -690,8 +690,8 @@ def test_menu_mnemonics_unique_and_activate(
 ) -> None:
     """0.2.199-补29en:顶层菜单助记键(&X)唯一,且 Alt+字母 能弹出对应菜单
     (曾出现 工具/设置 都取 T,Alt+T 歧义导致设置助记键失效)。"""
-    from PyQt6.QtCore import Qt
-    from PyQt6.QtTest import QTest
+    from qtcompat.QtCore import Qt
+    from qtcompat.QtTest import QTest
 
     manager = _manager_with_experiment(tmp_path, monkeypatch)
     window = MainWindow(manager=manager)
@@ -735,13 +735,13 @@ def test_other_menu_routes_to_standalone_check(
         lambda paths, kind: calls.append((str(paths[0]), kind))
     )
     monkeypatch.setattr(
-        "PyQt6.QtWidgets.QFileDialog.getOpenFileName",
+        "qtcompat.QtWidgets.QFileDialog.getOpenFileName",
         lambda *a, **k: (r"C:\x\d_001.fid", ""),
     )
     window._run_standalone_fid_diagnostics()
     assert calls == [(r"C:\x\d_001.fid", "fid")]
     monkeypatch.setattr(
-        "PyQt6.QtWidgets.QFileDialog.getOpenFileName",
+        "qtcompat.QtWidgets.QFileDialog.getOpenFileName",
         lambda *a, **k: (r"C:\x\d_001.ft3", ""),
     )
     window._run_standalone_spectrum_quality()
@@ -1396,7 +1396,7 @@ def test_right_click_open_path_emits_signal(
     # 0.2.199-补29gk 补:MainWindow 把 open_terminal_requested 连到 _open_terminal→
     # open_in_terminal(x-terminal-emulator),测试只验证信号;mock 掉避免真开终端窗口。
     monkeypatch.setattr("gui.project_tree.open_in_terminal", lambda p: True)
-    from PyQt6.QtWidgets import QMenu
+    from qtcompat.QtWidgets import QMenu
 
     manager = _manager_with_experiment(tmp_path, monkeypatch)
     base = manager.data_base("exp_001", "d_001")
@@ -1438,8 +1438,8 @@ def test_right_click_open_path_emits_signal(
 
 def test_spectrum_panel_vertical_layout(qapp: QApplication) -> None:
     """谱图面板上下布局:文件列表在上、查看器在下。"""
-    from PyQt6.QtCore import Qt
-    from PyQt6.QtWidgets import QSplitter
+    from qtcompat.QtCore import Qt
+    from qtcompat.QtWidgets import QSplitter
 
     panel = SpectrumPanel()
     found: list[QSplitter] = []
@@ -1460,8 +1460,8 @@ def test_spectrum_panel_vertical_layout(qapp: QApplication) -> None:
 
 def test_viewer_internal_vertical_layout(qapp: QApplication) -> None:
     """SpectrumViewer 内部上下布局:plot 在上、控制面板在下。"""
-    from PyQt6.QtCore import Qt
-    from PyQt6.QtWidgets import QSplitter
+    from qtcompat.QtCore import Qt
+    from qtcompat.QtWidgets import QSplitter
 
     from viewer.spectrum_viewer import SpectrumViewer
 
@@ -1868,7 +1868,7 @@ def test_tree_inline_create_experiment_editor_commit(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """新建实验类型:树内编辑器 commitData→closeEditor 后创建(模拟回车)。"""
-    from PyQt6.QtWidgets import QAbstractItemDelegate
+    from qtcompat.QtWidgets import QAbstractItemDelegate
 
     manager = _manager_with_experiment(tmp_path, monkeypatch)
     window = MainWindow(manager=manager)
@@ -1906,7 +1906,7 @@ def test_tree_inline_create_cancel_removes_pending(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """新建实验类型:编辑取消(Esc)不创建并移除待命名节点。"""
-    from PyQt6.QtWidgets import QAbstractItemDelegate
+    from qtcompat.QtWidgets import QAbstractItemDelegate
 
     manager = _manager_with_experiment(tmp_path, monkeypatch)
     window = MainWindow(manager=manager)
@@ -2002,7 +2002,7 @@ def test_rename_editor_appears_at_click_position(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """点「重命名」后,右键位置直接出现重命名输入框(回车提交)。"""
-    from PyQt6.QtCore import QPoint
+    from qtcompat.QtCore import QPoint
 
     manager = _manager_with_experiment(tmp_path, monkeypatch)
     window = MainWindow(manager=manager)
@@ -2031,7 +2031,7 @@ def test_context_menu_rename_opens_inline_editor(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """树右键「重命名」:菜单项触发后,右键位置变为重命名输入框。"""
-    from PyQt6.QtCore import QPoint
+    from qtcompat.QtCore import QPoint
 
     manager = _manager_with_experiment(tmp_path, monkeypatch)
     panel = ProjectTreePanel(manager)
@@ -2099,7 +2099,7 @@ def test_main_window_stop_no_task_notice(
 
 def test_default_column_widths_1920(qapp: QApplication) -> None:
     """默认列宽固定 [420, 600, 300, 600] 合计 1920;窄屏收窄不溢出。"""
-    from PyQt6.QtGui import QGuiApplication
+    from qtcompat.QtGui import QGuiApplication
 
     window = MainWindow()
     screen = window.screen() or QGuiApplication.primaryScreen()
@@ -2233,7 +2233,7 @@ def test_experiment_page_dropdown_not_covering_button(
     tmp_path: Path, qapp: QApplication
 ) -> None:
     """0.2.163-补3:下拉过长时限制高度加滚动条,且不遮住触发按钮。"""
-    from PyQt6.QtCore import QPoint
+    from qtcompat.QtCore import QPoint
 
     from gui.main_window import MainWindow
 
@@ -2294,7 +2294,7 @@ def test_experiment_page_dropdown_switch(
     page._open_import_dropdown()
     assert page._import_dropdown.isVisible()
     # 0.2.162-补14:下拉应在按钮正下方(先 show 再 move)
-    from PyQt6.QtCore import QPoint
+    from qtcompat.QtCore import QPoint
 
     # 0.2.194-补2:下拉为实验类型页子部件,位置相对本页
     expected = page.import_dropdown_button.mapTo(

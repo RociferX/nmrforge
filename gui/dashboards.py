@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import QEvent, QPoint, Qt, QTimer, pyqtSignal
-from PyQt6.QtWidgets import (
+from qtcompat.QtCore import QEvent, QPoint, Qt, QTimer
+from qtcompat.QtWidgets import (
     QAbstractItemView,
     QApplication,
     QCheckBox,
@@ -32,7 +32,8 @@ from PyQt6.QtWidgets import (
 
 from core.project import ProjectManager
 from gui.dialogs import InfoDialog
-from gui.theme import TEXT_MUTED, TEXT_PRIMARY
+from qtcompat import Signal
+from ui_support.theme import TEXT_MUTED, TEXT_PRIMARY
 
 
 def _active_data_of(exp) -> list:
@@ -65,7 +66,7 @@ def _data_processed(project) -> int:
 class ProjectDashboard(QWidget):
     """项目概览:统计 + 处理完成度 + 最近运行 + 新建实验。"""
 
-    create_experiment_requested = pyqtSignal(str)  # 实验标题
+    create_experiment_requested = Signal(str)  # 实验标题
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -151,9 +152,9 @@ class ExperimentImportPanel(QWidget):
 
     实验页不再内联展示,由主界面「导入数据」按钮下拉弹出。"""
 
-    import_options_requested = pyqtSignal(str, str, str, bool)  # (exp_id, name, source, copy)
-    segmented_import_requested = pyqtSignal(str, str)  # (exp_id, 分段采集容器目录)
-    batch_import_requested = pyqtSignal(str, list, bool)  # (exp_id, folders, group)
+    import_options_requested = Signal(str, str, str, bool)  # (exp_id, name, source, copy)
+    segmented_import_requested = Signal(str, str)  # (exp_id, 分段采集容器目录)
+    batch_import_requested = Signal(str, list, bool)  # (exp_id, folders, group)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -450,9 +451,9 @@ def _dropdown_geometry(
 class ImportDataDropdown(QWidget):
     """「导入数据」下拉面板:向下弹出,内含完整导入表单(0.2.162-补11)。"""
 
-    import_options_requested = pyqtSignal(str, str, str, bool)
-    segmented_import_requested = pyqtSignal(str, str)
-    batch_import_requested = pyqtSignal(str, list, bool)
+    import_options_requested = Signal(str, str, str, bool)
+    segmented_import_requested = Signal(str, str)
+    batch_import_requested = Signal(str, list, bool)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -577,10 +578,10 @@ class ImportDataDropdown(QWidget):
 class ExperimentDashboard(QWidget):
     """实验概览:样品数据列表(状态,名称可改);导入块已移入「导入数据」下拉。"""
 
-    import_options_requested = pyqtSignal(str, str, str, bool)  # (exp_id, name, source, copy)
-    data_rename_requested = pyqtSignal(str, str, str)  # (exp_id, data_id, new_name)
-    segmented_import_requested = pyqtSignal(str, str)  # (exp_id, 分段采集容器目录)
-    batch_import_requested = pyqtSignal(str, list, bool)  # (exp_id, folders, group)
+    import_options_requested = Signal(str, str, str, bool)  # (exp_id, name, source, copy)
+    data_rename_requested = Signal(str, str, str)  # (exp_id, data_id, new_name)
+    segmented_import_requested = Signal(str, str)  # (exp_id, 分段采集容器目录)
+    batch_import_requested = Signal(str, list, bool)  # (exp_id, folders, group)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)

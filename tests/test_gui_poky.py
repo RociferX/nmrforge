@@ -8,7 +8,7 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PyQt6.QtWidgets import QApplication
+from qtcompat.QtWidgets import QApplication
 
 from core.project import ProjectManager
 from gui.spectrum_panel import SpectrumPanel
@@ -52,7 +52,7 @@ def test_import_poky_replaces_association_then_save_writes_list(
         encoding="utf-8",
     )
     monkeypatch.setattr(
-        "PyQt6.QtWidgets.QFileDialog.getOpenFileName",
+        "qtcompat.QtWidgets.QFileDialog.getOpenFileName",
         staticmethod(lambda *args, **kwargs: (str(list_file), "")),
     )
     shown: list[str] = []

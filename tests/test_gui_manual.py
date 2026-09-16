@@ -8,7 +8,7 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PyQt6.QtWidgets import QApplication
+from qtcompat.QtWidgets import QApplication
 
 from core.project import ProjectManager
 from gui.dialogs import ScriptEditorDialog
@@ -203,7 +203,7 @@ def test_script_editor_save_writes_script_file(
     tmp_path: Path, qapp: QApplication
 ) -> None:
     """「保存」立即写回数据目录并关闭(0.2.192:之前保存不落盘)。"""
-    from PyQt6.QtWidgets import QDialog
+    from qtcompat.QtWidgets import QDialog
 
     dialog = ScriptEditorDialog(
         None, "x", script_name="process.com", content="old", save_dir=tmp_path
@@ -588,7 +588,7 @@ def test_edit_assignment_applies_immediately(
     w2 = panel.peak_table.cellWidget(1, 1)
     assert w2 is not None and w2.lines[0].text() == 'G2'
     assert w2.lines[1].text() == '' and w2.lines[1].placeholderText() == '?'
-    from PyQt6.QtTest import QTest
+    from qtcompat.QtTest import QTest
     w2.lines[1].setFocus()
     QTest.keyClicks(w2.lines[1], '5')
     qapp.processEvents()

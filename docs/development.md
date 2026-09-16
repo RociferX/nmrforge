@@ -214,7 +214,7 @@ du -sh ~/* ~/.[!.]* 2>/dev/null | sort -h | tail
   区分「被条纹否决」与「增益不足」,不得笼统写「候选未优于当前配置」。
   条纹比封顶(0.5)且各候选评分与 off 相同/更差时,竖条纹是数据/采集伪影
   (DC 偏置、能量分布不均),不是可被 POLY 校正的基线,保持 off 并如实报告。
-- Qt 事件 API 统一用 PyQt6 实际提供的名字(0.2.199-补10):拖动处理路径
+- Qt 事件 API 统一用绑定实际提供的名字(PySide6/`qtcompat`;0.2.199-补10 起):拖动处理路径
   不得使用不存在的 scenePosition;QGraphicsSceneMouseEvent 取 scenePos(),
   普通 QMouseEvent 取 position(),按类型分支;3D slice 拖动条保持足够长
   (最小宽度 ≥220)。

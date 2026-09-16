@@ -33,6 +33,25 @@
 
 ### Changed
 
+- **GUI 依赖由 PyQt6 切换为 PySide6(Stage 5)**:`pyproject.toml` 运行期依赖改为
+  `PySide6>=6.6`;`qtcompat` 收敛为 PySide6 专用(移除绑定选择开关、`NMRFORGE_QT_LIB`
+  与 PyQt6 的工厂名,保留 `PYQTGRAPH_QT_LIB` 强制与矛盾时报错);PyInstaller spec 的
+  `hiddenimports` 改为 `PySide6.QtSvg`;移除已无对照对象的迁移工具
+  `scripts/pyside6_symbol_parity.py`、`scripts/pyside6_smoke_test.py` 与残留脚本
+  `.measure_gap.py`(均可从 git 历史恢复);CI 去掉多余的 PySide6 作业(主矩阵经
+  `pip install -e ".[test]"` 已装 PySide6);全部表述当前架构的文档同步更新,
+  历史记录(CHANGELOG 旧条目、problems.md、归档任务)按原样保留作为 PyQt6 时代的证据;
+
+
+- **Qt 绑定边界(`qtcompat`)与共享 UI 层(`ui_support`)**:GUI/viewer/tests 不再直接依赖
+  PyQt6,所有 Qt 名字经 `qtcompat` 取得(116 条 import、101 处 `pyqtSignal` → `Signal`);
+  `qtcompat` 强制单进程单一绑定并同步强制 `PYQTGRAPH_QT_LIB`,两绑定同时可导入时直接报错;
+  主题拆分为 Qt 无关的 `ui_support.colors`/`assets` 与经 `qtcompat` 的 `ui_support.theme`,
+  `gui/theme.py` 降为弃用再导出垫片(Stage 5 删除);`viewer/` 不再导入 `gui/`;
+  打包发现新增 `qtcompat*` 与 `ui_support*`;
+- 同一份源码与同一套测试在 PyQt6 与 PySide6 两个环境分别全绿(1148 项,0 失败 0 错误),
+  详见 `docs/pyside6-migration/migration-plan.md` §9;
+
 - `README.md` 重写为公开发布口径:AppImage 为用户推荐安装方式,pip 安装明确为开发用途;
   补充能力边界、流程示意(Mermaid)、QC 与溯源说明;
 - `docs/README.md` 增加公开文档入口;

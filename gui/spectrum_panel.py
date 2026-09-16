@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import QItemSelectionModel, Qt, pyqtSignal
-from PyQt6.QtWidgets import (
+from qtcompat.QtCore import QItemSelectionModel, Qt
+from qtcompat.QtWidgets import (
     QAbstractItemView,
     QDoubleSpinBox,
     QFileDialog,
@@ -37,7 +37,8 @@ from gui.peaks_io import (
     normalize_poky_label,
 )
 from gui.processing import ProcessingController
-from gui.theme import TEXT_MUTED
+from qtcompat import Signal
+from ui_support.theme import TEXT_MUTED
 from viewer.spectrum3d_panel import Spectrum3DPanel
 from viewer.spectrum_viewer import SpectrumViewer
 
@@ -67,7 +68,7 @@ class _AssignmentCell(QWidget):
     0.2.199-补29cp(用户):"-" 固定显示,前后各一个输入框;编辑逐段 Poky
     规范化后合并为 label(如 G1H-G1N、G1H-G1N-G1CA)。"""
 
-    edited = pyqtSignal(int)  # row
+    edited = Signal(int)  # row
 
     def __init__(self, ndim: int, row: int, text: str = "", parent=None) -> None:
         super().__init__(parent)
@@ -121,13 +122,13 @@ class _AssignmentCell(QWidget):
 class SpectrumPanel(QWidget):
     """谱图面板:查看器 + 文件列表 + 峰表(加/删/改/存)。"""
 
-    peaks_saved = pyqtSignal()  # 峰表写回后发出(主窗口刷新 Pipeline/日志)
-    status_message = pyqtSignal(str)  # 状态栏提示(主窗口接收)
-    log_message = pyqtSignal(str)  # 任务日志(主窗口 LogPanel 接收,0.2.199-补29cz)
-    _ft3_ready = pyqtSignal(object, object)  # (path, Spectrum3D) 后台加载完成
-    _ft3_failed = pyqtSignal(object, str)  # (path, message)
+    peaks_saved = Signal()  # 峰表写回后发出(主窗口刷新 Pipeline/日志)
+    status_message = Signal(str)  # 状态栏提示(主窗口接收)
+    log_message = Signal(str)  # 任务日志(主窗口 LogPanel 接收,0.2.199-补29cz)
+    _ft3_ready = Signal(object, object)  # (path, Spectrum3D) 后台加载完成
+    _ft3_failed = Signal(object, str)  # (path, message)
     # 0.2.199-补29bp:谱图放大/收起(主窗口收起左侧三部分)
-    expand_requested = pyqtSignal(bool)
+    expand_requested = Signal(bool)
 
     # 0.2.89:超过该大小的 .ft3 后台线程加载,避免大文件读取卡死 UI
     _ASYNC_FT3_MIN_BYTES = 32 * 1024 * 1024

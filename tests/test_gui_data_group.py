@@ -8,7 +8,7 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PyQt6.QtWidgets import QApplication, QMenu
+from qtcompat.QtWidgets import QApplication, QMenu
 
 from core.project import ProjectManager
 from gui.group_panel import GroupBatchPanel

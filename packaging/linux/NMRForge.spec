@@ -12,7 +12,7 @@ a = Analysis(
         ("../../presets", "presets"),
         ("../../gui/assets", "gui/assets"),
     ],
-    hiddenimports=["PyQt6.QtSvg"],
+    hiddenimports=["PySide6.QtSvg"],
     hookspath=[os.path.abspath(os.path.join(SPECPATH, "hooks"))],
     runtime_hooks=[],
     excludes=[],

@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import numpy as np
 import pyqtgraph as pg
-from PyQt6.QtCore import QEvent, QPointF, QRect, QRectF, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
-from PyQt6.QtWidgets import (
+from qtcompat.QtCore import QEvent, QPointF, QRect, QRectF, Qt
+from qtcompat.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
+from qtcompat.QtWidgets import (
     QCheckBox,
     QDoubleSpinBox,
     QGraphicsEllipseItem,
@@ -35,6 +35,7 @@ from PyQt6.QtWidgets import (
 )
 
 from core.qc.peak_detection import snap_to_peak_top
+from qtcompat import Signal
 from viewer.contour_layer import ContourLayer
 from viewer.nmr_viewbox import NMRViewBox
 from viewer.spectrum import Spectrum, Spectrum1D, SpectrumAxis
@@ -203,10 +204,10 @@ class _LabelOverlay(QWidget):
 class SpectrumViewer(QWidget):
     """支持多谱叠加的二维谱查看器。"""
 
-    peak_clicked = pyqtSignal(int)  # 峰行号
-    manual_peak_requested = pyqtSignal(dict)  # 点击加峰:峰行 dict(已吸附峰顶)
-    delete_peak_requested = pyqtSignal(float, float)
-    peaks_box_selected = pyqtSignal(list)  # 框选峰:行号列表(选择模式)
+    peak_clicked = Signal(int)  # 峰行号
+    manual_peak_requested = Signal(dict)  # 点击加峰:峰行 dict(已吸附峰顶)
+    delete_peak_requested = Signal(float, float)
+    peaks_box_selected = Signal(list)  # 框选峰:行号列表(选择模式)
 
     def __init__(
         self,
@@ -968,7 +969,7 @@ class SpectrumViewer(QWidget):
                     return True
                 if self._strips_active or self._mode_1d:
                     # 0.2.199-补10:场景事件可能是 QGraphicsSceneMouseEvent
-                    # (取 scenePos)或普通 QMouseEvent(取 position);PyQt6 无
+                    # (取 scenePos)或普通 QMouseEvent(取 position);Qt 绑定无
                     # scenePosition 属性
                     if isinstance(event, QGraphicsSceneMouseEvent):
                         self._follow_drag(event.scenePos())
@@ -1368,7 +1369,7 @@ class SpectrumViewer(QWidget):
         ring.setZValue(22)
         self.plot.addItem(ring)
         self._flash_item = ring
-        from PyQt6.QtCore import QTimer
+        from qtcompat.QtCore import QTimer
 
         QTimer.singleShot(400, self._clear_flash)
 

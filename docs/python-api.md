@@ -35,7 +35,8 @@ positions and its warnings; the study accumulates `manifest.json`, `runs.json`,
 import nmrforge_api          # no Qt import
 ```
 
-The scripting API never imports PyQt6. Verified behaviour:
+The scripting API never imports a Qt binding (the GUI layer uses PySide6 through
+`qtcompat`). Verified behaviour:
 
 ```bash
 python -c "import sys, core, nmrforge_api; print([m for m in sys.modules if m.startswith('PyQt')])"

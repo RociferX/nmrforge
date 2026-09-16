@@ -8,7 +8,7 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PyQt6.QtWidgets import QApplication
+from qtcompat.QtWidgets import QApplication
 
 from gui.dialogs import ConfirmDialog, ImportExperimentDialog, InfoDialog
 
@@ -147,8 +147,8 @@ def test_settings_dialog_trimmed_and_linewidth_saved(
 
 def test_dialog_centered_on_screen(qapp: QApplication) -> None:
     """0.2.112:应用级过滤器把弹窗移到所在屏幕中心。"""
-    from PyQt6.QtCore import QEventLoop, QTimer
-    from PyQt6.QtWidgets import QDialog
+    from qtcompat.QtCore import QEventLoop, QTimer
+    from qtcompat.QtWidgets import QDialog
 
     from gui.dialogs import install_dialog_centering
 
@@ -178,7 +178,7 @@ def test_import_dialog_browse_starts_at_data_root(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """0.2.199-补29gg:导入「浏览...」默认起点=数据总目录。"""
-    from PyQt6.QtWidgets import QFileDialog
+    from qtcompat.QtWidgets import QFileDialog
 
     from gui import settings as settings_module
     from gui.dialogs import ImportExperimentDialog

@@ -3,15 +3,15 @@
 This file records every third-party component that nmrForge depends on, whether it is
 bundled with this repository, and under which terms it is used.
 
-Status note: this inventory was produced during public-release preparation. Items marked
-**BLOCKER** must be resolved by the repository owner before the repository is made public.
-Nothing here is legal advice.
+Status note: this inventory was produced during public-release preparation and updated when the
+GUI moved from PyQt6 to PySide6. Items marked **BLOCKER** must be resolved by the repository owner
+before the repository is made public. Nothing here is legal advice.
 
 ## 1. Summary table
 
 | Name | Purpose | Bundled or external | License (declared by upstream) | Official source | Required / optional |
 | --- | --- | --- | --- | --- | --- |
-| PyQt6 | Desktop GUI toolkit bindings | external (pip) | **GPL-3.0-only** (or commercial from Riverbank) | https://pypi.org/project/PyQt6/ | required for GUI and viewer |
+| PySide6 | Desktop GUI toolkit bindings | external (pip) | **LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only** | https://pypi.org/project/PySide6/ | required for GUI and viewer |
 | pyqtgraph | Interactive plotting widgets (GUI contours) | external (pip) | MIT | https://pypi.org/project/pyqtgraph/ | required for GUI and viewer |
 | NumPy | Array/FFT numerics | external (pip) | BSD-3-Clause | https://numpy.org/ | required |
 | SciPy | Optimization and signal routines | external (pip) | BSD-3-Clause | https://scipy.org/ | required |
@@ -73,39 +73,31 @@ user-facing error when they are missing, instead of shipping or downloading them
 
 ## 5. BLOCKERS
 
-### [BLOCKER] PyQt6 is GPL-3.0-only
+### PySide6 is the GUI dependency (LGPL-3.0 option available)
 
-`PyQt6` is distributed by Riverbank Computing under **GPL-3.0-only** (or a paid commercial
-license). Its installed metadata states:
+As of the PySide6 migration (Stage 5, 2026-09-16) the GUI and viewer use **PySide6** through the
+`qtcompat/` boundary, and `pyproject.toml` declares `PySide6`. **PyQt6 is no longer used or
+declared**; it is recorded here only as the removed dependency.
 
-    License-Expression: GPL-3.0-only
+| Item | Verified value (2026-09-16) |
+| --- | --- |
+| Distributions | `PySide6 6.11.2`, `PySide6_Essentials 6.11.2`, `PySide6_Addons 6.11.2`, `shiboken6 6.11.2` (Qt 6.11.2) |
+| Licence expression | `LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only` |
+| Licence text shipped in the wheel | **only** `dist-info/licenses/LicenseRef-Qt-Commercial.txt` - no LGPL-3.0 text |
+| `requires-python` | `>=3.10,<3.15` |
+| Removed dependency | `PyQt6` (`GPL-3.0-only` or commercial) - not declared, not imported anywhere |
+| Guard | `tests/test_qt_independence.py` fails if any module outside `qtcompat/` imports a binding |
 
-Consequences for public release (note that publishing the source on GitHub is itself
-distribution, so recommending the AppImage does not avoid this):
+What this means for distribution:
 
-- The GUI main window (`gui/`) and the standalone spectrum viewer (`viewer/`) import PyQt6
-  directly, and `pyproject.toml` lists `PyQt6>=6.5` as a **required** runtime dependency.
-- If nmrForge is published under a permissive license (MIT / BSD-3-Clause / Apache-2.0) while
-  the GUI depends on PyQt6, the distributed combination conflicts with the GPL: a GPL-3.0
-  component cannot be relicensed under a permissive licence by adding it to this project.
-- Publishing the source with no `LICENSE` file (the current state) does not resolve this; it
-  only leaves the terms undefined.
-
-Note that the non-GUI layers are already Qt-free, which keeps the options open:
-
-    python -c "import sys, core, nmrforge_api; print([m for m in sys.modules if m.startswith('PyQt')])"
-    # -> []
-
-Possible resolutions (owner decision, see LICENSE_OPTIONS.md):
-
-1. **Release nmrForge under GPL-3.0-only** (or `GPL-3.0-or-later`). Simplest, fully consistent
-   with the current dependency set.
-2. **Migrate the GUI from PyQt6 to PySide6** (LGPL-3.0). This preserves the option of a
-   permissive licence for the project, at the cost of a GUI migration.
-3. **Acquire a commercial PyQt6 licence** and document that fact; this is a cost/legal
-   question for the owner, not a code change.
-
-Until the owner decides, no `LICENSE` file is committed.
+1. **Source-only distribution** (GitHub repository, sdist): you distribute your own code and declare
+   PySide6 as a dependency, so the LGPL obligations on the library are not triggered by that act.
+2. **Binary distribution** (the AppImage, which bundles PySide6 and the Qt libraries): LGPL
+   obligations apply. The distributing party must supply the LGPL-3.0 text and the Qt/PySide6
+   notices (the wheel does not), and must satisfy the requirement that a recipient can replace or
+   relink the LGPL libraries - a genuinely open question for a read-only single-file AppImage.
+3. The **full** third-party audit must be rerun after the migration, before recommending MIT,
+   BSD-3-Clause or Apache-2.0. See [LICENSE_OPTIONS.md](LICENSE_OPTIONS.md) section 2.
 
 ### [BLOCKER] Author list, affiliation, and IP ownership not confirmed
 

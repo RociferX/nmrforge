@@ -8,7 +8,7 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PyQt6.QtWidgets import QApplication, QDialog, QFileDialog
+from qtcompat.QtWidgets import QApplication, QDialog, QFileDialog
 
 from core.project import ProjectManager
 from gui.dialogs import ConfirmDialog

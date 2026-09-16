@@ -13,49 +13,61 @@ that constrain the choice. This is not legal advice.
 | Existing `LICENSE` / `COPYING` file | None. The repository is currently "all rights reserved" by default. |
 | Institutional or laboratory copyright notice in the tree | None found. No `Copyright (c)` header in any source file. |
 | Per-file licence headers | None. |
-| Third-party components that constrain the choice | **Yes - PyQt6 is `GPL-3.0-only`.** See below. |
+| Third-party components that constrain the choice | **Yes, but no longer fatally.** The GUI uses PySide6 (`LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only`), which leaves a permissive licence open in principle. See section 2. |
 | Copyright holder named in packaging metadata | None (`pyproject.toml` has no `authors`/`license` field). |
 | Git author identity used so far | `Xuanfeng Li <330249944+RociferX@users.noreply.github.com>` (the identity used in the public history); no personal email address is published |
 
-## 2. The constraint that matters most
+## 2. What constrains the choice now
 
-The GUI (`gui/`) and the standalone viewer (`viewer/`) import **PyQt6**, which Riverbank
-Computing distributes under **GPL-3.0-only** or a paid commercial licence. `pyproject.toml`
-lists PyQt6 as a required dependency.
+The GUI (`gui/`, `viewer/`, `ui_support/`) uses Qt through a single boundary module,
+`qtcompat/`, which imports **PySide6**. `pyproject.toml` declares `PySide6` as the runtime
+dependency. PyQt6 - the binding whose `GPL-3.0-only` licence used to force this project to be GPL -
+is no longer used or declared anywhere; the migration is complete
+([docs/pyside6-migration/migration-plan.md](docs/pyside6-migration/migration-plan.md)).
 
-This means:
+PySide6 is published by the Qt Company under:
 
-- Choosing MIT / BSD-3-Clause / Apache-2.0 for the *whole* project, including the PyQt6 GUI, is
-  not consistent with PyQt6's terms for a binary distribution.
-- The core library and the scripting API (`core/`, `backend/`, `workflow/`, `nmrforge_api/`) are
-  Qt-free and could in principle be licensed permissively, with the GUI carrying the GPL
-  obligation. Splitting a licence across one repository is legal but needs an explicit
-  statement in `README.md` and `LICENSE`, and it is easy for downstream users to get wrong.
+    LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+
+Consequences, and the part that is easy to get wrong:
+
+- **LGPL-3.0-only is available as an option**, so a permissive licence for *this project's own code*
+  is now possible in principle. That was not true before the migration.
+- **There is a difference between publishing the source and shipping a binary.** A source-only
+  publication (a GitHub repository, or an sdist) distributes *your* code and merely declares PySide6
+  as a dependency: recipients install Qt themselves, so you are not distributing the LGPL library
+  and the LGPL's obligations on the library are not triggered by that act alone.
+- **Shipping the AppImage distributes Qt.** The AppImage bundles PySide6 and the Qt libraries, so
+  LGPL obligations do apply to it: licence texts and notices, and the requirement that a recipient
+  can replace or relink the LGPL library. The PySide6 wheels ship **no LGPL text at all** (only
+  `LicenseRef-Qt-Commercial.txt`), so the distributor must supply it. How to satisfy the
+  replace/relink requirement inside a read-only single-file AppImage is an open legal question, not
+  a packaging preference.
+- **The core is unaffected either way.** `core/`, `backend/`, `workflow/` and `nmrforge_api/` are
+  Qt-free, so a "core-only" distribution has no Qt dependency at all.
 
 ### 2.1 Publishing the source on GitHub is itself distribution
 
-This matters and is easy to get wrong: **publishing the source code on GitHub is distributing the
-program**, so it is not possible to sidestep the GPL question by recommending that users install
-only the AppImage, or by keeping PyQt6 out of the packaged artefact.
+**Publishing the source is distribution of your program**, which is why the licence decision cannot
+be deferred past the moment the repository becomes visible. It is also why the earlier obstacle had
+to be fixed in code rather than worked around in the documentation.
 
-- The GUI and viewer import PyQt6. The program as distributed - source or binary - depends on a
-  `GPL-3.0-only` library, so the terms that can be granted for that program are GPL-3.0 terms.
-- Recommending the AppImage changes *how users install* the software. It does not change the
-  licence analysis of what was published.
-- Publishing the repository without a `LICENSE` file does not fix this either; it leaves the terms
-  undefined while the GPL obligation still exists, which is the worst of both positions.
+What it does *not* do is make the LGPL's library obligations apply to your source tree: with a
+source-only distribution you are not handing out Qt, you are naming it as a dependency. The
+obligations follow the library, so they bite when a binary you distribute contains it.
 
-If the intent is "the source is public but the licence is permissive", the PyQt6 dependency has to
-change first (Option B below). There is no ordering of the AppImage, the README wording or the
-`pyproject.toml` that achieves it.
+### 2.2 Status of the migration and of the licence decision
 
-Because of this, the realistic options are:
+- PyQt6 removal: **done** (Stage 5 of the migration; the whole suite passes on PySide6, 1148 tests,
+  and `tests/test_qt_independence.py` fails if any module outside `qtcompat/` names a binding).
+- Rebuilding and smoke-testing the AppImage against PySide6: **not done** - it needs a Linux build
+  machine (Stage 4).
+- The full third-party audit has **not** been rerun since the migration. It must be, before any
+  permissive licence is recommended: every runtime dependency, not just Qt.
+- The LGPL distribution obligations for the AppImage (texts, notices, relink/replace) are
+  **unresolved**.
 
-- **Option A - GPL-3.0-only** (or `GPL-3.0-or-later`) for the whole project. Zero code changes.
-- **Option B - migrate the GUI from PyQt6 to PySide6** (LGPL-3.0), then choose a permissive
-  licence for the project. Code change, then freedom of licence choice.
-- **Option C - split licensing**: permissive for the Qt-free core, GPL for the GUI. Legal, but
-  must be stated unambiguously and cannot be expressed with a single SPDX identifier.
+No `LICENSE` file has been committed, by the owner's instruction.
 
 ## 3. Candidate licences compared
 
@@ -71,7 +83,7 @@ Because of this, the realistic options are:
 | Change-notice obligation | None | None | Must state modified files (section 4b) |
 | Text length / complexity | Shortest (~170 words) | Short (~220 words) | Long (~1500 words + `NOTICE`) |
 | Typical academic-software use | Very common | Common (NumPy, SciPy, nmrglue) | Common for infrastructure (OpenSSL-style governance) |
-| Compatibility with a GPL-3.0 GUI dependency | Incompatible as the licence of the combined work | Incompatible as the licence of the combined work | Incompatible as the licence of the combined work |
+| Compatibility with the current GUI dependency (PySide6, LGPL-3.0 option) | Fine for source distribution; binary distribution must meet the LGPL obligations | Fine, same | Fine, same |
 | Compatibility with PySide6 (LGPL-3.0) GUI | Fine (LGPL library linked by an MIT app) | Fine | Fine |
 | Friction for downstream academic users | Lowest | Low | Slightly higher (NOTICE/modification bookkeeping) |
 
@@ -85,8 +97,9 @@ Because of this, the realistic options are:
   can attract patents). The price is a longer licence, a `NOTICE` obligation, and the
   "state modified files" requirement, which is slightly awkward for academic users who copy
   code into analysis scripts.
-- **A permissive licence does not make the PyQt6 problem go away.** It only makes the
-  inconsistency harder to notice.
+- **A permissive licence is now possible, but not yet recommended.** Nothing in the code
+  blocks it after the PySide6 migration; what is missing is the rerun of the full third-party
+  audit and the owner's decision (section 5).
 
 ## 4. What a chosen licence would require us to change
 
@@ -97,10 +110,11 @@ Whichever option is chosen, the following places must be updated together:
    classifier.
 3. Add a "Licence" section to `README.md` and to `docs/README.md`.
 4. For Apache-2.0: add a `NOTICE` file and a per-file change notice when redistributing.
-5. If Option B (PySide6) or Option C (split licensing) is chosen, state the split explicitly
-   in both `README.md` and `LICENSE`, and record the PyQt6/PySide6 decision in
-   `docs/manager/decisions.md`.
-6. Record the decision in `docs/manager/decisions.md` so it is not silently revisited.
+5. State the Qt situation explicitly in `README.md` and `LICENSE`: the project depends on
+   PySide6 (LGPL-3.0 among its options) and ships it inside the AppImage.
+6. Ship the LGPL-3.0 text and the Qt/PySide6 notices with any binary distribution, and document how
+   a recipient can replace or relink the bundled Qt libraries.
+7. Record the decision in `docs/manager/decisions.md` so it is not silently revisited.
 
 ## 5. Recommendation for the owner to consider
 
@@ -110,8 +124,9 @@ deferrable past the moment the repository becomes visible.
 Recommended order:
 
 1. **Decide IP ownership and the author list first** (blocking everything else).
-2. **Decide PyQt6 vs PySide6.** If a permissive licence is important for the intended software
-   paper and for downstream reuse, migrating the GUI to PySide6 is the only way to get there;
-   the Qt-free core makes that migration self-contained in `gui/` and `viewer/`.
-3. **Then** pick the licence: BSD-3-Clause if staying permissive, GPL-3.0-only if the PyQt6
-   dependency is kept as-is.
+2. **Rerun the full third-party audit** on the post-migration dependency set (section 2.2), and
+   answer the AppImage/LGPL questions in section 6 of
+   [docs/pyside6-migration/migration-plan.md](docs/pyside6-migration/migration-plan.md).
+3. **Then** choose. With PyQt6 gone, both a permissive licence (BSD-3-Clause or MIT, matching the
+   numerical stack this project sits on) and GPL-3.0-only are defensible; the choice is the owner's,
+   and this document does not make it.

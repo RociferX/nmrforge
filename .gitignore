@@ -88,3 +88,6 @@ logs/
 # 打包/冻结中间产物
 _MEIPASS/
 *.manifest
+
+# PySide6 迁移验证环境(与 PyQt6 环境必须分开:一个进程只能一个 Qt 绑定)
+.venv-pyside/

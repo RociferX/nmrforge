@@ -9,8 +9,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import numpy as np
 import pytest
-from PyQt6.QtCore import QPointF, Qt
-from PyQt6.QtWidgets import QApplication
+from qtcompat.QtCore import QPointF, Qt
+from qtcompat.QtWidgets import QApplication
 
 from viewer.app import SpectrumWindow
 from viewer.spectrum import Spectrum, Spectrum1D, SpectrumAxis

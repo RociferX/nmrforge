@@ -8,7 +8,7 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PyQt6.QtWidgets import QApplication
+from qtcompat.QtWidgets import QApplication
 
 from core.project import ProjectManager
 from gui.pipeline_panel import PipelinePanel
@@ -277,7 +277,7 @@ def test_experiment_dashboard_single_batch_groups(
     qapp: QApplication,
 ) -> None:
     """实验类型页:单个导入与批量处理分组展示(视觉区分)。"""
-    from PyQt6.QtWidgets import QGroupBox
+    from qtcompat.QtWidgets import QGroupBox
 
     from gui.dashboards import ExperimentDashboard
 
@@ -293,7 +293,7 @@ def test_experiment_dashboard_segmented_between_single_and_batch(
     qapp: QApplication,
 ) -> None:
     """实验类型页:分段采集导入(合并 FID)入口位于单个导入与批量处理之间。"""
-    from PyQt6.QtWidgets import QGroupBox
+    from qtcompat.QtWidgets import QGroupBox
 
     from gui.dashboards import ExperimentDashboard
 

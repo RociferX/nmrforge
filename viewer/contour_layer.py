@@ -11,7 +11,7 @@ matplotlib 底层引擎)在数据原始分辨率逐级追踪真实等值线,正=
 等值线——光栅化是连续 alpha 填色,与 nmrDraw/POKY 的细线框完全不同;
 性能与光栅化同量级(512x1024 谱 10 级约 16-50ms、36 级约 52-116ms,
 QPainterPath 构建最坏约 170ms)。VM Linux 全量 pytest 下曾证实:小谱
-光栅化的内存分配模式会触发 PyQt6/sip 对 C++ 已析构子控件的 wrapper
+光栅化的内存分配模式会触发 Qt 绑定对 C++ 已析构子控件的 wrapper
 缓存错配段错误,故小谱保留 matplotlib 路径;统一走 contourpy(含小谱)
 会重新触发该段错误(崩溃点漂移,39737a5 同套件全绿),因此保留尺寸分流。
 """

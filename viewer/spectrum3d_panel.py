@@ -9,8 +9,8 @@ SpectrumViewer/ContourLayer 绘制(正黑负红、框选缩放/平移/滚轮均�
 
 from __future__ import annotations
 
-from PyQt6.QtCore import QSignalBlocker, Qt, pyqtSignal
-from PyQt6.QtWidgets import (
+from qtcompat.QtCore import QSignalBlocker, Qt
+from qtcompat.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
     QHBoxLayout,
@@ -21,6 +21,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from qtcompat import Signal
 from viewer.spectrum import Spectrum, Spectrum3D
 
 # (显示名, 被固定/切片的轴下标);查看平面为该轴之外的另两轴
@@ -40,7 +41,7 @@ def _nucleus_of(label: str) -> str:
 class Spectrum3DPanel(QWidget):
     """3D 谱控制:平面/切片滑块,变化后发 slice_changed(调用方重绘)。"""
 
-    slice_changed = pyqtSignal()
+    slice_changed = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)

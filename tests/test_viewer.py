@@ -9,8 +9,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import numpy as np
 import pytest
-from PyQt6.QtCore import QPointF
-from PyQt6.QtWidgets import QApplication, QGraphicsItem
+from qtcompat.QtCore import QPointF
+from qtcompat.QtWidgets import QApplication, QGraphicsItem
 
 from viewer.app import SpectrumWindow
 from viewer.contour_layer import ContourLayer
@@ -421,8 +421,8 @@ def test_spectrum_window_load_failure(
 
 def test_viewer_drag_hold_follow_crosshair(qapp: QApplication) -> None:
     """hold left-button drag: eventFilter MouseMove drives crosshair."""
-    from PyQt6.QtCore import QEvent, Qt
-    from PyQt6.QtGui import QMouseEvent
+    from qtcompat.QtCore import QEvent, Qt
+    from qtcompat.QtGui import QMouseEvent
 
     viewer = SpectrumViewer()
     viewer.add_spectrum(_synthetic_spectrum())
@@ -455,8 +455,8 @@ def test_viewer_drag_1d_updates_readout(qapp: QApplication) -> None:
     """in 1D data mode, hold-drag updates readout label live."""
     from types import SimpleNamespace
 
-    from PyQt6.QtCore import QEvent, Qt
-    from PyQt6.QtGui import QMouseEvent
+    from qtcompat.QtCore import QEvent, Qt
+    from qtcompat.QtGui import QMouseEvent
 
     viewer = SpectrumViewer()
     viewer.add_spectrum(_synthetic_spectrum())
@@ -482,7 +482,7 @@ def test_viewer_drag_1d_updates_readout(qapp: QApplication) -> None:
 
 def test_scene_mouse_event_kind_maps_graphics_types(qapp: QApplication) -> None:
     """0.2.148:pyqtgraph 场景着重事件类型 GraphicsSceneMouse* 必须认为按住/移动。"""
-    from PyQt6.QtCore import QEvent
+    from qtcompat.QtCore import QEvent
 
     from viewer.spectrum_viewer import SpectrumViewer
 

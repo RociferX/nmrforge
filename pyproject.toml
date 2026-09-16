@@ -22,7 +22,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Physics",
 ]
 dependencies = [
-    "PyQt6>=6.5",
+    "PySide6>=6.6",
     "pyqtgraph>=0.13",
     "numpy>=1.24,<2.5",
     "scipy>=1.10",
@@ -38,7 +38,7 @@ dependencies = [
 nmrforge-viewer = "viewer.app:main"
 
 # 可选依赖分组(PEP 621)。说明:
-# - 没有 `gui` 分组:PyQt6/pyqtgraph 是当前设计的运行期必需依赖,不是可选组件;
+# - 没有 `gui` 分组:PySide6/pyqtgraph 是当前设计的运行期必需依赖,不是可选组件;
 #   要装 GUI 就是装本包本身。
 # - `installer`/`wheel` 不是受支持的发行方式(发行物只有 Linux AppImage,
 #   见 docs/packaging.md PACK-015):`pip install -e .` 仅供开发与脚本化使用。
@@ -64,6 +64,8 @@ include = [
     "gui*",
     "viewer*",
     "nmrforge_api*",
+    "qtcompat*",
+    "ui_support*",
 ]
 
 [tool.setuptools.dynamic]

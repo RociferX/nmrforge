@@ -8,7 +8,7 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest  # noqa: E402
-from PyQt6.QtWidgets import QApplication  # noqa: E402
+from qtcompat.QtWidgets import QApplication
 
 from core.project import ProjectManager  # noqa: E402
 from gui.pipeline_panel import PipelinePanel  # noqa: E402
@@ -32,7 +32,7 @@ def test_rank1_button_visible_only_after_success(
     tmp_path: Path, qapp: QApplication
 ) -> None:
     """SMILE 步骤成功后才有「按 Rank1 重跑」(方案 B:优化不自动出谱)。"""
-    from PyQt6.QtWidgets import QWidget
+    from qtcompat.QtWidgets import QWidget
 
     host = QWidget()
     manager, _exp, _data = _manager(tmp_path)

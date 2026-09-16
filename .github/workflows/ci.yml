@@ -4,6 +4,10 @@ name: CI
 # the suite mocks the engine boundary (FakeBackend/MockBackend), so an NMRPipe
 # licence or download is never required to gate a pull request.
 #
+# The GUI stack is PySide6: `pip install -e ".[test]"` installs it (it is the
+# declared runtime dependency), so the matrix jobs below exercise the same
+# binding users get. PyQt6 is no longer a dependency of this project.
+#
 # Real-engine validation runs through the "external engine" job, which is only
 # enabled when a runner with NMRPipe is available (repository variable
 # NMRFORGE_SELF_HOSTED_CI=true). The laboratory workflow for that is
