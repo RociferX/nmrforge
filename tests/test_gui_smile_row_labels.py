@@ -6,10 +6,10 @@
 from __future__ import annotations
 
 import pytest
-from PyQt6.QtWidgets import QApplication, QWidget
+from qtcompat.QtWidgets import QApplication, QWidget
 
 from gui.pipeline_panel import PipelineStepRow
-from gui.theme import apply_dark_theme
+from ui_support.theme import apply_dark_theme
 
 
 @pytest.fixture(scope="module")

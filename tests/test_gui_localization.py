@@ -8,7 +8,7 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PyQt6.QtWidgets import QApplication
+from qtcompat.QtWidgets import QApplication
 
 from core.project import ProjectManager
 from gui.pipeline_panel import PipelinePanel

@@ -15,7 +15,7 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest  # noqa: E402
-from PyQt6.QtWidgets import QApplication  # noqa: E402
+from qtcompat.QtWidgets import QApplication
 
 from core.project import ProjectManager  # noqa: E402
 from gui.pipeline_panel import compute_data_step_statuses  # noqa: E402
@@ -31,8 +31,8 @@ def qapp() -> QApplication:
 
 @pytest.fixture
 def host(qapp: QApplication):
-    """控件宿主:测试结束整体销毁,避免顶层控件残留(PyQt6 收尾崩溃)。"""
-    from PyQt6.QtWidgets import QWidget
+    """控件宿主:测试结束整体销毁,避免顶层控件残留(Qt 收尾崩溃)。"""
+    from qtcompat.QtWidgets import QWidget
 
     widget = QWidget()
     yield widget

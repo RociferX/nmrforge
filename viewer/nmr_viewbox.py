@@ -1,7 +1,7 @@
 """NMR 查看器专用 ViewBox:框选缩放(RectMode)+ 中键拖动平移 + 滚轮缩放。
 
 pyqtgraph 的 RectMode 会把中键也当作框选缩放;且其平移分支
-``QPointF * numpy 数组`` 在 PyQt6 下会 TypeError,因此自行计算平移。
+``QPointF * numpy 数组`` 会 TypeError(PyQt6 实测),因此自行计算平移。
 0.2.133:右键不再响应任何行为;视图范围被限制在完整数据范围
 (reset_view 得到的最小矩形)之内——缩小不能把完整谱图缩出视野。
 """

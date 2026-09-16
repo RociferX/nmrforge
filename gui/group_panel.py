@@ -12,8 +12,8 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtWidgets import (
+from qtcompat.QtCore import Qt
+from qtcompat.QtWidgets import (
     QCheckBox,
     QComboBox,
     QGridLayout,
@@ -27,7 +27,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from gui.theme import (
+from qtcompat import Signal
+from ui_support.theme import (
     TEXT_MUTED,
     TEXT_PRIMARY,
     TEXT_SECONDARY,
@@ -45,10 +46,10 @@ STOP_STEP_OPTIONS: list[tuple[str, str]] = [
 class GroupBatchPanel(QWidget):
     """数据组批量处理面板(选中组节点时显示)。"""
 
-    log_message = pyqtSignal(str)
-    run_group_batch_requested = pyqtSignal(str, str, list, str, dict)
+    log_message = Signal(str)
+    run_group_batch_requested = Signal(str, str, list, str, dict)
     # (exp_id, group_id, steps, reference_data_id)
-    summary_requested = pyqtSignal(dict)  # 批量汇总(信息 + 逐数据结果)
+    summary_requested = Signal(dict)  # 批量汇总(信息 + 逐数据结果)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)

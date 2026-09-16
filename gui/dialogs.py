@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import QEvent, QObject, Qt, QTimer, pyqtSignal
-from PyQt6.QtWidgets import (
+from qtcompat.QtCore import QEvent, QObject, Qt, QTimer
+from qtcompat.QtWidgets import (
     QAbstractItemView,
     QApplication,
     QCheckBox,
@@ -40,7 +40,8 @@ from gui.notes import (
     experiment_type_options,
     note_fields,
 )
-from gui.theme import TEXT_MUTED, TEXT_PRIMARY
+from qtcompat import Signal
+from ui_support.theme import TEXT_MUTED, TEXT_PRIMARY
 
 
 def _center_on_screen(dialog: QDialog) -> None:
@@ -445,7 +446,7 @@ class ScriptEditorDialog(QDialog):
     执行并登记 WorkflowRun。
     """
 
-    run_requested = pyqtSignal(str)  # 脚本内容:点「运行」时发出
+    run_requested = Signal(str)  # 脚本内容:点「运行」时发出
 
     @staticmethod
     def _hint_text(script_name: str) -> str:
@@ -624,15 +625,15 @@ class RunHistoryDialog(QDialog):
         """打开当前选中运行的脚本/参数快照目录。"""
         if not self._current_snapshot:
             return
-        from PyQt6.QtCore import QUrl
-        from PyQt6.QtGui import QDesktopServices
+        from qtcompat.QtCore import QUrl
+        from qtcompat.QtGui import QDesktopServices
 
         QDesktopServices.openUrl(QUrl.fromLocalFile(self._current_snapshot))
 
 class BatchSummaryDialog(QDialog):
     """批量处理汇总:成功/失败清单;失败项双击定位到数据(阶段 C1)。"""
 
-    locate_requested = pyqtSignal(str)  # data_id
+    locate_requested = Signal(str)  # data_id
 
     def __init__(
         self,

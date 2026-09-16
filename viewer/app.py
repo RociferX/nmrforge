@@ -5,9 +5,9 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from PyQt6.QtCore import QEvent, QObject, QTimer
-from PyQt6.QtGui import QAction, QDragEnterEvent, QDropEvent
-from PyQt6.QtWidgets import (
+from qtcompat.QtCore import QEvent, QObject, QTimer
+from qtcompat.QtGui import QAction, QDragEnterEvent, QDropEvent
+from qtcompat.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFileDialog,
@@ -248,7 +248,7 @@ class SpectrumWindow(QMainWindow):
 
 def _install_dialog_centering(app) -> None:
     """独立查看器:QDialog 显示时自动居中到所在屏幕(与主应用一致,0.2.112)。"""
-    from PyQt6.QtWidgets import QApplication
+    from qtcompat.QtWidgets import QApplication
 
     def _center(dialog: QDialog) -> None:
         parent = dialog.parentWidget()
@@ -276,13 +276,13 @@ def _install_dialog_centering(app) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     """命令行入口:nmrforge-viewer [spectrum.ft2 ...]"""
-    from PyQt6.QtWidgets import QApplication
+    from qtcompat.QtWidgets import QApplication
 
     args = argv if argv is not None else sys.argv[1:]
     paths = [Path(a) for a in args if Path(a).suffix in (".ft2", ".ft3", ".ft1", ".fid")]
     app = QApplication(sys.argv[:1] + args)
     _install_dialog_centering(app)
-    from gui.theme import app_icon, apply_dark_theme
+    from ui_support.theme import app_icon, apply_dark_theme
 
     apply_dark_theme(app)
     _icon = app_icon()

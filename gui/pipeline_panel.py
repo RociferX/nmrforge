@@ -17,8 +17,8 @@ import hashlib
 import json
 from pathlib import Path
 
-from PyQt6.QtCore import QPoint, QRect, QSize, Qt, pyqtSignal
-from PyQt6.QtWidgets import (
+from qtcompat.QtCore import QPoint, QRect, QSize, Qt
+from qtcompat.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
@@ -48,7 +48,8 @@ from gui.pipeline_state import (
     script_fingerprint,
 )
 from gui.processing import ProcessingController
-from gui.theme import (
+from qtcompat import Signal
+from ui_support.theme import (
     STATUS_COLORS,
     TEXT_MUTED,
     TEXT_PRIMARY,
@@ -559,17 +560,17 @@ class PipelineStepRow(QWidget):
     OUTDATED / FAILED 原因灰字直显;FAILED 提供「查看日志」「重试」。
     """
 
-    run_requested = pyqtSignal(str)  # step_id
-    rerun_final_requested = pyqtSignal(str)  # step_id:重新运行已有终跑脚本(不重新优化)
-    manual_requested = pyqtSignal(str)  # step_id:打开脚本编辑器(已有脚本优先)
-    show_spectrum_requested = pyqtSignal(str)  # step_id:生成谱图完成后展示谱图
-    ext_range_requested = pyqtSignal(str)  # step_id:设置终跑直接维范围
-    ref_spectrum_requested = pyqtSignal(str)  # step_id:选择参考谱(峰挑选)
-    clear_ref_requested = pyqtSignal(str)  # step_id:清除参考谱约束
-    detail_toggled = pyqtSignal(str)  # step_id:点击行切换详情
-    view_log_requested = pyqtSignal(str)  # step_id:定位日志面板
-    rank1_run_requested = pyqtSignal(str)  # step_id:按 SMILE 扫描 Rank1 重跑终谱
-    localization_changed = pyqtSignal(str)  # 峰定位方法变化(peaks 步骤)
+    run_requested = Signal(str)  # step_id
+    rerun_final_requested = Signal(str)  # step_id:重新运行已有终跑脚本(不重新优化)
+    manual_requested = Signal(str)  # step_id:打开脚本编辑器(已有脚本优先)
+    show_spectrum_requested = Signal(str)  # step_id:生成谱图完成后展示谱图
+    ext_range_requested = Signal(str)  # step_id:设置终跑直接维范围
+    ref_spectrum_requested = Signal(str)  # step_id:选择参考谱(峰挑选)
+    clear_ref_requested = Signal(str)  # step_id:清除参考谱约束
+    detail_toggled = Signal(str)  # step_id:点击行切换详情
+    view_log_requested = Signal(str)  # step_id:定位日志面板
+    rank1_run_requested = Signal(str)  # step_id:按 SMILE 扫描 Rank1 重跑终谱
+    localization_changed = Signal(str)  # 峰定位方法变化(peaks 步骤)
 
     def __init__(
         self, step_id: str, label: str, description: str, parent: QWidget | None = None
@@ -964,17 +965,17 @@ class PipelineStepRow(QWidget):
 class PipelinePanel(QWidget):
     """Pipeline 功能区:上下文面包屑 + 下一步提示 + 步骤列表。"""
 
-    log_message = pyqtSignal(str)
-    log_scoped = pyqtSignal(str, str)  # (message, scope):运行日志按数据/组作用域(0.2.199-补29d)
-    memory_guard_requested = pyqtSignal(str)  # 0.2.112:SMILE 内存不足弹窗
-    run_finished = pyqtSignal()
-    run_started = pyqtSignal(str, str)  # (exp_id, data_id):某数据开始处理,左侧状态显示运行中
-    manual_open_requested = pyqtSignal(str)  # step_id:打开人工处理对话框
-    show_spectrum_requested = pyqtSignal(str)  # step_id:展示谱图
-    view_log_requested = pyqtSignal(str)  # step_id:定位日志面板
-    progress_updated = pyqtSignal(str)  # 批量进度文本(主线程更新标签)
-    batch_summary_requested = pyqtSignal(object)  # 批量汇总 dict
-    rank1_run_requested = pyqtSignal(str)  # SMILE Rank1 重跑
+    log_message = Signal(str)
+    log_scoped = Signal(str, str)  # (message, scope):运行日志按数据/组作用域(0.2.199-补29d)
+    memory_guard_requested = Signal(str)  # 0.2.112:SMILE 内存不足弹窗
+    run_finished = Signal()
+    run_started = Signal(str, str)  # (exp_id, data_id):某数据开始处理,左侧状态显示运行中
+    manual_open_requested = Signal(str)  # step_id:打开人工处理对话框
+    show_spectrum_requested = Signal(str)  # step_id:展示谱图
+    view_log_requested = Signal(str)  # step_id:定位日志面板
+    progress_updated = Signal(str)  # 批量进度文本(主线程更新标签)
+    batch_summary_requested = Signal(object)  # 批量汇总 dict
+    rank1_run_requested = Signal(str)  # SMILE Rank1 重跑
 
     def __init__(
         self,
@@ -1756,7 +1757,7 @@ class PipelinePanel(QWidget):
             f"已导入样品数据:下一步可运行「{STEP_LABEL.get(next_step, next_step)}」"
         )
         self.hint_bubble.setVisible(True)
-        from PyQt6.QtCore import QTimer
+        from qtcompat.QtCore import QTimer
 
         QTimer.singleShot(8000, self._clear_first_import_hint)
 

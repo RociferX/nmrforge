@@ -13,9 +13,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import QEvent, QPoint, Qt, pyqtSignal
-from PyQt6.QtGui import QKeyEvent
-from PyQt6.QtWidgets import (
+from qtcompat.QtCore import QEvent, QPoint, Qt
+from qtcompat.QtGui import QKeyEvent
+from qtcompat.QtWidgets import (
     QAbstractItemDelegate,
     QHBoxLayout,
     QHeaderView,
@@ -34,7 +34,8 @@ from core.project.artifacts import (
     is_projection_spectrum_file,
 )
 from gui.pipeline_state import ALL_STEP_RUN_REFS
-from gui.theme import TEXT_SECONDARY
+from qtcompat import Signal
+from ui_support.theme import TEXT_SECONDARY
 
 # 数据节点下真实目录(契约 v1.3 §9:raw/process/spectra/peaks/figures/report)
 DATA_SUBFOLDERS = ("raw", "process", "spectra", "peaks", "figures", "report")
@@ -85,7 +86,7 @@ def _terminal_argv(directory: str) -> list[str] | None:
 
 def open_in_terminal(path: str) -> bool:
     """在终端中打开目录(优先 csh),返回是否成功启动。"""
-    from PyQt6.QtCore import QProcess
+    from qtcompat.QtCore import QProcess
 
     argv = _terminal_argv(str(path))
     if not argv:
@@ -96,8 +97,8 @@ def open_in_terminal(path: str) -> bool:
 class _InlineRenameEditor(QWidget):
     """轻量重命名输入框:显示在右键菜单位置(菜单原地变输入框),回车提交/Esc 取消。"""
 
-    submitted = pyqtSignal(str)
-    cancelled = pyqtSignal()
+    submitted = Signal(str)
+    cancelled = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         # 内嵌子部件(0.2.163-补4):不再用 Popup 独立窗口,避免 Wayland
@@ -174,28 +175,28 @@ class _InlineRenameEditor(QWidget):
 class ProjectTreePanel(QWidget):
     """项目管理树;selection_changed 在上下文(实验)变化时发出。"""
 
-    selection_changed = pyqtSignal(str, str, str, str)  # (kind, exp_id, data_id, group_id)
-    open_requested = pyqtSignal(str)  # 双击实验:请求打开/聚焦该实验
-    open_project_requested = pyqtSignal(str)  # 双击未打开项目:请求打开
-    data_rename_requested = pyqtSignal(str, str, str)  # (exp_id, data_id, new_name):重命名数据
-    rename_project_requested = pyqtSignal(str)  # (new_name):重命名当前项目
-    project_create_submitted = pyqtSignal(str)  # 内联命名提交:项目名称
-    experiment_create_submitted = pyqtSignal(str)  # 内联命名提交:实验标题
-    open_path_requested = pyqtSignal(str)  # 打开所在目录(子文件夹右键)
-    open_terminal_requested = pyqtSignal(str)  # 在终端中打开(子文件夹右键)
-    open_spectrum_requested = pyqtSignal(str)  # 双击谱图文件:右侧直接显示
-    delete_project_requested = pyqtSignal()  # Project 右键:删除项目
-    create_experiment_requested = pyqtSignal()  # 空白处右键:新建空白实验
-    import_data_requested = pyqtSignal(str)  # 实验 右键:导入样品数据(exp_id)
-    data_action_requested = pyqtSignal(str, str)  # (action, data_id):生成FID/谱/删除
-    group_add_data_requested = pyqtSignal(str, str, list)  # (exp_id, group_id, data_ids)
-    group_remove_data_requested = pyqtSignal(str, str, str)  # (exp_id, group_id, data_id)
-    group_rename_requested = pyqtSignal(str, str, str)  # (exp_id, group_id, new_title)
-    group_delete_requested = pyqtSignal(str, str)  # (exp_id, group_id)
-    group_delete_with_members_requested = pyqtSignal(str, str)
+    selection_changed = Signal(str, str, str, str)  # (kind, exp_id, data_id, group_id)
+    open_requested = Signal(str)  # 双击实验:请求打开/聚焦该实验
+    open_project_requested = Signal(str)  # 双击未打开项目:请求打开
+    data_rename_requested = Signal(str, str, str)  # (exp_id, data_id, new_name):重命名数据
+    rename_project_requested = Signal(str)  # (new_name):重命名当前项目
+    project_create_submitted = Signal(str)  # 内联命名提交:项目名称
+    experiment_create_submitted = Signal(str)  # 内联命名提交:实验标题
+    open_path_requested = Signal(str)  # 打开所在目录(子文件夹右键)
+    open_terminal_requested = Signal(str)  # 在终端中打开(子文件夹右键)
+    open_spectrum_requested = Signal(str)  # 双击谱图文件:右侧直接显示
+    delete_project_requested = Signal()  # Project 右键:删除项目
+    create_experiment_requested = Signal()  # 空白处右键:新建空白实验
+    import_data_requested = Signal(str)  # 实验 右键:导入样品数据(exp_id)
+    data_action_requested = Signal(str, str)  # (action, data_id):生成FID/谱/删除
+    group_add_data_requested = Signal(str, str, list)  # (exp_id, group_id, data_ids)
+    group_remove_data_requested = Signal(str, str, str)  # (exp_id, group_id, data_id)
+    group_rename_requested = Signal(str, str, str)  # (exp_id, group_id, new_title)
+    group_delete_requested = Signal(str, str)  # (exp_id, group_id)
+    group_delete_with_members_requested = Signal(str, str)
     # (exp_id, group_id):删除组连同组内数据
-    rename_requested = pyqtSignal(str, str)  # (exp_id, new_title):重命名实验
-    delete_requested = pyqtSignal(str)  # 删除实验(exp_id)
+    rename_requested = Signal(str, str)  # (exp_id, new_title):重命名实验
+    delete_requested = Signal(str)  # 删除实验(exp_id)
 
     def __init__(
         self,
@@ -766,7 +767,7 @@ class ProjectTreePanel(QWidget):
     @staticmethod
     def _icon(kind: str):
         """简单 Unicode 图标(避免依赖外部资源文件)。"""
-        from PyQt6.QtGui import QColor, QFont, QIcon, QPainter, QPixmap
+        from qtcompat.QtGui import QColor, QFont, QIcon, QPainter, QPixmap
 
         glyph = {
             "workspace": "W",

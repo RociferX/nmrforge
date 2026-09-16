@@ -8,7 +8,7 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PyQt6.QtWidgets import QApplication
+from qtcompat.QtWidgets import QApplication
 
 from core.project import ProjectManager
 from gui.dialogs import RunHistoryDialog
@@ -171,7 +171,7 @@ def test_run_history_dialog_opens_snapshot(
     dialog.table.selectRow(0)
     opened: list[str] = []
     monkeypatch.setattr(
-        "PyQt6.QtGui.QDesktopServices.openUrl",
+        "qtcompat.QtGui.QDesktopServices.openUrl",
         staticmethod(lambda url: opened.append(url.toString())),
     )
     dialog._open_snapshot()

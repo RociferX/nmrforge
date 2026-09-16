@@ -17,9 +17,9 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QAction
-from PyQt6.QtWidgets import (
+from qtcompat.QtCore import Qt, QTimer
+from qtcompat.QtGui import QAction
+from qtcompat.QtWidgets import (
     QApplication,
     QFileDialog,
     QLabel,
@@ -48,6 +48,7 @@ from gui.log_panel import LogPanel
 from gui.pipeline_panel import STEP_LABEL
 from gui.processing import ProcessingController
 from gui.project_tree import ProjectTreePanel
+from qtcompat import Signal
 
 # 0.2.199-补29ht(用户):重模块改为延迟导入——谱图面板(pyqtgraph/viewer)与
 # 导入工作流不在 `import gui.main_window` 时载入,窗口先出现,随后由
@@ -74,19 +75,19 @@ def _pick_script_key(scripts: dict[str, str], data_id: str) -> str:
 class MainWindow(QMainWindow):
     """NMRForge 主窗口;未打开项目时显示欢迎页。"""
 
-    import_failed = pyqtSignal(str)  # 导入失败信息(后台线程 → 主线程)
-    import_finished = pyqtSignal(object)  # ImportResult(后台线程 → 主线程)
-    batch_import_finished = pyqtSignal(str, str, int, object)  # (exp_id, batch_id, count, results)
+    import_failed = Signal(str)  # 导入失败信息(后台线程 → 主线程)
+    import_finished = Signal(object)  # ImportResult(后台线程 → 主线程)
+    batch_import_finished = Signal(str, str, int, object)  # (exp_id, batch_id, count, results)
     # 0.2.199-补29hd:批量导入逐条进度(后台线程 → 主线程逐条显示,不等批量完成)
-    batch_import_progress = pyqtSignal(str, str, str, bool, str)  # 逐条进度
+    batch_import_progress = Signal(str, str, str, bool, str)  # 逐条进度
     # 0.2.199-补29hd:数据组批量完成后逐数据状态(成功/失败/跳过)写回左侧树
-    group_data_done = pyqtSignal(str, str, str)  # (exp_id, data_id, status)
-    manual_run_log = pyqtSignal(str)  # 人工脚本运行日志(后台线程 → 主线程)
-    manual_run_done = pyqtSignal()  # 人工脚本运行完成(主线程刷新 UI)
-    batch_run_done = pyqtSignal()  # 数据组批量处理完成(后台线程 → 主线程清运行标记)
-    log_append_requested = pyqtSignal(str, object)  # 工作线程日志经队列信号(0.2.199-补29c)
+    group_data_done = Signal(str, str, str)  # (exp_id, data_id, status)
+    manual_run_log = Signal(str)  # 人工脚本运行日志(后台线程 → 主线程)
+    manual_run_done = Signal()  # 人工脚本运行完成(主线程刷新 UI)
+    batch_run_done = Signal()  # 数据组批量处理完成(后台线程 → 主线程清运行标记)
+    log_append_requested = Signal(str, object)  # 工作线程日志经队列信号(0.2.199-补29c)
     # 0.2.199-补29ht:后台预热完成 → 主线程补建谱图面板
-    _spectrum_panel_ready = pyqtSignal()
+    _spectrum_panel_ready = Signal()
 
     def __init__(
         self,
@@ -135,7 +136,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("NMRForge")
         # 0.2.199-补29eq:应用图标(窗口/任务栏)
         try:
-            from gui.theme import app_icon
+            from ui_support.theme import app_icon
 
             _icon = app_icon()
             if _icon is not None:
@@ -159,8 +160,8 @@ class MainWindow(QMainWindow):
         屏幕比 1920 窄时窗口收窄到可用宽,列由 QSplitter 自动分配
         (用户仍可自由拖拽每列长宽)。
         """
-        from PyQt6.QtCore import QRect
-        from PyQt6.QtGui import QGuiApplication
+        from qtcompat.QtCore import QRect
+        from qtcompat.QtGui import QGuiApplication
 
         cols = [420, 600, 300, 600]
         screen = self.screen() or QGuiApplication.primaryScreen()
@@ -1164,7 +1165,7 @@ class MainWindow(QMainWindow):
         """Other menu: pick fid file/folder, run diagnostics to global log."""
         from pathlib import Path as _P
 
-        from PyQt6.QtWidgets import QFileDialog
+        from qtcompat.QtWidgets import QFileDialog
 
         default_dir = str(self.workspace.root)
         file_path, _ = QFileDialog.getOpenFileName(
@@ -1184,7 +1185,7 @@ class MainWindow(QMainWindow):
         """Other menu: pick spectrum file, run quality evaluation."""
         from pathlib import Path as _P
 
-        from PyQt6.QtWidgets import QFileDialog
+        from qtcompat.QtWidgets import QFileDialog
 
         file_path, _ = QFileDialog.getOpenFileName(
             self, "选择谱图文件", str(self.workspace.root),
@@ -1911,8 +1912,8 @@ class MainWindow(QMainWindow):
 
     def _open_path(self, path: str) -> None:
         """用系统文件管理器打开目录(双击/右键 data/子文件夹),中间保持 Pipeline。"""
-        from PyQt6.QtCore import QUrl
-        from PyQt6.QtGui import QDesktopServices
+        from qtcompat.QtCore import QUrl
+        from qtcompat.QtGui import QDesktopServices
 
         target = Path(path)
         if not target.is_dir():
@@ -2112,7 +2113,7 @@ class MainWindow(QMainWindow):
 
         app = QApplication(sys.argv)
         from gui.dialogs import install_dialog_centering
-        from gui.theme import app_icon, apply_dark_theme
+        from ui_support.theme import app_icon, apply_dark_theme
 
         install_dialog_centering(app)
         apply_dark_theme(app)
@@ -2132,8 +2133,9 @@ class MainWindow(QMainWindow):
         window.show()
         QTimer.singleShot(0, window._finish_startup)
         code = app.exec()
-        # 0.2.199:PyQt6/SIP 在解释器收尾时遍历已悬空的 sip 包装指针
-        # (cleanup_on_exit -> sip_api_get_address(0x1e80))导致 SIGSEGV,
+        # 0.2.199:Qt 绑定在解释器收尾时会遍历已悬空的包装指针
+        # (PyQt6 下实测为 sip 的 cleanup_on_exit -> sip_api_get_address(0x1e80))
+        # 导致 SIGSEGV,
         # 现象为关闭主窗口退出时核心转储。在事件循环返回后、Python 进入
         # Py_FinalizeEx 之前,显式销毁全部顶层窗口并处理 deleteLater,让
         # Qt 对象树在 sip 仍追踪时按序析构,绕开进程结束阶段对无有效 C++

@@ -15,8 +15,8 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest  # noqa: E402
-from PyQt6.QtCore import Qt  # noqa: E402
-from PyQt6.QtWidgets import QApplication, QTreeWidgetItem  # noqa: E402
+from qtcompat.QtCore import Qt
+from qtcompat.QtWidgets import QApplication, QTreeWidgetItem
 
 from core.project import ProjectManager  # noqa: E402
 from core.project.artifacts import is_projection_spectrum_file  # noqa: E402
@@ -39,8 +39,8 @@ def qapp() -> QApplication:
 
 @pytest.fixture
 def host(qapp: QApplication):
-    """控件宿主:测试结束整体销毁,避免顶层控件残留(PyQt6 收尾崩溃)。"""
-    from PyQt6.QtWidgets import QWidget
+    """控件宿主:测试结束整体销毁,避免顶层控件残留(Qt 收尾崩溃)。"""
+    from qtcompat.QtWidgets import QWidget
 
     widget = QWidget()
     yield widget

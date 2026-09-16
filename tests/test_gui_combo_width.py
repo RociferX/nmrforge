@@ -10,17 +10,11 @@
 from __future__ import annotations
 
 import pytest
-from PyQt6.QtWidgets import (
-    QApplication,
-    QComboBox,
-    QStyle,
-    QStyleOptionComboBox,
-    QWidget,
-)
+from qtcompat.QtWidgets import QApplication, QComboBox, QStyle, QStyleOptionComboBox, QWidget
 
 from gui.group_panel import GroupBatchPanel
 from gui.pipeline_panel import PipelineStepRow
-from gui.theme import apply_dark_theme
+from ui_support.theme import apply_dark_theme
 
 MIN_SLACK_PX = 8
 
@@ -92,7 +86,7 @@ def test_group_panel_combo_text_not_elided(host: QWidget) -> None:
 
 def test_fit_combo_width_sets_minimum(qapp: QApplication, host: QWidget) -> None:
     """fit_combo_width 对空/单项/长项都给出 ≥ 文字宽的显式最小宽度。"""
-    from gui.theme import fit_combo_width
+    from ui_support.theme import fit_combo_width
 
     combo = QComboBox(host)
     fit_combo_width(combo)

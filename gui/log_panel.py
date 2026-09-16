@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtWidgets import (
+from qtcompat.QtCore import Qt
+from qtcompat.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -15,7 +15,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from gui.theme import TEXT_MUTED
+from qtcompat import Signal
+from ui_support.theme import TEXT_MUTED
 
 
 def _data_is_trashed(manager: object, exp_id: str, data_id: str) -> bool:
@@ -37,7 +38,7 @@ class LogPanel(QWidget):
     set_scope 切换当前显示与追加目标。
     """
 
-    stop_requested = pyqtSignal()
+    stop_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)

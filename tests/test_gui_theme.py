@@ -3,7 +3,8 @@
 背景:软件强制暗色主题(窗口 #1e1e1e),但历史上不少 QSS 仍写浅色主题的
 深色文字(#2c3e50 ≈1.5:1、#333 ≈1.6:1、#444 ≈2.1:1、#555 ≈2.4:1、
 #666 ≈2.9:1),实际等于看不见。本测试把「文字色必须可读」固化成规则,
-防止回退写法再次混入;语义色集中在 gui/theme.py。
+防止回退写法再次混入;语义色集中在 ui_support/colors.py,
+样式表在 ui_support/theme.py。
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from gui.theme import (  # noqa: E402
+from ui_support.colors import (  # noqa: E402
     TEXT_MUTED,
     TEXT_PRIMARY,
     TEXT_SECONDARY,
@@ -53,11 +54,16 @@ def _contrast(a: str, b: str) -> float:
     return (hi + 0.05) / (lo + 0.05)
 
 
+#: 主题定义本身含 intentionally 低对比的 disabled 色,不做对比度判定;
+#: 界面文件(含 QSS)都在扫描范围内——样式表搬走不等于不再检查。
+THEME_DEFINITION_FILES = {"ui_support/theme.py"}
+
+
 def _iter_text_colors():
-    for pkg in ("gui", "viewer"):
+    for pkg in ("gui", "viewer", "ui_support"):
         for path in sorted((ROOT / pkg).rglob("*.py")):
             rel = path.relative_to(ROOT).as_posix()
-            if rel == "gui/theme.py":  # 主题定义本身(含 disabled 等豁免色)
+            if rel in THEME_DEFINITION_FILES:
                 continue
             for lineno, line in enumerate(
                 path.read_text(encoding="utf-8").splitlines(), 1

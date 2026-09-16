@@ -1,1 +1,4 @@
-"""GUI 层（PyQt6）：主窗口与面板。骨架阶段不导入 PyQt6。"""
+"""GUI 层:主窗口与面板。
+
+Qt 绑定不直接依赖:所有 Qt 名字经 ``qtcompat`` 取得(见 docs/pyside6-migration/)。
+"""

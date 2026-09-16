@@ -7,9 +7,9 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import QEvent, Qt, pyqtSignal
-from PyQt6.QtGui import QKeyEvent
-from PyQt6.QtWidgets import (
+from qtcompat.QtCore import QEvent, Qt
+from qtcompat.QtGui import QKeyEvent
+from qtcompat.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -20,14 +20,15 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from gui.theme import TEXT_PRIMARY, TEXT_SECONDARY
+from qtcompat import Signal
+from ui_support.theme import TEXT_PRIMARY, TEXT_SECONDARY
 
 
 class WelcomePage(QWidget):
     """首次启动/未打开项目时的欢迎页。"""
 
-    new_project_requested = pyqtSignal(str)  # 项目名称
-    open_project_requested = pyqtSignal(str)  # 项目路径
+    new_project_requested = Signal(str)  # 项目名称
+    open_project_requested = Signal(str)  # 项目路径
 
     def __init__(
         self, parent: QWidget | None = None, workspace=None

@@ -10,7 +10,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import numpy as np
 import pytest
-from PyQt6.QtWidgets import QApplication
+from qtcompat.QtWidgets import QApplication
 
 from core.project import ProjectManager
 from gui.spectrum_panel import SpectrumPanel
@@ -907,7 +907,7 @@ def test_load_from_ft3_prefers_header_order_over_metadata(
 
 def test_control_panel_spans_full_row(qapp: QApplication) -> None:
     """0.2.199-补29di:add_control_panel 跨满控制区整行,不挤单列留空/撑宽。"""
-    from PyQt6.QtWidgets import QWidget
+    from qtcompat.QtWidgets import QWidget
 
     from viewer.spectrum_viewer import SpectrumViewer
 

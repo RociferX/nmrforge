@@ -10,8 +10,8 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtWidgets import (
+from qtcompat.QtCore import Qt
+from qtcompat.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -26,26 +26,27 @@ from gui.dashboards import ExperimentDashboard, ProjectDashboard
 from gui.group_panel import GroupBatchPanel
 from gui.pipeline_panel import PipelinePanel
 from gui.welcome_page import WelcomePage
+from qtcompat import Signal
 
 
 class CenterPanel(QWidget):
     """中间面板容器:按选中层级切换页面。"""
 
-    log_message = pyqtSignal(str)
-    log_scoped = pyqtSignal(str, str)  # (message, scope):转发 pipeline 作用域日志(0.2.199-补29d)
-    memory_guard_requested = pyqtSignal(str)  # 0.2.112:转发 SMILE 内存不足
-    manual_open_requested = pyqtSignal(str)
-    import_data_requested = pyqtSignal(str)  # exp_id(兼容:打开导入表单)
-    import_options_requested = pyqtSignal(str, str, str, bool)  # (exp_id, name, source, copy)
-    data_rename_requested = pyqtSignal(str, str, str)  # (exp_id, data_id, new_name)
-    batch_import_requested = pyqtSignal(str, list, bool)  # (exp_id, folders, group)
-    segmented_import_requested = pyqtSignal(str, str)  # (exp_id, 分段采集容器目录)
-    create_experiment_requested = pyqtSignal(str)  # 实验类型标题
-    edit_notes_requested = pyqtSignal(str, str, str)  # (kind, exp_id, data_id)
-    group_run_requested = pyqtSignal(str, str, list, str, dict)
+    log_message = Signal(str)
+    log_scoped = Signal(str, str)  # (message, scope):转发 pipeline 作用域日志(0.2.199-补29d)
+    memory_guard_requested = Signal(str)  # 0.2.112:转发 SMILE 内存不足
+    manual_open_requested = Signal(str)
+    import_data_requested = Signal(str)  # exp_id(兼容:打开导入表单)
+    import_options_requested = Signal(str, str, str, bool)  # (exp_id, name, source, copy)
+    data_rename_requested = Signal(str, str, str)  # (exp_id, data_id, new_name)
+    batch_import_requested = Signal(str, list, bool)  # (exp_id, folders, group)
+    segmented_import_requested = Signal(str, str)  # (exp_id, 分段采集容器目录)
+    create_experiment_requested = Signal(str)  # 实验类型标题
+    edit_notes_requested = Signal(str, str, str)  # (kind, exp_id, data_id)
+    group_run_requested = Signal(str, str, list, str, dict)
     # (exp_id, group_id, steps, reference_data_id)
-    new_project_requested = pyqtSignal(str)  # 项目名称
-    open_project_requested = pyqtSignal(str)  # 项目路径
+    new_project_requested = Signal(str)  # 项目名称
+    open_project_requested = Signal(str)  # 项目路径
 
     def __init__(
         self,

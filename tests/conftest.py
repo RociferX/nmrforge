@@ -65,7 +65,7 @@ def _close_gui_windows_at_session_end() -> None:
     (0xC0000005);显式收尾关闭可消除该抖动。
     """
     yield
-    from PyQt6.QtWidgets import QApplication
+    from qtcompat.QtWidgets import QApplication
 
     app = QApplication.instance()
     if app is None:

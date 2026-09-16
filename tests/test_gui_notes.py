@@ -8,7 +8,7 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PyQt6.QtWidgets import QApplication
+from qtcompat.QtWidgets import QApplication
 
 from core.project import ProjectManager
 from gui.notes import (
@@ -237,7 +237,7 @@ def test_edit_notes_saves(
         "core.workspace.WorkspaceManager", lambda *a, **k: _Ws(workspace)
     )
 
-    from PyQt6.QtWidgets import QDialog
+    from qtcompat.QtWidgets import QDialog
 
     class _FakeNotesDialog:
         DialogCode = QDialog.DialogCode
@@ -263,7 +263,7 @@ def test_edit_notes_only_applies_changed_data_type(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """META-002:原样保存不伪装成用户选择,真正改值时仍权威写回。"""
-    from PyQt6.QtWidgets import QDialog
+    from qtcompat.QtWidgets import QDialog
 
     from gui.main_window import MainWindow
 

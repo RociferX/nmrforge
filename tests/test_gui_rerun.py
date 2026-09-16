@@ -8,7 +8,7 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PyQt6.QtWidgets import QApplication
+from qtcompat.QtWidgets import QApplication
 
 from core.project import ProjectManager
 from gui.log_panel import LogPanel
@@ -144,7 +144,7 @@ def test_run_worker_thread_refreshes_via_queued_signal(
     """
     import time
 
-    from PyQt6.QtCore import QEventLoop, QTimer
+    from qtcompat.QtCore import QEventLoop, QTimer
 
     manager, exp_id, data_id = _manager_with_artifacts(tmp_path)
     controller = _FakeController()

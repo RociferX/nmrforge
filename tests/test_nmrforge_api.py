@@ -1390,8 +1390,9 @@ def test_api_does_not_import_qt() -> None:
     """对外接口必须能在无 Qt 环境/集群上导入。"""
     code = (
         "import sys, nmrforge_api; "
-        "assert not any(m.startswith('PyQt6') for m in sys.modules), "
-        "sorted(m for m in sys.modules if m.startswith('PyQt6')); "
+        "bad = sorted(m for m in sys.modules "
+        "if m.startswith(('PyQt', 'PySide', 'shiboken'))); "
+        "assert not bad, bad; "
         "assert not any(m.startswith('gui') for m in sys.modules), 'gui imported'"
     )
     proc = subprocess.run(
