@@ -64,6 +64,8 @@ include = [
     "gui*",
     "viewer*",
     "nmrforge_api*",
+    "qtcompat*",
+    "ui_support*",
 ]
 
 [tool.setuptools.dynamic]
