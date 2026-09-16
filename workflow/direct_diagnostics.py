@@ -26,6 +26,7 @@ from typing import Any
 
 import numpy as np
 
+from core.audit.qc_audit import QcAction, QcAuditLog
 from core.data.internal_data_model import Experiment, SamplingMode
 
 # 阈值(初版,经验值;0.2.199-补29cw 校准)
@@ -36,6 +37,8 @@ BADPOINT_MAD = 12.0                # 孤立尖峰 = 幅度超出邻域中值 12�
 FIRST_POINT_RATIO = 1.6            # 首点幅/次点幅超 1.6× 提示群延迟重建
 BROAD_PEAK_FRACTION = 0.08         # 最强峰 FWHM 超过谱宽 8% 视为宽带包(疑似溶剂)
 DRIFT_FWHM_MULT = 1.0              # 首尾采样周期峰位漂移超过 1 个 FWHM 提示重采
+#: 单条 QC 审计记录最多列出多少个改动点(超出只记数量,避免病态数据写出巨大 JSONL)
+AUDIT_DETAIL_LIMIT = 32
 ENERGY_TOP20_THRESHOLD = 0.92      # 前 20% 迹能量占比超 92% 提示分布不均
 
 # nmrPipe fid 头长度因 2D(2048B)/3D 流(512B)等而异,解析时动态判定
@@ -283,6 +286,48 @@ def run_fid_diagnostics_paths(
     return _diagnose_paths(files, _work, repair=repair, is_uniform=False)
 
 
+def _record_bad_point_repair(
+    audit: QcAuditLog,
+    *,
+    file_name: str,
+    row: int,
+    changed: list[tuple[int, complex, complex]],
+    backup_dir: str = "",
+) -> None:
+    """写入一条「坏点已替换」的结构化审计记录(Phase 10)。
+
+    抽成独立函数以便直接单测:记录内容必须包含检测规则、动作、改动前/后的数值,
+    以及行号与备份位置;超出 ``AUDIT_DETAIL_LIMIT`` 时只记数量并标记 truncated。
+    """
+    shown = changed[:AUDIT_DETAIL_LIMIT]
+    audit.record(
+        QcAction(
+            issue_detected="直接维尖峰坏点",
+            location=f"{file_name} row={row}",
+            detection_rule="_find_bad_points(单行幅度分布):与相邻点比较的尖峰判定",
+            action_taken="neighbour_interpolation",
+            before_state={
+                "columns": [col for col, _b, _a in shown],
+                "real": [round(b.real, 6) for _c, b, _a in shown],
+                "imag": [round(b.imag, 6) for _c, b, _a in shown],
+                "count": len(changed),
+            },
+            after_state={
+                "columns": [col for col, _b, _a in shown],
+                "real": [round(a.real, 6) for _c, _b, a in shown],
+                "imag": [round(a.imag, 6) for _c, _b, a in shown],
+                "count": len(changed),
+            },
+            extra={
+                "file": file_name,
+                "row": row,
+                "truncated": len(changed) > len(shown),
+                "backup_dir": backup_dir,
+            },
+        )
+    )
+
+
 def _diagnose_paths(
     paths: list[Path],
     work: Path,
@@ -325,6 +370,7 @@ def _diagnose_paths(
     repaired = 0
     backup = work / "fid_diag_bak"
     made_backup = False
+    audit = QcAuditLog(work)
     if repair:
         repaired = 0
         for path, fdsize, specnum, header in parsed:
@@ -348,12 +394,24 @@ def _diagnose_paths(
                         except OSError:
                             pass
                     made_backup = True
+                changed: list[tuple[int, complex, complex]] = []
                 for col in np.where(mask)[0]:
                     if 0 < col < fdsize - 1:
+                        before_value = complex(data[row, col])
                         val = 0.5 * (data[row, col - 1] + data[row, col + 1])
                         data[row, col] = val
                         _patch_point(raw, fdsize, header, row, col, val)
+                        changed.append((int(col), before_value, complex(val)))
                         repaired += 1
+                if changed:
+                    # Phase 10:自动改动中间数据的每一步都要有结构化记录(不只日志行)
+                    _record_bad_point_repair(
+                        audit,
+                        file_name=path.name,
+                        row=int(row),
+                        changed=changed,
+                        backup_dir=str(backup) if made_backup else "",
+                    )
             if made_backup:
                 path.write_bytes(bytes(raw))
         res.repaired_badpoints = repaired
@@ -362,6 +420,9 @@ def _diagnose_paths(
             f"检测到 {repaired} 处尖峰坏点,已自动替换"
             "(原始 fid 备份于 fid_diag_bak/,重新转换 fid.com 亦可恢复)"
         )
+        audit_summary = audit.summary()
+        if audit_summary:
+            reports.append(audit_summary)
         nonzero = int(np.sum(np.sum(np.abs(traces) ** 2, axis=-1) > 0))
         if repaired / max(nonzero * n, 1) > 0.005:
             reports.append("坏点占比偏高,建议同时检查采集端 ADC/增益稳定性")

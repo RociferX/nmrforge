@@ -58,6 +58,7 @@ from backend.script_generator import (
     zero_fill_plan,
     zero_fill_report,
 )
+from core.audit.qc_audit import QcAction, QcAuditLog
 from core.data.internal_data_model import Experiment, SamplingMode
 from core.data.nus_reader import read_nuslist
 from core.optimization.phase_search import (
@@ -231,8 +232,53 @@ def _nus_grid_from_points(
     return None
 
 
+def _record_source_clean(
+    audit: QcAuditLog,
+    experiment: Experiment,
+    raw_dirs: list[Path],
+    valid_count: int,
+    bad_points: list[tuple[int, ...]],
+    removed: bool,
+) -> None:
+    """记录「源头删除坏点」这一自动改数据动作(Phase 10 结构化审计)。
+
+    只在采样表里确实存在坏点时写记录;``removed=False``(ser 缺失/不能按行整除)
+    表示**没有**改动原始数据,调用方会回退到 FID 清零,那条路径由
+    ``_zero_bad_point_fid`` 各自记录。
+    """
+    if not bad_points:
+        return
+    detail = [list(point) for point in bad_points[:8]]
+    audit.record(
+        QcAction(
+            issue_detected="NUS 采样表中的坏点(越界/重复坐标)",
+            location="、".join(str(Path(d) / "ser") + " + nuslist" for d in raw_dirs),
+            detection_rule="_validate_nus_points(nuslist 对 experiment 采样网格)",
+            action_taken=(
+                "removed_from_source_ser_and_nuslist(删除前 ser/nuslist 备份为 .bak,仅首次)"
+                if removed
+                else "reported_only(源头删除不可行,未改动原始数据)"
+            ),
+            before_state={
+                "sampling_points": int(valid_count) + len(bad_points),
+                "bad_points": len(bad_points),
+            },
+            after_state={"sampling_points": int(valid_count)},
+            extra={
+                "dataset_id": experiment.dataset_id,
+                "bad_points_sample": detail,
+                "bad_points_truncated": len(bad_points) > len(detail),
+                "source_removed": bool(removed),
+            },
+        )
+    )
+
+
 def _apply_nus_grid_after_clean(
-    experiment: Experiment, points: list[tuple[int, ...]]
+    experiment: Experiment,
+    points: list[tuple[int, ...]],
+    *,
+    audit: QcAuditLog | None = None,
 ) -> list[str]:
     """坏点移除后按实际采样范围更新 NusTD(0.2.197)。
 
@@ -253,6 +299,18 @@ def _apply_nus_grid_after_clean(
         if old and 0 < new < old:
             block["NusTD"] = new
             logs.append(f"采样坏点移除后网格调整: acqu2s NusTD {old}→{new}")
+            if audit is not None:
+                audit.record(
+                    QcAction(
+                        issue_detected="采样坏点移除后,声明的 NusTD 与实际采样范围不一致",
+                        location="acqu2s.NusTD",
+                        detection_rule="_nus_grid_from_points(清理后 nuslist) = 每维 max+1",
+                        action_taken="nus_td_shrunk",
+                        before_state={"NusTD": old},
+                        after_state={"NusTD": new},
+                        extra={"axis": "acqu2s", "dataset_id": experiment.dataset_id},
+                    )
+                )
     elif len(grid) == 2:
         for key, g in (("acqu2s", grid[0]), ("acqu3s", grid[1])):
             block = params.setdefault(key, {})
@@ -261,6 +319,22 @@ def _apply_nus_grid_after_clean(
             if old and 0 < new < old:
                 block["NusTD"] = new
                 logs.append(f"采样坏点移除后网格调整: {key} NusTD {old}→{new}")
+                if audit is not None:
+                    audit.record(
+                        QcAction(
+                            issue_detected=(
+                                "采样坏点移除后,声明的 NusTD 与实际采样范围不一致"
+                            ),
+                            location=f"{key}.NusTD",
+                            detection_rule=(
+                                "_nus_grid_from_points(清理后 nuslist) = 2 × 每维 max+1"
+                            ),
+                            action_taken="nus_td_shrunk",
+                            before_state={"NusTD": old},
+                            after_state={"NusTD": new},
+                            extra={"axis": key, "dataset_id": experiment.dataset_id},
+                        )
+                    )
     return logs
 
 
@@ -734,8 +808,12 @@ class NMRPipeBackend:
             segment_kind, kind_logs = _segment_kind_info(experiment.segments)
             logs += kind_logs
             # 0.2.124:坏点在源头 ser/nuslist 删除并备份(用户要求)
+            audit = QcAuditLog(work)
             _count, _bad, source_removed = self._clean_source_nus(
                 experiment, [Path(s) for s in experiment.segments], logs
+            )
+            _record_source_clean(
+                audit, experiment, list(experiment.segments), _count, _bad, source_removed
             )
             if _bad and source_removed:
                 # 0.2.197/0.2.199:分段也按清理后合并 nuslist 实际范围调整
@@ -745,7 +823,9 @@ class NMRPipeBackend:
                     merged_points += [
                         tuple(p) for p in read_nuslist(Path(seg) / "nuslist")
                     ]
-                logs += _apply_nus_grid_after_clean(experiment, merged_points)
+                logs += _apply_nus_grid_after_clean(
+                    experiment, merged_points, audit=audit
+                )
             converted, convert_logs = self._convert_segments(
                 runtime, experiment, work, [], fid_com_overrides=fid_com_overrides
             )
@@ -766,7 +846,11 @@ class NMRPipeBackend:
                 if bad_points:
                     # 源头删除不可行时回退到生成 FID 清零
                     self._zero_bad_point_fid(
-                        work, bad_points, logs, dataset_id=experiment.dataset_id
+                        work,
+                        bad_points,
+                        logs,
+                        dataset_id=experiment.dataset_id,
+                        audit=audit,
                     )
         else:
             converted, convert_logs = self._convert(
@@ -839,8 +923,12 @@ class NMRPipeBackend:
 
         if experiment.segments:
             # 0.2.124:坏点在源头 ser/nuslist 删除并备份(用户要求)
+            audit = QcAuditLog(work)
             _count, _bad, source_removed = self._clean_source_nus(
                 experiment, [Path(s) for s in experiment.segments], logs
+            )
+            _record_source_clean(
+                audit, experiment, list(experiment.segments), _count, _bad, source_removed
             )
             if _bad and source_removed:
                 # 0.2.197:坏点移除后按清理后 nuslist 实际范围调整 NusTD,
@@ -850,7 +938,9 @@ class NMRPipeBackend:
                     merged_points += [
                         tuple(p) for p in read_nuslist(Path(seg) / "nuslist")
                     ]
-                logs += _apply_nus_grid_after_clean(experiment, merged_points)
+                logs += _apply_nus_grid_after_clean(
+                    experiment, merged_points, audit=audit
+                )
             merged_in = self._merged_fid_in(
                 work, experiment.dataset_id
             )
@@ -887,7 +977,11 @@ class NMRPipeBackend:
                 if bad_points:
                     # 源头删除不可行时回退到生成 FID 清零
                     self._zero_bad_point_fid(
-                        work, bad_points, logs, dataset_id=experiment.dataset_id
+                        work,
+                        bad_points,
+                        logs,
+                        dataset_id=experiment.dataset_id,
+                        audit=audit,
                     )
             else:
                 logs.append(f"复用已合并 fid（{merged_in},跳过转换/合并）")
@@ -899,14 +993,20 @@ class NMRPipeBackend:
             ) or f"merged/{experiment.dataset_id}.fid"
         else:
             # 0.2.124:坏点在源头 ser/nuslist 删除并备份(用户要求),转换前执行
+            audit = QcAuditLog(work)
             nuslist_count, bad_points, source_removed = self._clean_source_nus(
                 experiment, [raw], logs
+            )
+            _record_source_clean(
+                audit, experiment, [raw], nuslist_count, bad_points, source_removed
             )
             if bad_points and source_removed:
                 # 0.2.197:坏点移除后按清理后 nuslist 实际范围调整 NusTD,
                 # 交叉验证(参数修正)使用调整后的值,不再改回
                 cleaned = [tuple(p) for p in read_nuslist(raw / "nuslist")]
-                logs += _apply_nus_grid_after_clean(experiment, cleaned)
+                logs += _apply_nus_grid_after_clean(
+                    experiment, cleaned, audit=audit
+                )
             fid_file = work / f"{experiment.dataset_id}.fid"
             if source_removed:
                 # 源头已变:旧的已转换 fid 失效,强制重转
@@ -3309,6 +3409,8 @@ class NMRPipeBackend:
         logs: list[str],
         in_file: str | None = None,
         dataset_id: str | None = None,
+        *,
+        audit: QcAuditLog | None = None,
     ) -> None:
         """清理坏点对应的 FID 数据(0.2.124 起仅作源头删除不可行时的回退)。
 
