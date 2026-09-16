@@ -43,3 +43,48 @@ Thumbs.db
 # GUI/Backend 独立工作区(git worktree),总管合并时排除
 workspaces/
 .pytest_tmp/
+
+# 公开发布准备补充(2026-09-16)
+# 注意:不删除任何已跟踪的小型 text fixture(tests/fixtures/bruker 下的
+# acqus/acqu2s/acqu3s/nuslist 是刻意版本控制的最小表头,不是原始数据)。
+
+# 示例/基准产物
+example_data/
+benchmark_results.csv
+benchmarks/results/
+
+# 运行/算法输出落点(仓库内不应留驻)
+outputs/
+results/
+generated/
+work/
+tmp/
+temp/
+cache/
+
+# 原始 NMR 谱与时间域数据(体积大且含未发表内容,禁止入库)
+*.ft2
+*.ft3
+*.ft4
+*.ucsf
+*.fid
+nuslist.local
+ser
+fid
+*.nmrpipe/
+
+# 环境与密钥
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+
+# 日志
+*.log
+logs/
+
+# 打包/冻结中间产物
+_MEIPASS/
+*.manifest
