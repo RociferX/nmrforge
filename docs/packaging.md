@@ -117,3 +117,30 @@ ldd usr/bin/NMRForge | grep 'not found'                            # 无缺失�
 - packaging/linux/build_appimage.sh：一键构建脚本
 - packaging/linux/icons/：应用图标（SVG 源 + PNG 产物）
 - core/app_paths.py：开发/冻结态资源路径解析
+
+
+## 许可与合规（LGPL）
+
+AppImage 把 PySide6 与 Qt 库打进产物，因此属于**分发 LGPL 覆盖的库**：必须随产物提供许可正文
+与声明，并允许接收方替换/重链接这些库。相关机制已固化，构建脚本会在失败时报错而不是静默漏发：
+
+| 机制 | 位置 | 作用 |
+| --- | --- | --- |
+| 许可正文入库 | `packaging/linux/THIRD_PARTY_LICENSES/LGPL-3.0.txt`、`GPL-3.0.txt` | LGPL-3.0 以引用方式并入 GPL-3.0，故两者都随产物提供（PySide6 的 wheel **不带**任何 LGPL 正文） |
+| 来源与哈希 | `THIRD_PARTY_LICENSES/PROVENANCE.txt` | 记录抓取 URL、字节数与 SHA-256，是校验的唯一事实来源 |
+| 声明 | `THIRD_PARTY_LICENSES/NOTICE.md` | 列出被打包组件与所用许可选项、对应源码获取方式、替换/重链接步骤 |
+| 构建前校验 | `scripts/check_third_party_licenses.py` | 正文缺失/被改、NOTICE 关键内容被删、构建脚本不再引用或不再提供 `--licenses` 都会失败 |
+| 打入产物 | `build_appimage.sh` 第 2.5 步 | 复制到 `usr/share/doc/NMRForge/third-party/`，并写入 `BUILD_INFO.txt`（版本、git 提交、工作区是否脏、构建时间、依赖版本） |
+| 运行时自述 | `AppRun --licenses` | 打印声明与各文件位置，产物内可自查 |
+| 可替换/重链接 | `build_appimage.sh` 的 `PYSIDE6_REQUIREMENT` / `SHIBOKEN6_REQUIREMENT` / `EXTRA_PIP_ARGS` | 用自建/修改过的 Qt 绑定重建 AppImage；构建脚本与 spec 均在公开源码中，故重链接所需材料齐备 |
+
+构建机验收（除了常规启动测试）：
+
+```bash
+python scripts/check_third_party_licenses.py                 # 正文与声明一致
+python scripts/audit_third_party.py --csv /tmp/audit.csv      # 构建环境里的完整依赖许可审计
+./build/appimage/NMRForge-*.AppImage --appimage-extract-and-run --licenses   # 产物内自述
+find build/appimage/NMRForge.AppDir/usr/share/doc -type f     # 应有 LGPL/GPL 正文、NOTICE、BUILD_INFO
+```
+
+> 注意：`NOTICE.md` 明确标注需由权利人复核；本节是工程实现与合规机制，不构成法律意见。
