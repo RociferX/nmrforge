@@ -126,6 +126,8 @@
   `pyproject.toml` 注册三个 marker,新增 `tests/test_test_categories.py` 守卫(漏登记、
   空类别、未注册 marker 都会失败)。用法:`pytest -m unit`(91 项,秒级)/ `-m integration`
   (955 项)/ `-m regression`(222 项)。**不挪文件**(审计 F.2:夹具路径依赖让挪目录得不偿失)。
+  本地全量 `1268` 收集 / `1267 passed, 1 skipped`;VM(HEAD `88316c1`)`bash scripts/vm_test.sh`
+  → 1264 passed, 4 skipped, `VM_TEST_EXIT=0`。
 
 ### Changed
 
