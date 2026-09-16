@@ -81,6 +81,11 @@ version = {attr = "core.__version__"}
 testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "-q"
+markers = [
+    "unit: 纯逻辑测试(不碰临时目录/Qt/项目管理器),最快的一组",
+    "integration: 走真实 I/O 或多模块协同(tmp_path/bruker_dir/Qt/ProjectManager)",
+    "regression: 针对已修复缺陷、审查整改项或发布/架构不变量的守卫",
+]
 
 [tool.ruff]
 line-length = 100

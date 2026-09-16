@@ -1,8 +1,14 @@
-"""共享 fixtures。"""
+"""共享 fixtures 与测试分类打标(Phase 12)。
+
+测试分类的**单一来源**是 ``tests/categories.py``;这里按文件名给每个用例打上
+``unit`` / ``integration`` / ``regression`` 标记,于是 ``pytest -m unit`` 等可以选子集。
+"""
 
 from __future__ import annotations
 
+import importlib.util
 import shutil
+import types
 from pathlib import Path
 
 import pytest
@@ -14,6 +20,39 @@ from core.data.internal_data_model import (
     Sampling,
     SamplingMode,
 )
+
+
+def _load_test_categories() -> types.ModuleType:
+    """加载分类表(``tests/categories.py``);用 importlib 而不 import,避免测试目录入 sys.path。"""
+    spec = importlib.util.spec_from_file_location(
+        "nmrforge_test_categories", Path(__file__).with_name("categories.py")
+    )
+    if spec is None or spec.loader is None:  # pragma: no cover - 文件必然存在
+        raise RuntimeError("找不到 tests/categories.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+TEST_CATEGORIES = _load_test_categories()
+category_of = TEST_CATEGORIES.category_of
+
+
+@pytest.fixture(scope="session")
+def test_categories() -> types.ModuleType:
+    """分类表(Phase 12 单一来源),供完整性守卫测试读取。"""
+    return TEST_CATEGORIES
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """Phase 12:按 ``tests/categories.py`` 给每个用例打类别标记。
+
+    标记在 conftest 里统一加,避免 100+ 个测试文件各写一行 ``pytestmark``
+    (分类表是单一来源,``tests/test_test_categories.py`` 保证不漏登记)。
+    """
+    for item in items:
+        marker = category_of(Path(str(item.fspath)).name)
+        item.add_marker(getattr(pytest.mark, marker))
 
 
 @pytest.fixture

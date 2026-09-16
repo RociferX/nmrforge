@@ -88,6 +88,14 @@
 - **命名统一:项目名为 `nmrforge`**(2026-09-16 权利人决定):旧名仅作为 2026-09-16 之前的
   历史名称保留在旧记录中,不再用于新材料;`core` 包 docstring、本文件的命名说明、审计 F.1 与发布
   清单同步。本地检出目录名仍是历史名称(本机操作,见 `PUBLIC_RELEASE_AUDIT.md` F.1)。
+### Changed
+
+- **备份纪律(用户要求)**:改文件前先保证可恢复——已提交状态由本地 git / `vm` 远程 / VM
+  工作副本三处持有;进行中的改动先 `git add -A && git stash create` 打
+  `backup/<日期>-<主题>` 标签,并把完整 bundle 与 `wip.patch` 归档到 `~/archive/<日期>/`;
+  规则写入 `docs/development.md` 与 `.codex/AGENTS.md`(本轮首次执行:
+  `private-backup-tag-phase12-markers`)。
+
 ### Added
 
 - **日志统一(Phase 22)**:新增 `core/logging_setup.py`(`configure_logging` 幂等、级别取
@@ -110,6 +118,14 @@
   签名与行为零改动。守卫 `tests/test_api_docstrings.py`(46 项)锁定清单,新增公开入口必须
   同步补文档。本地全量 `1262` 收集 / `1261 passed, 1 skipped`;VM(HEAD `220f9b6`)
   `bash scripts/vm_test.sh` → 1258 passed, 4 skipped, `VM_TEST_EXIT=0`。
+
+### Added
+
+- **测试分类(Phase 12 剩余)**:新增 `tests/categories.py` 作为 unit / integration / regression
+  的单一来源(106 个测试文件 = 18/71/17),`tests/conftest.py` 按表给每个用例打标,
+  `pyproject.toml` 注册三个 marker,新增 `tests/test_test_categories.py` 守卫(漏登记、
+  空类别、未注册 marker 都会失败)。用法:`pytest -m unit`(91 项,秒级)/ `-m integration`
+  (955 项)/ `-m regression`(222 项)。**不挪文件**(审计 F.2:夹具路径依赖让挪目录得不偿失)。
 
 ### Changed
 

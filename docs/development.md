@@ -52,6 +52,34 @@ ls ~/*.py ~/*.sh ~/*.csv ~/*.yaml 2>/dev/null   # 应为空
 du -sh ~/* ~/.[!.]* 2>/dev/null | sort -h | tail
 ```
 
+## 改动前先备份(强制,2026-09-17 用户)
+
+改任何文件之前,先保证这份状态是**可恢复**的:
+
+1. 已提交的部分天然有三份:本地 git、`vm` 远程、VM 工作副本 `~/NMRForge`;
+2. **进行中的改动**(未提交)必须先备份再继续:
+   ``git add -A && git stash create`` 得到一个 stash 提交,给它打标签
+   ``backup/<日期>-<主题>``;再把完整仓库与补丁归档到
+   ``~/archive/<日期>/<主题>/``(``git bundle create … --all`` + ``wip.patch``);
+3. 备份失败/未做就不许继续改;恢复方式:``git checkout backup/<标签> -- <文件>``
+   或 ``git bundle clone`` 到新目录。
+
+一轮改动完成后,备份标签随主题保留(不删),便于事后回溯「改之前长什么样」。
+
+## 测试分类(unit / integration / regression)
+
+分类表的**单一来源**是 [`tests/categories.py`](../tests/categories.py),`tests/conftest.py`
+按文件名给每个用例打标记(不挪文件——审计 F.2 已判定夹具路径依赖让挪目录得不偿失):
+
+```bash
+pytest -m unit          # 纯逻辑,秒级:提交前的快速回归
+pytest -m integration   # 真实 I/O / Qt / ProjectManager
+pytest -m regression    # 缺陷、审查整改与发布不变量的守卫
+```
+
+**新测试文件必须登记进 `tests/categories.py`**,否则 `tests/test_test_categories.py` 失败
+(未登记的按 `integration` 保守处理)。
+
 ## 公开 API 的 docstring(强制,2026-09-17,Phase 19)
 
 公开入口必须写清五节,缺一节 `tests/test_api_docstrings.py` 就失败:
