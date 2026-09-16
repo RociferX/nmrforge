@@ -48,6 +48,16 @@
   必须失败,分类逻辑覆盖 LGPL/GPL/AGPL/含糊字段等 11 种表达式(含首次实现时的两个真实
   缺陷:选项排序写反、只信含糊的 `License: Dual License` 而忽略精确 classifier)。
 
+### Added
+
+- **自动改动数据的结构化审计记录(Phase 10)**:新增 `core/audit/qc_audit.py`——每个处理工作目录
+  一份 append-only `qc_audit.jsonl`,逐条含 issue_detected / location / detection_rule /
+  action_taken / before_state / after_state / timestamp / software_version(并附 git 提交),
+  时间戳与版本由记录层统一盖章;**无改动即无记录**,使「无记录」等价于「未改动」;明细超限
+  只记数量并标 `truncated`;源头删除不可行时如实记 `reported_only`。接线点:坏点替换、
+  采样网格 NusTD 收缩、源头删除(后端另两处调用点已透传 audit 参数)。不传审计对象时行为
+  与之前完全一致。测试 `tests/test_qc_audit.py` 共 16 项;
+
 ### Changed
 
 - **GUI 依赖由 PyQt6 切换为 PySide6(Stage 5)**:`pyproject.toml` 运行期依赖改为

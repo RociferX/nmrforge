@@ -77,7 +77,34 @@ Each run ends with a three-part report in the log:
 The report is written for the person deciding whether to trust the spectrum: verdicts in words
 with advice, not a wall of numbers.
 
-## Known gap (public-release audit)
+## Structured audit record (implemented)
+
+Automatic corrections are recorded as machine-readable records, not only as log lines.
+`core/audit/qc_audit.py` writes one **append-only** `qc_audit.jsonl` per processing work
+directory (flushed per record, so a killed run still accounts for what it changed), with the
+fields the public-release task requires:
+
+```text
+issue_detected / location / detection_rule / action_taken / before_state / after_state /
+timestamp / software_version    (+ git_commit / git_commit_dirty when discoverable)
+```
+
+Rules this enforces:
+
+- **no change, no record** - the absence of a record is evidence that nothing was modified;
+- the timestamp and version are stamped by the log, so a call site cannot forget provenance;
+- `before_state`/`after_state` carry the concrete values (for example the real/imaginary parts
+  of the repaired samples, or the old and new `NusTD`), and oversized detail lists are capped
+  and flagged `truncated` rather than silently trimmed;
+- a source deletion that could not be performed is recorded as `reported_only`, never as a
+  completed removal.
+
+Where records are written today: bad-point replacement (`workflow/direct_diagnostics.py`),
+sampling-grid shrinkage after cleaning, and source-level bad-point deletion
+(`backend/nmrpipe_backend.py`). Read them back with `read_audit(work_dir)`, and see
+`tests/test_qc_audit.py` for the exact coverage.
+
+## Historic gap (for the record)
 
 Automatic corrections are currently recorded as structured log lines and as resolved parameters
 in the run record. There is not yet a single machine-readable quality-audit record per run with

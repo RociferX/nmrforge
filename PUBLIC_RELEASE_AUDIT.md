@@ -397,7 +397,18 @@ suggested classifying them. It was **not** done, deliberately: many tests locate
 no benefit at release time. Instead, the release-readiness suite adds the release-level invariants,
 and `CONTRIBUTING.md` documents the expectation.
 
-### F.3 QC audit trail is log-based, not a structured record
+### F.3 QC audit trail is log-based, not a structured record - **RESOLVED 2026-09-16**
+
+> Resolved in this round: `core/audit/qc_audit.py` now writes an append-only
+> `qc_audit.jsonl` per work directory with `issue_detected / location / detection_rule /
+> action_taken / before_state / after_state / timestamp / software_version` (plus git
+> provenance), rules out silent modification, and is wired into bad-point repair, sampling-grid
+> shrinkage and source deletion. Coverage: `tests/test_qc_audit.py` (16 tests).
+> `_zero_bad_point_fid` already accepts the audit parameter and is passed at its call sites.
+> See `docs/qc-system.md`.
+
+The original finding is kept below for the record.
+
 
 Automatic bad-point handling already follows *detect -> flag -> log -> optional correction*, and
 findings (DC offset, non-finite points, all-zero traces, anomalous traces, indices, metrics) are

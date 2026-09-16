@@ -28,6 +28,8 @@ BACKEND_PREFIXES = (
     "core/experiments/",
     "core/processing/",
     "core/planning/",
+    # 自动改动数据的结构化审计记录(Phase 10;处理侧写入)
+    "core/audit/",
     "core/optimization/",
     "core/qc/",
     "core/reporting/",
