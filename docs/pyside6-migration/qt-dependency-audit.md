@@ -272,3 +272,31 @@ Honest limitations, so the feasibility assessment is not read as stronger than i
    GUI's theme, panels, viewer and tests use.
 4. GUI behaviour was not re-verified against the `master` suite on this branch: the existing suite
    result (1131 passing / 1 skipped) is unchanged by this branch's additions.
+
+---
+
+## 11. Stage 2 results (the port has been executed)
+
+The audit above measured the surface; this section records what happened when the surface was
+actually routed through a compat layer. Details and the reproduction recipe are in
+[migration-plan.md](migration-plan.md) section 9; the numbers that matter for the audit:
+
+| Item | Before Stage 2 | After Stage 2 |
+| --- | --- | --- |
+| Files importing a Qt binding in `gui/` + `viewer/` | 18 | **0** |
+| Qt import statements in `gui/`/`viewer/`/`tests/` | 116 | 0 (all go through `qtcompat`) |
+| `pyqtSignal` occurrences | 101 | **0** (now `Signal` from `qtcompat`) |
+| Files naming a binding anywhere | 19 | 1 (`qtcompat/__init__.py`) + 2 migration tools |
+| `viewer/` -> `gui/` imports | 1 (`viewer/app.py` -> `gui.theme`) | **0** |
+| Full suite on PySide6 | not attempted | **exit 0, 0 failed, 0 error (1148 tests)** |
+| Full suite on PyQt6 | exit 0 (1127 tests) | **exit 0, 0 failed, 0 error (1148 tests)** |
+
+Two findings from doing it, worth recording because they were not visible before:
+
+1. **Function-local imports dominated.** A static pass that only matched top-level `from PyQt6...`
+   statements converted 63 of the 116 statements; the remaining 53 were inside functions (lazy
+   imports for heavy panels). The audit's list of "import sites" was correct, but the first
+   mechanical pass was not - a port must handle indentation.
+2. **Collapsing multi-line imports needs care.** Rewriting `from PyQt6.QtWidgets import (\n ...\n)`
+   into a single line produced 300-character lines. The final port reflows long imports back into
+   the project's parenthesised multi-line style, and the repository lints clean.

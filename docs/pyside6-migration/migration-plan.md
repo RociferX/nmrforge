@@ -90,8 +90,8 @@ would trade a licensing problem for an unreleased, unvalidated GUI.
 | --- | --- | --- |
 | 0 | Qt dependency audit; core Qt-independence guard test | **done**: audit written, guard test green |
 | 1 | Create an isolated environment with PySide6 installed; record the real wheel metadata; verify API-surface parity | **done**: `.venv-pyside/` with PySide6 6.11.2; licence metadata captured; 74/74 symbols and 126/126 attribute paths resolve; 25/25 binding-pattern smoke checks pass (audit section 9) |
-| 2 | Add `qtcompat`, move the ~44 symbols and the 101 `pyqtSignal` sites behind it; force `PYQTGRAPH_QT_LIB` | GUI starts under PySide6; no module imports PyQt6 in that environment |
-| 3 | Port the tests (30 files) and the `QApplication` fixture to `qtcompat` | full suite green in the PySide6 environment |
+| 2 | Add `qtcompat`, route every Qt name through it, move the theme into `ui_support/`, force `PYQTGRAPH_QT_LIB` | **done**: 43 files use `qtcompat`, no UI or test file imports a binding, GUI starts under PySide6 |
+| 3 | Port the tests (30 files) to `qtcompat` | **done**: the same 1148-test suite is green in both environments (see section 9) |
 | 4 | Port packaging: `NMRForge.spec` hiddenimports, AppImage smoke test, desktop integration | AppImage builds and starts on a clean machine |
 | 5 | Remove the PyQt6 path from `qtcompat`, drop `PyQt6` from dependencies, delete the leftover `.measure_gap.py`, update the docs that name PyQt6, then merge to `master` | all gates in section 5 pass, on `master` |
 
@@ -240,3 +240,75 @@ Two files in `scripts/` (`pyside6_symbol_parity.py`, `pyside6_smoke_test.py`) na
 purpose. They are migration tooling, they run in the PySide6 environment only, and the guard test
 asserts that nothing outside `scripts/pyside6_*` names a second binding - so they cannot be mistaken
 for application code.
+
+---
+
+## 9. Stage 2 results: the binding boundary exists and both bindings pass the suite
+
+Stage 2 is done on this branch. `master` is untouched (it still declares `PyQt6>=6.5`).
+
+### 9.1 What was added
+
+| Piece | Purpose |
+| --- | --- |
+| `qtcompat/` | The only module that names a Qt binding. It selects exactly one binding (`NMRFORGE_QT_LIB`, else the single importable one, else raises), registers `qtcompat.QtCore/QtGui/QtWidgets/QtTest` as aliases of the binding's real modules so `from qtcompat.QtWidgets import QLabel` works, normalises `Signal`/`Slot`/`Property`, and forces `PYQTGRAPH_QT_LIB` so pyqtgraph cannot pick a different binding. |
+| `ui_support/colors.py` | The semantic colours, Qt-free (option A: the Qt-free half of the old `gui/theme.py`). |
+| `ui_support/assets.py` | Icon and theme-image lookup, Qt-free. |
+| `ui_support/theme.py` | Palette, global QSS, `app_icon()`, `fit_combo_width()` - via `qtcompat`. The palette/QSS block is byte-identical to the old `gui/theme.py` (verified by comparing the `app.setStyleSheet(` section: 5827 characters, equal). |
+| `gui/theme.py` | Now a deprecation shim re-exporting `ui_support.*`; deleted in Stage 5. |
+
+### 9.2 What changed mechanically
+
+- **116 Qt import statements** in `gui/`, `viewer/` and `tests/` were rewritten to import from
+  `qtcompat` (both top-level and function-local/lazy imports; the codebase uses lazy imports for
+  heavy panels, so the first pass that only matched top-level imports was incomplete and was fixed).
+- **101 `pyqtSignal` occurrences** became `Signal`, with `from qtcompat import Signal` added where
+  needed (13 files).
+- **`gui.theme` -> `ui_support.theme`** in 16 files. This removed the last `viewer -> gui` edge:
+  `viewer/` no longer imports `gui/` at all.
+- String-form monkeypatch targets (`"PyQt6.QtWidgets.QFileDialog.getOpenFileName"`) became
+  `"qtcompat.QtWidgets...."`; these resolve to the same module object.
+- `pyproject.toml` now declares `qtcompat*` and `ui_support*` for packaging.
+- Comments that recorded bugs observed under PyQt6 keep the evidence ("PyQt6 实测") while no longer
+  implying that PyQt6 is *the* binding.
+
+### 9.3 Verification (the point of the stage)
+
+| Check | PyQt6 environment (`nmrforge/`) | PySide6 environment (`.venv-pyside/`) |
+| --- | --- | --- |
+| Binding selected by `qtcompat` | `PyQt6` | `PySide6` |
+| Tests collected | 1148 | 1148 |
+| Full suite result | **exit 0, 0 failed, 0 error** (155 s) | **exit 0, 0 failed, 0 error** (318 s) |
+| `ruff check .` | clean | clean (same interpreter-independent check) |
+
+The same sources, the same tests, no skips added and no test modified to accommodate either
+binding. This is what closes the "PySide6 implementation passes GUI startup, viewer, processing,
+QC, peak-picking and regression" gate: those areas are covered by the suite that ran in both
+environments (GUI layout/dialogs/panels, viewer 1D/2D/3D, four processing paths, QC, peak picking).
+
+### 9.4 How to reproduce the PySide6 environment
+
+The two environments must not be merged: one process may load only one binding.
+
+```bash
+# PyQt6 (current declared dependency)
+python -m venv nmrforge && nmrforge/Scripts/pip install -e ".[dev]"
+
+# PySide6, without installing the declared PyQt6 dependency
+python -m venv .venv-pyside
+.venv-pyside/Scripts/pip install PySide6 pyqtgraph numpy scipy pandas matplotlib     PyYAML nmrglue reportlab send2trash pytest
+QT_QPA_PLATFORM=offscreen .venv-pyside/Scripts/python -m pytest -q     # run from the repo root
+```
+
+`pytest` works from the repo root without installing the project because `pyproject.toml` sets
+`pythonpath = ["."]`.
+
+### 9.5 What Stage 2 deliberately did NOT do
+
+- No dependency change: `pyproject.toml` still declares `PyQt6`, so Stage 5's premise (PySide6 as
+  the declared binding, PyQt6 gone) is not yet met.
+- No packaging change: `packaging/linux/NMRForge.spec` still has `hiddenimports=["PyQt6.QtSvg"]`, and
+  the AppImage has not been rebuilt or smoke-tested against PySide6 (Stage 4).
+- No deletion of `gui/theme.py` (the shim) and none of `.measure_gap.py` (the known leftover that
+  still imports PyQt6; the guard names it explicitly and needs the owner's approval to delete).
+- No change to `master`, and nothing pushed.
