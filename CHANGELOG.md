@@ -97,6 +97,8 @@
   `gui/`、`viewer/` 由守卫测试确认没有裸 `print()`。API 逐 run 的 `log.txt` 契约不变。
   回归 `tests/test_logging_setup.py`(9 条)+ 失败隔离用例的 `run.log` 断言。
   遗留:GUI 逐 run 目录的 `run.log` 需要改 Shared Contract `core/project/manager.py`,另立 proposal。
+  本地全量 `1216` 收集 / `1215 passed, 1 skipped`;VM(HEAD `f97699a`)
+  `bash scripts/vm_test.sh` → 1212 passed, 4 skipped, `VM_TEST_EXIT=0`。
 
 ### Changed
 
