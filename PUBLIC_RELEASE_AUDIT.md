@@ -477,6 +477,15 @@ constrains the licence that can be granted. See [LICENSE_OPTIONS.md](LICENSE_OPT
 migrating the GUI to PySide6, or a commercial PyQt6 licence. **No `LICENSE` file has been
 committed.**
 
+### G.2.1 [BLOCKER] PyQt6 remains in place, migration pending
+
+Per the owner's instruction, `PyQt6` is **not** removed and no `LICENSE` is added. Work has moved to
+the feasibility branch `codex/pyside6-migration-feasibility`, which contains the Qt dependency audit
+(`docs/pyside6-migration/qt-dependency-audit.md`) and the migration plan with the acceptance gates
+(`docs/pyside6-migration/migration-plan.md`). PyQt6 stops being a blocker only when the PySide6
+implementation passes GUI startup, viewer, processing, QC, peak-picking and the full regression
+suite — and the third-party licence audit is rerun afterwards.
+
 ### G.3 [BLOCKER] Unpublished sample identifiers and dataset shorthand
 
 `sampleA.fid` and the uncertainty-study paths, plus internal dataset shorthand

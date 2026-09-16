@@ -49,6 +49,12 @@ If the intent is "the source is public but the licence is permissive", the PyQt6
 change first (Option B below). There is no ordering of the AppImage, the README wording or the
 `pyproject.toml` that achieves it.
 
+**Status of Option B:** a feasibility branch (`codex/pyside6-migration-feasibility`) now carries a full
+Qt dependency audit and a migration plan with acceptance gates, see
+[docs/pyside6-migration/migration-plan.md](docs/pyside6-migration/migration-plan.md). PyQt6 remains a
+public-release blocker until those gates pass; the third-party audit must be rerun before any
+permissive licence is recommended.
+
 Because of this, the realistic options are:
 
 - **Option A - GPL-3.0-only** (or `GPL-3.0-or-later`) for the whole project. Zero code changes.
