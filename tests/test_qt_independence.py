@@ -16,6 +16,7 @@ PySide6, because they assert the shape rather than the binding.
 from __future__ import annotations
 
 import ast
+import os
 import subprocess
 import sys
 import tomllib
@@ -96,10 +97,45 @@ def test_core_imports_load_no_qt_module() -> None:
     assert loaded == "[]", f"importing the core loaded Qt modules: {loaded}"
 
 
-def test_only_one_qt_binding_is_used_across_the_tree() -> None:
-    """A single process must never import two bindings; the static tree mirrors that rule."""
+#: Directories that make up the application and its tests. `scripts/pyside6_*` are deliberately
+#: excluded from this list: they are migration tooling that has to be able to name both bindings,
+#: and they only ever run in the PySide6 environment. The next test makes that exclusion explicit
+#: rather than implicit.
+SCANNED_ROOTS = UI_LAYERS + CORE_LAYERS + ("tests", "examples", "benchmarks")
+
+#: Migration tooling allowed to reference the target binding.
+MIGRATION_TOOLING_PREFIX = "scripts/pyside6_"
+
+#: Directories that are not project source: virtual environments (the project keeps two, one per
+#: Qt binding), caches and build output. A recursive scan must skip them or it would "find" the
+#: binding inside the installed packages themselves.
+IGNORED_DIR_NAMES = {"nmrforge", "build", "dist", "nmrforge.egg-info"}
+
+
+def _iter_repository_python_files() -> list[Path]:
+    """All project ``*.py`` files, pruning non-source directories *during* the walk.
+
+    ``Path.rglob`` would descend into the two virtual environments (``nmrforge/`` for PyQt6,
+    ``.venv-pyside/`` for PySide6) before any filter could reject them, which adds thousands of
+    files and minutes of I/O to the suite. ``os.walk`` with pruned ``dirnames`` never enters them.
+    """
+    files: list[Path] = []
+    for current, dirnames, filenames in os.walk(ROOT, topdown=True):
+        dirnames[:] = sorted(
+            name
+            for name in dirnames
+            if not name.startswith(".") and name not in IGNORED_DIR_NAMES
+        )
+        files.extend(
+            Path(current) / name for name in sorted(filenames) if name.endswith(".py")
+        )
+    return files
+
+
+def test_only_one_qt_binding_is_used_across_the_application() -> None:
+    """A single process must never import two bindings; the application tree mirrors that rule."""
     found: dict[str, list[str]] = {}
-    for layer in UI_LAYERS + CORE_LAYERS + ("tests", "examples", "benchmarks"):
+    for layer in SCANNED_ROOTS:
         directory = ROOT / layer
         if not directory.is_dir():
             continue
@@ -152,3 +188,25 @@ def test_pyqtgraph_binding_is_forced_or_pre_imported() -> None:
         assert not imported or imported == {declared}, (
             f"{_relative(path)} imports {sorted(imported)} but the project declares {declared}"
         )
+
+def test_only_migration_tooling_names_a_second_binding() -> None:
+    """Any file outside the migration tooling that names a second binding is a mistake.
+
+    This is what makes the ``scripts/pyside6_*`` exclusion above safe: a stray ``import PySide6``
+    in application code - or a leftover debug script - fails here instead of quietly creating a
+    two-binding process.
+    """
+    offenders: list[str] = []
+    for path in _iter_repository_python_files():
+        relative = path.relative_to(ROOT)
+        if relative.parts and relative.parts[0] in SCANNED_ROOTS:
+            continue
+        if "PySide6" not in _imported_bindings(path):
+            continue
+        if str(relative).replace("\\", "/").startswith(MIGRATION_TOOLING_PREFIX):
+            continue
+        offenders.append(_relative(path))
+    assert not offenders, (
+        "a second Qt binding may only be named by the migration tooling "
+        f"({MIGRATION_TOOLING_PREFIX}*); offending files: " + "; ".join(offenders)
+    )
