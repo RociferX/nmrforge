@@ -108,7 +108,8 @@
   sampling API(`detect`/`read_nuslist`/`indirect_grid_2d`/`scan_dense_2d`)统一补上
   `Parameters`(含类型)/`Returns`/`Raises`/`Side effects`/`Examples` 五节;原散文说明保留。
   签名与行为零改动。守卫 `tests/test_api_docstrings.py`(46 项)锁定清单,新增公开入口必须
-  同步补文档。
+  同步补文档。本地全量 `1262` 收集 / `1261 passed, 1 skipped`;VM(HEAD `220f9b6`)
+  `bash scripts/vm_test.sh` → 1258 passed, 4 skipped, `VM_TEST_EXIT=0`。
 
 ### Changed
 
