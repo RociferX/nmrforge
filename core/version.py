@@ -17,12 +17,77 @@ from __future__ import annotations
 
 import importlib.metadata
 import platform
+import subprocess
+import sys
+from pathlib import Path
 
 # 关键依赖:记录版本让产物可以回答「由哪套工具生成」
 _DEPENDENCIES = ("numpy", "scipy", "nmrglue", "matplotlib", "PyQt6", "PyYAML")
 
 # backend 层探测到的外部工具版本(进程内缓存)
 _TOOL_VERSIONS: dict[str, str] = {}
+
+# 源码提交(进程内缓存;None = 尚未探测)
+_GIT_COMMIT: str | None = None
+_GIT_DIRTY: bool | None = None
+
+
+def _git(*args: str) -> tuple[int, str]:
+    """在仓库根执行一次 git;失败返回 (非零, "")。"""
+    root = Path(__file__).resolve().parent.parent
+    try:
+        done = subprocess.run(
+            ["git", "-C", str(root), *args],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except Exception:  # noqa: BLE001 - 缺少 git / 超时都不算错误
+        return 1, ""
+    if done.returncode != 0:
+        return done.returncode, ""
+    return 0, done.stdout
+
+
+def _discover_git_commit() -> tuple[str, bool]:
+    """探测当前源码提交与工作区是否脏。
+
+    冻结态(AppImage/PyInstaller)内没有 ``.git``,取不到一律返回空串——
+    不伪造 ``unknown``,也不猜测。工作区脏只统计已跟踪文件的改动
+    (``--untracked-files=no``),避免临时产物把每次运行都标成脏。
+    """
+    if getattr(sys, "frozen", False):
+        return "", False
+    code, out = _git("rev-parse", "HEAD")
+    if code != 0:
+        return "", False
+    commit = out.strip()
+    code, status = _git("status", "--porcelain", "--untracked-files=no")
+    dirty = code == 0 and bool(status.strip())
+    return commit, dirty
+
+
+def git_commit() -> str:
+    """当前源码提交哈希(取不到返回空串)。"""
+    global _GIT_COMMIT, _GIT_DIRTY
+    if _GIT_COMMIT is None:
+        _GIT_COMMIT, _GIT_DIRTY = _discover_git_commit()
+    return _GIT_COMMIT
+
+
+def git_commit_dirty() -> bool:
+    """工作区是否含未提交的已跟踪文件改动(无 git/冻结态为 False)。"""
+    if _GIT_COMMIT is None:
+        git_commit()
+    return bool(_GIT_DIRTY)
+
+
+def reset_git_probe() -> None:
+    """清空提交探测缓存(测试用)。"""
+    global _GIT_COMMIT, _GIT_DIRTY
+    _GIT_COMMIT = None
+    _GIT_DIRTY = None
 
 
 def software_version() -> str:
@@ -67,6 +132,11 @@ def tool_versions() -> dict[str, str]:
     versions = {"nmrforge": software_version()}
     versions.update(dependency_versions())
     versions.update(registered_tool_versions())
+    # 源码提交:结果可回溯到具体代码状态(取不到时不写该键,不写 unknown)
+    commit = git_commit()
+    if commit:
+        versions["git_commit"] = commit
+        versions["git_commit_dirty"] = "1" if git_commit_dirty() else "0"
     return versions
 
 
@@ -77,7 +147,10 @@ def reset_tool_versions() -> None:
 
 __all__ = [
     "dependency_versions",
+    "git_commit",
+    "git_commit_dirty",
     "register_tool_version",
+    "reset_git_probe",
     "registered_tool_versions",
     "reset_tool_versions",
     "software_version",
