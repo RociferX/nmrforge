@@ -22,7 +22,7 @@ mkdir -p \
 "$BUILD_DIR/venv/bin/pip" install -e .
 "$BUILD_DIR/venv/bin/pip" install pyinstaller
 
-# 2) PyInstaller 打包（自动收集 PyQt6 插件）
+# 2) PyInstaller 打包（自动收集 PySide6 插件）
 "$BUILD_DIR/venv/bin/pyinstaller" --clean --noconfirm \
   --distpath "$BUILD_DIR/dist" packaging/linux/NMRForge.spec
 cp -a "$BUILD_DIR/dist/$APP/." "$APPDIR/usr/bin/"
