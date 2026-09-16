@@ -19,7 +19,7 @@ privacy decisions. Do not change the repository visibility yet.**
 | --- | --- |
 | READY | section E (16 items) |
 | WARNINGS | section F (12 items) |
-| BLOCKERS | section G (5 items) |
+| BLOCKERS | section G (5 items). G.2's nature changed: the GPL obstacle is removed, the licence decision and the LGPL distribution questions are not |
 | MANUAL ACTIONS | section H (12 items) |
 
 ---
@@ -69,7 +69,7 @@ privacy decisions. Do not change the repository visibility yet.**
 | --- | --- |
 | Python requirement | `>=3.12` (`pyproject.toml`) |
 | Python used for verification | 3.13.2 (project venv) |
-| Runtime dependencies | PyQt6, pyqtgraph, NumPy (`>=1.24,<2.5`), SciPy, pandas, Matplotlib, PyYAML, nmrglue, reportlab, send2trash |
+| Runtime dependencies | **PySide6** (switched from PyQt6 in the Stage 5 migration, 2026-09-16), pyqtgraph, NumPy (`>=1.24,<2.5`), SciPy, pandas, Matplotlib, PyYAML, nmrglue, reportlab, send2trash |
 | Optional groups | `test`, `dev`, `docs` (added during this preparation) |
 | External, not pip-managed | NMRPipe, SMILE, Java (detected at runtime, never bundled) |
 | Build backend | setuptools, `dynamic = ["version"]` from `core.__version__` |
@@ -81,7 +81,7 @@ privacy decisions. Do not change the repository visibility yet.**
 | --- | --- | --- |
 | GUI | yes | `gui/main_window.py`, `MainWindow.run()`; entry point `main.py` |
 | CLI | yes | `python -m nmrforge_api --help` lists `init/reference/peaks/sweep/workflows/report/status`; `nmrforge-viewer` console script |
-| Scripting API | yes | `nmrforge_api` (Qt-free; verified `import nmrforge_api` loads zero `PyQt6` modules) |
+| Scripting API | yes | `nmrforge_api` (Qt-free; verified `import nmrforge_api` loads zero Qt modules - asserted for `PyQt*`, `PySide*` and `shiboken*`) |
 | Viewer (1D/2D/3D) | yes | `viewer/` |
 
 ### A.6 Tests and checks
@@ -224,7 +224,8 @@ No file needed to be deleted, moved or history-rewritten for size reasons.
 
 ### C.1 Inventory
 
-Created: [THIRD_PARTY.md](THIRD_PARTY.md) - every runtime dependency (PyQt6, pyqtgraph, NumPy,
+Created: [THIRD_PARTY.md](THIRD_PARTY.md) - every runtime dependency (PySide6 after the migration,
+pyqtgraph, NumPy,
 SciPy, pandas, Matplotlib, PyYAML, nmrglue, reportlab, send2trash), the development dependencies
 (pytest, Ruff), the external engines (NMRPipe, SMILE, Java), and an explicit list of what this
 repository does **not** bundle.
@@ -233,7 +234,8 @@ Verified licence facts (from installed distribution metadata, 2026-09-16):
 
 | Component | Declared licence |
 | --- | --- |
-| PyQt6 6.11.0 | **`GPL-3.0-only`** (or commercial, from Riverbank) |
+| PySide6 6.11.2 | `LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only` (the current dependency) |
+| PyQt6 6.11.0 | **`GPL-3.0-only`** (or commercial, from Riverbank) - **removed** in Stage 5 |
 | pyqtgraph | MIT |
 | NumPy / SciPy / pandas | BSD-3-Clause |
 | Matplotlib | Matplotlib licence (PSF-derived, BSD-compatible) |
@@ -245,6 +247,11 @@ Verified licence facts (from installed distribution metadata, 2026-09-16):
 | NMRPipe / SMILE | external, free-of-charge research software; not bundled, not redistributed here |
 
 ### C.2 [BLOCKER] PyQt6 is GPL-3.0-only
+
+> **Superseded on 2026-09-16.** The GUI now uses PySide6 and `pyproject.toml` no longer declares
+> PyQt6, so this blocker is resolved *in code*; see G.2 for what still has to happen before a licence
+> can be recommended. The analysis below is kept unchanged as the record of why the migration was
+> undertaken - read it as history, not as the current state.
 
 `gui/` and `viewer/` import PyQt6, and `pyproject.toml` lists `PyQt6>=6.5` as a **required**
 dependency. Because the source itself will be published on GitHub, publishing it *is* a
@@ -469,22 +476,28 @@ redistribution conditions? `CITATION.cff` currently contains a placeholder autho
 (`TODO: author list and order not yet confirmed`) and no institution, and no source file carries a
 copyright header. **Nothing about authorship was invented.**
 
-### G.2 [BLOCKER] Licence selection - and it is not optional before publication
+### G.2 [BLOCKER] Licence selection - the obstacle is gone, the decision is not made
 
-Publishing the source on GitHub is itself distribution, so the PyQt6 `GPL-3.0-only` dependency
-constrains the licence that can be granted. See [LICENSE_OPTIONS.md](LICENSE_OPTIONS.md) and
-[THIRD_PARTY.md](THIRD_PARTY.md). The three viable routes are GPL-3.0-only for the project,
-migrating the GUI to PySide6, or a commercial PyQt6 licence. **No `LICENSE` file has been
-committed.**
+**Status changed on 2026-09-16.** The GUI no longer uses PyQt6: the PySide6 migration is complete on
+the branch `codex/pyside6-migration-feasibility` (Stage 5), `pyproject.toml` declares `PySide6`, and
+nothing outside `qtcompat/` imports a Qt binding. PySide6 is offered under
+`LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only`, so a permissive licence for this project is now
+**possible in principle** — the GPL-3.0-only constraint that previously forced the whole project to
+be GPL is gone.
 
-### G.2.1 [BLOCKER] PyQt6 remains in place, migration pending
+It is not **recommended** yet, and this remains a blocker because:
 
-Per the owner's instruction, `PyQt6` is **not** removed and no `LICENSE` is added. Work has moved to
-the feasibility branch `codex/pyside6-migration-feasibility`, which contains the Qt dependency audit
-(`docs/pyside6-migration/qt-dependency-audit.md`) and the migration plan with the acceptance gates
-(`docs/pyside6-migration/migration-plan.md`). PyQt6 stops being a blocker only when the PySide6
-implementation passes GUI startup, viewer, processing, QC, peak-picking and the full regression
-suite — and the third-party licence audit is rerun afterwards.
+1. the full third-party audit has not been rerun on the post-migration dependency set;
+2. the LGPL obligations for a *binary* distribution are unresolved — the AppImage bundles Qt, and
+   the PySide6 wheels ship no LGPL text at all, so the distributor must supply the licence text,
+   notices and a way to replace/relink the library;
+3. the AppImage has not been rebuilt or smoke-tested against PySide6 (Stage 4; needs a Linux build
+   machine);
+4. the owner still has to choose the licence.
+
+**No `LICENSE` file has been committed**, by instruction. See
+[LICENSE_OPTIONS.md](LICENSE_OPTIONS.md) section 2 and 5, and
+[THIRD_PARTY.md](THIRD_PARTY.md).
 
 ### G.3 [BLOCKER] Unpublished sample identifiers and dataset shorthand
 
@@ -515,8 +528,8 @@ Things only you can do. Suggested order:
 1. **Confirm IP ownership** (institution, funding terms, who holds copyright).
 2. **Confirm the author list, order and affiliation**, and get each author's agreement; then fill in
    `CITATION.cff` (and later `.zenodo.json`).
-3. **Decide PyQt6 vs GPL**: accept GPL-3.0-only for the project, schedule the PySide6 migration, or
-   buy a commercial PyQt6 licence.
+3. **Rerun the full third-party audit** on the post-migration dependency set, then choose the
+   licence (a permissive one is now open) and confirm the LGPL obligations for any bundled binary.
 4. **Add the `LICENSE` file** for the chosen licence, and set the `license` field and classifier in
    `pyproject.toml`.
 5. **Add the private contacts** for `SECURITY.md` and `CODE_OF_CONDUCT.md`.
@@ -524,8 +537,9 @@ Things only you can do. Suggested order:
    shorthand, internal host references. Decide keep / sanitise / remove per occurrence.
 7. **Decide the fate of the internal process material**: `.codex/AGENTS.md`, `docs/AGENT_PROMPTS.md`,
    `docs/manager/`, `docs/tasks/`, `docs/reviews/`, `docs/proposals/`.
-8. **Decide the fate of the root leftovers** `.measure_gap.py` and `.patch_smile_gap.py`
-   (recommended: delete), and whether `scripts/vm_*.py` should be sanitised.
+8. **Decide the fate of `.patch_smile_gap.py`** (recommended: delete) — `.measure_gap.py` and the
+   two `scripts/pyside6_*` migration tools were deleted in Stage 5, recoverable from git history —
+   and whether `scripts/vm_*.py` should be sanitised.
 9. **Take a real GUI screenshot** with publishable data, no user name, no sample name and no
    laboratory path, and add it to the README.
 10. **Resolve the naming question** (旧名 vs NMRForge) before the first public release, because it
@@ -537,8 +551,8 @@ Things only you can do. Suggested order:
     AppImage, then connect Zenodo, obtain the DOI, and update `CITATION.cff` and `.zenodo.json` with
     the real DOI and licence.
 
-Optional, recommended cleanups that need your approval because they involve deletion: move or delete
-`.measure_gap.py` and `.patch_smile_gap.py`; run `git gc` to shrink the local `.git`.
+Optional, recommended cleanups: delete `.patch_smile_gap.py`; run `git gc` to shrink the local
+`.git`. (`.measure_gap.py` was deleted in Stage 5 - see the commit history if you want it back.)
 
 ---
 

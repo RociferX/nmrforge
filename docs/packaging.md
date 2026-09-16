@@ -14,7 +14,7 @@
 
 **打包进 AppImage：**
 
-- 应用本身（Python 字节码 + PyQt6 + pyqtgraph + numpy/scipy/matplotlib/nmrglue 等依赖）。
+- 应用本身（Python 字节码 + PySide6 + pyqtgraph + numpy/scipy/matplotlib/nmrglue 等依赖）。
 - config/ 与 presets/（通过 PyInstaller datas 打进 _MEIPASS，见 core/app_paths.py）。
 - 应用图标与 desktop 文件。
 
@@ -96,7 +96,7 @@ packaging/linux/build_appimage.sh
   上构建，产物才能覆盖更多目标机器。
 - **FUSE**：部分系统需 `./NMRForge.AppImage --appimage-extract-and-run`，
   或设置 `APPIMAGE_EXTRACT_AND_RUN=1`；这是 AppImage 通用行为，非本软件问题。
-- **Qt 插件**：PyInstaller 的 PyQt6 hook 会自动收集插件；若出现
+- **Qt 插件**：PyInstaller 的 PySide6 hook 会自动收集插件；若出现
   "could not find or load the Qt platform plugin"，在打包机验证
   `QT_QPA_PLATFORM=offscreen` 下的 smoke 测试。
 - **路径**：代码一律用 `core/app_paths.py` 定位资源，禁止硬编码绝对路径，

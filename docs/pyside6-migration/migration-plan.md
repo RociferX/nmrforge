@@ -92,8 +92,8 @@ would trade a licensing problem for an unreleased, unvalidated GUI.
 | 1 | Create an isolated environment with PySide6 installed; record the real wheel metadata; verify API-surface parity | **done**: `.venv-pyside/` with PySide6 6.11.2; licence metadata captured; 74/74 symbols and 126/126 attribute paths resolve; 25/25 binding-pattern smoke checks pass (audit section 9) |
 | 2 | Add `qtcompat`, route every Qt name through it, move the theme into `ui_support/`, force `PYQTGRAPH_QT_LIB` | **done**: 43 files use `qtcompat`, no UI or test file imports a binding, GUI starts under PySide6 |
 | 3 | Port the tests (30 files) to `qtcompat` | **done**: the same 1148-test suite is green in both environments (see section 9) |
-| 4 | Port packaging: `NMRForge.spec` hiddenimports, AppImage smoke test, desktop integration | AppImage builds and starts on a clean machine |
-| 5 | Remove the PyQt6 path from `qtcompat`, drop `PyQt6` from dependencies, delete the leftover `.measure_gap.py`, update the docs that name PyQt6, then merge to `master` | all gates in section 5 pass, on `master` |
+| 4 | Port packaging: `NMRForge.spec` hiddenimports, AppImage smoke test, desktop integration | **partially done**: the spec now collects `PySide6.QtSvg`; the AppImage has *not* been rebuilt or smoke-tested (needs a Linux build machine) |
+| 5 | Remove the PyQt6 path from `qtcompat`, drop `PyQt6` from dependencies, update the docs that name PyQt6 | **done**: `qtcompat` is PySide6-only, `pyproject.toml` declares `PySide6`, the repository lints clean and the suite is green |
 
 Stage 1 has been executed (see the audit, section 9): PySide6 6.11.2 is installed in an isolated
 `.venv-pyside/` environment and the static API surface the project uses is fully present.
@@ -312,3 +312,35 @@ QT_QPA_PLATFORM=offscreen .venv-pyside/Scripts/python -m pytest -q     # run fro
 - No deletion of `gui/theme.py` (the shim) and none of `.measure_gap.py` (the known leftover that
   still imports PyQt6; the guard names it explicitly and needs the owner's approval to delete).
 - No change to `master`, and nothing pushed.
+
+---
+
+## 10. Stage 5 results (PyQt6 is gone) and what Stage 4 still owes
+
+### 10.1 Done in Stage 5
+
+| Change | Detail |
+| --- | --- |
+| `qtcompat` is PySide6-only | The selection machinery, the `NMRFORGE_QT_LIB` override and the PyQt6 factory names are gone. The module still forces `PYQTGRAPH_QT_LIB` and still refuses to run if that variable contradicts it. |
+| Dependency switched | `pyproject.toml`: `PyQt6>=6.5` -> `PySide6>=6.6`. |
+| PyInstaller spec | `hiddenimports=["PySide6.QtSvg"]`, guarded by `test_appimage_spec_collects_the_binding_plugins`. |
+| Deleted | `.measure_gap.py` (the last file importing PyQt6 directly), plus `scripts/pyside6_symbol_parity.py` and `scripts/pyside6_smoke_test.py`: both migration tools had served their purpose (the parity tool now has no PyQt6 imports to compare), and the project's own clean-up principle forbids leaving superseded tooling behind. All three are recoverable from git history. |
+| Guards simplified | `tests/test_qt_independence.py` no longer needs a migration-tooling exception or a known-leftover exception: **only `qtcompat/` may name a binding**, full stop. |
+| Docs updated | Every page that stated the toolkit as a current fact: README (+Chinese section), docs/README, development, faq, installation, packaging, python-api, manager/project_map, manager/project_state, AGENT_PROMPTS, the external-API proposal, plus THIRD_PARTY, LICENSE_OPTIONS and PUBLIC_RELEASE_AUDIT. Historical records (CHANGELOG entries, `docs/problems.md`, archived tasks) were left untouched on purpose - they are evidence of what was observed under PyQt6. |
+| CI | The separate PySide6 job was removed because the main matrix now installs PySide6 through `pip install -e ".[test]"`. |
+
+### 10.2 Stage 4 (packaging) is now the only outstanding engineering step
+
+The AppImage has **not** been rebuilt or smoke-tested against PySide6. The spec was edited, which is
+necessary for the build to work at all, but that edit is unverified: it needs a Linux machine with
+Python 3.12+, `appimagetool` and `mksquashfs`. Until that is done, the packaging path is
+"configured, not proven", and the release checklist keeps the AppImage item unchecked.
+
+### 10.3 Also still open (licence work, not code)
+
+1. Rerun the full third-party audit on the post-migration dependency set.
+2. Answer the LGPL distribution questions for a bundled Qt: supply the LGPL-3.0 text and notices
+   (the PySide6 wheels ship none), and satisfy the replace/relink requirement for a read-only
+   single-file AppImage.
+3. Only then decide the licence. **No `LICENSE` has been added, and this work does not recommend
+   one.**

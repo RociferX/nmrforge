@@ -33,6 +33,16 @@
 
 ### Changed
 
+- **GUI 依赖由 PyQt6 切换为 PySide6(Stage 5)**:`pyproject.toml` 运行期依赖改为
+  `PySide6>=6.6`;`qtcompat` 收敛为 PySide6 专用(移除绑定选择开关、`NMRFORGE_QT_LIB`
+  与 PyQt6 的工厂名,保留 `PYQTGRAPH_QT_LIB` 强制与矛盾时报错);PyInstaller spec 的
+  `hiddenimports` 改为 `PySide6.QtSvg`;移除已无对照对象的迁移工具
+  `scripts/pyside6_symbol_parity.py`、`scripts/pyside6_smoke_test.py` 与残留脚本
+  `.measure_gap.py`(均可从 git 历史恢复);CI 去掉多余的 PySide6 作业(主矩阵经
+  `pip install -e ".[test]"` 已装 PySide6);全部表述当前架构的文档同步更新,
+  历史记录(CHANGELOG 旧条目、problems.md、归档任务)按原样保留作为 PyQt6 时代的证据;
+
+
 - **Qt 绑定边界(`qtcompat`)与共享 UI 层(`ui_support`)**:GUI/viewer/tests 不再直接依赖
   PyQt6,所有 Qt 名字经 `qtcompat` 取得(116 条 import、101 处 `pyqtSignal` → `Signal`);
   `qtcompat` 强制单进程单一绑定并同步强制 `PYQTGRAPH_QT_LIB`,两绑定同时可导入时直接报错;

@@ -77,8 +77,10 @@ publish results, also cite NMRPipe and SMILE - see [THIRD_PARTY.md](../THIRD_PAR
 ### Can I use nmrForge commercially?
 
 The licence has not been chosen, so the repository is currently "all rights reserved" and you
-should not redistribute it. The dependency analysis that constrains the choice - notably PyQt6
-being GPL-3.0-only - is in [LICENSE_OPTIONS.md](../LICENSE_OPTIONS.md).
+should not redistribute it. The GUI now depends on PySide6 (whose options include LGPL-3.0) instead
+of PyQt6 (GPL-3.0-only), so a permissive licence is possible in principle - but it still has to be
+chosen, and the third-party audit has to be rerun first. See
+[LICENSE_OPTIONS.md](../LICENSE_OPTIONS.md).
 
 ### How do I know a published result is reproducible from nmrForge?
 

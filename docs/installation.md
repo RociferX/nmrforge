@@ -20,7 +20,7 @@ chmod +x NMRForge-<version>-x86_64.AppImage
 ./NMRForge-<version>-x86_64.AppImage
 ```
 
-What the AppImage contains: the application, PyQt6, pyqtgraph, NumPy, SciPy, Matplotlib, nmrglue,
+What the AppImage contains: the application, PySide6, pyqtgraph, NumPy, SciPy, Matplotlib, nmrglue,
 `config/`, `presets/` and the GUI assets.
 
 What it does **not** contain: NMRPipe, SMILE, Java, or any dataset. nmrForge drives NMRPipe as an
@@ -53,8 +53,11 @@ to fetch the AppImage runtime (a cached runtime under `~/.cache/nmrforge-appimag
 artefact name and the version inside the application cannot drift. Build on an older glibc
 distribution (Ubuntu 20.04/22.04) if you want the AppImage to run on more target machines.
 
-Note: redistribution of a built AppImage is a licensing question as well as a technical one.
-PyQt6 is GPL-3.0-only - see [LICENSE_OPTIONS.md](../LICENSE_OPTIONS.md) before publishing binaries.
+Note: redistribution of a built AppImage is a licensing question as well as a technical one, and
+the AppImage *bundles* Qt: PySide6 is offered under LGPL-3.0 among other options, which brings the
+LGPL obligations (licence texts, notices, and the ability to replace or relink the library) with it.
+See [LICENSE_OPTIONS.md](../LICENSE_OPTIONS.md) and [THIRD_PARTY.md](../THIRD_PARTY.md) before
+publishing binaries.
 
 ## Developers: editable source install
 

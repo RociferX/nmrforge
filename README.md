@@ -106,7 +106,7 @@ desktop integration, and deleting the AppImage file leaves your project data unt
 system cannot mount AppImages, run it with `--appimage-extract-and-run` or set
 `APPIMAGE_EXTRACT_AND_RUN=1`.
 
-Bundled into the AppImage: the application, PyQt6/pyqtgraph/NumPy/SciPy/Matplotlib/nmrglue,
+Bundled into the AppImage: the application, PySide6/pyqtgraph/NumPy/SciPy/Matplotlib/nmrglue,
 `config/`, `presets/` and the GUI assets. Not bundled: NMRPipe, SMILE and any dataset.
 
 Build one yourself with:
@@ -300,15 +300,21 @@ request.
 ## Licence
 
 **No licence has been chosen yet.** No `LICENSE` file is committed, which means the default
-"all rights reserved" applies. The dependency analysis that constrains this choice is in
-[LICENSE_OPTIONS.md](LICENSE_OPTIONS.md) and [THIRD_PARTY.md](THIRD_PARTY.md): the GUI depends on
-PyQt6, which is distributed under GPL-3.0-only or a commercial licence, so a permissive licence
-for the whole project is not currently an open option without migrating the GUI to PySide6.
+"all rights reserved" applies, and no licence may be assumed by anyone reading this repository.
 
-Publishing this repository is itself a distribution of the program, so it is not possible to avoid
-the question by recommending the AppImage: the AppImage only changes how users install it. The
-decision has to be made before the repository becomes visible to anyone else. Do not redistribute
-this repository before then.
+The dependency situation that constrains the choice is in [LICENSE_OPTIONS.md](LICENSE_OPTIONS.md)
+and [THIRD_PARTY.md](THIRD_PARTY.md). In short:
+
+- the GUI depends on **PySide6**, whose licence options include `LGPL-3.0-only`. The earlier
+  `GPL-3.0-only` obstacle (PyQt6) has been removed by the completed PySide6 migration, so a
+  permissive licence for this project is now *possible* in principle;
+- it is not yet *recommended*: the full third-party audit has to be rerun after the migration, and
+  the owner still has to choose. LGPL obligations apply to any binary that bundles Qt - including
+  the AppImage - and those are not resolved by this change.
+
+Publishing this repository is itself a distribution of the program, so the decision has to be made
+before the repository becomes visible to anyone else. Do not redistribute this repository before
+then.
 
 ## 中文简介
 
@@ -329,6 +335,9 @@ nmrForge 面向 Bruker 1D/2D/3D NMR 数据,提供自动化处理、参数优化�
 安装与快速上手见上文 Installation / Quick start;完整中文文档入口见
 [docs/README.md](docs/README.md)。
 
-**许可状态:尚未选择许可证**,在决定之前请勿再分发。GUI 依赖 PyQt6(GPL-3.0-only 或商业
-许可),因此本项目当前无法整体采用 MIT/BSD/Apache 这类宽松许可证,除非将 GUI 迁移到
-PySide6。详见 [LICENSE_OPTIONS.md](LICENSE_OPTIONS.md)。
+**许可状态:尚未选择许可证**,在决定之前请勿再分发,也不要把本仓库当作任何许可证下的作品。
+
+约束条件已经变化:GUI 依赖已从 PyQt6(GPL-3.0-only)迁到 **PySide6**(许可选项含
+`LGPL-3.0-only`),因此「整体采用 MIT/BSD/Apache」在原则上**已经可行**,但尚未被推荐——
+迁移后必须重跑完整第三方许可审计,并由权利人做出选择;打包 Qt 的二进制(含 AppImage)
+仍需满足 LGPL 的分发义务。详见 [LICENSE_OPTIONS.md](LICENSE_OPTIONS.md)。
