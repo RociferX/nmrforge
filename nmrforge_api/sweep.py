@@ -31,6 +31,7 @@ import hashlib
 import inspect
 import itertools
 import json
+import logging
 import math
 import shutil
 import time
@@ -39,6 +40,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from core.logging_setup import attach_run_log, detach_run_log
 from core.peaks import axis_units
 from core.planning.method_selector import select_method
 from core.project.manager import sha256_file
@@ -60,6 +62,8 @@ from nmrforge_api.reference import (
 from nmrforge_api.session import DatasetRef, StudySession, now_iso
 from workflow.pick_peaks import read_spectrum_axes
 from workflow.stepwise import read_experiment
+
+logger = logging.getLogger("nmrforge.api.sweep")
 
 DEFAULT_MAX_RUNS = 256
 
@@ -1519,7 +1523,7 @@ def run_sweep(
                     if on_run is not None:
                         on_run(cached)
                     continue
-            run = _run_condition(
+            run = _run_condition_with_log(
                 session,
                 plan=plan,
                 combo=combo,
@@ -1549,6 +1553,19 @@ def run_sweep(
         ):
             break
     return results
+
+
+def _run_condition_with_log(session: StudySession, **kwargs: Any) -> SweepRun:
+    """Phase 22:每个 run 挂一份 ``<run_dir>/run.log``(logging 通道,延迟创建)。
+
+    ``_run_condition`` 本身只在失败路径写 ``logger.exception``;失败 run 因此一定留下带
+    完整 traceback 的 ``run.log``(Phase 21 的「traceback 进日志」),成功的 run 不产生空文件。
+    """
+    handler = attach_run_log(Path(kwargs["run_dir"]))
+    try:
+        return _run_condition(session, **kwargs)
+    finally:
+        detach_run_log(handler)
 
 
 def _run_condition(
@@ -1664,6 +1681,8 @@ def _run_condition(
                 progress=_log,
             )
     except Exception as exc:  # noqa: BLE001 - 单条件失败不中断整轮
+        # Phase 21/22:用户看 run.message 的可执行提示,完整 traceback 落 <run_dir>/run.log
+        logger.exception("workflow %s/%s 处理失败", workflow_id, target.condition)
         response = {
             "success": False,
             "message": f"{type(exc).__name__}: {exc}",

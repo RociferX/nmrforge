@@ -52,6 +52,21 @@ ls ~/*.py ~/*.sh ~/*.csv ~/*.yaml 2>/dev/null   # 应为空
 du -sh ~/* ~/.[!.]* 2>/dev/null | sort -h | tail
 ```
 
+## 日志(Phase 22,强制)
+
+- 库代码(`core/` `backend/` `workflow/` `viewer/` `gui/`)只做
+  `logging.getLogger("nmrforge.<模块>")`,**不在 import 期配置 handler**;
+- 入口负责配置:GUI 的 `main.py` 与命令行 `python -m nmrforge_api` 都调用
+  `core.logging_setup.configure_logging()`。级别取 `NMRFORGE_LOG_LEVEL`
+  (DEBUG/INFO/WARNING/ERROR,默认 WARNING);日志写 **stderr**——CLI 的 stdout 只放 JSON;
+- **界面层禁止裸 `print()`**(`tests/test_logging_setup.py` 扫描 `gui/`、`viewer/` 守卫);
+  需要给用户的输出走界面控件/日志面板,需要给运维的输出走 logging;
+- 每次 run 的日志:`core.logging_setup.attach_run_log(<run_dir>)` 在该目录挂 `run.log`
+  (延迟创建:没有日志记录就不留空文件;结束时 `detach_run_log`)。失败路径用
+  `logger.exception` 把完整 traceback 写进 `run.log`。API 逐 run 的 `log.txt` 仍是处理日志
+  契约的一部分,两者并存、互不改名;
+- 日志文本涉及绝对路径时用 `core.logging_setup.sanitize_path()` 把 home 折成 `~`。
+
 ## 用户可见错误与调试信息(强制,2026-09-17,Phase 21)
 
 用户看到的消息必须能照着改:

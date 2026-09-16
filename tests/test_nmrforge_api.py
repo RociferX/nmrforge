@@ -2488,6 +2488,13 @@ def test_sweep_failure_is_isolated_and_parameters_recorded(
     assert ok_payload["parameters_used"]["zero_fill"]["F1"] == 2
     assert Path(ok.peak_table_path("parabolic")).is_file()
 
+    # Phase 22:失败 run 留下带 traceback 的 run.log;成功的 run 不产生空日志
+    failed_log = Path(failed.run_dir, "run.log")
+    assert failed_log.is_file(), "失败 run 必须留下 run.log(logging 通道)"
+    logged = failed_log.read_text(encoding="utf-8")
+    assert "forced workflow failure" in logged and "Traceback" in logged
+    assert not Path(ok.run_dir, "run.log").exists()
+
 
 # ------------------------------------- Phase 21:用户可见错误信息(CLI 出口)
 def test_cli_unexpected_error_is_actionable_not_a_traceback(

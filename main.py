@@ -33,6 +33,10 @@ def _bootstrap_venv() -> None:
 
 def main() -> int:
     """Launch the Qt main window (GUI is built on core.project)."""
+    from core.logging_setup import configure_logging
+
+    # Phase 22:入口统一配置日志(级别 NMRFORGE_LOG_LEVEL,默认 WARNING,写 stderr)
+    configure_logging()
     from gui.main_window import MainWindow
 
     return MainWindow.run()

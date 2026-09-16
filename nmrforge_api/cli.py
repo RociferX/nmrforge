@@ -496,6 +496,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    from core.logging_setup import configure_logging
+
+    # Phase 22:日志走 stderr(NMRFORGE_LOG_LEVEL,默认 WARNING),stdout 保持纯 JSON
+    configure_logging()
     parser = build_parser()
     args = parser.parse_args(argv)
     try:

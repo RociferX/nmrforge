@@ -88,6 +88,16 @@
 - **命名统一:项目名为 `nmrforge`**(2026-09-16 权利人决定):旧名仅作为 2026-09-16 之前的
   历史名称保留在旧记录中,不再用于新材料;`core` 包 docstring、本文件的命名说明、审计 F.1 与发布
   清单同步。本地检出目录名仍是历史名称(本机操作,见 `PUBLIC_RELEASE_AUDIT.md` F.1)。
+### Added
+
+- **日志统一(Phase 22)**:新增 `core/logging_setup.py`(`configure_logging` 幂等、级别取
+  `NMRFORGE_LOG_LEVEL` 默认 WARNING、写 stderr;`attach_run_log` 给每个 run 挂 `<run_dir>/run.log`,
+  延迟创建,失败路径用 `logger.exception` 落完整 traceback;`sanitize_path` 把 home 折成 `~`)。
+  GUI(`main.py`)与 CLI(`python -m nmrforge_api`)入口统一配置日志,CLI 的 stdout 保持纯 JSON;
+  `gui/`、`viewer/` 由守卫测试确认没有裸 `print()`。API 逐 run 的 `log.txt` 契约不变。
+  回归 `tests/test_logging_setup.py`(9 条)+ 失败隔离用例的 `run.log` 断言。
+  遗留:GUI 逐 run 目录的 `run.log` 需要改 Shared Contract `core/project/manager.py`,另立 proposal。
+
 ### Changed
 
 - **用户可见错误信息(Phase 21,CLI 出口)**:`python -m nmrforge_api` 不再把路径写错、YAML
