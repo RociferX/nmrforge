@@ -97,8 +97,9 @@
   (`docs/tasks/2026-09-17-phase21-error-messages.md`)。**GUI 侧同步完成**:`gui/main_window.py`、
   `gui/pipeline_panel.py`、`gui/processing.py`、`gui/spectrum_panel.py` 共 12 处
   `f"{type(exc).__name__}: {exc}"` 改走同一个翻译(`core/user_errors.describe_exception`),
-  并由 `tests/test_user_errors.py` 守卫 `gui/`、`viewer/` 不得再出现类型名式用户文本;
-  本地全量(见下)与 VM 回归通过。
+  并由 `tests/test_user_errors.py` 守卫 `gui/`、`viewer/` 不得再出现类型名式用户文本。
+  本地全量 `1205` 收集 / `1204 passed, 1 skipped`;VM(GUI 侧 HEAD `0d28292`)
+  `bash scripts/vm_test.sh` → 1201 passed, 4 skipped, `VM_TEST_EXIT=0`。
 - **AppImage 构建 + 冒烟完成(Stage 4)**:在用户 VM 上构建成功(`BUILD_EXIT=0`,产物约 134MB),
   产物内含 `LGPL-3.0.txt`/`GPL-3.0.txt`/`NOTICE.md`/`PROVENANCE.txt` 与 `BUILD_INFO.txt`;
   冒烟(隔离 HOME)验证 `--licenses` 自述、启动进入事件循环、桌面入口自动安装与
