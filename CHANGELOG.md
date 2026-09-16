@@ -78,6 +78,8 @@
   `RELEASE_CHECKLIST_v0.9.0.md`、`CONTRIBUTING.md`、`CITATION.cff`、`.zenodo.json` 同步;
   `tests/test_release_readiness.py` 的许可证守卫改为「有 LICENSE 时 LICENSE / pyproject.toml /
   README.md 三处声明必须一致」,`scripts/audit_third_party.py` 的本项目提示同步更新。
+  本地全量 `1190` 收集 / `1189 passed, 1 skipped`(平台跳过);VM(`69cf755`)
+  `bash scripts/vm_test.sh` → `1186 passed, 4 skipped`,`VM_TEST_EXIT=0`。
   作者名单与机构仍未公开(见 `PUBLIC_RELEASE_AUDIT.md` G.1)。
 
 ### Changed
