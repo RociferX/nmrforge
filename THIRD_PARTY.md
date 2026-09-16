@@ -117,3 +117,64 @@ What this means for distribution:
   bundled here, they are only listed as external prerequisites.
 - `reportlab` is used for PDF report export; confirm that the version pinned in a future
   release is the BSD-licensed open-source edition (not the commercial ReportLab Plus).
+
+---
+
+## 7. Full dependency inventory (audit rerun after the PySide6 migration)
+
+Generated with `python scripts/audit_third_party.py --csv <file>` against the environment that
+gets bundled (Windows development venv, 2026-09-16, PySide6 6.11.2). Re-run it in the AppImage
+build venv before any release: the build machine's set is what actually ships.
+
+Result: **28 permissive, 4 weak copyleft (the Qt/PySide6 set), 0 strong-copyleft-only**. The
+project's own distribution declares no licence, which is the pending decision, not a third-party
+finding. Every audited distribution ships at least one licence file - with the documented
+exception that the PySide6 wheels ship only `LicenseRef-Qt-Commercial.txt` and no LGPL text, which
+is why the texts are vendored in `packaging/linux/THIRD_PARTY_LICENSES/`.
+
+| Package | Version | Licence as declared | Class | Licence files | Direct dep |
+| --- | --- | --- | --- | --- | --- |
+| charset-normalizer | 3.4.9 | MIT | permissive | 1 | no |
+| colorama | 0.4.6 | BSD License | permissive | 1 | no |
+| contourpy | 1.3.3 | BSD License | permissive | 1 | no |
+| cycler | 0.12.1 | BSD License | permissive | 1 | no |
+| fonttools | 4.63.0 | MIT | permissive | 2 | no |
+| iniconfig | 2.3.0 | MIT | permissive | 1 | no |
+| kiwisolver | 1.5.0 | BSD License | permissive | 1 | no |
+| matplotlib | 3.11.1 | Python Software Foundation License | permissive | 3 | yes |
+| nmrforge | 0.2.199 | (none declared) | unknown | 1 | no |
+| nmrglue | 0.11 | New BSD License | permissive | 1 | yes |
+| numpy | 2.4.6 | BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0 | permissive | 20 | yes |
+| packaging | 26.3 | Apache-2.0 OR BSD-2-Clause | permissive | 5 | no |
+| pandas | 3.0.5 | BSD License | permissive | 1 | yes |
+| pillow | 12.3.0 | MIT-CMU | permissive | 1 | no |
+| pip | 26.2.1 | MIT | permissive | 44 | no |
+| pluggy | 1.6.0 | MIT | permissive | 1 | no |
+| Pygments | 2.21.0 | BSD-2-Clause | permissive | 2 | no |
+| pyparsing | 3.3.2 | MIT | permissive | 1 | no |
+| pyqtgraph | 0.14.0 | MIT | permissive | 1 | yes |
+| PySide6 | 6.11.2 | LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only | weak-copyleft | 1 | yes |
+| PySide6_Addons | 6.11.2 | LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only | weak-copyleft | 1 | no |
+| PySide6_Essentials | 6.11.2 | LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only | weak-copyleft | 1 | no |
+| pytest | 9.1.1 | MIT | permissive | 1 | yes |
+| python-dateutil | 2.9.0.post0 | BSD License OR Apache Software License | permissive | 1 | no |
+| PyYAML | 6.0.3 | MIT | permissive | 1 | yes |
+| reportlab | 5.0.0 | BSD license (see license.txt for details), Copyright (c) 2000-2025, ReportLab Inc. | permissive | 1 | yes |
+| ruff | 0.16.5 | MIT | permissive | 1 | yes |
+| scipy | 1.18.0 | BSD License | permissive | 5 | yes |
+| Send2Trash | 2.1.0 | BSD-3-Clause | permissive | 1 | yes |
+| shiboken6 | 6.11.2 | LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only | weak-copyleft | 1 | no |
+| six | 1.17.0 | MIT | permissive | 1 | no |
+| tzdata | 2026.3 | Apache-2.0 | permissive | 2 | no |
+| vulture | 2.16 | MIT License | permissive | 1 | no |
+
+How to read the *Class* column: it is the best option available in the declared expression, not a
+verdict on the whole expression. `LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only` is weak copyleft
+because the LGPL option can be used; a bare `GPL-3.0-only` would be strong copyleft and would
+constrain the project licence.
+
+Weak-copyleft components and what they require of a *binary* distribution:
+
+| Component | Requirement |
+| --- | --- |
+| Qt libraries, PySide6, shiboken6 | Ship the LGPL-3.0 text and the Qt notices (done: `packaging/linux/THIRD_PARTY_LICENSES/`, copied into the AppImage by the build script) and let the recipient replace or relink the libraries (done: the build script accepts `PYSIDE6_REQUIREMENT` / `SHIBOKEN6_REQUIREMENT` / `EXTRA_PIP_ARGS`, see `NOTICE.md`) |
