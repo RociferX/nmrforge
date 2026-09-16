@@ -82,7 +82,8 @@
   `CITATION.cff`、`.zenodo.json` 同步。LGPL 仅适用于 Linux AppImage 里捆绑的 Qt/PySide6
   (`LGPL-3.0-only` 选项),其正文/声明仍随产物分发并提供替换/重链接路径。守卫测试改为:声明
   漂移、本项目许可自称 LGPL、或 AppImage 不再随附 LGPL 正文 —— 任一出现即失败。
-  本地全量 `1190` 收集 / `1189 passed, 1 skipped`(平台跳过);VM(`69cf755` 起)回归见交接记录。
+  本地全量 `1190` 收集 / `1189 passed, 1 skipped`(平台跳过);VM(HEAD `d83ffb7`)
+  `bash scripts/vm_test.sh` → 1186 passed, 4 skipped, `VM_TEST_EXIT=0`。
   作者名单与机构仍未公开(见 `PUBLIC_RELEASE_AUDIT.md` G.1)。
 - **命名统一:项目名为 `nmrforge`**(2026-09-16 权利人决定):旧名仅作为 2026-09-16 之前的
   历史名称保留在旧记录中,不再用于新材料;`core` 包 docstring、本文件的命名说明、审计 F.1 与发布
