@@ -163,3 +163,12 @@ def test_audit_reports_no_strong_copyleft_dependency() -> None:
     assert done.returncode in (0, 1), done.stdout + done.stderr
     assert "strong-copyleft only       : 0" in done.stdout, done.stdout
     assert "PySide6" in done.stdout, done.stdout
+
+def test_licence_texts_are_not_line_ending_converted() -> None:
+    """The GNU licence texts are verified byte-for-byte, so git must not rewrite their line endings.
+
+    Without this, a Windows checkout would produce CRLF and every recorded SHA-256 in
+    PROVENANCE.txt would mismatch - the check would fail on one platform and pass on another.
+    """
+    attributes = (ROOT / ".gitattributes").read_text(encoding="utf-8")
+    assert "packaging/linux/THIRD_PARTY_LICENSES/*.txt -text" in attributes

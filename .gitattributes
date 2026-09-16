@@ -8,3 +8,5 @@
 *.desktop text eol=lf
 *.svg text eol=lf
 *.spec text eol=lf
+# 许可正文以字节校验(SHA-256 记录在 PROVENANCE.txt),禁止任何行尾转换
+packaging/linux/THIRD_PARTY_LICENSES/*.txt -text
