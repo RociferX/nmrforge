@@ -136,7 +136,8 @@
   message=…」并收回 FileHandler;GUI/batch/人工/导入/挑峰/对外 API 的运行现在都在
   `processing/<exp>/runs/<run_id>/run.log` 留下记录(头/尾行直接写,不依赖日志级别);
   `snapshot/` 路径与内容不变,`WorkflowRun` schema 不变。提案
-  `docs/proposals/2026-09-17-run-log.md`。
+  `docs/proposals/2026-09-17-run-log.md`。本地全量 `1270` 收集 / `1269 passed, 1 skipped`;
+  VM(HEAD `c145d51`)`bash scripts/vm_test.sh` → 1266 passed, 4 skipped, `VM_TEST_EXIT=0`。
 
 ### Changed
 
