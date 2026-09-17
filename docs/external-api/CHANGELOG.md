@@ -200,11 +200,14 @@
   完整 `log.txt`、`run.json`(`parameters_requested`/`parameters_used`/
   `parameters_resolved`/`phase`/`base_script`/`peak_tables`/`versions`)与
   组合级 `workflow.json`;
-- **统一峰表 19 列**(两算法结构一致):`workflow_id, condition, dataset,
-  reference_peak_id, assignment, H_ppm, N_ppm, intensity, SNR, detected,
+- **统一峰表 20 列**(两算法结构一致):`workflow_id, condition, dataset,
+  peak_id, reference_peak_id, assignment, H_ppm, N_ppm, intensity, SNR, detected,
   localization_method, localization_requested, fallback, fallback_reason,
   fit_success, FWHM_H, FWHM_N, fit_rmse, boundary_hit`;parabolic 不适用列写
   `NaN`;未检测到的峰保留行(`detected=false`);
+  *(2026-09-17 更正:此处原写「19 列」并漏列 `peak_id`;当前列数与列序以
+  `06-outputs-and-records.md` §6.2 与 `nmrforge_api.peak_tables.PEAK_TABLE_COLUMNS`
+  为准)*;
 - **稳定峰身份** `reference_peak_id`(R0001…),跨条件、跨 workflow 共享;
 - 每个 workflow 对**同一张谱**跑 parabolic 与 2D gaussian 两种定位(不再由
   `refine=` 二选一;`refine` 参数保留但已废弃);

@@ -34,7 +34,7 @@
         peak_table_<所选方法>.csv  各实际方法的 workflow × 条件长表
 ```
 
-## 6.2 统一峰表字段
+## 6.2 统一峰表字段(当前 **20 列**)
 
 组合模式只写 `localization` 实际选择的方法。用 `resume=False` 重跑时会删除
 上一轮未选方法的峰表和定位附件;`records/` 也会删除未选方法的旧汇总。旧版
@@ -47,8 +47,12 @@ localization_requested, fallback, fallback_reason,
 fit_success, FWHM_H, FWHM_N, fit_rmse, boundary_hit
 ```
 
-- **两种算法表结构完全一致**;parabolic 不适用的 Gaussian 字段写 `NaN`
-  (不是 false/0);
+- **两种算法表结构完全一致(20 列)**;parabolic 不适用的 Gaussian 字段写 `NaN`
+  (不是 false/0);列序即下面的代码块顺序,`nmrforge_api.peak_tables.PEAK_TABLE_COLUMNS`
+  是唯一来源(`tests/test_api_docstrings.py` 会逐列比对,文档漏改会直接失败);
+- `localization_method` 是**实际**采用的方法(`parabolic`/`gaussian`),
+  `localization_requested` 是**请求**的方法;两者不同即表示发生了回退,
+  原因在 `fallback`/`fallback_reason`;
 - `peak_id` 是**本谱**的峰序号(该组合自己那张谱的检出顺序);
 - `reference_peak_id`(`R0001`…)只属于**参考峰表**;组合模式 2026-09-14 起独立
   选峰,组合峰表里该列与 `assignment` **留空**(`detected` 恒 true——表里只有该

@@ -420,7 +420,7 @@ CLI:`python -m nmrforge_api {init,reference,peaks,sweep(=workflows),report,statu
   {`success`, `success_with_warning`, `failed`}、`warnings`(码 + 计数 + 峰);
 - `StudyResult`(session/plan/references/runs/workflows/summary/records)。
 
-### 11.4 峰表字段(两算法结构一致)
+### 11.4 峰表字段(两算法结构一致,当前 20 列)
 
 ```text
 workflow_id, condition, dataset, peak_id, reference_peak_id, assignment,
@@ -429,7 +429,11 @@ localization_requested, fallback, fallback_reason,
 fit_success, FWHM_H, FWHM_N, fit_rmse, boundary_hit
 ```
 
+- 列序 = 下面代码块 = `nmrforge_api.peak_tables.PEAK_TABLE_COLUMNS`(唯一来源,
+  `tests/test_api_docstrings.py` 逐列比对);
 - `peak_id` 是本谱(该 workflow × 该条件)的峰序号;
+- `localization_method` 是**实际**方法、`localization_requested` 是**请求**方法;
+  两者不同即发生回退,原因见 `fallback`/`fallback_reason`;
 - `reference_peak_id`(R0001…)由参考峰表建立(参考峰表里未检测到的峰保留
   `detected=false` 行);组合模式 2026-09-14 起独立选峰,组合峰表该列与
   `assignment` 留空,匹配由下游完成;

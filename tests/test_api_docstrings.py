@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import importlib
 import inspect
+from pathlib import Path
 
 import pytest
 
@@ -69,3 +70,28 @@ def test_public_api_docstring_names_real_parameters(module: str, name: str) -> N
     assert any(param in doc for param in parameters), (
         f"{module}.{name} 的 docstring 没有提到任何真实参数名"
     )
+
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+def _column_block(text: str, marker: str) -> list[str]:
+    """取出 ``marker`` 之后第一个 ```text 代码块里的逗号分隔列名。"""
+    block = text.split(marker, 1)[1]
+    block = block.split("```text", 1)[1].split("```", 1)[0]
+    return [name.strip() for name in block.replace("\n", " ").split(",") if name.strip()]
+
+
+def test_peak_table_columns_match_the_docs() -> None:
+    """统一峰表的列数与列序以代码为唯一来源,文档必须逐列对齐(防「19/20 列」漂移)。"""
+    from nmrforge_api.peak_tables import PEAK_TABLE_COLUMNS
+
+    expected = list(PEAK_TABLE_COLUMNS)
+    guide = (ROOT / "docs" / "external-api" / "06-outputs-and-records.md").read_text(
+        encoding="utf-8"
+    )
+    contract = (ROOT / "docs" / "API_CONTRACT.md").read_text(encoding="utf-8")
+
+    assert _column_block(guide, "## 6.2 统一峰表字段") == expected
+    assert _column_block(contract, "### 11.4 峰表字段") == expected
+    assert f"当前 **{len(expected)} 列**" in guide, "API 使用指南必须写明当前列数"

@@ -188,6 +188,14 @@
 ### Fixed
 
 - 公开发布准备周期内未改动处理行为;本周期内的处理修复见下方按期条目。
+- **文档更正:统一峰表列数**(2026-09-17):多处仍写「19 列」,实际自 `localization_requested`
+  加入后为 **20 列**。已在 `docs/external-api/06-outputs-and-records.md`(写明当前 20 列 + 补
+  `localization_method`(实际)/`localization_requested`(请求)语义)、
+  `docs/external-api/CHANGELOG.md`(原条目还漏列 `peak_id`,已补并标注更正)、
+  `docs/API_CONTRACT.md` §11.4、`docs/manager/project_map.md` 修正;历史任务/提案记录
+  (2026-09-13/14 条目、`docs/proposals/external-api/*`)按原样保留。新增守卫
+  `tests/test_api_docstrings.py::test_peak_table_columns_match_the_docs`,把文档列序与
+  `nmrforge_api.peak_tables.PEAK_TABLE_COLUMNS` 逐列比对,防止再次漂移。
 - **单条件失败的日志自追加(MemoryError)**:`nmrforge_api` 组合扫描里后端处理抛错时,失败
   run 的 `logs` 与外层累积列表是同一对象,`logs.extend(response["logs"])` 自我追加导致无限
   增长并抛 `MemoryError`。改为写入列表快照:单条件失败只落一条 `failed` run,同批其它
