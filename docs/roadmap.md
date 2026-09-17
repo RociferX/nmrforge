@@ -63,34 +63,38 @@ NUSOptimizer
 - Using an LLM to guess phase or NUS parameters from an image; an LLM is for explanation and
   reports only.
 
-## v0.10.0 - a bilingual (English / Chinese) application
+## v0.10.0 - an English repository
 
-Goal: the application itself becomes usable in English as well as Chinese, not just the
-documentation. Today every user-visible string is a hard-coded Chinese literal and there is no
-translation layer at all - no `QTranslator`, no gettext, no `.ts` catalogue.
+Goal: every piece of Chinese text in this repository is translated into English - inline comments,
+docstrings, user-visible messages and documentation. This is a translation task, not a runtime
+localisation framework: there is no Chinese identifier to rename, only prose.
 
-Planned work:
+Measured scope (2026-09-17):
 
-1. **Message catalogue.** One table (`core/messages.py`) mapping a stable key to
-   `{"zh-CN": ..., "en": ...}`, plus a `msg(key, **kwargs)` accessor, used by the GUI, the CLI,
-   the Python API and everything written into run records. Machine-readable values are already
-   language-neutral: warning codes such as `no_spectrum_change`, `roi_capped` and
-   `processing_script_not_found` are ASCII identifiers, so the on-disk contract does not change -
-   only the human-readable sentence next to them does.
-2. **Language selection.** The default follows the system locale. It can be overridden in the GUI
-   settings, through `NMRFORGE_LANG` for the CLI and API, and with a `--lang` option.
-3. **Coverage.** Roughly 3,100 user-visible strings in the application layers (`gui/`, `viewer/`,
-   `workflow/`, `backend/`, `nmrforge_api/`, `core/`), translated in stages - the GUI shell first,
-   then the text that ends up in records and logs. Argument-parsing help and the long-tail scripts
-   come last.
-4. **Enforcement.** A guard test that rejects new bare Chinese literals in the UI layer, so the two
-   languages cannot drift apart as features are added.
+| Category | Chinese characters | Files |
+| --- | --- | --- |
+| Inline comments | 43,159 | 264 |
+| Docstrings | 84,057 | 264 |
+| User-visible strings | 28,033 | - |
+| **Python total** | **155,249** | 264 |
+| Documentation (`.md`, `.yaml`, ...) | 126,789 | 135 |
+| **Total** | **282,038** | |
 
-Two related but separate tracks:
+`CHANGELOG.md` alone accounts for 93,303 of the documentation characters, because it keeps the
+project's history, and the test suite accounts for 38,503 of the Python characters.
 
-- **Documentation** stays bilingual with English as the primary file and a Chinese sibling where it
-  is worth maintaining;
-- **Terminology** is fixed in a shared glossary, so that the GUI, the CLI and the documentation use
-  the same English word for the same thing.
+How it will be done:
 
-Scope and staging are estimates, not commitments; nothing here changes the v0.9.0 source release.
+1. **Glossary first.** A single `docs/glossary.md` fixes the English word for each NMR term
+   (NMRPipe, SMILE, FID, NUS, zero filling, phase, baseline, TD/SI, ...), so the code, the CLI and
+   the documentation agree.
+2. **A progress ratchet.** A guard test records, per file, how much Chinese is left. It fails if a
+   file outside that list contains Chinese, and if a listed file gains Chinese. Progress can then
+   only move in one direction, and new code cannot quietly reintroduce Chinese.
+3. **Staged batches**, in this order: user-visible messages, documentation prose, docstrings in
+   production code, inline comments, `tests/`, and finally the historical `CHANGELOG` entries.
+   Each batch is a self-contained commit, so the work can stop after any batch.
+
+Only text changes. Machine-readable values such as the warning codes `no_spectrum_change`,
+`roi_capped` and `processing_script_not_found` are language-neutral identifiers and are not
+touched, so the on-disk contract is unaffected.
