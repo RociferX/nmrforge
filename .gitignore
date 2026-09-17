@@ -91,3 +91,7 @@ _MEIPASS/
 
 # PySide6 迁移验证环境(与 PyQt6 环境必须分开:一个进程只能一个 Qt 绑定)
 .venv-pyside/
+
+# OS / editor droppings (2026-09-17)
+desktop.ini
+*.swp
