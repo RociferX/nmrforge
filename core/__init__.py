@@ -5,4 +5,4 @@
 build_appimage.sh 也读同一属性(PROV-009,2026-09-12)。
 """
 
-__version__ = "0.2.199"
+__version__ = "0.9.0"

@@ -15,8 +15,21 @@
 
 ## [Unreleased]
 
+<!-- 下一个版本的变更写在这里;发布时把下面那节改名为新的版本号并写上日期。 -->
+
+## [0.9.0] - 2026-09-17
+
+> 首个公开发布版本:工程与合规准备完成(许可证、第三方审计、测试体系、CI、AppImage)。
+> 接口与处理默认值在 v1.0 之前仍可能变化,见 README 的 active-development 说明。
+
 ### Added
 
+- **公开发布最小信息补齐(2026-09-17)**:版本升到 **0.9.0**(仍是 `core.__version__` 单一来源);
+  作者与版权人写入 `README.md` / `LICENSE` / `pyproject.toml` / `CITATION.cff` / `.zenodo.json`
+  (**Xuanfeng Li / 李宣锋**);README 首屏给出「当前版本 · 状态 · 作者 · 许可证」与
+  「active development:v1.0 前接口与处理默认值可能变化」;`CITATION.cff` 现在可直接引用
+  (机构、仓库 URL、DOI 待建仓/Zenodo 后补)。待后续补的项(截图、benchmark、roadmap、
+  GitHub Pages、badge、完整 CHANGELOG 等)按 `RELEASE_CHECKLIST_v0.9.0.md` 的 6.x/附录处理。
 - 公开发布准备文档:`PUBLIC_RELEASE_AUDIT.md`(审计报告)、`THIRD_PARTY.md`(第三方依赖与
   许可清单,含 PyQt6 GPL-3.0-only 阻塞项)、`LICENSE_OPTIONS.md`(许可证候选分析,不代替
   决策)、`CONTRIBUTING.md`、`SECURITY.md`、`CODE_OF_CONDUCT.md`、
@@ -75,8 +88,8 @@
 ### Added
 
 - **许可证:源码 Apache-2.0,LGPL 只随打包产物(2026-09-16 权利人决定)**:根目录 `LICENSE`
-  改为 Apache-2.0 正文 + 项目声明(SPDX `Apache-2.0`;版权人 "NMRForge contributors",按要求不写
-  个人信息、不编造作者名单);`pyproject.toml` 声明同一 SPDX 与 Apache classifier;README(中/英)、
+  改为 Apache-2.0 正文 + 项目声明(SPDX `Apache-2.0`;版权人:Xuanfeng Li / 李宣锋——
+  2026-09-17 由权利人给出后补入,此前临时写作 "NMRForge contributors");`pyproject.toml` 声明同一 SPDX 与 Apache classifier;README(中/英)、
   `LICENSE_OPTIONS.md`、`THIRD_PARTY.md`、`packaging/linux/THIRD_PARTY_LICENSES/NOTICE.md`、
   `PUBLIC_RELEASE_AUDIT.md`(G.2)、`RELEASE_CHECKLIST_v0.9.0.md`、`CONTRIBUTING.md`、
   `CITATION.cff`、`.zenodo.json` 同步。LGPL 仅适用于 Linux AppImage 里捆绑的 Qt/PySide6

@@ -3,10 +3,10 @@
   "title": "nmrForge: automation, parameter optimisation and quality control for Bruker multidimensional NMR data",
   "upload_type": "software",
   "description": "nmrForge automates Bruker multidimensional NMR data processing: it reads acquisition parameters, identifies the experiment type and sampling scheme, plans and executes an NMRPipe processing strategy (with SMILE reconstruction for non-uniform sampling), performs quality control, and records the resolved parameters, external tool versions and warnings for reproducibility and audit.",
-  "version": "0.2.199",
+  "version": "0.9.0",
   "creators": [
     {
-      "name": "TODO: author list and order not yet confirmed (see PUBLIC_RELEASE_AUDIT.md)"
+      "name": "Li, Xuanfeng"
     }
   ],
   "keywords": [
@@ -21,5 +21,5 @@
   ],
   "access_right": "open",
   "license": "Apache-2.0",
-  "notes": "Licence: Apache-2.0 for the project's own source (see LICENSE and LICENSE_OPTIONS.md). LGPL-3.0 applies only to the Qt/PySide6 libraries bundled in the Linux AppImage, which ships their texts and notices. The creator list is still a placeholder: the owner asked that no personal data be published for now and no author list has been invented - fill it in before uploading. No Zenodo record has been created, no DOI has been reserved, and nothing has been uploaded."
+  "notes": "Licence: Apache-2.0 for the project's own source (see LICENSE and LICENSE_OPTIONS.md). LGPL-3.0 applies only to the Qt/PySide6 libraries bundled in the Linux AppImage, which ships their texts and notices. Author: Xuanfeng Li. Affiliation and DOI still to be added after the Zenodo upload; no Zenodo record has been created, no DOI has been reserved, and nothing has been uploaded."
 }

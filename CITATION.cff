@@ -1,28 +1,20 @@
 # Citation metadata for nmrForge.
 #
-# STATUS: PARTIAL. The licence is decided (Apache-2.0 for the source, 2026-09-16) and recorded below; the
-# author list, author order and affiliation are still unconfirmed - the owner asked that no personal
-# data be published for now - so this file is NOT yet a citable record. Until it is filled in, cite
-# the repository URL. Blocking items are listed in PUBLIC_RELEASE_AUDIT.md (section BLOCKERS) and
-# LICENSE_OPTIONS.md.
+# STATUS: usable as a citation for the repository itself. The author is confirmed; the affiliation,
+# the repository URL and a DOI are still to be added after the GitHub repository and the Zenodo
+# record exist (see RELEASE_CHECKLIST_v0.9.0.md). Until a DOI exists, cite the repository URL.
 #
-# When the author list is confirmed, replace the single placeholder entry with real entries, e.g.
+# When the repository is public, add:
+#   repository-code: "https://github.com/<owner>/nmrforge"
+# and after a Zenodo release:
+#   doi: "10.5281/zenodo.XXXXXXX"
+#   preferred-citation: { ... }   # only if a software paper exists
 #
-#   authors:
-#     - family-names: "Family"
-#       given-names: "Given"
-#       orcid: "https://orcid.org/0000-0000-0000-0000"
-#       affiliation: "Institute"
-#
-# and add:
-#   repository-code: "https://github.com/<owner>/<repo>"
-#   doi: "10.5281/zenodo.XXXXXXX"  # only after a Zenodo release exists
-# The licence is already set below (Apache-2.0 for the source; LGPL-3.0 applies only to the Qt/PySide6
-# bundled in the AppImage) and must not be changed without updating LICENSE, pyproject.toml,
-# README.md and LICENSE_OPTIONS.md together.
+# The licence below must not be changed without updating LICENSE, pyproject.toml, README.md and
+# LICENSE_OPTIONS.md together (a test enforces that they agree).
 
 cff-version: 1.2.0
-message: "This file is incomplete: the source licence is Apache-2.0, but the author list of nmrforge is not finalised. Please cite the repository URL instead, and check this file before using it."
+message: "If you use nmrForge, please cite this metadata (repository URL until a DOI exists)."
 title: "nmrForge: automation, parameter optimisation and quality control for Bruker multidimensional NMR data"
 abstract: >-
   nmrForge is a platform for automating Bruker multidimensional NMR data processing. It reads
@@ -32,8 +24,10 @@ abstract: >-
   external tool versions and warnings so that a run can be reproduced and audited.
 type: software
 authors:
-  - name: "TODO: author list and order not yet confirmed (see PUBLIC_RELEASE_AUDIT.md)"
-version: 0.2.199
+  - family-names: "Li"
+    given-names: "Xuanfeng"
+    # affiliation: add when confirmed (institute / laboratory)
+version: 0.9.0
 license: "Apache-2.0"
 keywords:
   - NMR

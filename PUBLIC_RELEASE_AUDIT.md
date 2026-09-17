@@ -112,8 +112,8 @@ privacy decisions. Do not change the repository visibility yet.**
 | --- | --- | --- |
 | Version definition | `core/__init__.py::__version__` (already single-source) | unchanged; the `v0.9.0` bump is deferred to the release step |
 | Packaging | AppImage (PyInstaller spec + build script + desktop/icon) | unchanged; contract still locked by a test |
-| LICENSE | absent | **added 2026-09-16**: Apache-2.0 text + project notice (holder "NMRForge contributors"); `pyproject.toml` declares the same SPDX id; LGPL stays confined to the AppImage's bundled Qt/PySide6 |
-| CITATION | absent | `CITATION.cff` with explicit placeholders |
+| LICENSE | absent | **added 2026-09-16**: Apache-2.0 text + project notice (holder **Xuanfeng Li / 李宣锋** since 2026-09-17); `pyproject.toml` declares the same SPDX id and `authors`; LGPL stays confined to the AppImage's bundled Qt/PySide6 |
+| CITATION | absent | `CITATION.cff` **usable**: author Xuanfeng Li, version 0.9.0, licence Apache-2.0; affiliation / repository URL / DOI still to add |
 | CI | absent | `.github/workflows/ci.yml` + issue/PR templates |
 | Security policy | absent | `SECURITY.md` (contact is a placeholder) |
 
@@ -486,12 +486,14 @@ readable as-is on GitHub; no site is built today.
 
 Must be resolved by you before the repository becomes visible to anyone else.
 
-### G.1 [BLOCKER] IP ownership and the author list
+### G.1 [BLOCKER] IP ownership and the author list - **author known, IP questions open**
 
-Who owns the copyright? Does the institute or laboratory claim it? Does a funding agreement impose
-redistribution conditions? `CITATION.cff` currently contains a placeholder author
-(`TODO: author list and order not yet confirmed`) and no institution, and no source file carries a
-copyright header. **Nothing about authorship was invented.**
+**Update 2026-09-17:** the author and copyright holder are now on record: **Xuanfeng Li (李宣锋)**,
+recorded in `LICENSE`, `README.md`, `pyproject.toml`, `CITATION.cff` and `.zenodo.json`; version
+0.9.0. What is still unresolved is the *institutional* side: whether the institute or laboratory
+claims the copyright, whether a funding agreement imposes redistribution conditions, whether
+co-authors exist and should be listed, and the affiliation to put in `CITATION.cff`. No source file
+carries a per-file copyright header (the root `LICENSE` notice covers the work).
 
 ### G.2 [BLOCKER] Licence - **decided 2026-09-16: source Apache-2.0, LGPL only for bundled Qt**
 
@@ -567,9 +569,10 @@ advertise a process that does not exist. Fill both in before publishing.
 
 Things only you can do. Suggested order:
 
-1. **Confirm IP ownership** (institution, funding terms, who holds copyright).
-2. **Confirm the author list, order and affiliation**, and get each author's agreement; then fill in
-   `CITATION.cff` (and later `.zenodo.json`).
+1. **Confirm IP ownership** (institution, funding terms, who holds copyright). *(Author/holder name
+   recorded 2026-09-17: Xuanfeng Li; the institutional claims are still open.)*
+2. ~~Confirm the author list~~ **partially done 2026-09-17** (Xuanfeng Li entered in `CITATION.cff`
+   and `.zenodo.json`); still to do: affiliation, any co-authors and their agreement.
 3. **Rerun the audit in the AppImage build environment**
    (`python scripts/audit_third_party.py --csv /tmp/audit.csv`) and have the LGPL mechanism reviewed
    by whoever owns the IP. *(The licence itself is decided: source Apache-2.0, LGPL only for the

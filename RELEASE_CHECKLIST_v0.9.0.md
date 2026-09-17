@@ -18,6 +18,9 @@ Working notes:
 - [ ] **IP ownership confirmed.** Who owns the copyright, and does the institute/laboratory claim
       it? Funding-agreement redistribution conditions checked.
 - [ ] **Author list, order and affiliation confirmed**, and each author agrees to be listed.
+      *(Author/copyright holder recorded 2026-09-17: Xuanfeng Li / 李宣锋 - in `LICENSE`,
+      `README.md`, `pyproject.toml`, `CITATION.cff`, `.zenodo.json`. Still open: affiliation, any
+      co-authors and their agreement.)*
 - [x] **LICENSE selected and committed (2026-09-16): source Apache-2.0, LGPL only for the bundled
       Qt/PySide6.** Root `LICENSE` holds the Apache-2.0 text plus a project notice ("Copyright 2026
       NMRForge contributors"); `pyproject.toml` declares `Apache-2.0` with the Apache classifier;
@@ -39,7 +42,9 @@ Working notes:
       AppImage.
 - [ ] **`SECURITY.md` has a real private contact** (currently a placeholder).
 - [ ] **`CODE_OF_CONDUCT.md` has a real reporting contact** (currently a placeholder).
-- [ ] **`CITATION.cff` placeholders replaced** with real authors, repository URL and licence.
+- [x] **`CITATION.cff` placeholders replaced** (2026-09-17): author Xuanfeng Li, version 0.9.0,
+      licence Apache-2.0. Still to add later: `repository-code`, affiliation, `doi` /
+      `preferred-citation` (see the appendix).
 
 ## 2. Security and privacy
 
@@ -63,7 +68,7 @@ Working notes:
 
 ## 3. Code and packaging
 
-- [ ] Version set to 0.9.0 in `core/__init__.py` (single source).
+- [x] Version set to 0.9.0 in `core/__init__.py` (single source; 2026-09-17).
 - [ ] `python -m pytest -q` green on the release commit.
 - [ ] `tests/test_release_readiness.py` green.
 - [ ] `python -m ruff check .` green.
@@ -95,7 +100,8 @@ Working notes:
 - [ ] README first screen answers: what it is, what problem it solves, what it needs, what it can
       do, how to install, how to run in five minutes.
 - [ ] Public docs under `docs/` match the shipped behaviour.
-- [ ] CHANGELOG `[Unreleased]` section converted to `[0.9.0] - <date>`.
+- [x] CHANGELOG `[Unreleased]` converted to `[0.9.0] - 2026-09-17` (a fresh empty
+      `[Unreleased]` section is kept above it).
 - [ ] GUI screenshots present, clean, and free of unpublished data, sample names, user names and
       laboratory paths.
 - [ ] Known limitations stated rather than omitted (batch is 2D-only; 3D SMILE UI hidden;
@@ -111,6 +117,32 @@ Working notes:
 - [ ] Zenodo connected / record created, DOI obtained, and `CITATION.cff` + `.zenodo.json`
       updated with the real DOI and licence.
 - [ ] Announcement (if any) does not claim performance or accuracy that no benchmark supports.
+
+## 7. GitHub repository settings (copy-paste, when you create the repository)
+
+```text
+Name:         nmrforge            (display name: nmrForge)
+Description:  Automation, parameter optimisation and quality control for Bruker multidimensional
+              NMR data (NMRPipe / SMILE), with reproducible run records.
+Topics:       nmr, nmrpipe, bruker, nmr-spectroscopy, non-uniform-sampling, smile,
+              peak-picking, quality-control, scientific-software, python, pyside6
+Visibility:   your choice (this preparation never changes it)
+```
+
+- default branch `master`; enable branch protection with "require CI to pass" after the first push;
+- add the CI badge to the README **after** the repository URL exists:
+
+```markdown
+[![CI](https://github.com/<owner>/nmrforge/actions/workflows/ci.yml/badge.svg)](https://github.com/<owner>/nmrforge/actions/workflows/ci.yml)
+```
+
+## 8. Deliberately deferred to later releases (fine to leave as TODO)
+
+These do **not** block the first public push: DOI badges, citation badge, software-paper
+reference, GUI screenshots, benchmark numbers, roadmap/milestones, GitHub Pages / documentation
+site, Codecov, logo, full API documentation site, complete examples/tutorials, release notes for
+later versions, external users and the contributor list. Add them through normal commits once the
+repository is public.
 
 ## Sign-off
 

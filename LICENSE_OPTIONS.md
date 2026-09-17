@@ -3,9 +3,9 @@
 **DECIDED on 2026-09-16: the source is released under the Apache License 2.0
 (`Apache-2.0`); LGPL is used only where a packaged distribution bundles an LGPL library (the
 AppImage's Qt/PySide6).** The text is committed as [LICENSE](LICENSE); the copyright holder is
-recorded there as "NMRForge contributors" (the owner does not publish a personal name yet, and no
-author list is invented). Sections 3-5 below are kept as the record of the analysis that led to the
-decision; the Apache-2.0 option analysed there was chosen.
+recorded there as "Xuanfeng Li (李宣锋)" - the owner supplied the name on 2026-09-17; it was
+temporarily "NMRForge contributors" before that. Sections 3-5 below are kept as the record of the
+analysis that led to the decision; the Apache-2.0 option analysed there was chosen.
 
 > Note (same day, after the first decision): the licence was first set to LGPL-3.0-only for the
 > whole project. The owner then clarified the intent - **source code Apache-2.0, LGPL only for what
@@ -23,7 +23,7 @@ that constrain the choice. This is not legal advice.
 | Institutional or laboratory copyright notice in the tree | None found. No `Copyright (c)` header in any source file. |
 | Per-file licence headers | None. |
 | Third-party components that constrain the choice | **Yes, but no longer fatally.** The GUI uses PySide6 (`LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only`), which leaves a permissive licence open in principle. See section 2. |
-| Copyright holder named in packaging metadata | None: the `LICENSE` notice names "NMRForge contributors" (the owner asks that no personal data be published yet), and `pyproject.toml` declares the licence SPDX id but no `authors` field. |
+| Copyright holder named in packaging metadata | `LICENSE` notice: "Copyright 2026 Xuanfeng Li (李宣锋)"; `pyproject.toml` declares the licence SPDX id and `authors = [{ name = "Xuanfeng Li" }]`. |
 | Git author identity used so far | `Xuanfeng Li <330249944+RociferX@users.noreply.github.com>` (the identity used in the public history); no personal email address is published |
 
 ## 2. What constrains the choice now
@@ -85,7 +85,8 @@ A `LICENSE` file **has now been committed** (`Apache-2.0`, 2026-09-16, on the ow
 instruction) with the LGPL confined to the packaged AppImage's Qt/PySide6. The remaining open points
 are the owner's review of those distribution obligations (section 6 of
 [docs/pyside6-migration/migration-plan.md](docs/pyside6-migration/migration-plan.md)) and the author
-list / IP ownership (the owner asks for no personal data for now).
+list / IP ownership: the author name is now public (Xuanfeng Li); the institution, funding terms
+and co-author list still need the owner's confirmation.
 
 ## 2.1 What the chosen licence means for this project
 

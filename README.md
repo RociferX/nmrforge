@@ -12,7 +12,13 @@ warning and output it produced so that the result can be reproduced and audited.
 > and keep the evidence (quality metrics, resolved parameters, run records) alongside the
 > spectrum.
 
-Current development version: **0.2.199** (pre-release; the public API is not frozen yet).
+Current development version: **0.9.0** · Status: **active development**
+Author: **Xuanfeng Li (李宣锋)** · Licence: Apache-2.0 for the source; LGPL-3.0 only for the
+Qt/PySide6 libraries bundled in the AppImage (see [LICENSE](LICENSE))
+
+> **nmrForge is under active development. Interfaces and processing defaults may change before
+> v1.0.** Behaviour that is documented here is tested (see the test suite), but the Python/CLI API
+> and the processing defaults are not frozen yet.
 
 ## What it does
 
@@ -300,7 +306,7 @@ request.
 ## Licence
 
 **The source code is released under the Apache License 2.0** ([LICENSE](LICENSE), SPDX
-`Apache-2.0`). The copyright holder is recorded there as "NMRForge contributors".
+`Apache-2.0`). The copyright holder is recorded there as "Xuanfeng Li (李宣锋)".
 
 **LGPL applies only to what a packaged distribution bundles.** The Linux AppImage ships Qt through
 PySide6, and that build uses Qt's `LGPL-3.0-only` option, so the AppImage carries the LGPL-3.0 and
@@ -339,8 +345,8 @@ nmrForge 面向 Bruker 1D/2D/3D NMR 数据,提供自动化处理、参数优化�
 安装与快速上手见上文 Installation / Quick start;完整中文文档入口见
 [docs/README.md](docs/README.md)。
 
-**源码采用 Apache License 2.0**(SPDX `Apache-2.0`,正文见 [LICENSE](LICENSE)),版权人记为
-"NMRForge contributors"。
+**源码采用 Apache License 2.0**(SPDX `Apache-2.0`,正文见 [LICENSE](LICENSE)),版权人:
+李宣锋(Xuanfeng Li)。当前版本 **0.9.0**,处于活跃开发中:接口与处理默认值在 v1.0 之前仍可能变化。
 
 **LGPL 只用于打包分发里被捆绑的第三方库**:Linux AppImage 内含 Qt/PySide6,该产物按 Qt 的
 `LGPL-3.0-only` 选项分发,因此 AppImage 里随附 LGPL-3.0/GPL-3.0 正文与 Qt/PySide6 声明,并提供
