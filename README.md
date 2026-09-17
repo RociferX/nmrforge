@@ -79,6 +79,32 @@ core: project model, data reading, experiment identification, planning,
 The `core/`, `backend/`, `workflow/` and `nmrforge_api/` layers are Qt-free, so processing can
 run headless on a server while `gui/` and `viewer/` provide the desktop interface.
 
+## Repository layout
+
+| Path | Contents |
+| --- | --- |
+| [`core/`](core/README.md) | data model, Bruker readers, experiment classification, sampling detection, peak localisation, QC and optimisation primitives (Qt-free) |
+| [`backend/`](backend/README.md) | the NMRPipe/SMILE boundary: script generation and subprocess execution |
+| [`workflow/`](workflow/README.md) | orchestration - import, stepwise processing, phase routes, peak picking, batch, diagnostics |
+| [`gui/`](gui/README.md) | the PySide6 desktop application |
+| [`viewer/`](viewer/README.md) | the 1D/2D/3D spectrum viewer, embedded by the GUI |
+| [`ui_support/`](ui_support/README.md) | UI helpers shared by the GUI and the viewer |
+| [`qtcompat/`](qtcompat/README.md) | the single module that names a Qt binding |
+| [`nmrforge_api/`](nmrforge_api/README.md) | the scriptable parameter-study API and its CLI |
+| [`config/`](config/README.md) | shipped defaults and machine-local overrides |
+| [`presets/`](presets/README.md) | experiment templates; the YAML files are the single source |
+| [`tests/`](tests/README.md) | the pytest suite: unit / integration / regression |
+| [`examples/`](examples/README.md) | runnable synthetic-dataset and walkthrough scripts |
+| [`packaging/`](packaging/README.md) | AppImage build assets (deferred distribution) |
+| [`scripts/`](scripts/README.md) | standalone command-line tools and validation scripts |
+| [`benchmarks/`](benchmarks/README.md) | the benchmark framework - framework only, no quoted results |
+| [`docs/`](docs/README.md) | the documentation index |
+| [`.github/`](.github/README.md) | the CI workflow and the contribution templates |
+
+Dependencies run one way: `gui/` and `viewer/` on top, then `workflow/`, then `backend/`, with
+`core/` at the bottom. [`tests/test_ownership.py`](tests/test_ownership.py) and
+[`tests/test_qt_independence.py`](tests/test_qt_independence.py) enforce the split.
+
 ## Requirements
 
 | Requirement | Notes |
