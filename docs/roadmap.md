@@ -104,5 +104,9 @@ Machine-readable values such as the warning codes `no_spectrum_change`, `roi_cap
 `processing_script_not_found` are language-neutral identifiers and are not touched, so the on-disk
 contract is unaffected.
 
+Both language editions are meant to stay available to users, each written in its own language;
+how the choice is presented (a second repository, a second branch, or two files in one tree) is
+still open.
+
 A bilingual (side-by-side) edition is deliberately not part of v0.10.0. The point of keeping a
 translation memory is to make it cheap to generate one afterwards, if there is demand for it.
