@@ -196,6 +196,8 @@
   (2026-09-13/14 条目、`docs/proposals/external-api/*`)按原样保留。新增守卫
   `tests/test_api_docstrings.py::test_peak_table_columns_match_the_docs`,把文档列序与
   `nmrforge_api.peak_tables.PEAK_TABLE_COLUMNS` 逐列比对,防止再次漂移。
+  本地全量 `1271` 收集 / `1270 passed, 1 skipped`;VM(HEAD `8721123`)
+  `bash scripts/vm_test.sh` → 1267 passed, 4 skipped, `VM_TEST_EXIT=0`。
 - **单条件失败的日志自追加(MemoryError)**:`nmrforge_api` 组合扫描里后端处理抛错时,失败
   run 的 `logs` 与外层累积列表是同一对象,`logs.extend(response["logs"])` 自我追加导致无限
   增长并抛 `MemoryError`。改为写入列表快照:单条件失败只落一条 `failed` run,同批其它
