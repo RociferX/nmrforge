@@ -1,12 +1,10 @@
 # Citation metadata for nmrForge.
 #
-# STATUS: usable as a citation for the repository itself. The author is confirmed; the affiliation,
-# the repository URL and a DOI are still to be added after the GitHub repository and the Zenodo
-# record exist (see RELEASE_CHECKLIST_v0.9.0.md). Until a DOI exists, cite the repository URL.
+# STATUS: usable as a citation for the repository itself. The author and the repository URL are
+# confirmed; the affiliation and a DOI are still to be added after the Zenodo record exists (see
+# RELEASE_CHECKLIST_v0.9.0.md). Until a DOI exists, cite the repository URL.
 #
-# When the repository is public, add:
-#   repository-code: "https://github.com/<owner>/nmrforge"
-# and after a Zenodo release:
+# After a Zenodo release add:
 #   doi: "10.5281/zenodo.XXXXXXX"
 #   preferred-citation: { ... }   # only if a software paper exists
 #
@@ -28,6 +26,7 @@ authors:
     given-names: "Xuanfeng"
     # affiliation: add when confirmed (institute / laboratory)
 version: 0.9.0
+repository-code: "https://github.com/RociferX/nmrforge"
 license: "Apache-2.0"
 keywords:
   - NMR

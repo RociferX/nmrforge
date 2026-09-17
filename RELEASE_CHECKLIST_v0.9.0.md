@@ -43,11 +43,8 @@ Working notes:
 - [ ] **`SECURITY.md` has a real private contact** (currently a placeholder).
 - [ ] **`CODE_OF_CONDUCT.md` has a real reporting contact** (currently a placeholder).
 - [x] **`CITATION.cff` placeholders replaced** (2026-09-17): author Xuanfeng Li, version 0.9.0,
-      licence Apache-2.0. Still to add later: `repository-code`, affiliation, `doi` /
-      `preferred-citation` (see the appendix).
-
-## 2. Security and privacy
-
+      licence Apache-2.0, `repository-code` = <https://github.com/RociferX/nmrforge>. Still to
+      add later: affiliation and `doi` / `preferred-citation` (see section 8).
 - [ ] Security audit clear: no credentials, tokens, SSH keys or private URLs in the working tree.
 - [ ] Git-history audit reviewed (nothing sensitive remains in earlier commits).
 - [ ] **Unpublished identifiers reviewed.** The following are currently present in tracked files
@@ -92,11 +89,9 @@ Working notes:
 - [ ] Test matrix green (Python 3.12 and 3.13).
 - [ ] Packaging-contract test green.
 - [ ] Branch protection enabled after the repository exists (require CI to pass).
-- [ ] README status badges added **after** the repository URL exists (a badge pointing at a
-      non-existent repository is worse than no badge).
-
-## 5. Documentation
-
+- [ ] README status badges added. The CI badge is already in `README.md` and points at
+      <https://github.com/RociferX/nmrforge> (owner account given 2026-09-17); it renders once
+      the repository exists and CI has run once. Other badges (DOI, citation) come later.
 - [ ] README first screen answers: what it is, what problem it solves, what it needs, what it can
       do, how to install, how to run in five minutes.
 - [ ] Public docs under `docs/` match the shipped behaviour.
@@ -130,10 +125,10 @@ Visibility:   your choice (this preparation never changes it)
 ```
 
 - default branch `master`; enable branch protection with "require CI to pass" after the first push;
-- add the CI badge to the README **after** the repository URL exists:
+- the CI badge is already in the README and points at the repository URL:
 
 ```markdown
-[![CI](https://github.com/<owner>/nmrforge/actions/workflows/ci.yml/badge.svg)](https://github.com/<owner>/nmrforge/actions/workflows/ci.yml)
+[![CI](https://github.com/RociferX/nmrforge/actions/workflows/ci.yml/badge.svg)](https://github.com/RociferX/nmrforge/actions/workflows/ci.yml)
 ```
 
 ## 8. Deliberately deferred to later releases (fine to leave as TODO)

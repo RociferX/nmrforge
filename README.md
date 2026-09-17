@@ -1,5 +1,7 @@
 # nmrForge
 
+[![CI](https://github.com/RociferX/nmrforge/actions/workflows/ci.yml/badge.svg)](https://github.com/RociferX/nmrforge/actions/workflows/ci.yml)
+
 **An automation, parameter-optimisation and quality-control platform for Bruker multidimensional
 NMR data.**
 
@@ -15,6 +17,7 @@ warning and output it produced so that the result can be reproduced and audited.
 Current development version: **0.9.0** · Status: **active development**
 Author: **Xuanfeng Li (李宣锋)** · Licence: Apache-2.0 for the source; LGPL-3.0 only for the
 Qt/PySide6 libraries bundled in the AppImage (see [LICENSE](LICENSE))
+Repository: <https://github.com/RociferX/nmrforge>
 
 > **nmrForge is under active development. Interfaces and processing defaults may change before
 > v1.0.** Behaviour that is documented here is tested (see the test suite), but the Python/CLI API
@@ -296,6 +299,23 @@ repository URL until a release with a DOI exists.
 
 If you publish work that used the processing or reconstruction engines, cite NMRPipe and SMILE
 as well - see [THIRD_PARTY.md](THIRD_PARTY.md).
+
+## Tests
+
+The suite runs without NMRPipe: the engine boundary is mocked, so a clone can be verified on any
+machine with Python >= 3.12.
+
+```bash
+python -m pip install -e ".[test]"
+python -m pytest -q                  # full suite (~1.3k tests)
+python -m pytest -m unit             # fast subset (pure logic, seconds)
+python -m ruff check .               # static checks
+```
+
+CI (GitHub Actions) runs the static checks, the full suite on Python 3.12 and 3.13, and a
+release-readiness job; a self-hosted job runs the same suite against a real NMRPipe installation
+when one is configured. Test files are flat by design and classified with the `unit` /
+`integration` / `regression` markers (`tests/categories.py` is the single source).
 
 ## Contributing
 

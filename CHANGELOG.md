@@ -29,7 +29,9 @@
   (**Xuanfeng Li / 李宣锋**);README 首屏给出「当前版本 · 状态 · 作者 · 许可证」与
   「active development:v1.0 前接口与处理默认值可能变化」;`CITATION.cff` 现在可直接引用
   (机构、仓库 URL、DOI 待建仓/Zenodo 后补)。待后续补的项(截图、benchmark、roadmap、
-  GitHub Pages、badge、完整 CHANGELOG 等)按 `RELEASE_CHECKLIST_v0.9.0.md` 的 6.x/附录处理。
+  GitHub Pages、badge、完整 CHANGELOG 等)按 `RELEASE_CHECKLIST_v0.9.0.md` 第 8 节处理;README 增加 **Tests** 一节(命令 + CI 口径 + unit/integration/regression 分类说明)。本地全量 `1271` 收集 /
+  `1270 passed, 1 skipped`;VM(HEAD `94c4b46`)`bash scripts/vm_test.sh` → 1267 passed,
+  4 skipped, `VM_TEST_EXIT=0`。
 - 公开发布准备文档:`PUBLIC_RELEASE_AUDIT.md`(审计报告)、`THIRD_PARTY.md`(第三方依赖与
   许可清单,含 PyQt6 GPL-3.0-only 阻塞项)、`LICENSE_OPTIONS.md`(许可证候选分析,不代替
   决策)、`CONTRIBUTING.md`、`SECURITY.md`、`CODE_OF_CONDUCT.md`、
