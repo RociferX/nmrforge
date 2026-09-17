@@ -63,13 +63,15 @@ NUSOptimizer
 - Using an LLM to guess phase or NUS parameters from an image; an LLM is for explanation and
   reports only.
 
-## v0.10.0 - an English repository
+## v0.10.0 - an English edition
 
-Goal: every piece of Chinese text in this repository is translated into English - inline comments,
-docstrings, user-visible messages and documentation. This is a translation task, not a runtime
-localisation framework: there is no Chinese identifier to rename, only prose.
+Goal: an English edition of this project, published alongside the Chinese original it is
+translated from. The two trees are meant to stay structurally parallel - the same files, the same
+structure, only the language of the prose differs. It is a translation task, not a runtime
+localisation framework: none of the text is an identifier, so neither the code nor the on-disk
+contract has to change.
 
-Measured scope (2026-09-17):
+Measured scope (2026-09-17), for the English side:
 
 | Category | Chinese characters | Files |
 | --- | --- | --- |
@@ -85,16 +87,22 @@ project's history, and the test suite accounts for 38,503 of the Python characte
 
 How it will be done:
 
-1. **Glossary first.** A single `docs/glossary.md` fixes the English word for each NMR term
-   (NMRPipe, SMILE, FID, NUS, zero filling, phase, baseline, TD/SI, ...), so the code, the CLI and
-   the documentation agree.
-2. **A progress ratchet.** A guard test records, per file, how much Chinese is left. It fails if a
-   file outside that list contains Chinese, and if a listed file gains Chinese. Progress can then
-   only move in one direction, and new code cannot quietly reintroduce Chinese.
-3. **Staged batches**, in this order: user-visible messages, documentation prose, docstrings in
-   production code, inline comments, `tests/`, and finally the historical `CHANGELOG` entries.
-   Each batch is a self-contained commit, so the work can stop after any batch.
+1. **Glossary first.** A single glossary fixes the English word for each NMR term (NMRPipe, SMILE,
+   FID, NUS, zero filling, phase, baseline, TD/SI, ...), so the code, the CLI and the documentation
+   agree.
+2. **A translation memory.** Every translated unit - a paragraph, a heading, a docstring, a comment,
+   a user-visible string - is recorded as a Chinese/English pair. That record, not the English
+   files alone, is the deliverable: it is what would make a bilingual edition a generation step
+   rather than a second translation pass.
+3. **A parallel guard.** A test asserts that the two trees have the same file set, that every
+   Chinese unit has an English counterpart, and that no Chinese is left on the English side.
+4. **Staged batches**, each a self-contained commit: user-visible messages, documentation prose,
+   docstrings in production code, inline comments, `tests/`, and finally the historical
+   `CHANGELOG` entries. The Chinese tree is the development trunk; the English tree follows it.
 
-Only text changes. Machine-readable values such as the warning codes `no_spectrum_change`,
-`roi_capped` and `processing_script_not_found` are language-neutral identifiers and are not
-touched, so the on-disk contract is unaffected.
+Machine-readable values such as the warning codes `no_spectrum_change`, `roi_capped` and
+`processing_script_not_found` are language-neutral identifiers and are not touched, so the on-disk
+contract is unaffected.
+
+A bilingual (side-by-side) edition is deliberately not part of v0.10.0. The point of keeping a
+translation memory is to make it cheap to generate one afterwards, if there is demand for it.
