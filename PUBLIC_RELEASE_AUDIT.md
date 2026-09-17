@@ -6,7 +6,7 @@ uploaded.** Every action below is local to this working copy.
 | | |
 | --- | --- |
 | Audit date | 2026-09-16 |
-| Audited working tree | `C:\<user>\<user>\Documents\旧名` (Git branch `master`); renamed by the owner to `(本地工作副本)` on 2026-09-17 |
+| Audited working tree | the maintainer's private working copy (Git branch `master`); renamed on 2026-09-17 |
 | Audit baseline commit | `b9cc67dcb53b9d4336ecd68a26d6f6c22a5ac2be` (working tree dirty, as expected during preparation) |
 | Software version in the tree | `0.2.199` (`core/__init__.py`, single source) |
 | Task specification | the private release-preparation task record |
@@ -389,8 +389,8 @@ history and must *not* be rewritten: the pre-2026-09-16 `CHANGELOG.md` entries, 
 `docs/tasks/archive/**`, `docs/HANDOVER.md`, `docs/DECISIONS.md` and `docs/AGENT_PROMPTS.md` - they
 record the state of the time (and several of them quote the local checkout path, see below).
 
-**Done 2026-09-17 (owner):** the private local checkout folder was renamed to match
-the VM working copy (`~/NMRForge`). Nothing in the
+**Done 2026-09-17 (owner):** the private local checkout folder was renamed to match the
+VM working copy (`~/NMRForge`). Nothing in the
 repository depends on the folder name, and the historical records that quote the old path
 (`docs/HANDOVER.md`, `docs/DECISIONS.md`, `docs/AGENT_PROMPTS.md`, `docs/problems.md`, old
 `CHANGELOG.md` entries) are deliberately left untouched as history.
@@ -548,8 +548,8 @@ It is not **recommended** yet, and this remains a blocker because:
 **Sanitised (owner chose option A on 2026-09-17).** All laboratory dataset labels, the real sample
 filename (`sampleA_…`), the study directory name and the internal host reference were replaced by
 neutral labels across the working tree (58 files: `CHANGELOG.md`, `docs/**`, four source comments,
-`scripts/`, `tests/`); `scripts/vm_sample_*.py` → `scripts/vm_sample_*.py` and
-`tests/test_vm_sample_make_nus.py` → `tests/test_vm_sample_make_nus.py`. The label mapping is kept
+`scripts/`, `tests/`); the VM helper scripts and their test were renamed to neutral names.
+The label mapping is kept
 in the owner's private archive, deliberately not in the repository. **Caveat:** older commits still
 contain the original identifiers - see the history decision in section 2 of
 `RELEASE_CHECKLIST_v0.9.0.md`.

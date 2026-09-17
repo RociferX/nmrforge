@@ -66,7 +66,7 @@ user-facing error when they are missing, instead of shipping or downloading them
 2. No third-party licensed script is vendored under `scripts/` or `presets/`.
 3. `presets/*.yaml` and the code in `core/`, `backend/`, `workflow/`, `gui/`, `viewer/`,
    `nmrforge_api/` are original project code. The pulse-program keyword lists they contain are
-   identifiers (e.g. `hsqc-sample`), not copied source code.
+   identifiers (laboratory sample shorthand), not copied source code.
 4. Icons under `gui/assets/` and `packaging/linux/icons/` are project assets.
 5. Users who build the Linux AppImage (`packaging/linux/build_appimage.sh`) are responsible for
    complying with the terms of every component they pack.

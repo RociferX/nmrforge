@@ -112,7 +112,7 @@ def test_append_run_log_line_writes_and_sanitizes(tmp_path: Path) -> None:
 def test_sanitize_path_folds_the_home_directory() -> None:
     folded = sanitize_path(Path.home() / "work" / "run.log")
     assert folded.startswith("~")
-    assert "<user>" not in folded or "<user>" in str(Path.home()).replace(str(Path.home()), "")
+    assert str(Path.home()) not in folded, "已折叠的路径不应再含完整 home 前缀"
     assert sanitize_path("没有任何路径") == "没有任何路径"
 
 

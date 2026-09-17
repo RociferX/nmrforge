@@ -394,7 +394,7 @@
   `~/NMRForge/nmrforge`。写入 `.codex/AGENTS.md`、`docs/development.md`、
   `docs/manager/decisions.md`、项目地图 §8;
 - 清理 VM home:删除测试缓存(pytest temp 121M + pycache 41M)、我建的 4 个冒烟
-  研究(42M)、异常路径目录 `NMRForge/C:Users<user>`(41M)、11 个散落的一次性
+  研究(42M)、异常路径目录(名字里带本机用户目录前缀,41M)、11 个散落的一次性
   脚本(归档到 `~/archive/scratch-2026-09/`)与无用 venv `~/nmr_venv`(450M);
   `scripts/vm_validate_nus_indirect_equiv.py` 的解释器说明改用项目 venv;
 
