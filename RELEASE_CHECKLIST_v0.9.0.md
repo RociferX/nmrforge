@@ -40,15 +40,26 @@ Working notes:
 - [ ] **LGPL obligations reviewed by the IP owner** - the notice states the mechanism, not legal
       advice, and Qt's licensing FAQ is the authority on the relink obligation for a single-file
       AppImage.
-- [ ] **`SECURITY.md` has a real private contact** (currently a placeholder).
-- [ ] **`CODE_OF_CONDUCT.md` has a real reporting contact** (currently a placeholder).
+- [x] **`SECURITY.md` has a private reporting channel** (2026-09-17): GitHub private vulnerability
+      reporting on <https://github.com/RociferX/nmrforge>, maintainer @RociferX as fallback; no email
+      published.
+- [x] **`CODE_OF_CONDUCT.md` has a reporting channel** (2026-09-17): maintainer @RociferX via
+      GitHub (with private reporting for confidential reports); no email published.
 - [x] **`CITATION.cff` placeholders replaced** (2026-09-17): author Xuanfeng Li, version 0.9.0,
       licence Apache-2.0, `repository-code` = <https://github.com/RociferX/nmrforge>. Still to
       add later: affiliation and `doi` / `preferred-citation` (see section 8).
 - [ ] Security audit clear: no credentials, tokens, SSH keys or private URLs in the working tree.
-- [ ] Git-history audit reviewed (nothing sensitive remains in earlier commits).
-- [ ] **Unpublished identifiers reviewed.** The following are currently present in tracked files
-      and must be accepted, sanitised or removed before the repository is public:
+- [ ] Git-history audit reviewed (nothing sensitive remains in earlier commits). **Open:** the
+      working tree was sanitised on 2026-09-17, but the identifiers still exist in *older commits*.
+      Decide before pushing: (a) publish a fresh single-commit history (recommended for a first
+      public release), (b) rewrite history with `git filter-repo`/BFG, or (c) accept them in
+      history.
+- [x] **Unpublished identifiers sanitised (2026-09-17, option A).** Every laboratory dataset label,
+      the real sample filename, the study directory name and the internal host reference were
+      replaced by neutral labels across the working tree (58 files, including the history-style docs
+      and the four source comments); the two VM comparison scripts were renamed
+      (`scripts/vm_sample_*.py`, `tests/test_vm_sample_make_nus.py`). The mapping is kept **outside**
+      the repository (owner's private archive). What the audit listed before the sweep:
       - the uncertainty-study paths and the real sample identifier `sampleA.fid`
         in `docs/proposals/external-api/001-parameter-sweep-api.md` and
         `docs/tasks/2026-09-14-combination-independent-picking.md`;

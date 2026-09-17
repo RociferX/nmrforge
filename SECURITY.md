@@ -7,8 +7,11 @@ Please **do not** open a public issue for a security problem.
 Report it privately through GitHub's "Report a vulnerability" feature on the repository's Security
 tab (Security Advisories). If that is not available, contact the maintainer directly:
 
-> TODO: add a private security contact address before publishing this repository.
-> Until an address is listed here, this file is not a usable reporting channel.
+The repository maintainer is **@RociferX** on GitHub. Use GitHub's private vulnerability
+reporting (<https://github.com/RociferX/nmrforge/security/advisories/new>) — it is the preferred
+channel and keeps the report private without publishing an email address. If the repository is not
+yet public, or advisories are unavailable, contact @RociferX through GitHub and ask for a private
+channel before sharing details.
 
 Please include: what you found, how to reproduce it, the affected version, and what an attacker
 could achieve.
@@ -61,6 +64,7 @@ Only the latest release is supported with security fixes:
 
 ## Status of this file
 
-This policy was written during public-release preparation. The private contact address is still a
-placeholder and must be filled in before the repository is made public - it is listed as a
-blocking manual action in [PUBLIC_RELEASE_AUDIT.md](PUBLIC_RELEASE_AUDIT.md).
+This policy was written during public-release preparation (2026-09). The reporting channel is
+**GitHub private vulnerability reporting** on <https://github.com/RociferX/nmrforge>, with the
+maintainer (@RociferX) as the fallback contact; no email address is published. See
+[PUBLIC_RELEASE_AUDIT.md](PUBLIC_RELEASE_AUDIT.md) G.5.

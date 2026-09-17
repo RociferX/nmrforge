@@ -543,13 +543,29 @@ It is not **recommended** yet, and this remains a blocker because:
 [LICENSE_OPTIONS.md](LICENSE_OPTIONS.md) section 2 and 5, and
 [THIRD_PARTY.md](THIRD_PARTY.md).
 
-### G.3 [BLOCKER] Unpublished sample identifiers and dataset shorthand
+### G.3 [RESOLVED 2026-09-17] Unpublished sample identifiers and dataset shorthand
+
+**Sanitised (owner chose option A on 2026-09-17).** All laboratory dataset labels, the real sample
+filename (`sampleA_…`), the study directory name and the internal host reference were replaced by
+neutral labels across the working tree (58 files: `CHANGELOG.md`, `docs/**`, four source comments,
+`scripts/`, `tests/`); `scripts/vm_sample_*.py` → `scripts/vm_sample_*.py` and
+`tests/test_vm_sample_make_nus.py` → `tests/test_vm_sample_make_nus.py`. The label mapping is kept
+in the owner's private archive, deliberately not in the repository. **Caveat:** older commits still
+contain the original identifiers - see the history decision in section 2 of
+`RELEASE_CHECKLIST_v0.9.0.md`.
+
+Original finding (kept for the record):
 
 `sampleA.fid` and the uncertainty-study paths, plus internal dataset shorthand
 across `CHANGELOG.md`, `docs/` and three source files. Details and recommended replacements are in
 B.3. Decide per occurrence.
 
-### G.4 [BLOCKER] Separation of nmrForge from the uncertainty study
+### G.4 [RESOLVED 2026-09-17] Separation of nmrForge from the uncertainty study
+
+Handled together with G.3: the study directory is referred to as `~/nmr-uncertainty/...` and the
+dataset it used is now `sampleA.fid`; no results, plans or drafts were ever in this repository.
+
+Original finding (kept for the record):
 
 The task's Phase 30 requires the nmrForge repository not to carry the unpublished study's results,
 plans or drafts. In practice the repository contains no results and no drafts, but it does reference
@@ -557,11 +573,12 @@ the study's existence, its directory layout (`~/nmr-uncertainty/...`) and one of
 Either sanitise those references, or accept them explicitly. Nothing about the study was moved or
 deleted here.
 
-### G.5 [BLOCKER] Private contacts for `SECURITY.md` and `CODE_OF_CONDUCT.md`
+### G.5 [RESOLVED 2026-09-17] Private contacts for `SECURITY.md` and `CODE_OF_CONDUCT.md`
 
-Both files are written, but their reporting contacts are placeholders. A security policy without a
-contact, and a code of conduct without a reporting channel, are worse than none because they
-advertise a process that does not exist. Fill both in before publishing.
+Both files now point at a real channel: GitHub private vulnerability reporting on
+<https://github.com/RociferX/nmrforge>, with the maintainer **@RociferX** as the fallback contact
+for both security and conduct reports. The owner chose **not** to publish an email address, so no
+personal address appears in the repository.
 
 ---
 

@@ -45,8 +45,10 @@ documentation, and any public forum where someone is representing the project.
 
 Report unacceptable behaviour privately to the maintainers.
 
-> TODO: add a private conduct-reporting contact before publishing this repository. Until an
-> address is listed, this file documents the standard but does not provide a reporting channel.
+Reports go to the project maintainer, **@RociferX** on GitHub. If the report needs to stay
+private, use GitHub's private reporting (Security ▸ Report a vulnerability on
+<https://github.com/RociferX/nmrforge>) and state that it is a conduct report; the maintainer will
+open a private channel. No personal email address is published.
 
 All reports will be reviewed and investigated promptly and fairly. Maintainers are obliged to
 respect the privacy and security of the reporter. Enforcement actions range from a private
