@@ -15,6 +15,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Directory guides (2026-09-17)**: every top-level directory now has an English `README.md`
+  describing what lives there and which dependency rules apply (`core/`, `backend/`,
+  `workflow/`, `gui/`, `viewer/`, `ui_support/`, `qtcompat/`, `nmrforge_api/`, `config/`,
+  `tests/`, `examples/`, `packaging/`, `.github/`); the root README gained a "Repository
+  layout" table linking to all of them.
+
 ### Fixed
 
 - **CI 可移植性(2026-09-17)**:首次公开推送后托管 CI 暴露两处「依赖运行机器」的写法,已修。
