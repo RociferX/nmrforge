@@ -10,6 +10,7 @@ from backend.config import (
     load_processing_defaults,
     resolve_nthread,
     resolve_points_per_line,
+    smile_thread_limit,
 )
 from backend.script_generator import effective_td, zero_fill_plan
 from core.data.bruker_reader import read_dataset
@@ -18,7 +19,7 @@ from core.data.bruker_reader import read_dataset
 def test_load_processing_defaults_empty_config() -> None:
     defaults = load_processing_defaults({})
     assert defaults["points_per_line"] == 2.0
-    assert defaults["nthread"] == 2
+    assert defaults["nthread"] == min(2, smile_thread_limit())
     assert defaults["nmrpipe_path"] == ""
     assert isinstance(defaults["linewidth_hz"], dict)
 
@@ -36,7 +37,7 @@ def test_load_processing_defaults_from_config() -> None:
     assert defaults["linewidth_hz"]["1H"] == 10.0
     assert defaults["linewidth_hz"]["15N"] == 12.0
     assert defaults["points_per_line"] == 3.0
-    assert defaults["nthread"] == 4
+    assert defaults["nthread"] == min(4, smile_thread_limit())
     assert defaults["nmrpipe_path"] == "/opt/nmrpipe"
 
 
@@ -53,7 +54,7 @@ def test_load_processing_defaults_invalid_fallback() -> None:
     assert defaults["linewidth_hz"]["1H"] == 8.0  # 无效 → 核素默认
     assert defaults["linewidth_hz"]["13C"] == 20.0
     assert defaults["points_per_line"] == 2.0
-    assert defaults["nthread"] == 2
+    assert defaults["nthread"] == min(2, smile_thread_limit())
     assert defaults["nmrpipe_path"] == "123"
 
 
@@ -61,9 +62,28 @@ def test_resolve_helpers() -> None:
     assert resolve_points_per_line(None) == 2.0
     assert resolve_points_per_line(4.0) == 4.0
     assert resolve_points_per_line("abc") == 2.0
-    assert resolve_nthread(None) == 2
-    assert resolve_nthread(4) == 4
-    assert resolve_nthread(0) == 2
+    limit = smile_thread_limit()
+    assert resolve_nthread(None) == min(2, limit)
+    assert resolve_nthread(4) == min(4, limit)  # 机上限=核数-2(CI 4 核→2)
+    assert resolve_nthread(0) == min(2, limit)
+
+
+def test_smile_thread_limit_follows_core_count(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """线程上限 = 核数-2,≤3 核只允许 1(2026-09-09 用户);读不到核数按 4 核兜底。
+
+    这层 clamp 是产品行为,所以期望值必须按上限算:CI 托管 runner 只有 4 核,
+    写死 4 会在 CI 上失败(2026-09-17 实测)。
+    """
+    import os as os_mod
+
+    monkeypatch.setattr(os_mod, "cpu_count", lambda: 8)
+    assert smile_thread_limit() == 6
+    monkeypatch.setattr(os_mod, "cpu_count", lambda: 3)
+    assert smile_thread_limit() == 1
+    monkeypatch.setattr(os_mod, "cpu_count", lambda: None)
+    assert smile_thread_limit() == 2
 
 
 def test_zero_fill_plan_uses_config_defaults(

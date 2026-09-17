@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import importlib.util
 import shutil
+import sys
 import types
 from pathlib import Path
 
@@ -145,6 +146,11 @@ def _clear_cancel_between_tests() -> None:
     yield
 
 
+def _qt_widgets_loaded() -> bool:
+    """本会话是否真的加载过 Qt(查 sys.modules,不触发新 import)。"""
+    return any(name in sys.modules for name in ("PySide6.QtWidgets", "PyQt6.QtWidgets"))
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _close_gui_windows_at_session_end() -> None:
     """会话结束前关闭所有残留顶层窗口并处理事件。
@@ -152,8 +158,14 @@ def _close_gui_windows_at_session_end() -> None:
     offscreen 平台下,残留的顶层窗口(含 0.2.194 恢复的导入/组间分析
     下拉 Tool 窗口)在解释器退出时销毁顺序不定,会间歇触发 Qt 访问冲突
     (0xC0000005);显式收尾关闭可消除该抖动。
+
+    只在会话真的用过 Qt 时才收尾:CI 的 release-readiness 作业只跑纯文本
+    用例、不安装 Qt 运行时库,无条件 import 会在 teardown 抛
+    ``ImportError: libEGL.so.1`` 让整份报告变红(2026-09-17 实测)。
     """
     yield
+    if not _qt_widgets_loaded():
+        return
     from qtcompat.QtWidgets import QApplication
 
     app = QApplication.instance()

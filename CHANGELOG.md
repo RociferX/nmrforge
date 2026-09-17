@@ -15,6 +15,16 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **CI 可移植性(2026-09-17)**:首次公开推送后托管 CI 暴露两处「依赖运行机器」的写法,已修。
+  `tests/conftest.py` 的会话收尾 fixture 改为只在会话真的用过 Qt 时才 import —— `release readiness`
+  作业只跑纯文本用例、不安装 Qt 运行时库,原先在 teardown 抛 `ImportError: libEGL.so.1`,让 22 项
+  用例全过的报告仍以 error 结束;`tests/test_config_defaults.py` 的 SMILE 线程数期望值改按
+  `smile_thread_limit()`(核数-2,≤3 核为 1)计算 —— 托管 runner 只有 4 核(上限 2),原先写死 4
+  必然失败,并新增 `test_smile_thread_limit_follows_core_count` 用 monkeypatch 锁定 clamp 语义。
+  **产品行为零改动**,只改测试与夹具。
+
 <!-- 下一个版本的变更写在这里;发布时把下面那节改名为新的版本号并写上日期。 -->
 
 ## [0.9.0] - 2026-09-17
