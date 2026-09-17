@@ -150,6 +150,32 @@ site, Codecov, logo, full API documentation site, complete examples/tutorials, r
 later versions, external users and the contributor list. Add them through normal commits once the
 repository is public.
 
+## 9. Public snapshot (`publish/`)
+
+`（发布快照工具,未随仓库发布）` builds the publishable snapshot from the committed tree:
+
+- exports the tracked files of `HEAD` through `git archive` (no private history, no uncommitted work);
+- drops internal process material: `.codex/`, `docs/manager/`, `docs/tasks/`, `docs/reviews/`,
+  `docs/proposals/`, the handover/status/problem records, `docs/GIT_WORKFLOW.md`,
+  `.patch_smile_gap.py`, and the generator itself;
+- installs a public `docs/README.md`, rewrites the few places that still carried the legacy project
+  name or a private absolute path, and checks every relative link resolves;
+- fails if any private identifier remains (dataset labels, sample filename, internal host,
+  developer paths);
+- initialises a fresh git repository inside `publish/` with **one** commit, so the public history
+  starts clean instead of carrying the identifiers that older private commits contain.
+
+Refresh and publish:
+
+```bash
+python （发布快照工具,未随仓库发布）        # regenerate publish/
+cd publish
+git remote add origin git@github.com:RociferX/nmrforge.git
+git push -u origin master
+```
+
+`publish/` is git-ignored in this repository (it is generated and has its own `.git`).
+
 ## Sign-off
 
 | Item | Owner decision | Date |
