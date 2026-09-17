@@ -40,7 +40,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from core.logging_setup import attach_run_log, detach_run_log
+from core.logging_setup import append_run_log_line, attach_run_log, detach_run_log
 from core.peaks import axis_units
 from core.planning.method_selector import select_method
 from core.project.manager import sha256_file
@@ -1640,11 +1640,20 @@ def _run_condition_with_log(session: StudySession, **kwargs: Any) -> SweepRun:
     ``_run_condition`` 本身只在失败路径写 ``logger.exception``;失败 run 因此一定留下带
     完整 traceback 的 ``run.log``(Phase 21 的「traceback 进日志」),成功的 run 不产生空文件。
     """
-    handler = attach_run_log(Path(kwargs["run_dir"]))
+    run_dir = Path(kwargs["run_dir"])
+    log_path = run_dir / "run.log"
+    handler = attach_run_log(run_dir)
+    append_run_log_line(
+        log_path,
+        f"run 开始: workflow={kwargs.get('workflow_id')} "
+        f"condition={getattr(kwargs.get('target'), 'condition', '-')}",
+    )
     try:
-        return _run_condition(session, **kwargs)
+        run = _run_condition(session, **kwargs)
     finally:
         detach_run_log(handler)
+    append_run_log_line(log_path, f"run 结束: status={run.status}")
+    return run
 
 
 def _run_condition(

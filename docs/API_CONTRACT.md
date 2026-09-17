@@ -36,11 +36,16 @@ ProjectManager:
     start_run(experiment_id, workflow_ref, inputs, scripts, params) -> WorkflowRun
     finish_run(run_id, status, outputs, message)
     snapshot_run(run_id, scripts, params) -> snapshot 目录
+    run_dir(run_id) -> Path        # processing/<exp_id>/runs/<run_id>/
+    run_log_path(run_id) -> Path   # 该目录下的 run.log(每次 run 都有,Phase 22)
 ```
 
 `ExperimentEntry`:id(exp_NNN)/title/source/status/metadata/imported_at/notes/
 sample_id/segments。`WorkflowRun`:run_id(R-YYYYMMDD-NNN)/inputs(SHA-256)/
 params/outputs/snapshot_dir/status。JSON schema 1.1,原子写。
+
+run 目录(`processing/<exp_id>/runs/<run_id>/`)含 `snapshot/`(脚本+参数快照)与
+`run.log`(开始/结束两行 + 该 run 期间按级别记录的日志;路径可由 run_id 推导,不进 schema)。
 
 ## 3. ProcessingBackend(backend/base.py)
 

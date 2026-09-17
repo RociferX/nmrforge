@@ -2493,7 +2493,12 @@ def test_sweep_failure_is_isolated_and_parameters_recorded(
     assert failed_log.is_file(), "失败 run 必须留下 run.log(logging 通道)"
     logged = failed_log.read_text(encoding="utf-8")
     assert "forced workflow failure" in logged and "Traceback" in logged
-    assert not Path(ok.run_dir, "run.log").exists()
+    assert "结束: status=failed" in logged
+    # Phase 22:成功的 run 也有一份 run.log(开始/结束两行,不依赖日志级别)
+    ok_log = Path(ok.run_dir, "run.log")
+    assert ok_log.is_file()
+    ok_text = ok_log.read_text(encoding="utf-8")
+    assert "run 开始" in ok_text and "结束: status=" in ok_text
 
 
 # ------------------------------------- Phase 21:用户可见错误信息(CLI 出口)

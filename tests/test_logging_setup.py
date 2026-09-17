@@ -11,6 +11,7 @@ import pytest
 from core.logging_setup import (
     LEVEL_ENV,
     LOGGER_NAME,
+    append_run_log_line,
     attach_run_log,
     configure_logging,
     detach_run_log,
@@ -94,6 +95,18 @@ def test_attach_run_log_defers_file_creation_until_a_record(tmp_path: Path) -> N
         detach_run_log(handler)
     # detach 可重复调用且关闭文件句柄
     detach_run_log(handler)
+
+
+def test_append_run_log_line_writes_and_sanitizes(tmp_path: Path) -> None:
+    """头/尾行直接写文件:不受日志级别影响,且 home 绝对路径被脱敏。"""
+    target = tmp_path / "run.log"
+    append_run_log_line(target, f"读到 {Path.home() / 'data' / 'x.fid'}")
+    append_run_log_line(target, "第二行")
+    lines = target.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 2
+    assert lines[0].startswith("20") and "INFO nmrforge.run:" in lines[0]
+    assert str(Path.home()) not in lines[0], "绝对路径必须脱敏成 ~"
+    assert "~" in lines[0] and "第二行" in lines[1]
 
 
 def test_sanitize_path_folds_the_home_directory() -> None:

@@ -20,6 +20,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from core.logging_setup import append_run_log_line, attach_run_log, detach_run_log
 from core.project.artifacts import find_primary_spectrum
 from core.project.models import (
     DEFAULT_DIRECTORIES,
@@ -76,12 +77,18 @@ def _next_sequence_id(existing: list[str], prefix: str, width: int = 3) -> str:
     return f"{prefix}{max_n + 1:0{width}d}"
 
 
+#: 逐 run 日志文件名(Phase 22:每次 run 一份;见 docs/proposals/2026-09-17-run-log.md)
+RUN_LOG_NAME = "run.log"
+
+
 class ProjectManager:
     """项目根目录上的全部领域操作;所有写操作后需 save() 落盘。"""
 
     def __init__(self, root: Path | str | None = None) -> None:
         self.root = Path(root).resolve() if root else None
         self.project: ProjectInfo | None = None
+        # 逐 run 日志的 FileHandler(Phase 22:start_run 挂、finish_run 收)
+        self._run_logs: dict[str, Any] = {}
 
     # ------------------------------------------------------------------
     # 生命周期
@@ -203,7 +210,10 @@ class ProjectManager:
         atomic_write_json(self.root / "project.json", self.project.to_dict())
 
     def close(self) -> None:
-        """关闭当前项目(仅清内存,不自动保存)。"""
+        """关闭当前项目(仅清内存,不自动保存)。未 finish 的 run 日志 handler 一并收回。"""
+        for handler in list(self._run_logs.values()):
+            detach_run_log(handler)
+        self._run_logs.clear()
         self.root = None
         self.project = None
 
@@ -221,6 +231,40 @@ class ProjectManager:
         rel = self.project.directories.get(key, key)
         return self.root / rel
 
+
+    def run_dir(self, run_id: str) -> Path:
+        """run 目录:``<processing>/<exp_id>/runs/<run_id>/``(快照与 run.log 都在这)。"""
+        run = self._require_run(run_id)
+        return self.dir_path("processing") / run.experiment_id / "runs" / run.run_id
+
+    def run_log_path(self, run_id: str) -> Path:
+        """逐 run 日志文件 ``<run_dir>/run.log``(Phase 22:每次 run 都会有)。"""
+        return self.run_dir(run_id) / RUN_LOG_NAME
+
+    def _open_run_log(self, run: WorkflowRun) -> None:
+        """挂上本次 run 的 run.log,并写入「开始」头(不受全局日志级别影响)。"""
+        try:
+            path = self.run_log_path(run.run_id)
+        except ProjectError:  # pragma: no cover - 项目未加载
+            return
+        self._run_logs[run.run_id] = attach_run_log(path.parent)
+        append_run_log_line(
+            path,
+            f"run {run.run_id} 开始: workflow={run.workflow_ref or '-'} "
+            f"inputs={sorted(run.inputs)}",
+        )
+
+    def _close_run_log(self, run: WorkflowRun) -> None:
+        """写入「结束」尾行并收回 handler(没有对应 start 的 run 直接跳过)。"""
+        handler = self._run_logs.pop(run.run_id, None)
+        try:
+            message = f"run {run.run_id} 结束: status={run.status}"
+            if run.message:
+                message += f" message={run.message}"
+            append_run_log_line(self.run_log_path(run.run_id), message)
+        except (ProjectError, OSError):
+            pass
+        detach_run_log(handler)
 
     def data_base(self, exp_id: str, data_id: str) -> Path:
         """schema 1.3 数据目录基座:<project>/<exp_id>/<data_id>/。"""
@@ -880,6 +924,7 @@ class ProjectManager:
             }
         ]
         self.project.workflow_runs.append(run)
+        self._open_run_log(run)
         self.add_history(
             "run_started",
             {
@@ -917,6 +962,7 @@ class ProjectManager:
             "run_finished",
             {"run_id": run_id, "status": status, "message": message},
         )
+        self._close_run_log(run)
         return run
 
     def snapshot_run(
@@ -927,8 +973,8 @@ class ProjectManager:
     ) -> Path:
         """把运行脚本与参数快照写入 processing/<exp>/runs/<run_id>/snapshot/。"""
         run = self._require_run(run_id)
-        exp = self._require_experiment(run.experiment_id)
-        snapshot = self.dir_path("processing") / exp.id / "runs" / run.run_id / "snapshot"
+        self._require_experiment(run.experiment_id)  # 保持原有校验:实验必须存在
+        snapshot = self.run_dir(run.run_id) / "snapshot"
         snapshot.mkdir(parents=True, exist_ok=True)
         for script_name, content in scripts.items():
             (snapshot / script_name).write_text(content, encoding="utf-8")

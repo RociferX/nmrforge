@@ -129,6 +129,15 @@
   本地全量 `1268` 收集 / `1267 passed, 1 skipped`;VM(HEAD `88316c1`)`bash scripts/vm_test.sh`
   → 1264 passed, 4 skipped, `VM_TEST_EXIT=0`。
 
+### Added
+
+- **每次 run 一份 `run.log`(Phase 22 剩余,Shared Contract)**:`ProjectManager` 新增
+  `run_dir()`/`run_log_path()`,`start_run` 写「开始」头、`finish_run` 写「结束: status=…
+  message=…」并收回 FileHandler;GUI/batch/人工/导入/挑峰/对外 API 的运行现在都在
+  `processing/<exp>/runs/<run_id>/run.log` 留下记录(头/尾行直接写,不依赖日志级别);
+  `snapshot/` 路径与内容不变,`WorkflowRun` schema 不变。提案
+  `docs/proposals/2026-09-17-run-log.md`。
+
 ### Changed
 
 - **用户可见错误信息(Phase 21,CLI 出口)**:`python -m nmrforge_api` 不再把路径写错、YAML

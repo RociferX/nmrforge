@@ -212,6 +212,28 @@ def test_workflow_run_lifecycle_and_sequencing(tmp_path: Path) -> None:
     assert any(h.action == "run_finished" for h in manager.project.processing_history)
 
 
+def test_every_run_gets_a_run_log(tmp_path: Path) -> None:
+    """Phase 22:每次 run 一份 run.log(开始/结束两行),handler 在 finish 后收回。"""
+    manager = ProjectManager.create_project(tmp_path / "proj", "demo")
+    exp = manager.add_experiment("/sampleD")
+    run = manager.start_run(exp.id, workflow_ref="hsqc_standard", inputs={"ft2": "spectra/x.ft2"})
+
+    log_path = manager.run_log_path(run.run_id)
+    assert log_path.is_file(), "start_run 之后 run.log 就应该存在"
+    text = log_path.read_text(encoding="utf-8")
+    assert "开始" in text and run.run_id in text and "hsqc_standard" in text
+
+    manager.finish_run(run.run_id, "success", message="ok")
+    text = log_path.read_text(encoding="utf-8")
+    assert "结束: status=success" in text and "message=ok" in text
+    assert run.run_id not in manager._run_logs, "finish 之后不得留着 FileHandler"
+
+    # 快照与 run.log 同一个 run 目录(向后兼容:snapshot/ 位置不变)
+    snapshot = manager.snapshot_run(run.run_id, {"process.com": "#!/bin/csh\n"})
+    assert snapshot.parent == log_path.parent
+    assert snapshot.name == "snapshot"
+
+
 def test_start_run_unknown_experiment_raises(tmp_path: Path) -> None:
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     with pytest.raises(ProjectError, match="实验不存在"):
