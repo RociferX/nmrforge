@@ -96,7 +96,7 @@ Working notes:
 
 ## 4. CI
 
-- [ ] CI workflow valid and green on `master`.
+- [ ] CI workflow valid and green on `main` (the workflow triggers on `main` and `master`).
 - [ ] Test matrix green (Python 3.12 and 3.13).
 - [ ] Packaging-contract test green.
 - [ ] Branch protection enabled after the repository exists (require CI to pass).
