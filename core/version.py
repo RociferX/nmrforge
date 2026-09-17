@@ -22,7 +22,7 @@ import sys
 from pathlib import Path
 
 # 关键依赖:记录版本让产物可以回答「由哪套工具生成」
-_DEPENDENCIES = ("numpy", "scipy", "nmrglue", "matplotlib", "PyQt6", "PyYAML")
+_DEPENDENCIES = ("numpy", "scipy", "nmrglue", "matplotlib", "PySide6", "PyYAML")
 
 # backend 层探测到的外部工具版本(进程内缓存)
 _TOOL_VERSIONS: dict[str, str] = {}

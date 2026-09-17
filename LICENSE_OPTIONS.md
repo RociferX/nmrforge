@@ -24,7 +24,7 @@ that constrain the choice. This is not legal advice.
 | Per-file licence headers | None. |
 | Third-party components that constrain the choice | **Yes, but no longer fatally.** The GUI uses PySide6 (`LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only`), which leaves a permissive licence open in principle. See section 2. |
 | Copyright holder named in packaging metadata | `LICENSE` notice: "Copyright 2026 Xuanfeng Li (李宣锋)"; `pyproject.toml` declares the licence SPDX id and `authors = [{ name = "Xuanfeng Li" }]`. |
-| Git author identity used so far | `Xuanfeng Li <330249944+RociferX@users.noreply.github.com>` (the identity used in the public history); no personal email address is published |
+| Git author identity | `Xuanfeng Li <330249944+RociferX@users.noreply.github.com>` (the identity used in the public history); no personal email address is published |
 
 ## 2. What constrains the choice now
 

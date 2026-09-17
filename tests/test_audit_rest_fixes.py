@@ -63,13 +63,22 @@ def test_analysis_removed_from_product_surface() -> None:
         importlib.import_module("gui.report_panel")
 
 
-def test_analysis_removal_is_archived() -> None:
-    """REPORT-008 留档:删除范围/原因/恢复方法必须有文档记录。"""
+def test_analysis_removal_is_documented() -> None:
+    """REPORT-008 留档:删除范围/原因/恢复方法必须有文档记录。
+
+    私有仓库里完整记录在 `docs/tasks/archive/2026-09-12-analysis-removal.md`;
+    公开仓库不随附内部归档,此时以 `CHANGELOG.md` 里的同一记录为准。
+    """
     note = Path("docs/tasks/archive/2026-09-12-analysis-removal.md")
-    assert note.is_file()
-    text = note.read_text(encoding="utf-8")
-    for key in ("workflow/analyze.py", "恢复", "git log"):
-        assert key in text, key
+    if note.is_file():
+        text = note.read_text(encoding="utf-8")
+        for key in ("workflow/analyze.py", "恢复", "git log"):
+            assert key in text, key
+        return
+    changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
+    assert "REPORT-008" in changelog
+    assert "workflow/analyze.py" in changelog
+    assert "恢复方法" in changelog
 
 
 def test_report_products_no_longer_drive_status(tmp_path: Path) -> None:

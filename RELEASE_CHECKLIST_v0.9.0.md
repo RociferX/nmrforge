@@ -150,28 +150,34 @@ site, Codecov, logo, full API documentation site, complete examples/tutorials, r
 later versions, external users and the contributor list. Add them through normal commits once the
 repository is public.
 
-## 9. Public snapshot (`publish/`)
+## 9. Public repository (`publish/`, filtered history)
 
-`（发布快照工具,未随仓库发布）` builds the publishable snapshot from the committed tree:
+The public repository is produced by `（历史过滤工具,未随仓库发布）`: an offline
+`git fast-export | filter | git fast-import` pass over the private `master` that (a) replaces the
+private identifiers using a mapping kept **outside** the repository, (b) drops internal-only
+material (`.codex/`, `docs/manager|tasks|reviews|proposals`, handover/status/problem records,
+`docs/GIT_WORKFLOW.md`, `.patch_smile_gap.py`, the audit records and the tooling itself),
+(c) renames the lab-named helper files, (d) installs the public `docs/README.md`, and
+(e) rewrites author/committer to the real identity. The replacement of text is checked afterwards
+by a full-history scan (private identifiers, internal paths) plus the link check,
+`ruff check .`, `pytest -m unit` and the release-readiness suite inside `publish/`.
 
-- exports the tracked files of `HEAD` through `git archive` (no private history, no uncommitted work);
-- drops internal process material: `.codex/`, `docs/manager/`, `docs/tasks/`, `docs/reviews/`,
-  `docs/proposals/`, the handover/status/problem records, `docs/GIT_WORKFLOW.md`,
-  `.patch_smile_gap.py`, and the generator itself;
-- installs a public `docs/README.md`, rewrites the few places that still carried the legacy project
-  name or a private absolute path, and checks every relative link resolves;
-- fails if any private identifier remains (dataset labels, sample filename, internal host,
-  developer paths);
-- initialises a fresh git repository inside `publish/` with **one** commit, so the public history
-  starts clean instead of carrying the identifiers that older private commits contain.
+`（发布快照工具,未随仓库发布）` still exists as a **diff/QA tool**: it renders the current tree as
+a single-commit snapshot and checks links/identifiers. It refuses to overwrite a `publish/` that
+already contains history unless `--force` is given.
 
-Refresh and publish:
+**Current state (2026-09-17):** `publish/` is the filtered **real history** - 1235 commits
+(2026-08-11 -> 2026-09-17), branch `main`, every commit authored by
+`Xuanfeng Li <330249944+RociferX@users.noreply.github.com>`, zero private identifiers and zero
+internal-only paths across all objects (produced by `（历史过滤工具,未随仓库发布）`;
+the replacement table lives outside the repository).
+
+Push it (owner action, after creating the empty GitHub repository):
 
 ```bash
-python （发布快照工具,未随仓库发布）        # regenerate publish/
 cd publish
-git remote add origin git@github.com:RociferX/nmrforge.git
-git push -u origin master
+git remote add origin git@github.com/RociferX/nmrforge.git
+git push -u origin main        # branch is main; first push must not force
 ```
 
 `publish/` is git-ignored in this repository (it is generated and has its own `.git`).
