@@ -1,47 +1,50 @@
-# 路线图
+# Roadmap
 
-## Phase 1：数据理解与基础处理
-
-```text
-Bruker parser → 2D/3D 检测 → uniform/NUS 检测 → 轴映射 → 基础处理
-→ 自动相位 → 基线 QC → 噪声估计 → 质量评分
-```
-
-落地项：
-
-- core/experiment：parse_dataset_params / sampling_detector / dimension_mapper / acquisition_mode_detector
-- core/processing：apodization / zero_fill / ft / phase / baseline / calibration 原语
-- core/planning：ProcessingDag.execution_order（拓扑排序）+ PipelineRunner 缓存
-- core/qc：noise / snr / phase_quality / baseline_quality / spectrum_quality.evaluate
-- backend：NMRPipeBackend.health_check / process（确定性 .com 生成）
-- AutoProcessor.run 最小闭环（uniform 2D）
-
-## Phase 2：实验分类
-
-- 多证据 classifier（pulse program → 核组合 → 维度顺序 → FnMODE → 参数 → 命名）
-- ExperimentTemplate.from_yaml + presets/*.yaml 加载
-- HSQC / HNCA / HNCO / HNCACB / CBCANH 模板匹配与置信度门控
-
-## Phase 3：NUS 管线
+## Phase 1: data understanding and basic processing
 
 ```text
-direct 优化（代表性子集）→ reconstruction 候选（fast preview + 少量候选 + 局部搜索 + early stopping）
-→ 最佳重建 → indirect 优化 → DAG 缓存
+Bruker parser -> 2D/3D detection -> uniform/NUS detection -> axis mapping -> basic processing
+-> automatic phase correction -> baseline QC -> noise estimation -> quality score
 ```
 
-落地项：NusReconstructionParams 后端接线（SMILE）、CandidateGenerator/GridSearch/LocalSearch、
-OptimizationBudget 执行、NUS quality score（data consistency + SNR + peak quality + stability - artifact）。
+Delivered items:
 
-## Phase 4：深度优化与报告
+- core/experiment: parse_dataset_params / sampling_detector / dimension_mapper / acquisition_mode_detector
+- core/processing primitives: apodization / zero_fill / ft / phase / baseline / calibration
+- core/planning: ProcessingDag.execution_order (topological sort) + PipelineRunner cache
+- core/qc: noise / snr / phase_quality / baseline_quality / spectrum_quality.evaluate
+- backend: NMRPipeBackend.health_check / process (deterministic .com generation)
+- AutoProcessor.run - the minimal closed loop (uniform 2D)
 
-- 谱中心/引用偏移调整(分析部分):改 ft3/ft2 FDF 头部 CAR/ORIG 平移谱轴,
-  数据不变;对齐实验室显示约定与手动校正(机制已验证 2026-08-18)
-- peak stability 分析
-- BayesianOptimizer（昂贵任务）
-- ProcessingReport：report.json / report.html / processing_recipe.json
-- 学习用户最终接受的参数（Parameter Predictor 远期，不做第一版 ML）
+## Phase 2: experiment classification
 
-## 第一版最值得实现的优化器
+- multi-evidence classifier (pulse program -> nucleus combination -> dimension order -> FnMODE -> parameters -> naming)
+- ExperimentTemplate.from_yaml + loading presets/*.yaml
+- HSQC / HNCA / HNCO / HNCACB / CBCANH template matching with a confidence gate
+
+## Phase 3: the NUS pipeline
+
+```text
+direct optimisation (representative subset) -> reconstruction candidates (fast preview + a few
+candidates + local search + early stopping) -> best reconstruction -> indirect optimisation -> DAG cache
+```
+
+Delivered items: NusReconstructionParams wired to the backend (SMILE), CandidateGenerator /
+GridSearch / LocalSearch, OptimizationBudget execution, NUS quality score (data consistency +
+SNR + peak quality + stability - artifact).
+
+## Phase 4: deeper optimisation and reporting
+
+- spectrum centre and referencing offset adjustment (the analysis part): shift the spectrum axis by
+  editing the CAR/ORIG headers of ft3/ft2, leaving the data untouched; this aligns the laboratory
+  display convention with manual correction (mechanism verified 2026-08-18)
+- peak stability analysis
+- BayesianOptimizer (expensive tasks)
+- ProcessingReport: report.json / report.html / processing_recipe.json
+- learning the parameters a user finally accepts (Parameter Predictor is a long-term idea; no ML
+  in the first version)
+
+## The optimisers most worth building first
 
 ```text
 AutoProcessor
@@ -54,7 +57,40 @@ NUSOptimizer
 ├── CandidateManager / CacheManager / StabilityAnalyzer
 ```
 
-## 明确不做（第一版）
+## Explicitly out of scope (first version)
 
-- 完整结构解析、自动 assignment、AI 结构预测、NOE。
-- 用 LLM 直接看图猜 phase/猜 NUS 参数；LLM 只做解释与报告。
+- Full structure determination, automatic assignment, AI structure prediction, NOE.
+- Using an LLM to guess phase or NUS parameters from an image; an LLM is for explanation and
+  reports only.
+
+## v0.10.0 - a bilingual (English / Chinese) application
+
+Goal: the application itself becomes usable in English as well as Chinese, not just the
+documentation. Today every user-visible string is a hard-coded Chinese literal and there is no
+translation layer at all - no `QTranslator`, no gettext, no `.ts` catalogue.
+
+Planned work:
+
+1. **Message catalogue.** One table (`core/messages.py`) mapping a stable key to
+   `{"zh-CN": ..., "en": ...}`, plus a `msg(key, **kwargs)` accessor, used by the GUI, the CLI,
+   the Python API and everything written into run records. Machine-readable values are already
+   language-neutral: warning codes such as `no_spectrum_change`, `roi_capped` and
+   `processing_script_not_found` are ASCII identifiers, so the on-disk contract does not change -
+   only the human-readable sentence next to them does.
+2. **Language selection.** The default follows the system locale. It can be overridden in the GUI
+   settings, through `NMRFORGE_LANG` for the CLI and API, and with a `--lang` option.
+3. **Coverage.** Roughly 3,100 user-visible strings in the application layers (`gui/`, `viewer/`,
+   `workflow/`, `backend/`, `nmrforge_api/`, `core/`), translated in stages - the GUI shell first,
+   then the text that ends up in records and logs. Argument-parsing help and the long-tail scripts
+   come last.
+4. **Enforcement.** A guard test that rejects new bare Chinese literals in the UI layer, so the two
+   languages cannot drift apart as features are added.
+
+Two related but separate tracks:
+
+- **Documentation** stays bilingual with English as the primary file and a Chinese sibling where it
+  is worth maintaining;
+- **Terminology** is fixed in a shared glossary, so that the GUI, the CLI and the documentation use
+  the same English word for the same thing.
+
+Scope and staging are estimates, not commitments; nothing here changes the v0.9.0 source release.
