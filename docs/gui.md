@@ -13,12 +13,11 @@ what the interface does; the underlying engine behaviour is in
 ## Starting it
 
 ```bash
-./NMRForge-<version>-x86_64.AppImage    # users: the supported distribution
-python main.py                          # developers: reuses the local nmrforge/ venv
+python main.py    # v0.9.0 source-release entry point
 ```
 
-On first launch the AppImage installs its own desktop entry and icon. `--remove-desktop` removes
-them, `NMRFORGE_NO_DESKTOP=1` skips the desktop integration.
+The AppImage path is deferred for v0.9.0. Its planned desktop integration remains documented in
+[packaging.md](packaging.md) and must pass the separate binary release checklist.
 
 ## Window layout
 

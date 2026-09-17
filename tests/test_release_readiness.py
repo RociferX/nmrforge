@@ -51,6 +51,7 @@ ROOT_ARTIFACTS = [
     "LICENSE_OPTIONS.md",
     "CITATION.cff",
     "RELEASE_CHECKLIST_v0.9.0.md",
+    "APPIMAGE_RELEASE_CHECKLIST.md",
     "PUBLIC_RELEASE_AUDIT.md",
 ]
 
@@ -268,3 +269,47 @@ def test_benchmark_output_schema_columns_are_documented() -> None:
         assert column in readme, f"benchmarks/README.md does not document column {column}"
     # The framework must not ship results.
     assert not (ROOT / "benchmark_results.csv").exists()
+
+
+@pytest.mark.parametrize("mode", ["2d", "3d", "all"])
+@pytest.mark.parametrize("explicit_root", [False, True])
+def test_zero_fill_validation_cli_routes_output_and_datasets(
+    tmp_path, monkeypatch, mode, explicit_root,
+) -> None:
+    """Exercise main(), not just --help: missing Namespace fields must be caught."""
+    from scripts import vm_validate_zero_fill as script
+
+    monkeypatch.chdir(tmp_path)
+    calls = []
+    monkeypatch.setattr(script, "run_2d", lambda dataset, root: calls.append(("2d", dataset, root)))
+    monkeypatch.setattr(script, "run_3d", lambda dataset, root: calls.append(("3d", dataset, root)))
+    args = [mode, "--dataset-2d", "input2d", "--dataset-3d", "input3d"]
+    output = Path("chosen-output") if explicit_root else Path("outputs/zero-fill-validation")
+    if explicit_root:
+        args += ["--root", str(output)]
+    assert script.main(args) == 0
+    assert output.is_dir()
+    modes = ["2d", "3d"] if mode == "all" else [mode]
+    assert calls == [(m, Path("input" + m), output) for m in modes]
+
+
+def test_source_release_keeps_appimage_as_deferred_distribution() -> None:
+    """Prevent a future edit from advertising unverified binaries as this release."""
+    checklist = _read("APPIMAGE_RELEASE_CHECKLIST.md")
+    assert "DEFERRED" in checklist
+    assert "Apache-2.0" in checklist and "LGPL-3.0" in checklist
+    assert "APPIMAGE_RELEASE_CHECKLIST.md" in _read("RELEASE_CHECKLIST_v0.9.0.md")
+    assert "AppImage is not included" in _read("README.md")
+    claims = "\n".join(
+        _read(name) for name in (
+            "README.md", "docs/getting-started.md", "docs/installation.md",
+            "docs/gui.md", "docs/faq.md", "docs/cli.md",
+        )
+    )
+    stale_claims = (
+        "AppImage (recommended)",
+        "supported distribution is a single-file Linux AppImage",
+        "users: the supported distribution",
+    )
+    for stale in stale_claims:
+        assert stale not in claims

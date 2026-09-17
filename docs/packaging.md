@@ -1,11 +1,13 @@
 # AppImage 打包方案（NMRForge）
 
-目标：最终以单个可执行文件（`NMRForge-<版本>-<架构>.AppImage`）在 Linux 发行，
-无需用户安装 Python/Qt 依赖。
+状态：**暂缓分发**。v0.9.0 只发布 Apache-2.0 源码，不附带 AppImage。
+
+本页保留未来 Linux AppImage 的构建方案；真正分发前必须完成根目录
+`APPIMAGE_RELEASE_CHECKLIST.md`，并按最终捆绑的 PySide6/Qt 与其他组件复核许可。
 
 ## 发行策略（PACK-015，2026-09-12 定案）
 
-- **唯一受支持的发行物是 AppImage。** 它由 PyInstaller 打成，`config/`、`presets/`、`gui/assets/` 通过 spec 的 `datas` 进 `_MEIPASS`，资源定位见 `core/app_paths.py`。
+- **当前 v0.9.0 发行物只有源码。** AppImage 是预留的未来二进制形态；它由 PyInstaller 打成，`config/`、`presets/`、`gui/assets/` 通过 spec 的 `datas` 进 `_MEIPASS`，资源定位见 `core/app_paths.py`。
 - **`pip install .` / wheel 不是受支持的发行方式**：运行资源（`config/`、`presets/`、`gui/assets/`）位于仓库根目录、不属于任何 Python 包，setuptools 的包发现与 package-data 覆盖不到；即使装上，`resource_path()` 也找不到这些目录。wheel 只作为开发/依赖解析用途，开发一律使用 `pip install -e .`（见 README 开发流程）。
 - `pyproject.toml` 只保留一个控制台入口 `nmrforge-viewer`（独立谱图查看器），它不依赖仓库根资源；主 GUI 入口是 `main.py`（由 AppImage 启动），不作为 console script 发布。
 - 回归门禁：`tests/test_audit_rest_fixes.py` 锁定 spec 的 `datas` 必须覆盖三个运行资源目录，防止打包配置被误删后 AppImage 静默缺资源。

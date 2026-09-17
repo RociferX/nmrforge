@@ -93,6 +93,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--dataset-3d", type=Path, default=Path("/home/<lab-user>/Desktop/data/sampleB")
     )
+    parser.add_argument(
+        "--root", type=Path, default=Path("outputs/zero-fill-validation"),
+        help="Output directory (default: outputs/zero-fill-validation)",
+    )
     opts = parser.parse_args(argv if argv is not None else sys.argv[1:])
     opts.root.mkdir(parents=True, exist_ok=True)
     if opts.mode in ("2d", "all"):

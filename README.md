@@ -15,8 +15,8 @@ warning and output it produced so that the result can be reproduced and audited.
 > spectrum.
 
 Current development version: **0.9.0** · Status: **active development**
-Author: **Xuanfeng Li (李宣锋)** · Licence: Apache-2.0 for the source; LGPL-3.0 only for the
-Qt/PySide6 libraries bundled in the AppImage (see [LICENSE](LICENSE))
+Author: **Xuanfeng Li (李宣锋)** · Source licence: Apache-2.0 (see [LICENSE](LICENSE))
+Distribution: source release; the AppImage is deferred and is not part of v0.9.0
 Repository: <https://github.com/RociferX/nmrforge>
 
 > **nmrForge is under active development. Interfaces and processing defaults may change before
@@ -83,7 +83,7 @@ run headless on a server while `gui/` and `viewer/` provide the desktop interfac
 
 | Requirement | Notes |
 | --- | --- |
-| Python | 3.12 or newer - only for the developer/source install; the AppImage bundles its own runtime |
+| Python | 3.12 or newer for the current source release |
 | NMRPipe | Required for real processing (conversion, FT, baseline, phase). Not bundled - install it yourself and make sure the executables are on `PATH`, or point nmrForge at the installation directory. |
 | SMILE | Required for NUS reconstruction. Ships with NMRPipe and is located the same way. |
 | Python packages | See `pyproject.toml`; `pip install -e .` installs them. |
@@ -95,55 +95,31 @@ licence inventory.
 
 ## Installation
 
-### Users: run the AppImage (recommended)
-
-The supported distribution is a single-file Linux AppImage that bundles the Python runtime, Qt
-and all runtime resources, so users do not have to install Python or any Python package:
+The v0.9.0 release contains source code only. **An AppImage is not included in this release.**
+Clone the repository and use an editable install so the repository-root resources remain available:
 
 ```bash
-chmod +x NMRForge-<version>-x86_64.AppImage
-./NMRForge-<version>-x86_64.AppImage
+git clone https://github.com/RociferX/nmrforge.git
+cd nmrforge
+python -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+python -m pip install -e ".[test]"
+python main.py
 ```
 
-You still need NMRPipe (and SMILE, which comes with it) installed on your own machine, because
-nmrForge drives it rather than replacing it - see
-[external-dependencies.md](docs/external-dependencies.md).
+Real processing additionally requires NMRPipe; SMILE is needed for NUS reconstruction. They are
+external programs and are never downloaded or bundled by nmrForge. A plain `pip install .` and a
+wheel are not supported because runtime resources live at the repository root.
 
-Anything after the first run is handled for you: the AppImage installs its own desktop entry and
-icon on first launch. `--remove-desktop` removes them again, `NMRFORGE_NO_DESKTOP=1` skips the
-desktop integration, and deleting the AppImage file leaves your project data untouched. If the
-system cannot mount AppImages, run it with `--appimage-extract-and-run` or set
-`APPIMAGE_EXTRACT_AND_RUN=1`.
-
-Bundled into the AppImage: the application, PySide6/pyqtgraph/NumPy/SciPy/Matplotlib/nmrglue,
-`config/`, `presets/` and the GUI assets. Not bundled: NMRPipe, SMILE and any dataset.
-
-Build one yourself with:
-
-```bash
-bash packaging/linux/build_appimage.sh     # needs Python 3.12+, pip and appimagetool
-```
-
-### Developers: editable source install
-
-```bash
-git clone <this repository>
-cd nmrForge
-pip install -e ".[test]"     # runtime dependencies + pytest
-pip install -e ".[dev]"      # adds ruff
-python main.py               # creates and reuses a local nmrforge/ virtual environment
-```
-
-A plain `pip install .` is **not** a supported distribution path: the runtime resources
-(`config/`, `presets/`, `gui/assets/`) live at the repository root rather than inside a Python
-package, so a wheel install cannot locate them. Editable installs and the AppImage are the
-supported shapes - see [docs/packaging.md](docs/packaging.md).
+The AppImage build recipe remains in the repository for future binary work. It would bundle
+PySide6/Qt and therefore requires a separate third-party licence and clean-machine release review.
+See [APPIMAGE_RELEASE_CHECKLIST.md](APPIMAGE_RELEASE_CHECKLIST.md); do not treat the presence of
+the build scripts as an available or approved binary.
 
 ## Quick start
 
-**Users:** download or build the AppImage, launch it, and import a Bruker dataset directory in
-the GUI. The steps below are the developer/source route and also demonstrate what works without
-NMRPipe installed.
+**This release is installed from source.** Launch the GUI with `python main.py`. The steps below
+also demonstrate what works without NMRPipe installed.
 
 The example only needs a Bruker dataset directory and no NMRPipe to walk through data
 understanding and quality control:
@@ -178,8 +154,7 @@ python -m nmrforge_api sweep --study ./study --grid grid.yaml
 ## GUI usage
 
 ```bash
-./NMRForge-<version>-x86_64.AppImage    # recommended, bundles everything
-python main.py                         # development entry point (creates the local venv on first run)
+python main.py    # source-release GUI entry point; creates/reuses the local venv
 ```
 
 The main window is organised around a project/experiment/dataset tree on the left, a processing
@@ -328,18 +303,17 @@ request.
 **The source code is released under the Apache License 2.0** ([LICENSE](LICENSE), SPDX
 `Apache-2.0`). The copyright holder is recorded there as "Xuanfeng Li (李宣锋)".
 
-**LGPL applies only to what a packaged distribution bundles.** The Linux AppImage ships Qt through
-PySide6, and that build uses Qt's `LGPL-3.0-only` option, so the AppImage carries the LGPL-3.0 and
-GPL-3.0 texts plus the Qt/PySide6 notices and lets a recipient replace or relink those libraries.
-None of that changes the Apache-2.0 terms of this project's own code, and installing from source
-does not trigger LGPL obligations - you install Qt yourself, as a separate package.
+**A future AppImage has a separate distribution boundary.** It would bundle PySide6/Qt and other
+third-party libraries, so their licences and the applicable LGPL-3.0 distribution requirements
+must be satisfied and verified for the exact binary. No AppImage is distributed with v0.9.0.
+This does not change the Apache-2.0 terms of nmrForge's own source code.
 
 What this means in practice:
 
 - **using nmrforge from source**: Apache-2.0, including the patent grant, the requirement to keep
   attribution notices, and a statement of changes if you redistribute modified files;
-- **redistributing the AppImage**: keep the bundled licence texts and notices (the AppImage prints
-  them with `--licenses`) and keep the replace/relink route working;
+- **a future AppImage**: complete [APPIMAGE_RELEASE_CHECKLIST.md](APPIMAGE_RELEASE_CHECKLIST.md)
+  against the final binary before redistribution;
 - third-party components keep their own licences; see [THIRD_PARTY.md](THIRD_PARTY.md) and, for
   binaries, `packaging/linux/THIRD_PARTY_LICENSES/NOTICE.md`.
 
@@ -368,10 +342,10 @@ nmrForge 面向 Bruker 1D/2D/3D NMR 数据,提供自动化处理、参数优化�
 **源码采用 Apache License 2.0**(SPDX `Apache-2.0`,正文见 [LICENSE](LICENSE)),版权人:
 李宣锋(Xuanfeng Li)。当前版本 **0.9.0**,处于活跃开发中:接口与处理默认值在 v1.0 之前仍可能变化。
 
-**LGPL 只用于打包分发里被捆绑的第三方库**:Linux AppImage 内含 Qt/PySide6,该产物按 Qt 的
-`LGPL-3.0-only` 选项分发,因此 AppImage 里随附 LGPL-3.0/GPL-3.0 正文与 Qt/PySide6 声明,并提供
-替换/重链接路径(`--licenses` 可自查)。这不改变本项目源码的 Apache-2.0 条款;从源码安装属于
-用户自行安装 Qt,不触发 LGPL 义务。
+**v0.9.0 只发布源码,暂不发布 AppImage。**未来 AppImage 会捆绑 Qt/PySide6 与其他第三方库,
+必须按最终产物逐项满足相应许可与 LGPL-3.0 分发要求,并完成干净机器验收。预留清单见
+[APPIMAGE_RELEASE_CHECKLIST.md](APPIMAGE_RELEASE_CHECKLIST.md)。这不改变本项目源码的
+Apache-2.0 条款。
 
 第三方组件各自保留其许可,见 [THIRD_PARTY.md](THIRD_PARTY.md);二进制分发的声明见
 `packaging/linux/THIRD_PARTY_LICENSES/NOTICE.md`。选择依据与随之而来的义务记录在

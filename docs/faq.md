@@ -7,19 +7,20 @@ then drives NMRPipe to do the processing. You need an NMRPipe installation.
 
 ### Do I need Python to use nmrForge?
 
-No. The supported distribution is a single-file Linux AppImage that bundles its own Python
-runtime and Qt. You only need NMRPipe installed separately. Python 3.12+ is needed only for the
-developer/source install.
+Yes for v0.9.0, which is a source-only release: install Python 3.12+ and use the editable
+repository checkout. A future AppImage may bundle Python and Qt, but no binary is distributed
+with this release.
 
 ### Can I run it on Windows or macOS?
 
-The GUI and the test suite run on Windows: that is the development environment. macOS is untested
-and no CI covers it. The supported end-user distribution is the Linux AppImage.
+The GUI and test suite run on Windows and Linux. macOS is currently untested and has no CI.
+v0.9.0 is installed from source; a Linux AppImage is deferred.
 
 ### Does nmrForge send my data anywhere?
 
-No. There is no telemetry, no upload, and no requirement to log in. Processing runs locally. The
-only network access involved in the project at all is the AppImage build fetching its runtime.
+No. There is no telemetry, upload or account requirement. Processing is local, and the
+application itself makes no network calls. Development or future packaging may use network
+access to install dependencies or fetch an AppImage runtime.
 
 ### Does it modify my raw data?
 

@@ -1,193 +1,60 @@
-# Release checklist - v0.9.0 (first public version)
+# Source release checklist - v0.9.0
 
-Status: **prepared, not executed.** No tag, no GitHub release, no Zenodo record and no DOI has
-been created. This checklist is the gate between the current private repository and a public
-v0.9.0.
+Status: **source release candidate ready locally; external publication not executed.**
 
-Working notes:
+This checklist covers the Git source repository only. No AppImage, wheel, DOI or Zenodo record is
+part of this release. Binary preparation is intentionally separate in
+[APPIMAGE_RELEASE_CHECKLIST.md](APPIMAGE_RELEASE_CHECKLIST.md).
 
-- The version currently in `core/__init__.py` is `0.2.199`. The first public version is planned as
-  **0.9.0** (explicitly not 1.0.0: the scripting API is not frozen). Bumping the version is a
-  one-line change in `core/__init__.py`, because that is the single source of truth - but make it
-  as part of the release, not before, so the version never overstates readiness.
-- Release artefacts: the Linux AppImage is the supported distribution
-  (`packaging/linux/build_appimage.sh`). A wheel is not a supported distribution path (PACK-015).
+## Source release boundary
 
-## 1. Legal and ownership
+- [x] Version is `0.9.0` from the single source `core.__version__`.
+- [x] nmrForge source licence is Apache-2.0 and the copyright holder is recorded.
+- [x] PySide6/Qt and every other dependency retain their own licences.
+- [x] The AppImage is deferred and documentation does not advertise a binary download.
+- [x] No wheel or non-editable pip install is presented as supported.
+- [x] NMRPipe, SMILE and research data are not bundled.
+- [x] Author identity and public repository URL are populated; DOI and affiliation may be added later.
 
-- [ ] **IP ownership confirmed.** Who owns the copyright, and does the institute/laboratory claim
-      it? Funding-agreement redistribution conditions checked.
-- [ ] **Author list, order and affiliation confirmed**, and each author agrees to be listed.
-      *(Author/copyright holder recorded 2026-09-17: Xuanfeng Li / 李宣锋 - in `LICENSE`,
-      `README.md`, `pyproject.toml`, `CITATION.cff`, `.zenodo.json`. Still open: affiliation, any
-      co-authors and their agreement.)*
-- [x] **LICENSE selected and committed (2026-09-16): source Apache-2.0, LGPL only for the bundled
-      Qt/PySide6.** Root `LICENSE` holds the Apache-2.0 text plus a project notice ("Copyright 2026
-      NMRForge contributors"); `pyproject.toml` declares `Apache-2.0` with the Apache classifier;
-      README (EN/ZH), `CITATION.cff`, `.zenodo.json`, `THIRD_PARTY.md` and
-      [LICENSE_OPTIONS.md](LICENSE_OPTIONS.md) state the same, and the guard test fails if the
-      project's own licence claims LGPL or if the AppImage stops shipping the LGPL text. The PyQt6
-      GPL-3.0-only obstacle had already been removed by the PySide6 migration.
-- [x] **Third-party licences checked** against the actual installed versions, including what is
-      bundled into the AppImage: `scripts/audit_third_party.py` (28 permissive, 4 weak copyleft,
-      0 strong-copyleft-only on 2026-09-16) with the full inventory in
-      [THIRD_PARTY.md](THIRD_PARTY.md) section 7.
-- [x] **LGPL texts and notice shipped**: `packaging/linux/THIRD_PARTY_LICENSES/` is hash-checked by
-      `scripts/check_third_party_licenses.py`, copied into the AppDir by the build script, and
-      readable from the built AppImage with `--licenses`.
-- [x] **Replace/relink route documented and supported** (`PYSIDE6_REQUIREMENT` et al. in
-      `build_appimage.sh`, see `NOTICE.md`).
-- [ ] **LGPL obligations reviewed by the IP owner** - the notice states the mechanism, not legal
-      advice, and Qt's licensing FAQ is the authority on the relink obligation for a single-file
-      AppImage.
-- [x] **`SECURITY.md` has a private reporting channel** (2026-09-17): GitHub private vulnerability
-      reporting on <https://github.com/RociferX/nmrforge>, maintainer @RociferX as fallback; no email
-      published.
-- [x] **`CODE_OF_CONDUCT.md` has a reporting channel** (2026-09-17): maintainer @RociferX via
-      GitHub (with private reporting for confidential reports); no email published.
-- [x] **`CITATION.cff` placeholders replaced** (2026-09-17): author Xuanfeng Li, version 0.9.0,
-      licence Apache-2.0, `repository-code` = <https://github.com/RociferX/nmrforge>. Still to
-      add later: affiliation and `doi` / `preferred-citation` (see section 8).
-- [ ] Security audit clear: no credentials, tokens, SSH keys or private URLs in the working tree.
-- [ ] Git-history audit reviewed (nothing sensitive remains in earlier commits). **Open:** the
-      working tree was sanitised on 2026-09-17, but the identifiers still exist in *older commits*.
-      Decide before pushing: (a) publish a fresh single-commit history (recommended for a first
-      public release), (b) rewrite history with `git filter-repo`/BFG, or (c) accept them in
-      history.
-- [x] **Unpublished identifiers sanitised (2026-09-17, option A).** Every laboratory dataset label,
-      the real sample filename, the study directory name and the internal host reference were
-      replaced by neutral labels across the working tree (58 files, including the history-style docs
-      and the four source comments); the two VM comparison scripts were renamed
-      (`scripts/vm_sample_*.py`, `tests/test_vm_sample_make_nus.py`). The mapping is kept **outside**
-      the repository (owner's private archive). What the audit listed before the sweep:
-      - the uncertainty-study paths and the real sample identifier `sampleA.fid`
-        in `docs/proposals/external-api/001-parameter-sweep-api.md` and
-        `docs/tasks/2026-09-14-combination-independent-picking.md`;
-      - laboratory dataset shorthand (`sampleA`, `sampleB`, `sampleC`, `sampleM`, ...) in
-        `CHANGELOG.md`, several `docs/` files, and comments in `backend/script_generator.py`,
-        `core/experiment/acquisition_mode_detector.py`, `core/processing/axes.py`;
-      - the internal development host reference in `.codex/AGENTS.md`, `docs/GIT_WORKFLOW.md`
-        and `docs/HANDOVER.md`.
-- [ ] **Internal management docs reviewed** for public suitability (`docs/manager/`, `docs/tasks/`,
-      `docs/AGENT_PROMPTS.md`, `docs/HANDOVER.md`, `docs/PROJECT_STATUS.md`, `.codex/`).
-- [ ] **Example data publishable**: `examples/` and `tests/fixtures/` contain only synthetic or
-      tiny header-only data.
-- [ ] No raw NMR data anywhere in the repository or its history.
+## Privacy, history and repository shape
 
-## 3. Code and packaging
+- [x] `publish/` is the filtered real history on branch `main`, with only the public author identity.
+- [x] Internal management material is excluded from every public revision.
+- [x] The current tree and every Git object are checked for the release's sensitive patterns.
+- [x] No raw NMR data, credentials, private keys or private remote is included.
+- [x] The public repository has no remote, tag or release configured locally.
 
-- [x] Version set to 0.9.0 in `core/__init__.py` (single source; 2026-09-17).
-- [ ] `python -m pytest -q` green on the release commit.
-- [ ] `tests/test_release_readiness.py` green.
-- [ ] `python -m ruff check .` green.
-- [ ] `python -m pip install -e ".[test]"` works from a clean clone.
-- [x] AppImage builds from the release commit and starts (2026-09-16, user's Linux VM):
-      `BUILD_EXIT=0`, `NMRForge-0.2.199-x86_64.AppImage` (~134 MB); smoke test with an isolated
-      `HOME` passed: `--licenses` prints the shipped LGPL/GPL texts, NOTICE, PROVENANCE and
-      BUILD_INFO; the application starts and stays in its event loop; the desktop entry is
-      installed and `--remove-desktop` removes it. Remaining nuance: this was the build host,
-      not a freshly provisioned third machine - a distribution test on an untouched machine is
-      still worth doing before announcing.
-- [ ] AppImage smoke test: launches, `--remove-desktop` works, `NMRFORGE_NO_DESKTOP=1` works.
-- [ ] GUI launches (`python main.py`); CLI launches (`python -m nmrforge_api --help`).
-- [ ] Core API imports without Qt (`import core, nmrforge_api`).
-- [ ] Example workflow runs (`examples/make_synthetic_dataset.py` + `examples/quickstart.py`).
-- [ ] README quick start is reproducible exactly as written.
+## Engineering gates
 
-## 4. CI
+- [ ] Full pytest suite passes on the final public commit.
+- [ ] Ruff passes on the final public commit.
+- [ ] Release-readiness tests pass on the final public commit.
+- [ ] Source install succeeds from a clean clone on Python 3.12 and 3.13.
+- [ ] Hosted GitHub CI passes after the first push.
+- [x] Core/API import without Qt, CLI help and the synthetic quickstart work locally.
+- [x] The existing NMRPipe development-host regression is recorded separately from hosted CI.
 
-- [ ] CI workflow valid and green on `main` (the workflow triggers on `main` and `master`).
-- [ ] Test matrix green (Python 3.12 and 3.13).
-- [ ] Packaging-contract test green.
-- [ ] Branch protection enabled after the repository exists (require CI to pass).
-- [ ] README status badges added. The CI badge is already in `README.md` and points at
-      <https://github.com/RociferX/nmrforge> (owner account given 2026-09-17); it renders once
-      the repository exists and CI has run once. Other badges (DOI, citation) come later.
-- [ ] README first screen answers: what it is, what problem it solves, what it needs, what it can
-      do, how to install, how to run in five minutes.
-- [ ] Public docs under `docs/` match the shipped behaviour.
-- [x] CHANGELOG `[Unreleased]` converted to `[0.9.0] - 2026-09-17` (a fresh empty
-      `[Unreleased]` section is kept above it).
-- [ ] GUI screenshots present, clean, and free of unpublished data, sample names, user names and
-      laboratory paths.
-- [ ] Known limitations stated rather than omitted (batch is 2D-only; 3D SMILE UI hidden;
-      NMSPipe required; GUI is Chinese-only).
+## Owner actions for first publication
 
-## 6. Publication (all manual, by the owner)
+- [ ] Confirm the repository visibility and create the empty GitHub repository.
+- [ ] Push `publish/` branch `main` without force.
+- [ ] Confirm the first hosted CI matrix is green.
+- [ ] Enable branch protection requiring CI.
+- [ ] Review the rendered README, licence, citation and security pages on GitHub.
+- [ ] Create the `v0.9.0` source tag/release only after those checks.
+- [ ] Do not attach an AppImage; link its deferred checklist if users ask about binaries.
 
-- [ ] GitHub repository created by the owner.
-- [ ] **Visibility chosen by the owner** (this preparation never changes visibility).
-- [ ] Remote added and `master` pushed by the owner.
-- [ ] Release tag `v0.9.0` created and the GitHub release published.
-- [ ] AppImage attached to the release.
-- [ ] Zenodo connected / record created, DOI obtained, and `CITATION.cff` + `.zenodo.json`
-      updated with the real DOI and licence.
-- [ ] Announcement (if any) does not claim performance or accuracy that no benchmark supports.
-
-## 7. GitHub repository settings (copy-paste, when you create the repository)
+## GitHub repository settings
 
 ```text
-Name:         nmrforge            (display name: nmrForge)
+Name:         nmrforge
 Description:  Automation, parameter optimisation and quality control for Bruker multidimensional
               NMR data (NMRPipe / SMILE), with reproducible run records.
+Default:      main
 Topics:       nmr, nmrpipe, bruker, nmr-spectroscopy, non-uniform-sampling, smile,
               peak-picking, quality-control, scientific-software, python, pyside6
-Visibility:   your choice (this preparation never changes it)
 ```
 
-- default branch `master`; enable branch protection with "require CI to pass" after the first push;
-- the CI badge is already in the README and points at the repository URL:
-
-```markdown
-[![CI](https://github.com/RociferX/nmrforge/actions/workflows/ci.yml/badge.svg)](https://github.com/RociferX/nmrforge/actions/workflows/ci.yml)
-```
-
-## 8. Deliberately deferred to later releases (fine to leave as TODO)
-
-These do **not** block the first public push: DOI badges, citation badge, software-paper
-reference, GUI screenshots, benchmark numbers, roadmap/milestones, GitHub Pages / documentation
-site, Codecov, logo, full API documentation site, complete examples/tutorials, release notes for
-later versions, external users and the contributor list. Add them through normal commits once the
-repository is public.
-
-## 9. Public repository (`publish/`, filtered history)
-
-The public repository is produced by `（历史过滤工具,未随仓库发布）`: an offline
-`git fast-export | filter | git fast-import` pass over the private `master` that (a) replaces the
-private identifiers using a mapping kept **outside** the repository, (b) drops internal-only
-material (`.codex/`, `docs/manager|tasks|reviews|proposals`, handover/status/problem records,
-`docs/GIT_WORKFLOW.md`, `.patch_smile_gap.py`, the audit records and the tooling itself),
-(c) renames the lab-named helper files, (d) installs the public `docs/README.md`, and
-(e) rewrites author/committer to the real identity. The replacement of text is checked afterwards
-by a full-history scan (private identifiers, internal paths) plus the link check,
-`ruff check .`, `pytest -m unit` and the release-readiness suite inside `publish/`.
-
-`（发布快照工具,未随仓库发布）` still exists as a **diff/QA tool**: it renders the current tree as
-a single-commit snapshot and checks links/identifiers. It refuses to overwrite a `publish/` that
-already contains history unless `--force` is given.
-
-**Current state (2026-09-17):** `publish/` is the filtered **real history** - 1235 commits
-(2026-08-11 -> 2026-09-17), branch `main`, every commit authored by
-`Xuanfeng Li <330249944+RociferX@users.noreply.github.com>`, zero private identifiers and zero
-internal-only paths across all objects (produced by `（历史过滤工具,未随仓库发布）`;
-the replacement table lives outside the repository).
-
-Push it (owner action, after creating the empty GitHub repository):
-
-```bash
-cd publish
-git remote add origin git@github.com/RociferX/nmrforge.git
-git push -u origin main        # branch is main; first push must not force
-```
-
-`publish/` is git-ignored in this repository (it is generated and has its own `.git`).
-
-## Sign-off
-
-| Item | Owner decision | Date |
-| --- | --- | --- |
-| IP ownership | | |
-| Author list | | |
-| Licence | | |
-| Visibility | | |
-| Release approval | | |
+The local checks can establish a release candidate. The hosted CI checkbox necessarily remains
+open until the first external push; it is a post-push publication gate rather than a reason to
+publish binaries.

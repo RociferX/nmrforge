@@ -7,9 +7,8 @@ drives:
 python -m nmrforge_api --help
 ```
 
-Installation of the AppImage does not put this command on `PATH`, because the AppImage is a GUI
-application. Use the command line from a source (editable) install, or from a machine where
-nmrForge is installed for scripted use - see [installation.md](installation.md).
+Use the command line from the v0.9.0 source checkout after its editable install; see
+[installation.md](installation.md).
 
 ## Sub-commands
 

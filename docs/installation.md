@@ -1,63 +1,29 @@
 # Installation
 
-## Which install do I want?
+## Current release: source only
 
-| You are... | Use this | Notes |
-| --- | --- | --- |
-| A user who wants to process spectra | **the Linux AppImage** | Bundles Python, Qt and all runtime resources. Nothing else to install except NMRPipe. |
-| Developing nmrForge | editable source install (`pip install -e ".[dev]"`) | Needs Python 3.12+. |
-| Scripting the parameter-sweep API on a cluster | editable source install from a clone | The API needs the repository layout, not an installed wheel. |
-
-**A plain `pip install .` (wheel) is not a supported distribution path.** The runtime resources
-(`config/`, `presets/`, `gui/assets/`) live at the repository root rather than inside a Python
-package, so a non-editable install cannot locate them. See
-[packaging.md](packaging.md) (decision PACK-015).
-
-## Recommended: the AppImage
+v0.9.0 does not include an AppImage or wheel. Use an editable install from the repository:
 
 ```bash
-chmod +x NMRForge-<version>-x86_64.AppImage
-./NMRForge-<version>-x86_64.AppImage
+git clone https://github.com/RociferX/nmrforge.git
+cd nmrforge
+python -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+python -m pip install -e ".[test]"
+python main.py
 ```
 
-What the AppImage contains: the application, PySide6, pyqtgraph, NumPy, SciPy, Matplotlib, nmrglue,
-`config/`, `presets/` and the GUI assets.
+A plain `pip install .` is not supported because `config/`, `presets/` and `gui/assets/` remain
+repository-root resources. Real processing requires a separately installed NMRPipe; NUS
+reconstruction also requires SMILE.
 
-What it does **not** contain: NMRPipe, SMILE, Java, or any dataset. nmrForge drives NMRPipe as an
-external program, so install NMRPipe yourself and see
-[external-dependencies.md](external-dependencies.md) if it is not detected.
+## Deferred AppImage
 
-Desktop integration happens automatically on first launch: the AppImage writes a desktop entry
-and an icon into `~/.local/share`, pointing at the AppImage's real path, so moving or deleting the
-AppImage behaves sensibly.
-
-| Command | Effect |
-| --- | --- |
-| `./NMRForge-<version>-x86_64.AppImage` | Start the application |
-| `./NMRForge-<version>-x86_64.AppImage --remove-desktop` | Remove the desktop entry and icon |
-| `NMRFORGE_NO_DESKTOP=1 ./NMRForge-<version>-x86_64.AppImage` | Start without touching `~/.local/share` |
-| `./NMRForge-<version>-x86_64.AppImage --appimage-extract-and-run` | Run systems/directories where FUSE mounting is unavailable |
-
-Uninstalling is exactly deleting the AppImage file. Project data and studies live in your own
-directories and are never touched.
-
-### Building the AppImage
-
-```bash
-bash packaging/linux/build_appimage.sh
-```
-
-Requirements: Python 3.12+, `pip`, `appimagetool`, `mksquashfs`, and network access on first run
-to fetch the AppImage runtime (a cached runtime under `~/.cache/nmrforge-appimage/` is reused, and
-`RUNTIME_FILE` overrides it). The script reads the version from `core.__version__`, so the
-artefact name and the version inside the application cannot drift. Build on an older glibc
-distribution (Ubuntu 20.04/22.04) if you want the AppImage to run on more target machines.
-
-Note: redistribution of a built AppImage is a licensing question as well as a technical one, and
-the AppImage *bundles* Qt: PySide6 is offered under LGPL-3.0 among other options, which brings the
-LGPL obligations (licence texts, notices, and the ability to replace or relink the library) with it.
-See [LICENSE_OPTIONS.md](../LICENSE_OPTIONS.md) and [THIRD_PARTY.md](../THIRD_PARTY.md) before
-publishing binaries.
+The build recipe remains available, but its presence does not mean a binary has been released.
+An AppImage bundles PySide6/Qt and other libraries whose licences remain in force alongside the
+Apache-2.0 licence for nmrForge's source. Before any binary is offered, the final artefact must pass
+the licence, provenance and clean-machine checks in
+[APPIMAGE_RELEASE_CHECKLIST.md](../APPIMAGE_RELEASE_CHECKLIST.md).
 
 ## Developers: editable source install
 
@@ -78,7 +44,7 @@ pip install -e ".[docs]"    # documentation tooling
 ```
 
 `python main.py` bootstraps a local `nmrforge/` virtual environment on first run and reuses it
-afterwards; that is also the entry point the AppImage wraps.
+afterwards. A future AppImage would wrap the same entry point.
 
 The editable install exposes one console script:
 
@@ -87,7 +53,7 @@ The editable install exposes one console script:
 | `nmrforge-viewer` | Standalone spectrum viewer (`python -m viewer` works too) |
 
 The main GUI is intentionally not published as a console script, because it depends on the
-repository-root resources (decision PACK-015). Use the AppImage or `python main.py`.
+repository-root resources (decision PACK-015). Use `python main.py` in the editable checkout.
 
 The processing command line lives in the `nmrforge_api` package:
 

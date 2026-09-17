@@ -410,3 +410,30 @@ def test_import_records_link_stats(
     assert stats["copy"] == 0
     assert stats["writable"] == 0
     assert result.warnings == []
+
+
+def test_user_experiment_type_write_failure_keeps_traceback(tmp_path, monkeypatch, caplog):
+    """An OS write failure stays observable without changing the GUI bool contract."""
+    import logging
+    from types import SimpleNamespace
+
+    from workflow import import_workflow
+
+    path = tmp_path / "metadata.json"
+    path.write_text('{"dataset": {}}', encoding="utf-8")
+    original = path.read_bytes()
+    manager = SimpleNamespace(
+        root=tmp_path,
+        project=SimpleNamespace(experiment=lambda exp_id: SimpleNamespace(data=[])),
+        data_metadata_path=lambda exp_id, data_id: path,
+    )
+
+    def locked(*args):
+        raise PermissionError("metadata is temporarily locked")
+
+    monkeypatch.setattr(import_workflow, "atomic_write_json", locked)
+    with caplog.at_level(logging.DEBUG, logger="workflow.import_workflow"):
+        assert not import_workflow.apply_user_experiment_type(manager, "exp", "data", "HSQC")
+    assert path.read_bytes() == original
+    record = next(r for r in caplog.records if "persist user experiment type" in r.message)
+    assert record.exc_info[0] is PermissionError

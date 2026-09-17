@@ -10,7 +10,7 @@
 - BATCH-012   批量正式限定 2D(常量 + 跳过原因);
 - STUB-013    native 后端骨架与未实现的模板校验删除,provider 创建期即校验;
 - DEAD-014    无消费者的配置段与旧 SMILE 文案清理;
-- PACK-015    AppImage 为唯一受支持发行物,spec datas 覆盖运行资源;
+- PACK-015    v0.9.0 源码发布、AppImage 暂缓,spec datas 保留未来运行资源;
 - QA-017      两项 Ruff 告警(由 ruff check 全量门禁覆盖,此处只锁关键点)。
 """
 
@@ -340,16 +340,17 @@ def test_smile_wording_matches_scheme_b() -> None:
 
 # ------------------------------------------------------------------ PACK-015
 def test_appimage_spec_covers_runtime_resources() -> None:
-    """PACK-015:唯一发行物(AppImage)的 datas 必须覆盖运行期资源目录。"""
+    """PACK-015:未来 AppImage 的 datas 必须继续覆盖运行期资源目录。"""
     spec = Path("packaging/linux/NMRForge.spec").read_text(encoding="utf-8")
     for resource in ("config", "presets", "gui/assets"):
         assert f'("../../{resource}", "{resource}")' in spec, resource
     assert '"../../main.py"' in spec
 
 
-def test_packaging_policy_declares_appimage_only() -> None:
-    """PACK-015:发行边界必须写进打包文档(wheel/pip 只用于开发)。"""
+def test_packaging_policy_declares_source_only_and_defers_appimage() -> None:
+    """PACK-015:当前源码发布与未来二进制边界必须明确。"""
     text = Path("docs/packaging.md").read_text(encoding="utf-8")
-    assert "发行策略" in text
-    assert "唯一受支持" in text
+    assert "v0.9.0 只发布 Apache-2.0 源码" in text
+    assert "暂缓分发" in text
     assert "wheel" in text
+    assert "APPIMAGE_RELEASE_CHECKLIST.md" in text

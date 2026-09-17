@@ -19,10 +19,12 @@
 
 ## [0.9.0] - 2026-09-17
 
-> 首个公开发布版本:工程与合规准备完成(许可证、第三方审计、测试体系、CI、AppImage)。
+> 首个公开发布版本:发布 Apache-2.0 源码;AppImage 暂缓,另按二进制许可与验收清单推进。
 > 接口与处理默认值在 v1.0 之前仍可能变化,见 README 的 active-development 说明。
 
 ### Added
+
+- **源码发布边界收口(2026-09-17)**:v0.9.0 仅发布源码,AppImage 暂缓且不随本版提供;新增 `APPIMAGE_RELEASE_CHECKLIST.md` 保留 PySide6/Qt 等捆绑组件的独立许可、构建溯源与干净机器验收门槛;发布检查器改为扫描全部 Git 对象并忽略未跟踪缓存;修复零填充验证脚本缺失 `--root` 参数,元数据写盘失败保留 debug traceback。
 
 - **公开发布最小信息补齐(2026-09-17)**:版本升到 **0.9.0**(仍是 `core.__version__` 单一来源);
   作者与版权人写入 `README.md` / `LICENSE` / `pyproject.toml` / `CITATION.cff` / `.zenodo.json`

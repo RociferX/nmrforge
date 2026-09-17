@@ -3,6 +3,22 @@
 Prepared for the repository owner. **Nothing has been published, pushed, tagged, released or
 uploaded.** Every action below is local to this working copy.
 
+## Current source-release decision (2026-09-17)
+
+This document began as the preparation audit and retains its dated findings below. The current
+decision supersedes its earlier blockers and distribution wording:
+
+- v0.9.0 is a **source-only** release under Apache-2.0;
+- the AppImage is deferred and is governed by `APPIMAGE_RELEASE_CHECKLIST.md`;
+- the public repository is the filtered `publish/` history on `main`;
+- an all-object audit now checks blobs, trees, commits, tags, ref names and unreachable objects;
+- final engineering evidence is recorded in `RELEASE_CHECKLIST_v0.9.0.md` and this document's
+  final-review addendum, while GitHub CI remains an external post-push gate.
+
+No AppImage readiness statement elsewhere in this historical report applies to v0.9.0.
+
+---
+
 | | |
 | --- | --- |
 | Audit date | 2026-09-16 |

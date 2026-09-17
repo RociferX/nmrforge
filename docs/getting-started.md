@@ -1,32 +1,25 @@
 # Getting started
 
-This page takes you from nothing to a first useful result. It has two tracks:
+This page takes you from the v0.9.0 source release to a first useful result. The AppImage is
+deferred and is not distributed with this release.
 
-- **Users** install the AppImage and work in the GUI.
-- **Developers** install from source and can also run the scripted walkthrough, which needs no
-  NMRPipe at all and shows what nmrForge understands about a dataset.
+## Track A - source installation and GUI
 
-## Track A - users: the AppImage
+```bash
+git clone https://github.com/RociferX/nmrforge.git
+cd nmrforge
+python -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+python -m pip install -e ".[test]"
+python main.py
+```
 
-1. Download `NMRForge-<version>-x86_64.AppImage` and make it executable:
+Install NMRPipe on the same machine for real processing; SMILE comes with it. nmrForge does not
+bundle or download either engine. If they are missing, data inspection still works and the program
+reports the unavailable processing capability explicitly.
 
-   ```bash
-   chmod +x NMRForge-<version>-x86_64.AppImage
-   ./NMRForge-<version>-x86_64.AppImage
-   ```
-
-2. Install NMRPipe on the same machine (SMILE comes with it). nmrForge does not bundle it and
-   never downloads it. See [external-dependencies.md](external-dependencies.md).
-
-3. In the application: import your Bruker dataset directory, check the detected experiment type
-   and sampling mode, run the automated processing path, read the quality report, then pick and
-   export peaks. [gui.md](gui.md) walks through the interface.
-
-4. If nmrForge cannot find NMRPipe, it says so explicitly instead of failing silently. Point it at
-   your installation through `config/nmrforge.yaml`, or use the GUI setting if you prefer.
-
-The AppImage is the supported way to install nmrForge for processing. It bundles Python, Qt and
-the runtime resources, so there is nothing else to install besides NMRPipe.
+The future AppImage path and its additional PySide6/Qt distribution checks are reserved in
+[APPIMAGE_RELEASE_CHECKLIST.md](../APPIMAGE_RELEASE_CHECKLIST.md).
 
 ## Track B - developers: inspect a dataset without NMRPipe
 
@@ -111,6 +104,6 @@ combination keeps its own script, candidate spectrum, peak table, run record and
 
 ## Next steps
 
-- [installation.md](installation.md) - AppImage details, extras, uninstall
+- [installation.md](installation.md) - source installation and deferred AppImage boundary
 - [external-dependencies.md](external-dependencies.md) - NMRPipe/SMILE
 - [troubleshooting.md](troubleshooting.md) | [FAQ](faq.md)

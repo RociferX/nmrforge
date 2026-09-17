@@ -9,6 +9,7 @@ convert_to_fid 与 process/reconstruct_nus 完成)。
 
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 from dataclasses import dataclass, field
@@ -19,6 +20,8 @@ from core.data.bruker_reader import read_dataset
 from core.data.internal_data_model import Experiment
 from core.project import ProjectManager, WorkflowRun
 from core.project.manager import atomic_write_json, sha256_file
+
+logger = logging.getLogger(__name__)
 
 METADATA_SCHEMA_VERSION = "1.0"
 IMPORT_WORKFLOW_REF = "import"
@@ -472,5 +475,6 @@ def apply_user_experiment_type(
         atomic_write_json(path, payload)
         return True
     except Exception:
+        logger.debug("Failed to persist user experiment type", exc_info=True)
         return False
 
