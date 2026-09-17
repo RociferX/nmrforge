@@ -23,7 +23,8 @@
   用例全过的报告仍以 error 结束;`tests/test_config_defaults.py` 的 SMILE 线程数期望值改按
   `smile_thread_limit()`(核数-2,≤3 核为 1)计算 —— 托管 runner 只有 4 核(上限 2),原先写死 4
   必然失败,并新增 `test_smile_thread_limit_follows_core_count` 用 monkeypatch 锁定 clamp 语义。
-  **产品行为零改动**,只改测试与夹具。
+  **产品行为零改动**,只改测试与夹具;推送后 CI 全绿(`static` / `release readiness` /
+  `tests Python 3.12` / `tests Python 3.13`)。
 
 <!-- 下一个版本的变更写在这里;发布时把下面那节改名为新的版本号并写上日期。 -->
 
