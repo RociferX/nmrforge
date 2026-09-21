@@ -40,6 +40,7 @@ import copy
 import functools
 import hashlib
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -181,6 +182,22 @@ def _strip_docstrings(tree: ast.AST) -> None:
             node.body = node.body[1:] or [ast.Pass()]
 
 
+def _dump_ast(tree: ast.AST) -> str:
+    """Canonical AST text for ``token_digest``.
+
+    From Python 3.13 on, ``ast.dump`` omits empty optional fields/sequences by default
+    (``show_empty=False``) while 3.12 prints them, so the very same source produced two
+    different token fingerprints and the 3.12/3.13 CI matrix went red. Ask for the empty
+    fields explicitly wherever the interpreter supports it, so one code base keeps one
+    fingerprint.
+    """
+    if sys.version_info >= (3, 13):
+        return ast.dump(
+            tree, annotate_fields=True, include_attributes=False, show_empty=True
+        )
+    return ast.dump(tree, annotate_fields=True, include_attributes=False)
+
+
 def token_digest(root: Path | None = None) -> str:
     """Code fingerprint: AST text with comments/docstrings stripped (edition-comparable)."""
     base = Path(root) if root is not None else repo_root()
@@ -195,11 +212,7 @@ def token_digest(root: Path | None = None) -> str:
         _strip_docstrings(tree)
         digest.update(rel.encode("utf-8"))
         digest.update(b"\0")
-        digest.update(
-            ast.dump(tree, annotate_fields=True, include_attributes=False).encode(
-                "utf-8"
-            )
-        )
+        digest.update(_dump_ast(tree).encode("utf-8"))
         digest.update(b"\n")
     return digest.hexdigest()
 
