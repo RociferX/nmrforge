@@ -160,6 +160,10 @@ def test_gui_saved_settings_are_loaded_by_backend(
     assert raw["backend"]["nmrpipe"]["path"] == "/opt/nmrpipe/bin"
     assert raw["processing"]["linewidth_hz"]["1H"] == 9.5
 
+    # resolve_nthread() clamps to "cores - 2" (1 on a <=3-core machine) and the CI runners
+    # are small, so pin the core count or this assertion depends on the machine (red CI
+    # 2026-09-22)
+    monkeypatch.setattr(backend_config.os, "cpu_count", lambda: 8)
     defaults = backend_config.load_processing_defaults(backend_config.load_config())
     assert defaults["nmrpipe_path"] == "/opt/nmrpipe/bin"
     assert defaults["linewidth_hz"]["1H"] == 9.5

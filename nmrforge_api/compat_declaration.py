@@ -23,13 +23,13 @@ from typing import Any
 
 #: declared behaviour level (see the module doc; meaning matches nmrforge_api.compat)
 DECLARATION: dict[str, Any] = {'schema': 'nmrforge_api.compat.declaration.v1',
- 'digest': '15d2c385f31b5d1c01fa4d5fa7885544cd0ca3e9db6532bcfa5dfcf1230c56bf',
- 'token_digest': 'd3a1bc740c97553af6710a39e627e7c0e1cffa7497c1e3e7e85a58988b3f8413',
- 'compat_level': 'same',
+ 'digest': '312d721c8d500cdba67eb5a76c59fd2017fa8f8b74d2bf8816c5df5deeae7c9d',
+ 'token_digest': 'f2385717800ef8d99eb38989b09d5dd4e5b0fd8f3589b976db90b9796a55ad90',
+ 'compat_level': 'additive',
  'affected': [],
- 'updated': '2026-09-21',
- 'note': 'public-tree wording cleanup only (no agent/role language, no dev-environment '
-         'notes): token digest unchanged, numbers unchanged',
+ 'updated': '2026-09-22',
+ 'note': 'one fingerprint per code base: ast.dump stopped printing empty fields in 3.13, so the '
+         '3.12 and 3.13 CI jobs disagreed; numbers and the golden vector unchanged',
  'golden': {'name': 'conformance_v1',
             'spectrum_sha256': '382b330926da93d856feef40ca33c2df1eec21b61e50db471bdf7aa4bb2fb311',
             'peak_table_sha256': '7f8180662220c83db225fa6b2bf0f5b4c71196fcdaebebe7e8c172a4861657ab',
