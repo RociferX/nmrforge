@@ -1,0 +1,10 @@
+# 参数网格示例(python -m nmrforge_api sweep --grid grid.yaml)
+# 键是处理参数的点号路径,值是该参数的候选列表;组合数 = 各轴长度之积。
+axes:
+  zero_fill: [1, 2, 4]                 # 间接维填零倍数(数字分辨率)
+  points_per_line: [2.0, 4.0]          # 间接维目标数字点距
+  "window.F1.off": [0.35, 0.45, 0.55]  # 间接维窗函数起始
+  "window.F1.end": [0.90, 0.98]        # 间接维窗函数结束
+  "baseline.F1.enabled": [true, false] # 间接维基线开关(关=不加 POLY)
+
+max_runs: 128        # 组合数上限(超过会直接报错,提示减小网格)

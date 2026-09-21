@@ -1,0 +1,5 @@
+window.F1.off,zero_fill,phase_delta.F2.p0,baseline.F1.enabled
+0.35,1,-5,false
+0.35,2,5,true
+0.45,1,5,false
+0.45,2,-5,true

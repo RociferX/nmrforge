@@ -1,0 +1,236 @@
+name: CI
+
+# Core CI runs on a hosted runner with no NMRPipe installation, on purpose:
+# the suite mocks the engine boundary (FakeBackend/MockBackend), so an NMRPipe
+# licence or download is never required to gate a pull request.
+#
+# The GUI stack is PySide6: `pip install -e ".[test]"` installs it (it is the
+# declared runtime dependency), so the matrix jobs below exercise the same
+# binding users get. PyQt6 is no longer a dependency of this project.
+#
+# Real-engine validation runs through the "external engine" job, which is only
+# enabled when a runner with NMRPipe is available (repository variable
+# NMRFORGE_SELF_HOSTED_CI=true). The laboratory workflow for that is
+# scripts/vm_test.sh on the NMRPipe host, documented in docs/GIT_WORKFLOW.md.
+
+on:
+  push:
+    branches: ["main", "master"]
+    tags: ["v*"]          # a release tag must drag the real-engine job in (release gate)
+  pull_request:
+  schedule:
+    # Weekly drift check for the real-engine job (Monday 03:17 UTC): catches a changed
+    # engine or a changed machine even when the code did not move.
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static:
+    name: static checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      - name: Ruff
+        run: python -m ruff check .
+
+  tests:
+    name: tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install Qt runtime system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgl1 libegl1 libxkbcommon0 libxkbcommon-x11-0 \
+            libdbus-1-3 libfontconfig1 libxcb-cursor0
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[test]"
+      - name: Import check
+        run: python -c "import core, nmrforge_api, gui, viewer, backend, workflow; print('imports ok')"
+      - name: Tests
+        run: python -m pytest -q --basetemp="$RUNNER_TEMP/pytest"
+
+  release-readiness:
+    name: release readiness
+    runs-on: ubuntu-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[test]"
+      - name: Single version source, packaging contract, docs links, examples
+        run: python -m pytest -q tests/test_release_readiness.py --basetemp="$RUNNER_TEMP/pytest-rr"
+
+  wheel:
+    # Since 2026-09-21 (option A) the runtime resources live in the data package
+    # nmrforge_data, which makes `pip install .` / a wheel a supported install path. This job
+    # only does "install into a clean venv, then smoke it headlessly": the data really ships
+    # with the wheel and works outside the checkout (the old failure mode was that
+    # resource_path() could not find the repository-root directories).
+    name: wheel install smoke
+    runs-on: ubuntu-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install Qt runtime system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgl1 libegl1 libxkbcommon0 libxkbcommon-x11-0 \
+            libdbus-1-3 libfontconfig1 libxcb-cursor0
+      - name: Build the wheel
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build --wheel
+      - name: The wheel really carries the runtime resources
+        run: |
+          python -m zipfile -l dist/*.whl > "$RUNNER_TEMP/wheel-files.txt"
+          # the last group is the four behaviour-tree READMEs: behavior_digest covers them, so
+          # dropping them would make an installed copy report an unverified compat stamp
+          for entry in nmrforge_data/config/nmrforge.yaml ui_support/locales/zh.json \
+                       gui/assets/nmrforge.png nmrforge_data/presets/hsqc.yaml \
+                       core/README.md backend/README.md workflow/README.md nmrforge_api/README.md; do
+            grep -q "$entry" "$RUNNER_TEMP/wheel-files.txt" || { echo "missing in wheel: $entry"; exit 1; }
+          done
+          if grep -q "\.local\.yaml" "$RUNNER_TEMP/wheel-files.txt"; then
+            echo "the machine-local config must never ship"; exit 1
+          fi
+          if grep -q "locales/source.json" "$RUNNER_TEMP/wheel-files.txt"; then
+            echo "the translation-tooling list must not ship"; exit 1
+          fi
+      - name: Install into a clean venv outside the checkout
+        run: |
+          python -m venv "$RUNNER_TEMP/clean"
+          "$RUNNER_TEMP/clean/bin/python" -m pip install --upgrade pip
+          "$RUNNER_TEMP/clean/bin/python" -m pip install dist/*.whl
+      - name: Headless smoke
+        working-directory: ${{ runner.temp }}
+        run: |
+          "$RUNNER_TEMP/clean/bin/python" - <<'PY'
+          from pathlib import Path
+
+          import core
+          from core.app_paths import resource_path
+          from ui_support.i18n import load_catalogue
+
+          # it must be the installed copy, not the checkout
+          assert "site-packages" in core.__file__, core.__file__
+          config = resource_path("config/nmrforge.yaml")
+          assert config.is_file(), config
+          presets = sorted(resource_path("presets").glob("*.yaml"))
+          assert len(presets) >= 50, len(presets)
+
+          import ui_support.assets as assets
+
+          assert assets.gui_assets_dir() is not None, "gui/assets did not ship"
+          catalogue = load_catalogue("zh")
+          assert len(catalogue) > 1000, len(catalogue)
+
+          import backend.nmrpipe_backend  # noqa: F401
+          import gui.main_window  # noqa: F401
+          import viewer.app  # noqa: F401
+          import workflow.stepwise  # noqa: F401
+
+          from backend.config import load_processing_defaults
+
+          load_processing_defaults()
+
+          from nmrforge_api import compat_manifest
+
+          level = compat_manifest()["compat_level"]
+          assert level != "unverified", f"the wheel disagrees with the compat declaration: {level}"
+
+          print("wheel smoke ok:", core.__version__, len(presets), "presets", len(catalogue), "zh")
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wheel-smoke
+          path: ${{ runner.temp }}/wheel-files.txt
+          if-no-files-found: ignore
+
+  external-engine:
+    name: full suite on a runner with NMRPipe
+    runs-on: [self-hosted, linux]
+    # Enabled only where a self-hosted runner exists (repository variable
+    # NMRFORGE_SELF_HOSTED_CI=true). With the triggers above it runs on v* tags and
+    # weekly, so it is a release gate plus a drift check rather than an optional local
+    # script. The log and its sha256 are published as an artifact so the result can be
+    # checked from outside the machine.
+    if: ${{ vars.NMRFORGE_SELF_HOSTED_CI == 'true' }}
+    env:
+      QT_QPA_PLATFORM: offscreen
+      # Make scripts/vm_test.sh test *this checkout* rather than the copy in the
+      # runner's home directory; NMRFORGE_SELF_HOSTED_PYTHON points at the interpreter
+      # that has the dependencies and NMRPipe.
+      NMRFORGE_TEST_ROOT: ${{ github.workspace }}
+      NMRFORGE_TEST_PYTHON: ${{ vars.NMRFORGE_SELF_HOSTED_PYTHON }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Full suite, including paths that touch a real engine
+        run: |
+          set -o pipefail
+          mkdir -p artifacts
+          bash scripts/vm_test.sh 2>&1 | tee artifacts/full-suite.log
+      - name: Desensitised real-data aggregate report
+        if: ${{ vars.NMRFORGE_REAL_DATA_TARGETS != '' }}
+        run: |
+          mkdir -p artifacts
+          IFS="," read -ra targets <<< "${{ vars.NMRFORGE_REAL_DATA_TARGETS }}"
+          for target in "${targets[@]}"; do
+            tag="${target%%=*}"
+            dir="${target#*=}"
+            "${NMRFORGE_TEST_PYTHON:-python3}" scripts/vm_realdata_report.py \
+              --dataset "$dir" --tag "$tag" \
+              --root "${RUNNER_TEMP:-/tmp}/realdata-$tag" --repeats 3 \
+              --json "artifacts/realdata-$tag.json"
+          done
+      - name: Log checksums
+        if: always()
+        run: |
+          cd artifacts
+          sha256sum ./* > SHA256SUMS 2>/dev/null || true
+          cat SHA256SUMS 2>/dev/null || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: real-engine-evidence
+          path: artifacts/
+          if-no-files-found: warn

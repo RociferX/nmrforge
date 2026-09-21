@@ -1,0 +1,15 @@
+name: CANCO
+description: Solid-state NMR - 3D 13Calpha-15N-13C' (sequential walk, 13C direct detection)
+phase_sensitive: true
+direct_nucleus: 13C
+indirect_nuclei: [13C, 15N]
+expected_peak_mode: absorption
+peak_sign: uniform
+display_orientation: "13C/15N/13C"
+priors:
+  "13C": [10.0, 190.0]
+  "13C_alpha": [40.0, 70.0]
+  "15N": [90.0, 140.0]
+  "13C_carbonyl": [165.0, 185.0]
+constraints:
+  ndim: 3

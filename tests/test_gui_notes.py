@@ -1,0 +1,492 @@
+"""Project/experiment type/sample data three-level annotation function test: structured field
+helper + middle top annotation bar."""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+import pytest
+from qtcompat.QtWidgets import QApplication
+
+from core.project import ProjectManager
+from gui.notes import (
+    DATA_FIELDS,
+    EXPERIMENT_FIELDS,
+    SAMPLE_FIELDS,
+    auto_fill_notes_from_metadata,
+    data_note,
+    data_note_fields,
+    experiment_note,
+    experiment_note_fields,
+    experiment_type_options,
+    format_fields,
+    note_fields,
+    sample_note,
+    sample_note_fields,
+    set_data_note_fields,
+    set_experiment_note_fields,
+    set_sample_note_fields,
+)
+
+
+@pytest.fixture(scope="module")
+def qapp() -> QApplication:
+    app = QApplication.instance() or QApplication([])
+    yield app
+
+
+def _manager(tmp_path: Path) -> tuple[ProjectManager, str, str]:
+    manager = ProjectManager.create_project(tmp_path / "proj", "demo")
+    entry = manager.create_experiment("HSQC")
+    data = manager.import_data(entry.id, "/fake/1")
+    return manager, entry.id, data.id
+
+
+def test_note_fields_schemas_differ_per_level() -> None:
+    """Experiment type =Identify/dynamics; sample=repeat/condition/pH/temperature+ dimension /data
+    type/nuclear/Peak symbol."""
+    assert [key for key, _ in SAMPLE_FIELDS] == [
+        "protein_name",
+        "expression_system",
+        "concentration",
+        "buffer",
+        "notes",
+    ]
+    assert [key for key, _ in EXPERIMENT_FIELDS] == [
+        "experiment_type",
+        "sample_name",
+        "instrument",
+        "temperature",
+        "notes",
+    ]
+    assert [key for key, _ in DATA_FIELDS] == [
+        "repeat",
+        "condition",
+        "buffer_ph",
+        "temperature",
+        "dimension",
+        "experiment_type",
+        "nuclei",
+        "peak_sign",
+        "notes",
+    ]
+    assert note_fields("project") == SAMPLE_FIELDS
+    assert note_fields("experiment") == EXPERIMENT_FIELDS
+    assert note_fields("data") == DATA_FIELDS
+
+
+def test_notes_helper_roundtrip(tmp_path: Path) -> None:
+    """Three-level structured comments are read and written, and can still be read after reopening
+    after manager.save()."""
+    manager, exp_id, data_id = _manager(tmp_path)
+    assert sample_note(manager.project) == ""
+    assert experiment_note(manager.project, exp_id) == ""
+    assert data_note(manager.project, exp_id, data_id) == ""
+    set_sample_note_fields(
+        manager.project,
+        {"protein_name": "GB1", "concentration": "0.5 mM", "buffer": "PBS"},
+    )
+    set_experiment_note_fields(
+        manager.project,
+        exp_id,
+        {"experiment_type": "identification experiment"},
+    )
+    set_data_note_fields(
+        manager.project,
+        exp_id,
+        data_id,
+        {
+            "repeat": "2",
+            "condition": "pH 7.0",
+            "buffer_ph": "7.0",
+            "temperature": "25",
+            "dimension": "2D",
+            "experiment_type": "HSQC",
+            "nuclei": "1H-15N",
+        },
+    )
+    assert "Protein name: GB1" in sample_note(manager.project)
+    assert "Concentration: 0.5 mM" in sample_note(manager.project)
+    assert "Experiment type: identification experiment" in experiment_note(manager.project, exp_id)
+    assert "Repeat number: 2" in data_note(manager.project, exp_id, data_id)
+    assert "Data type: HSQC" in data_note(manager.project, exp_id, data_id)
+    assert "Buffer pH: 7.0" in data_note(manager.project, exp_id, data_id)
+    manager.save()
+    reopened = ProjectManager.open_project(tmp_path / "proj")
+    assert sample_note_fields(reopened.project)["protein_name"] == "GB1"
+    assert experiment_note_fields(reopened.project, exp_id)["experiment_type"] == (
+        "identification experiment"
+    )
+    assert data_note_fields(reopened.project, exp_id, data_id)["temperature"] == "25"
+    assert data_note_fields(reopened.project, exp_id, data_id)["dimension"] == "2D"
+
+
+def test_legacy_plain_text_notes_compat(tmp_path: Path) -> None:
+    """Old plain text comments (protein.notes / entry.notes / data_notes strings) are still
+    readable."""
+    manager, exp_id, data_id = _manager(tmp_path)
+    manager.project.protein.notes = "GB1, 0.5 mM, PBS"
+    entry = manager.project.experiment(exp_id)
+    entry.notes = "15N HSQC"
+    meta = dict(entry.metadata or {})
+    meta.setdefault("data_notes", {})[data_id] = "2026-08-13"
+    entry.metadata = meta
+    assert sample_note(manager.project) == "GB1, 0.5 mM, PBS"
+    assert experiment_note(manager.project, exp_id) == "15N HSQC"
+    assert data_note(manager.project, exp_id, data_id) == "2026-08-13"
+
+
+def test_format_fields_skips_empty() -> None:
+    assert format_fields({"protein_name": "GB1", "notes": ""}) == "Protein name: GB1"
+    assert format_fields({}) == ""
+
+
+def test_center_panel_notes_bar(tmp_path: Path, qapp: QApplication) -> None:
+    """At the top of the middle area, comment fields at each level are displayed according to the
+    selected level."""
+    manager, exp_id, data_id = _manager(tmp_path)
+    set_sample_note_fields(manager.project, {"protein_name": "sample A"})
+    set_experiment_note_fields(
+        manager.project, exp_id, {"experiment_type": "identification experiment"}
+    )
+    set_data_note_fields(manager.project, exp_id, data_id, {"repeat": "3"})
+    manager.save()
+    from gui.center_panel import CenterPanel
+
+    panel = CenterPanel(manager)
+    panel.set_selection("project", exp_id)
+    assert "Protein name: sample A" in panel.notes_label.text()
+    panel.set_selection("experiment", exp_id)
+    assert "Experiment type: identification experiment" in panel.notes_label.text()
+    panel.set_selection("data", exp_id, data_id)
+    assert "Repeat number: 3" in panel.notes_label.text()
+    assert not panel.edit_notes_button.isHidden()
+    seen: list[tuple[str, str, str]] = []
+    panel.edit_notes_requested.connect(lambda k, e, d: seen.append((k, e, d)))
+    panel.edit_notes_button.click()
+    assert seen and seen[0] == ("data", exp_id, data_id)
+    panel.close()
+
+
+def test_main_window_menu_experiment(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Top menu: "Project/experiment type",Remove sample management/Add to/Delete sample."""
+    from gui.main_window import MainWindow
+
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+
+    class _Ws:
+        def __init__(self, root):
+            self.root = root
+
+        def ensure(self):
+            self.root.mkdir(parents=True, exist_ok=True)
+            return self.root
+
+        def list_projects(self):
+            return sorted(
+                p
+                for p in self.root.iterdir()
+                if p.is_dir() and (p / "project.json").is_file()
+            )
+
+    monkeypatch.setattr("gui.main_window.WorkspaceManager", lambda: _Ws(workspace))
+    monkeypatch.setattr(
+        "core.workspace.WorkspaceManager", lambda *a, **k: _Ws(workspace)
+    )
+    window = MainWindow()
+    menus = [action.text() for action in window.menuBar().actions()]
+    assert "&experiment" in menus
+    assert "&sample" not in menus
+    experiment_menu = next(
+        action.menu()
+        for action in window.menuBar().actions()
+        if action.text() == "&experiment"
+    )
+    labels = [action.text() for action in experiment_menu.actions()]
+    assert "New experiment..." in labels
+    assert "project management" not in labels
+    assert "Add project..." not in labels
+    assert "delete project..." not in labels
+    window.close()
+
+
+def test_edit_notes_saves(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """"Edit Comments" -> The main window saves the structured field and refreshes the top comment
+    bar."""
+    from gui.main_window import MainWindow
+
+    manager, exp_id, _data_id = _manager(tmp_path)
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+
+    class _Ws:
+        def __init__(self, root):
+            self.root = root
+
+        def ensure(self):
+            self.root.mkdir(parents=True, exist_ok=True)
+            return self.root
+
+        def list_projects(self):
+            return sorted(
+                p
+                for p in self.root.iterdir()
+                if p.is_dir() and (p / "project.json").is_file()
+            )
+
+    monkeypatch.setattr("gui.main_window.WorkspaceManager", lambda: _Ws(workspace))
+    monkeypatch.setattr(
+        "core.workspace.WorkspaceManager", lambda *a, **k: _Ws(workspace)
+    )
+
+    from qtcompat.QtWidgets import QDialog
+
+    class _FakeNotesDialog:
+        DialogCode = QDialog.DialogCode
+
+        def __init__(self, parent, title, kind="", values=None):
+            self._values = values or {}
+
+        def exec(self):
+            return self.DialogCode.Accepted
+
+        def result_fields(self):
+            return {"experiment_type": "identification experiment"}
+
+    monkeypatch.setattr("gui.main_window.NotesDialog", _FakeNotesDialog)
+    window = MainWindow(manager=manager)
+    window.center_panel.set_selection("experiment", exp_id)
+    window._edit_notes("experiment", exp_id, "")
+    fields = experiment_note_fields(manager.project, exp_id)
+    assert fields["experiment_type"] == "identification experiment"
+    assert "identification experiment" in window.center_panel.notes_label.text()
+    window.close()
+def test_edit_notes_only_applies_changed_data_type(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """META-002: Save it as it is without pretending to be a user selection, and it will still be
+    authoritatively written back when the value is actually changed."""
+    from qtcompat.QtWidgets import QDialog
+
+    from gui.main_window import MainWindow
+
+    manager, exp_id, data_id = _manager(tmp_path)
+    set_data_note_fields(
+        manager.project,
+        exp_id,
+        data_id,
+        {"dimension": "2D", "experiment_type": "HSQC"},
+    )
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+
+    class _Ws:
+        def __init__(self, root):
+            self.root = root
+
+        def ensure(self):
+            return self.root
+
+        def list_projects(self):
+            return []
+
+    class _FakeNotesDialog:
+        DialogCode = QDialog.DialogCode
+        result = {"dimension": "2D", "experiment_type": "HSQC"}
+
+        def __init__(self, parent, title, kind="", values=None):
+            pass
+
+        def exec(self):
+            return self.DialogCode.Accepted
+
+        def result_fields(self):
+            return dict(self.result)
+
+    applied: list[str] = []
+    monkeypatch.setattr("gui.main_window.WorkspaceManager", lambda: _Ws(workspace))
+    monkeypatch.setattr("core.workspace.WorkspaceManager", lambda *a, **k: _Ws(workspace))
+    monkeypatch.setattr("gui.main_window.NotesDialog", _FakeNotesDialog)
+    monkeypatch.setattr(
+        "workflow.import_workflow.apply_user_experiment_type",
+        lambda manager, exp_id, data_id, name: applied.append(name) or True,
+    )
+
+    window = MainWindow(manager=manager)
+    window._edit_notes("data", exp_id, data_id)
+    assert applied == []
+
+    _FakeNotesDialog.result = {"dimension": "2D", "experiment_type": "COSY"}
+    window._edit_notes("data", exp_id, data_id)
+    assert applied == ["COSY"]
+    window.close()
+
+
+def test_experiment_type_options_from_presets() -> None:
+    """0.2.85: Data type options come from presets, filtered by dimension (generic is excluded)."""
+    options_1d = experiment_type_options("1D")
+    options_2d = experiment_type_options("2D")
+    options_3d = experiment_type_options("3D")
+    assert "1H-1D" in options_1d and "13C-1D" in options_1d
+    assert "HSQC" in options_2d and "COSY" in options_2d
+    assert "HNCA" in options_3d and "HNCACB" in options_3d
+    assert "HNCA" not in options_2d
+    assert "HSQC" not in options_3d
+    assert "Generic2D" not in options_2d
+    assert "Generic3D" not in options_3d
+    assert (
+        set(options_1d) | set(options_2d) | set(options_3d)
+        == set(experiment_type_options())
+    )
+
+
+def test_temperature_from_acqus_detects_celsius_and_kelvin(
+    tmp_path: Path,
+) -> None:
+    """0.2.87: Temperature identification 0.1K(2980 -> 24.9°C), K(298.0 -> 24.9), °C(25 -> 25.0)."""
+    from gui.notes import temperature_from_acqus
+
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    (raw / "acqus").write_text("##$TE= 2980\n", encoding="latin-1")
+    assert temperature_from_acqus(raw) == "24.9"
+    (raw / "acqus").write_text("##$TE= 298.0\n", encoding="latin-1")
+    assert temperature_from_acqus(raw) == "24.9"
+    (raw / "acqus").write_text("##$TE= 25\n", encoding="latin-1")
+    assert temperature_from_acqus(raw) == "25.0"
+
+
+def test_auto_fill_notes_from_metadata(tmp_path: Path) -> None:
+    """0.2.86: After importing, press metadata/acqus to automatically fill in comments (without
+    overwriting existing values)."""
+    manager, exp_id, data_id = _manager(tmp_path)
+    set_data_note_fields(
+        manager.project, exp_id, data_id, {"experiment_type": "HSQC"}
+    )
+    raw = manager.data_dir(exp_id, data_id, "raw")
+    raw.mkdir(parents=True, exist_ok=True)
+    (raw / "acqus").write_text(
+        "##$NUC1= 1H\n##$NUC2= 15N\n##$TE= 2980\n",
+        encoding="latin-1",
+    )
+    metadata = {
+        "dataset": {
+            "ndim": 2,
+            "dimensions": [{"nucleus": "1H"}, {"nucleus": "15N"}],
+            "experiment_type": {"name": "HSQC"},
+        }
+    }
+    filled = auto_fill_notes_from_metadata(
+        manager, exp_id, data_id, metadata
+    )
+    exp_fields = experiment_note_fields(manager.project, exp_id)
+    assert exp_fields == {}  # Experiment type annotation is no longer auto-populated by import.
+    data_fields = data_note_fields(manager.project, exp_id, data_id)
+    assert data_fields["dimension"] == "2D"
+    assert data_fields["experiment_type"] == "HSQC"  # Existing values are not overwritten.
+    assert data_fields["nuclei"] == "1H-15N"
+    assert data_fields["temperature"].startswith("24")
+    assert "data.dimension" in filled
+    assert "data.experiment_type" in filled
+    assert "data.nuclei" in filled
+    assert "data.temperature" in filled
+
+
+def test_notes_dialog_combos_dimension_then_type(
+    qapp: QApplication,
+) -> None:
+    """0.2.85: Use the drop-down for sample data annotation; first select dimension, and then
+    filter the data type by presets."""
+    from gui.dialogs import NotesDialog
+
+    dialog = NotesDialog(
+        None,
+        "sample data annotation",
+        "data",
+        {"dimension": "2D", "experiment_type": "HSQC"},
+    )
+    assert dialog._combos["dimension"].currentText() == "2D"
+    type_combo = dialog._combos["experiment_type"]
+    assert type_combo.currentText() == "HSQC"
+    items = [type_combo.itemText(i) for i in range(type_combo.count())]
+    assert "HNCA" not in items
+    # Dimension switch to 3D -> switch the type option to three resonance spectrum.
+    dialog._combos["dimension"].setCurrentText("3D")
+    items = [type_combo.itemText(i) for i in range(type_combo.count())]
+    assert "HNCA" in items
+    assert "HSQC" not in items
+    type_combo.setCurrentText("HNCA")
+    dialog._combos["nuclei"].setCurrentText("1H-15N-13C")
+    fields = dialog.result_fields()
+    assert fields["dimension"] == "3D"
+    assert fields["experiment_type"] == "HNCA"
+    assert fields["nuclei"] == "1H-15N-13C"
+    dialog.close()
+
+
+def test_notes_dialog_blank_does_not_invent_values(qapp: QApplication) -> None:
+    """META-002: Blank form round-trips must not produce a default value for the first item in the
+    drop-down box."""
+    from gui.dialogs import NotesDialog
+
+    data_dialog = NotesDialog(None, "sample data annotation", "data", {})
+    assert data_dialog.result_fields() == {}
+    dimension_items = [
+        data_dialog._combos["dimension"].itemText(i)
+        for i in range(data_dialog._combos["dimension"].count())
+    ]
+    assert "1D" in dimension_items
+    data_dialog.close()
+
+    experiment_dialog = NotesDialog(None, "experiment type annotation", "experiment", {})
+    assert experiment_dialog.result_fields() == {}
+    experiment_dialog.close()
+
+
+def test_notes_dialog_preserves_1d_without_inventing_nuclei(
+    qapp: QApplication,
+) -> None:
+    """META-002: 1D Notes should be saved as they are after opening. The dimension should not be
+    lost or the two-dimensional kernel combination should be automatically added."""
+    from gui.dialogs import NotesDialog
+
+    dialog = NotesDialog(
+        None,
+        "sample data annotation",
+        "data",
+        {"dimension": "1D", "experiment_type": "1H-1D"},
+    )
+    assert dialog.result_fields() == {
+        "dimension": "1D",
+        "experiment_type": "1H-1D",
+    }
+    dialog.close()
+
+
+def test_notes_dialog_experiment_category_options(qapp: QApplication) -> None:
+    """IMPORT-007 A: The experimental category no longer treats imported dynamics as an optional
+    ability."""
+    from gui.dialogs import NotesDialog
+
+    dialog = NotesDialog(
+        None,
+        "experiment type annotation",
+        "experiment",
+        {"experiment_type": "identification experiment"},
+    )
+    type_combo = dialog._combos["experiment_type"]
+    assert type_combo.currentText() == "identification experiment"
+    items = [type_combo.itemText(i) for i in range(type_combo.count())]
+    assert "identification experiment" in items
+    assert "dynamics experiment" not in items
+    assert "dimension" not in dialog._combos
+    assert dialog.result_fields() == {"experiment_type": "identification experiment"}
+    dialog.close()

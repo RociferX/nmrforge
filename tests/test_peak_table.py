@@ -1,0 +1,314 @@
+"""Peak table model test: save/load round trip, Poky Export/import, 2D/3D, placeholder (G2B-005)."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from core.peaks import (
+    PeakTable,
+    export_peaks_poky,
+    import_peaks_poky,
+    load_peaks,
+    normalize_poky_label,
+    poky_label_is_valid,
+    save_peaks,
+)
+
+
+def test_save_load_roundtrip(tmp_path: Path) -> None:
+    """0.2.199-patch29ar: Peak file i.e. Poky.list (without SN/CSV column)."""
+    path = tmp_path / "peaks.list"
+    peaks = [
+        {
+            "Peak_ID": 1, "H_shift": 8.464, "N_shift": 118.5,
+            "Intensity": 500.0, "label": "H1",
+        },
+        {
+            "Peak_ID": 2, "H_shift": 7.2, "N_shift": 120.1,
+            "Intensity": 350.0, "label": "",
+        },
+    ]
+    save_peaks(path, peaks)
+    loaded = load_peaks(path)
+    assert len(loaded) == 2
+    assert loaded[0]["Peak_ID"] == 1  # Number ID(row order).
+    assert loaded[1]["Peak_ID"] == 2
+    assert loaded[0]["H_shift"] == 8.464
+    assert loaded[0]["N_shift"] == 118.5
+    assert loaded[0]["Intensity"] == 500.0
+    assert loaded[1]["label"] == "?-?"
+
+
+def test_save_peaks_missing_columns_filled(tmp_path: Path) -> None:
+    path = tmp_path / "peaks.list"
+    save_peaks(path, [{"Peak_ID": 1, "H_shift": 8.0, "N_shift": 118.0}])
+    loaded = load_peaks(path)
+    assert loaded[0]["Peak_ID"] == 1
+    assert loaded[0]["H_shift"] == 8.0
+    assert loaded[0]["Intensity"] == 0.0  # Lack of strength -> 0.0.
+
+
+def test_save_peaks_auto_detect_3d(tmp_path: Path) -> None:
+    path = tmp_path / "peaks3d.list"
+    save_peaks(
+        path,
+        [
+            {
+                "Peak_ID": 1,
+                "F1_shift": 120.0,
+                "F2_shift": 30.0,
+                "F3_shift": 8.5,
+                "Intensity": 100.0,
+            }
+        ],
+    )
+    first = path.read_text(encoding="utf-8").splitlines()[0]
+    assert first == "Assignment w1 w2 w3 Data Height Volume"
+    loaded = load_peaks(path)
+    assert loaded[0]["F3_shift"] == 8.5
+
+
+def test_export_poky_2d_format(tmp_path: Path) -> None:
+    path = tmp_path / "peaks.list"
+    export_peaks_poky(
+        path,
+        [{"N_shift": 118.5, "H_shift": 4.703, "Intensity": 500.0}],
+        ndim=2,
+    )
+    lines = path.read_text(encoding="utf-8").splitlines()
+    assert lines[0] == "Assignment w1 w2 Data Height Volume"
+    # Unnamed ?-?;Displacement %.3f;Data/Volume=0;Height %.3g;Double space.
+    assert lines[1] == "?-?  118.500  4.703  0  500  0"
+
+
+def test_export_poky_3d_format(tmp_path: Path) -> None:
+    path = tmp_path / "peaks3d.list"
+    export_peaks_poky(
+        path,
+        [
+            {
+                "F1_shift": 120.0,
+                "F2_shift": 30.0,
+                "F3_shift": 8.5,
+                "Intensity": 1234.5,
+                "label": "Gly_HN",
+            }
+        ],
+        ndim=3,
+    )
+    lines = path.read_text(encoding="utf-8").splitlines()
+    assert lines[0] == "Assignment w1 w2 w3 Data Height Volume"
+    assert lines[1] == "Gly_HN  120.000  30.000  8.500  0  1.23e+03  0"
+
+
+def test_import_poky_roundtrip(tmp_path: Path) -> None:
+    path = tmp_path / "peaks.list"
+    original = [
+        {"label": "H1", "N_shift": 118.5, "H_shift": 4.703, "Intensity": 500.0},
+        {"label": "", "N_shift": 120.1, "H_shift": 7.2, "Intensity": 3.5},
+    ]
+    export_peaks_poky(path, original, ndim=2)
+    imported = import_peaks_poky(path)
+    assert len(imported) == 2
+    assert imported[0]["label"] == "H1"
+    assert imported[0]["N_shift"] == 118.5
+    assert imported[0]["H_shift"] == 4.703
+    assert imported[0]["Intensity"] == 500.0
+    assert imported[1]["label"] == "?-?"
+    assert imported[1]["Intensity"] == 3.5
+
+
+def test_import_poky_3d(tmp_path: Path) -> None:
+    path = tmp_path / "peaks3d.list"
+    export_peaks_poky(
+        path,
+        [{"F1_shift": 120.0, "F2_shift": 30.0, "F3_shift": 8.5, "Intensity": 100.0}],
+        ndim=3,
+    )
+    imported = import_peaks_poky(path)
+    assert imported[0]["F3_shift"] == 8.5
+    assert imported[0]["Intensity"] == 100.0
+
+
+def test_peak_table_add_remove() -> None:
+    table = PeakTable(experiment_id="exp_001", params={"min_snr": 3.0})
+    peak_id = table.add({"H_shift": 8.0, "N_shift": 118.0})
+    assert peak_id == 1
+    table.add({"H_shift": 7.0, "N_shift": 120.0})
+    assert len(table.rows) == 2
+    table.remove(1)
+    assert len(table.rows) == 1
+    assert table.rows[0]["Peak_ID"] == 2
+
+
+def test_pick_peaks_columns_match_poky(tmp_path: Path) -> None:
+    """0.2.199-patch29ar:pick_peaks Output Poky.list (Contract §6: peak file is.list)."""
+    import numpy as np
+    from scipy.ndimage import gaussian_filter
+
+    from core.project import ProjectManager
+    from workflow.pick_peaks import pick_peaks
+
+    def _write_ft2(path: Path, data: np.ndarray) -> None:
+        from nmrglue.fileio import pipe
+
+        dic = {k: "0" for k in pipe.fdata_dic}
+        dic["FDMAGIC"] = 9.2330230000000007e14
+        dic["FDDIMCOUNT"] = 2
+        dic["FDSIZE"] = data.shape[1]
+        dic["FDSPECNUM"] = data.shape[0]
+        dic["FDQUADFLAG"] = 1
+        dic["FDF1QUADFLAG"] = 1
+        dic["FDF2QUADFLAG"] = 1
+        for prefix in ("FDF1", "FDF2"):
+            dic[prefix + "SW"] = "6000.0"
+            dic[prefix + "OBS"] = "600.0"
+            dic[prefix + "CAR"] = "4.7"
+            dic[prefix + "ORIG"] = "1000.0"
+        pipe.write(str(path), dic, data.astype(np.float32), overwrite=True)
+
+    spec = np.zeros((64, 128))
+    spec[20, 40] = 500.0
+    spec = gaussian_filter(spec, sigma=1.5)
+    ft2 = tmp_path / "out.ft2"
+    _write_ft2(ft2, spec)
+    manager = ProjectManager.create_project(tmp_path / "proj", "demo")
+    entry = manager.create_experiment()
+    data = manager.import_data(entry.id, "/sampleD")
+    manager.set_data_spectrum(entry.id, data.id, str(ft2))
+    result = pick_peaks(manager, entry.id, data.id)
+    assert Path(result["peak_path"]).suffix == ".list"
+    first = Path(result["peak_path"]).read_text(encoding="utf-8").splitlines()[0]
+    assert first == "Assignment w1 w2 Data Height Volume"
+
+
+def test_save_peaks_extra_columns_ignored_in_list(tmp_path: Path) -> None:
+    """0.2.199-patch29ar:Poky.list has no additional columns (extra_columns is ignored for
+    compatibility)."""
+    path = tmp_path / "peaks_extra.list"
+    save_peaks(
+        path,
+        [
+            {
+                "Peak_ID": 1,
+                "H_shift": 8.0,
+                "N_shift": 118.0,
+                "Note": "x",
+            }
+        ],
+        extra_columns=("Note",),
+    )
+    lines = path.read_text(encoding="utf-8").splitlines()
+    assert lines[0] == "Assignment w1 w2 Data Height Volume"
+    assert "Note" not in "\n".join(lines)
+
+
+def test_normalize_poky_label() -> None:
+    """0.2.199-patch29co: Poky assignment is segmented by dimension (2D two paragraphs/3D three
+    segments, hyphen)."""
+    assert normalize_poky_label("g1h-g1n") == "G1H-G1N"            # 2D
+    assert normalize_poky_label("c16h-k15cb-c16n", ndim=3) == "C16H-K15CB-C16N"
+    assert normalize_poky_label("v32ca-k31h-v32n", ndim=3) == "V32CA-K31H-V32N"
+    assert normalize_poky_label("g1h-?") == "G1H-?"                # Partially unidentified.
+    assert normalize_poky_label("?-?") == "?-?"
+    assert normalize_poky_label("?-?-?", ndim=3) == "?-?-?"
+    assert normalize_poky_label("") == ""
+    assert normalize_poky_label(None) == ""
+
+
+def test_poky_label_is_valid() -> None:
+    """0.2.199-patch29co: The number of segments must be consistent with dimension (2D two
+    paragraphs/3D three segments) to be valid."""
+    assert poky_label_is_valid("G1H-G1N")               # 2D Two paragraphs.
+    assert poky_label_is_valid("G1H-?")
+    assert poky_label_is_valid("?-?")
+    assert not poky_label_is_valid("G1H")               # 2D Only one paragraph.
+    assert poky_label_is_valid("G1H-G1N-G1CA", ndim=3)  # 3D Three sections.
+    assert not poky_label_is_valid("G1H-G1N", ndim=3)   # 3D Only two paragraphs.
+    assert poky_label_is_valid("?-?-?", ndim=3)
+    assert not poky_label_is_valid("xyz")
+    assert not poky_label_is_valid("1H-1N")
+
+def test_export_import_3d_external_nuclei_order(tmp_path: Path) -> None:
+    """0.2.199-patch29dk:3D.list According to external convention w1=15N/w2=13C/w3=1H
+    Export/import."""
+    path = tmp_path / "ext.list"
+    export_peaks_poky(
+        path,
+        [
+            {
+                "Peak_ID": 1,
+                "F1_shift": 118.0,
+                "F2_shift": 8.2,
+                "F3_shift": 45.0,
+                "Intensity": 90.0,
+                "label": "",
+            }
+        ],
+        ndim=3,
+        nuclei=["15N", "1H", "13C"],
+    )
+    lines = path.read_text(encoding="utf-8").splitlines()
+    assert lines[1].split()[1:4] == ["118.000", "45.000", "8.200"]  # N,C,H
+    # Import with core name: map back to internal F1=N/F2=H/F3=C.
+    rows = import_peaks_poky(path, nuclei=["15N", "1H", "13C"])
+    assert rows[0]["F1_shift"] == 118.0
+    assert rows[0]["F2_shift"] == 8.2
+    assert rows[0]["F3_shift"] == 45.0
+    # No core name: fallback position formula (w2 -> F2, w3 -> F3).
+    rows2 = import_peaks_poky(path)
+    assert rows2[0]["F2_shift"] == 45.0
+    assert rows2[0]["F3_shift"] == 8.2
+
+
+
+def test_import_poky_lowercase_header_and_extra_columns(
+    tmp_path: Path,
+) -> None:
+    """0.2.199-patch29fx: Real Poky reference.list compatible -- lowercase header, simplified 2D/3D
+    columns, redundant tail columns ignored."""
+    p = tmp_path / "ref_min2d.list"
+    p.write_text("assignment w1 w2\n?-? 118.500 4.703\n", encoding="utf-8")
+    rows = load_peaks(p)
+    assert len(rows) == 1
+    assert rows[0]["N_shift"] == 118.5
+    assert rows[0]["H_shift"] == 4.703
+    assert rows[0]["Data"] == 0.0 and rows[0]["Height"] == 0.0
+
+    p3 = tmp_path / "ref_min3d.list"
+    p3.write_text(
+        "assignment w1 w2 w3\n"
+        "?-?-? 118.0 45.0 8.5 0 100 0 9.9 8.8\n",
+        encoding="utf-8",
+    )
+    rows3 = import_peaks_poky(p3)
+    assert len(rows3) == 1
+    assert rows3[0]["F1_shift"] == 118.0
+    assert rows3[0]["F2_shift"] == 45.0
+    assert rows3[0]["F3_shift"] == 8.5
+    assert rows3[0]["Height"] == 100.0
+
+
+def test_import_poky_headerless_2d(tmp_path: Path) -> None:
+    """0.2.199-patch29fx: No header simplified.list is inferred to 2D by the number of columns."""
+    p = tmp_path / "ref_nohdr.list"
+    p.write_text(
+        "?-? 118.5 4.703\nG1H-G1N 120.1 7.2\n",
+        encoding="utf-8",
+    )
+    rows = load_peaks(p)
+    assert len(rows) == 2
+    assert rows[0]["Peak_ID"] == 1
+    assert rows[0]["N_shift"] == 118.5
+    assert rows[1]["H_shift"] == 7.2
+
+
+def test_import_poky_minimal_3d_with_nuclei(tmp_path: Path) -> None:
+    """0.2.199-patch29fx: condense 3D 4 columns + core name -> map back to internal F1/F2/F3."""
+    p = tmp_path / "ref_min3d_nuc.list"
+    p.write_text("?-?-? 118.0 45.0 8.5\n", encoding="utf-8")
+    rows = import_peaks_poky(p, nuclei=["15N", "1H", "13C"])
+    assert len(rows) == 1
+    assert rows[0]["F1_shift"] == 118.0
+    assert rows[0]["F2_shift"] == 8.5
+    assert rows[0]["F3_shift"] == 45.0

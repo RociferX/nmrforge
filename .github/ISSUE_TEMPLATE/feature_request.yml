@@ -1,0 +1,59 @@
+name: Feature request
+description: Suggest a capability or an improvement.
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before requesting automation, consider whether the behaviour is verifiable. nmrForge
+        deliberately reports rather than guesses when the data does not support a decision.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Describe the workflow you are doing now and where it hurts.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behaviour
+      description: What should nmrForge do differently?
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Including "do this manually / in a downstream script".
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - data understanding / classification
+        - processing / parameter optimisation
+        - NUS / SMILE reconstruction
+        - quality control
+        - peak picking / localisation
+        - GUI
+        - scripting API (nmrforge_api)
+        - packaging / installation
+        - documentation
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Please confirm
+      options:
+        - label: I have searched the existing issues for the same request.
+          required: true
+        - label: This request does not rely on unpublished data being included in the repository.
+          required: true

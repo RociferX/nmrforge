@@ -1,0 +1,10 @@
+name: Generic1D
+description: Safe fallback for an unknown 1D experiment
+phase_sensitive: false
+direct_nucleus: ""
+indirect_nuclei: []
+expected_peak_mode: unknown
+peak_sign: uniform
+display_orientation: ""
+constraints:
+  ndim: 1

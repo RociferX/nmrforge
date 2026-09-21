@@ -1,0 +1,20 @@
+name: CBCANCO
+description: Solid-state NMR - 3D 13Calpha/beta-15N-13C' (Calpha/Cbeta anti-phase)
+phase_sensitive: true
+direct_nucleus: 13C
+indirect_nuclei: [13C, 15N]
+expected_peak_mode: absorption
+peak_sign: mixed
+peak_sign_regions:
+  13C:
+    alpha: {ppm: [40.0, 70.0], sign: -1}
+    beta: {ppm: [15.0, 45.0], sign: 1}
+display_orientation: "13C/15N/13C"
+priors:
+  "13C": [10.0, 190.0]
+  "13C_alpha": [40.0, 70.0]
+  "13C_beta": [15.0, 45.0]
+  "15N": [90.0, 140.0]
+  "13C_carbonyl": [165.0, 185.0]
+constraints:
+  ndim: 3

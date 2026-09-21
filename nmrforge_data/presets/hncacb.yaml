@@ -1,0 +1,22 @@
+name: HNCACB
+description: 15N-1H 3D HNCACB(13Cα+13Cβ)
+phase_sensitive: true
+direct_nucleus: 1H
+indirect_nuclei: [15N, 13C]
+expected_peak_mode: absorption
+peak_sign: mixed
+peak_sign_regions:
+  13C:
+    alpha: {ppm: [40.0, 70.0], sign: -1}
+    beta: {ppm: [15.0, 45.0], sign: 1}
+display_orientation: "13C/15N/1H"
+priors:
+  "1H": [6.0, 11.0]
+  "15N": [90.0, 135.0]
+  "13C": [10.0, 80.0]
+  "13C_alpha": [40.0, 70.0]
+  "13C_beta": [15.0, 45.0]
+constraints:
+  ndim: 3
+processing_hints:
+  auto_phase: true

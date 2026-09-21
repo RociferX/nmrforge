@@ -1,0 +1,15 @@
+name: HSQC
+description: 15N-1H HSQC（2D）
+phase_sensitive: true
+direct_nucleus: 1H
+indirect_nuclei: [15N]
+expected_peak_mode: absorption
+peak_sign: uniform
+display_orientation: "1H/15N"
+priors:
+  "1H": [6.0, 11.0]
+  "15N": [90.0, 135.0]
+constraints:
+  ndim: 2
+processing_hints:
+  auto_phase: true

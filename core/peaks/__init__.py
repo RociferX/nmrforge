@@ -1,0 +1,25 @@
+"""Peak table model and persistence (Shared, contract §6 / G2B-005)."""
+
+from core.peaks.peak_table import (
+    PEAK_3D_COLUMNS,
+    PEAK_COLUMNS,
+    PeakTable,
+    export_peaks_poky,
+    import_peaks_poky,
+    load_peaks,
+    normalize_poky_label,
+    poky_label_is_valid,
+    save_peaks,
+)
+
+__all__ = [
+    "PEAK_3D_COLUMNS",
+    "PEAK_COLUMNS",
+    "PeakTable",
+    "export_peaks_poky",
+    "import_peaks_poky",
+    "load_peaks",
+    "normalize_poky_label",
+    "poky_label_is_valid",
+    "save_peaks",
+]

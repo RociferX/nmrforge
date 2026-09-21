@@ -1,0 +1,18 @@
+# Provenance of the vendored licence texts
+
+These files are verbatim copies of the canonical GNU licence texts, fetched so that every built
+AppImage carries them. Verify them with:
+
+    python scripts/check_third_party_licenses.py
+
+| File | Source URL | Bytes | SHA-256 |
+| --- | --- | --- | --- |
+| `LGPL-3.0.txt` | https://www.gnu.org/licenses/lgpl-3.0.txt | 7652 | e3a994d82e644b03a792a930f574002658412f62407f5fee083f2555c5f23118 |
+| `GPL-3.0.txt` | https://www.gnu.org/licenses/gpl-3.0.txt | 35149 | 3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986 |
+
+Fetched: 2026-09-16. The texts are unmodified; the GPL-3.0 text is required because LGPL-3.0
+incorporates it by reference ("This library incorporates the terms and conditions of the GNU
+General Public License, version 3").
+
+This file is the input for the build-time and CI checks, so both the build and the test suite fail
+if a text is missing or altered.

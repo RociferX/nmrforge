@@ -1,0 +1,97 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Virtual environment (created at the project root by the dev bootstrap: nmrforge/)
+nmrforge/
+.venv/
+
+# Build artefacts
+build/
+dist/
+
+# NMRPipe working artefacts (<dataset>.nmrpipe dirs: conversion / reconstruction intermediates)
+*.nmrpipe/
+
+# Local config overrides (may hold sensitive data; do not commit)
+nmrforge_data/config/nmrforge.local.yaml
+
+# User reference documents (kept for cross-checking rewrites): stay on disk, never enter the repository
+SOFTWARE_SUMMARY.md
+
+# Coverage / test caches
+.coverage
+htmlcov/
+.hypothesis/
+.tox/
+
+# Editor / system temporary files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.tmp
+*.bak
+*.orig
+*.rej
+*~
+
+# Separate GUI/Backend workspaces (git worktree), dropped when the manager merges
+workspaces/
+.pytest_tmp/
+
+# Additions for the public release preparation (2026-09-16)
+# Note: never delete a tracked small text fixture (the files under tests/fixtures/bruker
+# acqus/acqu2s/acqu3s/nuslist are deliberately version-controlled minimal headers, not raw data).
+
+# Example / benchmark artefacts
+example_data/
+benchmark_results.csv
+benchmarks/results/
+
+# Run / algorithm output locations (nothing should persist inside the repository)
+outputs/
+results/
+generated/
+work/
+tmp/
+temp/
+cache/
+
+# Raw NMR spectra and time-domain data (large, unpublished: never commit)
+*.ft2
+*.ft3
+*.ft4
+*.ucsf
+*.fid
+nuslist.local
+ser
+fid
+*.nmrpipe/
+
+# Environments and secrets
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Logs
+*.log
+logs/
+
+# Packaging / freezing intermediates
+_MEIPASS/
+*.manifest
+
+# PySide6 migration verification environment (must stay separate from the PyQt6 environment: one process can bind only one Qt)
+.venv-pyside/
+
+# OS / editor droppings (2026-09-17)
+desktop.ini
+*.swp

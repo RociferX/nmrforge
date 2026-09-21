@@ -1,0 +1,12 @@
+# Unified text line endings (matches the NMRFlow LF convention)
+* text=auto
+*.py text eol=lf
+*.toml text eol=lf
+*.yaml text eol=lf
+*.md text eol=lf
+*.sh text eol=lf
+*.desktop text eol=lf
+*.svg text eol=lf
+*.spec text eol=lf
+# Licence texts are byte-verified (SHA-256 recorded in PROVENANCE.txt): no line-ending conversion is allowed
+packaging/linux/THIRD_PARTY_LICENSES/*.txt -text

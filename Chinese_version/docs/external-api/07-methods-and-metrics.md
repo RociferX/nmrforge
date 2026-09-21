@@ -1,0 +1,167 @@
+# 07 · 方法与 QC 口径(v1.0)
+
+> 本页描述软件**执行**了什么、留下了哪些 QC 记录。任何跨组合/跨条件的统计
+> (统计推断与科学结论)都不在本软件范围内,由使用者自己的分析基于
+> 统一峰表计算。
+
+## 7.1 参考工作流
+
+1. `generate_fid`(bruker `-AUTO`/fid.com 转换)→ `generate_spectrum`
+   (NMRPipe 管道 + 统一相位路线;NUS 走 SMILE 重构);
+2. 冻结**参考谱**与**参考脚本**(`process.com`,带 SHA-256)——参考脚本是该条件
+   后续所有 workflow 的模板;
+3. 参考峰位:软件在参考谱上自动选峰(阈值 `sigma_multiplier` 在**生成参考时**
+   可由外部指定,缺省 35σ;API `sigma_multiplier=` / CLI `peaks --sigma`),
+   轴峰按物理边距剔除,或使用外部峰表;峰按行序获得稳定身份 `R0001…`;
+   **阈值随参考一起冻结**:后续所有 workflow 只能沿用参考的阈值,给不同阈值
+   会报错(要换阈值须重建参考);
+4. 在同一条参考谱上分别用 **parabolic** 与 **2D gaussian** 定位,写两张
+   参考峰表;
+5. 参考只作参数扰动的基准,**不声称全局最优**。
+
+## 7.2 参数扰动(workflow)
+
+- 每个组合的 `parameters_used` = 该条件参考运行的有效参数(基底)+ 组合表覆盖;
+- 相位默认**锁定在参考值**(直接维跳过相位搜索、间接维沿用参考优化相位);
+  人工偏差用 `phase_delta.<轴>.p0|p1`(相对参考)或 `phase.<轴>.p0|p1`(绝对值),
+  实际值写进 `phase.<轴>.actual_p0/actual_p1`;
+- 同一个条件内 fid 只转换一次(参考运行),候选谱写
+  `study/workflows/<id>/<条件>/`,不替换活动谱;
+- 相位/窗函数/填零/基线/NUS 参数全部按表执行,所有影响结果的参数三层落档。
+
+## 7.2b 采样路由(满采样 → uniform)
+
+读数据阶段判定有效采样:标注 NUS 但 `nuslist` 覆盖全格,或 2D `ser` 是「全格+
+零填充」且**无零行** → 判为**实际满采样**,`sampling="uniform"`,
+`sampling_schedule="full_sampling"`,并记录证据;处理走 `process()` 常规 FT,
+**不跑 SMILE**。真 NUS(采样表只覆盖子集、或稀疏文件无采样表)仍走
+`reconstruct_nus()`;3D NUS 维持原状(只支持建参考)。
+
+## 7.3 两种峰定位
+
+| 方法 | 做法 | 适用范围 |
+| --- | --- | --- |
+| `parabolic`(参考方法) | 在参考峰位附近的窗口内取 \|强度\| 极值,再对每个参与轴做 ±1 点三点抛物线亚像素 refine | 任意维 |
+| `gaussian` | 以抛物线的整数格结果为中心,对**同一 candidate** 做 2D 高斯最小二乘拟合(不旋转、轴向可分离,含局部常数基线),给出中心/FWHM/幅度/rmse | **仅 2D** |
+
+两者对**完全相同的 candidate** 独立运行,结果可直接比较(峰位差即算法差异)。
+
+- **参考模式**:对参考峰表里的每个峰分别做两种定位,两张参考峰表用同一批
+  `reference_peak_id`;
+- **组合模式**(2026-09-14):每个组合在**自己的候选谱**上先用参考锁定阈值
+  独立选峰,再按 `localization` 精修(parabolic 默认 / gaussian / both),
+  峰表里 `reference_peak_id` 留空——两种方法、不同组合之间的峰匹配由使用者完成。
+
+高斯失败(ROI 太小/不收敛/撞边界/病态)时:回退抛物线位置,并在峰表
+`fallback`/`fallback_reason`/`fit_success` 与 `run.json.peak_localization`
+中逐峰记录原因,workflow 状态升为 `success_with_warning`——**不允许静默**。
+
+### 拟合成本与结果口径(2026-09-14)
+
+逐峰 2D 高斯的成本 = 迭代数 × ROI 点数;三项约束让成本不随填零线性膨胀:
+
+| 机制 | 默认 | 对结果的影响 |
+| --- | --- | --- |
+| 解析式雅可比 | 开启 | **无**:同一模型、同一目标函数与收敛判据;实测峰位差 ≤3e-05 ppm(15N)/3e-06 ppm(1H),方法零翻转、回退计数不变 |
+| 拟合窗口每轴半宽上限(`peaks.localization.gaussian_roi_max_points`) | **0 = 不限制(默认)** | 默认完全不截断 → 结果与旧版一致;设正值(如 48)可限制细网格拟合规模换取速度,**会改结果**:真机 4× 最大 0.39 ppm(3 个峰翻转)、两维 2× 最大 0.71 ppm(1 个翻转);触发逐峰留档 `roi_capped`,截断后拟合失败会自动用完整 ROI 重试(`fit_retry_uncapped`/`retry_n_iter`) |
+| 单峰求值上限(`peaks.localization.gaussian_max_nfev`) | 200 | 只影响原本要跑更多求值的难收敛峰;数值差分时期 1 迭代 ≈7 次求值,解析雅可比下 1 迭代 = 1 次求值,因此 200 求值 ≈ 200 迭代(比原来 ~57 迭代更宽松),只是把“最坏成本”减半 |
+
+真机对照(248 峰跟踪、同参考峰表;默认配置 = 不限制上限):
+
+| 网格 | 旧版 | 新版(默认) | 提速 | 峰位差(15N/1H)/方法翻转 |
+| --- | --- | --- | --- | --- |
+| F1 1× | 2.02 s | 1.46 s | 1.38× | 3e-05 / 3e-06 ppm,0 |
+| F1 2× | 3.67 s | 2.24 s | 1.64× | 7e-06 / 3e-06 ppm,0 |
+| F1 4× | 6.43 s | 3.89 s | 1.65× | 1e-06 / 0 ppm,**0** |
+| F1 2× + F2 2× | 4.98 s | 3.13 s | 1.59× | 0 / 0 ppm,**0** |
+
+若把 `gaussian_roi_max_points` 设为 48(可选):4× 1.73×、两维 2× 1.84×,但代价是
+上面列出的峰位改变(留档可审计)。
+
+## 7.4 选峰阈值与边距(物理宽度口径)
+
+- 选峰阈值 = **噪声 σ 倍数**(`sigma_multiplier`,内部同时作为 `min_snr`):
+  参考模式确定(缺省 35σ),组合模式**锁定沿用**,逐 workflow 留档
+  `parameters_resolved.detection`(`source="reference(locked)"`);
+- 边缘轴峰排除边距默认 = **3×该轴核素线宽(Hz)折算 ppm**
+  (`core.peaks.axis_units`);`edge_margin_ppm` 可显式给物理宽度;
+  运行时按**当前候选谱的点距**换算点数:零填零 k 倍只改点距,不改变边距覆盖
+  的 ppm 宽度;
+- 换算结果逐组合留档:`run.json.window`(points/ppm/effective_ppm/
+  ppm_per_point/source)与 `records/measurement.json`;
+- 组合模式**没有** `max_peaks`,也没有「参考峰位搜索窗口」(不跟踪参考峰表);
+  参考模式/低层 `measure_peak_positions` 仍保留 `window_ppm`(缺省 1.5×线宽)
+  与 `window_pts` 逃生口;
+- `window_ppm`/`window_pts` 只是**上限**:缺省 `exclusive_windows=True` 时,
+  每个参考峰的实际搜索区间再按相邻参考峰位置的中点逐轴切分,只在自己那一格
+  里取极值——否则窗口宽于相邻峰间距时,两条参考记录会被重定位到同一个格点,
+  参考峰表出现只有 `reference_peak_id` 不同的同坐标重复行(2026-09-19 修;实机上一套
+  真实 2D HSQC 的 parabolic 表 253 行只有 184 个唯一坐标)。`exclusive_windows
+  =False` 可复现旧口径;
+- 高斯 ROI 同样按物理宽度(ppm)定义(`peaks.localization.gaussian_roi_f1_ppm`
+  / `_f2_ppm`,或函数/CLI 参数),按点距换算点数;
+- 结构性点数(局部极大 3 点邻域、抛物线 ±1 点)不换算——它们与分辨率无关。
+
+### 基线校正口径(2026-09-16 修正)
+
+- 时间域:直接维 DC 偏置由 `POLY -time` 处理(自动诊断决定,写入参考基底
+  `direct_poly_time`,组合沿用);
+- 频域:`mode=order` 渲染 **`POLY -ord N -auto`**(NMRPipe `-auto` 自动挑基线点
+  后做 N 阶拟合)。历史缺陷:NMRPipe 裸 `POLY -ord N` 默认 `-nc 0` 且无
+  `-first/-last` → 没有基线节点 → **恒等操作**(真机逐位验证),导致“关掉该轴谱不变”;
+- 因此参考的基线优化器评分(内存稳健多项式拟合)与终跑脚本现在同源;
+- `mode=auto` 仍渲染 `POLY -auto`(NMRPipe 自带默认阶数)。
+
+### 轴效果按条件报
+
+同一参数在不同条件下可能截然不同(数据不同、参考配置不同)。软件逐
+(workflow, 条件)比较候选谱与**该条件参考谱**的 SHA-256:逐位相同即发
+`no_spectrum_change` 警告——正式 plan 不应把该轴在该条件下当成真实扰动。
+
+## 7.5 逐峰 QC(落表字段)
+
+| 字段 | 含义 |
+| --- | --- |
+| `detected` | 该谱上是否检到该峰(组合模式:表里只有检出的峰 → 恒 true;参考峰表
+跟踪模式下未测到的参考峰会保留行且 `detected=false`) |
+| `intensity` / `SNR` | 极值处的峰强与 `|峰强|/σ`(σ = 该谱 robust MAD 噪声) |
+| `fit_success` / `FWHM_H` / `FWHM_N` / `boundary_hit` | 该行**实际用的定位方法**的 QC(高斯拟合 / 三点抛物线);P3-7(2026-09-19)起 parabolic 也写实数,抛物线给**等效线宽**(`FWHM = 2.3548σ`,`σ² = H/(2|a|)`) |
+| `fit_rmse` | 高斯拟合残差 RMS;**仅高斯有**,parabolic 表写 NaN(三点抛物线是精确解) |
+| `duplicate_localization` | 该行与同表另一行同坐标(ppm 精确到 1e-6,P2-5):重复组每行都标 true、不删行;`peak_localization.<method>.n_duplicate` 记多出来的行数,`run.json.warnings` 另留 `duplicate_localization` 码 |
+| `fallback` / `fallback_reason` | 是否回退与原因 |
+| `cell_low_*` / `cell_high_*` / `cell_edge` / `intensity_ratio_vs_picked` / `shift_vs_picked_*` | 参考表的逐峰**格/身份 QC**(P1-3):最终搜索区间(闭区间,数据轴格点)、极值是否被邻居的格截断、**|测得强度| ÷ |身份表 `Height`|**、measured − picked(ppm);**组合表一律写 NaN**(sweep 是「选峰即定位」,没有这一步) |
+
+`window_edge` 与 `cell_edge` **正交**:前者只在**物理窗**(±1.5×线宽折算的点数,再被谱边界截断)边界命中时为真,后者只在**独占邻域**(相邻参考峰位置的中点)把该峰的搜索区间截断、且极值正好停在那条边界上时为真;历史口径 `measure_peak_positions(exclusive_windows=False)` 没有邻居截断,`cell_edge` 恒 false。两者同时为真 = 真峰顶既可能出窗、也可能落在邻居那一侧。
+
+
+内部 `PeakMeasurement`(参考峰跟踪/低层测量路径)另带 `window_edge`(极值贴窗口
+边界)、`boundary`(贴谱边界)、`out_of_range`(参考位置在谱范围外)与 `deltas`
+(相对参考峰位),汇总进 `run.json.peak_localization` 与
+`records/measurement.json`;组合模式改用本谱检出的峰 → 逐峰 QC 为
+`fit_success`/`fit_rmse`/`FWHM_*`/`boundary_hit`/`fallback`。
+
+## 7.6 测试/检测辅助(不属于处理契约)
+
+`nmrforge_api.uncertainty`(`position_uncertainty` / `uncertainty_summary` /
+`PeakUncertainty`)计算同一批峰在多个组合间的 σ、极差与 Δδ 下限。它**不参与**
+处理链,也不会出现在 `records/` 里;用途是:
+
+- **回归检测**:σ/Δδ 全 0 说明被扫参数被静默忽略(真机历史上出现过该缺陷);
+- **算法对比**:同一批 candidate 下 parabolic 与 gaussian 的峰位差;
+- **使用者参考实现**:分析侧可直接复用或照此实现。
+
+```python
+from nmrforge_api import position_uncertainty, uncertainty_summary
+
+items = position_uncertainty(runs, csp_n_weight=0.2)
+summary = uncertainty_summary(items, n_runs=len(runs))
+```
+
+正式统计与显著性判断请在你的分析代码里按自己的假设完成。
+
+## 7.7 版本与可复算
+
+每条记录带:软件版本(`core.__version__`)、Python 与关键依赖版本、真机登记的
+NMRPipe/SMILE 版本、参考脚本与候选脚本 SHA-256、参考谱与候选谱 SHA-256、
+网格哈希(`grid_sha256`)、参数三层、窗口换算记录、完整日志。凭
+`records/manifest.json` + `workflows/<id>/` 即可复算并核对。

@@ -1,0 +1,13 @@
+name: HETCOR
+description: Solid-state NMR - 2D 1H-13C HETCOR (CP/FSLG heteronuclear correlation, 13C direct detection)
+phase_sensitive: true
+direct_nucleus: 13C
+indirect_nuclei: [1H]
+expected_peak_mode: absorption
+peak_sign: uniform
+display_orientation: "1H/13C"
+priors:
+  "1H": [-5.0, 20.0]
+  "13C": [10.0, 190.0]
+constraints:
+  ndim: 2

@@ -1,0 +1,105 @@
+name: Bug report
+description: Something in nmrForge does not work as documented.
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a problem. Please do not paste unpublished
+        data, sample names, or laboratory paths into a public issue - see SECURITY.md.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you expect, and what actually happened?
+      placeholder: |
+        Expected: the peak table contains N peaks.
+        Actual: the run reports a failure with ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open project ...
+        2. Import dataset ...
+        3. Click "generate spectrum" / run `python -m nmrforge_api ...`
+        4. See error
+    validations:
+      required: true
+
+  - type: input
+    id: nmrforge-version
+    attributes:
+      label: nmrForge version
+      description: "`core.__version__`, or the AppImage file name."
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: How did you install nmrForge?
+      options:
+        - Linux AppImage
+        - editable source install (pip install -e .)
+        - other (describe below)
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: "Ubuntu 22.04 / Windows 11 23H2 / ..."
+    validations:
+      required: true
+
+  - type: input
+    id: python
+    attributes:
+      label: Python version
+      description: Output of `python --version` (source installs only).
+      placeholder: "3.12.13"
+
+  - type: input
+    id: nmrpipe-version
+    attributes:
+      label: NMRPipe version
+      description: Recorded in the run record, or the installation directory name.
+      placeholder: "NMRPipe 11.9 / nmrbin.linux212_64"
+
+  - type: dropdown
+    id: dimensionality
+    attributes:
+      label: Data dimensionality
+      options: ["1D", "2D", "3D", "not applicable"]
+    validations:
+      required: true
+
+  - type: dropdown
+    id: sampling
+    attributes:
+      label: Sampling type
+      options: ["uniform", "NUS", "uncertain (metadata conflict)", "not applicable"]
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / error output
+      description: |
+        Paste the message from the GUI log panel, the run record, or the console.
+        Redact absolute paths, sample names and anything unpublished.
+      render: text
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Relevant configuration, experiment template, or parameters.
