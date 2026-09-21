@@ -1,0 +1,152 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nmrforge"
+# PROV-009: the version lives in exactly one place (core.__version__) so that pyproject / package / AppImage cannot drift
+dynamic = ["version"]
+description = "Automated processing, parameter optimisation and quality control for Bruker 2D/3D NMR data"
+readme = "README.md"
+requires-python = ">=3.12"
+authors = [{ name = "Xuanfeng Li" }]
+# Licence: the source is Apache-2.0 (decided by the rights holder on 2026-09-16; the text is LICENSE at the repository root).
+# LGPL applies only to third-party libraries bundled inside a packaged distribution (the Qt/PySide6
+# shipped in the Linux AppImage, whose licence texts and notice travel with the artefact); it does not apply to this project's source.
+# Copyright holder: Xuanfeng Li (李宣锋) - see LICENSE / README / CITATION.cff.
+# Note: the table form of `license` is kept for compatibility with the declared build-system setuptools>=68;
+# if the build requirement rises to setuptools>=77, switch to the PEP 639 string form license = "Apache-2.0".
+license = { text = "Apache-2.0" }
+# Classifier policy (aligned 2026-09-21 after an external review):
+# - Development Status stays "3 - Alpha". During 0.x the Python/CLI API names, defaults and the
+#   records it writes can still change (the desktop track is already usable day to day), so the
+#   metadata neither claims Stable nor pretends to be 1.0. The bar for 1.0 is a frozen public API
+#   contract plus end-to-end scientific validation on real instrument data.
+# - Operating systems: Linux ships a released AppImage; Windows is the day-to-day development and
+#   regression platform (source installs work); macOS is not validated, so it is not claimed.
+classifiers = [
+    "License :: OSI Approved :: Apache Software License",
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Chemistry",
+    "Topic :: Scientific/Engineering :: Physics",
+]
+dependencies = [
+    "PySide6>=6.6",
+    "pyqtgraph>=0.13",
+    "numpy>=1.24,<2.5",
+    "scipy>=1.10",
+    "pandas>=2.0",
+    "matplotlib>=3.7",
+    "PyYAML>=6.0",
+    "nmrglue>=0.9",
+    "reportlab>=4.0",
+    "send2trash>=1.8",
+]
+
+[project.scripts]
+nmrforge-viewer = "viewer.app:main"
+
+# Optional dependency groups (PEP 621). Notes:
+# - There is no `gui` group: PySide6/pyqtgraph are runtime-required dependencies of the current design, not optional extras;
+#   installing the GUI means installing this package itself.
+# - `pip install .` / a wheel is supported since 2026-09-21: the runtime resources
+#   (config/, presets/) moved into the data package `nmrforge_data` (see its __init__.py),
+#   and gui/assets, ui_support/locales ship as package-data. The relative position is the
+#   same in a checkout and in an installed copy, so `resource_path()` works in both.
+#   The Linux AppImage ships with v0.11.0 (one artefact; the UI language is switched at run time).
+# - The `docs` group prepares a future documentation site; the Markdown under docs/ is readable as it is.
+[project.optional-dependencies]
+test = [
+    "pytest>=7.4",
+]
+dev = [
+    "pytest>=7.4",
+    "ruff>=0.4",
+]
+docs = [
+    "mkdocs>=1.6",
+    "mkdocs-material>=9.5",
+]
+
+# Shipped data is declared explicitly below instead of relying on "everything tracked by the
+# VCS counts as package data", which would drag the git-ignored nmrforge.local.yaml along
+[tool.setuptools]
+include-package-data = false
+
+[tool.setuptools.packages.find]
+include = [
+    "core*",
+    "backend*",
+    "workflow*",
+    "gui*",
+    "viewer*",
+    "nmrforge_api*",
+    "qtcompat*",
+    "ui_support*",
+    "nmrforge_data*",
+]
+
+# Shipped data (YAML/JSON/images cannot ride along through package discovery alone)
+[tool.setuptools.package-data]
+# list the files that belong in the package: config/ also holds the git-ignored
+# nmrforge.local.yaml (machine paths), which "config/*.yaml" would package as well
+nmrforge_data = [
+    "config/nmrforge.yaml",
+    "config/README.md",
+    "presets/*.yaml",
+    "presets/*.md",
+]
+gui = ["assets/*.png", "assets/*.svg"]
+# Name the language packs one by one: source.json / converted.json are tooling lists for
+# scripts/i18n_extract_ui.py, read only during development/CI - a "locales/*.json" glob would
+# ship them too (package_data is expanded from the filesystem, and exclude-package-data does
+# not apply to explicit package_data)
+ui_support = [
+    "locales/default.json",
+    "locales/en.json",
+    "locales/zh.json",
+    "locales/*.md",
+]
+# The four behaviour-tree READMEs ship as well: nmrforge_api.compat behaviour_digest covers
+# EVERY file under core/ + backend/ + workflow/ + nmrforge_api/, so without them an installed
+# copy computes a different fingerprint and compat_verified / compat_level read
+# false / unverified there. Guarded by
+# tests/test_release_readiness.py::test_wheel_ships_every_fingerprinted_file
+core = ["README.md"]
+backend = ["README.md"]
+workflow = ["README.md"]
+nmrforge_api = ["README.md"]
+
+# The machine-local override (nmrforge.local.yaml) is a git-ignored local file that may carry
+# developer absolute paths: never put it in a wheel/sdist (the AppImage build stashes it first)
+[tool.setuptools.exclude-package-data]
+nmrforge_data = ["config/*.local.yaml"]
+
+[tool.setuptools.dynamic]
+version = {attr = "core.__version__"}
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+# Chinese_version/ holds the Chinese edition of the documentation; it is excluded from test
+# collection and static checks
+norecursedirs = ["Chinese_version", ".git", ".venv", "build", "dist"]
+addopts = "-q"
+markers = [
+    "unit: pure logic tests (no temp dirs, Qt or project manager); the fastest group",
+    "integration: real I/O or multi-module interaction (tmp_path/bruker_dir/Qt/ProjectManager)",
+    "regression: guards for fixed defects, audit follow-ups or release/architecture invariants",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+exclude = ["nmrforge", ".venv", ".git", "build", "dist", "Chinese_version"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP"]

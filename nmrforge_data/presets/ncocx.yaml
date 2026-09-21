@@ -1,0 +1,13 @@
+name: NCOCX
+description: Solid-state NMR - 3D 15N-13C'-13C side-chain correlation (13C direct detection)
+phase_sensitive: true
+direct_nucleus: 13C
+indirect_nuclei: [15N, 13C]
+expected_peak_mode: absorption
+peak_sign: uniform
+display_orientation: "15N/13C/13C"
+priors:
+  "15N": [90.0, 140.0]
+  "13C": [10.0, 190.0]
+constraints:
+  ndim: 3

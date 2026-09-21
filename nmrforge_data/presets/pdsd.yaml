@@ -1,0 +1,12 @@
+name: PDSD
+description: Solid-state NMR - 2D 13C-13C proton-driven spin diffusion (side-chain correlation)
+phase_sensitive: true
+direct_nucleus: 13C
+indirect_nuclei: [13C]
+expected_peak_mode: absorption
+peak_sign: uniform
+display_orientation: "13C/13C"
+priors:
+  "13C": [10.0, 190.0]
+constraints:
+  ndim: 2

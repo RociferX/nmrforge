@@ -1,0 +1,40 @@
+# NMRForge default configuration (nmrforge_data/config/nmrforge.local.yaml may override it
+# locally; never commit sensitive data)
+# Only configuration sections with a runtime consumer are kept (DEAD-014, 2026-09-12):
+# sections without a consumer other than backend / processing / smile were removed.
+# The GUI's software settings write the **local override** file; the interface-language
+# preference lives there too, as language: auto|zh|en (auto follows the system; the full
+# resolution order is documented in ui_support/i18n.py).
+
+backend:
+  provider: nmrpipe            # current production backend; unimplemented providers are no longer listed
+  nmrpipe:
+    nmrpipe_bin: ""            # leave empty to search automatically (PATH -> csh environment -> common dirs)
+    path: ""                   # explicit NMRPipe bin directory / executable (wins over nmrpipe_bin; may be empty)
+
+processing:
+  linewidth_hz:                # automatic zero-filling target line width for the indirect dimension (nucleus -> Hz); explicit params override it
+    1H: 8
+    15N: 15
+    13C: 20
+  points_per_line: 2.0         # target digital point spacing = max(line width, 1/AQ)/points_per_line
+  ext_lo: "10.5"                 # high end of the direct-dimension extraction window (EXT -x1), default 10.5 ppm
+  ext_hi: "6.5"                  # low end of the direct-dimension extraction window (EXT -xn), default 6.5 ppm
+  intermediate_memory: auto      # auto=put the intermediate-spectrum work directory on a ramdisk when memory allows; off=always on disk
+  memory_disk_path: ""           # optional: ramdisk root (default Linux /dev/shm; on Windows point at a self-created RAM disk)
+
+peaks:
+  # peak localisation (2026-09-13): the sub-grid refinement method that follows detection.
+  # consumer: core/peaks/localize.py::load_localization_defaults (peak picking / GUI / API).
+  localization:
+    method: parabolic           # parabolic (default, the existing 3-point parabola) | gaussian (2D only)
+    gaussian_roi_f1_ppm: 1.5    # Gaussian fit ROI radius (indirect dimension F1, ppm, physical width)
+    gaussian_roi_f2_ppm: 0.25   # Gaussian fit ROI radius (direct dimension F2, ppm, physical width)
+    gaussian_roi_max_points: 0  # maximum half-width per axis of the fitting window, in points: 0 = no limit (the default,
+                                # identical to earlier versions); a positive value such as 48 caps the fit size
+                                # on a fine grid (zero-filled) and speeds it up markedly (records roi_capped per peak
+                                # when it triggers; a failed fit automatically retries with the full ROI)
+    gaussian_max_nfev: 200      # maximum number of function evaluations for the single-peak least-squares fit (hard cap on a failing fit)
+
+smile:
+  nthread: 2                   # SMILE thread count (default 2; ceiling = machine cores - 2, only 1 on <=3 cores; 0 also falls back to the safe default of 2)

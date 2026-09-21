@@ -1,0 +1,15 @@
+name: TOCSY-HSQC-15N
+description: 3D 15N-edited TOCSY-HSQC (1H-15N-1H, backbone sequential assignment)
+phase_sensitive: true
+direct_nucleus: 1H
+indirect_nuclei: [15N, 1H]
+expected_peak_mode: absorption
+peak_sign: uniform
+display_orientation: "1H/15N/1H"
+priors:
+  "1H": [6.0, 11.0]
+  "15N": [90.0, 135.0]
+constraints:
+  ndim: 3
+processing_hints:
+  auto_phase: true

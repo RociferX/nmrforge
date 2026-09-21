@@ -1,0 +1,15 @@
+name: HMBC
+description: 13C-1H HMBC (2D, long-range coupling, wide 13C range covering carbonyl/aromatic)
+phase_sensitive: false
+direct_nucleus: 1H
+indirect_nuclei: [13C]
+expected_peak_mode: absorption
+peak_sign: uniform
+display_orientation: "13C/1H"
+priors:
+  "1H": [0.0, 11.0]
+  "13C": [10.0, 200.0]
+constraints:
+  ndim: 2
+processing_hints:
+  auto_phase: false

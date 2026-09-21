@@ -1,0 +1,13 @@
+name: HNHETCOR
+description: Solid-state NMR - 2D 1H-15N HETCOR (CP/FSLG heteronuclear correlation, 15N direct detection)
+phase_sensitive: true
+direct_nucleus: 15N
+indirect_nuclei: [1H]
+expected_peak_mode: absorption
+peak_sign: uniform
+display_orientation: "1H/15N"
+priors:
+  "1H": [-5.0, 20.0]
+  "15N": [90.0, 140.0]
+constraints:
+  ndim: 2

@@ -1,0 +1,12 @@
+name: NHHC
+description: Solid-state NMR - 2D 1H-1H spatial correlation via 15N (distance restraints; nucleus combination pending real-data validation)
+phase_sensitive: true
+direct_nucleus: 1H
+indirect_nuclei: [1H]
+expected_peak_mode: absorption
+peak_sign: uniform
+display_orientation: "1H/1H"
+priors:
+  "1H": [-5.0, 20.0]
+constraints:
+  ndim: 2

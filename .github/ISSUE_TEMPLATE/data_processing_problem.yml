@@ -1,0 +1,76 @@
+name: Data-processing problem
+description: A spectrum came out wrong, or processing failed on a dataset.
+title: "[Processing] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Processing problems are easiest to diagnose when we know how the data was classified.
+        **Never attach raw or unpublished data, sample names, or laboratory paths.**
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: One or two sentences describing what is wrong with the result.
+    validations:
+      required: true
+
+  - type: input
+    id: classification
+    attributes:
+      label: Reported experiment type and sampling mode
+      description: From the pipeline panel or the run log ("classified as ... / mode ...").
+      placeholder: "HSQC / uniform"
+    validations:
+      required: true
+
+  - type: input
+    id: shape
+    attributes:
+      label: Dimensionality and sizes
+      placeholder: "2D, F2 TD=2048, F1 TD=256, States-TPPI"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: path
+    attributes:
+      label: Which processing path?
+      options:
+        - automatic (generate spectrum)
+        - manual (edited script)
+        - batch / data group
+        - parameter sweep (nmrforge_api)
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+
+  - type: textarea
+    id: report
+    attributes:
+      label: Quality report and warnings
+      description: |
+        Paste the three-part run report (final spectrum quality / data quality diagnostics /
+        processing parameters) and any warnings, with paths redacted.
+      render: text
+
+  - type: input
+    id: versions
+    attributes:
+      label: nmrForge version, NMRPipe version, OS
+    validations:
+      required: true
+
+  - type: textarea
+    id: tried
+    attributes:
+      label: What you already tried
+      description: Different parameters, manual script, different dataset, ...

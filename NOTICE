@@ -1,0 +1,38 @@
+nmrforge - NMR processing, parameter study and QC
+
+Copyright 2026 Xuanfeng Li (李宣锋)
+
+SPDX-License-Identifier: Apache-2.0
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not use
+this file except in compliance with the License. You may obtain a copy of the
+License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software distributed
+under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+CONDITIONS OF ANY KIND, either express or implied. See the License for the
+specific language governing permissions and limitations under the License.
+
+`LICENSE` holds the verbatim Apache-2.0 text and nothing else, so that licence
+detection tools recognise the repository as Apache-2.0. This file carries the
+copyright line, the SPDX identifier and the scope notes.
+
+Scope
+-----
+- Apache-2.0 covers this project's own source code (the repository and the
+  `nmrforge` package). It does not change the terms of any third-party component,
+  and it is not the licence of the files under
+  packaging/linux/THIRD_PARTY_LICENSES/.
+- LGPL is used only where a *packaged distribution* actually bundles an
+  LGPL-covered library: the Linux AppImage ships Qt/PySide6, whose licence option
+  in use is LGPL-3.0-only. For that binary the LGPL obligations apply to those
+  libraries (and to the relink/replace route), not to this project's source. The
+  texts and notices travel inside the AppImage
+  (packaging/linux/THIRD_PARTY_LICENSES/), are printable with
+  `nmrforge --licenses`, and the build script accepts self-built bindings
+  (PYSIDE6_REQUIREMENT / SHIBOKEN6_REQUIREMENT / EXTRA_PIP_ARGS) so a recipient
+  can replace or relink them.
+- Third-party components keep their own licences; see THIRD_PARTY.md.
+- The reasoning behind the source/binary licence split is in LICENSE_OPTIONS.md.

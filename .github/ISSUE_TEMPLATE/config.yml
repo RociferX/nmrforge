@@ -1,0 +1,6 @@
+# Issue chooser configuration.
+#
+# "Data-processing problem" and "Bug report" exist separately because the two need different
+# evidence: a processing problem needs the classification and the quality report, a code bug
+# usually does not.
+blank_issues_enabled: true

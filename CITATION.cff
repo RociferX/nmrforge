@@ -1,0 +1,48 @@
+# Citation metadata for nmrForge.
+#
+# STATUS: usable for citing the repository itself. The author and the repository URL are
+# confirmed; the affiliation is not, and no DOI exists yet, so cite the repository URL (every
+# release is also citable through its GitHub Release page and tag).
+#
+# DOI: none, and none reserved. `.zenodo.json` is prepared but still carries an explicit
+# placeholder marker - nothing has been uploaded to Zenodo. When a Zenodo release mints a DOI,
+# make exactly two changes here: add
+#   doi: "10.5281/zenodo.XXXXXXX"
+# and, only if a software paper exists, a `preferred-citation` block; then update the "Citation"
+# section of README.md. Never fill in a DOI before the record exists.
+#
+# `version` and `date-released` are bumped together with core.__version__ on every release;
+# tests/test_release_readiness.py fails if the version drifts.
+#
+# The licence below must not be changed without updating LICENSE, NOTICE, pyproject.toml,
+# README.md and LICENSE_OPTIONS.md together (a test enforces that they agree).
+
+cff-version: 1.2.0
+message: "If you use nmrForge, please cite this metadata (repository URL until a DOI exists)."
+title: "nmrForge: automation, parameter optimisation and quality control for Bruker multidimensional NMR data"
+abstract: >-
+  nmrForge is a platform for automating Bruker multidimensional NMR data processing. It reads
+  Bruker acquisition parameters, identifies the experiment type and the sampling scheme, plans a
+  processing strategy, drives NMRPipe (and SMILE for non-uniform sampling reconstruction) to
+  execute it, performs quality control on the result, and records the resolved parameters,
+  external tool versions and warnings so that a run can be reproduced and audited.
+type: software
+authors:
+  - family-names: "Li"
+    given-names: "Xuanfeng"
+    # affiliation: add when confirmed (institute / laboratory)
+version: 0.11.0
+date-released: "2026-09-20"
+repository-code: "https://github.com/RociferX/nmrforge"
+license: "Apache-2.0"
+keywords:
+  - NMR
+  - NMRPipe
+  - Bruker
+  - non-uniform sampling
+  - NUS
+  - SMILE
+  - spectrum processing
+  - quality control
+  - reproducibility
+  - scientific software

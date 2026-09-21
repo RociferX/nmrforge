@@ -1,0 +1,15 @@
+name: HCACO
+description: 13C-1H 3D HCACO(1H-13Cα-13CO)
+phase_sensitive: true
+direct_nucleus: 1H
+indirect_nuclei: [13C, 13C]
+expected_peak_mode: absorption
+peak_sign: uniform
+display_orientation: "13C/13C/1H"
+priors:
+  "1H": [0.0, 11.0]
+  "13C": [10.0, 200.0]
+constraints:
+  ndim: 3
+processing_hints:
+  auto_phase: true

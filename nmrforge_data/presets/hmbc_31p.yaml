@@ -1,0 +1,15 @@
+name: HMBC-31P
+description: 31P-1H 2D HMBC (1H-31P, long-range coupling, magnitude spectrum)
+phase_sensitive: false
+direct_nucleus: 1H
+indirect_nuclei: [31P]
+expected_peak_mode: absorption
+peak_sign: uniform
+display_orientation: "31P/1H"
+priors:
+  "1H": [0.0, 11.0]
+  "31P": [-30.0, 30.0]
+constraints:
+  ndim: 2
+processing_hints:
+  auto_phase: false

@@ -1,0 +1,15 @@
+name: HSQC-TOCSY-13C
+description: 13C-1H 2D HSQC-TOCSY (1H-13C, side-chain assignment)
+phase_sensitive: true
+direct_nucleus: 1H
+indirect_nuclei: [13C]
+expected_peak_mode: absorption
+peak_sign: uniform
+display_orientation: "13C/1H"
+priors:
+  "1H": [0.0, 11.0]
+  "13C": [10.0, 80.0]
+constraints:
+  ndim: 2
+processing_hints:
+  auto_phase: true

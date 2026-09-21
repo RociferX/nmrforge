@@ -1,0 +1,10 @@
+# Parameter-grid example (python -m nmrforge_api sweep --grid grid.yaml)
+# keys are dotted paths of processing parameters, values are their candidate lists; the number of combinations is the product of the axis lengths.
+axes:
+  zero_fill: [1, 2, 4]                 # zero-filling factor for the indirect dimension (digital resolution)
+  points_per_line: [2.0, 4.0]          # target digital point spacing for the indirect dimension
+  "window.F1.off": [0.35, 0.45, 0.55]  # apodisation window start for the indirect dimension
+  "window.F1.end": [0.90, 0.98]        # apodisation window end for the indirect dimension
+  "baseline.F1.enabled": [true, false] # indirect-dimension baseline switch (off = no POLY)
+
+max_runs: 128        # maximum number of combinations (exceeding it errors out and asks for a smaller grid)
