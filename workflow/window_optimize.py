@@ -23,7 +23,37 @@ ratio artificially high will overturn the windowless selection of the natural at
 (0.2.190 requires retention). The selected configuration is written back to
 window[axis](type=none/sine_bell/gaussian/exp etc.), the complete script application is run from
 the terminal; any failure downgrade returns to the current configuration and does not block
-automatic processing."""
+automatic processing.
+
+2026-09-22 (user: "fix the window selection"): the scoring moved from "peak/noise of the strongest
+peak only" to three **detection-oriented** factors, anchored on the ground-truth benchmark (see
+``workflow/truth_benchmark.py``) instead of a self-referential metric:
+
+1. **the noise estimate excludes every detected peak**, not just the neighbourhood of the strongest
+   one -- in a crowded region the old convention treated a neighbouring peak as noise,
+   overestimating the noise and flattening the differences between candidates;
+2. **merging peaks is penalised directly**: the peaks of the un-windowed reference spectrum are the
+   expected peaks, and every candidate is checked for whether each of them is still a **separate**
+   local maximum; two expected peaks inside one maximum = one real peak lost (a false negative in
+   the ground-truth benchmark), so the score is multiplied by (independent maxima / expected peaks);
+3. **the resolution threshold is data driven**: the tolerance is no longer a fixed 1.25x but comes
+   from the **closest pair** of peaks in the reference spectrum (``_effective_res_tol``): the worst
+   FWHM after apodisation may not exceed the closest spacing, and widely separated peaks are not
+   tightened further.
+
+The expected peaks use the **product's own peak-picking threshold** (``_PEAK_SIGMA_MULT`` = the
+default 35 sigma), not a low value picked by hand: with a low threshold the truncation side lobes
+of the un-windowed spectrum are themselves counted as peaks, and the merging criterion then reads
+"the side lobes were always there" as "the window merged peaks" (measured: at 6 sigma a single-peak
+synthetic spectrum reports a dozen expected peaks).
+
+Score = median over traces of (mean detection d x independent-maxima fraction x line-shape factor);
+each factor has a clear job (detection strength / resolution loss / artefacts) instead of being
+normalised into one pool where they cancel out. The convention is locked by the synthetic
+ground-truth benchmark in ``tests/test_window_truth_benchmark.py``: on synthetic data with injected
+peaks, the window the optimiser picks must agree with the candidate that recovers the truth best
+(within tolerance).
+"""
 
 from __future__ import annotations
 
@@ -35,6 +65,7 @@ import numpy as np
 
 from core.data.internal_data_model import Experiment
 from ui_support.i18n import tr
+from workflow.truth_benchmark import detect_peaks, robust_noise_sigma
 
 
 @dataclass
@@ -48,6 +79,10 @@ class WindowChoice:
     shape: float
     score: float
     selected: bool = False
+    #: number of expected peaks this window merged into a single detection
+    merged: float = 0.0
+    #: number of expected peaks on the reference spectrum (denominator of the detection stats)
+    n_ref: float = 0.0
 
 
 @dataclass
@@ -112,6 +147,25 @@ _RES_TOL = 1.25
 # deterministic and only leaves no window.
 _INDIRECT_RES_TOL = 1.15
 
+# Peak detection convention used for the detection statistics (same function as
+# workflow/truth_benchmark.detect_peaks): threshold = noise sigma x 35, i.e. the **product's
+# default peak-picking threshold** (see workflow/pick_peaks._PICK_THRESHOLD_SIGMA;
+# tests/test_window_truth_benchmark.py asserts the two are equal); minimum separation 2 points.
+# The cap on d only affects the ordering among very strong peaks; 30 is an empirical value (higher
+# values do not change the window choice, they only amplify numerical noise).
+_PEAK_SIGMA_MULT = 35.0
+_PEAK_MIN_SEP = 2
+_DETECTION_CAP = 30.0
+#: A local maximum below this fraction of the strongest reference peak is not an expected peak
+#: (truncation side lobes sit around 21%)
+_REFERENCE_MIN_FRACTION = 0.25
+#: Merging criterion: two reference peaks closer than this multiple of the smaller FWHM count as a
+#: pair that was resolved to begin with
+_MERGE_PAIR_SPAN = 1.5
+#: Merging criterion: the valley between them must drop below this fraction of the smaller peak;
+#: a valley that does not drop means the window merged the two peaks into one
+_MERGE_VALLEY_FRACTION = 0.6
+
 
 def _label(cfg: dict[str, Any]) -> str:
     wtype = str(cfg.get("type", "sine_bell"))
@@ -168,61 +222,241 @@ def _window_vector(
 
 
 
-def _measure_trace(amp: np.ndarray) -> dict[str, float]:
-    """Single trace indicators: resolution (FWHM points), SNR, linear (symmetry + side lobes)."""
-    n = amp.size
-    if n < 16:
-        return {"fwhm": float(n), "snr": 0.0, "shape": 0.0, "ok": False}
-    p = int(np.argmax(amp[2 : n - 3])) + 2
-    peak = float(amp[p])
+def _peak_fwhm(amp: np.ndarray, index: int) -> float:
+    """Half-height full width of the peak at ``index`` (points, linearly interpolated)."""
+    peak = float(amp[index])
     if peak <= 0.0:
-        return {"fwhm": float(n), "snr": 0.0, "shape": 0.0, "ok": False}
+        return 1.0
     half = peak * 0.5
-    left = p
+    n = amp.size
+    left = index
     while left > 0 and amp[left] > half:
         left -= 1
     if left > 0:
         frac = (half - amp[left]) / max(amp[left + 1] - amp[left], 1e-12)
         left = left + max(min(frac, 1.0), 0.0)
-    right = p
+    right = index
     while right < n - 1 and amp[right] > half:
         right += 1
     if right < n - 1:
         frac = (half - amp[right]) / max(amp[right - 1] - amp[right], 1e-12)
         right = right - max(min(frac, 1.0), 0.0)
-    fwhm = max(float(right - left), 1.0)
-    lo = max(int(p - 3 * fwhm), 0)
-    hi = min(int(p + 3 * fwhm), n)
-    noise = amp[list(range(0, lo)) + list(range(hi, n))]
-    if noise.size < 4:
-        noise = amp[np.concatenate([np.arange(0, max(lo, 4)), np.arange(min(hi, n - 4), n)])]
-    med = float(np.median(noise))
-    mad = float(np.median(np.abs(noise - med)))
-    rms = max(1.4826 * mad, med, np.finfo(float).eps)
-    snr = peak / rms
-    half_l = float(p - left)
-    half_r = float(right - p)
+    return max(float(right - left), 1.0)
+
+
+def _noise_sigma_without_peaks(amp: np.ndarray, peaks: list[tuple[int, float]]) -> float:
+    """Robust noise sigma after excluding **all** detected peaks (each +-3 FWHM).
+
+    The old convention carved out only the strongest peak's neighbourhood, so a neighbouring peak
+    in a crowded region counted as noise (sigma overestimated, candidate differences flattened);
+    too few leftover points falls back to the spectrum-wide MAD, a consistent conservative
+    estimate.
+    """
+    n = amp.size
+    mask = np.ones(n, dtype=bool)
+    for index, _height in peaks:
+        radius = max(int(round(3.0 * _peak_fwhm(amp, index))), 3)
+        mask[max(index - radius, 0) : min(index + radius + 1, n)] = False
+    selected = amp[mask]
+    if selected.size < max(8, n // 5):
+        return robust_noise_sigma(amp)
+    return robust_noise_sigma(selected)
+
+
+def _shape_factor(amp: np.ndarray, index: int, fwhm: float) -> float:
+    """Line-shape factor: symmetry (0-1) x side-lobe penalty (same convention as 0.2.139)."""
+    peak = float(amp[index])
+    if peak <= 0.0:
+        return 0.0
+    half = peak * 0.5
+    n = amp.size
+    left = index
+    while left > 0 and amp[left] > half:
+        left -= 1
+    right = index
+    while right < n - 1 and amp[right] > half:
+        right += 1
+    half_l = float(index - left)
+    half_r = float(right - index)
     sym = min(half_l, half_r) / max(max(half_l, half_r), 1e-9)
     span = max(int(fwhm), 2)
-    left_sw = amp[max(p - 6 * span, 0) : max(p - 2 * span, 0)]
-    right_sw = amp[min(p + 2 * span, n) : min(p + 6 * span, n)]
+    left_sw = amp[max(index - 6 * span, 0) : max(index - 2 * span, 0)]
+    right_sw = amp[min(index + 2 * span, n) : min(index + 6 * span, n)]
     swell = 0.0
     if left_sw.size and right_sw.size:
         swell = float(max(np.max(left_sw), np.max(right_sw))) / peak
-    shape = sym / (1.0 + 5.0 * max(swell, 0.0))
-    return {"fwhm": fwhm, "snr": snr, "shape": shape, "ok": True}
+    return sym / (1.0 + 5.0 * max(swell, 0.0))
 
 
-def _aggregate(amp_traces: np.ndarray, cfg: dict[str, Any]) -> dict[str, float]:
-    """Take the median index of the energy top trace."""
-    per = [_measure_trace(row) for row in amp_traces]
+def _reference_peaks(amp: np.ndarray) -> list[tuple[int, float, float]]:
+    """The expected peaks on the un-windowed reference spectrum: ``[(position, height, FWHM)]``,
+    sorted by position."""
+    return [
+        (index, height, _peak_fwhm(amp, index))
+        for index, height in detect_peaks(
+            amp, sigma_mult=_PEAK_SIGMA_MULT, min_sep=_PEAK_MIN_SEP
+        )
+    ]
+
+
+def _significant_reference(
+    reference: list[tuple[int, float, float]],
+) -> list[tuple[int, float, float]]:
+    """The **significant** peaks of the reference spectrum (height >= ``_REFERENCE_MIN_FRACTION``
+    of the strongest one).
+
+    Far weaker local maxima are truncation side lobes or noise spikes: they must neither be
+    required to be found again nor take part in the "closest peak spacing" -- otherwise adding a
+    window to truncated data (which suppresses side lobes) would be scored as losing real peaks,
+    and a naturally decaying axis would have its resolution threshold tightened by side-lobe
+    spacing.
+    """
+    strongest = max((float(item[1]) for item in reference), default=0.0)
+    if strongest <= 0.0:
+        return []
+    return [
+        item
+        for item in reference
+        if float(item[1]) >= _REFERENCE_MIN_FRACTION * strongest
+    ]
+
+
+def _min_reference_spacing(reference: list[list[tuple[int, float, float]]]) -> float:
+    """Distance between the two closest significant reference peaks (points).
+
+    Median over traces; 0 (unknown) when no trace has such a pair.
+    """
+    spacings: list[float] = []
+    for peaks in reference:
+        significant = _significant_reference(peaks)
+        if len(significant) < 2:
+            continue
+        positions = [float(item[0]) for item in significant]
+        spacings.append(min(b - a for a, b in zip(positions, positions[1:])))
+    if not spacings:
+        return 0.0
+    return float(np.median(spacings))
+
+
+def _effective_res_tol(res_tol: float, spacing: float, min_fwhm: float) -> float:
+    """Data-driven resolution threshold: the closest **significant** pair sets how wide a window
+    may be.
+
+    ``spacing / narrowest candidate FWHM``: when the two peaks are separated (spacing >= 1.25 x the
+    narrowest FWHM, i.e. the ratio is >= 1.25) this term does nothing and the ``res_tol`` ceiling
+    decides; when the peaks are very close, no candidate FWHM may exceed the peak spacing -- the
+    minimum requirement that the window does not blur the two peaks into one.
+    """
+    if spacing <= 0.0 or min_fwhm <= 0.0 or not np.isfinite(spacing):
+        return float(res_tol)
+    return float(min(max(spacing / float(min_fwhm), 1.0), float(res_tol)))
+
+
+def _measure_trace(
+    amp: np.ndarray,
+    reference_peaks: list[tuple[int, float, float]] | None = None,
+) -> dict[str, float]:
+    """Detection statistics of a single trace (the candidate spectrum is already apodised).
+
+    ``reference_peaks`` are the peaks of the un-windowed reference spectrum (position / height /
+    FWHM). Only the **significant** ones (>= ``_REFERENCE_MIN_FRACTION`` of the strongest peak)
+    count as expected peaks:
+
+    * detection term ``det``: the height at the same position in the candidate spectrum divided by
+      the noise sigma (sigma is a robust MAD after excluding **all** detected peaks). Using the
+      height at that position instead of looking for a local maximum again keeps a noise spike
+      from pretending that the peak is still there;
+    * merging term ``merge``: when two expected peaks are already resolved in the reference
+      spectrum (spacing <= 1.5 x the smaller FWHM), the valley between them in the candidate
+      spectrum must drop below ``_MERGE_VALLEY_FRACTION`` of the smaller peak -- a valley that does
+      not drop means this window merged the two peaks into one, which in the ground-truth benchmark
+      is one real peak lost;
+    * line-shape factor ``shape``: symmetry + side lobes (suppresses truncation ringing and
+      artefacts, same convention as 0.2.139).
+
+    ``score = det_mean x merge_factor x shape``: the three factors are detection strength,
+    resolution loss and artefacts.
+    """
+    n = amp.size
+    empty = {
+        "fwhm": float(n), "snr": 0.0, "shape": 0.0, "score": 0.0,
+        "det_mean": 0.0, "n_ref": 0.0, "resolved": 0.0, "ok": False,
+    }
+    if n < 16:
+        return empty
+    peaks = detect_peaks(amp, sigma_mult=_PEAK_SIGMA_MULT, min_sep=_PEAK_MIN_SEP)
+    if not peaks:
+        return empty
+    sigma = _noise_sigma_without_peaks(amp, peaks)
+    strongest_index, strongest_height = max(peaks, key=lambda item: item[1])
+    fwhm = _peak_fwhm(amp, strongest_index)
+    snr = float(strongest_height) / max(sigma, np.finfo(float).eps)
+    shape = _shape_factor(amp, strongest_index, fwhm)
+    reference_all = reference_peaks if reference_peaks else [
+        (index, height, _peak_fwhm(amp, index)) for index, height in peaks
+    ]
+    targets = _significant_reference(reference_all)
+    if not targets:
+        return {**empty, "fwhm": fwhm, "snr": snr, "shape": shape, "score": snr * shape, "ok": True}
+    det_sum = 0.0
+    for index, _height, _ref_fwhm in targets:
+        det_sum += min(
+            float(amp[int(index)]) / max(sigma, np.finfo(float).eps), _DETECTION_CAP
+        )
+    det_mean = det_sum / len(targets)
+    # Merging criterion: a pair that is resolved in the reference spectrum must stay separated here
+    merged = 0
+    pairs = 0
+    for left, right in zip(targets, targets[1:]):
+        left_index = int(left[0])
+        right_index = int(right[0])
+        separation = float(right_index - left_index)
+        if separation <= 0.0:
+            continue
+        ref_fwhm = min(float(left[2]), float(right[2]))
+        if separation > _MERGE_PAIR_SPAN * max(ref_fwhm, 1.0):
+            continue
+        pairs += 1
+        valley = float(np.min(amp[left_index : right_index + 1]))
+        smaller = min(float(amp[left_index]), float(amp[right_index]))
+        if smaller <= 0.0:
+            merged += 1
+            continue
+        if valley > _MERGE_VALLEY_FRACTION * smaller:
+            merged += 1
+    n_targets = len(targets)
+    merge_factor = 1.0 if pairs == 0 else max(1.0 - merged / pairs, 0.0)
+    score = det_mean * merge_factor * shape
+    return {
+        "fwhm": fwhm,
+        "snr": snr,
+        "shape": shape,
+        "score": score,
+        "det_mean": det_mean,
+        "n_ref": float(n_targets),
+        "resolved": float(n_targets - merged),
+        "ok": True,
+    }
+
+
+def _aggregate(
+    amp_traces: np.ndarray,
+    reference: list[list[tuple[int, float, float]]],
+) -> dict[str, float]:
+    """Detection statistics per trace, then the median (robust against individual noisy traces)."""
+    per = [_measure_trace(row, refs) for row, refs in zip(amp_traces, reference)]
     ok = [m for m in per if m["ok"] and m["snr"] > 3.0]
     if not ok:
-        return {"fwhm": float(amp_traces.shape[-1]), "snr": 0.0, "shape": 0.0}
+        return {"fwhm": float(amp_traces.shape[-1]), "snr": 0.0, "shape": 0.0,
+                "score": 0.0, "det_mean": 0.0, "n_ref": 0.0, "resolved": 0.0}
     return {
         "fwhm": float(np.median([m["fwhm"] for m in ok])),
         "snr": float(np.median([m["snr"] for m in ok])),
         "shape": float(np.median([m["shape"] for m in ok])),
+        "score": float(np.median([m["score"] for m in ok])),
+        "det_mean": float(np.median([m["det_mean"] for m in ok])),
+        "n_ref": float(np.median([m["n_ref"] for m in ok])),
+        "resolved": float(np.median([m["resolved"] for m in ok])),
     }
 
 
@@ -259,6 +493,13 @@ def _score_axis(
             skipped_sw += 1
             continue
         scorable.append(cfg)
+    # The un-windowed reference spectrum ("none" is a first-class candidate) defines the expected
+    # peaks that every candidate has to keep.
+    ref_amp = np.abs(np.fft.fft(picked, n_zf, axis=-1))
+    ref_amp[:, : max(2, n_zf // 80)] = 0.0
+    ref_amp[:, n_zf - 3 :] = 0.0
+    reference = [_reference_peaks(row) for row in ref_amp]
+    reference_spacing = _min_reference_spacing(reference)
     measured: list[WindowChoice] = []
     for cfg in scorable:
         win = _window_vector(cfg, n, sw=sw)
@@ -269,7 +510,7 @@ def _score_axis(
         # Exclude low-frequency cutoff area and mirror end.
         amp[:, : max(2, n_zf // 80)] = 0.0
         amp[:, n_zf - 3 :] = 0.0
-        agg = _aggregate(amp, cfg)
+        agg = _aggregate(amp, reference)
         measured.append(
             WindowChoice(
                 cfg=cfg,
@@ -277,20 +518,25 @@ def _score_axis(
                 fwhm=agg["fwhm"],
                 snr=agg["snr"],
                 shape=agg["shape"],
-                score=0.0,
+                score=agg["score"],
+                merged=float(agg["n_ref"] - agg["resolved"]),
+                n_ref=float(agg["n_ref"]),
             )
         )
     valid = [m for m in measured if m.snr > 0.0]
     if not valid:
         return measured, None, tr("trace no valid signal")
     min_fwhm = min(m.fwhm for m in valid)
-    pool = [m for m in valid if m.fwhm <= min_fwhm * res_tol] or valid
-    max_snr = max(m.snr for m in pool)
-    max_shape = max(m.shape for m in pool)
-    for m in pool:
-        snr_norm = m.snr / max(max_snr, 1e-12)
-        shape_norm = m.shape / max(max_shape, 1e-12)
-        m.score = 0.5 * snr_norm + 0.5 * shape_norm
+    # The resolution threshold comes from the closest significant pair of reference peaks
+    # (data driven instead of a fixed multiple)
+    tol_used = _effective_res_tol(res_tol, reference_spacing, min_fwhm)
+    pool = [m for m in valid if m.fwhm <= min_fwhm * tol_used] or valid
+    pool_ids = {id(m) for m in pool}
+    for m in measured:
+        if id(m) not in pool_ids:
+            # Candidates outside the resolution pool are not compared (resolution first, 0.2.139)
+            m.score = 0.0
+            continue
         if resolution_penalty > 0.0:
             widen = max(m.fwhm / min_fwhm - 1.0, 0.0)
             m.score *= float(np.exp(-resolution_penalty * widen))
@@ -309,9 +555,16 @@ def _score_axis(
             p4=best.score,
             p5=len(pool),
             p6=len(measured),
-            p7=min_fwhm * res_tol,
+            p7=min_fwhm * tol_used,
         )
     )
+    if best.merged > 0.0:
+        log += tr(
+            "; {p0}/{p1} expected peak(s) were merged into one detection by this "
+            "window",
+            p0=int(round(best.merged)),
+            p1=int(round(best.n_ref)),
+        )
     if skipped_sw:
         log += tr(
             "; {p0} spectral width dependent candidates (GM/EM) not provided SW "
@@ -379,6 +632,8 @@ def optimize_axis_window(
                 "shape": m.shape,
                 "score": m.score,
                 "selected": m.selected,
+                "merged": m.merged,
+                "n_ref": m.n_ref,
             }
             for m in measured
         ],
