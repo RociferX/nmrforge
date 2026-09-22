@@ -1,4 +1,4 @@
-# nmrforge_api external documents (v0.2)
+# nmrforge_api external documents (v1.0 - first version)
 
 > **Track B - still changing.** This is the in-flux scripting surface; see
 > [Python API](../python-api.md) for the stability promise and the behaviour-digest check.
@@ -46,7 +46,7 @@ is opt-in) are in [09-limitations-and-roadmap.md](09-limitations-and-roadmap.md)
 | [10-troubleshooting.md](10-troubleshooting.md) | Common errors, warning processing, breakpoint resume |
 | [examples/](examples/) | Runnable example(one step/step by step/Measure only) |
 
-Contract: `API_CONTRACT.md` (v0.2).
+Contract: `API_CONTRACT.md` (v1.0; released as the first version on 2026-09-22).
 
 ## Install and run
 

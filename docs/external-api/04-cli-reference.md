@@ -1,4 +1,4 @@
-# 04 · Command line reference (v0.2)
+# 04 · Command line reference (v1.0)
 
 Entry:`python -m nmrforge_api <Order> --study <Research roots>`.
 Public parameter:`--study`(required), `--name`(new research name), `--condition <A|B|…>`.

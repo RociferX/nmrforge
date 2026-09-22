@@ -1,4 +1,4 @@
-# 04 · 命令行参考(v0.2)
+# 04 · 命令行参考(v1.0)
 
 入口:`python -m nmrforge_api <命令> --study <研究根>`。
 公共参数:`--study`(必填)、`--name`(新建研究名)、`--condition <A|B|…>`

@@ -49,7 +49,13 @@ from ui_support.i18n import tr
 
 STUDY_DIRNAME = "study"
 STUDY_STATE_FILENAME = "study.json"
-API_VERSION = "0.2"
+# Public API contract version (single definition point, 2026-09-22): nmrforge_api is
+# released as its **first version**, so this goes from "0.2" to "1.0". It is the
+# **contract** version, not the release version (that one is core.__version__). It is
+# written into study.json, records/manifest.json and records/workflows.json, so it must
+# have exactly one definition -- __init__.py and records.py used to carry their own
+# literals, and a bump could silently miss one of them.
+API_VERSION = "1.0"
 #: order in which condition labels are assigned (A/B/C...)
 CONDITION_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 

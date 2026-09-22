@@ -12,7 +12,7 @@ Entry point for the documentation that ships with the repository.
 
 ## Two tracks
 
-nmrForge has two tracks with different maturity. Pick the one that matches your work.
+nmrForge has two tracks; both are at their first version. Pick the one that matches your work.
 
 ### Track A - the desktop application (mature)
 
@@ -25,11 +25,12 @@ nmrForge has two tracks with different maturity. Pick the one that matches your 
   comparison figure, the inspection verdict, the match rate, the QC scores, the two parameter sets
   and a real-machine repeatability snapshot.
 
-### Track B - the Python/CLI API (still changing)
+### Track B - the Python/CLI API (first version)
 
-Names, defaults and the records these calls write can change before v1.0. Pin a commit and
-compare `nmrforge_api.compat_manifest()` (`behavior_digest`, `compat_level`, `affected`) before
-treating a set of numbers as comparable.
+The parameter-study surface is released as its **first version** (`API_VERSION = "1.0"`, since
+2026-09-22); names, defaults and the records it writes are managed through
+`nmrforge_api.compat_manifest()` (`behavior_digest`, `compat_level`, `affected`) and recorded in the
+release notes. Pin a commit and compare the manifest before treating a set of numbers as comparable.
 
 - [Python API](python-api.md) - the public `nmrforge_api` surface versus the internal layers.
 - [CLI reference](cli.md) - `python -m nmrforge_api` subcommands and options.

@@ -1,4 +1,4 @@
-# 06 · Output and Record (v0.2)
+# 06 · Output and records (v1.0)
 
 ## 6.1 directory layout
 

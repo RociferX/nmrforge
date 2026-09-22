@@ -28,7 +28,7 @@ from core.version import software_commit, software_version, tool_versions
 from nmrforge_api.compat import record_stamp
 from nmrforge_api.peak_tables import read_peak_table, write_peak_table
 from nmrforge_api.reference import ReferenceSpectrum
-from nmrforge_api.session import StudySession, now_iso
+from nmrforge_api.session import API_VERSION, StudySession, now_iso
 from nmrforge_api.sweep import (
     SweepPlan,
     SweepRun,
@@ -210,7 +210,7 @@ def write_reference_records(
         else list(references)
     )
     payload = {
-        "api_version": "0.2",
+        "api_version": API_VERSION,
         "created": now_iso(),
         "nmrforge_version": software_version(),
         "software_commit": software_commit(),
@@ -300,7 +300,7 @@ def write_records(
         ref_list = list(references)
     workloads = workflow_summary(runs)
     manifest = {
-        "api_version": "0.2",
+        "api_version": API_VERSION,
         "created": now_iso(),
         "nmrforge_version": software_version(),
         "software_commit": software_commit(),
