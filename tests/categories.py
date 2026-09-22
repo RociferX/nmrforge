@@ -129,6 +129,7 @@ CATEGORIES: dict[str, str] = {
     "test_vm_sample_make_nus.py": "integration",
     "test_window_optimize.py": "integration",
     "test_window_parity.py": "unit",
+    "test_window_truth_benchmark.py": "integration",
     "test_workspace.py": "integration",
 }
 
