@@ -222,10 +222,11 @@ Done on this branch:
 - `tests/test_qt_independence.py`, which locks the properties the target architecture rests on
   (Qt-free core, one binding per process, one binding in packaging metadata);
 - **Stage 1 execution**: an isolated `.venv-pyside/` environment with PySide6 6.11.2, its real
-  licence metadata, and two migration instruments that produce repeatable evidence -
-  `scripts/pyside6_symbol_parity.py` (74/74 symbols, 126/126 nested attribute paths) and
-  `scripts/pyside6_smoke_test.py` (25/25 binding-pattern checks, including pyqtgraph's binding
-  choice).
+  licence metadata, and two migration instruments that produced repeatable evidence - the symbol
+  parity tool (`pyside6_symbol_parity.py`; 74/74 symbols, 126/126 nested attribute paths) and the
+  binding smoke test (`pyside6_smoke_test.py`; 25/25 binding-pattern checks, including pyqtgraph's
+  binding choice). Both tools were deleted once the migration finished - see the change table in
+  section 10.1.
 
 Deliberately **not** done:
 
@@ -236,10 +237,10 @@ Deliberately **not** done:
   port, and the LGPL questions in section 6 answered first;
 - nothing merged to `master`, and nothing pushed to any remote.
 
-Two files in `scripts/` (`pyside6_symbol_parity.py`, `pyside6_smoke_test.py`) name PySide6 on
-purpose. They are migration tooling, they run in the PySide6 environment only, and the guard test
-asserts that nothing outside `scripts/pyside6_*` names a second binding - so they cannot be mistaken
-for application code.
+The two migration tools named PySide6 on purpose. They ran in the PySide6 environment only, and
+the guard test asserted that nothing outside those two files named a second binding - so they
+could not be mistaken for application code. The tools are gone (section 10.1); what survives is
+the rule they were the exception to: only `qtcompat/` may name a binding.
 
 ---
 
@@ -324,7 +325,7 @@ QT_QPA_PLATFORM=offscreen .venv-pyside/Scripts/python -m pytest -q     # run fro
 | `qtcompat` is PySide6-only | The selection machinery, the `NMRFORGE_QT_LIB` override and the PyQt6 factory names are gone. The module still forces `PYQTGRAPH_QT_LIB` and still refuses to run if that variable contradicts it. |
 | Dependency switched | `pyproject.toml`: `PyQt6>=6.5` -> `PySide6>=6.6`. |
 | PyInstaller spec | `hiddenimports=["PySide6.QtSvg"]`, guarded by `test_appimage_spec_collects_the_binding_plugins`. |
-| Deleted | `.measure_gap.py` (the last file importing PyQt6 directly), plus `scripts/pyside6_symbol_parity.py` and `scripts/pyside6_smoke_test.py`: both migration tools had served their purpose (the parity tool now has no PyQt6 imports to compare), and the project's own clean-up principle forbids leaving superseded tooling behind. All three are recoverable from git history. |
+| Deleted | `.measure_gap.py` (the last file importing PyQt6 directly), plus the two migration tools (`pyside6_symbol_parity.py`, `pyside6_smoke_test.py`): both had served their purpose (the parity tool now has no PyQt6 imports to compare), and the project's own clean-up principle forbids leaving superseded tooling behind. All three are recoverable from git history. |
 | Guards simplified | `tests/test_qt_independence.py` no longer needs a migration-tooling exception or a known-leftover exception: **only `qtcompat/` may name a binding**, full stop. |
 | Docs updated | Every page that stated the toolkit as a current fact: README (+Chinese section), docs/README, development, faq, installation, packaging, python-api, manager/project_map, manager/project_state, the external-API proposal, plus THIRD_PARTY, LICENSE_OPTIONS and PUBLIC_RELEASE_AUDIT. Historical records (CHANGELOG entries, the internal problems log, archived tasks) were left untouched on purpose - they are evidence of what was observed under PyQt6. |
 | CI | The separate PySide6 job was removed because the main matrix now installs PySide6 through `pip install -e ".[test]"`. |

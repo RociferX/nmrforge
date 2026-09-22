@@ -331,7 +331,10 @@
       "workflow/optimization_report.py:229"
     ],
     "; {p0} spectral width dependent candidates (GM/EM) not provided SW skip": [
-      "workflow/window_optimize.py:316"
+      "workflow/window_optimize.py:580"
+    ],
+    "; {p0}/{p1} expected peak(s) were merged into one detection by this window": [
+      "workflow/window_optimize.py:573"
     ],
     "== Quality inspection (manual spectrum preparation, multiplexing automatic optimisation final script) ==": [
       "workflow/manual.py:90"
@@ -939,7 +942,7 @@
       "gui/spectrum_panel.py:337"
     ],
     "Import failed, registration has been rolled back": [
-      "workflow/import_workflow.py:370"
+      "workflow/import_workflow.py:373"
     ],
     "Import is not supported": [
       "gui/main_window.py:1110"
@@ -968,7 +971,7 @@
       "workflow/phase_routes.py:1319"
     ],
     "Indirect dimension window optimisation failed (reading reconstruction plane): {p0}": [
-      "workflow/window_optimize.py:701"
+      "workflow/window_optimize.py:967"
     ],
     "Indirect-dimension target digital point spacing = max(linewidth, 1/AQ) / points_per_line (default 1/2, i.e. at least 2 digital points per linewidth; raise it for accurate peak positions / linewidths / fitting / CSP, lower it to save memory in 2D)": [
       "backend/script_generator.py:1569"
@@ -1189,7 +1192,7 @@
     ],
     "Multi-segment type: {p0}": [
       "backend/nmrpipe_backend.py:507",
-      "workflow/import_workflow.py:231"
+      "workflow/import_workflow.py:234"
     ],
     "Multi-slice merging completed -> merged/fid/ ({p0} parts)": [
       "backend/nmrpipe_backend.py:3792"
@@ -1317,7 +1320,7 @@
       "gui/dialogs.py:585"
     ],
     "No window (linear)": [
-      "workflow/window_optimize.py:119"
+      "workflow/window_optimize.py:184"
     ],
     "No. {p0} Line: There are extra characters after the line continuation character `\\` {p1!r}(should be `\\` at the end of the line and wrap directly), the pipe will break": [
       "workflow/script_check.py:83"
@@ -1348,7 +1351,7 @@
       "gui/processing.py:407"
     ],
     "Not a Bruker dataset directory (acqus is missing): {p0}": [
-      "workflow/import_workflow.py:126"
+      "workflow/import_workflow.py:129"
     ],
     "Not a Bruker dataset directory (acqus is missing):{p0}": [
       "core/data/bruker_reader.py:465"
@@ -1659,7 +1662,7 @@
       "workflow/batch.py:339"
     ],
     "Project is not loaded and data cannot be imported": [
-      "workflow/import_workflow.py:196"
+      "workflow/import_workflow.py:199"
     ],
     "Project management on the left": [
       "gui/main_window.py:214"
@@ -1779,10 +1782,10 @@
       "gui/notes.py:35"
     ],
     "Repeat-experiment overlay (NUS, identical sampling points)": [
-      "workflow/import_workflow.py:228"
+      "workflow/import_workflow.py:231"
     ],
     "Repeat-experiment overlay (uniform, identical parameters)": [
-      "workflow/import_workflow.py:227"
+      "workflow/import_workflow.py:230"
     ],
     "Replica preview": [
       "workflow/stepwise.py:495"
@@ -2169,7 +2172,7 @@
       "gui/main_window.py:575"
     ],
     "The source directory is already in the project, skip copying (refer to the original path): {p0}": [
-      "workflow/import_workflow.py:246"
+      "workflow/import_workflow.py:249"
     ],
     "The source ser has been backed up -> {p0}/ser.bak ({p1} bytes)": [
       "backend/nmrpipe_backend.py:4094"
@@ -2369,7 +2372,7 @@
       "nmrforge_api/localization_targets.py:938"
     ],
     "a kinetics experiment was detected (variable delay / time series); the current product does not support importing it": [
-      "workflow/import_workflow.py:174"
+      "workflow/import_workflow.py:177"
     ],
     "a manual fid.com needs the backend to convert/merge, so run it from the interface": [
       "workflow/manual.py:202"
@@ -2731,7 +2734,7 @@
       "core/experiment/acquisition_mode_detector.py:73"
     ],
     "direct dimension": [
-      "workflow/window_optimize.py:406"
+      "workflow/window_optimize.py:672"
     ],
     "direct dimension 1H extraction window height ppm(EXT -x1)": [
       "backend/script_generator.py:1618"
@@ -2849,14 +2852,14 @@
       "workflow/phase_routes.py:1292"
     ],
     "direct dimension window optimisation failed (read fid): {p0}": [
-      "workflow/window_optimize.py:630"
+      "workflow/window_optimize.py:896"
     ],
     "direct dimension window optimisation failed: {p0}": [
       "workflow/phase_routes.py:1305",
       "workflow/phase_routes.py:1490"
     ],
     "direct dimension window optimisation skipped: converted.fid not found": [
-      "workflow/window_optimize.py:636"
+      "workflow/window_optimize.py:902"
     ],
     "direct dimension {p0}×TD({p1}→{p2})": [
       "backend/script_generator.py:341",
@@ -2980,7 +2983,7 @@
       "gui/dashboards.py:106"
     ],
     "experiment type does not exist: {p0}": [
-      "workflow/import_workflow.py:449",
+      "workflow/import_workflow.py:452",
       "gui/processing.py:187"
     ],
     "experiment type {p0}: magnitude spectra are not phase-optimised, so the all-axis phase search is skipped (keeping 0,0)": [
@@ -3172,10 +3175,10 @@
       "gui/spectrum_panel.py:1527"
     ],
     "import complete({p0})": [
-      "workflow/import_workflow.py:364"
+      "workflow/import_workflow.py:367"
     ],
     "import completed": [
-      "workflow/import_workflow.py:362",
+      "workflow/import_workflow.py:365",
       "gui/spectrum_panel.py:1566"
     ],
     "import completed (prompt)": [
@@ -3230,20 +3233,20 @@
       "workflow/phase_routes.py:1503"
     ],
     "indirect dimension window optimisation failed (reading fid): {p0}": [
-      "workflow/window_optimize.py:666"
+      "workflow/window_optimize.py:932"
     ],
     "indirect dimension window optimisation failed: {p0}": [
       "workflow/phase_routes.py:1334",
       "workflow/phase_routes.py:1520"
     ],
     "indirect dimension window optimisation skip: no timeline available": [
-      "workflow/window_optimize.py:460"
+      "workflow/window_optimize.py:726"
     ],
     "indirect dimension window optimisation skip: not found SMILE reconstruction plane": [
-      "workflow/window_optimize.py:713"
+      "workflow/window_optimize.py:979"
     ],
     "indirect dimension window optimisation skipped: converted.fid not found": [
-      "workflow/window_optimize.py:672"
+      "workflow/window_optimize.py:938"
     ],
     "indirect dimension {p0}×TD({p1}→{p2})": [
       "backend/script_generator.py:344"
@@ -3400,7 +3403,7 @@
       "nmrforge_api/sweep.py:1860"
     ],
     "optimal {p0} (FWHM {p1:.2f}point, SNR {p2:.1f}, shape {p3:.3f}, score {p4:.3f}); qualifying pool {p5}/{p6} candidate(s) (resolution >= {p7:.2f}point)": [
-      "workflow/window_optimize.py:301"
+      "workflow/window_optimize.py:558"
     ],
     "optimisation ": [
       "workflow/baseline_optimize.py:354"
@@ -3596,8 +3599,8 @@
       "gui/main_window.py:1881"
     ],
     "project is not loaded, cannot import experiment": [
-      "workflow/import_workflow.py:413",
-      "workflow/import_workflow.py:446"
+      "workflow/import_workflow.py:416",
+      "workflow/import_workflow.py:449"
     ],
     "project name when creating a study": [
       "nmrforge_api/cli.py:478"
@@ -3882,7 +3885,7 @@
       "gui/raw_quality.py:110"
     ],
     "segmented (NUS complementary sampling point)": [
-      "workflow/import_workflow.py:229"
+      "workflow/import_workflow.py:232"
     ],
     "segmented (NUS, complementary sampling points)": [
       "backend/nmrpipe_backend.py:475"
@@ -3894,7 +3897,7 @@
       "gui/dashboards.py:202"
     ],
     "segmented import requires at least 2 segmented subdirectories containing acqus (non-data subdirectories are ignored): {p0}": [
-      "workflow/import_workflow.py:214"
+      "workflow/import_workflow.py:217"
     ],
     "segmented/duplicate experiment container directory (containing multiple acqus subdirectories)": [
       "gui/dashboards.py:220"
@@ -4224,7 +4227,7 @@
       "gui/raw_quality.py:151"
     ],
     "trace no valid signal": [
-      "workflow/window_optimize.py:285"
+      "workflow/window_optimize.py:539"
     ],
     "trash target conflict: {p0}": [
       "core/trash.py:34"
@@ -4382,7 +4385,7 @@
       "workflow/batch.py:489"
     ],
     "{p0} file(s) could not be linked and were copied instead": [
-      "workflow/import_workflow.py:293"
+      "workflow/import_workflow.py:296"
     ],
     "{p0} line {p1}": [
       "nmrforge_api/localization_targets.py:297"
@@ -4424,7 +4427,7 @@
       "workflow/smile_optimize.py:317"
     ],
     "{p0}(indirect dimension)": [
-      "workflow/window_optimize.py:449"
+      "workflow/window_optimize.py:715"
     ],
     "{p0}.fid is in place ({p1})": [
       "backend/nmrpipe_backend.py:2786"
@@ -4449,7 +4452,7 @@
       "backend/bruker_workflow.py:379"
     ],
     "{p0}: Window: The optimal configuration is consistent with the existing configuration and remains": [
-      "workflow/window_optimize.py:366"
+      "workflow/window_optimize.py:630"
     ],
     "{p0}: fid.com={p1} -> manual={p2} (applied)": [
       "backend/bruker_workflow.py:365"
@@ -4461,7 +4464,7 @@
       "workflow/phase_routes.py:894"
     ],
     "{p0}: indirect dimension window optimisation skip: insufficient points": [
-      "workflow/window_optimize.py:435"
+      "workflow/window_optimize.py:701"
     ],
     "{p0}: jump over({p1})": [
       "workflow/batch.py:418"
@@ -4502,13 +4505,13 @@
       "nmrforge_api/localization_targets.py:464"
     ],
     "{p0}: window optimisation skip: insufficient points in this axis": [
-      "workflow/window_optimize.py:343"
+      "workflow/window_optimize.py:607"
     ],
     "{p0}: window optimisation skip:{p1}": [
-      "workflow/window_optimize.py:360"
+      "workflow/window_optimize.py:624"
     ],
     "{p0}: window(memory score): {p1}": [
-      "workflow/window_optimize.py:363"
+      "workflow/window_optimize.py:627"
     ],
     "{p0}: {p1} Completed, skip": [
       "workflow/batch.py:456"

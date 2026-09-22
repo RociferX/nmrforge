@@ -133,15 +133,21 @@ def test_relative_links_in_public_docs_resolve() -> None:
     assert not broken, "broken relative links: " + "; ".join(broken)
 
 
-#: Plain-text references to a document (`docs/xxx.md`, not a markdown link). Anything written
-#: that way in the public tree must actually ship with the snapshot: the 2026-09-22 review found
-#: the "Related documents" list of architecture.md naming three private-trunk records that no
-#: reader could open (the markdown-link checker cannot see that style at all).
-PLAIN_DOC_REF_RE = re.compile(r"(?i)\bdocs/[A-Za-z0-9_./-]+\.md")
+#: Repository paths a public document names must really ship with the snapshot: documents
+#: (`docs/xxx.md`) as well as scripts and assets (`scripts/xxx.py`, `tests/xxx.py`,
+#: `nmrforge_data/xxx` ...). Plain text counts too - a reader can neither click nor find the file,
+#: and the markdown-link checker cannot see that style.
+#: 2026-09-22 review: architecture.md listed three private-trunk records; 2026-09-23 review: the
+#: evidence page pointed its reproduction commands at three scripts that were never shipped - the
+#: same defect class, so this now covers those directories instead of just docs/*.md.
+PLAIN_DOC_REF_RE = re.compile(
+    r"(?i)\b(?:docs|scripts|tests|nmrforge_data|packaging)/[A-Za-z0-9_./-]+"
+    r"\.(?:md|py|sh|json|yaml|yml|toml|spec|txt|cff)"
+)
 
 
 def test_public_docs_do_not_reference_documents_that_are_not_shipped() -> None:
-    """Every `docs/xxx.md` a public document names must exist - plain text included."""
+    """Every repository path a public document names must exist - plain text included."""
     public = ROOT / "publish" if _private_trunk() else ROOT
     if not public.is_dir():
         pytest.skip("the public snapshot is not present (VM/CI)")
@@ -154,16 +160,15 @@ def test_public_docs_do_not_reference_documents_that_are_not_shipped() -> None:
         body = LINK_RE.sub(" ", text)
         for match in PLAIN_DOC_REF_RE.finditer(body):
             target = match.group(0)
-            relative = re.sub(r"(?i)^docs/", "", target)
             candidates = (
-                public / "docs" / relative,  # the repository-level docs/
-                path.parent / relative,      # a same-named directory next to this file
+                public / target,        # the same path under the repository root
+                path.parent / target,   # a same-named directory next to this file
             )
             if any(candidate.exists() for candidate in candidates):
                 continue
             offenders.append(f"{path.relative_to(public).as_posix()} -> {target}")
     assert not offenders, (
-        "public docs reference documents that the snapshot does not ship: "
+        "public docs reference files that the snapshot does not ship: "
         + "; ".join(sorted(set(offenders))[:8])
     )
 

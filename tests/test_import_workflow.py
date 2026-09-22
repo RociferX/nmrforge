@@ -370,8 +370,8 @@ def test_nus_import_records_nuslist_checksum(
 def test_import_writable_raw_names_copied_not_linked(
     tmp_path: Path, bruker_dir: Path
 ) -> None:
-    """Fid.com/profY.dat/profYZ.dat Is backend writable/touch file: Entity copy is not linked (changes do not
-    pollute the source)."""
+    """fid.com / profY.dat / profYZ.dat are backend-writable: copied as real entities,
+    not linked, so changes do not pollute the source."""
     src = tmp_path / "src_with_fid"
     shutil.copytree(_source(bruker_dir), src)
     fid_com = src / "fid.com"
