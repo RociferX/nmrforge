@@ -35,7 +35,10 @@ KEY_FILES = ("acqus", "acqu2s", "acqu3s", "ser", "fid", "nuslist")
 # will write the modifications back to the source data (G2B-009 compatibility clause "fid.com and
 # other backends generate files that are always written physically and are not affected").
 # Conversion will be touch/rewrite profYZ.dat, entity copy to protect source.
-WRITABLE_RAW_NAMES = {"fid.com", "profYZ.dat"}
+# 2026-09-22: a real data set caught the source directory being rewritten -- BMRB 53374 ships
+# profY.dat (no Z); it fell through to a symlink and the conversion wrote through into the
+# source data set, changing its fingerprint. Both spellings are copied now.
+WRITABLE_RAW_NAMES = {"fid.com", "profY.dat", "profYZ.dat"}
 
 
 class ImportWorkflowError(Exception):

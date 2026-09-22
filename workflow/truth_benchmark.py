@@ -202,6 +202,7 @@ def match_one_to_one(
                 best = int(index)
                 break
         if best is None:
+            nearest = int(np.argmin(distances)) if distances.size else None
             rows.append(
                 {
                     "expected_id": str(reference["peak_id"]),
@@ -210,6 +211,13 @@ def match_one_to_one(
                     "dH": math.nan,
                     "dN": math.nan,
                     "scaled_distance": math.nan,
+                    # "not detected" does not mean "nothing nearby": record the closest
+                    # detection and how far it is, in tolerance units (2026-09-22 - the
+                    # question readers keep asking when a black box sits on a strong peak).
+                    "nearest_id": str(det[nearest]["peak_id"]) if nearest is not None else "",
+                    "nearest_distance": (
+                        float(distances[nearest]) if nearest is not None else math.nan
+                    ),
                 }
             )
             continue
@@ -223,6 +231,8 @@ def match_one_to_one(
                 "dH": float(hit["H_ppm"]) - float(reference["H_ppm"]),
                 "dN": float(hit["N_ppm"]) - float(reference["N_ppm"]),
                 "scaled_distance": float(distances[best]),
+                "nearest_id": str(hit["peak_id"]),
+                "nearest_distance": float(distances[best]),
             }
         )
     return rows
@@ -643,7 +653,10 @@ def write_matches_csv(path: Path | str, matches: Sequence[dict[str, Any]]) -> No
     with target.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(
             handle,
-            fieldnames=["expected_id", "detected_id", "status", "dH", "dN", "scaled_distance"],
+            fieldnames=[
+                "expected_id", "detected_id", "status", "dH", "dN", "scaled_distance",
+                "nearest_id", "nearest_distance",
+            ],
         )
         writer.writeheader()
         for row in matches:
