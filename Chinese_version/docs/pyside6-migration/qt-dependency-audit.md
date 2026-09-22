@@ -61,7 +61,8 @@ toolkit version is recorded by the GUI layer instead of hard-coded in the core's
 
 ### 3.2 Distinct imported symbols
 
-Authoritative count, from the AST pass in `scripts/pyside6_symbol_parity.py`:
+Authoritative count, from the AST pass of the migration symbol-parity tool (deleted after the
+migration - see `docs/pyside6-migration/migration-plan.md`):
 **74 distinct Qt symbols** across `QtCore`, `QtGui`, `QtWidgets` and `QtTest`. All 74 resolve under
 PySide6, together with 126 nested attribute paths (section 10).
 
@@ -222,9 +223,9 @@ Stage 1 of the plan is done. PySide6 was installed into a **separate** environme
 | Licence files actually shipped | only `dist-info/licenses/LicenseRef-Qt-Commercial.txt`; **no LGPL-3.0 text is bundled** (see the compliance note below) |
 | `requires-python` | `>=3.10,<3.15` (the project requires `>=3.12`: compatible) |
 | PyQt6 importable in that environment | no - single binding per process holds by construction |
-| Imported-symbol parity | **74 / 74** resolve (`scripts/pyside6_symbol_parity.py`) |
+| Imported-symbol parity | **74 / 74** resolve (migration symbol-parity tool) |
 | Nested attribute-path parity | **126 / 126** resolve, e.g. `QPalette.ColorRole.Window`, `QStyle.StyleHint.SH_ToolTip_WakeUpDelay`, `Qt.ItemDataRole.UserRole`, `Qt.MouseButton.MiddleButton`, `QtGui.QPainter.RenderHint.Antialiasing` |
-| Binding-pattern smoke test | **25 / 25** pass (`scripts/pyside6_smoke_test.py`): QProxyStyle subclassing, palette + global QSS, `Signal` definition/connect/emit with multiple arguments, `QAction` from `QtGui` in a `QMenu`, `QSplitter` + `QTreeWidget` + `QTreeWidgetItem.setData(UserRole, dict)`, `QFontMetrics.horizontalAdvance`, `QSignalBlocker`, `QProcess`, `QTimer`, `QDesktopServices`, `QUrl`, `QTest`, offscreen `show()` |
+| Binding-pattern smoke test | **25 / 25** pass (migration binding smoke test): QProxyStyle subclassing, palette + global QSS, `Signal` definition/connect/emit with multiple arguments, `QAction` from `QtGui` in a `QMenu`, `QSplitter` + `QTreeWidget` + `QTreeWidgetItem.setData(UserRole, dict)`, `QFontMetrics.horizontalAdvance`, `QSignalBlocker`, `QProcess`, `QTimer`, `QDesktopServices`, `QUrl`, `QTest`, offscreen `show()` |
 | `pyqtgraph` behaviour | picks `PySide6` by itself when PyQt6 is absent (`QT_LIB=PySide6`) |
 
 ### 9.1 pyqtgraph returns a proxy module, not the binding module

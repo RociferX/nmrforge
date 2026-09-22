@@ -1,6 +1,13 @@
 # Phase optimisation two-path (Simple/Advanced) design record
 
-> Status: Implementation and independent testing have been completed, but have not yet been connected to the existing backend/stepwise production orchestration
+> Status: implementation and independent testing were completed; these routes were never wired
+> into the existing backend/stepwise production orchestration.
+> **Later note (2026-09-23)**: the "simple / advanced" display-layer phase route was superseded by
+> the unified phase scheme in 0.2.106 - the display-layer phase engine, the NUS hybrid-flow
+> optimiser and their accompanying tests have all been deleted from the tree; the current
+> implementation is `workflow/phase_routes.py` plus the unified phase scheme. This page is kept as
+> the design record of that time: the modules, entry points and tests described below are **not
+> shipped with the current version**.
 > Date: 2026-08-16
 
 ## 1. Goal
@@ -150,10 +157,10 @@ File:`workflow/phase_routes.py`.
 
 ## 5. Test
 
-- `tests/test_display_phase_engine.py`: Hilbert dimension-wise phase recovery, near-zero phase
-  Baseline order, zero filling recommended for narrow peaks.
-- `tests/test_display_hybrid_optimize.py`:NUS The calling sequence of the hybrid process, direct dimension
-  Override, indirect dimension candidate selection, backend times.
+- The tests that accompanied the display-layer phase engine and the NUS hybrid-flow optimiser
+  (Hilbert dimension-wise phase recovery, near-zero phase, baseline order, zero-filling advice for
+  narrow peaks; hybrid call order, direct-dimension override, indirect-dimension candidate
+  selection, backend call counts): retired with the mechanism and no longer in the tree.
 - `tests/test_phase_routes.py`:simple/advanced dispatch, uniform twice
   NUS direct dimension override + indirect dimension finalize, advanced uniform delegates to the old optimizer.
 

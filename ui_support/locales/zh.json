@@ -106,6 +106,7 @@
   "3D spectrum loading failed: {p0}": "3D 谱加载失败: {p0}",
   "; the quality evaluation uses the final spectrum while the baseline optimisation uses the per-axis in-memory score of the joint spectrum, so the two baselines differ; windowing / zero-filling change the baseline shape, and the optimisation stays off (no correction) when the candidate gain is <=0.5 or the striping check vetoes it.": "；质量评估基于终跑谱,基线优化基于 joint 谱逐维内存评分,两基准不同;窗函数/填零会改变基线形态,且优化候选增益≤0.5 或条纹否决时保持 off(不校正)。",
   "; {p0} spectral width dependent candidates (GM/EM) not provided SW skip": "; {p0} 个依赖谱宽的候选(GM/EM)未提供 SW 跳过",
+  "; {p0}/{p1} expected peak(s) were merged into one detection by this window": "; 这个窗把 {p0}/{p1} 个应有峰并成了一个",
   "== Quality inspection (manual spectrum preparation, multiplexing automatic optimisation final script) ==": "== 质量检测(人工谱图准备,复用自动优化终脚本) ==",
   "== data quality diagnosis ==": "== 数据质量诊断 ==",
   "== spectrum quality and data quality report ==": "== 谱图质量与数据质量报告 ==",
