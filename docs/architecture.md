@@ -28,28 +28,28 @@ contract layer before release. Both ship together from one code base.
 
 ## 2. Directory ownership
 
-| Path | Side | Description |
+| Path | Owner | Description |
 | --- | --- | --- |
-| `gui/` | GUI | main window/dialog box/processing control/panel |
-| `viewer/` | GUI | Independent spectrum viewer (including spectrum reading contract implementation) |
-| `main.py` | GUI | Program entry (venv boot + Qt startup) |
+| `gui/` | GUI | main window / dialogs / processing controls / panels |
+| `viewer/` | GUI | standalone spectrum viewer (implements the spectrum-reading contract) |
+| `main.py` | GUI | entry point (venv bootstrap + Qt startup) |
 | `scripts/make_icon.py` | GUI | icon |
-| `backend/` | Backend | NMRPipe/SMILE Backend and runtime |
-| `workflow/` | Backend | stepwise / `phase_routes` unified phase / manual / batch (2D only) / optimisation |
-| `core/data/` (except internal_data_model) | Backend | Bruker read/nus/pipe_io |
-| `core/experiment/`, `core/experiments/` | Backend | parse/Classification/ template |
-| `core/processing/`, `core/planning/` | Backend | processing primitives/DAG |
-| `core/optimisation/` | Backend | parameter space/search/ phase |
-| `core/qc/` | Backend | QC(core/reporting Cleaned and deleted on 0.2.164; CSP Analysis and deleted on 2026-09-12) |
-| `scripts/{smile_optimize,param_optimize}.py` | Backend | Command line tool (optional) |
-| `core/project/` | Shared | Project management model (GUI Foundation + Backend operation registration) |
-| `core/workspace.py` | Shared | Workspace container (default ~/NMRForgeWorkspace, created on first startup) |
+| `backend/` | Backend | NMRPipe/SMILE backend and runtime |
+| `workflow/` | Backend | stepwise / `phase_routes` unified phase / manual / batch (2D-only) / optimisation |
+| `core/data/` (except internal_data_model) | Backend | Bruker reading / nus / pipe_io |
+| `core/experiment/`, `core/experiments/` | Backend | parsing / classification / templates |
+| `core/processing/`, `core/planning/` | Backend | processing primitives / DAG |
+| `core/optimization/` | Backend | parameter space / search / phase |
+| `core/qc/` | Backend | QC (`core/reporting` was removed in 0.2.164; the CSP analysis was removed on 2026-09-12) |
+| `scripts/{smile_optimize,param_optimize}.py` | Backend | command-line tools (optional) |
+| `core/project/` | Shared | project-management model (GUI foundation + Backend run registration) |
+| `core/workspace.py` | Shared | workspace container (default ~/NMRForgeWorkspace, created on first start) |
 | `core/data/internal_data_model.py` | Shared | Experiment/Dimension/Sampling |
 | `backend/base.py` | Shared | ProcessingBackend Protocol |
-| `viewer/spectrum.py` | Shared | Spectrum/SpectrumAxis(Music Reading Contract) |
-| `gui/processing.py` | Shared(implementation attribute GUI) | ProcessingController cross-border adaptation |
-| `pyproject.toml`/`.gitignore`/`nmrforge_data/` | Shared | Project Configuration and shipped data |
-| `docs/`, `scripts/check_ownership.py` | Shared | Documentation and the ownership-boundary check |
+| `viewer/spectrum.py` | Shared | Spectrum/SpectrumAxis (the spectrum-reading contract) |
+| `gui/processing.py` | Shared (implementation owned by GUI) | ProcessingController cross-boundary adapter |
+| `pyproject.toml` / `.gitignore` / `nmrforge_data/` | Shared | project configuration and shipped data |
+| `docs/`, `scripts/check_ownership.py` | Shared | documentation and the ownership-boundary check |
 
 ## 3. Core data flow
 
@@ -93,8 +93,12 @@ For contract changes, see docs/API_CONTRACT.md, Proposal must be used.
 
 ## 7. Related documents
 
-- Docs/API_CONTRACT.md -- Shared Contract definition and change process
-- Docs/PROJECT_STATUS.md -- Status and unfinished items
-- Docs/DECISIONS.md -- Decision record
-- Docs/GIT_WORKFLOW.md -- Branch collaboration
-- Docs/GUI_ARCHITECTURE_VISION.md -- user GUI layout vision (design reference)
+- `docs/API_CONTRACT.md` -- Shared Contract definition and change process
+- `docs/GUI_ARCHITECTURE_VISION.md` -- user GUI layout vision (design reference)
+- `docs/README.md` -- documentation index
+- `docs/roadmap.md` -- roadmap and open items
+
+> The development process records (status, decisions, branch workflow) exist only in the private
+> development trunk and are **not part of this snapshot**; for the public snapshot use this
+> directory's README, the roadmap and the release notes. (2026-09-22 review: the public page used
+> to list those three under "Related documents", where no reader could find them.)

@@ -92,7 +92,10 @@ Bruker 目录 → core/data/bruker_reader.read_dataset → Experiment(Shared)
 ## 7. 相关文档
 
 - docs/API_CONTRACT.md — Shared Contract 定义与变更流程
-- docs/PROJECT_STATUS.md — 状态与未完成项
-- docs/DECISIONS.md — 决策记录
-- docs/GIT_WORKFLOW.md — 分支协作
 - docs/GUI_ARCHITECTURE_VISION.md — 用户 GUI 布局愿景(设计参考)
+- docs/README.md — 文档导航
+- docs/roadmap.md — 路线图与未完成项
+
+> 开发过程记录(状态、决策、分支协作三份)只存在于私有主干,**不随公开快照发布**;读公开快照
+> 时请以本目录的 README、roadmap 与 release notes 为准(2026-09-22 复核:此前公开页把这三份
+> 列在「相关文档」里,读者找不到)。

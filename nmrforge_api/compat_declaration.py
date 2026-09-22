@@ -23,15 +23,16 @@ from typing import Any
 
 #: declared behaviour level (see the module doc; meaning matches nmrforge_api.compat)
 DECLARATION: dict[str, Any] = {'schema': 'nmrforge_api.compat.declaration.v1',
- 'digest': '8d66e3a9096cf737559cb7ec4039bc93c9be863d7df140cbe11402e4f2ba4f3d',
+ 'digest': '0104a12f68e647be6e57986addd38ce3cca2d6ca395ffc24ef5c96cd28a1840d',
  'token_digest': 'ed82686e64574c2e6245556c78198ac0d08339d1d7d12e215a4589f987d8ca70',
  'compat_level': 'behavior_changed',
  'affected': ['processing'],
  'updated': '2026-09-22',
- 'note': '2026-09-22 NUS reuse unification: reconstruct_nus reuses converted/merged '
-         'products on the raw input fingerprint (same criterion as process()) and '
-         'records provenance; source-level cleanup no longer needs a per-run event '
-         'flag',
+ 'note': '2026-09-22 batch: NUS reuse admission unified on the raw fingerprint '
+         '(reconstruct_nus == process(); re-converts when the raw input changed) plus '
+         'documentation-only clarifications (the conversion fingerprint is not content '
+         'attestation; source-level NUS cleanup scope; public snapshot vs private '
+         'records)',
  'golden': {'name': 'conformance_v1',
             'spectrum_sha256': '382b330926da93d856feef40ca33c2df1eec21b61e50db471bdf7aa4bb2fb311',
             'peak_table_sha256': '7f8180662220c83db225fa6b2bf0f5b4c71196fcdaebebe7e8c172a4861657ab',
