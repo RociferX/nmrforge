@@ -130,8 +130,16 @@ two can be compared.
 ## 10. Where the products go
 
 Everything lives in the **project directory** you chose: the project file, each data set's working
-directory, the generated scripts, run records and logs. The program never writes into your original
-data directory, and anything it deletes goes to the operating system's trash.
+directory, the generated scripts, run records and logs. On the normal path the program does not write
+into your original data directory, and deleting project data goes to the operating system's trash
+(recoverable).
+
+**One exception: NUS bad-point cleaning happens at the source.** The program **rewrites `ser` and
+`nuslist` in place** in the raw directory (dropping the whole row of each bad point), copying the
+originals to `ser.bak` / `nuslist.bak` next to them first (an existing `.bak` is not overwritten); the
+log states `Source cleanup ... (backup .bak)`. It does this so the reconstruction gets clean input;
+**if your raw data is read-only, or you cannot accept the original being rewritten, copy it yourself
+first** - the `.bak` in the raw directory is your way back.
 
 ## 11. Known boundaries
 
