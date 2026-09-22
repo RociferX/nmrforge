@@ -1,6 +1,6 @@
-# 03 · API reference(v0.2)
+# 03 · API reference (v1.0)
 
-See `nmrforge_api/__init__.py`(`API_VERSION = "0.2"`) for top-level exports.
+See `nmrforge_api/__init__.py`(`API_VERSION = "1.0"`) for top-level exports; since 2026-09-22 `nmrforge_api` is released as its **first version**, with the contract version defined once in `nmrforge_api.session`.
 
 ## 3.1 Sessions and Datasets
 

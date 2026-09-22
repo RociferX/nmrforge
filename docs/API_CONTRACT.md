@@ -327,7 +327,7 @@ class Spectrum3D:
   Automatically enter 2D/3D mode according to dimension number;
 - The 3D peak table columns (F1/F2/F3_shift) are mapped according to the current slice plane axis label, and the linkage is not affected
 
-## 11. External interface contract:`nmrforge_api`(v0.2, specification updated on 2026-09-13)
+## 11. External interface contract: `nmrforge_api` (v1.0 - first version; specification finalised 2026-09-13, released as the first version on 2026-09-22)
 
 Status: implemented. Source of specification: user 2026-09-13 "API specification update"; compliance ledger.
 API_CONTRACT.md;External documents `docs/external-api/`.
@@ -372,7 +372,7 @@ Complete provenance + QC (three parameter layers, script/spectrum hashes, full l
   (`nmrforge_api/uncertainty.py`) is kept as a **test/detection aid**: the processing chain
   (study/sweep/records/CLI) does not call it.
 
-### 11.2 Public (`nmrforge_api/__init__.py`,`API_VERSION = "0.2"`)
+### 11.2 Public (`nmrforge_api/__init__.py`, `API_VERSION = "1.0"`; defined once in `nmrforge_api.session`)
 
 ```python
 # two modes (2026-09-14): reference mode builds the reference; combination mode must be given the reference explicitly

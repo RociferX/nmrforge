@@ -1,4 +1,5 @@
-"""NMRForge parameter-combination API (v0.2, specification update of 2026-09-13).
+"""NMRForge parameter-combination API (v1.0 - first version; specification finalised
+2026-09-13, released as the first version on 2026-09-22).
 
 What it does (Qt-free, scriptable, cluster friendly):
 
@@ -115,6 +116,7 @@ from nmrforge_api.reference import (
     set_reference_peaks,
 )
 from nmrforge_api.session import (
+    API_VERSION,
     CONDITION_LETTERS,
     DatasetRef,
     StudySession,
@@ -163,8 +165,8 @@ from nmrforge_api.uncertainty import (
     uncertainty_summary,
 )
 
-API_VERSION = "0.2"
-
+# API_VERSION comes from the single definition in nmrforge_api.session (2026-09-22: this
+# module, session.py and records.py each carried a literal, so a bump could miss one).
 __all__ = [
     "AFFECTED_STEPS",
     "API_VERSION",

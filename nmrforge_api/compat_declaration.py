@@ -23,16 +23,15 @@ from typing import Any
 
 #: declared behaviour level (see the module doc; meaning matches nmrforge_api.compat)
 DECLARATION: dict[str, Any] = {'schema': 'nmrforge_api.compat.declaration.v1',
- 'digest': '0104a12f68e647be6e57986addd38ce3cca2d6ca395ffc24ef5c96cd28a1840d',
- 'token_digest': 'ed82686e64574c2e6245556c78198ac0d08339d1d7d12e215a4589f987d8ca70',
- 'compat_level': 'behavior_changed',
- 'affected': ['processing'],
+ 'digest': '06f3f11956ec13a644ba38967ba0a4e4bfc678ad204437da3171ba965a799a2d',
+ 'token_digest': '307bd58d00f31796e217f969559e6b80fbca15215361a16c6e5209b736e218fa',
+ 'compat_level': 'contract_changed',
+ 'affected': ['records', 'api_surface'],
  'updated': '2026-09-22',
- 'note': '2026-09-22 batch: NUS reuse admission unified on the raw fingerprint '
-         '(reconstruct_nus == process(); re-converts when the raw input changed) plus '
-         'documentation-only clarifications (the conversion fingerprint is not content '
-         'attestation; source-level NUS cleanup scope; public snapshot vs private '
-         'records)',
+ 'note': '2026-09-22: nmrforge_api released as its first version - the contract '
+         'version API_VERSION moves from 0.2 to 1.0 with a single definition point '
+         '(session.py), so the api_version field in study.json / records/manifest.json '
+         '/ records/workflows.json changes; no other contract element changed',
  'golden': {'name': 'conformance_v1',
             'spectrum_sha256': '382b330926da93d856feef40ca33c2df1eec21b61e50db471bdf7aa4bb2fb311',
             'peak_table_sha256': '7f8180662220c83db225fa6b2bf0f5b4c71196fcdaebebe7e8c172a4861657ab',

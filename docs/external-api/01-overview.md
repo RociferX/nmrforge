@@ -1,4 +1,4 @@
-# 01 · Positioning and terminology (v0.2,2026-09-13)
+# 01 · Positioning and terminology (v1.0, specification finalised 2026-09-13)
 
 ## What is it
 
@@ -44,7 +44,7 @@ go through SMILE; the judgement and its evidence are kept with the reference fil
   (`nmrforge_api.uncertainty`) is left as **test/Detection aid** (the processing chain does not call it).
   The rest is completed by subsequent independent analysis codes based on the unified peak table;
 - No peak attribution/Identify (an external peak table can be used as a reference peak, but the software does not infer the assignment);
-- No peak overlap decoupling and deconvolution (v0.2 only has parabolic subpixel + 2D Gaussian single peak fitting);
+- No peak overlap decoupling and deconvolution (v1.0 has parabolic subpixel + 2D Gaussian single-peak fitting only);
 - Does not perform the behaviour of 3D NUS (both 2D uniform and 2D NUS are supported);
 - No parallel scheduling (serial + breakpoint resume);
 - The research parameter space is not automatically generated (`axes` is just a convenient expansion entry; `combos=` is executed as is)

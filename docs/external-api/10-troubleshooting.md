@@ -1,4 +1,4 @@
-# 10 - Troubleshooting (v0.2)
+# 10 - Troubleshooting (v1.0)
 
 ## 10.1 Common errors and what to do
 

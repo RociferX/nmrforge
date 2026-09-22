@@ -320,7 +320,7 @@ class Spectrum3D:
   按维度数自动进入 2D/3D 模式;
 - 3D 峰表列(F1/F2/F3_shift)按当前切片平面轴标签映射,联动不受影响。
 
-## 11. 对外接口契约:`nmrforge_api`(v0.2,2026-09-13 规范更新)
+## 11. 对外接口契约:`nmrforge_api`(v1.0 —— 第一版,2026-09-13 规范定稿,2026-09-22 起作为第一版发布)
 
 状态:implemented。对外文档在 `docs/external-api/`。
 
@@ -402,7 +402,7 @@ Complete provenance + QC(参数三层、脚本/谱哈希、完整日志、版本
   (`nmrforge_api/uncertainty.py`)保留为**测试/检测辅助**:处理链
   (study/sweep/records/CLI)不调用它。
 
-### 11.2 公开面(`nmrforge_api/__init__.py`,`API_VERSION = "0.2"`)
+### 11.2 公开面(`nmrforge_api/__init__.py`,`API_VERSION = "1.0"`;定义点是 `nmrforge_api.session`)
 
 ```python
 # 两种模式(2026-09-14):参考模式生成参考;组合模式必须显式给参考

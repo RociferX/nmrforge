@@ -18,7 +18,11 @@ authors = [{ name = "Xuanfeng Li" }]
 # if the build requirement rises to setuptools>=77, switch to the PEP 639 string form license = "Apache-2.0".
 license = { text = "Apache-2.0" }
 # Classifier policy (aligned 2026-09-21 after an external review):
-# - Development Status stays "3 - Alpha". During 0.x the Python/CLI API names, defaults and the
+# - Development Status stays "3 - Alpha": this describes the **release** status of the whole
+#   distribution (0.x, no backwards-compatibility promise), not the maturity of the API - the
+#   `nmrforge_api` contract has been at its first version (`API_VERSION = "1.0"`) since 2026-09-22
+#   and is managed through the compat process. The desktop track is usable day to day.
+#   Legacy note: during 0.x the Python/CLI API names, defaults and the
 #   records it writes can still change (the desktop track is already usable day to day), so the
 #   metadata neither claims Stable nor pretends to be 1.0. The bar for 1.0 is a frozen public API
 #   contract plus end-to-end scientific validation on real instrument data.

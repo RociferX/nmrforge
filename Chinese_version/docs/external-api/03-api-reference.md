@@ -1,6 +1,6 @@
-# 03 · API 参考(v0.2)
+# 03 · API 参考(v1.0)
 
-顶层导出见 `nmrforge_api/__init__.py`(`API_VERSION = "0.2"`)。
+顶层导出见 `nmrforge_api/__init__.py`(`API_VERSION = "1.0"`;2026-09-22 起 `nmrforge_api` 作为**第一版**发布,契约版本由 `nmrforge_api.session.API_VERSION` 单点定义)。
 
 ## 3.1 会话与数据集
 
