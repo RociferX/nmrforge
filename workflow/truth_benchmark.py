@@ -654,7 +654,7 @@ def write_matches_csv(path: Path | str, matches: Sequence[dict[str, Any]]) -> No
         writer = csv.DictWriter(
             handle,
             fieldnames=[
-                "expected_id", "detected_id", "status", "dH", "dN", "scaled_distance",
+                "level", "expected_id", "detected_id", "status", "dH", "dN", "scaled_distance",
                 "nearest_id", "nearest_distance",
             ],
         )

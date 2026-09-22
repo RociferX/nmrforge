@@ -30,10 +30,13 @@ section 2.
 ![Automatic processing overlaid with the published deposited chemical shifts](truth_recovery_2026-09-22.png)
 
 Overlaying the **deposited chemical shifts** gives the quantitative reading: the top panel is the
-**automatically processed spectrum**; red filled circles are **expected peaks matched within the tight
-tolerance (1H 0.01 / 15N 0.05 ppm)**, black open squares are expected peaks that were not detected;
-bottom-left is the calibrated **position residual** scatter (dashed box = tight tolerance), bottom-right
-is the **recovery per tolerance** (dark bars = the chance background under the same convention).
+**automatically processed spectrum**, and the expected peaks are drawn in **three tiers** by how well they
+line up - **red filled circles = matched inside the tight tolerance (1H 0.01 / 15N 0.05 ppm)**, **amber
+filled circles = matched only at the loose tolerance (0.02 / 0.10 ppm)**, which is a small positional
+shift rather than a missing peak, **black open squares = matched at neither tier**. Bottom-left is the
+calibrated **position residual** scatter (dashed box = tight tolerance; the loose-only peaks are drawn as
+open circles and sit just outside that box), bottom-right is the **recovery per tolerance** (dark bars =
+the chance background under the same convention).
 
 **Data citation (public data - cite the sources together with any number quoted from this page)**:
 
@@ -96,18 +99,17 @@ software does not decide it for you). That 12 sigma applies only to the **peak s
 looks at** (`workflow/window_optimize.py`); it is a separate constant from the product's peak-picking
 default (35 sigma) and the two never override each other.
 
-**The 17 not-detected expected peaks, measured one by one** (the `nearest_id` / `nearest_distance`
-columns of the match CSV exist for exactly this - they give, for every not-detected expected peak, the
-*closest detection* and its distance in tolerance units):
+**Read it in three tiers** (same matching, only the tolerance changes):
 
-- **11 of them** have their closest detection only **1.0-1.5 tolerance units** away: the residual is almost
-  entirely in 15N (0.045-0.072 ppm), 1H is <= 0.005 ppm throughout, and most of those neighbours are strong
-  peaks (SNR 155-588). The peak is **there**; its position is slightly off.
-- **3 of them** are 2.3-2.5 units away and **3** are genuinely far (0.27-1.43 ppm in 15N) - that group is
-  closer to "a peak of the multi-spectrum joint assignment that does not exist under this condition".
-- For **4** of the 17, the closest detection has already been assigned to a neighbouring expected peak -
-  **the one-to-one rule lets a detection satisfy one expected peak only**, so the loser is recorded as
-  not detected.
+| Tier | Expected peaks | What it means |
+| --- | --- | --- |
+| **matched at the tight tolerance** (1H 0.01 / 15N 0.05 ppm) | **90 / 107 = 84.1%** | position lines up precisely |
+| **matched only at the loose tolerance** (0.02 / 0.10 ppm) | **10** | a **positional offset**: the residual is almost entirely in 15N (0.045-0.072 ppm), 1H stays <= 0.005 ppm, and most of those neighbours are strong peaks (SNR 155-588) - **the peak is there, the algorithm did not drop it** |
+| **matched at neither tier** | **7 / 107 = 6.5%** | for one of them (LEU42) there is a peak right next to it, claimed by a neighbouring expected peak under the **one-to-one rule (a detection can satisfy one expected peak only)**; the other six have no detection within 2.3x the tight tolerance (15N off by 0.12-1.43 ppm), which is closer to "a peak of the multi-spectrum joint assignment that does not exist as such under this condition" |
+
+The `level` / `nearest_id` / `nearest_distance` columns of the match CSV exist for this table: the CSV
+carries **one block per tolerance tier** (`level` = that tier's `tol_H/tol_N`), and `nearest_*` gives the
+**closest detection** of every unmatched expected peak together with its distance in tolerance units.
 - **The tight tolerance sits on the data-point resolution**: the 15N axis of the final spectrum has 512
   points over 104.05-132.00 ppm, so **one data point = 0.055 ppm**, while the tight tolerance is 0.05 ppm -
   **smaller than one point**. "Matched" therefore asks for a 15N position within **less than one data
@@ -189,7 +191,7 @@ the closest significant peaks in the reference spectrum).
 python scripts/vm_realdata_report.py \
     --dataset <Bruker dataset directory> --tag "Rabies P CTD (CVS-11)" --root <scratch root> --repeats 3
 
-# truth benchmark (section 2; aggregate numbers plus a per-peak match CSV)
+# truth benchmark (section 2; aggregate numbers plus a per-peak match CSV, one block per tier)
 nmrforge/bin/python scripts/vm_truth_benchmark.py \
     --dataset <Bruker dataset directory> --expected <expected peak CSV> --tag "Rabies P CTD (CVS-11)" \
     --root <scratch root> --thresholds 12 --json <report JSON> --matches <match CSV>
