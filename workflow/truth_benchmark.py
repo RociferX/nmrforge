@@ -615,7 +615,8 @@ def load_expected_csv(
     data).
     """
     rows: list[dict[str, Any]] = []
-    with Path(path).open(encoding="utf-8", newline="") as handle:
+    # utf-8-sig:期望峰表通常带 BOM,不处理会把首列名读成 "\ufeffpeak_id"、peak_id 退化成 E1
+    with Path(path).open(encoding="utf-8-sig", newline="") as handle:
         for index, row in enumerate(csv.DictReader(handle)):
             if not row:
                 continue
