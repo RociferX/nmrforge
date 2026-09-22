@@ -1164,19 +1164,22 @@ class NMRPipeBackend:
             merged_in = self._merged_fid_in(
                 work, experiment.dataset_id
             )
+            # 2026-09-22: reuse goes through the raw input fingerprint (see
+            # _converted_fid_is_current) on every path. Source-level cleaning that
+            # rewrites or empties raw always changes the fingerprint, so the old merged
+            # product goes stale by itself -- no separate "cleaned this run" event flag
+            # is needed, and the criterion is identical to process()'s segment branch.
             merged_ready = (
                 merged_in is not None
                 and (work / "nuslist").is_file()
                 and not params.get("segment_shift_hz")  # a shift forces a re-conversion
+                and self._converted_fid_is_current(
+                    work,
+                    experiment.dataset_id,
+                    [Path(s) for s in experiment.segments],
+                    logs,
+                )
             )
-            if source_removed:
-                # the source changed: the old merged product is stale, force a
-                # re-conversion
-                if merged_in is not None:
-                    merged_path = work / merged_in.replace("%03d", "000")
-                    if merged_path.is_file():
-                        merged_path.unlink()
-                merged_ready = False
             if not merged_ready:
                 # 0.2.199-patch29cv: this path converts/merges on its own and notes
                 # the multi-segment type as well
@@ -1206,6 +1209,12 @@ class NMRPipeBackend:
                         dataset_id=experiment.dataset_id,
                         audit=audit,
                     )
+                self._record_conversion(
+                    work,
+                    experiment.dataset_id,
+                    [Path(s) for s in experiment.segments],
+                    logs,
+                )
             else:
                 logs.append(tr("Reuse merged fid ({p0}; skipping conversion/merge)", p0=merged_in))
                 nuslist_count = len(
@@ -1233,11 +1242,15 @@ class NMRPipeBackend:
                     experiment, cleaned, audit=audit
                 )
             fid_file = work / f"{experiment.dataset_id}.fid"
-            if source_removed:
-                # the source changed: the previously converted fid is stale, force a
-                # re-conversion
-                if fid_file.is_file():
-                    fid_file.unlink()
+            # 2026-09-22: reuse goes through the raw input fingerprint -- the old product
+            # is dropped and re-converted only when the fingerprint changed (source-level
+            # cleaning rewrote or emptied raw) or when the product itself is incomplete
+            # (empty fid / size mismatch with the record / unreadable record). Projects
+            # without a record are still reused, with an "unverified" note.
+            if fid_file.is_file() and not self._converted_fid_is_current(
+                work, experiment.dataset_id, raw, logs
+            ):
+                fid_file.unlink()
                 stale_slice = work / "fid"
                 if stale_slice.is_dir():
                     shutil.rmtree(stale_slice)
@@ -1273,6 +1286,7 @@ class NMRPipeBackend:
                         "message": tr("NUS Conversion failed (bruker native recognition failed)"),
                         "logs": logs,
                     }
+                self._record_conversion(work, experiment.dataset_id, raw, logs)
             if raw_nuslist.is_file():
                 shutil.copy2(raw_nuslist, work / "nuslist")
                 # Safety net: re-validate the working nuslist (0 bad points expected
