@@ -1,8 +1,9 @@
 # AppImage packaging solution (NMRForge)
 
 Status: **released with v0.11.0**. The source stays Apache-2.0; the Linux AppImage ships in the
-release (v0.11.0 shipped two, Chinese and English; **from the next release there is one artefact**,
-with the interface language chosen at run time).
+release. **Since 2026-09-22 the release carries one artefact**, with the interface language chosen at
+run time; it is built from the released source commit recorded in
+`usr/share/doc/NMRForge/BUILD_INFO.txt`.
 
 This page records the Linux AppImage build plan. Before every release the root
 `APPIMAGE_RELEASE_CHECKLIST.md` must be completed, and the licences of the bundled PySide6/Qt and
