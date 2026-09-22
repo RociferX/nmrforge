@@ -23,15 +23,15 @@ from typing import Any
 
 #: declared behaviour level (see the module doc; meaning matches nmrforge_api.compat)
 DECLARATION: dict[str, Any] = {'schema': 'nmrforge_api.compat.declaration.v1',
- 'digest': '827462ba4c5902dfe2fcf5307ca0a73b85ba3e1b78931e92d3a4f1f1aeda0aab',
- 'token_digest': 'ee525220f669ee1e5fb89003b577b6cd86644ba9ea2889ef7f73d97070bc9b0e',
+ 'digest': '8d66e3a9096cf737559cb7ec4039bc93c9be863d7df140cbe11402e4f2ba4f3d',
+ 'token_digest': 'ed82686e64574c2e6245556c78198ac0d08339d1d7d12e215a4589f987d8ca70',
  'compat_level': 'behavior_changed',
  'affected': ['processing'],
  'updated': '2026-09-22',
- 'note': '2026-09-22 review: converted-fid reuse now checks the raw fingerprint '
-         '(re-converts on change), smile_scan reports failure when no candidate '
-         'succeeded, hold-out planes follow the produced slices; shared raw '
-         'fingerprint module in core',
+ 'note': '2026-09-22 NUS reuse unification: reconstruct_nus reuses converted/merged '
+         'products on the raw input fingerprint (same criterion as process()) and '
+         'records provenance; source-level cleanup no longer needs a per-run event '
+         'flag',
  'golden': {'name': 'conformance_v1',
             'spectrum_sha256': '382b330926da93d856feef40ca33c2df1eec21b61e50db471bdf7aa4bb2fb311',
             'peak_table_sha256': '7f8180662220c83db225fa6b2bf0f5b4c71196fcdaebebe7e8c172a4861657ab',

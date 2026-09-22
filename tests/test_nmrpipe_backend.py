@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
+import backend.nmrpipe_backend as npb
 from backend.factory import create_backend
 from backend.nmrpipe_backend import NMRPipeBackend
 from backend.nmrpipe_finder import find_nmrpipe_bin
@@ -46,6 +49,118 @@ def test_converted_fid_reuse_follows_the_raw_fingerprint(tmp_path: Path) -> None
     (work / "d_001.fid").write_bytes(b"x")
     logs.clear()
     assert backend._converted_fid_is_current(work, "d_001", raw, logs) is False
+
+
+class _FakeCshRuntime:
+    """Fake csh: always rc=0; the converted products are written by the fake _convert."""
+
+    def run(self, args, cwd=None, timeout=None):
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+
+def _conversion_fingerprint(work: Path, dataset_id: str) -> str:
+    """Read the raw fingerprint back out of the conversion record (language-neutral evidence)."""
+    record = work / f"{dataset_id}.fid.conversion.json"
+    return json.loads(record.read_text(encoding="utf-8"))["raw_fingerprint"]
+
+
+def _reconstruct_params() -> dict[str, object]:
+    """Turn both phase searches off so the NUS path reaches script generation directly."""
+    return {"direct_phase_search": False, "display_phase_search": False}
+
+
+def test_reconstruct_nus_reconverts_only_when_the_raw_fingerprint_changed(
+    bruker_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Single-dataset NUS: reuse follows the raw fingerprint, so rewritten raw re-converts."""
+    exp = read_dataset(bruker_dir / "nus_2d")
+    raw = Path(exp.source_path)
+    calls: list[str] = []
+    monkeypatch.setattr(npb, "CshRuntime", _FakeCshRuntime)
+    monkeypatch.setattr(NMRPipeBackend, "_bin_dir", lambda self: tmp_path)
+
+    def fake_convert(self, runtime, experiment, r, work, fid_com_overrides=None):
+        calls.append("convert")
+        work.mkdir(parents=True, exist_ok=True)
+        (work / f"{experiment.dataset_id}.fid").write_bytes(b"fid-v1")
+        return True, ["fake conversion"]
+
+    monkeypatch.setattr(NMRPipeBackend, "_convert", fake_convert)
+    backend = NMRPipeBackend(nmrpipe_bin="")
+    params = _reconstruct_params()
+
+    first = backend.reconstruct_nus(exp, dict(params), script_only=True)
+    assert first["success"] is True
+    assert len(calls) == 1
+    work = Path(first["work_dir"])
+    fingerprint = _conversion_fingerprint(work, exp.dataset_id)
+
+    second = backend.reconstruct_nus(exp, dict(params), script_only=True)
+    assert second["success"] is True
+    assert len(calls) == 1  # unchanged raw -> the converted product is reused, no new conversion
+    assert _conversion_fingerprint(work, exp.dataset_id) == fingerprint
+
+    # source-level cleanup rewrote raw (for example a nuslist with bad points removed)
+    (raw / "nuslist").write_text("1 1\n2 3\n4 5\n", encoding="utf-8")
+    third = backend.reconstruct_nus(exp, dict(params), script_only=True)
+    assert third["success"] is True
+    assert len(calls) == 2
+    assert _conversion_fingerprint(work, exp.dataset_id) != fingerprint
+
+
+def test_reconstruct_nus_segments_reuse_follows_the_raw_fingerprint(
+    bruker_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Segmented NUS: the merged product is reused on the same fingerprint; a change re-converts."""
+    exp = read_dataset(bruker_dir / "nus_2d")
+    base = Path(exp.source_path)
+    segments: list[Path] = []
+    for name in ("s1", "s2"):
+        segment = base.parent / name
+        segment.mkdir()
+        for filename in ("acqus", "acqu2s", "nuslist"):
+            (segment / filename).write_bytes((base / filename).read_bytes())
+        segments.append(segment)
+    exp.segments = segments
+
+    merge_calls: list[tuple[float, ...]] = []
+    monkeypatch.setattr(npb, "CshRuntime", _FakeCshRuntime)
+    monkeypatch.setattr(NMRPipeBackend, "_bin_dir", lambda self: tmp_path)
+
+    def fake_convert_segments(
+        self, runtime, experiment, work, shifts, fid_com_overrides=None
+    ):
+        merge_calls.append(tuple(shifts))
+        (work / "merged" / "fid").mkdir(parents=True, exist_ok=True)
+        (work / "merged" / "fid" / "test001.fid").write_bytes(b"merged-v1")
+        (work / "nuslist").write_text("1 1\n2 3\n4 5\n", encoding="utf-8")
+        return True, ["fake segment conversion"]
+
+    monkeypatch.setattr(NMRPipeBackend, "_convert_segments", fake_convert_segments)
+    monkeypatch.setattr(
+        NMRPipeBackend,
+        "_write_merged_nuslist",
+        lambda self, work, segment_dirs, experiment, logs: (3, []),
+    )
+    backend = NMRPipeBackend(nmrpipe_bin="")
+    params = _reconstruct_params()
+
+    first = backend.reconstruct_nus(exp, dict(params), script_only=True)
+    assert first["success"] is True
+    assert len(merge_calls) == 1
+    work = Path(first["work_dir"])
+    fingerprint = _conversion_fingerprint(work, exp.dataset_id)
+
+    second = backend.reconstruct_nus(exp, dict(params), script_only=True)
+    assert second["success"] is True
+    assert len(merge_calls) == 1  # unchanged raw -> the merged product is reused
+    assert _conversion_fingerprint(work, exp.dataset_id) == fingerprint
+
+    (segments[0] / "nuslist").write_text("1 1\n2 3\n", encoding="utf-8")
+    third = backend.reconstruct_nus(exp, dict(params), script_only=True)
+    assert third["success"] is True
+    assert len(merge_calls) == 2
+    assert _conversion_fingerprint(work, exp.dataset_id) != fingerprint
 
 
 _NO_NMRPIPE = find_nmrpipe_bin() is None
