@@ -719,7 +719,14 @@ class SpectrumPanel(QWidget):
                 self._clear_peaks()
             else:
                 spectrum = Spectrum.load_from_ft2(path)
-        except Exception:  # noqa: BLE001 - Damaged files are uniformly prompted by the caller.
+        except Exception as exc:  # noqa: BLE001 - the caller still prompts; the cause goes to the task log
+            self.log_message.emit(
+                tr(
+                    "2D spectrum loading failed {p0}: {p1}",
+                    p0=path.name,
+                    p1=describe_exception(exc),
+                )
+            )
             return False
         self._spectrum3d_panel.clear()
         self.viewer.clear()

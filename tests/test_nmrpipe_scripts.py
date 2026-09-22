@@ -472,7 +472,7 @@ def test_3d_nus_script_smile_tuning(bruker_dir: Path) -> None:
     assert "-report 2" in script
 
 
-def test_select_smile_params_low_sampling() -> None:
+def test_select_smile_params_is_one_tier_for_every_fraction() -> None:
     from backend.script_generator import select_smile_params
 
     assert select_smile_params(0.04) == (5.0, 0.95)

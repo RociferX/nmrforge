@@ -23,13 +23,15 @@ from typing import Any
 
 #: declared behaviour level (see the module doc; meaning matches nmrforge_api.compat)
 DECLARATION: dict[str, Any] = {'schema': 'nmrforge_api.compat.declaration.v1',
- 'digest': '312d721c8d500cdba67eb5a76c59fd2017fa8f8b74d2bf8816c5df5deeae7c9d',
- 'token_digest': 'f2385717800ef8d99eb38989b09d5dd4e5b0fd8f3589b976db90b9796a55ad90',
- 'compat_level': 'additive',
- 'affected': [],
+ 'digest': '827462ba4c5902dfe2fcf5307ca0a73b85ba3e1b78931e92d3a4f1f1aeda0aab',
+ 'token_digest': 'ee525220f669ee1e5fb89003b577b6cd86644ba9ea2889ef7f73d97070bc9b0e',
+ 'compat_level': 'behavior_changed',
+ 'affected': ['processing'],
  'updated': '2026-09-22',
- 'note': 'one fingerprint per code base: ast.dump stopped printing empty fields in 3.13, so the '
-         '3.12 and 3.13 CI jobs disagreed; numbers and the golden vector unchanged',
+ 'note': '2026-09-22 review: converted-fid reuse now checks the raw fingerprint '
+         '(re-converts on change), smile_scan reports failure when no candidate '
+         'succeeded, hold-out planes follow the produced slices; shared raw '
+         'fingerprint module in core',
  'golden': {'name': 'conformance_v1',
             'spectrum_sha256': '382b330926da93d856feef40ca33c2df1eec21b61e50db471bdf7aa4bb2fb311',
             'peak_table_sha256': '7f8180662220c83db225fa6b2bf0f5b4c71196fcdaebebe7e8c172a4861657ab',

@@ -27,6 +27,7 @@ import os
 import shutil
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -66,6 +67,7 @@ from backend.script_generator import (
 from core.audit.qc_audit import QcAction, QcAuditLog
 from core.data.internal_data_model import Experiment, SamplingMode
 from core.data.nus_reader import read_nuslist
+from core.data.raw_fingerprint import raw_dir_fingerprint
 from core.optimization.phase_search import (
     direct_ft_traces,
     dominant_absorption_ratio,
@@ -723,8 +725,16 @@ class NMRPipeBackend:
             )
             merged_ready = merged_in is not None
             in_file = merged_in or f"merged/{experiment.dataset_id}.fid"
-            if merged_ready and not (params or {}).get("segment_shift_hz"):
-                logs.append(tr("Reuse converted fid (skip conversion)"))
+            if (
+                merged_ready
+                and not (params or {}).get("segment_shift_hz")
+                and self._converted_fid_is_current(
+                    work,
+                    experiment.dataset_id,
+                    [Path(seg) for seg in experiment.segments],
+                    logs,
+                )
+            ):
                 _progress(tr("Reuse converted fid (skip conversion)"))
             else:
                 _progress(tr("Start converting fid"))
@@ -738,10 +748,18 @@ class NMRPipeBackend:
                     runtime, experiment, work, shifts
                 )
                 logs += convert_logs
+                if converted:
+                    self._record_conversion(
+                        work,
+                        experiment.dataset_id,
+                        [Path(seg) for seg in experiment.segments],
+                        logs,
+                    )
         else:
             in_file = f"{experiment.dataset_id}.fid"
-            if (work / in_file).is_file():
-                logs.append(tr("Reuse converted fid (skip conversion)"))
+            if (work / in_file).is_file() and self._converted_fid_is_current(
+                work, experiment.dataset_id, raw, logs
+            ):
                 _progress(tr("Reuse converted fid (skip conversion)"))
             else:
                 _progress(tr("Start converting fid"))
@@ -760,6 +778,7 @@ class NMRPipeBackend:
                             "processing)",
                             p0=slice_in,
                         ))
+                self._record_conversion(work, experiment.dataset_id, raw, logs)
         if not converted:
             return {"success": False, "message": (
                 tr(
@@ -2085,15 +2104,31 @@ class NMRPipeBackend:
                             scan_dir / "nus3d_rc",
                             "test%04d.ft1",
                         )
-                        planes = [
-                            i for i in range(1, 1203) if i % 40 == 1
-                        ][:30]
-                        units = len(planes)
+                        # 2026-09-22: the plane list follows the slices this run actually
+                        # produced instead of a fixed 1..1202 / step 40 (a spectrum of
+                        # another size used to leave the hold-out metric silently empty).
+                        available = sorted(
+                            int(path.stem[4:])
+                            for path in acq_dir.glob("test*.ft1")
+                            if path.stem[4:].isdigit()
+                        )
+                        step = max(1, len(available) // 30)
+                        planes = available[::step][:30]
+                        if not planes:
+                            logs.append(
+                                tr(
+                                    "Hold-out residual: no plane was found under {p0}; "
+                                    "the hold-out metric is skipped",
+                                    p0=acq_dir.name,
+                                )
+                            )
+                        units = 0
                         for p in planes:
                             fa = acq_dir / (name % p)
                             fr = rc_dir / (name % p)
                             if not (fa.is_file() and fr.is_file()):
                                 continue
+                            units += 1
                             _da, A = ng.pipe.read(str(fa))
                             _dr, R = ng.pipe.read(str(fr))
                             A = np.asarray(A)
@@ -2284,11 +2319,31 @@ class NMRPipeBackend:
                     "spectrum)",
                 )
                 )
+            n_ok = sum(1 for entry in candidates if entry.get("ok"))
+            if not candidates:
+                logs.append(tr("The scan produced no candidate; nothing to rank"))
+            elif not n_ok:
+                logs.append(
+                    tr(
+                        "Every one of the {p0} scan candidates failed; no ranking is "
+                        "written and no rank-1 script is promoted",
+                        p0=len(candidates),
+                    )
+                )
             return {
-                "success": True,
-                "message": tr("Finish {p0} group scan", p0=len(candidates)),
+                "success": bool(n_ok),
+                "message": (
+                    tr("Finish {p0} group scan", p0=len(candidates))
+                    if n_ok
+                    else tr(
+                        "SMILE scan failed: {p0} candidate(s), none succeeded",
+                        p0=len(candidates),
+                    )
+                ),
                 "logs": logs,
                 "candidates": candidates,
+                "n_ok": n_ok,
+                "n_failed": len(candidates) - n_ok,
                 "scan_dir": str(scan_dir),
                 "holdout_file": holdout_file,
             }
@@ -2616,6 +2671,81 @@ class NMRPipeBackend:
             return f"merged/{slice_in}"
         return None
 
+    def _conversion_record_path(self, work: Path, dataset_id: str) -> Path:
+        """Path of the conversion record: next to the fid, holding the raw fingerprint."""
+        return work / f"{dataset_id}.fid.conversion.json"
+
+    def _record_conversion(
+        self,
+        work: Path,
+        dataset_id: str,
+        raw_dirs: Any,
+        logs: list[str],
+    ) -> None:
+        """Record the raw fingerprint and the fid size of this conversion for reuse checks."""
+        payload: dict[str, Any] = {
+            "raw_fingerprint": raw_dir_fingerprint(raw_dirs),
+            "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        }
+        fid = work / f"{dataset_id}.fid"
+        if fid.is_file():
+            payload["fid_size"] = fid.stat().st_size
+        try:
+            atomic_write_text(
+                self._conversion_record_path(work, dataset_id),
+                json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+            )
+        except OSError as exc:
+            logs.append(tr("Could not record the conversion provenance: {p0}", p0=exc))
+
+    def _converted_fid_is_current(
+        self,
+        work: Path,
+        dataset_id: str,
+        raw_dirs: Any,
+        logs: list[str],
+    ) -> bool:
+        """Whether an already converted fid may be reused (2026-09-22 review: a stale or
+        incomplete product must not be reused silently).
+
+        - record present but the raw input fingerprint changed (for example the source-level
+          NUS cleanup rewrote ser) -> convert again;
+        - record missing (older project) -> still reuse, but log that nothing was verified;
+        - record unreadable / fid empty / fid size not matching the record -> convert again.
+        """
+        fid = work / f"{dataset_id}.fid"
+        if fid.is_file() and fid.stat().st_size == 0:
+            logs.append(tr("Converted fid {p0} is empty; converting again", p0=fid.name))
+            return False
+        record = self._conversion_record_path(work, dataset_id)
+        if not record.is_file():
+            logs.append(
+                tr(
+                    "Reuse converted fid (no conversion record; the raw data is not "
+                    "verified)"
+                )
+            )
+            return True
+        try:
+            data = json.loads(record.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            logs.append(
+                tr("Conversion record {p0} is unreadable; converting again", p0=record.name)
+            )
+            return False
+        recorded = str(data.get("raw_fingerprint") or "")
+        if recorded and recorded != raw_dir_fingerprint(raw_dirs):
+            logs.append(tr("Raw data changed since the conversion; converting again"))
+            return False
+        size = data.get("fid_size")
+        if isinstance(size, int) and fid.is_file() and fid.stat().st_size != size:
+            logs.append(
+                tr("Converted fid {p0} is incomplete; converting again", p0=fid.name)
+            )
+            return False
+        logs.append(tr("Reuse converted fid (skip conversion)"))
+        return True
+
     def _finalize_converted_fid(
         self,
         raw_dir: Path,
@@ -2666,9 +2796,15 @@ class NMRPipeBackend:
                 )
                 return True
         dest_slice = dest_work / "fid"
+        # 2026-09-22: copy into a staging directory and rename it into place, so a
+        # half-written slice stream is never treated as a usable product
+        staging = dest_work / "fid.copying"
+        if staging.exists():
+            shutil.rmtree(staging)
+        shutil.copytree(slice_dir, staging)
         if dest_slice.exists():
             shutil.rmtree(dest_slice)
-        shutil.copytree(slice_dir, dest_slice)
+        os.replace(staging, dest_slice)
         logs.append(tr("sliced fid -> {p0}/ ({p1} slices)", p0=dest_slice.name, p1=len(slices)))
         return True
 

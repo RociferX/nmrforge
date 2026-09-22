@@ -10,7 +10,7 @@
 
 - Branch `master`; One commit corresponds to one logical change
 - Routine: change locally -> `pytest` (add `--basetemp=<dir>` if your temporary directory is
-  restricted) -> `ruff check .` -> run the real-engine suite on a machine that has NMRPipe ->
+  restricted) -> `ruff check .` -> run the suite on a machine that has NMRPipe (the suite does not call the engine) ->
   commit.
 
 ## Test
@@ -21,7 +21,7 @@
   2D/3D uniform + NUS main path (including diagnosis and processing parameter optimisation). Batch currently only supports 2D.
   Should not be expressed as covering all four paths; this capability boundary is recorded as a review item `BATCH-012`.
   This file must be updated simultaneously when new or modified processing procedures are added.
-- Tests that do not rely on the real NMRPipe are preferred (FakeBackend/MockBackend mode)
+- Tests that do not rely on the real NMRPipe are preferred (FakeBackend mode, `tests/test_full_paths.py`)
 - If the system temporary directory is restricted, point pytest somewhere writable with
   `--basetemp=<directory>` (for example `$env:TEMP\pytest_nmrforge`).
 

@@ -380,16 +380,13 @@ def zero_fill_report(plan: dict[str, dict[str, Any]]) -> list[str]:
 
 
 def select_smile_params(fraction: float) -> tuple[float, float]:
-    """SMILE tier params (nSigma, thresh) by sampling fraction.
+    """SMILE params (nSigma, thresh): one tier for every sampling fraction.
 
     2026-08-11 validation (61/63/65/67 merged 3.9%): low sampling with
-    nSigma=7/thresh=0.85 gave QC 57.5 (SNR 17); nSigma=5/thresh=0.95
-    gave 74.1 (SNR 92).
+    nSigma=7/thresh=0.85 gave QC 57.5 (SNR 17); nSigma=5/thresh=0.95 gave 74.1
+    (SNR 92), so 5.0/0.95 is used for every fraction. The signature keeps the
+    sampling fraction because callers pass it and smile_max_iter() still tiers on it.
     """
-    if fraction >= 0.5:
-        return 5.0, 0.95
-    if fraction >= 0.2:
-        return 5.0, 0.95
     return 5.0, 0.95
 
 

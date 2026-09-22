@@ -45,8 +45,9 @@ ProjectManager:
 sample_id/segments.`WorkflowRun`:run_id(R-YYYYMMDD-NNN)/inputs(SHA-256)/
 Params/outputs/snapshot_dir/status. JSON schema 1.1, atomic writing.
 
-Run directory (`processing/<exp_id>/runs/<run_id>/`) contains `snapshot/`(script + parameter snapshot) and.
-`run.log`(start/End two lines + log recorded by level during the run; the path can be deduced from run_id without entering the schema).
+Run directory (`processing/<exp_id>/runs/<run_id>/`) contains `snapshot/` (script + parameter
+snapshot) and `run.log` (a start/end pair plus the log recorded by level during the run; the
+path can be deduced from run_id and is not part of the schema).
 
 **Records and state are always written atomically (mandatory, 2026-09-20)**: every
 JSON document that is written and read back as a whole (study state, `run.json`,

@@ -83,7 +83,8 @@ instead:
   (see [development](development.md) and the [GUI guide](gui.md));
 - `python scripts/i18n_extract_ui.py --check` is the guard: new strings have to be registered,
   files that have been converted may not contain Chinese literals outside `tr()`, and the Chinese
-  coverage may not shrink.
+  coverage may not shrink (this is UI-string coverage, not code coverage: the project keeps no
+  code-coverage threshold).
 
 Machine-readable values such as the warning codes `no_spectrum_change`, `roi_capped` and
 `processing_script_not_found` are language-neutral identifiers and are not touched, so the on-disk
