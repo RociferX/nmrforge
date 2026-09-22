@@ -104,6 +104,7 @@ nmrforge_data = [
     "config/README.md",
     "presets/*.yaml",
     "presets/*.md",
+    "tutorial/*.md",
 ]
 gui = ["assets/*.png", "assets/*.svg"]
 # Name the language packs one by one: source.json / converted.json are tooling lists for

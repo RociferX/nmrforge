@@ -71,6 +71,7 @@ CATEGORIES: dict[str, str] = {
     "test_gui_snapshot.py": "integration",
     "test_gui_step_row_layout.py": "integration",
     "test_gui_theme.py": "unit",
+    "test_gui_tutorial.py": "integration",
     "test_ui_i18n.py": "regression",
     "test_import_workflow.py": "integration",
     "test_logging_setup.py": "regression",

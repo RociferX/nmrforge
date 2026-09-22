@@ -66,6 +66,8 @@ a = Analysis(
         # shape inside the artefact, exactly as in an installed copy
         ("../../nmrforge_data/config", "nmrforge_data/config"),
         ("../../nmrforge_data/presets", "nmrforge_data/presets"),
+        # in-app usage tutorial (Help -> Usage tutorial), shipped as plain markdown
+        ("../../nmrforge_data/tutorial", "nmrforge_data/tutorial"),
         ("../../gui/assets", "gui/assets"),
         # language catalogues: the UI-string lookup tables (zh.json etc.), located at run time by
         # ui_support/i18n.py

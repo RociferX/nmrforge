@@ -18,6 +18,8 @@ Install NMRPipe on the same machine for real processing; SMILE comes with it. nm
 bundle or download either engine. If they are missing, data inspection still works and the program
 reports the unavailable processing capability explicitly.
 
+On first launch, open **`Help -> Usage tutorial`**: a full walkthrough from importing data to a peak table, and the text follows the interface language.
+
 The future AppImage path and its additional PySide6/Qt distribution checks are reserved in
 the release checklist kept in the maintainer's private repository.
 
