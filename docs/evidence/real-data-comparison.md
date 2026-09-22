@@ -110,6 +110,20 @@ default (35 sigma) and the two never override each other.
 The `level` / `nearest_id` / `nearest_distance` columns of the match CSV exist for this table: the CSV
 carries **one block per tolerance tier** (`level` = that tier's `tol_H/tol_N`), and `nearest_*` gives the
 **closest detection** of every unmatched expected peak together with its distance in tolerance units.
+
+**Those 7 "matched at neither tier" peaks, measured one by one** (from the final spectrum's local maxima):
+
+- **One peak is inside its box but never entered the picked table**: the local maximum at GLY82's box
+  (1H 8.44 / 15N 104.59) is **130 sigma (about 12.5% of the spectrum maximum)**, but it sits only about 10
+  points from the 15N edge of the spectrum (104.05 ppm) and therefore inside the **detection edge margin**
+  (default = 3x the nuclide line width, about 0.63 ppm or 12 points). Re-running the same detection with
+  `edge_margin_ppm=0.10` gives 309 peaks instead of 308, and the extra one is at **8.436 / 104.594
+  (SNR 130)**. That is a **detection-coverage** setting, not the algorithm dropping a peak.
+- **Two peaks were taken by a neighbouring expected peak** under the one-to-one rule: the closest detection
+  of both LEU42 and VAL56 is the same peak (8.487 / 120.178, SNR 340), already assigned to ILE40.
+- **Three peaks were picked but sit outside the loose tier**: the local maxima of ALA20 / GLY72 / GLN106 are
+  0.10-0.27 ppm away in 15N (2-5 data points) from the deposited position.
+- **Only around SER37 is there really no peak** (local maximum 3 sigma).
 - **The tight tolerance sits on the data-point resolution**: the 15N axis of the final spectrum has 512
   points over 104.05-132.00 ppm, so **one data point = 0.055 ppm**, while the tight tolerance is 0.05 ppm -
   **smaller than one point**. "Matched" therefore asks for a 15N position within **less than one data
@@ -180,9 +194,6 @@ only two things change**: (1) the direct-dimension window, `SP -off 0.45 -end 0.
 0.98`; (2) both baselines, from a bare `POLY -auto` to `POLY -ord 2 -auto` / `POLY -ord 3 -auto`. The
 indirect window, zero filling, phase and the 1H window are unchanged.
 
-The candidate pool and scoring convention live in `workflow/window_optimize.py` (since 2026-09-22 scored by
-"detected intensity x merge factor x lineshape", detection threshold 12 sigma, resolution limit derived from
-the closest significant peaks in the reference spectrum).
 
 ## 5. Repeatability and reproduction commands
 
