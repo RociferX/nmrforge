@@ -150,7 +150,7 @@ Whichever option is chosen, the following places must be updated together:
    PySide6 (LGPL-3.0 among its options) and ships it inside the AppImage.
 6. Ship the LGPL-3.0 text and the Qt/PySide6 notices with any binary distribution, and document how
    a recipient can replace or relink the bundled Qt libraries.
-7. Record the decision in `docs/manager/decisions.md` so it is not silently revisited.
+7. Record the decision in the project's decision log so it is not silently revisited.
 
 ## 5. Recommendation for the owner to consider
 

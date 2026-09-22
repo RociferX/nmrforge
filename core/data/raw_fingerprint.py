@@ -8,6 +8,12 @@ products had no fingerprint check).
 
 This module imports no Qt and depends on no project model, so core / backend / gui
 can all use it.
+
+Scope (2026-09-22 external review): **this is not content attestation**. Files up to 8 MiB are
+hashed by content; larger ones (such as `ser`) fall back to a `size + mtime_ns` digest, which
+detects that a file was rewritten or replaced but does not prove the input was not tampered
+with. For content-level proof, hash once at import time and store that in the project record
+instead of hashing again on every refresh (which would fight the speed-first tradeoff).
 """
 
 from __future__ import annotations
