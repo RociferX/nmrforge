@@ -17,6 +17,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from core.data.raw_fingerprint import RAW_KEY_FILES, file_fingerprint
 from core.project.artifacts import find_primary_spectrum
 
 # Step -> Possible workflow ref (used to check recent runs/determine failures). 0.2.199-patch29hz:
@@ -32,31 +33,8 @@ from core.project.run_refs import (  # noqa: F401  (Continue to use this name ex
 STATE_VERSION = 1
 STATE_FILENAME = ".pipeline_state.json"
 
-# Products larger than this size (final spectrum, etc.) use (size, mtime_ns) digest to avoid
-# refreshing the full hash file each time.
-_HASH_LIMIT = 8 * 1024 * 1024
-
-
-def file_fingerprint(path: Path | str) -> str | None:
-    """File content fingerprint: <= 8MiB full size SHA-256; use size+mtime_ns for summary of large
-    files."""
-    target = Path(path)
-    try:
-        st = target.stat()
-    except OSError:
-        return None
-    if st.st_size <= _HASH_LIMIT:
-        digest = hashlib.sha256()
-        try:
-            with target.open("rb") as fh:
-                for chunk in iter(lambda: fh.read(65536), b""):
-                    digest.update(chunk)
-        except OSError:
-            return None
-        return digest.hexdigest()
-    digest = hashlib.sha256()
-    digest.update(f"stat:{st.st_size}:{st.st_mtime_ns}".encode())
-    return digest.hexdigest()
+# The file fingerprint comes from core (single source, 2026-09-22): byte-identical to
+# the previous implementation, and shared with the backend reuse check.
 
 
 def _sha256_text(text: str) -> str:
@@ -118,7 +96,7 @@ def _raw_dir(manager: Any, exp_id: str, data_id: str) -> Path | None:
 # Raw data authoritative input file (consistent with sha256:<name> of import WorkflowRun.inputs);
 # processing in raw/ write down/mobile intermediates (fid/, mask/, ft/, etc.) does not count the
 # input fingerprint.
-_RAW_KEY_FILES = ("acqus", "acqu2s", "acqu3s", "ser", "fid", "nuslist")
+_RAW_KEY_FILES = RAW_KEY_FILES  # single source: core/data/raw_fingerprint.py (2026-09-22)
 
 
 def raw_fingerprint(manager: Any, exp_id: str, data_id: str) -> str | None:

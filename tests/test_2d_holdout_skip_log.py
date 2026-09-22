@@ -56,7 +56,8 @@ def test_missing_direct_segment_logs_skip(tmp_path: Path, monkeypatch) -> None:
         work_dir=tmp_path / "scan",
         holdout_ratio=0.25,
     )
-    assert result["success"] is True
+    assert result["success"] is False  # 0 candidates succeeded: no ranking, no promotion
+    assert result["n_ok"] == 0
     assert any(
         log.startswith("2D hold-out residual: cannot extract")
         for log in result["logs"]

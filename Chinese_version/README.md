@@ -293,6 +293,16 @@ python examples/quickstart.py ./example_data/hsqc_2d
 - 批量处理**只支持 2D**;非 2D 数据集会被跳过并给出说明;
 - SMILE 参数扫描与按名次重跑**只对 2D NUS** 开放;3D NUS 处理可用,但 3D SMILE 优化界面是隐藏的;
 - 真实处理需要外部安装的 NMRPipe/SMILE;没有它们时只能做数据理解、规划与 QC;
+- **本工具会改写项目自己那份 raw 数据(不是你手上的原始数据集)**:检出 NUS 坏点时,
+  `<项目>/<exp>/<data>/raw/` 下的 `ser` 与 `nuslist` 会按整行重写,备份 `ser.bak` /
+  `nuslist.bak` 就放在旁边;写入走临时文件 + `os.replace`,会打断硬链接/软链接,因此被链接的
+  原始数据集不会被改动;行布局推不出来时回退为清理生成的 FID,且该清理只在真的检出坏点时才执行;
+- **公开仓的历史是重启过的**:早期公开历史里含真实样品名与开发机路径,所以是替换而不是重写;
+  公开提交记录因此刻意不保留演进轨迹,版本历史见[发布说明](https://github.com/RociferX/nmrforge/releases);
+- **静态门禁是 `ruff check .`**;`ruff format` 只是提示:既有代码刻意没有按 format 重排版,
+  所以 `ruff format --check .` 会报出一大批文件,这是预期行为,重排版不属于贡献流程;
+- 本机 wheel/AppImage 构建留下的 `build/` 目录不进仓库(已被 .gitignore 忽略),
+  不要在 `build/` 里跑测试;
 - 早期版本里 MATLAB 风格的分析功能(HSQC CSP 分析)已在 2026-09 移除;
 - Python API 尚未冻结;破坏性变更记录在[发布说明](https://github.com/RociferX/nmrforge/releases)里。
 
@@ -321,6 +331,9 @@ python examples/quickstart.py ./example_data/hsqc_2d
   与耗时快照。它说明的是**软件自动处理的结果可用**,与用哪个入口(桌面程序 / 命令行 / 脚本接口)无关。
 - [验证边界:工程回归 vs 科学验证](docs/external-api/09-limitations-and-roadmap.md) §9.5 ——
   每类证据在哪跑、产物落在哪,以及科学结论为什么由使用者自己的分析给出。
+- 这些数字背后的原始实验数据不能随仓库分发,逐 run 的 JSON 与日志留在装有 NMRPipe 的机器上
+  (只在配置了 `NMRFORGE_REAL_DATA_TARGETS` 时作为 CI artifact 发布)。因此聚合数字**无法仅凭
+  本仓库复算**;页面里给出了输入指纹(SHA-256),数据持有者可以据此重跑。
 
 ## 测试
 
@@ -329,13 +342,18 @@ python examples/quickstart.py ./example_data/hsqc_2d
 ```bash
 python -m pip install -e ".[test]"
 python -m pytest -q                  # 全量(约 1.3k 条)
-python -m pytest -m unit             # 快速子集(纯逻辑,秒级)
+python -m pytest -m unit             # 快速子集(纯逻辑;约 45 秒,主要是收集开销)
 python -m ruff check .               # 静态检查
 ```
 
-CI(GitHub Actions)会跑静态检查、Python 3.12 与 3.13 上的全量测试,以及发布就绪检查;
-还有一个自托管作业,在配置了真实 NMRPipe 且仓库变量 `NMRFORGE_SELF_HOSTED_CI` 为 `true` 时,
-用同一套测试跑真机。测试文件刻意保持扁平,用 `unit` / `integration` / `regression` 标记分类
+CI(GitHub Actions)会跑静态检查、Python 3.12 与 3.13 上的全量测试,以及发布就绪检查。
+另有一个自托管作业 `external-engine`:它在装有 NMRPipe 的机器上**再跑一遍同一套打桩测试**
+并把日志作为 artifact 发布 —— 它不调用引擎,性质是「对这台机器的漂移检测 + 发布时的门」,
+不是引擎测试;该作业只在注册了自托管 runner 且仓库变量 `NMRFORGE_SELF_HOSTED_CI` 为 `true`
+时才会跑,**变量未设时连打发布 tag 也不会触发它**。引擎层面的事情一律手工做:在装有 NMRPipe
+的机器上跑 `scripts/vm_test.sh`,以及在实验室数据上跑 `scripts/vm_realdata_report.py`
+(它的聚合报告只在配置了 `NMRFORGE_REAL_DATA_TARGETS` 时才作为 CI artifact 发布)。
+测试文件刻意保持扁平,用 `unit` / `integration` / `regression` 标记分类
 (`tests/categories.py` 是唯一来源)。
 
 ## 贡献

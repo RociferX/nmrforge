@@ -8,15 +8,16 @@ name: CI
 # declared runtime dependency), so the matrix jobs below exercise the same
 # binding users get. PyQt6 is no longer a dependency of this project.
 #
-# Real-engine validation runs through the "external engine" job, which is only
-# enabled when a runner with NMRPipe is available (repository variable
-# NMRFORGE_SELF_HOSTED_CI=true). The laboratory workflow for that is
-# scripts/vm_test.sh on the NMRPipe host, documented in docs/GIT_WORKFLOW.md.
+# The "external engine" job re-runs this same stubbed suite on a self-hosted runner that
+# has NMRPipe and uploads the log; it does not call the engine. It is enabled only when
+# such a runner exists (repository variable NMRFORGE_SELF_HOSTED_CI=true), so with the
+# variable unset no trigger - not even a release tag - runs it. Engine-level work is
+# done by hand with scripts/vm_test.sh on the NMRPipe host (docs/GIT_WORKFLOW.md).
 
 on:
   push:
     branches: ["main", "master"]
-    tags: ["v*"]          # a release tag must drag the real-engine job in (release gate)
+    tags: ["v*"]          # a release tag also triggers the NMRPipe-host job (release gate), if armed
   pull_request:
   schedule:
     # Weekly drift check for the real-engine job (Monday 03:17 UTC): catches a changed
@@ -190,10 +191,11 @@ jobs:
     name: full suite on a runner with NMRPipe
     runs-on: [self-hosted, linux]
     # Enabled only where a self-hosted runner exists (repository variable
-    # NMRFORGE_SELF_HOSTED_CI=true). With the triggers above it runs on v* tags and
-    # weekly, so it is a release gate plus a drift check rather than an optional local
-    # script. The log and its sha256 are published as an artifact so the result can be
-    # checked from outside the machine.
+    # NMRFORGE_SELF_HOSTED_CI=true); unset means the job is skipped on every trigger.
+    # What runs here is the same suite as the hosted jobs - the engine boundary is
+    # stubbed, so this is a drift check on the machine and a release-time gate, not an
+    # engine test. The log and its sha256 are published as an artifact so the result can
+    # be checked from outside the machine.
     if: ${{ vars.NMRFORGE_SELF_HOSTED_CI == 'true' }}
     env:
       QT_QPA_PLATFORM: offscreen
@@ -204,7 +206,7 @@ jobs:
       NMRFORGE_TEST_PYTHON: ${{ vars.NMRFORGE_SELF_HOSTED_PYTHON }}
     steps:
       - uses: actions/checkout@v4
-      - name: Full suite, including paths that touch a real engine
+      - name: Full suite on a machine that has NMRPipe (engine boundary still stubbed)
         run: |
           set -o pipefail
           mkdir -p artifacts

@@ -1,5 +1,5 @@
 {
-  "_comment": "已转换文件清单(棘轮:只增不减):不得再有 tr() 之外的中文字面量。",
+  "_comment": "Converted files (a ratchet: it only grows): no Chinese literals outside tr().",
   "files": [
     "backend/bruker_workflow.py",
     "backend/factory.py",

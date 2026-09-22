@@ -1882,8 +1882,9 @@ class MainWindow(QMainWindow):
             tr(
                 "delete project {p0} and all of its sample data and outputs?\nThe project will be "
                 "moved to the system trash and can be restored (the audit history is kept)\npath: "
-                "{{self.manager.root}}",
+                "{p1}",
                 p0=self.manager.project.name,
+                p1=str(self.manager.root),
             ),
         )
         if not confirmed:

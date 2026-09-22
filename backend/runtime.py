@@ -9,6 +9,7 @@ behind; a timeout likewise kills the process tree before returning.
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import shlex
@@ -22,6 +23,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from ui_support.i18n import tr
+
+logger = logging.getLogger(__name__)
 
 
 class ToolError(RuntimeError):
@@ -142,12 +145,21 @@ def _kill_process_tree(proc: subprocess.Popen) -> None:
         return
     try:
         if os.name == "nt":
-            subprocess.run(
+            result = subprocess.run(
                 ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
                 timeout=10,
             )
+            if result.returncode != 0:
+                detail = (result.stderr or result.stdout or "").strip() or "no message"
+                logger.warning(
+                    "taskkill failed for pid %s (rc=%s): %s; falling back to terminate()",
+                    proc.pid,
+                    result.returncode,
+                    detail,
+                )
+                proc.kill()
         else:
             # start_new_session=True -> the pid leads the root process group; then
             # cover every descendant recursively
@@ -163,9 +175,9 @@ def _kill_process_tree(proc: subprocess.Popen) -> None:
             try:
                 proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
-                pass
-    except (OSError, ProcessLookupError):
-        pass
+                logger.warning("pid %s did not exit within 5 s after SIGKILL", proc.pid)
+    except (OSError, ProcessLookupError) as exc:
+        logger.warning("could not kill the process tree for pid %s: %s", proc.pid, exc)
 
 
 _NMRPIPE_TOOL_NAMES = (

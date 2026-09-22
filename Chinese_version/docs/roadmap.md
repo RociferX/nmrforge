@@ -75,7 +75,8 @@ NUSOptimizer
 - 界面语言跟随系统语言,也可以用 `NMRFORGE_LANG=zh` 钉死中文(见[开发](development.md)、
   [图形界面](gui.md));
 - `python scripts/i18n_extract_ui.py --check` 是守卫:新增文案必须先登记,已转换的文件里不得
-  再有 `tr()` 之外的中文字面量,中文覆盖率不得回退。
+  再有 `tr()` 之外的中文字面量,中文覆盖率不得回退 —— 这里的「覆盖率」指界面文案的中文条目
+  覆盖率,不是代码覆盖率;本项目不设代码覆盖率门槛。
 
 `no_spectrum_change`、`roi_capped`、`processing_script_not_found` 这类告警码是语言无关的
 标识符,不会被改动,因此磁盘上的契约不受影响。

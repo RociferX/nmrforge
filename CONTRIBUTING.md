@@ -31,8 +31,13 @@ Requirements: Python 3.12+, and an NMRPipe installation if you want to exercise 
 ```bash
 python -m pytest -q                 # full suite
 python -m ruff check .              # lint (must be clean)
-python -m ruff format --check .     # formatter (advisory for existing files)
+python -m ruff format --check .     # formatter (advisory: existing files are not reformatted)
 ```
+
+The lint gate is `ruff check .`; `ruff format` is advisory and the tree is not format-clean on
+purpose. `pytest` needs PySide6, which is a runtime dependency (there is no GUI-less extra), so
+run it from the project environment - a bare interpreter without PySide6 stops at collection
+with 29 import errors.
 
 GUI tests need a display or offscreen Qt:
 
@@ -50,7 +55,7 @@ python -m pytest --basetemp=$env:TEMP\nf_pytest -q          # PowerShell
 
 ### The suite does not require NMRPipe
 
-The engine boundary is mocked (`FakeBackend`/`MockBackend`), so `pytest` passes on a machine with
+The engine boundary is mocked (`FakeBackend`, see `tests/test_full_paths.py`), so `pytest` passes on a machine with
 no NMRPipe at all. Please keep it that way: a contribution that makes plain CI require a
 proprietary external program would break the release pipeline. If your change genuinely needs a
 real engine, describe the manual verification you performed in the pull request instead.

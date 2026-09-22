@@ -10,7 +10,7 @@
 
 - 分支 `master`；一次提交对应一个逻辑变更。
 - 例行：本地改 → `pytest`（临时目录不可写时加 `--basetemp=<目录>`）→ `ruff check .` →
-  在装有 NMRPipe 的机器上跑真实引擎全量 → commit。
+  在装有 NMRPipe 的机器上跑全量(同一套打桩测试,不调用引擎)→ commit。
 
 ## 测试
 
@@ -20,7 +20,7 @@
   2D/3D uniform + NUS 主路径（含诊断与处理参数优化）。Batch 当前仅支持 2D，
   不应表述为覆盖全部四路径；该能力边界记录为审查项 `BATCH-012`。
   新增或改动处理流程时必须同步更新该文件。
-- 不依赖真实 NMRPipe 的测试优先（FakeBackend/MockBackend 模式）。
+- 不依赖真实 NMRPipe 的测试优先(FakeBackend 模式,见 `tests/test_full_paths.py`)。
 - 系统临时目录不可写时，用 `--basetemp=<可写目录>` 指定 pytest 的临时根
   （如 `$env:TEMP\pytest_nmrforge`）。
 

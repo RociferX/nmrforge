@@ -13,6 +13,41 @@ from backend.nmrpipe_finder import find_nmrpipe_bin
 from core.data.bruker_reader import read_dataset
 from core.planning.method_selector import select_method
 
+
+def test_converted_fid_reuse_follows_the_raw_fingerprint(tmp_path: Path) -> None:
+    """Reuse follows the raw fingerprint: a change re-converts, a missing record still logs."""
+    backend = NMRPipeBackend(nmrpipe_bin="")
+    work = tmp_path / "process"
+    work.mkdir()
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    (raw / "acqus").write_text("##TITLE= test\n", encoding="utf-8")
+    (raw / "ser").write_bytes(b"1" * 64)
+    (work / "d_001.fid").write_bytes(b"x" * 32)
+    logs: list[str] = []
+
+    # no record yet (legacy project): reuse, but say in the log that nothing was verified
+    assert backend._converted_fid_is_current(work, "d_001", raw, logs) is True
+    assert logs
+
+    backend._record_conversion(work, "d_001", raw, logs)
+    assert backend._conversion_record_path(work, "d_001").is_file()
+    logs.clear()
+    assert backend._converted_fid_is_current(work, "d_001", raw, logs) is True
+
+    # the raw data changed (for example the source-level NUS cleanup): convert again
+    (raw / "ser").write_bytes(b"2" * 64)
+    logs.clear()
+    assert backend._converted_fid_is_current(work, "d_001", raw, logs) is False
+    assert logs
+
+    # truncated fid: convert again
+    backend._record_conversion(work, "d_001", raw, logs)
+    (work / "d_001.fid").write_bytes(b"x")
+    logs.clear()
+    assert backend._converted_fid_is_current(work, "d_001", raw, logs) is False
+
+
 _NO_NMRPIPE = find_nmrpipe_bin() is None
 
 
