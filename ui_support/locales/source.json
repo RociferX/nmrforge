@@ -21,7 +21,7 @@
       "gui/center_panel.py:302"
     ],
     "  skipped/failed: {p0} - {p1}": [
-      "gui/main_window.py:646"
+      "gui/main_window.py:648"
     ],
     " (condition {p0})": [
       "nmrforge_api/localization_targets.py:1302"
@@ -39,14 +39,14 @@
       "backend/bruker_workflow.py:295"
     ],
     " - skipped (type/condition mismatch):": [
-      "gui/main_window.py:961"
+      "gui/main_window.py:963"
     ],
     " ... ({p0} in total)": [
       "nmrforge_api/localization_targets.py:1299",
       "nmrforge_api/peaks.py:1092"
     ],
     " Autofill comments: {p0}": [
-      "gui/main_window.py:675"
+      "gui/main_window.py:677"
     ],
     " Baseline indicators{p0}: slope {p1:.1f}%  offset {p2:.1f}%  curvature {p3:.1f}%  striping {p4:.2f}": [
       "workflow/optimization_report.py:202"
@@ -73,7 +73,7 @@
       "workflow/optimization_report.py:264"
     ],
     " Raw data quality:": [
-      "gui/main_window.py:677"
+      "gui/main_window.py:679"
     ],
     " Reasons for uneven baseline: ": [
       "workflow/optimization_report.py:228"
@@ -91,19 +91,19 @@
       "workflow/optimization_report.py:261"
     ],
     " fail: {p0} → {p1}": [
-      "gui/main_window.py:706"
+      "gui/main_window.py:708"
     ],
     " hint: {p0}": [
-      "gui/main_window.py:1129"
+      "gui/main_window.py:1131"
     ],
     " import completion: {p0} → {p1}": [
-      "gui/main_window.py:657"
+      "gui/main_window.py:659"
     ],
     " import failed: {p0} ({p1})": [
-      "gui/main_window.py:685"
+      "gui/main_window.py:687"
     ],
     " import in: {p0} → {p1}": [
-      "gui/main_window.py:644"
+      "gui/main_window.py:646"
     ],
     " pass": [
       "gui/raw_quality.py:181"
@@ -118,7 +118,7 @@
       "workflow/optimization_report.py:275"
     ],
     " · Stopped,{p0} unprocessed": [
-      "gui/main_window.py:959"
+      "gui/main_window.py:961"
     ],
     " ⚠ Check out {p0} question {p1}": [
       "gui/pipeline_panel.py:530"
@@ -134,28 +134,28 @@
       "workflow/manual.py:151"
     ],
     "&File": [
-      "gui/main_window.py:192",
+      "gui/main_window.py:193",
       "viewer/app.py:76"
     ],
     "&Help": [
-      "gui/main_window.py:238",
+      "gui/main_window.py:239",
       "viewer/app.py:126"
     ],
     "&Peaks": [
       "viewer/app.py:106"
     ],
     "&Settings": [
-      "gui/main_window.py:236"
+      "gui/main_window.py:237"
     ],
     "&Tools": [
-      "gui/main_window.py:226"
+      "gui/main_window.py:227"
     ],
     "&View": [
-      "gui/main_window.py:209",
+      "gui/main_window.py:210",
       "viewer/app.py:90"
     ],
     "&experiment": [
-      "gui/main_window.py:204"
+      "gui/main_window.py:205"
     ],
     "(Automatically processed {p0} item)": [
       "gui/pipeline_panel.py:521"
@@ -164,7 +164,7 @@
       "workflow/pick_peaks.py:884"
     ],
     "(Independent entrance) ==": [
-      "gui/main_window.py:1377"
+      "gui/main_window.py:1383"
     ],
     "(Memory directory creation failed)": [
       "workflow/stepwise.py:382"
@@ -204,7 +204,7 @@
       "nmrforge_api/localization_targets.py:441"
     ],
     "(common {p0})": [
-      "gui/main_window.py:957"
+      "gui/main_window.py:959"
     ],
     "(mapping form)": [
       "nmrforge_api/localization_targets.py:761"
@@ -224,7 +224,7 @@
       "gui/pipeline_panel.py:526"
     ],
     "(null)": [
-      "gui/main_window.py:873"
+      "gui/main_window.py:875"
     ],
     "(peak_id given by the caller)": [
       "nmrforge_api/localization_targets.py:179"
@@ -252,7 +252,7 @@
       "workflow/phase_routes.py:2135"
     ],
     ", 1D weak signal uses estimated value)": [
-      "backend/nmrpipe_backend.py:3579"
+      "backend/nmrpipe_backend.py:3597"
     ],
     ", condition {p0}": [
       "nmrforge_api/localization_targets.py:181"
@@ -261,16 +261,16 @@
       "workflow/pick_peaks.py:852"
     ],
     ", reference data {p0}": [
-      "gui/main_window.py:875"
+      "gui/main_window.py:877"
     ],
     "--rebuild-peak-tables cannot be combined with --force / --direct-range": [
       "nmrforge_api/cli.py:153"
     ],
     "1D phase search: no results available, keep p0=p1=0": [
-      "backend/nmrpipe_backend.py:3504"
+      "backend/nmrpipe_backend.py:3522"
     ],
     "1D phase search: p0={p0:g} p1={p1:g} (score={p2:.3f})": [
-      "backend/nmrpipe_backend.py:3526"
+      "backend/nmrpipe_backend.py:3544"
     ],
     "1D spectrum does not generate UCSF file (skip)": [
       "workflow/stepwise.py:207"
@@ -310,13 +310,13 @@
       "backend/nmrpipe_backend.py:606"
     ],
     "2D NUS: No sampling schedule, restored from full grid zero mode {p0} sampling complex points": [
-      "backend/nmrpipe_backend.py:1295"
+      "backend/nmrpipe_backend.py:1309"
     ],
     "2D hold-out residual: cannot extract the direct-dimension block from the final script (not a TP row before SMILE); skipping the hold-out metric": [
-      "backend/nmrpipe_backend.py:2041"
+      "backend/nmrpipe_backend.py:2055"
     ],
     "2D single plane output {p0} → {p1}(Processed as a single file, 2D does not use slicing flow)": [
-      "backend/nmrpipe_backend.py:2786"
+      "backend/nmrpipe_backend.py:2803"
     ],
     "2D spectrum loading failed {p0}: {p1}": [
       "gui/spectrum_panel.py:724"
@@ -349,7 +349,7 @@
       "workflow/direct_diagnostics.py:447"
     ],
     "About NMRForge": [
-      "gui/main_window.py:1271"
+      "gui/main_window.py:1273"
     ],
     "Add data folder...": [
       "gui/dashboards.py:272"
@@ -407,26 +407,26 @@
       "gui/pipeline_panel.py:1742"
     ],
     "Already imported": [
-      "gui/main_window.py:2205",
-      "gui/main_window.py:896",
+      "gui/main_window.py:2211",
+      "gui/main_window.py:898",
       "gui/project_tree.py:812"
     ],
     "Already peak picking": [
-      "gui/main_window.py:2208",
-      "gui/main_window.py:899",
+      "gui/main_window.py:2214",
+      "gui/main_window.py:901",
       "gui/project_tree.py:792"
     ],
     "Analyzed": [
-      "gui/main_window.py:2209"
+      "gui/main_window.py:2215"
     ],
     "Apply direct dimension phase (recon plane rotation)": [
-      "backend/nmrpipe_backend.py:3233"
+      "backend/nmrpipe_backend.py:3251"
     ],
     "Apply this range to the optimisation process": [
       "gui/pipeline_panel.py:1828"
     ],
     "Applying direct dimension phase failed: {p0}": [
-      "backend/nmrpipe_backend.py:3294"
+      "backend/nmrpipe_backend.py:3312"
     ],
     "Artificial": [
       "gui/pipeline_panel.py:908"
@@ -438,7 +438,7 @@
       "core/data/bruker_reader.py:379"
     ],
     "Autofill comments: {p0}": [
-      "gui/main_window.py:1134"
+      "gui/main_window.py:1136"
     ],
     "Automated processing, parameter optimisation and quality control platform for Bruker 2D/3D NMR": [
       "gui/welcome_page.py:52"
@@ -485,10 +485,10 @@
       "gui/dashboards.py:261"
     ],
     "Batch import completed: experiment {p0} Group {p1}, common {p2} sample data": [
-      "gui/main_window.py:709"
+      "gui/main_window.py:711"
     ],
     "Batch import summary: Total {p0} data, success {p1} failure {p2} indivual": [
-      "gui/main_window.py:694"
+      "gui/main_window.py:696"
     ],
     "Batch only supports {p0}D spectra, so {p1}D data are skipped (see the capability boundary in docs/manager/architecture.md)": [
       "workflow/batch.py:434"
@@ -497,7 +497,7 @@
       "gui/dashboards.py:243"
     ],
     "Batch processing run...": [
-      "gui/main_window.py:888"
+      "gui/main_window.py:890"
     ],
     "Batch processing summary - {p0}": [
       "gui/dialogs.py:701"
@@ -537,7 +537,7 @@
       "gui/dialogs.py:547"
     ],
     "Canceled": [
-      "gui/main_window.py:908"
+      "gui/main_window.py:910"
     ],
     "Cancelled (interrupted); unfinished workflows are not recorded as successful.": [
       "nmrforge_api/cli.py:728"
@@ -580,7 +580,7 @@
       "backend/runtime.py:436"
     ],
     "Comment": [
-      "gui/main_window.py:2087"
+      "gui/main_window.py:2093"
     ],
     "Comments (optional):": [
       "gui/dialogs.py:221"
@@ -613,32 +613,32 @@
       "workflow/stepwise.py:262"
     ],
     "Conversion record {p0} is unreadable; converting again": [
-      "backend/nmrpipe_backend.py:2730"
+      "backend/nmrpipe_backend.py:2747"
     ],
     "Convert raw data to fid (backend bruker -AUTO/fid.com)": [
       "gui/pipeline_panel.py:61"
     ],
     "Converted fid {p0} is empty; converting again": [
-      "backend/nmrpipe_backend.py:2715"
+      "backend/nmrpipe_backend.py:2732"
     ],
     "Converted fid {p0} is incomplete; converting again": [
-      "backend/nmrpipe_backend.py:2740"
+      "backend/nmrpipe_backend.py:2757"
     ],
     "Copy the P0/P1 value, which can be pasted into the manual phase parameter or script PS line": [
       "viewer/phase_panel.py:83"
     ],
     "Could not record the conversion provenance: {p0}": [
-      "backend/nmrpipe_backend.py:2698"
+      "backend/nmrpipe_backend.py:2713"
     ],
     "Create a new blank experiment...": [
       "gui/project_tree.py:1100",
       "gui/project_tree.py:1123"
     ],
     "Create a new project or open a project to start working": [
-      "gui/main_window.py:2381"
+      "gui/main_window.py:2387"
     ],
     "Current task has been stopped ({p0} Process tree, clean up the residue {p1} item(s); cancellation of the memory computation was requested, exiting shortly)": [
-      "gui/main_window.py:2338"
+      "gui/main_window.py:2344"
     ],
     "Data directory": [
       "gui/dialogs.py:776"
@@ -647,7 +647,7 @@
       "workflow/batch.py:126"
     ],
     "Data group {p0} batch finished: {p1} ok, {p2} failed, {p3:.1f}s": [
-      "gui/main_window.py:947"
+      "gui/main_window.py:949"
     ],
     "Data has been moved to trash: {p0}/{p1}": [
       "core/project/manager.py:426",
@@ -670,33 +670,33 @@
       "workflow/direct_diagnostics.py:429"
     ],
     "Data quality inspection": [
-      "gui/main_window.py:1358",
-      "gui/main_window.py:1376"
+      "gui/main_window.py:1364",
+      "gui/main_window.py:1382"
     ],
     "Data quality inspection...": [
-      "gui/main_window.py:228"
+      "gui/main_window.py:229"
     ],
     "Data type": [
       "gui/notes.py:132",
       "gui/notes.py:40"
     ],
     "Data type check: {p0} (confidence {p1:.2f}); please verify the data type is correct (it can be edited in the sample-data comment)": [
-      "gui/main_window.py:1193"
+      "gui/main_window.py:1195"
     ],
     "Data type updated by user selection: {p0}": [
-      "gui/main_window.py:2115"
+      "gui/main_window.py:2121"
     ],
     "Data within the group ({p0} indivual): {p1}": [
       "gui/group_panel.py:324"
     ],
     "Delete sample data failed": [
-      "gui/main_window.py:2010"
+      "gui/main_window.py:2016"
     ],
     "Delete the selected rows from the peak table (automatic and manual peaks alike)": [
       "gui/spectrum_panel.py:239"
     ],
     "Detection failed: {p0}": [
-      "gui/main_window.py:1399"
+      "gui/main_window.py:1405"
     ],
     "Dimension-wise baseline correction (POLY, Contract §6)": [
       "backend/script_generator.py:1632"
@@ -709,43 +709,43 @@
       "gui/raw_quality.py:119"
     ],
     "Direct dimension phase search (NU-DFT) fails, fallback slice by slice: {p0}": [
-      "backend/nmrpipe_backend.py:3430"
+      "backend/nmrpipe_backend.py:3448"
     ],
     "Direct dimension phase search failed (fallback p0=p1=0): {p0}": [
-      "backend/nmrpipe_backend.py:3583"
+      "backend/nmrpipe_backend.py:3601"
     ],
     "Direct-dimension range does not match the frozen reference; rebuilding it: ext_lo={p0:g} ext_hi={p1:g} ppm": [
       "nmrforge_api/cli.py:196"
     ],
     "Display layer phase p1={p0:g}° Abnormal amplitude (>170°), reset to zero": [
-      "backend/nmrpipe_backend.py:1748"
+      "backend/nmrpipe_backend.py:1762"
     ],
     "Display layer phase search failed: {p0}": [
-      "backend/nmrpipe_backend.py:3203"
+      "backend/nmrpipe_backend.py:3221"
     ],
     "Display layer phase search: F2=({p0:.1f}, {p1:.1f}) score={p2:.1f}": [
-      "backend/nmrpipe_backend.py:3193"
+      "backend/nmrpipe_backend.py:3211"
     ],
     "Display layer phase search: main reconstruction PS(0,0), symmetry score after reconstruction": [
-      "backend/nmrpipe_backend.py:1583"
+      "backend/nmrpipe_backend.py:1597"
     ],
     "Display layer phase search: no clean signal peak": [
-      "backend/nmrpipe_backend.py:3190"
+      "backend/nmrpipe_backend.py:3208"
     ],
     "Display layer phase: F2=({p0:g}, {p1:g}) score={p2:.2f}": [
-      "backend/nmrpipe_backend.py:1736"
+      "backend/nmrpipe_backend.py:1750"
     ],
     "Display-layer phase search: all {p0} 3D replica planes take part (direct dimension = plane index, axis=-1)": [
-      "backend/nmrpipe_backend.py:3168"
+      "backend/nmrpipe_backend.py:3186"
     ],
     "Do you want to continue running anyway?": [
-      "gui/main_window.py:1690"
+      "gui/main_window.py:1696"
     ],
     "Double-click an entry to locate the corresponding data (failed items) or view the status on the left": [
       "gui/dialogs.py:722"
     ],
     "Drag and drop import: {p0} data directory": [
-      "gui/main_window.py:1475"
+      "gui/main_window.py:1481"
     ],
     "Editor's note": [
       "gui/center_panel.py:133"
@@ -770,7 +770,7 @@
       "gui/raw_quality.py:110"
     ],
     "Every one of the {p0} scan candidates failed; no ranking is written and no rank-1 script is promoted": [
-      "backend/nmrpipe_backend.py:2326"
+      "backend/nmrpipe_backend.py:2341"
     ],
     "Experiment type": [
       "gui/notes.py:28"
@@ -792,10 +792,10 @@
       "backend/script_generator.py:1606"
     ],
     "FID (*.fid);; All files (*)": [
-      "gui/main_window.py:1321"
+      "gui/main_window.py:1327"
     ],
     "FID Ready": [
-      "gui/main_window.py:2206"
+      "gui/main_window.py:2212"
     ],
     "FID data points": [
       "viewer/spectrum.py:996"
@@ -804,21 +804,21 @@
       "backend/script_generator.py:1586"
     ],
     "Failed": [
-      "gui/main_window.py:904",
+      "gui/main_window.py:906",
       "gui/pipeline_panel.py:109",
       "gui/project_tree.py:786"
     ],
     "Failed to create new experiment": [
-      "gui/main_window.py:2037"
+      "gui/main_window.py:2043"
     ],
     "Failed to join {p0}: {p1}": [
-      "gui/main_window.py:769"
+      "gui/main_window.py:771"
     ],
     "Failed to load script": [
-      "gui/main_window.py:1595"
+      "gui/main_window.py:1601"
     ],
     "Failed to open project": [
-      "gui/main_window.py:516"
+      "gui/main_window.py:518"
     ],
     "File is not a key/value table (YAML/JSON): {p0}": [
       "nmrforge_api/cli.py:103"
@@ -852,7 +852,7 @@
       "gui/dialogs.py:617"
     ],
     "Finish {p0} group scan": [
-      "backend/nmrpipe_backend.py:2335"
+      "backend/nmrpipe_backend.py:2350"
     ],
     "Finish {p0}: {p1}": [
       "gui/pipeline_panel.py:2512"
@@ -890,14 +890,14 @@
       "gui/pipeline_panel.py:61"
     ],
     "Generate only script (script_only)": [
-      "backend/nmrpipe_backend.py:1654"
+      "backend/nmrpipe_backend.py:1668"
     ],
     "Generate spectrum": [
       "gui/group_panel.py:40",
       "gui/pipeline_panel.py:64"
     ],
     "Generated FID": [
-      "gui/main_window.py:897",
+      "gui/main_window.py:899",
       "gui/project_tree.py:797",
       "gui/project_tree.py:809"
     ],
@@ -933,7 +933,7 @@
       "nmrforge_api/cli.py:89"
     ],
     "Hold-out residual: no plane was found under {p0}; the hold-out metric is skipped": [
-      "backend/nmrpipe_backend.py:2118"
+      "backend/nmrpipe_backend.py:2133"
     ],
     "If the project is not open, select experiment under project on the left, or click on the spectrum file to view the results": [
       "gui/spectrum_panel.py:337"
@@ -942,7 +942,7 @@
       "workflow/import_workflow.py:370"
     ],
     "Import is not supported": [
-      "gui/main_window.py:1108"
+      "gui/main_window.py:1110"
     ],
     "In phase optimisation: {p0} Replica preview (direct dimension has been determined)": [
       "workflow/phase_routes.py:847"
@@ -990,7 +990,7 @@
       "gui/dialogs.py:795"
     ],
     "Intermediate Pipeline": [
-      "gui/main_window.py:217"
+      "gui/main_window.py:218"
     ],
     "Intermediate spectrum peak estimation is not available": [
       "backend/memory_disk.py:197"
@@ -1023,10 +1023,10 @@
       "gui/group_panel.py:194"
     ],
     "Leave residual calculation failed: {p0}": [
-      "backend/nmrpipe_backend.py:2278"
+      "backend/nmrpipe_backend.py:2293"
     ],
     "Leave sampling point: train={p0} holdout={p1}": [
-      "backend/nmrpipe_backend.py:1986"
+      "backend/nmrpipe_backend.py:2000"
     ],
     "Left drag: box zoom\nMiddle drag: pan\nWheel: zoom\nHome / full-spectrum view: restore the full range\nView menu: lock the display aspect ratio\nPeak menu: switch the single-click behaviour (select / add / delete peaks)\n3D spectra (.ft3): pick the plane to view in the right-hand panel (F1-F2 / F1-F3 / F2-F3),\n  drag the slice slider to step through the planes, or switch to the MIP / summed projection\n.fid: one dimension shows the 1D trace; two dimensions show the whole time-domain block nmrDraw style\n  (rows = individual FIDs, columns = direct-dimension time points; turn on the 1D strip to inspect them one by one)\n2D spectra: right-click the spectrum to extract a 1D row/column slice; right-click a layer in the list to delete it": [
       "viewer/app.py:245"
@@ -1035,22 +1035,22 @@
       "gui/spectrum_panel.py:1878"
     ],
     "Lightweight SMILE phase search failed, fallback NU-DFT": [
-      "backend/nmrpipe_backend.py:1378"
+      "backend/nmrpipe_backend.py:1392"
     ],
     "Lightweight SMILE phase search: symbolic link failed, skipped": [
-      "backend/nmrpipe_backend.py:2995"
+      "backend/nmrpipe_backend.py:3013"
     ],
     "Lightweight SMILE phase search: {p0}/{p1} sampled points,window {p2}-{p3} ppm, PS(0,0) reconstruction": [
-      "backend/nmrpipe_backend.py:3045"
+      "backend/nmrpipe_backend.py:3063"
     ],
     "Lightweight SMILE phase: F2=({p0:g}, {p1:g}) score={p2:.2f}(Written phase.json, officially refactored and reused)": [
-      "backend/nmrpipe_backend.py:3098"
+      "backend/nmrpipe_backend.py:3116"
     ],
     "Lightweight spectrum scoring failed (fallback): {p0}": [
-      "backend/nmrpipe_backend.py:3077"
+      "backend/nmrpipe_backend.py:3095"
     ],
     "Lightweight spectrum without signal (fallback)": [
-      "backend/nmrpipe_backend.py:3080"
+      "backend/nmrpipe_backend.py:3098"
     ],
     "Link raw data to project (read only, copy if necessary)": [
       "gui/dashboards.py:173"
@@ -1105,16 +1105,16 @@
       "workflow/manual.py:227"
     ],
     "Manual entry for this step is not currently supported: {p0}": [
-      "gui/main_window.py:1524"
+      "gui/main_window.py:1530"
     ],
     "Manual peak table editing ({p0} peak)": [
       "gui/processing.py:603"
     ],
     "Manual processing": [
-      "gui/main_window.py:1521"
+      "gui/main_window.py:1527"
     ],
     "Manual run failed: {p0}": [
-      "gui/main_window.py:1728"
+      "gui/main_window.py:1734"
     ],
     "Mark size": [
       "gui/spectrum_panel.py:279"
@@ -1123,10 +1123,10 @@
       "gui/spectrum_panel.py:285"
     ],
     "Memory guard: direct dimension zero filling reduced to 1 x TD": [
-      "backend/nmrpipe_backend.py:1510"
+      "backend/nmrpipe_backend.py:1524"
     ],
     "Memory guard: peak value approx. {p0:.0f}MB > Available {p1}MB×{p2:.2f}, direct dimension zero filling is reduced to 1 x TD({p3}→{p4})": [
-      "backend/nmrpipe_backend.py:1489"
+      "backend/nmrpipe_backend.py:1503"
     ],
     "Memory phase research({p0}) No trace available": [
       "workflow/phase_routes.py:883",
@@ -1136,7 +1136,7 @@
       "workflow/phase_routes.py:246"
     ],
     "Merge nuslist:{p0} sampling point (bad point {p1})": [
-      "backend/nmrpipe_backend.py:4223"
+      "backend/nmrpipe_backend.py:4241"
     ],
     "Missing 2D reconstruction plane: {p0}": [
       "workflow/phase_routes.py:1152"
@@ -1155,19 +1155,19 @@
       "backend/nmrpipe_backend.py:992"
     ],
     "Missing input file: {p0}/acqus": [
-      "backend/nmrpipe_backend.py:2836"
+      "backend/nmrpipe_backend.py:2854"
     ],
     "Missing nuslist sampling schedule": [
-      "backend/nmrpipe_backend.py:1304"
+      "backend/nmrpipe_backend.py:1318"
     ],
     "Missing processing script (editor content is empty)": [
       "workflow/manual.py:374"
     ],
     "Missing reconstruction plane nus2d/recon.ft1: {p0}": [
-      "backend/nmrpipe_backend.py:2403"
+      "backend/nmrpipe_backend.py:2418"
     ],
     "Missing reconstruction plane nus3d_rc: {p0}": [
-      "backend/nmrpipe_backend.py:2396"
+      "backend/nmrpipe_backend.py:2411"
     ],
     "Missing required field {p0} (does the input file or run record belong to this version?)": [
       "core/user_errors.py:40"
@@ -1185,23 +1185,23 @@
       "core/data/bruker_reader.py:282"
     ],
     "Multi-segment merge completed -> merged/{p0}.fid ({p1} parts)": [
-      "backend/nmrpipe_backend.py:3692"
+      "backend/nmrpipe_backend.py:3710"
     ],
     "Multi-segment type: {p0}": [
       "backend/nmrpipe_backend.py:507",
       "workflow/import_workflow.py:231"
     ],
     "Multi-slice merging completed -> merged/fid/ ({p0} parts)": [
-      "backend/nmrpipe_backend.py:3774"
+      "backend/nmrpipe_backend.py:3792"
     ],
     "Multiple single file merge failed": [
-      "backend/nmrpipe_backend.py:3915"
-    ],
-    "Multiple slice merging failed": [
       "backend/nmrpipe_backend.py:3933"
     ],
+    "Multiple slice merging failed": [
+      "backend/nmrpipe_backend.py:3951"
+    ],
     "NMRForge - welcome": [
-      "gui/main_window.py:2380"
+      "gui/main_window.py:2386"
     ],
     "NMRForge parameter-combination runner (command line, no GUI)": [
       "nmrforge_api/cli.py:455"
@@ -1216,11 +1216,14 @@
     "NMRForge spectrum viewer - {p0}": [
       "viewer/app.py:182"
     ],
+    "NMRForge usage tutorial": [
+      "gui/tutorial.py:69"
+    ],
     "NMRForge: an automated processing, parameter-optimisation and quality-control platform for Bruker 2D/3D NMR.\nThree-column layout: project tree / pipeline / spectrum viewer.\n\nAxis-order convention (internally everything is organised in the logical order F1/F2/F3):\n- 2D: F1 = indirect dimension, F2 = direct dimension; 3D: F1 = first indirect, F2 = second indirect, F3 = direct dimension.\n- NMRPipe stores 3D files in the standard order (F2,F1,F3); loading transposes them into the logical order\n  (the \"axis reorder\" log line reports exactly this and is normal behaviour).\n- Dimensions of the same nucleus (e.g. 2D 1H-1H, HNN with two 15N) are told apart by an x/y/z subscript\n  following the priority \"direct > acqu2 > acqu3\" (e.g. Nx = the N of the HSQC, Ny = the sequential N).": [
-      "gui/main_window.py:1272"
+      "gui/main_window.py:1274"
     ],
     "NMRPipe (*.ft2 *.ft3 *.fdf);; All files (*)": [
-      "gui/main_window.py:1340"
+      "gui/main_window.py:1346"
     ],
     "NMRPipe macro(SP/ZF/FT/PS)": [
       "backend/script_generator.py:1661"
@@ -1240,10 +1243,10 @@
       "viewer/app.py:136"
     ],
     "NUS Conversion failed (bruker native recognition failed)": [
-      "backend/nmrpipe_backend.py:1273"
+      "backend/nmrpipe_backend.py:1286"
     ],
     "NUS Conversion requires bruker native recognition (without bruk2pipe fallback)": [
-      "backend/nmrpipe_backend.py:3602"
+      "backend/nmrpipe_backend.py:3620"
     ],
     "NUS Data: Start SMILE reconstruction (including direct dimension phase)": [
       "gui/processing.py:372"
@@ -1264,14 +1267,14 @@
       "gui/dashboards.py:108"
     ],
     "New experiment...": [
-      "gui/main_window.py:205"
+      "gui/main_window.py:206"
     ],
     "New project failed": [
-      "gui/main_window.py:477",
-      "gui/main_window.py:480"
+      "gui/main_window.py:479",
+      "gui/main_window.py:482"
     ],
     "New project...": [
-      "gui/main_window.py:193",
+      "gui/main_window.py:194",
       "gui/welcome_page.py:76"
     ],
     "Next step: rerun {p0}": [
@@ -1284,7 +1287,7 @@
       "core/experiment/sampling_detector.py:190"
     ],
     "No available terminal program found": [
-      "gui/main_window.py:2171"
+      "gui/main_window.py:2177"
     ],
     "No baseline optimisation record": [
       "workflow/optimization_report.py:223"
@@ -1357,7 +1360,7 @@
       "backend/memory_disk.py:215"
     ],
     "Not generated {p0}": [
-      "backend/nmrpipe_backend.py:4457"
+      "backend/nmrpipe_backend.py:4475"
     ],
     "Not optimisation ": [
       "workflow/baseline_optimize.py:356"
@@ -1381,10 +1384,10 @@
       "core/experiment/experiment_classifier.py:461"
     ],
     "Number of slices: {p0}": [
-      "backend/nmrpipe_backend.py:3645"
+      "backend/nmrpipe_backend.py:3663"
     ],
     "Old version cache (algorithm has been updated), need to search again": [
-      "backend/nmrpipe_backend.py:3344"
+      "backend/nmrpipe_backend.py:3362"
     ],
     "On by default: the optimisation (first-pass reconstruction / phase search, plus baseline / zero-fill / window evaluation)\nuses the specified range, matching the final spectrum and reducing SMILE memory;\nif the optimisation comes out poorly you can turn this off and optimise over the default wide range.": [
       "gui/pipeline_panel.py:1832"
@@ -1429,7 +1432,7 @@
       "gui/project_tree.py:1218"
     ],
     "Open project...": [
-      "gui/main_window.py:194",
+      "gui/main_window.py:195",
       "gui/project_tree.py:1118"
     ],
     "Open snapshot directory": [
@@ -1452,8 +1455,8 @@
       "viewer/app.py:73"
     ],
     "Opened: {p0}": [
-      "gui/main_window.py:2189",
-      "gui/main_window.py:2152",
+      "gui/main_window.py:2195",
+      "gui/main_window.py:2158",
       "gui/spectrum_panel.py:1864"
     ],
     "Operating Instructions": [
@@ -1475,13 +1478,13 @@
       "gui/pipeline_panel.py:1747"
     ],
     "Out of memory": [
-      "gui/main_window.py:1416"
+      "gui/main_window.py:1422"
     ],
     "Out of memory: Unable to load {p0} Replica preview{p1},free memory or use a smaller data set": [
       "workflow/phase_routes.py:280"
     ],
     "Out of memory: direct dimension zero filling has been reduced to 1 x TD to reduce SMILE memory": [
-      "backend/nmrpipe_backend.py:1502"
+      "backend/nmrpipe_backend.py:1516"
     ],
     "Output: {p0}": [
       "gui/pipeline_panel.py:2146"
@@ -1554,16 +1557,16 @@
       "gui/dialogs.py:790"
     ],
     "Please create or open a project first": [
-      "gui/main_window.py:554",
-      "gui/main_window.py:1927",
-      "gui/main_window.py:2023",
-      "gui/main_window.py:2045"
+      "gui/main_window.py:556",
+      "gui/main_window.py:1933",
+      "gui/main_window.py:2029",
+      "gui/main_window.py:2051"
     ],
     "Please enter a number (ppm), or leave it blank to use the default": [
       "gui/pipeline_panel.py:174"
     ],
     "Please generate FID first": [
-      "gui/main_window.py:1592"
+      "gui/main_window.py:1598"
     ],
     "Please select Bruker dataset directory": [
       "gui/dialogs.py:301"
@@ -1572,7 +1575,7 @@
       "gui/dashboards.py:415"
     ],
     "Please select an experiment on the left first": [
-      "gui/main_window.py:1483"
+      "gui/main_window.py:1489"
     ],
     "Please select reference data first": [
       "gui/group_panel.py:361"
@@ -1590,7 +1593,7 @@
       "gui/dashboards.py:456"
     ],
     "Please select the segmented/duplicate experiment container directory": [
-      "gui/main_window.py:561"
+      "gui/main_window.py:563"
     ],
     "Poky peak table (*.list);; all files (*)": [
       "gui/spectrum_panel.py:1530",
@@ -1617,7 +1620,7 @@
       "gui/pipeline_panel.py:895"
     ],
     "Press Rank1 to rerun the final script and start: {p0}/{p1}": [
-      "gui/main_window.py:1798"
+      "gui/main_window.py:1804"
     ],
     "Press Rank1 to rerun the script: {p0}": [
       "gui/processing.py:893"
@@ -1627,7 +1630,7 @@
       "gui/group_panel.py:148"
     ],
     "Processed": [
-      "gui/main_window.py:2207"
+      "gui/main_window.py:2213"
     ],
     "Processed Complete; click to force reprocessing (downstream steps will be marked as expired)": [
       "gui/pipeline_panel.py:1100"
@@ -1659,10 +1662,10 @@
       "workflow/import_workflow.py:196"
     ],
     "Project management on the left": [
-      "gui/main_window.py:213"
+      "gui/main_window.py:214"
     ],
     "Projection requires 3D spectrum: {p0} shape={p1}": [
-      "backend/nmrpipe_backend.py:2590"
+      "backend/nmrpipe_backend.py:2605"
     ],
     "Protein name": [
       "gui/notes.py:21"
@@ -1677,7 +1680,7 @@
       "workflow/manual.py:104"
     ],
     "Quality warning: {p0}": [
-      "gui/main_window.py:1166"
+      "gui/main_window.py:1168"
     ],
     "R0001... (reference-table row order; only in the reference table)": [
       "nmrforge_api/records.py:338"
@@ -1686,13 +1689,13 @@
       "gui/processing.py:938"
     ],
     "Rank1 rerun completed: {p0}": [
-      "gui/main_window.py:1812"
+      "gui/main_window.py:1818"
     ],
     "Rank1 rerun failed (rc={p0}), not generated {p1}": [
       "gui/processing.py:904"
     ],
     "Rank1 rerun failed: {p0}": [
-      "gui/main_window.py:1814",
+      "gui/main_window.py:1820",
       "gui/processing.py:967"
     ],
     "Rank1 script not found, please run SMILE optimisation first": [
@@ -1708,13 +1711,13 @@
       "gui/processing.py:808"
     ],
     "Raw data changed since the conversion; converting again": [
-      "backend/nmrpipe_backend.py:2735"
+      "backend/nmrpipe_backend.py:2752"
     ],
     "Raw data directory (raw/) not found": [
       "gui/raw_quality.py:96"
     ],
     "Raw data quality:": [
-      "gui/main_window.py:1138"
+      "gui/main_window.py:1140"
     ],
     "Raw signal-to-noise ratio too low ({p0:.1f})": [
       "gui/raw_quality.py:164"
@@ -1735,7 +1738,7 @@
       "gui/processing.py:362"
     ],
     "Refactoring failed (rc={p0})": [
-      "backend/nmrpipe_backend.py:2271"
+      "backend/nmrpipe_backend.py:2286"
     ],
     "Reference data:": [
       "gui/group_panel.py:132"
@@ -1759,7 +1762,7 @@
       "gui/pipeline_panel.py:2334"
     ],
     "Registered": [
-      "gui/main_window.py:2210"
+      "gui/main_window.py:2216"
     ],
     "Related projects:": [
       "gui/dialogs.py:227"
@@ -1791,15 +1794,15 @@
       "workflow/phase_routes.py:866"
     ],
     "Reuse converted fid (no conversion record; the raw data is not verified)": [
-      "backend/nmrpipe_backend.py:2720"
+      "backend/nmrpipe_backend.py:2737"
     ],
     "Reuse converted fid (skip conversion)": [
-      "backend/nmrpipe_backend.py:2743",
+      "backend/nmrpipe_backend.py:2760",
       "backend/nmrpipe_backend.py:738",
       "backend/nmrpipe_backend.py:763"
     ],
     "Reuse merged fid ({p0}; skipping conversion/merge)": [
-      "backend/nmrpipe_backend.py:1210"
+      "backend/nmrpipe_backend.py:1219"
     ],
     "Right click: open the directory / open in the terminal / rename / delete sample data": [
       "gui/project_tree.py:659"
@@ -1812,7 +1815,7 @@
       "gui/group_panel.py:158"
     ],
     "SMILE Memory limit (-maxMem): {p0:.1f} GB({p1} MB available)": [
-      "backend/nmrpipe_backend.py:1544"
+      "backend/nmrpipe_backend.py:1558"
     ],
     "SMILE Number of reconstruction threads (default 2); upper limit {p0} (machine cores minus 2, capped at 1 when the core count is 3 or less);too high may trip the high-load shutdown, so keeping it at 2 is recommended": [
       "gui/dialogs.py:839"
@@ -1821,19 +1824,19 @@
       "gui/dialogs.py:847"
     ],
     "SMILE Reconstruction failed (internal error: direct dimension needs to be windowed)": [
-      "backend/nmrpipe_backend.py:1703"
+      "backend/nmrpipe_backend.py:1717"
     ],
     "SMILE Reconstruction successful": [
-      "backend/nmrpipe_backend.py:1793"
+      "backend/nmrpipe_backend.py:1807"
     ],
     "SMILE Refactor ({p0} sampling points, {p1:.1f}%,1H {p2}-{p3}ppm, nSigma={p4:g} thresh={p5:g})": [
-      "backend/nmrpipe_backend.py:1661"
+      "backend/nmrpipe_backend.py:1675"
     ],
     "SMILE Scan failed": [
       "workflow/smile_optimize.py:376"
     ],
     "SMILE internal error detected (direct dimension not windowed or bad input state), reconstruction failed": [
-      "backend/nmrpipe_backend.py:1694"
+      "backend/nmrpipe_backend.py:1708"
     ],
     "SMILE optimisation": [
       "gui/pipeline_panel.py:74",
@@ -1855,13 +1858,13 @@
       "gui/processing.py:791"
     ],
     "SMILE reconstruction failed / nothing written to {p0}": [
-      "backend/nmrpipe_backend.py:1718"
+      "backend/nmrpipe_backend.py:1732"
     ],
     "SMILE refactoring completed; final spectrum in place": [
-      "backend/nmrpipe_backend.py:1790"
+      "backend/nmrpipe_backend.py:1804"
     ],
     "SMILE scan failed: {p0} candidate(s), none succeeded": [
-      "backend/nmrpipe_backend.py:2337"
+      "backend/nmrpipe_backend.py:2352"
     ],
     "SNR (head/tail)": [
       "gui/raw_quality.py:162"
@@ -1913,20 +1916,20 @@
       "gui/spectrum_panel.py:1654"
     ],
     "Select fid file": [
-      "gui/main_window.py:1320"
+      "gui/main_window.py:1326"
     ],
     "Select fid folder": [
-      "gui/main_window.py:1327"
+      "gui/main_window.py:1333"
     ],
     "Select peak": [
       "viewer/app.py:109",
       "viewer/app.py:229"
     ],
     "Select project directory": [
-      "gui/main_window.py:496"
+      "gui/main_window.py:498"
     ],
     "Select spectrum file": [
-      "gui/main_window.py:1339"
+      "gui/main_window.py:1345"
     ],
     "Select the data directory": [
       "gui/dialogs.py:896"
@@ -1953,14 +1956,14 @@
       "gui/dialogs.py:396"
     ],
     "Skipped": [
-      "gui/main_window.py:906"
+      "gui/main_window.py:908"
     ],
     "Slice index out of bounds: No. {p0} dimension index={p1} (size={p2})": [
       "viewer/spectrum.py:816",
       "viewer/spectrum.py:794"
     ],
     "Sliced fid: direct dimension phase search {p0} slices": [
-      "backend/nmrpipe_backend.py:1398",
+      "backend/nmrpipe_backend.py:1412",
       "backend/nmrpipe_backend.py:835"
     ],
     "Snapshot directory: {p0}": [
@@ -1970,13 +1973,13 @@
       "gui/dialogs.py:747"
     ],
     "Software settings...": [
-      "gui/main_window.py:237"
+      "gui/main_window.py:238"
     ],
     "Some candidates were rejected by striping, and the rest had insufficient gain": [
       "workflow/baseline_optimize.py:325"
     ],
     "Source cleanup {p0}: nuslist {p1} → {p2} OK, ser {p3} → {p4} bytes (backup .bak)": [
-      "backend/nmrpipe_backend.py:4107"
+      "backend/nmrpipe_backend.py:4125"
     ],
     "Specify range": [
       "gui/group_panel.py:180"
@@ -1988,7 +1991,7 @@
       "gui/processing.py:413"
     ],
     "Spectrum has been generated": [
-      "gui/main_window.py:898",
+      "gui/main_window.py:900",
       "gui/project_tree.py:794",
       "gui/project_tree.py:807"
     ],
@@ -1996,10 +1999,10 @@
       "workflow/manual.py:505"
     ],
     "Start SMILE refactoring": [
-      "backend/nmrpipe_backend.py:1676"
+      "backend/nmrpipe_backend.py:1690"
     ],
     "Start batch import: {p0} directory -> experiment {p1}": [
-      "gui/main_window.py:601"
+      "gui/main_window.py:603"
     ],
     "Start converting fid": [
       "backend/nmrpipe_backend.py:1005",
@@ -2007,13 +2010,13 @@
       "backend/nmrpipe_backend.py:765"
     ],
     "Start data group {p0} Batch processing: {p1}{p2}": [
-      "gui/main_window.py:879"
+      "gui/main_window.py:881"
     ],
     "Start importing: {p0} (experiment {p1})": [
-      "gui/main_window.py:1002"
+      "gui/main_window.py:1004"
     ],
     "Start manual run: {p0} (data {p1})": [
-      "gui/main_window.py:1697"
+      "gui/main_window.py:1703"
     ],
     "Start phase optimisation (1D)": [
       "backend/nmrpipe_backend.py:819"
@@ -2028,7 +2031,7 @@
       "gui/log_panel.py:63"
     ],
     "Success": [
-      "gui/main_window.py:909"
+      "gui/main_window.py:911"
     ],
     "Sure": [
       "gui/dialogs.py:424",
@@ -2066,7 +2069,7 @@
       "workflow/batch.py:383"
     ],
     "The batch import part failed:\n": [
-      "gui/main_window.py:621"
+      "gui/main_window.py:623"
     ],
     "The carrier frequency difference is large ({p0:.1f} vs {p1:.1f})": [
       "workflow/batch.py:276"
@@ -2087,7 +2090,7 @@
       "gui/pipeline_panel.py:1120"
     ],
     "The current memory cannot process this spectrum (about {p0} MB available, SMILE peak about {p1:.0f} MB); please provide at least {p2} GB. You can also narrow the direct-dimension range and turn on \"apply this range to the optimisation\" (the narrower the direct-dimension window, the lower the SMILE peak memory)": [
-      "backend/nmrpipe_backend.py:1525"
+      "backend/nmrpipe_backend.py:1539"
     ],
     "The current peak table association was replaced with the Poky peak table ({p0} peak(s));\n(click \"Save peak table\" to write back to the .list file)": [
       "gui/spectrum_panel.py:1567"
@@ -2096,7 +2099,7 @@
       "backend/memory_guard.py:150"
     ],
     "The display layer phase has insufficient confidence or the search failed. Keep the default phase": [
-      "backend/nmrpipe_backend.py:1784"
+      "backend/nmrpipe_backend.py:1798"
     ],
     "The experiment type does not yet have sample data": [
       "gui/pipeline_panel.py:2583"
@@ -2142,13 +2145,13 @@
       "gui/dialogs.py:503"
     ],
     "The project has been moved to the system trash and can be restored from trash": [
-      "gui/main_window.py:1917"
+      "gui/main_window.py:1923"
     ],
     "The reference peak table is 3D and the nucleus name cannot be determined (no reference spectrum is loaded), the constraint will not take effect": [
       "gui/pipeline_panel.py:2336"
     ],
     "The scan produced no candidate; nothing to rank": [
-      "backend/nmrpipe_backend.py:2323"
+      "backend/nmrpipe_backend.py:2338"
     ],
     "The script content is empty and cannot be run": [
       "workflow/script_check.py:34"
@@ -2163,13 +2166,13 @@
       "gui/dialogs.py:317"
     ],
     "The selected directory is not a segmented/repeat-experiment container (it needs at least 2 subdirectories that each hold an acqus data segment; non-data subdirectories were ignored; it is normal for the container itself to have no acqus)": [
-      "gui/main_window.py:573"
+      "gui/main_window.py:575"
     ],
     "The source directory is already in the project, skip copying (refer to the original path): {p0}": [
       "workflow/import_workflow.py:246"
     ],
     "The source ser has been backed up -> {p0}/ser.bak ({p1} bytes)": [
-      "backend/nmrpipe_backend.py:4076"
+      "backend/nmrpipe_backend.py:4094"
     ],
     "The source spectrum does not exist, skip UCSF conversion: {p0}": [
       "workflow/ucsf_export.py:29"
@@ -2189,11 +2192,14 @@
     "The time domain data file is too small (<1KB), and the collection may fail": [
       "gui/raw_quality.py:154"
     ],
+    "The tutorial document is missing from this installation.": [
+      "gui/tutorial.py:79"
+    ],
     "The upstream step has expired: ": [
       "gui/pipeline_panel.py:450"
     ],
     "There are currently no tasks running (cancellation of memory calculations has been requested)": [
-      "gui/main_window.py:2348"
+      "gui/main_window.py:2354"
     ],
     "There are no parsable peak lines in the file": [
       "gui/spectrum_panel.py:1548"
@@ -2215,7 +2221,7 @@
       "gui/pipeline_panel.py:2616"
     ],
     "There is no spectrum file for this sample data yet": [
-      "gui/main_window.py:1784"
+      "gui/main_window.py:1790"
     ],
     "There is no ungrouped sample data under experiment": [
       "gui/project_tree.py:1039"
@@ -2224,7 +2230,7 @@
       "viewer/spectrum3d_panel.py:66"
     ],
     "This experiment does not have sample data yet, please import sample data first": [
-      "gui/main_window.py:1497"
+      "gui/main_window.py:1503"
     ],
     "This software only executes processing and writes spectra, peak tables and processing records (provenance + QC). CSP, robustness, statistical analysis, significance testing and scientific conclusions are out of scope; downstream analysis does that from the unified peak table.": [
       "nmrforge_api/records.py:51"
@@ -2233,7 +2239,7 @@
       "gui/dialogs.py:211"
     ],
     "To add/delete/edit peak table, please operate the peak table on the spectrum panel on the right, and save it as a Poky.list file": [
-      "gui/main_window.py:1513"
+      "gui/main_window.py:1519"
     ],
     "Try again": [
       "gui/pipeline_panel.py:950"
@@ -2245,19 +2251,19 @@
       "workflow/ucsf_export.py:33"
     ],
     "Unable to generate scan script": [
-      "backend/nmrpipe_backend.py:2011"
+      "backend/nmrpipe_backend.py:2025"
     ],
     "Unable to get fid.com: {p0}": [
-      "gui/main_window.py:1554"
+      "gui/main_window.py:1560"
     ],
     "Unable to load reference peak table: {p0}/{p1}": [
       "gui/pipeline_panel.py:2318"
     ],
     "Unable to open spectrum file (format not supported or file damaged): {p0}": [
-      "gui/main_window.py:2158"
+      "gui/main_window.py:2164"
     ],
     "Unable to open spectrum: {p0}": [
-      "gui/main_window.py:2156"
+      "gui/main_window.py:2162"
     ],
     "Unable to render and process script (not supported in acquisition mode): {p0}": [
       "workflow/manual.py:312"
@@ -2298,11 +2304,14 @@
     "Upper limit(ppm):": [
       "gui/group_panel.py:185"
     ],
+    "Usage tutorial...": [
+      "gui/main_window.py:240"
+    ],
     "Use SMILE to scan the selected Rank1 parameter, rerun the final script, and use the result as the current spectrum": [
       "gui/pipeline_panel.py:897"
     ],
     "Use bruker sliced fid ({p0}, streaming processing)": [
-      "backend/nmrpipe_backend.py:1319",
+      "backend/nmrpipe_backend.py:1333",
       "backend/nmrpipe_backend.py:776"
     ],
     "Use this for one acquisition split into several segments (segmented NUS / averaged repeat experiments); leave it unchecked for an ordinary single data set. It is ticked automatically when you pick a container directory.": [
@@ -2369,7 +2378,7 @@
       "nmrforge_api/reference.py:1212"
     ],
     "about": [
-      "gui/main_window.py:239"
+      "gui/main_window.py:241"
     ],
     "actual full sampling: nuslist covers the whole grid {p0} for the indirect dimension (labelled NUS, actually full sampling) -> uniform": [
       "core/experiment/sampling_detector.py:59"
@@ -2378,7 +2387,7 @@
       "core/experiment/sampling_detector.py:78"
     ],
     "addNMR seg_{p0:03d} slice merge: rc={p1}": [
-      "backend/nmrpipe_backend.py:3768"
+      "backend/nmrpipe_backend.py:3786"
     ],
     "allow this batch's --direct-range to disagree with the reference's frozen range (leaving the run-level warning code direct_range_override); by default a disagreement is an error rather than a silent window change": [
       "nmrforge_api/cli.py:601"
@@ -2485,7 +2494,7 @@
       "core/optimization/phase_search.py:624"
     ],
     "candidate output mode: skip the display-layer phase search and re-render (the phase must be locked by direct_phase, otherwise the candidate spectrum phase disagrees with the reference)": [
-      "backend/nmrpipe_backend.py:1613"
+      "backend/nmrpipe_backend.py:1627"
     ],
     "cannot normalise {p0}: {p1}": [
       "nmrforge_api/compat.py:211"
@@ -2507,7 +2516,8 @@
       "viewer/app.py:83"
     ],
     "close": [
-      "gui/spectrum_panel.py:1893"
+      "gui/spectrum_panel.py:1893",
+      "gui/tutorial.py:83"
     ],
     "combination mode needs a built reference: {p0} (condition {p1}) has no reference spectrum yet; run reference mode first": [
       "nmrforge_api/reference.py:393"
@@ -2528,13 +2538,13 @@
       "nmrforge_api/cli.py:613"
     ],
     "condition directory token collision: {p0!r} and {p1!r} both map to {p2!r}": [
-      "nmrforge_api/session.py:300"
+      "nmrforge_api/session.py:306"
     ],
     "condition label (A/B/...); omit for all conditions": [
       "nmrforge_api/cli.py:482"
     ],
     "condition label {p0!r} is taken by {p1}; give each condition its own label (A / B)": [
-      "nmrforge_api/session.py:440"
+      "nmrforge_api/session.py:446"
     ],
     "condition name in the target peak list does not belong to the study: {p0}(from {p1}); the study has {p2}. A misspelled condition is never ignored.": [
       "nmrforge_api/localization_targets.py:328"
@@ -2586,7 +2596,7 @@
       "gui/group_panel.py:77"
     ],
     "data group does not exist: {p0}": [
-      "gui/main_window.py:749"
+      "gui/main_window.py:751"
     ],
     "data group does not exist: {p0}/{p1}": [
       "core/project/manager.py:690",
@@ -2596,44 +2606,44 @@
       "core/project/manager.py:771"
     ],
     "data group {p0} Without member data, batch processing cannot be performed": [
-      "gui/main_window.py:866"
+      "gui/main_window.py:868"
     ],
     "data group {p0} deleted (member restores single data)": [
-      "gui/main_window.py:816"
+      "gui/main_window.py:818"
     ],
     "data group {p0} deleted, together with {p1} data moved to trash": [
-      "gui/main_window.py:843"
+      "gui/main_window.py:845"
     ],
     "data group {p0} in experiment {p1} There is no data in": [
       "workflow/batch.py:98"
     ],
     "data group {p0} renamed to {p1}": [
-      "gui/main_window.py:790"
+      "gui/main_window.py:792"
     ],
     "data part {p0} ({p1}) conversion failed": [
-      "backend/nmrpipe_backend.py:3817"
+      "backend/nmrpipe_backend.py:3835"
     ],
     "data quality diagnosis failed: {p0}": [
       "workflow/phase_routes.py:698",
       "workflow/phase_routes.py:1586"
     ],
     "data segment {p0} Slicing failed": [
-      "backend/nmrpipe_backend.py:3929"
+      "backend/nmrpipe_backend.py:3947"
     ],
     "data {p0} It is a 3D spectrum. Batch only supports 2D for now and has not been added to the data group": [
-      "gui/main_window.py:758"
+      "gui/main_window.py:760"
     ],
     "data {p0} Joined data group {p1}": [
-      "gui/main_window.py:767"
+      "gui/main_window.py:769"
     ],
     "data {p0} Moved out of data group {p1}": [
-      "gui/main_window.py:781"
+      "gui/main_window.py:783"
     ],
     "dataset already registered: {p0}": [
-      "nmrforge_api/session.py:177"
+      "nmrforge_api/session.py:183"
     ],
     "dataset path does not exist: {p0}": [
-      "nmrforge_api/session.py:449"
+      "nmrforge_api/session.py:455"
     ],
     "dataset segment parameters disagree": [
       "core/data/bruker_reader.py:424"
@@ -2656,27 +2666,27 @@
       "gui/pipeline_panel.py:779"
     ],
     "delete data group": [
-      "gui/main_window.py:803"
+      "gui/main_window.py:805"
     ],
     "delete data group (including data)": [
-      "gui/main_window.py:829"
+      "gui/main_window.py:831"
     ],
     "delete data group {p0}?In the group {p1} data set(s) will be moved to the trash together with the group (recoverable).": [
-      "gui/main_window.py:830"
+      "gui/main_window.py:832"
     ],
     "delete data group {p0}?In the group {p1} data set(s) will be restored as individual data sets (the data themselves are not deleted).": [
-      "gui/main_window.py:804"
+      "gui/main_window.py:806"
     ],
     "delete experiment": [
-      "gui/main_window.py:207",
-      "gui/main_window.py:1243",
+      "gui/main_window.py:208",
+      "gui/main_window.py:1245",
       "gui/project_tree.py:1146"
     ],
     "delete experiment failed": [
-      "gui/main_window.py:1264"
+      "gui/main_window.py:1266"
     ],
     "delete experiment {p0} and its output files?\nIt will be moved to the system trash and can be restored.\n(the WorkflowRun audit trail is kept)": [
-      "gui/main_window.py:1244"
+      "gui/main_window.py:1246"
     ],
     "delete group (including data)...": [
       "gui/project_tree.py:1166"
@@ -2689,24 +2699,24 @@
       "viewer/app.py:234"
     ],
     "delete project": [
-      "gui/main_window.py:1881",
-      "gui/main_window.py:1898"
+      "gui/main_window.py:1887",
+      "gui/main_window.py:1904"
     ],
     "delete project failed": [
-      "gui/main_window.py:1909"
+      "gui/main_window.py:1915"
     ],
     "delete project {p0} and all of its sample data and outputs?\nThe project will be moved to the system trash and can be restored (the audit history is kept)\npath: {p1}": [
-      "gui/main_window.py:1882"
+      "gui/main_window.py:1888"
     ],
     "delete project...": [
       "gui/project_tree.py:1133"
     ],
     "delete sample data": [
-      "gui/main_window.py:1989",
+      "gui/main_window.py:1995",
       "gui/project_tree.py:1207"
     ],
     "delete sample data {p0} and its output files?\nIt will be moved to the system trash and can be restored.\n(the WorkflowRun audit trail is kept)": [
-      "gui/main_window.py:1990"
+      "gui/main_window.py:1996"
     ],
     "detected {p0} cluster(s) of isolated peaks": [
       "core/qc/spectrum_quality.py:363"
@@ -2736,7 +2746,7 @@
       "gui/raw_quality.py:141"
     ],
     "direct dimension TD=0(acqus/acqu does not provide valid TD), abort the conversion to avoid stuck": [
-      "backend/nmrpipe_backend.py:2883"
+      "backend/nmrpipe_backend.py:2901"
     ],
     "direct dimension memory phase: {p0}=({p1:g}°, {p2:g}°)": [
       "workflow/phase_routes.py:1924"
@@ -2748,21 +2758,21 @@
       "workflow/direct_diagnostics.py:370"
     ],
     "direct dimension phase (cache): p0={p0:g} p1={p1:g}": [
-      "backend/nmrpipe_backend.py:3349",
-      "backend/nmrpipe_backend.py:2957",
-      "backend/nmrpipe_backend.py:1570"
+      "backend/nmrpipe_backend.py:3367",
+      "backend/nmrpipe_backend.py:2975",
+      "backend/nmrpipe_backend.py:1584"
     ],
     "direct dimension phase coverage: p0={p0:g} p1={p1:g}": [
-      "backend/nmrpipe_backend.py:1340"
+      "backend/nmrpipe_backend.py:1354"
     ],
     "direct dimension phase coverage: {p0}": [
       "backend/nmrpipe_backend.py:816"
     ],
     "direct dimension phase information is weak (coherence SNR={p0:.2f} < 2), keep p0=p1=0": [
-      "backend/nmrpipe_backend.py:3407"
+      "backend/nmrpipe_backend.py:3425"
     ],
     "direct dimension phase information is weak (gain={p0:.3f}, score={p1:.3f}),keeping p0=p1=0": [
-      "backend/nmrpipe_backend.py:3559"
+      "backend/nmrpipe_backend.py:3577"
     ],
     "direct dimension phase is searching (last appointment {p0:.0f} seconds), please wait": [
       "workflow/phase_routes.py:1847"
@@ -2775,7 +2785,7 @@
       "workflow/phase_routes.py:1831"
     ],
     "direct dimension phase search (NU-DFT): p0={p0:g} p1={p1:g} (correlation SNR={p2:.2f}, peak k*={p3}, {p4} slice)": [
-      "backend/nmrpipe_backend.py:3416"
+      "backend/nmrpipe_backend.py:3434"
     ],
     "direct dimension phase search basis: real data final spectrum {p0}(indirect dimension corrected, direct dimension = last axis, projection trace = sum of indirect dimension points)": [
       "workflow/phase_routes.py:1811"
@@ -2785,22 +2795,22 @@
       "workflow/phase_routes.py:1872"
     ],
     "direct dimension phase search: direct dimension spectrum has no signal, keep p0=p1=0": [
-      "backend/nmrpipe_backend.py:3537"
+      "backend/nmrpipe_backend.py:3555"
     ],
     "direct dimension phase search: no slices available, keep p0=p1=0": [
-      "backend/nmrpipe_backend.py:3467"
+      "backend/nmrpipe_backend.py:3485"
     ],
     "direct dimension phase search: p0={p0:g} p1={p1:g} (score={p2:.3f}, gain={p3:.3f}, {p4} trace": [
-      "backend/nmrpipe_backend.py:3569"
+      "backend/nmrpipe_backend.py:3587"
     ],
     "direct dimension phase search: shape=%s serial completion, takes %.1fs": [
       "core/optimization/phase_search.py:696"
     ],
     "direct dimension processing (generating slices)..": [
-      "backend/nmrpipe_backend.py:2062"
+      "backend/nmrpipe_backend.py:2076"
     ],
     "direct dimension processing failed (rc={p0})": [
-      "backend/nmrpipe_backend.py:2073"
+      "backend/nmrpipe_backend.py:2087"
     ],
     "direct dimension projection HT Search for: {p0}=({p1:g}°, {p2:g}°) score={p3:.2f}": [
       "workflow/phase_routes.py:1901"
@@ -2871,7 +2881,7 @@
       "core/optimization/phase_search.py:638"
     ],
     "direct-dimension phase search: no fid/slice found, keeping p0=p1=0": [
-      "backend/nmrpipe_backend.py:1403",
+      "backend/nmrpipe_backend.py:1417",
       "backend/nmrpipe_backend.py:840"
     ],
     "direct-dimension range (ext_lo high, ext_hi low, ppm): overrides the batch base": [
@@ -2933,13 +2943,13 @@
       "nmrforge_api/sweep.py:2557"
     ],
     "duplicate condition label: {p0}": [
-      "nmrforge_api/session.py:175"
+      "nmrforge_api/session.py:181"
     ],
     "edge exclusion width when picking peaks (ppm; default 3x the linewidth)": [
       "nmrforge_api/cli.py:654"
     ],
     "edit{p0}": [
-      "gui/main_window.py:2095"
+      "gui/main_window.py:2101"
     ],
     "empty array: nothing to evaluate": [
       "core/qc/spectrum_quality.py:173"
@@ -2955,13 +2965,13 @@
     "experiment does not exist: {p0}": [
       "core/project/manager.py:1093",
       "workflow/batch.py:85",
-      "nmrforge_api/session.py:471"
+      "nmrforge_api/session.py:477"
     ],
     "experiment has been moved to trash: {p0}": [
       "core/project/manager.py:827"
     ],
     "experiment notes": [
-      "gui/main_window.py:2085"
+      "gui/main_window.py:2091"
     ],
     "experiment title": [
       "nmrforge_api/cli.py:493"
@@ -2983,10 +2993,10 @@
       "gui/log_panel.py:186"
     ],
     "experiment {p0} Moved to system trash (can be restored from trash)": [
-      "gui/main_window.py:1257"
+      "gui/main_window.py:1259"
     ],
     "experiment {p0}: Double-click to view the spectrum file, and the pipeline in the middle displays the processing steps": [
-      "gui/main_window.py:2196"
+      "gui/main_window.py:2202"
     ],
     "experiment: {p0} | sample data: {p1} | Processed: {p2}": [
       "gui/dashboards.py:127"
@@ -3036,19 +3046,19 @@
       "workflow/pick_peaks.py:998"
     ],
     "fallback: use the built-in bruk2pipe parameter conversion": [
-      "backend/nmrpipe_backend.py:2898"
+      "backend/nmrpipe_backend.py:2916"
     ],
     "fid layout cannot be parsed": [
-      "backend/nmrpipe_backend.py:1881"
+      "backend/nmrpipe_backend.py:1895"
     ],
     "fid noise injection (single file) failed: {p0}": [
-      "backend/nmrpipe_backend.py:1855"
+      "backend/nmrpipe_backend.py:1869"
     ],
     "fid noise injection (slicing) failed: {p0}": [
-      "backend/nmrpipe_backend.py:1844"
+      "backend/nmrpipe_backend.py:1858"
     ],
     "fid not found (neither a single file nor slices), the final run will fail": [
-      "backend/nmrpipe_backend.py:1323"
+      "backend/nmrpipe_backend.py:1337"
     ],
     "fid.com Conversion failed: {p0}": [
       "workflow/manual.py:213"
@@ -3060,7 +3070,7 @@
       "workflow/manual.py:168"
     ],
     "fid.com run completed: {p0}": [
-      "gui/main_window.py:1716"
+      "gui/main_window.py:1722"
     ],
     "final run only": [
       "gui/pipeline_panel.py:1871",
@@ -3070,22 +3080,22 @@
       "workflow/phase_routes.py:2123"
     ],
     "final spectrum -> {p0}": [
-      "backend/nmrpipe_backend.py:1728"
+      "backend/nmrpipe_backend.py:1742"
     ],
     "final spectrum has been re-rendered according to the display layer phase (stage-2 re-run, no SMILE)": [
-      "backend/nmrpipe_backend.py:1776"
+      "backend/nmrpipe_backend.py:1790"
     ],
     "final spectrum is in place": [
       "backend/nmrpipe_backend.py:915"
     ],
     "finalize complete": [
-      "backend/nmrpipe_backend.py:2461"
+      "backend/nmrpipe_backend.py:2476"
     ],
     "finalize failed / nothing written to {p0}": [
-      "backend/nmrpipe_backend.py:2454"
+      "backend/nmrpipe_backend.py:2469"
     ],
     "finalize rerender failed: {p0}": [
-      "backend/nmrpipe_backend.py:3290"
+      "backend/nmrpipe_backend.py:3308"
     ],
     "first-pass reconstruction / phase search and the optimisation evaluation share the window": [
       "gui/pipeline_panel.py:1896"
@@ -3123,15 +3133,15 @@
       "gui/dialogs.py:301",
       "gui/dialogs.py:305",
       "gui/dialogs.py:316",
-      "gui/main_window.py:554",
-      "gui/main_window.py:558",
-      "gui/main_window.py:1481",
-      "gui/main_window.py:1494",
-      "gui/main_window.py:1782",
-      "gui/main_window.py:1927",
-      "gui/main_window.py:2023",
-      "gui/main_window.py:2045",
-      "gui/main_window.py:2171",
+      "gui/main_window.py:556",
+      "gui/main_window.py:560",
+      "gui/main_window.py:1487",
+      "gui/main_window.py:1500",
+      "gui/main_window.py:1788",
+      "gui/main_window.py:1933",
+      "gui/main_window.py:2029",
+      "gui/main_window.py:2051",
+      "gui/main_window.py:2177",
       "gui/spectrum_panel.py:1579",
       "gui/spectrum_panel.py:1582",
       "gui/spectrum_panel.py:1840",
@@ -3169,30 +3179,30 @@
       "gui/spectrum_panel.py:1566"
     ],
     "import completed (prompt)": [
-      "gui/main_window.py:1170"
+      "gui/main_window.py:1172"
     ],
     "import completion: {p0}/{p1} ({p2} document, {p3} bytes, run {p4})": [
-      "gui/main_window.py:1118"
+      "gui/main_window.py:1120"
     ],
     "import data": [
       "gui/dashboards.py:740"
     ],
     "import failed": [
-      "gui/main_window.py:1111",
-      "gui/main_window.py:1458",
+      "gui/main_window.py:1113",
+      "gui/main_window.py:1464",
       "gui/spectrum_panel.py:1542"
     ],
     "import failed: {p0}": [
-      "gui/main_window.py:1110"
+      "gui/main_window.py:1112"
     ],
     "import failed: {p0}: {p1}": [
-      "nmrforge_api/session.py:478"
+      "nmrforge_api/session.py:484"
     ],
     "import finished but produced no usable data entry": [
-      "nmrforge_api/session.py:485"
+      "nmrforge_api/session.py:491"
     ],
     "import rejected: {p0}": [
-      "gui/main_window.py:1107"
+      "gui/main_window.py:1109"
     ],
     "import results": [
       "gui/spectrum_panel.py:1545"
@@ -3257,7 +3267,7 @@
       "core/experiment/experiment_classifier.py:365"
     ],
     "lightweight SMILE phase search failed (falling back to NU-DFT/default)": [
-      "backend/nmrpipe_backend.py:3063"
+      "backend/nmrpipe_backend.py:3081"
     ],
     "line {p0}: the script ends with a trailing `\\` (dangling continuation),and csh waits for further input": [
       "workflow/script_check.py:112"
@@ -3291,10 +3301,10 @@
       "workflow/phase_routes.py:1707"
     ],
     "missing nuslist sampling table: this 2D data set is not the full-grid+zero-fill dense model, so the sampling positions cannot be recovered; please provide nuslist": [
-      "backend/nmrpipe_backend.py:1258"
+      "backend/nmrpipe_backend.py:1271"
     ],
     "multi-segment NUS conversion/merge failed": [
-      "backend/nmrpipe_backend.py:1193"
+      "backend/nmrpipe_backend.py:1196"
     ],
     "multi-segment dataset ({p0} directories): the datasets and their sampling points were merged and produced by the backend": [
       "core/data/bruker_reader.py:339"
@@ -3312,7 +3322,7 @@
       "backend/nmrpipe_backend.py:704",
       "backend/nmrpipe_backend.py:959",
       "backend/nmrpipe_backend.py:1131",
-      "backend/nmrpipe_backend.py:2382"
+      "backend/nmrpipe_backend.py:2397"
     ],
     "no": [
       "gui/dialogs.py:175"
@@ -3339,7 +3349,7 @@
       "nmrforge_api/localization_targets.py:1300"
     ],
     "not recognisable as a raw Bruker dataset: {p0} ({p1}: {p2}). This API needs an unpacked Bruker directory containing acqus/ser.": [
-      "nmrforge_api/session.py:457"
+      "nmrforge_api/session.py:463"
     ],
     "note: combination {p0} gives {p1} but baseline.{p2}.mode={p3} is not order, so the order does nothing": [
       "nmrforge_api/sweep.py:1424"
@@ -3372,7 +3382,7 @@
       "backend/bruker_workflow.py:295"
     ],
     "nuslist cleanup: {p0} → {p1} sampling point (bad point {p2})": [
-      "backend/nmrpipe_backend.py:4352"
+      "backend/nmrpipe_backend.py:4370"
     ],
     "nuslist conflicts with NusAMOUNT>=100, enter safe mode": [
       "core/experiment/sampling_detector.py:157"
@@ -3381,7 +3391,7 @@
       "gui/project_tree.py:242"
     ],
     "ongoing{p0}: {p1}": [
-      "gui/main_window.py:1366"
+      "gui/main_window.py:1372"
     ],
     "only 1 subdirectory holds data files ({p0}); a segmented import needs at least 2; these subdirectories look independent: {p1}": [
       "core/data/bruker_reader.py:413"
@@ -3424,7 +3434,7 @@
       "nmrforge_api/sweep.py:648"
     ],
     "parameter correction: {p0}": [
-      "backend/nmrpipe_backend.py:2872"
+      "backend/nmrpipe_backend.py:2890"
     ],
     "parameter description": [
       "backend/script_generator.py:1665"
@@ -3439,16 +3449,16 @@
       "gui/pipeline_panel.py:2152"
     ],
     "part {p0} frequency shift -rs {p1}Hz: rc={p2}": [
-      "backend/nmrpipe_backend.py:3859"
+      "backend/nmrpipe_backend.py:3877"
     ],
     "part {p0} has {p1} slices, inconsistent with first part ({p2})": [
-      "backend/nmrpipe_backend.py:3733"
+      "backend/nmrpipe_backend.py:3751"
     ],
     "part {p0} slice-form frequency shift -rs {p1}Hz: rc={p2}": [
-      "backend/nmrpipe_backend.py:3897"
+      "backend/nmrpipe_backend.py:3915"
     ],
     "part {p0}: bruker outputs sliced fid (compatible with merging)": [
-      "backend/nmrpipe_backend.py:3829"
+      "backend/nmrpipe_backend.py:3847"
     ],
     "pdata/title agrees with the classification": [
       "core/experiment/experiment_classifier.py:320"
@@ -3472,7 +3482,7 @@
       "nmrforge_api/reference.py:798"
     ],
     "peak table edit": [
-      "gui/main_window.py:1511"
+      "gui/main_window.py:1517"
     ],
     "peak table has been written:\n{p0}": [
       "gui/spectrum_panel.py:1603"
@@ -3481,7 +3491,7 @@
       "gui/processing.py:606"
     ],
     "peak table saved and registered manual_peaks run": [
-      "gui/main_window.py:1838"
+      "gui/main_window.py:1844"
     ],
     "peak {p0}: the fixed-axis coordinate is missing or 0, so the plane cannot be located": [
       "gui/spectrum_panel.py:2026"
@@ -3493,7 +3503,7 @@
       "nmrforge_api/localization_targets.py:480"
     ],
     "perform the \"Generate FID\" step first": [
-      "gui/main_window.py:1585"
+      "gui/main_window.py:1591"
     ],
     "phase": [
       "workflow/optimization_report.py:183"
@@ -3567,23 +3577,23 @@
       "gui/pipeline_panel.py:2108"
     ],
     "proj3D output parsing exception (expected 3 *.dat, actual {p0}): {p1}": [
-      "backend/nmrpipe_backend.py:2550"
+      "backend/nmrpipe_backend.py:2565"
     ],
     "proj3D.tcl(NMRPipe projection tool) not found": [
-      "backend/nmrpipe_backend.py:2503"
+      "backend/nmrpipe_backend.py:2518"
     ],
     "project": [
       "gui/dashboards.py:76"
     ],
     "project comments": [
-      "gui/main_window.py:2084"
+      "gui/main_window.py:2090"
     ],
     "project does not exist: {p0}": [
       "core/workspace.py:98",
       "core/workspace.py:116"
     ],
     "project has been renamed to {p0}": [
-      "gui/main_window.py:1874"
+      "gui/main_window.py:1880"
     ],
     "project is not loaded, cannot import experiment": [
       "workflow/import_workflow.py:413",
@@ -3602,17 +3612,17 @@
       "core/project/manager.py:982",
       "core/project/manager.py:1090",
       "core/project/manager.py:1098",
-      "gui/main_window.py:1042",
+      "gui/main_window.py:1044",
       "gui/per_data_records.py:31"
     ],
     "project not open": [
-      "gui/main_window.py:345",
-      "gui/main_window.py:2216",
+      "gui/main_window.py:347",
+      "gui/main_window.py:2222",
       "gui/pipeline_panel.py:1200",
       "gui/pipeline_panel.py:1635"
     ],
     "project saved": [
-      "gui/main_window.py:510"
+      "gui/main_window.py:512"
     ],
     "project.json has an invalid structure: {p0}": [
       "core/project/manager.py:174"
@@ -3624,10 +3634,10 @@
       "gui/project_tree.py:235"
     ],
     "project: {p0}": [
-      "gui/main_window.py:2393"
+      "gui/main_window.py:2399"
     ],
     "quit": [
-      "gui/main_window.py:202",
+      "gui/main_window.py:203",
       "viewer/app.py:85"
     ],
     "ramdisk is not readable: {p0}": [
@@ -3652,7 +3662,7 @@
       "viewer/app.py:81"
     ],
     "recent project": [
-      "gui/main_window.py:199",
+      "gui/main_window.py:200",
       "gui/welcome_page.py:66"
     ],
     "recently run": [
@@ -3699,24 +3709,24 @@
       "backend/nmrpipe_backend.py:298"
     ],
     "rename data failed": [
-      "gui/main_window.py:1978",
-      "gui/main_window.py:1970"
+      "gui/main_window.py:1984",
+      "gui/main_window.py:1976"
     ],
     "rename experiment...": [
-      "gui/main_window.py:206"
+      "gui/main_window.py:207"
     ],
     "rename failed": [
-      "gui/main_window.py:1230"
+      "gui/main_window.py:1232"
     ],
     "rename group...": [
       "gui/project_tree.py:1155"
     ],
     "rename project": [
-      "gui/main_window.py:1855"
+      "gui/main_window.py:1861"
     ],
     "rename project failed": [
-      "gui/main_window.py:1870",
-      "gui/main_window.py:1867"
+      "gui/main_window.py:1876",
+      "gui/main_window.py:1873"
     ],
     "rename project...": [
       "gui/project_tree.py:1129"
@@ -3741,7 +3751,7 @@
       "gui/pipeline_panel.py:1096"
     ],
     "right spectrum": [
-      "gui/main_window.py:221"
+      "gui/main_window.py:222"
     ],
     "row {p0} of the combination table is empty": [
       "nmrforge_api/sweep.py:883"
@@ -3760,7 +3770,7 @@
       "gui/pipeline_panel.py:1074"
     ],
     "run cancelled (script check warning)": [
-      "gui/main_window.py:1693"
+      "gui/main_window.py:1699"
     ],
     "run current step": [
       "gui/pipeline_panel.py:1109"
@@ -3800,7 +3810,7 @@
       "gui/dashboards.py:694"
     ],
     "sample data annotation": [
-      "gui/main_window.py:2086"
+      "gui/main_window.py:2092"
     ],
     "sample data annotation (optional, can also be edited in the upper middle after import)": [
       "gui/dialogs.py:216"
@@ -3809,7 +3819,7 @@
       "gui/dashboards.py:181"
     ],
     "sample data {p0} Moved to system trash (can be restored from trash)": [
-      "gui/main_window.py:2003"
+      "gui/main_window.py:2009"
     ],
     "sample does not exist: {p0}": [
       "core/project/manager.py:390",
@@ -3831,33 +3841,33 @@
       "gui/spectrum_panel.py:1601"
     ],
     "save failed": [
-      "gui/main_window.py:508",
-      "gui/main_window.py:2119",
+      "gui/main_window.py:510",
+      "gui/main_window.py:2125",
       "gui/spectrum_panel.py:1595"
     ],
     "save failed: {p0}": [
       "gui/dialogs.py:594"
     ],
     "save project": [
-      "gui/main_window.py:195"
+      "gui/main_window.py:196"
     ],
     "save to {p0}, it will take effect after restarting; the default value will be displayed when not configured": [
       "gui/dialogs.py:874"
     ],
     "saved{p0}": [
-      "gui/main_window.py:2122"
+      "gui/main_window.py:2128"
     ],
     "scan run mode: full-sampling reconstruction (net true-peak wording; peak count and quality score come from the final spectrum)": [
-      "backend/nmrpipe_backend.py:2315"
+      "backend/nmrpipe_backend.py:2330"
     ],
     "scan run mode: hold-out reconstruction (consistency wording; peak count and quality score come from the hold-out reconstruction)": [
-      "backend/nmrpipe_backend.py:2307"
+      "backend/nmrpipe_backend.py:2322"
     ],
     "scanning {p0}/{p1}: {p2}": [
-      "backend/nmrpipe_backend.py:2200"
+      "backend/nmrpipe_backend.py:2215"
     ],
     "script check found warning": [
-      "gui/main_window.py:1682"
+      "gui/main_window.py:1688"
     ],
     "script diff (reference -> this workflow): {p0} lines; ": [
       "nmrforge_api/sweep.py:2184"
@@ -3891,7 +3901,7 @@
     ],
     "segmented/repeated experiment overlay import": [
       "gui/dashboards.py:231",
-      "gui/main_window.py:572"
+      "gui/main_window.py:574"
     ],
     "ser size {p0} is not \"direct dimension {p1} x {p2} bytes\"({p3}); layout unclear, so the dense model cannot be decided": [
       "core/data/nus_reader.py:233"
@@ -3921,13 +3931,13 @@
       "core/qc/spectrum_quality.py:269"
     ],
     "slice {p0}: already has slice-form output ({p1}), skip splitting": [
-      "backend/nmrpipe_backend.py:3628"
+      "backend/nmrpipe_backend.py:3646"
     ],
     "slice {p0}: rc={p1}": [
-      "backend/nmrpipe_backend.py:3642"
+      "backend/nmrpipe_backend.py:3660"
     ],
     "sliced fid -> {p0}/ ({p1} slices)": [
-      "backend/nmrpipe_backend.py:2804"
+      "backend/nmrpipe_backend.py:2822"
     ],
     "solid-state": [
       "core/experiment/experiment_classifier.py:355"
@@ -3939,8 +3949,8 @@
       "gui/spectrum_panel.py:178"
     ],
     "spectrum -> {p0}": [
-      "backend/nmrpipe_backend.py:2457",
-      "backend/nmrpipe_backend.py:4458"
+      "backend/nmrpipe_backend.py:2472",
+      "backend/nmrpipe_backend.py:4476"
     ],
     "spectrum cleared": [
       "viewer/app.py:210"
@@ -3956,10 +3966,10 @@
       "workflow/pick_peaks.py:583"
     ],
     "spectrum quality assessment": [
-      "gui/main_window.py:1361"
+      "gui/main_window.py:1367"
     ],
     "spectrum quality assessment...": [
-      "gui/main_window.py:232"
+      "gui/main_window.py:233"
     ],
     "spectrum quality assessment: baseline worst axis analysis in progress": [
       "workflow/optimization_report.py:153"
@@ -3990,16 +4000,16 @@
       "gui/pipeline_panel.py:1058"
     ],
     "step1 2D direct dimension: rc={p0}": [
-      "backend/nmrpipe_backend.py:2055"
+      "backend/nmrpipe_backend.py:2069"
     ],
     "step1 direct dimension: rc={p0}": [
-      "backend/nmrpipe_backend.py:2069"
+      "backend/nmrpipe_backend.py:2083"
     ],
     "study root directory": [
       "nmrforge_api/cli.py:469"
     ],
     "study root does not exist or is not an NMRForge project: {p0}": [
-      "nmrforge_api/session.py:368"
+      "nmrforge_api/session.py:374"
     ],
     "study {p0} has no condition {p1!r}: available conditions are {p2}": [
       "nmrforge_api/reference.py:380"
@@ -4196,9 +4206,9 @@
     ],
     "this study has no dataset yet; call add_dataset() first": [
       "nmrforge_api/reference.py:611",
-      "nmrforge_api/session.py:510",
-      "nmrforge_api/session.py:233",
-      "nmrforge_api/session.py:269",
+      "nmrforge_api/session.py:516",
+      "nmrforge_api/session.py:239",
+      "nmrforge_api/session.py:275",
       "nmrforge_api/sweep.py:1838"
     ],
     "this study has no reference yet; build one first": [
@@ -4223,7 +4233,7 @@
       "core/planning/method_selector.py:130"
     ],
     "unknown": [
-      "backend/nmrpipe_backend.py:4128"
+      "backend/nmrpipe_backend.py:4146"
     ],
     "unknown detection key: {p0!r} (a combination table allows localization = parabolic / gaussian / both, plus localization.targets = a target-peak CSV)": [
       "nmrforge_api/sweep.py:387"
@@ -4324,13 +4334,13 @@
       "gui/project_tree.py:617"
     ],
     "{p0} ({p1} data)": [
-      "gui/main_window.py:2234"
+      "gui/main_window.py:2240"
     ],
     "{p0} -- No data selected": [
       "gui/pipeline_panel.py:1647"
     ],
     "{p0} Check before run and find {p1} Questions:\n": [
-      "gui/main_window.py:1683"
+      "gui/main_window.py:1689"
     ],
     "{p0} Completed, skip": [
       "workflow/batch.py:454"
@@ -4387,7 +4397,7 @@
       "gui/pipeline_panel.py:180"
     ],
     "{p0} run complete: {p1}": [
-      "gui/main_window.py:1725"
+      "gui/main_window.py:1731"
     ],
     "{p0} run failed: {p1}": [
       "workflow/manual.py:461"
@@ -4417,7 +4427,7 @@
       "workflow/window_optimize.py:449"
     ],
     "{p0}.fid is in place ({p1})": [
-      "backend/nmrpipe_backend.py:2769"
+      "backend/nmrpipe_backend.py:2786"
     ],
     "{p0}: +/-180° chemical shift partitioning disambiguation {p1} → {p2}": [
       "workflow/phase_routes.py:802",
@@ -4474,7 +4484,7 @@
       "gui/pipeline_panel.py:2409"
     ],
     "{p0}: rc={p1} ({p2}) indicator={p3}": [
-      "backend/nmrpipe_backend.py:2282"
+      "backend/nmrpipe_backend.py:2297"
     ],
     "{p0}: refines nothing ({p1})": [
       "nmrforge_api/localization_targets.py:466"
@@ -4522,16 +4532,16 @@
       "nmrforge_api/sweep.py:896"
     ],
     "{p0}Currently only project is closed and directory is retained": [
-      "gui/main_window.py:1901"
+      "gui/main_window.py:1907"
     ],
     "{p0}Currently only the name of project.json is updated": [
-      "gui/main_window.py:1857"
+      "gui/main_window.py:1863"
     ],
     "{p0}D/{p1} combinations are not supported": [
       "nmrforge_api/sweep.py:1867"
     ],
     "{p0}Finish: {p1}": [
-      "gui/main_window.py:1395"
+      "gui/main_window.py:1401"
     ],
     "{p0}Right click: import sample data / rename / delete": [
       "gui/project_tree.py:370",
@@ -4550,7 +4560,7 @@
       "nmrforge_api/records.py:152"
     ],
     "── {p0} run log (most recent)──": [
-      "gui/main_window.py:1295"
+      "gui/main_window.py:1301"
     ],
     "◆ Data quality diagnosis (data monitoring before processing, FID inspection)": [
       "workflow/phase_routes.py:451",
@@ -4578,50 +4588,50 @@
       "backend/nmrpipe_backend.py:466"
     ],
     "⚠ Sampling bad point detected {p0}: {p1},deleted from the source ser/nuslist (backup .bak)": [
-      "backend/nmrpipe_backend.py:4131"
+      "backend/nmrpipe_backend.py:4149"
     ],
     "⚠ Sampling bad point detected {p0}: {p1},not deleted from the source (ser missing / layout undecidable / write failed), fell back to zeroing while the FID is generated; the original ser/nuslist is untouched": [
-      "backend/nmrpipe_backend.py:4141"
+      "backend/nmrpipe_backend.py:4159"
     ],
     "⚠ Sampling bad point detected {p0}:{p1},dropped from the merged nuslist": [
-      "backend/nmrpipe_backend.py:4214"
+      "backend/nmrpipe_backend.py:4232"
     ],
     "⚠ Sampling bad point detected {p0}:{p1},dropped from the nuslist and the corresponding FID cleaned up": [
-      "backend/nmrpipe_backend.py:4343"
+      "backend/nmrpipe_backend.py:4361"
     ],
     "⚠ Warning": [
       "workflow/optimization_report.py:170"
     ],
     "⚠ bad point must be deleted from the source ser, but {p0}/ser is missing; falling back to cleaning the generated FID": [
-      "backend/nmrpipe_backend.py:4027"
+      "backend/nmrpipe_backend.py:4045"
     ],
     "⚠ bad point {p0}: Out of bounds, no corresponding slice, merge FID No need to clean up": [
-      "backend/nmrpipe_backend.py:4280"
+      "backend/nmrpipe_backend.py:4298"
     ],
     "⚠ bad point {p0}: the corresponding FID increment has been zeroed({p1} OK {p2})": [
-      "backend/nmrpipe_backend.py:4315"
+      "backend/nmrpipe_backend.py:4333"
     ],
     "⚠ bad point {p0}:FID Cleanup failed {p1}": [
-      "backend/nmrpipe_backend.py:4325"
+      "backend/nmrpipe_backend.py:4343"
     ],
     "⚠ bad point {p0}:No corresponding FID file, no need to clean": [
-      "backend/nmrpipe_backend.py:4291"
+      "backend/nmrpipe_backend.py:4309"
     ],
     "⚠ bad point {p0}:The line is out of bounds, no need to clean up": [
-      "backend/nmrpipe_backend.py:4306"
+      "backend/nmrpipe_backend.py:4324"
     ],
     "⚠ script check: {p0}": [
-      "gui/main_window.py:1679",
+      "gui/main_window.py:1685",
       "gui/pipeline_panel.py:2662"
     ],
     "⚠ the {p0}/ser layout cannot be determined from the sampling parameters (direct-dimension TD={p1}, {p2} bytes per point; redundancy count inconsistent or word size unknown); falling back to cleaning the generated FID, not handled automatically": [
-      "backend/nmrpipe_backend.py:4058"
+      "backend/nmrpipe_backend.py:4076"
     ],
     "⚠ {p0} source cleanup failed ({p1}), falling back to cleaning the generated FID": [
-      "backend/nmrpipe_backend.py:4120"
+      "backend/nmrpipe_backend.py:4138"
     ],
     "⚠ {p0}/ser size {p1} Cannot press nuslist {p2} rows divide evenly (the ser row count may not match the nuslist point count); falling back to cleaning the generated FID, not handled automatically": [
-      "backend/nmrpipe_backend.py:4039"
+      "backend/nmrpipe_backend.py:4057"
     ],
     "✓ Accept": [
       "workflow/optimization_report.py:169"
@@ -4670,6 +4680,7 @@
     "gui/project_tree.py",
     "gui/raw_quality.py",
     "gui/spectrum_panel.py",
+    "gui/tutorial.py",
     "gui/welcome_page.py",
     "nmrforge_api/cli.py",
     "nmrforge_api/compat.py",
@@ -4704,5 +4715,5 @@
     "workflow/ucsf_export.py",
     "workflow/window_optimize.py"
   ],
-  "coverage_floor_zh": 1456
+  "coverage_floor_zh": 1459
 }

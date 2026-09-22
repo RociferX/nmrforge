@@ -47,6 +47,7 @@ from gui.log_panel import LogPanel
 from gui.pipeline_panel import STEP_LABEL
 from gui.processing import ProcessingController
 from gui.project_tree import ProjectTreePanel
+from gui.tutorial import TutorialDialog
 from qtcompat import Signal
 from ui_support.i18n import tr
 
@@ -236,6 +237,7 @@ class MainWindow(QMainWindow):
         settings_menu = bar.addMenu(tr("&Settings"))
         settings_menu.addAction(tr("Software settings..."), self._open_settings)
         help_menu = bar.addMenu(tr("&Help"))
+        help_menu.addAction(tr("Usage tutorial..."), self.show_tutorial)
         help_menu.addAction(tr("about"), self.about)
 
     def _build_central(self) -> None:
@@ -1284,6 +1286,10 @@ class MainWindow(QMainWindow):
                 "N).",
             ),
         )
+
+    def show_tutorial(self) -> None:
+        """Help -> Usage tutorial: open the shipped tutorial (text in the current language)."""
+        TutorialDialog(self).exec()
 
     # ------------------------------------------------------------------
     # Processing action.

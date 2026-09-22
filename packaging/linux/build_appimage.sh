@@ -96,7 +96,7 @@ BUNDLE_DIR="$APPDIR/usr/bin"
 if [ -d "$BUNDLE_DIR/_internal" ]; then
     BUNDLE_DIR="$BUNDLE_DIR/_internal"
 fi
-for resource in nmrforge_data/config nmrforge_data/presets gui/assets ui_support/locales; do
+for resource in nmrforge_data/config nmrforge_data/presets nmrforge_data/tutorial gui/assets ui_support/locales; do
     if [ ! -e "$BUNDLE_DIR/$resource" ]; then
         echo "build failed: the artefact is missing the runtime resource $resource (PyInstaller datas did not apply)" >&2
         exit 1
