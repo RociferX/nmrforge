@@ -370,12 +370,14 @@ def test_nus_import_records_nuslist_checksum(
 def test_import_writable_raw_names_copied_not_linked(
     tmp_path: Path, bruker_dir: Path
 ) -> None:
-    """Fid.com/profYZ.dat Is backend writable/touch file: Entity copy is not linked (changes do not
+    """Fid.com/profY.dat/profYZ.dat Is backend writable/touch file: Entity copy is not linked (changes do not
     pollute the source)."""
     src = tmp_path / "src_with_fid"
     shutil.copytree(_source(bruker_dir), src)
     fid_com = src / "fid.com"
     fid_com.write_text("#!/bin/csh\n# user fid.com\n", encoding="utf-8")
+    prof_y = src / "profY.dat"
+    prof_y.write_text("profile", encoding="utf-8")
     prof_yz = src / "profYZ.dat"
     prof_yz.write_text("profile", encoding="utf-8")
 
@@ -384,11 +386,13 @@ def test_import_writable_raw_names_copied_not_linked(
     assert manager.project is not None
     raw_dir = manager.data_dir("exp_001", "d_001", "raw")
     # Writable file is not a link: unlike source file, rewriting does not pollute the source.
-    for name in ("fid.com", "profYZ.dat"):
+    for name in ("fid.com", "profY.dat", "profYZ.dat"):
         assert (raw_dir / name).is_file()
         assert not os.path.samefile(src / name, raw_dir / name)
     (raw_dir / "fid.com").write_text("#!/bin/csh\n# patched\n", encoding="utf-8")
     assert fid_com.read_text(encoding="utf-8") == "#!/bin/csh\n# user fid.com\n"
+    (raw_dir / "profY.dat").write_text("patched", encoding="utf-8")
+    assert prof_y.read_text(encoding="utf-8") == "profile"
     (raw_dir / "profYZ.dat").write_text("patched", encoding="utf-8")
     assert prof_yz.read_text(encoding="utf-8") == "profile"
     # The remaining read-only files are still links (symbolic links take precedence, Windows falls
@@ -398,7 +402,7 @@ def test_import_writable_raw_names_copied_not_linked(
         assert (raw_dir / "acqus").is_symlink()
     run = manager.project.run(result.run_id)
     assert run is not None
-    assert run.params["link_stats"]["writable"] == 2
+    assert run.params["link_stats"]["writable"] == 3
     assert (
         run.params["link_stats"]["symlink"] > 0
         or run.params["link_stats"]["hardlink"] > 0

@@ -23,13 +23,12 @@ from typing import Any
 
 #: declared behaviour level (see the module doc; meaning matches nmrforge_api.compat)
 DECLARATION: dict[str, Any] = {'schema': 'nmrforge_api.compat.declaration.v1',
- 'digest': '7d027acb0bdfb4bf03cc70e0f18a725b6953797c48a484ee2f05dbba79782dc0',
- 'token_digest': '4b258d98b4d91060045cae6fc7b53077a321f06cecc37b438dce72f7cd35e64e',
- 'compat_level': 'behavior_changed',
- 'affected': ['processing'],
+ 'digest': 'd14fc3400500a1f16036f4109273ae410a5036d1b72eab4d92a0564c45f9168f',
+ 'token_digest': '52eb51e93a7d1e93cf5465e36da8470aa4fb15235ee03a940a72c2c8efc6d0d1',
+ 'compat_level': 'additive',
+ 'affected': [],
  'updated': '2026-09-22',
- 'note': 'window-scoring detection threshold changed from 35 sigma (pick-peaking '
-         'default) to 12 sigma',
+ 'note': 'truth_benchmark: nearest_id / nearest_distance columns on not-detected rows',
  'golden': {'name': 'conformance_v1',
             'spectrum_sha256': '382b330926da93d856feef40ca33c2df1eec21b61e50db471bdf7aa4bb2fb311',
             'peak_table_sha256': '7f8180662220c83db225fa6b2bf0f5b4c71196fcdaebebe7e8c172a4861657ab',
