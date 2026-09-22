@@ -21,17 +21,18 @@ typical session from start to finish. Menu and button names follow the text the 
 
 ## 2. The window at a glance
 
-Three columns:
+**Four columns**, with draggable separators:
 
-- **Left - project tree**: project → experiment → inputs / processing / outputs / graphics.
-  Selecting a node sets the context for the other two columns.
-- **Middle - processing pipeline**: the four steps for the current data set, each with a status and a
-  "what to do next" hint; below it the **task log**, scoped to the current selection (single data
-  set, data group, experiment type or everything).
-- **Right - spectra**: the embedded viewer plus the spectra already produced for this context.
+- **Column 1 - project tree**: project → experiment → inputs / processing / outputs / graphics.
+  Selecting a node sets the context for the other columns.
+- **Column 2 - processing pipeline**: the breadcrumb for the current data set plus the four steps,
+  each with a status and a "what to do next" hint.
+- **Column 3 - task log**: a permanent **middle column** (it no longer sits at the bottom),
+  scoped to the current selection (single data set, data group, experiment type or everything).
+- **Column 4 - spectra**: the embedded viewer plus the spectra already produced for this context.
 
-Top menu: `File`, `Experiment`, `View`, `Tools`, `Settings`, `Help` (About, and Usage tutorial -
-this document).
+Top menu: `File`, `Experiment`, `View` (hide/show the project tree, the pipeline or the spectra),
+`Tools`, `Settings`, `Help` (Usage tutorial, and About - the tutorial is this document).
 
 ## 3. First run, step by step
 
@@ -39,10 +40,10 @@ this document).
    recorded there.
 2. **New experiment**: `Experiment → New experiment...`. The experiment type can be left blank - the
    program classifies the data itself.
-3. **Import data**: right-click the experiment node in the left column → "Import sample data...",
+3. **Import data**: right-click the experiment node in column 1 → "Import sample data...",
    then pick the **Bruker data directory** (the one holding `acqus` and friends). Segments of the
    same experiment can be imported as several runs; 2D data can also be imported as a group.
-4. **Check what the program understood**: the middle column shows the experiment type, the sampling
+4. **Check what the program understood**: column 2 shows the experiment type, the sampling
    classification and the dimension layout, with the evidence in the log. **Fix a wrong
    classification now** - it is far cheaper than patching things up after processing.
 5. **Generate FID**, then **Generate spectrum**. The data-quality inspection runs before any
@@ -90,7 +91,7 @@ step.
 
 ## 5. Looking at spectra
 
-- the viewer in the right column: wheel to zoom, middle button to pan, an intensity slider for the
+- the viewer in column 4: wheel to zoom, middle button to pan, an intensity slider for the
   contour levels, several spectra overlaid;
 - 3D data can be inspected slice by slice with projections;
 - a **standalone viewer** (no project needed) can be started on its own: `nmrforge-viewer` after an
@@ -154,7 +155,7 @@ first** - the `.bak` in the raw directory is your way back.
 
 ## 12. Where to look when something fails
 
-1. the **task log** in the middle column: the reason is usually there (a missing executable, memory
+1. the **task log** in column 3 (the middle column): the reason is usually there (a missing executable, memory
    running out at a particular step, ...);
 2. `Tools → Data quality inspection`: separates "the data has a problem" from "the parameters do
    not fit";

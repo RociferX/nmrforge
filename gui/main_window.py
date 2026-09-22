@@ -1273,8 +1273,9 @@ class MainWindow(QMainWindow):
             tr("About NMRForge"),
             tr(
                 "NMRForge: an automated processing, parameter-optimisation and quality-control "
-                "platform for Bruker 2D/3D NMR.\nThree-column layout: project tree / pipeline / "
-                "spectrum viewer.\n\nAxis-order convention (internally everything is organised in "
+                "platform for Bruker 2D/3D NMR.\nFour columns: project tree / processing "
+                "pipeline / task log / spectrum viewer.\n\nAxis-order convention (internally "
+                "everything is organised in "
                 "the logical order F1/F2/F3):\n- 2D: F1 = indirect dimension, F2 = direct "
                 "dimension; 3D: F1 = first indirect, F2 = second indirect, F3 = direct "
                 "dimension.\n- NMRPipe stores 3D files in the standard order (F2,F1,F3); loading "

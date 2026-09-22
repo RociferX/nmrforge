@@ -25,15 +25,17 @@ records are in [packaging.md](packaging.md).
 
 ## Window layout
 
-| Area | What it shows |
+The window has **four columns** (the separators can be dragged; the View menu only toggles three of them):
+
+| Column | What it shows |
 | --- | --- |
-| Left | Project tree: Project -> Experiment -> Input / Processing / Output / Figures. Selecting a node sets the context for everything else. |
-| Middle | Processing pipeline for the selected dataset: a breadcrumb plus the status-driven step list and the "what next" prompt. |
-| Middle column | Task log, scoped to the current selection (single dataset, data group, experiment type, or global). It expands automatically. |
-| Right | Spectrum panel: the embedded viewer plus the list of spectra produced for the current context. |
+| 1 | Project tree: Project -> Experiment -> Input / Processing / Output / Figures. Selecting a node sets the context for everything else. |
+| 2 | Processing pipeline for the selected dataset: a breadcrumb plus the status-driven step list and the "what next" prompt. |
+| 3 | Task log: the permanent middle column, scoped to the current selection (single dataset, data group, experiment type, or global). |
+| 4 | Spectrum panel: the embedded viewer plus the list of spectra produced for the current context. |
 
 Menus: `File` (new/open/save project, recent projects), `experiment` (new/rename/delete
-experiment), `View` (toggle the three columns), `Tools` (data-quality inspection, spectrum
+experiment), `View` (hide/show the project tree, the pipeline or the spectra), `Tools` (data-quality inspection, spectrum
 quality assessment), `Settings` (software settings), `Help` (usage tutorial, about).
 **`Help -> Usage tutorial`** opens the tutorial that ships with the program (what it does and how to use it, in the current interface language); the text lives in `nmrforge_data/tutorial/{zh,en}.md`.
 
