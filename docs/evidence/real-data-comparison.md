@@ -31,12 +31,13 @@ section 2.
 
 Overlaying the **deposited chemical shifts** gives the quantitative reading: the top panel is the
 **automatically processed spectrum**, and the expected peaks are drawn in **three tiers** by how well they
-line up - **red filled circles = matched inside the tight tolerance (1H 0.01 / 15N 0.05 ppm)**, **amber
-filled circles = matched only at the loose tolerance (0.02 / 0.10 ppm)**, which is a small positional
-shift rather than a missing peak, **black open squares = matched at neither tier**. Bottom-left is the
-calibrated **position residual** scatter (dashed box = tight tolerance; the loose-only peaks are drawn as
-open circles and sit just outside that box), bottom-right is the **recovery per tolerance** (dark bars =
-the chance background under the same convention).
+line up - **red filled circles = matched inside the tight tolerance (1H 0.01 / 15N 0.05 ppm)**, **amber filled
+circles = matched only at the loose tier (0.02 / 0.10 ppm)**, **grey filled circles = matched only at the
+coarse tier (0.05 / 0.50 ppm)** - all of them positional shifts rather than missing peaks - and **black
+open squares = matched at no tier**. Bottom-left is the calibrated **position residual** scatter (dashed
+box = tight tolerance; loose-only peaks are drawn as open circles and coarse-only peaks as crosses, both
+outside that box), bottom-right is the **recovery per tolerance** (dark bars = the chance background under
+the same convention).
 
 **Data citation (public data - cite the sources together with any number quoted from this page)**:
 
@@ -99,31 +100,41 @@ software does not decide it for you). That 12 sigma applies only to the **peak s
 looks at** (`workflow/window_optimize.py`); it is a separate constant from the product's peak-picking
 default (35 sigma) and the two never override each other.
 
-**Read it in three tiers** (same matching, only the tolerance changes):
+**Read it in tiers** (same matching, only the tolerance changes; every tier's per-peak status is in the
+match CSV):
 
 | Tier | Expected peaks | What it means |
 | --- | --- | --- |
-| **matched at the tight tolerance** (1H 0.01 / 15N 0.05 ppm) | **90 / 107 = 84.1%** | position lines up precisely |
-| **matched only at the loose tolerance** (0.02 / 0.10 ppm) | **10** | a **positional offset**: the residual is almost entirely in 15N (0.045-0.072 ppm), 1H stays <= 0.005 ppm, and most of those neighbours are strong peaks (SNR 155-588) - **the peak is there, the algorithm did not drop it** |
-| **matched at neither tier** | **7 / 107 = 6.5%** | for one of them (LEU42) there is a peak right next to it, claimed by a neighbouring expected peak under the **one-to-one rule (a detection can satisfy one expected peak only)**; the other six have no detection within 2.3x the tight tolerance (15N off by 0.12-1.43 ppm), which is closer to "a peak of the multi-spectrum joint assignment that does not exist as such under this condition" |
+| **(1) matched at the tight tolerance** (1H 0.01 / 15N 0.05 ppm) | **90 / 107 = 84.1%** | position lines up precisely |
+| **(2) matched only at the loose tier** (0.02 / 0.10 ppm) | **10** | a **positional offset**: the residual is almost entirely in 15N (0.045-0.072 ppm), 1H stays <= 0.005 ppm, and most of those neighbours are strong peaks (SNR 155-588) - **the peak is there, the algorithm did not drop it** |
+| **(3) matched only at the coarse tier** (0.05 / 0.50 ppm) | **4** | a larger shift (0.11-0.27 ppm in 15N). **This tier is a classification aid, not a criterion**: the chance background under the same convention is already **35%** |
+| **(4) matched at no tier** | **3 / 107 = 2.8%** | attributed one by one below |
 
 The `level` / `nearest_id` / `nearest_distance` columns of the match CSV exist for this table: the CSV
 carries **one block per tolerance tier** (`level` = that tier's `tol_H/tol_N`), and `nearest_*` gives the
 **closest detection** of every unmatched expected peak together with its distance in tolerance units.
 
-**Those 7 "matched at neither tier" peaks, measured one by one** (from the final spectrum's local maxima):
+**Those 3 "matched at no tier" peaks, measured one by one** (from the final spectrum's local maxima):
 
-- **One peak is inside its box but never entered the picked table**: the local maximum at GLY82's box
-  (1H 8.44 / 15N 104.59) is **130 sigma (about 12.5% of the spectrum maximum)**, but it sits only about 10
-  points from the 15N edge of the spectrum (104.05 ppm) and therefore inside the **detection edge margin**
-  (default = 3x the nuclide line width, about 0.63 ppm or 12 points). Re-running the same detection with
-  `edge_margin_ppm=0.10` gives 309 peaks instead of 308, and the extra one is at **8.436 / 104.594
-  (SNR 130)**. That is a **detection-coverage** setting, not the algorithm dropping a peak.
-- **Two peaks were taken by a neighbouring expected peak** under the one-to-one rule: the closest detection
-  of both LEU42 and VAL56 is the same peak (8.487 / 120.178, SNR 340), already assigned to ILE40.
-- **Three peaks were picked but sit outside the loose tier**: the local maxima of ALA20 / GLY72 / GLN106 are
-  0.10-0.27 ppm away in 15N (2-5 data points) from the deposited position.
-- **Only around SER37 is there really no peak** (local maximum 3 sigma).
+- **GLY82 (box at 1H 8.44 / 15N 104.59): the peak is inside the box but never entered the picked table** -
+  its local maximum is **130 sigma (about 12.5% of the spectrum maximum)** and sits only about 10 data
+  points from the 15N edge (104.05 ppm), i.e. inside the **detection edge margin** (next bullet).
+- **VAL56: the peak was taken by ILE40** under the one-to-one rule - that detection (8.487 / 120.178,
+  SNR 340) went to ILE40; the cluster around 8.48-8.49 / 120.0-120.2 carries three deposited positions, so
+  the assignment is genuinely ambiguous.
+- **SER37: there really is no peak nearby** (local maximum 3 sigma), closer to exchange broadening or a
+  weak peak.
+
+**About edge peaks: this is deliberate behaviour of the peak picker, stated here so it cannot be
+misread.** The picker **intentionally excludes** maxima within **3x the nuclide line width** of the top and
+bottom edges of the spectrum (about 0.63 ppm, i.e. 12 data points, on 15N here) in order to **filter axis
+peaks** - truncation/wrap-around residue and a tilting baseline at the edges routinely create spurious
+maxima that would otherwise pollute the peak table. The price is that **a real signal peak is occasionally
+removed as well**: this data set has exactly one such case (GLY82). Re-running with
+`edge_margin_ppm=0.10` gives 309 peaks instead of 308, and the extra one is at **8.436 / 104.594
+(SNR 130)**, only 0.003 ppm from the deposited position. **Users should therefore check the top and bottom
+edges of their own spectra**: lowering the edge margin (`edge_margin_ppm`) or adding peaks manually near the
+edges brings such peaks back.
 - **The tight tolerance sits on the data-point resolution**: the 15N axis of the final spectrum has 512
   points over 104.05-132.00 ppm, so **one data point = 0.055 ppm**, while the tight tolerance is 0.05 ppm -
   **smaller than one point**. "Matched" therefore asks for a 15N position within **less than one data
