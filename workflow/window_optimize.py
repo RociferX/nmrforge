@@ -41,11 +41,15 @@ peak only" to three **detection-oriented** factors, anchored on the ground-truth
    FWHM after apodisation may not exceed the closest spacing, and widely separated peaks are not
    tightened further.
 
-The expected peaks use the **product's own peak-picking threshold** (``_PEAK_SIGMA_MULT`` = the
-default 35 sigma), not a low value picked by hand: with a low threshold the truncation side lobes
-of the un-windowed spectrum are themselves counted as peaks, and the merging criterion then reads
-"the side lobes were always there" as "the window merged peaks" (measured: at 6 sigma a single-peak
-synthetic spectrum reports a dozen expected peaks).
+The expected-peak threshold is ``_PEAK_SIGMA_MULT`` = **12 sigma**: it is not an arbitrarily low
+value (with a low threshold the truncation side lobes of the un-windowed spectrum are themselves
+counted as peaks and the merging criterion reads "the side lobes were always there" as "the window
+merged peaks" -- measured: at 6 sigma a single-peak synthetic spectrum reports a dozen expected
+peaks), and it is **not** the peak-picking default of 35 sigma either -- 35 sigma is the default
+prepared for strong-signal liquid spectra, whose value is that it stays applicable in more
+situations rather than being the peak set the window choice should look at. Window selection has to
+judge "did this window merge peaks that were resolved to begin with", so the peak set has to cover
+weak peaks.
 
 Score = median over traces of (mean detection d x independent-maxima fraction x line-shape factor);
 each factor has a clear job (detection strength / resolution loss / artefacts) instead of being
@@ -148,12 +152,19 @@ _RES_TOL = 1.25
 _INDIRECT_RES_TOL = 1.15
 
 # Peak detection convention used for the detection statistics (same function as
-# workflow/truth_benchmark.detect_peaks): threshold = noise sigma x 35, i.e. the **product's
-# default peak-picking threshold** (see workflow/pick_peaks._PICK_THRESHOLD_SIGMA;
-# tests/test_window_truth_benchmark.py asserts the two are equal); minimum separation 2 points.
+# workflow/truth_benchmark.detect_peaks): threshold = noise sigma x 12 (**not** the product's
+# default peak-picking threshold of 35 sigma, see below); minimum separation 2 points.
 # The cap on d only affects the ordering among very strong peaks; 30 is an empirical value (higher
 # values do not change the window choice, they only amplify numerical noise).
-_PEAK_SIGMA_MULT = 35.0
+#
+# Why 12 sigma and not the pick-peaking default of 35 sigma (2026-09-22, user): 35 sigma is the
+# default prepared for **strong-signal liquid spectra**; its value is that it stays applicable in
+# more situations, not that it is the peak set the window choice should look at. Window selection
+# asks "did this window merge peaks that were resolved to begin with", so the peak set has to cover
+# weak peaks too; the higher the threshold, the earlier weak peaks disappear and the less the
+# merging criterion can see. 12 sigma is the threshold these real datasets use in the reference
+# workflow and it also keeps the synthetic close-pair criterion sensitive.
+_PEAK_SIGMA_MULT = 12.0
 _PEAK_MIN_SEP = 2
 _DETECTION_CAP = 30.0
 #: A local maximum below this fraction of the strongest reference peak is not an expected peak
