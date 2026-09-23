@@ -1,15 +1,12 @@
 # Citation metadata for nmrForge.
 #
-# STATUS: usable for citing the repository itself. The author and the repository URL are
-# confirmed; the affiliation is not, and no DOI exists yet, so cite the repository URL (every
-# release is also citable through its GitHub Release page and tag).
+# STATUS: usable for citing the software. The author and the repository URL are confirmed; the
+# affiliation is not. Zenodo archives tagged releases of this repository through its GitHub
+# integration, so 1.0.0 has a DOI: the version DOI below identifies this release, and the
+# concept DOI in `identifiers` always resolves to the newest version.
 #
-# DOI: none, and none reserved. `.zenodo.json` is prepared but still carries an explicit
-# placeholder marker - nothing has been uploaded to Zenodo. When a Zenodo release mints a DOI,
-# make exactly two changes here: add
-#   doi: "10.5281/zenodo.XXXXXXX"
-# and, only if a software paper exists, a `preferred-citation` block; then update the "Citation"
-# section of README.md. Never fill in a DOI before the record exists.
+# Add a `preferred-citation` block only if a software paper exists. Keep the DOI in step with
+# the Zenodo record: never fill in a DOI before the record exists.
 #
 # `version` and `date-released` are bumped together with core.__version__ on every release;
 # tests/test_release_readiness.py fails if the version drifts.
@@ -18,7 +15,7 @@
 # README.md and LICENSE_OPTIONS.md together (a test enforces that they agree).
 
 cff-version: 1.2.0
-message: "If you use nmrForge, please cite this metadata (repository URL until a DOI exists)."
+message: "If you use nmrForge, please cite this metadata (DOI 10.5281/zenodo.22909416)."
 title: "nmrForge: automation, parameter optimisation and quality control for Bruker multidimensional NMR data"
 abstract: >-
   nmrForge is a platform for automating Bruker multidimensional NMR data processing. It reads
@@ -34,6 +31,11 @@ authors:
 version: 1.0.0
 date-released: "2026-09-23"
 repository-code: "https://github.com/RociferX/nmrforge"
+doi: "10.5281/zenodo.22909416"
+identifiers:
+  - type: doi
+    value: "10.5281/zenodo.22909415"
+    description: "Concept DOI - always resolves to the newest version"
 license: "Apache-2.0"
 keywords:
   - NMR

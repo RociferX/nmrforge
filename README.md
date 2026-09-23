@@ -28,6 +28,7 @@ Author: **Xuanfeng Li** · Source licence: Apache-2.0 (see [LICENSE](LICENSE) an
 Distribution: source plus a Linux AppImage (one artefact; the interface language is switched at run time)
 Releases: <https://github.com/RociferX/nmrforge/releases>
 Repository: <https://github.com/RociferX/nmrforge>
+Archived at Zenodo: DOI [10.5281/zenodo.22909416](https://doi.org/10.5281/zenodo.22909416) (all versions: [10.5281/zenodo.22909415](https://doi.org/10.5281/zenodo.22909415))
 
 > **nmrForge 1.0.0 is the production release: the desktop application and the Python/CLI API
 > (`nmrforge_api`, contract version 1.0) are both released.** Behaviour documented here is tested
@@ -368,7 +369,9 @@ These are deliberate, documented boundaries rather than unfinished features:
 ## Citation
 
 [CITATION.cff](CITATION.cff) carries the citation metadata. The author and the repository URL
-are confirmed; the affiliation is not, and there is no DOI yet, so cite the repository URL (or the
+are confirmed; the affiliation is not. Since 1.0.0 every release has a DOI - cite
+`10.5281/zenodo.22909416` for this version (<https://doi.org/10.5281/zenodo.22909416>), or
+`10.5281/zenodo.22909415` for all versions (<https://doi.org/10.5281/zenodo.22909415>); the
 GitHub Release page of the version you used) until a DOI exists. The file states exactly which
 two lines to add once a Zenodo release mints a DOI.
 
