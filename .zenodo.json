@@ -2,8 +2,8 @@
   "title": "nmrForge: automation, parameter optimisation and quality control for Bruker multidimensional NMR data",
   "upload_type": "software",
   "publication_date": "2026-09-23",
-  "description": "nmrForge automates Bruker multidimensional NMR data processing: it reads acquisition parameters, identifies the experiment type and the sampling scheme, plans and executes an NMRPipe processing strategy (with SMILE reconstruction for non-uniform sampling), performs quality control, and records the resolved parameters, external tool versions and warnings so that a run can be reproduced and audited. This record is the 1.0.0 release: source plus a Linux AppImage, validated end to end on public data (BMRB timedomain entry 53374) with the reproduction scripts shipped in the repository.",
-  "version": "1.0.0",
+  "description": "nmrForge automates Bruker multidimensional NMR data processing: it reads acquisition parameters, identifies the experiment type and the sampling scheme, plans and executes an NMRPipe processing strategy (with SMILE reconstruction for non-uniform sampling), performs quality control, and records the resolved parameters, external tool versions and warnings so that a run can be reproduced and audited. This record is the 1.0.1 release: source plus a Linux AppImage, validated end to end on public data (BMRB timedomain entry 53374) with the reproduction scripts shipped in the repository.",
+  "version": "1.0.1",
   "language": "eng",
   "creators": [
     {

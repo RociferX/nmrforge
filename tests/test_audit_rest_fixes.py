@@ -425,7 +425,9 @@ def test_packaging_policy_declares_source_and_appimage_release() -> None:
     """PACK-015: The boundary between the current release and its AppImage licences must be
     clear."""
     text = Path("docs/packaging.md").read_text(encoding="utf-8")
-    assert "released with v1.0.0" in text
+    from core import __version__
+
+    assert "released with v" + __version__ in text
     assert "AppImage" in text
     assert "wheel" in text
     assert "APPIMAGE_RELEASE_CHECKLIST.md" in text

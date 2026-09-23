@@ -1,6 +1,6 @@
 # Getting started
 
-This page takes you from v1.0.0 to a first useful result: either the Linux AppImage
+This page takes you from 1.0.1 to a first useful result: either the Linux AppImage
 (self-contained, interface language switched at run time) or a source installation. Both tracks are covered below.
 
 ## Track A - source installation and GUI

@@ -63,6 +63,16 @@ NUSOptimizer
 - Using an LLM to guess phase or NUS parameters from an image; an LLM is for explanation and
   reports only.
 
+## v1.0.1 - the patch release (done 2026-09-23)
+
+A patch on top of 1.0.0, **with no new features**: it fixes the few places that could make a
+result silently wrong - the conversion parameter (`-xN` follows the physical `ser` row instead of
+overriding it with the `acqus` TD), the FnMODE to bruk2pipe conversion keyword (no longer
+rewriting a `fid.com` that `bruker -AUTO` had written correctly) and the inter-part field-drift
+alignment before a multi-part merge. Documentation and metadata follow along (affiliation, DOI
+citation, execute-bit troubleshooting, the `-xN` note). The per-item list is in the changelog,
+which the maintainer keeps in the private repository.
+
 ## v1.0.0 - the production release (done 2026-09-23)
 
 The distribution moved from 0.11.0 to **1.0.0**: both bars for 1.0 are met -

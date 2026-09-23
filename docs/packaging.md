@@ -1,6 +1,6 @@
 # AppImage packaging solution (NMRForge)
 
-Status: **released with v1.0.0**. The source stays Apache-2.0; the Linux AppImage ships in the
+Status: **released with v1.0.1**. The source stays Apache-2.0; the Linux AppImage ships in the
 release. **Since 2026-09-22 the release carries one artefact**, with the interface language chosen at
 run time; it is built from the released source commit recorded in
 `usr/share/doc/NMRForge/BUILD_INFO.txt`.
@@ -11,7 +11,7 @@ other components must be re-checked.
 
 ## Release strategy (PACK-015, decided 2026-09-12)
 
-- **v1.0.0 ships both the source and the AppImage.** The AppImage is
+- **v1.0.1 ships both the source and the AppImage.** The AppImage is
   built by PyInstaller; `nmrforge_data/config`, `nmrforge_data/presets`, `gui/assets` and
   `ui_support/locales` reach `_MEIPASS` through the spec's `datas` (the data package keeps its
   shape), and resources are located through `core/app_paths.py` and `ui_support/i18n.py`.

@@ -6,4 +6,4 @@ through ``dynamic = ["version"]`` + ``attr = "core.__version__"``, and
 packaging/linux/build_appimage.sh reads it too (PROV-009, 2026-09-12).
 """
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"

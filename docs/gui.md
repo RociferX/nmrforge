@@ -15,10 +15,10 @@ what the interface does; the underlying engine behaviour is in
 ## Starting it
 
 ```bash
-python main.py    # v1.0.0 source entry point (the AppImage starts it internally)
+python main.py    # 1.0.1 source entry point (the AppImage starts it internally)
 ```
 
-The v1.0.0 Linux AppImage is on the releases page (one artefact, interface language switched at
+The 1.0.1 Linux AppImage is on the releases page (one artefact, interface language switched at
 run time); the first
 normal run installs the desktop entry (`--remove-desktop` removes it). Build and acceptance
 records are in [packaging.md](packaging.md).

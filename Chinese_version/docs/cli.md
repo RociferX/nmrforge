@@ -6,7 +6,7 @@
 python -m nmrforge_api --help
 ```
 
-请在 v1.0.0 的源码检出里、完成可编辑安装之后使用命令行;见
+请在 v1.0.1 的源码检出里、完成可编辑安装之后使用命令行;见
 [installation.md](installation.md)。
 
 ## 子命令

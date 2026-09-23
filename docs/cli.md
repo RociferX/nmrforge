@@ -7,7 +7,7 @@ drives:
 python -m nmrforge_api --help
 ```
 
-Use the command line from the v1.0.0 source checkout after its editable install; see
+Use the command line from the 1.0.1 source checkout after its editable install; see
 [installation.md](installation.md).
 
 ## Sub-commands

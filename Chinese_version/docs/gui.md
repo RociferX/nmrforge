@@ -13,10 +13,10 @@
 ## 启动
 
 ```bash
-python main.py    # v1.0.0 源码入口(AppImage 里是内置入口)
+python main.py    # 1.0.1 源码入口(AppImage 里是内置入口)
 ```
 
-v1.0.0 的 Linux AppImage 在发布页(一份产物,界面语言运行时切换);首次正常运行会装桌面菜单项
+1.0.1 的 Linux AppImage 在发布页(一份产物,界面语言运行时切换);首次正常运行会装桌面菜单项
 (`--remove-desktop` 移除),构建与验收记录见 [packaging.md](packaging.md)。
 
 ## 窗口布局
