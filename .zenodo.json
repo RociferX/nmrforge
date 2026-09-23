@@ -1,9 +1,10 @@
 {
-  "_status": "PLACEHOLDER - not uploaded, no DOI reserved. Fill in before any Zenodo release.",
   "title": "nmrForge: automation, parameter optimisation and quality control for Bruker multidimensional NMR data",
   "upload_type": "software",
-  "description": "nmrForge automates Bruker multidimensional NMR data processing: it reads acquisition parameters, identifies the experiment type and sampling scheme, plans and executes an NMRPipe processing strategy (with SMILE reconstruction for non-uniform sampling), performs quality control, and records the resolved parameters, external tool versions and warnings for reproducibility and audit.",
+  "publication_date": "2026-09-23",
+  "description": "nmrForge automates Bruker multidimensional NMR data processing: it reads acquisition parameters, identifies the experiment type and the sampling scheme, plans and executes an NMRPipe processing strategy (with SMILE reconstruction for non-uniform sampling), performs quality control, and records the resolved parameters, external tool versions and warnings so that a run can be reproduced and audited. This record is the 1.0.0 release: source plus a Linux AppImage, validated end to end on public data (BMRB timedomain entry 53374) with the reproduction scripts shipped in the repository.",
   "version": "1.0.0",
+  "language": "eng",
   "creators": [
     {
       "name": "Li, Xuanfeng"
@@ -21,5 +22,12 @@
   ],
   "access_right": "open",
   "license": "Apache-2.0",
-  "notes": "Licence: Apache-2.0 for the project's own source (see LICENSE for the verbatim text, NOTICE for the copyright line and scope, LICENSE_OPTIONS.md for the reasoning). LGPL-3.0 applies only to the Qt/PySide6 libraries bundled in the Linux AppImage, which ships their texts and notices. Author: Xuanfeng Li; affiliation still unknown. No Zenodo record exists, no DOI has been reserved and nothing has been uploaded: keep this file and CITATION.cff in step, and bump \"version\" here together with core.__version__ on every release."
+  "related_identifiers": [
+    {
+      "identifier": "https://github.com/RociferX/nmrforge",
+      "relation": "isSupplementTo",
+      "resource_type": "software"
+    }
+  ],
+  "notes": "Licence: Apache-2.0 for the project's own source (LICENSE holds the verbatim text, NOTICE the copyright line, LICENSE_OPTIONS.md the reasoning). LGPL-3.0 applies only to the Qt/PySide6 libraries bundled in the Linux AppImage, which ships their texts and notices. Author: Xuanfeng Li; affiliation still unknown. Maintainers: keep the \"version\" field in step with core.__version__ and CITATION.cff on every release. If a repository has both .zenodo.json and CITATION.cff, Zenodo uses this file and ignores CITATION.cff."
 }
