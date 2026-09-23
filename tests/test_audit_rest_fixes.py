@@ -7,7 +7,7 @@ drop it; - LOG-011 The source bad point shall not be remembered as "deleted" whe
 fails; - BATCH-012 Batch formal limit 2D (constant + skip reason); - STUB-013 Native backend
 skeleton and unimplemented template verification deletion, provider Verification during
 creation; - DEAD-014 Configuration section without consumers and old SMILE copywriting cleanup;
-- PACK-015 v0.11.0 source plus AppImage, spec datas covering runtime resources (language
+- PACK-015 v1.0.0 source plus AppImage, spec datas covering runtime resources (language
                catalogues included), one artefact with the language switched at run time;
 - QA-017 Two Ruff alarms (covered by ruff check full access control, only key
 points are locked here)."""
@@ -425,7 +425,7 @@ def test_packaging_policy_declares_source_and_appimage_release() -> None:
     """PACK-015: The boundary between the current release and its AppImage licences must be
     clear."""
     text = Path("docs/packaging.md").read_text(encoding="utf-8")
-    assert "released with v0.11.0" in text
+    assert "released with v1.0.0" in text
     assert "AppImage" in text
     assert "wheel" in text
     assert "APPIMAGE_RELEASE_CHECKLIST.md" in text

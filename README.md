@@ -23,16 +23,18 @@ warning and output it produced so that the result can be reproduced and audited.
 > and keep the evidence (quality metrics, resolved parameters, run records) alongside the
 > spectrum.
 
-Current development version: **0.11.0** · Status: **active development**
+Current version: **1.0.0** · Status: **production release**
 Author: **Xuanfeng Li** · Source licence: Apache-2.0 (see [LICENSE](LICENSE) and [NOTICE](NOTICE))
 Distribution: source plus a Linux AppImage (one artefact; the interface language is switched at run time)
 Releases: <https://github.com/RociferX/nmrforge/releases>
 Repository: <https://github.com/RociferX/nmrforge>
 
-> **Both tracks - the desktop application and the Python/CLI API (`nmrforge_api`) - are released as
-> their first version; the release version is still 0.11.0.** Behaviour documented here is tested
-> (see the test suite); processing defaults may still be adjusted before the release version reaches
-> 1.0.
+> **nmrForge 1.0.0 is the production release: the desktop application and the Python/CLI API
+> (`nmrforge_api`, contract version 1.0) are both released.** Behaviour documented here is tested
+> (see the test suite); any later behaviour change is declared through the compat process
+> (`nmrforge_api/compat_declaration.py`: behaviour digests plus the
+> `same/additive/behavior_changed/contract_changed` levels) rather than by "defaults may still
+> change".
 
 > ### Two tracks: the desktop application and the Python/CLI API
 >
@@ -129,7 +131,7 @@ run headless on a server while `gui/` and `viewer/` provide the desktop interfac
 | [`nmrforge_data/presets/`](nmrforge_data/presets/README.md) | experiment templates; the YAML files are the single source |
 | [`tests/`](tests/README.md) | the pytest suite: unit / integration / regression |
 | [`examples/`](examples/README.md) | runnable synthetic-dataset and walkthrough scripts |
-| [`packaging/`](packaging/README.md) | AppImage build assets (shipped with v0.11.0; the release checklist stays in the maintainer's private repository) |
+| [`packaging/`](packaging/README.md) | AppImage build assets (shipped with v1.0.0; the release checklist stays in the maintainer's private repository) |
 | [`scripts/`](scripts/README.md) | standalone command-line tools and validation scripts |
 | [`docs/`](docs/README.md) | the documentation index |
 | [`.github/`](.github/) | the CI workflow and the issue/PR templates |
@@ -154,7 +156,7 @@ licence inventory.
 
 ## Installation
 
-v0.11.0 ships two things: the **Linux AppImage** and the **source**.
+v1.0.0 ships two things: the **Linux AppImage** and the **source**.
 The AppImage bundles Python and Qt, so it needs no environment of its own
 ([releases page](https://github.com/RociferX/nmrforge/releases)); for the source, clone the
 repository and use an editable install so the repository-root resources remain available:
@@ -430,7 +432,7 @@ tools recognise the repository as Apache-2.0.
 
 **The AppImage has a separate distribution boundary.** It bundles PySide6/Qt and other
 third-party libraries, which are distributed under their own licences (LGPL-3.0 among them).
-The v0.11.0 AppImage completed the release checklist kept in the maintainer's private repository
+The v1.0.0 AppImage completed the release checklist kept in the maintainer's private repository
 (licence texts and notice inside the artefact, replace/relink path, clean-machine acceptance,
 recorded SHA-256). Since 2026-09-21 the release carries **one** artefact - the interface language is
 switched at run time - and it is built from the released source commit recorded in
@@ -441,7 +443,7 @@ What this means in practice:
 
 - **using nmrforge from source**: Apache-2.0, including the patent grant, the requirement to keep
   attribution notices, and a statement of changes if you redistribute modified files;
-- **the AppImage**: the v0.11.0 artefact completed the release checklist kept in the maintainer's
+- **the AppImage**: the v1.0.0 artefact completed the release checklist kept in the maintainer's
   private repository; re-check before redistribution;
 - third-party components keep their own licences; see [THIRD_PARTY.md](THIRD_PARTY.md) and, for
   binaries, `packaging/linux/THIRD_PARTY_LICENSES/NOTICE.md`.
