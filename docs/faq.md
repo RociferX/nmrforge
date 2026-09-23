@@ -83,17 +83,20 @@ version in the application, the package and the provenance record cannot drift a
 
 ### How do I cite nmrForge?
 
-Citation metadata is being finalised in [CITATION.cff](../CITATION.cff); the author list and
-affiliation are not fixed yet. Until a release with a DOI exists, cite the repository URL. If you
-publish results, also cite NMRPipe and SMILE - see [THIRD_PARTY.md](../THIRD_PARTY.md).
+Citation metadata is in [CITATION.cff](../CITATION.cff): author Xuanfeng Li, affiliation University
+of Science and Technology of China. Every release from 1.0.0 has a DOI - the version DOI
+[10.5281/zenodo.22909416](https://doi.org/10.5281/zenodo.22909416) for one release, the concept DOI
+[10.5281/zenodo.22909415](https://doi.org/10.5281/zenodo.22909415) for all of them; cite the
+repository URL if you do not need a version. If you publish results, also cite NMRPipe and SMILE -
+see [THIRD_PARTY.md](../THIRD_PARTY.md).
 
 ### Can I use nmrForge commercially?
 
-The licence has not been chosen, so the repository is currently "all rights reserved" and you
-should not redistribute it. The GUI now depends on PySide6 (whose options include LGPL-3.0) instead
-of PyQt6 (GPL-3.0-only), so a permissive licence is possible in principle - but it still has to be
-chosen, and the third-party audit has to be rerun first. See
-[LICENSE_OPTIONS.md](../LICENSE_OPTIONS.md).
+Yes. This project's own source is Apache-2.0: the verbatim text is [LICENSE](../LICENSE) and the
+copyright line plus SPDX identifier are in [NOTICE](../NOTICE). The Qt/PySide6 libraries bundled
+inside the packaged distribution are LGPL-3.0, which constrains that distribution, not your use of
+the source. [LICENSE_OPTIONS.md](../LICENSE_OPTIONS.md) records the source/binary split and
+[THIRD_PARTY.md](../THIRD_PARTY.md) the third-party components.
 
 ### How do I know a published result is reproducible from nmrForge?
 
