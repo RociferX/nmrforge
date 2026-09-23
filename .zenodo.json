@@ -7,7 +7,8 @@
   "language": "eng",
   "creators": [
     {
-      "name": "Li, Xuanfeng"
+      "name": "Li, Xuanfeng",
+      "affiliation": "University of Science and Technology of China"
     }
   ],
   "keywords": [
@@ -29,5 +30,5 @@
       "resource_type": "software"
     }
   ],
-  "notes": "Licence: Apache-2.0 for the project's own source (LICENSE holds the verbatim text, NOTICE the copyright line, LICENSE_OPTIONS.md the reasoning). LGPL-3.0 applies only to the Qt/PySide6 libraries bundled in the Linux AppImage, which ships their texts and notices. Author: Xuanfeng Li; affiliation still unknown. Maintainers: keep the \"version\" field in step with core.__version__ and CITATION.cff on every release. If a repository has both .zenodo.json and CITATION.cff, Zenodo uses this file and ignores CITATION.cff."
+  "notes": "Licence: Apache-2.0 for the project's own source (LICENSE holds the verbatim text, NOTICE the copyright line, LICENSE_OPTIONS.md the reasoning). LGPL-3.0 applies only to the Qt/PySide6 libraries bundled in the Linux AppImage, which ships their texts and notices. Author: Xuanfeng Li, University of Science and Technology of China (中国科学技术大学) - ROR https://ror.org/04c4dkn09. Maintainers: keep the \"version\" field in step with core.__version__ and CITATION.cff on every release. If a repository has both .zenodo.json and CITATION.cff, Zenodo uses this file and ignores CITATION.cff."
 }

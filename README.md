@@ -24,7 +24,7 @@ warning and output it produced so that the result can be reproduced and audited.
 > spectrum.
 
 Current version: **1.0.0** · Status: **production release**
-Author: **Xuanfeng Li** · Source licence: Apache-2.0 (see [LICENSE](LICENSE) and [NOTICE](NOTICE))
+Author: **Xuanfeng Li**, University of Science and Technology of China · Source licence: Apache-2.0 (see [LICENSE](LICENSE) and [NOTICE](NOTICE))
 Distribution: source plus a Linux AppImage (one artefact; the interface language is switched at run time)
 Releases: <https://github.com/RociferX/nmrforge/releases>
 Repository: <https://github.com/RociferX/nmrforge>
@@ -368,12 +368,12 @@ These are deliberate, documented boundaries rather than unfinished features:
 
 ## Citation
 
-[CITATION.cff](CITATION.cff) carries the citation metadata. The author and the repository URL
-are confirmed; the affiliation is not. Since 1.0.0 every release has a DOI - cite
-`10.5281/zenodo.22909416` for this version (<https://doi.org/10.5281/zenodo.22909416>), or
-`10.5281/zenodo.22909415` for all versions (<https://doi.org/10.5281/zenodo.22909415>); the
-GitHub Release page of the version you used) until a DOI exists. The file states exactly which
-two lines to add once a Zenodo release mints a DOI.
+[CITATION.cff](CITATION.cff) carries the citation metadata - author: Xuanfeng Li, University of
+Science and Technology of China. Since 1.0.0 every release has a DOI: cite
+`10.5281/zenodo.22909416` for this version (<https://doi.org/10.5281/zenodo.22909416>) or
+`10.5281/zenodo.22909415` for all versions (<https://doi.org/10.5281/zenodo.22909415>). The Zenodo
+deposit metadata comes from `.zenodo.json` in the repository, which takes precedence over
+`CITATION.cff`.
 
 If you publish work that used the processing or reconstruction engines, cite NMRPipe and SMILE
 as well - see [THIRD_PARTY.md](THIRD_PARTY.md).

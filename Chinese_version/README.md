@@ -19,7 +19,7 @@ nmrForge 读取一个 Bruker 数据集,判定它是什么实验、用了哪种�
 > 再生成可解释的处理方案,并把证据(质量指标、解析后的参数、运行记录)与谱图放在一起。
 
 当前开发版本:**1.0.0** · 状态:**活跃开发中**
-作者:**李宣锋(Xuanfeng Li)** · 源码许可:Apache-2.0(见 [LICENSE](../LICENSE) 与 [NOTICE](../NOTICE))
+作者:**李宣锋(Xuanfeng Li),中国科学技术大学** · 源码许可:Apache-2.0(见 [LICENSE](../LICENSE) 与 [NOTICE](../NOTICE))
 分发方式:源码 + Linux AppImage(一份产物,界面语言运行时切换)
 发布页:<https://github.com/RociferX/nmrforge/releases>
 仓库:<https://github.com/RociferX/nmrforge>
@@ -323,7 +323,7 @@ python examples/quickstart.py ./example_data/hsqc_2d
 - 本版本:`10.5281/zenodo.22909416`(<https://doi.org/10.5281/zenodo.22909416>)
 - 全部版本(始终指向最新版):`10.5281/zenodo.22909415`(<https://doi.org/10.5281/zenodo.22909415>)
 
-作者与仓库地址已确定;单位尚未确定。
+作者:李宣锋,中国科学技术大学(University of Science and Technology of China);仓库地址见上。
 
 如果你发表的工作用到了本软件的处理或重构引擎,请同时引用 NMRPipe 与 SMILE ——
 见 [THIRD_PARTY.md](../THIRD_PARTY.md)。
