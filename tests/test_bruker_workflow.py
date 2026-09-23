@@ -11,8 +11,10 @@ from backend.bruker_workflow import (
     parse_fid_com,
     patch_fid_com,
     patch_fid_out_name,
+    physical_direct_points,
 )
 from core.data.bruker_reader import read_dataset
+from core.data.internal_data_model import AxisRole, Dimension, Experiment
 
 FID_COM = (
     "bruk2pipe -in ./ser \\\n"
@@ -71,6 +73,71 @@ def test_patch_fid_com(bruker_dir: Path) -> None:
     assert "-xN 2048" in patched
     assert "-yN 256" in patched
     assert "-xT 1024" in patched
+
+
+def _padded_2d(tmp_path: Path, td: int = 1612, rows: int = 210) -> tuple[Experiment, Path]:
+    """Build a 2D dataset directory whose direct-dimension rows need serPadSize padding."""
+    data_dir = tmp_path / "raw"
+    data_dir.mkdir(parents=True)
+    row = ((td + 127) // 128) * 128
+    with open(data_dir / "ser", "wb") as handle:
+        handle.truncate(rows * row * 8)
+    exp = Experiment(
+        dataset_id="d_015",
+        source_path=data_dir,
+        ndim=2,
+        dimensions=[
+            Dimension(logical_axis="F2", nucleus="1H", td=td, role=AxisRole.DIRECT),
+            Dimension(logical_axis="F1", nucleus="15N", td=rows),
+        ],
+        acquisition_parameters={
+            "acqus": {"DTYPE": 0, "BYTORDA": 0},
+            "acqu2s": {"TD": rows, "FnMODE": 5},
+        },
+    )
+    return exp, data_dir
+
+
+def test_physical_direct_points_padded_and_aligned(tmp_path: Path) -> None:
+    """2026-09-23: d_015 (TD=1612 -> row 1664) and the usual aligned layout."""
+    exp, data_dir = _padded_2d(tmp_path)
+    assert physical_direct_points(exp, data_dir) == 1664
+
+    exp2, data_dir2 = _padded_2d(tmp_path / "aligned", td=2048, rows=128)
+    assert physical_direct_points(exp2, data_dir2) == 2048
+
+
+def test_patch_fid_com_keeps_padded_direct_row(tmp_path: Path) -> None:
+    """d_015: acqus TD=1612 but the ser row is 1664, so -xN must not be "corrected".
+
+    Using the acqus TD makes bruk2pipe read the file with the wrong stride: same output
+    size, no error, wrong contents. -xT stays TD//2 = 806 (the valid-points size; the
+    padded part is dropped there).
+    """
+    exp, data_dir = _padded_2d(tmp_path)
+    text = (
+        "bruk2pipe -in ./ser \\\n"
+        "  -xN              1664  -yN               210  \\\n"
+        "  -xT               806  -yT               105  \\\n"
+        "  -out fid\n"
+    )
+    patched, warnings = patch_fid_com(text, exp, data_dir=data_dir)
+    parsed = parse_fid_com(patched)
+    assert parsed["xN"] == "1664"          # physical row length, not acqus TD=1612
+    assert parsed["xT"] == "806"           # valid points = TD//2
+    assert parsed["yN"] == "210"
+    assert not any("xN" in w for w in warnings), warnings
+
+
+def test_patch_fid_com_unverified_row_keeps_value(tmp_path: Path) -> None:
+    """When the file size does not confirm any row length, keep the fid.com value."""
+    exp, data_dir = _padded_2d(tmp_path)
+    with open(data_dir / "ser", "r+b") as handle:
+        handle.truncate(12345)
+    text = "bruk2pipe -in ./ser \\\n  -xN 999 -out fid\n"
+    patched, warnings = patch_fid_com(text, exp, data_dir=data_dir)
+    assert parse_fid_com(patched)["xN"] == "999"
+    assert not any("xN" in w for w in warnings), warnings
 
 
 def test_patch_fid_out_name_single(bruker_dir: Path) -> None:

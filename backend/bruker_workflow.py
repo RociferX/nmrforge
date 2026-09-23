@@ -11,6 +11,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from core.data.bruker_dtype import UnknownBrukerDtype, point_bytes
 from core.data.internal_data_model import Experiment, SamplingMode
 from ui_support.i18n import tr
 
@@ -59,6 +60,55 @@ def _effective_td(experiment: Experiment) -> list[int]:
     return td
 
 
+#: ser rows are padded to serPadSize: 8 bytes per complex point -> 128, 4 bytes -> 256
+_SER_PAD_BY_WORD = {8: 128, 4: 256}
+
+
+def _align(value: int, pad: int) -> int:
+    return ((value + pad - 1) // pad) * pad
+
+
+def _candidate_direct_points(td: int, word_bytes: int) -> list[int]:
+    """Candidate lengths for one direct-dimension row: acqus TD plus its padded value."""
+    pads = [_SER_PAD_BY_WORD[word_bytes]] if word_bytes in _SER_PAD_BY_WORD else [128, 256]
+    return sorted({td, *(_align(td, pad) for pad in pads)})
+
+
+def physical_direct_points(
+    experiment: Experiment, data_dir: Path | str | None
+) -> int | None:
+    """Complex points per direct-dimension row (physical file, may exceed the acqus TD).
+
+    Bruker pads the direct dimension when writing ser (serPadSize: 8 bytes per complex point
+    -> 128 alignment, 4 bytes -> 256), and ``bruk2pipe -xN`` must match that **physical row
+    length**: measured on d_015 (2026-09-23), acqus TD=1612 while the row is **1664**
+    (2,795,520 bytes = 210 rows x 1664 complex points x 8 bytes). Changing it to the acqus
+    TD makes bruk2pipe read the file with the wrong stride: same output size, exit code 0,
+    no warning, but the contents are wrong (observed by the maintainer).
+
+    Only a divisibility that actually holds is accepted; when it cannot be derived (missing
+    file, not divisible, unknown DTYPE) this returns None and the caller keeps the value
+    computed by ``bruker -AUTO`` instead of guessing.
+    """
+    if data_dir is None:
+        return None
+    td = _effective_td(experiment)
+    if not td or td[0] <= 0:
+        return None
+    data_file = Path(data_dir) / ("ser" if experiment.ndim >= 2 else "fid")
+    try:
+        word_bytes = point_bytes(experiment.acquisition_parameters.get("acqus", {}))
+        size = data_file.stat().st_size
+    except (OSError, UnknownBrukerDtype):
+        return None
+    if word_bytes <= 0 or size <= 0:
+        return None
+    for candidate in _candidate_direct_points(td[0], word_bytes):
+        if size % (candidate * word_bytes) == 0:
+            return candidate
+    return None
+
+
 _NUSEXPAND_RE = re.compile(r"nusExpand\.tcl[^\n]*?-sampleCount\s+(\d+)")
 
 
@@ -98,18 +148,33 @@ def _num(value: str) -> float | None:
         return None
 
 
-def expected_values(experiment: Experiment) -> dict[str, tuple[Any, float | None]]:
+def expected_values(
+    experiment: Experiment, data_dir: Path | str | None = None
+) -> dict[str, tuple[Any, float | None]]:
     """fid.com target parameters (value, tolerance): shared by cross_check_fid_com and
     patch_fid_com.
 
     String parameters (LAB/MODE) have a tolerance of None; N/T/decim/dspfvs match exactly;
     SW/OBS/CAR/
     grpdly use a tolerance of 1e-3.
+
+    When ``data_dir`` is given, ``xN`` is the physical row length derived from the data
+    file (see physical_direct_points), not the acqus TD; if it cannot be derived, no xN
+    target is given and the caller keeps the fid.com value. ``xT`` stays acqus TD//2:
+    that is the "valid points" size, independent of the padding (bruk2pipe drops the
+    padded/oversampled part there).
     """
     td = _effective_td(experiment)
+    direct = physical_direct_points(experiment, data_dir)
+    if data_dir is None:
+        xN: float | None = float(td[0])       # no file information: keep the old rule
+    elif direct is not None:
+        xN = float(direct)
+    else:
+        xN = None                             # not divisible: never guess
     x = _dim(experiment, "F2" if experiment.ndim == 2 else "F3")
     values: dict[str, tuple[Any, float | None]] = {
-        "xN": (float(td[0]), 0.0),
+        "xN": (xN, 0.0),
         "xT": (float(td[0] // 2), 0.0),
         "xSW": (float(x.sw), 1e-3) if x else (None, 1e-3),
         "xOBS": (float(x.sf), 1e-3) if x else (None, 1e-3),
@@ -157,11 +222,12 @@ def expected_values(experiment: Experiment) -> dict[str, tuple[Any, float | None
 def cross_check_fid_com(
     fid_params: dict[str, str],
     experiment: Experiment,
+    data_dir: Path | str | None = None,
 ) -> list[str]:
     """Check the fid.com parameters against the acqus/acqu2s metadata (including MODE/DSP flags);
     returns warnings for any difference."""
     warnings: list[str] = []
-    for key, (desired, tolerance) in expected_values(experiment).items():
+    for key, (desired, tolerance) in expected_values(experiment, data_dir).items():
         if key not in fid_params:
             continue
         if isinstance(desired, str):
@@ -176,9 +242,11 @@ def cross_check_fid_com(
     return warnings
 
 
-def _acqus_values(experiment: Experiment) -> dict[str, str]:
+def _acqus_values(
+    experiment: Experiment, data_dir: Path | str | None = None
+) -> dict[str, str]:
     values: dict[str, str] = {}
-    for key, (desired, _tolerance) in expected_values(experiment).items():
+    for key, (desired, _tolerance) in expected_values(experiment, data_dir).items():
         if desired is None:
             continue
         if isinstance(desired, str):
@@ -201,6 +269,7 @@ def _acqus_values(experiment: Experiment) -> dict[str, str]:
 def patch_fid_com(
     text: str,
     experiment: Experiment,
+    data_dir: Path | str | None = None,
 ) -> tuple[str, list[str]]:
     """Correct the fid.com parameters that disagree with acqus/acqu2s, and rename the single-file
     output from bruker default test.fid to {dataset_id}.fid
@@ -208,7 +277,7 @@ def patch_fid_com(
 
     Returns (the corrected text, the list of corrections).
     """
-    target = _acqus_values(experiment)
+    target = _acqus_values(experiment, data_dir)
     warnings: list[str] = []
 
     def replace(match: re.Match) -> str:

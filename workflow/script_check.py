@@ -17,7 +17,7 @@ KNOWN_FUNCTIONS = frozenset(
     {
         "SP", "ZF", "FT", "PS", "EXT", "TP", "ZTP", "POLY", "MC", "REV",
         "EM", "GM", "HT", "SINE", "GAUSS", "LP", "NUS", "SMILE", "MAC",
-        "ADD", "SUB", "MUL", "DIV", "SQRT", "EXP", "LOG", "ABS", "STAT",
+        "ADD", "SUB", "MULT", "MUL", "DIV", "SQRT", "EXP", "LOG", "ABS", "STAT",
         "WRITE", "READ", "CUBE", "PROJ", "SUM", "ALTP", "COMPLEX", "REAL",
         "FILTER", "DIM", "COPY", "NUSExpand",
     }
@@ -127,9 +127,10 @@ def _check_output_write(content: str, warnings: list[str]) -> None:
     )
     if not looks_pipeline:
         return
-    has_out = bool(re.search(r"pipe2xyz\s+-out", content)) or bool(
-        re.search(r"nmrPipe\s+.*-out\s+\S+", content)
-    )
+    # `-out` often sits on the continuation line (fid.com: `| nmrPipe -fn MULT -c ... \\`
+    # then `  -out ./d_015.fid -ov`); the old `.*` regex does not cross lines and therefore
+    # reported "no output sink" for every conversion script (measured on d_015, 2026-09-23).
+    has_out = bool(re.search(r"(^|\s)-out\s+\S+", content))
     if not has_out:
         warnings.append(
             tr(
