@@ -79,7 +79,8 @@ reason is recorded in `<peak table>.localization.json` and in the run parameters
 
 | Symptom | Fix |
 | --- | --- |
-| Nothing happens, or "AppRun: No such file or directory" after extracting | Use `./NMRForge-<version>-x86_64.AppImage --appimage-extract-and-run`, or set `APPIMAGE_EXTRACT_AND_RUN=1` |
+| Double-clicking does nothing | Check the execute bit first: `ls -l NMRForge-*.AppImage` should show `-rwxr-xr-x`; if it does not, run `chmod +x NMRForge-*.AppImage`. In a file manager you can also right-click the file and use Properties -> "Allow executing file as program". Copying the file from a Windows shared folder or a USB stick often loses this bit |
+| "AppRun: No such file or directory" after extracting | Use `./NMRForge-<version>-x86_64.AppImage --appimage-extract-and-run`, or set `APPIMAGE_EXTRACT_AND_RUN=1` |
 | FUSE-related mount errors | Same as above; FUSE is not available on every system, and this is generic AppImage behaviour |
 | "could not load the Qt platform plugin" | Make sure you are not overriding `QT_QPA_PLATFORM` in your shell; unset it for normal desktop use |
 | No icon in the application menu | Launch it once so it installs its desktop entry, or remove and re-run; deleting the AppImage makes the entry hide itself |
