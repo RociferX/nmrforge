@@ -71,7 +71,8 @@ Gaussian 定位是二维模型,所以对 1D/3D 谱直接报错,而不是静默�
 
 | 现象 | 处理 |
 | --- | --- |
-| 没有任何反应,或解包后报 "AppRun: No such file or directory" | 用 `./NMRForge-<版本>-x86_64.AppImage --appimage-extract-and-run`,或设 `APPIMAGE_EXTRACT_AND_RUN=1` |
+| 双击没有任何反应 | 先确认执行位:`ls -l NMRForge-*.AppImage` 是否为 `-rwxr-xr-x`;不是就 `chmod +x NMRForge-*.AppImage`。图形界面里也可以右键 → 属性 → 勾选「允许作为程序执行」。从 Windows 共享目录 / U 盘拷进虚拟机时经常丢这一位 |
+| 解包后报 "AppRun: No such file or directory" | 用 `./NMRForge-<版本>-x86_64.AppImage --appimage-extract-and-run`,或设 `APPIMAGE_EXTRACT_AND_RUN=1` |
 | FUSE 相关的挂载错误 | 同上;不是每台机器都有 FUSE,这是 AppImage 的通用行为 |
 | "could not load the Qt platform plugin" | 确认没有在 shell 里覆盖 `QT_QPA_PLATFORM`;日常桌面使用请 unset |
 | 应用菜单里没有图标 | 先启动一次让它装好桌面入口;删掉 AppImage 文件入口会自动隐藏 |
