@@ -162,10 +162,10 @@ ldd usr/bin/NMRForge | grep 'not found'                            # no missing 
 
 Packaging related files:
 
-- Packaging/linux/NMRForge.desktop: desktop entry
-- Packaging/linux/NMRForge.spec: PyInstaller configuration
-- Packaging/linux/build_appimage.sh: Build script with one click
-- Packaging/linux/icons/: application icon (SVG source + PNG product)
+- packaging/linux/NMRForge.desktop: desktop entry
+- packaging/linux/NMRForge.spec: PyInstaller configuration
+- packaging/linux/build_appimage.sh: Build script with one click
+- packaging/linux/icons/: application icon (SVG source + PNG product)
 - Core/app_paths.py: develop/Frozen resource path analysis
 
 
