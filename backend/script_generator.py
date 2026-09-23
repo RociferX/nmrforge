@@ -599,6 +599,7 @@ def generate_convert_script(
     *,
     in_file: str = "./ser",
     out_file: str | None = None,
+    direct_points: int | None = None,
 ) -> str:
     """Generate the bruk2pipe conversion script (LF line endings, csh syntax; used
     only by the uniform-sampling fallback).
@@ -613,6 +614,10 @@ def generate_convert_script(
     tokens = _bruk2pipe_tokens(experiment, ctx)
     tokens[tokens.index("-in") + 1] = in_file
     tokens[tokens.index("-out") + 1] = out_file
+    if direct_points:
+        # 0.2.199-patch30: -xN must match the physical ser row (Bruker pads to
+        # serPadSize), not the acqus TD; see physical_direct_points
+        tokens[tokens.index("-xN") + 1] = str(int(direct_points))
     lines = [
         "#!/bin/csh",
         "# NMRForge conversion script (bruk2pipe)",

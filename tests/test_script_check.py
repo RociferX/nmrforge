@@ -21,6 +21,29 @@ xyz2pipe -in d_001.fid -x \\
 """
 
 
+FID_COM = """#!/bin/csh
+
+bruk2pipe -verb -in ./ser \\
+  -bad 0.0 -ext -aswap -AMX -decim 1240 -dspfvs 20 -grpdly 68 -ws 8 -noi2f  \\
+  -xN              1664  -yN               210  \\
+  -xT               806  -yT               105  \\
+  -xMODE            DQD  -yMODE        Complex  \\
+  -ndim               2  -aq2D         Complex  \\
+| nmrPipe -fn MULT -c 3.12500e+01 \\
+  -out ./d_015.fid -ov
+"""
+
+
+def test_bruk2pipe_fidcom_has_no_false_positives() -> None:
+    """The two false positives measured on d_015 (2026-09-23).
+
+    MULT is a valid nmrPipe function, and -out sits on the continuation line: the old
+    check matched ``nmrPipe`` plus ``.*`` -out (which does not cross lines) and therefore
+    reported "no output sink" for every conversion script.
+    """
+    assert check_script(FID_COM) == []
+
+
 def test_good_script_no_warnings() -> None:
     assert check_script(GOOD_SCRIPT) == []
 

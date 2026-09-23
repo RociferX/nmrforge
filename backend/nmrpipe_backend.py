@@ -38,6 +38,7 @@ from backend.bruker_workflow import (
     apply_fid_com_overrides,
     patch_fid_com,
     patch_nus_expand_count,
+    physical_direct_points,
 )
 from backend.config import (
     resolve_ext_hi,
@@ -2870,7 +2871,9 @@ class NMRPipeBackend:
                         fid_com.parent.mkdir(parents=True, exist_ok=True)
                         shutil.move(str(raw_fid), str(fid_com))
                     text = fid_com.read_text(encoding="utf-8", errors="replace")
-                    patched, corrections = patch_fid_com(text, experiment)
+                    patched, corrections = patch_fid_com(
+                        text, experiment, data_dir=convert_dir
+                    )
                     if fid_com_overrides:
                         # Manual tuning overrides parameters only; the output name
                         # and structure remain guaranteed by the backend
@@ -2914,7 +2917,10 @@ class NMRPipeBackend:
                 if is_nus:
                     return False
                 logs.append(tr("fallback: use the built-in bruk2pipe parameter conversion"))
-                script = generate_convert_script(experiment)
+                script = generate_convert_script(
+                    experiment,
+                    direct_points=physical_direct_points(experiment, convert_dir),
+                )
                 convert_script = dest_work / f"{experiment.dataset_id}_convert.com"
                 convert_script.write_text(script, encoding="utf-8", newline="\n")
                 run_result = runtime.run(
