@@ -280,3 +280,7 @@ installed.
   runs are not part of this repository, so that paragraph is a maintainer statement that cannot be
   recomputed from the snapshot alone; what can be recomputed are the numbers in sections 1-5
   (`scripts/vm_truth_benchmark.py` + `scripts/vm_truth_figure.py` plus the published input hashes).
+- **Validation on more data types is being prepared for release**: 3D spectra, other experiment
+  types and sampling schemes (and processed spectra from more sources) are being written up and will
+  be added here in the same shape as this page - public data plus the scripts that reproduce the
+  numbers.
