@@ -1,6 +1,6 @@
 # Installation
 
-## Current release: v0.11.0 (source + Linux AppImage)
+## Current release: v1.0.0 (source + Linux AppImage)
 
 Both paths are supported: a **Linux AppImage** (bundling Python and Qt, so no system environment is
 needed, with the interface language following the system locale; see the
@@ -23,15 +23,15 @@ reconstruction also requires SMILE.
 
 ## AppImage (Linux)
 
-v0.11.0 offers an AppImage on the releases page ([Releases](https://github.com/RociferX/nmrforge/releases)):
+v1.0.0 offers an AppImage on the releases page ([Releases](https://github.com/RociferX/nmrforge/releases)):
 one artefact whose interface language is switched at run time. It bundles its own interpreter and
 Qt; verify it with:
 
 ```bash
-sha256sum NMRForge-0.11.0-x86_64.AppImage      # compare with the release notes
-chmod +x NMRForge-0.11.0-x86_64.AppImage
-./NMRForge-0.11.0-x86_64.AppImage --licenses  # third-party licences and build provenance
-./NMRForge-0.11.0-x86_64.AppImage             # first run installs the desktop entry
+sha256sum NMRForge-1.0.0-x86_64.AppImage      # compare with the release notes
+chmod +x NMRForge-1.0.0-x86_64.AppImage
+./NMRForge-1.0.0-x86_64.AppImage --licenses  # third-party licences and build provenance
+./NMRForge-1.0.0-x86_64.AppImage             # first run installs the desktop entry
 ```
 
 They bundle PySide6/Qt, distributed under LGPL-3.0 alongside the Apache-2.0 licence of nmrForge's

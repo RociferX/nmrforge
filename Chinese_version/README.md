@@ -18,7 +18,7 @@ nmrForge 读取一个 Bruker 数据集,判定它是什么实验、用了哪种�
 > 目标不是做一个套在 NMRPipe 外面的图形界面。nmrForge 先*理解*实验与采样方式,
 > 再生成可解释的处理方案,并把证据(质量指标、解析后的参数、运行记录)与谱图放在一起。
 
-当前开发版本:**0.11.0** · 状态:**活跃开发中**
+当前开发版本:**1.0.0** · 状态:**活跃开发中**
 作者:**李宣锋(Xuanfeng Li)** · 源码许可:Apache-2.0(见 [LICENSE](../LICENSE) 与 [NOTICE](../NOTICE))
 分发方式:源码 + Linux AppImage(一份产物,界面语言运行时切换)
 发布页:<https://github.com/RociferX/nmrforge/releases>
@@ -110,7 +110,7 @@ core:项目模型、数据读取、实验判定、规划、处理原语、优化
 | [`nmrforge_data/presets/`](../nmrforge_data/presets/README.md) | 实验模板;YAML 文件是唯一数据源 |
 | [`tests/`](../tests/README.md) | pytest 测试套件:unit / integration / regression |
 | [`examples/`](../examples/README.md) | 可运行的合成数据集与走查脚本 |
-| [`packaging/`](../packaging/README.md) | AppImage 构建素材(v0.11.0 已发布) |
+| [`packaging/`](../packaging/README.md) | AppImage 构建素材(v1.0.0 已发布) |
 | [`scripts/`](../scripts/README.md) | 独立命令行工具与校验脚本 |
 | [`docs/`](docs/README.md) | 中文文档索引(英文原文在 [`docs/`](../docs/README.md)) |
 | [`.github/`](../.github/) | CI 工作流与 issue/PR 模板 |
@@ -134,7 +134,7 @@ nmrForge 不会替你分发、下载或安装 NMRPipe/SMILE。它在运行时探
 
 ## 安装
 
-v0.11.0 提供两样东西:**Linux AppImage**与**源码**。AppImage 自带 Python 与 Qt,
+v1.0.0 提供两样东西:**Linux AppImage**与**源码**。AppImage 自带 Python 与 Qt,
 不需要先装环境([发布页](https://github.com/RociferX/nmrforge/releases));用源码则克隆仓库
 并做可编辑安装,这样仓库根目录的运行时资源才仍然可用:
 
@@ -370,7 +370,7 @@ CI(GitHub Actions)会跑静态检查、Python 3.12 与 3.13 上的全量测试,�
 是为了让许可识别工具正确识别为 Apache-2.0。
 
 **AppImage 另有一条分发边界。** 它捆绑 PySide6/Qt 与其他第三方库,这些组件按各自的许可
-(含 LGPL-3.0)随产物分发。v0.11.0 的产物完成了维护者私有仓库里的发布检查清单
+(含 LGPL-3.0)随产物分发。v1.0.0 的产物完成了维护者私有仓库里的发布检查清单
 (许可正文与声明在产物内、可替换/重链接、干净机器验收、记录 SHA-256)。2026-09-21 起 Release 上
 只有**一份**产物(界面语言运行时切换),它由已发布源码的提交构建,提交号记在产物的
 `usr/share/doc/NMRForge/BUILD_INFO.txt` 里。这不改变 nmrForge 自身源码的 Apache-2.0 条款。
@@ -379,7 +379,7 @@ CI(GitHub Actions)会跑静态检查、Python 3.12 与 3.13 上的全量测试,�
 
 - **从源码使用 nmrforge**:Apache-2.0,包括专利授权、保留署名声明的要求,以及再分发修改过的
   文件时说明改动的要求;
-- **AppImage**:v0.11.0 的产物已完成上述验收;再分发前按同一清单复核;
+- **AppImage**:v1.0.0 的产物已完成上述验收;再分发前按同一清单复核;
 - 第三方组件各自保留其许可;见 [THIRD_PARTY.md](../THIRD_PARTY.md),
   二进制的声明见 `packaging/linux/THIRD_PARTY_LICENSES/NOTICE.md`。
 

@@ -1,6 +1,6 @@
 # 安装
 
-## 当前发布:v0.11.0(源码 + Linux AppImage)
+## 当前发布:v1.0.0(源码 + Linux AppImage)
 
 两条路都可以:**Linux AppImage**(自带 Python 与 Qt,不需要系统环境,界面中英随系统区域切换;见
 [Releases](https://github.com/RociferX/nmrforge/releases)),或者从仓库做可编辑安装:
@@ -20,14 +20,14 @@ python main.py
 
 ## AppImage(Linux)
 
-v0.11.0 在发布页提供 AppImage:[Releases](https://github.com/RociferX/nmrforge/releases)
+v1.0.0 在发布页提供 AppImage:[Releases](https://github.com/RociferX/nmrforge/releases)
 （一份产物,界面中英在运行时切换）。产物自带解释器与 Qt,校验方式:
 
 ```bash
-sha256sum NMRForge-0.11.0-x86_64.AppImage      # 与发布说明里的校验和对比
-chmod +x NMRForge-0.11.0-x86_64.AppImage
-./NMRForge-0.11.0-x86_64.AppImage --licenses  # 产物内的第三方许可与构建溯源
-./NMRForge-0.11.0-x86_64.AppImage             # 首次运行会装桌面菜单项
+sha256sum NMRForge-1.0.0-x86_64.AppImage      # 与发布说明里的校验和对比
+chmod +x NMRForge-1.0.0-x86_64.AppImage
+./NMRForge-1.0.0-x86_64.AppImage --licenses  # 产物内的第三方许可与构建溯源
+./NMRForge-1.0.0-x86_64.AppImage             # 首次运行会装桌面菜单项
 ```
 
 它们捆绑 PySide6/Qt,这些库按 LGPL-3.0 随产物分发(许可与 nmrForge 源码的 Apache-2.0

@@ -60,6 +60,17 @@ NUSOptimizer
 - 完整的结构解析、自动指认、AI 结构预测、NOE。
 - 用大模型从图片里猜相位或 NUS 参数;大模型只用于解释与报告。
 
+## v1.0.0 —— 正式版(2026-09-23 已完成)
+
+整包版本从 0.11.0 升到 **1.0.0**:升 1.0 的两个门槛都满足了 ——
+
+- **端到端科学验证**:证据页 [`evidence/real-data-comparison.md`](evidence/real-data-comparison.md)
+  在公开数据(BMRB timedomain **53374**)上给出依赖严格容差的定量回收率与逐峰归因,并且附带
+  随仓库发布的复现脚本(`scripts/vm_truth_benchmark.py` 等);
+- **兼容性承诺**:行为面由 compat 流程管理(行为指纹 + `same/additive/behavior_changed/`
+  `contract_changed` 四级分级 + 黄金向量),`nmrforge_api` 的契约版本自 2026-09-22 起是 1.0;
+- 发布物:源码 + Linux AppImage(一份产物,界面中英运行时切换),PyPI 仍未发布。
+
 ## v0.11.0 —— 英文版与首个 AppImage 发布(2026-09-20 已完成)
 
 目标:本项目的英文版与首个 Linux AppImage。第一版保留了中文主干,并把它翻译成一棵结构平行

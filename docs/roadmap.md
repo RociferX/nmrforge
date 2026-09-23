@@ -63,6 +63,20 @@ NUSOptimizer
 - Using an LLM to guess phase or NUS parameters from an image; an LLM is for explanation and
   reports only.
 
+## v1.0.0 - the production release (done 2026-09-23)
+
+The distribution moved from 0.11.0 to **1.0.0**: both bars for 1.0 are met -
+
+- **end-to-end scientific validation**: the evidence page
+  [`evidence/real-data-comparison.md`](evidence/real-data-comparison.md) gives tolerance-tiered
+  recovery numbers and per-peak attribution on public data (BMRB timedomain **53374**), together
+  with the reproduction scripts that ship with the repository (`scripts/vm_truth_benchmark.py`);
+- **compatibility promise**: behaviour is managed through the compat process (behaviour digests, the
+  `same/additive/behavior_changed/contract_changed` levels and a golden vector), and the
+  `nmrforge_api` contract has been at version 1.0 since 2026-09-22;
+- released as source plus a Linux AppImage (one artefact; the interface language is switched at run
+  time). PyPI is still not published.
+
 ## v0.11.0 - the English edition and the first AppImage release (done 2026-09-20)
 
 Goal: an English edition of this project and a first Linux AppImage. The first pass kept the
