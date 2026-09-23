@@ -317,7 +317,14 @@ Change/When adding a new function, old implementations that it supersedes or dup
   -aq2D Complex, consistent with laboratory fid.com); acqu3s TD must no longer be used to correct the temporary storage.
   (When TD=1, bruker also outputs single file full mesh fid); 3D NUS slice only in SMILE script.
   Step1 direct dimension is processed and generated (nus3d_1/test%04d.ft1); multiple segments are merged using addNMR to merge.
-  Single file (merged/{dataset_id}.fid), segment frequency migration PS -rs. The conversion period slice is a historical product.
+  Single file (merged/{dataset_id}.fid), segment frequency migration PS -rs (a manual value
+  goes through params["segment_shift_hz"]). Since 2026-09-23 a multi-part conversion also
+  checks the inter-part field drift automatically (reference = part 1, criterion |d| > 1.5 Hz,
+  Hz only - ppm is measured and recorded but does not gate): over the threshold,
+  `PS -rs <d>Hz` is inserted before `MULT -c` in that
+  part's fid.com (MULT kept) and the part is re-converted; the residual is re-checked before
+  merging, and an unmeasurable peak or a residual still over the threshold is only reported
+  (see workflow/field_drift.py). The conversion period slice is a historical product.
   New code must not be generated; the slicing fallback for _zero_bad_point_fid is only compatible with the old working directory.
 - SMILE peak memory budget (0.2.199-patch15): a SMILE peak of <= 2.8GB (zero fill 1024) is
   safe; the 5.6GB magnitude (zero fill 2048, direct dimension doubled) exceeds the memory

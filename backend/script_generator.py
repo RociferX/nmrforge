@@ -9,7 +9,9 @@ NusTD on a staging copy before running bruker, which outputs the slice form fid/
 (SMILE consumes it as a slice stream; see nmrpipe_backend._convert_dir). SMILE reconstruction
 parameters may be overridden through reconstruct_nus params (nSigma/thresh/scaling/report); the
 SMILE command carries no window or phase parameters (step3 post-processing handles windowing and
-phase), which keeps it usable for tuning against the lab script (data/ script /smile2.com)."""
+phase), which keeps it usable for tuning against the lab script (data/ script /smile2.com).
+Conversion keywords have a single source since 2026-09-23:
+core.experiment.acquisition_mode_detector.bruk2pipe_mode_for."""
 
 from __future__ import annotations
 
@@ -20,6 +22,8 @@ from typing import Any
 from core.data.internal_data_model import Experiment, SamplingMode
 from core.experiment.acquisition_mode_detector import (
     _REAL_FNMODE,
+    DIRECT_BRUK2PIPE_MODE,
+    bruk2pipe_mode_for,
     ft_kind_for,
     ft_neg_for,
     unsupported_real_mode_error,
@@ -502,12 +506,7 @@ def _bruk2pipe_tokens(experiment: Experiment, ctx: dict[str, Any]) -> list[str]:
     ndim = experiment.ndim
     y_fnmode = _fnmode(experiment, "F1" if ndim == 2 else "F2")
     y_kind = ft_kind_for(y_fnmode)
-    y_mode = {
-        "complex": "Echo-AntiEcho" if y_fnmode == 6 else "Complex",
-        "magnitude": "Real",
-        "tppi": "TPPI",
-        "sequential": "Sequential",
-    }[y_kind]
+    y_mode = bruk2pipe_mode_for(y_fnmode)  # single source (2026-09-23)
     y_real = y_kind in ("magnitude", "tppi", "sequential")  # real classes: no /2
     tokens = [
         "bruk2pipe",
@@ -525,7 +524,7 @@ def _bruk2pipe_tokens(experiment: Experiment, ctx: dict[str, Any]) -> list[str]:
         _fmt(ctx["meta.grpdly"]),
         "-ext",
         "-xMODE",
-        "DQD",
+        DIRECT_BRUK2PIPE_MODE,
         "-yMODE",
         y_mode,
     ]
@@ -567,12 +566,7 @@ def _bruk2pipe_tokens(experiment: Experiment, ctx: dict[str, Any]) -> list[str]:
     if ndim >= 3:
         z_fnmode = _fnmode(experiment, "F1")
         z_kind = ft_kind_for(z_fnmode)
-        z_mode = {
-            "complex": "Complex",
-            "magnitude": "Real",
-            "tppi": "TPPI",
-            "sequential": "Sequential",
-        }[z_kind]
+        z_mode = bruk2pipe_mode_for(z_fnmode, axis="z")  # E-A only exists in y
         z_real = z_kind in ("magnitude", "tppi", "sequential")
         tokens += [
             "-zMODE",

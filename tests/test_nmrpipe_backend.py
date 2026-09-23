@@ -15,6 +15,7 @@ from backend.nmrpipe_backend import NMRPipeBackend
 from backend.nmrpipe_finder import find_nmrpipe_bin
 from core.data.bruker_reader import read_dataset
 from core.planning.method_selector import select_method
+from workflow import field_drift
 
 
 def test_converted_fid_reuse_follows_the_raw_fingerprint(tmp_path: Path) -> None:
@@ -108,6 +109,101 @@ def test_reconstruct_nus_reconverts_only_when_the_raw_fingerprint_changed(
     assert _conversion_fingerprint(work, exp.dataset_id) != fingerprint
 
 
+def test_convert_segments_gates_the_automatic_drift_check(tmp_path: Path) -> None:
+    """Multi-part conversion: automatic inter-part drift by default; a manual
+    segment_shift_hz keeps the scripts untouched."""
+    from types import SimpleNamespace
+
+    from core.data.internal_data_model import AxisRole, Dimension, Experiment
+
+    def fake_convert_dir(
+        self, runtime, experiment, raw_dir, dest_work, is_nus, logs, fid_com_overrides=None
+    ):
+        dest_work.mkdir(parents=True, exist_ok=True)
+        (dest_work / f"{experiment.dataset_id}.fid").write_bytes(b"converted")
+        return True
+
+    class _FakeRuntime:
+        def run(self, args, cwd=None, timeout=None):  # noqa: ARG002
+            name = args[args.index("-out") + 1]
+            (Path(cwd) / name).write_bytes(b"shifted")
+            return SimpleNamespace(returncode=0)
+
+    calls: list[bool] = []
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(NMRPipeBackend, "_convert_dir", fake_convert_dir)
+    monkeypatch.setattr(NMRPipeBackend, "_merge_single_fid", lambda *a, **k: True)
+    monkeypatch.setattr(
+        NMRPipeBackend,
+        "_correct_group_drift",
+        lambda self, runtime, experiment, work, logs: calls.append(True),
+    )
+    try:
+        exp = Experiment(
+            dataset_id="d_900",
+            source_path=tmp_path,
+            ndim=2,
+            dimensions=[
+                Dimension(logical_axis="F2", nucleus="1H", td=64, role=AxisRole.DIRECT),
+                Dimension(logical_axis="F1", nucleus="15N", td=8),
+            ],
+            segments=[tmp_path / "a", tmp_path / "b"],
+        )
+        backend = NMRPipeBackend(nmrpipe_bin="")
+
+        ok, logs = backend._convert_segments(_FakeRuntime(), exp, tmp_path / "auto", [])
+        assert ok is True
+        assert calls == [True]
+
+        calls.clear()
+        ok, logs = backend._convert_segments(
+            _FakeRuntime(), exp, tmp_path / "manual", [0.0, 12.5]
+        )
+        assert ok is True
+        assert calls == []
+        assert any("segment_shift_hz" in line for line in logs)
+    finally:
+        monkeypatch.undo()
+
+
+def test_multi_segment_reuse_requires_the_field_drift_record(tmp_path: Path) -> None:
+    """Multi-part reuse: a record without an inter-part drift conclusion means convert again."""
+    backend = NMRPipeBackend(nmrpipe_bin="")
+    work = tmp_path / "process"
+    work.mkdir()
+    raws = []
+    for name in ("raw", "raw2"):
+        raw = tmp_path / name
+        raw.mkdir()
+        (raw / "acqus").write_text("##TITLE= test\n", encoding="utf-8")
+        raws.append(raw)
+    (work / "d_001.fid").write_bytes(b"x" * 32)
+    logs: list[str] = []
+
+    # an old record (converted before this feature): no drift field -> convert again
+    backend._record_conversion(work, "d_001", raws, logs)
+    logs.clear()
+    assert (
+        backend._converted_fid_is_current(
+            work, "d_001", raws, logs, require_field_drift=True
+        )
+        is False
+    )
+    assert any("field drift" in line for line in logs)
+
+    # with the drift conclusion -> reuse; the single-dataset path (default False) is unaffected
+    field_drift.write_field_drift_record(work, {"checked": True, "rounds": []})
+    backend._record_conversion(work, "d_001", raws, logs)
+    logs.clear()
+    assert (
+        backend._converted_fid_is_current(
+            work, "d_001", raws, logs, require_field_drift=True
+        )
+        is True
+    )
+    assert backend._converted_fid_is_current(work, "d_001", raws, logs) is True
+
+
 def test_reconstruct_nus_segments_reuse_follows_the_raw_fingerprint(
     bruker_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -134,6 +230,10 @@ def test_reconstruct_nus_segments_reuse_follows_the_raw_fingerprint(
         (work / "merged" / "fid").mkdir(parents=True, exist_ok=True)
         (work / "merged" / "fid" / "test001.fid").write_bytes(b"merged-v1")
         (work / "nuslist").write_text("1 1\n2 3\n4 5\n", encoding="utf-8")
+        # the real _convert_segments leaves an inter-part drift conclusion behind for multiple
+        # parts (2026-09-23); the fake must do the same or the reuse check would treat a record
+        # without a drift conclusion as an old record and convert again
+        field_drift.write_field_drift_record(work, {"checked": True, "rounds": []})
         return True, ["fake segment conversion"]
 
     monkeypatch.setattr(NMRPipeBackend, "_convert_segments", fake_convert_segments)

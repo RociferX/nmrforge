@@ -60,6 +60,38 @@ def ft_kind_for(fnmode: int) -> str:
     return FT_KIND.get(fnmode, "complex")
 
 
+#: FT processing shape -> bruk2pipe conversion keyword (-yMODE/-zMODE)
+_BRUK2PIPE_MODE_BY_KIND = {
+    "complex": "Complex",
+    "magnitude": "Real",
+    "sequential": "Sequential",
+    "tppi": "TPPI",
+}
+
+#: Direct-dimension conversion keyword (bruk2pipe -xMODE): always DQD in Bruker
+DIRECT_BRUK2PIPE_MODE = "DQD"
+
+
+def bruk2pipe_mode_for(fnmode: int, *, axis: str = "y") -> str:
+    """FnMODE -> bruk2pipe conversion keyword (``-xMODE``/``-yMODE``/``-zMODE``).
+
+    Single source: ``backend.bruker_workflow.expected_values`` (fid.com cross-check and
+    patch, acqus is authoritative) and ``backend.script_generator`` (fallback conversion
+    script) both call this function. Before the 2026-09-23 merge the two places each had
+    their own table and they disagreed: bruker_workflow mapped FnMODE=4 and 6 to
+    ``Echo-AntiEcho`` and 3/2/1 to ``Complex``, so it rewrote the fid.com that
+    ``bruker -AUTO`` had written correctly (datasets with FnMODE 1/2/3/4).
+
+    With ``axis="z"`` the result is never ``Echo-AntiEcho``: the E-A shuffling happens
+    in the y dimension of bruk2pipe only (see the z branch of script_generator), so z
+    always stays ``Complex``.
+    """
+    kind = ft_kind_for(fnmode)
+    if kind == "complex" and int(fnmode) == 6 and axis != "z":
+        return "Echo-AntiEcho"
+    return _BRUK2PIPE_MODE_BY_KIND.get(kind, "Complex")
+
+
 def unsupported_real_mode_error(fnmode: int, *, logical_axis: str) -> str:
     """Rejection text for a real indirect dimension on the SMILE (NUS) path.
 

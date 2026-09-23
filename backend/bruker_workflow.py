@@ -13,6 +13,10 @@ from typing import Any
 
 from core.data.bruker_dtype import UnknownBrukerDtype, point_bytes
 from core.data.internal_data_model import Experiment, SamplingMode
+from core.experiment.acquisition_mode_detector import (
+    DIRECT_BRUK2PIPE_MODE,
+    bruk2pipe_mode_for,
+)
 from ui_support.i18n import tr
 
 _KEY_RE = re.compile(
@@ -163,6 +167,11 @@ def expected_values(
     target is given and the caller keeps the fid.com value. ``xT`` stays acqus TD//2:
     that is the "valid points" size, independent of the padding (bruk2pipe drops the
     padded/oversampled part there).
+
+    ``xMODE``/``yMODE``/``zMODE`` come from
+    ``core.experiment.acquisition_mode_detector.bruk2pipe_mode_for`` (the same source as
+    script_generator since 2026-09-23; before that this function rewrote the fid.com of
+    FnMODE 1/2/3/4 datasets incorrectly).
     """
     td = _effective_td(experiment)
     direct = physical_direct_points(experiment, data_dir)
@@ -180,7 +189,7 @@ def expected_values(
         "xOBS": (float(x.sf), 1e-3) if x else (None, 1e-3),
         "xCAR": (float(x.o1p), 1e-3) if x else (None, 1e-3),
         "xLAB": (x.nucleus, None) if x else ("", None),
-        "xMODE": ("DQD", None),
+        "xMODE": (DIRECT_BRUK2PIPE_MODE, None),
     }
     if experiment.ndim >= 2 and len(td) > 1:
         y = _dim(experiment, "F1" if experiment.ndim == 2 else "F2")
@@ -193,11 +202,12 @@ def expected_values(
                 "yOBS": (float(y.sf), 1e-3) if y else (None, 1e-3),
                 "yCAR": (float(y.o1p), 1e-3) if y else (None, 1e-3),
                 "yLAB": (y.nucleus, None) if y else ("", None),
-                "yMODE": ("Echo-AntiEcho" if y_fnmode in (4, 6) else "Complex", None),
+                "yMODE": (bruk2pipe_mode_for(y_fnmode), None),
             }
         )
     if experiment.ndim >= 3 and len(td) > 2:
         z = _dim(experiment, "F1")
+        z_fnmode = _fnmode(experiment, z.logical_axis) if z else 0
         values.update(
             {
                 "zN": (float(td[2]), 0.0),
@@ -206,7 +216,7 @@ def expected_values(
                 "zOBS": (float(z.sf), 1e-3) if z else (None, 1e-3),
                 "zCAR": (float(z.o1p), 1e-3) if z else (None, 1e-3),
                 "zLAB": (z.nucleus, None) if z else ("", None),
-                "zMODE": ("Complex", None),
+                "zMODE": (bruk2pipe_mode_for(z_fnmode, axis="z"), None),
             }
         )
     acqus = experiment.acquisition_parameters.get("acqus", {})
