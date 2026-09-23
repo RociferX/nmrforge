@@ -62,6 +62,7 @@
     "workflow/baseline_optimize.py",
     "workflow/batch.py",
     "workflow/direct_diagnostics.py",
+    "workflow/field_drift.py",
     "workflow/import_workflow.py",
     "workflow/manual.py",
     "workflow/memory_phase_search.py",

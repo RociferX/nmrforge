@@ -349,7 +349,11 @@ python scripts/update_compat_declaration.py --level same              # 只是�
   -aq2D Complex,与实验室 fid.com 一致);不得再用 acqu3s TD 修正暂存
   (TD=1 时 bruker 同样输出单文件全网格 fid);3D NUS 切片只在 SMILE 脚本
   step1 直接维处理后产生(nus3d_1/test%04d.ft1);多段合并用 addNMR 合并
-  单文件(merged/{dataset_id}.fid),段频移用 PS -rs。转换期切片是历史产物,
+  单文件(merged/{dataset_id}.fid),段频移用 PS -rs(手工值走 params["segment_shift_hz"])。
+  2026-09-23 起多段转换还会自动测组间场漂(基准 = 第 1 段,**判据 |Δ| > 1.5 Hz,ppm 只记录**):
+  超阈值时把 `PS -rs <Δ>Hz` 插到该段 fid.com 的 `MULT -c` 之前(保留 MULT)重转该段,
+  复检残差后才合并;测不出峰/残差仍超阈值只报告(见 workflow/field_drift.py)。
+  转换期切片是历史产物,
   新代码不得生成;_zero_bad_point_fid 的切片回退仅兼容旧工作目录。
 - SMILE 峰值内存预算(0.2.199-补15):安全的 SMILE 峰值 ≤ 2.8GB(填零 1024);
   5.6GB 量级(填零 2048,直接维翻倍)会超出内存护栏。测试数据/复跑必须保证
