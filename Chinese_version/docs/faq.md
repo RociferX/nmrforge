@@ -70,16 +70,19 @@ AppImage 构建脚本读取它,运行记录也存它 —— 因此应用里的�
 
 ### 怎么引用 nmrForge?
 
-引用元数据正在 [CITATION.cff](../../CITATION.cff) 里定稿;作者名单与单位尚未固定。
-在出现带 DOI 的发布之前,请引用仓库地址。如果你发表了结果,请同时引用 NMRPipe 与 SMILE ——
-见 [THIRD_PARTY.md](../../THIRD_PARTY.md)。
+引用元数据见 [CITATION.cff](../../CITATION.cff):作者李宣锋(Xuanfeng Li),单位中国科学技术大学
+(University of Science and Technology of China)。1.0.0 起每个发布版本都有 DOI —— 版本 DOI
+[10.5281/zenodo.22909416](https://doi.org/10.5281/zenodo.22909416),全部版本用概念 DOI
+[10.5281/zenodo.22909415](https://doi.org/10.5281/zenodo.22909415);不需要区分版本时引用仓库地址即可。
+如果你发表了结果,请同时引用 NMRPipe 与 SMILE —— 见 [THIRD_PARTY.md](../../THIRD_PARTY.md)。
 
 ### 能商用吗?
 
-许可尚未选定,因此仓库目前是「保留所有权利」,你不应再分发它。
-GUI 现在依赖 PySide6(其选项包含 LGPL-3.0)而不是 PyQt6(仅 GPL-3.0),
-所以原则上可以采用宽松许可 —— 但仍需先选定,并且必须先重跑第三方审计。
-见 [LICENSE_OPTIONS.md](../../LICENSE_OPTIONS.md)。
+可以:本项目自己的源码是 Apache-2.0,正文见根目录 [LICENSE](../../LICENSE),版权行与 SPDX 标识在
+[NOTICE](../../NOTICE)。打包产物里捆绑的 Qt/PySide6 单独按 LGPL-3.0 授权,义务落在那些库上,不限制你
+对本项目源码的使用(源码安装由你自己拉取 Qt,不触发 LGPL 义务)。许可选择与「源码宽松、产物里
+捆绑库 LGPL」的分离理由见 [LICENSE_OPTIONS.md](../../LICENSE_OPTIONS.md),第三方组件的许可见
+[THIRD_PARTY.md](../../THIRD_PARTY.md)。
 
 ### 怎么确认一个已发表的结果能从 nmrForge 复现?
 

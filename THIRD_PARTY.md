@@ -108,12 +108,18 @@ bundles**: the AppImage's Qt/PySide6 libraries (see the next section). Installin
 Qt in as a separate package and triggers no LGPL obligation on this project. Third-party components
 keep their own licences regardless of the project licence above.
 
-### [BLOCKER] Author list, affiliation, and IP ownership not confirmed
+### Author list, affiliation, and IP ownership
 
-`CITATION.cff` contains placeholders (see the `TODO` entries). The owner must confirm:
+Confirmed 2026-09-23: `CITATION.cff` names the author as "Li, Xuanfeng" (李宣锋) with the
+affiliation University of Science and Technology of China (中国科学技术大学, ROR
+https://ror.org/04c4dkn09), and it carries no placeholders. `.zenodo.json` declares the same
+creator and affiliation for the archived release, and `NOTICE` records the copyright holder.
 
-- who the authors are and in which order;
-- whether the institution/laboratory claims copyright or imposes a copyright notice;
+Still to be confirmed by the rights holder (it does not change the Apache-2.0 grant already in
+`LICENSE`, and it only becomes relevant if the copyright line is ever changed to name an
+institution):
+
+- whether the institution/laboratory claims copyright over this software;
 - whether the software was created under a funding agreement with redistribution conditions.
 
 ## 6. Verification gaps
