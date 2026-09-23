@@ -23,6 +23,7 @@ nmrForge 读取一个 Bruker 数据集,判定它是什么实验、用了哪种�
 分发方式:源码 + Linux AppImage(一份产物,界面语言运行时切换)
 发布页:<https://github.com/RociferX/nmrforge/releases>
 仓库:<https://github.com/RociferX/nmrforge>
+归档与 DOI:Zenodo [10.5281/zenodo.22909416](https://doi.org/10.5281/zenodo.22909416)(全部版本 [10.5281/zenodo.22909415](https://doi.org/10.5281/zenodo.22909415))
 
 > **nmrForge 仍在活跃开发中,接口与处理默认值在 v1.0 之前仍可能变化。** 这里写明的行为都有
 > 测试覆盖(见测试套件),但 Python/CLI 接口与处理默认值尚未冻结。
@@ -317,9 +318,12 @@ python examples/quickstart.py ./example_data/hsqc_2d
 
 ## 引用
 
-引用元数据见 [CITATION.cff](../CITATION.cff)。作者与仓库地址已确定;单位尚未确定,也还没有 DOI,
-因此在 DOI 出现之前请引用仓库地址(或你所用版本的 GitHub Release 页)。该文件写明了 Zenodo
-发布取得 DOI 之后要补的那两行。
+引用元数据见 [CITATION.cff](../CITATION.cff)。1.0.0 起每个发布版本都有 DOI:
+
+- 本版本:`10.5281/zenodo.22909416`(<https://doi.org/10.5281/zenodo.22909416>)
+- 全部版本(始终指向最新版):`10.5281/zenodo.22909415`(<https://doi.org/10.5281/zenodo.22909415>)
+
+作者与仓库地址已确定;单位尚未确定。
 
 如果你发表的工作用到了本软件的处理或重构引擎,请同时引用 NMRPipe 与 SMILE ——
 见 [THIRD_PARTY.md](../THIRD_PARTY.md)。
