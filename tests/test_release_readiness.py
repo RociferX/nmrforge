@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import fnmatch
 import re
+import subprocess
 import tomllib
 from pathlib import Path
 
@@ -146,27 +147,103 @@ PLAIN_DOC_REF_RE = re.compile(
 )
 
 
+def _shipped_paths(root: Path) -> set[str] | None:
+    """Files the snapshot ships, from ``git ls-files`` (casefolded); ``None`` when git is absent.
+
+    A bare ``Path.exists()`` mistakes a machine-local file for a shipped one - for example the
+    run-time ``nmrforge_data/config/nmrforge.local.yaml`` (it is in ``.gitignore``): present on the
+    developer machine, absent from CI's clean checkout, so the same commit passed on Windows and
+    failed on Linux CI (hit for real on 2026-09-23). "Shipped" means "tracked by git".
+    """
+    try:
+        done = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "-z"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return {name.casefold() for name in done.stdout.split("\0") if name}
+
+
+def _ignored_paths(root: Path, targets: set[str]) -> set[str]:
+    """Which of ``targets`` ``.gitignore`` excludes (generated / run-time / machine-local files).
+
+    Naming one of these in a document is legitimate - the repository deliberately does not ship it,
+    which is different from naming a file that neither exists nor should exist. ``--no-index``
+    makes the decision depend on the rules alone, not on whether the file happens to be present
+    right now, so the local run and CI agree.
+    """
+    if not targets:
+        return set()
+    try:
+        done = subprocess.run(
+            ["git", "-C", str(root), "check-ignore", "--no-index", "-z", "--stdin"],
+            input="\0".join(sorted(targets)),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return set()
+    return {name.casefold() for name in done.stdout.split("\0") if name}
+
+
+#: Resolve a repository path case-insensitively, one component at a time. Only a fallback for when
+#: `_shipped_paths` cannot reach git: the regex is `(?i)` while Windows compares paths
+#: case-insensitively and Linux does not, so a bare `Path.exists()` makes the same document pass on
+#: Windows and fail on Linux CI (hit for real on 2026-09-23: `docs/packaging.md` wrote
+#: `Packaging/linux/NMRForge.spec`).
+def _path_resolves_case_insensitively(base: Path, target: str) -> bool:
+    """Walk ``target`` from ``base`` one component at a time, ignoring case."""
+    current = base
+    for part in Path(target).parts:
+        if not current.is_dir():
+            return False
+        found = next(
+            (child for child in current.iterdir() if child.name.casefold() == part.casefold()),
+            None,
+        )
+        if found is None:
+            return False
+        current = found
+    return current.exists()
+
+
 def test_public_docs_do_not_reference_documents_that_are_not_shipped() -> None:
-    """Every repository path a public document names must exist - plain text included."""
+    """Every repository path a public document names must really ship - plain text included."""
     public = ROOT / "publish" if _private_trunk() else ROOT
     if not public.is_dir():
         pytest.skip("the public snapshot is not present (VM/CI)")
-    offenders: list[str] = []
+    shipped = _shipped_paths(public)
+    references: list[tuple[str, str]] = []  # (document, as written)
     for path in sorted(public.rglob("*.md")):
         if PRIVATE_SCAN_SKIP & set(path.parts):
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
         # markdown-link targets are covered by test_relative_links_in_public_docs_resolve
         body = LINK_RE.sub(" ", text)
-        for match in PLAIN_DOC_REF_RE.finditer(body):
-            target = match.group(0)
-            candidates = (
-                public / target,        # the same path under the repository root
-                path.parent / target,   # a same-named directory next to this file
-            )
-            if any(candidate.exists() for candidate in candidates):
-                continue
-            offenders.append(f"{path.relative_to(public).as_posix()} -> {target}")
+        references += [
+            (path.relative_to(public).as_posix(), match.group(0))
+            for match in PLAIN_DOC_REF_RE.finditer(body)
+        ]
+    if shipped is None:  # no git: fall back to a case-insensitive filesystem lookup
+        missing = [
+            (where, target)
+            for where, target in references
+            if not _path_resolves_case_insensitively(public, target)
+            and not _path_resolves_case_insensitively((public / where).parent, target)
+        ]
+    else:
+        missing = [
+            (where, target) for where, target in references if target.casefold() not in shipped
+        ]
+        ignored = _ignored_paths(public, {target for _, target in missing})
+        missing = [
+            (where, target) for where, target in missing if target.casefold() not in ignored
+        ]
+    offenders = [f"{where} -> {target}" for where, target in missing]
     assert not offenders, (
         "public docs reference files that the snapshot does not ship: "
         + "; ".join(sorted(set(offenders))[:8])
