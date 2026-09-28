@@ -125,11 +125,50 @@ Unified phase route), GUI page shall not bypass this controller and directly cal
 
 ## 6. Parameter/result convention
 
-- Process parameter unified dict keys: `zero_fill`, `sampling`(ft_neg/ft_alt/flip_f1/
-  Starting from auto_phase,0.2.67 script generates consumption: ft_neg None=Automatically according to the collection method/True=mandatory.
-  FT -neg/False=Close;ft_alt True=Automatically according to the collection method/False=Force close;flip_f1.
-  True, F1 axis FT -neg flip; auto_phase False, turn off direct dimension automatic phase).
-  `baseline`(baseline correction for each dimension, see below), `stages`(list.
+- Process parameter unified dict keys: `zero_fill`, `sampling`(ft_neg/ft_neg_f1/ft_neg_f2/
+  flip_f1/flip_f2/ft_alt/auto_phase, consumed by script generation since 0.2.67: `ft_neg` is
+  **global**, `ft_neg_f1`/`ft_neg_f2` are **per-axis**, and all three are tri-state -
+  None=follow the acquisition mode / the automatic rule, True=**apply** `FT -neg`,
+  False=**do not apply**; `ft_alt` True=automatic from the acquisition mode/False=force off;
+  `auto_phase` False turns the direct-dimension automatic phase off).
+  **Semantics of the per-axis keys (confirmed by the user by name on 2026-09-25)**: `ft_neg_f1`/
+  `ft_neg_f2` **directly decide whether that axis gets** `-neg` (**absolute**); they are **not**
+  "the result of flipping/inverting the automatic rule" - the same `True` means "apply" whether
+  the automatic rule is on or off; `flip_f1`/`flip_f2` are the **legacy compatibility aliases**
+  for these two keys (same meaning; new code should use `ft_neg_f*`). Precedence:
+  **`ft_neg` (global) > `ft_neg_f*` (per-axis) > the automatic rule**; the per-axis keys take
+  effect only when `ft_neg` is None (or absent).
+  **The `-neg` decision (user, 2026-09-25, second and final round)**: the automatic rule is
+  **on by default** (`AUTO_NEG_JUDGEMENT=True`), and it is the simple rule with the **lowest
+  probability of error** (canonical `-N` / solved Layer A ⇒ take it; **the 3D NMRPipe `y`
+  dimension (identified through `AQSEQ`, not blindly the logical F2) + the States family
+  (`FnMODE` 2/3/4/5) ⇒ apply `-neg`**; the 3D `z` dimension, and the E/A family (QF family)
+  agreeing with `FnMODE`, ⇒ do not apply; everything else - 2D States, `FnMODE` missing,
+  `AQSEQ` that cannot tell y from z, **a pulse-program family contradicting `FnMODE`** ⇒
+  **do not apply + the same reminder in all three places** (log / report / import), i.e.
+  `ask_user`: "hand it to the user" - neither guess nor silently decide "do not apply" - and let
+  the user settle it with the "indirect-dimension flip" control on the spectrum step).
+  The spectrum step's "indirect-dimension flip" control edits the **already generated final
+  script** (it only touches the indirect-dimension FT line; the control itself is a "command",
+  and the panel first works out the **explicit target state** from the current final script and
+  then sends it out); when building a reference, API/CLI uses
+  `params={"sampling": {"ft_neg_f1"|"ft_neg_f2": true|false}}` (the alias `flip_f*` works as
+  well);
+  the keys that affect sign/direction (`ft_neg`/`ft_neg_f1`/`ft_neg_f2`/`flip_f1`/`flip_f2`/
+  `ft_alt`) have a **single source**
+  (`core.experiment.acquisition_mode_detector.sign_sampling_flags`), and the derived runs while
+  the reference is built (per-axis phase preview / joint evaluation spectra) and the final run
+  **must use the same sign convention**;
+  these keys **must not** be used as combination sweep axes (`plan_sweep` raises an error; the
+  same locked keys as `sampling.auto_phase`);
+  `ReferenceSpectrum.sampling_flags` is a **derived read-only** attribute (taken from `params`),
+  recorded together with `reference.json`, the reference record and `run.json`'s
+  `parameters_resolved.sampling.flags`
+  (`flags_source: reference(locked)`); the automatic rule's conclusion is recorded per
+  dimension in `mode_symbol.dims` of `*.fid.conversion.json`
+  (`neg_decision`/`neg_basis`/`neg_reason`/`neg_applied`);
+- Process parameter unified dict keys (the rest): `baseline`(per-dimension baseline correction,
+  see below), `stages`(list.
   id/tool/macro/params/param_docs);
 - Baseline correction `baseline` key (G2B-007):
   `{"enabled": true, "mode": "auto"|"order", "order": N,
@@ -420,7 +459,12 @@ CLI:`python -m nmrforge_api {init,reference,peaks,sweep(=workflows),report,statu
 
 - `DatasetRef`(exp_id/data_id/**condition**/ndim/nuclei/sampling/source/raw_dir);
 - `ReferenceSpectrum`(condition, frozen spectrum and script path + SHA-256, valid parameter +
-  `direct_phase` (PS for each axis, **actual results** of automatic phase identification) + reference peak identity table.
+  `direct_phase` (PS for each axis, **actual results** of automatic phase identification) +
+  `sampling_flags` (**derived read-only**: the FT sign/direction choice settled when the
+  reference was built, e.g. `{"ft_neg_f1": true}` (the alias `flip_f1` is synonymous; user,
+  2026-09-25: "building a reference through the API has to take `neg` in as well") -
+  combinations reuse the same set,
+  and it must not be used as a sweep axis) + reference peak identity table.
   (`reference.list` + SHA-256 + peak number + source auto|external|shared:<condition>)+.
   **Two reference peak tables** `reference_peak_table_parabolic.csv` /.
   `reference_peak_table_gaussian.csv`(path + SHA-256 + Number of lines/detected count)+.

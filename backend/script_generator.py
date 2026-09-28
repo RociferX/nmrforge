@@ -1,17 +1,27 @@
 """Deterministic NMRPipe script generation (conversion + processing pipeline + NUS SMILE
-reconstruction). The same input (experiment metadata + processing plan) yields byte-
-identical.com scripts (LF line endings), which keeps runs reproducible. The key parameters
-follow the NMRFlow audit (SOFTWARE_SUMMARY section 6.2): - xMODE DQD / yMODE Echo-
-AntiEcho|Complex / zMODE Complex; - DSPFVS=21 -> -ws 8 -noi2f; -DMX stays disabled; - -aq2D
-values (FnMODE 6->3 E-A, 4->2 States, 5->2 States-TPPI); - NUS indirect-dimension TD uses NusTD;
-when 3D NUS acqu3s TD is written as 1 (as in sampleB) the conversion layer first corrects TD to
-NusTD on a staging copy before running bruker, which outputs the slice form fid/test%03d.fid
-(SMILE consumes it as a slice stream; see nmrpipe_backend._convert_dir). SMILE reconstruction
-parameters may be overridden through reconstruct_nus params (nSigma/thresh/scaling/report); the
-SMILE command carries no window or phase parameters (step3 post-processing handles windowing and
-phase), which keeps it usable for tuning against the lab script (data/ script /smile2.com).
-Conversion keywords have a single source since 2026-09-23:
-core.experiment.acquisition_mode_detector.bruk2pipe_mode_for."""
+reconstruction).
+
+The same input (experiment metadata + processing plan) yields byte-identical .com scripts
+(LF line endings), which keeps runs reproducible. The key parameters follow the NMRFlow
+audit (SOFTWARE_SUMMARY section 6.2):
+- xMODE DQD / yMODE Echo-AntiEcho|Complex|TPPI|Sequential|Real / zMODE the same as y
+  (without E-A); the conversion keywords have a single source:
+  acquisition_mode_detector.bruk2pipe_mode_for (2026-09-23);
+- the format switches replicate the bruker -AUTO rules (2026-09-24 parameter source
+  table): -aswap/-noaswap is decided by BYTORDA, the -AMX -decim -dspfvs -grpdly group is
+  written only when DECIM>1, DTYPA=1/2 writes -noi2f / -ws 8 -noi2f (not DSPFVS=21), and
+  -aq2D takes a keyword (Real classes -> Magnitude, everything else -> Complex; the
+  numeric spelling is deprecated by bruk2pipe and prints a warning);
+- NUS indirect-dimension TD uses NusTD; when a 3D NUS acqu3s TD is written as 1 (as in
+  sampleB) the conversion layer first corrects TD to NusTD on a staging copy before
+  running bruker, which outputs the slice form fid/test%03d.fid (SMILE consumes it as a
+  slice stream; see nmrpipe_backend._convert_dir).
+SMILE reconstruction parameters may be overridden through reconstruct_nus params
+(nSigma/thresh/scaling/report);
+# the SMILE command carries no window or phase parameters (step3 post-processing handles
+windowing and phase), which keeps it usable for tuning against the lab script
+(data/scripts/smile2.com).
+"""
 
 from __future__ import annotations
 
@@ -19,6 +29,7 @@ import math
 from collections.abc import Mapping
 from typing import Any
 
+from backend.bruker_workflow import carrier_values
 from core.data.internal_data_model import Experiment, SamplingMode
 from core.experiment.acquisition_mode_detector import (
     _REAL_FNMODE,
@@ -26,23 +37,45 @@ from core.experiment.acquisition_mode_detector import (
     bruk2pipe_mode_for,
     ft_kind_for,
     ft_neg_for,
+    hypercomplex_mult,
+    time_domain_points,
     unsupported_real_mode_error,
 )
 from core.planning.method_selector import select_method
 from core.planning.processing_plan import ProcessingPlan
 from ui_support.i18n import tr
 
-_AQ2D_KEYWORDS = {0: "2", 1: "1", 2: "2", 3: "2", 4: "2", 5: "2", 6: "3"}
 
-# FnMODE -> (FT -neg, FT -alt): the official Bruker TopSpin enumeration plus
-# the official bruk2pipe ACQUISITION MODES table (nmrPipe/format docs):
-#   0=undefined, 1/2=Magnitude(QF/QSEQ) and 3=TPPI are real/magnitude classes
-#   and need the -yMODE Real + FT -real/-bruk/MC path (not implemented; the
-#   entry point raises),
-#   4=States needs no flag, 5=States-TPPI needs -alt, 6=Echo-Antiecho is
-#   completed by shuffling inside the bruk2pipe conversion and needs no flag.
-# The States -neg of the 3D first indirect dimension (F2) is added by the
-# caller's force_neg (see core.experiment.acquisition_mode_detector.ft_neg_for).
+def _aq2d_keyword(y_kind: str) -> str:
+    """``-aq2D`` keyword (2026-09-24): bruk2pipe has deprecated the numeric spelling (it
+    prints "should now be specified as a keyword"), so the keyword is written instead.
+
+    Legal values (from the ``bruk2pipe`` help): ``0 Magnitude``/``1 Real``/``1 TPPI``/
+    ``2 Complex``/``2 States``/``3 Image`` -- ``TPPI`` is a keyword. This generator writes
+    it only in the **fallback** script; the script produced by ``bruker -AUTO`` is decided
+    by AUTO itself (the measured corpus writes ``Complex`` in 14/14 cases), and
+    ``expected_values`` does not treat ``-aq2D`` as an override target (review D of
+    2026-09-24 records that difference). The semantics match the old numeric table
+    (magnitude->0, TPPI->1, everything else->2), except that FnMODE=6 (E-A) moves from
+    ``3`` (Image) to ``Complex`` (identical to ``States`` 2): the depositor's own two
+    script families (RhoA ``fid.com``, OR8C/ACP ``Convert_HSQC.csh``) both write
+    ``States`` for E-A data.
+    """
+    if y_kind == "magnitude":
+        return "Magnitude"
+    if y_kind == "tppi":
+        return "TPPI"
+    return "Complex"
+
+# FnMODE -> (FT -neg, FT -alt): the official Bruker TopSpin enum plus the bruk2pipe
+# ACQUISITION MODES table (nmrPipe/format documentation):
+#   0=undefined; 1/2=Magnitude(QF/QSEQ) and 3=TPPI are real/magnitude classes
+#   needing -yMODE Real + the FT -real/-bruk/MC path (not implemented; the entry
+#   point raises), 4=States needs no flag, 5=States-TPPI needs -alt, and
+#   6=Echo-Antiecho needs no flag because bruk2pipe shuffles during conversion.
+# The -neg of the States family in the 3D first indirect dimension (F2) is layered on
+# by the caller through force_neg (see
+# core.experiment.acquisition_mode_detector.ft_neg_for).
 _FT_FLAGS = {
     0: (False, False),
     1: (False, False),
@@ -67,9 +100,9 @@ def _fnmode(experiment: Experiment, logical_axis: str) -> int:
 
 
 def _mult_for(fnmode: int) -> int:
-    """Hypercomplex component count: 2 for States/TPPI/States-TPPI/Echo-Antiecho
-    and 1 for QF."""
-    return 2 if int(fnmode) in (0, 1, 2, 4, 5, 6) else 1
+    """Hypercomplex component count (single source:
+    acquisition_mode_detector.hypercomplex_mult)."""
+    return hypercomplex_mult(fnmode)
 
 
 
@@ -105,9 +138,20 @@ def effective_td(experiment: Experiment) -> list[int]:
     return td
 
 
+def _int_param(block: dict[str, Any], key: str, default: int = 0) -> int:
+    """acqus integer parameter (missing or invalid always yields default; no guessing)."""
+    try:
+        return int(block.get(key, default) or default)
+    except (TypeError, ValueError):
+        return default
+
+
 def _fmt(value: Any) -> str:
     if isinstance(value, float):
-        return f"{value:g}"
+        # 2026-09-24 (compared against a public deposition script): AUTO and the depositor
+        # both write full precision; ``%g`` keeps only 6 significant digits (11160.7 vs
+        # 11160.7142857143), physically negligible but it distorts script diffs and reviews
+        return f"{value:.10g}"
     return str(value)
 
 
@@ -115,21 +159,20 @@ def _next_pow2(value: int) -> int:
     return 1 << max(0, int(value) - 1).bit_length()
 
 
-# ------------------------------------------------------------ zero-fill planning
-# Principle (2026-08-13, the user's plan): zero filling does not change the real
-# frequency resolution (which depends on the effective acquisition time AQ=TD/SW);
-# it only reduces the digital point spacing in the frequency domain (SW/SI). The
-# direct dimensions F2/F3 default to SI=2xTD (a safe empirical starting point,
-# 1024->2048); the indirect dimensions follow the target digital resolution:
-# target spacing = max(linewidth, 1/AQ)/points_per_line (1/2 by default, i.e. at
-# least 2 digital points per linewidth; precise peak positions/linewidths/fitting/
-# CSP may want 1/4 or finer), the required SI is rounded up to a power of two and
-# clamped to [TD, next_pow2(points_per_line x TD)] -- SI can never exceed the
-# power-of-two bound of points_per_line x TD. Linewidth sources:
-# params.linewidth_hz[axis] -> the per-nucleus default table -> 15 Hz. The NUS
-# indirect-dimension TD uses the reconstructed full complex-point grid
-# (effective_td), and zero filling applies only to the reconstructed time-domain
-# data (an independent process from the SMILE reconstruction).
+# --------------------------------------------------------------- zero-fill plan
+# Principle (2026-08-13, user's design): zero filling does not change the true frequency
+# resolution (which depends on the effective acquisition time AQ=TD/SW); it only reduces
+# the digital spacing in the frequency domain (SW/SI). The direct dimensions F2/F3 default
+# to SI=2xTD (a safe empirical starting point, 1024->2048); the indirect dimensions are
+# decided dynamically from the target digital resolution: target spacing =
+# max(linewidth, 1/AQ)/points_per_line (default 1/2, i.e. at least 2 digital points per
+# linewidth; 1/4 or finer is available for exact peak positions/linewidths/fitting/CSP),
+# and the required SI is rounded up to a power of two and clamped to
+# [TD, next_pow2(points_per_line x TD)] -- so SI never exceeds the power-of-two bound of
+# points_per_line x TD. The linewidth comes from params.linewidth_hz[axis] -> the
+# per-nucleus default table -> 15 Hz. For NUS the indirect-dimension TD is the full
+# complex-point grid after reconstruction (effective_td), and zero filling acts only on the
+# reconstructed time-domain data (it is a process independent of the SMILE reconstruction).
 DIRECT_ZF_FACTOR = 2
 DEFAULT_POINTS_PER_LINE = 2.0
 _DEFAULT_LINEWIDTH_HZ = {
@@ -203,7 +246,7 @@ def _indirect_si(
     if sw <= 0 or linewidth <= 0:
         si = _next_pow2(2 * n)
         return si, tr("SW/linewidth missing, falling back to 2x ({p0}->{p1})", p0=n, p1=si)
-    natural = sw / n  # 1/AQ: the real frequency-resolution floor (Hz/pt)
+    natural = sw / n  # 1/AQ: the true frequency-resolution floor (Hz/pt)
     lw_eff = max(linewidth, natural)
     si_req = int(math.ceil(points_per_line * sw / lw_eff))
     si = _next_pow2(max(si_req, n))
@@ -300,10 +343,10 @@ def zero_fill_plan(
     axes = [dim.logical_axis for dim in experiment.dimensions]
     td = effective_td(experiment)
     direct_axis = axes[0] if axes else ''
-    # 0.2.199-patch29dq (user): the NUS direct-dimension zero fill defaults to
-    # 2xTD like uniform (resolution first); when memory is short the reconstruct_nus
-    # memory guard (0.2.112) reduces it to 1xTD and says so, and only if that is
-    # still not enough does it report "not enough memory to process this spectrum"
+    # 0.2.199-patch29dq (user): the NUS direct-dimension zero fill defaults to 2xTD, the
+    # same as uniform (resolution first); when memory is short the reconstruct_nus memory
+    # guard (0.2.112) drops it to 1xTD with a notice, and only if that is still not enough
+    # does it report "the current memory cannot handle this spectrum"
     direct_factor = DIRECT_ZF_FACTOR
     plan: dict[str, dict[str, Any]] = {}
 
@@ -326,8 +369,7 @@ def zero_fill_plan(
             if isinstance(cfg, dict):
                 override[axis] = dict(cfg)
             else:
-                # A bare per-axis scalar means the factor kxTD (the same as the
-                # global zero_fill=k).
+                # A bare per-axis scalar is the factor kxTD (same as the global zero_fill=k).
                 override[axis] = {"mode": "factor", "factor": int(cfg)}
 
     for index, axis in enumerate(axes):
@@ -410,8 +452,7 @@ def smile_max_iter(fraction: float) -> int:
 
 
 def _is_constant_time(experiment: Experiment) -> bool:
-    # Constant-time experiment test: PULPROG values such as
-    # hsqcct/cthsqc/cthmqc/hmqcct/ctet.
+    # constant-time experiment test: PULPROG values such as hsqcct/cthsqc/cthmqc/hmqcct/ctet.
     acqus = experiment.acquisition_parameters.get("acqus", {}) or {}
     pulprog = str(acqus.get("PULPROG", "")).lower()
     return any(
@@ -421,11 +462,11 @@ def _is_constant_time(experiment: Experiment) -> bool:
 
 
 def smile_cross_term_args(experiment: Experiment) -> str:
-    # Whether SMILE -xCT/-yCT is added depends only on the experiment type: the
-    # indirect dimensions of a constant-time experiment need the cross terms
-    # switched off explicitly (-xCT 1/-yCT 1, because no coupling evolves during
-    # the constant-time period and cross terms would introduce spurious peaks);
-    # ordinary experiments omit them and keep SMILE's default behaviour.
+    # Whether SMILE -xCT/-yCT is added depends only on the experiment type: the indirect
+    # dimensions of a constant-time experiment need the cross terms switched off explicitly
+    # (-xCT 1/-yCT 1, because no coupling evolves alongside during the constant-time period,
+    # so cross terms would introduce false peaks); ordinary experiments add nothing and use
+    # the SMILE default behaviour.
     if not _is_constant_time(experiment):
         return ""
     axes = ["x", "y"] if experiment.ndim >= 3 else ["x"]
@@ -457,9 +498,17 @@ def build_context(experiment: Experiment) -> dict[str, Any]:
     z = dims.get("F1") if experiment.ndim >= 3 else None
     acqus = experiment.acquisition_parameters.get("acqus", {})
 
-    def _carrier(dim: Any) -> float:
+    # 2026-09-24: the carrier convention uses the same criterion as the main path
+    # (bruker -AUTO + patch_fid_com) -- by default "water peak (TE) + gamma ratio", falling
+    # back to acqus O1/BF1 when the direct-dimension 1H carrier is not near the water peak.
+    carriers = carrier_values(experiment).get("values") or {}
+
+    def _carrier(letter: str, dim: Any) -> float:
         if dim is None:
             return 0.0
+        value = carriers.get(letter)
+        if value is not None:  # 0.0 ppm is a legal carrier (review D 2026-09-24: no truthiness)
+            return float(value)
         if dim.o1p:
             return float(dim.o1p)
         return float(dim.o1) / float(dim.sf) if dim.sf else 0.0
@@ -474,9 +523,9 @@ def build_context(experiment: Experiment) -> dict[str, Any]:
         "meta.sfo.x": float(x.sf) if x else 0.0,
         "meta.sfo.y": float(y.sf) if y else 0.0,
         "meta.sfo.z": float(z.sf) if z else 0.0,
-        "meta.carrier.x": _carrier(x),
-        "meta.carrier.y": _carrier(y),
-        "meta.carrier.z": _carrier(z),
+        "meta.carrier.x": _carrier("x", x),
+        "meta.carrier.y": _carrier("y", y),
+        "meta.carrier.z": _carrier("z", z),
         "meta.nucleus.x": x.nucleus if x else "",
         "meta.nucleus.y": y.nucleus if y else "",
         "meta.nucleus.z": z.nucleus if z else "",
@@ -507,29 +556,42 @@ def _bruk2pipe_tokens(experiment: Experiment, ctx: dict[str, Any]) -> list[str]:
     y_fnmode = _fnmode(experiment, "F1" if ndim == 2 else "F2")
     y_kind = ft_kind_for(y_fnmode)
     y_mode = bruk2pipe_mode_for(y_fnmode)  # single source (2026-09-23)
-    y_real = y_kind in ("magnitude", "tppi", "sequential")  # real classes: no /2
+    acqus = experiment.acquisition_parameters.get("acqus", {}) or {}
     tokens = [
         "bruk2pipe",
         "-in",
         "./ser",
         "-bad",
         "0.0",
-        "-aswap",
-        "-AMX",
-        "-decim",
-        str(ctx["meta.decim"]),
-        "-dspfvs",
-        str(ctx["meta.dspfvs"]),
-        "-grpdly",
-        _fmt(ctx["meta.grpdly"]),
         "-ext",
+        # 2026-09-24: the format switches follow the bruker -AUTO rules (BYTORDA!=0 -> -noaswap)
+        "-noaswap" if _int_param(acqus, "BYTORDA") else "-aswap",
+    ]
+    decim = int(ctx["meta.decim"] or 0)
+    if decim > 1:
+        # AUTO writes these three digital-filter parameters only when DECIM>1 (nih.tcl
+        # 602-612); GRPDLY is copied from acqus (a negative value means the data has no
+        # usable group delay, matching AUTO)
+        tokens += [
+            "-AMX",
+            "-decim",
+            str(decim),
+            "-dspfvs",
+            str(ctx["meta.dspfvs"]),
+            "-grpdly",
+            _fmt(ctx["meta.grpdly"]),
+        ]
+    dtypa = _int_param(acqus, "DTYPA")
+    if dtypa == 2:
+        tokens += ["-ws", "8", "-noi2f"]
+    elif dtypa == 1:
+        tokens += ["-noi2f"]
+    tokens += [
         "-xMODE",
         DIRECT_BRUK2PIPE_MODE,
         "-yMODE",
         y_mode,
     ]
-    if int(ctx["meta.dspfvs"] or 0) == 21:
-        tokens += ["-ws", "8", "-noi2f"]
     tokens += [
         "-xN",
         str(ctx["meta.td.x"]),
@@ -538,7 +600,7 @@ def _bruk2pipe_tokens(experiment: Experiment, ctx: dict[str, Any]) -> list[str]:
         "-xT",
         str(int(ctx["meta.td.x"]) // 2),
         "-yT",
-        str(int(ctx["meta.td.y"]) if y_real else int(ctx["meta.td.y"]) // 2),
+        str(time_domain_points(y_fnmode, int(ctx["meta.td.y"]))),
         "-xSW",
         _fmt(ctx["meta.sw.x"]),
         "-ySW",
@@ -559,22 +621,17 @@ def _bruk2pipe_tokens(experiment: Experiment, ctx: dict[str, Any]) -> list[str]:
         str(ndim),
     ]
     if ndim >= 2:
-        keyword = _AQ2D_KEYWORDS.get(y_fnmode, "")
-        if y_kind != "complex":
-            keyword = {"magnitude": "0", "tppi": "1", "sequential": "2"}[y_kind]
-        tokens += ["-aq2D", keyword] if keyword else ["-aq2D"]
+        tokens += ["-aq2D", _aq2d_keyword(y_kind)]
     if ndim >= 3:
         z_fnmode = _fnmode(experiment, "F1")
-        z_kind = ft_kind_for(z_fnmode)
-        z_mode = bruk2pipe_mode_for(z_fnmode, axis="z")  # E-A only exists in y
-        z_real = z_kind in ("magnitude", "tppi", "sequential")
+        z_mode = bruk2pipe_mode_for(z_fnmode, axis="z")  # E-A applies to the y axis only
         tokens += [
             "-zMODE",
             z_mode,
             "-zN",
             str(ctx["meta.td.z"]),
             "-zT",
-            str(int(ctx["meta.td.z"]) if z_real else int(ctx["meta.td.z"]) // 2),
+            str(time_domain_points(z_fnmode, int(ctx["meta.td.z"]))),
             "-zSW",
             _fmt(ctx["meta.sw.z"]),
             "-zOBS",
@@ -609,8 +666,8 @@ def generate_convert_script(
     tokens[tokens.index("-in") + 1] = in_file
     tokens[tokens.index("-out") + 1] = out_file
     if direct_points:
-        # 0.2.199-patch30: -xN must match the physical ser row (Bruker pads to
-        # serPadSize), not the acqus TD; see physical_direct_points
+        # 0.2.199-patch30: -xN must match the physical line length of ser (Bruker pads to
+        # serPadSize), not the acqus TD; see backend.bruker_workflow.physical_direct_points
         tokens[tokens.index("-xN") + 1] = str(int(direct_points))
     lines = [
         "#!/bin/csh",
@@ -649,26 +706,25 @@ def _stage_lines(
     lines: list[str] = []
     for op, params in stages:
         if op == "combine_hypercomplex":
-            continue  # bruk2pipe already completed the hypercomplex reconstruction
+            continue  # bruk2pipe already did the hypercomplex reconstruction per MODE
         if op == "apodization":
             axis = str(params.get("axis", ""))
             cfg = dict(params.get("params", {}) or {})
             if window and axis in window:
                 cfg.update(window[axis] or {})
             wtype = str(cfg.get("type", "sine_bell"))
-            # 0.2.189: an explicit window[axis] type=none adds no apodisation for
-            # that axis (no SP is inserted); this is how the fixed "no window" on
-            # the indirect dimensions takes effect (uniform takes this branch too)
+            # 0.2.189: when window[axis] explicitly says type=none that axis gets no window
+            # (no SP inserted); this is what makes the fixed no-window indirect dimensions
+            # effective (uniform takes this branch too)
             if wtype in ("none", "off"):
                 continue
             if wtype == "gaussian":
-                # NMRPipe: GM accepts only -g1/-g2/-g3 (0.2.170). History: GM
-                # -lb/-gb was silently ignored (the window had no effect), while
-                # GMB -lb/-gb blew up towards the end of the FID in practice
-                # (0.2.165 user report of a completely wrong spectrum). The
-                # NMRPipe-native g1/g2 are used throughout (defaults 8/15; measured
-                # behaviour is gentle, peak about 1.2 with a smoothly decaying
-                # tail), and lb/gb (Bruker semantics) are no longer mapped directly.
+                # NMRPipe: GM only accepts -g1/-g2/-g3 (0.2.170). Historical problems: GM
+                # -lb/-gb was silently ignored (the window had no effect), and GMB -lb/-gb was
+                # measured to blow the window up at the FID tail (0.2.165 user report of a
+                # completely wrong spectrum). Native NMRPipe g1/g2 is used throughout (8/15 by
+                # default, a measurably gentle window: peak about 1.2 with a smooth tail
+                # decay); lb/gb (Bruker semantics) are no longer mapped directly.
                 lines.append(
                     f"| nmrPipe -fn GM -g1 {_fmt(cfg.get('g1', 8.0))} "
                     f"-g2 {_fmt(cfg.get('g2', 15.0))} \\"
@@ -698,22 +754,30 @@ def _stage_lines(
         elif op == "ft":
             axis = str(params.get("axis", ""))
             kind = str(params.get("kind", "complex") or "complex")
+            # review D 2026-09-24: the real-class branch (TPPI/QSEQ/QF) used to hard-code
+            # its flags and ignore sampling.ft_neg/ft_alt/flip_f1; it now goes through
+            # _ft_flags like the complex branch (a real class only takes -neg; the direction
+            # comes from -real/-bruk)
+            override = _ft_flags(
+                bool(params.get("neg")),
+                False,
+                sampling=sampling,
+                axis=axis,
+            )
+            neg_suffix = " -neg" if "-neg" in override else ""
             if kind == "tppi":
                 # TPPI(phase-sensitive real):FT -real
-                lines.append("| nmrPipe -fn FT -real \\")
+                lines.append(f"| nmrPipe -fn FT -real{neg_suffix} \\")
             elif kind == "sequential":
-                # QSEQ/Sequential: detected directly by Bruker; FT -bruk
-                # (= -alt -real)
-                lines.append("| nmrPipe -fn FT -bruk \\")
+                # QSEQ/Sequential: detected directly by Bruker, FT -bruk (= -alt -real)
+                lines.append(f"| nmrPipe -fn FT -bruk{neg_suffix} \\")
             elif kind == "magnitude":
-                # QF/magnitude: complex FT of the indirect dimension (direction
-                # via -neg), followed by MC
-                neg = bool(params.get("neg"))
-                suffix = " -neg" if neg else ""
-                lines.append(f"| nmrPipe -fn FT{suffix} \\")
+                # QF/magnitude: complex FT on the indirect dimension (the direction may use
+                # -neg), then MC
+                lines.append(f"| nmrPipe -fn FT{neg_suffix} \\")
             else:
-                # Sampling overrides and flag assembly both go through _ft_flags
-                # (the same source as NUS/finalize)
+                # sampling overrides and flag assembly both go through _ft_flags (the same
+                # source as NUS/finalize)
                 flags = _ft_flags(
                     bool(params.get("neg")),
                     bool(params.get("alt")),
@@ -748,11 +812,9 @@ def _stage_lines(
                 continue
             if str(cfg.get("mode", "auto")) == "order":
                 order = max(1, int(cfg.get("order", 1) or 1))
-                # 2026-09-16 (real hardware): a bare NMRPipe ``POLY -ord N`` has
-                # no baseline nodes (-nc 0 and no -first/-last), so it is the
-                # identity operation; -auto is needed for baseline points to be
-                # picked and fitted automatically, and only then does -ord N take
-                # effect.
+                # 2026-09-16 (real machine): a bare NMRPipe ``POLY -ord N`` has no baseline
+                # nodes (-nc 0 and no -first/-last) -> identity; -auto is required for it to
+                # pick baseline points automatically, and for -ord N to take effect.
                 lines.append(f"| nmrPipe -fn POLY -ord {order} -auto \\")
             else:
                 lines.append("| nmrPipe -fn POLY -auto \\")
@@ -807,9 +869,9 @@ def generate_process_script(
         f"xyz2pipe -in {in_file} -x \\",
     ]
     for index, axis in enumerate(axes):
-        # DC-offset correction (POLY -time) acts on the direct-dimension time-domain
-        # FID and must precede windowing/FT, as in NUS script step1
-        # (0.2.155/0.2.160: it goes only into the full final-run script)
+        # The DC-offset correction (POLY -time) acts on the direct-dimension time-domain
+        # FID and must come before the window/FT, matching step1 of the NUS script
+        # (0.2.155/0.2.160: only in the final full script).
         if direct_poly_time and index == 0:
             lines.append("| nmrPipe -fn POLY -time " + "\\")
         lines += _stage_lines(
@@ -830,22 +892,21 @@ def generate_process_script(
             )
         if index < len(axes) - 1:
             if len(axes) >= 3 and index == len(axes) - 2:
-                # 3D single pass: before the last dimension (F1) ZTP moves the slow
-                # dimension onto the current FT axis (aligned with the NUS
-                # finalize); otherwise the third FT acts on an already
-                # frequency-domain dimension, transposing the complex intermediate
-                # dimension gives a broken pipe, and F1 stays in the time domain.
+                # 3D single pass: before the last dimension (F1), ZTP moves the slow
+                # dimension onto the current FT axis (aligned with NUS finalize); otherwise the
+                # third FT acts on an already-frequency dimension, the complex middle dimension
+                # transposes into a broken pipe, and F1 stays in the time domain.
                 lines.append("| nmrPipe -fn ZTP \\")
             else:
                 lines.append("| nmrPipe -fn TP \\")
     if len(axes) == 2:
-        # NMRPipe 2D: after the indirect-dimension FT another TP must transpose
-        # back, otherwise the output has F1/F2 swapped
+        # NMRPipe 2D: after the indirect-dimension FT another TP must transpose back,
+        # otherwise the output has F1/F2 swapped
         lines.append("| nmrPipe -fn TP \\")
     elif len(axes) >= 3:
-        # 3D single pass: one more TP after the last FT gives the (F2,F1,F3) file
-        # layout (consistent with file_axis_index/_axis_index, so complex previews
-        # read the axes correctly).
+        # 3D single pass: after the last FT one more TP is appended, giving the
+        # (F2,F1,F3) file layout (consistent with file_axis_index/_axis_index, so the
+        # complex preview is read on the right axes).
         lines.append("| nmrPipe -fn TP \\")
     lines.append(f"| pipe2xyz -out {out_file} -x")
     return "\n".join(lines) + "\n"
@@ -940,27 +1001,48 @@ def _ft_flags(
 ) -> list[str]:
     """FT flag list (the single implementation of the sampling override logic).
 
-    base_neg/base_alt come from the caller (the uniform path takes them from the
-    plan node; NUS/finalize derive them from FnMODE); sampling.ft_neg/ft_alt
-    override them when not None. With flip_f1=True the F1 axis is forced to -neg
-    (flipped); with force_neg=True the default state gains -neg (the correction
-    for States-type 3D first indirect dimensions, see ft_neg_for), while an
-    explicit sampling.ft_neg still wins; by default the derived output is
-    unchanged.
+    base_neg/base_alt come from the caller (the uniform path takes them from the plan
+    node; NUS/finalize derive them from FnMODE); ``sampling.ft_neg`` (global, **highest
+    priority**) / ``ft_neg_f1``/``ft_neg_f2`` (per axis, effective only while ``ft_neg``
+    is None) **decide directly whether that axis gets ``-neg``** when not None (True=add,
+    False=do not add -- absolute, not an inversion of the automatic criterion);
+    ``flip_f1``/``flip_f2`` are **compatible aliases** for the per-axis keys (historical
+    names, same semantics). ``ft_alt`` False switches ``-alt`` off.
+    ``force_neg=True`` is the conclusion of the **automatic criterion**
+    (:func:`ft_neg_for`: the 3D ``y`` dimension + the States family, etc.); it only applies
+    while **nobody has decided explicitly** (``ft_neg``/``ft_neg_f*`` all None) -- an
+    explicit user setting wins (``ft_neg_f2 = False`` also removes an automatically added
+    ``-neg``). By default the derived output is unchanged.
     """
     neg, alt = bool(base_neg), bool(base_alt)
+    override: bool | None = None
     if sampling:
         if sampling.get("ft_neg") is not None:
-            neg = bool(sampling.get("ft_neg"))
+            # global switch: highest priority -- once it is given, the per-axis ft_neg_f*
+            # can no longer override it
+            override = bool(sampling.get("ft_neg"))
+            neg = override
         if sampling.get("ft_alt") is False:
-            alt = False  # True = auto by acquisition mode; False = force off
-        if axis == "F1" and bool(sampling.get("flip_f1")):
-            neg = True
-    if force_neg and (not sampling or sampling.get("ft_neg") is None):
+            alt = False  # True=automatic by acquisition mode; False=force off
+        # Per-axis explicit decision (user, 2026-09-25): True=add, False=do not add,
+        # None/default=follow the automatic criterion. The official names are
+        # ft_neg_f1/ft_neg_f2; flip_f1/flip_f2 are historical aliases (same semantics,
+        # not an inversion).
+        if sampling.get("ft_neg") is None:
+            key, alias = {
+                "F1": ("ft_neg_f1", "flip_f1"),
+                "F2": ("ft_neg_f2", "flip_f2"),
+            }.get(axis, ("", ""))
+            value = sampling.get(key) if key else None
+            if value is None and alias:
+                value = sampling.get(alias)
+            if value is not None:
+                override = bool(value)
+                neg = override
+    if force_neg and override is None:
         neg = True
     flags = []
-    # The order is fixed as -alt -neg (matching the lab's hand-made templates,
-    # which makes diffing easy)
+    # the order is fixed as -alt -neg (matching the lab's hand-written template, easy to diff)
     if alt:
         flags.append("-alt")
     if neg:
@@ -1048,11 +1130,10 @@ def _window_line(cfg: dict[str, Any] | None) -> str | None:
         return None
     wtype = str(cfg.get("type", "sine_bell"))
     if wtype in ("none", "off"):
-        return None  # explicit no-window candidate: no SP is inserted
+        return None  # explicitly no window (a window-optimisation candidate); no SP added
     if wtype == "gaussian":
-        # 0.2.170: GM -g1/-g2 are NMRPipe's native Gaussian window parameters;
-        # GMB -lb/-gb blew up at the tail in practice and GM -lb/-gb is ignored,
-        # so neither is usable
+        # 0.2.170: GM -g1/-g2 are the native NMRPipe Gaussian window parameters; GMB
+        # -lb/-gb blew up at the tail in testing and GM -lb/-gb is ignored, so neither works
         return (
             f"| nmrPipe -fn GM -g1 {_fmt(cfg.get('g1', 8.0))} "
             f"-g2 {_fmt(cfg.get('g2', 15.0))} \\"
@@ -1115,14 +1196,16 @@ def generate_2d_nus_script(
     f1_zf = zf_plan.get("F1", {})
     direct_zf = _nus_zf_size(f2_zf, td[0])
     f1_fnmode = _fnmode(experiment, "F1")
-    x_t = max(1, int(td[1])) if len(td) > 1 else 1  # indirect-dimension complex grid
-    # SMILE's internal direction flags come from the same source as the stage-2
-    # finalize (the same _FT_FLAGS derivation plus the sampling override); the 2D
-    # single indirect dimension (F1) has no force_neg
+    x_t = max(1, int(td[1])) if len(td) > 1 else 1  # indirect-dimension complex-point grid
+    # The direction flags inside SMILE come from the same source as the stage-2 finalize
+    # (the same _FT_FLAGS derivation + sampling override); for 2D the force_neg automatic
+    # criterion (the simple criterion answers ask_user for every 2D States case -> False)
+    # only yields -neg once Layer A has fixed it.
     f1_dir_flags = _ft_flags(
         *_FT_FLAGS.get(int(f1_fnmode), (False, False)),
         sampling=sampling,
         axis="F1",
+        force_neg=ft_neg_for(experiment, f1_fnmode, "F1"),
     )
     f1_dir_arg = _smile_direction_args(f1_dir_flags, "x")
     _grid2 = max(int(td[1]), 1)
@@ -1137,8 +1220,8 @@ def generate_2d_nus_script(
     direct_stages = []
     if direct_poly_time:
         direct_stages.append("| nmrPipe -fn POLY -time " + "\\")
-    # 0.2.199-patch11: the direct-dimension window is fixed to SP (SMILE requires
-    # the direct dimension to be apodised with a decaying tail)
+    # 0.2.199-patch11: the direct-dimension window is fixed to SP (SMILE requires it to be
+    # apodised with a decaying tail)
     direct_stages.append(_nus_direct_window_line(direct_window_cfg, 1))
     if f2_zf.get("mode") != "none":
         direct_stages.append(f"| nmrPipe -fn ZF -zf -size {direct_zf} \\")
@@ -1147,15 +1230,15 @@ def generate_2d_nus_script(
         direct_stages.append(
             f"| nmrPipe -fn EXT -x1 {ext_lo}ppm -xn {ext_hi}ppm -sw -round 2 \\"
         )
-    # The direct-dimension phase is applied after EXT: p1 is normalised to the
-    # extracted size (consistent with the in-memory rotation of the recon planes)
+    # The direct-dimension phase is applied after EXT: p1 is normalised to the extracted
+    # size (consistent with the in-memory rotation of the recon planes).
     direct_stages.append(
         f"| nmrPipe -fn PS -p0 {direct_phase[0]:g} -p1 {direct_phase[1]:g} -di \\"
     )
     direct_stages += direct_poly
     smile_tail = [
-        # SMILE carries no window or phase (0.2.134): windowing and phase are
-        # handled by the later finalize/step3 post-processing
+        # SMILE carries no window/phase (0.2.134): the window and phase are handled by the
+        # later finalize/step3 post-processing
         f"           -maxIter {max_iter} \\",
         f"           -xT {x_t} \\",
         *([f"           {f1_dir_arg} \\"] if f1_dir_arg else []),
@@ -1221,7 +1304,12 @@ def generate_2d_nus_script(
         "nmrPipe -in nus2d/recon.ft1 \\",
         *([f1_window] if f1_window else []),
         *f1_zf_line,
-        _ft_flag_line(f1_fnmode, sampling=sampling, axis="F1"),
+        _ft_flag_line(
+            f1_fnmode,
+            sampling=sampling,
+            axis="F1",
+            force_neg=ft_neg_for(experiment, f1_fnmode, "F1"),
+        ),
         _ps_line(phases, "F1"),
         *indirect_poly,
         "| nmrPipe -fn TP \\",
@@ -1234,19 +1322,16 @@ def generate_2d_nus_script(
 # ---------------------------------------------------------------------------
 # SMILE parameter sweep: splitting the final-run script (0.2.199-patch29hz-fix3)
 #
-# The sweep uses the final-run script as its template and changes only the SMILE
-# parameters:
-#   the first part (direct dimension -> slice files) runs once;
-#   the second part (SMILE + indirect dimension -> final spectrum) runs again with
-#   different SMILE parameters, and each candidate spectrum is evaluated and then
-#   deleted.
-# 3D and 2D multi-file scripts write and read back slices themselves, so they can
-# be split between the two parts. A 2D single-file script has no slice stream
-# (the direct-dimension processing and SMILE live in one pipeline), so the split
-# returns empty and the caller (smile_scan) falls back to "run the whole script
-# per combination, each candidate writing its own output" -- the user's
-# 2026-09-11 constraint "2D should not have a slice stream, mind the
-# compatibility".
+# The sweep uses the final-run script as a template and only swaps SMILE parameters:
+#   the first part (direct dimension -> slice file) runs once;
+#   the second part (SMILE + indirect dimensions -> final spectrum) is repeated with
+#   different SMILE parameters, and each candidate spectrum is deleted after evaluation.
+# The 3D and 2D multi-file scripts write and read back their own slices, so they split
+# directly between the two parts. The 2D single-file script has no slice stream (the
+# direct-dimension processing and SMILE share one pipeline), the split returns empty and
+# the caller (smile_scan) falls back to running the whole script once per group with each
+# candidate output named separately -- the user's 2026-09-11 constraint that "2D should
+# not have a slice stream, watch out for compatibility".
 # ---------------------------------------------------------------------------
 _NUS_SLICE_WRITES = (
     "pipe2xyz -out nus3d_1/test%04d.ft1 -z",
@@ -1308,11 +1393,11 @@ def split_nus_script(script: str) -> tuple[str, str]:
                 prefix = "\n".join(lines[: write_index + 1]) + "\n"
                 return prefix, "\n".join(lines[j:])
         return "", ""
-    # A 2D single-file script has no slice stream (the direct-dimension processing
-    # and SMILE live in one pipeline), and cutting an artificial slice stream would
-    # change SMILE's sampling semantics, so it is not split here; the caller
-    # (smile_scan) falls back to "run the whole script per combination, each output
-    # named individually" (the user's 2026-09-11 constraint).
+    # The 2D single-file script has no slice stream (the direct-dimension processing and
+    # SMILE share one pipeline); cutting an artificial slice stream would change SMILE's
+    # sampling semantics, so the split does not happen here and the caller (smile_scan)
+    # falls back to running the whole script once per group with separately named outputs
+    # (the user's 2026-09-11 constraint).
     return "", ""
 
 
@@ -1409,12 +1494,13 @@ def generate_3d_nus_script(
     step1_direct: list[str] = []
     if direct_poly_time:
         step1_direct.append("| nmrPipe -fn POLY -time " + "\\")
-    # 0.2.199-patch11: the direct-dimension window is fixed to SP (SMILE requires
-    # the direct dimension to be apodised with a decaying tail)
+    # 0.2.199-patch11: the direct-dimension window is fixed to SP (SMILE requires it to be
+    # apodised with a decaying tail)
     step1_direct.append(_nus_direct_window_line((window or {}).get("F3"), 2))
-    # SMILE's internal direction flags come from the same source as step3: the same
-    # _FT_FLAGS derivation plus the sampling override; F2 adds force_neg (the
-    # States-type 3D first indirect dimension, see ft_neg_for)
+    # The direction flags inside SMILE come from the same source as step3: the same
+    # _FT_FLAGS derivation + sampling override; F2/F1 each layer on force_neg (the
+    # conclusion of the automatic criterion -- the y dimension is usually F2, but with
+    # AQSEQ=312 the y axis is logical F1, so both axes must be asked; see ft_neg_for)
     x_dir_flags = _ft_flags(
         *_FT_FLAGS.get(int(f2_fnmode), (False, False)),
         sampling=sampling,
@@ -1425,6 +1511,7 @@ def generate_3d_nus_script(
         *_FT_FLAGS.get(int(f1_fnmode), (False, False)),
         sampling=sampling,
         axis="F1",
+        force_neg=ft_neg_for(experiment, f1_fnmode, "F1"),
     )
     x_dir_arg = _smile_direction_args(x_dir_flags, "x")
     y_dir_arg = _smile_direction_args(y_dir_flags, "y")
@@ -1447,8 +1534,8 @@ def generate_3d_nus_script(
         ),
         "| nmrPipe -fn FT \\",
         f"| nmrPipe -fn EXT -x1 {ext_lo}ppm -xn {ext_hi}ppm -sw -round 2 \\",
-        # The direct-dimension phase is applied after EXT: p1 is normalised to the
-        # extracted size (consistent with the in-memory rotation of recon planes)
+        # The direct-dimension phase is applied after EXT: p1 is normalised to the extracted
+        # size (consistent with the in-memory rotation of the recon planes).
         f"| nmrPipe -fn PS -p0 {direct_phase[0]:g} -p1 {direct_phase[1]:g} -di \\",
         "| pipe2xyz -out nus3d_1/test%04d.ft1 -z",
         "",
@@ -1465,12 +1552,12 @@ def generate_3d_nus_script(
         ),
         *(["           -scaling 1 \\"] if smile_scaling else []),
         f"           -maxIter {max_iter} \\",
-        # SMILE carries no window or phase (0.2.134): step3 post-processing handles
-        # them; the direction flags (0.2.135) come from the same source as the step3
-        # FT: F2 is derived from FnMODE with force_neg added (the States -neg of the
-        # 3D first indirect dimension) and F1 follows the FnMODE derivation, both
-        # subject to the sampling override -- so the direction inside the
-        # reconstruction cannot disagree with the post-processing
+        # SMILE carries no window/phase (0.2.134): step3 post-processing handles the
+        # window/phase; the direction flags (0.2.135) come from the same source as the step3
+        # FT: F2 is derived from FnMODE with force_neg layered on (the -neg for States-type
+        # 3D first indirect dimensions) and F1 follows the same FnMODE derivation, both
+        # subject to the sampling override -- this keeps the direction inside the
+        # reconstruction consistent with the post-processing.
         *([f"           {x_dir_arg} \\"] if x_dir_arg else []),
         *([f"           {y_dir_arg} \\"] if y_dir_arg else []),
         f"           {xct_arg}-thresh {thresh:g} \\",
@@ -1502,7 +1589,12 @@ def generate_3d_nus_script(
             if f1_zf.get("mode") != "none"
             else []
         ),
-        _ft_flag_line(f1_fnmode, sampling=sampling, axis="F1"),
+        _ft_flag_line(
+            f1_fnmode,
+            sampling=sampling,
+            axis="F1",
+            force_neg=ft_neg_for(experiment, f1_fnmode, "F1"),
+        ),
         _ps_line(phases, "F1"),
         "| nmrPipe -fn TP \\",
         "| nmrPipe -fn ZTP \\",
@@ -1528,11 +1620,9 @@ def param_schema() -> dict[str, Any]:
     return {
         "type": "object",
         "title": tr("NMRForge processing parameter"),
-        "description": (
-            tr(
+        "description": tr(
             "Processing plan parameter (table editor/script rendering shared data "
             "source)",
-        )
         ),
         "properties": {
             "zero_fill": {
@@ -1581,11 +1671,9 @@ def param_schema() -> dict[str, Any]:
                     "ft_neg": {
                         "type": ["boolean", "null"],
                         "default": None,
-                        "description": (
-                            tr(
+                        "description": tr(
                             "FT and then flip the axis (null=automatic according to acquisition "
                             "mode, True/False=mandatory)",
-                        )
                         ),
                     },
                     "ft_alt": {
@@ -1599,10 +1687,47 @@ def param_schema() -> dict[str, Any]:
                             )
                         ),
                     },
+                    "ft_neg_f1": {
+                        # 2026-09-25 (user): per axis, **decides directly** whether that axis
+                        # gets -neg (absolute; the same semantics as the global ft_neg).
+                        # None = follow the automatic criterion (the simple ft_neg_for rule);
+                        # True = add; False = do not add (it can remove a -neg that the
+                        # automatic criterion added). It is **not** "the inverse of the
+                        # automatic criterion".
+                        "type": ["boolean", "null"],
+                        "default": None,
+                        "description": tr(
+                            "F1 indirect dimension: directly decide whether FT -neg is applied "
+                            "(null=automatic rule, True=apply, False=do not apply); not a "
+                            "toggle of the automatic decision"
+                        ),
+                    },
+                    "ft_neg_f2": {
+                        "type": ["boolean", "null"],
+                        "default": None,
+                        "description": tr(
+                            "F2 indirect dimension (3D): directly decide whether FT -neg is "
+                            "applied "
+                            "(null=automatic rule, True=apply, False=do not apply); not a "
+                            "toggle of the automatic decision"
+                        ),
+                    },
+                    # Historical names (compatible aliases with exactly the same semantics as
+                    # ft_neg_f1/ft_neg_f2; the spectrum-step controls used to emit these keys.
+                    # New code should use ft_neg_f*)
                     "flip_f1": {
-                        "type": "boolean",
-                        "default": False,
-                        "description": tr("F1 axis flip (FT -neg)"),
+                        "type": ["boolean", "null"],
+                        "default": None,
+                        "description": tr(
+                            "alias of ft_neg_f1 (legacy name; same meaning, not a toggle)"
+                        ),
+                    },
+                    "flip_f2": {
+                        "type": ["boolean", "null"],
+                        "default": None,
+                        "description": tr(
+                            "alias of ft_neg_f2 (legacy name; same meaning, not a toggle)"
+                        ),
                     },
                     "auto_phase": {
                         "type": "boolean",
@@ -1644,11 +1769,9 @@ def param_schema() -> dict[str, Any]:
             },
             "stages": {
                 "type": "array",
-                "description": (
-                    tr(
+                "description": tr(
                     "List of processing stages (displayed line by line in the table "
                     "editor)",
-                )
                 ),
                 "items": {
                     "type": "object",
@@ -1685,7 +1808,12 @@ def param_schema() -> dict[str, Any]:
             "sampling": {
                 "ft_neg": None,
                 "ft_alt": True,
-                "flip_f1": False,
+                # per-axis direct decision (None = follow the automatic criterion); flip_f*
+                # are same-semantics compatible aliases
+                "ft_neg_f1": None,
+                "ft_neg_f2": None,
+                "flip_f1": None,
+                "flip_f2": None,
                 "auto_phase": True,
             },
             "stages": [],
@@ -1865,7 +1993,12 @@ def generate_nus_finalize_script(
                 if zf_plan.get("F1", {}).get("mode") != "none"
                 else []
             ),
-            _ft_flag_line(f1_fnmode, sampling=sampling, axis="F1"),
+            _ft_flag_line(
+                f1_fnmode,
+                sampling=sampling,
+                axis="F1",
+                force_neg=ft_neg_for(experiment, f1_fnmode, "F1"),
+            ),
             f"| nmrPipe -fn PS -p0 {f1_p0:g} -p1 {f1_p1:g}{f1_di} \\",
             "| nmrPipe -fn TP \\",
             "| nmrPipe -fn ZTP \\",
@@ -1890,7 +2023,12 @@ def generate_nus_finalize_script(
                 if zf_plan.get("F1", {}).get("mode") != "none"
                 else []
             ),
-            _ft_flag_line(f1_fnmode, sampling=sampling, axis="F1"),
+            _ft_flag_line(
+                f1_fnmode,
+                sampling=sampling,
+                axis="F1",
+                force_neg=ft_neg_for(experiment, f1_fnmode, "F1"),
+            ),
             f"| nmrPipe -fn PS -p0 {f1_p0:g} -p1 {f1_p1:g}{f1_di} \\",
             *_baseline_line(expanded, "F1"),
             "| nmrPipe -fn TP \\",
@@ -1942,8 +2080,7 @@ def _baseline_line(
         return []
     if str(cfg.get("mode", "auto")) == "order":
         order = max(1, int(cfg.get("order", 1) or 1))
-        # Same rule as uniform: a bare -ord N is the identity, so -auto is mandatory
-        # (2026-09-16).
+        # Same convention as uniform: a bare -ord N is identity, so -auto is required (2026-09-16).
         return [f"| nmrPipe -fn POLY -ord {order} -auto \\"]
     return ["| nmrPipe -fn POLY -auto \\"]
 

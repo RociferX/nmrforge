@@ -1,8 +1,11 @@
-"""Step row layout: Leave space between items + SMILE Leave space between two groups
-(0.2.199-patch29hz-Revision 19). user 2026-09-11: "The optimisation degree and sorting are too
-close, and there is no gap between them" -- Root cause: Custom flow layout `_FlowLayout`
-declares `setSpacing(6)` but only uses it when **line wrapping**, and the items are close to
-each other (0 px); there is no extra space between the two groups."""
+"""Step-row layout: spacing between items + a gap between the two SMILE groups
+(0.2.199-patch29hz-fix19).
+
+User 2026-09-11: "the optimisation degree and rank are too close together, and there is no gap
+between them" -- root cause: the custom flow layout `_FlowLayout` declares `setSpacing(6)` but only
+uses it when **wrapping**, so items sit flush against each other (0 px) and the two groups have no
+extra gap.
+"""
 
 from __future__ import annotations
 
@@ -29,18 +32,18 @@ def host(qapp: QApplication):
 
 
 def _hosted_row(host: QWidget, step: str) -> PipelineStepRow:
-    """Put the step rows into the host layout (otherwise the row width will not follow the host,
-    and the measured values will be in line breaks)."""
+    """Place the step row into the host layout (otherwise the row width does not follow the host and
+    every measurement is taken in the wrapped state)."""
     lay = host.layout() or QVBoxLayout(host)
     lay.setContentsMargins(0, 0, 0, 0)
-    row = PipelineStepRow(step, step, "illustrate", host)
+    row = PipelineStepRow(step, step, "说明", host)
     lay.addWidget(row)
     return row
 
 
 def test_flow_layout_applies_item_spacing(qapp: QApplication, host: QWidget) -> None:
-    """There should be spacing between items in fluid layout (spacing is not used only for line
-    breaks)."""
+    """The flow layout must put spacing between items (spacing is not only used for wrapping to a
+    new line)."""
     flow = _FlowLayout(host)
     buttons = [QPushButton(f"b{i}", host) for i in range(3)]
     for button in buttons:
@@ -55,8 +58,8 @@ def test_flow_layout_applies_item_spacing(qapp: QApplication, host: QWidget) -> 
 
 
 def test_smile_groups_are_separated(qapp: QApplication, host: QWidget) -> None:
-    """Leave a clear gap between the "optimisation degree" group and the "sorting" group; keep the
-    groups compact."""
+    """Leave a clear gap between the "optimisation degree" group and the "rank" group, while keeping
+    each group compact."""
     row = _hosted_row(host, "smile")
     host.resize(420, 240)
     host.show()
@@ -68,9 +71,7 @@ def test_smile_groups_are_separated(qapp: QApplication, host: QWidget) -> None:
         between = row.rank_label.x() - (
             row.grid_combo.x() + row.grid_combo.width()
         )
-    # When the viewport is very narrow, the line will wrap -- At this time, look at the vertical
-    # spacing between lines.
-    else:
+    else:  # a very narrow viewport wraps the line -- then look at the vertical gap between rows
         between = row.rank_label.y() - (
             row.grid_label.y() + row.grid_label.height()
         )
@@ -83,8 +84,7 @@ def test_smile_groups_are_separated(qapp: QApplication, host: QWidget) -> None:
 def test_smile_gap_not_visible_for_other_steps(
     qapp: QApplication, host: QWidget
 ) -> None:
-    """The interval control only takes up space in the SMILE row, and other step rows are not
-    affected."""
+    """The gap widget only takes up space in the SMILE row; other step rows are unaffected."""
     for step in ("fid", "spectrum", "peaks"):
         row = PipelineStepRow(step, step, "x", host)
         assert row.smile_gap.isHidden() is True, step
@@ -93,7 +93,7 @@ def test_smile_gap_not_visible_for_other_steps(
     assert smile.smile_gap.isHidden() is False
 
 # ---------------------------------------------------------------------------
-# Geometry Guard (0.2.199-patch29hz - fix 20): all step rows x multiple widths.
+# Geometry guard (0.2.199-patch29hz-fix20): every step row x multiple widths
 # ---------------------------------------------------------------------------
 
 _STEPS = ("project", "fid", "spectrum", "smile", "peaks")
@@ -109,14 +109,14 @@ def _visible_children(row: PipelineStepRow) -> list:
 
 
 def _audit_row(row: PipelineStepRow, *, min_gap: int = 4) -> list[str]:
-    """Return to the list of geometric problems: Overlapping / Insufficient line spacing /
-    Exceeding the visual width / Squeezed into narrow strips."""
+    """Return the list of geometry problems: overlap / insufficient spacing on a line / wider than
+    the visible width / squeezed into a narrow strip."""
     problems: list[str] = []
     kids = _visible_children(row)
     for child in kids:
         if child.x() < 0 or child.x() + child.width() > row.width() + 1:
             problems.append(
-                f"{type(child).__name__} Exceeds line width x={child.x()} w={child.width()} "
+                f"{type(child).__name__} 超出行宽 x={child.x()} w={child.width()} "
                 f"row_w={row.width()}"
             )
     for i, left in enumerate(kids):
@@ -125,7 +125,7 @@ def _audit_row(row: PipelineStepRow, *, min_gap: int = 4) -> list[str]:
             rrect = right.geometry()
             if lrect.intersects(rrect):
                 problems.append(
-                    f"{type(left).__name__}{lrect} and {type(right).__name__}{rrect} overlapping"
+                    f"{type(left).__name__}{lrect} 与 {type(right).__name__}{rrect} 重叠"
                 )
                 continue
             same_line = abs(left.y() - right.y()) <= 2
@@ -135,8 +135,8 @@ def _audit_row(row: PipelineStepRow, *, min_gap: int = 4) -> list[str]:
             gap = b.x() - (a.x() + a.width())
             if 0 <= gap < min_gap:
                 problems.append(
-                    f"peer spacing {gap}px < {min_gap}px:"
-                    f"{type(left).__name__} and {type(right).__name__}"
+                    f"同行间距 {gap}px < {min_gap}px:"
+                    f"{type(left).__name__} 与 {type(right).__name__}"
                 )
     return problems
 
@@ -145,8 +145,8 @@ def _audit_row(row: PipelineStepRow, *, min_gap: int = 4) -> list[str]:
 def test_step_rows_have_no_geometry_problems(
     qapp: QApplication, host: QWidget, width: int
 ) -> None:
-    """All step rows are under common width: controls do not overlap, row spacing >= 4px, and do
-    not exceed the line width."""
+    """Every step row at common widths: widgets do not overlap, in-line spacing >= 4px, and nothing
+    exceeds the row width."""
     problems: list[str] = []
     for step in _STEPS:
         row = _hosted_row(host, step)

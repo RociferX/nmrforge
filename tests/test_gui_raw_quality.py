@@ -1,4 +1,4 @@
-"""Raw data quality check test (automatically executed after import, GUI side)."""
+"""Raw data quality check tests (run automatically after import, GUI side)."""
 
 from __future__ import annotations
 
@@ -12,8 +12,8 @@ from gui.raw_quality import check_raw_quality, format_quality_report
 
 
 def test_raw_quality_reports_missing_fid(tmp_path: Path) -> None:
-    """0.2.86: A warning is given when ser/fid is missing; dimension /nuclear/temperature parameter
-    is collected normally."""
+    """0.2.86: a missing ser/fid raises a warning; dimension/nucleus/temperature parameters are
+    collected normally."""
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     entry = manager.create_experiment("HSQC")
     data = manager.import_data(entry.id, "/fake/1")
@@ -27,16 +27,16 @@ def test_raw_quality_reports_missing_fid(tmp_path: Path) -> None:
     report = check_raw_quality(manager, entry.id, data.id)
     assert not report["ok"]
     assert any("ser/fid" in issue for issue in report["issues"])
-    assert report["info"]["Dimensions"] == "2D"
-    assert report["info"]["nuclear"] == "1H-15N"
-    assert report["info"]["temperature"] == "298.0 K"  # TE=2980 → 298.0 K(Kelvin).
+    assert report["info"]["维度"] == "2D"
+    assert report["info"]["核"] == "1H-15N"
+    assert report["info"]["温度"] == "298.0 K"  # TE=2980 -> 298.0 K (Kelvin)
     text = format_quality_report(report)
-    assert "warn" in text
+    assert "警告" in text
 
 
 def test_raw_quality_segmented_checks_first_segment(tmp_path: Path) -> None:
-    """0.2.199: Segmented collection is evaluated based on the first segment, and there will be no
-    false positives due to the lack of acqus/ser in the container root directory."""
+    """0.2.199: segmented acquisition is assessed on the first segment, so a missing acqus/ser in
+    the container root is not falsely reported."""
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     entry = manager.create_experiment("cc")
     data = manager.import_data(entry.id, "/fake/cc")
@@ -51,5 +51,5 @@ def test_raw_quality_segmented_checks_first_segment(tmp_path: Path) -> None:
     manager.save()
     report = check_raw_quality(manager, entry.id, data.id)
     assert not any("acqus" in issue for issue in report["issues"])
-    assert report["info"].get("segmented")
-    assert report["info"]["Dimensions"] == "1D"
+    assert report["info"].get("分段")
+    assert report["info"]["维度"] == "1D"

@@ -6,7 +6,7 @@ silently fixes.
 
 ## Level 1 - FID diagnostics
 
-Run before processing, on the converted FID (`workflow/direct_diagnostics.py`). Detected and
+Run at the **end of the Generate-FID step** (after the fid has been converted/merged and before the spectrum is built; the conclusion and what was done about it go into that step log and into `process/diagnostics.json`, and Generate Spectrum only reads it back). Detected and
 reported:
 
 | Finding | Detection rule |

@@ -1,4 +1,4 @@
-"""3D Spectrum Viewing Test (Contract §10): Spectrum3D model + independent window/panel 3D mode."""
+"""3D spectrum viewing tests (contract §10): Spectrum3D model + standalone window/panel 3D mode."""
 
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ def _axis3(label: str, size: int, carrier: float) -> SpectrumAxis:
 
 
 def _synthetic3d(shape: tuple[int, int, int] = (4, 6, 8)) -> Spectrum3D:
-    """Synthetic 3D spectrum: peaks at (1, 2, 3), three axis labels F1/F2/F3."""
+    """Synthetic 3D spectrum: peak at (1, 2, 3), axis labels F1/F2/F3."""
     data = np.zeros(shape, dtype=np.float32)
     data[1, 2, 3] = 500.0
     from scipy.ndimage import gaussian_filter
@@ -52,8 +52,8 @@ def _synthetic3d(shape: tuple[int, int, int] = (4, 6, 8)) -> Spectrum3D:
 
 
 def _write_ft3(path: Path, spectrum3d: Spectrum3D, stream: bool = True) -> None:
-    """Write NMRPipe 3D spectrum: streaming file (FDPIPEFLAG=1) or non-streaming single file
-    (FDPIPEFLAG=0)."""
+    """Write an NMRPipe 3D spectrum: stream file (FDPIPEFLAG=1) or a single
+    non-stream file (FDPIPEFLAG=0)."""
     from nmrglue.fileio import pipe
 
     axes = spectrum3d.axes
@@ -62,8 +62,7 @@ def _write_ft3(path: Path, spectrum3d: Spectrum3D, stream: bool = True) -> None:
     dic["FDDIMCOUNT"] = 3
     dic["FDPIPEFLAG"] = 1 if stream else 0
     dic["FDSIZE"] = axes[2].size
-    # Stream file FDSPECNUM = F2 (the number of planes is given by FDF3SIZE); non-stream storage is
-    # F1*F2.
+    # Stream file: FDSPECNUM = F2 (plane count given by FDF3SIZE); non-stream stores F1*F2
     dic["FDSPECNUM"] = axes[1].size if stream else axes[0].size * axes[1].size
     dic["FDF3SIZE"] = axes[0].size
     dic["FDQUADFLAG"] = 1
@@ -86,10 +85,13 @@ def _write_ft3(path: Path, spectrum3d: Spectrum3D, stream: bool = True) -> None:
 def _write_ft3_ordered(
     path: Path, data: np.ndarray, fddimorder: list[float]
 ) -> None:
-    """Write a 3D stream file with FDDIMORDER. data is a natural array of shapes (FDF3SIZE,
-    FDSPECNUM, FDSIZE) read back by nmrglue (axis order = storage order inversion; FDDIMORDER
-    records the logical dimension number corresponding to each axis). FDF1/FDF2/ FDF3 are
-    parameter blocks of the logical dimension 1/2/3 respectively."""
+    """Write a 3D stream file with FDDIMORDER.
+
+    data is the natural array in the shape nmrglue reads back
+    (FDF3SIZE, FDSPECNUM, FDSIZE) (axis order = reverse storage order;
+    FDDIMORDER records the logical dimension number of each axis). FDF1/FDF2/
+    FDF3 are the parameter blocks for logical dimensions 1/2/3.
+    """
     from nmrglue.fileio import pipe
 
     nz, ny, nx = data.shape
@@ -108,7 +110,7 @@ def _write_ft3_ordered(
     dic["FDDIMORDER"] = [float(v) for v in fddimorder] + [4.0]
     for i, v in enumerate(fddimorder, start=1):
         dic[f"FDDIMORDER{i}"] = float(v)
-    blocks = {  # Logical dimension number -> (core, point number, SW, OBS, CAR, ORIG).
+    blocks = {  # logical dimension number -> (nucleus, size, SW, OBS, CAR, ORIG)
         1: ("15N", nz, 2189.0, 60.8, 118.0, 100.0 * 60.8),
         2: ("1H", nx, 3000.0, 600.0, 4.7, 6.0 * 600.0),
         3: ("13C", ny, 11300.0, 150.9, 45.0, 40.0 * 150.9),
@@ -126,12 +128,14 @@ def _write_ft3_ordered(
 
 
 def test_load_from_ft3_honors_fddimorder_order_231(tmp_path: Path) -> None:
-    """0.2.151:ORDER 2 3 1 (storage F2, F3, F1) file is correctly mapped to the logical sequence.
-    28.ft3/61.ft3 and other real NMRPipe 3D output is ORDER 2 3 1 (natural array axis sequence
-    (F1, F3, F2)); before repair, the viewer is configured according to position FDF1/FDF2/FDF3,
-    and the data-axis correspondence is misaligned (axis 1/2 parameter block swap without
-    warning)."""
-    # Natural array (F1=15N, F3=13C, F2=1H):P[z,y,x] = z*100 + y*10 + x.
+    """0.2.151: ORDER 2 3 1 files (storage F2,F3,F1) map correctly to logical order.
+
+    Real NMRPipe 3D outputs such as 28.ft3/61.ft3 are ORDER 2 3 1 (natural
+    array axis order (F1,F3,F2)); before the fix the viewer paired
+    FDF1/FDF2/FDF3 by position, so data and axes were mismatched (parameter
+    blocks for axes 1/2 swapped, without warning).
+    """
+    # Natural array (F1=15N, F3=13C, F2=1H): P[z,y,x] = z*100 + y*10 + x
     nz, ny, nx = 2, 4, 6
     P = np.zeros((nz, ny, nx), dtype=np.float32)
     for z in range(nz):
@@ -143,7 +147,7 @@ def test_load_from_ft3_honors_fddimorder_order_231(tmp_path: Path) -> None:
     loaded = Spectrum3D.load_from_ft3(
         path, labels=("N", "H", "C"), nuclei=["15N", "1H", "13C"]
     )
-    # Logical order (F1=15N, F2=1H, F3=13C): shape (2, 6, 4), data[i,j,k]=P[i,k,j].
+    # Logical order (F1=15N, F2=1H, F3=13C): shape (2, 6, 4), data[i,j,k]=P[i,k,j]
     assert loaded.data.shape == (nz, nx, ny)
     assert loaded.data[1, 2, 3] == P[1, 3, 2]
     assert [ax.label for ax in loaded.axes] == ["N", "H", "C"]
@@ -151,7 +155,7 @@ def test_load_from_ft3_honors_fddimorder_order_231(tmp_path: Path) -> None:
     assert loaded.axes[0].obs_mhz == pytest.approx(60.8)  # 15N
     assert loaded.axes[1].obs_mhz == pytest.approx(600.0)  # 1H
     assert loaded.axes[2].obs_mhz == pytest.approx(150.9)  # 13C
-    # Slice: fixed F3(13C) -> plane (15N, 1H), data and logical order are consistent.
+    # Slice: fix F3 (13C) → plane (15N, 1H); data matches logical order
     sl = loaded.slice(2, 1)
     assert sl.data.shape == (nz, nx)
     assert sl.y_axis.label == "N" and sl.x_axis.label == "H"
@@ -161,14 +165,13 @@ def test_load_from_ft3_honors_fddimorder_order_231(tmp_path: Path) -> None:
 def test_load_from_ft3_without_metadata_reorders_and_labels(
     tmp_path: Path,
 ) -> None:
-    """0.2.152: When opening directly without metadata, press FDDIMORDER to rearrange the logical
-    order and deduce labels."""
+    """0.2.152: opening with no metadata reorders by FDDIMORDER and derives labels."""
     nz, ny, nx = 2, 4, 6
     P = np.arange(nz * ny * nx, dtype=np.float32).reshape(nz, ny, nx)
     path = tmp_path / "order231_nomd.ft3"
     _write_ft3_ordered(path, P, [2.0, 3.0, 1.0])
     loaded = Spectrum3D.load_from_ft3(path)
-    # ORDER 2 3 1 -> Logical order (F1=15N, F2=1H, F3=13C), the label is derived from the head core.
+    # ORDER 2 3 1 → logical order (F1=15N, F2=1H, F3=13C), labels from header nuclei
     assert loaded.data.shape == (nz, nx, ny)
     assert [ax.label for ax in loaded.axes] == ["N", "H", "C"]
     assert loaded.axes[0].obs_mhz == pytest.approx(60.8)
@@ -176,7 +179,7 @@ def test_load_from_ft3_without_metadata_reorders_and_labels(
     assert loaded.axes[2].obs_mhz == pytest.approx(150.9)
 
 def _write_ft2(path: Path, data: np.ndarray) -> None:
-    """Write synthetic 2D spectrum (for "ft3 rejects 2D file" assertion)."""
+    """Write a synthetic 2D spectrum (for the "ft3 rejects 2D files" assertion)."""
     from nmrglue.fileio import pipe
 
     dic = {key: "0" for key in pipe.fdata_dic}
@@ -196,12 +199,12 @@ def _write_ft2(path: Path, data: np.ndarray) -> None:
 
 
 # ----------------------------------------------------------------------
-# Spectrum3D Model(Contract §10.1).
+# Spectrum3D model (contract §10.1)
 # ----------------------------------------------------------------------
 def test_slices_carry_noise_floor(tmp_path: Path) -> None:
-    """0.2.199-patch29fw: The 3D slice contour is graded by the max of the slice itself (the peak
-    is solid), noise_floor = full spectrum noise (lazy loading and full spectrum homology), the
-    viewer uses it to filter pure noise."""
+    """0.2.199-patch29fw: 3D slice contours are leveled by the slice's own max
+    (solid peaks); noise_floor = whole-spectrum noise (same source for lazy and
+    full loads), used by the viewer to filter pure noise."""
     rng = np.random.default_rng(7)
     data = rng.normal(0, 1.0, (4, 32, 32)).astype(np.float32)
     data[1, 12:18, 12:18] += 500.0
@@ -237,16 +240,16 @@ def test_load_from_ft3_roundtrip(tmp_path: Path) -> None:
     assert loaded.data.shape == spectrum3d.data.shape
     np.testing.assert_allclose(loaded.data, spectrum3d.data)
     assert loaded.source == path
-    # 0.2.152: When there is no metadata, the label is deduced according to the head core (synthetic
-    # file OBS full 1H -> same core index; 0.2.199-patch29ah: direct dimension F3 -> Hx, F2 -> Hy,
-    # F1 -> Hz).
+    # 0.2.152: without metadata, labels derive from header nuclei (the synthetic
+    # file has OBS all 1H → same-nucleus indices); 0.2.199-patch29ah: direct
+    # dimensions F3→Hx, F2→Hy, F1→Hz)
     assert [axis.label for axis in loaded.axes] == ["Hz", "Hy", "Hx"]
     assert loaded.max_intensity > 0
 
 
 def test_load_from_ft3_reshapes_non_stream(tmp_path: Path) -> None:
-    """Non-streaming single file (nmgrue reads back to 2D storage) is reshaped by
-    FDF3SIZE/FDSPECNUM/FDSIZE."""
+    """Reshape a non-stream single file (nmgrue reads it back as 2D storage)
+    by FDF3SIZE/FDSPECNUM/FDSIZE."""
     spectrum3d = _synthetic3d()
     path = tmp_path / "nostream.ft3"
     _write_ft3(path, spectrum3d, stream=False)
@@ -258,24 +261,24 @@ def test_load_from_ft3_reshapes_non_stream(tmp_path: Path) -> None:
 def test_load_from_ft3_rejects_2d(tmp_path: Path) -> None:
     path = tmp_path / "two.ft2"
     _write_ft2(path, np.zeros((16, 32)))
-    with pytest.raises(ValueError, match="three-dimensional spectrum"):
+    with pytest.raises(ValueError, match="三维"):
         Spectrum3D.load_from_ft3(path)
 
 
 def test_slice_returns_2d_with_correct_axes() -> None:
     spectrum3d = _synthetic3d()
-    # Fixed F3(index 3) -> plane F1-F2(y=F1, x=F2).
+    # Fix F3 (index 3) → plane F1-F2 (y=F1, x=F2)
     sl = spectrum3d.slice(2, 3)
     assert sl.data.shape == (4, 6)
     assert sl.y_axis.label == "F1" and sl.x_axis.label == "F2"
-    assert sl.data[1, 2] > 0  # The peak is at (1, 2, 3).
+    assert sl.data[1, 2] > 0  # peak at (1, 2, 3)
     np.testing.assert_allclose(sl.data, spectrum3d.data[:, :, 3])
-    # Fixed F1 -> Plane F2-F3.
+    # Fix F1 → plane F2-F3
     sl = spectrum3d.slice(0, 1)
     assert sl.data.shape == (6, 8)
     assert sl.y_axis.label == "F2" and sl.x_axis.label == "F3"
     np.testing.assert_allclose(sl.data, spectrum3d.data[1, :, :])
-    # Fixed F2 -> Plane F1-F3.
+    # Fix F2 → plane F1-F3
     sl = spectrum3d.slice(1, 2)
     assert sl.data.shape == (4, 8)
     assert sl.y_axis.label == "F1" and sl.x_axis.label == "F3"
@@ -291,7 +294,7 @@ def test_slice_out_of_range_raises() -> None:
 
 
 def test_project_nmrpipe_thresholded_sum() -> None:
-    """0.2.89:nmrPipe projZ-style projection: zero below the threshold and sum along the axis."""
+    """0.2.89: nmrPipe projZ projection: zero below threshold, then sum along the axis."""
     spectrum3d = _synthetic3d()
     thresh = 0.5
     proj = spectrum3d.project_nmrpipe(2, thresh)
@@ -304,15 +307,15 @@ def test_project_nmrpipe_thresholded_sum() -> None:
 
 def test_project_modes() -> None:
     spectrum3d = _synthetic3d()
-    # MIP Along F3 -> Plane F1-F2.
+    # MIP along F3 → plane F1-F2
     proj = spectrum3d.project(2, "max")
     assert proj.data.shape == (4, 6)
     assert proj.y_axis.label == "F1" and proj.x_axis.label == "F2"
     np.testing.assert_allclose(proj.data, np.max(spectrum3d.data, axis=2))
-    # Summing along F3.
+    # Sum along F3
     proj = spectrum3d.project(2, "sum")
     np.testing.assert_allclose(proj.data, np.sum(spectrum3d.data, axis=2))
-    # Along F1 -> Plane F2-F3.
+    # Along F1 → plane F2-F3
     proj = spectrum3d.project(0, "max")
     assert proj.data.shape == (6, 8)
     np.testing.assert_allclose(proj.data, np.max(spectrum3d.data, axis=0))
@@ -326,25 +329,25 @@ def test_index_at_by_ppm() -> None:
 
 
 # ----------------------------------------------------------------------
-# 3D control panel.
+# 3D control panel
 # ----------------------------------------------------------------------
 def test_spectrum3d_panel_widget(qapp: QApplication) -> None:
     from viewer.spectrum3d_panel import Spectrum3DPanel
 
     panel = Spectrum3DPanel()
     panel.set_spectrum3d(_synthetic3d())
-    assert panel.slice_axis_label() == "F3"  # Default F1-F2 plane, fixed F3.
-    # 0.2.133: slice mode only (default), none mode_combo.
+    assert panel.slice_axis_label() == "F3"  # default F1-F2 plane, F3 fixed
+    # 0.2.133: slice mode only (default), no mode_combo
     assert panel._mode == "slice"
     assert not hasattr(panel, "mode_combo")
     spectrum = panel.current_spectrum()
     assert spectrum is not None and spectrum.data.shape == (4, 6)
     assert panel.slice_slider.isEnabled() is True
-    # 0.2.199-patch29da:Slicing carries fixed shaft/Location, for peak filtering by plane.
+    # 0.2.199-patch29da: the slice carries its fixed axis/position for plane filtering
     assert spectrum.slice_axis == 2
     assert spectrum.slice_ppm is not None
     assert spectrum.slice_step_ppm > 0
-    # 0.2.199-patch29dj: Fixed the entire range of the axis (for out-of-bounds judgment).
+    # 0.2.199-patch29dj: full fixed-axis range (used for out-of-range checks)
     assert spectrum.slice_ppm_min is not None
     assert spectrum.slice_ppm_max is not None
     assert spectrum.slice_ppm_min <= spectrum.slice_ppm <= spectrum.slice_ppm_max
@@ -352,8 +355,8 @@ def test_spectrum3d_panel_widget(qapp: QApplication) -> None:
 
 
 def test_viewer_slice_filters_peaks_to_plane(qapp: QApplication) -> None:
-    """0.2.199-patch29da: The 3D slice only displays peaks whose fixed axis coordinates fall in the
-    current plane."""
+    """0.2.199-patch29da: a 3D slice shows only peaks whose fixed-axis
+    coordinate lies in the current plane."""
     from viewer.spectrum3d_panel import Spectrum3DPanel
     from viewer.spectrum_viewer import SpectrumViewer
 
@@ -375,8 +378,8 @@ def test_viewer_slice_filters_peaks_to_plane(qapp: QApplication) -> None:
     )
     assert viewer._visible_peak_rows == {0, 2}
     xy = viewer._peak_data_xy
-    assert xy[0][0] == xy[0][0] and xy[2][0] == xy[2][0]  # This plane is visible.
-    assert xy[1][0] != xy[1][0]  # Other planar peaks are hidden (NaN).
+    assert xy[0][0] == xy[0][0] and xy[2][0] == xy[2][0]  # visible in this plane
+    assert xy[1][0] != xy[1][0]  # peaks in other planes hidden (NaN)
     assert viewer._nearest_peak(int(xy[0][0]), int(xy[0][1])) == 0
     viewer.close()
     panel.close()
@@ -385,8 +388,8 @@ def test_viewer_slice_filters_peaks_to_plane(qapp: QApplication) -> None:
 def test_viewer_slice_shows_peaks_without_axis_coord(
     qapp: QApplication,
 ) -> None:
-    """0.2.199-patch29db: Peaks that lack fixed axis coordinates (such as 2D peak tables) are still
-    displayed in 3D slices."""
+    """0.2.199-patch29db: peaks without a fixed-axis coordinate (e.g. a 2D peak
+    table) still show in the 3D slice."""
     from viewer.spectrum3d_panel import Spectrum3DPanel
     from viewer.spectrum_viewer import SpectrumViewer
 
@@ -397,8 +400,7 @@ def test_viewer_slice_shows_peaks_without_axis_coord(
     viewer.add_spectrum(spectrum)
     x_ppm = float(spectrum.x_axis.ppm_at(2))
     y_ppm = float(spectrum.y_axis.ppm_at(3))
-    # 2D Peak Table (None F3_shift): Cannot filter by plane, should be shown rather than completely
-    # hidden.
+    # 2D peak table (no F3_shift): cannot filter by plane, so show rather than hide
     viewer.set_peaks(
         [
             {"H_shift": x_ppm, "N_shift": y_ppm, "label": "G1"},
@@ -415,7 +417,7 @@ def test_viewer_slice_shows_peaks_without_axis_coord(
 def test_peak_table_click_jumps_3d_slice(
     tmp_path: Path, qapp: QApplication
 ) -> None:
-    """0.2.199-patch29dc: 3D peak table point jumps to the corresponding section of the peak."""
+    """0.2.199-patch29dc: clicking a peak in the 3D peak table jumps to its slice."""
     from core.project import ProjectManager
     from gui.spectrum_panel import SpectrumPanel
 
@@ -442,8 +444,7 @@ def test_peak_table_click_jumps_3d_slice(
     panel.peak_table.selectRow(0)
     panel._on_peak_row_selected()
     assert panel._spectrum3d_panel.slice_slider.value() == target
-    # After the jump, the peak falls on the current slice plane, and the viewer is visible and
-    # flashing.
+    # after the jump the peak lies in the current slice plane, visible and flashing
     assert panel.viewer._visible_peak_rows is None or 0 in panel.viewer._visible_peak_rows
     assert panel.viewer._flash_item is not None
     panel.close()
@@ -452,8 +453,8 @@ def test_peak_table_click_jumps_3d_slice(
 def test_peak_table_click_skips_out_of_range_peak(
     tmp_path: Path, qapp: QApplication
 ) -> None:
-    """0.2.199-patch29de:Fixed axis coordinate out of bounds/for The peak of 0 does not jump, does
-    not flash, and log prompts."""
+    """0.2.199-patch29de: peaks whose fixed-axis coordinate is out of range or
+    zero do not jump or flash, and a log message is emitted."""
     from core.project import ProjectManager
     from gui.spectrum_panel import SpectrumPanel
 
@@ -473,22 +474,19 @@ def test_peak_table_click_skips_out_of_range_peak(
         {
             "F1_shift": float(s3d.axes[0].ppm_at(1)),
             "F2_shift": float(s3d.axes[1].ppm_at(2)),
-            "F3_shift": 0.0,  # Fixed axis (F3) coordinates are invalid.
+            "F3_shift": 0.0,  # invalid fixed-axis (F3) coordinate
         }
     ]
     panel._populate_peak_table()
     panel.peak_table.selectRow(0)
     panel._on_peak_row_selected()
     assert panel._spectrum3d_panel.slice_slider.value() == before
-    assert any(
-        "fixed-axis coordinate is missing or 0" in line for line in logs
-    )
+    assert any("无法定位切面" in line or "不在当前谱轴范围" in line for line in logs)
     panel.close()
 
 
 def test_viewer_slice_shows_out_of_range_peaks(qapp: QApplication) -> None:
-    """0.2.199-patch29de: Peaks with fixed axis coordinates that exceed the bounds are still
-    displayed as much as possible and not completely hidden."""
+    """0.2.199-patch29de: peaks with an out-of-range fixed-axis coordinate are still shown."""
     from viewer.spectrum3d_panel import Spectrum3DPanel
     from viewer.spectrum_viewer import SpectrumViewer
 
@@ -512,7 +510,7 @@ def test_viewer_slice_shows_out_of_range_peaks(qapp: QApplication) -> None:
 
 
 def test_load_from_ft3_lazy_matches_full(tmp_path: Path) -> None:
-    """0.2.199-patch29dd: Lazy loading (read-only 2D slice) is consistent with full read slice."""
+    """0.2.199-patch29dd: lazy loading (reads only 2D slices) matches full loading."""
     nz, ny, nx = 2, 4, 6
     P = np.zeros((nz, ny, nx), dtype=np.float32)
     for z in range(nz):
@@ -520,7 +518,7 @@ def test_load_from_ft3_lazy_matches_full(tmp_path: Path) -> None:
             for x in range(nx):
                 P[z, y, x] = z * 100 + y * 10 + x
     path = tmp_path / "o231.ft3"
-    _write_ft3_ordered(path, P, [2.0, 3.0, 1.0])  # ORDER 2 3 1(Really common).
+    _write_ft3_ordered(path, P, [2.0, 3.0, 1.0])  # ORDER 2 3 1 (common in real data)
     full = Spectrum3D.load_from_ft3(path)
     lazy = Spectrum3D.load_from_ft3(path, lazy=True)
     assert getattr(lazy, "_lazy", False) is True
@@ -530,16 +528,15 @@ def test_load_from_ft3_lazy_matches_full(tmp_path: Path) -> None:
             a = lazy.slice(axis, index).data
             b = full.slice(axis, index).data
             assert np.allclose(a, b), (axis, index)
-    # Lazy objects do not read the entire amount: data is a streaming lazy object rather than an
-    # ordinary ndarray.
+    # the lazy object does not read everything: data is a streaming lazy object, not an ndarray
     assert type(lazy.data).__name__ != "ndarray"
-    # Noise/Lazy estimation of maximum intensity available.
+    # lazy noise/max-intensity estimates are available
     assert lazy.estimate_noise() >= 0.0
     assert lazy.max_intensity > 0.0
 
 
 def test_load_from_ft3_lazy_non_stream_falls_back(tmp_path: Path) -> None:
-    """0.2.199-patch29dd:non-current/Incomplete head file lazy loading and rollback to full size."""
+    """0.2.199-patch29dd: non-stream or incomplete-header files fall back to a full load."""
     path = tmp_path / "ns.ft3"
     _write_ft3(path, _synthetic3d(), stream=False)
     loaded = Spectrum3D.load_from_ft3(path, lazy=True)
@@ -548,7 +545,7 @@ def test_load_from_ft3_lazy_non_stream_falls_back(tmp_path: Path) -> None:
 
 
 # ----------------------------------------------------------------------
-# Standalone viewer/spectrum panel.
+# Standalone viewer / spectrum panel
 # ----------------------------------------------------------------------
 def test_spectrum_window_3d_mode(
     tmp_path: Path, qapp: QApplication
@@ -559,18 +556,18 @@ def test_spectrum_window_3d_mode(
     assert window.load_spectrum(path) is True
     assert window._spectrum3d_active is True
     assert not window._spectrum3d_panel.isHidden()
-    # 0.2.133: only slice mode (default), open the score and the score will be output.
+    # 0.2.133: slice mode only (default): the spectrum appears on open
     assert window._spectrum3d_panel._mode == "slice"
     assert window.viewer.layer_list.count() == 1
-    # Switch plane F2-F3.
+    # Switch to the F2-F3 plane
     window._spectrum3d_panel.plane_combo.setCurrentIndex(2)
     assert window.viewer.layer_list.count() == 1
-    # Move the slider to refresh the slice.
+    # Moving the slider refreshes the slice
     assert window._spectrum3d_panel.slice_slider.isEnabled() is True
     window._spectrum3d_panel.slice_slider.setValue(5)
     window._spectrum3d_panel.refresh()
     assert window.viewer.layer_list.count() == 1
-    # Exit 3D mode after loading 2D.
+    # Loading a 2D spectrum exits 3D mode
     ft2 = tmp_path / "2d.ft2"
     _write_ft2(ft2, np.zeros((16, 32)))
     assert window.load_spectrum(ft2) is True
@@ -589,7 +586,7 @@ def test_spectrum_panel_opens_ft3(
     spectra.mkdir(parents=True, exist_ok=True)
     ft3 = spectra / f"{data.id}.ft3"
     _write_ft3(ft3, _synthetic3d())
-    # Task E: Three projection files (proj3D product, prefix d_001) for panel loading.
+    # Task E: three projection files (proj3D output, prefix d_001) for the panel to load
     for logical in ("F1", "F2", "F3"):
         _write_ft2(
             spectra / f"{data.id}_proj_{logical}.ft2",
@@ -603,9 +600,9 @@ def test_spectrum_panel_opens_ft3(
     assert panel._current_spectrum == ft3
     assert panel.viewer.layer_list.count() == 1
     assert not panel._spectrum3d_panel.isHidden()
-    # 0.2.133: 3D default slicing mode (projection file is opened directly from the list).
+    # 0.2.133: 3D defaults to slice mode (projection files open directly from the list)
     assert panel._spectrum3d_panel._mode == "slice"
-    # Peak table 3D column linkage.
+    # 3D peak-table column linkage
     peaks = manager.data_dir(entry.id, data.id, "peaks")
     peaks.mkdir(parents=True, exist_ok=True)
     (peaks / f"{entry.id}-{data.id}.csv").write_text(
@@ -619,8 +616,8 @@ def test_spectrum_panel_opens_ft3(
         panel.peak_table.horizontalHeaderItem(i).text()
         for i in range(panel.peak_table.columnCount())
     ]
-    # 0.2.199-patch29df/patch29dg: 3D column names are changed to display according to core names
-    # (N_shift style), no longer F1/F2/F3.
+    # 0.2.199-patch29df/patch29dg: 3D column names now use nucleus names
+    # (N_shift style) instead of F1/F2/F3
     shift_cols = [h for h in headers if h.endswith("_shift")]
     assert len(shift_cols) == 3
     assert "F1_shift" not in headers
@@ -642,12 +639,12 @@ def test_spectrum_panel_open_corrupt_ft3_returns_false(
 
 
 def test_viewer_peak_xy_3d_mapping(qapp: QApplication) -> None:
-    """The 3D peak table (F1/F2/F3_shift) is mapped according to the current slice plane axis
-    label; the 2D H/N fallback remains unchanged."""
+    """A 3D peak table (F1/F2/F3_shift) maps by the current slice's axis
+    labels; the 2D H/N fallback is unchanged."""
     spectrum3d = _synthetic3d()
     viewer = SpectrumViewer()
-    sl = spectrum3d.slice(2, 3)  # Plane F1-F2.
-    sl.dim_indices = (0, 1)  # Same as spectrum3d_panel.current_spectrum.
+    sl = spectrum3d.slice(2, 3)  # plane F1-F2
+    sl.dim_indices = (0, 1)  # matches spectrum3d_panel.current_spectrum
     viewer.add_spectrum(sl)
     x_ppm, y_ppm = viewer._peak_xy(
         {
@@ -657,7 +654,7 @@ def test_viewer_peak_xy_3d_mapping(qapp: QApplication) -> None:
     )
     assert sl.x_axis.index_at(x_ppm) == 2
     assert sl.y_axis.index_at(y_ppm) == 1
-    # 2D Peak Table H/N Fallback.
+    # 2D peak table H/N fallback
     x_ppm, y_ppm = viewer._peak_xy(
         {
             "H_shift": sl.x_axis.ppm_at(2),
@@ -666,10 +663,10 @@ def test_viewer_peak_xy_3d_mapping(qapp: QApplication) -> None:
     )
     assert sl.x_axis.index_at(x_ppm) == 2
     assert sl.y_axis.index_at(y_ppm) == 1
-    # F2-F3 plane.
+    # F2-F3 plane
     viewer2 = SpectrumViewer()
     sl2 = spectrum3d.slice(0, 1)
-    sl2.dim_indices = (1, 2)  # Same as spectrum3d_panel.current_spectrum.
+    sl2.dim_indices = (1, 2)  # matches spectrum3d_panel.current_spectrum
     viewer2.add_spectrum(sl2)
     x2, y2 = viewer2._peak_xy(
         {
@@ -684,8 +681,7 @@ def test_viewer_peak_xy_3d_mapping(qapp: QApplication) -> None:
 
 
 def _misordered_dic_and_data() -> tuple[dict, np.ndarray]:
-    """Store the ft3 header and data of the axis sequence (15N, 1H, 13C) (corresponding to logic
-    F2/F3/F1)."""
+    """ft3 header and data with storage axis order (15N, 1H, 13C) (logical F2/F3/F1)."""
     data = np.zeros((20, 40, 30), dtype=np.float32)
     dic = {
         "FDDIMCOUNT": 3,
@@ -702,10 +698,10 @@ def _misordered_dic_and_data() -> tuple[dict, np.ndarray]:
 def test_load_from_ft3_without_fddimorder_keeps_storage_order(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog
 ) -> None:
-    """0.2.199-patch29dh: The storage order is maintained when there is no FDDIMORDER in the
-    header, and the label is generated according to the head core; metadata is no longer
-    rearranged (user: the software has an axis rearrangement process, and the metadata
-    collection order cannot be rearranged)."""
+    """0.2.199-patch29dh: without FDDIMORDER in the header, storage order is
+    kept and labels come from header nuclei; metadata no longer reorders as a
+    fallback (user: the software has an axis-reordering step, so the metadata
+    acquisition order cannot serve as a fallback)."""
     dic, data = _misordered_dic_and_data()
     monkeypatch.setattr("nmrglue.pipe.read", lambda path: (dic, data))
     with caplog.at_level(logging.INFO, logger="nmrforge.viewer.spectrum"):
@@ -713,8 +709,7 @@ def test_load_from_ft3_without_fddimorder_keeps_storage_order(
             tmp_path / "61.ft3", labels=("C", "N", "H"),
             nuclei=["13C", "15N", "1H"],
         )
-    # Storage order (FDF1=15N, FDF2=1H, FDF3=13C): No rearrangement, labels are generated by the
-    # head core N, H, C.
+    # storage order (FDF1=15N, FDF2=1H, FDF3=13C): no reordering, labels from header nuclei N,H,C
     assert [a.label for a in spec.axes] == ["N", "H", "C"]
     assert spec.data.shape == (20, 40, 30)
     assert round(spec.axes[0].obs_mhz, 1) == 81.1
@@ -725,8 +720,8 @@ def test_load_from_ft3_without_fddimorder_keeps_storage_order(
 def test_load_from_ft3_warns_ppm_range_mismatch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog
 ) -> None:
-    """0.2.122:nuclear/ppm Self-check alarm when the range does not match (the storage order is
-    maintained when there is no metadata)."""
+    """0.2.122: self-check warning when nucleus/ppm ranges disagree (storage
+    order is kept without metadata)."""
     data = np.zeros((8, 8, 8), dtype=np.float32)
     dic = {
         "FDDIMCOUNT": 3,
@@ -740,15 +735,15 @@ def test_load_from_ft3_warns_ppm_range_mismatch(
     monkeypatch.setattr("nmrglue.pipe.read", lambda path: (dic, data))
     with caplog.at_level(logging.WARNING, logger="nmrforge.viewer.spectrum"):
         Spectrum3D.load_from_ft3(tmp_path / "x.ft3")
-    assert "axis order/reference self-check" in caplog.text
+    assert "轴序/引用自检" in caplog.text
 
 
 def test_load_from_ft2_without_fddimorder_keeps_storage_order(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog
 ) -> None:
-    """0.2.199-patch29dh: When the 2D header does not have FDDIMORDER, the storage order is
-    maintained, and the label is generated according to the head core; metadata is no longer
-    rearranged (user decision)."""
+    """0.2.199-patch29dh: without FDDIMORDER in a 2D header, storage order is
+    kept and labels come from header nuclei; metadata no longer reorders as a
+    fallback (user decision)."""
     data = np.zeros((40, 20), dtype=np.float32)
     dic = {
         "FDDIMCOUNT": 2,
@@ -762,16 +757,16 @@ def test_load_from_ft2_without_fddimorder_keeps_storage_order(
         spec = Spectrum.load_from_ft2(
             tmp_path / "x.ft2", labels=("N", "H"), nuclei=["15N", "1H"]
         )
-    # Storage order (FDF1=1H, FDF2=15N): no rearrangement; load_from_ft2 does not perform display
-    # orientation, original axis order x=F2(15N), y=F1(1H); display layer is transposed by
-    # orient_x_priority.
+    # storage order (FDF1=1H, FDF2=15N): no reordering; load_from_ft2 does no
+    # display orientation, so the raw axis order is x=F2(15N), y=F1(1H); the
+    # display layer transposes via orient_x_priority
     assert spec.data.shape == (40, 20)
     assert spec.y_axis.label == "H"
     assert spec.x_axis.label == "N"
     assert round(spec.y_axis.obs_mhz, 1) == 600.0
 
 def test_3d_panel_slice_only() -> None:
-    """NO QUERY SPECIFIED. EXAMPLE REQUEST: GET?Q=HELLO&LANGPAIR=EN|IT."""
+    '''0.2.133: the 3D panel keeps slices only; no MIP/Sum/projection modes.'''
     from viewer.spectrum3d_panel import Spectrum3DPanel
 
     panel = Spectrum3DPanel()
@@ -788,8 +783,8 @@ def test_3d_panel_slice_only() -> None:
 
 
 def test_load_projections_new_naming(tmp_path: Path, qapp: QApplication) -> None:
-    """0.2.133: The projection is loaded with a new name of {data_id}_{coreA}-{coreB}.ft2, and the
-    core is resolved by the file name."""
+    """0.2.133: projections load under the new {data_id}_{nucleusA}-{nucleusB}.ft2
+    naming, with nuclei parsed from the file name."""
     import numpy as np
 
     from core.project import ProjectManager
@@ -828,7 +823,7 @@ def test_load_projections_new_naming(tmp_path: Path, qapp: QApplication) -> None
         '{"logical_axis": "F3", "nucleus": "1H", "sf": 600.1}'
         ']}}', encoding='utf-8')
 
-    # File name = {data_id}_{Core A}-{Core B}.ft2 (Core A=X axis/List, Core B=Y axis/OK).
+    # file name = {data_id}_{nucleusA}-{nucleusB}.ft2 (A = X axis/column, B = Y axis/row)
     _write_ft2(spectra / f'{data.id}_15N-1H.ft2', np.zeros((8, 16)))
     _write_ft2(spectra / f'{data.id}_13C-1H.ft2', np.zeros((16, 8)))
     _write_ft2(spectra / f'{data.id}_13C-15N.ft2', np.zeros((8, 8)))
@@ -837,19 +832,20 @@ def test_load_projections_new_naming(tmp_path: Path, qapp: QApplication) -> None
     panel.set_context(entry.id, data.id)
     proj = panel._load_3d_projections()
     assert len(proj) == 3, f'expected 3, got {len(proj)}: {list(proj.keys())}'
-    # 0.2.133:ppm Small nuclear abscissa (carrier wave/Reference table sorting, transpose if
-    # necessary) 15N-1H plane: fixed axis = 13C(F1, index 0);x=1H(H) < 15N(N).
+    # 0.2.133: the nucleus with the smaller ppm goes on the x axis (carrier/
+    # reference ordering, transposed when needed)
+    # 15N-1H plane: fixed axis = 13C (F1, index 0); x=1H(H) < 15N(N)
     s0 = proj[0]
     assert s0.x_axis.label == 'H', f'x label {s0.x_axis.label}'
     assert s0.y_axis.label == 'N', f'y label {s0.y_axis.label}'
     assert s0.data.shape == (16, 8)
-    # 13C-1H plane: fixed axis = 15N(F2, index 1);x=1H(H) < 13C(C).
+    # 13C-1H plane: fixed axis = 15N (F2, index 1); x=1H(H) < 13C(C)
     s1 = proj[1]
     assert s1.x_axis.label == 'H', f'x label {s1.x_axis.label}'
     assert s1.y_axis.label == 'C', f'y label {s1.y_axis.label}'
     assert s1.data.shape == (8, 16)
-    # 13C-15N plane: fixed axis = 1H(F3, index 2);0.2.153 Starting abscissa priority H > N > C ->
-    # x=15N(N) > 13C(C).
+    # 13C-15N plane: fixed axis = 1H (F3, index 2); since 0.2.153 the x-axis
+    # priority is H > N > C → x=15N(N) > 13C(C)
     s2 = proj[2]
     assert s2.x_axis.label == 'N'
     assert s2.y_axis.label == 'C'
@@ -878,7 +874,7 @@ def test_contour_state_memory(monkeypatch, tmp_path: Path, qapp: QApplication) -
 
 
 def test_slice_orientation_x_priority_h_n_c(tmp_path: Path) -> None:
-    """0.2.153: The 3D slice abscissa is oriented H > N > C (transposed if necessary)."""
+    """0.2.153: 3D slice x axes are oriented H > N > C (transposed when needed)."""
     nz, ny, nx = 2, 4, 6
     P = np.zeros((nz, ny, nx), dtype=np.float32)
     for z in range(nz):
@@ -890,15 +886,15 @@ def test_slice_orientation_x_priority_h_n_c(tmp_path: Path) -> None:
     loaded = Spectrum3D.load_from_ft3(
         path, labels=("N", "H", "C"), nuclei=["15N", "1H", "13C"]
     )
-    # F1-F2 plane (fixed F3): (N, H) -> H is already on the abscissa, not transposed.
+    # F1-F2 plane (F3 fixed): (N, H) → H is already on x, no transpose
     sl = loaded.slice(2, 1)
     assert sl.y_axis.label == "N" and sl.x_axis.label == "H"
     np.testing.assert_allclose(sl.data, loaded.data[:, :, 1])
-    # F1-F3 plane (fixed F2): (N, C) -> N > C, after transposition N is on the abscissa.
+    # F1-F3 plane (F2 fixed): (N, C) → N > C, so N is on x after transposing
     sl = loaded.slice(1, 2)
     assert sl.y_axis.label == "C" and sl.x_axis.label == "N"
     np.testing.assert_allclose(sl.data, loaded.data[:, 2, :].T)
-    # F2-F3 plane (fixed F1): (H, C) -> H > C, after transposition, H is on the abscissa.
+    # F2-F3 plane (F1 fixed): (H, C) → H > C, so H is on x after transposing
     sl = loaded.slice(0, 1)
     assert sl.y_axis.label == "C" and sl.x_axis.label == "H"
     np.testing.assert_allclose(sl.data, loaded.data[1, :, :].T)
@@ -907,10 +903,14 @@ def test_slice_orientation_x_priority_h_n_c(tmp_path: Path) -> None:
 def test_load_from_ft3_prefers_header_order_over_metadata(
     tmp_path: Path,
 ) -> None:
-    """0.2.199-patch29dh: When the file header is complete, it is rearranged by the header first,
-    and metadata conflicts are not covered. To reproduce the real HNCA: metadata (Bruker
-    acquisition sequence) F1=13C/F2=15N/F3=1H=CNH, and the.ft3 header ORDER 2 3 1 gives NHC --
-    the viewer must display N, H, C, and The peak tables (pick_peaks homologous) are consistent."""
+    """0.2.199-patch29dh: a complete header wins for reordering; conflicting
+    metadata does not override it.
+
+    Reproduces a real HNCA: metadata (Bruker acquisition order) gives
+    F1=13C/F2=15N/F3=1H=CNH, while the .ft3 header ORDER 2 3 1 gives NHC --
+    the viewer must show N,H,C, consistent with the peak table (same source as
+    pick_peaks).
+    """
     nz, ny, nx = 2, 4, 6
     P = np.arange(nz * ny * nx, dtype=np.float32).reshape(nz, ny, nx)
     path = tmp_path / "conflict.ft3"
@@ -918,7 +918,7 @@ def test_load_from_ft3_prefers_header_order_over_metadata(
     loaded = Spectrum3D.load_from_ft3(
         path, labels=("C", "N", "H"), nuclei=["13C", "15N", "1H"]
     )
-    # Header ORDER 2 3 1 -> logic (F1=15N, F2=1H, F3=13C), metadata CNH does not take effect.
+    # header ORDER 2 3 1 → logical (F1=15N, F2=1H, F3=13C); metadata CNH has no effect
     assert [ax.label for ax in loaded.axes] == ["N", "H", "C"]
     assert loaded.axes[0].obs_mhz == pytest.approx(60.8)
     assert loaded.axes[1].obs_mhz == pytest.approx(600.0)
@@ -926,8 +926,7 @@ def test_load_from_ft3_prefers_header_order_over_metadata(
     assert loaded.data.shape == (nz, nx, ny)
 
 def test_control_panel_spans_full_row(qapp: QApplication) -> None:
-    """0.2.199-patch29di:add_control_panel spans the entire line of the control area, Do not
-    squeeze single column and leave it blank/Spread wide."""
+    """0.2.199-patch29di: add_control_panel spans the full control row, leaving no gap."""
     from qtcompat.QtWidgets import QWidget
 
     from viewer.spectrum_viewer import SpectrumViewer
@@ -940,8 +939,8 @@ def test_control_panel_spans_full_row(qapp: QApplication) -> None:
     _row, _col, _row_span, col_span = viewer.controls_layout.getItemPosition(
         index
     )
-    # The control area is a 3-column grid; the panel must span the entire row (the original
-    # implementation only occupies column 0 -> leave the right side blank).
+    # The control area is a 3-column grid; the panel must span the whole row
+    # (the old implementation used column 0 only, leaving the right side empty)
     assert viewer.controls_layout.columnCount() >= 3
     assert col_span == viewer.controls_layout.columnCount()
     viewer.close()
@@ -949,12 +948,14 @@ def test_control_panel_spans_full_row(qapp: QApplication) -> None:
 def test_viewer_slice_hides_peaks_far_in_axis_range(
     qapp: QApplication,
 ) -> None:
-    """0.2.199-patch29dj: Peaks whose fixed axis coordinates are within the axis range but far away
-    from the current slice must be hidden. The original "cross-border best-effort display" uses
-    the current slice +/-10 steps to judge, and almost all peaks that are not in this plane are
-    displayed as out-of-bounds (one slice sees all layer peaks); after using the fixed axis full
-    range judgment, only peaks that exceed the entire axis range (Jiuxuanfeng/bad value) are
-    displayed with best effort."""
+    """0.2.199-patch29dj: peaks whose fixed-axis coordinate is inside the axis
+    range but far from the current slice must be hidden.
+
+    The old "show out-of-range peaks anyway" rule used the current slice ±10
+    steps, so almost every peak outside this plane counted as out of range (one
+    slice showed peaks from all layers); with the full fixed-axis range, only
+    peaks beyond the whole axis (stale picks/bad values) are shown anyway.
+    """
     from viewer.spectrum import Spectrum, SpectrumAxis
     from viewer.spectrum_viewer import SpectrumViewer
 
@@ -969,7 +970,7 @@ def test_viewer_slice_hides_peaks_far_in_axis_range(
     import numpy as np
 
     spec = Spectrum(np.zeros((256, 256)), [y_axis, x_axis], source="x.ft3")
-    spec.slice_axis = 0  # Fixed F1(15N).
+    spec.slice_axis = 0  # F1 (15N) fixed
     spec.slice_ppm = 117.0
     spec.slice_step_ppm = 0.05
     spec.slice_ppm_min = 105.0
@@ -980,14 +981,14 @@ def test_viewer_slice_hides_peaks_far_in_axis_range(
     y_ppm = float(y_axis.ppm_at(100))
     viewer.set_peaks(
         [
-            {"F1_shift": 117.0, "F2_shift": x_ppm, "F3_shift": y_ppm},  # This plane.
-            {"F1_shift": 125.0, "F2_shift": x_ppm, "F3_shift": y_ppm},  # Far away in the shaft.
-            {"F1_shift": 50.0, "F2_shift": x_ppm, "F3_shift": y_ppm},  # Beyond the entire axis.
+            {"F1_shift": 117.0, "F2_shift": x_ppm, "F3_shift": y_ppm},  # this plane
+            {"F1_shift": 125.0, "F2_shift": x_ppm, "F3_shift": y_ppm},  # far within the axis
+            {"F1_shift": 50.0, "F2_shift": x_ppm, "F3_shift": y_ppm},  # beyond the whole axis
         ]
     )
     assert viewer._visible_peak_rows == {0, 2}
     xy = viewer._peak_data_xy
-    assert xy[0][0] == xy[0][0] and xy[2][0] == xy[2][0]  # This plane + visible outside the axis.
-    assert xy[1][0] != xy[1][0]  # In-axis away from current slice: hidden (NaN).
+    assert xy[0][0] == xy[0][0] and xy[2][0] == xy[2][0]  # in-plane + beyond-axis visible
+    assert xy[1][0] != xy[1][0]  # far from the current slice within the axis: hidden (NaN)
     viewer.close()
 

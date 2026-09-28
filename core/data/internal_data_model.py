@@ -31,7 +31,20 @@ class Dimension:
     logical_axis: str
     nucleus: str
     sf: float = 0.0
+    #: Resolved spectrum width (Hz): the value
+    #: ``core.data.bruker_reader.resolve_sweep_width`` derives from its consistency criterion
     sw: float = 0.0
+    #: 2026-09-24: the raw ``SW`` (ppm) and ``SW_h`` (Hz) of acqus. Kept for the record /
+    #: re-checking -- when the two contradict each other ``sw`` takes the ppm convention
+    #: (see ``sw_source``), and derived values never overwrite the raw fields.
+    sw_ppm: float = 0.0
+    sw_hz_raw: float = 0.0
+    #: Where ``sw`` came from: ``sw_h`` (both fields agree) / ``ppm_x_sfo`` (taken as
+    #: SW x SFO1) / ``missing``
+    sw_source: str = ""
+    #: One sentence when an explanation is needed (already translated): non-empty when the
+    #: spectrum-width convention was overridden, or when SW_h is missing
+    sw_note: str = ""
     o1: float = 0.0
     o1p: float = 0.0
     td: int = 0

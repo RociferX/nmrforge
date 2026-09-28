@@ -1,10 +1,15 @@
-"""Step-by-step processing and arrangement (API_CONTRACT §8.3 / G2B-002). Three steps: 1.
-import_data -- workflow.import_workflow.import_data (read-only parameter + link (G2B-009)); 2.
-generate_fid -- backend.convert_to_fid (generate NMRPipe fid); 3. generate_spectrum --
-backend.process / reconstruct_nus (inclusive NUS SMILE reconstruction). phase optimisation:
-first use SMILE reconstruction to generate the spectrum, and then repeatedly run the backend
-(violent) optimisation candidate by candidate, and the final spectrum is output by the real
-pipeline (memory phase search + final script write back, 0.2.164 unify together)."""
+"""Stepwise processing orchestration (API_CONTRACT §8.3 / G2B-002).
+
+Three steps:
+1. import_data -- workflow.import_workflow.import_data (read the parameters + link files
+   (G2B-009));
+2. generate_fid -- backend.convert_to_fid (generate the NMRPipe fid);
+3. generate_spectrum -- backend.process / reconstruct_nus (including NUS SMILE reconstruction).
+
+Phase optimisation: reconstruct the spectrum with SMILE first, then repeatedly run the backend
+optimisation candidate by candidate (brute force); the final spectrum is produced by the real
+pipeline (in-memory phase search + final-run script write-back, unified since 0.2.164).
+"""
 
 from __future__ import annotations
 
@@ -25,7 +30,7 @@ from workflow.ucsf_export import export_ucsf
 
 
 class StepwiseError(Exception):
-    """Handle errors in steps."""
+    """Stepwise processing error."""
 
 
 def _require_data(manager: ProjectManager, exp_id: str, data_id: str) -> Any:
@@ -111,12 +116,15 @@ def _rewrite_duplicate_nucleus_labels(
     spectrum_path: str,
     experiment: Any,
 ) -> bool:
-    """Homonuclear spectrum duplicate labels are unique (0.2.199-patch29af/patch29ag/patch29ah).
-    proj3D Press FDF label to select axis, re-review label is ambiguity; when processing,
-    change: re-review, press index priority "direct dimension > acqu2 > acqu3" and add x/y/z (2D
-    double 1H: F2 (direct) -> 1Hx, F1 -> 1Hy; 3D Three identical cores: F3 (direct) -> 1Hx, F2
-    -> 1Hy, F1 -> 1Hz;HNN Double 15N:F2(acqu2,HSQC's N) -> 15Nx, F1 -> 15Ny). GUI's
-    nucleus_symbol will display 15Nx as Nx. Return whether to overwrite."""
+    """Make duplicate labels unique in homonuclear spectra (0.2.199-patch29af/29ag/29ah).
+
+    proj3D picks axes by FDF label, so a repeated nucleus label is ambiguous; it is fixed while
+    processing: repeated nuclei get x/y/z appended in index priority order "direct dimension >
+    acqu2 > acqu3" (2D with two 1H: F2 (direct) -> 1Hx, F1 -> 1Hy; 3D with three identical
+    nuclei: F3 (direct) -> 1Hx, F2 -> 1Hy, F1 -> 1Hz; HNN with two 15N: F2 (acqu2, the N of the
+    HSQC) -> 15Nx, F1 -> 15Ny). The GUI nucleus_symbol shows 15Nx as Nx. Returns whether the
+    file was rewritten.
+    """
     import nmrglue as ng
     import numpy as np
 
@@ -283,8 +291,8 @@ def generate_fid(
 
 
 def _apply_note_overrides(manager, exp_id: str, data_id: str, experiment) -> None:
-    """Override automatic classification and presets (0.2.199-patch29hc) with data annotations
-    (experiment type of data type /peak symbol)."""
+    """Override the automatic classification and presets with the data note (experiment type /
+    peak sign), 0.2.199-patch29hc."""
     try:
         project = getattr(manager, "project", None)
         if project is None:
@@ -315,8 +323,8 @@ def _apply_note_overrides(manager, exp_id: str, data_id: str, experiment) -> Non
 
 
 def _default_phase_route(experiment) -> str:
-    """Press dimension to select the default phase_route: 1D without indirect dimension, directly
-    connected to process(patch29gj)."""
+    """Pick the default phase_route by dimensionality: 1D has no indirect dimension, so it goes
+    straight to process (patch29gj)."""
     return "none" if int(getattr(experiment, "ndim", 2) or 2) == 1 else "unified"
 
 
@@ -330,25 +338,31 @@ def generate_spectrum(
     work_dir: Path | str | None = None,
     progress: Callable[[str], None] | None = None,
 ) -> str:
-    """Step 3: Generate spectrum (NUS automatically go through SMILE reconstruction; reuse
-    converted fid). params["phase_route"] Select processing path: - "unified" (default): unified
-    scheme -- first pass of dimensionally complex preview (only search axis without -di), memory
-    phase modulation (old algorithm judgment standard, zero extra backend), complete final run;
-    - "none": keep the old path, directly process/reconstruct_nus, no additional optimisation
-    (escape hatch). 0.2.199-patch29ey: When work_dir is not explicitly specified, press
-    processing.intermediate_memory to adaptively put the working directory of the intermediate
-    spectrum into the memory disk (when the memory margin is sufficient), and delete it entirely
-    when it is used up."""
+    """Step 3: generate the spectrum (NUS goes through SMILE reconstruction automatically; the
+    already converted fid is reused).
+
+    params["phase_route"] selects the processing route:
+    - "unified" (default): the unified scheme -- a first pass of per-dimension replica preview
+      (search axes only, no -di), in-memory phase alignment (old algorithm criterion, no extra
+      backend), then the complete final run;
+    - "none": keep the old path, call process/reconstruct_nus directly, no extra optimisation
+      (escape hatch).
+
+    0.2.199-patch29ey: when work_dir is not given explicitly, the intermediate spectrum working
+    directory is placed on the RAM disk adaptively via processing.intermediate_memory (when there
+    is enough free memory) and removed as a whole afterwards.
+    """
     experiment = _read_experiment(manager, exp_id, data_id)
     work = Path(work_dir) if work_dir else _work_dir(manager, exp_id, data_id)
     _ensure_work_dir(backend, work)
 
     def _sweep_intermediates() -> None:
-        """Clean up this data unified intermediate product residue (0.2.199-patch29gi). Execute
-        once before running and once at the end: clear the legacy of the last hard interrupt
-        (SIGKILL/power outage) before running, clear this residue after ending (including
-        exception); only delete the intermediate product, final spectrum / final script /fid
-        retain."""
+        """Sweep leftover unified intermediates of this dataset (0.2.199-patch29gi).
+
+        Runs once before and once after: the first pass clears what the previous hard interrupt
+        (SIGKILL / power loss) left behind, the second (including on exception) clears this run's
+        leftovers; only intermediates are deleted, the final spectrum / final script / fid stay.
+        """
         from workflow.phase_routes import _cleanup_unified_intermediates
 
         _cleanup_unified_intermediates(
@@ -369,8 +383,7 @@ def generate_spectrum(
             work, experiment, params=params
         )
         if memory_dir is not None and progress is not None:
-            progress(
-                tr(
+            progress(tr(
                 "Intermediate spectrum working directory using ramdisk (adaptive): "
                 "{p0}",
                 p0=_intermediate_root,
@@ -607,9 +620,17 @@ def _generate_spectrum_impl(
 
         report_text = report_text_from_logs(list(result.get("logs", [])))
         if report_text:
-            write_quality_record(spectrum_path, merged_params, report_text)
-    # Failure of cache recording does not affect spectrum generation.
-    except Exception:  # noqa: BLE001 -
+            # 2026-09-23 fix: the "parameter fingerprint of the report record" must have exactly
+            # the same shape as the run.params the GUI reads -- the record used to be written from
+            # the local merged_params, and any divergence (the record object being written back /
+            # normalised later) made the GUI judge the fingerprint as mismatched and show "no
+            # report record".
+            record_params = merged_params
+            _stored = manager.project.run(run_id)
+            if _stored is not None and _stored.params:
+                record_params = dict(_stored.params)
+            write_quality_record(spectrum_path, record_params, report_text)
+    except Exception:  # noqa: BLE001 - a failed cache record must not affect spectrum generation
         pass
     return spectrum_path
 
@@ -620,10 +641,13 @@ def projection_filename(
     logical: str,
     tag: str,
 ) -> str:
-    """Projection file name (0.2.133):d_001_15N-1H.ft2 -- Contains the actual two cores of the
-    plane. Nuclear deletion/Fallback to old name when unavailable d_001_proj_<logical|tag>.ft2
-    (still hit by GUI <data_id>_*.ft2 and *_proj_*.ft2 wildcard scan, compatible with historical
-    files)."""
+    """Projection file name (0.2.133): d_001_15N-1H.ft2 -- carries the two nuclei actually in the
+    plane.
+
+    When a nucleus is missing or unusable, fall back to the old name
+    d_001_proj_<logical|tag>.ft2 (still matched by the GUI <data_id>_*.ft2 and *_proj_*.ft2
+    wildcard scans, so historical files stay compatible).
+    """
     if nuclei and len(nuclei) >= 2:
         safe = [
             re.sub(r"[^A-Za-z0-9]", "", str(nuc or ""))
@@ -639,11 +663,14 @@ def projection_filename(
 
 
 def read_experiment(manager: ProjectManager, exp_id: str, data_id: str) -> Any:
-    """Public reading experiment entrance: Read Experiment by data entry (same caliber as the
-    processing chain). 2026-09-12 The parameter sensitivity interface (nmrforge_api) requires
-    the same experimental object as the processing (including experiment type/peak symbol
-    coverage in the data annotation), so the internal implementation is explicitly exposed to
-    avoid a second set of reading logic in the external interface."""
+    """Public experiment-reading entry point: read the Experiment from the data entry (same rule as
+    the processing chain).
+
+    2026-09-12: the parameter-sensitivity API (nmrforge_api) needs exactly the same experiment
+    object as processing (including the experiment type / peak sign overrides from the data
+    note), so the internal implementation is exposed explicitly to keep the public API from
+    growing a second reading path.
+    """
     return _read_experiment(manager, exp_id, data_id)
 
 

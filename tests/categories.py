@@ -1,22 +1,31 @@
-"""Test classification (Phase 12): **Single source** for unit / integration / regression. Why mark
-instead of moving directory: Audit (F.2) has confirmed that many tests use
-``Path(__file__).parent / fixtures`` to position the fixture, and moving the file is true
-reconstruction and has no release period benefits. Here, use pytest to mark the classification,
-``tests/conftest.py`` according to this table to mark each test,
-``tests/test_test_categories.py`` to ensure that: each test file is in the table, the category
-is legal, and the three categories are not empty. Definition (must be added to this table when
-adding a new test file): - ``unit``: pure logic, without touching the temporary directory
-/Qt/project manager -- the fastest group; - ``integration``: can use ``tmp_path``/``bruker_dir``
-fixtures, Qt control or ``ProjectManager``, that is, real I/O or multi-module collaboration; -
-``regression``: for a fixed defect, Review correction items or releases/Guard tests for
-architectural invariants. Usage:: pytest -m unit # fast pytest -m integration pytest -m
-regression."""
+"""Test categories (Phase 12): the **single source of truth** for unit / integration / regression.
+
+Why markers instead of moving directories: the audit (F.2) confirmed that many tests locate
+fixtures with ``Path(__file__).parent / fixtures``, so moving files would be a real refactor with
+no release-time benefit. Categories are expressed as pytest markers: ``tests/conftest.py`` marks
+every test from this table and ``tests/test_test_categories.py`` guarantees that every test file
+is listed, its category is valid, and all three categories are non-empty.
+
+Definitions (a new test file must be added to this table):
+
+- ``unit``: pure logic only — no temp directories, Qt or ProjectManager; the fastest group;
+- ``integration``: uses ``tmp_path``/``bruker_dir`` fixtures, Qt widgets or ``ProjectManager``,
+  i.e. real I/O or collaboration across modules;
+- ``regression``: a guard test that exists for a fixed defect, an audit follow-up item or a
+  release/architecture invariant.
+
+Usage::
+
+    pytest -m unit            # fast
+    pytest -m integration
+    pytest -m regression
+"""
 
 from __future__ import annotations
 
 __all__ = ["CATEGORIES", "CATEGORY_MARKERS", "category_of"]
 
-# : file name -> category (single source).
+#: filename → category (single source of truth)
 CATEGORIES: dict[str, str] = {
     "test_1d_phase_td.py": "integration",
     "test_1d_processing.py": "unit",
@@ -74,7 +83,6 @@ CATEGORIES: dict[str, str] = {
     "test_gui_step_row_layout.py": "integration",
     "test_gui_theme.py": "unit",
     "test_gui_tutorial.py": "integration",
-    "test_ui_i18n.py": "regression",
     "test_import_workflow.py": "integration",
     "test_logging_setup.py": "regression",
     "test_manual.py": "integration",
@@ -98,6 +106,8 @@ CATEGORIES: dict[str, str] = {
     "test_planning.py": "integration",
     "test_progress.py": "integration",
     "test_project_manager.py": "integration",
+    "test_coherence_pathway.py": "regression",
+    "test_pulse_pathways.py": "regression",
     "test_qc.py": "unit",
     "test_qc_audit.py": "regression",
     "test_qc_enhance.py": "unit",
@@ -117,6 +127,9 @@ CATEGORIES: dict[str, str] = {
     "test_smile_optimize.py": "integration",
     "test_smile_scan_script_split.py": "unit",
     "test_smile_scan_workflow.py": "integration",
+    "test_ui_i18n.py": "regression",
+    # test_public_tree_sync.py is private-trunk only (it compares this tree against it), so it is
+    # not registered here; the trunk's copy registers it.
     "test_test_categories.py": "regression",
     "test_smoke.py": "unit",
     "test_stepwise.py": "integration",
@@ -135,7 +148,7 @@ CATEGORIES: dict[str, str] = {
     "test_workspace.py": "integration",
 }
 
-# : Category -> pytest marker name (consistent with pyproject’s markers registration).
+#: category → pytest marker name (matches the markers registered in pyproject)
 CATEGORY_MARKERS: dict[str, str] = {
     "unit": "unit",
     "integration": "integration",
@@ -144,7 +157,5 @@ CATEGORY_MARKERS: dict[str, str] = {
 
 
 def category_of(filename: str) -> str:
-    """Select the category according to the file name; if it is not registered, press
-    ``integration`` to handle it conservatively (the guard test will require additional
-    registration)."""
+    """Category for a filename; unregistered files conservatively default to ``integration``."""
     return CATEGORIES.get(filename, "integration")

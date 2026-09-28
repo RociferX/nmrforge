@@ -1,8 +1,10 @@
-"""Task termination mechanism test: process registry + process tree termination (Windows/Linux
-compatible). Does not rely on csh (local/CI usually does not have tcsh): directly use the
-current interpreter to start a long task process, register it in the global registry of the
-runtime, and verify that terminate_current_tasks() can actually kill the process without leaving
-any child processes."""
+"""Task termination tests: process registry + process tree termination (Windows/Linux
+compatible).
+
+Does not depend on csh (local/CI usually has no tcsh): start a long-running task process
+with the current interpreter, register it in runtime's global registry, and check that
+terminate_current_tasks() really kills the process and leaves no child behind.
+"""
 
 from __future__ import annotations
 
@@ -18,7 +20,7 @@ from backend.runtime import (
 
 
 def test_cancel_flag_lifecycle() -> None:
-    """0.2.199-patch6:Cancel flag set/Clear/Query."""
+    """0.2.199-patch6: set / clear / query the cancellation flag."""
     from backend.runtime import cancel_requested, clear_cancel, request_cancel
 
     clear_cancel()
@@ -30,7 +32,7 @@ def test_cancel_flag_lifecycle() -> None:
 
 
 def test_orphan_match_scopes_by_name_and_workspace() -> None:
-    """The tool name itself does not represent ownership; it must match the current workspace."""
+    """A tool name alone does not prove ownership; the current workspace must match."""
     from backend.runtime import _orphan_match
 
     assert not _orphan_match({"name": "nmrPipe.exe", "args": ""}, None, None)
@@ -98,8 +100,7 @@ def test_orphan_targets_require_dead_parent_and_current_workspace() -> None:
 
 def _spawn_sleeper(seconds: int = 120) -> subprocess.Popen:
     code = f"import time; time.sleep({seconds})"
-    # Start_new_session Consistent with CshRuntime (independent process group to facilitate tree
-    # termination).
+    # start_new_session matches CshRuntime (own process group, so the tree can be killed)
     return subprocess.Popen(
         [sys.executable, "-c", code],
         stdout=subprocess.DEVNULL,
@@ -120,7 +121,7 @@ def test_terminate_kills_registered_task() -> None:
         assert proc.poll() is None
         killed = terminate_current_tasks()
         assert killed == 1
-        # Wait for the process to actually exit (Windows taskkill asynchronous, polling wait).
+        # wait for the process to really exit (Windows taskkill is asynchronous, so poll)
         deadline = time.monotonic() + 10.0
         while proc.poll() is None and time.monotonic() < deadline:
             time.sleep(0.05)
@@ -145,8 +146,9 @@ def test_terminate_empty_returns_zero() -> None:
 
 
 def test_terminate_kills_child_process_tree() -> None:
-    """When the parent process has exited, the registry still holds the child process: the
-    grandchild process will also be killed when the entire tree is terminated."""
+    """The registry still holds a child after the parent exited: tree termination must
+    kill the grandchild too.
+    """
     parent = subprocess.Popen(
         [sys.executable, "-c",
          "import subprocess,sys,time;"
@@ -158,21 +160,20 @@ def test_terminate_kills_child_process_tree() -> None:
     )
     try:
         _register(parent)
-        time.sleep(0.5)  # Let the child python pull up the grandchild process.
+        time.sleep(0.5)  # let the child python start the grandchild
         assert terminate_current_tasks() == 1
         deadline = time.monotonic() + 10.0
         while parent.poll() is None and time.monotonic() < deadline:
             time.sleep(0.05)
         assert parent.poll() is not None
-        # Confirm that the grandson process has also been terminated: check on the command line.
+        # confirm the grandchild was terminated too: look it up by command line
         import os
         if os.name == "nt":
             out = subprocess.run(
                 ["tasklist", "/FI", "IMAGENAME eq python.exe", "/FO", "CSV"],
                 capture_output=True, text=True,
             ).stdout
-            # Pure placeholder, actually press PID to search the tree more stably.
-            assert "time.sleep(120)" not in out
+            assert "time.sleep(120)" not in out  # placeholder only; a PID tree lookup is steadier
         else:
             ps = subprocess.run(
                 ["ps", "-ef"], capture_output=True, text=True

@@ -1,11 +1,12 @@
-"""Drop-down box text margin guard: cannot be pressed into ellipses (0.2.199-patch29hz-Fix 14).
-user 2026-09-11: "The content of the drop-down box with optimised degree and sorting has many
-ellipses". Root cause: The sizeHint of QComboBox in the system/QSS style does not include the
-drop-down arrow and padding, and only 2~3 px margin is left in the text area (measured
-"Jingzhenfeng Priority" 60 px text / 62 px text area), there is a slight difference in font
-rendering and it is truncated by Qt ellipses. Correction method: gui/theme.fit_combo_width Press
-"Longest item text + arrow + margin" to set the minimum width; in this test, stick to "text area
->= text width + 8 px"."""
+"""Combo box text slack guard: it must not be squeezed into an ellipsis (0.2.199-patch29hz-fix14).
+
+User 2026-09-11: "the optimisation-level and ranking combo boxes show lots of ellipses".
+Root cause: under the system/QSS style the QComboBox sizeHint excludes the drop-down arrow
+and the padding, leaving only 2~3 px of slack in the text area (measured: "pure peaks
+first" 60 px of text / 62 px text area), so a slight font-rendering difference makes Qt
+elide it. Fix: gui/theme.fit_combo_width sets a minimum width from "longest item text +
+arrow + slack"; this test holds "text area >= text width + 8 px".
+"""
 
 from __future__ import annotations
 
@@ -35,8 +36,7 @@ def host(qapp: QApplication):
 
 
 def _text_slack(combo: QComboBox) -> int:
-    """Text area width - the longest item text width (negative values will be truncated by
-    ellipses)."""
+    """Text area width minus the longest item text width (negative means it gets elided)."""
     metrics = combo.fontMetrics()
     option = QStyleOptionComboBox()
     option.initFrom(combo)
@@ -56,8 +56,8 @@ def _text_slack(combo: QComboBox) -> int:
 
 
 def test_smile_row_combo_text_not_elided(host: QWidget) -> None:
-    """Leave enough text margin for the "optimisation level/sort" drop-down box in the SMILE row."""
-    row = PipelineStepRow("smile", "SMILE optimisation", "Optional", host)
+    """The SMILE row's "optimisation level / ranking" combo boxes keep enough text slack."""
+    row = PipelineStepRow("smile", "SMILE 优化", "可选", host)
     host.resize(360, 220)
     host.show()
     QApplication.processEvents()
@@ -72,8 +72,7 @@ def test_smile_row_combo_text_not_elided(host: QWidget) -> None:
 
 
 def test_group_panel_combo_text_not_elided(host: QWidget) -> None:
-    """The "Process to / optimisation to" drop-down box in the data group panel also does not leave
-    an ellipsis."""
+    """The data group panel's "process to / optimise through" combos show no ellipsis either."""
     panel = GroupBatchPanel(host)
     host.resize(360, 520)
     host.show()
@@ -87,16 +86,15 @@ def test_group_panel_combo_text_not_elided(host: QWidget) -> None:
 
 
 def test_fit_combo_width_sets_minimum(qapp: QApplication, host: QWidget) -> None:
-    """Fit_combo_width against air/Single item/All long terms are given >= Explicit minimum width
-    of text width."""
+    """fit_combo_width gives an explicit minimum width >= the text width for empty, single
+    and long items."""
     from ui_support.theme import fit_combo_width
 
     combo = QComboBox(host)
     fit_combo_width(combo)
     assert combo.minimumWidth() > 0
-    combo.addItems(["Consistency first", "Pure peaks first"])
+    combo.addItems(["一致性优先", "净真峰优先"])
     fit_combo_width(combo)
     metrics = combo.fontMetrics()
-    longest = max(metrics.horizontalAdvance(t) for t in ("Consistency first",
-        "Pure peaks first"))
+    longest = max(metrics.horizontalAdvance(t) for t in ("一致性优先", "净真峰优先"))
     assert combo.minimumWidth() >= longest + MIN_SLACK_PX

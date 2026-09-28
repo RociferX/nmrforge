@@ -1,4 +1,4 @@
-"""1D processing regression: Default/Classification/plan/ script/routing (patch29gj)."""
+"""1D processing regression: presets / classification / plan / script / routing (patch29gj)."""
 
 from __future__ import annotations
 
@@ -31,8 +31,7 @@ def _experiment_1d(nucleus: str = "1H") -> Experiment:
 
 
 def test_preset_options_include_1d() -> None:
-    """The 1D preset is registered and entered into the type options (Generic1D does not drop
-    down)."""
+    """1D presets are registered and enter the type options (Generic1D is not in the dropdown)."""
     from gui.notes import experiment_type_options
 
     options = experiment_type_options(1)
@@ -42,7 +41,7 @@ def test_preset_options_include_1d() -> None:
 
 
 def test_classify_1d_1h() -> None:
-    """1D 1H data unique hit 1H-1D (confidence 0.95)."""
+    """1D 1H data hits 1H-1D uniquely (confidence 0.95)."""
     from core.experiment.experiment_classifier import classify
 
     result = classify(_experiment_1d("1H"))
@@ -51,8 +50,7 @@ def test_classify_1d_1h() -> None:
 
 
 def test_classify_1d_unknown_uses_generic_1d() -> None:
-    """1D unknown core combination falls back to generic_1d (no longer mistakenly enters
-    generic_2d)."""
+    """An unknown 1D nucleus falls back to generic_1d (no longer mistakenly generic_2d)."""
     from core.experiment.experiment_classifier import classify
 
     result = classify(_experiment_1d("29Si"))
@@ -61,7 +59,7 @@ def test_classify_1d_unknown_uses_generic_1d() -> None:
 
 
 def test_plan_1d_only_direct_axis() -> None:
-    """The 1D processing plan only contains F2 (direct dimension) nodes, no F1/TP."""
+    """The 1D processing plan holds only F2 (direct dimension) nodes, no F1/TP."""
     from core.planning.method_selector import select_method
 
     plan = select_method(_experiment_1d())
@@ -71,7 +69,7 @@ def test_plan_1d_only_direct_axis() -> None:
 
 
 def test_process_script_1d() -> None:
-    """1D NMRPipe script: single chain FT/PS/POLY, no TP transpose, output.ft1."""
+    """1D NMRPipe script: a single FT/PS/POLY chain, no TP transpose, writes .ft1."""
     from backend.script_generator import generate_process_script
     from core.planning.method_selector import select_method
 
@@ -95,7 +93,7 @@ def test_process_script_1d() -> None:
 
 
 def test_default_phase_route_1d_is_none() -> None:
-    """1D default phase_route=none (direct connection process); 2D still unified."""
+    """1D defaults to phase_route=none (straight to process); 2D stays unified."""
     from workflow.stepwise import _default_phase_route
 
     assert _default_phase_route(_experiment_1d()) == "none"

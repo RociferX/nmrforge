@@ -1,8 +1,11 @@
-"""API side regression of the peak positioning method: measure refine='gaussian', non-2D rejection,
-config default. These use cases reuse ``tests/test_nmrforge_api.py`` The synthetic spectrum/peak
-table/Fake backend construct (the same ppm caliber), verifying that the downstream research
-interface can select the positioning algorithm through API -- that is, the entrance to "compare
-the peak position difference brought by the two algorithms"."""
+"""API-side regression for the peak localization method: measure refine='gaussian', non-2D
+rejection, config default.
+
+These cases reuse the synthetic spectrum/peak table/fake backend fixtures from
+``tests/test_nmrforge_api.py`` (same ppm convention) to verify that the downstream
+research interface can select the localization algorithm through the API -- that is, the
+entry point for "comparing the peak-position difference the two algorithms bring".
+"""
 
 from __future__ import annotations
 
@@ -37,8 +40,7 @@ from nmrforge_api.peaks import pick_reference_peaks  # noqa: E402
 
 
 def test_localization_defaults_come_from_config() -> None:
-    """ROI is not hard-coded into the core function: config ``peaks.localization`` can be
-    overridden."""
+    """ROI is not hard-coded in the core function: config ``peaks.localization`` can override it."""
     defaults = lz.load_localization_defaults()
     assert defaults["method"] == "parabolic"
     assert defaults["gaussian_roi_f1_ppm"] > 0
@@ -57,7 +59,7 @@ def test_localization_defaults_come_from_config() -> None:
     assert custom["method"] == "gaussian"
     assert custom["gaussian_roi_f1_ppm"] == pytest.approx(0.8)
     assert custom["gaussian_roi_f2_ppm"] == pytest.approx(0.1)
-    # If an illegal value returns to the default value, no exception will be thrown.
+    # Illegal values fall back to the defaults without raising
     broken = lz.load_localization_defaults(
         {"peaks": {"localization": {"method": "nope", "gaussian_roi_f1_ppm": -3}}}
     )
@@ -68,8 +70,7 @@ def test_localization_defaults_come_from_config() -> None:
 
 
 def test_measure_peak_positions_gaussian_refine(tmp_path: Path) -> None:
-    """Refine='gaussian':The same sheet of music/Same batch peak conversion method,Peak-by-peak
-    retention method/QC."""
+    """refine='gaussian': same spectrum/peaks, different algorithm; method/QC recorded per peak."""
     rows = load_peaks(_write_peak_table(tmp_path / "ref.list"))
     spectrum = _write_ft2(tmp_path / "shift.ft2", shift_y=1.25, shift_x=0.625)
     parabolic = measure_peak_positions(
@@ -92,19 +93,18 @@ def test_measure_peak_positions_gaussian_refine(tmp_path: Path) -> None:
         if record["actual_method"] == "gaussian":
             assert record["fwhm_f1"] > 0 and record["fwhm_f2"] > 0
             assert record["amplitude"] > 0
-        # Same candidate: the two methods will not jump to other peaks.
+        # Same candidate: the two methods do not jump to another peak
         assert abs(fine.positions["15N"] - coarse.positions["15N"]) < 0.5 * _n15_step()
         assert abs(fine.positions["1H"] - coarse.positions["1H"]) < 0.5 * _h1_step()
-    # At least one peak really went through Gaussian fitting (otherwise this use case did not cover
-    # the fitting path).
+    # At least one peak really went through Gaussian fitting (otherwise this case would not
+    # cover the fitting path)
     assert (
         sum(1 for m in gaussian if m.localization["actual_method"] == "gaussian") >= 1
     )
 
 
 class _Fake3D:
-    """Minimal 3D spectral double: only provides properties where read_spectrum_axes will be
-    used."""
+    """Minimal 3D spectrum double: only provides the attributes read_spectrum_axes uses."""
 
     data = np.zeros((4, 4, 4))
     ppm = [np.linspace(0.0, 1.0, 4)] * 3
@@ -120,15 +120,15 @@ class _Fake3D:
 def test_measure_peak_positions_gaussian_rejects_non_2d(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Refine='gaussian' only supports 2D: non-2D spectra must be explicitly rejected to not
-    silently run the wrong algorithm."""
+    """refine='gaussian' supports 2D only: a non-2D spectrum must be rejected, never silently
+    run."""
     spectrum = _write_ft2(tmp_path / "ref.ft2")
     rows = [{"N_shift": 119.0, "H_shift": 5.0, "label": "G1"}]
     monkeypatch.setattr(api_peaks, "read_spectrum_axes", lambda path: _Fake3D())
     with pytest.raises(MeasurementError) as exc:
         measure_peak_positions(spectrum, rows, refine="gaussian")
     assert "only for 2D spectra" in str(exc.value)
-    # Unknown refine still reports an error explicitly (it will not run silently by default).
+    # An unknown refine still errors explicitly (it does not silently run the default)
     with pytest.raises(MeasurementError):
         measure_peak_positions(spectrum, rows, refine="lorentzian")
 
@@ -138,8 +138,8 @@ def test_pick_reference_peaks_passes_localization_method(
     bruker_dir: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Gaussian positioning is optional for the reference peak table: method/ROI is transparently
-    transmitted to workflow.pick_peaks and saved."""
+    """The reference peak table can opt into Gaussian localization: method/ROI are passed
+    through to workflow.pick_peaks and recorded."""
     captured: dict = {}
 
     def fake_pick_peaks(manager, exp_id, data_id, *args, **kwargs):

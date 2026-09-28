@@ -14,6 +14,7 @@ from core.experiment.acquisition_mode_detector import (
     ft_alt_for,
     ft_kind_for,
     ft_neg_for,
+    hypercomplex_mult,
 )
 from core.planning.dependency_graph import PlanNode, ProcessingDag
 from core.planning.processing_plan import ProcessingPlan
@@ -29,7 +30,8 @@ _HYPER_MODE = {
     6: "echo_antiecho",
 }
 
-_MULT_FNMODE = {0, 4, 5, 6}
+# The number of hypercomplex components has a single source of truth:
+# acquisition_mode_detector.hypercomplex_mult (re-checked 2026-09-24, item D)
 
 
 def _fnmode_for(experiment: Experiment, axis: str) -> int:
@@ -67,7 +69,7 @@ def select_method(
         fnmode = _fnmode_for(experiment, axis)
         kind = ft_kind_for(fnmode) if dim.role is not AxisRole.DIRECT else "complex"
         steps: list[tuple[str, dict]] = []
-        if dim.role is not AxisRole.DIRECT and fnmode in _MULT_FNMODE:
+        if dim.role is not AxisRole.DIRECT and hypercomplex_mult(fnmode) == 2:
             steps.append(
                 (
                     "combine_hypercomplex",

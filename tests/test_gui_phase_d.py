@@ -1,4 +1,4 @@
-"""Phase D Test: First Import Boot + Tree Incremental Refresh."""
+"""Phase D test: first import guide + incremental tree refresh."""
 
 from __future__ import annotations
 
@@ -63,7 +63,7 @@ def test_tree_incremental_refresh_preserves_nodes(
     panel.refresh()
     data_item2 = panel.tree.topLevelItem(0).child(0).child(0).child(0)
     assert data_item2 is data_item
-    # New data: old nodes are retained and new nodes are added.
+    # New data: old nodes are retained, new nodes are added.
     manager.import_data(entry.id, "/fake/2")
     manager.save()
     panel.refresh()
@@ -99,7 +99,7 @@ def test_tree_folder_children_preserved_when_unchanged(
     )
     after = [folder_item2.child(i) for i in range(folder_item2.childCount())]
     assert after == before  # Unchanged: file child nodes were not rebuilt.
-    # Directory change -> refresh file subnode.
+    # Directory change -> refresh the file child nodes.
     (raw / "ser").write_text("y")
     panel.refresh()
     folder_item3 = (
@@ -124,7 +124,7 @@ def test_first_import_hint_highlights_next_step(
     panel.set_selection("data", entry.id, "d_001")
     panel.show_first_import_hint()
     assert not panel.hint_bubble.isHidden()
-    assert "Generate FID" in panel.hint_bubble.text()
+    assert "生成 FID" in panel.hint_bubble.text()
     panel.close()
 
 

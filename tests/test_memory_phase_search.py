@@ -1,5 +1,4 @@
-"""Memory phase search engine test (duplicate data + old algorithm judgment criteria, zero
-backend)."""
+"""In-memory phase-search engine tests (complex data + legacy criteria, no backend)."""
 
 from __future__ import annotations
 
@@ -21,10 +20,11 @@ def _complex_axis_2d(
     *,
     width: float = 1.5,
 ) -> np.ndarray:
-    """Construct a two-dimensional spectrum that is complex in only one axis (consistent with the
-    real "axis-by-axis complex preview"): evaluated axis = analytic complex Lorentzian with
-    known phase applied; other axes = real-type purely absorbing Lorentzian (equivalent to other
-    dimensions that have been -di to avoid phase contamination)."""
+    """Build a 2D spectrum that is complex along one axis only (matching the real
+    "per-axis complex preview"): the evaluated axis is an analytic complex Lorentzian with a
+    known phase applied, the other axis a real pure-absorption Lorentzian (equivalent to the
+    other dimensions after -di, avoiding phase contamination).
+    """
     n0, n1 = size
     k0 = np.arange(n0, dtype=float)
     k1 = np.arange(n1, dtype=float)
@@ -54,8 +54,8 @@ def _apply_ramp(arr: np.ndarray, axis: int, p0: float, p1: float) -> np.ndarray:
 
 
 def test_rotate_real_recovers_absorptive() -> None:
-    """Rotating back to take the real part should restore the pure absorption real spectrum
-    (consistent with the old PS -di semantics)."""
+    """Rotating back and taking the real part restores the pure-absorption real spectrum
+    (same semantics as the legacy PS -di)."""
     base = _complex_axis_2d((128, 96), axis=0)
     mixed = _apply_ramp(base, 0, 90.0, 0.0)
     recovered = rotate_real(mixed, 0, -90.0, 0.0)
@@ -63,12 +63,13 @@ def test_rotate_real_recovers_absorptive() -> None:
 
 
 def test_search_axis_memory_recovers_known_p0_axis0() -> None:
-    """The constant phase -40° should be restored to the correction phase of about +40° (coarse
-    mesh 30° accuracy). 0.2.199-patch29dn: It is optimal to maintain the coarse mesh when the
-    scoring surface is flat (the platform circle median is no longer used -- the median in the
-    flat area will drift, such as sampleI F1 coarse mesh 90° is biased to 80°); therefore, the
-    restoration accuracy is the coarse mesh step size (30°), and the tolerance is relaxed to
-    +/-15°."""
+    """A constant -40° phase should be recovered as a correction of about +40° (coarse 30° grid).
+
+    0.2.199-patch29dn: on a flat score surface the coarse-grid optimum is kept (no more
+    platform circular median — the median drifts on flat regions, e.g. the sampleI F1 coarse
+    grid value 90° was dragged to 80°); the recovery precision is therefore the coarse grid
+    step (30°) and the tolerance is relaxed to ±15°.
+    """
     mixed = _complex_axis_2d((128, 96), axis=0, p0=-40.0)
     est = search_axis_memory(mixed, axis=0)
     assert est is not None
@@ -77,8 +78,8 @@ def test_search_axis_memory_recovers_known_p0_axis0() -> None:
 
 
 def test_search_axis_memory_recovers_known_p0_axis1() -> None:
-    """0.2.199-patch29dn: It is optimal to maintain a coarse grid on the flat surface, and the
-    recovery accuracy is the coarse grid step size (+/-15°)."""
+    """0.2.199-patch29dn: flat surface keeps the coarse-grid optimum; accuracy is the coarse
+    grid step (±15°)."""
     mixed = _complex_axis_2d((96, 128), axis=1, p0=-50.0)
     est = search_axis_memory(mixed, axis=1)
     assert est is not None
@@ -103,14 +104,13 @@ def test_score_axis_memory_matches_formula() -> None:
             positions.append(int(np.argmax(np.abs(real0[i, :]))))
     s = score_axis_memory(base, 0, 0.0, 0.0, indices, positions)
     assert 0.0 <= s <= 100.0
-    assert s > 95.0  # The pure absorption spectrum should be close to the perfect score.
+    assert s > 95.0  # a pure-absorption spectrum should score near full marks
 
 
 def test_window_nets_flattens_baseline_before_sign_split() -> None:
-    """The overall baseline offset (just/burden) no longer pollutes the net absorption: after
-    flattening, the net absorption of the absorption peak is ≈ +1, and the dispersion peak is ≈
-    0; the offset spectrum is consistent with the zero baseline spectrum score (0.2.175 user
-    scheme is restored)."""
+    """A global baseline offset (positive or negative) no longer pollutes the net absorption:
+    after flattening, an absorption peak has net ≈ +1 and a dispersive peak ≈ 0; an offset
+    spectrum scores the same as a zero-baseline spectrum (0.2.175 user scheme restored)."""
     from workflow.memory_phase_search import _window_nets
 
     base = _complex_axis_2d((64, 48), axis=0)
@@ -123,9 +123,9 @@ def test_window_nets_flattens_baseline_before_sign_split() -> None:
     positions = [int(np.argmax(np.abs(real0[i, :]))) for i in indices]
 
     nets_flat = _window_nets(real0, 0, indices, positions)
-    # Overall raised baseline (peak height is about 400, offset 30 is relatively significant): after
-    # flattening, the net absorption should be close to zero baseline results; without flattening,
-    # the overall positive bias will make the net falsely high.
+    # Baseline lifted as a whole (peak height ~400, offset 30 is significant): after flattening
+    # the net absorption should match the zero-baseline result; without flattening the positive
+    # offset inflates net.
     shifted = real0 + 30.0
     nets_shifted = _window_nets(shifted, 0, indices, positions)
     assert len(nets_flat) == len(nets_shifted) >= 2
@@ -136,9 +136,9 @@ def test_window_nets_flattens_baseline_before_sign_split() -> None:
 
 
 def test_lock_discrete_traces_excludes_clump() -> None:
-    """Discrete peak traces are selected, and the central mixed peak cluster (wide platform) is
-    excluded (user feedback: mixed peak clusters will bias the phase, and only discrete peaks
-    are adjusted)."""
+    """Discrete sharp-peak traces are selected while the central mixed blob (wide plateau) is
+    excluded (user feedback: mixed peak clusters skew the phase, so only discrete peaks are
+    tuned)."""
     from workflow.memory_phase_search import _lock_discrete_traces
 
     n0, n1 = 128, 128
@@ -148,27 +148,25 @@ def test_lock_discrete_traces_excludes_clump() -> None:
     w = 1.2
     z0 = 1.0 / (1.0 + 1j * (k0 - 30) / w)
     arr += 400.0 * np.outer(z0, 1.0 / (1.0 + ((k1 - 40) / 2.0) ** 2))
-    # Central large cluster: The space is concentrated in a "cluster" with k1 >= 64 (amplitude 200,
-    # width 8, interval 8 superposition), which does not contaminate the discrete peak sequence of
-    # k1≈40.
+    # Central blob: spatially concentrated into one lump at k1>=64 (superimposed amplitude 200,
+    # width 8, spacing 8) so it does not pollute the discrete peak column at k1≈40
     for c0 in range(60, 97, 8):
         for c1 in range(64, 97, 8):
             zz0 = 1.0 / (1.0 + ((k0 - c0) / 8.0) ** 2)
             zz1 = 1.0 / (1.0 + ((k1 - c1) / 8.0) ** 2)
             arr += 200.0 * np.outer(zz0, zz1)
     idx, pos = _lock_discrete_traces(arr, 0)
-    assert idx, "should have trace selected"
-    # The discrete peak is located at k0=30; the large cluster is located at k0>=60. Most of the
-    # selected trace peaks should fall near the discrete peaks.
+    assert idx, "应有迹线入选"
+    # Discrete peaks sit at k0=30, the blob at k0>=60. Most selected traces should peak nearby
     near = sum(1 for p0 in pos if abs(p0 - 30) <= 5)
     assert near / len(pos) >= 0.7, (near, len(pos))
-    assert len(idx) < n1, "All traces should not be selected"
+    assert len(idx) < n1, "不应选中全部迹线"
 
 
 def test_joint_recheck_tie_keeps_fixed() -> None:
-    """When joint review p1 is flat (+/-5° equal points), it should not be significantly better
-    than sequential fixing (the caller presses the PHASE_SCORE_FLAT_MARGIN gate, no overall
-    rollback)."""
+    """When the joint review has a flat p1 (±5° ties), it must not be significantly better than
+    the sequential fixed route (the caller gates on PHASE_SCORE_FLAT_MARGIN instead of always
+    falling back)."""
     from workflow.memory_phase_search import PHASE_SCORE_FLAT_MARGIN
 
     size = (96, 80)
@@ -184,15 +182,13 @@ def test_joint_recheck_tie_keeps_fixed() -> None:
     best, best_score, fixed_score, zero_score = joint_recheck_memory(
         arrays, index, traces, fixed
     )
-    # P1 flat: joint optimality is not significantly better than sequential fixation (otherwise the
-    # gate will be updated).
+    # Flat p1: the joint optimum is not significantly better than sequential (or the gate updates)
     assert best_score - fixed_score < PHASE_SCORE_FLAT_MARGIN + 1e-9
     assert fixed_score >= zero_score - 1e-9
 
 
 def test_joint_recheck_row_scoring_matches_full_array() -> None:
-    """Patch29fi:joint row-wise scoring is equivalent to the old full array score_axis_memory
-    (phase /score)."""
+    """patch29fi: joint row-wise scoring is equivalent to the legacy array score_axis_memory."""
     import itertools
 
     size = (96, 80)

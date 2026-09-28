@@ -1,10 +1,11 @@
-"""Direct dimension diagnostic gate test: DC offset -> POLY -time, bad point -> automatic
-replacement, rendering insertion. fid template comes from ``tests/conftest.py``
-``nmrpipe_fid_template``:2048 byte header + real part block per trace/imaginary block, the same
-layout as the real conversion product. Previously, this file used the absolute path of the
-development machine as the template, and the entire file was skipped on VM/CI (whether each
-machine executes depends on whether that path exists), now the fixture As the tests are
-generated, any machine will actually execute these diagnostic cases."""
+"""Direct-dimension diagnostics: DC offset -> POLY -time, bad-point repair, render insertion.
+
+The fid template comes from ``nmrpipe_fid_template`` in ``tests/conftest.py``: a 2048-byte
+header + a real and an imaginary block per trace, matching real conversion output. This file
+used to take a developer-machine absolute path as its template, so the whole file was skipped
+on VM/CI (whether it ran depended on that path existing); the fixture is now generated with the
+tests, so these diagnostic cases really run on every machine.
+"""
 
 from __future__ import annotations
 
@@ -19,11 +20,12 @@ from workflow.direct_diagnostics import (
     run_direct_diagnostics,
 )
 
+ROOT_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "bruker"
+
 
 @pytest.fixture
 def template(nmrpipe_fid_template: Path) -> Path:
-    """Fid template for diagnostics (= shared fixture, layout consistent with the real conversion
-    product)."""
+    """Diagnostic fid template (the shared fixture, layout matches real conversion output)."""
     return nmrpipe_fid_template
 
 
@@ -35,8 +37,7 @@ def exp_fixture(bruker_dir: Path):
 
 
 def _synth_like(template: Path) -> np.ndarray:
-    """Synthetic replica fid of the same size as template (exponential decay + noise, no DC/bad
-    point)."""
+    """Synthetic complex fid at template size (exponential decay + noise, no DC or bad points)."""
     got = _read_fid_raw(template)
     assert got is not None
     data, fdsize, specnum, _header = got
@@ -51,8 +52,7 @@ def _synth_like(template: Path) -> np.ndarray:
 
 
 def _write_data_region(dst: Path, array: np.ndarray) -> None:
-    """Write the complex array back to the fid data area (head still; real part block + imaginary
-    part block per trace)."""
+    """Write a complex array back into the fid data region (header kept; re + im blocks)."""
     got = _read_fid_raw(dst)
     assert got is not None
     _data, fdsize, specnum, header = got
@@ -72,8 +72,7 @@ def _write_data_region(dst: Path, array: np.ndarray) -> None:
 def _signal(
     template: Path, *, decay: float = 150.0, freq: float = 0.12
 ) -> np.ndarray:
-    """A clean single-frequency complex attenuated signal of template size (noiseless, easy to
-    construct boundary conditions)."""
+    """Clean single-frequency complex decay at template size (no noise, for edge cases)."""
     got = _read_fid_raw(template)
     assert got is not None
     _data, fdsize, specnum, _header = got
@@ -94,8 +93,7 @@ def _stage(
     zero_rows: list[int] | None = None,
     high_energy_row: int | None = None,
 ) -> Path:
-    """Copies a fid from the shared template; can replace the data area (array) or inject
-    defects."""
+    """Copy a fid from the shared template; optionally replace the array or inject a defect."""
     dst = tmp_path / "nus_2d.fid"
     dst.write_bytes(template.read_bytes())
     if array is not None:
@@ -152,8 +150,7 @@ def _stage(
 
 
 def test_parse_template_fid_layout(template: Path, tmp_path: Path, exp_fixture) -> None:
-    """The template itself is the "real layout": 2048 byte header + Reality/virtual block, accepted
-    by the parser."""
+    """The template is the real layout: 2048-byte header + re/im blocks, parser accepts it."""
     fid = _stage(template, tmp_path)
     got = _read_fid_raw(fid)
     assert got is not None
@@ -167,18 +164,17 @@ def test_parse_template_fid_layout(template: Path, tmp_path: Path, exp_fixture) 
 def test_dc_offset_enables_poly_time(
     template: Path, tmp_path: Path, exp_fixture
 ) -> None:
-    """Significant DC offset: Automatically enable POLY -time and report (0.2.199-patch29cw
-    threshold 0.25)."""
+    """Clear DC offset: enable POLY -time and report it (0.2.199-patch29cw, threshold 0.25)."""
     _stage(template, tmp_path, synthetic=True, dc_amp=1.0)
     res = run_direct_diagnostics(tmp_path, exp_fixture)
     assert isinstance(res, DirectDiagnosticsResult)
     assert res.apply_poly_time is True
-    assert any("DC bias" in r and "POLY -time" in r for r in res.reports)
+    assert any("直流偏置" in r and "POLY -time" in r for r in res.reports)
     assert res.metrics["dc_ratio"] > 0.0
 
 
 def test_dc_small_stays_off(template: Path, tmp_path: Path, exp_fixture) -> None:
-    """Data after DC removal: Not enabled POLY -time."""
+    """DC-removed data: POLY -time stays off."""
     _stage(template, tmp_path, synthetic=True)
     res = run_direct_diagnostics(tmp_path, exp_fixture)
     assert res.apply_poly_time is False
@@ -187,8 +183,7 @@ def test_dc_small_stays_off(template: Path, tmp_path: Path, exp_fixture) -> None
 def test_dc_small_offset_stays_off(
     template: Path, tmp_path: Path, exp_fixture
 ) -> None:
-    """Small amplitude FID mean (common level of conventional spectrum) does not trigger POLY
-    -time(0.2.199-patch29cw)."""
+    """Small FID mean (routine spectra) does not trigger POLY -time (0.2.199-patch29cw)."""
     _stage(template, tmp_path, synthetic=True, dc_amp=0.08)
     res = run_direct_diagnostics(tmp_path, exp_fixture)
     assert res.apply_poly_time is False
@@ -197,32 +192,29 @@ def test_dc_small_offset_stays_off(
 def test_first_point_ratio_reported(
     template: Path, tmp_path: Path, exp_fixture
 ) -> None:
-    """The amplitude of the first point is much higher than that of the second point (group
-    delay/First point reconstruction problem): report and give acqus check suggestions."""
+    """First point far above the second (group-delay issue): report and suggest checking acqus."""
     arr = _synth_like(template)
     arr[:, 0] *= 20.0
     _stage(template, tmp_path, array=arr)
     res = run_direct_diagnostics(tmp_path, exp_fixture)
     assert res.metrics["first_point_ratio"] > 1.6
-    assert any("first sampling point" in r for r in res.reports)
+    assert any("首点" in r for r in res.reports)
 
 
 def test_broad_solvent_peak_reported(
     template: Path, tmp_path: Path, exp_fixture
 ) -> None:
-    """Broadband peak envelope (FWHM over spectral width 8%): Report solvent/Chemical exchange and
-    recommendations to check pressing conditions."""
+    """Broad hump (FWHM > 8% of sweep width): report solvent/exchange, suggest checks."""
     arr = _signal(template, decay=3.0, freq=0.05)
     _stage(template, tmp_path, array=arr)
     res = run_direct_diagnostics(tmp_path, exp_fixture)
-    assert bool(res.metrics["broad_peak"]) is True  # metrics Convert to float uniformly.
+    assert bool(res.metrics["broad_peak"]) is True  # metrics are all coerced to float
     assert res.metrics["fwhm_pts"] > 0.08 * res.metrics["n_direct"]
-    assert any("broad envelope peak" in r for r in res.reports)
+    assert any("宽带包峰" in r for r in res.reports)
 
 
 def test_drift_reported(template: Path, tmp_path: Path, exp_fixture) -> None:
-    """Before sampling/Post-cycle frequency drift exceeds one line width: Report "Data processing
-    cannot be eliminated + re-acquisition is recommended"."""
+    """Drift over one linewidth between sampling periods: report and suggest re-acquiring."""
     got = _read_fid_raw(template)
     assert got is not None
     _data, fdsize, specnum, _header = got
@@ -236,12 +228,153 @@ def test_drift_reported(template: Path, tmp_path: Path, exp_fixture) -> None:
     _stage(template, tmp_path, array=arr)
     res = run_direct_diagnostics(tmp_path, exp_fixture)
     assert res.metrics["drift_pts"] > res.metrics["fwhm_pts"]
-    assert any("frequency drift" in r and "re-acquiring" in r for r in res.reports)
+    line = next(r for r in res.reports if "漂移" in r and "重新采谱" in r)
+    # 2026-09-24 real bug fix: the linewidth multiple is drift points / FWHM (points). It used
+    # to be a product; d_019 is 12 points / 10 points = 1.2 linewidths, but the report said 120.
+    expected = res.metrics["drift_pts"] / res.metrics["fwhm_pts"]
+    assert f"{expected:.1f} 个线宽" in line
+    assert f"{res.metrics['drift_pts'] * res.metrics['fwhm_pts']:.1f} 个线宽" not in line
+
+
+def test_fid_report_wording_matches_a_single_dataset() -> None:
+    """A single-dataset (no merge) report must not mention "merge" or "inter-part drift" (user,
+    2026-09-24).
+
+    Real d_019 (12 drift points) is single-part, yet the report said "◆ conversion and merge
+    stage" + "✓ source sampling points and inter-part drift: nothing to correct" -- that step
+    neither merges nor has inter-part drift.
+    """
+    from workflow.direct_diagnostics import DirectDiagnosticsResult, format_fid_step_report
+
+    diagnostics = DirectDiagnosticsResult(reports=[], clean=True)
+    single = "\n".join(format_fid_step_report(diagnostics=diagnostics, parts=1))
+    assert "◆ 转换阶段" in single
+    assert "◆ 转换与合并阶段" not in single
+    assert "✓ 源头采样点:无需修正" in single
+    assert "组间场漂" not in single
+    assert "合并" not in single
+
+    multi = "\n".join(format_fid_step_report(diagnostics=diagnostics, parts=3))
+    assert "◆ 转换与合并阶段" in multi
+    # 2026-09-24 review B3: with no field-drift record, multi-part data must say "not checked".
+    assert "没有检查记录" in multi
+    assert "✓ 源头采样点与组间场漂:无需修正" not in multi
+
+    # Unknown part count (None): keep the old wording, do not guess
+    unknown = "\n".join(format_fid_step_report(diagnostics=diagnostics))
+    assert "◆ 转换与合并阶段" in unknown
+
+
+def test_fid_report_recomputes_stale_linewidth_numbers() -> None:
+    """Stale linewidth multiples in old records are recomputed in place (d_019: 12/10 = 1.2)."""
+    from workflow.direct_diagnostics import DirectDiagnosticsResult, format_fid_step_report
+
+    diagnostics = DirectDiagnosticsResult(
+        reports=[
+            "采样前/后周期直接维频率漂移约 12.0 点(120.0 个线宽量级),数据处理无法完全消除,"
+            "建议检查温控/锁场并考虑重新采谱"
+        ],
+        metrics={"drift_pts": 12.0, "fwhm_pts": 10.0},
+        clean=False,
+    )
+    text = "\n".join(format_fid_step_report(diagnostics=diagnostics, parts=1))
+    assert "12.0 点(1.2 个线宽量级)" in text
+    assert "120.0 个线宽" not in text
+    # Lines written with the new wording are already correct: re-rendering is idempotent
+    fresh = DirectDiagnosticsResult(
+        reports=[
+            "采样前/后周期直接维频率漂移约 12.0 点(1.2 个线宽量级),数据处理无法完全消除,"
+            "建议检查温控/锁场并考虑重新采谱"
+        ],
+        metrics={"drift_pts": 12.0, "fwhm_pts": 10.0},
+        clean=False,
+    )
+    again = "\n".join(format_fid_step_report(diagnostics=fresh, parts=1))
+    assert "12.0 点(1.2 个线宽量级)" in again
+
+
+def test_fid_step_quality_report_is_part_count_aware(tmp_path: Path) -> None:
+    """The GUI read-only entry point must also follow the part count (single dataset -> conversion).
+
+    2026-09-24 pitfall: only the sample call of `format_fid_step_report` was fixed, not the real
+    call inside `fid_step_quality_report` -> the log was right while the GUI step report still
+    said "conversion and merge stage".
+    """
+    import json as _json
+
+    from workflow.direct_diagnostics import fid_step_quality_report
+
+    def _stage(work, *, multi: bool):
+        work.mkdir(parents=True, exist_ok=True)
+        (work / "diagnostics.json").write_text(
+            _json.dumps(
+                {
+                    "reports": [],
+                    "metrics": {},
+                    "notes": [],
+                    "clean": True,
+                    "auto_handled": 0,
+                    "repaired_badpoints": 0,
+                    "apply_poly_time": False,
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        if multi:
+            (work / "seg_001").mkdir(exist_ok=True)
+            (work / "seg_002").mkdir(exist_ok=True)
+            (work / "field_drift.json").write_text("{}", encoding="utf-8")
+        return work
+
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    single = "\n".join(fid_step_quality_report(_stage(tmp_path / "one", multi=False), [raw]))
+    assert "◆ 转换阶段" in single
+    assert "组间场漂" not in single and "合并" not in single
+    assert "✓ 源头采样点:无需修正" in single
+
+    multi = "\n".join(fid_step_quality_report(_stage(tmp_path / "many", multi=True), [raw]))
+    assert "◆ 转换与合并阶段" in multi
+
+
+def test_detect_part_count(tmp_path: Path) -> None:
+    """Part count: multi dir/drift record -> multi; seg_001 only -> single; unknown -> None."""
+    from workflow.direct_diagnostics import detect_part_count
+
+    single = tmp_path / "single"
+    (single / "seg_001").mkdir(parents=True)
+    assert detect_part_count(single) == 1
+
+    multi = tmp_path / "multi"
+    (multi / "seg_001").mkdir(parents=True)
+    (multi / "seg_002").mkdir()
+    assert detect_part_count(multi) == 2
+
+    drift = tmp_path / "drift"
+    drift.mkdir()
+    (drift / "field_drift.json").write_text("{}", encoding="utf-8")
+    assert detect_part_count(drift) == 2
+
+    # Empty dir + in-project raw/segments (5 parts) -> 5
+    raw = tmp_path / "raw"
+    for name in ("01", "02", "03", "04", "05"):
+        d = raw / "segments" / name
+        d.mkdir(parents=True)
+        (d / "acqus").write_text("##TITLE= t\n", encoding="utf-8")
+    assert detect_part_count(tmp_path / "empty", [raw]) == 5
+
+    # Single-dataset raw dir (no segments subdir) -> 1
+    plain = tmp_path / "plain_raw"
+    plain.mkdir()
+    assert detect_part_count(tmp_path / "empty", [plain]) == 1
+    assert detect_part_count(tmp_path / "empty") is None
 
 
 def test_run_fid_diagnostics_paths_file(template: Path, tmp_path: Path) -> None:
-    """Independent entrance: directly provide the path to the fid file to diagnose (default only
-    detects but does not repair, and does not generate backups."""
+    """Standalone entry point: pass fid file paths directly to diagnose them
+    (detect only by default, no repair, no backup).
+    """
     from workflow.direct_diagnostics import run_fid_diagnostics_paths
 
     fid = _stage(template, tmp_path, synthetic=True)
@@ -253,7 +386,7 @@ def test_run_fid_diagnostics_paths_file(template: Path, tmp_path: Path) -> None:
 
 
 def test_run_fid_diagnostics_paths_folder(template: Path, tmp_path: Path) -> None:
-    """Independent entrance: file folder automatically collects *.fid / test*.fid."""
+    """Standalone entry point: a folder auto-collects *.fid / test*.fid."""
     from workflow.direct_diagnostics import run_fid_diagnostics_paths
 
     _stage(template, tmp_path, synthetic=True)
@@ -263,17 +396,15 @@ def test_run_fid_diagnostics_paths_folder(template: Path, tmp_path: Path) -> Non
 
 
 def test_run_fid_diagnostics_paths_missing(tmp_path: Path) -> None:
-    """Independent entrance: when the path does not exist, it will prompt that fid is not found and
-    will not crash."""
+    """Standalone entry point: a missing path reports "fid not found" instead of crashing."""
     from workflow.direct_diagnostics import run_fid_diagnostics_paths
 
     res = run_fid_diagnostics_paths([tmp_path / "nope.fid"])
-    assert any("not found" in r for r in res.reports)
+    assert any("未找到" in r for r in res.reports)
 
 
 def test_dc_ratio_time_metric_unit() -> None:
-    """Time domain DC indicator: constant offset ≈ offset/peak; clean attenuation FID is very
-    small."""
+    """Time-domain DC metric: constant offset ~ offset/peak; tiny for a clean decaying FID."""
     from workflow.direct_diagnostics import _dc_ratio_time
 
     rng = np.random.default_rng(3)
@@ -290,14 +421,14 @@ def test_dc_ratio_time_metric_unit() -> None:
 def test_badpoint_repaired_with_backup(
     template: Path, tmp_path: Path, exp_fixture
 ) -> None:
-    """Orphaned spikes: automatic replacement, write back to disk, backup directory generation."""
+    """Isolated spike: auto-replaced, written back to disk, backup directory created."""
     fid = _stage(template, tmp_path, synthetic=True, spike=(-1, 128, 40.0))
     before = _read_fid_raw(fid)
     assert before is not None
     data_before, _, _, _ = before
     res = run_direct_diagnostics(tmp_path, exp_fixture)
     assert res.repaired_badpoints >= 1
-    assert any("bad point" in r and "replaced automatically" in r for r in res.reports)
+    assert any("坏点" in r and "自动替换" in r for r in res.reports)
     backup = tmp_path / "fid_diag_bak"
     assert backup.is_dir()
     assert (backup / "nus_2d.fid").is_file()
@@ -308,7 +439,7 @@ def test_badpoint_repaired_with_backup(
     orig_val = data_before[row, 128]
     expect = 0.5 * (data_after[row, 127] + data_after[row, 129])
     assert abs(data_after[row, 128] - expect) < 1.0
-    # Backup still retains spikes.
+    # The backup still keeps the spike
     orig = _read_fid_raw(backup / "nus_2d.fid")
     assert orig is not None
     assert np.isclose(np.asarray(orig[0])[row, 128], orig_val)
@@ -317,40 +448,36 @@ def test_badpoint_repaired_with_backup(
 def test_nan_inf_reported_not_fixed(
     template: Path, tmp_path: Path, exp_fixture
 ) -> None:
-    """0.2.196:NaN/Inf values are only reported and not automatically processed."""
+    """0.2.196: NaN/Inf values are reported, not auto-fixed."""
     fid = _stage(template, tmp_path, synthetic=True, nan_point=(-1, 64))
     got = _read_fid_raw(fid)
-    assert got is not None  # NaN No longer causes layout parsing to fail.
+    assert got is not None  # NaN no longer breaks layout parsing
     res = run_direct_diagnostics(tmp_path, exp_fixture)
-    assert any("NaN/Inf" in r and "left untouched" in r for r in res.reports)
+    assert any("NaN/Inf" in r and "未自动处理" in r for r in res.reports)
     assert res.metrics.get("nan_inf_count", 0) >= 1
 
 
 def test_uniform_zero_trace_reported(
     template: Path, tmp_path: Path, bruker_dir
 ) -> None:
-    """0.2.196: Uniformly sampled all-zero trace is only reported and not processed
-    automatically."""
+    """0.2.196: uniformly sampled all-zero traces are reported, not auto-fixed."""
     from core.data.bruker_reader import read_dataset
 
     exp = read_dataset(bruker_dir / "hsqc_2d")
     fid = _stage(template, tmp_path, synthetic=True, zero_rows=[0])
     fid.rename(tmp_path / f"{exp.dataset_id}.fid")
     res = run_direct_diagnostics(tmp_path, exp)
-    assert any("all-zero trace" in r and "left untouched" in r for r in res.reports)
+    assert any("全零迹线" in r and "未自动处理" in r for r in res.reports)
     assert res.metrics.get("zero_traces", 0) >= 1
 
 
 def test_high_energy_reported_not_fixed(
     template: Path, tmp_path: Path, exp_fixture
 ) -> None:
-    """0.2.196: Sustained abnormally high energy trace is only reported and not processed
-    automatically."""
+    """0.2.196: persistently abnormal high-energy traces are reported, not auto-fixed."""
     _stage(template, tmp_path, synthetic=True, high_energy_row=1)
     res = run_direct_diagnostics(tmp_path, exp_fixture)
-    assert any(
-        "abnormally high energy" in r and "left untouched" in r for r in res.reports
-    )
+    assert any("能量异常偏高" in r and "未自动处理" in r for r in res.reports)
     assert res.metrics.get("high_energy_traces", 0) >= 1
 
 
@@ -366,12 +493,11 @@ def test_repair_false_leaves_data(
 def test_no_fid_skips_gracefully(tmp_path: Path, exp_fixture) -> None:
     res = run_direct_diagnostics(tmp_path, exp_fixture)
     assert res.reports
-    assert "skipped" in res.reports[0]
+    assert "跳过" in res.reports[0]
 
 
 def test_render_poly_time_inserted_before_sp(bruker_dir: Path) -> None:
-    """When direct_poly_time=True, step1 inserts POLY -time before SP; it is not inserted by
-    default."""
+    """With direct_poly_time=True, step1 inserts POLY -time before SP; off by default."""
     from backend.script_generator import (
         generate_2d_nus_script,
         generate_3d_nus_script,
@@ -390,9 +516,8 @@ def test_render_poly_time_inserted_before_sp(bruker_dir: Path) -> None:
     assert s.index("| nmrPipe -fn POLY -time") < s.index("| nmrPipe -fn SP")
     s = generate_3d_nus_script(exp3, direct_poly_time=True, **b3)
     assert s.index("| nmrPipe -fn POLY -time") < s.index("| nmrPipe -fn SP")
-    # 0.2.165:uniform 2D/3D When running the complete script, insert POLY -time before direct
-    # dimension SP (aligned with NUS step1); default is not inserted (first pass preview, 0.2.160
-    # design).
+    # 0.2.165: the full uniform 2D/3D production script also inserts POLY -time before the
+    # direct-dimension SP (aligned with NUS step1); off by default (0.2.160 preview design).
     u2 = dict(in_file="e.fid", out_file="e.ft2")
     u3 = dict(in_file="e.fid", out_file="e.ft3")
     assert "POLY -time" not in generate_process_script(
@@ -409,3 +534,788 @@ def test_render_poly_time_inserted_before_sp(bruker_dir: Path) -> None:
         exp3, select_method(exp3), direct_poly_time=True, **u3
     )
     assert s3.index("| nmrPipe -fn POLY -time") < s3.index("| nmrPipe -fn SP")
+
+
+# ---------------------------------------------------------------------------
+# 2026-09-23 (user request): diagnostics moved to the end of "generate FID"
+#   1) the merged multi-part single file (merged/{dataset_id}.fid) must be found, otherwise the
+#      whole diagnostics block is silently skipped;
+#   2) "generate spectrum" reads back the diagnostics.json from the FID step and reuses it
+#      (re-run only when the artifacts changed);
+#   3) the report states item by item what was found / how it was handled, and says ✓ when
+#      nothing was found.
+# ---------------------------------------------------------------------------
+
+
+def _path_experiment(dataset_id: str, segments: list[str] | None = None):
+    """Minimal stand-in object: locating a fid only needs dataset_id / segments."""
+    from types import SimpleNamespace
+
+    return SimpleNamespace(dataset_id=dataset_id, segments=list(segments or []))
+
+
+def test_collect_fid_paths_finds_the_merged_single_file(tmp_path: Path, template: Path) -> None:
+    """The merged single file lives at merged/{dataset_id}.fid and must not be missed."""
+    from workflow.direct_diagnostics import collect_fid_paths
+
+    work = tmp_path / "process"
+    (work / "merged").mkdir(parents=True)
+    merged = work / "merged" / "d_017.fid"
+    merged.write_bytes(template.read_bytes())
+
+    found = collect_fid_paths(work, _path_experiment("d_017", ["seg_001", "seg_002"]))
+    assert found == [merged]
+    # merged/*.fid fallback (when the merged name differs from dataset_id)
+    other = work / "merged" / "anything.fid"
+    other.write_bytes(template.read_bytes())
+    merged.unlink()
+    assert collect_fid_paths(work, _path_experiment("d_017", ["seg_001"])) == [other]
+    # Slice streams win: while merged/fid/test*.fid exists, still take the slices
+    (work / "merged" / "fid").mkdir()
+    (work / "merged" / "fid" / "test001.fid").write_bytes(template.read_bytes())
+    sliced = collect_fid_paths(work, _path_experiment("d_017", ["seg_001"]))
+    assert [item.name for item in sliced] == ["test001.fid"]
+    # 2026-09-24: with segment markers missing (old work dirs), the merged/fid slices must be
+    # found too -- the manual path saying "fid not found" missed exactly this kind of location
+    assert collect_fid_paths(work, _path_experiment("d_017")) == sliced
+
+
+def test_load_or_run_reuses_the_fid_step_record(
+    tmp_path: Path, template: Path, exp_fixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Generate-spectrum reuses the FID-step record; re-runs only if the fid changed."""
+    from workflow import direct_diagnostics as diag
+
+    work = tmp_path / "process"
+    work.mkdir()
+    fid = work / f"{exp_fixture.dataset_id}.fid"
+    fid.write_bytes(template.read_bytes())
+
+    first = diag.run_direct_diagnostics(work, exp_fixture)
+    assert (work / "diagnostics.json").is_file()
+
+    calls: list[tuple] = []
+    monkeypatch.setattr(
+        diag,
+        "run_direct_diagnostics",
+        lambda *args, **kwargs: calls.append(args) or first,
+    )
+
+    again = diag.load_or_run_direct_diagnostics(work, exp_fixture)
+    assert calls == []  # record hit -> no re-run
+    assert again.reports == first.reports
+    assert again.clean == first.clean
+    assert again.apply_poly_time == first.apply_poly_time
+
+    # fid changed (size/timestamp) -> the record is stale, fall back to a re-run
+    fid.write_bytes(template.read_bytes() + b"\x00" * 8)
+    diag.load_or_run_direct_diagnostics(work, exp_fixture)
+    assert len(calls) == 1
+
+
+def test_format_fid_step_report_lists_every_fix_and_fid_finding() -> None:
+    """Report findings and auto-handling (source bad points, drift, FID-layer findings)."""
+    from workflow.direct_diagnostics import (
+        DirectDiagnosticsResult,
+        format_fid_step_report,
+    )
+
+    diagnostics = DirectDiagnosticsResult(
+        reports=[
+            "直接维存在直流偏置(FID 均值约为最强幅度的 49%),已启用 POLY -time",
+            "检出 3 个尖峰坏点并已自动替换(原 fid 备份在 fid_diag_bak/)",
+        ],
+        apply_poly_time=True,
+        repaired_badpoints=3,
+        clean=False,
+    )
+    drift = {
+        "checked": True,
+        "reference": 1,
+        "hz_min": 1.5,
+        "ppm_reference": 0.005,
+        "rounds": [
+            {
+                "offsets_hz": [None, 2.1446, 2.8776],
+                "offsets_ppm": [None, 0.00268, 0.0036],
+                "shifted_parts_hz": {"2": 2.1446, "3": 2.8776},
+            },
+            {"offsets_hz": [None, 0.0, 0.0], "offsets_ppm": [None, 0.0, 0.0]},
+        ],
+        "corrected_parts": [2, 3],
+        "within_threshold_after": True,
+    }
+    lines = format_fid_step_report(
+        diagnostics=diagnostics,
+        source_bad_points=[(27, 2350)],
+        source_removed=True,
+        field_drift=drift,
+    )
+    text = "\n".join(lines)
+    assert text.startswith("== 数据质量报告(FID 生成) ==")
+    assert "◆ 转换与合并阶段" in text
+    # Source bad points: state what was removed and where the backup is
+    assert "源头采样坏点 (27, 2350)" in text
+    assert "已从 raw 的 ser + nuslist 删除" in text
+    assert ".bak" in text
+    # Field drift: which parts, how many Hz, what changed, and the re-check result
+    assert "组间场漂" in text
+    assert "+2.14 Hz" in text and "+2.88 Hz" in text
+    assert "PS -rs" in text
+    assert "最大残差 0.00 Hz" in text
+    # FID layer: findings + auto-handled count + each item's original text
+    assert "◆ FID 层检查(转换后直接维内存扫描)" in text
+    assert "检出 2 项问题" in text
+    assert "已自动处理 2 项" in text
+    assert "POLY -time" in text
+    assert "尖峰坏点" in text
+
+
+def test_format_fid_step_report_states_an_all_clear() -> None:
+    """With nothing found, say ✓; "nothing found" is not 1 issue in the count."""
+    from workflow.direct_diagnostics import (
+        DirectDiagnosticsResult,
+        format_fid_step_report,
+    )
+
+    diagnostics = DirectDiagnosticsResult(
+        reports=["数据质量诊断:未检出直流偏置、尖峰坏点、首点异常、宽带峰或漂移"],
+        clean=True,
+    )
+    lines = format_fid_step_report(
+        diagnostics=diagnostics,
+        field_drift={
+            "checked": True,
+            "reference": 1,
+            "hz_min": 1.5,
+            "rounds": [{"offsets_hz": [None, 0.0], "offsets_ppm": [None, 0.0]}],
+            "corrected_parts": [],
+        },
+    )
+    text = "\n".join(lines)
+    assert "✓ 未检出直流偏置" in text
+    assert "判据以内" in text
+    assert "项问题" not in text
+    # Say so when diagnostics did not run (do not pretend "no problem")
+    missing = "\n".join(format_fid_step_report(diagnostics=None))
+    assert "本步未执行 FID 层检查" in missing
+
+
+def test_fid_report_states_subpoint_drift_cannot_be_resolved() -> None:
+    """d_018 wording: an offset below one FFT point says "cannot resolve" -- no ✓, and not
+    "within criterion" either.
+
+    At 66.9 Hz/point, +0.98 / +4.0 Hz is only 0.01-0.06 points; the old implementation wrote
+    "max offset 4.00 Hz, within criterion". Now the real reason is stated and that part is not
+    counted as "nothing to correct".
+    """
+    from workflow.direct_diagnostics import format_fid_step_report
+
+    record = {
+        "checked": True,
+        "reference": 1,
+        "parts": 5,
+        "hz_min": 1.5,
+        "points_min": 1.0,
+        "rounds": [
+            {
+                "offsets_hz": [None, 0.98, 2.0, 83.9, 33.4],
+                "offsets_ppm": [None, 0.0016, 0.0033, 0.1398, 0.0556],
+                "below_resolution_parts": [2, 3],
+                "point_hz": 66.9,
+                "criterion_hz": 66.9,
+                "quality": [None, 1.4, 1.4, 1.4, 1.4],
+                "uncertainty_hz": [None, 113.2, 39.5, 151.0, 130.0],
+                "skipped": [
+                    "第 4 段:两段看起来不是同一次实验(相关峰是底线的 3.4 倍,逐迹分歧 33.4 Hz)"
+                ],
+            }
+        ],
+        "corrected_parts": [],
+        "merge": {"parts": 5, "corrected_parts": [], "uncorrected_parts": []},
+        "segment_consistency": {
+            "available": 5,
+            "warnings": [
+                {"key": "NS", "parameter": "acqus.NS", "values": [32, 16, 32, 32, 16]}
+            ],
+            "blocking": [],
+        },
+    }
+    text = "\n".join(format_fid_step_report(field_drift=record))
+    assert "无法分辨" in text
+    assert "66.9 Hz/点" in text
+    assert "已合并 5 段" in text
+    assert "NS 不同" in text and "32/16/32/32/16" in text
+    assert "✓ 源头采样点与组间场漂:无需修正" not in text
+    # Old records' "not the same experiment" wording gets the measurement wording (user,
+    # 2026-09-24: the sentence read as self-contradictory)
+    assert "看起来不是同一次实验" not in text
+    assert "第 4 段:逐迹信噪比不足,量不出可信漂移" in text
+    assert "不代表各段不是同一次实验" in text
+
+
+def test_fid_report_neutralizes_legacy_identity_claim() -> None:
+    """The "the two parts look like different experiments" wording in old records (real d_018)
+    must be replaced by the measurement wording.
+
+    User, 2026-09-24: "the two parts look like different experiments, why is it still shown" --
+    the same report's segment consistency says "only NS differs", so that sentence both
+    contradicts the conclusion and turns "cannot measure" into "data from different sources".
+    """
+    from workflow.direct_diagnostics import format_fid_step_report
+
+    record = {
+        "checked": True,
+        "reference": 1,
+        "parts": 5,
+        "hz_min": 1.5,
+        "point_hz": 66.9,
+        "rounds": [
+            {
+                "offsets_hz": [None, -19.606, -3.639, -23.611, -24.256],
+                "offsets_ppm": [None, -0.0327, -0.0061, -0.0393, -0.0404],
+                "quality": [None, 1.38, 1.43, 1.35, 1.54],
+                "uncertainty_hz": [None, 113.25, 39.5, 151.0, 130.0],
+                "below_resolution_parts": [],
+                "trusted_parts": [],
+                "point_hz": 66.9,
+                "criterion_hz": 66.9,
+                "skipped": [
+                    "第 2 段:两段看起来不是同一次实验(相关峰是底线的 1.4 倍,逐迹分歧 113.2 Hz,"
+                    "1.69 个 FFT 点);未做场漂校正",
+                    "第 5 段:两段看起来不是同一次实验(相关峰是底线的 1.5 倍,逐迹分歧 130.0 Hz,"
+                    "1.94 个 FFT 点);未做场漂校正",
+                ],
+            }
+        ],
+        "corrected_parts": [],
+        "segment_consistency": {
+            "available": 5,
+            "warnings": [
+                {"key": "NS", "parameter": "acqus.NS", "values": [32, 16, 32, 32, 16]}
+            ],
+            "blocking": [],
+        },
+        "merge": {"parts": 5, "corrected_parts": [], "uncorrected_parts": []},
+    }
+    text = "\n".join(format_fid_step_report(field_drift=record))
+    assert "看起来不是同一次实验" not in text
+    assert "第 2 段:逐迹信噪比不足,量不出可信漂移" in text
+    assert "113.2 Hz" in text and "1.69 个 FFT 点" in text      # numbers still come from the record
+    assert "不代表各段不是同一次实验" in text
+    assert "相对第 1 段没有任何一段给出可信测量" in text
+
+
+def test_fid_report_never_calls_untrusted_offsets_within_criterion() -> None:
+    """When every part is blocked by the confidence gate, the fid report must not say "max offset
+    X Hz, within criterion" (real d_018).
+
+    Field case (2026-09-24, d_018 re-converted in five parts): four parts were judged "not the
+    same experiment", yet the old implementation wrote their noise-level estimates (max 24.26 Hz)
+    as "within the 1.5 Hz criterion, no shift applied".
+    """
+    from workflow.direct_diagnostics import format_fid_step_report
+
+    record = {
+        "checked": True,
+        "reference": 1,
+        "parts": 5,
+        "hz_min": 1.5,
+        "rounds": [
+            {
+                "offsets_hz": [None, -24.26, 39.5, 151.0, 130.0],
+                "offsets_ppm": [None, -0.04, 0.066, 0.25, 0.22],
+                "below_resolution_parts": [],
+                "trusted_parts": [],
+                "point_hz": 66.9,
+                "criterion_hz": 66.9,
+                "skipped": ["第 2 段:两段看起来不是同一次实验"],
+            }
+        ],
+        "corrected_parts": [],
+        "merge": {"parts": 5, "corrected_parts": [], "uncorrected_parts": []},
+    }
+    text = "\n".join(format_fid_step_report(field_drift=record))
+    assert "判据以内" not in text
+    assert "没有任何一段给出可信测量" in text
+    assert "✓ 源头采样点与组间场漂:无需修正" not in text
+
+
+def test_fid_report_does_not_call_a_rolled_back_offset_within_criterion() -> None:
+    """On a failed correction or rollback the report must not say "within criterion", and must not
+    give a ✓ (2026-09-24 review).
+
+    Field case: rewriting fid.com failed -> all-or-nothing rollback -> `corrected_parts` empty,
+    but the part in `trusted_parts` **really does exceed the criterion**. The old renderer only
+    checked "is there a trusted measurement", so one report showed both "✓ nothing to correct"
+    and "max offset 60.00 Hz ... within the 7.81 Hz criterion" -- self-contradictory.
+    """
+    from workflow.direct_diagnostics import format_fid_step_report
+
+    record = {
+        "checked": True,
+        "reference": 1,
+        "parts": 2,
+        "rounds": [
+            {
+                "offsets_hz": [None, 60.0],
+                "offsets_ppm": [None, 0.075],
+                "trusted_parts": [2],
+                "point_hz": 7.8125,
+                "linewidth_hz": 39.06,
+                "criterion_basis": "linewidth",
+                "criterion_hz": 7.81,
+                "quality": [None, 300.0],
+                "uncertainty_hz": [None, 0.2],
+                "skipped": [],
+            }
+        ],
+        "corrected_parts": [],
+        "rolled_back": True,
+        "merge": {"parts": 2, "corrected_parts": [], "uncorrected_parts": [2]},
+    }
+    text = "\n".join(format_fid_step_report(field_drift=record, parts=2))
+    assert "判据以内" not in text
+    assert "✓ 源头采样点与组间场漂:无需修正" not in text
+    assert "+60.00 Hz" in text and "没有做成" in text
+
+
+def test_fid_report_adds_the_measurement_note_for_a_not_reproducible_part() -> None:
+    """When some parts are "not reproducible", the report still needs the closing note that
+    "cannot measure != different origin" (2026-09-24 review).
+
+    That note is decided by `_measurement_note_needed`; it used to accept only the old wording
+    ("cannot measure a trusted drift" / "too low"), so the new wording ("not reproducible" /
+    "too few comparable traces") dropped the note in **mixed cases** (some parts trusted, some
+    not) -- the log (written at run time) had it, the step report (GUI re-render) did not.
+    """
+    from workflow.direct_diagnostics import format_fid_step_report
+
+    record = {
+        "checked": True,
+        "reference": 1,
+        "parts": 3,
+        "rounds": [
+            {
+                "offsets_hz": [None, 3.0, None],
+                "offsets_ppm": [None, 0.0037, None],
+                "trusted_parts": [2],
+                "point_hz": 66.9,
+                "linewidth_hz": 117.0,
+                "criterion_basis": "linewidth",
+                "criterion_hz": 23.41,
+                "skipped": ["第 3 段:随机半份重采样的散布 ±56.1 Hz,超过 23.41 Hz 判据 —— "
+                            "这个信噪比下估计不可复现,未做校正"],
+            }
+        ],
+        "corrected_parts": [],
+        "merge": {"parts": 3, "corrected_parts": [], "uncorrected_parts": []},
+    }
+    text = "\n".join(format_fid_step_report(field_drift=record))
+    assert "判据以内" in text                      # part 2 really is within criterion
+    assert "不代表各段不是同一次实验" in text       # the wording note must be present
+
+
+# ---------------------------------------------------------------------------
+# 2026-09-23 (round 2, user request)
+#   1) data whose bad points were already removed must still be reported (cleanup history);
+#   2) wording fixed in review: the audit summary does not count toward "N issues found", drift
+#      "not checked / not measurable" no longer says "within criterion", bool metrics are not
+#      written as 1.0;
+#   3) the GUI "generate FID" step report only reads records (no diagnostics re-run, no fid fix).
+# ---------------------------------------------------------------------------
+
+
+def _history_work(tmp_path: Path) -> tuple[Path, Path]:
+    """Build a work dir with a past source-bad-point cleanup (qc_audit.jsonl + .bak)."""
+    from core.audit.qc_audit import QcAction, QcAuditLog
+
+    work = tmp_path / "process"
+    work.mkdir(parents=True, exist_ok=True)
+    raw = tmp_path / "raw"
+    (raw / "seg_001").mkdir(parents=True, exist_ok=True)
+    (raw / "ser.bak").write_bytes(b"x")
+    (raw / "seg_001" / "nuslist.bak").write_text("1 2\n", encoding="utf-8")
+    QcAuditLog(work).record(
+        QcAction(
+            issue_detected="bad point in the NUS sampling table",
+            location="raw/ser + nuslist",
+            detection_rule="_validate_nus_points",
+            action_taken="removed_from_source_ser_and_nuslist",
+            before_state={"sampling_points": 12, "bad_points": 2},
+            after_state={"sampling_points": 10},
+            extra={"bad_points_sample": [[27, 2350], [28, 2351]], "source_removed": True},
+        )
+    )
+    return work, raw
+
+
+def test_source_cleanup_history_is_reported_for_already_cleaned_data(tmp_path: Path) -> None:
+    """No cleanup this step != never broken: cleanup history belongs in the report (user)."""
+    from workflow.direct_diagnostics import (
+        DirectDiagnosticsResult,
+        format_fid_step_report,
+        read_source_cleanup_history,
+    )
+
+    work, raw = _history_work(tmp_path)
+    history = read_source_cleanup_history(work, [raw])
+    assert history["events"] == 1 and history["points"] == 2
+    assert history["sample"] == [[27, 2350], [28, 2351]]
+    assert "raw/ser.bak" in history["backup_files"]
+    assert "raw/seg_001/nuslist.bak" in history["backup_files"]
+
+    text = "\n".join(
+        format_fid_step_report(
+            diagnostics=DirectDiagnosticsResult(
+                reports=["数据质量诊断:未检出直流偏置、尖峰坏点、首点异常、宽带峰或漂移"],
+                clean=True,
+            ),
+            source_history=history,
+        )
+    )
+    assert "2 处已在更早的运行里从 raw 的 ser + nuslist 删除" in text
+    assert "(27, 2350)" in text and "ser.bak" in text
+    # Must not say "source sampling points ... nothing to correct" (the misleading line)
+    assert "无需修正" not in text
+    # Keep the current behavior when there is no history (do not invent history)
+    assert read_source_cleanup_history(tmp_path / "nowhere", [tmp_path / "noraw"]) == {}
+
+
+def test_diagnostics_metrics_keep_boolean_flags(
+    tmp_path: Path, template: Path, exp_fixture
+) -> None:
+    """Flags like broad_peak must persist as bool (isinstance(True, int) used to write 1.0)."""
+    import json
+
+    from workflow.direct_diagnostics import run_direct_diagnostics
+
+    work = tmp_path / "process"
+    work.mkdir()
+    (work / f"{exp_fixture.dataset_id}.fid").write_bytes(template.read_bytes())
+    run_direct_diagnostics(work, exp_fixture)
+    data = json.loads((work / "diagnostics.json").read_text(encoding="utf-8"))
+    assert isinstance(data["metrics"]["broad_peak"], bool)
+
+
+def test_fid_step_report_counts_issues_not_notes() -> None:
+    """Only reports count toward "N issues found"; notes such as the audit summary do not."""
+    from workflow.direct_diagnostics import DirectDiagnosticsResult, format_fid_step_report
+
+    result = DirectDiagnosticsResult(
+        reports=["直接维存在直流偏置(...)", "检出 3 个尖峰坏点并已自动替换(...)"],
+        notes=["QC 审计记录: 4 条(...)"],
+        apply_poly_time=True,
+        repaired_badpoints=3,
+        auto_handled=2,
+        clean=False,
+    )
+    text = "\n".join(format_fid_step_report(diagnostics=result))
+    assert "检出 2 项问题" in text and "已自动处理 2 项" in text
+    assert "· QC 审计记录" in text
+
+
+def test_drift_report_never_claims_clean_when_not_measured() -> None:
+    """When drift was not checked or nothing is measurable, state it and give no ✓."""
+    from workflow.direct_diagnostics import DirectDiagnosticsResult, format_fid_step_report
+
+    clean = DirectDiagnosticsResult(reports=["x"], clean=True)
+    unchecked = "\n".join(
+        format_fid_step_report(
+            diagnostics=clean,
+            field_drift={"checked": False, "reason": "direct-axis-unknown"},
+        )
+    )
+    assert "未检查(直接维 SW/OBS 未知)" in unchecked
+    assert "无需修正" not in unchecked
+    unmeasurable = "\n".join(
+        format_fid_step_report(
+            diagnostics=clean,
+            field_drift={
+                "checked": True,
+                "reference": 1,
+                "hz_min": 1.5,
+                "rounds": [{"offsets_hz": [None, None], "offsets_ppm": [None, None]}],
+                "corrected_parts": [],
+            },
+        )
+    )
+    assert "一段都测不出偏移" in unmeasurable
+    assert "判据以内" not in unmeasurable
+
+
+def test_fid_step_quality_report_only_reads_records(
+    tmp_path: Path, template: Path, exp_fixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """GUI "generate FID" step report: read records only, no diagnostics re-run, no fid fix."""
+    from workflow import direct_diagnostics as diag
+
+    work = tmp_path / "process"
+    work.mkdir()
+    (work / f"{exp_fixture.dataset_id}.fid").write_bytes(template.read_bytes())
+    diag.run_direct_diagnostics(work, exp_fixture)
+
+    calls: list[tuple] = []
+    monkeypatch.setattr(diag, "run_direct_diagnostics", lambda *a, **k: calls.append(a))
+    lines = diag.fid_step_quality_report(work, [tmp_path / "raw"])
+    assert calls == []
+    assert lines[0] == "== 数据质量报告(FID 生成) =="
+    assert any("FID 层检查" in line for line in lines)
+
+    # State it when the record is missing; do not pretend "no problem"
+    missing = diag.fid_step_quality_report(tmp_path / "empty", None)
+    assert "本步未执行 FID 层检查" in "\n".join(missing)
+
+
+#: Real-data (OR8C_600/BMRB) sweep-width note: both step tests use it so log and report match
+_SWEEP_WIDTH_NOTE = (
+    "F1: sweep width: SW_h=2000 Hz and SW=30 ppm x SFO1=60.8178 MHz = 1824.53 Hz "
+    "differ by 9.6%; the ppm convention 1824.53 Hz is used (SW_h looks stale)"
+)
+
+
+def test_fid_report_lists_the_sweep_width_decision() -> None:
+    """A revised sweep-width convention goes into the conversion-stage correction list, not into
+    "nothing to correct".
+
+    2026-09-24: the BMRB deposited data writes ``SW_h=2000 Hz`` in ``acqu2s`` (a constant carried
+    over), while the ppm convention gives 1824.5 Hz; that step really changed ``-ySW`` in
+    fid.com, so the report gives no ✓.
+    """
+    from workflow.direct_diagnostics import format_fid_step_report
+
+    lines = format_fid_step_report(
+        field_drift=None,
+        sweep_width=[{"axis": "F1", "note": _SWEEP_WIDTH_NOTE}],
+        parts=1,
+    )
+    text = "\n".join(lines)
+    assert "1824.53" in text
+    assert "✓" not in text
+
+
+def test_conversion_record_sweep_width_reaches_the_report(tmp_path: Path) -> None:
+    """Sweep-width records in ``*.fid.conversion.json`` must appear in the step report."""
+    import json
+
+    from workflow.direct_diagnostics import fid_step_quality_report, read_sweep_width_audit
+
+    work = tmp_path / "process"
+    work.mkdir()
+    entry = {"axis": "F1", "nucleus": "15N", "sw_hz_raw": 2000.0, "note": _SWEEP_WIDTH_NOTE}
+    (work / "d_001.fid.conversion.json").write_text(
+        json.dumps({"raw_fingerprint": {}, "sweep_width": [entry]}),
+        encoding="utf-8",
+    )
+    assert read_sweep_width_audit(work) == [entry]
+    text = "\n".join(fid_step_quality_report(work, [tmp_path / "raw"], parts=1))
+    assert "1824.53" in text
+    assert "✓" not in text
+    # A missing record does not affect existing rendering
+    empty = tmp_path / "process_empty"
+    empty.mkdir()
+    assert read_sweep_width_audit(empty) == []
+
+
+#: The carrier-convention note measured on d_018 (report and log share the text)
+_CARRIER_SUMMARY = (
+    "CAR switched to the acqus O1/BF1 convention (x=8.49, y=117.5, z=53): the conversion "
+    "script assumes the 1H carrier sits on the water peak, but this dataset's 1H carrier is "
+    "at 8.49 ppm while the water peak should be at 5.3554 ppm (3.1346 ppm apart), so that "
+    "convention cannot be used"
+)
+_CARRIER_FIX = "yCAR: fid.com=114.375 -> acqus O1/BF1=117.5 (corrected)"
+
+
+def test_fid_report_lists_the_carrier_decision() -> None:
+    """A rewritten carrier convention goes in the conversion list; AUTO keeps only a · note."""
+    from workflow.direct_diagnostics import format_fid_step_report
+
+    overridden = format_fid_step_report(
+        field_drift=None,
+        carrier={"fix_lines": [_CARRIER_FIX], "summary": _CARRIER_SUMMARY},
+        parts=1,
+    )
+    assert any("117.5" in line for line in overridden)
+    assert any("3.1346" in line for line in overridden)
+    assert not any("✓" in line for line in overridden)  # value changed: no "nothing to correct"
+
+    kept = format_fid_step_report(
+        field_drift=None,
+        carrier={
+            "fix_lines": [],
+            "summary": (
+                "CAR keeps the conversion script (AUTO) convention: the 1H carrier is taken "
+                "as the water peak ... (x=4.754, y=118.05)"
+            ),
+        },
+        parts=1,
+    )
+    assert any("AUTO" in line and "118.05" in line for line in kept)
+    assert any("✓" in line for line in kept)  # keeping the original convention is not a fix
+
+
+def test_conversion_record_carrier_reaches_the_report(tmp_path: Path) -> None:
+    """Carrier records in ``*.fid.conversion.json`` must appear in the step report."""
+    import json
+
+    from workflow.direct_diagnostics import fid_step_quality_report, read_carrier_audit
+
+    work = tmp_path / "process"
+    work.mkdir()
+    carrier = {
+        "convention": "o1bf1",
+        "summary": _CARRIER_SUMMARY,
+        "fix_lines": [_CARRIER_FIX],
+        "dims": [
+            {
+                "axis": "y",
+                "logical_axis": "F1",
+                "nucleus": "15N",
+                "auto": 114.375,
+                "o1bf1": 117.5,
+                "expected": 117.5,
+                "decision": "o1bf1",
+                "delta_ppm": -3.125,
+            },
+        ],
+    }
+    (work / "d_001.fid.conversion.json").write_text(
+        json.dumps({"raw_fingerprint": {}, "carrier": carrier}), encoding="utf-8"
+    )
+    assert read_carrier_audit(work) == carrier
+    lines = fid_step_quality_report(work, [tmp_path / "raw"], parts=1)
+    assert any("3.1346" in line for line in lines)
+    assert any("117.5" in line for line in lines)
+    empty = tmp_path / "process_empty"
+    empty.mkdir()
+    assert read_carrier_audit(empty) == {}
+
+
+#: fid.com parameters changed during conversion (report and log share the text)
+_FID_COM_FIX = "yMODE: fid.com=Complex -> acqus=Echo-AntiEcho (corrected)"
+
+
+def test_fid_report_lists_fid_com_parameter_corrections() -> None:
+    """Per-line "parameter corrections" printed in the log also go into the conversion list."""
+    from workflow.direct_diagnostics import format_fid_step_report
+
+    lines = format_fid_step_report(field_drift=None, corrections=[_FID_COM_FIX], parts=1)
+    assert any(_FID_COM_FIX in line for line in lines)
+    assert not any("nothing needed correcting" in line for line in lines)
+
+
+def test_conversion_record_fid_com_corrections_reach_the_report(tmp_path: Path) -> None:
+    """fid.com correction records in the conversion record must appear in the step report."""
+    import json
+
+    from workflow.direct_diagnostics import fid_step_quality_report, read_fid_com_corrections
+
+    work = tmp_path / "process"
+    work.mkdir()
+    (work / "d_001.fid.conversion.json").write_text(
+        json.dumps({"raw_fingerprint": {}, "fid_com_corrections": [_FID_COM_FIX]}),
+        encoding="utf-8",
+    )
+    assert read_fid_com_corrections(work) == [_FID_COM_FIX]
+    lines = fid_step_quality_report(work, [tmp_path / "raw"], parts=1)
+    assert any(_FID_COM_FIX in line for line in lines)
+    empty = tmp_path / "process_empty"
+    empty.mkdir()
+    assert read_fid_com_corrections(empty) == []
+
+
+# ------------------------------------------------- 2026-09-24 review batch B guards
+
+
+def test_drift_residual_counts_only_trusted_parts() -> None:
+    """B4: the re-check max residual counts **trusted parts** only -- otherwise "residual 151 Hz"
+    sits right next to "that estimate is not reproducible".
+    """
+    from workflow.direct_diagnostics import _drift_report_lines
+
+    record = {
+        "checked": True,
+        "reference": 1,
+        "parts": 3,
+        "corrected_parts": [2],
+        "rounds": [
+            {
+                "offsets_hz": [None, 1.0, 151.0],
+                "offsets_ppm": [None, 0.002, 0.3],
+                "criterion_hz": 2.0,
+                "linewidth_hz": 10.0,
+                "criterion_basis": "linewidth",
+                "trusted_parts": [2],
+                "skipped": ["part 3: 不可复现"],
+            }
+        ],
+    }
+    lines, corrected, _all_clear = _drift_report_lines(record)
+    joined = "\n".join(lines)
+    assert corrected is True
+    assert "1.00 Hz" in joined  # residual of the trusted part
+    assert "151.00 Hz" not in joined  # skipped parts do not enter the residual
+
+
+def test_drift_report_does_not_claim_a_merge_when_it_was_refused() -> None:
+    """B5: on a rollback mismatch (blocked) the report must say "merge refused", not "merged N"."""
+    from workflow.direct_diagnostics import _drift_report_lines
+
+    record = {
+        "checked": True,
+        "reference": 1,
+        "parts": 3,
+        "blocked": True,
+        "corrected_parts": [2, 3],
+        "rounds": [
+            {
+                "offsets_hz": [None, 3.0, 4.0],
+                "offsets_ppm": [None, 0.01, 0.01],
+                "criterion_hz": 2.0,
+                "linewidth_hz": 10.0,
+                "criterion_basis": "linewidth",
+                "trusted_parts": [2, 3],
+                "skipped": [],
+            }
+        ],
+        "merge": {"parts": 3, "blocked": True, "corrected_parts": [2, 3]},
+    }
+    lines, _corrected, _all_clear = _drift_report_lines(record)
+    joined = "\n".join(lines)
+    assert "拒绝合并" in joined
+    assert "已合并" not in joined
+
+
+def test_fid_inspection_that_did_not_run_is_not_reported_as_an_issue() -> None:
+    """B13: "fid not found / layout unparsable" means it did not run, not "1 issue found"."""
+    from workflow.direct_diagnostics import DirectDiagnosticsResult, format_fid_step_report
+
+    skipped = DirectDiagnosticsResult(
+        reports=["Data quality diagnosis: converted fid not found, skipped"],
+        clean=False,
+        ran=False,
+    )
+    lines = "\n".join(format_fid_step_report(diagnostics=skipped, parts=1))
+    assert "未执行" in lines
+    assert "检出" not in lines
+
+    issues = DirectDiagnosticsResult(reports=["dc offset 0.4"], clean=False, ran=True)
+    lines2 = "\n".join(format_fid_step_report(diagnostics=issues, parts=1))
+    assert "检出" in lines2
+
+
+def test_collect_fid_paths_finds_the_new_style_slice_names(tmp_path: Path) -> None:
+    """B11: slice streams use two naming generations (`{dataset_id}NNN.fid`, `testNNN.fid`)."""
+    from core.data.bruker_reader import read_dataset
+    from workflow.direct_diagnostics import collect_fid_paths
+
+    work = tmp_path / "process"
+    (work / "fid").mkdir(parents=True)
+    first = work / "fid" / "d_001001.fid"
+    second = work / "fid" / "d_001002.fid"
+    for path in (first, second):
+        path.write_bytes(b"\x00" * 4096)
+    exp = read_dataset(ROOT_FIXTURES / "hsqc_2d")
+    exp.dataset_id = "d_001"
+    assert collect_fid_paths(work, exp) == [first, second]

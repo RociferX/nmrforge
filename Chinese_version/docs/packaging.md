@@ -1,6 +1,6 @@
 # AppImage 打包方案（NMRForge）
 
-状态：**v1.0.1 已发布**。源码保持 Apache-2.0；Linux AppImage 随 Release 分发（2026-09-22 起 Release 上只有**一份**产物，界面语言在运行时切换；该产物按公开快照提交 `90e0d8a` 重建，见 `APPIMAGE_RELEASE_CHECKLIST.md`）。
+状态：**v1.0.1 已发布**。源码保持 Apache-2.0；Linux AppImage 随 Release 分发（2026-09-22 起 Release 上只有**一份**产物，界面语言在运行时切换；该产物按 tag `v1.0.1` 指向的公开提交 `20d95e9` 构建，见 `APPIMAGE_RELEASE_CHECKLIST.md`）。
 
 本页记录 Linux AppImage 的构建方案；每次发布前必须完成根目录
 `APPIMAGE_RELEASE_CHECKLIST.md`，并按最终捆绑的 PySide6/Qt 与其他组件复核许可。

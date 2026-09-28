@@ -1,4 +1,4 @@
-"""Processing flow controller test:step-by-step/import/Manual interface wiring."""
+"""Processing pipeline controller tests: stepwise/import/manual interface wiring."""
 
 from __future__ import annotations
 
@@ -18,8 +18,7 @@ def _manager_with_experiment(tmp_path: Path) -> ProjectManager:
 
 
 def test_is_segmented_container(tmp_path: Path) -> None:
-    """0.2.108: Container directory = top-level directory without acqus and >= 2 subdirectories
-    containing acqus."""
+    """0.2.108: container dir = no top-level acqus and ≥2 subdirs containing acqus."""
     from gui.processing import is_segmented_container
 
     container = tmp_path / "container"
@@ -28,12 +27,12 @@ def test_is_segmented_container(tmp_path: Path) -> None:
         (container / seg).mkdir()
         (container / seg / "acqus").write_text("x", encoding="utf-8")
     assert is_segmented_container(container)
-    # The top level is directly the Bruker dataset -> not a container.
+    # The top level is itself a Bruker dataset → not a container
     single = tmp_path / "single"
     single.mkdir()
     (single / "acqus").write_text("x", encoding="utf-8")
     assert not is_segmented_container(single)
-    # Only 1 staging subdirectory -> not counting containers.
+    # Only 1 segmented subdir → does not count as a container
     one = tmp_path / "one"
     one.mkdir()
     (one / "seg1").mkdir()
@@ -45,8 +44,7 @@ def test_is_segmented_container(tmp_path: Path) -> None:
 def test_import_segmented_dataset_passthrough(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """0.2.108: Segmented collection imports transparent transmission
-    workflow.import_segmented_dataset."""
+    """0.2.108: segmented import passes through to workflow.import_segmented_dataset."""
     manager = _manager_with_experiment(tmp_path)
     controller = ProcessingController(manager)
     captured: dict = {}
@@ -74,8 +72,7 @@ def test_import_segmented_dataset_passthrough(
         "/data/container", exp_id="exp_001", title="seg", copy=False
     )
     assert captured["source"] == "/data/container"
-    # Transparently transmit the current experiment type.
-    assert captured["exp_id"] == "exp_001"
+    assert captured["exp_id"] == "exp_001"  # G2B-011: forward the current experiment type
     assert captured["title"] == "seg"
     assert captured["copy"] is False
     assert result.data_id == "d_001"
@@ -84,8 +81,8 @@ def test_import_segmented_dataset_passthrough(
 def test_generate_spectrum_passes_phase_route_params(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """0.2.108:params["phase_route"] transparently transmits stepwise, and no longer superimposes
-    the old violent optimisation."""
+    """0.2.108: params["phase_route"] is forwarded to stepwise, with no old brute-force
+    optimization stacked on top."""
     manager = _manager_with_experiment(tmp_path)
     controller = ProcessingController(manager)
     controller.set_manager(manager)
@@ -112,7 +109,7 @@ def test_generate_spectrum_passes_phase_route_params(
 def test_generate_spectrum_phase_route_none_skips_optimize(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """0.2.108:phase_route="none" Escape exit skips phase optimisation."""
+    """0.2.108: phase_route="none" escape hatch skips phase optimization."""
     manager = _manager_with_experiment(tmp_path)
     controller = ProcessingController(manager)
     controller.set_manager(manager)
@@ -137,23 +134,23 @@ def test_generate_spectrum_phase_route_none_skips_optimize(
 
 
 def test_manual_interfaces_require_manager() -> None:
-    """A clear error is given when the artificial interface is not bound to the project (the
-    NotImplementedError placeholder is no longer thrown)."""
+    """Manual interfaces raise a clear error when no project is bound (no more
+    NotImplementedError placeholder)."""
     controller = ProcessingController()
-    with pytest.raises(RuntimeError, match="not bound to a project"):
+    with pytest.raises(RuntimeError, match="未绑定项目"):
         controller.manual_fid_com(None)
-    with pytest.raises(RuntimeError, match="not bound to a project"):
+    with pytest.raises(RuntimeError, match="未绑定项目"):
         controller.manual_scripts(None)
-    with pytest.raises(RuntimeError, match="not bound to a project"):
+    with pytest.raises(RuntimeError, match="未绑定项目"):
         controller.run_manual_spectrum(None, {})
-    with pytest.raises(RuntimeError, match="not bound to a project"):
+    with pytest.raises(RuntimeError, match="未绑定项目"):
         controller.save_peaks_manual(None, [])
 
 
 def test_save_peaks_manual_writes_list_and_registers_run(
     tmp_path: Path,
 ) -> None:
-    """Save artificial peak table: write data/peaks Poky.list + register manual_peaks and run."""
+    """Manual peak table save: write data/peaks Poky .list + register a manual_peaks run."""
     manager = _manager_with_experiment(tmp_path)
     controller = ProcessingController(manager)
     from core.peaks.localize import (
@@ -191,8 +188,7 @@ def test_save_peaks_manual_writes_list_and_registers_run(
     )
     assert Path(list_path).suffix == ".list"
     assert Path(list_path).is_file()
-    # Old automatic positioning diagnostics must be invalidated after manual overwriting.
-    assert not sidecar.exists()
+    assert not sidecar.exists()  # old auto-localization diagnostics must be invalidated
     content = Path(list_path).read_text(encoding="utf-8")
     assert "Assignment w1 w2" in content
     assert "G1" in content and "8.0" in content and "118.0" in content
@@ -209,9 +205,8 @@ def test_save_peaks_manual_writes_list_and_registers_run(
 def test_generate_spectrum_reports_progress(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The progress of the spectrum generation phase is reported through the progress callback
-    (0.2.154: unified and automatic processing, no longer superimposing the old violent phase
-    optimisation)."""
+    """Spectrum generation progress is reported through the progress callback
+    (0.2.154: unified automatic processing, no old brute-force phase optimization)."""
     manager = _manager_with_experiment(tmp_path)
     data = manager.project.experiment("exp_001").data[0]
     messages: list[str] = []
@@ -228,18 +223,17 @@ def test_generate_spectrum_reports_progress(
     )
     assert path == "/tmp/x.ft2"
     assert messages
-    assert any("Read data" in msg for msg in messages)
-    assert any("Spectrum generation is completed" in msg for msg in messages)
-    assert any("phase route" in msg for msg in messages)
-    assert not any("phase optimisation completed" in msg for msg in messages)
+    assert any("读取数据" in msg for msg in messages)
+    assert any("生成谱图完成" in msg for msg in messages)
+    assert any("相位途径" in msg for msg in messages)
+    assert not any("相位优化完成" in msg for msg in messages)
 
 
 def test_generate_spectrum_phase_optimize_disabled(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Phase_optimize Parameter compatibility is retained: the behaviour is unified (0.2.154, there
-    is no longer a distinction between basic spectrum/violent optimisation, all are handled
-    uniformly and automatically)."""
+    """phase_optimize is kept for compatibility: behaviour is unified (0.2.154, no more
+    basic-spectrum/brute-force split; all go through unified automatic processing)."""
     manager = _manager_with_experiment(tmp_path)
     data = manager.project.experiment("exp_001").data[0]
     messages: list[str] = []
@@ -256,15 +250,15 @@ def test_generate_spectrum_phase_optimize_disabled(
         phase_optimize=False,
     )
     assert path == "/tmp/x.ft2"
-    assert any("Spectrum generation is completed" in msg for msg in messages)
-    assert not any("phase optimisation completed" in msg for msg in messages)
+    assert any("生成谱图完成" in msg for msg in messages)
+    assert not any("相位优化完成" in msg for msg in messages)
 
 
 def test_generate_spectrum_wires_linewidth_from_settings(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """0.2.112: The software sets the line width (nuclide key) access to generate spectrum params
-    (mapping by axis)."""
+    """0.2.112: software line widths (keyed by nucleus) feed spectrum-generation params
+    (mapped per axis)."""
     from types import SimpleNamespace
 
     from core.data.internal_data_model import SamplingMode
@@ -309,7 +303,7 @@ def test_generate_spectrum_wires_linewidth_from_settings(
 def test_generate_spectrum_explicit_linewidth_wins(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """0.2.112: Not overwritten when params["linewidth_hz"] is passed in explicitly."""
+    """0.2.112: explicit params["linewidth_hz"] is not overwritten."""
     from types import SimpleNamespace
 
     from core.data.internal_data_model import SamplingMode
@@ -346,7 +340,8 @@ def test_generate_spectrum_explicit_linewidth_wins(
     assert params["linewidth_hz"] == {"F2": 99.0}
 
 def test_resolve_import_source(tmp_path: Path) -> None:
-    """NO QUERY SPECIFIED. EXAMPLE REQUEST: GET?Q=HELLO&LANGPAIR=EN|IT."""
+    '''Task F: ignore non-data subdirectories when resolving the import source
+    (dataset/segmented/single/no data).'''
     from gui.processing import resolve_import_source
     from workflow.import_workflow import ImportWorkflowError
 
@@ -385,7 +380,7 @@ def test_resolve_import_source(tmp_path: Path) -> None:
     (nothing / "notes" / "readme.txt").write_text("x", encoding="utf-8")
     try:
         resolve_import_source(nothing)
-        raise AssertionError("ImportWorkflowError should be thrown")
+        raise AssertionError("应抛 ImportWorkflowError")
     except ImportWorkflowError:
         pass
 
@@ -393,14 +388,14 @@ def test_resolve_import_source(tmp_path: Path) -> None:
 def test_resolve_import_source_ignores_no_acqus_subdirs(
     tmp_path: Path,
 ) -> None:
-    """0.2.198: The subdirectory only has data files but lacks acqus. It will be treated as a non-
-    data file folder and ignored; if there is exactly one acqus section, it will be imported as
-    a single file, and acqus will not be reported as missing due to miscellaneous directories."""
+    """0.2.198: a subdir with data files but no acqus counts as a non-data folder and is
+    ignored; with exactly 1 acqus segment it imports as a single dataset and does not
+    report a missing acqus because of stray directories."""
     from gui.processing import resolve_import_source
     from workflow.import_workflow import ImportWorkflowError
 
-    # Exactly 1 acqus section + 1 miscellaneous directory with only ser -> ignore the miscellaneous
-    # directory and only import the acqus section.
+    # Exactly 1 acqus segment + 1 stray dir with only ser → ignore the stray dir and
+    # import the acqus segment alone
     one = tmp_path / "one"
     one.mkdir()
     seg = one / "segA"
@@ -413,8 +408,8 @@ def test_resolve_import_source_ignores_no_acqus_subdirs(
     assert seg_flag is False
     assert Path(src).name == "segA"
 
-    # All subdirectories only have data files but are missing acqus -> explicitly report missing
-    # acqus, don’t blame the top level.
+    # All subdirs have data files but no acqus → explicitly report the missing acqus
+    # instead of blaming the top level
     bad = tmp_path / "bad"
     bad.mkdir()
     d1 = bad / "d1"
@@ -422,6 +417,6 @@ def test_resolve_import_source_ignores_no_acqus_subdirs(
     (d1 / "ser").write_text("x", encoding="utf-8")
     try:
         resolve_import_source(bad)
-        raise AssertionError("ImportWorkflowError should be thrown")
+        raise AssertionError("应抛 ImportWorkflowError")
     except ImportWorkflowError as exc:
-        assert "an acqus" in str(exc)
+        assert "缺少 acqus" in str(exc)

@@ -1,19 +1,22 @@
-"""Results on disk: workflow records, the long-form peak table and the manifest.
+"""Results on disk: workflow records, the unified long-form peak table and the manifest
+(no CSP / statistical inference).
 
 Artefacts (under the study root, ``study/records/``):
 
-- ``manifest.json``: the condition datasets, each condition's reference (script/spectrum/hashes),
-  the plan and grid hashes, peak identity, tool versions, status counts, boundary statement;
+- ``manifest.json``: the condition datasets, each condition's reference (script/spectrum and the
+  hashes of both peak tables), the plan and grid hashes, peak identity, software/tool versions,
+  the workflow status counts, the software boundary statement;
 - ``workflows.json``: the full record of each workflow (``parameters_requested`` /
   ``parameters_used`` / ``parameters_resolved``, status, warnings, chosen peak table,
   run logs, versions);
 - ``runs.json``: one flat record per (workflow, condition);
-- ``peak_table_<method>.csv``: the **long-form** workflow x condition table of the chosen method
-  (unified fields); summaries of the unchosen method are removed;
-- ``measurement.json``: the measurement convention (width-to-points, method, QC counts).
+- ``peak_table_<method>.csv``: the **long-form** workflow x condition table of the actually
+  chosen method (unified fields); old summaries of the unchosen method are removed;
+- ``measurement.json``: the measurement convention (window physical width <-> point count,
+  localisation method, QC counts).
 
-Boundary (spec J): this module **only** aggregates processing artefacts and provenance.
-Sigma, delta-delta bounds, robustness and significance testing are not computed here.
+Boundary (spec J): this module **only** aggregates processing artefacts and provenance;
+sigma, the delta-delta bound, robustness and significance decisions are never computed here.
 """
 
 from __future__ import annotations
@@ -77,6 +80,10 @@ def _reference_record(
         "sampling": reference.sampling,
         "sampling_schedule": reference.sampling_schedule,
         "sampling_evidence": reference.sampling_evidence,
+        # 2026-09-25 (user): the FT sign/direction choice frozen when the reference was built
+        # (manual -neg flips and the like). Combination mode reuses the same one and must not
+        # treat it as a sweep axis.
+        "sampling_flags": reference.sampling_flags,
         "run_id": reference.run_id,
         "phase_route": reference.phase_route,
         "script_path": reference.script_path,
@@ -148,17 +155,13 @@ def measurement_record(
         localization[method] = {**totals, "fallback_reasons": reasons}
     return {
         "peak_position_method": {
-            "parabolic": (
-                tr(
+            "parabolic": tr(
                 "|intensity| extremum in the window plus a three-point parabolic sub-pixel "
                 "refine",
-            )
             ),
-            "gaussian": (
-                tr(
+            "gaussian": tr(
                 "2D Gaussian least squares on the same candidate (2D only; falls back and records "
                 "why)",
-            )
             ),
         },
         "window_policy": WINDOW_POLICY,
@@ -198,9 +201,9 @@ def write_reference_records(
     """Reference-mode artefact: ``records/reference.json``.
 
     Records, per condition, the reference spectrum/script/two peak tables (path + SHA-256), the
-    resolved parameters, the sampling convention (with full-sampling evidence), the picking
-    threshold
-    and the versions; combination mode only references these hashes.
+    resolved parameters, the sampling convention (with the "actually full sampling" evidence),
+    the picking threshold and the version table; combination mode only references these hashes
+    in the manifest (the reference is supplied externally).
     """
     out_dir = session.records_dir
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -227,7 +230,7 @@ def write_reference_records(
 
 
 def _reference_spec_on_disk(session: StudySession) -> str:
-    """The ``reference_spec`` of the existing ``records/reference.json``, if any."""
+    """The ``reference_spec`` of an existing ``records/reference.json`` (kept as-is on refresh)."""
     path = session.records_dir / "reference.json"
     if not path.is_file():
         return ""
@@ -334,11 +337,9 @@ def write_records(
             "notes": plan.notes,
         },
         "peak_identity": {
-            "reference_peak_id_scheme": (
-                tr(
+            "reference_peak_id_scheme": tr(
                 "R0001... (reference-table row order; only in the reference "
                 "table)",
-            )
             ),
             "matching": tr(
                 "external: combination tables leave reference_peak_id/assignment empty and "

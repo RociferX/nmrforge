@@ -1,4 +1,4 @@
-"""Phase C test:batch progress/Summary, drag-and-drop import, settings dialog box."""
+"""Phase C tests: batch progress/summary, drag-and-drop import, settings dialog."""
 
 from __future__ import annotations
 
@@ -49,7 +49,7 @@ class _TempWorkspace:
 
 
 class _BatchController:
-    """Logging call; d_002 failed (Verify batch summary is successful/Failure count)."""
+    """Records calls; d_002 fails (to verify the batch summary success/failure counts)."""
 
     def __init__(self) -> None:
         self.calls: list[str] = []
@@ -61,9 +61,9 @@ class _BatchController:
     def generate_spectrum(self, data, exp_id=None, data_id=None, progress=None):
         self.calls.append(data_id or "")
         if progress:
-            progress("Refactoring")
+            progress("正在重构")
         if data_id == "d_002":
-            raise RuntimeError("Simulation failed")
+            raise RuntimeError("模拟失败")
         return "/tmp/x.ft2"
 
     def run_group_batch(
@@ -75,11 +75,10 @@ class _BatchController:
         progress=None,
         params=None,
     ) -> dict:
-        """Fake implementation of new engine entry: the last member failed, summary 1/2
-        succeeded."""
+        """Fake new-engine entry point: the last member fails, giving 1/2 success in the summary."""
         self.group_calls.append((group_id, list(steps)))
         if progress:
-            progress(f"{group_id}: 1/2 Done")
+            progress(f"{group_id}: 1/2 完成")
         ids = list(self.member_ids)
         results = {
             d: {"data_id": d, "status": "success", "steps": {}, "error": ""}
@@ -89,7 +88,7 @@ class _BatchController:
             "data_id": ids[-1],
             "status": "failed",
             "steps": {},
-            "error": "Simulation failed",
+            "error": "模拟失败",
         }
         return {
             "batch_id": group_id,
@@ -104,8 +103,8 @@ class _BatchController:
 def test_batch_progress_and_summary(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The whole data group is executed: the new engine is entrusted uniformly, and the progress
-    and summary are output through the panel log/signal."""
+    """Whole-group execution: delegated uniformly to the new engine, with progress and summary
+    emitted through the panel log/signals."""
     monkeypatch.setattr("threading.Thread", _SyncThread)
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     entry = manager.create_experiment("batch")
@@ -113,8 +112,8 @@ def test_batch_progress_and_summary(
     data2 = manager.import_data(entry.id, "/fake/2")
     manager.create_data_group(entry.id, data_ids=[data1.id, data2.id])
     manager.save()
-    # 0.2.163-patch14: Do not run the next step if the pre-processing is not completed -- Let the
-    # two sets of fids be ready first.
+    # 0.2.163-patch14: an unfinished prerequisite does not run the next step -- first make both
+    # fids ready
     from gui.pipeline_state import record_step_success
 
     for data in (data1, data2):
@@ -132,13 +131,13 @@ def test_batch_progress_and_summary(
     logs: list[str] = []
     panel.batch_summary_requested.connect(summaries.append)
     panel.log_message.connect(logs.append)
-    panel.log_scoped.connect(lambda msg, _scope: logs.append(msg))  # 0.2.199-Patch29d.
+    panel.log_scoped.connect(lambda msg, _scope: logs.append(msg))  # 0.2.199-patch29d
     panel._on_run_requested("spectrum")
-    # 0.2.199-patch29gv: Single data in the group runs independently in the panel (not automatically
-    # converted to the entire group).
+    # 0.2.199-patch29gv: a single dataset in a group runs independently in the panel (no
+    # automatic promotion to the whole group)
     assert controller.group_calls == []
     assert controller.calls == [data1.id]
-    assert any("Refactoring" in msg for msg in logs)
+    assert any("正在重构" in msg for msg in logs)
     panel.close()
 
 
@@ -174,7 +173,7 @@ def test_drag_drop_import(
     entry_now = manager.project.experiment(entry.id)
     assert len(entry_now.data) == 1
     assert any(
-        "neither a Bruker data set" in text or "acqus" in text
+        "缺少 acqus" in text or "既不是 Bruker 数据集" in text
         for text in shown
     )
     window.close()
@@ -191,10 +190,10 @@ def test_settings_defaults_and_roundtrip(
     assert "points_per_line" not in loaded
     assert "smile_thread_cap" not in loaded
     assert loaded["linewidth_hz"]["1H"] == 8
-    # 0.2.199-patch29gg: The data directory is empty by default (import browsing and fallback to
-    # user's main directory).
+    # 0.2.199-patch29gg: the data root defaults to empty (the import browser falls back to
+    # the user home directory)
     assert loaded["data_root"] == ""
-    # 0.2.199-patch29fx: Alignment tolerance default = Poky kr.
+    # 0.2.199-patch29fx: the default alignment tolerance = Poky kr
     assert loaded["alignment_tolerance_ppm"] == {
         "1H": 0.02,
         "15N": 0.2,
@@ -207,14 +206,14 @@ def test_settings_defaults_and_roundtrip(
     assert loaded2["linewidth_hz"]["1H"] == 10
     assert loaded2["linewidth_hz"]["15N"] == 15
     assert loaded2["linewidth_hz"]["13C"] == 20
-    # When only covering the 1H tolerance, 15N/13C remains the default.
+    # overriding only the 1H tolerance keeps 15N/13C at their defaults
     settings_module.save_settings(
         {"alignment_tolerance_ppm": {"1H": 0.05}}
     )
     loaded3 = settings_module.load_settings()
     assert loaded3["alignment_tolerance_ppm"]["1H"] == 0.05
     assert loaded3["alignment_tolerance_ppm"]["15N"] == 0.2
-    # 0.2.199-patch29gg:data directory save/read/Path fallback.
+    # 0.2.199-patch29gg: data root save/load and path fallback
     settings_module.save_settings({"data_root": str(tmp_path)})
     loaded4 = settings_module.load_settings()
     assert loaded4["data_root"] == str(tmp_path)
@@ -225,12 +224,12 @@ def test_settings_dialog_defaults(qapp: QApplication) -> None:
     from gui.dialogs import SettingsDialog
 
     dialog = SettingsDialog()
-    # 0.2.199-patch29gh: The window height is sufficient and new rows will not be clipped.
+    # 0.2.199-patch29gh: the window is tall enough that the added rows are not clipped
     assert dialog.height() >= 460
     assert dialog.linewidth_spins["1H"].value() == 8
     assert dialog.linewidth_spins["15N"].value() == 15
     assert dialog.linewidth_spins["13C"].value() == 20
-    assert hasattr(dialog, "data_root_edit")  # 0.2.199-Patch29gg.
+    assert hasattr(dialog, "data_root_edit")  # 0.2.199-patch29gg
     assert dialog.tolerance_spins["1H"].value() == 0.02
     assert dialog.tolerance_spins["15N"].value() == 0.2
     assert dialog.tolerance_spins["13C"].value() == 0.2
@@ -243,14 +242,14 @@ def test_batch_summary_dialog(qapp: QApplication) -> None:
     from gui.dialogs import BatchSummaryDialog
 
     summary = {
-        "info": "Batch Group B1: 1/2 Success",
+        "info": "批量组 B1: 1/2 成功",
         "items": [
-            {"data_id": "d_001", "step": "generate spectrum", "ok": True},
+            {"data_id": "d_001", "step": "生成谱图", "ok": True},
             {
                 "data_id": "d_002",
-                "step": "generate spectrum",
+                "step": "生成谱图",
                 "ok": False,
-                "error": "RuntimeError: Simulation failed",
+                "error": "RuntimeError: 模拟失败",
             },
         ],
     }
@@ -262,7 +261,7 @@ def test_batch_summary_dialog(qapp: QApplication) -> None:
 def test_settings_path_appimage_uses_user_config(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """0.2.199-patch29gb:AppImage runtime settings are saved to ~/.config/NMRForge/."""
+    """0.2.199-patch29gb: under AppImage the settings are saved to ~/.config/NMRForge/."""
     from pathlib import Path
 
     from gui import settings as settings_module
@@ -280,7 +279,7 @@ def test_settings_path_appimage_uses_user_config(
 def test_settings_dialog_hides_simple_mode_in_appimage(
     qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """0.2.199-patch29gb: AppImage hides "simple mode" when packaging and running."""
+    """0.2.199-patch29gb: the packaged AppImage runtime hides "simple mode"."""
     from gui import settings as settings_module
     from gui.dialogs import SettingsDialog
 
@@ -296,7 +295,7 @@ def test_settings_dialog_hides_simple_mode_in_appimage(
 def test_data_root_path_fallback_to_home(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """0.2.199-patch29gg:data_root invalid/Fallback when empty user main directory."""
+    """0.2.199-patch29gg: an invalid/empty data_root falls back to the user home directory."""
     from pathlib import Path as _Path
 
     from gui import settings as settings_module

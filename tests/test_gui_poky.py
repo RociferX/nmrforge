@@ -1,5 +1,4 @@
-"""Poky peak table association replacement test (import replacement association, save and
-write.list)."""
+"""Poky peak-table association replacement test (import replaces it; save writes .list)."""
 
 from __future__ import annotations
 
@@ -43,8 +42,8 @@ def _manager_with_peaks(tmp_path: Path):
 def test_import_poky_replaces_association_then_save_writes_list(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Poky import only replaces the peak table association (does not overwrite file); when saving,
-    write.list peak file."""
+    """Poky import only replaces the peak table association (no file overwrite); when saving, the
+    .list peak file is written."""
     manager, exp_id, data_id = _manager_with_peaks(tmp_path)
     list_file = tmp_path / "new.list"
     list_file.write_text(
@@ -65,16 +64,16 @@ def test_import_poky_replaces_association_then_save_writes_list(
     panel = SpectrumPanel(manager)
     panel.set_context(exp_id, data_id)
 
-    # Import: Replace association, do not overwrite old CSV.
+    # Import: replace the association, do not overwrite the old CSV
     panel._on_import_poky()
     old_csv = (
         manager.data_dir(exp_id, data_id, "peaks") / f"{exp_id}-{data_id}.csv"
     )
     assert "OLD" in old_csv.read_text(encoding="utf-8")
-    assert any("current peak table association" in text for text in shown)
+    assert any("替换当前峰表关联" in text for text in shown)
     assert panel.peak_table.rowCount() == 2
 
-    # Save: Write Poky.list peak file and register manual_peaks to run.
+    # Save: write the Poky .list peak file and register a manual_peaks run
     panel._on_save_peaks()
     list_path = (
         manager.data_dir(exp_id, data_id, "peaks") / f"{exp_id}-{data_id}.list"
@@ -95,8 +94,7 @@ def test_import_poky_replaces_association_then_save_writes_list(
 def test_projection_file_hides_peak_ui(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """0.2.199-patch29db: Open projection file to hide peaks UI,No peak correlation/peak
-    operation."""
+    """0.2.199-patch29db: projection file hides peak UI, no peak association/operations."""
     import numpy as np
 
     from viewer.spectrum import Spectrum, SpectrumAxis
@@ -123,8 +121,8 @@ def test_projection_file_hides_peak_ui(
     assert panel.peak_table.rowCount() == 0
     assert panel.peak_table.isVisible() is False
     assert panel.peak_toolbar_widget.isVisible() is False
-    # _load_peaks (unified entry for the caller) also remains empty under projection and is not
-    # associated with the peak table.
+    # _load_peaks (the caller's unified entry) also remains empty under a projection and is not
+    # associated with the peak table
     panel._load_peaks(proj)
     assert panel._peaks == []
     assert panel.peak_table.rowCount() == 0
@@ -134,8 +132,8 @@ def test_projection_file_hides_peak_ui(
 def test_peak_table_lazy_assignment_widgets(
     tmp_path: Path, qapp: QApplication
 ) -> None:
-    """0.2.199-patch29dc: Assignment editing components are created on demand, and peak tables with
-    thousands of rows are no longer stuck."""
+    """0.2.199-patch29dc: Assignment editors are created on demand; peak tables with thousands of
+    rows no longer stall."""
     manager, exp_id, data_id = _manager_with_peaks(tmp_path)
     peaks = [
         {
@@ -158,11 +156,11 @@ def test_peak_table_lazy_assignment_widgets(
         for row in range(panel.peak_table.rowCount())
         if panel.peak_table.cellWidget(row, label_col) is not None
     )
-    # Create components only for visible rows +/- buffers, much less than the total number of rows.
+    # Widgets are created only for visible rows +/- a buffer, far fewer than the row count
     assert widget_count <= 60
     table_peaks = panel._table_peaks()
-    # Visual row (with components) label normalized by segment (2D two segments -> G1-?); viewport
-    # outer row (without components) fallback item text original label.
+    # Visible rows (with widgets): label is normalized by segment (2D two segments -> G1-?);
+    # rows outside the viewport (no widget) fall back to the raw label in the item text
     assert table_peaks[0]["label"] == "G1-?"
     assert table_peaks[-1]["label"] == "G120"
     panel.close()
@@ -171,8 +169,7 @@ def test_peak_table_lazy_assignment_widgets(
 def test_3d_peak_table_columns_use_nucleus_names(
     tmp_path: Path, qapp: QApplication
 ) -> None:
-    """0.2.199-patch29df: The 3D peak table column name displays the corresponding nuclei name
-    (F1_shift -> N/H/C)."""
+    """0.2.199-patch29df: 3D peak-table columns show nucleus names (F1_shift -> N/H/C)."""
     import json
 
     manager, exp_id, data_id = _manager_with_peaks(tmp_path)
@@ -194,9 +191,8 @@ def test_3d_peak_table_columns_use_nucleus_names(
     )
     panel = SpectrumPanel(manager)
     panel.set_context(exp_id, data_id)
-    # 0.2.199-patch29dj: The column name comes from the axis label of the loaded 3D spectrum (no
-    # longer using metadata), first bind and synthesize the N, H, C 3D spectrum and then fill the
-    # peak table.
+    # 0.2.199-patch29dj: column names come from the loaded 3D spectrum's axis labels (no more
+    # metadata fallback); bind a synthetic N,H,C 3D spectrum first, then fill the peak table
     import numpy as np
 
     from viewer.spectrum import Spectrum3D, SpectrumAxis
@@ -226,8 +222,8 @@ def test_3d_peak_table_columns_use_nucleus_names(
         panel.peak_table.horizontalHeaderItem(i).text()
         for i in range(panel.peak_table.columnCount())
     ]
-    # 0.2.199-patch29dk: The peak table sequence is consistent with the external.list convention
-    # (w1=15N/w2=13C/w3=1H).
+    # 0.2.199-patch29dk: peak table column order matches the external .list convention
+    # (w1=15N/w2=13C/w3=1H)
     shift_cols = [h for h in headers if h.endswith("_shift")]
     assert shift_cols == ["N_shift", "C_shift", "H_shift"]
     assert "F1_shift" not in headers and "F2_shift" not in headers

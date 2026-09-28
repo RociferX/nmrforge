@@ -11,18 +11,28 @@ Follows the Bruker integration of NMRFlow:
 
 from __future__ import annotations
 
+import logging
+import math
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
-from core.data.bruker_dtype import UnknownBrukerDtype, point_bytes, sample_dtype
+from core.data.bruker_dtype import (
+    UnknownBrukerDtype,
+    point_bytes,
+    sample_dtype,
+    sample_itemsize,
+)
 from core.data.internal_data_model import (
     AxisRole,
     Dimension,
     Experiment,
     SamplingMode,
 )
+from core.data.ser_layout import solve_row_count, solve_row_points
+from core.experiment.acquisition_mode_detector import hypercomplex_mult
 from core.experiment.bruker_parser import parse_dataset_params
 from core.experiment.experiment_classifier import classify
 from core.experiment.sampling_detector import detect
@@ -31,6 +41,8 @@ from ui_support.i18n import tr
 # files that identify a directory as Bruker data (any one of them makes it a data directory;
 # used at import time to ignore non-data subfolders, 2026-08-19 Task F)
 DATA_KEY_FILES = ("acqus", "acqu2s", "acqu3s", "ser", "fid", "nuslist")
+
+logger = logging.getLogger("nmrforge.core.data.bruker_reader")
 
 
 def is_data_directory(path: Path | str) -> bool:
@@ -78,8 +90,13 @@ def _fnmode(experiment: Experiment, logical_axis: str) -> int:
 
 
 def _mult_for(fnmode: int) -> int:
-    """Number of hypercomplex components: 2 for States/TPPI/States-TPPI/Echo-Antiecho, 1 for QF."""
-    return 2 if fnmode in (0, 1, 2, 4, 5, 6) else 1
+    """Number of hypercomplex components (sole source:
+    ``acquisition_mode_detector.hypercomplex_mult``).
+
+    2026-09-24 re-check D: FnMODE=1/2 (QF/QSEQ, the real kinds) used to count as 2 as well,
+    which disagreed with the ``_REAL_FNMODE`` table and with method_selector.
+    """
+    return hypercomplex_mult(fnmode)
 
 
 def _dim(experiment: Experiment, logical_axis: str) -> Dimension:
@@ -116,7 +133,26 @@ def _check_size(path: Path, expected_bytes: int, is_nus: bool) -> None:
 
 
 def read_data(experiment: Experiment) -> BrukerData:
-    """Read the Bruker binary data (ser/fid) into a complex FID matrix."""
+    """Read the Bruker binary data (ser/fid) into a complex FID matrix (**the layout is solved
+    from the file itself**).
+
+    2026-09-24 re-check A3: both the row length and the row count are solved from the file; the
+    code no longer assumes "rows = indirect TD x hypercomplex components" and no longer takes
+    ``acqus TD`` as the row length (neither holds on real instruments):
+
+    - **row length** = :func:`core.data.ser_layout.solve_row_points` -- the smallest multiple of
+      1024 bytes that is not below the direct TD and divides the file size (real instruments:
+      ``TD=1612 -> 1664``, ``356 -> 384``, ``952 -> 1024``);
+    - **row count** = :func:`core.data.ser_layout.solve_row_count`;
+    - for 3D, when the row count matches the declared grid ``(TD1 x m1) x (TD2 x m2)`` the old
+      order is restored as ``(n_f1, n_f2, points)``; otherwise the data is returned as
+      ``(row count, row length)`` and the actual row count is written into ``layout``.
+
+    Real data used to be unreadable across the board (2D uniform reported "size mismatch" at
+    exactly 2x, 3D NUS raised ``ValueError`` in reshape) and callers (such as
+    ``gui.raw_quality``) swallowed the exception, **silently losing the SNR**. When the layout
+    cannot be solved an explicit ``BrukerDataError`` is raised (never guessed).
+    """
     ndim = experiment.ndim
     data_file = experiment.source_path / ("ser" if ndim >= 2 else "fid")
     if not data_file.is_file():
@@ -133,36 +169,70 @@ def read_data(experiment: Experiment) -> BrukerData:
         byterda = 0
     byte_order = "little" if byterda == 0 else "big"
     try:
-        # DTYPE: 0=int32 / 1=float64 / 2=float32 (an unknown value is reported, never guessed)
+        # DTYPE: 0=int32 / 1=float64 / 2=float32; when DTYPE is missing DTYPA decides
+        # (most real datasets only carry DTYPA)
         dt = sample_dtype(acqus)
         complex_bytes = point_bytes(acqus)
+        value_bytes = sample_itemsize(acqus)
     except UnknownBrukerDtype as exc:
         raise BrukerDataError(str(exc)) from exc
     is_nus = experiment.sampling.mode is SamplingMode.NUS
+    size = data_file.stat().st_size
 
     if ndim == 1:
         f2 = _dim(experiment, "F2")
-        _check_size(data_file, f2.td * complex_bytes, is_nus)
-        matrix = _read_complex(data_file, dt).reshape(-1)
+        row_values = solve_row_points(f2.td, value_bytes, size)
+        raw = _read_complex(data_file, dt)
+        if row_values is not None and solve_row_count(size, row_values, value_bytes) == 1:
+            # 1D: the padding inside the row is not data (the declared TD is authoritative)
+            matrix = raw[: f2.td]
+        else:
+            # unsolvable (an odd file): fall back to the declared value plus the size check,
+            # keeping the old error behaviour
+            _check_size(data_file, f2.td * complex_bytes, is_nus)
+            matrix = raw.reshape(-1)
         layout = {"F2": DimensionLayout(td=f2.td, mult=1, fnmode=0, n_fids=1)}
         return BrukerData(
             matrix=matrix, layout=layout, data_file=data_file.name, byte_order=byte_order
         )
 
+    direct = _dim(experiment, "F2" if ndim == 2 else "F3")
+    # units: ``-xN``/the row length counts "real + imaginary values", so use bytes per value;
+    # complex points per row = row_values // 2
+    row_values = solve_row_points(direct.td, value_bytes, size)
+    rows = solve_row_count(size, row_values, value_bytes) if row_values is not None else None
+    row_points = row_values // 2 if row_values else 0
+    if row_values is None or rows is None or row_points <= 0:
+        raise BrukerDataError(
+            tr(
+                "ser layout could not be derived (size {p0} bytes, direct TD {p1}, "
+                "{p2} bytes per sampled value); the row padding or the element type is "
+                "unexpected",
+                p0=size,
+                p1=direct.td,
+                p2=complex_bytes,
+            )
+        )
+    raw = _read_complex(data_file, dt)
+
     if ndim == 2:
         f1 = _dim(experiment, "F1")
-        f2 = _dim(experiment, "F2")
+        f2 = direct
         m1 = _mult_for(_fnmode(experiment, "F1"))
-        n_fids = f1.td * m1
-        points = f2.td
-        _check_size(data_file, n_fids * points * complex_bytes, is_nus)
-        matrix = _read_complex(data_file, dt).reshape(n_fids, points)
+        matrix = raw.reshape(rows, row_points)
+        if not is_nus and rows != f1.td:
+            logger.debug(
+                "ser row count %d differs from the declared indirect TD %d (%s)",
+                rows,
+                f1.td,
+                experiment.dataset_id,
+            )
         layout = {
             "F1": DimensionLayout(
-                td=f1.td, mult=m1, fnmode=_fnmode(experiment, "F1"), n_fids=n_fids
+                td=f1.td, mult=m1, fnmode=_fnmode(experiment, "F1"), n_fids=rows
             ),
             "F2": DimensionLayout(
-                td=f2.td, mult=1, fnmode=_fnmode(experiment, "F2"), n_fids=n_fids
+                td=f2.td, mult=1, fnmode=_fnmode(experiment, "F2"), n_fids=rows
             ),
         }
         return BrukerData(
@@ -171,26 +241,103 @@ def read_data(experiment: Experiment) -> BrukerData:
 
     f1 = _dim(experiment, "F1")
     f2 = _dim(experiment, "F2")
-    f3 = _dim(experiment, "F3")
+    f3 = direct
     m1 = _mult_for(_fnmode(experiment, "F1"))
     m2 = _mult_for(_fnmode(experiment, "F2"))
     n_f1 = f1.td * m1
     n_f2 = f2.td * m2
-    n_fids = n_f1 * n_f2
-    points = f3.td
-    _check_size(data_file, n_fids * points * complex_bytes, is_nus)
-    matrix = np.transpose(
-        _read_complex(data_file, dt).reshape(n_f2, n_f1, points),
-        (1, 0, 2),
-    )
+    if rows == n_f1 * n_f2:
+        matrix = np.transpose(raw.reshape(n_f2, n_f1, row_points), (1, 0, 2))
+    else:
+        # NUS / a non-standard grid: the row count follows the sampling schedule, so return
+        # (row count, row length)
+        logger.debug(
+            "ser row count %d does not match the declared 3D grid %d x %d (%s)",
+            rows,
+            n_f1,
+            n_f2,
+            experiment.dataset_id,
+        )
+        matrix = raw.reshape(rows, row_points)
     layout = {
         "F1": DimensionLayout(td=f1.td, mult=m1, fnmode=_fnmode(experiment, "F1"), n_fids=n_f1),
         "F2": DimensionLayout(td=f2.td, mult=m2, fnmode=_fnmode(experiment, "F2"), n_fids=n_f2),
-        "F3": DimensionLayout(td=f3.td, mult=1, fnmode=_fnmode(experiment, "F3"), n_fids=n_fids),
+        "F3": DimensionLayout(td=f3.td, mult=1, fnmode=_fnmode(experiment, "F3"), n_fids=rows),
     }
     return BrukerData(
         matrix=matrix, layout=layout, data_file=data_file.name, byte_order=byte_order
     )
+
+
+#: Relative consistency tolerance between ``SW_h`` and ``SW`` (ppm) x ``SFO1`` (2026-09-24).
+#: In TopSpin ``SW_h`` is by definition equal to ``SW x SFO1`` (measured on three real datasets
+#: the relative difference is <= 5e-16; only a comparison against ``SW x BF1`` is off by 1e-4 --
+#: the reference frequency is SFO1, not BF1), so a 1% disagreement necessarily means some field
+#: was copied or written wrongly: for example a BMRB deposition writes ``SW=30 ppm`` and
+#: ``SW_h=2000 Hz`` into ``acqu2s`` while ``SFO1=60.8178`` in the same file converts to
+#: 1824.5 Hz; that 2000 Hz is identical in 600 MHz and 800 MHz data => it is a copied constant.
+#: Beyond the tolerance the **ppm convention** (``SW x SFO1``) is used -- ``SW(ppm)`` is the
+#: width the operator set and ``SW_h`` is a derived value computed by the software; the
+#: depositor's own conversion script (AGNuS' ``Convert_HSQC.csh``) and nmrglue's indirect
+#: dimensions also use ``ppm x SFO1``. The adopted value, its source and the raw values are all
+#: kept in ``Dimension.sw_*`` and ``*.fid.conversion.json`` so they can be audited later.
+SW_CONSISTENCY_TOL = 0.01
+
+
+def _as_float(value: Any) -> float:
+    """Convert to float safely (a non-numeric value becomes NaN, which the caller treats as
+    missing)."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float("nan")
+
+
+def resolve_sweep_width(sw_ppm: float, sw_hz: float, sfo: float) -> tuple[float, str, str]:
+    """Resolve the sweep width (Hz): use ``SW_h`` when it agrees with ``SW(ppm) x SFO1``, and the
+    ppm convention when the two contradict each other.
+
+    Returns ``(hz, source, note)``: ``source`` is one of ``{"sw_h", "ppm_x_sfo", "missing"}``;
+    ``note`` is a sentence for the user (an empty string when no explanation is needed).
+    """
+    # 2026-09-24 re-check: NaN/Inf is always treated as missing -- float("nan") is truthy, so the
+    # old code wrote a NaN "adopted value" into -ySW of fid.com (or emitted a malformed nan% note)
+    sw_ppm = float(sw_ppm) if math.isfinite(_as_float(sw_ppm)) else 0.0
+    sw_hz = float(sw_hz) if math.isfinite(_as_float(sw_hz)) else 0.0
+    sfo = float(sfo) if math.isfinite(_as_float(sfo)) else 0.0
+    ppm_hz = sw_ppm * sfo if sw_ppm and sfo else 0.0
+    if sw_hz and ppm_hz:
+        difference = abs(float(sw_hz) - ppm_hz)
+        if difference <= SW_CONSISTENCY_TOL * ppm_hz:
+            return float(sw_hz), "sw_h", ""
+        return (
+            ppm_hz,
+            "ppm_x_sfo",
+            tr(
+                "sweep width: SW_h={p0:g} Hz and SW={p1:g} ppm x SFO1={p2:g} MHz = {p3:g} Hz "
+                "differ by {p4}; the ppm convention {p3:g} Hz is used (SW_h looks stale)",
+                p0=float(sw_hz),
+                p1=float(sw_ppm),
+                p2=float(sfo),
+                p3=ppm_hz,
+                p4=f"{difference / ppm_hz:.1%}",
+            ),
+        )
+    if sw_hz:
+        return float(sw_hz), "sw_h", ""
+    if ppm_hz:
+        return (
+            ppm_hz,
+            "ppm_x_sfo",
+            tr(
+                "sweep width: SW_h is missing (or 0), so SW={p0:g} ppm x SFO1={p1:g} MHz "
+                "= {p2:g} Hz is used",
+                p0=float(sw_ppm),
+                p1=float(sfo),
+                p2=ppm_hz,
+            ),
+        )
+    return 0.0, "missing", ""
 
 
 def _param_float(block: dict, *keys: str, default: float = 0.0) -> float:
@@ -258,12 +405,22 @@ def _build_dimensions(params: dict, ndim: int) -> list[Dimension]:
             # 0.2.199-patch29gk: when acqus has TD=0 fall back to the authoritative TD in acqu
             # (otherwise the conversion hangs)
             td = int(params["acqu"].get("TD", 0) or 0)
+        sw_ppm = _param_float(block, "SW")
+        sw_hz_raw = _param_float(block, "SW_h")
+        sw, sw_source, sw_note_raw = resolve_sweep_width(sw_ppm, sw_hz_raw, sf)
+        # axis-name prefix: logs, import warnings and step reports show the same sentence
+        # (2026-09-24)
+        sw_note = f"{logical}: {sw_note_raw}" if sw_note_raw else ""
         dims.append(
             Dimension(
                 logical_axis=logical,
                 nucleus=str(block.get("NUC1", "")),
                 sf=sf,
-                sw=_param_float(block, "SW_h", "SW"),
+                sw=sw,
+                sw_ppm=sw_ppm,
+                sw_hz_raw=sw_hz_raw,
+                sw_source=sw_source,
+                sw_note=sw_note,
                 o1=o1,
                 o1p=o1p,
                 td=td,
@@ -335,14 +492,12 @@ def read_segments(paths: list[Path | str]) -> Experiment:
                 )
             )
     if base.sampling.mode is SamplingMode.NUS:
-        base.sampling.evidence.append(
-            tr(
+        base.sampling.evidence.append(tr(
             "multi-segment dataset ({p0} directories): the datasets and their sampling points were "
             "merged and produced by the "
             "backend",
             p0=len(dirs),
-        )
-        )
+        ))
     return base
 
 

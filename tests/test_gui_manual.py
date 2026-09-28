@@ -1,5 +1,5 @@
-"""Manual processing entrance test: script editor/main window wiring + peak table editing and
-writeback (offscreen)."""
+"""Manual entry-point tests: script editor / main-window wiring and peak-table
+write-back (offscreen)."""
 
 from __future__ import annotations
 
@@ -26,8 +26,7 @@ def qapp() -> QApplication:
 
 
 class SyncThread:
-    """Turn the background thread into synchronous execution, and the test does not depend on
-    thread timing."""
+    """Make the background thread synchronous; tests do not depend on thread timing."""
 
     def __init__(self, target=None, daemon=None) -> None:
         self._target = target
@@ -71,7 +70,7 @@ class _TempWorkspace:
 
 
 class FakeManualController:
-    """Manually handle fake controllers: record calls and return synchronously."""
+    """Fake manual-processing controller: records calls and returns synchronously."""
 
     def __init__(self) -> None:
         self.calls: list[tuple] = []
@@ -121,8 +120,7 @@ def test_script_editor_dialog_content_and_run_signal(qapp: QApplication) -> None
 def test_main_window_manual_flows(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Manual entrance opens the corresponding editor step by step/hint (not blocking, via fake
-    controller)."""
+    """Manual entry opens the matching editor/prompt per step (non-blocking, fake controller)."""
     messages: list[str] = []
     monkeypatch.setattr(
         "gui.main_window.InfoDialog.show_info",
@@ -140,22 +138,21 @@ def test_main_window_manual_flows(
 
     window._open_manual_dialog("fid")
     assert ("manual_fid_com", "exp_001", "d_001") in controller.calls
-    assert "fid.com" in shown  # 0.2.192:Non-modal show opens, no exec locks the main interface.
+    assert "fid.com" in shown  # 0.2.192: non-modal show, does not exec-lock the main window
 
     window._open_manual_dialog("spectrum")
-    assert ("manual_scripts", "exp_001", "d_001", None) in controller.calls  # Open script editor.
+    assert ("manual_scripts", "exp_001", "d_001", None) in controller.calls  # open script editor
     assert "process.com" in shown
 
     window._open_manual_dialog("peaks")
-    assert any("peak table" in message for message in messages)
+    assert any("峰表" in message for message in messages)
     window.close()
 
 
 def test_script_editor_single_instance_per_data_step(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Only one script editor is allowed for the same data and the same step; different steps can
-    coexist (0.2.193)."""
+    """Only one script editor per data + step; different steps coexist (0.2.193)."""
     manager = _manager(tmp_path, monkeypatch)
     controller = FakeManualController()
     window = MainWindow(manager=manager, controller=controller)
@@ -165,17 +162,17 @@ def test_script_editor_single_instance_per_data_step(
     assert len(window._script_editors) == 1
     assert controller.calls.count(("manual_scripts", "exp_001", "d_001", None)) == 1
 
-    # Open the same data again with the same steps: reuse, no new creation.
+    # reopen the same step for the same data: reuse, do not create anew
     window._open_manual_dialog("spectrum")
     assert len(window._script_editors) == 1
     assert controller.calls.count(("manual_scripts", "exp_001", "d_001", None)) == 1
 
-    # Fid and spectrum are different steps and can coexist.
+    # fid and spectrum are different steps and can coexist
     window._open_manual_dialog("fid")
     assert len(window._script_editors) == 2
     assert ("manual_fid_com", "exp_001", "d_001") in controller.calls
 
-    # After closing the spectrum editor, release the deduplication key and reopen it.
+    # closing the spectrum editor releases the dedup key, so it can be reopened
     dialog = window._script_editors[("d_001", "spectrum")]
     dialog.close()
     qapp.processEvents()
@@ -188,7 +185,7 @@ def test_script_editor_single_instance_per_data_step(
 def test_script_run_wires_controller(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Script editor "Run" -> run_manual_spectrum (wired via the main window)."""
+    """Script editor "Run" → run_manual_spectrum (wired via the main window)."""
     monkeypatch.setattr("threading.Thread", SyncThread)
     manager = _manager(tmp_path, monkeypatch)
     controller = FakeManualController()
@@ -206,8 +203,7 @@ def test_script_run_wires_controller(
 def test_script_editor_save_writes_script_file(
     tmp_path: Path, qapp: QApplication
 ) -> None:
-    """"Save" immediately writes back the data directory and closes it (0.2.192: the previous save
-    will not be saved)."""
+    """The "Save" button writes the script to the data directory at once and closes (0.2.192)."""
     from qtcompat.QtWidgets import QDialog
 
     dialog = ScriptEditorDialog(
@@ -225,7 +221,7 @@ def test_script_editor_save_writes_script_file(
 def test_script_editor_run_saves_emits_and_closes(
     tmp_path: Path, qapp: QApplication
 ) -> None:
-    """"Run" first saves, sends the content and automatically closes (0.2.192)."""
+    """The "Run" button saves first, emits the content and closes automatically (0.2.192)."""
     dialog = ScriptEditorDialog(
         None, "x", script_name="process.com", content="old", save_dir=tmp_path
     )
@@ -239,15 +235,15 @@ def test_script_editor_run_saves_emits_and_closes(
     assert (tmp_path / "process.com").read_text(encoding="utf-8") == (
         "#!/bin/csh\nxyz2pipe -in x.fid\n"
     )
-    assert not dialog.isVisible()  # Automatically close after running.
+    assert not dialog.isVisible()  # closes automatically after running
     dialog.close()
 
 
 def test_spectrum_panel_peak_add_edit_delete_save(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Peak table plus/change/delete/live: Write back Poky.list + register manual_peaks + viewer
-    refresh."""
+    """Peak table add/edit/delete/save: write back Poky .list, record
+    manual_peaks, refresh viewer."""
     messages: list[str] = []
     monkeypatch.setattr(
         "gui.spectrum_panel.InfoDialog.show_info",
@@ -267,15 +263,15 @@ def test_spectrum_panel_peak_add_edit_delete_save(
     controller = ProcessingController(manager)
     panel = SpectrumPanel(manager, controller=controller)
     panel.set_context("exp_001", "d_001")
-    panel._load_peaks(spectra / "exp_001-d_001.ft2")  # 0.2.88:Explicitly load peak table.
+    panel._load_peaks(spectra / "exp_001-d_001.ft2")  # 0.2.88: load the peak table explicitly
     assert panel.peak_table.rowCount() == 1
 
-    # 0.2.199-patch29ar: Add peak and click the spectrum entrance (callback after adsorption), no
-    # longer directly append blank lines.
+    # 0.2.199-patch29ar: a peak is added through the spectrum click entry (snap then
+    # callback), no longer by appending a blank row directly
     panel._on_manual_peak_added({"H_shift": 8.5, "N_shift": 117.0, "label": ""})
     assert panel.peak_table.rowCount() == 2
-    panel.peak_table.item(1, 2).setText("7.5")  # Assignment Column after H_shift in 2.
-    panel.peak_table.item(1, 3).setText("118.0")  # N_shift In 3.
+    panel.peak_table.item(1, 2).setText("7.5")  # H_shift is column 2, after Assignment
+    panel.peak_table.item(1, 3).setText("118.0")  # N_shift at column 3
     panel._on_save_peaks()
 
     list_path = peaks / "exp_001-d_001.list"
@@ -299,7 +295,7 @@ def test_spectrum_panel_peak_add_edit_delete_save(
 
 
 def test_import_peaks_poky_2d_3d(tmp_path: Path) -> None:
-    """Poky.list import:2D N/H + 3D F1/F2/F3."""
+    """Poky .list import: 2D N/H + 3D F1/F2/F3."""
     list_2d = tmp_path / "peaks.list"
     list_2d.write_text(
         "Assignment w1 w2 Data Height Volume\n?-?  115.0  8.0  0  100  0\n",
@@ -325,7 +321,7 @@ def test_import_peaks_poky_2d_3d(tmp_path: Path) -> None:
 def test_spectrum_panel_3d_columns_auto(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """When the 3D peak table is loaded, the table columns automatically switch to F1/F2/F3."""
+    """Loading a 3D peak table switches the table columns to F1/F2/F3."""
     manager = _manager(tmp_path, monkeypatch)
     spectra = manager.data_dir("exp_001", "d_001", "spectra")
     spectra.mkdir(parents=True, exist_ok=True)
@@ -339,7 +335,7 @@ def test_spectrum_panel_3d_columns_auto(
     )
     panel = SpectrumPanel(manager)
     panel.set_context("exp_001", "d_001")
-    panel._load_peaks(spectra / "exp_001-d_001.ft3")  # 0.2.88:Explicitly load peak table.
+    panel._load_peaks(spectra / "exp_001-d_001.ft3")  # 0.2.88: load the peak table explicitly
     assert panel.peak_table.rowCount() == 1
     assert "F1_shift" in panel._peak_keys
     assert panel.peak_table.horizontalHeaderItem(1).text() == "Assignment ✓"
@@ -349,7 +345,7 @@ def test_spectrum_panel_3d_columns_auto(
 
 
 def test_peak_table_assignment_column(tmp_path, qapp, monkeypatch) -> None:
-    # 0.2.199-patch29at: The peak table contains the Assignment column (label).
+    # 0.2.199-patch29at: the peak table has an Assignment column (label)
     manager = _manager(tmp_path, monkeypatch)
     spectra = manager.data_dir('exp_001', 'd_001', 'spectra')
     spectra.mkdir(parents=True, exist_ok=True)
@@ -364,17 +360,16 @@ def test_peak_table_assignment_column(tmp_path, qapp, monkeypatch) -> None:
     panel.set_context('exp_001', 'd_001')
     panel._load_peaks(spectra / 'exp_001-d_001.ft2')
     assert panel.peak_table.horizontalHeaderItem(1).text() == 'Assignment ✓'
-    # 0.2.199-patch29cr: The item text is cleared and does not overlap; the merged value is read by
-    # the component.
+    # 0.2.199-patch29cr: item text cleared to avoid overlap; merged value read from the widget
     assert panel.peak_table.item(0, 1).text() == ''
     widget0 = panel.peak_table.cellWidget(0, 1)
-    # Two paragraphs, make up for the missing paragraph?
+    # 2D has two segments; a missing segment is filled with ?
     assert widget0 is not None and widget0.merged_text() == 'G1-?'
     panel.close()
 
 
 def test_peak_modes_mutually_exclusive(tmp_path, qapp, monkeypatch) -> None:
-    # 0.2.199-patch29at:choose/Add peak/1D Mutually exclusive.
+    # 0.2.199-patch29at: Select / Add peak / 1D are mutually exclusive
     manager = _manager(tmp_path, monkeypatch)
     panel = SpectrumPanel(manager)
     panel.set_context('exp_001', 'd_001')
@@ -393,7 +388,7 @@ def test_peak_modes_mutually_exclusive(tmp_path, qapp, monkeypatch) -> None:
 
 
 def test_peak_size_spin_controls_marker(tmp_path, qapp, monkeypatch) -> None:
-    # 0.2.199-patch29az: Peak mark input box adjusts viewer peak mark size.
+    # 0.2.199-patch29az: the peak-marker spin box adjusts the viewer marker size
     manager = _manager(tmp_path, monkeypatch)
     panel = SpectrumPanel(manager)
     panel.set_context('exp_001', 'd_001')
@@ -405,8 +400,8 @@ def test_peak_size_spin_controls_marker(tmp_path, qapp, monkeypatch) -> None:
 
 
 def test_delete_button_enabled_when_peaks_exist(tmp_path, qapp, monkeypatch) -> None:
-    # 0.2.199-patch29ba:automatic/Manual peaks can be deleted -- Enable the delete button when there
-    # is a peak table.
+    # 0.2.199-patch29ba: automatic and manual peaks are both deletable --
+    # the delete button is enabled whenever a peak table exists
     manager = _manager(tmp_path, monkeypatch)
     spectra = manager.data_dir('exp_001', 'd_001', 'spectra')
     spectra.mkdir(parents=True, exist_ok=True)
@@ -419,17 +414,18 @@ def test_delete_button_enabled_when_peaks_exist(tmp_path, qapp, monkeypatch) -> 
     )
     panel = SpectrumPanel(manager)
     panel.set_context('exp_001', 'd_001')
-    assert not panel.delete_peak_button.isEnabled()  # Disabled when there is no peak table.
+    assert not panel.delete_peak_button.isEnabled()  # disabled when there is no peak table
     panel._load_peaks(spectra / 'exp_001-d_001.ft2')
-    assert panel.delete_peak_button.isEnabled()  # Automatic peak can be deleted.
+    assert panel.delete_peak_button.isEnabled()  # automatic peaks are deletable
     panel._on_manual_peak_added({'H_shift': 8.5, 'N_shift': 117.0, 'label': ''})
-    assert panel.delete_peak_button.isEnabled()  # Peaks can be deleted manually.
+    assert panel.delete_peak_button.isEnabled()  # manual peaks are deletable
     panel.close()
 
 
 
 def test_1d_mode_hides_peak_ui(tmp_path, qapp, monkeypatch) -> None:
-    # 0.2.199-patch29bd: Enable 1D Hide peak toolbar/peak table/Peak information; Disable recovery.
+    # 0.2.199-patch29bd: turning 1D on hides the peak toolbar / peak table / peak
+    # info; turning it off restores them
     import numpy as np
 
     from viewer.spectrum import Spectrum, SpectrumAxis
@@ -468,8 +464,7 @@ def test_1d_mode_hides_peak_ui(tmp_path, qapp, monkeypatch) -> None:
 def test_box_select_no_flash_table_click_flashes(
     tmp_path, qapp, monkeypatch
 ) -> None:
-    """0.2.199-patch29bo: The linked peak table does not trigger flashing when frame-selected; it
-    flashes only when the peak table is clicked."""
+    """0.2.199-patch29bo: box-select syncing does not flash; only a table click does."""
     import numpy as np
 
     from viewer.spectrum import Spectrum, SpectrumAxis
@@ -499,10 +494,10 @@ def test_box_select_no_flash_table_click_flashes(
     panel.set_context('exp_001', 'd_001')
     panel._load_peaks(spectra / 'exp_001-d_001.ft2')
     panel.viewer._clear_flash()
-    # Frame selection: Linked peak table multiple selection, should not flash.
+    # box select: syncing the peak table multi-selection must not flash
     panel._on_peaks_box_selected([0])
     assert panel.viewer._flash_item is None
-    # Peak table click (programmed selectRow equivalent user click): triggers flashing.
+    # peak-table click (programmatic selectRow, equivalent to a user click): flash
     panel.peak_table.selectRow(1)
     assert panel.viewer._flash_item is not None
     panel.viewer._clear_flash()
@@ -512,9 +507,8 @@ def test_box_select_no_flash_table_click_flashes(
 def test_click_already_selected_peak_row_flashes(
     tmp_path, qapp, monkeypatch
 ) -> None:
-    """0.2.199-patch29cm: Clicking the selected row in the peak table again will trigger flickering
-    positioning (selectionChanged is not triggered on the selected row, and cellClicked
-    processing is added)."""
+    """0.2.199-patch29cm: clicking an already selected peak-table row also flashes and
+    localizes it (selectionChanged does not fire on a selected row, so cellClicked handles it)."""
     import numpy as np
 
     from viewer.spectrum import Spectrum, SpectrumAxis
@@ -544,11 +538,11 @@ def test_click_already_selected_peak_row_flashes(
     panel.set_context('exp_001', 'd_001')
     panel._load_peaks(spectra / 'exp_001-d_001.ft2')
     panel.viewer._clear_flash()
-    # First click to select row -> flashing.
+    # first click selects the row → flash
     panel.peak_table.selectRow(1)
     assert panel.viewer._flash_item is not None
     panel.viewer._clear_flash()
-    # The selected row is clicked again (cellClicked) -> Still flashing.
+    # already selected row clicked again (cellClicked) → still flashes
     panel.peak_table.cellClicked.emit(1, 0)
     assert panel.viewer._flash_item is not None
     panel.viewer._clear_flash()
@@ -558,9 +552,9 @@ def test_click_already_selected_peak_row_flashes(
 def test_edit_assignment_applies_immediately(
     tmp_path, qapp, monkeypatch
 ) -> None:
-    """0.2.199-patch29cp: Assignment column fixed hyphen + segment input box (default ?), the edit
-    takes effect immediately to the label on the diagram and is normalized segment by segment
-    according to Poky."""
+    """0.2.199-patch29cp: the Assignment column is a fixed hyphen plus per-segment
+    inputs (default ?); edits apply to the on-spectrum labels at once and are
+    normalized segment by segment per Poky."""
     import numpy as np
 
     from viewer.spectrum import Spectrum, SpectrumAxis
@@ -589,16 +583,16 @@ def test_edit_assignment_applies_immediately(
     panel.viewer.add_spectrum(Spectrum(np.zeros((64, 64)), [axis_y, axis_x]))
     panel.set_context('exp_001', 'd_001')
     panel._load_peaks(spectra / 'exp_001-d_001.ft2')
-    # Cell = fixed hyphen + segment input box (2D two segments, unspecified segments are
-    # placeholders?).
+    # cell = fixed hyphen + per-segment inputs (2D has two segments; an
+    # unassigned one shows the ? placeholder)
     widget = panel.peak_table.cellWidget(0, 1)
     assert widget is not None and len(widget.lines) == 2
-    assert widget.lines[0].text() == 'G1'  # The first paragraph of the old label is retained.
-    assert widget.lines[1].text() == ''              # Default section has no real text.
-    assert widget.lines[1].placeholderText() == '?'  # Placeholder display?
-    assert panel.peak_table.item(0, 1).text() == ''  # item Text is cleared without overlapping.
+    assert widget.lines[0].text() == 'G1'            # first segment of the old label kept
+    assert widget.lines[1].text() == ''              # default segment has no real text
+    assert widget.lines[1].placeholderText() == '?'  # placeholder shows ?
+    assert panel.peak_table.item(0, 1).text() == ''  # item text cleared to avoid overlap
     assert widget.merged_text() == 'G1-?'
-    # Second line: Enter the placeholder box and replace it without appending ?5.
+    # second row: typing into the placeholder box replaces it, no "?5" appended
     w2 = panel.peak_table.cellWidget(1, 1)
     assert w2 is not None and w2.lines[0].text() == 'G2'
     assert w2.lines[1].text() == '' and w2.lines[1].placeholderText() == '?'
@@ -606,23 +600,22 @@ def test_edit_assignment_applies_immediately(
     w2.lines[1].setFocus()
     QTest.keyClicks(w2.lines[1], '5')
     qapp.processEvents()
-    assert w2.lines[1].text() == '5'                # Do not append ?5.
+    assert w2.lines[1].text() == '5'                # no "?5" appended
     assert w2.merged_text() == 'G2-5'
-    # First line edit: take effect immediately after normalisation section by section.
+    # first row edit: normalized per segment and applied at once
     widget.lines[0].setText('g1h')
     widget.lines[1].setText('g1n')
     qapp.processEvents()
-    assert widget.merged_text() == 'G1H-G1N'  # Poky 2D Two paragraphs.
-    assert panel.peak_table.item(0, 1).text() == ''  # item Text remains empty.
-    assert panel.viewer._peaks[0]['label'] == 'G1H-G1N'  # Effective immediately.
+    assert widget.merged_text() == 'G1H-G1N'  # Poky 2D, two segments
+    assert panel.peak_table.item(0, 1).text() == ''  # item text stays cleared
+    assert panel.viewer._peaks[0]['label'] == 'G1H-G1N'  # applies at once
     labels = panel.viewer._label_overlay._collect_labels()
     assert any(text == 'G1H-G1N' for _xi, _yi, text in labels)
     panel.close()
 
 
 def test_assignment_header_toggles_labels(tmp_path, qapp, monkeypatch) -> None:
-    # 0.2.199-patch29bf: Click the Assignment column header to switch the assignment label on the
-    # graph.
+    # 0.2.199-patch29bf: clicking the Assignment column header toggles the on-spectrum labels
     import numpy as np
 
     from viewer.spectrum import Spectrum, SpectrumAxis

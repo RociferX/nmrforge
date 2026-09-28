@@ -1,4 +1,5 @@
-"""Phase B Test: Pipeline step details/parameter trace back/The reason is obvious/FAILED Retry."""
+"""Phase B tests: Pipeline step details / parameter trace-back / reasons shown
+inline / FAILED retry."""
 
 from __future__ import annotations
 
@@ -47,13 +48,13 @@ def _manager_with_spectrum(tmp_path: Path, failed: bool = False):
         params={"ext_lo": "11.0", "ext_hi": "6.0", "zero_fill": 2},
     )
     if failed:
-        manager.finish_run(run.run_id, "failed", message="SMILE Refactoring failed: boom")
+        manager.finish_run(run.run_id, "failed", message="SMILE 重构失败: boom")
     else:
         manager.finish_run(
             run.run_id,
             "success",
             outputs={"spectrum_path": str(ft2)},
-            message="generate spectrum",
+            message="生成谱图",
         )
         manager.snapshot_run(run.run_id, {"process.com": "nmrPipe ..."})
     manager.save()
@@ -61,8 +62,8 @@ def _manager_with_spectrum(tmp_path: Path, failed: bool = False):
 
 
 def _record_spectrum_report(spectrum_path: Path, params: dict, text: str) -> None:
-    """Press GUI _cached_spectrum_report and write {notation}.quality.json with the same
-    fingerprint."""
+    """Write {spectrum}.quality.json with the same fingerprint as GUI
+    _cached_spectrum_report."""
     import hashlib
     import json
 
@@ -80,22 +81,17 @@ def _record_spectrum_report(spectrum_path: Path, params: dict, text: str) -> Non
 def test_step_detail_uses_quality_record_not_recompute(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """0.2.199-patch29d: Expand details and read {spectrum}. quality.json Record, do not
-    recalculate the report (do not read the spectrum)."""
+    """0.2.199-patch29d: expanding the details reads the {spectrum}.quality.json
+    record instead of recomputing the report (no spectrum read)."""
     from workflow.optimization_report import (
         report_text_from_logs,
         write_quality_record,
     )
 
-    logs = [
-        "Processing completed",
-        "== spectrum quality and data quality report ==",
-        "◆ Final spectrum image quality: good",
-        "Processing parameter: zero filling 2",
-    ]
+    logs = ["处理完成", "== 谱图质量报告 ==", "◆ 最终谱图质量: 良好", "处理参数: 填零 2"]
     text = report_text_from_logs(logs)
-    assert text is not None and "good" in text
-    assert report_text_from_logs(["No report"]) is None
+    assert text is not None and "良好" in text
+    assert report_text_from_logs(["无报告"]) is None
 
     manager, exp_id, data_id = _manager_with_spectrum(tmp_path)
     runs = [
@@ -109,33 +105,107 @@ def test_step_detail_uses_quality_record_not_recompute(
     called = []
     monkeypatch.setattr(
         "gui.pipeline_panel._spectrum_param_report",
-        lambda *a, **k: called.append(1) or "should not be recalculated",
+        lambda *a, **k: called.append(1) or "不应重算",
     )
     panel = PipelinePanel(manager, _FakeController())
     panel.set_selection("data", exp_id, data_id)
     panel._toggle_step_detail("spectrum")
-    assert "good" in panel._rows["spectrum"].detail_label.text()
-    assert not called, "Reports should not be recalculated when records are hit"
+    assert "良好" in panel._rows["spectrum"].detail_label.text()
+    assert not called, "命中记录时不应重算报告"
+    panel.close()
+
+
+def test_spectrum_report_title_comes_from_the_shared_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2026-09-23 fix guard: the report title is defined in exactly one place, so
+    the producer and the extractor must agree with each other.
+
+    Real bug seen: the producer renamed the title to "== spectrum quality report =="
+    while the extractor (report_text_from_logs) still compared against the old
+    title -> the report is still announced in the log, but {spectrum}.quality.json
+    is never refreshed, so the GUI "generate spectrum" step detail keeps showing
+    "no report record".
+    """
+    from workflow.optimization_report import (
+        report_text_from_logs,
+        spectrum_report_title,
+    )
+    from workflow.phase_routes import _append_final_summary
+
+    monkeypatch.setattr(
+        "workflow.optimization_report.spectrum_quality_report_lines",
+        lambda *a, **k: ["◆ 最终谱图质量: 良好"],
+    )
+    logs: list[str] = ["处理完成"]
+    _append_final_summary(logs, str(tmp_path / "x.ft2"))
+    assert logs[1] == spectrum_report_title()
+    extracted = report_text_from_logs(logs)
+    assert extracted is not None and "良好" in extracted
+    # The old title (before 2026-09-23) is still tolerated, so legacy records
+    # are not lost
+    legacy = ["处理完成", "== 谱图质量与数据质量报告 ==", "◆ 数据质量: 已清理坏点"]
+    assert "已清理坏点" in (report_text_from_logs(legacy) or "")
+
+
+def test_quality_record_matches_on_the_spectrum_file_fingerprint(
+    tmp_path: Path, qapp: QApplication
+) -> None:
+    """Record reuse is judged by the **spectrum file fingerprint**: a changed
+    parameter representation does not invalidate it, a changed spectrum does."""
+    import json
+    from pathlib import Path as _Path
+
+    from gui.pipeline_panel import PipelinePanel
+    from workflow.optimization_report import write_quality_record
+
+    manager, exp_id, data_id = _manager_with_spectrum(tmp_path)
+    runs = [
+        r for r in manager.project.workflow_runs
+        if r.experiment_id == exp_id and r.workflow_ref == "process"
+    ]
+    ft2 = _Path(runs[-1].outputs["spectrum_path"])
+    write_quality_record(str(ft2), runs[-1].params, "报告A")
+
+    panel = PipelinePanel(manager, _FakeController())
+    panel.set_selection("data", exp_id, data_id)
+    assert "报告A" in panel._cached_spectrum_report(runs[-1].params, str(ft2))
+
+    # Parameter fingerprint mismatches but the spectrum is unchanged -> the
+    # record is still valid (the spectrum file fingerprint is authoritative)
+    record = json.loads(_Path(f"{ft2}.quality.json").read_text(encoding="utf-8"))
+    record["params_fp"] = "0" * 16
+    _Path(f"{ft2}.quality.json").write_text(
+        json.dumps(record, ensure_ascii=False), encoding="utf-8"
+    )
+    assert "报告A" in panel._cached_spectrum_report(
+        runs[-1].params, str(ft2)
+    )
+
+    # Spectrum changed (regenerated elsewhere) -> the old record is void, prompt
+    # to re-run
+    ft2.write_bytes(b"ft2-regenerated")
+    assert "无报告记录" in panel._cached_spectrum_report(runs[-1].params, str(ft2))
     panel.close()
 
 
 def test_spectrum_report_without_record_shows_note(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """0.2.199-patch29e: When there is no quality record, no report will be generated on site (no
-    spectrum will be read), and a re-run will be prompted."""
+    """0.2.199-patch29e: with no quality record no report is generated on the
+    spot (no spectrum read), and the user is prompted to re-run."""
     manager, exp_id, data_id = _manager_with_spectrum(tmp_path)
     called = []
     monkeypatch.setattr(
         "gui.pipeline_panel._spectrum_param_report",
-        lambda *a, **k: called.append(1) or "Should not be generated on-site",
+        lambda *a, **k: called.append(1) or "不应现场生成",
     )
     panel = PipelinePanel(manager, _FakeController())
     panel.set_selection("data", exp_id, data_id)
     panel._toggle_step_detail("spectrum")
     text = panel._rows["spectrum"].detail_label.text()
-    assert "No report record" in text
-    assert not called, "Reports should not be generated on-site when there are no records"
+    assert "无报告记录" in text
+    assert not called, "无记录时不应现场生成报告"
     panel.close()
 
 
@@ -148,13 +218,13 @@ def test_step_detail_expands_with_params(tmp_path: Path, qapp: QApplication) -> 
     panel._toggle_step_detail("spectrum")
     assert not row.detail_frame.isHidden()
     text = row.detail_label.text()
-    assert "product" in text and "parameter" in text
-    # 0.2.155: Simplified -- Only readable parameter reports are retained, and internal parameters
-    # such as ext_lo are no longer displayed.
+    assert "产物" in text and "参数" in text
+    # 0.2.155: simplified -- only the readable parameter report is kept;
+    # internal parameters such as ext_lo are no longer displayed
     assert "ext_lo" not in text
-    # 0.2.199-patch29e: When there is no quality record, it will not be generated on-site, and it
-    # will prompt to re-run.
-    assert "No report record" in text
+    # 0.2.199-patch29e: with no quality record nothing is generated on the spot;
+    # prompt to re-run
+    assert "无报告记录" in text
     assert not hasattr(row, "manual_with_params_button")
     panel._toggle_step_detail("spectrum")
     assert row.detail_frame.isHidden()
@@ -170,7 +240,7 @@ def test_locked_reason_inline(tmp_path: Path, qapp: QApplication) -> None:
     panel.set_selection("data", entry.id, "d_001")
     row = panel._rows["spectrum"]
     assert not row.reason_label.isHidden()
-    assert "Generate FID" in row.reason_label.text()
+    assert "生成 FID" in row.reason_label.text()
     panel.close()
 
 
@@ -201,11 +271,11 @@ def test_view_log_signal(tmp_path: Path, qapp: QApplication) -> None:
 
 
 def test_step_detail_light_background(qapp: QApplication) -> None:
-    """The step details panel has an explicit light background + dark text (still readable under
-    dark system themes)."""
+    """The step details panel has an explicit light background + dark text (still
+    readable under a dark system theme)."""
     from gui.pipeline_panel import PipelineStepRow
 
-    row = PipelineStepRow("spectrum", "generate spectrum", "desc")
+    row = PipelineStepRow("spectrum", "生成谱图", "desc")
     style = row.detail_frame.styleSheet()
     assert "background: #ffffff" in style
     assert "color: #222" in row.detail_label.styleSheet()
@@ -216,8 +286,8 @@ def test_step_detail_light_background(qapp: QApplication) -> None:
 def test_step_detail_refreshes_on_data_switch(
     tmp_path: Path, qapp: QApplication
 ) -> None:
-    """0.2.161: When switching data, the expanded step details are immediately refreshed as reports
-    of new data."""
+    """0.2.161: when switching data, an already expanded step detail refreshes
+    immediately to the new data's report."""
     manager = ProjectManager.create_project(tmp_path / "proj2", "demo")
     entry = manager.create_experiment("HSQC")
     d1 = manager.import_data(entry.id, "/fake/1")
@@ -229,7 +299,7 @@ def test_step_detail_refreshes_on_data_switch(
             inputs={"data_id": data.id},
             params={"zero_fill": zf},
         )
-        manager.finish_run(run.run_id, "success", outputs={}, message="generate spectrum")
+        manager.finish_run(run.run_id, "success", outputs={}, message="生成谱图")
     manager.save()
 
     panel = PipelinePanel(manager, _FakeController())
@@ -238,10 +308,11 @@ def test_step_detail_refreshes_on_data_switch(
     row = panel._rows["spectrum"]
     assert not row.detail_frame.isHidden()
     first_text = row.detail_label.text()
-    assert "No report record" in first_text  # 0.2.199-Patch29e: no record, no on-site generation.
-    # Switch to d_002: Expanded details should refresh immediately (no need to re-click to expand).
+    assert "无报告记录" in first_text  # 0.2.199-patch29e: no record, no on-the-spot
+    # generation
+    # Switch to d_002: the expanded detail must refresh immediately (no re-click)
     panel.set_selection("data", entry.id, d2.id)
     text2 = row.detail_label.text()
-    assert text2 != first_text  # Running records that have been refreshed with new data.
-    assert "No report record" in text2
+    assert text2 != first_text  # refreshed with the new data's run record
+    assert "无报告记录" in text2
     panel.close()

@@ -1,5 +1,4 @@
-"""Batch processing test: data group import, entire group running within the group (new engine),
-tree display."""
+"""Batch processing tests: data-group import, whole-group runs (new engine), tree display."""
 
 from __future__ import annotations
 
@@ -31,7 +30,7 @@ def _manager_with_experiment(tmp_path: Path) -> tuple[ProjectManager, str]:
 
 
 def test_batch_group_is_data_group(tmp_path: Path) -> None:
-    """0.2.164-patch1: The batch group is the data group (schema 1.4, the only source)."""
+    """0.2.164-patch1: a batch group is a data group (schema 1.4, the single source)."""
     manager, exp_id = _manager_with_experiment(tmp_path)
     manager.import_data(exp_id, "/fake/2")
     manager.save()
@@ -39,7 +38,7 @@ def test_batch_group_is_data_group(tmp_path: Path) -> None:
     group = manager.create_data_group(exp_id, data_ids=data_ids)
     assert manager.group_data_ids(exp_id, group.id) == data_ids
     assert manager.group_of_data(exp_id, data_ids[0]) is not None
-    # Move out of group: restore single data.
+    # remove from the group: the data is standalone again
     manager.remove_from_group(exp_id, group.id, data_ids[1])
     assert manager.group_data_ids(exp_id, group.id) == [data_ids[0]]
     assert manager.group_of_data(exp_id, data_ids[1]) is None
@@ -47,8 +46,9 @@ def test_batch_group_is_data_group(tmp_path: Path) -> None:
 
 
 def test_batch_import_marks_group(tmp_path: Path, bruker_dir: Path) -> None:
-    """Batch import: Multiple directories import the same experiment type and are classified into
-    the same data group. The group number will be incremented for multiple imports."""
+    """Batch import: several folders imported into one experiment type share the same data group;
+    the group number increments on each further import.
+    """
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     entry = manager.create_experiment("batch")
     manager.save()
@@ -56,8 +56,7 @@ def test_batch_import_marks_group(tmp_path: Path, bruker_dir: Path) -> None:
         str(bruker_dir / "hsqc_2d"),
         str(bruker_dir / "nus_2d"),
     ]
-    # 0.2.199-patch29gl: Batch import verification original data file; supplement ser for temporary
-    # backup for testing.
+    # 0.2.199-patch29gl: batch import validates the raw data files; add ser to the test fixture
     (bruker_dir / "hsqc_2d" / "ser").write_bytes(b"")
     (bruker_dir / "nus_2d" / "ser").write_bytes(b"")
     (bruker_dir / "hsqc_small" / "ser").write_bytes(b"")
@@ -68,10 +67,10 @@ def test_batch_import_marks_group(tmp_path: Path, bruker_dir: Path) -> None:
     data_ids = [item["data_id"] for item in result["results"]]
     assert len(data_ids) == 2
     assert manager.group_data_ids(entry.id, "G1") == data_ids
-    # 0.2.163: Data group synchronization falls into project.json(schema 1.4).
+    # 0.2.163: the data group is written to project.json as well (schema 1.4)
     group = manager.group(entry.id, "G1")
     assert group is not None and group.data_ids == data_ids
-    # Batch import again -> G2.
+    # batch import once more -> G2
     result2 = controller.batch_import(
         entry.id, [str(bruker_dir / "hsqc_small")]
     )
@@ -80,7 +79,7 @@ def test_batch_import_marks_group(tmp_path: Path, bruker_dir: Path) -> None:
 
 
 class _FakeController:
-    """Log each data_id step call."""
+    """Record the step calls for each data_id."""
 
     def __init__(self) -> None:
         self.calls: list[str] = []
@@ -94,19 +93,19 @@ class _FakeController:
 
 
 class _ProgressController(_FakeController):
-    """Fake controller with progress callback (log into panel during verification phase)."""
+    """Fake controller with a progress callback (checks stage logs reach the panel)."""
 
     def generate_spectrum(
         self, data, exp_id=None, data_id=None, progress=None
     ) -> str:
         self.calls.append(data_id or "")
         if progress:
-            progress("NUS Data: Start SMILE reconstruction (including direct dimension phase)")
+            progress("NUS 数据: 开始 SMILE 重构(含直接维相位)")
         return "/tmp/x.ft2"
 
 
 class _GroupFakeController(_FakeController):
-    """New engine entry fake implementation: record run_group_batch delegate call."""
+    """Fake new-engine entrance: records the run_group_batch delegation calls."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -123,7 +122,7 @@ class _GroupFakeController(_FakeController):
     ) -> dict:
         self.group_calls.append((group_id, list(steps), dict(params or {})))
         if progress:
-            progress(f"{group_id}: Finish")
+            progress(f"{group_id}: 完成")
         ids = list(self.member_ids)
         return {
             "batch_id": group_id,
@@ -151,8 +150,7 @@ def test_pipeline_group_run_applies_to_all(
     qapp: QApplication,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Intermediate processing page operations: The entire data group is executed uniformly and
-    entrusted to the new engine run_group_batch."""
+    """Pipeline page: running a whole data group delegates uniformly to the new run_group_batch."""
     monkeypatch.setattr("threading.Thread", _SyncThread)
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     entry = manager.create_experiment("batch")
@@ -160,8 +158,7 @@ def test_pipeline_group_run_applies_to_all(
     data2 = manager.import_data(entry.id, "/fake/2")
     group = manager.create_data_group(entry.id, data_ids=[data1.id, data2.id])
     manager.save()
-    # 0.2.163-patch14: Do not run the next step if the pre-processing is not completed -- Let the
-    # two sets of fids be ready first.
+    # 0.2.163-patch14: an unfinished prerequisite blocks the next step -- make both fids ready
     from gui.pipeline_state import record_step_success
 
     for data in (data1, data2):
@@ -176,8 +173,7 @@ def test_pipeline_group_run_applies_to_all(
     panel = PipelinePanel(manager, controller)
     panel.set_selection("data", entry.id, data1.id)
     assert f"Group {group.id}" in panel.context_label.text()
-    # 0.2.199-patch29gv: Single data in the group runs independently in the panel (not automatically
-    # converted to the entire group).
+    # 0.2.199-patch29gv: a single member runs on its own in the panel (no auto whole-group run)
     panel._on_run_requested("spectrum")
     assert controller.group_calls == []
     assert controller.calls == [data1.id]
@@ -185,8 +181,7 @@ def test_pipeline_group_run_applies_to_all(
 
 
 class _TempWorkspace:
-    """Workspace stub pointing to a temporary directory (used to list projects in the tree
-    panel)."""
+    """Workspace stub pointing at a temp directory (so the tree panel lists projects)."""
 
     def __init__(self, root: Path) -> None:
         self.root = Path(root)
@@ -206,8 +201,7 @@ class _TempWorkspace:
 def test_tree_data_label_shows_no_batch_suffix(
     tmp_path: Path, qapp: QApplication
 ) -> None:
-    """0.2.164-patch1: The batch group is the data group; the ungrouped data labels no longer have
-    the [batch] suffix."""
+    """0.2.164-patch1: a batch group is a data group; ungrouped data carries no [batch] suffix."""
     from gui.project_tree import ProjectTreePanel
 
     ws = tmp_path / "ws"
@@ -225,15 +219,14 @@ def test_tree_data_label_shows_no_batch_suffix(
 def test_pipeline_status_shows_selected_data(
     tmp_path: Path, qapp: QApplication
 ) -> None:
-    """After importing new data, the intermediate state is based on the currently selected data
-    instead of the first data."""
+    """After importing new data, the pipeline status follows the selected data, not the first."""
     from gui.pipeline_panel import compute_data_step_statuses
 
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     entry = manager.create_experiment("multi")
     data1 = manager.import_data(entry.id, "/fake/1")
     data2 = manager.import_data(entry.id, "/fake/2")
-    # Data1 has been processed (fid+ft2), data2 is blank.
+    # data1 is processed (fid+ft2), data2 is blank
     process = manager.data_dir(entry.id, data1.id, "process")
     process.mkdir(parents=True, exist_ok=True)
     fid = process / f"{entry.id}-{data1.id}.fid"
@@ -250,8 +243,7 @@ def test_pipeline_status_shows_selected_data(
     assert st1["fid"] == "SUCCESS" and st1["spectrum"] == "SUCCESS"
     st2 = compute_data_step_statuses(manager, entry.id, data2.id)
     assert st2["fid"] == "READY" and st2["spectrum"] == "LOCKED"
-    # When data2 is selected in the panel, its status is displayed (not the completed status of
-    # data1).
+    # with data2 selected the panel shows its status (not data1's completed status)
     panel = PipelinePanel(manager, _FakeController())
     panel.set_selection("data", entry.id, data2.id)
     assert panel._rows["fid"].status_label.text().startswith("▶")
@@ -260,26 +252,25 @@ def test_pipeline_status_shows_selected_data(
 
 
 def test_batch_subfolder_scan(tmp_path: Path) -> None:
-    """Automatically check Bruker datasets in sub-file folders when adding the total file folder in
-    batches."""
+    """Adding a batch root folder scans its subfolders for Bruker datasets."""
     from gui.dashboards import ExperimentDashboard
 
     root = tmp_path / "batch_root"
     (root / "hsqc").mkdir(parents=True)
     (root / "hsqc" / "acqus").write_text("x")
-    (root / "hsqc" / "acqu2s").write_text("x")  # 2D Logo.
+    (root / "hsqc" / "acqu2s").write_text("x")  # 2D marker
     (root / "nested" / "hnca").mkdir(parents=True)
     (root / "nested" / "hnca" / "acqus").write_text("x")
-    (root / "nested" / "hnca" / "acqu2s").write_text("x")  # 2D Logo.
+    (root / "nested" / "hnca" / "acqu2s").write_text("x")  # 2D marker
     (root / "nested" / "canh").mkdir(parents=True)
     (root / "nested" / "canh" / "acqus").write_text("x")
-    (root / "nested" / "canh" / "acqu3s").write_text("x")  # 3D Logo.
+    (root / "nested" / "canh" / "acqu3s").write_text("x")  # 3D marker
     (root / "notes.txt").write_text("not a dataset")
     found = ExperimentDashboard._bruker_datasets_under(root)
     names = {p.name for p in found}
-    # 0.2.199-patch29hd: Batch only supports 2D -- 3D (canh) is filtered, only 2D hsqc/hnca.
+    # 0.2.199-patch29hd: batch supports 2D only -- the 3D canh is filtered out, leaving the 2D pair
     assert names == {"hsqc", "hnca"}
-    # Directly select the dataset directory -> return to itself.
+    # selecting a dataset directory directly -> return it itself
     direct = ExperimentDashboard._bruker_datasets_under(root / "hsqc")
     assert [p.name for p in direct] == ["hsqc"]
 
@@ -287,8 +278,7 @@ def test_batch_subfolder_scan(tmp_path: Path) -> None:
 def test_experiment_dashboard_single_batch_groups(
     qapp: QApplication,
 ) -> None:
-    """Experiment type page: Single import and batch processing group display (visual
-    distinction)."""
+    """Experiment type page: single import and batch processing shown as separate groups."""
     from qtcompat.QtWidgets import QGroupBox
 
     from gui.dashboards import ExperimentDashboard
@@ -296,25 +286,23 @@ def test_experiment_dashboard_single_batch_groups(
     page = ExperimentDashboard()
     assert isinstance(page.single_group, QGroupBox)
     assert isinstance(page.batch_group, QGroupBox)
-    assert page.single_group.title() == "single import"
-    assert page.batch_group.title() == "Batch processing"
+    assert page.single_group.title() == "单个导入"
+    assert page.batch_group.title() == "批量处理"
     page.close()
 
 
 def test_experiment_dashboard_segmented_between_single_and_batch(
     qapp: QApplication,
 ) -> None:
-    """Experiment type page: The segmented acquisition import (merge FID) entry is located between
-    single import and batch processing."""
+    """Experiment type page: the segmented import (merged FIDs) sits between single and batch."""
     from qtcompat.QtWidgets import QGroupBox
 
     from gui.dashboards import ExperimentDashboard
 
     page = ExperimentDashboard()
     assert isinstance(page.segmented_group, QGroupBox)
-    assert page.segmented_group.title() == "segmented data or repeated experiment overlay import"
-    # 0.2.162-patch11: The import block is within import_panel (the experiment type page is no
-    # longer displayed inline).
+    assert page.segmented_group.title() == "分段数据或重复实验叠加导入"
+    # 0.2.162-patch11: the import block lives inside import_panel (no longer inlined on the page)
     layout = page.import_panel.layout()
     assert layout.indexOf(page.single_group) < layout.indexOf(page.segmented_group)
     assert layout.indexOf(page.segmented_group) < layout.indexOf(page.batch_group)
@@ -332,8 +320,7 @@ def test_experiment_dashboard_segmented_between_single_and_batch(
 def test_project_single_click_opens(
     tmp_path: Path, qapp: QApplication
 ) -> None:
-    """Click the project node to open it (no need to double-click); the current project will not be
-    opened repeatedly."""
+    """One click opens a project node (no double click); the open project is not reopened."""
     from gui.project_tree import ProjectTreePanel
 
     ws = tmp_path / "ws"
@@ -357,9 +344,9 @@ def test_project_single_click_opens(
     proj_a = project_item("projA")
     proj_b = project_item("projB")
     assert proj_a is not None and proj_b is not None
-    panel._on_item_clicked(proj_a, 0)  # Non-current project -> Open.
+    panel._on_item_clicked(proj_a, 0)  # a different project -> open
     assert opened and Path(opened[0]).name == "projA"
-    panel._on_item_clicked(proj_b, 0)  # Current project -> Do not open repeatedly.
+    panel._on_item_clicked(proj_b, 0)  # the current project -> do not reopen
     assert len(opened) == 1
     panel.close()
 
@@ -369,8 +356,7 @@ def test_pipeline_progress_logs_to_panel(
     qapp: QApplication,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """When running to generate a spectrum, the stage progress enters the log panel through
-    progress."""
+    """While generating a spectrum, stage progress reaches the log panel through progress."""
     from gui.log_panel import LogPanel
 
     monkeypatch.setattr("threading.Thread", _SyncThread)
@@ -378,8 +364,7 @@ def test_pipeline_progress_logs_to_panel(
     entry = manager.create_experiment("prog")
     data = manager.import_data(entry.id, "/fake/1")
     manager.save()
-    # 0.2.163-patch14: The next step will not be run if the prefix is not completed -- Let fid be
-    # ready first.
+    # 0.2.163-patch14: an unfinished prerequisite blocks the next step -- make the fid ready
     from gui.pipeline_state import record_step_success
 
     fid = manager.data_dir(entry.id, data.id, "process") / f"{data.id}.fid"
@@ -392,11 +377,11 @@ def test_pipeline_progress_logs_to_panel(
     panel = PipelinePanel(manager, controller)
     log = LogPanel()
     panel.log_message.connect(log.append)
-    panel.log_scoped.connect(log.append)  # 0.2.199-Patch29d: run log by scope.
+    panel.log_scoped.connect(log.append)  # 0.2.199-patch29d: run logs are scoped
     panel.set_selection("data", entry.id, data.id)
     log.set_scope("data", entry.id, data.id)
     panel._on_run_requested("spectrum")
-    assert "Start SMILE reconstruction" in log.text.toPlainText()
+    assert "SMILE 重构" in log.text.toPlainText()
     panel.close()
     log.close()
 
@@ -404,7 +389,7 @@ def test_pipeline_progress_logs_to_panel(
 def test_welcome_single_click_opens(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Welcome page recent items click to open."""
+    """A single click on a recent project in the welcome page opens it."""
     from core.workspace import WorkspaceManager
     from gui.welcome_page import WelcomePage
 
@@ -423,7 +408,7 @@ def test_welcome_single_click_opens(
 def test_experiment_dashboard_copy_check_above_groups(
     qapp: QApplication,
 ) -> None:
-    """0.2.112: The "Link raw data to project" checkbox is located above the three import groups."""
+    """0.2.112: the "Link raw data to project" checkbox sits above the three import groups."""
     from gui.dashboards import ExperimentDashboard
 
     page = ExperimentDashboard()
@@ -436,11 +421,11 @@ def test_experiment_dashboard_copy_check_above_groups(
 
 
 def test_experiment_dashboard_clear_import_form(qapp: QApplication) -> None:
-    """0.2.112: The import form provides cleaning (name/path) to facilitate continuous import."""
+    """0.2.112: the import form offers a clear action (name/path) for repeated imports."""
     from gui.dashboards import ExperimentDashboard
 
     page = ExperimentDashboard()
-    page.name_edit.setText("sample 1")
+    page.name_edit.setText("样品1")
     page.source_edit.setText("/data/a")
     page.segmented_source_edit.setText("/data/container")
     page.clear_import_form()
@@ -451,16 +436,13 @@ def test_experiment_dashboard_clear_import_form(qapp: QApplication) -> None:
 
 
 def test_import_data_dropdown_panel(qapp: QApplication) -> None:
-    """0.2.162-patch11: The "Import data" drop-down contains the complete import panel and forwards
-    the signal."""
+    """0.2.162-patch11: the "Import data" drop-down embeds the whole import panel and signals."""
     from gui.dashboards import ImportDataDropdown
 
     dd = ImportDataDropdown()
-    assert dd.panel.single_group.title() == "single import"
-    assert dd.panel.segmented_group.title() == (
-        "segmented data or repeated experiment overlay import"
-    )
-    assert dd.panel.batch_group.title() == "Batch processing"
+    assert dd.panel.single_group.title() == "单个导入"
+    assert dd.panel.segmented_group.title() == "分段数据或重复实验叠加导入"
+    assert dd.panel.batch_group.title() == "批量处理"
     emitted: list[tuple] = []
     dd.import_options_requested.connect(lambda *a: emitted.append(a))
     dd.panel.set_context("exp_1")
@@ -471,8 +453,7 @@ def test_import_data_dropdown_panel(qapp: QApplication) -> None:
 
 
 def test_batch_import_no_group(tmp_path: Path, bruker_dir: Path) -> None:
-    """0.2.162-patch12: Batch import is not grouped = multiple single imports (no data group is
-    created)."""
+    """0.2.162-patch12: batch import without grouping = several single imports (no data group)."""
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     entry = manager.create_experiment("batch")
     manager.save()
@@ -480,8 +461,7 @@ def test_batch_import_no_group(tmp_path: Path, bruker_dir: Path) -> None:
         str(bruker_dir / "hsqc_2d"),
         str(bruker_dir / "nus_2d"),
     ]
-    # 0.2.199-patch29gl: Batch import verification original data file; supplement ser for temporary
-    # backup for testing.
+    # 0.2.199-patch29gl: batch import validates the raw data files; add ser to the test fixture
     (bruker_dir / "hsqc_2d" / "ser").write_bytes(b"")
     (bruker_dir / "nus_2d" / "ser").write_bytes(b"")
     (bruker_dir / "hsqc_small" / "ser").write_bytes(b"")
@@ -496,11 +476,11 @@ def test_batch_import_no_group(tmp_path: Path, bruker_dir: Path) -> None:
 
 
 def test_batch_import_group_option(qapp: QApplication) -> None:
-    """0.2.162-patch12: The batch import panel has a group option, and the signal carries group."""
+    """0.2.162-patch12: the batch import panel has a grouping option; the signal carries group."""
     from gui.dashboards import ExperimentImportPanel
 
     panel = ExperimentImportPanel()
-    assert panel.batch_group_check.isChecked()  # Default group.
+    assert panel.batch_group_check.isChecked()  # grouped by default
     emitted: list[tuple] = []
     panel.batch_import_requested.connect(lambda *a: emitted.append(a))
     panel.set_context("exp_1")
@@ -508,8 +488,7 @@ def test_batch_import_group_option(qapp: QApplication) -> None:
     panel._on_batch_import()
     assert emitted and emitted[0][2] is True
     panel.batch_group_check.setChecked(False)
-    # 0.2.199-patch29gn: The list is cleared after importing and added again to test the lack of
-    # grouping.
+    # 0.2.199-patch29gn: the list is cleared after import; add again to test ungrouped import
     panel.batch_list.addItem("/data/b")
     panel._on_batch_import()
     assert emitted[-1][2] is False
@@ -517,8 +496,7 @@ def test_batch_import_group_option(qapp: QApplication) -> None:
 
 
 def test_import_button_no_source_gives_hint(qapp: QApplication) -> None:
-    """When the import button has no path, a prompt will be given instead of being silent and
-    unresponsive (user feedback)."""
+    """With no path the import button gives a hint instead of doing nothing (user feedback)."""
     from gui.dashboards import ExperimentImportPanel
 
     hints: list[str] = []
@@ -534,10 +512,9 @@ def test_import_button_no_source_gives_hint(qapp: QApplication) -> None:
         panel.import_options_requested.connect(lambda *a: emitted.append(a))
         panel.set_context("exp_1")
         panel._on_import()
-        assert emitted == [], "No import request should be made if there is no path"
-        assert hints and "acqus) first" in hints[-1]
-        # With path + empty exp_id: Send request as usual (the main window automatically creates
-        # experiment type).
+        assert emitted == [], "无路径不应发导入请求"
+        assert hints and "请先选择" in hints[-1]
+        # a path + an empty exp_id: the request still goes out (the main window creates the type)
         hints.clear()
         panel.set_context("")
         panel.source_edit.setText("/data/foo")
@@ -551,8 +528,7 @@ def test_import_button_no_source_gives_hint(qapp: QApplication) -> None:
 def test_experiment_dashboard_rename_data_name(
     tmp_path: Path, qapp: QApplication
 ) -> None:
-    """0.2.162-patch13: Editing of the "Name" column of the data table triggers renaming and
-    placement."""
+    """0.2.162-patch13: editing the data table's "Name" column renames the data and saves it."""
     from gui.main_window import MainWindow
 
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
@@ -561,10 +537,10 @@ def test_experiment_dashboard_rename_data_name(
     manager.save()
     window = MainWindow(manager=manager)
     page = window.center_panel.experiment_page
-    page.set_context(manager, entry.id, "Label")
+    page.set_context(manager, entry.id, "标签")
     assert page.data_table.rowCount() >= 1
     item = page.data_table.item(0, 1)
-    item.setText("new name")  # itemChanged → data_rename_requested → _rename_data
+    item.setText("新名称")  # itemChanged -> data_rename_requested -> _rename_data
     entry2 = manager.project.experiment(entry.id)
-    assert entry2 is not None and entry2.data[0].title == "new name"
+    assert entry2 is not None and entry2.data[0].title == "新名称"
     window.close()

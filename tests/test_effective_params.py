@@ -9,7 +9,7 @@ from workflow.stepwise import generate_fid, generate_spectrum
 
 
 class _EffectiveBackend:
-    """Returns a fake backend for effective_params."""
+    """Fake backend that returns effective_params."""
 
     def __init__(self, work_dir: Path) -> None:
         self.work_dir = str(work_dir)
@@ -104,7 +104,7 @@ def test_generate_spectrum_records_effective_params(
     run = _last_run(manager, exp_id, "process")
     params = run.params
     assert params["extract"] is False  # Caller takes precedence.
-    assert params["ext_lo"] == "11.0"  # effective Effective parameter.
+    assert params["ext_lo"] == "11.0"  # effective_params applied.
     assert params["zero_fill"]["F2"]["size"] == 2048
     assert params["direct_phase"] == {"F2": (0.0, 0.0)}
     assert params["points_per_line"] == 2.0
@@ -128,7 +128,7 @@ def test_generate_fid_records_effective_params(
 
 
 def test_legacy_backend_params_unchanged(tmp_path: Path, bruker_dir: Path) -> None:
-    """Old backend (none effective_params) params keep caller params (compatible)."""
+    """Old backend (no effective_params): params keep caller params (compatible)."""
 
     class _LegacyBackend(_EffectiveBackend):
         def process(
@@ -167,7 +167,7 @@ def test_legacy_backend_params_unchanged(tmp_path: Path, bruker_dir: Path) -> No
 def test_generate_spectrum_records_ucsf_output(
     tmp_path: Path, bruker_dir: Path, monkeypatch
 ) -> None:
-    """0.2.162-patch15: After generating spectrum, UCSF is output and registered to run outputs."""
+    """0.2.162-patch15: after generating a spectrum, also emit UCSF into run outputs."""
     import workflow.stepwise as stepwise_mod
 
     manager, exp_id, data_id = _manager_with_data(
@@ -179,7 +179,7 @@ def test_generate_spectrum_records_ucsf_output(
     monkeypatch.setattr(
         stepwise_mod,
         "_export_ucsf",
-        lambda mgr, e, d, spec: (str(fake_ucsf), f"UCSF has generated: {fake_ucsf}"),
+        lambda mgr, e, d, spec: (str(fake_ucsf), f"UCSF 已生成: {fake_ucsf}"),
     )
     generate_fid(manager, exp_id, data_id, backend)
     generate_spectrum(
@@ -196,7 +196,7 @@ def test_generate_spectrum_records_ucsf_output(
 def test_generate_spectrum_none_route_maps_final_ext(
     tmp_path: Path, bruker_dir: Path, monkeypatch
 ) -> None:
-    """0.2.162-patch15: The escape hatch only runs once, final_ext is directly mapped to ext."""
+    """0.2.162-patch15: escape hatch runs only once; final_ext maps straight to ext."""
     import workflow.stepwise as stepwise_mod
 
     captured: dict = {}
@@ -226,7 +226,7 @@ def test_generate_spectrum_none_route_maps_final_ext(
     monkeypatch.setattr(
         stepwise_mod,
         "_export_ucsf",
-        lambda mgr, e, d, spec: (None, "Skip UCSF conversion"),
+        lambda mgr, e, d, spec: (None, "跳过 UCSF 转换"),
     )
     generate_fid(manager, exp_id, data_id, backend)
     generate_spectrum(
@@ -248,8 +248,8 @@ def test_generate_spectrum_none_route_maps_final_ext(
 
 
 def test_zf_summary_compact() -> None:
-    """Zero filling plan summary only retains mode/size (for WorkflowRun params)."""
+    """Zero-fill plan summary keeps only mode/size (for WorkflowRun params)."""
     from backend.nmrpipe_backend import zf_summary
 
-    plan = {"F2": {"mode": "auto", "size": 2048, "note": "direct dimension 2 x TD"}}
+    plan = {"F2": {"mode": "auto", "size": 2048, "note": "直接维 2×TD"}}
     assert zf_summary(plan) == {"F2": {"mode": "auto", "size": 2048}}

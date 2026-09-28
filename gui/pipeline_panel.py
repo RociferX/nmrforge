@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 
 from qtcompat.QtCore import QPoint, QRect, QSize, Qt
@@ -50,7 +51,9 @@ from gui.processing import ProcessingController
 from qtcompat import Signal
 from ui_support.i18n import tr
 from ui_support.theme import (
+    PANEL_BORDER,
     STATUS_COLORS,
+    SURFACE_ALT,
     TEXT_MUTED,
     TEXT_PRIMARY,
     fit_combo_width,
@@ -493,52 +496,48 @@ def _format_params(params: dict) -> str:
     return ", ".join(f"{key}={value}" for key, value in sorted(params.items()))
 
 
+def _fid_step_report_lines(
+    manager: ProjectManager, exp_id: str, data_id: str
+) -> list[str]:
+    """Data-quality report of the Generate-FID step (reads that data's process/ records only).
+
+    2026-09-23 (user request): what this step's log reports at its end must also show up in the
+    step report of the middle panel - both use the same format
+    (workflow.direct_diagnostics.fid_step_quality_report) and read diagnostics.json /
+    field_drift.json / qc_audit.jsonl without re-running the diagnosis or touching the fid.
+    """
+    from workflow.direct_diagnostics import fid_step_quality_report
+
+    try:
+        work = manager.data_dir(exp_id, data_id, "process")
+        raw = manager.data_dir(exp_id, data_id, "raw")
+    except Exception:  # noqa: BLE001 - an unresolvable path means "no record"
+        return [tr("(no data quality report record for this data)")]
+    try:
+        return fid_step_quality_report(work, [raw])
+    except Exception as exc:  # noqa: BLE001 - a broken report must not break the UI
+        return [tr("could not read the data quality report: {p0}", p0=exc)]
+
+
 def _spectrum_param_report(
     params: dict, spectrum_path: str | None = None
 ) -> str:
-    """Generate spectrum parameter report (0.2.169-complement readable): ◆ data quality diagnosis +
-    ◆ processing parameter and optimisation; spectrum_path appended when readable ◆ final
-    spectrum graph quality (shared with log end summary spectrum_quality_report_lines)."""
+    """Generate spectrum parameter report (0.2.169-complement readable): ◆ processing parameter
+    and optimisation; spectrum_path appended when readable ◆ final spectrum graph quality
+    (shared with log end summary spectrum_quality_report_lines).
+
+    2026-09-23 (user request): the data quality diagnosis belongs to the Generate-FID step and
+    was removed from this report - that step's log and step report carry it now."""
     from workflow.optimization_report import (
         format_optimization_report,
         spectrum_quality_report_lines,
     )
 
     lines: list[str] = []
-    reports = list((params.get("diagnostics") or {}).get("reports") or [])
-    lines.append(tr("◆ Data quality diagnosis (data monitoring before processing, FID inspection)"))
-    if reports:
-        auto_count = int(
-            bool((params.get("diagnostics") or {}).get("apply_poly_time"))
-        )
-        auto_count += int(
-            int(
-                (params.get("diagnostics") or {}).get("repaired_badpoints") or 0
-            )
-            > 0
-        )
-        suffix = (
-            tr(
-            "(Automatically processed {p0} "
-            "item)",
-            p0=auto_count,
-        )
-        ) if auto_count else tr(
-            "(not processed "
-            "automatically)",
-        )
-        lines.append(tr(" ⚠ Check out {p0} question {p1}", p0=len(reports), p1=suffix))
-        for i, report in enumerate(reports, 1):
-            lines.append(f"     {i}. {report}")
-    else:
-        lines.append(
-            tr(
-            " ✓ No DC offset, peak bad point, abnormal first point, broadband peak or drift "
-            "detected",
-        )
-        )
-    # 0.2.199-patch29ab: Reporting order = data quality -> processing parameter and optimisation ->
-    # final spectrum image quality.
+    # 2026-09-23 (user request): the data quality diagnosis is not here - that conclusion
+    # belongs to the Generate-FID step (see _fid_step_report_lines / that step's log report).
+    # 0.2.199-patch29ab: reporting order = processing parameter and optimisation -> final
+    # spectrum image quality (the data quality diagnosis moved to the Generate-FID step).
     lines.append(tr("◆ Handle parameter and optimisation"))
     lines += format_optimization_report(
         {k: v for k, v in params.items() if k != "diagnostics"}
@@ -625,6 +624,178 @@ class _FlowLayout(QLayout):
         return y + line_height + m.bottom() - rect.y()
 
 
+# ---------------------------------------------------------------------------
+# Indirect-dimension flip (FT -neg): rewriting the final script text / reading its current state
+#
+# User 2026-09-25: the spectrum step's "indirect flip" only edits the **existing final
+# script** (no re-optimisation), and the re-run reuses the 0.2.163-patch5 entrance. The only
+# rewriting rule: add/remove ``-neg`` on the **indirect-dimension FT line** according to the
+# choice; the direct-dimension FT, ``-alt``/``-real``/``-bruk``, EXT, PS, window functions,
+# baseline and the SMILE direction flags (``-xNeg``/``-yNeg``) are never touched.
+# ---------------------------------------------------------------------------
+
+#: ndim -> order in which the indirect-dimension FT lines appear in the final script (matches
+#: backend/script_generator.py's generate_process_script / generate_*_nus_script: after the
+#: direct dimension, F2 then F1)
+_INDIRECT_AXIS_ORDER: dict[int, tuple[str, ...]] = {2: ("F1",), 3: ("F2", "F1")}
+
+#: stand-alone ``-neg`` token (does not match ``-xNeg``/``-nSigma`` and the like)
+_NEG_TOKEN = re.compile(r"(?<![-\w])-neg(?![-\w])")
+_FT_LINE_TOKEN = re.compile(r"-fn\s+FT(?![-\w])", re.IGNORECASE)
+
+
+def _pipeline_statements(lines: list[str]) -> list[list[int]]:
+    """Cut the script into "pipeline statements": one top-level command plus its continuation
+    lines (returns lists of line numbers).
+
+    Blank lines and ``#`` comment lines are separators; a continuation line is either the
+    previous line ending in ``\\``, or the current line starting with ``|``.
+    """
+    statements: list[list[int]] = []
+    current: list[int] = []
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if not current:
+            if not stripped or stripped.startswith("#"):
+                continue
+            current = [index]
+            continue
+        if lines[current[-1]].rstrip().endswith("\\") or stripped.startswith("|"):
+            current.append(index)
+            continue
+        statements.append(current)
+        current = [] if (not stripped or stripped.startswith("#")) else [index]
+    if current:
+        statements.append(current)
+    return statements
+
+
+def _is_ft_line(line: str) -> bool:
+    """Is this line a ``| nmrPipe -fn FT`` line (comment lines do not count)."""
+    stripped = line.strip()
+    return bool(stripped) and not stripped.startswith("#") and bool(
+        _FT_LINE_TOKEN.search(line)
+    )
+
+
+def _indirect_ft_line_indexes(lines: list[str], ndim: int) -> list[int] | None:
+    """Line numbers of the indirect-dimension FT lines (in F2 -> F1 order); None when the
+    script layout cannot be recognised.
+
+    Rule: the **first** FT line of the statement reading the time-domain ``.fid`` is the
+    direct dimension; the remaining FT lines of that statement (after TP/ZTP) and the FT
+    lines of **other** statements (reading back from a reconstructed plane / SMILE output)
+    are all indirect. If the number of indirect FT lines does not match the dimensionality,
+    do not guess -- return None (the caller warns the user).
+    """
+    expected = _INDIRECT_AXIS_ORDER.get(int(ndim))
+    if not expected:
+        return None
+    indirect: list[int] = []
+    for statement in _pipeline_statements(lines):
+        time_domain = ".fid" in lines[statement[0]]
+        seen_ft = False
+        for line_no in statement:
+            if not _is_ft_line(lines[line_no]):
+                continue
+            if time_domain and not seen_ft:
+                seen_ft = True  # the statement's first FT line = direct dimension
+                continue
+            indirect.append(line_no)
+    if len(indirect) != len(expected):
+        return None
+    return indirect
+
+
+def _add_neg_token(line: str) -> str:
+    """Append ``-neg`` to an FT line (unchanged if already present); inserted at the end of
+    the parameters, before the continuation backslash."""
+    if _NEG_TOKEN.search(line):
+        return line
+    body = line.rstrip()
+    if body.endswith("\\"):
+        return body[:-1].rstrip() + " -neg \\"
+    return body + " -neg"
+
+
+def _remove_neg_token(line: str) -> str:
+    """Remove ``-neg`` from an FT line (unchanged if absent), cleaning up only the gap the
+    token leaves behind.
+
+    **Only** the space left by ``-neg`` itself is cleaned; the line's leading indentation and
+    any other whitespace stay exactly as they are -- an earlier
+    ``re.sub(r"[ \\t]{2,}", " ")`` collapsed **every** run of spaces inside the line and
+    destroyed the script's indentation (continuation-line alignment the user had edited by
+    hand).
+    """
+    if not _NEG_TOKEN.search(line):
+        return line
+    # Eat the whitespace immediately before the token too, so that no gap such as "FT  -alt"
+    # or "FT \\" is left behind.
+    cleaned = re.sub(r"[ \t]*-neg(?![-\w])", "", line, count=1)
+    return re.sub(r"[ \t]+$", "", cleaned)
+
+
+def flip_indirect_ft_lines(
+    script: str, *, ndim: int, flips: dict[str, bool]
+) -> tuple[str, dict[str, bool]]:
+    """Edit the **indirect-dimension** FT lines according to ``flips`` (axis -> whether that
+    axis should finally carry ``-neg``).
+
+    Returns ``(new script, axes actually changed -> resulting state)``; when the layout
+    cannot be recognised it returns an empty dict, on which the caller tells the user to
+    "re-optimise to generate the script first".
+    """
+    if not script or not flips:
+        return script, {}
+    lines = script.split("\n")
+    indexes = _indirect_ft_line_indexes(lines, ndim)
+    if indexes is None:
+        return script, {}
+    applied: dict[str, bool] = {}
+    for axis, line_no in zip(_INDIRECT_AXIS_ORDER[int(ndim)], indexes):
+        if axis not in flips:
+            continue
+        want = bool(flips[axis])
+        if want == bool(_NEG_TOKEN.search(lines[line_no])):
+            continue  # already in the target state
+        lines[line_no] = (
+            _add_neg_token(lines[line_no]) if want else _remove_neg_token(lines[line_no])
+        )
+        applied[axis] = want
+    return "\n".join(lines), applied
+
+
+def indirect_neg_state(script: str, *, ndim: int) -> dict[str, bool]:
+    """Whether each indirect dimension of the final script currently carries ``-neg``;
+    empty dict when the layout cannot be recognised."""
+    lines = script.split("\n")
+    indexes = _indirect_ft_line_indexes(lines, ndim)
+    if indexes is None:
+        return {}
+    return {
+        axis: bool(_NEG_TOKEN.search(lines[line_no]))
+        for axis, line_no in zip(_INDIRECT_AXIS_ORDER[int(ndim)], indexes)
+    }
+
+
+def _indirect_only_section(script: str) -> str | None:
+    """3D NUS: cut out the "indirect-dimension processing from the retained reconstruction
+    planes" section (step 3 of the final script).
+
+    Only a statement that really reads back from ``nus3d_rc/...`` is cut (returns from that
+    statement to the end of the script); when nothing can be cut it returns None -- the
+    caller then falls back to re-running the whole script instead of silently running
+    something else.
+    """
+    lines = script.split("\n")
+    for statement in _pipeline_statements(lines):
+        header = lines[statement[0]]
+        if "xyz2pipe -in " in header and "nus3d_rc" in header:
+            return "\n".join(lines[statement[0]:]) + "\n"
+    return None
+
+
 class PipelineStepRow(QWidget):
     """Single step line: status icon + name + description + run/artificial entrance + embedded
     details. Click on row to expand/Collapse details (input product, running record, parameter,
@@ -632,8 +803,9 @@ class PipelineStepRow(QWidget):
     provides "View log" and "Retry"."""
 
     run_requested = Signal(str)  # step_id
-    # Rerun existing final script (without re-optimisation).
-    rerun_final_requested = Signal(str)
+    # step_id + sampling overrides (indirect flip: {"flip_f1"/"flip_f2": whether the target
+    # should carry -neg})
+    rerun_final_requested = Signal(str, dict)
     # Open the script editor (existing scripts are preferred).
     manual_requested = Signal(str)
     # Display the spectrum after generating the spectrum.
@@ -655,6 +827,11 @@ class PipelineStepRow(QWidget):
         self.setObjectName("StepRow")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.step_id = step_id
+        # Indirect-dimension flip controls (2026-09-25): 2D checkbox / 3D drop-down; the state
+        # stays in sync with the final script.
+        self._flip_ndim = 2
+        self._rerun_widgets_visible = False
+        self._indirect_neg: dict[str, bool] = {}
         outer = QVBoxLayout(self)
         outer.setContentsMargins(4, 2, 4, 2)
         outer.setSpacing(0)
@@ -863,6 +1040,30 @@ class PipelineStepRow(QWidget):
         button_row.addWidget(self.run_button)
         # 0.2.163-patch5: "Rerun the final script" when the spectrum is completed (reuse existing
         # scripts, without optimisation).
+        # 2026-09-25 (user, second UI wording): the indirect flip and "Re-run the final script"
+        # are **one thing** (the flip only applies to this re-run), so both go into the same
+        # bordered little box with the flip control on the **left** (read as "flip -> re-run"),
+        # and the box never takes up space in other step rows.
+        self.rerun_group = QFrame()
+        self.rerun_group.setObjectName("RerunGroup")
+        self.rerun_group.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.rerun_group.setStyleSheet(
+            f"#RerunGroup {{ border: 1px solid {PANEL_BORDER}; "
+            f"border-radius: 6px; background: {SURFACE_ALT}; }}"
+        )
+        self.rerun_group.setToolTip(
+            tr(
+                "Re-run the last generated final script without re-optimisation. The indirect flip "
+                "next to it applies to this run only.",
+            )
+        )
+        self.rerun_group.setVisible(False)
+        _group_row = QHBoxLayout(self.rerun_group)
+        _group_row.setContentsMargins(8, 3, 8, 3)
+        _group_row.setSpacing(6)
+        self.flip_group_label = QLabel(tr("Indirect flip"))
+        self.flip_group_label.setStyleSheet(f"color: {TEXT_MUTED};")
+        _group_row.addWidget(self.flip_group_label)
         self.rerun_final_button = QPushButton(tr("Re-run the final script"))
         self.rerun_final_button.setToolTip(
             tr(
@@ -872,10 +1073,62 @@ class PipelineStepRow(QWidget):
             )
         )
         self.rerun_final_button.setVisible(False)
-        self.rerun_final_button.clicked.connect(
-            lambda: self.rerun_final_requested.emit(self.step_id)
+        self.rerun_final_button.clicked.connect(self._on_rerun_final_clicked)
+        # Indirect-dimension flip (FT -neg): 2D uses a checkbox (checked = the final script's
+        # indirect dimension F1 already carries -neg), 3D uses a three-entry drop-down (indirect
+        # F2 / indirect F1 / F1 and F2); shown/hidden under the same condition as
+        # rerun_final_button.
+        self.flip_indirect_check = QCheckBox(tr("Indirect (F1)"))
+        self.flip_indirect_check.setToolTip(
+            tr(
+                "Add FT -neg to the indirect dimension (F1) and re-run the final script; "
+                "unchecking removes it again. Only the indirect-dimension FT line is changed.",
+            )
         )
-        button_row.addWidget(self.rerun_final_button)
+        self.flip_indirect_check.setVisible(False)
+        self.flip_indirect_combo = QComboBox()
+        # Option value = the per-axis keys to decide **directly** (official names
+        # ft_neg_f1/ft_neg_f2, same semantics as the global ft_neg; flip_f* are legacy aliases
+        # that new code does not use)
+        self.flip_indirect_combo.addItem(tr("Indirect (F2)"), {"ft_neg_f2": True})
+        self.flip_indirect_combo.addItem(tr("Indirect (F1)"), {"ft_neg_f1": True})
+        self.flip_indirect_combo.addItem(
+            tr("F1 and F2"), {"ft_neg_f1": True, "ft_neg_f2": True}
+        )
+        # When nothing is selected (-1) nothing happens: the drop-down is a **command**
+        # (choosing an entry sets the dimensions it contains to "add", and choosing the same
+        # entry again sets them back to "no add"), then it resets; the empty state shows
+        # "no flip".
+        self.flip_indirect_combo.setCurrentIndex(-1)
+        self.flip_indirect_combo.setPlaceholderText(tr("no flip"))
+        self.flip_indirect_combo.setToolTip(
+            tr(
+                "Flip the FT sign (FT -neg) of the chosen indirect dimension(s) and re-run the "
+                "final script; choosing an already-flipped entry again removes the flip. Only the "
+                "indirect-dimension FT line is changed.",
+            )
+        )
+        self.flip_indirect_combo.setVisible(False)
+        fit_combo_width(self.flip_indirect_combo)
+        # The placeholder text's width is not part of fit_combo_width's rule (it only measures
+        # the menu entries), so top it up separately, lest the placeholder be truncated with an
+        # ellipsis while nothing is selected (same cause as 0.2.199-patch29hz-revision 14).
+        _flip_metrics = self.flip_indirect_combo.fontMetrics()
+        self.flip_indirect_combo.setMinimumWidth(
+            max(
+                self.flip_indirect_combo.minimumWidth(),
+                _flip_metrics.horizontalAdvance(
+                    self.flip_indirect_combo.placeholderText()
+                )
+                + 38,
+            )
+        )
+        # Order inside the group: title -> flip control -> re-run button (read as
+        # "flip -> re-run")
+        _group_row.addWidget(self.flip_indirect_check)
+        _group_row.addWidget(self.flip_indirect_combo)
+        _group_row.addWidget(self.rerun_final_button)
+        button_row.addWidget(self.rerun_group)
         self.show_spectrum_button = QPushButton(tr("display spectrum"))
         self.show_spectrum_button.setToolTip(
                 tr(
@@ -1091,10 +1344,10 @@ class PipelineStepRow(QWidget):
                         "run)",
                     )
                 )
-                self.rerun_final_button.setVisible(True)
+                self._set_rerun_widgets_visible(True)
             else:
                 self.run_button.setText(tr("reprocess"))
-                self.rerun_final_button.setVisible(False)
+                self._set_rerun_widgets_visible(False)
             self.run_button.setVisible(True)
             self.run_button.setToolTip(
                     tr(
@@ -1107,12 +1360,85 @@ class PipelineStepRow(QWidget):
             self.run_button.setText(tr("run"))
             self.run_button.setVisible(status == "READY")
             self.run_button.setToolTip(tr("run current step"))
-            self.rerun_final_button.setVisible(False)
+            self._set_rerun_widgets_visible(False)
         # SMILE The "Rerun by Rank1" entrance will be provided only after the scan is completed
         # (SUCCESS).
         self.rank1_button.setVisible(
             status == "SUCCESS" and self.step_id == "smile"
         )
+
+    # ------------------------------------------------------------------
+    # Indirect-dimension flip (FT -neg) controls (user 2026-09-25)
+    # ------------------------------------------------------------------
+    def _set_rerun_widgets_visible(self, visible: bool) -> None:
+        """Show/hide "Re-run the final script" and the indirect flip (one unit inside the same
+        box) together."""
+        self._rerun_widgets_visible = bool(visible)
+        self.rerun_group.setVisible(bool(visible))
+        self.rerun_final_button.setVisible(bool(visible))
+        self._sync_flip_widget_visibility()
+
+    def _sync_flip_widget_visibility(self) -> None:
+        """Flip-control visibility: spectrum step + an existing final script; 2D checkbox, 3D
+        drop-down, no entrance for 1D."""
+        visible = self._rerun_widgets_visible and self.step_id == "spectrum"
+        self.flip_indirect_check.setVisible(visible and self._flip_ndim == 2)
+        self.flip_indirect_combo.setVisible(visible and self._flip_ndim >= 3)
+
+    def set_indirect_dimension(self, ndim: int) -> None:
+        """Pick the control's shape from the data dimensionality (2D checkbox / 3D three-entry
+        drop-down)."""
+        self._flip_ndim = int(ndim or 2)
+        self._sync_flip_widget_visibility()
+
+    def set_indirect_neg_state(self, state: dict[str, bool] | None) -> None:
+        """Fill the controls from the final script's current state (2D checkbox checked =
+        indirect dimension F1 already carries ``-neg``).
+
+        The 2D checkbox is itself a **state**: without filling it back in, the next ordinary
+        re-run (only to update the direct-dimension range) would silently drop the previous
+        flip. The 3D drop-down is a command and does not show the current state, but the flip
+        conversion needs that state (see :meth:`_take_flip_sampling`).
+        """
+        self._indirect_neg = {
+            str(axis): bool(neg) for axis, neg in (state or {}).items()
+        }
+        if self._flip_ndim < 3:
+            self.flip_indirect_check.setChecked(
+                bool(self._indirect_neg.get("F1", False))
+            )
+
+    def _take_flip_sampling(self) -> dict[str, bool]:
+        """Current control choice -> sampling overrides (explicitly "should this axis finally
+        carry ``-neg``").
+
+        The keys use the official names ``ft_neg_f1``/``ft_neg_f2`` (same semantics as the
+        global ``ft_neg``: they decide **directly** whether to add it, not an inverted
+        auto-criterion).
+
+        2D: the checkbox's checked state is the target state; 3D: the drop-down is a
+        **command** (choosing an entry sets the dimensions it contains, choosing the same
+        entry again sets them back to "no add" -- here the panel computes the **explicit
+        target state** from the row's stored final-script state, so the script layer always
+        receives "add/no add"), and the drop-down is reset to "nothing selected".
+        """
+        if self.step_id != "spectrum":
+            return {}
+        if self._flip_ndim >= 3:
+            data = self.flip_indirect_combo.currentData()
+            self.flip_indirect_combo.setCurrentIndex(-1)
+            if not isinstance(data, dict):
+                return {}
+            return {
+                key: not bool(self._indirect_neg.get(axis, False))
+                for key, axis in (("ft_neg_f2", "F2"), ("ft_neg_f1", "F1"))
+                if key in data
+            }
+        return {"ft_neg_f1": bool(self.flip_indirect_check.isChecked())}
+
+    def _on_rerun_final_clicked(self) -> None:
+        """'Re-run the final script': emit the indirect-flip choice together with the signal."""
+        self.rerun_final_requested.emit(self.step_id, self._take_flip_sampling())
 def _looks_like_memory_guard(exc: BaseException) -> bool:
     """Is this exception the memory guard's? (two producers, one wording each)"""
     text = str(exc)
@@ -1765,6 +2091,10 @@ class PipelinePanel(QWidget):
                 if run is not None and run.message:
                     reason = run.message
             self._rows[step_id].set_status(status, reason)
+            if step_id == "spectrum":
+                # 2026-09-25: the indirect-dimension flip control takes its shape from the data
+                # dimensionality and is filled back from the final script's current state.
+                self._sync_indirect_flip_control(status)
             # Importing sample data is an automated step, with no manual entry; the remaining
             # processing steps remain manual; 0.2.163-patch14: No manual button is provided when the
             # previous step is not completed (LOCKED) -- The next run entry is not given until the
@@ -1947,6 +2277,45 @@ class PipelinePanel(QWidget):
             ext_params["final_ext_hi"] = over[1]
         return ext_params
 
+    def _final_script_path(self, data_id: str) -> Path | None:
+        """Locate an existing final-run script (uniform ``_process.com`` / NUS ``_nus.com``).
+
+        Returns None when nothing is found (the caller prompts to optimise and generate one
+        first). The final-run script names match how ``backend.nmrpipe_backend`` writes them.
+        """
+        if not (self._current_exp_id and data_id):
+            return None
+        work = self.manager.data_dir(self._current_exp_id, data_id, "process")
+        for name in (
+            f"{data_id}_process.com",
+            f"{data_id}_nus.com",
+            "process.com",
+            "nus.com",
+        ):
+            candidate = work / name
+            if candidate.is_file():
+                return candidate
+        return None
+
+    def _sync_indirect_flip_control(self, status: str) -> None:
+        """Sync the spectrum step's indirect-flip control (shape by dimensionality, state by the
+        final script's current state)."""
+        row = self._rows.get("spectrum")
+        if row is None:
+            return
+        ndim = self._data_ndim(self._current_exp_id, self._current_data_id)
+        row.set_indirect_dimension(ndim)
+        if status != "SUCCESS":
+            return
+        script_path = self._final_script_path(self._current_data_id)
+        if script_path is None:
+            return
+        try:
+            content = script_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return
+        row.set_indirect_neg_state(indirect_neg_state(content, ndim=ndim))
+
     # ------------------------------------------------------------------
     # Run.
     # ------------------------------------------------------------------
@@ -2076,11 +2445,13 @@ class PipelinePanel(QWidget):
         if rec is not None and rec.is_file():
             try:
                 data = json.loads(rec.read_text(encoding="utf-8"))
-                if (
-                    data.get("fp") == fp
-                    and data.get("params_fp") == params_fp
-                    and isinstance(data.get("text"), str)
-                ):
+                # 2026-09-23: the authoritative fingerprint is the spectrum file itself
+                # (mtime_ns+size). The report was computed for this spectrum; parameter identity
+                # only decides which run's text the record holds. Requiring params_fp to match
+                # byte for byte would misjudge "spectrum unchanged, parameter object rendered
+                # slightly differently" as no record, and what the user sees is the "Generate
+                # Spectrum" step showing "no report record" forever.
+                if data.get("fp") == fp and isinstance(data.get("text"), str):
                     self._spectrum_report_cache[key] = data["text"]
                     return data["text"]
             except (OSError, ValueError):
@@ -2122,7 +2493,13 @@ class PipelinePanel(QWidget):
             ))
             if run.message:
                 lines.append(tr("information: {p0}", p0=run.message))
-            if step_id == "spectrum":
+            if step_id == "fid":
+                # 2026-09-23 (user request): whatever the step log ended with is shown here
+                # (the data quality diagnosis belongs to this step; the spectrum step report
+                # no longer carries that section)
+                lines.append(tr("data quality report (from the Generate-FID step):"))
+                lines += _fid_step_report_lines(self.manager, exp_id, data_id)
+            elif step_id == "spectrum":
                 # 0.2.155: Simplification -- only display readable parameter reports when generating
                 # spectrum, and no longer dump internal details such as original parameter/script
                 # snapshots.
@@ -2542,14 +2919,29 @@ class PipelinePanel(QWidget):
         self._run_active = True
         threading.Thread(target=worker, daemon=True).start()
 
-    def _on_rerun_final_requested(self, step_id: str) -> None:
-        """"Rerun the final script": directly change the direct dimension range on the existing
-        final script and then run it. The final script (uniform {data_id}_process.com / NUS
-        {data_id}_nus.com) already contains all parameters such as phase/window/baseline after
-        optimisation; after the user has changed the direct dimension range, he only needs to
-        change the EXT line -x1/-xn ppm in the script. Replace the window with the latest value
-        and run again -- other parameters will not change at all, and the spectrum will not
-        change due to re-rendering."""
+    def _on_rerun_final_requested(
+        self, step_id: str, sampling: dict | None = None
+    ) -> None:
+        """"Rerun the final script": change the direct dimension range / the indirect flip
+        directly on the existing final script and run it.
+
+        The final script (uniform {data_id}_process.com / NUS {data_id}_nus.com) already
+        contains every optimised parameter (phase/window/baseline and so on); after the user
+        has changed the direct dimension range or picked an indirect flip, only the matching
+        lines (EXT's -x1/-xn; the indirect-dimension FT line's -neg) are changed before
+        running -- no other parameter is touched, and the spectrum does not change by being
+        re-rendered.
+
+        Sampling overrides (user 2026-09-25): ``ft_neg_f1``/``ft_neg_f2`` inside ``sampling``
+        are the **target states** (True = that indirect dimension should carry ``-neg``,
+        False = it should not; they decide **directly**, they are not an inversion), supplied
+        by the spectrum step's flip control (``flip_f1``/``flip_f2`` are legacy aliases and
+        are accepted too); they only affect the indirect-dimension FT lines. For 3D NUS the
+        indirect-dimension input (``nus3d_rc``) is kept by the pipeline cleanup, so a flip
+        re-run only runs the indirect-dimension section and does not re-run SMILE and the
+        direct dimension; 2D (including 2D NUS) and 3D uniform have no such intermediate, so
+        the whole script is re-run.
+        """
         if step_id != "spectrum":
             return
         if self._run_active:
@@ -2563,27 +2955,31 @@ class PipelinePanel(QWidget):
         exp_id = self._current_exp_id
         if not exp_id:
             return
+        flips: dict[str, bool] = {}
+        for axis, keys in (
+            ("F2", ("ft_neg_f2", "flip_f2")),
+            ("F1", ("ft_neg_f1", "flip_f1")),
+        ):
+            for key in keys:  # official names first; flip_f* are legacy aliases
+                if sampling and sampling.get(key) is not None:
+                    flips[axis] = bool(sampling[key])
+                    break
         self._rows[step_id].set_status("RUNNING")
-        self.log_message.emit(
-            tr(
-            "Start re-running the final script (only the direct dimension range is updated, the "
-            "other parameters remain "
+        self.log_message.emit(tr(
+            "Start re-running the final script (only the direct dimension range / the indirect "
+            "dimension flip is "
+            "updated, the other parameters remain "
             "unchanged)",
-        )
-        )
-
-        import re
+        ))
 
         def worker() -> None:
             try:
                 nodes = _data_nodes(self.manager, exp_id)
                 if not nodes:
                     self.log_scoped.emit(
-                        (
-                            tr(
+                        tr(
                             "The experiment type does not yet have sample "
                             "data",
-                        )
                         ), self._run_log_scope(exp_id, "")
                     )
                     return
@@ -2599,34 +2995,35 @@ class PipelinePanel(QWidget):
                 # Locate the existing final script (uniform/NUS). If it cannot be found, it will
                 # prompt optimisation to generate it first.
                 work = self.manager.data_dir(exp_id, data_id, "process")
-                script_path = None
-                for name in (
-                    f"{data_id}_process.com",
-                    f"{data_id}_nus.com",
-                    "process.com",
-                    "nus.com",
-                ):
-                    candidate = work / name
-                    if candidate.is_file():
-                        script_path = candidate
-                        break
+                script_path = self._final_script_path(data_id)
                 if script_path is None:
                     self.log_scoped.emit(
-                        (
-                            tr(
+                        tr(
                             "There is no reusable final script, please execute \"re-optimisation\" "
                             "to generate it "
                             "first",
-                        )
                         ),
                         run_scope,
                     )
                     return
+                ndim = self._data_ndim(exp_id, data_id)
                 content = script_path.read_text(encoding="utf-8", errors="replace")
-                # Apply the direct dimension range of user's latest setting: replace -x1/-xn of the
-                # EXT line.
+                # 3D NUS: the indirect-dimension input (nus3d_rc) is retained, so a flip re-run
+                # only runs the indirect-dimension section.
+                indirect_section = (
+                    _indirect_only_section(content)
+                    if (flips and ndim >= 3)
+                    else None
+                )
+                if indirect_section is not None:
+                    planes_dir = work / "nus3d_rc"
+                    if not (planes_dir.is_dir() and any(planes_dir.glob("*.ft1"))):
+                        indirect_section = None
+                # Apply the direct dimension range of user's latest setting: replace -x1/-xn of
+                # the EXT line (when only the indirect section runs, EXT is left alone: the
+                # direct dimension is already baked into the retained reconstruction planes).
                 ext = self._spectrum_ext_params(data_id) or {}
-                if ext:
+                if ext and indirect_section is None:
                     lo = str(ext.get("final_ext_lo", ""))
                     hi = str(ext.get("final_ext_hi", ""))
                     if lo:
@@ -2643,32 +3040,99 @@ class PipelinePanel(QWidget):
                         )
                     script_path.write_text(content, encoding="utf-8", newline="\n")
                     self.log_scoped.emit(
-                        (
-                            tr(
+                        tr(
                             "direct dimension range updated: {p0}-{p1} ppm → "
                             "{p2}",
                             p0=lo or 'default',
                             p1=hi or 'default',
                             p2=script_path.name,
-                        )
                         ),
                         run_scope,
                     )
+                elif ext and indirect_section is not None:
+                    self.log_scoped.emit(
+                        tr(
+                            "The direct dimension range was not applied: this re-run reuses the "
+                            "retained reconstruction planes — execute \"re-optimisation\" to apply "
+                            "it",
+                        ),
+                        run_scope,
+                    )
+                # Indirect-dimension flip: only change the matching indirect FT line to
+                # carry/not carry -neg.
+                if flips:
+                    content, applied = flip_indirect_ft_lines(
+                        content, ndim=ndim, flips=flips
+                    )
+                    if applied:
+                        script_path.write_text(
+                            content, encoding="utf-8", newline="\n"
+                        )
+                        added = sorted(
+                            axis for axis, neg in applied.items() if neg
+                        )
+                        removed = sorted(
+                            axis for axis, neg in applied.items() if not neg
+                        )
+                        if added:
+                            self.log_scoped.emit(
+                                tr(
+                                    "indirect dimension flip on the final script: {p0} -neg",
+                                    p0=", ".join(added),
+                                ),
+                                run_scope,
+                            )
+                        if removed:
+                            self.log_scoped.emit(
+                                tr(
+                                    "indirect dimension flip cancelled on the final script: "
+                                    "{p0} -neg",
+                                    p0=", ".join(removed),
+                                ),
+                                run_scope,
+                            )
+                    else:
+                        self.log_scoped.emit(
+                            tr(
+                                "The indirect dimension FT line could not be located in the final "
+                                "script; the flip was not applied — execute \"re-optimisation\" to "
+                                "regenerate the script "
+                                "first",
+                            ),
+                            run_scope,
+                        )
+                # The script to run: for a 3D NUS flip only the indirect-dimension section runs
+                # (under a new script name, keeping the full final script).
+                if indirect_section is not None:
+                    run_key = f"{data_id}_nus_indirect.com"
+                    # Cut from the **already flipped** script, otherwise the run would use the
+                    # copy without -neg.
+                    content = _indirect_only_section(content) or content
+                    self.log_scoped.emit(
+                        tr(
+                            "Indirect dimension flip: only the indirect dimension is re-run "
+                            "from the retained reconstruction planes (SMILE and the direct "
+                            "dimension are not re-run)",
+                        ),
+                        run_scope,
+                    )
+                else:
+                    run_key = script_path.name
                 # 0.2.199-patch29h: Detect common errors before running after modification (in
                 # worker, log prompt).
                 from workflow.script_check import check_script
 
-                for w in check_script(content, script_path.name):
+                for w in check_script(content, run_key):
                     self.log_scoped.emit(tr("⚠ script check: {p0}", p0=w), run_scope)
                 # Run the modified final script and return the spectrum to its original position;
                 # forward the script output in real time.
                 result = self.controller.run_manual_spectrum(
                     data_node,
-                    {script_path.name: content},
+                    {run_key: content},
                     exp_id=exp_id,
                     data_id=data_id,
                     progress=lambda line: self.log_scoped.emit(
-                        f"[{script_path.name}] {line}", run_scope
+                        f"[{run_key}] {line}", run_scope
                     ),
                 )
                 self.log_scoped.emit(

@@ -12,6 +12,11 @@
 - 例行：本地改 → `pytest`（临时目录不可写时加 `--basetemp=<目录>`）→ `ruff check .` →
   在装有 NMRPipe 的机器上跑全量(同一套打桩测试,不调用引擎)→ commit。
 
+- **对外动作门槛(2026-09-23 用户)**:公开树镜像与推送、GitHub 推送、AppImage 重建一律等用户
+  点名;小改动先在私有主干 + VM 验证。小轮次只跑相关测试 —— 本地**全量**回归含
+  两棵树同步守卫(只存在于私有主干:结构/文案一致),公开树落后时它会红,跑全量前先同步
+  公开树,别把「公开树落后」当缺陷。
+
 ## 测试
 
 - `pytest` 全量；GUI 测试用 `QT_QPA_PLATFORM=offscreen`。
@@ -216,8 +221,16 @@ python scripts/update_compat_declaration.py --level same              # 只是�
   判定 + 信噪比/相位/基线/伪影分项等级分数 + 基线指标 + 检查说明)、
   ◆ 数据质量诊断(检出 N 项/已自动处理 M 项结论 + 明细)、◆ 处理参数
   与优化;不得再退回单行浓缩式「谱图质量: ...」;
-- 数据质量诊断(处理前)的日志必须排在流程最开头(uniform 与 NUS 一致),
-  不得延后到优化之后;
+- FID 数据质量诊断的日志排在**「生成 FID」步骤的最后**(2026-09-23 用户要求:诊断在现场跑,
+  结论与「怎么处理的」一起报;uniform 与 NUS 一致),**不**在「生成谱图」开头播报 —— 谱图步骤
+只读回并复用,不重跑;
+- 数据质量诊断只属「生成 FID」步骤(2026-09-23 第二轮,用户要求):该步骤的日志与 GUI 该步骤
+  报告共用 `workflow.direct_diagnostics.format_fid_step_report`;谱图报告(自动 + 人工)不含这一段,
+  不得再往里加。本步没有新增源头坏点时必须查历史留痕
+  (`read_source_cleanup_history`:qc_audit.jsonl 的 `removed_from_source_ser_and_nuslist` + raw
+  下 `.bak`)并照实写「N 处已在更早的运行里删除」;场漂没检查成 / 一段都测不出同样照实写,
+  不得给 ✓。计数只用「检出项」(`auto_handled` / `notes` 分开),审计摘要等附注不参与计数。
+  `process/diagnostics.json` 复用(记录缺失或与当前 fid 不符时才回退重跑,回退时照旧播报);
 - 日志按选中上下文隔离(0.2.186):单个数据独立 log、数据组组内共用、
   实验类型实验级、其余归全局;选中变化由主窗口 set_scope 切换显示,组批量
   进度显式路由到组作用域——不得把不同数据的日志混进同一缓冲区。
@@ -285,7 +298,11 @@ python scripts/update_compat_declaration.py --level same              # 只是�
   的建议。
 - pipeline 步骤行按钮区必须能自动折行(0.2.199-补4):生成谱图完成后一行
   最多 5 个按钮(直接维范围/重新优化/重新运行终脚本/展示谱图/人工),宽度
-  不足时自动另起一行,不得单行硬撑;隐藏按钮不占位。
+  不足时自动另起一行,不得单行硬撑;隐藏按钮不占位。2026-09-25(第三十轮)
+  在「重新优化」与「展示谱图」之间再加**间接维翻转 + 重新运行终脚本**的
+  一体方框(`PipelineStepRow.rerun_group`,框内:标题「间接维翻转」→ 2D 复选框 /
+  3D 下拉三项 → 重跑按钮;整排里只占 **1 个**流式项,故仍是「5 个可见项」),
+  显隐与「重新运行终脚本」同条件;D009 记录该口径。
 - 左侧树数据运行中状态(0.2.199-补5):任何处理过程(自动步骤/重新运行终
   脚本/人工脚本/数据组批量)开始时,左侧树对应数据显示「运行中」,结束后
   恢复产物推断状态;标记须在主线程维护(后台线程经排队信号),不得直接
@@ -350,11 +367,38 @@ python scripts/update_compat_declaration.py --level same              # 只是�
   (TD=1 时 bruker 同样输出单文件全网格 fid);3D NUS 切片只在 SMILE 脚本
   step1 直接维处理后产生(nus3d_1/test%04d.ft1);多段合并用 addNMR 合并
   单文件(merged/{dataset_id}.fid),段频移用 PS -rs(手工值走 params["segment_shift_hz"])。
-  2026-09-23 起多段转换还会自动测组间场漂(基准 = 第 1 段,**判据 |Δ| > 1.5 Hz,ppm 只记录**):
-  超阈值时把 `PS -rs <Δ>Hz` 插到该段 fid.com 的 `MULT -c` 之前(保留 MULT)重转该段,
-  复检残差后才合并;测不出峰/残差仍超阈值只报告(见 workflow/field_drift.py)。
+  2026-09-23 起多段转换还会自动测组间场漂(基准 = 第 1 段);**判据自 2026-09-24 起是「漂移 vs 直接维线宽」**:
+  `|Δ|` 需超过 `max(DRIFT_HZ_MIN = 1.5 Hz, IMPACT_FRACTION = 0.2 × 线宽)`——线宽 = 顶部迹的幅度谱取逐点
+  中位数作底线、扣除后的半高全宽,0.2×线宽 ⇔ 各段刚性偏移的方差只让谱线相对变宽 ≤ 2%;量不出线宽时才
+  退回按 FFT 点判(`DRIFT_POINTS_MIN = 1` 个,点宽 = 直接维 SW/复点数,`1.5 Hz` 作绝对下限;此后 FFT 点
+  只是报告里的参考量)。测不出偏移时既不写校正值、也不写成「判据以内」,只照实写「逐迹信噪比不足,
+  量不出可信漂移(相关峰只有底线的 X 倍,各迹给出的偏移互相差 Y Hz);未做校正」;超判据时把 `PS -rs <Δ>Hz` 插到该段 fid.com 的
+  `MULT -c` 之前(保留 MULT)重转该段,复检残差后才合并。合并前先做**分段一致性检查**:TD/SW/O1/SFO1/GRPDLY/FnMODE/PULPROG 等不同 = 拒绝合并;
+  NS 不同 = 告警但**不是权重问题**(每段 S∝NS、σ∝√NS,匹配权重 w∝S/σ² 是常数 → 直接相加即最优
+  合并;NS 差只说明各段不是等长采集);超判据的段
+  **要么全部校正、要么全部不校正**(中途失败就回滚已改段)。见 workflow/field_drift.py。
   转换期切片是历史产物,
   新代码不得生成;_zero_bad_point_fid 的切片回退仅兼容旧工作目录。
+- **谱宽口径(2026-09-24,强制)**:fid.com 的 `-xSW/-ySW/-zSW` 一律取
+  `core.data.bruker_reader.resolve_sweep_width` 的采用值 —— `SW_h` 与 `SW(ppm)×SFO1` 一致
+  (相对差 ≤ `SW_CONSISTENCY_TOL = 1%`)时用 `SW_h`;**矛盾时按 ppm 口径**(`SW×SFO1`)取并留说明;
+  `SW_h` 缺失/为 0 时同样按 `SW×SFO1`(**不得**把 ppm 当 Hz 用)。依据:TopSpin 的 `SW_h` 就是
+  `SW×SFO1` 的派生量(真机三段实测比值 1.000000000000),NMRPipe 官方 `com/nih.tcl` 的间接维候选
+  与 nmrglue 的间接维都用 ppm×SFO1,沉积方脚本(AGNuS `Convert_HSQC.csh`)也用它。采用值/原始值/
+  来源写进 `*.fid.conversion.json` 的 `sweep_width`,并出现在「生成 FID」步骤报告与导入告警里
+  (日志/报告/导入同文)。
+- **采集模式策略(2026-09-24 用户口径,强制)**:fid.com 的 `-yMODE/-zMODE` **一律统一写成 `Complex` 模式号**
+  (bruk2pipe 表:`0 = Complex, States, Complex-N, States-N / States-TPPI, States-TPPI-N`),**转换期不做符号调整**;
+  要不要 `-alt`/`-neg`/`-real`/`-bruk` 由 `acquisition_mode_detector` 的 FT 标志表在**处理阶段**判断
+  (转换期与处理期各做一次 = 重复施加)。沉积方脚本里的别的 0 族关键字(如 `States-TPPI`)会被统一成
+  `Complex`,并在「生成 FID」修正清单里说明原因(2026-09-24 公开沉积脚本对照)。
+- **CAR 参考口径(2026-09-24 用户定稿,强制)**:fid.com 的 `-xCAR/-yCAR/-zCAR` 一律取该维 acqus
+  `O1/BF1`(计算出来的、操作者设定的谱中心;这样同一实验不同时间采集的谱共用同一参考口径),
+  单一来源 `backend.bruker_workflow.carrier_values`。`bruker -AUTO` 的「水峰(TE)+ γ 比」只作旁证
+  (`water_value`/`configured_source`),不参与取值;**覆盖必须逐维告知用户**:「生成 FID」的日志与报告
+  给出 `acquisition center / Configured target CAR / Δ(=configured−acquisition) / status: REFERENCE_OVERRIDE`
+  四行块(`carrier_reference_block` 单一来源;`REFERENCE_KEPT/MANUAL/MISSING/UNKNOWN` 其余状态),两侧同文;
+  留档 `*.fid.conversion.json.carrier`(`acquisition_center`/`configured_target`/`delta_ppm`/`status`)。
 - SMILE 峰值内存预算(0.2.199-补15):安全的 SMILE 峰值 ≤ 2.8GB(填零 1024);
   5.6GB 量级(填零 2048,直接维翻倍)会超出内存护栏。测试数据/复跑必须保证
   `estimate_smile_peak_mb ≤ 2.8GB`;`test_dev_smile_memory_ceiling` 固化该约束。

@@ -9,8 +9,9 @@ Semantics (user API spec of 2026-09-13; independent picking from 2026-09-14):
     ``parameters_used`` (what the backend got) and ``parameters_resolved`` (the **actual**
     automatic values: actual_p0/actual_p1, SMILE nSigma/thresh, and the noise sigma);
 - **combinations pick independently** (2026-09-14): each picks on **its own candidate** at
-    the **reference-locked** threshold, writing its own table with ``reference_peak_id`` and
-    ``assignment`` empty (matching back to the reference is **external** work);
+    the **reference-locked** detection threshold, writing its own table with
+    ``reference_peak_id`` and ``assignment`` empty (matching back to the reference is
+    **external** work);
 - **refinement chosen outside**: ``localization`` = ``parabolic`` (default) / ``gaussian`` /
     ``both``; only the chosen table is written;
 - **several conditions, one parameter set**: one workflow uses one
@@ -40,6 +41,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from core.experiment.acquisition_mode_detector import sign_sampling_flags
 from core.logging_setup import append_run_log_line, attach_run_log, detach_run_log
 from core.peaks import axis_units
 from core.planning.method_selector import select_method
@@ -86,23 +88,25 @@ SUCCESS_STATUSES: frozenset[str] = frozenset({STATUS_SUCCESS, STATUS_WARNING})
 
 #: warning codes (spec D9/G3: anything affecting reading must be recorded, not silent)
 # 2026-09-14 (independent picking): the peak-tracking warnings are gone
-# (peak_not_detected / peak_window_edge / peak_out_of_range /
-# and window_points_fallback); a combination reports its own localisation QC only.
+# (peak_not_detected / peak_window_edge / peak_out_of_range / window_points_fallback
+# are no longer produced); a combination reports its own localisation QC only.
 WARN_GAUSSIAN_FALLBACK = "gaussian_fallback"
 WARN_GAUSSIAN_BOUNDARY_HIT = "gaussian_boundary_hit"
 WARN_GAUSSIAN_UNSUPPORTED = "gaussian_unsupported_ndim"
-#: the full processing script is missing (spec D1: every workflow keeps its script)
+#: this workflow's complete processing script cannot be found (spec D1: never drop it)
 WARN_SCRIPT_NOT_FOUND = "processing_script_not_found"
-#: the combination left the spectrum bit-identical to the reference, so the parameter was
+#: the combination left the spectrum bit-identical to the reference: the parameter did nothing
 WARN_NO_SPECTRUM_CHANGE = "no_spectrum_change"
 
-#: the combination mode's direct-range override disagrees with the reference's frozen range
+#: the combination mode's direct-range override disagrees with the reference's frozen
+#: range (a run-level mark, set once the explicit switch lets it through)
 WARN_DIRECT_RANGE_OVERRIDE = "direct_range_override"
-#: one peak table contains rows sharing a coordinate (duplicate localization)
+#: one peak table contains rows sharing a coordinate (duplicate localization), which
+#: downstream statistics must not treat as two independent observations
 WARN_DUPLICATE_LOCALIZATION = "duplicate_localization"
 
 # phase axes: phase.<axis>.p0|p1 is absolute, phase_delta.<axis>.p0|p1 is a deviation
-# from the reference phase (a manual ±5 degree correction, say).
+# from the reference phase (a manual +/-5 degree correction, say).
 PHASE_PREFIXES: tuple[str, ...] = ("phase.", "phase_delta.")
 
 # keys the backend actually reads (first path segment decides); others can be gridded
@@ -169,9 +173,25 @@ _DETERMINISTIC_KEYS: frozenset[str] = frozenset(
     }
 )
 
-# writing them breaks phase locking (or is ignored) -> raise and name the alternative.
+#: choosing ``-neg`` and ``-alt`` by hand is a sign convention settled **when the
+#: reference is built** (see the sampling overrides in
+#: nmrforge_api.reference.build_reference), not a sensitivity knob: any sweep axis that
+#: would put the candidate's sign out of step with the reference is refused.
+#: ``ft_neg_f1``/``ft_neg_f2`` are the official names and ``flip_f1``/``flip_f2`` the
+#: historical aliases; both spellings are refused.
 _LOCKED_AXIS_KEYS: frozenset[str] = frozenset(
-    {"phases", "direct_phase", "phase_route", "sampling.auto_phase"}
+    {
+        "phases",
+        "direct_phase",
+        "phase_route",
+        "sampling.auto_phase",
+        "sampling.flip_f1",
+        "sampling.flip_f2",
+        "sampling.ft_neg_f1",
+        "sampling.ft_neg_f2",
+        "sampling.ft_neg",
+        "sampling.ft_alt",
+    }
 )
 
 
@@ -229,8 +249,9 @@ def apply_phase_axes(
     return effective
 
 
-#: the **only** detection key a combination table may carry: per-combination refinement.
-#: it never reaches the backend (2026-09-14: combinations pick independently).
+#: the **only** detection (picking/localization) keys a combination table may carry: the
+#: per-combination refinement and the targeted peak list (``localization.targets``).
+#: They never reach the backend (2026-09-14: independent picking; 2026-09-19: targets).
 DETECTION_KEYS: frozenset[str] = frozenset(
     {
         "localization",
@@ -317,7 +338,7 @@ def locked_detection_sigma(
 
 
 def _localization_methods(value: Any) -> list[str]:
-    """A localisation spec -> the method list: parabolic / gaussian / both."""
+    """A localisation spec -> the method list: parabolic / gaussian / both of them."""
     if value is None:
         return []
     items = value if isinstance(value, (list, tuple)) else [value]
@@ -345,8 +366,9 @@ def split_combo(
 ) -> tuple[dict[str, Any], dict[str, float], dict[str, Any]]:
     """A combination -> (processing overrides, phase-axis overrides, detection overrides).
 
-    Of the detection keys only the **refinement** (``localization``) is allowed; it is
-    stripped from the processing parameters. Threshold keys always raise.
+    Of the detection keys only the **refinement** (``localization``) and the **target
+    list** (``localization.targets``) are allowed; they are stripped from the processing
+    parameters and never reach the backend. Threshold keys (sigma/min_snr/...) always raise.
     """
     params: dict[str, Any] = {}
     phases: dict[str, float] = {}
@@ -664,9 +686,10 @@ def validate_axes(
     """Check grid keys: locked keys raise, deterministic or unknown ones only warn.
 
     - locked keys (``phases``/``direct_phase``/``phase_route``/``sampling.auto_phase``)
-      break phase locking or are ignored, so a `SweepError` points at
-      `phase_delta.<axis>.p0|p1` / `phase.<axis>.p0|p1`;
-    - deterministic/policy parameters get a "usually not gridded" note;
+      break phase locking or are silently ignored, so a `SweepError` asks for
+      `phase_delta.<axis>.p0|p1` / `phase.<axis>.p0|p1` instead;
+    - deterministic/policy parameters (extraction windows, target spacing, sampling
+      tables, timeouts) get a "usually not gridded" note;
     - keys the backend does not read and that are not phase axes get "may not take effect".
     """
     live = _NUS_KEYS if str(sampling) == "nus" else _UNIFORM_KEYS
@@ -813,7 +836,8 @@ def design_diagnostics(
         a correlation between levels is a diagnostic, not a statistical test);
     - ``missing_levels``: levels declared in ``axes`` that never appear.
 
-    Orthogonal arrays, fractional factorials, D-optimal and LHS designs come from outside.
+    Orthogonal arrays, fractional factorials, D-optimal and LHS designs come from an
+    external tool; this function only checks them.
     """
     rows = [dict(combo) for combo in combos]
     keys = list(infer_axes(rows).keys())
@@ -929,8 +953,6 @@ _TARGET_KEYS: tuple[str, ...] = (
     "localization.targets",
     "detection.localization.targets",
 )
-
-
 def _maybe_target_mapping(token: str) -> Mapping[str, Any] | None:
     """A CSV cell written as ``{A: a.csv, B: b.csv}`` -> a condition mapping.
 
@@ -951,7 +973,7 @@ def _maybe_target_mapping(token: str) -> Mapping[str, Any] | None:
 
 
 def _resolve_target_paths(value: Any, base_dir: Path) -> Any:
-    """Resolve relative paths inside a target spec against the table directory."""
+    """Resolve target-spec relative paths against the table directory (nested mappings too)."""
     if isinstance(value, Mapping):
         return {
             key: _resolve_target_paths(item, base_dir)
@@ -1076,7 +1098,8 @@ def plan_sweep(
     deterministic and policy parameters are reported in `notes`.
 
     ``base_overrides`` is a batch-level override; at run time each condition starts from its
-    own reference parameters, then applies it and the combination. Absolute bases are gone.
+    own reference parameters, then applies it and the combination. The old absolute
+    ``base_params`` entry point is gone.
 
     Parameters
     ----------
@@ -1096,12 +1119,13 @@ def plan_sweep(
     Returns
     -------
     SweepPlan
-        the plan (no absolute base; the base is resolved per condition at run time).
+        the plan (no absolute ``base_params``; the base is resolved per condition at run time).
 
     Raises
     ------
     SweepError
-        neither axes nor combos was given, the limit is exceeded, or a key is illegal.
+        neither axes nor combos was given, the limit is exceeded, or a key is illegal
+        (a picking threshold, say).
 
     Side effects
     ------------
@@ -1574,7 +1598,8 @@ def _condition_base_params(
 
     Behaviour the reference run decided through diagnostics or routing (a direct-dimension DC
     correction adding POLY -time, say) must be inherited: it lives only in the reference
-    ``params.diagnostics``, and dropping it moves parameters nobody specified.
+    ``params.diagnostics``, and dropping it moves parameters nobody specified. An explicit
+    value in the combination table still wins.
     """
     base = merge_overrides(reference.sweep_params, plan.base_overrides)
     for key, value in reference_runtime_decisions(reference.params).items():
@@ -1821,7 +1846,8 @@ def run_sweep(
     Raises
     ------
     SweepError
-        the plan, reference or conditions disagree, or the backend cannot run the path.
+        the plan, reference or conditions disagree, or the backend cannot run the path
+        (a 3D NUS combination, say).
 
     Side effects
     ------------
@@ -1972,10 +1998,11 @@ def run_sweep(
 
 
 def _run_condition_with_log(session: StudySession, **kwargs: Any) -> SweepRun:
-    """Phase 22: attach ``<run_dir>/run.log`` to every run (created lazily).
+    """Phase 22: attach ``<run_dir>/run.log`` to every run (the logging channel, lazily).
 
     ``_run_condition`` only calls ``logger.exception`` on failure, so a failed run always
-    leaves a run.log with the traceback, while a successful run creates no empty file.
+    leaves a ``run.log`` with the full traceback (Phase 21's traceback-into-log), while a
+    successful run creates no empty file.
     """
     run_dir = Path(kwargs["run_dir"])
     log_path = run_dir / "run.log"
@@ -2127,13 +2154,15 @@ def _run_condition(
                 progress=_log,
             )
     except Exception as exc:  # noqa: BLE001 - one condition must not stop the batch
-        # Phase 21/22: run.message is the actionable line; the traceback goes to run.log
+        # Phase 21/22: run.message is the actionable line; the traceback goes to
+        # ``<run_dir>/run.log``
         logger.exception(tr("workflow %s/%s failed"), workflow_id, target.condition)
         response = {
             "success": False,
             "message": f"{type(exc).__name__}: {exc}",
-            # snapshot, not alias: if logs.extend got the same list it would append to itself
-            # and grow without bound (a MemoryError found by the Phase 12 isolation test).
+            # snapshot, not alias: if logs.extend(response["logs"]) got the same list it
+            # would append to itself and grow without bound (a MemoryError found by the
+            # Phase 12 isolation test).
             "logs": list(logs),
         }
     run.wall_time_s = round(time.perf_counter() - started, 3)
@@ -2236,9 +2265,9 @@ def _run_condition(
     reference_sha = str(reference.spectrum_sha256 or "")
     no_spectrum_change = bool(reference_sha) and run.spectrum_sha256 == reference_sha
 
-    # combination mode (2026-09-14): each picks on **its own spectrum** at the
-    # **reference-locked** threshold, writing its own table; matching back is
-    # **external** work (reference_peak_id and assignment stay empty).
+    # combination mode (2026-09-14): each picks **independently** on **its own spectrum**
+    # at the **reference-locked** detection threshold, writing its own table; matching back
+    # is **external** work (reference_peak_id and assignment stay empty).
     from nmrforge_api.peaks import detect_and_localize
 
     sigma_locked, sigma_origin = locked_detection_sigma(reference)
@@ -2524,6 +2553,11 @@ def _run_condition(
         "sampling": {
             "effective": str(reference.sampling),
             "schedule": str(reference.sampling_schedule or ""),
+            # 2026-09-25 (user): the FT sign/direction settled when the reference was
+            # built (a manual -neg flip, say) is inherited here unchanged; these are
+            # locked keys and must never become sweep axes
+            "flags": sign_sampling_flags(params),
+            "flags_source": "reference(locked)",
             "route": (
                 "reconstruct_nus"
                 if str(reference.sampling) == "nus"
@@ -2537,7 +2571,8 @@ def _run_condition(
             if is_nus
             else {}
         ),
-        # this combination's own noise sigma (robust MAD), the SNR denominator
+        # this combination's own noise sigma (robust MAD): the SNR denominator, recorded
+        # so it can be recomputed
         "spectrum_noise_sigma": {
             "value": float(first_meta["noise_sigma"]),
             "source": "core.qc.noise(robust MAD)",

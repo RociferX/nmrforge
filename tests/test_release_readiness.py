@@ -70,11 +70,11 @@ def _private_trunk() -> bool:
     """True in the private trunk (it keeps docs/manager and .codex), False publicly."""
     return (ROOT / "docs" / "manager").is_dir() or (ROOT / ".codex").is_dir()
 
-# Runtime package: The absolute path to the development machine must not appear.
+# Runtime packages: developer-machine absolute paths must not appear.
 RUNTIME_PACKAGES = ["core", "backend", "workflow", "gui", "viewer", "nmrforge_api"]
 
 ABSOLUTE_PATH_PATTERNS = [
-    re.compile(r"[A-Za-z]:\\\\?Users\\\\?"),          # C:\<user>\... / C:/Users/...
+    re.compile(r"[A-Za-z]:\\\\?Users\\\\?"),          # drive-letter user paths (both separators)
     re.compile(r"/home/(?!nmrforge\b)[A-Za-z0-9_.-]+/"),
     re.compile(r"/Users/[A-Za-z0-9_.-]+/"),          # macOS home
     re.compile(r"OneDrive", re.IGNORECASE),
@@ -134,13 +134,15 @@ def test_relative_links_in_public_docs_resolve() -> None:
     assert not broken, "broken relative links: " + "; ".join(broken)
 
 
-#: Repository paths a public document names must really ship with the snapshot: documents
-#: (`docs/xxx.md`) as well as scripts and assets (`scripts/xxx.py`, `tests/xxx.py`,
-#: `nmrforge_data/xxx` ...). Plain text counts too - a reader can neither click nor find the file,
-#: and the markdown-link checker cannot see that style.
-#: 2026-09-22 review: architecture.md listed three private-trunk records; 2026-09-23 review: the
-#: evidence page pointed its reproduction commands at three scripts that were never shipped - the
-#: same defect class, so this now covers those directories instead of just docs/*.md.
+#: Repository paths written in the public docs must really ship with the snapshot: documents
+#: (`docs/xxx.md`) and scripts / assets (`scripts/xxx.py`, `tests/xxx.py`, `nmrforge_data/xxx`
+#: ...) alike, plain-text mentions included -- a reader can neither click them nor find them, and
+#: the markdown link check cannot see that form.
+#: 2026-09-22 external review: architecture.md's "related documents" listed three records that
+#: exist only in the private trunk; 2026-09-23 external review then found an evidence page
+#: pointing its reproduction commands at three scripts never published with the public tree --
+#: the same kind of defect, so this check widened from "only `docs/*.md`" to the documents and
+#: assets under those directories.
 PLAIN_DOC_REF_RE = re.compile(
     r"(?i)\b(?:docs|scripts|tests|nmrforge_data|packaging)/[A-Za-z0-9_./-]+"
     r"\.(?:md|py|sh|json|yaml|yml|toml|spec|txt|cff)"
@@ -148,12 +150,13 @@ PLAIN_DOC_REF_RE = re.compile(
 
 
 def _shipped_paths(root: Path) -> set[str] | None:
-    """Files the snapshot ships, from ``git ls-files`` (casefolded); ``None`` when git is absent.
+    """The set of "files shipped with the snapshot" as reported by ``git ls-files`` (case-folded);
+    ``None`` when it cannot be obtained.
 
-    A bare ``Path.exists()`` mistakes a machine-local file for a shipped one - for example the
-    run-time ``nmrforge_data/config/nmrforge.local.yaml`` (it is in ``.gitignore``): present on the
-    developer machine, absent from CI's clean checkout, so the same commit passed on Windows and
-    failed on Linux CI (hit for real on 2026-09-23). "Shipped" means "tracked by git".
+    Looking at ``Path.exists()`` alone treats files that **exist only locally** as published --
+    for instance the runtime-generated ``nmrforge_data/config/nmrforge.local.yaml`` (listed in
+    ``.gitignore``): present locally, absent from a clean CI checkout, so the same commit is
+    green on Windows and red on Linux CI (actually hit on 2026-09-23). "Published" = git-tracked.
     """
     try:
         done = subprocess.run(
@@ -168,12 +171,13 @@ def _shipped_paths(root: Path) -> set[str] | None:
 
 
 def _ignored_paths(root: Path, targets: set[str]) -> set[str]:
-    """Which of ``targets`` ``.gitignore`` excludes (generated / run-time / machine-local files).
+    """The paths in ``targets`` that ``.gitignore`` explicitly excludes (build output / runtime
+    files / local configuration).
 
-    Naming one of these in a document is legitimate - the repository deliberately does not ship it,
-    which is different from naming a file that neither exists nor should exist. ``--no-index``
-    makes the decision depend on the rules alone, not on whether the file happens to be present
-    right now, so the local run and CI agree.
+    A document mentioning these paths is legitimate -- the repository **deliberately** does not
+    publish them, which is not the same as "naming a file that neither exists nor should exist".
+    ``--no-index`` looks at the ignore rules only, independent of whether the file happens to
+    exist locally right now (same locally and in CI).
     """
     if not targets:
         return set()
@@ -190,13 +194,13 @@ def _ignored_paths(root: Path, targets: set[str]) -> set[str]:
     return {name.casefold() for name in done.stdout.split("\0") if name}
 
 
-#: Resolve a repository path case-insensitively, one component at a time. Only a fallback for when
-#: `_shipped_paths` cannot reach git: the regex is `(?i)` while Windows compares paths
-#: case-insensitively and Linux does not, so a bare `Path.exists()` makes the same document pass on
-#: Windows and fail on Linux CI (hit for real on 2026-09-23: `docs/packaging.md` wrote
-#: `Packaging/linux/NMRForge.spec`).
+#: Resolve a repository path case-insensitively (matching directory entries level by level). Used
+#: only as a fallback when `_shipped_paths` cannot reach git: the regex itself is `(?i)`, while
+#: Windows filesystems are case-insensitive and Linux is not -- a bare `Path.exists()` would make
+#: the same document green on Windows and red on Linux CI (actually hit on 2026-09-23:
+#: `docs/packaging.md` wrote `Packaging/linux/NMRForge.spec`).
 def _path_resolves_case_insensitively(base: Path, target: str) -> bool:
-    """Walk ``target`` from ``base`` one component at a time, ignoring case."""
+    """Walk ``target``'s path components from ``base``, case-insensitively, checking existence."""
     current = base
     for part in Path(target).parts:
         if not current.is_dir():
@@ -212,23 +216,24 @@ def _path_resolves_case_insensitively(base: Path, target: str) -> bool:
 
 
 def test_public_docs_do_not_reference_documents_that_are_not_shipped() -> None:
-    """Every repository path a public document names must really ship - plain text included."""
+    """Repository paths in the public docs (`docs/*.md`, `scripts/*.py`, ...) must really ship."""
     public = ROOT / "publish" if _private_trunk() else ROOT
     if not public.is_dir():
-        pytest.skip("the public snapshot is not present (VM/CI)")
+        pytest.skip("公开树不在场(VM/CI)")
     shipped = _shipped_paths(public)
-    references: list[tuple[str, str]] = []  # (document, as written)
+    references: list[tuple[str, str]] = []  # (document relative path, quoted reference text)
     for path in sorted(public.rglob("*.md")):
         if PRIVATE_SCAN_SKIP & set(path.parts):
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
-        # markdown-link targets are covered by test_relative_links_in_public_docs_resolve
+        # markdown link targets are covered by test_relative_links_in_public_docs_resolve
         body = LINK_RE.sub(" ", text)
         references += [
             (path.relative_to(public).as_posix(), match.group(0))
             for match in PLAIN_DOC_REF_RE.finditer(body)
         ]
-    if shipped is None:  # no git: fall back to a case-insensitive filesystem lookup
+    # no git: fall back to a filesystem lookup (case-insensitive, avoiding platform differences)
+    if shipped is None:
         missing = [
             (where, target)
             for where, target in references
@@ -245,23 +250,22 @@ def test_public_docs_do_not_reference_documents_that_are_not_shipped() -> None:
         ]
     offenders = [f"{where} -> {target}" for where, target in missing]
     assert not offenders, (
-        "public docs reference files that the snapshot does not ship: "
-        + "; ".join(sorted(set(offenders))[:8])
+        "公开文档引用了不随公开快照发布的文件: " + "; ".join(sorted(set(offenders))[:8])
     )
 
 
-#: Real sample names, developer-machine and VM paths: the public tree (including the comments
-#: and docstrings of scripts, packaging and tests) must never carry them. Until 2026-09-22 the
-#: check only covered the runtime packages' .py files and missed exactly these places.
+#: Markers such as real sample names / developer-machine and VM paths: they must never appear in
+#: the public tree (comments and docstrings in scripts, packaging, tests included). On 2026-09-22
+#: it turned out the check had only looked at runtime packages' .py files, missing these places.
 def _marker(*parts: bytes) -> bytes:
-    """Assemble a marker - this test file itself lives in the public tree, so the markers
-    must not appear verbatim here."""
+    """Assemble a marker's literal text -- this test file is itself in the public tree, so the
+    marker cannot be written here verbatim."""
     return b"".join(parts)
 
 
 PRIVATE_MARKERS = (
-    # public data is cited by its BMRB timedomain entry id, so sample names are no longer a
-    # redaction term (2026-09-22, owner's call)
+    # public data (BMRB timedomain entries) is cited under its real name; sample names are no longer
+    # redacted terms (2026-09-22, user decision)
 
     _marker(b"/home/", b"nmr"),
     _marker(b"nmrforge-test-", b"artifacts"),
@@ -272,7 +276,7 @@ PRIVATE_MARKERS = (
     _marker(b"127.0.0", b".1"),
     _marker(b"l", b"zj"),
 )
-#: Directories the scan skips: repository internals, build output, caches
+#: Directories skipped while scanning: version-control internals, build output, caches
 PRIVATE_SCAN_SKIP = {
     ".git",
     "build",
@@ -288,10 +292,11 @@ PRIVATE_SCAN_SKIP = {
 
 
 def test_public_tree_carries_no_private_markers() -> None:
-    """The public tree must not carry real sample names, developer-machine or VM paths."""
+    """The public tree must carry no real sample names, developer-machine or VM paths (including
+    script comments and test docstrings)."""
     public = ROOT / "publish" if _private_trunk() else ROOT
     if not public.is_dir():
-        pytest.skip("the public tree is not present (VM/CI)")
+        pytest.skip("公开树不在场(VM/CI)")
     offenders: list[str] = []
     for path in sorted(public.rglob("*")):
         if not path.is_file() or PRIVATE_SCAN_SKIP & set(path.parts):
@@ -306,7 +311,7 @@ def test_public_tree_carries_no_private_markers() -> None:
         for marker in PRIVATE_MARKERS:
             if marker in data:
                 offenders.append(f"{path.relative_to(public).as_posix()} <- {marker.decode()}")
-    assert not offenders, "private markers in the public tree: " + "; ".join(offenders[:8])
+    assert not offenders, "公开树出现私有标记: " + "; ".join(offenders[:8])
 
 
 def test_no_developer_absolute_paths_in_runtime_packages() -> None:
@@ -349,14 +354,14 @@ def test_github_templates_exist() -> None:
 
 
 def test_wheel_ships_every_fingerprinted_file() -> None:
-    """behavior_digest covers every file under the four behaviour trees, so an installed copy
-    must be able to reproduce the same fingerprint.
+    """behavior_digest covers **every** file under the four behaviour trees, and an installed copy
+    must reproduce the same fingerprint.
 
-    Drop one of them (typically a package README) and the wheel computes a digest that
-    disagrees with ``nmrforge_api/compat_declaration.py``: ``compat_verified`` is then
-    permanently false, which makes the engine stamp useless downstream. The
-    translation-tooling lists (``source.json`` / ``converted.json``) are the opposite case -
-    development-only, never shipped.
+    Miss any one of them (typically a package's README) and the fingerprint computed inside the
+    wheel no longer matches ``nmrforge_api/compat_declaration.py``; ``compat_verified`` is then
+    permanently false -- the engine version stamp downstream receives is worthless. The
+    translation tooling's manifests (``source.json`` / ``converted.json``) are the opposite: they
+    only serve the development flow and must not enter the artefact.
     """
     data = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     packaged = data["tool"]["setuptools"]["package-data"]
@@ -368,17 +373,17 @@ def test_wheel_ships_every_fingerprinted_file() -> None:
             if not path.is_file() or "__pycache__" in path.parts:
                 continue
             if path.suffix in (".py", ".pyc", ".pyo"):
-                continue  # the code ships by itself, no declaration needed
+                continue  # code itself is already in the wheel, no declaration needed
             relative = path.relative_to(ROOT / package).as_posix()
             declared = packaged.get(package, ())
             dropped = excluded.get(package, ())
             if any(fnmatch.fnmatch(relative, pattern) for pattern in dropped):
-                missing.append(f"{package}/{relative} (excluded from package-data)")
+                missing.append(f"{package}/{relative}(被 exclude-package-data 排除)")
             elif not any(fnmatch.fnmatch(relative, pattern) for pattern in declared):
                 missing.append(f"{package}/{relative}")
     assert not missing, (
-        "files the behaviour fingerprint covers are missing from the wheel "
-        "(the installed behavior_digest would disagree with the declaration): " + "; ".join(missing)
+        "指纹覆盖的文件没进 wheel(装机态的 behavior_digest 会和声明不一致): "
+        + "; ".join(missing)
     )
     tooling = {"source.json", "converted.json"}
     locales = packaged.get("ui_support", ())
@@ -388,11 +393,11 @@ def test_wheel_ships_every_fingerprinted_file() -> None:
         if path.name not in tooling
         and not any(fnmatch.fnmatch(f"locales/{path.name}", pattern) for pattern in locales)
     ]
-    assert not undeclared, "runtime language packs missing from the wheel: " + ", ".join(undeclared)
+    assert not undeclared, "运行期语言包没进 wheel: " + ", ".join(undeclared)
     for name in sorted(tooling):
         assert not any(
             fnmatch.fnmatch(f"locales/{name}", pattern) for pattern in locales
-        ), f"translation-tooling list locales/{name} must not ship"
+        ), f"翻译工具清单 locales/{name} 不该进产物"
 
 
 def test_example_scripts_compile_and_expose_main() -> None:
@@ -587,7 +592,7 @@ def test_release_documents_the_appimage_and_its_language_switch() -> None:
         assert "Apache-2.0" in checklist and "LGPL-3.0" in checklist
         assert "APPIMAGE_RELEASE_CHECKLIST.md" in _read("RELEASE_CHECKLIST_v0.9.0.md")
         assert f"NMRForge-{released}-x86_64.AppImage" in checklist
-        # 2026-09-21: a single artefact, the edition suffix is gone for good
+        # 2026-09-21: single artefact, the edition suffix is gone for good
         assert "单产物" in checklist
         script = _read("packaging/linux/build_appimage.sh")
         assert "APPIMAGE_SUFFIX" not in script and "APPIMAGE_EDITION" not in script

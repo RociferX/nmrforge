@@ -1,10 +1,11 @@
-"""Structured QC audit record test (mission statement Phase 10). The requirements of Phase 10 are:
-Any automatic modification of the original/The behaviour of intermediate data must be left
-behind ``issue_detected / location / detection_rule / action_taken / before_state / after_state
-/ timestamp / software_version`` records, that is, ``detect -> flag -> log -> optional
-correction``, silent changes are prohibited. Here, not only the recording module itself is
-tested, but also three real wiring points (bad point replacement, NusTD grid adjustment, source
-deletion) are tested."""
+"""Structured QC audit record tests (the task specification, Phase 10).
+
+The Phase 10 requirement is: any automatic modification of raw/intermediate data must leave an
+``issue_detected / location / detection_rule / action_taken / before_state / after_state /
+timestamp / software_version`` record, i.e. ``detect -> flag -> log -> optional correction``, and
+silent changes are forbidden. This covers both the record module itself and three real wiring
+points (bad-point repair, NusTD grid adjustment, source removal).
+"""
 
 from __future__ import annotations
 
@@ -22,9 +23,9 @@ from core.audit.qc_audit import (
 
 def _action(**overrides) -> QcAction:
     base = dict(
-        issue_detected="test questions",
+        issue_detected="测试问题",
         location="somewhere row=1",
-        detection_rule="test rules",
+        detection_rule="测试规则",
         action_taken="test_action",
         before_state={"value": 1.0},
         after_state={"value": 0.0},
@@ -33,7 +34,7 @@ def _action(**overrides) -> QcAction:
     return QcAction(**base)
 
 
-# --------------------------------------------------------------- Logging module itself.
+# ------------------------------------------------------------------ the record module itself
 
 def test_record_has_every_field_phase10_requires(tmp_path: Path) -> None:
     log = QcAuditLog(tmp_path)
@@ -41,8 +42,8 @@ def test_record_has_every_field_phase10_requires(tmp_path: Path) -> None:
     payload = written.to_dict()
     for field in REQUIRED_FIELDS:
         assert field in payload, field
-    assert payload["timestamp"], "The timestamp must be stamped by the record layer"
-    assert payload["software_version"], "Software versions must be stamped by the record layer"
+    assert payload["timestamp"], "时间戳必须由记录层盖章"
+    assert payload["software_version"], "软件版本必须由记录层盖章"
 
 
 def test_log_is_append_only_and_readable(tmp_path: Path) -> None:
@@ -65,8 +66,7 @@ def test_records_survive_a_new_reader(tmp_path: Path) -> None:
 
 
 def test_no_records_when_nothing_changed(tmp_path: Path) -> None:
-    """There is no file without changes: "No records" must be equivalent to "unchanged" during
-    review."""
+    """No change means no file: for review, "no record" must be equivalent to "no change"."""
     assert read_audit(tmp_path) == []
     assert not audit_path(tmp_path).exists()
 
@@ -93,7 +93,7 @@ def test_summary_lists_the_actions(tmp_path: Path) -> None:
     log.record(_action(action_taken="neighbour_interpolation"))
     log.record(_action(action_taken="nus_td_shrunk"))
     summary = log.summary()
-    assert "2 entries" in summary
+    assert "2 条" in summary
     assert "neighbour_interpolation" in summary and "nus_td_shrunk" in summary
     assert str(log.path) in summary
 
@@ -115,10 +115,10 @@ def test_action_round_trips_through_dict() -> None:
     assert again.schema_version == original.schema_version
 
 
-# --------------------------------------------------------------- Real wiring points.
+# ------------------------------------------------------------------ the real wiring points
 
 def test_bad_point_repair_is_recorded(tmp_path: Path) -> None:
-    """Bad point replacement: record detection rules, Before action and changes/The value after."""
+    """Bad-point repair: records the detection rule, the action and the before/after values."""
     from workflow.direct_diagnostics import AUDIT_DETAIL_LIMIT, _record_bad_point_repair
 
     log = QcAuditLog(tmp_path)
@@ -143,8 +143,8 @@ def test_bad_point_repair_is_recorded(tmp_path: Path) -> None:
 
 
 def test_bad_point_repair_truncates_huge_lists(tmp_path: Path) -> None:
-    """Huge records cannot be written for pathological data: only the number is left when the upper
-    limit is exceeded and marked as truncated."""
+    """Pathological data must not write a huge record: beyond the limit only the count is kept and
+    the record is marked truncated."""
     from workflow.direct_diagnostics import AUDIT_DETAIL_LIMIT, _record_bad_point_repair
 
     log = QcAuditLog(tmp_path)
@@ -157,7 +157,8 @@ def test_bad_point_repair_truncates_huge_lists(tmp_path: Path) -> None:
 
 
 def test_nus_grid_adjustment_is_recorded(tmp_path: Path, bruker_dir: Path) -> None:
-    """Bad point cleaned NusTD shrink: Record axis name and before change/grid value after."""
+    """NusTD shrink after bad-point cleaning: records the axis name and the before/after grid
+    values."""
     from backend.nmrpipe_backend import _apply_nus_grid_after_clean
     from core.data.bruker_reader import read_dataset
 
@@ -167,7 +168,7 @@ def test_nus_grid_adjustment_is_recorded(tmp_path: Path, bruker_dir: Path) -> No
 
     logs = _apply_nus_grid_after_clean(experiment, [(0,), (145,)], audit=log)
 
-    assert logs and "Grid adjustment" in logs[0]
+    assert logs and "网格调整" in logs[0]
     action = read_audit(tmp_path)[0]
     assert action.action_taken == "nus_td_shrunk"
     assert action.location == "acqu2s.NusTD"
@@ -179,8 +180,7 @@ def test_nus_grid_adjustment_is_recorded(tmp_path: Path, bruker_dir: Path) -> No
 def test_nus_grid_adjustment_without_audit_still_returns_logs(
     tmp_path: Path, bruker_dir: Path
 ) -> None:
-    """The behaviour remains unchanged when the audit object is not passed (the wiring is
-    additional)."""
+    """Behaviour is unchanged when no audit object is passed (the wiring is additive)."""
     from backend.nmrpipe_backend import _apply_nus_grid_after_clean
     from core.data.bruker_reader import read_dataset
 
@@ -192,8 +192,8 @@ def test_nus_grid_adjustment_without_audit_still_returns_logs(
 
 
 def test_source_clean_removal_is_recorded(tmp_path: Path, bruker_dir: Path) -> None:
-    """Source deletion bad point: recording action contains.bak backup semantics, and before
-    changes/later sampling point number."""
+    """Source removal of bad points: the action records .bak backup semantics and the before/after
+    sampling-point counts."""
     from backend.nmrpipe_backend import _record_source_clean
     from core.data.bruker_reader import read_dataset
 
@@ -210,8 +210,8 @@ def test_source_clean_removal_is_recorded(tmp_path: Path, bruker_dir: Path) -> N
 
 
 def test_source_clean_without_removal_says_so(tmp_path: Path, bruker_dir: Path) -> None:
-    """When the source cannot be deleted (the original data is not changed), it must be written
-    truthfully as reported_only."""
+    """When source removal is impossible (raw data untouched) it must honestly be written as
+    reported_only."""
     from backend.nmrpipe_backend import _record_source_clean
     from core.data.bruker_reader import read_dataset
 
@@ -226,7 +226,7 @@ def test_source_clean_without_removal_says_so(tmp_path: Path, bruker_dir: Path) 
 def test_source_clean_without_bad_points_records_nothing(
     tmp_path: Path, bruker_dir: Path
 ) -> None:
-    """Without bad points, there are no changes, and no noise records should be generated."""
+    """No bad points means no change, so no noise record should be produced."""
     from backend.nmrpipe_backend import _record_source_clean
     from core.data.bruker_reader import read_dataset
 
@@ -239,10 +239,12 @@ def test_source_clean_without_bad_points_records_nothing(
 def test_bad_point_repair_writes_audit_file_end_to_end(
     tmp_path: Path, nmrpipe_fid_template: Path, bruker_dir: Path
 ) -> None:
-    """End-to-end: When diagnosing the actual disk change, qc_audit.jsonl appears in the working
-    directory (Phase 10 core commitment). It shares the ``nmrpipe_fid_template`` fixture with
-    ``test_direct_diagnostics.py``, so this link will be executed on any machine (including
-    VM/CI)."""
+    """End to end: when the diagnostics really touch the disk, qc_audit.jsonl appears in the
+    processing work directory (the core Phase 10 promise).
+
+    It shares the ``nmrpipe_fid_template`` fixture with ``test_direct_diagnostics.py``, so this path
+    runs on any machine (including VM/CI).
+    """
     import numpy as np
 
     from core.data.bruker_reader import read_dataset
@@ -264,7 +266,7 @@ def test_bad_point_repair_writes_audit_file_end_to_end(
     experiment = read_dataset(bruker_dir / "nus_2d")
     result = run_direct_diagnostics(tmp_path, experiment)
     assert result.repaired_badpoints >= 1
-    assert audit_path(tmp_path).is_file(), "Changes must be recorded in a structured record"
+    assert audit_path(tmp_path).is_file(), "改动必须落结构化记录"
 
     actions = read_audit(tmp_path)
     action = next(a for a in actions if a.extra.get("row") == row)

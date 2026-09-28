@@ -6,10 +6,11 @@ what the interface does; the underlying engine behaviour is in
 
 ![NMRForge main window](../gui/assets/nmrforge.png)
 
-> **Language note.** English is the interface's source language, so the menus, panel labels,
-> statuses and messages are English by default. The same build also speaks Chinese: follow the
-> system language, pick it in `Settings -> Software settings -> Interface language`, or pin it
-> with `NMRFORGE_LANG=zh`. A Chinese edition of this guide is in
+> **Language note.** English is the interface's source language, and the public-repo build shows
+> English by default; the same build also speaks Chinese: follow the system language, pick it in
+> `Settings -> Software settings -> Interface language`, or pin it with `NMRFORGE_LANG=zh`. The
+> Chinese wording lives in `ui_support/locales/zh.json` and is the **same code** as the English
+> version. A Chinese edition of this guide is in
 > [`Chinese_version/docs/gui.md`](../Chinese_version/docs/gui.md).
 
 ## Starting it
@@ -64,32 +65,85 @@ rather than silently reused - the step fingerprints its inputs, its script and i
 
 ## Typical session
 
-1. **Create or open a project**, then **import** a Bruker dataset directory (right-click the
-   experiment node in the project tree and choose "import sample data..."). Only directories
-   containing Bruker parameter files are accepted, and multiple segments of one experiment are
-   offered as separate runs of the same experiment.
+The interface carries its own step-by-step walkthrough: `Help -> Usage tutorial` (the text is
+`nmrforge_data/tutorial/{zh,en}.md`). What follows is a short version of the same flow; the button
+positions and the branches of every step are in the tutorial.
+
+1. **Create or open a project** (`File -> New project...` / `Recent projects`), then **import** a
+   Bruker dataset directory (right-click the experiment node in the project tree ->
+   "Import sample data..."). Only directories containing Bruker parameter files are accepted;
+   picking the wrong one is reported straight away and no half dataset is left behind.
+   **Segmented acquisition / repeated experiment overlay** goes through "segmented data or repeated
+   experiment overlay import" (a container directory, merged into **one** dataset); **several
+   independent 2D datasets** go through the "Batch processing" group - the two are **different
+   things**, see the sections below.
 2. **Check what was understood**: experiment type with its evidence, sampling classification, and
    the dimension layout. If the classification is wrong, the experiment template can be corrected
-   before processing, which is much cheaper than fixing a processed spectrum.
-3. **Generate FID**, then **generate the spectrum**. Data diagnostics run first and their findings
-   are written to the log before any optimisation step.
+   before processing - much cheaper than patching things up afterwards. This is the basis for every
+   later automatic choice.
+3. **Generate FID** -> **set the direct dimension range** (optional, "direct dimension range" on the
+   step row, 6.5-10.5 ppm by default) -> **Generate spectrum** (the next step unlocks
+   automatically). The data-quality inspection runs first and its conclusion goes into the log
+   before any optimisation step. Generate FID needs **NMRPipe** on the machine; the SMILE
+   reconstruction of NUS data is included automatically in the Generate spectrum step.
 4. **Read the report** at the end of the run: final spectrum quality (with signal-to-noise, phase,
-   baseline and artefact sub-scores), the data-quality diagnostics section, and the resolved
-   processing parameters, including anything the optimiser chose.
-5. **Inspect the spectrum** in the right-hand panel: zoom with the mouse, pan with the middle
-   button, overlay spectra, and click in the peak table to jump to a peak.
-6. **Pick peaks** and export the peak table (POKY style). The spectrum can also be exported to
-   UCSF for use in other software.
-7. **Manual path** - any generated script can be opened in the script editor, edited and run
-   directly. Editing a script is a deliberate override, so it is recorded separately from the
-   automated run.
+   baseline and artefact sub-scores), the data-quality inspection section, and the resolved
+   processing parameters, including anything the optimiser chose, plus the direct dimension range
+   and the CAR carrier convention. Read the report before looking at the spectrum.
+5. **Look at the spectrum**: click **"Display spectrum"** on the step row to open the current final
+   spectrum in column 4 - wheel to zoom, middle button to pan, an intensity slider, overlaid
+   spectra; clicking a row in the peak table jumps to that peak.
+6. **Adjust as needed** (usual after looking at the spectrum, and done before picking peaks): to
+   change the spectrum centre, use the **Generate FID manual** entry to edit `CAR` and then run it;
+   to flip an indirect dimension, select the dimension and click **"Re-run the final script"**;
+   anything else, use the **manual** entry, edit the script and run it.
+7. **Pick peaks** and export the peak table (POKY / Sparky `.list`). When the picked peaks are not
+   what you want, **change the threshold and pick again**, or **set a reference spectrum** and pick
+   again (only peaks matching the reference peak table are kept). The export is either
+   **export directly** (original coordinates) or **export after alignment** (overall translation
+   onto the selected reference peak table); a peak table can also be **imported** from a `.list`.
+8. **Collect the results**: export the peak table with `Export peaks`; the processed spectra are in
+   the **`spectra` folder** of that dataset's working directory (the NMRPipe final spectra
+   `.ft2`/`.ft3`, plus the exported **UCSF**, same name as the final spectrum with a `.ucsf`
+   extension).
 
-## Data groups and batch runs
+**Extra entry points**: once the Generate spectrum step has completed, "Re-run the final script" on
+the step row reuses the existing script and **does not re-optimise**, changing only the direct
+dimension range and the indirect-dimension flips (the flip control and the rerun button share one
+box: in 2D the checkbox is a state, in 3D the dropdown is a command); "Reference spectrum" on the
+Peak picking step row picks a dataset that already has a peak table as the reference, so that peak
+picking keeps only the peaks matching the reference peak table. **Manual path** - any generated
+script can be opened in the script editor, edited and run directly; editing a script is a deliberate
+override, so it is recorded separately from the automated run, and when a step has failed its row
+offers "View log" to jump straight to the log entry.
 
-Data can be organised into groups and processed together: tick "batch import and group (2D spectra
-only)" while importing, or add and remove members by right-clicking a group node in the project
-tree. Batch processing is **2D-only**: non-2D datasets are skipped and the reason is stated.
-Failures are isolated per dataset so one bad dataset does not abort the whole group.
+## Importing segmented acquisitions / averaged repeat experiments
+
+When one acquisition was split into several segments (**segmented NUS**, the segments complementing
+each other to fill the sampling grid), or when the same experiment was acquired repeatedly and you
+want to average them for better signal-to-noise, use this path: do **not** import the segments as
+separate datasets. There are two entries (same effect): tick "segmented data or repeated experiment
+overlay import (container directory: multiple subdirectories containing acqus are merged into one
+data)" in the import dialog, or use the **"segmented data or repeated experiment overlay import"**
+group in the experiment page's import area directly.
+
+A container directory = **no `acqus` at the top level** and **at least 2 subdirectories that each
+hold a set of `acqus`** below it; when you pick such a directory the checkbox in the dialog is
+**ticked automatically**; if the box is ticked but the directory is not such a structure it reports
+an error plainly. After importing, the segments are **merged into one dataset** that goes through
+the whole flow (Generate FID / Generate spectrum run once).
+
+## Data groups and batch processing
+
+To **batch-import several independent datasets**, use the **"Batch processing"** group in the
+experiment page's import area: add data folders one by one with "Add data folder..." ->
+**"Batch import and group (only supports 2D spectra)" is ticked by default** (with it ticked the
+imported data lands in one data group that can then be processed together) -> click "Batch import",
+and a summary (total / succeeded / failed) follows. Members can also be added and removed by
+right-clicking a data group node in the project tree.
+
+**Batch processing is 2D only**: non-2D data is skipped with a reason; failures are isolated per
+dataset, so one bad dataset does not abort the whole group.
 
 ## Standalone viewer
 
@@ -104,5 +158,13 @@ spectra with intensity sliders, marks peaks, and supports 3D slicing with projec
 ## Where the GUI writes
 
 All state lives in the project directory you chose: the project file, per-dataset working
-directories, generated scripts, run records and logs. The GUI never writes into your raw data
-directory, and anything it removes goes to the operating system trash rather than being erased.
+directories, generated scripts, run records and logs. Deleting project data goes to the operating
+system's trash (recoverable) rather than being erased.
+
+**One exception: NUS bad-point cleaning rewrites the raw directory in place.** When it removes bad
+points the program **rewrites `ser` and `nuslist` in place** in the raw directory (dropping the
+whole row), copying the originals to `ser.bak` / `nuslist.bak` next to them first (an existing
+`.bak` is not overwritten), with the log stating `Source cleanup ... (backup .bak)`; the point is to
+give the reconstruction clean input. **If your raw data is read-only, or you cannot accept the
+original being rewritten, make your own copy first** - the `.bak` in the source directory is the one
+to fall back to.

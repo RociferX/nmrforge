@@ -1,10 +1,10 @@
-"""GUI usage tutorial: the document opened from the Help menu (2026-09-22, user request).
+"""GUI usage tutorial: the tutorial document opened from the Help menu (2026-09-22, user request).
 
-Three things are guarded: the tutorial ships in both languages; the names it uses are the ones
-the interface shows (the four pipeline steps, the two Tools entries, software settings); and the
-first entry of the Help menu really opens the tutorial dialog. The wording of the document itself
-is maintained by hand - this file only makes sure the two do not drift apart when the interface
-is renamed.
+It guards three things: the tutorial is present and readable in both languages; the names it uses
+come from the same source as the real interface text (the four pipeline steps, the two Tools menu
+items, software settings); and the first Help menu item really carries the entry and opens the
+tutorial dialog. The tutorial body is maintained by hand, so this only guards against drifting
+apart when the interface is renamed.
 """
 
 from __future__ import annotations
@@ -35,12 +35,14 @@ def qapp() -> QApplication:
 
 
 def _plain(label: str) -> str:
-    """Menu labels without the ellipsis (the tutorial names things, it is not a menu dumps)."""
+    """Strip the ellipsis from menu item text (the tutorial writes the name, not the full menu
+    label)."""
     return label.rstrip(". ").strip()
 
 
 def _mentions(document: str, label: str) -> bool:
-    """Whether the tutorial mentions this name; case-insensitive (it may start a sentence)."""
+    """Whether the tutorial mentions this name; case-insensitive (a name inside a sentence may start
+    lowercase)."""
     return label.lower() in document.lower()
 
 
@@ -56,17 +58,19 @@ def test_both_languages_ship_a_tutorial_document() -> None:
 def test_tutorial_falls_back_to_the_other_language() -> None:
     assert tutorial_path("zh").name == "zh.md"
     assert tutorial_path("en").name == "en.md"
-    # an unsupported language (or a typo) falls back to the text that is there, never crashes
+    # An unlisted language (or a mistyped code) falls back to the one that is present, instead of
+    # raising or returning blank
     assert tutorial_path("fr").is_file()
     assert load_tutorial_text("fr") == load_tutorial_text(tutorial_path("fr").stem)
 
 
 def test_tutorial_uses_the_names_the_interface_shows() -> None:
-    """Four steps + two Tools entries + software settings must be named as the interface does."""
+    """Four steps + two Tools items + software settings: the tutorial and the interface must use the
+    same names (renaming later turns this red)."""
     english = load_tutorial_text("en")
     chinese = load_tutorial_text("zh")
     catalogue = load_catalogue("zh")
-    to_english = {value: key for key, value in catalogue.items()}  # Chinese -> English source
+    to_english = {value: key for key, value in catalogue.items()}  # Chinese -> English source text
     fixed = (
         "Software settings...",
         "Data quality inspection...",
@@ -79,7 +83,8 @@ def test_tutorial_uses_the_names_the_interface_shows() -> None:
 
 
 def test_tutorial_strings_are_translated() -> None:
-    """The new interface strings must have a Chinese entry, or the Chinese UI shows English."""
+    """Newly added interface text must have a Chinese counterpart, otherwise the Chinese interface
+    would show English."""
     catalogue = load_catalogue("zh")
     for key in (
         "Usage tutorial...",
@@ -90,7 +95,7 @@ def test_tutorial_strings_are_translated() -> None:
 
 
 def test_tutorial_dialog_renders_the_document(qapp: QApplication) -> None:
-    """Asking for a language loads that document and really renders it into the QTextBrowser."""
+    """The requested language loads that document and really renders it into the QTextBrowser."""
     dialog = TutorialDialog(None, language="en")
     try:
         browser = dialog.findChild(QTextBrowser)
@@ -105,7 +110,8 @@ def test_tutorial_dialog_renders_the_document(qapp: QApplication) -> None:
 def test_tutorial_dialog_survives_a_missing_document(
     qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """An installation without the data file shows one message line - not an empty window."""
+    """An installed copy that somehow lacks the tutorial data shows a one-line hint -- never an
+    empty window and never an exception."""
     monkeypatch.setattr("gui.tutorial.load_tutorial_text", lambda language=None: "")
     dialog = TutorialDialog(None, language="zh")
     try:
@@ -119,11 +125,13 @@ def test_tutorial_dialog_survives_a_missing_document(
 def test_help_menu_opens_the_tutorial(
     qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The last menu (Help) opens with the tutorial as its first entry, and that opens it."""
+    """The first item of the Help menu (the last entry) is the usage tutorial; clicking it opens the
+    tutorial dialog."""
     opened: list[object] = []
 
     class _Recorder:
-        """Stand-in: record the call instead of opening a modal window in a test."""
+        """Stand-in: records that it was opened, avoiding a real modal window that would hang the
+        test."""
 
         def __init__(self, parent=None, language=None) -> None:
             opened.append(parent)
@@ -146,7 +154,8 @@ def test_help_menu_opens_the_tutorial(
 
 
 def test_both_tutorial_documents_share_one_section_structure() -> None:
-    """The two documents have the same sections: changing one language must not forget the other."""
+    """The two tutorials have a one-to-one section structure (only the language differs): this
+    prevents editing the Chinese one and forgetting the English one."""
     zh = load_tutorial_text("zh")
     en = load_tutorial_text("en")
     zh_heads = [line for line in zh.splitlines() if line.startswith("#")]

@@ -1,7 +1,9 @@
-"""Bruker ser/fid element type (DTYPE/BYTORDA) test. user 2026-09-11: "ser file seems to be dynamic
-byte output, so it is not necessarily int32" -- TopSpin's `##$DTYPE`:0=int32 / 1=float64 /
-2=float32,`##$BYTORDA`:0=little endian / 1=big endian; unknown DTYPE Don’t guess, report an
-error explicitly."""
+"""Element type of Bruker ser/fid data (DTYPE/BYTORDA) tests.
+
+Maintainer 2026-09-11: "the ser file looks like dynamic byte output, so it is not necessarily
+int32" -- TopSpin's `##$DTYPE`: 0=int32 / 1=float64 / 2=float32, `##$BYTORDA`: 0=little endian /
+1=big endian; an unknown DTYPE is not guessed but reported explicitly.
+"""
 
 from __future__ import annotations
 
@@ -29,7 +31,7 @@ def test_sample_dtype_codes_and_endianness() -> None:
 
 
 def test_sample_dtype_defaults_to_int32() -> None:
-    """DTYPE/BYTORDA Default -> int32 little endian (consistent with existing data)."""
+    """DTYPE/BYTORDA absent -> int32 little endian (consistent with the existing data)."""
     assert sample_dtype({}) == np.dtype("<i4")
     assert sample_dtype(None) == np.dtype("<i4")
     assert sample_itemsize({}) == 4
@@ -38,8 +40,7 @@ def test_sample_dtype_defaults_to_int32() -> None:
 
 
 def test_sample_dtype_unknown_code_is_refused() -> None:
-    """Unknown DTYPE (such as 7) is not processed silently as int32, and an error is reported
-    directly."""
+    """An unknown DTYPE (e.g. 7) is not silently treated as int32 but raised."""
     with pytest.raises(UnknownBrukerDtype):
         sample_dtype({"DTYPE": 7})
 
@@ -57,8 +58,8 @@ def _copy_fixture(bruker_dir: Path, name: str, tmp_path: Path) -> Path:
 def test_read_data_honours_dtype(
     tmp_path: Path, bruker_dir: Path, dtype_code: int, np_dtype: str
 ) -> None:
-    """All three types of DTYPE can be read correctly (previously hard-coded int32, float Data will
-    be read incorrectly/Size misjudgment)."""
+    """All three DTYPEs read correctly (int32 used to be hard-coded, so float data was read
+    wrongly and its size misjudged)."""
     dst = _copy_fixture(bruker_dir, "hsqc_small", tmp_path)
     acqus = dst / "acqus"
     text = acqus.read_text(encoding="utf-8")
@@ -73,20 +74,25 @@ def test_read_data_honours_dtype(
     fids = np.zeros((td1 * 2, td2), dtype=complex)
     fids[0::2] = s.real
     fids[1::2] = s.imag
-    interleaved = np.stack([fids.real, fids.imag], axis=-1).reshape(-1)
+    # real layout: every row is padded to 1024 bytes => 2 x itemsize bytes per complex point and
+    # 1024//point_bytes padded complex points
+    row_points = 1024 // (2 * np.dtype(np_dtype).itemsize)
+    padded = np.zeros((fids.shape[0], row_points), dtype=complex)
+    padded[:, :td2] = fids
+    interleaved = np.stack([padded.real, padded.imag], axis=-1).reshape(-1)
     interleaved.astype(np_dtype).tofile(dst / "ser")
 
     exp = read_dataset(dst)
     data = read_data(exp)
 
-    assert data.matrix.shape == (td1 * 2, td2)
-    assert np.allclose(data.matrix.real, fids.real, atol=1.0)
-    assert np.allclose(data.matrix.imag, fids.imag, atol=1.0)
+    assert data.matrix.shape == (td1 * 2, row_points)
+    assert np.allclose(data.matrix[:, :td2].real, fids.real, atol=1.0)
+    assert np.allclose(data.matrix[:, :td2].imag, fids.imag, atol=1.0)
 
 
 def test_read_data_unknown_dtype_raises(tmp_path: Path, bruker_dir: Path) -> None:
-    """Unknown DTYPE is exposed as a BrukerDataError during the read phase (no silent read
-    errors)."""
+    """An unknown DTYPE surfaces as a BrukerDataError already while reading (not read wrongly in
+    silence)."""
     dst = _copy_fixture(bruker_dir, "hsqc_small", tmp_path)
     acqus = dst / "acqus"
     text = acqus.read_text(encoding="utf-8")

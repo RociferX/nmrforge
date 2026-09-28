@@ -1,10 +1,13 @@
-"""Determination of ownership of running records (0.2.199-patch29hz-repair). Background: patch29hi
-Peak selection written in the previous version/There is no analysis run record inputs.data_id,
-Pipeline's _last_run_for originally accepted such records, and an old failure in the multi-data
-experiment would be counted on **all** data heads; the project tree uses strict matching, and
-inconsistencies will be displayed on both sides. User 2026-09-10 Confirmed: Old project products
-will be regenerated without compatibility rollback. Now unified ProjectManager.last_run_for_data
-Strict judgment + a refs table."""
+"""Run record ownership (0.2.199-patch29hz-fix).
+
+Background: peak-picking/analysis run records written by versions before patch29hi carry
+no inputs.data_id. Pipeline's _last_run_for used to accept such records outright, so in a
+multi-data experiment one old failure was counted against **all** data entries, while the
+project tree matched strictly and the two displays disagreed. The user confirmed on
+2026-09-10 that artifacts of old projects are always regenerated, with no compatibility
+fallback. It is now unified on ProjectManager.last_run_for_data strict matching + one refs
+table.
+"""
 
 from __future__ import annotations
 
@@ -30,8 +33,9 @@ def qapp() -> QApplication:
 
 @pytest.fixture
 def host(qapp: QApplication):
-    """Control host: The entire test is destroyed to avoid remaining top-level controls (Qt crashes
-    at the end)."""
+    """Widget host: destroyed as a whole when the test ends, so no top-level widget is
+    left behind (Qt teardown crash).
+    """
     from qtcompat.QtWidgets import QWidget
 
     widget = QWidget()
@@ -60,8 +64,9 @@ def test_strict_match_finds_exact_data_id(tmp_path: Path) -> None:
 
 
 def test_legacy_run_without_data_id_is_ignored(tmp_path: Path) -> None:
-    """Old records with empty data_id are no longer counted in any data header (compatible fallback
-    is not preserved)."""
+    """Legacy records with an empty data_id no longer count against any data entry (no
+    compatibility fallback is kept).
+    """
     manager, exp, d1 = _project(tmp_path, "own_legacy")
     d2 = manager.import_data(exp.id, "/fake/2")
     _record(manager, exp.id, "", "pick_peaks", "failed")
@@ -84,7 +89,7 @@ def test_failure_marks_only_its_own_data(tmp_path: Path) -> None:
 def test_tree_and_pipeline_agree(
     tmp_path: Path, qapp: QApplication, host
 ) -> None:
-    """The project tree "failure" and Pipeline step FAILED must have the same origin."""
+    """The project tree's "failed" and the Pipeline step FAILED must share one source."""
     manager, exp, d1 = _project(tmp_path, "own_agree")
     d2 = manager.import_data(exp.id, "/fake/2")
     _record(manager, exp.id, d2.id, "pick_peaks", "failed")
@@ -97,8 +102,9 @@ def test_tree_and_pipeline_agree(
 
 
 def test_step_refs_table_is_single_source(tmp_path: Path) -> None:
-    """There is only one copy of the step ref table and it covers four steps + optional SMILE
-    (analysis deleted)."""
+    """The step ref table exists in exactly one place, covering the four steps + the
+    optional SMILE (analysis has been removed).
+    """
     assert set(STEP_RUN_REFS) == {"fid", "spectrum", "smile", "peaks"}
     assert "phase_optimize_unified" in STEP_RUN_REFS["spectrum"]
     assert set(ALL_STEP_RUN_REFS) == {

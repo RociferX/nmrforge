@@ -1,20 +1,20 @@
 """Guards for the run-time interface language (2026-09-21).
 
-Model: the code writes the **English original** and wraps it in ``tr()`` (the public English
-tree and the private repository share one code base, so the English tree carries no
-Chinese); Chinese lives in ``ui_support/locales/zh.json`` (key = the English original).
-This file guards:
+Model: the code writes the **English original** and wraps it in ``tr()`` (the public
+English tree and the private repository share one code base, so the English tree carries
+no Chinese); Chinese lives in ``ui_support/locales/zh.json`` (key = the English
+original). This file guards:
 
 1. ``tr()`` is the identity in English (the source language) and substitutes from the
    catalogue in Chinese, with ``str.format`` placeholders;
-2. where the language comes from: explicit setting > environment > injected system language
-   > the source language (English); an unknown language falls back to the source;
-3. ``ui_support/locales/source.json`` matches the ``tr()`` strings in the code (a new string
-   must be registered first);
-4. files that have been converted must not contain Chinese literals outside ``tr()``
-   (a ratchet: it only grows);
-5. every key in the Chinese catalogue must be a ``tr()`` string that really exists (no dead
-   keys left behind by a rename).
+2. language resolution order: explicit setting > environment variable > injected system
+   language > the source language (English); an unknown language falls back to the source;
+3. ``ui_support/locales/source.json`` matches the ``tr()`` strings in the code (a new
+   string must be registered first);
+4. converted files must not contain Chinese literals outside ``tr()`` (a ratchet: it only
+   grows);
+5. every key in the Chinese catalogue must be a ``tr()`` string that really exists (no
+   dead keys left behind by a rename).
 """
 
 from __future__ import annotations
@@ -44,7 +44,8 @@ def _tool() -> Any:
 
 @pytest.fixture(autouse=True)
 def _restore_language(monkeypatch: pytest.MonkeyPatch):
-    """Reset the language state and the catalogue cache after every test."""
+    """Reset the language state and the catalogue cache after every test case, so the
+    tests cannot pollute each other."""
     saved_language = i18n._language
     saved_resolver = i18n._system_resolver
     for key in ("NMRFORGE_LANG", "NMRFORGE_LANGUAGE", "LANG", "LC_ALL", "LC_MESSAGES"):
@@ -81,13 +82,15 @@ def test_tr_interpolates_placeholders() -> None:
 
 
 def test_language_from_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Explicit env and the system locale both normalise to zh / en; else the tree default."""
+    """The explicit environment variable and the system locale both normalise to zh / en;
+    with neither, the tree's declared default language is used."""
     monkeypatch.setenv("NMRFORGE_LANG", "zh_CN.UTF-8")
     assert i18n.language_from_environment() == "zh"
     assert i18n.get_language() == "zh"
     monkeypatch.delenv("NMRFORGE_LANG")
     monkeypatch.setenv("LANG", "en_US.UTF-8")
     # The system locale is not an explicit pin: it ranks below the settings preference
+    # (see the regression test below)
     assert i18n.language_from_environment() is None
     assert i18n.language_from_locale_environment() == "en"
     i18n.set_system_language_resolver(lambda: None)
@@ -97,16 +100,26 @@ def test_language_from_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     i18n.set_system_language_resolver(lambda: "zh-CN")
     assert i18n.get_language() == "zh"
     i18n.set_system_language_resolver(lambda: None)
-    assert i18n.get_language() == i18n.default_language() == "en"
+    # Fall back to **this tree's declared default language** (zh in the private trunk, en
+    # in the public English tree) ⇒ assert the two agree instead of hard-coding zh
+    declared = json.loads(
+        (Path(i18n.__file__).resolve().parent / "locales" / "default.json").read_text(
+            encoding="utf-8"
+        )
+    )["language"]
+    assert declared in {"zh", "en"}
+    assert i18n.default_language() == declared
+    assert i18n.get_language() == declared
 
 
 def test_explicit_language_wins_over_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An explicit setting beats the environment; an unknown language falls back."""
+    """An explicit setting beats the environment variable; an unknown language falls
+    back to this tree's default language."""
     monkeypatch.setenv("NMRFORGE_LANG", "zh")
     assert i18n.set_language("en") == "en"
     assert i18n.tr("Determined") == "Determined"
     monkeypatch.delenv("NMRFORGE_LANG")
-    i18n.set_system_language_resolver(lambda: None)  # 别让别的用例留下的系统语言解析器影响判定
+    i18n.set_system_language_resolver(lambda: None)  # drop any resolver left by another test
     assert i18n.set_language("de") == i18n.default_language()
 
 
@@ -118,7 +131,7 @@ def test_user_preference_from_config(tmp_path: Path) -> None:
     assert i18n.read_user_preference(config) == "zh"
     config.write_text("language: auto\n", encoding="utf-8")
     assert i18n.read_user_preference(config) is None
-    config.write_text("language: de\n", encoding="utf-8")  # unsupported -> follow the system
+    config.write_text("language: de\n", encoding="utf-8")  # unsupported → follow the system
     assert i18n.read_user_preference(config) is None
     config.write_text("language: [bad yaml\n", encoding="utf-8")
     assert i18n.read_user_preference(config) is None
@@ -128,10 +141,11 @@ def test_user_preference_from_config(tmp_path: Path) -> None:
 def test_user_preference_sits_between_environment_and_system(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Resolver order: explicit setting > NMRFORGE_LANG > the settings preference > system.
+    """Resolution order: explicit setting > NMRFORGE_LANG > the settings preference >
+    the system language.
 
-    The environment variable deliberately comes first: the README and the packaging docs use
-    it to pin the language for one run, and a stale setting must not override that.
+    The environment variable deliberately comes first: the README and the packaging docs
+    use it to pin the language for one run, and a stale setting must not override that.
     """
     config = tmp_path / "nmrforge.local.yaml"
     config.write_text("language: en\n", encoding="utf-8")
@@ -141,7 +155,7 @@ def test_user_preference_sits_between_environment_and_system(
     i18n.set_system_language_resolver(lambda: "zh-CN")
     assert i18n.get_language() == "en"  # the setting beats the system language
     monkeypatch.setenv("NMRFORGE_LANG", "zh")
-    assert i18n.get_language() == "zh"  # the environment beats the setting
+    assert i18n.get_language() == "zh"  # the environment variable beats the setting
     monkeypatch.delenv("NMRFORGE_LANG")
     assert i18n.set_language("en") == "en"  # an explicit setting wins outright
     monkeypatch.setenv("NMRFORGE_LANG", "zh")
@@ -151,11 +165,12 @@ def test_user_preference_sits_between_environment_and_system(
 def test_system_locale_does_not_override_the_user_setting(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``LANG`` / ``LC_ALL`` are the system locale and must not beat the settings choice.
+    """``LANG`` / ``LC_ALL`` are the system locale only and must not beat the settings
+    choice (the second trap found in practice on 2026-09-21).
 
-    Almost every Linux machine runs a supported ``en_US.UTF-8``; ranking it above the user
-    setting would make "Settings -> Interface language = Chinese" a no-op (the same "I changed
-    it and nothing happened" symptom as the config-persistence bug).
+    Almost every Linux machine defaults to ``en_US.UTF-8``: if it ranked above the user
+    setting, "Settings → Interface language = Chinese" would never take effect -- the
+    same "changed it and nothing happened" symptom.
     """
     config = tmp_path / "nmrforge.local.yaml"
     config.write_text("language: zh\n", encoding="utf-8")
@@ -168,7 +183,7 @@ def test_system_locale_does_not_override_the_user_setting(
     i18n.set_language(None)
     i18n.set_system_language_resolver(lambda: "en-US")
     try:
-        assert i18n.get_language() == "zh"  # the setting beats the locale and QLocale
+        assert i18n.get_language() == "zh"  # the setting beats the system locale and QLocale
         monkeypatch.setenv("NMRFORGE_LANG", "en")
         assert i18n.get_language() == "en"  # an explicit pin still wins
     finally:
@@ -177,13 +192,14 @@ def test_system_locale_does_not_override_the_user_setting(
 
 
 def test_chinese_catalogue_keys_are_registered() -> None:
-    """Every key in zh.json must be a tr() string that exists (no dead keys after renames)."""
+    """Every key in zh.json must be a tr() string that really exists (no dead keys after
+    a rename)."""
     source = json.loads((LOCALES / "source.json").read_text(encoding="utf-8"))
     catalogue = json.loads((LOCALES / "zh.json").read_text(encoding="utf-8"))
     unknown = sorted(set(catalogue) - set(source["keys"]))
-    assert not unknown, f"zh.json has keys that are not registered: {unknown[:5]}"
+    assert not unknown, f"zh.json 出现未登记的键: {unknown[:5]}"
 
 
 def test_ui_string_snapshot_is_current() -> None:
-    """The tr() strings and the converted-file list must match the snapshot (run --write)."""
+    """The tr() strings and the converted-file list must match the snapshot (run --write first)."""
     assert _tool().check() == 0

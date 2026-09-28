@@ -1,16 +1,24 @@
-"""Targeted localization (2026-09-19 request): refine only the named peaks.
+"""Targeted localization (2026-09-19 requirement): refine only the selected
+peaks with the chosen method.
 
-Acceptance (given by the user):
+Acceptance (as given by the user):
 
-- **equivalence**: on the same workflow, targeted and whole-spectrum agree per peak on
-    ``H_ppm``/``N_ppm`` (1e-9) and on ``fit_success``/fallback reason for **the same peaks**;
-- **detection is unchanged**: row count and ``peak_id`` numbering stay, and unlisted peaks
-  keep the detection-stage parabola position;
-- **record**: ``run.json`` keeps the target origin (path + sha256 + peak count) plus
-  n_targeted/n_skipped; **errors**: an empty list / a missing file / an unknown ``peak_id``
-  / a missing ``peak_id`` column all raise; **default**: no targets = whole spectrum,
-    unchanged behaviour and record (``scope=all``); **condition granularity** (2026-09-20):
-    with a ``condition`` column or mapping each condition reads only its own ids, and a
+- **Equivalence**: on the same workflow, targeted and full-spectrum runs give
+  per-peak identical ``H_ppm``/``N_ppm`` (1e-9) and the same
+  ``fit_success``/fallback reason for the **same batch of peaks**;
+- **Detection unchanged**: row count and ``peak_id`` numbering are unchanged;
+  peaks not listed as targets keep the detection-stage parabola position;
+- **Recorded**: ``run.json`` stores the target source (path + sha256 + peak
+  count) + n_targeted/n_skipped;
+- **Errors**: an empty list / a missing file / an unknown ``peak_id`` / a
+  missing ``peak_id`` column all fail loudly;
+- **Default**: no targets given = full spectrum, same behavior and reporting
+  (``scope=all``);
+- **Condition granularity** (2026-09-20): with a ``condition`` column in the
+  CSV or a condition mapping, each condition takes only its own ``peak_id``
+  (checked against that condition's own spectrum); a missing row fails
+  **before processing** by default, and ``on_missing`` / per-condition
+  ``peak_ids`` / line ranges are written into run.json.
 """
 
 from __future__ import annotations
@@ -42,14 +50,15 @@ from nmrforge_api.localization_targets import (
     resolve_localization_targets,
 )
 
-# synthetic spectrum geometry: data axis 0 = indirect (15N, 64 points), axis 1 = direct
+# Synthetic spectrum geometry: data axis 0 = indirect (15N, 64 points),
+# axis 1 = direct (1H, 128 points)
 _N15_OBS, _N15_SW, _N15_CAR, _N15_SIZE = 60.8, 2000.0, 118.0, 64
 _H1_OBS, _H1_SW, _H1_CAR, _H1_SIZE = 600.0, 6000.0, 4.7, 128
 _PEAKS = ((30, 60), (45, 90), (18, 100))
 
 
 def _write_ft2(path: Path, *, shift_y: float = 0.0, shift_x: float = 0.0) -> Path:
-    """Write a 2D spectrum nmrglue can read: 3 strong peaks + fixed-seed noise."""
+    """Write an nmrglue-readable 2D spectrum: 3 strong peaks + fixed-seed noise."""
     from nmrglue.fileio import pipe
 
     shape = (_N15_SIZE, _H1_SIZE)
@@ -87,7 +96,8 @@ def _write_ft2(path: Path, *, shift_y: float = 0.0, shift_x: float = 0.0) -> Pat
 
 
 class _FakeBackend:
-    """Minimal backend double: writes spectra deterministically (as test_nmrforge_api)."""
+    """Minimal backend stand-in: writes spectra deterministically (same shape as
+    tests/test_nmrforge_api.py)."""
 
     def __init__(self) -> None:
         self.work_dir = ""
@@ -145,13 +155,14 @@ def _gaussian_rows(spectrum: Path, **kwargs):
     return detect_and_localize(spectrum, method="gaussian", sigma_multiplier=20, **kwargs)
 
 
-# --------------------------------------------------------------- unit/integration layer
+# ------------------------------------------------------------- unit/integration layer
 def test_targeted_matches_full_spectrum_on_the_same_peaks(tmp_path: Path) -> None:
-    """Equivalence (core acceptance): targets agree per peak, unlisted keep the parabola."""
+    """Equivalence (core acceptance): target peaks match per peak; peaks not
+    listed keep the detection-stage parabola position."""
     spectrum = _write_ft2(tmp_path / "spec.ft2")
     full, full_meta = _gaussian_rows(spectrum)
     ids = [row["peak_id"] for row in full]
-    assert len(ids) >= 3, f"the synthetic spectrum should detect at least 3 peaks, found {len(ids)}"
+    assert len(ids) >= 3, f"合成谱应检出至少 3 个峰,实际 {len(ids)}"
     assert ids == list(range(1, len(ids) + 1))
     assert full_meta["localization_scope"] == "all"
     assert full_meta["n_skipped"] == 0
@@ -191,30 +202,32 @@ def test_targeted_matches_full_spectrum_on_the_same_peaks(tmp_path: Path) -> Non
 
 
 def test_target_list_errors_are_explicit(tmp_path: Path) -> None:
-    """Empty list / missing file / missing column / bad id / unknown peak_id never pass silently."""
-    with pytest.raises(SweepError, match="does not exist"):
+    """Empty list, missing file, missing column, invalid id and unknown peak_id
+    are all loud."""
+    with pytest.raises(SweepError, match="不存在"):
         read_localization_targets(tmp_path / "missing.csv")
     empty = tmp_path / "empty.csv"
     empty.write_text("", encoding="utf-8")
-    with pytest.raises(SweepError, match="is empty"):
+    with pytest.raises(SweepError, match="为空"):
         read_localization_targets(empty)
     no_column = tmp_path / "no_column.csv"
     no_column.write_text("foo,bar\n1,2\n", encoding="utf-8")
-    with pytest.raises(SweepError, match="has no peak_id column"):
+    with pytest.raises(SweepError, match="缺少 peak_id"):
         read_localization_targets(no_column)
     bad_id = tmp_path / "bad_id.csv"
     bad_id.write_text("peak_id\nR0001\n", encoding="utf-8")
-    with pytest.raises(SweepError, match="not a positive integer"):
+    with pytest.raises(SweepError, match="不是正整数"):
         read_localization_targets(bad_id)
-    with pytest.raises(SweepError, match="is empty"):
+    with pytest.raises(SweepError, match="为空"):
         resolve_localization_targets([])
     spectrum = _write_ft2(tmp_path / "spec.ft2")
-    with pytest.raises(MeasurementError, match="were not detected"):
+    with pytest.raises(MeasurementError, match="未检出"):
         _gaussian_rows(spectrum, targets=(9999,))
 
 
 def test_target_sources_accept_paths_ids_and_mappings(tmp_path: Path) -> None:
-    """CSV (dedup, order kept, reference ids) / peak numbers / mappings work without glue."""
+    """CSV (deduplicated, order-preserving, with reference identities) / id
+    sequences / mappings all work without separate glue code."""
     csv = tmp_path / "targets.csv"
     csv.write_text(
         "peak_id,reference_peak_id\n3,R0003\n1,R0001\n3,R0003\n", encoding="utf-8"
@@ -236,7 +249,8 @@ def test_target_sources_accept_paths_ids_and_mappings(tmp_path: Path) -> None:
 def test_per_method_targets_limit_only_that_method(
     tmp_path: Path, bruker_dir: Path
 ) -> None:
-    """A per-method key restricts only the named method (parabolic stays whole-spectrum)."""
+    """Per-method key: only the named method is restricted (under both mode
+    parabolic stays full-spectrum)."""
     root = tmp_path / "per_method"
     backend = _FakeBackend()
     dataset = bruker_dir / "hsqc_2d"
@@ -281,7 +295,8 @@ def test_per_method_targets_limit_only_that_method(
 
 
 def test_combo_table_per_method_target_key(tmp_path: Path, bruker_dir: Path) -> None:
-    """Combination table localization.targets.<method>: restricts that method, origin is combo."""
+    """Combo-table localization.targets.<method>: restricts that method only and
+    records the source as combo."""
     root = tmp_path / "combo_per_method"
     backend = _FakeBackend()
     probe = run_parameter_study(
@@ -355,7 +370,7 @@ def test_cli_sweep_wires_the_localize_peaks_option() -> None:
 def test_targeted_run_records_sources_and_matches_full_run(
     tmp_path: Path, bruker_dir: Path
 ) -> None:
-    """Same workflow: targeted and whole-spectrum agree per peak, run.json records everything."""
+    """Same workflow: targeted matches full per peak, and run.json records all source info."""
     root = tmp_path / "targeted_run"
     backend = _FakeBackend()
     full = run_parameter_study(
@@ -428,7 +443,8 @@ def test_targeted_run_records_sources_and_matches_full_run(
 def test_changing_the_target_file_content_invalidates_the_resume_cache(
     tmp_path: Path, bruker_dir: Path
 ) -> None:
-    """The fingerprint carries the resolved targets: same path, new content -> re-run."""
+    """The resume fingerprint carries the parsed target list: changed content at
+    the same path must rerun."""
     root = tmp_path / "targets_fingerprint"
     backend = _FakeBackend()
     dataset = bruker_dir / "hsqc_2d"
@@ -466,7 +482,8 @@ def test_changing_the_target_file_content_invalidates_the_resume_cache(
 def test_combo_table_key_resolves_relative_target_path(
     tmp_path: Path, bruker_dir: Path
 ) -> None:
-    """A relative path in the combination table resolves against the table's directory."""
+    """A relative path in the combo table's ``localization.targets`` resolves
+    against the combo table's directory."""
     root = tmp_path / "combo_targets"
     backend = _FakeBackend()
     first = run_parameter_study(
@@ -501,7 +518,7 @@ def test_combo_table_key_resolves_relative_target_path(
     assert record["n_targets"] == 1
     assert Path(record["path"]).resolve() == targets.resolve()
 
-# ----------------------------------------------------- condition granularity (2026-09-20)
+# ------------------------------------------------------ Condition granularity (2026-09-20)
 def _condition_csv(
     path: Path, rows: Sequence[tuple[str, int]], *, header: str = "condition,peak_id"
 ) -> Path:
@@ -511,7 +528,8 @@ def _condition_csv(
 
 
 def _ab_study(tmp_path: Path, bruker_dir: Path, backend: _FakeBackend):
-    """A two-condition (A/B) study with the reference built: each condition has its own table."""
+    """A/B two-condition study (the reference is already built): each condition
+    has its own spectrum and its own peak table."""
     return run_parameter_study(
         tmp_path / "ab",
         datasets={"A": bruker_dir / "hsqc_2d", "B": bruker_dir / "hsqc_small"},
@@ -543,7 +561,8 @@ def _rerun(root: Path, backend: _FakeBackend, **kwargs):
 def test_condition_column_targets_each_condition_separately(
     tmp_path: Path, bruker_dir: Path
 ) -> None:
-    """A and B share one CSV: each condition reads its rows and the per-run counts are right."""
+    """A/B share one CSV: each condition takes only its own rows, and per-run
+    counts are correct for both."""
     backend = _FakeBackend()
     probe = _ab_study(tmp_path, bruker_dir, backend)
     ids = _detected_ids(probe)
@@ -577,7 +596,7 @@ def test_condition_column_targets_each_condition_separately(
             if not math.isnan(row["fit_success"])
         }
         assert refined == set(expect[name])
-    # line ranges: after the header (line 1) A occupies line 2 and B occupies lines 3-4
+    # line ranges: after the header (line 1), A takes line 2 and B takes lines 3-4
     record = runs["A"].parameters_resolved["detection"]["localization_targets"]
     assert record["by_condition"]["A"]["line_ranges"] == [[2, 2]]
     assert record["by_condition"]["B"]["line_ranges"] == [[3, 4]]
@@ -588,7 +607,8 @@ def test_condition_column_targets_each_condition_separately(
 def test_condition_column_absent_keeps_batch_wide_targets(
     tmp_path: Path, bruker_dir: Path
 ) -> None:
-    """Without a condition column -> bit-for-bit as before, recorded as by_condition="all"."""
+    """No condition column -> identical to the existing per-position behavior,
+    recorded as by_condition="all" (regression)."""
     backend = _FakeBackend()
     probe = _ab_study(tmp_path, bruker_dir, backend)
     ids = _detected_ids(probe)
@@ -611,33 +631,35 @@ def test_condition_column_absent_keeps_batch_wide_targets(
 def test_condition_targets_error_before_processing(
     tmp_path: Path, bruker_dir: Path
 ) -> None:
-    """Missing rows / unknown condition names / empty lists fail **before processing**."""
+    """A missing row / unknown condition name / empty list all fail **before
+    processing** (no workflow runs)."""
     backend = _FakeBackend()
     probe = _ab_study(tmp_path, bruker_dir, backend)
     ids = _detected_ids(probe)
     before = len(backend.process_calls)
     only_a = _condition_csv(tmp_path / "only_a.csv", [("A", ids["A"][0])])
-    with pytest.raises(SweepError, match="has no rows for condition 'B'"):
+    with pytest.raises(SweepError, match="没有条件 'B' 的行"):
         _rerun(probe.session.root, backend, localize_peaks=only_a, resume=False)
     assert len(backend.process_calls) == before
     unknown = _condition_csv(
         tmp_path / "unknown.csv", [("A", ids["A"][0]), ("C", ids["B"][0])]
     )
-    with pytest.raises(SweepError, match="does not belong to the study"):
+    with pytest.raises(SweepError, match="不属于该研究"):
         _rerun(probe.session.root, backend, localize_peaks=unknown, resume=False)
     assert len(backend.process_calls) == before
     empty = tmp_path / "empty.csv"
     empty.write_text("", encoding="utf-8")
-    with pytest.raises(SweepError, match="is empty"):
+    with pytest.raises(SweepError, match="为空"):
         _rerun(probe.session.root, backend, localize_peaks=empty, resume=False)
     assert len(backend.process_calls) == before
-    # a target list on a combination-table key fails before processing too (paths resolve there)
+    # a target list on a combo-table key also fails before processing
+    # (relative paths resolve against the combo-table directory)
     combos_csv = tmp_path / "combos.csv"
     combos_csv.write_text(
         "zero_fill,localization,localization.targets\n1,gaussian,only_a.csv\n",
         encoding="utf-8",
     )
-    with pytest.raises(SweepError, match="has no rows for condition 'B'"):
+    with pytest.raises(SweepError, match="没有条件 'B' 的行"):
         run_combination_study(
             str(probe.session.root),
             combos=load_combo_table(combos_csv),
@@ -645,10 +667,10 @@ def test_condition_targets_error_before_processing(
             backend=backend,
         )
     assert len(backend.process_calls) == before
-    # a mapping that misses a condition (and gives no default) raises as well
+    # a mapping that omits a condition (no default) also fails
     b_only = tmp_path / "b.csv"
     b_only.write_text(f"peak_id\n{ids['B'][0]}\n", encoding="utf-8")
-    with pytest.raises(SweepError, match="has no rows for condition 'A'"):
+    with pytest.raises(SweepError, match="没有条件 'A' 的行"):
         _rerun(
             probe.session.root,
             backend,
@@ -665,7 +687,8 @@ def test_condition_targets_error_before_processing(
 def test_condition_on_missing_policies_are_explicit(
     tmp_path: Path, bruker_dir: Path, policy: str, scope: str, origin: str
 ) -> None:
-    """Letting a missing row through needs an explicit all/none, recorded with its origin."""
+    """Allowing missing rows requires an explicit all/none, and both policy and
+    source are recorded."""
     backend = _FakeBackend()
     probe = _ab_study(tmp_path, bruker_dir, backend)
     ids = _detected_ids(probe)
@@ -699,7 +722,8 @@ def test_condition_on_missing_policies_are_explicit(
 def test_condition_mapping_files_and_default(
     tmp_path: Path, bruker_dir: Path
 ) -> None:
-    """One file per condition and the ``default`` + ``by_condition`` mapping both work."""
+    """One file per condition / the ``default`` + ``by_condition`` mapping form
+    are both supported."""
     backend = _FakeBackend()
     probe = _ab_study(tmp_path, bruker_dir, backend)
     ids = _detected_ids(probe)
@@ -744,7 +768,8 @@ def test_condition_mapping_files_and_default(
 
 
 def test_combo_table_cell_condition_mapping(tmp_path: Path, bruker_dir: Path) -> None:
-    """A combination-table cell ``{A: a.csv, B: b.csv}``: relative paths resolve there."""
+    """Writing ``{A: a.csv, B: b.csv}`` in a combo-table cell: relative paths
+    resolve against the combo-table directory."""
     backend = _FakeBackend()
     probe = _ab_study(tmp_path, bruker_dir, backend)
     ids = _detected_ids(probe)
@@ -778,7 +803,8 @@ def test_combo_table_cell_condition_mapping(tmp_path: Path, bruker_dir: Path) ->
 def test_condition_targets_resume_only_reruns_the_changed_condition(
     tmp_path: Path, bruker_dir: Path
 ) -> None:
-    """The fingerprint carries the per-condition list: edit one -> only that one re-runs."""
+    """The resume fingerprint carries the parsed per-condition lists: changing
+    one condition reruns only that condition."""
     backend = _FakeBackend()
     probe = _ab_study(tmp_path, bruker_dir, backend)
     ids = _detected_ids(probe)
@@ -794,18 +820,18 @@ def test_condition_targets_resume_only_reruns_the_changed_condition(
     } == {"A": 1, "B": 2}
     calls = len(backend.process_calls)
     again = _rerun(probe.session.root, backend, localize_peaks=targets, resume=True)
-    assert len(backend.process_calls) == calls  # nothing changed -> everything reused
+    assert len(backend.process_calls) == calls  # nothing changed → all reused
     assert [run.resume_fingerprint for run in again.runs] == [
         run.resume_fingerprint for run in first.runs
     ]
-    # change one peak number of B only (same row count, A's list bit-for-bit unchanged)
+    # change one of B's peak ids (same row count, A's list unchanged per position)
     targets.write_text(
         f"condition,peak_id\nA,{ids['A'][0]}\n"
         f"B,{ids['B'][1]}\nB,{ids['B'][2]}\n",
         encoding="utf-8",
     )
     third = _rerun(probe.session.root, backend, localize_peaks=targets, resume=True)
-    assert len(backend.process_calls) == calls + 1  # only B re-runs
+    assert len(backend.process_calls) == calls + 1  # only B reruns
     runs = {run.condition: run for run in third.runs}
     assert runs["A"].parameters_resolved["detection"]["localization_targets"][
         "peak_ids"
@@ -817,30 +843,31 @@ def test_condition_targets_resume_only_reruns_the_changed_condition(
 
 
 def test_condition_aware_readers_and_low_level_api(tmp_path: Path) -> None:
-    """Low level: read_localization_targets(condition=) and an explicit empty set."""
+    """Low level: read_localization_targets(condition=) and an explicitly empty
+    target set (scope=none)."""
     path = _condition_csv(tmp_path / "t.csv", [("A", 3), ("B", 9)])
-    with pytest.raises(SweepError, match="has a condition column"):
+    with pytest.raises(SweepError, match="带 condition 列"):
         read_localization_targets(path)
     parsed = read_localization_targets(path, condition="B")
     assert parsed.peak_ids == (9,)
     assert parsed.condition == "B"
     assert parsed.line_ranges == ((3, 3),)
-    with pytest.raises(SweepError, match="has no rows for condition 'C'"):
+    with pytest.raises(SweepError, match="没有条件 'C' 的行"):
         read_localization_targets(path, condition="C")
     conditional = resolve_conditional_targets(path, conditions=["A", "B"])
     assert conditional.mode == "by_condition"
     assert conditional.is_conditional
     assert conditional.for_condition("A").peak_ids == (3,)
-    assert conditional.describe().startswith("per condition")
+    assert conditional.describe().startswith("按条件")
     assert conditional.to_dict()["conditions"]["B"]["n_targets"] == 1
-    with pytest.raises(SweepError, match="unknown on_missing"):
+    with pytest.raises(SweepError, match="未知的 on_missing"):
         resolve_conditional_targets(path, conditions=["A", "B"], on_missing="nope")
-    with pytest.raises(SweepError, match="does not belong to the study"):
+    with pytest.raises(SweepError, match="不属于该研究"):
         resolve_conditional_targets(path, conditions=["A"])
 
     spectrum = _write_ft2(tmp_path / "spec.ft2")
     rows, _meta = detect_and_localize(spectrum, method="parabolic", sigma_multiplier=20)
-    with pytest.raises(MeasurementError, match="target peak list is empty"):
+    with pytest.raises(MeasurementError, match="目标峰列表为空"):
         detect_and_localize(
             spectrum, method="parabolic", sigma_multiplier=20, targets=()
         )

@@ -1,4 +1,4 @@
-"""GUI Skeleton test: The main window is built on ProjectManager/WorkspaceManager (offscreen)."""
+"""GUI skeleton tests: the main window is built on ProjectManager/WorkspaceManager (offscreen)."""
 
 from __future__ import annotations
 
@@ -74,7 +74,7 @@ def test_window_shows_experiments_from_project(
 def test_window_empty_state(qapp: QApplication) -> None:
     window = MainWindow()
     assert window.manager.project is None
-    assert "welcome" in window.windowTitle()
+    assert "欢迎" in window.windowTitle()
     assert window.center_panel.welcome_page is not None
     window.close()
 
@@ -82,10 +82,9 @@ def test_window_empty_state(qapp: QApplication) -> None:
 def test_new_project_action(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """When the project is not open, "New Project" names the welcome page inline (no pop-up
-    window)."""
-    # New projects fall into the default workspace (to avoid contaminating the real
-    # ~/NMRForgeWorkspace).
+    """With no project open, "New project" names it inline on the welcome page (no dialog)."""
+    # A new project lands in the default workspace (to avoid polluting the real
+    # ~/NMRForgeWorkspace)
     workspace = tmp_path / "ws"
     workspace.mkdir()
     monkeypatch.setattr(
@@ -109,8 +108,7 @@ def test_new_project_action(
     monkeypatch.setattr("gui.main_window.NotesDialog", _FakeNotesDialog)
     window.new_project()
     page = window.center_panel.welcome_page
-    # The input line appears on the page, no pop-up window appears.
-    assert not page._name_edit.isHidden()
+    assert not page._name_edit.isHidden()  # the inline input row appears, no dialog
     page._name_edit.setText("demo")
     page._commit_name()
     assert window.manager.project is not None
@@ -122,8 +120,7 @@ def test_new_project_action(
 def test_new_project_tree_inline_when_project_open(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """When the project is open, "New Project" is named inline in the project tree (no pop-up
-    window)."""
+    """With a project open, "New project" names it inline in the project tree (no dialog)."""
     manager = _build_manager(tmp_path, monkeypatch)
     workspace = tmp_path / "ws"
     monkeypatch.setattr(
@@ -154,7 +151,7 @@ def test_new_project_tree_inline_when_project_open(
 
 
 class _WorkspaceStub:
-    """Workspace stub for testing: Create a project under the workspace directory."""
+    """Test workspace stub: creates a project under the workspace directory."""
 
     def __init__(self, root: Path) -> None:
         self.root = root
@@ -194,8 +191,8 @@ def test_open_project_action(
 def test_add_experiment_action(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """"Add experiment type" = create a new blank experiment type: name it inline in the project
-    tree (no pop-up window)."""
+    """The "Add experiment type" action creates a blank experiment type: named inline in the project
+    tree, no dialog."""
     manager = _build_manager(tmp_path, monkeypatch)
 
     class _FakeNotesDialog:
@@ -219,7 +216,7 @@ def test_add_experiment_action(
     last = window.manager.project.experiment("exp_003")
     assert last is not None and last.title == "3D HNCACB"
     entry = manager.project.experiment("exp_003")
-    assert entry is not None and len(entry.data) == 0  # Blank experiment type no sample data.
+    assert entry is not None and len(entry.data) == 0  # a blank experiment type has no sample data
     window.close()
 
 
@@ -241,12 +238,11 @@ def test_delete_experiment_action_keeps_audit(
     window = MainWindow(manager=manager)
     window.project_tree.select_experiment("exp_001")
     window.delete_experiment()
-    # The flat compatibility table has been deleted: Check that there is only 1 undeleted experiment
-    # left.
+    # The flat compatibility table is gone: check that only 1 experiment remains undeleted
     assert len([e for e in manager.project.experiments if not e.trashed]) == 1
-    assert manager.project.experiment("exp_001").trashed is True  # Soft delete.
+    assert manager.project.experiment("exp_001").trashed is True  # soft delete
     assert manager.project is not None
-    assert len(manager.project.workflow_runs) == 1  # Audit hold.
+    assert len(manager.project.workflow_runs) == 1  # the audit is preserved
     window.close()
 
 
@@ -267,7 +263,7 @@ def test_recent_menu_persists(tmp_path: Path, qapp: QApplication) -> None:
 def test_import_workflow_e2e(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """End-to-end: Real Bruker fixture directory imported via
+    """End to end: a real Bruker fixture directory goes through
     workflow.import_workflow.import_data."""
     ws = tmp_path / "ws"
     ws.mkdir(exist_ok=True)
@@ -293,8 +289,8 @@ def test_import_workflow_e2e(
             self._target()
 
     monkeypatch.setattr("threading.Thread", SyncThread)
-    # 0.2.86: The import completion prompt may contain quality warnings. The stub modal dialog box
-    # in the test avoids blocking.
+    # 0.2.86: the import completion prompt may carry quality warnings; the test stubs the modal
+    # dialog to avoid blocking
     monkeypatch.setattr(
         "gui.dialogs.InfoDialog.show_info",
         staticmethod(lambda *args, **kwargs: None),

@@ -4,13 +4,17 @@ Commands::
 
     init         create a study and import datasets (use --condition A / B for more)
     reference    run automatic optimisation, freeze the reference spectrum and script
-    peaks        reference peak table: pick peaks or register an external table
+                 (one per condition)
+    peaks        reference peak table: pick peaks or register an external table, and write
+                 both reference peak tables
     sweep        run workflows from a parameter table (alias: workflows)
     report       recompute the summary from run.json/workflow.json (no reprocessing)
     status       print the current study status (conditions/reference/workflows)
-    compat       behaviour compatibility manifest (behaviour fingerprint + change level)
+    compat       behaviour compatibility manifest (behaviour fingerprint + change level;
+                 --golden runs the golden vector as self-proof)
 
-Parameter combinations (the ``axes`` shortcut in YAML/JSON, or an explicit table)::
+Parameter combinations (the ``axes`` shortcut in YAML/JSON, or an explicit CSV/YAML
+combination table)::
 
     axes:
       zero_fill: [1, 2, 4]
@@ -68,19 +72,25 @@ COMBINATION_LOCALIZATION_CHOICES: tuple[str, ...] = (
 )
 
 
-#: When set to any non-empty value, print the full traceback; same as --debug (Phase 21)
+#: When set to any non-empty value, print the full traceback to help troubleshooting; same
+#: as every subcommand's --debug (Phase 21)
 DEBUG_ENV = "NMRFORGE_DEBUG"
 
 
 def _debug_enabled(args: argparse.Namespace | None = None) -> bool:
-    """Print the full traceback when --debug or NMRFORGE_DEBUG=1 is set."""
+    """Print the full traceback when --debug or NMRFORGE_DEBUG=1 is set.
+
+    By default the user only sees the actionable hint.
+    """
     if getattr(args, "debug", False):
         return True
     return bool(str(os.environ.get(DEBUG_ENV, "")).strip())
 
 
 def _report_unexpected(exc: BaseException, *, debug: bool) -> int:
-    """User-visible exit for an unexpected exception: one actionable line plus the traceback."""
+    """User-visible exit for an unexpected exception: one actionable line plus the full
+    traceback on the debug channel.
+    """
     print(tr("Error: {p0}", p0=describe_exception(exc)))
     if debug:
         print(tr("Full traceback (debug):"))
@@ -220,6 +230,8 @@ def cmd_reference(args: argparse.Namespace) -> int:
                 "phase_route": reference.phase_route,
                 "phase": reference.phase_record(),
                 "sampling": reference.sampling,
+                # 2026-09-25 (user): FT sign/direction frozen with the reference (manual -neg)
+                "sampling_flags": reference.sampling_flags,
                 "workflow_supported": reference.sweep_supported,
             }
         )
@@ -310,7 +322,7 @@ def _targets_spec_from_args(args: argparse.Namespace) -> Any:
 
 
 def cmd_sweep(args: argparse.Namespace) -> int:
-    """**Combination mode**: an explicit reference plus a parameter table."""
+    """**Combination mode**: an explicit reference plus a parameter table (builds no reference)."""
     if (args.grid is None) == (args.combos is None):
         raise SensitivityError(
             tr(
@@ -457,23 +469,19 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     parser.add_argument(
-        "--debug",
-        action="store_true",
-        help=tr(
+        "--debug", action="store_true", help=tr(
             "print the full traceback on error (same as "
             "NMRFORGE_DEBUG=1)",
-        ),
+        )
     )
 
     def _common(handler: argparse.ArgumentParser) -> None:
         handler.add_argument("--study", required=True, help=tr("study root directory"))
         handler.add_argument(
-            "--debug",
-            action="store_true",
-            help=tr(
+            "--debug", action="store_true", help=tr(
                 "print the full traceback on error (same as "
                 "NMRFORGE_DEBUG=1)",
-            ),
+            )
         )
         handler.add_argument("--name", default="", help=tr("project name when creating a study"))
         handler.add_argument(
@@ -484,21 +492,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     init = sub.add_parser("init", help=tr("create a study and import a Bruker dataset"))
     _common(init)
-    init.add_argument(
-        "--dataset", help=tr(
+    init.add_argument("--dataset", help=tr(
         "Bruker directory downloaded and unpacked from the public "
         "archive",
-    )
-    )
+    ))
     init.add_argument("--title", default="", help=tr("experiment title"))
     init.set_defaults(func=cmd_init)
 
-    reference = sub.add_parser(
-        "reference", help=tr(
+    reference = sub.add_parser("reference", help=tr(
         "build and freeze the reference spectrum and "
         "script",
-    )
-    )
+    ))
     _common(reference)
     reference.add_argument("--params", help=tr(
         "input parameters for automatic processing "
@@ -526,21 +530,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     peaks = sub.add_parser("peaks", help=tr("reference peak table: pick or register"))
     _common(peaks)
-    peaks.add_argument(
-        "--sigma", type=float, default=None, help=tr(
+    peaks.add_argument("--sigma", type=float, default=None, help=tr(
         "peak-picking threshold (multiples of "
         "sigma)",
-    )
-    )
+    ))
     peaks.add_argument(
         "--max-peaks", type=int, default=0, help=tr("keep only the N most intense peaks (0 = all)")
     )
-    peaks.add_argument(
-        "--force", action="store_true", help=tr(
+    peaks.add_argument("--force", action="store_true", help=tr(
         "discard the existing peak table and pick "
         "again",
-    )
-    )
+    ))
     peaks.add_argument(
         "--localization",
         choices=LOCALIZATION_CHOICES,
@@ -667,12 +667,10 @@ def build_parser() -> argparse.ArgumentParser:
     ))
     sweep.set_defaults(func=cmd_sweep)
 
-    report = sub.add_parser(
-        "report", help=tr(
+    report = sub.add_parser("report", help=tr(
         "recompute the summary from existing records (no "
         "reprocessing)",
-    )
-    )
+    ))
     _common(report)
     report.set_defaults(func=cmd_report)
 

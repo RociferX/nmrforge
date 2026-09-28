@@ -1,4 +1,4 @@
-"""Ownership-boundary checks (purely functional tests)."""
+"""Pure-function tests for the ownership check (maintained by the Architect)."""
 
 from __future__ import annotations
 
@@ -63,7 +63,7 @@ def test_unknown_path_is_shared() -> None:
 
 
 def test_violations_logic() -> None:
-    # Pure logic: Given a file list, manually determine the ownership without triggering git.
+    # Pure logic: ownership is judged from a hand-written file list, without invoking git
     files = {
         "gui/main_window.py": "gui",
         "backend/base.py": "shared",
@@ -75,7 +75,7 @@ def test_violations_logic() -> None:
 
 
 def test_default_base_resolves_in_this_repository() -> None:
-    """The default baseline must resolve here (trunk master / public main, no hard-coded name)."""
+    """The default base must resolve in this repository, without hard-coding a branch name."""
     base = module.default_base()
     assert module._rev_exists(base), base
 
@@ -83,7 +83,7 @@ def test_default_base_resolves_in_this_repository() -> None:
 def test_changed_files_sees_uncommitted_edits(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The pre-commit check must see uncommitted edits: base...HEAD only looks at commits."""
+    """The pre-commit check must see uncommitted edits: base...HEAD only covers commits."""
     repo = tmp_path / "repo"
     repo.mkdir()
 
@@ -102,4 +102,4 @@ def test_changed_files_sees_uncommitted_edits(
     assert module.changed_files("HEAD") == []  # clean working tree
 
     (repo / "tracked.txt").write_text("two\n", encoding="utf-8")
-    assert "tracked.txt" in module.changed_files("HEAD")  # uncommitted edit must appear
+    assert "tracked.txt" in module.changed_files("HEAD")  # uncommitted edit shows up

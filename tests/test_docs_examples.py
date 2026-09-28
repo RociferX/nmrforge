@@ -1,19 +1,24 @@
-"""Guard that the documented examples actually run (2026-09-20).
+"""Documentation example executability guard (2026-09-20).
 
-Background (user report): the README Python API example printed
-``result.summary["delta_std_ppm"]``, but ``StudyResult.summary`` reports the execution
-outcome only (status/counts) and never returns that field -- copying it raised ``KeyError``.
-The old doc tests only checked that sections and names were present, never that examples ran.
+Background (user report): the README Python API example writes
+``result.summary["delta_std_ppm"]``, while ``StudyResult.summary`` only aggregates
+**execution results** (status / counts) and does not return that field -- copying the
+example raises ``KeyError`` on lookup. The old documentation test only checked "is the
+section name / parameter name present" and did not execute the examples, so this kind of
+error was never caught.
 
-This file makes "the documented examples really run" a regression fact:
+This file turns "the documentation examples really run" into a regression fact:
 
-1. the README Python API block is **executed as written** (only the study root and
-   dataset path are redirected to a temporary directory, and a deterministic stub
-   backend is injected -- the example omits ``backend=`` because real use drives NMRPipe);
-2. every ``*.summary["field"]`` in the docs must be a field that really exists (scan + run);
-3. the two "Example workflow" commands in the README run as written;
-4. the scripts under ``docs/external-api/examples/`` run with their documented arguments
-   (the measurement one needs no NMRPipe; the study ones get the stub backend).
+1. the README Python API code block is **executed verbatim** (only the study root / data
+   directory in the example are swapped for temporary paths, and a deterministic
+   stand-in backend is injected -- the example itself does not write ``backend=``,
+   because real usage is driven by the default backend running NMRPipe);
+2. every ``*.summary["field"]`` appearing in the documentation must be a field that is
+   **really returned** (static scan + real run);
+3. the two commands of the README "Example workflow" are executed verbatim;
+4. the example scripts under ``docs/external-api/examples/`` are really run with the
+   documented parameters (the measurement-layer examples do not need NMRPipe; the study
+   examples get a stand-in backend injected).
 """
 
 from __future__ import annotations
@@ -39,7 +44,8 @@ FENCE = re.compile(r"```python\n(.*?)```", re.S)
 SUMMARY_ACCESS = re.compile(r"\.summary\[\s*[\"']([A-Za-z_][A-Za-z0-9_]*)[\"']\s*\]")
 BARE_SUMMARY = re.compile(r"(?<![.\w])summary\[\s*[\"']([A-Za-z_][A-Za-z0-9_]*)[\"']\s*\]")
 
-# synthetic spectrum geometry: data axis 0 = indirect (15N, 64 points), axis 1 = direct
+# Synthetic spectrum geometry: data axis 0 = indirect (15N, 64 points),
+# axis 1 = direct (1H, 128 points)
 N15_OBS, N15_SW, N15_CAR, N15_SIZE = 60.8, 2000.0, 118.0, 64
 H1_OBS, H1_SW, H1_CAR, H1_SIZE = 600.0, 6000.0, 4.7, 128
 PEAKS = ((30, 60), (45, 90), (18, 100))
@@ -87,7 +93,7 @@ def _write_ft2(path: Path) -> Path:
 
 
 class _DocBackend:
-    """Deterministic stub backend: writes ``fid.com`` and an nmrglue-readable ``.ft2``."""
+    """Deterministic stand-in backend: produces ``fid.com`` and an nmrglue-readable ``.ft2``."""
 
     def __init__(self) -> None:
         self.work_dir = ""
@@ -145,14 +151,14 @@ def _fenced_python_blocks(text: str) -> list[str]:
 def _readme_section(title: str) -> str:
     text = README.read_text(encoding="utf-8")
     head = f"## {title}"
-    assert head in text, f"README has no section {head!r}"
+    assert head in text, f"README 里找不到小节 {head!r}"
     body = text.split(head, 1)[1]
     return body.split("\n## ", 1)[0]
 
 
 def _readme_python_api_block() -> str:
     blocks = _fenced_python_blocks(_readme_section("Python API"))
-    assert blocks, "the README Python API section has no ```python block"
+    assert blocks, "README 的 Python API 小节里没有 ```python 代码块"
     return blocks[0]
 
 
@@ -161,7 +167,7 @@ INTERNAL_DOC_DIRS = frozenset({"proposals", "tasks", "manager", "reviews"})
 
 
 def _documented_summary_keys() -> list[tuple[str, str, bool]]:
-    """``[(file, field)]``: where the docs read ``.summary["field"]``."""
+    """``[(file, field)]``: the places in the documentation that read ``.summary["field"]``."""
     found: list[tuple[str, str, bool]] = []
     targets = [README]
     for candidate in sorted((ROOT / "docs").rglob("*.md")):
@@ -184,7 +190,8 @@ def _documented_summary_keys() -> list[tuple[str, str, bool]]:
 def _run_documented_python_example(
     code: str, root: Path, dataset: Path
 ) -> tuple[Any, set[str]]:
-    """Run a documented block (stub backend + temporary paths) -> (result, keys read)."""
+    """Execute a documentation code block (stand-in backend and temporary paths injected);
+    returns (result, the summary fields the code block reads)."""
     import nmrforge_api
     import nmrforge_api.study as study_module
 
@@ -201,9 +208,9 @@ def _run_documented_python_example(
         used.update(SUMMARY_ACCESS.findall(line))
 
     namespace: dict[str, Any] = {}
-    nmrforge_api.run_parameter_study = wrapper  # examples import from the package
+    nmrforge_api.run_parameter_study = wrapper  # the example does from nmrforge_api import ...
     try:
-        exec(compile(code, str(README), "exec"), namespace)  # noqa: S102 - doc example
+        exec(compile(code, str(README), "exec"), namespace)  # noqa: S102 - documentation example
     finally:
         nmrforge_api.run_parameter_study = real
     return namespace.get("result"), used
@@ -212,24 +219,25 @@ def _run_documented_python_example(
 def test_readme_python_api_example_runs(
     tmp_path: Path, bruker_dir: Path
 ) -> None:
-    """The README Python API example runs as written and its summary fields exist."""
+    """The README Python API example runs verbatim, and the summary fields it reads really exist."""
     code = _readme_python_api_block()
     result, used = _run_documented_python_example(
         code, tmp_path / "readme_study", bruker_dir / "hsqc_2d"
     )
-    assert result is not None, "the README example produced no result"
-    assert used, "the README example reads no .summary[...] at all; it may be stale"
+    assert result is not None, "README 示例没有产出 result"
+    assert used, "README 示例里没有任何 .summary[...] 取值,示例可能已失真"
     missing = sorted(used - set(result.summary))
     assert not missing, (
-        f"the README example reads fields StudyResult.summary does not have: {missing};"
-        f"actual fields: {sorted(result.summary)}"
+        f"README 示例读取了 StudyResult.summary 里不存在的字段: {missing};"
+        f"实际字段: {sorted(result.summary)}"
     )
 
 
 def test_documented_summary_keys_come_from_the_real_api(
     tmp_path: Path, bruker_dir: Path
 ) -> None:
-    """Every ``*.summary["field"]`` in the docs must be a field that really exists."""
+    """Every ``*.summary["field"]`` appearing in the documentation must be a really
+    returned field."""
     result, _used = _run_documented_python_example(
         _readme_python_api_block(), tmp_path / "keys_study", bruker_dir / "hsqc_2d"
     )
@@ -242,18 +250,21 @@ def test_documented_summary_keys_come_from_the_real_api(
             unknown.append((rel, key))
     unknown.sort()
     assert not unknown, (
-        f"the docs read summary fields that do not exist: {unknown};"
-        f"StudyResult.summary has {sorted(study_keys)}, uncertainty_summary has "
+        f"文档读取了不存在的 summary 字段: {unknown};"
+        f"StudyResult.summary 有 {sorted(study_keys)},uncertainty_summary 有 "
         f"{sorted(uncertainty_keys)}"
     )
 
 
 def _run_example(script: str, tail: str) -> subprocess.CompletedProcess:
-    """按 README 原文跑一个示例脚本,输出固定按 UTF-8 解码。
+    """Run an example script verbatim from the README, with the output always decoded as
+    UTF-8.
 
-    ``text=True`` 会用本机区域编码(Windows 上常是 GBK)解码子进程输出,而子进程按
-    ``PYTHONIOENCODING`` 写 UTF-8 —— 父进程设了 ``PYTHONIOENCODING=utf-8`` 时就会在读取线程里
-    抛``UnicodeDecodeError``(2026-09-21 复核时看到的告警)。两个方向都钉成 UTF-8。
+    ``text=True`` decodes the subprocess output with the machine locale encoding (often GBK
+    on Windows), while the subprocess writes UTF-8 according to ``PYTHONIOENCODING`` -- with
+    ``PYTHONIOENCODING=utf-8`` set in the parent this raises ``UnicodeDecodeError`` in the
+    reader thread (a warning seen in the 2026-09-21 review). Both directions are pinned to
+    UTF-8.
     """
     env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
     return subprocess.run(
@@ -270,26 +281,23 @@ def _run_example(script: str, tail: str) -> subprocess.CompletedProcess:
 
 
 def test_readme_example_workflow_commands_run(tmp_path: Path) -> None:
-    """The two "Example workflow" commands in the README run as written."""
+    """The two commands of the README "Example workflow" run verbatim."""
     section = _readme_section("Example workflow")
     commands = re.findall(r"^python (\S+)([^\n]*)", section, re.M)
-    assert len(commands) == 2, f"the README example command count changed: {commands}"
+    assert len(commands) == 2, f"README 的示例命令数变了: {commands}"
     out = tmp_path / "example_data" / "hsqc_2d"
     script, tail = commands[0]
     done = _run_example(script, tail.replace("./example_data/hsqc_2d", str(out)))
-    assert done.returncode == 0, (
-        f"{script} failed: {done.stdout[-800:]} {done.stderr[-800:]}"
-    )
-    assert (out / "acqus").is_file(), "the synthetic dataset wrote no acqus"
+    assert done.returncode == 0, f"{script} 失败: {done.stdout[-800:]} {done.stderr[-800:]}"
+    assert (out / "acqus").is_file(), "合成数据集没有写出 acqus"
     script, tail = commands[1]
     done = _run_example(script, tail.replace("./example_data/hsqc_2d", str(out)))
-    assert done.returncode == 0, (
-        f"{script} failed: {done.stdout[-800:]} {done.stderr[-800:]}"
-    )
+    assert done.returncode == 0, f"{script} 失败: {done.stdout[-800:]} {done.stderr[-800:]}"
 
 
 def test_measure_only_example_runs(tmp_path: Path) -> None:
-    """``examples/measure_only.py`` runs with its documented args (no NMRPipe)."""
+    """``examples/measure_only.py`` really runs with the documented parameters (the
+    measurement layer needs no NMRPipe)."""
     module = _load_example("measure_only")
     spectrum = _write_ft2(tmp_path / "candidate.ft2")
     peaks = tmp_path / "reference.list"
@@ -307,7 +315,8 @@ def test_measure_only_example_runs(tmp_path: Path) -> None:
 
 
 def test_study_example_scripts_run(tmp_path: Path, bruker_dir: Path) -> None:
-    """``run_study.py`` / ``step_by_step.py`` run with their documented args."""
+    """``run_study.py`` / ``step_by_step.py`` run with the documented parameters (stand-in
+    backend injected)."""
     backend = _DocBackend()
     combos = EXAMPLES / "combos.csv"
     assert combos.is_file()
@@ -350,7 +359,8 @@ def test_study_example_scripts_run(tmp_path: Path, bruker_dir: Path) -> None:
 
 
 def test_example_scripts_parse_their_documented_flags() -> None:
-    """All three example scripts print ``--help`` (their documented flags parse)."""
+    """``--help`` works for the three example scripts (the documented parameters are
+    really accepted)."""
     for name in ("run_study", "step_by_step", "measure_only"):
         module = _load_example(name)
         with pytest.raises(SystemExit) as excinfo:
@@ -359,7 +369,7 @@ def test_example_scripts_parse_their_documented_flags() -> None:
 
 
 def _load_example(name: str):
-    """Load ``docs/external-api/examples/<name>.py`` by path (not a package module)."""
+    """Load ``docs/external-api/examples/<name>.py`` by path (they are not package modules)."""
     path = EXAMPLES / f"{name}.py"
     assert path.is_file(), path
     spec = importlib.util.spec_from_file_location(f"docs_example_{name}", path)

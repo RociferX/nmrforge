@@ -1,4 +1,4 @@
-"""Step processing test: generate_fid / generate_spectrum / phase brute force optimisation."""
+"""Stepwise processing tests: generate_fid / generate_spectrum / phase brute-force optimization."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from workflow.stepwise import (
 
 
 class _FakeBackend:
-    """Fake backend that logs calls (convert_to_fid / process / reconstruct_nus / project_3d)."""
+    """Fake backend that records calls (convert_to_fid / process / reconstruct_nus / project_3d)."""
 
     def __init__(self, work_dir: Path, *, success: bool = True) -> None:
         self.work_dir = str(work_dir)
@@ -34,7 +34,7 @@ class _FakeBackend:
         self.experiment = experiment
         self.calls.append("convert_to_fid")
         if not self.success:
-            return {"success": False, "message": "Conversion failed", "logs": []}
+            return {"success": False, "message": "转换失败", "logs": []}
         fid_path = Path(self.work_dir) / f"{experiment.dataset_id}.fid"
         self._touch(fid_path)
         return {"success": True, "fid_path": str(fid_path), "message": "ok", "logs": []}
@@ -54,8 +54,8 @@ class _FakeBackend:
         self.process_params.append(params)
         p0, p1 = 0, 0
         if direct_phase_override:
-            # When searching dimension by dimension, covering multiple axes, take p0/p1 of the last
-            # axis (the axis being searched).
+            # per-dimension search covers several axes; take p0/p1 of the last
+            # axis (the one currently being searched)
             p0, p1 = list(direct_phase_override.values())[-1]
         spectrum = Path(self.work_dir) / f"out_p0{int(p0)}_p1{int(p1)}.ft2"
         self._touch(spectrum)
@@ -86,20 +86,21 @@ class _FakeBackend:
         timeout=900,
         labels=None,
     ) -> dict:
-        """Press 0.2.133 measured geometry to return three projections: xy=(fixed third axis
-        F3,F1), xz=(F2,F1), yz=(F2,F3), the head is a plane with two actual cores."""
+        """Return three projections with the geometry verified on real data in
+        0.2.133: xy=(third axis F3 fixed, F1), xz=(F2, F1), yz=(F2, F3); the
+        header holds the two actual nuclei of the plane."""
         self.calls.append("project_3d")
         out_dir = Path(out_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
         by_axis = {
             dim.logical_axis: dim.nucleus for dim in self.experiment.dimensions
         }
-        pairs = {  # Production flow geometry (measured): xy=(F3,F1), xz=(F2,F1), yz=(F2,F3).
+        pairs = {  # production-flow geometry (measured): xy=(F3,F1), xz=(F2,F1), yz=(F2,F3)
             "xy": (by_axis["F3"], by_axis["F1"]),
             "xz": (by_axis["F2"], by_axis["F1"]),
             "yz": (by_axis["F2"], by_axis["F3"]),
         }
-        fixed = {  # Summed third axis kernel.
+        fixed = {  # nucleus of the third (summed) axis
             "xy": by_axis["F2"],
             "xz": by_axis["F3"],
             "yz": by_axis["F1"],
@@ -137,7 +138,7 @@ def test_generate_fid_registers(tmp_path: Path, bruker_dir: Path) -> None:
     backend = _FakeBackend(work)
     fid_path = generate_fid(manager, exp_id, data_id, backend)
     assert fid_path.endswith(".fid")
-    # Contract §9.2:fid placement data_dir(..., "process").
+    # contract §9.2: the fid is written to data_dir(..., "process")
     assert Path(fid_path).parent == manager.data_dir(exp_id, data_id, "process")
     data = manager.data(exp_id, data_id)
     assert data.fid_path == fid_path
@@ -154,9 +155,9 @@ def test_generate_spectrum_uniform(tmp_path: Path, bruker_dir: Path) -> None:
     generate_fid(manager, exp_id, data_id, backend)
     spectrum = generate_spectrum(manager, exp_id, data_id, backend, params={"phase_route": "none"})
     assert spectrum.endswith(".ft2")
-    # Contract §9.2: final spectrum placement data_dir(..., "spectra").
+    # contract §9.2: the final spectrum is written to data_dir(..., "spectra")
     assert Path(spectrum).parent == manager.data_dir(exp_id, data_id, "spectra")
-    # G2B-009: final spectrum only saves spectra/,process/ without leaving a copy.
+    # G2B-009: the final spectrum lives only in spectra/; no copy is left in process/
     assert not (manager.data_dir(exp_id, data_id, "process") / Path(spectrum).name).exists()
     data = manager.data(exp_id, data_id)
     assert data.spectrum_path == spectrum
@@ -168,7 +169,7 @@ def test_generate_spectrum_uniform(tmp_path: Path, bruker_dir: Path) -> None:
 def test_generate_spectrum_passes_params(
     tmp_path: Path, bruker_dir: Path
 ) -> None:
-    """Uniform branching transparently passes params to backend.process (G2B-006)."""
+    """The uniform branch passes params through to backend.process (G2B-006)."""
     manager, exp_id, data_id, work = _manager_with_data(
         tmp_path, bruker_dir / "hsqc_2d"
     )
@@ -198,8 +199,8 @@ def test_generate_spectrum_nus_uses_reconstruct(tmp_path: Path, bruker_dir: Path
 def test_generate_spectrum_3d_projections_new_naming(
     tmp_path: Path, bruker_dir: Path, monkeypatch
 ) -> None:
-    """0.2.133: The 3D projection file name contains the actual two cores of the plane, and the
-    registration is based on the fixed axis logical axis; compatible with the old name."""
+    """0.2.133: 3D projection filenames carry the two actual nuclei of the plane,
+    registration uses the fixed axis logical name; old names remain supported."""
     import workflow.phase_routes as phase_routes
 
     manager, exp_id, data_id, work = _manager_with_data(
@@ -221,14 +222,14 @@ def test_generate_spectrum_3d_projections_new_naming(
     monkeypatch.setattr(phase_routes, "unified_route", fake_unified)
     result = generate_spectrum(manager, exp_id, data_id, backend)
     assert result.endswith("d_001.ft3")
-    # Nus_3d fixture logical axis: F1=13C, F2=15N, F3=1H(direct).
+    # nus_3d fixture logical axes: F1=13C, F2=15N, F3=1H (direct)
     spectra_dir = manager.data_dir(exp_id, data_id, "spectra")
     assert sorted(p.name for p in spectra_dir.glob("d_001_*.ft2")) == [
         "d_001_15N-13C.ft2",
         "d_001_15N-1H.ft2",
         "d_001_1H-13C.ft2",
     ]
-    # No old style *_proj_*.ft2 names.
+    # no legacy *_proj_*.ft2 names
     assert not list(spectra_dir.glob("d_001_proj_*.ft2"))
     run = next(
         r
@@ -236,8 +237,8 @@ def test_generate_spectrum_3d_projections_new_naming(
         if r.workflow_ref == "phase_optimize_unified"
     )
     projections = run.params.get("projections", {})
-    # Registration key = third axis to be summed (logical): xy -> F2(15N), xz -> F3(1H), yz ->
-    # F1(13C).
+    # registration key = the summed third axis (logical): xy→F2(15N),
+    # xz→F3(1H), yz→F1(13C)
     assert projections["F2"].endswith("d_001_1H-13C.ft2")
     assert projections["F3"].endswith("d_001_15N-13C.ft2")
     assert projections["F1"].endswith("d_001_15N-1H.ft2")
@@ -246,8 +247,8 @@ def test_generate_spectrum_3d_projections_new_naming(
 def test_generate_spectrum_3d_projections_fallback_old_naming(
     tmp_path: Path, bruker_dir: Path, monkeypatch
 ) -> None:
-    """When the backend does not return nuclei, it falls back to d_001_proj_<logical|tag>.ft2
-    (compatible with the old name)."""
+    """Falls back to d_001_proj_<logical|tag>.ft2 when the backend returns no
+    nuclei (legacy names remain supported)."""
     import workflow.phase_routes as phase_routes
 
     manager, exp_id, data_id, work = _manager_with_data(
@@ -290,8 +291,8 @@ def test_generate_spectrum_3d_projections_fallback_old_naming(
 def test_generate_spectrum_defaults_to_unified_route(
     tmp_path: Path, bruker_dir: Path, monkeypatch
 ) -> None:
-    """Default phase_route=unified, generate spectrum using a unified solution (duplicate preview +
-    memory phase modulation + final run)."""
+    """Default phase_route=unified: spectrum generation uses the unified plan
+    (complex preview + in-memory phase adjustment + final run)."""
     import workflow.phase_routes as phase_routes
 
     manager, exp_id, data_id, work = _manager_with_data(
@@ -314,7 +315,7 @@ def test_generate_spectrum_defaults_to_unified_route(
 
     monkeypatch.setattr(phase_routes, "unified_route", fake_unified)
     spectrum = generate_spectrum(manager, exp_id, data_id, backend)
-    # 2026-08-19: The final spectrum naming prefix is data id(d_001).
+    # 2026-08-19: the final spectrum is prefixed with the data id (d_001)
     assert spectrum.endswith("d_001.ft2")
     assert seen["base_params"] == {}
     assert any(r.workflow_ref == "phase_optimize_unified" for r in manager.project.workflow_runs)
@@ -323,22 +324,22 @@ def test_generate_spectrum_defaults_to_unified_route(
 def test_generate_spectrum_falls_back_when_replica_preview_fails(
     tmp_path: Path, bruker_dir: Path, monkeypatch
 ) -> None:
-    """0.2.199-patch29gy: when the unified phase replication preview fails, fall back to
-    phase_route=none instead of aborting; the fallback must recognise the message the phase
-    routes really raise."""
+    """0.2.199-patch29gy: when the unified complex preview fails, fall back to
+    phase_route=none instead of raising; the escape hatch must recognize the
+    exact message the phase route actually raises (matched verbatim against tr()
+    after the text became runtime-resolved)."""
     import workflow.phase_routes as phase_routes
 
-    manager, exp_id, data_id, work = _manager_with_data(
-        tmp_path, bruker_dir / "hsqc_2d"
-    )
+    manager, exp_id, data_id, work = _manager_with_data(tmp_path, bruker_dir / "hsqc_2d")
     backend = _FakeBackend(work)
     generate_fid(manager, exp_id, data_id, backend)
 
     def failing_unified(
         experiment, backend_, plan=None, work_dir=None, base_params=None, progress=None
     ):
-        # The phase routes really raise this wording; the escape hatch matches it verbatim.
-        raise RuntimeError(tr("Replica preview ({p0}) failed: {p1}", p0="F1", p1="broken pipe"))
+        raise RuntimeError(
+            tr("Replica preview ({p0}) failed: {p1}", p0="F1", p1="broken pipe")
+        )
 
     monkeypatch.setattr(phase_routes, "unified_route", failing_unified)
     spectrum = generate_spectrum(manager, exp_id, data_id, backend)
@@ -348,13 +349,13 @@ def test_generate_spectrum_falls_back_when_replica_preview_fails(
 def test_generate_spectrum_unknown_route_raises(
     tmp_path: Path, bruker_dir: Path
 ) -> None:
-    """Old simple/advanced dispatch deleted, unknown phase_route throws error."""
+    """The old simple/advanced dispatch is gone; an unknown phase_route raises."""
     manager, exp_id, data_id, work = _manager_with_data(
         tmp_path, bruker_dir / "hsqc_2d"
     )
     backend = _FakeBackend(work)
     generate_fid(manager, exp_id, data_id, backend)
-    with pytest.raises(StepwiseError, match="Unknown phase_route"):
+    with pytest.raises(StepwiseError, match="未知 phase_route"):
         generate_spectrum(
             manager, exp_id, data_id, backend, params={"phase_route": "advanced"}
         )
@@ -365,14 +366,14 @@ def test_generate_fid_failure_raises(tmp_path: Path, bruker_dir: Path) -> None:
         tmp_path, bruker_dir / "hsqc_2d"
     )
     backend = _FakeBackend(work, success=False)
-    with pytest.raises(StepwiseError, match="Conversion failed"):
+    with pytest.raises(StepwiseError, match="转换失败"):
         generate_fid(manager, exp_id, data_id, backend)
 
 
 def _score_from_path(path: str) -> tuple[float, dict[str, float]]:
     p0 = float(path.split("_p0")[1].split("_")[0])
     p1 = float(path.split("_p1")[1].split(".")[0])
-    # P0 is a weak dimension (the impact of p0 on the real phase score is small but non-zero).
+    # p0 is the weak dimension (in real phase scoring p0 has a small but nonzero effect)
     return 100.0 - abs(p1 - 30.0) - 0.02 * abs(p0), {"snr": 0.0}
 
 
@@ -380,7 +381,7 @@ def _score_from_path(path: str) -> tuple[float, dict[str, float]]:
 def test_read_experiment_prefers_raw_copy(
     tmp_path: Path, bruker_dir: Path
 ) -> None:
-    """When raw_dir exists, read the complex data within the project first."""
+    """When raw_dir exists, the in-project copy is read first."""
     from workflow.import_workflow import import_data
     from workflow.stepwise import _read_experiment
 
@@ -393,7 +394,8 @@ def test_read_experiment_prefers_raw_copy(
     assert read_dataset(Path(result.raw_dir)).ndim == 2
 
 def test_rewrite_duplicate_nucleus_labels(tmp_path: Path) -> None:
-    """0.2.199-patch29af: Double 15N (HNN/NNH) label uniqueization -- F2 -> 15Nx, F1 -> 15Ny."""
+    """0.2.199-patch29af: unique labels for double 15N (HNN/NNH) --
+    F2→15Nx, F1→15Ny."""
     import nmrglue as ng
     import numpy as np
     from nmrglue.fileio import pipe as ngpipe
@@ -412,7 +414,7 @@ def test_rewrite_duplicate_nucleus_labels(tmp_path: Path) -> None:
     dic = {k: "0" for k in ngpipe.fdata_dic}
     dic["FDMAGIC"] = 9.2330230000000007e14
     dic["FDDIMCOUNT"] = 3
-    dic["FDPIPEFLAG"] = 1  # 3D Single file stream.
+    dic["FDPIPEFLAG"] = 1  # 3D single-file stream
     dic["FDSIZE"] = 32
     dic["FDSPECNUM"] = 16
     dic["FDF3SIZE"] = 16
@@ -421,9 +423,9 @@ def test_rewrite_duplicate_nucleus_labels(tmp_path: Path) -> None:
     dic["FDF2QUADFLAG"] = 1
     dic["FDF3QUADFLAG"] = 1
     dic["FDDIMORDER"] = [2.0, 3.0, 1.0]
-    # Position formula: FDF1=Axis 0(F2), FDF2=Axis 1(F1), FDF3=Axis 2(F3); FDDIMORDER will be
-    # cleared after writing to the disk, and the reading end will return to the position formula, so
-    # the direct positions are consistent.
+    # positional: FDF1=axis 0 (F2), FDF2=axis 1 (F1), FDF3=axis 2 (F3);
+    # FDDIMORDER is zeroed when written, and the reader falls back to
+    # positional, so the positions line up directly
     dic["FDF1LABEL"] = "15N"
     dic["FDF2LABEL"] = "15N"
     dic["FDF3LABEL"] = "1H"
@@ -446,14 +448,14 @@ def test_rewrite_duplicate_nucleus_labels(tmp_path: Path) -> None:
     )
     assert _rewrite_duplicate_nucleus_labels(str(path), exp) is True
     rdic, _ = ng.pipe.read(str(path))
-    assert rdic.get("FDF1LABEL") == "15Nx"  # F2 → Nx(HSQC Of N).
+    assert rdic.get("FDF1LABEL") == "15Nx"  # F2 → Nx (the N of HSQC)
     assert rdic.get("FDF2LABEL") == "15Ny"  # F1 → Ny
     assert rdic.get("FDF3LABEL") == "1H"
 
 
 def test_rewrite_duplicate_nucleus_labels_2d(tmp_path: Path) -> None:
-    """0.2.199-patch29ag: 2D double 1H label uniqueization -- direct dimension F2 -> Hx, indirect
-    dimension F1 -> Hy."""
+    """0.2.199-patch29ag: unique labels for a double 1H 2D -- direct dimension
+    F2→Hx, indirect dimension F1→Hy."""
     import nmrglue as ng
     import numpy as np
     from nmrglue.fileio import pipe as ngpipe
@@ -497,12 +499,12 @@ def test_rewrite_duplicate_nucleus_labels_2d(tmp_path: Path) -> None:
     )
     assert _rewrite_duplicate_nucleus_labels(str(path), exp) is True
     rdic, _ = ng.pipe.read(str(path))
-    assert rdic.get("FDF1LABEL") == "1Hy"  # Indirect dimension F1 -> Hy (display layer goes to 1).
-    assert rdic.get("FDF2LABEL") == "1Hx"  # Direct dimension F2 -> Hx (display layer goes to 1).
+    assert rdic.get("FDF1LABEL") == "1Hy"  # indirect dimension F1 → Hy (1 dropped when displayed)
+    assert rdic.get("FDF2LABEL") == "1Hx"  # direct dimension F2 → Hx (1 dropped when displayed)
 
 def test_rewrite_duplicate_nucleus_labels_3d_triple(tmp_path: Path) -> None:
-    """0.2.199-patch29ah: 3D triple homonuclear (1H-1H-1H) label uniqueization -- direct dimension
-    F3 -> 1Hx, F2(acqu2) -> 1Hy, F1(acqu3) -> 1Hz."""
+    """0.2.199-patch29ah: unique labels for a triple homonuclear 3D (1H-1H-1H) --
+    direct dimension F3→1Hx, F2(acqu2)→1Hy, F1(acqu3)→1Hz."""
     import nmrglue as ng
     import numpy as np
     from nmrglue.fileio import pipe as ngpipe
@@ -553,16 +555,19 @@ def test_rewrite_duplicate_nucleus_labels_3d_triple(tmp_path: Path) -> None:
     rdic, _ = ng.pipe.read(str(path))
     assert rdic.get("FDF1LABEL") == "1Hy"  # F2(acqu2)→1Hy
     assert rdic.get("FDF2LABEL") == "1Hz"  # F1(acqu3)→1Hz
-    assert rdic.get("FDF3LABEL") == "1Hx"  # Direct dimension F3 -> 1Hx.
+    assert rdic.get("FDF3LABEL") == "1Hx"  # direct dimension F3→1Hx
 
 
 def test_generate_spectrum_cleans_intermediates_on_error(
     tmp_path: Path, bruker_dir: Path, monkeypatch
 ) -> None:
-    """Interruption residue (0.2.199-patch29gi): Clean up the last residue before running; finally
-    clean up when exception occurs. When unified routing throws an error in the middle,
-    intermediate products such as preview/joint/nus3d_* are not left; reserved items
-    (process/fid, etc.) are not affected."""
+    """Interrupted leftovers (0.2.199-patch29gi): sweep the previous leftovers
+    before the run; clean up in finally on error.
+
+    When the unified route raises midway, intermediates such as
+    preview/joint/nus3d_* are not left behind; kept items (process/fid etc.)
+    are unaffected.
+    """
     import workflow.phase_routes as phase_routes
 
     manager, exp_id, data_id, work = _manager_with_data(
@@ -573,7 +578,7 @@ def test_generate_spectrum_cleans_intermediates_on_error(
     proc = manager.data_dir(exp_id, data_id, "process")
     fallback = proc.parent / f"{data_id}.nmrpipe"
 
-    # Remains of the last interruption (should be deleted by cleaning before this run).
+    # leftover from the previous interruption (should be swept before this run)
     stale = [
         proc / "nus3d_rc" / "test0001.ft1",
         proc / f"{data_id}_preview_F1.ft2",
@@ -590,14 +595,16 @@ def test_generate_spectrum_cleans_intermediates_on_error(
     def fake_unified(
         experiment, backend_, plan=None, work_dir=None, base_params=None, progress=None
     ):
-        # The cleanup before running should have deleted the last remnants (_intermediate will be
-        # rebuilt as an empty directory).
-        assert not (proc / "nus3d_rc").exists()
+        # the pre-run sweep should have deleted the previous leftovers
+        # (_intermediate is recreated as an empty directory)
+        # 2026-09-25 (user): nus3d_rc is the "indirect-dimension processing
+        # input" of 3D NUS and is **kept**; other leftovers are still cleaned.
+        assert (proc / "nus3d_rc").exists()
         assert not (proc / f"{data_id}_preview_F1.ft2").exists()
         assert not (proc / f"{data_id}_joint.ft3").exists()
         assert not (proc / "_intermediate" / "prev.ft2").exists()
         assert not fallback.exists()
-        # Simulate the intermediate products left before the failure of this run.
+        # simulate the intermediates left by this run before it failed
         created = [
             proc / "nus3d_1" / "stage1.ft1",
             proc / "nus3d_rc" / "test0001.ft1",
@@ -608,18 +615,19 @@ def test_generate_spectrum_cleans_intermediates_on_error(
         for p in created:
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_text("x")
-        raise RuntimeError("Simulation failed midway")
+        raise RuntimeError("模拟中途失败")
 
     monkeypatch.setattr(phase_routes, "unified_route", fake_unified)
-    with pytest.raises(RuntimeError, match="Simulation failed midway"):
+    with pytest.raises(RuntimeError, match="模拟中途失败"):
         generate_spectrum(manager, exp_id, data_id, backend)
 
-    # Finally cleaning: the remnants of this failure have been deleted.
+    # finally sweep: this failure's leftovers are deleted (except nus3d_rc --
+    # kept per the user on 2026-09-25, so the indirect-dimension flip can rerun)
     assert not (proc / "nus3d_1").exists()
-    assert not (proc / "nus3d_rc").exists()
+    assert (proc / "nus3d_rc").exists()
     assert not (proc / f"{data_id}_preview_F1.ft2").exists()
     assert not (proc / f"{data_id}_joint.ft3").exists()
     assert not (proc / "_intermediate").exists()
-    # Reserved items are not affected (fid is written to process/ by generate_fid).
+    # kept items are unaffected (the fid is written to process/ by generate_fid)
     assert (proc / f"{data_id}.fid").exists()
 

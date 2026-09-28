@@ -1,5 +1,5 @@
-"""SMILE Scanning workflow: sorting list + top three script + candidate spectrum deletion
-(0.2.199-patch29hz-repair 3 step 2)."""
+"""SMILE scan workflow: ranking table + top-three scripts + candidate spectrum cleanup
+(0.2.199-patch29hz-fix3, step 2)."""
 
 from __future__ import annotations
 
@@ -19,8 +19,7 @@ BRUKER = Path(__file__).resolve().parent / "fixtures" / "bruker"
 
 
 class _FakeBackend:
-    """Fake backend: does not run NMRPipe, but produces candidate -> evaluation -> delete according
-    to real semantics."""
+    """Fake backend: no NMRPipe, but emits candidates → evaluates → deletes as real."""
 
     def __init__(self) -> None:
         self.deleted: list[str] = []
@@ -44,9 +43,8 @@ class _FakeBackend:
             spectrum = Path(work_dir) / f"cand{index:02d}.ft2"
             spectrum.write_bytes(b"x" * (index * 8))
             if progress is not None:
-                progress(index, len(combos), f"scanning {index}/{len(combos)}")
-            # Common peak (stable across combinations) + unique peak for each combination; S/N
-            # increases with index.
+                progress(index, len(combos), f"扫描 {index}/{len(combos)}")
+            # shared peaks (stable across combos) + per-combo unique peaks; S/N rises with index
             metrics = {
                 "peak_count": 2,
                 "quality": 40.0 + index,
@@ -83,29 +81,27 @@ def test_scan_ranks_and_deletes_candidates(tmp_path: Path) -> None:
     scan_dir = tmp_path / "scan"
     result = scan_smile_parameters(exp, backend, {}, scan_dir=scan_dir)
 
-    assert result["n_combos"] == 16  # Default 4x4(0.2.199-patch29hz-fix 5).
+    assert result["n_combos"] == 16  # default 4x4 (0.2.199-patch29hz-fix5)
     assert len(result["rows"]) == 16
-    assert len(backend.deleted) == 16          # Candidate spectrum is deleted after evaluation.
-    assert not any(scan_dir.glob("*.ft2"))     # Scan directory without leaving any records.
+    assert len(backend.deleted) == 16          # candidate spectra deleted after evaluation
+    assert not any(scan_dir.glob("*.ft2"))     # no spectra left in the scan dir
 
-    # Common peaks appear in all 25 groups -> number of stable peaks in each group >= 1; sorted by
-    # average S/N in descending order.
+    # shared peaks appear in all 25 combos → each combo has ≥1 stable peak; rank by mean S/N desc
     ranks = [row["rank"] for row in result["rows"]]
     assert ranks == list(range(1, 17))
     assert all(row["stable_count"] >= 1 for row in result["rows"])
     assert result["rows"][0]["mean_snr"] >= result["rows"][-1]["mean_snr"]
-    assert "script" not in result["rows"][0]   # Script text is not leaked to the sorted table.
+    assert "script" not in result["rows"][0]   # script text not leaked into the ranking table
     assert "smile_rms_ratio" in result["rows"][0]
     assert "holdout_rmse" in result["rows"][0]
     assert "holdout_corr" in result["rows"][0]
     assert len(result["scripts"]) == 3
     assert all(text for text in result["scripts"].values())
-    # 0.2.199-patch29hz - Modification 10: The scanning link defaults to a set aside (authenticity
-    # criterion when there is no full sampling reference).
-    assert backend.holdout_ratio == 0.0  # Net True Peak Caliber -> Full Sampling Run.
+    # 0.2.199-patch29hz-fix10: the scan path carries a holdout set by default (truth check when
+    # no full-sampling reference exists)
+    assert backend.holdout_ratio == 0.0  # true-peak criterion → run full sampling
 
-    # Consistency caliber -> transfer the set-out ratio (each group is reconstructed with the set-
-    # out points).
+    # consistency criterion → pass the holdout ratio (each combo rebuilds from held-out points)
     backend_consistency = _FakeBackend()
     scan_smile_parameters(
         exp,

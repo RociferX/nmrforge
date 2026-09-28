@@ -16,7 +16,7 @@ from gui.pipeline_panel import PipelinePanel
 
 
 class _FakeController:
-    """Minimum substitute: data_facts determines ndim and thus whether Gaussian is available."""
+    """Minimal stand-in: data_facts sets ndim, which decides whether Gaussian is available."""
 
     def __init__(self, ndim: int) -> None:
         self.ndim = int(ndim)
@@ -73,11 +73,11 @@ def test_localization_select_gaussian_emits_and_persists(
     row = panel._rows["peaks"]
     row.threshold_spin.setValue(18.0)
     row.set_localization_method("gaussian")
-    row.localization_changed.emit("gaussian")  # Simulate user to change selection in selection box.
+    row.localization_changed.emit("gaussian")  # Simulate user changing the combo selection.
     assert seen == ["gaussian"]
     state = load_ui_state(manager, exp_id, data_id).get("peaks") or {}
     assert state["localization_method"] == "gaussian"
-    assert float(state["threshold"]) == pytest.approx(18.0)  # The threshold has not been cleared.
+    assert float(state["threshold"]) == pytest.approx(18.0)  # Threshold was not cleared.
     panel.close()
 
 
@@ -96,7 +96,7 @@ def test_localization_gaussian_disabled_for_3d(
     item = model.item(row.localization_combo.findData("gaussian"))
     assert item is not None and item.isEnabled() is False
     assert GAUSSIAN_UNSUPPORTED_MESSAGE in row.localization_combo.toolTip()
-    # Even if Gaussian has been saved before, the 3D data will fall back to the parabola (the error
+    # Even if Gaussian has been saved before, 3D data falls back to the parabola (the wrong
     # algorithm will not run silently).
     row.set_localization_method("gaussian")
     row.set_localization_supported(False)
@@ -107,7 +107,7 @@ def test_localization_gaussian_disabled_for_3d(
 def test_localization_restored_from_ui_state_for_2d(
     tmp_path: Path, qapp: QApplication
 ) -> None:
-    """Press data recovery: After reopening the panel, the 2D data still displays the last selected
+    """Per-data restore: after reopening the panel, 2D data still shows the last selected
     Gaussian."""
     from gui.per_data_records import update_ui_state
 
@@ -128,8 +128,8 @@ def test_localization_restored_from_ui_state_for_2d(
 def test_switching_data_does_not_copy_previous_localization(
     tmp_path: Path, qapp: QApplication
 ) -> None:
-    """When switching, the threshold signal cannot overwrite the positioning method of the previous
-    data to the current data."""
+    """When switching, the threshold signal must not overwrite the current data's positioning
+    method with the previous data's."""
     from gui.per_data_records import load_ui_state, update_ui_state
 
     manager = ProjectManager.create_project(tmp_path / "switch", "demo")

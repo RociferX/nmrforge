@@ -1,5 +1,4 @@
-"""Pipeline state machine improvement test: OUTDATED + fingerprint verification
-(gui/pipeline_state)."""
+"""Pipeline state machine tests: OUTDATED + fingerprint verification (gui/pipeline_state)."""
 
 from __future__ import annotations
 
@@ -29,8 +28,8 @@ def qapp() -> QApplication:
 
 
 def _manager_with_artifacts(tmp_path: Path):
-    """Project + experiment type + sample data + full set of products (fid/Spectrum/peak
-    table/Report, no fingerprint status)."""
+    """Project + experiment type + sample data + the full artifact set
+    (fid/spectrum/peak table/report, no fingerprint state)."""
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     entry = manager.create_experiment("HSQC")
     data = manager.import_data(entry.id, "/fake/bruker/1")
@@ -65,7 +64,7 @@ def _record_all(manager: ProjectManager, exp_id: str, data_id: str) -> None:
 
 
 def test_file_fingerprint_changes_with_content(tmp_path: Path) -> None:
-    """File fingerprint: content change -> fingerprint change; missing file returns None."""
+    """File fingerprint: content change → fingerprint change; a missing file returns None."""
     path = tmp_path / "a.txt"
     path.write_bytes(b"abc")
     first = file_fingerprint(path)
@@ -76,10 +75,11 @@ def test_file_fingerprint_changes_with_content(tmp_path: Path) -> None:
 
 
 def test_raw_fingerprint_ignores_mtime_touch() -> None:
-    """0.2.84 Regression: small file only mtime is touched (the content remains unchanged) without
-    changing the raw fingerprint -- back-end conversion will touch profYZ.dat and other
-    auxiliary files, pure mtime fingerprint has led to 3D generation FID post-import/generateFID
-    Double misjudgment OUTDATED."""
+    """0.2.84 regression: touching only the mtime of a small file (content
+    unchanged) does not change the raw fingerprint -- the backend conversion
+    touches auxiliary files such as profYZ.dat, and a pure mtime fingerprint
+    once made both import and "Generate FID" report OUTDATED after a 3D FID
+    generation."""
     import os
     import tempfile
     from pathlib import Path as _Path
@@ -94,25 +94,25 @@ def test_raw_fingerprint_ignores_mtime_touch() -> None:
         data = manager.import_data(entry.id, str(root / "src"))
         raw = manager.data_dir(entry.id, data.id, "raw")
         raw.mkdir(parents=True, exist_ok=True)
-        data.raw_dir = str(raw)  # Point to the raw copy in the project (simulating real import).
+        data.raw_dir = str(raw)  # point at the in-project raw copy (simulates a real import)
         manager.save()
-        # 0.2.89: Input fingerprint only counts authoritative input files (acqus, etc.),
-        # touch/Content changes to this file shall prevail; processing products (profYZ.dat and
-        # other auxiliary files) are not included.
+        # 0.2.89: the input fingerprint only counts authoritative input files
+        # (acqus etc.); touch/content changes are judged from that file, while
+        # processing artifacts (auxiliary files such as profYZ.dat) are excluded
         (raw / "acqus").write_text("payload-v1", encoding="utf-8")
         f1 = ps.raw_fingerprint(manager, entry.id, data.id)
         st = (raw / "acqus").stat()
         os.utime(raw / "acqus", (st.st_atime + 1, st.st_mtime + 1))
         f2 = ps.raw_fingerprint(manager, entry.id, data.id)
-        assert f1 == f2, "mtime touch should not change raw fingerprint"
+        assert f1 == f2, "mtime touch 不应改变 raw 指纹"
         (raw / "acqus").write_text("payload-v2", encoding="utf-8")
         f3 = ps.raw_fingerprint(manager, entry.id, data.id)
-        assert f1 != f3, "Content changes should change the raw fingerprint"
+        assert f1 != f3, "内容变化应改变 raw 指纹"
 
 
 def test_raw_processing_artifacts_ignored(tmp_path: Path) -> None:
-    """0.2.89: Processing in raw/ write down/mobile intermediate (fid/, mask/, etc.) does not
-    change the input fingerprint."""
+    """0.2.89: processing that writes/moves intermediates under raw/ (fid/, mask/
+    etc.) does not change the input fingerprint."""
     from gui import pipeline_state as ps
 
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
@@ -125,23 +125,21 @@ def test_raw_processing_artifacts_ignored(tmp_path: Path) -> None:
     (raw / "acqus").write_text("acqus-v1", encoding="utf-8")
     (raw / "ser").write_text("ser-v1", encoding="utf-8")
     f1 = ps.raw_fingerprint(manager, entry.id, data.id)
-    # Simulate 3D NUS processing: write fid/, mask/ intermediate products under raw/ and move
-    # individual files.
+    # simulate 3D NUS processing: write fid/ and mask/ intermediates under raw/ and move some files
     (raw / "fid").mkdir()
     (raw / "mask").mkdir()
     (raw / "fid" / "test001.fid").write_text("x", encoding="utf-8")
     (raw / "mask" / "test001.fid").write_text("y", encoding="utf-8")
     (raw / "test.fid").write_text("z", encoding="utf-8")
-    (raw / "test.fid").unlink()  # Simulate processing of moving files.
+    (raw / "test.fid").unlink()  # simulate the processing moving files
     f2 = ps.raw_fingerprint(manager, entry.id, data.id)
-    assert f1 == f2, "Processing products should not change the raw input fingerprint"
+    assert f1 == f2, "处理产物不应改变 raw 输入指纹"
 
 
 def test_statuses_success_without_state(
     tmp_path: Path, qapp: QApplication
 ) -> None:
-    """Old data (no fingerprint state): The product exists SUCCESS, and there is no misjudgment
-    OUTDATED."""
+    """Old data (no fingerprint state): an existing artifact is SUCCESS, not OUTDATED."""
     manager, exp_id, _data_id, _artifacts = _manager_with_artifacts(tmp_path)
     statuses = compute_step_statuses(manager, exp_id)
     for step in ("fid", "spectrum", "peaks"):
@@ -151,8 +149,8 @@ def test_statuses_success_without_state(
 def test_upstream_regen_marks_downstream_outdated(
     tmp_path: Path, qapp: QApplication
 ) -> None:
-    """Re-run to generate spectrum and register -> Peak picking changes to OUTDATED (fingerprint
-    verification)."""
+    """Re-running spectrum generation and recording it → peak picking becomes
+    OUTDATED (fingerprint check)."""
     manager, exp_id, data_id, artifacts = _manager_with_artifacts(tmp_path)
     _record_all(manager, exp_id, data_id)
     statuses = compute_step_statuses(manager, exp_id)
@@ -165,7 +163,7 @@ def test_upstream_regen_marks_downstream_outdated(
     assert statuses["spectrum"] == "SUCCESS"
     assert statuses["peaks"] == "OUTDATED"
 
-    # Re-pick peaks (update peak table content) and register -> peaks recovery SUCCESS.
+    # re-pick peaks (peak table content updated) and record → peaks back to SUCCESS
     artifacts["csv"].write_text(
         "Peak_ID,H_shift,N_shift,Intensity,SN,label\n"
         "1,8.0,115.0,100,20,G1\n2,7.5,118.0,80,15,A2\n",
@@ -179,8 +177,8 @@ def test_upstream_regen_marks_downstream_outdated(
 def test_smile_rank_scripts_do_not_invalidate_active_spectrum(
     tmp_path: Path, qapp: QApplication
 ) -> None:
-    """STATE-003: When scanning only adds a new Rank template, the activity spectrum and downstream
-    status remain successful."""
+    """STATE-003: when a scan only adds Rank templates, the active spectrum and
+    downstream statuses stay successful."""
     manager, exp_id, data_id, _artifacts = _manager_with_artifacts(tmp_path)
     process = manager.data_dir(exp_id, data_id, "process")
     spectrum_script = process / "spectrum.com"
@@ -207,8 +205,8 @@ def test_smile_rank_scripts_do_not_invalidate_active_spectrum(
 def test_projection_only_is_not_primary_spectrum(
     tmp_path: Path, qapp: QApplication
 ) -> None:
-    """STATE-006: The projection residue cannot make any Pipeline caliber think that the main score
-    exists."""
+    """STATE-006: a projection leftover must not make any Pipeline view treat
+    the main spectrum as present."""
     manager = ProjectManager.create_project(tmp_path / "proj_projection", "demo")
     entry = manager.create_experiment("3D")
     data = manager.import_data(entry.id, "/fake/bruker/1")
@@ -234,7 +232,7 @@ def test_projection_only_is_not_primary_spectrum(
 def test_raw_change_marks_fid_outdated_and_propagates(
     tmp_path: Path, qapp: QApplication
 ) -> None:
-    """Original data changes -> FID OUTDATED, and propagated downstream along dependencies."""
+    """Raw data change → FID OUTDATED, propagated to downstream along dependencies."""
     manager, exp_id, data_id, _artifacts = _manager_with_artifacts(tmp_path)
     _record_all(manager, exp_id, data_id)
     meta = manager.data_metadata_path(exp_id, data_id)
@@ -248,7 +246,8 @@ def test_raw_change_marks_fid_outdated_and_propagates(
 def test_segmented_merged_fid_directory_counts_as_done(
     tmp_path: Path, qapp: QApplication
 ) -> None:
-    """0.2.108: When segmented merge FID is process/merged/fid directory, FID step SUCCESS."""
+    """0.2.108: when the segmented merged FID is a process/merged/fid
+    directory, the FID step is SUCCESS."""
     manager, exp_id, data_id, _artifacts = _manager_with_artifacts(tmp_path)
     process = manager.data_dir(exp_id, data_id, "process")
     merged_fid = process / "merged" / "fid"
@@ -264,10 +263,10 @@ def test_segmented_merged_fid_directory_counts_as_done(
 def test_simple_mode_disables_outdated(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """0.2.91: Simple mode -- Only judge by product file, OUTDATED will not appear."""
+    """0.2.91: simple mode -- judged only by artifact files, no OUTDATED."""
     manager, exp_id, data_id, artifacts = _manager_with_artifacts(tmp_path)
     _record_all(manager, exp_id, data_id)
-    # The input to the spectrum step is FID file: override FID -> default OUTDATED.
+    # the spectrum step input is the FID file: rewriting the FID → OUTDATED by default
     artifacts["fid"].write_bytes(b"fid-v2")
     assert compute_step_statuses(manager, exp_id)["spectrum"] == "OUTDATED"
 
@@ -283,15 +282,15 @@ def test_simple_mode_disables_outdated(
 def test_mtime_fallback_without_state(
     tmp_path: Path, qapp: QApplication
 ) -> None:
-    """Old data (no fingerprint state): the upstream product is newer than the downstream product
-    -> OUTDATED (mtime heuristic)."""
+    """Old data (no fingerprint state): an upstream artifact newer than the
+    downstream one → OUTDATED (mtime heuristic)."""
     manager, exp_id, data_id, artifacts = _manager_with_artifacts(tmp_path)
     statuses = compute_step_statuses(manager, exp_id)
     assert statuses["spectrum"] == "SUCCESS"
     assert statuses["peaks"] == "SUCCESS"
     artifacts["ft2"].write_bytes(b"ft2-new")
-    # After explicitly setting ft2 mtime to peaks (to avoid having the same mtime in the same second
-    # causing unstable heuristic judgment during full runtime).
+    # explicitly set the ft2 mtime after peaks (avoids the same-second mtime
+    # making the heuristic unstable in a full run)
     _peaks_mtime = artifacts["csv"].stat().st_mtime
     os.utime(artifacts["ft2"], (_peaks_mtime + 5, _peaks_mtime + 5))
     statuses = compute_step_statuses(manager, exp_id)
@@ -302,7 +301,7 @@ def test_mtime_fallback_without_state(
 def test_panel_shows_outdated_and_rerun_button(
     tmp_path: Path, qapp: QApplication
 ) -> None:
-    """Panel: OUTDATED Step displays the "Rerun" entry and next step prompts."""
+    """Panel: an OUTDATED step shows the "run again" entry and the next-step hint."""
     manager, exp_id, data_id, artifacts = _manager_with_artifacts(tmp_path)
     _record_all(manager, exp_id, data_id)
     artifacts["ft2"].write_bytes(b"ft2-v2")
@@ -311,14 +310,14 @@ def test_panel_shows_outdated_and_rerun_button(
     panel = PipelinePanel(manager, _FakeController())
     panel.set_selection("data", exp_id, data_id)
     assert panel._rows["peaks"].status_label.text().startswith("!")
-    assert panel._rows["peaks"].run_button.text() == "run again"
+    assert panel._rows["peaks"].run_button.text() == "重新运行"
     assert not panel._rows["peaks"].run_button.isHidden()
-    assert "rerun Peak picking" in panel.next_label.text()
+    assert "重新运行" in panel.next_label.text()
     panel.close()
 
 
 def test_save_peaks_manual_records_state(tmp_path: Path) -> None:
-    """Register the peaks fingerprint after manually saving the peak table."""
+    """Saving the peak table manually records the peaks fingerprint."""
     from gui.processing import ProcessingController
 
     manager, exp_id, data_id, _artifacts = _manager_with_artifacts(tmp_path)
@@ -342,11 +341,11 @@ def test_save_peaks_manual_records_state(tmp_path: Path) -> None:
 
 
 class _FakeController:
-    """PipelinePanel is constructed with a minimal fake controller (the test only refreshes the
-    state, not runs the steps)."""
+    """Minimal fake controller for building PipelinePanel (tests only refresh
+    state, never run steps)."""
 
     def _read_experiment(self, *args, **kwargs):
-        """Returns NUS samples (0.2.199-patch29gd:SMILE lines only NUS are shown)."""
+        """Return NUS sampling (0.2.199-patch29gd: the SMILE row is shown only for NUS)."""
         from types import SimpleNamespace
 
         from core.data.internal_data_model import SamplingMode
@@ -356,8 +355,8 @@ class _FakeController:
         )
 
     def data_facts(self, *args, **kwargs) -> dict:
-        """Public interface (0.2.199-patch29hz): Pipeline gate reads according to dict and no
-        longer touches private."""
+        """Public interface (0.2.199-patch29hz): Pipeline gating reads a dict,
+        no longer touching privates."""
         return {
             "ndim": 2,
             "direct_nucleus": "1H",
@@ -369,14 +368,13 @@ class _FakeController:
 
 
 def test_next_label_skips_optional_smile(tmp_path: Path, qapp: QApplication) -> None:
-    """0.2.199-patch29as:SMILE If not done, the next step points to peak selection, and "optional"
-    is displayed separately."""
+    """0.2.199-patch29as: when SMILE is not done the next step points to peak
+    picking and shows "optional" separately."""
     from gui.pipeline_panel import PipelinePanel
     from gui.pipeline_state import record_step_success
 
     manager, exp_id, data_id, _ft2 = _manager_with_artifacts(tmp_path)
-    # Remove the peak table, leaving peaks as READY (the fixture defaults to the full set of
-    # products).
+    # remove the peak table so peaks stays READY (the fixture has the full artifact set by default)
     for f in manager.data_dir(exp_id, data_id, "peaks").glob("*"):
         f.unlink()
     for f in manager.data_dir(exp_id, data_id, "report").glob("*"):
@@ -385,22 +383,22 @@ def test_next_label_skips_optional_smile(tmp_path: Path, qapp: QApplication) -> 
     panel = PipelinePanel(manager, _FakeController())
     panel.set_selection("data", exp_id, data_id)
     text = panel.next_label.text()
-    assert "Peak picking" in text
+    assert "峰挑选" in text
     assert "SMILE" in text
-    assert "Optional" in text
-    # SMILE After completion, "optional" will no longer appear. The next step is peak selection.
+    assert "可选做" in text
+    # once SMILE is done "optional" no longer appears; the next step is peak picking
     record_step_success(manager, exp_id, data_id, "smile")
     panel.refresh()
     text = panel.next_label.text()
-    assert "Optional" not in text
-    assert "Peak picking" in text
+    assert "可选做" not in text
+    assert "峰挑选" in text
     panel.close()
 
 def test_pipeline_peaks_reference_selection(
     tmp_path: Path, qapp: QApplication
 ) -> None:
-    """0.2.199-patch29dl: Peak selection "reference spectrum" button + candidate data + reference
-    loading."""
+    """0.2.199-patch29dl: peak-picking "Reference spectrum" button, candidate
+    data and reference loading."""
     from core.peaks.peak_table import export_peaks_poky
     from gui.pipeline_panel import PipelinePanel
 
@@ -419,7 +417,7 @@ def test_pipeline_peaks_reference_selection(
     panel = PipelinePanel(manager)
     row = panel._rows["peaks"]
     assert row.step_id == "peaks"
-    assert row.ref_button.text() == "Reference spectrum"
+    assert row.ref_button.text() == "参考谱"
     assert not row.ref_button.isHidden()
     candidates = panel._reference_candidates()
     assert any(did == d1.id for _n, _e, did in candidates)
@@ -427,7 +425,7 @@ def test_pipeline_peaks_reference_selection(
     info = panel._load_reference(exp.id, d1.id)
     assert info is not None and info["peaks"]
     assert info["nuclei"] == ["15N", "1H"]
-    # 0.2.199-patch29fx: Reference is isolated by (exp, data), switching data will not remain.
+    # 0.2.199-patch29fx: reference isolated per (exp, data); switching data leaves no leftover
     panel.set_selection("data", exp.id, d1.id)
     panel._ref_info[(exp.id, d1.id)] = info
     panel.refresh()
@@ -446,8 +444,9 @@ def test_pipeline_peaks_reference_selection(
 def test_pipeline_peak_threshold_isolated_per_data(
     tmp_path: Path, qapp: QApplication
 ) -> None:
-    """0.2.199-patch29fz: Peak selection threshold is isolated by data -- d_001 Changing the
-    threshold does not affect d_002, switching back to d_001 restores the respective values."""
+    """0.2.199-patch29fz: the peak-picking threshold is isolated per data set --
+    changing it for d_001 does not affect d_002, and switching back to d_001
+    restores each value."""
     from core.project import ProjectManager
     from gui.pipeline_panel import PipelinePanel
 
@@ -473,8 +472,8 @@ def test_pipeline_peak_threshold_isolated_per_data(
 def test_pipeline_threshold_persisted_in_data_folder(
     tmp_path: Path, qapp: QApplication
 ) -> None:
-    """0.2.199-patch29ga: The threshold is persisted to d_xxx/ui_state.json and restored after
-    restarting."""
+    """0.2.199-patch29ga: the threshold is persisted to d_xxx/ui_state.json and
+    restored after a restart."""
     import json
 
     from core.project import ProjectManager
@@ -490,7 +489,7 @@ def test_pipeline_threshold_persisted_in_data_folder(
     assert path.is_file()
     payload = json.loads(path.read_text(encoding="utf-8"))
     assert payload["peaks"]["threshold"] == 18.0
-    # New panel (simulated restart) restored from file.
+    # new panel (simulating a restart) restores from the file
     panel2 = PipelinePanel(manager)
     panel2.set_selection("data", exp.id, d1.id)
     assert panel2._rows["peaks"].threshold_spin.value() == 18.0
@@ -501,7 +500,7 @@ def test_pipeline_threshold_persisted_in_data_folder(
 def test_threshold_legacy_default15_migrates_to35(
     tmp_path: Path, qapp: QApplication
 ) -> None:
-    """The old default 15σ (not explicitly customized) is migrated to the new default 35σ."""
+    """Legacy default 15σ (not explicitly customized) migrates to the new default 35σ."""
     import json
 
     from core.project import ProjectManager
@@ -525,7 +524,8 @@ def test_threshold_legacy_default15_migrates_to35(
 def test_threshold_explicit_15_preserved_when_custom(
     tmp_path: Path, qapp: QApplication
 ) -> None:
-    """0.2.199-patch29gc: Explicitly customized (custom=True) 15σ is not covered by migration."""
+    """0.2.199-patch29gc: an explicitly customized 15σ (custom=True) is not
+    overwritten by the migration."""
     import json
 
     from core.project import ProjectManager
@@ -551,8 +551,7 @@ def test_threshold_explicit_15_preserved_when_custom(
 def test_pipeline_smile_step_hidden_for_uniform_data(
     tmp_path: Path, qapp: QApplication
 ) -> None:
-    """0.2.199-patch29gd: Non-NUS (full sampling) data does not display the SMILE optimisation
-    step."""
+    """0.2.199-patch29gd: non-NUS (fully sampled) data hides the SMILE optimization step."""
     from types import SimpleNamespace
 
     from core.data.internal_data_model import SamplingMode
@@ -576,7 +575,7 @@ def test_pipeline_smile_step_hidden_for_uniform_data(
 def test_pipeline_smile_step_shown_for_2d_nus_data(
     tmp_path: Path, qapp: QApplication
 ) -> None:
-    """2D NUS data display SMILE optimisation step (0.2.199-patch29gd + fix 21 limit 2D)."""
+    """2D NUS data shows the SMILE optimization step (0.2.199-patch29gd + fix21 limits it to 2D)."""
     from types import SimpleNamespace
 
     from core.data.internal_data_model import SamplingMode
@@ -600,7 +599,7 @@ def test_pipeline_smile_step_shown_for_2d_nus_data(
 def test_pipeline_smile_step_hidden_for_3d_nus_data(
     tmp_path: Path, qapp: QApplication
 ) -> None:
-    """0.2.199-patch29hz-Xiu21(user):3D NUS Temporarily hide SMILE optimisation entrance."""
+    """0.2.199-patch29hz-fix21 (user): 3D NUS temporarily hides the SMILE optimization entry."""
     from types import SimpleNamespace
 
     from core.data.internal_data_model import SamplingMode

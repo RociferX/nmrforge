@@ -1,4 +1,4 @@
-"""Workspace container test(core/workspace, contract v1.3 §9.1)."""
+"""Workspace container tests (core/workspace, contract v1.3 §9.1)."""
 
 from __future__ import annotations
 
@@ -29,12 +29,12 @@ def test_ensure_is_idempotent(tmp_path: Path) -> None:
 def test_list_projects_discovers_and_ignores(tmp_path: Path) -> None:
     manager = WorkspaceManager(tmp_path / "ws")
     manager.ensure()
-    # There are project.json items.
+    # Projects that have project.json
     ProjectManager.create_project(manager.root / "proj_a", "proj_a")
     ProjectManager.create_project(manager.root / "proj_b", "proj_b")
-    # Directories without project.json should be ignored.
+    # A directory without project.json is ignored
     (manager.root / "not_a_project").mkdir()
-    # File should also be ignored.
+    # Plain files are ignored too
     (manager.root / "readme.txt").write_text("x", encoding="utf-8")
 
     projects = manager.list_projects()
@@ -53,15 +53,15 @@ def test_create_project_in_workspace(tmp_path: Path) -> None:
 def test_create_project_rejects_duplicate(tmp_path: Path) -> None:
     manager = WorkspaceManager(tmp_path / "ws")
     manager.create_project("demo")
-    with pytest.raises(WorkspaceError, match="already has a project"):
+    with pytest.raises(WorkspaceError, match="已存在项目"):
         manager.create_project("demo")
 
 
 def test_create_project_rejects_unsafe_name(tmp_path: Path) -> None:
     manager = WorkspaceManager(tmp_path / "ws")
-    with pytest.raises(WorkspaceError, match="illegal project name"):
+    with pytest.raises(WorkspaceError, match="非法项目名"):
         manager.create_project("../escape")
-    with pytest.raises(WorkspaceError, match="illegal project name"):
+    with pytest.raises(WorkspaceError, match="非法项目名"):
         manager.create_project("")
 
 
@@ -90,19 +90,19 @@ def test_rename_project_conflicts_and_validation(tmp_path: Path) -> None:
     manager = WorkspaceManager(tmp_path / "ws")
     manager.create_project("alpha")
     manager.create_project("beta")
-    with pytest.raises(WorkspaceError, match="already has a project"):
+    with pytest.raises(WorkspaceError, match="已存在项目"):
         manager.rename_project("alpha", "beta")
-    with pytest.raises(WorkspaceError, match="illegal project name"):
+    with pytest.raises(WorkspaceError, match="非法项目名"):
         manager.rename_project("alpha", "../x")
-    with pytest.raises(WorkspaceError, match="project does not exist"):
+    with pytest.raises(WorkspaceError, match="项目不存在"):
         manager.rename_project("nope", "gamma")
 
 
 def test_delete_project_trash_moves(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """0.2.199-patch29ex: Delete the project into the (fake) recycle bin, and the project will be
-    visible again after being moved back to the workspace."""
+    """0.2.199-patch29ex: deletion moves the project to a (fake) trash; once moved back into
+    the workspace it becomes visible again."""
     import shutil
 
     manager = WorkspaceManager(tmp_path / "ws")
@@ -121,8 +121,7 @@ def test_delete_project_trash_moves(
     assert not (manager.root / "alpha").exists()
     assert target.exists()
     assert (target / "project.json").is_file()
-    # Recovery: Move back to the workspace -> Project is visible again (scanning, no central
-    # registry).
+    # Restore: move it back into the workspace → visible again (scan-based, no central registry)
     shutil.move(str(target), str(manager.root / "alpha"))
     assert manager.list_projects() == [manager.root / "alpha"]
 
@@ -132,5 +131,5 @@ def test_delete_project_direct_and_missing(tmp_path: Path) -> None:
     manager.create_project("alpha")
     manager.delete_project("alpha", trash=False)
     assert not (manager.root / "alpha").exists()
-    with pytest.raises(WorkspaceError, match="project does not exist"):
+    with pytest.raises(WorkspaceError, match="项目不存在"):
         manager.delete_project("alpha")

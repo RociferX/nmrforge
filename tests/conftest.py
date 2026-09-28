@@ -1,7 +1,9 @@
-"""Shared fixtures and test classification marking (Phase 12). The **single source** of test
-classification is ``tests/categories.py``; here, each use case is marked with ``unit`` /
-``integration`` / ``regression`` according to the file name, so ``pytest -m unit`` and so on can
-select subsets."""
+"""Shared fixtures and test category marking (Phase 12).
+
+The **single source** of test categories is ``tests/categories.py``; here every test gets its
+``unit`` / ``integration`` / ``regression`` mark from the file name, so ``pytest -m unit`` and
+friends can select a subset.
+"""
 
 from __future__ import annotations
 
@@ -25,22 +27,30 @@ from ui_support.i18n import default_language
 
 
 def _load_test_categories() -> types.ModuleType:
-    """Load the classification table (``tests/categories.py``); use importlib instead of import to
-    avoid testing directory into sys.path."""
+    """Load the category table (``tests/categories.py``) via importlib rather than import, so the
+    test directory never enters ``sys.path``."""
     spec = importlib.util.spec_from_file_location(
         "nmrforge_test_categories", Path(__file__).with_name("categories.py")
     )
-    if spec is None or spec.loader is None:  # pragma: no cover - File must exist.
-        raise RuntimeError("tests/categories.py not found")
+    if spec is None or spec.loader is None:  # pragma: no cover - the file always exists
+        raise RuntimeError("找不到 tests/categories.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
-# The rendered interface language must not depend on the machine's locale: pin the language
-# this tree declares (``ui_support/locales/default.json``: private repository = zh, public
-# English tree = en) unless the environment already asks for something else.
-os.environ.setdefault("NMRFORGE_LANG", default_language())
+# The rendered interface language must not depend on the machine's locale. The shared suite
+# asserts the Chinese message catalogue (it is the private trunk's language), and this tree ships
+# that catalogue in full (``ui_support/locales/zh.json``), so tests pin ``zh`` as well: the runtime
+# default of this tree stays ``en`` (``ui_support/locales/default.json``) and the English rendering
+# is covered by ``tests/test_ui_i18n.py``, which switches languages explicitly.
+# (2026-09-25 sync note: the previous per-tree default pin made the shared suite fail here on
+# ~280 assertions that quote the Chinese catalogue; making those assertions catalogue-driven is a
+# follow-up, this pin keeps the gate meaningful in the meantime.)
+# The runtime default of this tree (``en``) still comes from ``ui_support/locales/default.json``;
+# only the test language is pinned separately below.
+TREE_DEFAULT_LANGUAGE = default_language()
+os.environ["NMRFORGE_LANG"] = "zh"
 
 
 TEST_CATEGORIES = _load_test_categories()
@@ -49,15 +59,17 @@ category_of = TEST_CATEGORIES.category_of
 
 @pytest.fixture(scope="session")
 def test_categories() -> types.ModuleType:
-    """Classification table (Phase 12 single source), read by integrity guard tests."""
+    """The category table (the Phase 12 single source), read by the completeness guard test."""
     return TEST_CATEGORIES
 
 
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
-    """Phase 12: Press ``tests/categories.py`` to mark each use case with a category. The marks are
-    added uniformly in conftest to avoid writing one line for each of 100+ test files
-    ``pytestmark`` (the classification table is from a single source, and
-    ``tests/test_test_categories.py`` ensures that no registration is missed)."""
+    """Phase 12: mark every test with its category from ``tests/categories.py``.
+
+    The marks are added centrally in conftest so 100+ test files do not each need a ``pytestmark``
+    line (the category table is the single source, and ``tests/test_test_categories.py`` guards
+    against anything being left unregistered).
+    """
     for item in items:
         marker = category_of(Path(str(item.fspath)).name)
         item.add_marker(getattr(pytest.mark, marker))
@@ -65,7 +77,7 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
 
 @pytest.fixture
 def hsqc_experiment() -> Experiment:
-    """Construct a 2D HSQC style minimal Experiment (used in the skeleton stage)."""
+    """Build a minimal 2D HSQC-style Experiment (used by the skeleton stage)."""
     return Experiment(
         dataset_id="exp_001",
         source_path=Path("/fake/bruker/1"),
@@ -86,18 +98,20 @@ NMRPIPE_FID_SPECNUM = 120
 
 @pytest.fixture(scope="session")
 def nmrpipe_fid_template(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """Real NMRPipe 2D single file fid layout template (does not rely on any development machine
-    file). The real conversion product is "2048-byte parameter header + real part block /
-    imaginary part block per trace": in the header ``FDDIMCOUNT=2``, ``FDSIZE``= direct
-    dimension complex points, ``FDSPECNUM``=trace number, ``FDQUADFLAG=0``. Key details: nmrglue
-    only converts it when ``FDF2QUADFLAG=0`` ``(specnum, 2*fdsize)``'s real data is decoded back
-    into ``(specnum, fdsize)``; keeping the default value of 1 in ``create_empty_dic()`` will
-    read as real, while ``workflow.direct_diagnostics._read_fid_raw``'s two-dimensional branch
-    requires a copy -- this is why the synthesized template was never accepted before (it has
-    nothing to do with the parser). The data is handed over to ``ng.pipe.write``:real part/The
-    imaginary block is expanded into using complex64 "2048 byte header + float32", which is the
-    same as the real file The layout is the same byte by byte (the size is smaller for testing
-    speed, and the layout is consistent with the real file of 862 traces)."""
+    """Template for the real NMRPipe 2D single-file fid layout (machine independent).
+
+    A real conversion product is "a 2048-byte parameter header + a real block / imaginary block per
+    trace": the header carries ``FDDIMCOUNT=2``, ``FDSIZE`` = complex points in the direct
+    dimension, ``FDSPECNUM`` = number of traces, ``FDQUADFLAG=0``. The key detail: nmrglue decodes
+    the real data of ``(specnum, 2*fdsize)`` back into complex ``(specnum, fdsize)`` only when
+    ``FDF2QUADFLAG=0``; keeping the ``create_empty_dic()`` default of 1 reads it as real, while the
+    2D branch of ``workflow.direct_diagnostics._read_fid_raw`` requires complex -- which is exactly
+    why the synthetic template was never accepted before (unrelated to the parser).
+
+    The data is handed to ``ng.pipe.write`` as complex64: it expands it by real/imaginary block into
+    "2048-byte header + float32", byte-for-byte the same layout as a real file (the size is kept
+    small for test speed; the layout matches the real 862-trace file).
+    """
     import nmrglue as ng
     import numpy as np
 
@@ -117,14 +131,12 @@ def nmrpipe_fid_template(tmp_path_factory: pytest.TempPathFactory) -> Path:
     data = data + 1j * rng.normal(0.0, 0.02, (specnum, fdsize))
     ng.pipe.write(str(path), dic, data.astype(np.complex64), overwrite=True)
 
-    # The template must really be accepted by the diagnostic parser, otherwise the fixture itself is
-    # wrong (the previous synthetic writing method failed twice).
+    # The template must really be accepted by the diagnostics parser, otherwise the fixture itself
+    # is wrong (the earlier synthetic approach failed twice)
     from workflow.direct_diagnostics import _read_fid_raw
 
     parsed = _read_fid_raw(path)
-    assert parsed is not None, (
-        "Synthetic fid templates must be parsable by _read_fid_raw (real layout)"
-    )
+    assert parsed is not None, "合成 fid 模板必须能被 _read_fid_raw 解析(真实布局)"
     _data, got_fdsize, got_specnum, header = parsed
     assert (got_fdsize, got_specnum) == (fdsize, specnum)
     assert header == 2048, header
@@ -134,10 +146,11 @@ def nmrpipe_fid_template(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 @pytest.fixture
 def bruker_dir(tmp_path: Path) -> Path:
-    """Bruker test dataset fixture directory (one copy for each test). Directly linking to the
-    shared fixture will cause the number of file hard links to accumulate to the NTFS upper
-    limit (1024), causing os.link to fail; the complex data ensures that the link is built on an
-    independent inode for each test (0.2.162-patch13)."""
+    """Bruker test dataset fixture directory (each test gets its own copy).
+
+    Linking the shared fixture directly would accumulate the file hard link count up to the NTFS
+    limit (1024) and make os.link fail; the copy keeps links on a per-test inode
+    (0.2.162-patch13)."""
     copy = tmp_path / "bruker"
     if not copy.exists():
         shutil.copytree(FIXTURES_BRUKER, copy)
@@ -146,9 +159,9 @@ def bruker_dir(tmp_path: Path) -> Path:
 
 @pytest.fixture(autouse=True)
 def _clear_cancel_between_tests() -> None:
-    """0.2.199-patch29hg: Clear the backend cancellation flag before each test starts to avoid the
-    previous test (such as GUI stop button) from leaking _CANCEL to the next processing/phase
-    search test causing "task canceled" false alarm."""
+    """0.2.199-patch29hg: clear the backend cancel flag before each test, so the previous test
+    (e.g. the GUI stop button) cannot leak _CANCEL into the next processing/phase-search test and
+    cause a false "task cancelled" report."""
     from backend.runtime import clear_cancel
 
     clear_cancel()
@@ -156,21 +169,23 @@ def _clear_cancel_between_tests() -> None:
 
 
 def _qt_widgets_loaded() -> bool:
-    """Whether Qt has really been loaded in this session (check sys.modules, no new import will be
-    triggered)."""
+    """Whether this session really loaded Qt (checks sys.modules, triggers no new import)."""
     return any(name in sys.modules for name in ("PySide6.QtWidgets", "PyQt6.QtWidgets"))
 
 
 @pytest.fixture(scope="session", autouse=True)
 def _close_gui_windows_at_session_end() -> None:
-    """Close all remaining top-level windows and handle events before the end of the session. Under
-    the offscreen platform, the remaining top-level windows (including 0.2.194 Restored
-    import/Between-group analysis drop-down Tool windows) are destroyed in an uncertain order
-    when the interpreter exits, which will intermittently trigger Qt access violations
-    (0xC0000005); explicit closing can eliminate this jitter. Only end the session when Qt has
-    actually been used: CI's release-readiness job only runs plain text Use case, if the Qt
-    runtime library is not installed, unconditional import will throw ``ImportError:
-    libEGL.so.1`` in the teardown and make the entire report turn red (measured on 2026-09-17)."""
+    """Close every leftover top-level window and process events before the session ends.
+
+    On the offscreen platform, leftover top-level windows (including the import / inter-group
+    analysis drop-down Tool windows restored in 0.2.194) are destroyed in an unpredictable order
+    when the interpreter exits, which intermittently triggers a Qt access violation (0xC0000005);
+    an explicit teardown close removes that jitter.
+
+    Only run the teardown when the session really used Qt: the CI release-readiness job runs plain
+    text tests only and installs no Qt runtime library, so an unconditional import would raise
+    ``ImportError: libEGL.so.1`` in teardown and turn the whole report red (measured 2026-09-17).
+    """
     yield
     if not _qt_widgets_loaded():
         return
@@ -182,6 +197,6 @@ def _close_gui_windows_at_session_end() -> None:
     for widget in list(app.topLevelWidgets()):
         try:
             widget.close()
-        except RuntimeError:  # pragma: no cover - Destroyed.
+        except RuntimeError:  # pragma: no cover - already destroyed
             pass
     app.processEvents()

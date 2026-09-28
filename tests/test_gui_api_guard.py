@@ -1,12 +1,16 @@
-"""GUI Cross-object private access guard + public interface smoke (0.2.199-patch29hz). Background:
-There have been a lot of cross-object private accesses like `self.viewer._update_levels()`,
-`self.project_tree._data_id_of(...)`, `self.import_panel._on_import()`,
-`self.center_panel._manager =...` in gui/ -- as soon as the accessed party changes its name, it
-will silently fail (no error will be reported, and the function will not take effect silently).
-Now it has been changed to a public interface, and this test is responsible for preventing the
-fallback writing method from being mixed in again. Note: Scan only gui/. Viewer/ internally has
-the same auxiliary class as file (such as _LabelOverlay) to read the private members of
-SpectrumViewer, which is an implementation detail and is not within the scope of this guard."""
+"""GUI cross-object private access guard + public interface smoke (0.2.199-patch29hz).
+
+Background: gui/ once had many cross-object private accesses such as
+`self.viewer._update_levels()`, `self.project_tree._data_id_of(...)`,
+`self.import_panel._on_import()`, `self.center_panel._manager = ...` -- once the
+accessed side is renamed they fail silently (no error, the feature quietly stops
+working). They are now unified as public interfaces, and this test keeps the fallback
+style from creeping back in.
+
+Note: only gui/ is scanned. Inside viewer/, same-file helper classes (such as
+_LabelOverlay) read SpectrumViewer private members; that is an implementation detail
+and outside this guard's scope.
+"""
 
 from __future__ import annotations
 
@@ -24,7 +28,7 @@ from core.project import ProjectManager  # noqa: E402
 ROOT = Path(__file__).resolve().parent.parent
 CROSS_PRIVATE_RE = re.compile(r"self\.[a-z_][a-z0-9_]*\._[a-zA-Z]")
 
-# Allow list: If necessary (and reviewed), register "relative path: line content fragment" here.
+# Allow list: if truly necessary (and reviewed), register "relative path: line content" here
 ALLOWED: set[str] = set()
 
 
@@ -36,8 +40,8 @@ def qapp() -> QApplication:
 
 @pytest.fixture
 def host(qapp: QApplication):
-    """Control host: The entire test is destroyed to avoid remaining top-level controls (Qt crashes
-    at the end)."""
+    """Widget host: destroyed wholesale at test end, avoiding leftover top-level widgets (Qt
+    teardown crash)."""
     from qtcompat.QtWidgets import QWidget
 
     widget = QWidget()
@@ -58,14 +62,11 @@ def test_no_cross_object_private_access_in_gui() -> None:
             if f"{rel}:{line.strip()}" in ALLOWED:
                 continue
             offenders.append(f"{rel}:{lineno} {line.strip()}")
-    assert not offenders, (
-        "Cross-object private access (please use the public interface instead):\n"
-    ) + "\n".join(offenders)
+    assert not offenders, "跨对象私有访问(请改走公开接口):\n" + "\n".join(offenders)
 
 
 def test_controller_data_facts_is_public(tmp_path: Path) -> None:
-    """GUI gate uniformly goes to ProcessingController.data_facts (returns empty dict if read
-    fails)."""
+    """GUI gating goes through ProcessingController.data_facts (failed read -> empty dict)."""
     from gui.processing import ProcessingController
 
     manager = ProjectManager.create_project(tmp_path / "facts", "demo")
@@ -73,7 +74,7 @@ def test_controller_data_facts_is_public(tmp_path: Path) -> None:
     data = manager.import_data(exp.id, "/fake/bruker/1")
     controller = ProcessingController(manager)
     facts = controller.data_facts(exp.id, data.id)
-    assert isinstance(facts, dict)  # Source directory does not exist -> allow empty dict downgrade.
+    assert isinstance(facts, dict)  # source dir missing -> empty dict downgrade allowed
     assert not hasattr(controller, "data_facts_private")
 
 
@@ -84,8 +85,7 @@ def test_panel_public_accessors(
     from gui.pipeline_panel import PipelinePanel
     from gui.project_tree import ProjectTreePanel
 
-    # The tree only lists the projects in the workspace, and the temporary workspace is used for
-    # testing.
+    # The tree lists only projects inside the workspace, so the test uses a temp workspace
     workspace = WorkspaceManager(root=tmp_path / "ws")
     manager = workspace.create_project("acc")
     exp = manager.create_experiment("HSQC")
@@ -108,7 +108,7 @@ def test_viewer_public_accessors(qapp: QApplication, host) -> None:
     viewer = SpectrumViewer(host)
     assert viewer.primary_spectrum is None
     assert viewer.peak_labels_visible is True
-    viewer.refresh_levels()  # It should also be safe in empty views.
+    viewer.refresh_levels()  # Should be safe with an empty view too
     panel = Spectrum3DPanel(host)
     assert panel.spectrum3d is None
 

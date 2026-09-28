@@ -1,14 +1,17 @@
-"""Dimension-wise consensus phase search test (0.2.199-patch29i, artificial projection phase
-modulation idea). Model: The total phase of each peak of the 3D complex spectrum = the sum of
-the signal phases of each of the three axes (the correction (p0, p1) of each axis is known). Put
-multiple peaks with sufficient spacing in each trace of the target axis (fixed coordinates of
-the other two axes), simulating the clean 1D trace seen by artificial projection: - p1 is fitted
-by the multi-peak phase difference in the trace (the other dimensions phase is the entire trace)
-Common constant, offset), each dimension is independent and does not interfere with each other;
-- p0 is restored in one axis when the phase of other axes is zero; when multiple axes have
-phases at the same time, what can be distinguished is the sum of p0 in each dimension (the
-absolute phase of the spectrum peak is only determined by the sum, and the splitting of each
-dimension is a convention)."""
+"""Per-dimension consensus phase-search tests (0.2.199-patch29i, manual projection tuning).
+
+Model: in a 3D complex spectrum each peak's total phase is the sum of the three axes'
+signal phases (each axis's correction (p0, p1) is known). Every trace of the target axis
+(the other two coordinates fixed) holds several peaks with **sufficient spacing**,
+mimicking the clean 1D traces seen in a manual projection:
+- p1 is fitted from the phase differences between peaks in a trace (the other dimensions'
+  phases are a common constant along the whole trace and cancel), so each dimension is
+  independent and does not disturb the others;
+- p0 is recovered per axis when the other axes have zero phase; when several axes carry
+  phase at once, what is identifiable is the sum of the per-axis p0 values (a peak's
+  absolute phase depends only on the total; splitting it across dimensions is a
+  convention).
+"""
 
 from __future__ import annotations
 
@@ -26,8 +29,7 @@ def _make_3d(
     seed: int = 5,
     n_per_trace: int = 3,
 ) -> np.ndarray:
-    """Synthesize the replica 3D spectrum: (F2, F1, F3), each trace of the target axis has multiple
-    peaks and adequate intervals."""
+    """Synthetic complex 3D spectrum (F2, F1, F3): each target-axis trace has spaced peaks."""
     n2, n1, n3 = 40, 40, 48
     phases = phases or {
         "F3": (40.0, 25.0),
@@ -58,7 +60,7 @@ def _make_3d(
         )
 
     def _trace_positions(n: int, n_pts: int) -> list[int]:
-        """N_pts Take n peak positions with spacing >=6 on the axis."""
+        """Pick n peak positions with spacing >= 6 along the n_pts axis."""
         lo, hi = 6, n_pts - 6
         if n == 1:
             return [int(rng.integers(lo, hi))]
@@ -69,17 +71,17 @@ def _make_3d(
             out.append(int(base + rng.integers(0, max(step - 6, 1))))
         return out
 
-    if target_axis == 2:  # Trace along F3, fixed (F2,F1).
+    if target_axis == 2:  # traces along F3, (F2, F1) fixed
         for i in range(4, n2 - 4):
             for j in range(4, n1 - 4):
                 for k in _trace_positions(n_per_trace, n3):
                     spec += _add(i, j, k, float(rng.uniform(40.0, 80.0)))
-    elif target_axis == 0:  # Trace along F2, fixed (F1,F3).
+    elif target_axis == 0:  # traces along F2, (F1, F3) fixed
         for j in range(4, n1 - 4):
             for k in range(4, n3 - 4):
                 for i in _trace_positions(n_per_trace, n2):
                     spec += _add(i, j, k, float(rng.uniform(40.0, 80.0)))
-    else:  # Trace along F1, fixed (F2,F3).
+    else:  # traces along F1, (F2, F3) fixed
         for i in range(4, n2 - 4):
             for k in range(4, n3 - 4):
                 for j in _trace_positions(n_per_trace, n1):
@@ -98,10 +100,10 @@ def _close(actual: float, expected: float, tol: float) -> bool:
 
 
 def test_single_axis_phase_recovered() -> None:
-    """When the phase of other axes is zero, the target axis (p0, p1) is completely restored."""
+    """With zero phase on the other axes, the target axis (p0, p1) is fully recovered."""
     spec = _make_3d(target_axis=2, phases={"F3": (40.0, 25.0), "F1": (0.0, 0.0), "F2": (0.0, 0.0)})
     est = search_axis_phase_consensus(spec, axis=2)
-    assert est is not None, "There should be a clean peak"
+    assert est is not None, "应有干净峰"
     assert _close(est[0], 40.0, 8.0), est
     assert abs(est[1] - 25.0) <= 6.0, est
     assert est[2] > 55.0, est
@@ -116,19 +118,19 @@ def test_indirect_axis_phase_recovered() -> None:
 
 
 def test_p1_independent_of_other_axis_phases() -> None:
-    """Each axis has phase at the same time: p1 is fitted within the trace and is not interfered by
-    the phase constants of other axes."""
+    """With phase on several axes, p1 is fitted within a trace and is unaffected by the
+    other axes' constant phase."""
     all_phases = {"F3": (40.0, 25.0), "F1": (355.0, 10.0), "F2": (80.0, -15.0)}
     for axis, expected_p1 in ((2, 25.0), (0, -15.0), (1, 10.0)):
         spec = _make_3d(target_axis=axis, phases=all_phases)
         est = search_axis_phase_consensus(spec, axis)
-        assert est is not None, f"axis {axis} There should be a peak"
+        assert est is not None, f"axis {axis} 应有峰"
         assert abs(est[1] - expected_p1) <= 6.0, (axis, est)
 
 
 def test_p0_sum_identifiable_when_all_phased() -> None:
-    """Multiple axes have phases at the same time: the sum of p0 of each axis (the absolute phase
-    of the spectrum peak) can be distinguished."""
+    """With phase on several axes, the sum of the per-axis p0 values (the peak's absolute
+    phase) is what can be identified."""
     spec = _make_3d(
         target_axis=2,
         phases={"F3": (40.0, 25.0), "F1": (355.0, 10.0), "F2": (80.0, -15.0)},
@@ -148,8 +150,7 @@ def test_noise_only_returns_none() -> None:
 
 
 def test_mixed_sign_mode_keeps_negative_peaks() -> None:
-    """Sign_mode=mixed: Half of the traces can be inverted (other dimensions +/-180 offset) and
-    still achieve consensus."""
+    """sign_mode=mixed: half the traces inverted (±180 offset on other dims) still agree."""
     spec = _make_3d(target_axis=2, phases={"F3": (40.0, 25.0), "F1": (0.0, 0.0), "F2": (0.0, 0.0)})
     for i in range(0, spec.shape[0], 2):
         spec[i] = -spec[i]
@@ -174,9 +175,12 @@ def _exact_direct_spectrum(
     occ: float = 1.0,
     t2: tuple[float, float] = (6.0, 15.0),
 ) -> np.ndarray:
-    """Accurately reconstructed pure real direct dimension spectrum: time domain Ŝ only retains the
-    positive half (t<n/2), X=IFFT(Ŝ), then z_std(_hilbert positive frequency half)
-    mathematically accurately restores."""
+    """Exactly reconstructed pure-real direct-dimension spectrum: the time-domain Ŝ keeps only
+    the positive half (t<n/2) and X=IFFT(Ŝ), so z_std (the _hilbert positive-frequency half)
+    restores X exactly, the peak phase is the constant psi0, and the search should return
+    (-psi0, 0). The real part is kept and the imaginary part dropped; trace sparsity is
+    tunable.
+    """
     rng = np.random.default_rng(seed)
     n_dir = shape[-1]
     half = n_dir // 2
@@ -203,22 +207,20 @@ def _exact_direct_spectrum(
 
 
 def test_direct_phase_real_ht_projected_traces() -> None:
-    """3D projection trace + HT(Positive frequency half/scipy convention) restores direct dimension
-    p0."""
+    """3D projection traces + HT (positive half, scipy convention) recover the direct p0."""
     real = _exact_direct_spectrum(
         (20, 16, 160), 40.0, seed=7, occ=0.15, t2=(4.0, 10.0)
     )
     est = search_direct_phase_real_ht(real, axis=-1)
-    assert est is not None, "The projected trace should have clean peaks"
-    # 0.2.199-patch29p: direct dimension returns 0-180° folded value (positive peak is not forced).
+    assert est is not None, "投影迹线应有干净峰"
+    # 0.2.199-patch29p: the direct dimension returns a value folded to 0-180° (no forced sign)
     assert _close(est[0], (-40.0) % 180.0, 20.0), est
     assert abs(est[1]) <= 15.0, est
     assert est[2] > 50.0, est
 
 
 def test_direct_phase_real_ht_2d_rows() -> None:
-    """2D spectrum: Each row is a direct dimension trace (without projection), and the correction
-    is also restored."""
+    """2D spectrum: each row is a direct-dimension trace (no projection) and recovers the same."""
     real = _exact_direct_spectrum((24, 120), -70.0, seed=11)
     est = search_direct_phase_real_ht(real, axis=-1)
     assert est is not None

@@ -1,10 +1,14 @@
-"""Element type of Bruker raw data (ser/fid): DTYPE + BYTORDA.
+"""Element type of Bruker raw data (ser/fid): DTYPA / DTYPE + BYTORDA.
 
-TopSpin convention (``##$DTYPE``):
-    0 -> 32-bit integer (int32, by far the most common)
-    1 -> 64-bit float (float64)
-    2 -> 32-bit float (float32)
-``##$BYTORDA``: 0 = little endian, 1 = big endian.
+**Real-instrument facts (re-checked 2026-09-24, 292 datasets)**: 287 of them only carry
+``##$DTYPA`` and just 5 carry ``##$DTYPE`` -- the word size has to be decided by DTYPA
+(same convention as NMRPipe ``com/nih.tcl``: ``DTYPA==2 -> serWordSize 8``), otherwise
+data sampled with 8 bytes would be read as int32 (sizes and row lengths all wrong).
+
+Field conventions:
+    ``##$DTYPA``: 0/1 -> 4 bytes per sample (int32); 2 -> 8 bytes per sample (float64).
+    ``##$DTYPE`` (authoritative when present): 0 -> int32; 1 -> float64; 2 -> float32.
+    ``##$BYTORDA``: 0 = little endian, 1 = big endian.
 
 A module of its own (depending on nothing else in the project) so that the readers, the
 backend and the VM tools share one definition; an unknown DTYPE is never guessed but
@@ -23,6 +27,10 @@ from ui_support.i18n import tr
 
 BRUKER_DTYPE_CODES: dict[int, str] = {0: "i4", 1: "f8", 2: "f4"}
 
+#: ``##$DTYPA`` -> numpy dtype code (NMRPipe ``com/nih.tcl`` serWordSize convention:
+#: 2 -> 8 bytes).
+BRUKER_DTYPA_CODES: dict[int, str] = {0: "i4", 1: "i4", 2: "f8"}
+
 
 class UnknownBrukerDtype(ValueError):
     """DTYPE is outside the TopSpin values we know (0/1/2) and must not be guessed."""
@@ -38,16 +46,32 @@ def _int_param(acqus: Mapping[str, Any] | None, key: str, default: int) -> int:
 def sample_dtype(acqus: Mapping[str, Any] | None) -> np.dtype:
     """Sample element type of ser/fid (int32/float64/float32 plus endianness).
 
-    DTYPE defaults to 0 (int32); an unknown value raises `UnknownBrukerDtype` (it is never
-    silently treated as int32).
+    DTYPE is authoritative when present, otherwise DTYPA decides (most real datasets only
+    carry DTYPA) and when neither is present int32 is assumed. An unknown value raises
+    `UnknownBrukerDtype` (it is never silently treated as int32).
     """
-    code = _int_param(acqus, "DTYPE", 0)
-    if code not in BRUKER_DTYPE_CODES:
-        raise UnknownBrukerDtype(
-            tr("Unknown Bruker DTYPE={p0}(Only supports 0=int32 / 1=float64 / 2=float32)", p0=code)
-        )
-    order = "<" if _int_param(acqus, "BYTORDA", 0) == 0 else ">"
-    return np.dtype(order + BRUKER_DTYPE_CODES[code])
+    params = acqus or {}
+    if params.get("DTYPE") not in (None, ""):
+        code = _int_param(params, "DTYPE", 0)
+        if code not in BRUKER_DTYPE_CODES:
+            raise UnknownBrukerDtype(
+                tr(
+                    "Unknown Bruker DTYPE={p0}(Only supports 0=int32 / 1=float64 / 2=float32)",
+                    p0=code,
+                )
+            )
+        kind = BRUKER_DTYPE_CODES[code]
+    elif params.get("DTYPA") not in (None, ""):
+        code = _int_param(params, "DTYPA", 0)
+        if code not in BRUKER_DTYPA_CODES:
+            raise UnknownBrukerDtype(
+                tr("Unknown Bruker DTYPA={p0}(0/1=int32, 2=float64)", p0=code)
+            )
+        kind = BRUKER_DTYPA_CODES[code]
+    else:
+        kind = BRUKER_DTYPE_CODES[0]
+    order = "<" if _int_param(params, "BYTORDA", 0) == 0 else ">"
+    return np.dtype(order + kind)
 
 
 def sample_itemsize(acqus: Mapping[str, Any] | None) -> int:

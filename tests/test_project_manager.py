@@ -1,5 +1,5 @@
-"""Project management module test:life cycle/experiment/sample/history/Operation record/Snapshot/
-template/recent projects."""
+"""Project management module tests: lifecycle / experiments / samples / history / runs /
+snapshots / templates / recent projects."""
 
 from __future__ import annotations
 
@@ -21,8 +21,8 @@ from core.project.manager import atomic_write_json, sha256_file
 
 
 def _install_fake_trash(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
-    """Replace send_to_trash with a fake recycle bin moved to the temporary directory (test for
-    certainty)."""
+    """Replace send_to_trash with a fake trash that moves files to a temp dir (deterministic
+    tests)."""
     import shutil
 
     trash = tmp_path / "trash"
@@ -42,8 +42,7 @@ def test_create_project_layout(tmp_path: Path) -> None:
     root = tmp_path / "proj"
     manager = ProjectManager.create_project(root, "demo", protein_name="GB1")
 
-    # Schema 1.3(§9.2): There is no pre-built flat directory template, the file system is a
-    # hierarchy.
+    # schema 1.3 (§9.2): no flat directory template is pre-created; the filesystem is the hierarchy
     for rel in DEFAULT_DIRECTORIES:
         assert not (root / rel).exists(), rel
     project_file = root / "project.json"
@@ -61,7 +60,7 @@ def test_create_project_layout(tmp_path: Path) -> None:
 def test_create_project_refuses_existing(tmp_path: Path) -> None:
     root = tmp_path / "proj"
     ProjectManager.create_project(root, "a")
-    with pytest.raises(ProjectError, match="already has a project"):
+    with pytest.raises(ProjectError, match="已存在项目"):
         ProjectManager.create_project(root, "b")
 
 
@@ -81,7 +80,7 @@ def test_open_and_save_roundtrip(tmp_path: Path) -> None:
 
 
 def test_open_project_missing_file(tmp_path: Path) -> None:
-    with pytest.raises(ProjectError, match="project.json not found"):
+    with pytest.raises(ProjectError, match="未找到 project.json"):
         ProjectManager.open_project(tmp_path / "nope")
 
 
@@ -89,13 +88,13 @@ def test_open_project_invalid_schema(tmp_path: Path) -> None:
     root = tmp_path / "proj"
     root.mkdir()
     (root / "project.json").write_text('{"name": 1}', encoding="utf-8")
-    with pytest.raises(ProjectError, match="invalid structure"):
+    with pytest.raises(ProjectError, match="结构无效"):
         ProjectManager.open_project(root)
 
 
 def test_save_without_project_raises(tmp_path: Path) -> None:
     manager = ProjectManager(tmp_path)
-    with pytest.raises(ProjectError, match="no project is loaded"):
+    with pytest.raises(ProjectError, match="未加载项目"):
         manager.save()
 
 
@@ -112,7 +111,7 @@ def test_experiment_crud_and_sequencing(tmp_path: Path) -> None:
 
     manager.rename_experiment("exp_001", "15N HSQC")
     assert manager.project.experiment("exp_001").title == "15N HSQC"
-    # Audit history is append-only.
+    # the audit history is append-only
     actions = [h.action for h in manager.project.processing_history]
     assert actions == [
         "project_created",
@@ -124,15 +123,15 @@ def test_experiment_crud_and_sequencing(tmp_path: Path) -> None:
 
 def test_add_experiment_unknown_sample_raises(tmp_path: Path) -> None:
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
-    with pytest.raises(ProjectError, match="sample does not exist"):
+    with pytest.raises(ProjectError, match="样本不存在"):
         manager.add_experiment("/sampleD", sample_id="S999")
 
 
 def test_delete_experiment_trashes_and_restores(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """0.2.199-patch29ex: Delete the experiment and put it into the recycle bin. The entry is soft-
-    deleted and automatically restored after recovery."""
+    """0.2.199-patch29ex: deleting an experiment sends it to the trash; the entry is
+    soft-deleted and restored automatically on recovery."""
     _install_fake_trash(monkeypatch, tmp_path)
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     exp = manager.add_experiment("/sampleD")
@@ -150,16 +149,15 @@ def test_delete_experiment_trashes_and_restores(
     manager.delete_experiment(exp.id)
     assert manager.project is not None
     assert exp.trashed is True
-    assert manager.project.experiment(exp.id) is exp  # Entries retained (soft deleted).
+    assert manager.project.experiment(exp.id) is exp  # entry kept (soft delete)
     assert not base.exists()
     assert not (manager.root / exp.id).exists()
-    assert manager.project.run(run.run_id) is run  # Audit hold.
+    assert manager.project.run(run.run_id) is run  # audit record kept
     assert any(
         h.action == "experiment_deleted" for h in manager.project.processing_history
     )
 
-    # Recovery: Experiment with directory returning to original location -> recover to automatically
-    # restore.
+    # recovery: the experiment directory is back in place → recover restores it automatically
     (manager.root / exp.id).mkdir(parents=True)
     assert manager.recover_trashed() == 1
     assert exp.trashed is False
@@ -168,13 +166,13 @@ def test_delete_experiment_trashes_and_restores(
 def test_delete_experiment_outside_root_refused(tmp_path: Path) -> None:
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     exp = manager.add_experiment("/sampleD")
-    # Tampering with directory mapping to point outside the project (processing snapshot directory
-    # is still in use).
+    # tamper with the directory mapping so it points outside the project (the processing run
+    # snapshot directory is still in use)
     outside = tmp_path / "outside"
     outside.mkdir()
     assert manager.project is not None
     manager.project.directories["processing"] = str(outside)
-    with pytest.raises(ProjectError, match="leaves the project directory"):
+    with pytest.raises(ProjectError, match="超出项目目录"):
         manager.delete_experiment(exp.id)
 
 
@@ -186,14 +184,14 @@ def test_sample_crud_and_reference_protection(tmp_path: Path) -> None:
     assert s2.sample_id == "S002"
     assert s1.created
 
-    manager.delete_sample(s2.sample_id)  # No references to delete.
+    manager.delete_sample(s2.sample_id)  # no references, safe to delete
     assert manager.project is not None
     assert manager.project.sample("S002") is None
 
     manager.add_experiment("/sampleD", sample_id=s1.sample_id)
-    with pytest.raises(ProjectError, match="is referenced by an experiment"):
+    with pytest.raises(ProjectError, match="被实验引用"):
         manager.delete_sample(s1.sample_id)
-    with pytest.raises(ProjectError, match="sample does not exist"):
+    with pytest.raises(ProjectError, match="样本不存在"):
         manager.delete_sample("S999")
 
 
@@ -207,7 +205,7 @@ def test_workflow_run_lifecycle_and_sequencing(tmp_path: Path) -> None:
     assert pattern.match(r2.run_id)
     assert r1.run_id < r2.run_id
     assert r1.status == "running"
-    assert r1.sample_id == ""  # Experiment without samples.
+    assert r1.sample_id == ""  # the experiment has no sample
     assert r1.params == {"zero_fill": 2}
 
     finished = manager.finish_run(r1.run_id, "success", outputs={"ft2": "spectra/x.ft2"})
@@ -219,24 +217,23 @@ def test_workflow_run_lifecycle_and_sequencing(tmp_path: Path) -> None:
 
 
 def test_every_run_gets_a_run_log(tmp_path: Path) -> None:
-    """Phase 22: One copy of run.log(start/End two lines) is run each time, and the handler is
-    recovered after finish."""
+    """Phase 22: every run gets its own run.log (a start and an end line); the handler is
+    reclaimed after finish."""
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     exp = manager.add_experiment("/sampleD")
     run = manager.start_run(exp.id, workflow_ref="hsqc_standard", inputs={"ft2": "spectra/x.ft2"})
 
     log_path = manager.run_log_path(run.run_id)
-    assert log_path.is_file(), "start_run should exist after run.log"
+    assert log_path.is_file(), "start_run 之后 run.log 就应该存在"
     text = log_path.read_text(encoding="utf-8")
-    assert "Start:" in text and run.run_id in text and "hsqc_standard" in text
+    assert "开始" in text and run.run_id in text and "hsqc_standard" in text
 
     manager.finish_run(run.run_id, "success", message="ok")
     text = log_path.read_text(encoding="utf-8")
-    assert "end: status=success" in text and "message=ok" in text
-    assert run.run_id not in manager._run_logs, "FileHandler must not be retained after finish"
+    assert "结束: status=success" in text and "message=ok" in text
+    assert run.run_id not in manager._run_logs, "finish 之后不得留着 FileHandler"
 
-    # The snapshot is in the same run directory as run.log (backward compatibility: snapshot/
-    # location remains unchanged).
+    # the snapshot shares the run directory with run.log (back-compatible: snapshot/ stays put)
     snapshot = manager.snapshot_run(run.run_id, {"process.com": "#!/bin/csh\n"})
     assert snapshot.parent == log_path.parent
     assert snapshot.name == "snapshot"
@@ -244,7 +241,7 @@ def test_every_run_gets_a_run_log(tmp_path: Path) -> None:
 
 def test_start_run_unknown_experiment_raises(tmp_path: Path) -> None:
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
-    with pytest.raises(ProjectError, match="experiment does not exist"):
+    with pytest.raises(ProjectError, match="实验不存在"):
         manager.start_run("exp_999")
 
 
@@ -267,9 +264,9 @@ def test_snapshot_run_writes_scripts_and_params(tmp_path: Path) -> None:
 
 def test_atomic_write_json_and_sha256(tmp_path: Path) -> None:
     target = tmp_path / "sub" / "data.json"
-    atomic_write_json(target, {"a": [1, 2], "Chinese": "value"})
+    atomic_write_json(target, {"a": [1, 2], "中文": "值"})
     data = json.loads(target.read_text(encoding="utf-8"))
-    assert data == {"a": [1, 2], "Chinese": "value"}
+    assert data == {"a": [1, 2], "中文": "值"}
     assert not list(tmp_path.glob("*.tmp"))
 
     src = tmp_path / "fid"
@@ -282,14 +279,14 @@ def test_recent_projects_store(tmp_path: Path) -> None:
     assert store.list() == []
     store.push("/p/1")
     store.push("/p/2")
-    store.push("/p/1")  # Pin to the top and remove duplicates.
+    store.push("/p/1")  # move to top, de-duplicated
     assert store.list() == ["/p/1", "/p/2"]
     store.push("/p/3")
-    store.push("/p/4")  # Exceeds max_entries, eliminates the oldest.
+    store.push("/p/4")  # exceeds max_entries, evict the oldest
     assert store.list() == ["/p/4", "/p/3", "/p/1"]
     store.remove("/p/3")
     assert "/p/3" not in store.list()
-    # Corrupted file fault tolerance.
+    # tolerate a corrupt file
     store.path.write_text("{broken", encoding="utf-8")
     assert store.list() == []
 
@@ -306,7 +303,7 @@ def test_default_directories_configurable(tmp_path: Path) -> None:
     manager = ProjectManager.create_project(
         tmp_path / "proj", "demo", directories={"raw": "data/raw"}
     )
-    # Schema 1.4: directory mapping is only for parsing, no directory is pre-built.
+    # schema 1.4: directory mappings are for resolution only; directories are not pre-created
     assert manager.dir_path("raw") == (tmp_path / "proj" / "data" / "raw").resolve()
     assert not (tmp_path / "proj" / "data" / "raw").exists()
 
@@ -343,7 +340,7 @@ def test_data_entry_roundtrip() -> None:
 
 def test_create_experiment_blank_and_import_data(tmp_path: Path) -> None:
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
-    entry = manager.create_experiment(title="blank")
+    entry = manager.create_experiment(title="空白")
     assert entry.status == ExperimentStatus.REGISTERED.value
     assert entry.data == []
 
@@ -352,9 +349,9 @@ def test_create_experiment_blank_and_import_data(tmp_path: Path) -> None:
     assert d1.id == "d_001"
     assert d2.id == "d_002"
     assert entry.status == ExperimentStatus.IMPORTED.value
-    assert entry.source == "/sampleD"  # Compatibility attribute = data[0].source.
+    assert entry.source == "/sampleD"  # compatibility property = data[0].source
     assert entry.imported_at == d1.imported_at
-    with pytest.raises(ProjectError, match="data does not exist"):
+    with pytest.raises(ProjectError, match="数据不存在"):
         manager.data(entry.id, "d_999")
 
 
@@ -375,8 +372,8 @@ def test_set_data_fid_and_spectrum(tmp_path: Path) -> None:
 def test_delete_data_trashes_and_restores(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """0.2.199-patch29ex: Delete the data into the recycle bin, soft delete the entries, and
-    automatically restore them after recovery."""
+    """0.2.199-patch29ex: deleting data sends it to the trash; the entry is soft-deleted and
+    restored automatically on recovery."""
     trash = _install_fake_trash(monkeypatch, tmp_path)
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     entry = manager.create_experiment()
@@ -396,12 +393,12 @@ def test_delete_data_trashes_and_restores(
     assert entry.status == ExperimentStatus.REGISTERED.value
     assert not raw.exists()
     assert not spec.exists()
-    assert (trash / entry.id / data.id).exists()  # File entered the (fake) recycle bin.
+    assert (trash / entry.id / data.id).exists()  # files landed in the (fake) trash
     with pytest.raises(ProjectError):
         manager.data(entry.id, data.id)
     assert any(h.action == "data_deleted" for h in manager.project.processing_history)
 
-    # Recovery: Return the data base to its original position -> recover and automatically restore.
+    # recovery: the data base is back in place → recover restores it automatically
     raw.mkdir(parents=True)
     (raw / "acqus").write_text("x", encoding="utf-8")
     assert manager.recover_trashed() == 1
@@ -410,14 +407,14 @@ def test_delete_data_trashes_and_restores(
 
 
 def test_schema_1_1_migration_to_1_3(tmp_path: Path) -> None:
-    """Data[0] migration of old project.json(source/segments top-level) -> schema 1.3."""
+    """Legacy project.json (top-level source/segments) → schema 1.3 data[0] migration."""
     root = tmp_path / "proj"
     ProjectManager.create_project(root, "demo")
     manager = ProjectManager.open_project(root)
-    entry = manager.add_experiment("/old/sampleD", title="old experiment")
+    entry = manager.add_experiment("/old/sampleD", title="旧实验")
     entry.data[0].metadata_path = "exp_001.json"
     manager.save()
-    # Manually rewritten as schema 1.1 old structure.
+    # hand-edit into the old schema 1.1 structure
     import json
 
     path = root / "project.json"
@@ -443,9 +440,9 @@ def test_schema_1_1_migration_to_1_3(tmp_path: Path) -> None:
     assert migrated_data.segments == ["/old/sampleE"]
     assert migrated_data.imported_at == "2026-01-01T00:00:00+00:00"
     assert migrated_data.migrated_from_1_1 is True
-    assert migrated_entry.source == "/old/sampleD"  # Compatible properties.
+    assert migrated_entry.source == "/old/sampleD"  # compatibility property
     assert any(h.action == "project_migrated" for h in migrated.project.processing_history)
-    # After saving, it will still be 1.3.
+    # still 1.3 after saving
     migrated.save()
     reopened = ProjectManager.open_project(root)
     assert reopened.project.schema_version == "1.4"
@@ -479,8 +476,8 @@ def test_infer_status_aggregates_data(tmp_path: Path) -> None:
     peaks.parent.mkdir(parents=True, exist_ok=True)
     peaks.write_text("", encoding="utf-8")
     assert manager.infer_status(entry.id) is ExperimentStatus.PICKED
-    # REPORT-008(2026-09-12): The analysis function has been deleted, and the report/ product no
-    # longer drives the experimental status.
+    # REPORT-008 (2026-09-12): analysis was removed, so report/ artefacts no longer drive
+    # experiment status
     report = manager.data_dir(entry.id, data.id, "report") / f"{data.id}.json"
     report.parent.mkdir(parents=True, exist_ok=True)
     report.write_text("{}", encoding="utf-8")
@@ -491,11 +488,11 @@ def test_infer_status_aggregates_data(tmp_path: Path) -> None:
 def test_data_entry_title_roundtrip() -> None:
     from core.project import DataEntry
 
-    data = DataEntry(id="d_001", title="Skeleton A", source="/sampleD")
+    data = DataEntry(id="d_001", title="骨架 A", source="/sampleD")
     restored = DataEntry.from_dict(data.to_dict())
     assert restored == data
-    assert restored.title == "Skeleton A"
-    # Old data is missing title: empty by default.
+    assert restored.title == "骨架 A"
+    # legacy data without a title: defaults to empty
     legacy = DataEntry.from_dict({"id": "d_001", "source": "/x"})
     assert legacy.title == ""
 
@@ -504,19 +501,19 @@ def test_rename_data_persists_and_audits(tmp_path: Path) -> None:
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     entry = manager.create_experiment()
     data = manager.import_data(entry.id, "/sampleD")
-    renamed = manager.rename_data(entry.id, data.id, "Skeleton A")
+    renamed = manager.rename_data(entry.id, data.id, "骨架 A")
     assert renamed is data
-    assert data.title == "Skeleton A"
+    assert data.title == "骨架 A"
     manager.save()
     reopened = ProjectManager.open_project(tmp_path / "proj")
-    assert reopened.project.experiment(entry.id).data[0].title == "Skeleton A"
+    assert reopened.project.experiment(entry.id).data[0].title == "骨架 A"
     assert any(h.action == "data_renamed" for h in manager.project.processing_history)
 
 
 
 def test_data_id_not_reused_after_delete(tmp_path: Path) -> None:
-    """0.2.159: Delete the data and re-import it, the data number is not reused (Avoid
-    comments/Running records inherited)."""
+    """0.2.159: re-importing after deleting data does not reuse data ids (so notes and run
+    records do not carry over)."""
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     entry = manager.create_experiment()
     first = manager.import_data(entry.id, "/sampleD")
@@ -529,8 +526,8 @@ def test_data_id_not_reused_after_delete(tmp_path: Path) -> None:
 
 
 def test_experiment_id_not_reused_after_delete(tmp_path: Path) -> None:
-    """0.2.159: Delete the experiment and create a new one. The experiment number is not reused;
-    the new experiment data starts from d_001 again."""
+    """0.2.159: creating an experiment after a delete does not reuse experiment ids; the new
+    experiment's data starts again at d_001."""
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     e1 = manager.create_experiment()
     assert e1.id == "exp_001"
@@ -545,8 +542,8 @@ def test_experiment_id_not_reused_after_delete(tmp_path: Path) -> None:
 def test_delete_data_keeps_notes_and_group_for_restore(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """0.2.199-patch29ex: Delete data, retain comments and group references, and restore them
-    without loss."""
+    """0.2.199-patch29ex: deleting data keeps its notes and group references; recovery is
+    lossless."""
     _install_fake_trash(monkeypatch, tmp_path)
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     entry = manager.create_experiment()
@@ -554,18 +551,16 @@ def test_delete_data_keeps_notes_and_group_for_restore(
     manager.data_base(entry.id, data.id).mkdir(parents=True)
     group = manager.create_data_group(entry.id, data_ids=[data.id])
     meta = dict(entry.metadata or {})
-    meta["data_notes"] = {data.id: {"notes": "old comment"}}
+    meta["data_notes"] = {data.id: {"notes": "旧注释"}}
     entry.metadata = meta
 
     manager.delete_data(entry.id, data.id)
     assert data.trashed is True
-    assert group.data_ids == [data.id]  # Group reference retained.
-    assert (entry.metadata or {}).get("data_notes", {}).get(data.id, {}).get("notes") == (
-        "old comment"
-    )
+    assert group.data_ids == [data.id]  # group reference kept
+    assert (entry.metadata or {}).get("data_notes", {}).get(data.id, {}).get("notes") == "旧注释"
     assert manager.active_data(entry.id) == []
 
-    # After restoration, the entry returns to the active state and can be accessed again.
+    # after recovery the entry is active again and can be accessed
     (manager.data_base(entry.id, data.id) / "raw").mkdir(
         parents=True
     )
@@ -575,7 +570,7 @@ def test_delete_data_keeps_notes_and_group_for_restore(
 def test_data_dir_supports_smile_optimized(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """0.2.162:smile_optimized/ serves as the data base subdirectory (same level as raw)."""
+    """0.2.162: smile_optimized/ is a subdirectory of the data base (a sibling of raw)."""
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     entry = manager.create_experiment()
     data = manager.import_data(entry.id, "/sampleD")
@@ -583,7 +578,7 @@ def test_data_dir_supports_smile_optimized(
     assert opt == manager.data_base(entry.id, data.id) / "smile_optimized"
     opt.mkdir(parents=True, exist_ok=True)
     (opt / "x.csv").write_text("x", encoding="utf-8")
-    # When data is deleted, it is also cleaned up along with the data base.
+    # cleaned up with the data base when the data is deleted
     _install_fake_trash(monkeypatch, tmp_path)
     manager.delete_data(entry.id, data.id)
     assert not opt.exists()

@@ -119,11 +119,35 @@ unified 相位路线),GUI 页面不得绕过本控制器直接调 Backend。
 
 ## 6. 参数/结果约定
 
-- 处理参数统一 dict 键:`zero_fill`、`sampling`(ft_neg/ft_alt/flip_f1/
-  auto_phase,0.2.67 起脚本生成消费:ft_neg None=按采集方式自动/True=强制
-  FT -neg/False=关闭;ft_alt True=按采集方式自动/False=强制关闭;flip_f1
-  True 时 F1 轴 FT -neg 翻转;auto_phase False 关闭直接维自动相位)、
-  `baseline`(每维基线校正,见下)、`stages`(列表,
+- 处理参数统一 dict 键:`zero_fill`、`sampling`(ft_neg/ft_neg_f1/ft_neg_f2/
+  flip_f1/flip_f2/ft_alt/auto_phase,0.2.67 起脚本生成消费:`ft_neg` **全局**、
+  `ft_neg_f1`/`ft_neg_f2` **逐轴**,三者都是三态 —— None=按采集方式/自动判据、
+  True=**加** `FT -neg`、False=**不加**;`ft_alt` True=按采集方式自动/False=强制关闭;
+  `auto_phase` False 关闭直接维自动相位)。
+  **逐轴键的语义(2026-09-25 用户点名确认)**:`ft_neg_f1`/`ft_neg_f2` 是**直接决定该轴
+  加不加** `-neg`(**绝对**),**不是**"翻转/取反自动判据的结果" —— 同一个 `True` 在自动判据
+  开或关时都得到"加";`flip_f1`/`flip_f2` 是这两个键的**历史兼容别名**(同义,新代码请用
+  `ft_neg_f*`)。优先级:**`ft_neg`(全局) > `ft_neg_f*`(逐轴) > 自动判据**;
+  逐轴键只在 `ft_neg` 为 None(或缺省)时生效。
+  **`-neg` 的定案(2026-09-25 用户,二次定稿)**:自动判据**默认开启**
+  (`AUTO_NEG_JUDGEMENT=True`),判据是**出错概率最低**的简单规则(canonical `-N` / Layer A 已解 ⇒
+  采纳;**3D 的 NMRPipe `y` 维(按 `AQSEQ` 认,不是死认逻辑 F2)+ States 族(`FnMODE` 2/3/4/5)
+  ⇒ 加 `-neg`**;3D 的 `z` 维、E/A 族(QF 族)与 `FnMODE` **一致** ⇒ 不加;其余 —— 2D 的 States、
+  `FnMODE` 缺失、`AQSEQ` 分不清 y/z、**脉程序族与 `FnMODE` 矛盾** —— ⇒ **不加 + 三处同文提醒**
+  ("交给用户":不猜也不静默判不加),让用户在谱图步骤用「间接维翻转」控件定)。
+  谱图步骤的「间接维翻转」控件改**已生成的终脚本**(只改间接维 FT 行;控件本身是"命令",
+  面板先按终脚本现状算出**显式目标状态**再发出去),API/CLI
+  建参考时用 `params={"sampling": {"ft_neg_f1"|"ft_neg_f2": true|false}}`(别名 `flip_f*` 同样可用);
+  影响符号/方向的键(`ft_neg`/`ft_neg_f1`/`ft_neg_f2`/`flip_f1`/`flip_f2`/`ft_alt`)是**单一来源**
+  (`core.experiment.acquisition_mode_detector.sign_sampling_flags`),参考建立过程中的
+  派生运行(逐轴相位预览/联合评估谱)与终跑**必须同一符号约定**;
+  这些键**不得**作为组合扫描轴(`plan_sweep` 报错,锁定键同 `sampling.auto_phase`);
+  `ReferenceSpectrum.sampling_flags` 是**派生只读**属性(从 `params` 取),随
+  `reference.json`、参考记录与 `run.json` 的 `parameters_resolved.sampling.flags`
+  (`flags_source: reference(locked)`)一起留档;自动判据的结论逐维记在
+  `*.fid.conversion.json` 的 `mode_symbol.dims`
+  (`neg_decision`/`neg_basis`/`neg_reason`/`neg_applied`);
+- 处理参数统一 dict 键(其余):`baseline`(每维基线校正,见下)、`stages`(列表,
   id/tool/macro/params/param_docs);
 - 基线校正 `baseline` 键(G2B-007):
   `{"enabled": true, "mode": "auto"|"order", "order": N,
@@ -457,7 +481,11 @@ CLI:`python -m nmrforge_api {init,reference,peaks,sweep(=workflows),report,statu
 
 - `DatasetRef`(exp_id/data_id/**condition**/ndim/nuclei/sampling/source/raw_dir);
 - `ReferenceSpectrum`(条件、冻结谱与脚本路径 + SHA-256、有效参数 +
-  `direct_phase`(各轴 PS,自动相位识别的**实际结果**)+ 参考峰身份表
+  `direct_phase`(各轴 PS,自动相位识别的**实际结果**)+
+  `sampling_flags`(**派生只读**:参考建立时定下的 FT 符号/方向选择,如
+  `{"ft_neg_f1": true}`(别名 `flip_f1` 同义,2026-09-25 用户「API 建立参考也要接入 neg」)——
+  组合沿用同一份,
+  不得当扫描轴)+ 参考峰身份表
   (`reference.list` + SHA-256 + 峰数 + 来源 auto|external|shared:<条件>)+
   **两张参考峰表** `reference_peak_table_parabolic.csv` /
   `reference_peak_table_gaussian.csv`(路径 + SHA-256 + 行数/detected 计数)+

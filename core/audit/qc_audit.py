@@ -208,6 +208,10 @@ class QcAuditLog:
         self._enabled = bool(enabled)
         self._lock = threading.Lock()
         self._count = 0
+        # 2026-09-23: per-instance action counter - summary() must report its count and
+        # its breakdown over the same scope (this-run count next to a whole-file
+        # breakdown contradicted itself)
+        self._actions: Counter[str] = Counter()
 
     @property
     def path(self) -> Path:
@@ -240,6 +244,7 @@ class QcAuditLog:
                 handle.write(line + "\n")
                 handle.flush()
             self._count += 1
+            self._actions[str(stamped.action_taken)] += 1
         return stamped
 
     def read(self) -> list[QcAction]:
@@ -254,10 +259,13 @@ class QcAuditLog:
         return self._count
 
     def summary(self) -> str:
-        """One-line summary for the run log; empty when nothing was recorded."""
+        """One-line summary for the run log: only the records written through **this**
+        instance (count and breakdown share the same scope); empty when nothing was
+        recorded."""
         if not self._enabled or not self._count:
             return ""
-        actions = Counter(action.action_taken for action in self.read())
+        # 2026-09-23: count and breakdown both come from this instance's records
+        actions = Counter(self._actions)
         detail = ", ".join(f"{name} {n}" for name, n in sorted(actions.items()))
         return tr(
             "QC audit records: {p0} entries ({p1}) → "

@@ -1,4 +1,4 @@
-"""SMILE optimisation degree (2x2..5x5) and estimated time consumption (0.2.199-patch29hz-fix 4)."""
+"""SMILE optimization degree (2x2..5x5) and time estimation (0.2.199-patch29hz-fix4)."""
 
 from __future__ import annotations
 
@@ -17,8 +17,7 @@ BRUKER = Path(__file__).resolve().parent / "fixtures" / "bruker"
 
 
 class _FakeBackend:
-    """Fake backend: Each group has a "candidate spectrum", which is deleted after evaluation
-    (consistent with the real semantics)."""
+    """Fake backend: one "candidate spectrum" per group, deleted after evaluation."""
 
     def smile_scan(
         self, experiment, params, combos, *, work_dir, evaluate=None, progress=None,
@@ -27,11 +26,11 @@ class _FakeBackend:
         self.holdout_ratio = holdout_ratio
         Path(work_dir).mkdir(parents=True, exist_ok=True)
         if progress is not None:
-            progress(0, len(combos), "direct dimension processing (generating slices)..")
+            progress(0, len(combos), "直接维处理(生成切片)…")
         candidates = []
         for index, combo in enumerate(combos, start=1):
             if progress is not None:
-                progress(index, len(combos), f"scanning {index}/{len(combos)}")
+                progress(index, len(combos), f"扫描 {index}/{len(combos)}")
             spectrum = Path(work_dir) / f"cand{index:02d}.ft2"
             spectrum.write_bytes(b"x")
             metrics = {
@@ -65,7 +64,7 @@ class _FakeBackend:
 
 
 def test_smile_grid_sizes() -> None:
-    """2x2..5x5 corresponds to the 4/9/16/25 group, and the first and last gears are always in."""
+    """2x2..5x5 map to 4/9/16/25 groups, and the first/last levels are always present."""
     assert (SMILE_GRID_MIN, SMILE_GRID_MAX) == (2, 5)
     assert len(smile_grid(2)) == 4
     assert len(smile_grid(3)) == 9
@@ -73,13 +72,13 @@ def test_smile_grid_sizes() -> None:
     assert len(smile_grid(5)) == 25
     assert smile_grid(5)[0] == {"nsigma": 3.0, "thresh": 0.9}
     assert smile_grid(5)[-1] == {"nsigma": 7.0, "thresh": 0.99}
-    # Out-of-bounds input converges to legal range.
+    # out-of-range input converges to the legal range
     assert len(smile_grid(1)) == 4
     assert len(smile_grid(9)) == 25
 
 
 def test_estimate_scan_seconds_scales() -> None:
-    """Rough estimate based on data size: positive number, proportional to the number of groups."""
+    """Rough estimate from the data size: positive and proportional to the group count."""
     exp = read_dataset(BRUKER / "nus_3d")
     per_group, total_25 = estimate_scan_seconds(exp, 25)
     assert per_group > 0
@@ -90,8 +89,7 @@ def test_estimate_scan_seconds_scales() -> None:
 
 
 def test_rank_modes_differ(tmp_path) -> None:
-    """Jingzhen Peak Priority and Consistency Priority will give different rankings
-    (0.2.199-patch29hz-Xiu 7)."""
+    """true_peaks and consistency ranking give different orders (0.2.199-patch29hz-fix7)."""
 
     class _Mode(tuple):
         pass
@@ -104,8 +102,8 @@ def test_rank_modes_differ(tmp_path) -> None:
             Path(work_dir).mkdir(parents=True, exist_ok=True)
             cands = []
             for i, combo in enumerate(combos, start=1):
-                # Candidate 1: many peaks but good residuals; candidate 2: few peaks but good
-                # residuals.
+                # candidate 1: more peaks but worse holdout residual; candidate 2: fewer
+                # peaks but better residual
                 peaks = (
                     [
                         {"position": [1.0, 1.0], "height": 1.0, "snr": 5.0},
@@ -148,12 +146,11 @@ def test_rank_modes_differ(tmp_path) -> None:
     )
     assert peak_first["rank_mode"] == "true_peaks"
     assert cons_first["rank_mode"] == "consistency"
-    assert peak_first["rows"][0]["index"] == 1   # The one with the most peaks ranks first.
-    assert cons_first["rows"][0]["index"] == 2   # The best residuals rank first.
+    assert peak_first["rows"][0]["index"] == 1   # more peaks ranks first
+    assert cons_first["rows"][0]["index"] == 2   # better residual ranks first
 
 def test_eta_messages_and_single_combo_fallback() -> None:
-    """Initial estimate -> measured update prompt; no cross-combination elimination is performed
-    for a single group of grids (the stable peak is not 0)."""
+    """Estimate -> measured update messages; a single-group grid skips cross-group pruning."""
     exp = read_dataset(BRUKER / "nus_3d")
     messages: list[str] = []
     result = scan_smile_parameters(
@@ -164,14 +161,13 @@ def test_eta_messages_and_single_combo_fallback() -> None:
         grid=smile_grid(2),
         progress=lambda index, total, msg: messages.append(msg),
     )
-    assert any("Estimate" in m for m in messages)      # Estimate based on data before running.
-    # Update with measured after the first group.
-    assert any("Measured approx." in m for m in messages)
+    assert any("估算" in m for m in messages)      # data-based estimate before the run
+    assert any("实测" in m for m in messages)      # measured update after the first group
     assert result["n_combos"] == 4
     assert all(row["stable_count"] > 0 for row in result["rows"])
     assert all("suspect_count" in row and "net_peaks" in row for row in result["rows"])
-    # Two common peaks appear stably in the 4 sets of grids -> spurious peak is 0, net true peak =
-    # stable peak.
+    # in the 4-group grid both shared peaks appear stably -> suspect_count 0 and
+    # net peaks = stable peaks
     assert all(row["suspect_count"] == 0 for row in result["rows"])
 
     single = scan_smile_parameters(
@@ -181,27 +177,27 @@ def test_eta_messages_and_single_combo_fallback() -> None:
         scan_dir=Path(__file__).resolve().parent / "_tmp_scan_one",
         grid=smile_grid(2)[:1],
     )
-    assert single["rows"][0]["stable_count"] > 0   # Single group rollback (no longer constant 0).
+    assert single["rows"][0]["stable_count"] > 0   # single-group fallback (no longer always 0)
 
 # ---------------------------------------------------------------------------
-# SMILE candidate evaluation threshold (0.2.199-patch29hz-fix 16).
+# SMILE candidate evaluation threshold (0.2.199-patch29hz-fix16)
 # ---------------------------------------------------------------------------
 
 
 def _two_peak_spectrum():
-    """A composite two-dimensional spectrum of a strong peak + a weak true peak (about 5σ)."""
+    """A synthetic 2D spectrum with one strong peak + one weak real peak (about 5σ)."""
     import numpy as np
 
     rng = np.random.default_rng(3)
-    arr = rng.standard_normal((64, 64)) * 1.0  # Noise σ ≈ 1.
-    arr[20, 30] = 50.0  # Qiangfeng.
-    arr[44, 12] = 5.5  # Weak true peak.
+    arr = rng.standard_normal((64, 64)) * 1.0  # noise σ ≈ 1
+    arr[20, 30] = 50.0  # strong peak
+    arr[44, 12] = 5.5  # weak real peak
     return arr
 
 
 def test_smile_scan_uses_low_threshold() -> None:
-    """A low threshold (3σ) is used for candidate evaluation: weak true peaks must also be detected
-    and cannot be missed according to the 35σ in the peak selection step."""
+    """Candidate evaluation uses a low threshold (3σ): the weak real peak must be
+    detected, not missed by the 35σ of the picking step."""
     import numpy as np
 
     from core.qc import peak_detection
@@ -211,12 +207,11 @@ def test_smile_scan_uses_low_threshold() -> None:
     peaks = evaluate_candidate_peaks(arr, sign_mode="positive")
     positions = {(int(round(p.position[0])), int(round(p.position[1]))) for p in peaks}
 
-    assert SMILE_SCAN_SIGMA <= 5.0  # Low threshold level.
-    assert (20, 30) in positions  # Qiangfeng.
-    assert (44, 12) in positions  # Weak true peak (about 5σ).
+    assert SMILE_SCAN_SIGMA <= 5.0  # low-threshold tier
+    assert (20, 30) in positions  # strong peak
+    assert (44, 12) in positions  # weak real peak (about 5σ)
 
-    # Control: According to the default threshold (35σ) of the peak selection step, this weak true
-    # peak will be missed.
+    # control: the picking step's default threshold (35σ) misses this weak real peak
     strict = peak_detection.detect(
         np.asarray(arr),
         peak_detection.PeakDetectionParams(
@@ -230,8 +225,8 @@ def test_smile_scan_uses_low_threshold() -> None:
 
 
 def test_smile_scan_sign_mode_follows_preset(monkeypatch) -> None:
-    """The symbolic mode has the same origin as the peak selection step: mixed preset ->
-    both,uniform/unknown -> dominant."""
+    """The sign mode shares its source with picking: the mixed preset -> both,
+    uniform/unknown -> dominant."""
     from types import SimpleNamespace
 
     import core.experiments.registry as registry
@@ -254,8 +249,7 @@ def test_smile_scan_sign_mode_follows_preset(monkeypatch) -> None:
 
 
 def test_smile_scan_edge_margin_matches_pick_peaks() -> None:
-    """The axial peak exclusion and peak selection steps have the same constant (do not write a
-    number each)."""
+    """Axial-peak exclusion uses the same constant as picking (no duplicated number)."""
     from workflow.pick_peaks import PICK_EDGE_MARGIN
     from workflow.smile_optimize import smile_scan_edge_margin
 
@@ -265,15 +259,15 @@ def test_smile_scan_edge_margin_matches_pick_peaks() -> None:
 def test_smile_scan_uses_candidate_axis_and_reports_evaluated_margin(
     tmp_path, monkeypatch
 ) -> None:
-    """The actual spectral axis after clipping/zero filling determines the margin, and log must
-    write the actual number of points after evaluation."""
+    """The actual axes after cropping/zero-fill set the margin; the log must
+    report the real evaluated point count."""
     from types import SimpleNamespace
 
     import numpy as np
 
     from workflow.smile_optimize import smile_scan_edge_margin
 
-    axis0 = np.linspace(4.0, -3.75, 32)  # 0.25 ppm/Point.
+    axis0 = np.linspace(4.0, -3.75, 32)  # 0.25 ppm/point
     spectrum = SimpleNamespace(
         data=np.zeros((32, 64), dtype=float),
         ppm=[axis0, np.linspace(10.0, 0.0, 64)],
@@ -323,13 +317,13 @@ def test_smile_scan_uses_candidate_axis_and_reports_evaluated_margin(
         scan_dir=tmp_path / "actual-axis",
         grid=[{"nsigma": 5.0, "thresh": 0.95}],
     )
-    assert f"{expected}–{expected} point" in result["logs"][0]
-    assert "Not evaluated" not in result["logs"][0]
+    assert f"{expected}–{expected} 点" in result["logs"][0]
+    assert "未评估" not in result["logs"][0]
 
 
 def test_rank_mode_selects_run_mode(tmp_path) -> None:
-    """Modification 23: The sorting caliber determines the operation mode (net true peak -> full
-    sampling holdout=0; consistency -> hold out)."""
+    """fix23: the ranking mode decides the run mode (true peaks -> full sampling,
+    holdout=0; consistency -> hold out)."""
     seen: list[float] = []
 
     class _Backend:
@@ -368,8 +362,7 @@ def test_rank_mode_selects_run_mode(tmp_path) -> None:
 
 
 def test_pick_edge_margin_is_public() -> None:
-    """Fix 24: Peak selection/SMILE Make shared constants public (old private names remain
-    compatible)."""
+    """fix24: the picking/SMILE shared constant is public (the old private name is kept)."""
     from workflow.pick_peaks import _PICK_EDGE_MARGIN, PICK_EDGE_MARGIN
 
     assert PICK_EDGE_MARGIN == _PICK_EDGE_MARGIN

@@ -1,4 +1,4 @@
-"""Peak table model test: save/load round trip, Poky Export/import, 2D/3D, placeholder (G2B-005)."""
+"""Peak-table model: save/load round-trip, Poky export/import, 2D/3D, placeholders (G2B-005)."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from core.peaks import (
 
 
 def test_save_load_roundtrip(tmp_path: Path) -> None:
-    """0.2.199-patch29ar: Peak file i.e. Poky.list (without SN/CSV column)."""
+    """0.2.199-patch29ar: the peak file is the Poky .list (no SN/CSV columns)."""
     path = tmp_path / "peaks.list"
     peaks = [
         {
@@ -31,7 +31,7 @@ def test_save_load_roundtrip(tmp_path: Path) -> None:
     save_peaks(path, peaks)
     loaded = load_peaks(path)
     assert len(loaded) == 2
-    assert loaded[0]["Peak_ID"] == 1  # Number ID(row order).
+    assert loaded[0]["Peak_ID"] == 1  # numeric ID (row order)
     assert loaded[1]["Peak_ID"] == 2
     assert loaded[0]["H_shift"] == 8.464
     assert loaded[0]["N_shift"] == 118.5
@@ -45,7 +45,7 @@ def test_save_peaks_missing_columns_filled(tmp_path: Path) -> None:
     loaded = load_peaks(path)
     assert loaded[0]["Peak_ID"] == 1
     assert loaded[0]["H_shift"] == 8.0
-    assert loaded[0]["Intensity"] == 0.0  # Lack of strength -> 0.0.
+    assert loaded[0]["Intensity"] == 0.0  # missing intensity → 0.0
 
 
 def test_save_peaks_auto_detect_3d(tmp_path: Path) -> None:
@@ -77,7 +77,7 @@ def test_export_poky_2d_format(tmp_path: Path) -> None:
     )
     lines = path.read_text(encoding="utf-8").splitlines()
     assert lines[0] == "Assignment w1 w2 Data Height Volume"
-    # Unnamed ?-?;Displacement %.3f;Data/Volume=0;Height %.3g;Double space.
+    # unnamed ?-?; shifts %.3f; Data/Volume=0; Height %.3g; two spaces
     assert lines[1] == "?-?  118.500  4.703  0  500  0"
 
 
@@ -142,7 +142,7 @@ def test_peak_table_add_remove() -> None:
 
 
 def test_pick_peaks_columns_match_poky(tmp_path: Path) -> None:
-    """0.2.199-patch29ar:pick_peaks Output Poky.list (Contract §6: peak file is.list)."""
+    """0.2.199-patch29ar: pick_peaks writes a Poky .list (contract §6: the peak file is .list)."""
     import numpy as np
     from scipy.ndimage import gaussian_filter
 
@@ -183,8 +183,7 @@ def test_pick_peaks_columns_match_poky(tmp_path: Path) -> None:
 
 
 def test_save_peaks_extra_columns_ignored_in_list(tmp_path: Path) -> None:
-    """0.2.199-patch29ar:Poky.list has no additional columns (extra_columns is ignored for
-    compatibility)."""
+    """0.2.199-patch29ar: a Poky .list has no extra columns (extra_columns is tolerated)."""
     path = tmp_path / "peaks_extra.list"
     save_peaks(
         path,
@@ -204,12 +203,11 @@ def test_save_peaks_extra_columns_ignored_in_list(tmp_path: Path) -> None:
 
 
 def test_normalize_poky_label() -> None:
-    """0.2.199-patch29co: Poky assignment is segmented by dimension (2D two paragraphs/3D three
-    segments, hyphen)."""
+    """0.2.199-patch29co: Poky assignments are segmented by dimension (2D two, 3D three)."""
     assert normalize_poky_label("g1h-g1n") == "G1H-G1N"            # 2D
     assert normalize_poky_label("c16h-k15cb-c16n", ndim=3) == "C16H-K15CB-C16N"
     assert normalize_poky_label("v32ca-k31h-v32n", ndim=3) == "V32CA-K31H-V32N"
-    assert normalize_poky_label("g1h-?") == "G1H-?"                # Partially unidentified.
+    assert normalize_poky_label("g1h-?") == "G1H-?"                # partly unassigned
     assert normalize_poky_label("?-?") == "?-?"
     assert normalize_poky_label("?-?-?", ndim=3) == "?-?-?"
     assert normalize_poky_label("") == ""
@@ -217,21 +215,19 @@ def test_normalize_poky_label() -> None:
 
 
 def test_poky_label_is_valid() -> None:
-    """0.2.199-patch29co: The number of segments must be consistent with dimension (2D two
-    paragraphs/3D three segments) to be valid."""
-    assert poky_label_is_valid("G1H-G1N")               # 2D Two paragraphs.
+    """0.2.199-patch29co: only valid when the segment count matches the dimension."""
+    assert poky_label_is_valid("G1H-G1N")               # 2D, two segments
     assert poky_label_is_valid("G1H-?")
     assert poky_label_is_valid("?-?")
-    assert not poky_label_is_valid("G1H")               # 2D Only one paragraph.
-    assert poky_label_is_valid("G1H-G1N-G1CA", ndim=3)  # 3D Three sections.
-    assert not poky_label_is_valid("G1H-G1N", ndim=3)   # 3D Only two paragraphs.
+    assert not poky_label_is_valid("G1H")               # 2D with a single segment
+    assert poky_label_is_valid("G1H-G1N-G1CA", ndim=3)  # 3D, three segments
+    assert not poky_label_is_valid("G1H-G1N", ndim=3)   # 3D with only two segments
     assert poky_label_is_valid("?-?-?", ndim=3)
     assert not poky_label_is_valid("xyz")
     assert not poky_label_is_valid("1H-1N")
 
 def test_export_import_3d_external_nuclei_order(tmp_path: Path) -> None:
-    """0.2.199-patch29dk:3D.list According to external convention w1=15N/w2=13C/w3=1H
-    Export/import."""
+    """0.2.199-patch29dk: 3D .list export/import follows w1=15N/w2=13C/w3=1H."""
     path = tmp_path / "ext.list"
     export_peaks_poky(
         path,
@@ -250,12 +246,12 @@ def test_export_import_3d_external_nuclei_order(tmp_path: Path) -> None:
     )
     lines = path.read_text(encoding="utf-8").splitlines()
     assert lines[1].split()[1:4] == ["118.000", "45.000", "8.200"]  # N,C,H
-    # Import with core name: map back to internal F1=N/F2=H/F3=C.
+    # Import with nucleus names: map back to internal F1=N/F2=H/F3=C
     rows = import_peaks_poky(path, nuclei=["15N", "1H", "13C"])
     assert rows[0]["F1_shift"] == 118.0
     assert rows[0]["F2_shift"] == 8.2
     assert rows[0]["F3_shift"] == 45.0
-    # No core name: fallback position formula (w2 -> F2, w3 -> F3).
+    # No nucleus names: fall back to positional mapping (w2→F2, w3→F3)
     rows2 = import_peaks_poky(path)
     assert rows2[0]["F2_shift"] == 45.0
     assert rows2[0]["F3_shift"] == 8.2
@@ -265,8 +261,8 @@ def test_export_import_3d_external_nuclei_order(tmp_path: Path) -> None:
 def test_import_poky_lowercase_header_and_extra_columns(
     tmp_path: Path,
 ) -> None:
-    """0.2.199-patch29fx: Real Poky reference.list compatible -- lowercase header, simplified 2D/3D
-    columns, redundant tail columns ignored."""
+    """0.2.199-patch29fx: compatible with a real Poky reference .list — lowercase header,
+    trimmed 2D/3D columns, trailing extra columns ignored."""
     p = tmp_path / "ref_min2d.list"
     p.write_text("assignment w1 w2\n?-? 118.500 4.703\n", encoding="utf-8")
     rows = load_peaks(p)
@@ -290,7 +286,7 @@ def test_import_poky_lowercase_header_and_extra_columns(
 
 
 def test_import_poky_headerless_2d(tmp_path: Path) -> None:
-    """0.2.199-patch29fx: No header simplified.list is inferred to 2D by the number of columns."""
+    """0.2.199-patch29fx: a headerless trimmed .list is inferred as 2D from its column count."""
     p = tmp_path / "ref_nohdr.list"
     p.write_text(
         "?-? 118.5 4.703\nG1H-G1N 120.1 7.2\n",
@@ -304,7 +300,7 @@ def test_import_poky_headerless_2d(tmp_path: Path) -> None:
 
 
 def test_import_poky_minimal_3d_with_nuclei(tmp_path: Path) -> None:
-    """0.2.199-patch29fx: condense 3D 4 columns + core name -> map back to internal F1/F2/F3."""
+    """0.2.199-patch29fx: trimmed 3D, 4 columns + nucleus names → mapped to internal F1/F2/F3."""
     p = tmp_path / "ref_min3d_nuc.list"
     p.write_text("?-?-? 118.0 45.0 8.5\n", encoding="utf-8")
     rows = import_peaks_poky(p, nuclei=["15N", "1H", "13C"])

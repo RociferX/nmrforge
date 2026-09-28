@@ -1,4 +1,4 @@
-"""Bruker parameter parsing test."""
+"""Bruker parameter parsing tests."""
 
 from __future__ import annotations
 

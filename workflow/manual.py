@@ -1,12 +1,16 @@
-"""Manual processing path backend (user feedback: Check/Revise/run script). Corresponding to
-automatic processing, it integrates the previous manual processing processes on the command
-line: - Generate FID: the automatic phase produces fid.com(backend.convert_to_fid) first ->
-Manually view the content (manual_fid_com) -> Modify -> Run (run_manual_fid_com, manual
-parameter is handed over to the backend as an overlay) -> Register fid; - Generate spectrum:
-script Edit (manual_scripts render, process/ existing scripts are displayed first -> modify) ->
-run (process.com / nus*.com, run_manual_spectrum) -> final spectrum returns to spectra/ and
-registers. Run reuse backend.runtime.CshRuntime; product registration set_data_fid /
-set_data_spectrum + WorkflowRun (audit)."""
+"""Manual processing path backend (user feedback: view / edit / run the script).
+
+Mirrors the automatic path and gathers the manual command-line processing that came before:
+- Generate FID: the automatic stage produces fid.com first (backend.convert_to_fid) -> the user
+  views it (manual_fid_com) -> edits it -> runs it (run_manual_fid_com, the manual parameters are
+  handed to the backend as overrides) -> fid registered;
+- Generate spectrum: edit the script (manual_scripts renders it, an existing script in process/
+  is shown first -> edit) -> run it (process.com / nus*.com, run_manual_spectrum) -> the final
+  spectrum is put back into spectra/ and registered.
+
+Running reuses backend.runtime.CshRuntime; the products are registered through set_data_fid /
+set_data_spectrum + WorkflowRun (audit).
+"""
 
 from __future__ import annotations
 
@@ -25,7 +29,7 @@ from workflow.stepwise import _read_experiment, _register_spectrum
 
 
 class ManualRunError(Exception):
-    """Manually handle runtime errors (script Missing/Execution failed/Product missing)."""
+    """Manual processing run error (missing script / failed run / missing product)."""
 
 
 def _resolve_raw_dir(manager: ProjectManager, data_entry: Any) -> Path:
@@ -39,19 +43,8 @@ def _work_dir(manager: ProjectManager, exp_id: str, data_id: str) -> Path:
     return manager.data_dir(exp_id, data_id, "process")
 
 
-def _slice_files(directory: Path, dataset_id: str) -> list[Path]:
-    """Slice fid candidate: The new name {dataset_id}*.fid takes precedence and is compatible with
-    the old test*.fid."""
-    if not directory.is_dir():
-        return []
-    new_style = sorted(directory.glob(f"{dataset_id}*.fid"))
-    legacy = sorted(directory.glob("test*.fid"))
-    seen = {p.name for p in new_style}
-    return new_style + [p for p in legacy if p.name not in seen]
-
-
 def _fid_ready(candidate: Path | None) -> bool:
-    """The presence of a single file or slice directory (either named) is considered converted."""
+    """A single file or a slice directory (either naming) already counts as converted."""
     if candidate is None:
         return False
     if candidate.is_file():
@@ -61,6 +54,111 @@ def _fid_ready(candidate: Path | None) -> bool:
     return False
 
 
+def _located_fids(work: Path, experiment: Experiment) -> list[Path]:
+    """Where the converted fid actually landed (single file / slice stream) -- the same decision
+    the automatic path makes.
+
+    The merged product of multi-part data lands in ``merged/fid/...`` or
+    ``merged/{dataset_id}.fid``, unlike the ``{dataset_id}.fid`` / ``fid/...`` of a single
+    dataset; the manual path must ask the same implementation
+    (``workflow.direct_diagnostics.collect_fid_paths``), otherwise it reports "fid not found"
+    even though the conversion succeeded (user report, 2026-09-24).
+    """
+    from workflow.direct_diagnostics import collect_fid_paths
+
+    return collect_fid_paths(work, experiment)
+
+
+def _converted_fid_present(
+    work: Path, data_entry: Any, experiment: Experiment
+) -> bool:
+    """True when converted: the registered ``fid_path`` (single file or slice directory), or
+    located by where it lands.
+
+    2026-09-24 (user): "the fid of a multi-part dataset sits somewhere else, so the manual run
+    failed with fid not found" -- previously only the registered path and
+    ``work/{dataset_id}.fid`` were checked.
+    """
+    registered = str(getattr(data_entry, "fid_path", "") or "")
+    if registered and _fid_ready(Path(registered)):
+        return True
+    return bool(_located_fids(work, experiment))
+
+
+def _fid_in_argument(
+    work: Path, located: list[Path], dataset_id: str
+) -> str | None:
+    """Located fid -> the relative path the script's ``-in`` has to carry (single file or slice
+    wildcard).
+
+    The rendered script writes ``-in {dataset_id}.fid`` by default, but the real landing spot of a
+    segmented/sliced product differs (``merged/{dataset_id}.fid``, ``merged/fid/test%03d.fid``,
+    ``fid/test%03d.fid``), so the manual run fails unless it is rewritten. Returns None when
+    nothing can be located (the rendered value is kept).
+    """
+    if not located:
+        return None
+    first = located[0]
+    try:
+        rel = first.relative_to(work)
+    except ValueError:
+        return None
+    parent = rel.parent.as_posix()
+    prefix = "" if parent == "." else parent + "/"
+    if len(located) == 1 and first.is_file():
+        return prefix + first.name
+    for stem in (dataset_id, "test"):
+        if first.name.startswith(stem) and first.name.endswith(".fid"):
+            return f"{prefix}{stem}%03d.fid"
+    return None
+
+
+def _reference_fid_com_path(
+    work: Path, raw_dir: Path, segments: list[Any]
+) -> Path | None:
+    """The **reference baseline** fid.com for a manual script (``bruker -AUTO`` plus the backend
+    patches, untouched).
+
+    During conversion the backend keeps the script without manual overrides as ``fid.com.auto``
+    (see ``NMRPipeBackend._convert_dir``); a manual edit has to carry "only the parameters that
+    were really changed" to every segment, which requires this baseline for comparison -- without
+    it a second run takes the previous manual parameters as the baseline and silently drops them.
+    When the baseline is absent (old work directory), fall back to the current ``fid.com``, then
+    to raw.
+    """
+    # 2026-09-24 review B8: the baseline **must** be "the one without manual overrides" --
+    # fid.com.auto first, then the original raw/fid.com; never work/seg_001/fid.com (that one is
+    # for humans and already carries the previous manual values), otherwise the second manual run
+    # diffs to nothing and the previous manual parameters are silently dropped. When neither is
+    # available, return None (the caller falls back to "the keys of the whole script", i.e. the
+    # old behaviour).
+    candidates: list[Path] = []
+    if segments:
+        candidates.append(work / "seg_001" / "fid.com.auto")
+    candidates += [work / "fid.com.auto", raw_dir / "fid.com"]
+    for path in candidates:
+        if path.is_file():
+            return path
+    return None
+
+
+def _changed_fid_com_params(edited: str, reference: str | None) -> dict[str, str]:
+    """Manual script vs automatic baseline -> only "the parameters a human really changed" (the
+    same set is applied to every segment).
+
+    2026-09-24 (user): editing the script manually means specifying some fid.com parameters by
+    hand, while conversion / slicing / merging still go through the full automatic flow. Keys with
+    the same value in the baseline are filtered out, so a segment's own acquisition parameters
+    (such as its own -yN) are not overwritten by the reference segment's values. When the baseline
+    is unavailable it falls back to "the keys of the whole script" (the old behaviour).
+    """
+    changed = parse_fid_com(edited)
+    if reference is None:
+        return changed
+    base = parse_fid_com(reference)
+    return {key: value for key, value in changed.items() if base.get(key) != value}
+
+
 def _run_quality_check(
     manager: ProjectManager,
     exp_id: str,
@@ -68,37 +166,39 @@ def _run_quality_check(
     work: Path,
     data_id: str,
 ) -> None:
-    """Quality diagnosis before manually "running" the spectrum (without re-running optimisation).
-    The results are written to process/manual_quality.log; the diagnosis will repair the bad
-    point (backup) incidentally, which is consistent with the quality inspection at the
-    beginning of the automatic path "Generate spectrum" (0.2.163-patch13). 0.2.193: When opening
-    from the script editor, click "Run" and execute (run_manual_spectrum), and the editor will
-    no longer freeze."""
-    fid_candidate = (
-        Path(data_entry.fid_path)
-        if data_entry.fid_path
-        else work / f"{data_id}.fid"
-    )
-    if not _fid_ready(fid_candidate):
-        return  # fid When not in place, diagnosis is meaningless and editing is not blocked.
-    try:
-        from workflow.direct_diagnostics import run_direct_diagnostics
+    """Quality diagnosis before a manual spectrum "run" (the optimisation is not re-run).
 
+    The result is written to process/manual_quality.log; the diagnosis also repairs bad points (a
+    backup is kept), matching the quality inspection at the start of the automatic
+    "Generate spectrum" path (0.2.163-patch13). 0.2.193: running it was moved from opening the
+    script editor to clicking "Run" (run_manual_spectrum), so opening the editor no longer stalls.
+    """
+    try:
         experiment = _read_experiment(manager, exp_id, data_id)
-        result = run_direct_diagnostics(work, experiment)
-        lines = [(
-            tr(
+    except Exception:  # noqa: BLE001 - no experiment means no diagnosis; do not block editing
+        return
+    # 2026-09-24 (user): a multi-part fid lands elsewhere than a single dataset's, so decide by
+    # the located paths uniformly
+    if not _converted_fid_present(work, data_entry, experiment):
+        return  # diagnosis is pointless while the fid is not in place; do not block editing
+    try:
+        from workflow.direct_diagnostics import load_or_run_direct_diagnostics
+
+        # 2026-09-23: reuse the conclusion persisted by the "Generate FID" step first; run the
+        # check for real only for old work directories / manual paths without a record (the same
+        # criterion as the automatic path)
+        result = load_or_run_direct_diagnostics(work, experiment)
+        lines = [tr(
             "== Quality inspection (manual spectrum preparation, multiplexing automatic "
             "optimisation final script) "
             "==",
-        )
         )]
         lines += [f"{i + 1}. {report}" for i, report in enumerate(result.reports)]
         lines.append(tr("index: {p0}", p0=result.metrics))
         (work / "manual_quality.log").write_text(
             (chr(10).join(lines) + chr(10)), encoding="utf-8"
         )
-    except Exception as exc:  # noqa: BLE001 - Quality check failure does not block editing.
+    except Exception as exc:  # noqa: BLE001 - a failed quality check must not block editing
         try:
             (work / "manual_quality.log").write_text(
                 tr("Quality check failed: {p0}: {p1}", p0=type(exc).__name__, p1=exc) + chr(10),
@@ -132,14 +232,16 @@ def manual_fid_com(
     data_id: str,
     backend: Any | None = None,
 ) -> str:
-    """Get the generated fid.com content (For human viewing/Revise); do not trigger automatic
-    conversion. 0.2.199-patch29dm(user): The manual button to generate FID will only appear
-    after the automatic processing is successful. Here, directly read the generated fid.com --
-    single dataset process/fid.com; segment the reference segment process/seg_001/fid.com and
-    add a prompt header (after manually changing the parameter, run_manual_fid_com As an
-    overlay, it is handed over to the backend for unified execution). fid.com Explicitly report
-    an error when it does not exist, and no longer automatically convert (avoid opening after a
-    while after clicking)."""
+    """Get the already generated fid.com content (for manual viewing / editing); does not trigger
+    an automatic conversion.
+
+    0.2.199-patch29dm (user): the manual "Generate FID" button only appears after the automatic
+    processing succeeded, so this reads the generated fid.com directly -- process/fid.com for a
+    single dataset, and the reference segment process/seg_001/fid.com with an explanatory header
+    for segmented data (after the parameters are edited, run_manual_fid_com hands them to the
+    backend as overrides and it runs them uniformly). A missing fid.com is reported clearly
+    instead of converting automatically (so a click does not only open it a while later).
+    """
     data_entry = manager.data(exp_id, data_id)
     raw_dir = _resolve_raw_dir(manager, data_entry)
     work = _work_dir(manager, exp_id, data_id)
@@ -149,10 +251,11 @@ def manual_fid_com(
         if seg_fid.is_file():
             header = (
                 tr(
-                    "# Segmented acquisition: this is the reference-segment fid.com; parameter "
-                    "edits apply to every segment\n# (conversion / slicing / merging is done by "
-                    "the backend; do not change the output "
-                    "name)\n",
+                    "# Segmented acquisition: this is the reference-segment fid.com - edit "
+                    "parameters only.\n# Running it applies the parameters you changed to EVERY "
+                    "segment's fid.com and then\n# runs the full automatic conversion / slicing / "
+                    "merging (the output name and the script\n# structure are still written by the "
+                    "backend; changing them has no effect)\n",
                 )
             )
             return header + seg_fid.read_text(
@@ -183,14 +286,16 @@ def run_manual_fid_com(
     backend: Any | None = None,
     progress: Callable[[str], None] | None = None,
 ) -> str:
-    """Run manual fid.com and register fid. The single dataset is consistent with the segmentation
-    (0.2.199-patch2): the manually modified parameters are extracted as overrides by
-    parse_fid_com, and are uniformly executed by the backend convert_to_fid to generate bruker /
-    parameter correction / bad point clean up/Slice return -- Manually adjust parameters only,
-    and the conversion structure is guaranteed by the backend, and no longer directly csh to run
-    user scripts (structural changes are not retained, consistent with segmentation semantics).
-    Single dataset product placement process/(single file or slice), segmented product placement
-    process/merged/fid."""
+    """Run a manual fid.com and register the fid.
+
+    A single dataset behaves like segmented data (0.2.199-patch2): the manually changed parameters
+    are extracted as overrides by parse_fid_com and the backend convert_to_fid runs them uniformly
+    (bruker generation / parameter fixes / bad-point cleanup / slicing), so a human only tunes
+    parameters while the conversion structure is guaranteed by the backend; a user script is no
+    longer run through csh directly (structural changes are not kept, consistent with the
+    segmented semantics). A single dataset's product lands in process/ (single file or slices), a
+    segmented product in process/merged/fid.
+    """
     data_entry = manager.data(exp_id, data_id)
     raw_dir = _resolve_raw_dir(manager, data_entry)
     work = Path(work_dir) if work_dir else _work_dir(manager, exp_id, data_id)
@@ -201,7 +306,16 @@ def run_manual_fid_com(
         raise ManualRunError(
             tr("a manual fid.com needs the backend to convert/merge, so run it from the interface")
         )
-    overrides = parse_fid_com(content)
+    # 2026-09-24 (user): editing the script manually means specifying some fid.com parameters by
+    # hand -- only the parameters **changed** relative to the automatic baseline are handed to the
+    # backend; the backend still runs the full automatic flow (per-segment conversion / slicing /
+    # merging) and applies the same overrides to every segment's fid.com (see
+    # NMRPipeBackend._convert_dir). Structural changes such as the output name have no effect.
+    reference = _reference_fid_com_path(work, raw_dir, segments)
+    reference_text = (
+        reference.read_text(encoding="utf-8", errors="replace") if reference else None
+    )
+    overrides = _changed_fid_com_params(content, reference_text)
     if hasattr(backend, "work_dir"):
         backend.work_dir = str(work)
     resp = backend.convert_to_fid(
@@ -223,13 +337,17 @@ def run_manual_fid_com(
         raise ManualRunError(message)
     if segments:
         fid_path = Path(str(resp.get("fid_path") or (work / "merged" / "fid")))
-        run_params = {"fid_path": str(fid_path), "segments": len(segments)}
+        run_params = {
+            "fid_path": str(fid_path),
+            "segments": len(segments),
+            "fid_com_overrides": dict(overrides),
+        }
         message = tr("Manual FID completed (segmented merge)")
     else:
         fid_path = Path(
             str(resp.get("fid_path") or (work / f"{experiment.dataset_id}.fid"))
         )
-        run_params = {"fid_path": str(fid_path)}
+        run_params = {"fid_path": str(fid_path), "fid_com_overrides": dict(overrides)}
         message = tr("Manual FID Completed")
     manager.set_data_fid(exp_id, data_id, fid_path)
     _finish_run(manager, exp_id, data_id, "manual_fid", run_params, message)
@@ -242,16 +360,18 @@ def manual_scripts(
     data_id: str,
     params: dict[str, Any] | None = None,
 ) -> dict[str, str]:
-    """Spectrum step script (process.com / nus*.com, for script editor display). Manual generation
-    of spectrum is not completely manual, data conversion/merge/ bad point cleaning and
-    automatic path alignment (0.2.163-patch13): when fid is missing, the user is prompted to
-    perform the "Generate FID" step first (0.2.163-patch14, no sneak conversion at the spectrum
-    entrance); open the editor to only read the existing script, and do not run quality
-    diagnosis -- Diagnosis is changed to "Run" to execute (run_manual_spectrum, 0.2.193), and
-    the big data script editor is no longer stuck. Priority is given to returning the existing
-    script under the process/ directory; only the default script is re-rendered if there is no
-    such script. Only spectrum scripts are returned -- fid is produced by the "Generate FID"
-    step."""
+    """Spectrum-step script (process.com / nus*.com, for the script editor to display).
+
+    Generating a spectrum manually is not entirely manual -- data conversion / merging /
+    bad-point cleanup stay aligned with the automatic path (0.2.163-patch13): when the fid is
+    missing the user is asked to run the "Generate FID" step first (0.2.163-patch14, the spectrum
+    entry point does not sneak in a conversion); opening the editor only reads the existing script
+    and does not run the quality diagnosis -- that moved to the "Run" click
+    (run_manual_spectrum, 0.2.193), so opening the editor of a large dataset no longer stalls. An
+    existing script in process/ is preferred; only when there is none is the default script
+    rendered again. Only spectrum scripts are returned -- the fid comes from the "Generate FID"
+    step.
+    """
     data_entry = manager.data(exp_id, data_id)
     raw_dir = _resolve_raw_dir(manager, data_entry)
     work = _work_dir(manager, exp_id, data_id)
@@ -264,24 +384,16 @@ def manual_scripts(
                 encoding="utf-8", errors="replace"
             )
     if existing:
-        # There is an existing script that can be directly given to people (0.2.193: Quality
-        # diagnosis is executed when the quality diagnosis is changed to "Run", and the editor is no
-        # longer re-run to avoid lags every time the big data is opened).
+        # Existing scripts are handed over as they are (0.2.193: the quality diagnosis moved to
+        # "Run", so opening the editor no longer re-runs it and large datasets do not stall)
         return existing
-    # Fid is missing: Prompt to perform the "Generate [2]]" step first (Convert/Merging is done by
-    # automatic paths). The manual method is only for adjusting parameters for people, not for sneak
-    # conversion at the spectrum entrance (0.2.163-patch14).
+    # fid missing: ask for the "Generate FID" step first (conversion/merging is done by the
+    # automatic path); the manual route only lets a human tune parameters and does not sneak in a
+    # conversion at the spectrum entry point (0.2.163-patch14)
     experiment = _read_experiment(manager, exp_id, data_id)
-    fid_candidate = (
-        Path(data_entry.fid_path)
-        if data_entry.fid_path
-        else work / f"{experiment.dataset_id}.fid"
-    )
-    if not _fid_ready(fid_candidate) and not _slice_files(
-        work / "fid", experiment.dataset_id
-    ):
-        raise ManualRunError(
-            tr(
+    located = _located_fids(work, experiment)
+    if not _converted_fid_present(work, data_entry, experiment):
+        raise ManualRunError(tr(
             "The converted fid is missing, please perform the \"Generate FID\" step "
             "first",
         ))
@@ -308,8 +420,7 @@ def manual_scripts(
         experiment = _read_experiment(manager, exp_id, data_id)
         rendered = render_scripts(experiment, params)
     except NotImplementedError as exc:
-        raise ManualRunError(
-            tr(
+        raise ManualRunError(tr(
             "Unable to render and process script (not supported in acquisition mode): "
             "{p0}",
             p0=exc,
@@ -320,30 +431,17 @@ def manual_scripts(
         else "process.com"
     )
     content = rendered[script_key]
-    # 0.2.163-patch9: The fid of 3D uniform/NUS is the slice directory (fid/test*.fid). The default
-    # rendering in_file is a single file {dataset_id}.fid -- When a slice is detected, it is
-    # rewritten as a slice stream so that manual operation does not fail (consistent with the
-    # automatic path backend slice switching).
-    slice_dir = work / "fid"
-    slices = _slice_files(slice_dir, experiment.dataset_id)
-    if slices:
-        single = f"{experiment.dataset_id}.fid"
-        new_style = any(
-            p.name.startswith(experiment.dataset_id) for p in slices
-        )
-        sliced = (
-            f"fid/{experiment.dataset_id}%03d.fid"
-            if new_style
-            else "fid/test%03d.fid"
-        )
-        # Only change the -in input of xyz2pipe/nmrPipe and leave the -out output unchanged.
+    # 0.2.163-patch9 / 2026-09-24: the rendered default in_file is the single file
+    # {dataset_id}.fid, while the real landing spot may be a slice directory (fid/test*.fid) or a
+    # segmented merge product (merged/fid/test*.fid, merged/{dataset_id}.fid) -- rewrite -in from
+    # the located paths so the manual run does not fail (the same -in rule as the automatic path).
+    # Only the -in input is changed, never the -out output.
+    single = f"{experiment.dataset_id}.fid"
+    target = _fid_in_argument(work, located, experiment.dataset_id)
+    if target and target != single:
         import re
 
-        content = re.sub(
-            r"(-in )" + re.escape(single),
-            r"\g<1>" + sliced,
-            content,
-        )
+        content = re.sub(r"(-in )" + re.escape(single), r"\g<1>" + target, content)
     return {script_key: content}
 
 
@@ -357,9 +455,10 @@ def run_manual_spectrum(
     timeout: float = 7200.0,
     progress: Callable[[str], None] | None = None,
 ) -> str:
-    """Run spectrum script (process.com/nus*.com in process/, consumption has been converted to
-    fid), final spectrum returns to spectra/ and registers; does not execute fid.com (generating
-    FID is an independent step)."""
+    """Run the spectrum script (process.com/nus*.com in process/, consuming the converted fid);
+    the final spectrum is put back into spectra/ and registered. fid.com is not executed
+    (generating the FID is an independent step).
+    """
     data_entry = manager.data(exp_id, data_id)
     raw_dir = _resolve_raw_dir(manager, data_entry)
     work = Path(work_dir) if work_dir else _work_dir(manager, exp_id, data_id)
@@ -416,15 +515,12 @@ def _run_manual_spectrum_impl(
     timeout: float,
     progress: Callable[[str], None] | None = None,
 ) -> str:
-    """Actual execution of run_manual_spectrum (success path; ManualRunError thrown on failure).
-    The spectrum step only consumes the converted fid (the output of the independent step
-    "Generate FID") and does not execute fid.com."""
-    fid_candidate = (
-        Path(data_entry.fid_path)
-        if data_entry.fid_path
-        else work / f"{experiment.dataset_id}.fid"
-    )
-    if not _fid_ready(fid_candidate):
+    """The actual run of run_manual_spectrum (success path; failures raise ManualRunError).
+
+    The spectrum step only consumes the converted fid (produced by the independent "Generate FID"
+    step) and does not execute fid.com.
+    """
+    if not _converted_fid_present(work, data_entry, experiment):
         raise ManualRunError(
             tr(
                 "The converted fid is missing, please generate FID first: "
@@ -440,9 +536,9 @@ def _run_manual_spectrum_impl(
         if nuslist_src.is_file() and not nuslist_dst.is_file():
             shutil.copy2(nuslist_src, nuslist_dst)
 
-    # 0.2.193: When manually "running", first run a quality diagnosis (bad point repair/Report),
-    # which is consistent with the beginning of the automatic path generation spectrum; open the
-    # script editor and no longer execute it (opening becomes faster).
+    # 0.2.193: a manual "Run" does the quality diagnosis first (bad-point repair / report), like
+    # the start of the automatic spectrum path; opening the script editor no longer runs it (so
+    # opening got faster)
     _run_quality_check(manager, exp_id, data_entry, work, data_id)
 
     script = scripts.get(script_key)
@@ -463,44 +559,38 @@ def _run_manual_spectrum_impl(
     spectrum_path = _register_spectrum(
         manager, exp_id, data_id, str(spectrum_src)
     )
-    # 0.2.199-patch29v: The manual approach also generates a spectrum quality report (data quality
-    # diagnosis + final spectrum quality score), writing {spectrum}.quality.json for display on the
-    # GUI report page -- consistent with the automatic approach to avoid "no report record" for
-    # manual spectrum.
+    # 0.2.199-patch29v: the manual route also produces a spectrum quality report (the final
+    # spectrum quality score) and writes {spectrum}.quality.json for the GUI report page --
+    # consistent with the automatic route, so a manual spectrum has no "no report record". The
+    # data quality diagnosis belongs to the "Generate FID" step since 2026-09-23 and is not part
+    # of this report.
     try:
         from workflow.optimization_report import (
             spectrum_quality_report_lines,
+            spectrum_report_title,
             write_quality_record,
         )
         from workflow.phase_routes import _sign_mode
 
-        lines = [tr("== spectrum quality and data quality report ==")]
+        lines = [spectrum_report_title()]
         lines += spectrum_quality_report_lines(
             spectrum_path, sign_mode=_sign_mode(experiment)
         )
-        qlog = work / "manual_quality.log"
-        if qlog.is_file():
-            diag = [
-                ln
-                for ln in qlog.read_text(
-                    encoding="utf-8", errors="replace"
-                ).splitlines()
-                if ln.strip()
-            ]
-            if diag:
-                lines += [tr("◆ Data quality diagnosis (manual approach)")] + diag
+        # 2026-09-23 (user request): the diagnosis is not in this report -- the FID-layer
+        # conclusions belong to the "Generate FID" step; this report keeps the quality score and
+        # the parameter note of this step (the manual run).
         lines.append(tr("◆ Process parameter: manual method (mode=manual)"))
         write_quality_record(
             spectrum_path, {"mode": "manual"}, "\n".join(lines)
         )
-        # 0.2.199-patch29ei: The evaluation report is synchronously output to the progress/log and
-        # is visible after manual operation.
+        # 0.2.199-patch29ei: the evaluation report is mirrored to progress/logs, visible after a
+        # manual run
         if progress is not None:
             for _ln in lines:
                 progress(_ln)
-    except Exception as exc:  # noqa: BLE001 - Report failure does not affect spectrum generation.
-        # 0.2.199-patch29eh: Evaluation failure is not silent -- Write manual_quality.log and
-        # prompt.
+    except Exception as exc:  # noqa: BLE001 - a failed report does not affect spectrum generation
+        # 0.2.199-patch29eh: a failed evaluation is not silent -- it is written to
+        # manual_quality.log and reported
         _msg = (
             tr("Spectrum quality assessment failed: {p0}: {p1}", p0=type(exc).__name__, p1=exc)
         )

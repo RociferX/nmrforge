@@ -1,5 +1,5 @@
-"""Presets data type template data integrity test: all YAML can be parsed, fields and chemical
-shifts are legal a priori."""
+"""Presets data type template data integrity test: all YAML parses, fields and chemical shifts
+are valid a priori."""
 
 from __future__ import annotations
 
@@ -22,22 +22,22 @@ def _presets() -> list[tuple[str, dict]]:
 
 
 def test_all_presets_parse_and_required_fields() -> None:
-    """All defaults are analytic and contain name/ndim; non-generic templates contain kernel and
-    chemical shift priors."""
+    """All presets parse and contain name/ndim; non-generic templates carry nucleus and chemical
+    shift priors."""
     presets = _presets()
-    assert presets, "presets directory should not be empty"
+    assert presets, "presets 目录不应为空"
     for name, data in presets:
         assert isinstance(data, dict) and data.get("name"), name
         ndim = (data.get("constraints") or {}).get("ndim")
         assert ndim in (1, 2, 3), f"{name}: ndim={ndim}"
         generic = str(data.get("name", "")).lower().startswith("generic")
         if not generic:
-            assert data.get("direct_nucleus"), f"{name}: missing direct_nucleus"
-            assert data.get("priors"), f"{name}: Missing priors"
+            assert data.get("direct_nucleus"), f"{name}: 缺 direct_nucleus"
+            assert data.get("priors"), f"{name}: 缺 priors"
 
 
 def test_presets_priors_are_valid_ranges() -> None:
-    """The priors are all [lo, hi] and lo <= hi."""
+    """Priors are all [lo, hi] with lo <= hi."""
     for name, data in _presets():
         for nucleus, rng in (data.get("priors") or {}).items():
             assert isinstance(rng, list) and len(rng) == 2, f"{name}: {nucleus}"
@@ -45,7 +45,7 @@ def test_presets_priors_are_valid_ranges() -> None:
 
 
 def test_common_types_present() -> None:
-    """Commonly used 1D/2D/3D spectrum presets are complete."""
+    """Commonly used 1D/2D/3D spectrum presets are all present."""
     names = {data["name"] for _, data in _presets()}
     for expected in (
         "HSQC",
@@ -74,4 +74,4 @@ def test_common_types_present() -> None:
         "31P-1D",
         "19F-1D",
     ):
-        assert expected in names, f"Missing common presets {expected}"
+        assert expected in names, f"缺少常用预设 {expected}"

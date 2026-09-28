@@ -1,4 +1,4 @@
-"""QC Data structure skeleton test."""
+"""QC data structure skeleton tests."""
 
 from __future__ import annotations
 
@@ -25,7 +25,9 @@ def test_peak_defaults() -> None:
 
 
 def test_peak_detection_both_signs() -> None:
-    """Mixed experiment: select both positive and negative peaks, height retains the true sign."""
+    """mixed experiment: both positive and negative peaks are picked, height keeps the
+    true sign.
+    """
     import numpy as np
     from scipy.ndimage import gaussian_filter
 
@@ -41,8 +43,9 @@ def test_peak_detection_both_signs() -> None:
 
 
 def test_peak_detection_dominant_keeps_majority_sign() -> None:
-    """Uniform experiment: only retain the majority symbol peaks (if there are more negative peaks,
-    only negative peaks will be output)."""
+    """uniform experiment: keep only the majority-sign peaks (mostly negative -> only
+    negative peaks are reported).
+    """
     import numpy as np
     from scipy.ndimage import gaussian_filter
 
@@ -60,8 +63,9 @@ def test_peak_detection_dominant_keeps_majority_sign() -> None:
 
 
 def test_peak_detection_ignores_flat_plateau() -> None:
-    """A flat baseline does not produce spurious peaks (strict local maximum, 0.2.199-patch29aq
-    modification)."""
+    """A flat baseline produces no false peaks (strict local maxima, fixed in
+    0.2.199-patch29aq).
+    """
     import numpy as np
     from scipy.ndimage import gaussian_filter
 
@@ -75,8 +79,9 @@ def test_peak_detection_ignores_flat_plateau() -> None:
 
 
 def test_peak_detection_threshold_5sigma_filters_noise() -> None:
-    """The 5σ threshold eliminates local maxima of noise <5σ (default threshold for peak selection,
-    0.2.199-patch29aq)."""
+    """The 5-sigma threshold rejects noise local maxima below 5 sigma (the default peak
+    picking threshold, 0.2.199-patch29aq).
+    """
     import numpy as np
     from scipy.ndimage import gaussian_filter
 
@@ -95,7 +100,9 @@ def test_peak_detection_threshold_5sigma_filters_noise() -> None:
 
 
 def test_snap_to_peak_top_finds_peak() -> None:
-    """Click near the peak to snap to the top; click flat to keep it as is (0.2.199-patch29ar)."""
+    """A click near a peak snaps to the peak top; a click on flat ground stays as it is
+    (0.2.199-patch29ar).
+    """
     import numpy as np
     from scipy.ndimage import gaussian_filter
 

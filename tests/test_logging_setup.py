@@ -1,5 +1,5 @@
-"""Phase 22: Unify logging configuration, every run ``run.log``, log desensitization and "GUI no
-naked print" guard."""
+"""Phase 22: unified logging configuration, a per-run ``run.log``, log redaction, and the
+"GUI has no bare print" guard."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 @pytest.fixture(autouse=True)
 def _restore_logger():
-    """Test your own installation handler/Do not leak levels to other tests."""
+    """Handlers/levels installed by a test must not leak into other tests."""
     logger = logging.getLogger(LOGGER_NAME)
     before = list(logger.handlers)
     level = logger.level
@@ -62,69 +62,66 @@ def test_resolve_level_falls_back_to_warning(monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_configure_logging_is_idempotent_and_writes_to_the_stream() -> None:
-    """Repeated calls (entry + test) do not overlap handlers, otherwise the same log will be output
-    repeatedly."""
+    """Repeated calls (entry point + tests) do not stack handlers, otherwise one record is emitted
+    twice."""
     stream = io.StringIO()
     logger = configure_logging(level="INFO", stream=stream)
     count = len(logger.handlers)
     configure_logging(level="DEBUG", stream=stream)
     assert len(logging.getLogger(LOGGER_NAME).handlers) == count
-    logging.getLogger("nmrforge.demo").info("Hello")
-    assert "Hello" in stream.getvalue()
+    logging.getLogger("nmrforge.demo").info("你好")
+    assert "你好" in stream.getvalue()
 
 
 def test_configure_logging_respects_the_level() -> None:
     stream = io.StringIO()
     configure_logging(level="ERROR", stream=stream)
-    logging.getLogger("nmrforge.demo").warning("warning should not appear")
-    logging.getLogger("nmrforge.demo").error("error should appear")
+    logging.getLogger("nmrforge.demo").warning("warning 不该出现")
+    logging.getLogger("nmrforge.demo").error("error 应该出现")
     out = stream.getvalue()
-    assert "error should appear" in out
-    assert "warning should not appear" not in out
+    assert "error 应该出现" in out
+    assert "warning 不该出现" not in out
 
 
 def test_attach_run_log_defers_file_creation_until_a_record(tmp_path: Path) -> None:
-    """If there is no log record, leave it blank run.log; when there is a record, the message and
-    level will be written to the disk."""
+    """No log record means no empty run.log; with a record both message and level reach disk."""
     handler = attach_run_log(tmp_path)
     try:
         assert not (tmp_path / "run.log").exists()
-        logging.getLogger("nmrforge.demo").error("failed")
+        logging.getLogger("nmrforge.demo").error("失败了")
         for item in logging.getLogger(LOGGER_NAME).handlers:
             item.flush()
         text = (tmp_path / "run.log").read_text(encoding="utf-8")
-        assert "failed" in text and "ERROR" in text
+        assert "失败了" in text and "ERROR" in text
     finally:
         detach_run_log(handler)
-    # Detach can be called repeatedly and closes the file handle.
+    # detach is idempotent and closes the file handle
     detach_run_log(handler)
 
 
 def test_append_run_log_line_writes_and_sanitizes(tmp_path: Path) -> None:
-    """Head/Write the last line directly file: Not affected by the log level, and the absolute path
-    of home is desensitized."""
+    """Header/footer lines are written straight to the file: unaffected by the log level, and an
+    absolute home path is redacted."""
     target = tmp_path / "run.log"
-    append_run_log_line(target, f"read {Path.home() / 'data' / 'x.fid'}")
-    append_run_log_line(target, "second line")
+    append_run_log_line(target, f"读到 {Path.home() / 'data' / 'x.fid'}")
+    append_run_log_line(target, "第二行")
     lines = target.read_text(encoding="utf-8").splitlines()
     assert len(lines) == 2
     assert lines[0].startswith("20") and "INFO nmrforge.run:" in lines[0]
-    assert str(Path.home()) not in lines[0], "The absolute path must be desensitized to ~"
-    assert "~" in lines[0] and "second line" in lines[1]
+    assert str(Path.home()) not in lines[0], "绝对路径必须脱敏成 ~"
+    assert "~" in lines[0] and "第二行" in lines[1]
 
 
 def test_sanitize_path_folds_the_home_directory() -> None:
     folded = sanitize_path(Path.home() / "work" / "run.log")
     assert folded.startswith("~")
-    assert str(Path.home()) not in folded, (
-        "Collapsed paths should no longer contain the full home prefix"
-    )
-    assert sanitize_path("no path") == "no path"
+    assert str(Path.home()) not in folded, "已折叠的路径不应再含完整 home 前缀"
+    assert sanitize_path("没有任何路径") == "没有任何路径"
 
 
 def test_gui_and_viewer_have_no_bare_print() -> None:
-    """Phase 22: The interface layer must not use bare ``print()`` (log go logging,Console output
-    is only on entry/CLI)."""
+    """Phase 22: the UI layer must not use a bare ``print()`` (logging goes through logging,
+    console output only at the entry point/CLI)."""
     offenders: list[str] = []
     for base in ("gui", "viewer"):
         for path in sorted((ROOT / base).glob("*.py")):
@@ -132,4 +129,4 @@ def test_gui_and_viewer_have_no_bare_print() -> None:
                 stripped = line.strip()
                 if stripped.startswith("print(") or stripped.startswith("print ("):
                     offenders.append(f"{path.relative_to(ROOT)}:{number}")
-    assert not offenders, "GUI/viewer must not use naked print: " + ", ".join(offenders)
+    assert not offenders, "GUI/viewer 不得使用裸 print: " + ", ".join(offenders)

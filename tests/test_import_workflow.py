@@ -1,5 +1,5 @@
-"""Import workflow test: Data hierarchy (raw link + SHA-256 + metadata + WorkflowRun
-registration)."""
+"""Import workflow test: the Data hierarchy (raw link + SHA-256 + metadata +
+WorkflowRun registration)."""
 
 from __future__ import annotations
 
@@ -24,9 +24,27 @@ def _source(bruker_dir: Path) -> Path:
     return bruker_dir / "hsqc_2d"
 
 
+#: 2026-09-24 final decision: an indirect dimension we cannot judge (no pulse program /
+#: F1EA / unlisted sequence / family conflict) does not get ``FT -neg``; the import
+#: warning carries the same sentence (identical to the conversion log and step report).
+#: The fixture has no ``pulseprogram``, so every dataset carries that line and assertions
+#: filter it out first. **Expectations come from the single source** (not the English
+#: literal: conftest pins the UI language to this tree's default).
+def _mode_symbol_warnings(source: Path) -> list[str]:
+    from core.data.bruker_reader import read_dataset
+    from core.experiment.pulse_pathways import review_lines
+
+    return review_lines(read_dataset(source))
+
+
+def _other_warnings(warnings: list[str], source: Path) -> list[str]:
+    expected = set(_mode_symbol_warnings(source))
+    return [w for w in warnings if w not in expected]
+
+
 def _symlink_supported() -> bool:
-    """Platform detection: os.symlink is available (VM/Linux is; Windows has no permissions by
-    default)."""
+    """Platform probe: os.symlink is available (yes on VM/Linux; Windows has no permission
+    by default)."""
     import tempfile
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -41,8 +59,8 @@ def _symlink_supported() -> bool:
 
 
 def _make_segment_container(tmp_path: Path, bruker_dir: Path, n: int = 2) -> Path:
-    """Construct a container directory: n segments of the same data (directly containing
-    subdirectories of acqus)."""
+    """Build a container directory: n segments of the same data (subdirectories that
+    hold acqus directly)."""
     container = tmp_path / "segmented_data"
     for i in range(1, n + 1):
         shutil.copytree(bruker_dir / "hsqc_2d", container / f"s{i:02d}")
@@ -52,8 +70,8 @@ def _make_segment_container(tmp_path: Path, bruker_dir: Path, n: int = 2) -> Pat
 def test_import_segmented_container_single_entry(
     tmp_path: Path, bruker_dir: Path
 ) -> None:
-    """Container import: multiple segments are merged into one DataEntry (clearly distinguished
-    from batch import of multiple entries)."""
+    """Container import: several segments merge into one DataEntry (clearly distinct
+    from a batch import of many entries)."""
     from workflow.import_workflow import import_segmented_dataset
 
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
@@ -62,7 +80,7 @@ def test_import_segmented_container_single_entry(
     assert result.data_id == "d_001"
     entry = manager.project.experiment("exp_001")
     assert entry is not None
-    assert len(entry.data) == 1  # A DataEntry.
+    assert len(entry.data) == 1  # one DataEntry
     data = entry.data[0]
     assert len(data.segments) == 2
     raw_dir = manager.data_dir("exp_001", "d_001", "raw")
@@ -72,15 +90,14 @@ def test_import_segmented_container_single_entry(
         manager.data_metadata_path("exp_001", "d_001").read_text(encoding="utf-8")
     )
     assert len(meta["segments"]) == 2
-    assert meta["segment_kind"] == "repeat_uniform"  # hsqc_2d Traditional sampling.
-    assert "Repeat-experiment overlay" in meta["segment_kind_label"]
+    assert meta["segment_kind"] == "repeat_uniform"  # hsqc_2d traditional sampling
+    assert "重复实验叠加" in meta["segment_kind_label"]
 
 
 def test_import_segmented_to_existing_experiment(
     tmp_path: Path, bruker_dir: Path
 ) -> None:
-    """G2B-011: exp_id is imported into the current experiment type when specified, and does not
-    create a new experiment type."""
+    """G2B-011: with exp_id given, import into the current experiment type, no new type."""
     from workflow.import_workflow import import_segmented_dataset
 
     manager = ProjectManager.create_project(tmp_path / "proj_exp", "demo")
@@ -89,7 +106,7 @@ def test_import_segmented_to_existing_experiment(
     result = import_segmented_dataset(manager, container, exp_id=entry.id)
     assert result.experiment_id == entry.id
     assert manager.project is not None
-    assert len(manager.project.experiments) == 1  # Do not create a new experiment type.
+    assert len(manager.project.experiments) == 1  # no new experiment type
     updated = manager.project.experiment(entry.id)
     assert updated is not None and len(updated.data) == 1
     assert len(updated.data[0].segments) == 2
@@ -98,12 +115,12 @@ def test_import_segmented_to_existing_experiment(
 def test_import_segmented_invalid_exp_id_raises(
     tmp_path: Path, bruker_dir: Path
 ) -> None:
-    """G2B-011: Illegal exp_id throws an error and does not create a new one."""
+    """G2B-011: an invalid exp_id raises; nothing new is created."""
     from workflow.import_workflow import ImportWorkflowError, import_segmented_dataset
 
     manager = ProjectManager.create_project(tmp_path / "proj_bad", "demo")
     container = _make_segment_container(tmp_path, bruker_dir)
-    with pytest.raises(ImportWorkflowError, match="experiment type does not exist"):
+    with pytest.raises(ImportWorkflowError, match="实验类型不存在"):
         import_segmented_dataset(manager, container, exp_id="exp_999")
     assert manager.project is not None and len(manager.project.experiments) == 0
 
@@ -111,8 +128,8 @@ def test_import_segmented_invalid_exp_id_raises(
 def test_import_container_rejected_unless_segmented(
     tmp_path: Path, bruker_dir: Path
 ) -> None:
-    """The container directory is not a single Bruker dataset: ordinary import should report an
-    error, Not automatically treated as segments/batch."""
+    """A container directory is not a single Bruker dataset: plain import must report
+    an error instead of guessing segments/batch."""
     from workflow.import_workflow import ImportWorkflowError, import_data
 
     manager = ProjectManager.create_project(tmp_path / "proj2", "demo")
@@ -127,7 +144,7 @@ def test_import_links_and_registers(tmp_path: Path, bruker_dir: Path) -> None:
     assert result.experiment_id == "exp_001"
     assert result.data_id == "d_001"
     assert result.run_id.startswith("R-")
-    assert result.warnings == []
+    assert _other_warnings(result.warnings, _source(bruker_dir)) == []
     assert manager.project is not None
 
     entry = manager.project.experiment("exp_001")
@@ -139,16 +156,16 @@ def test_import_links_and_registers(tmp_path: Path, bruker_dir: Path) -> None:
     assert data.source == str(_source(bruker_dir))
     assert (raw_dir / "acqus").is_file()
     assert (raw_dir / "acqu2s").is_file()
-    # G2B-009: raw read-only file is a link (symbolic link takes precedence, Windows falls back to
-    # hard link), not copy.
+    # G2B-009: raw read-only files are links (symlink first, hard link as the Windows
+    # fallback), not copies
     if _symlink_supported():
         assert (raw_dir / "acqus").is_symlink()
     assert os.path.samefile(_source(bruker_dir) / "acqus", raw_dir / "acqus")
     assert os.path.samefile(_source(bruker_dir) / "acqu2s", raw_dir / "acqu2s")
-    # Compatible read-only attribute points to data[0].
+    # The compatibility read-only attribute points at data[0]
     assert entry.source == data.raw_dir
 
-    # Metadata placement (schema 1.3:<exp>/<data>/metadata.json).
+    # metadata is written to disk (schema 1.3: <exp>/<data>/metadata.json)
     metadata_path = manager.data_metadata_path("exp_001", "d_001")
     assert metadata_path.is_file()
     meta = json.loads(metadata_path.read_text(encoding="utf-8"))
@@ -160,7 +177,7 @@ def test_import_links_and_registers(tmp_path: Path, bruker_dir: Path) -> None:
     assert meta["workflow_run_id"] == result.run_id
     assert "acqus" in meta["manifest"]["checksums"]
     assert meta["manifest"]["file_count"] == 2
-    # G2B-009:metadata record link statistics (import method can be verified).
+    # G2B-009: metadata records link statistics (the import method is auditable)
     if _symlink_supported():
         assert meta["link_stats"]["symlink"] == 2
     else:
@@ -168,7 +185,7 @@ def test_import_links_and_registers(tmp_path: Path, bruker_dir: Path) -> None:
     assert meta["link_stats"]["copy"] == 0
     assert meta["link_stats"]["writable"] == 0
 
-    # WorkflowRun registration.
+    # WorkflowRun registration
     run = manager.project.run(result.run_id)
     assert run is not None
     assert run.workflow_ref == IMPORT_WORKFLOW_REF
@@ -178,10 +195,10 @@ def test_import_links_and_registers(tmp_path: Path, bruker_dir: Path) -> None:
     assert run.outputs["raw_dir"] == "exp_001/d_001/raw"
     assert run.outputs["metadata"] == "exp_001/d_001/metadata.json"
 
-    # The state machine advances to imported.
+    # The state machine advances to imported
     assert manager.infer_status("exp_001") is ExperimentStatus.IMPORTED
 
-    # The caller is responsible for save().
+    # The caller is responsible for save()
     manager.save()
     reopened = ProjectManager.open_project(tmp_path / "proj")
     assert reopened.project is not None
@@ -193,7 +210,7 @@ def test_import_data_into_existing_experiment(
     tmp_path: Path, bruker_dir: Path
 ) -> None:
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
-    entry = manager.create_experiment(title="skeleton")
+    entry = manager.create_experiment(title="骨架")
     assert entry.status == ExperimentStatus.REGISTERED.value
     assert entry.data == []
 
@@ -210,7 +227,7 @@ def test_import_data_into_existing_experiment(
 
 def test_import_requires_loaded_project(tmp_path: Path, bruker_dir: Path) -> None:
     manager = ProjectManager(tmp_path / "proj")
-    with pytest.raises(ImportWorkflowError, match="project is not loaded"):
+    with pytest.raises(ImportWorkflowError, match="未加载项目"):
         import_bruker_dataset(manager, _source(bruker_dir))
 
 
@@ -219,7 +236,7 @@ def test_import_rejects_non_bruker_source(tmp_path: Path) -> None:
     bogus = tmp_path / "not_a_dataset"
     bogus.mkdir()
     (bogus / "readme.txt").write_text("hello", encoding="utf-8")
-    with pytest.raises(ImportWorkflowError, match="acqus is missing"):
+    with pytest.raises(ImportWorkflowError, match="缺少 acqus"):
         import_bruker_dataset(manager, bogus)
     assert manager.project is not None
     assert manager.project.experiments == []
@@ -255,7 +272,7 @@ def test_import_source_inside_project_skips_copy(
     assert entry is not None
     assert entry.data[0].raw_dir == ""
     assert not manager.data_dir("exp_001", "d_001", "raw").exists()
-    assert any("skip copying" in w for w in result.warnings)
+    assert any("跳过复制" in w for w in result.warnings)
     assert manager.project.run(result.run_id).status == "success"
 
 
@@ -280,8 +297,8 @@ def test_import_segments_are_linked(tmp_path: Path, bruker_dir: Path) -> None:
 def test_import_link_failure_falls_back_to_copy(
     tmp_path: Path, bruker_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Hard link/Fallback copying item by item when all symbolic links fail, still succeeds and
-    logs warnings."""
+    """When hard and symbolic links both fail, copy item by item instead: the import
+    still succeeds and records warnings."""
 
     def _no_link(*_args: object, **_kwargs: object) -> None:
         raise OSError("link disabled for test")
@@ -293,9 +310,9 @@ def test_import_link_failure_falls_back_to_copy(
     assert manager.project is not None
     raw_dir = manager.data_dir("exp_001", "d_001", "raw")
     assert (raw_dir / "acqus").is_file()
-    # Fallback copy: file is an independent copy and is no longer the same file as the source.
+    # Copy fallback: the file is an independent copy, no longer samefile with the source
     assert not os.path.samefile(_source(bruker_dir) / "acqus", raw_dir / "acqus")
-    assert any("could not be linked" in w for w in result.warnings)
+    assert any("回退复制" in w for w in result.warnings)
     assert manager.project.run(result.run_id).status == "success"
 
 
@@ -305,19 +322,19 @@ def test_import_failure_rolls_back(
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
 
     def _boom(*_args: object, **_kwargs: object) -> None:
-        raise RuntimeError("Metadata disk writing failed")
+        raise RuntimeError("metadata 写盘失败")
 
     monkeypatch.setattr(
         "workflow.import_workflow.atomic_write_json", _boom
     )
-    with pytest.raises(RuntimeError, match="Metadata disk writing failed"):
+    with pytest.raises(RuntimeError, match="写盘失败"):
         import_bruker_dataset(manager, _source(bruker_dir))
 
     assert manager.project is not None
-    assert manager.project.experiments == []  # Convenient entrance to roll back blank experiments.
+    assert manager.project.experiments == []  # convenience entry rolls back the blank experiment
     assert not manager.data_dir("exp_001", "d_001", "raw").exists()
     assert not manager.data_metadata_path("exp_001", "d_001").exists()
-    # Audit retains failed runs.
+    # Audit keeps the failed run
     assert len(manager.project.workflow_runs) == 1
     assert manager.project.workflow_runs[0].status == "failed"
 
@@ -325,17 +342,17 @@ def test_import_failure_rolls_back(
 def test_import_data_failure_keeps_experiment(
     tmp_path: Path, bruker_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Import_data Failure only rolls back data entries and does not clear blank experiments."""
+    """An import_data failure rolls back only the data entry, not the blank experiment."""
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
-    entry = manager.create_experiment(title="reserve")
+    entry = manager.create_experiment(title="保留")
 
     def _boom(*_args: object, **_kwargs: object) -> None:
-        raise RuntimeError("Metadata disk writing failed")
+        raise RuntimeError("metadata 写盘失败")
 
     monkeypatch.setattr(
         "workflow.import_workflow.atomic_write_json", _boom
     )
-    with pytest.raises(RuntimeError, match="Metadata disk writing failed"):
+    with pytest.raises(RuntimeError, match="写盘失败"):
         import_data(manager, entry.id, _source(bruker_dir))
     assert manager.project.experiment(entry.id) is entry
     assert entry.data == []
@@ -370,8 +387,8 @@ def test_nus_import_records_nuslist_checksum(
 def test_import_writable_raw_names_copied_not_linked(
     tmp_path: Path, bruker_dir: Path
 ) -> None:
-    """fid.com / profY.dat / profYZ.dat are backend-writable: copied as real entities,
-    not linked, so changes do not pollute the source."""
+    """fid.com/profY.dat/profYZ.dat are backend-writable/touched files: copied for
+    real, not linked, so edits do not pollute the source."""
     src = tmp_path / "src_with_fid"
     shutil.copytree(_source(bruker_dir), src)
     fid_com = src / "fid.com"
@@ -385,7 +402,8 @@ def test_import_writable_raw_names_copied_not_linked(
     result = import_bruker_dataset(manager, src)
     assert manager.project is not None
     raw_dir = manager.data_dir("exp_001", "d_001", "raw")
-    # Writable file is not a link: unlike source file, rewriting does not pollute the source.
+    # Writable files are not links: they are different files from the source, so
+    # rewriting them does not pollute the source
     for name in ("fid.com", "profY.dat", "profYZ.dat"):
         assert (raw_dir / name).is_file()
         assert not os.path.samefile(src / name, raw_dir / name)
@@ -395,8 +413,7 @@ def test_import_writable_raw_names_copied_not_linked(
     assert prof_y.read_text(encoding="utf-8") == "profile"
     (raw_dir / "profYZ.dat").write_text("patched", encoding="utf-8")
     assert prof_yz.read_text(encoding="utf-8") == "profile"
-    # The remaining read-only files are still links (symbolic links take precedence, Windows falls
-    # back to hard links).
+    # The other read-only files are still links (symlink first, hard-link fallback on Windows)
     assert os.path.samefile(src / "acqus", raw_dir / "acqus")
     if _symlink_supported():
         assert (raw_dir / "acqus").is_symlink()
@@ -412,7 +429,7 @@ def test_import_writable_raw_names_copied_not_linked(
 def test_import_records_link_stats(
     tmp_path: Path, bruker_dir: Path
 ) -> None:
-    """WorkflowRun params record link_stats(hard link/symbolic link/copy/writable)."""
+    """WorkflowRun params record link_stats (hard link/symlink/copy/writable)."""
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     result = import_bruker_dataset(manager, _source(bruker_dir))
     assert manager.project is not None
@@ -423,7 +440,7 @@ def test_import_records_link_stats(
     assert stats["symlink"] > 0 or stats["hardlink"] > 0
     assert stats["copy"] == 0
     assert stats["writable"] == 0
-    assert result.warnings == []
+    assert _other_warnings(result.warnings, _source(bruker_dir)) == []
 
 
 def test_user_experiment_type_write_failure_keeps_traceback(tmp_path, monkeypatch, caplog):
@@ -451,3 +468,28 @@ def test_user_experiment_type_write_failure_keeps_traceback(tmp_path, monkeypatc
     assert path.read_bytes() == original
     record = next(r for r in caplog.records if "persist user experiment type" in r.message)
     assert record.exc_info[0] is PermissionError
+
+
+def test_import_warns_about_a_stale_indirect_sweep_width(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """Report the sweep-width decision already at import time (when acqus SW_h
+    contradicts SW×SFO1)."""
+    src = tmp_path / "stale_sw"
+    shutil.copytree(bruker_dir / "hsqc_2d", src)
+    acqu2s = src / "acqu2s"
+    keep = [
+        line
+        for line in acqu2s.read_text(encoding="utf-8").splitlines()
+        if not line.startswith(("##$SW_h=", "##$SFO1="))
+    ]
+    keep += ["##$SW= 30", "##$SW_h= 2000", "##$SFO1= 60.81782065611"]
+    acqu2s.write_text("\n".join(keep) + "\n", encoding="utf-8", newline="\n")
+
+    manager = ProjectManager.create_project(tmp_path / "proj_sw", "demo")
+    result = import_bruker_dataset(manager, src)
+    assert any("2000" in w and "1824.5" in w for w in result.warnings), result.warnings
+    # A self-consistent dataset must not carry this warning (other import warnings unchanged)
+    manager2 = ProjectManager.create_project(tmp_path / "proj_ok", "demo")
+    clean = import_bruker_dataset(manager2, _source(bruker_dir))
+    assert _other_warnings(clean.warnings, _source(bruker_dir)) == []

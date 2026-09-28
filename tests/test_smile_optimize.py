@@ -1,10 +1,13 @@
-"""SMILE optimisation module test: Grid and report rendering (survival interface after revision
-24). 0.2.199-patch29hz-Revision 24 deleted the old two-stage scoring chain
-(optimize_smile_parameters / write_smile_optimized_output / _rank_by_true_peaks and only the
-scoring helper they used), and the use cases that relied on the old chain were removed together;
-the new scan chain (sorting list + top three script + candidate spectrum deleted) see
-tests/test_smile_scan_workflow.py, optimisation For estimates of extent and time consumption,
-see tests/test_smile_grid_eta.py."""
+"""SMILE optimization module tests: grid and report rendering (the interfaces that
+survived fix24).
+
+0.2.199-patch29hz-fix24 removed the old two-stage scoring chain
+(optimize_smile_parameters / write_smile_optimized_output / _rank_by_true_peaks plus the
+scoring helpers used only by them), and the cases that depended on the old chain were
+removed with it; the new scan chain (ranking table + top three scripts + candidate
+spectrum deletion) is in tests/test_smile_scan_workflow.py, and optimization degree and
+time estimation are in tests/test_smile_grid_eta.py.
+"""
 
 from __future__ import annotations
 
@@ -21,15 +24,15 @@ from workflow.smile_optimize import (
 
 def test_default_smile_grid() -> None:
     grid = default_smile_grid()
-    assert len(grid) == 25  # 0.2.162-Supplement: Encrypted grid (5x5), finer parameter adjustment.
+    assert len(grid) == 25  # 0.2.162-patch: denser grid (5x5), finer parameter tuning
     assert grid[0] == {"nsigma": 3.0, "thresh": 0.90}
-    assert all("smile_xq3" not in g for g in grid)  # 0.2.162:xQ3 Dead parameter removed.
+    assert all("smile_xq3" not in g for g in grid)  # 0.2.162: dead xQ3 parameter removed
     combos = {(g["nsigma"], g["thresh"]) for g in grid}
     assert len(combos) == 25
 
 
 def test_save_report_and_format(tmp_path: Path) -> None:
-    """Reporting JSON and table rendering (param_optimize reuses the same implementation)."""
+    """Report JSON and table rendering (param_optimize reuses the same implementation)."""
     results = [
         SmileParameterResult(
             params={"nsigma": 5.0, "thresh": 0.95},
@@ -54,7 +57,7 @@ def test_save_report_and_format(tmp_path: Path) -> None:
 
 
 def test_cli_parse_grid() -> None:
-    """CLI --grid parsing (nSigma,thresh semicolon separated)."""
+    """CLI --grid parsing (nSigma,thresh separated by semicolons)."""
     from scripts.smile_optimize import _parse_grid
 
     grid = _parse_grid("5.0,0.95;6.0,0.99")

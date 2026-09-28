@@ -1,7 +1,9 @@
-"""Construction tool regression: full sampling Bruker 2D -> synthesis NUS (for sampleA
-verification). Core invariant: complex point grid = acqu2s TD // Super complex component (States
-256/2=128); nuslist first point must be 0 (nusExpand -off offset); ser only retains sampling
-point FID."""
+"""Construction tool regression: fully sampled Bruker 2D -> synthetic NUS (for sampleA
+verification).
+
+Core invariant: complex point grid = acqu2s TD // hypercomplex component (States 256/2=128);
+nuslist first point must be 0 (nusExpand -off offset); ser keeps only the sampling point FID.
+"""
 
 from __future__ import annotations
 
@@ -31,8 +33,8 @@ def _make_dataset(tmp_path: Path) -> Path:
     (src / "acqu2s").write_text(
         "##$TD= 256\n##$FnMODE= 5\n", encoding="utf-8"
     )
-    rows_total = 256  # Incremental rows collected (Bruker TD semantics; 128 complex points x 2).
-    x_n = 2048  # acqus TD:Direct dimension int32 number per row.
+    rows_total = 256  # Increment rows acquired (Bruker TD semantics; 128 complex points x 2)
+    x_n = 2048  # acqus TD: int32 count per row in the direct dimension.
     rng = np.random.default_rng(7)
     data = rng.standard_normal((rows_total, x_n // 2)) + 1j * rng.standard_normal(
         (rows_total, x_n // 2)
@@ -43,7 +45,7 @@ def _make_dataset(tmp_path: Path) -> Path:
 
 
 def test_make_nus_grid_td_div_mult(tmp_path: Path) -> None:
-    """NusTD=TD (line unit, 256), nuslist first point 0, ser only retains sampling point FID."""
+    """NusTD=TD (row unit, 256), nuslist first point 0, ser only keeps the sampling point FID."""
     tool = _load_tool()
     src = _make_dataset(tmp_path)
     out = tmp_path / "nus"
@@ -51,11 +53,11 @@ def test_make_nus_grid_td_div_mult(tmp_path: Path) -> None:
 
     acqu2s = (out / "acqu2s").read_text(encoding="utf-8")
     acqus = (out / "acqus").read_text(encoding="utf-8")
-    # Real NUS Convention: NusTD is the row (increment) unit (sampleJ: NusTD=292 ↔ nuslist max 145).
+    # Real NUS convention: NusTD is in rows (increments) (sampleJ: NusTD=292 <-> nuslist max 145)
     assert tool._param(acqu2s, "NusTD") == 256
     assert tool._param(acqus, "NusAMOUNT") == 25
     nuslist = (out / "nuslist").read_text(encoding="utf-8").splitlines()
     assert len(nuslist) == 32
-    assert nuslist[0] == "0"  # First point 0:nusExpand -off No offset.
+    assert nuslist[0] == "0"  # First point 0: nusExpand -off does not shift.
     ser = np.fromfile(out / "ser", dtype="<i4")
-    assert ser.size == 32 * 2 * 2048  # Sampling point x super complex row x direct dimension int32.
+    assert ser.size == 32 * 2 * 2048  # sampling points x hypercomplex rows x direct-dim int32

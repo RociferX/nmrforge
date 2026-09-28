@@ -1,6 +1,10 @@
-"""1D phase and FID conversion repair regression test (0.2.199-patch29gk). - Fall back to acqu
-authority TD when acqus TD=0 (fix fid.com xN=0 conversion stuck); - dominant_absorption_ratio:
-Main peak absorption ratio for 1D new and old phases."""
+"""1D phase and FID conversion repair regression test (0.2.199-patch29gk).
+
+- Fall back to the authoritative acqu TD when acqus TD=0 (fixes the fid.com
+  xN=0 conversion hang);
+- dominant_absorption_ratio: main-peak absorption ratio used to pick the better
+  phase for 1D old/new data.
+"""
 
 import numpy as np
 
@@ -13,8 +17,7 @@ from core.optimization.phase_search import (
 
 
 def test_dimensions_acqus_td_zero_falls_back_to_acqu(tmp_path: object) -> None:
-    """Acqus TD=0 but when acqu TD is normal, direct dimension TD should be acqu(TDP43 No. 13
-    data)."""
+    """acqus TD=0 but acqu TD is normal: direct-dim TD should take acqu (TDP43 dataset 13)."""
     import pytest  # noqa: F401
 
     dst = tmp_path / "td_fallback"
@@ -42,11 +45,10 @@ def test_dimensions_acqus_td_zero_falls_back_to_acqu(tmp_path: object) -> None:
 
 
 def test_dimensions_acqus_td_zero_no_acqu_keeps_zero() -> None:
-    """When acqus TD=0 and there is no acqu, TD remains 0 (stopped by the conversion side guard and
-    not stuck)."""
+    """acqus TD=0 and no acqu: TD stays 0 (the conversion-side guard aborts instead of hanging)."""
     import pytest  # noqa: F401
 
-    # No acqu fallback source: directly construct the minimum dictionary.
+    # No acqu fallback source: build the minimal dict directly
     params = {
         "acqus": {
             "TD": "0",
@@ -62,22 +64,20 @@ def test_dimensions_acqus_td_zero_no_acqu_keeps_zero() -> None:
 
 
 def test_orient_dominant_positive() -> None:
-    """When the main peak is negative (downward), p0 should be flipped 180 to make the peak upward
-    (positive absorption)."""
+    """Negative main peak (pointing down): p0 flips 180 to point the peak up (absorption)."""
     n = 64
     spec = np.zeros(n, dtype=complex)
-    spec[32] = -1.0 + 0.0j  # Down/negative peak.
+    spec[32] = -1.0 + 0.0j  # Down / negative peak
     assert orient_dominant_positive(spec, 0.0, 0.0) == 180.0
-    spec[32] = 1.0 + 0.0j  # Up/Zhengfeng.
+    spec[32] = 1.0 + 0.0j  # Up / positive peak
     assert orient_dominant_positive(spec, 0.0, 0.0) == 0.0
-    # When p0=180, the negative peak (original -1) is already positive (+1, upward) after rotation,
-    # and there is no need to turn it again.
+    # At p0=180 the negative peak (original -1) rotates to positive (+1, up): no further flip
     spec[32] = -1.0 + 0.0j
     assert orient_dominant_positive(spec, 180.0, 0.0) == 180.0
 
 
 def test_dominant_absorption_ratio() -> None:
-    """Main peak absorption ratio: pure peak -> 1 (absorption), rotated 90° -> 0 (dispersion)."""
+    """Main peak absorption ratio: pure real peak -> 1, rotated 90° -> 0 (dispersion)."""
     n = 64
     spec = np.zeros(n, dtype=complex)
     spec[32] = 1.0 + 0.0j

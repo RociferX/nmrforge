@@ -1,5 +1,4 @@
-"""G2B-008 progress log test: CshRuntime on_line line-by-line forwarding + stepwise progress
-forwarding."""
+"""G2B-008 progress-log tests: CshRuntime on_line forwarding plus stepwise progress relay."""
 
 from __future__ import annotations
 
@@ -9,8 +8,7 @@ from pathlib import Path
 def test_csh_runtime_on_line_forwards_lines(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """CshRuntime.run(on_line) Forward stdout line by line (the phase log is visible in real
-    time)."""
+    """CshRuntime.run(on_line) forwards stdout line by line (stage logs visible in real time)."""
     from backend import runtime as rt
 
     class _FakePopen:
@@ -33,7 +31,7 @@ def test_csh_runtime_on_line_forwards_lines(
 
 
 class _ProgressBackend:
-    """Fake backend that logs progress calls."""
+    """Fake backend that records progress calls."""
 
     def __init__(self, work_dir: Path) -> None:
         self.work_dir = str(work_dir)
@@ -45,7 +43,7 @@ class _ProgressBackend:
 
     def convert_to_fid(self, experiment, data_dir, progress=None) -> dict:
         if progress:
-            progress("Start converting fid")
+            progress("开始转换 fid")
         fid_path = Path(self.work_dir) / f"{experiment.dataset_id}.fid"
         self._touch(fid_path)
         return {
@@ -64,7 +62,7 @@ class _ProgressBackend:
         progress=None,
     ) -> dict:
         if progress:
-            progress("Processing")
+            progress("处理中")
         spectrum = Path(self.work_dir) / f"{experiment.dataset_id}.ft2"
         self._touch(spectrum)
         return {
@@ -76,7 +74,7 @@ class _ProgressBackend:
 
     def reconstruct_nus(self, experiment, params, progress=None) -> dict:
         if progress:
-            progress("Start SMILE refactoring")
+            progress("开始 SMILE 重构")
         spectrum = Path(self.work_dir) / f"{experiment.dataset_id}.ft2"
         self._touch(spectrum)
         return {
@@ -99,7 +97,7 @@ def test_stepwise_generate_fid_forwards_progress(
     backend = _ProgressBackend(tmp_path / "work")
     messages: list[str] = []
     generate_fid(manager, entry.id, data.id, backend, progress=messages.append)
-    assert "Start converting fid" in messages
+    assert "开始转换 fid" in messages
 
 
 def test_stepwise_generate_spectrum_forwards_progress(
@@ -122,4 +120,4 @@ def test_stepwise_generate_spectrum_forwards_progress(
         params={"phase_route": "none"},
         progress=messages.append,
     )
-    assert "Processing" in messages
+    assert "处理中" in messages

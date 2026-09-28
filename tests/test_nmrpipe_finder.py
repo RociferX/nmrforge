@@ -1,4 +1,4 @@
-"""NMRPipe finds logical tests."""
+"""NMRPipe discovery logic tests."""
 
 from __future__ import annotations
 

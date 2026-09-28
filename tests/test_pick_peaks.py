@@ -1,5 +1,4 @@
-"""Peak selection test: synthetic spectrum detection + Poky.list placement + WorkflowRun
-registration."""
+"""Peak picking tests: synthetic detection + Poky .list output + WorkflowRun records."""
 
 from __future__ import annotations
 
@@ -15,7 +14,7 @@ from workflow.pick_peaks import PickPeaksError, pick_peaks
 
 
 def _write_ft2(path: Path, data: np.ndarray) -> None:
-    """Use nmrglue to write the synthesized NMRPipe 2D spectrum (with ORIG/SW/OBS/CAR head)."""
+    """Write a synthetic NMRPipe 2D spectrum with nmrglue (ORIG/SW/OBS/CAR header)."""
     from nmrglue.fileio import pipe
 
     dic = {k: "0" for k in pipe.fdata_dic}
@@ -77,21 +76,21 @@ def test_pick_peaks_detects_and_writes(tmp_path: Path) -> None:
 
 
 def test_permutation_to_logical_maps_storage_to_logical() -> None:
-    """0.2.199-patch29df:storage -> Logical axis replacement has the same origin as viewer."""
+    """0.2.199-patch29df: storage→logical axis permutation shares its source with the viewer."""
     from workflow.pick_peaks import _permutation_to_logical
 
-    # Storage (15N, 1H, 13C) but logic (1H, 15N, 13C): F1=storage axis 1, F2=storage axis 0.
+    # storage (15N, 1H, 13C) but logical (1H, 15N, 13C): F1=storage axis 1, F2=storage axis 0
     perm = _permutation_to_logical(["15N", "1H", "13C"], ["1H", "15N", "13C"])
     assert perm == [1, 0, 2]
     logical_axes = [0, 0, 0]
     for spos, lpos in enumerate(perm):
         logical_axes[lpos] = spos
-    assert logical_axes == [1, 0, 2]  # F1←Axis 1, F2←Axis 0, F3←Axis 2.
+    assert logical_axes == [1, 0, 2]  # F1←axis 1, F2←axis 0, F3←axis 2
 
 
 def test_pick_peaks_subpixel_shift_interpolated(tmp_path: Path) -> None:
-    """Sub-pixel peak position: write ppm of.list as interpolation (non-integer pixel value,
-    0.2.199-patch29eo)."""
+    """Sub-pixel peak positions: the ppm written to .list is interpolated
+    (not an integer pixel value, 0.2.199-patch29eo)."""
     shape = (64, 128)
     yy, xx = np.mgrid[0:64, 0:128]
     rng = np.random.default_rng(4)
@@ -107,12 +106,13 @@ def test_pick_peaks_subpixel_shift_interpolated(tmp_path: Path) -> None:
     top = max(rows, key=lambda r: float(r["Intensity"]))
     h = float(top["H_shift"])
     n = float(top["N_shift"])
-    # _write_ft2 Head ORIG=1000/600,SW=6000: ppm_i = 1000/600 + (size-1-i)*6000/(size*600).
+    # _write_ft2 header ORIG=1000/600, SW=6000:
+    #   ppm_i = 1000/600 + (size-1-i)*6000/(size*600)
     exp_h = 1000 / 600 + (127 - 40.7) * 6000 / (128 * 600)
     exp_n = 1000 / 600 + (63 - 20.4) * 6000 / (64 * 600)
     assert abs(h - exp_h) < 0.02
     assert abs(n - exp_n) < 0.03
-    # Confirm that it is not rounded to the nearest integer pixel (interpolation is indeed done).
+    # confirm it is not rounded to the nearest integer pixel (interpolation happened)
     int_h = 1000 / 600 + (127 - 41) * 6000 / (128 * 600)
     assert abs(h - int_h) > 0.01
 
@@ -122,7 +122,7 @@ def test_pick_peaks_missing_spectrum_fails(tmp_path: Path) -> None:
     entry = manager.create_experiment()
     data = manager.import_data(entry.id, "/sampleD")
 
-    with pytest.raises(PickPeaksError, match="spectrum is missing"):
+    with pytest.raises(PickPeaksError, match="谱图缺失"):
         pick_peaks(manager, entry.id, data.id)
 
     runs = [r for r in manager.project.workflow_runs if r.workflow_ref == "pick_peaks"]
@@ -131,8 +131,7 @@ def test_pick_peaks_missing_spectrum_fails(tmp_path: Path) -> None:
 
 
 def test_pick_peaks_writes_poky_list(tmp_path: Path) -> None:
-    """0.2.199-patch29ar: Peak selection output Poky.list (peak file is.list, no CSV/reliability
-    column)."""
+    """0.2.199-patch29ar: picking outputs a Poky .list (no CSV/reliability columns)."""
     spec = np.zeros((64, 128))
     spec[20, 40] = 500.0
     spec = gaussian_filter(spec, sigma=1.5)
@@ -146,8 +145,8 @@ def test_pick_peaks_writes_poky_list(tmp_path: Path) -> None:
     lines = path.read_text(encoding="utf-8").splitlines()
     assert lines[0] == "Assignment w1 w2 Data Height Volume"
     assert len(lines) >= 2
-    assert "threshold" in result["logs"][0]
-    assert "25.0σ" in result["logs"][0]  # Mechanism test explicit 25σ (default 35σ, patch29hn).
+    assert "阈值" in result["logs"][0]
+    assert "25.0σ" in result["logs"][0]  # mechanism test uses explicit 25σ (default 35σ, patch29hn)
 
 
 def _write_metadata(
@@ -157,14 +156,14 @@ def _write_metadata(
     name: str,
     confidence: float = 1.0,
 ) -> None:
-    """Write data metadata(experiment_type.name+confidence), driving peak sign mode."""
+    """Write data metadata (experiment_type.name+confidence), driving the peak sign mode."""
     import json
 
     path = manager.data_metadata_path(exp_id, data_id)
     path.parent.mkdir(parents=True, exist_ok=True)
-    # 0.2.199-patch29fa (fix): The real metadata structure is dataset.experiment_type (previously,
-    # the test was to write the top level experiment_type, which covered up the bug that the peak
-    # selection could not read the type).
+    # 0.2.199-patch29fa (fix): real metadata nests dataset.experiment_type
+    # (tests used to write a top-level experiment_type, hiding the bug where
+    # picking could not read the type)
     path.write_text(
         json.dumps(
             {
@@ -183,7 +182,7 @@ def _write_metadata(
 def _write_ft3_ordered(
     path: Path, data: np.ndarray, fddimorder: list[float]
 ) -> None:
-    """Writes a 3D stream file with FDDIMORDER (isomorphic to test_viewer3d)."""
+    """Write a 3D stream file with FDDIMORDER (same shape as test_viewer3d)."""
     from nmrglue.fileio import pipe
 
     nz, ny, nx = data.shape
@@ -222,10 +221,9 @@ def _write_ft3_ordered(
 def _spectrum_with_peaks(
     shape: tuple[int, ...], peaks: list[tuple[tuple[int, ...], float]]
 ) -> np.ndarray:
-    """The spectrum of the Gaussian kernel superimposed on the peak point (Positive value/Negative
-    peaks are acceptable); with a noise floor of σ≈1, making the global noise estimate robust
-    MAD (the relative relationship between the threshold and peak intensity is consistent with
-    the real spectrum, 0.2.199-patch29cm)."""
+    """Spectrum with Gaussian kernels at the peak points (positive or negative);
+    a σ≈1 noise floor makes the global noise estimate use robust MAD, so the
+    threshold-to-peak-height ratio matches real spectra (0.2.199-patch29cm)."""
     rng = np.random.default_rng(20260829)
     spec = rng.normal(0, 1.0, shape)
     for pos, height in peaks:
@@ -234,8 +232,8 @@ def _spectrum_with_peaks(
 
 
 def _read_rows(path: Path, nuclei=None) -> list[dict]:
-    # 0.2.199-patch29dk: 3D.list writes columns according to external convention N, C, H, and reads
-    # the core name of each F axis.
+    # 0.2.199-patch29dk: 3D .list columns follow the external N,C,H convention;
+    # reading requires the nucleus name of each F axis
     return import_peaks_poky(path, nuclei=nuclei)
 
 
@@ -243,8 +241,7 @@ def _read_rows(path: Path, nuclei=None) -> list[dict]:
 def test_experiment_type_name_reads_dataset_and_legacy(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """0.2.199-patch29fa: dataset.experiment_type of real metadata takes precedence, and the top-
-    level old structure is compatible."""
+    """0.2.199-patch29fa: dataset.experiment_type wins; the legacy top level still works."""
     import json
 
     from workflow.pick_peaks import _experiment_type_name
@@ -267,8 +264,8 @@ def test_experiment_type_name_reads_dataset_and_legacy(
 
 
 def test_pick_peaks_uniform_type_keeps_dominant_sign_only(tmp_path: Path) -> None:
-    """Uniform (single symbol) experiment: only the main symbol peaks are retained, and a few
-    reverse-sign peaks are regarded as spurious peaks and eliminated."""
+    """uniform (single-sign) experiment: keep only dominant-sign peaks; the few
+    inverted peaks are treated as spurious and dropped."""
     spec = _spectrum_with_peaks(
         (64, 128),
         [
@@ -287,12 +284,12 @@ def test_pick_peaks_uniform_type_keeps_dominant_sign_only(tmp_path: Path) -> Non
     rows = _read_rows(Path(result["peak_path"]))
     assert len(rows) == 3
     assert all(float(r["Intensity"]) > 0 for r in rows)
-    assert "Only the main symbol peak" in result["logs"][0]
+    assert "仅主符号峰" in result["logs"][0]
 
 
 def test_pick_peaks_uniform_type_negative_dominant(tmp_path: Path) -> None:
-    """When the main sign of the uniform experiment is negative, only the main sign (negative peak)
-    is selected."""
+    """When the uniform experiment's dominant sign is negative, only the dominant
+    sign (negative peaks) is kept."""
     spec = _spectrum_with_peaks(
         (64, 128),
         [
@@ -315,8 +312,8 @@ def test_pick_peaks_uniform_type_negative_dominant(tmp_path: Path) -> None:
 
 
 def test_pick_peaks_spectrum_evidence_backfill(tmp_path: Path) -> None:
-    """0.2.199-patch29fc: Low confidence type but high positive and negative number + intensity
-    ratio of spectrum -> Press mixed to select both positive and negative."""
+    """0.2.199-patch29fc: low-confidence type, but both signs are frequent and
+    strong enough -> pick as mixed."""
     spec = _spectrum_with_peaks(
         (64, 128),
         [
@@ -332,20 +329,19 @@ def test_pick_peaks_spectrum_evidence_backfill(tmp_path: Path) -> None:
     ft2 = tmp_path / "out.ft2"
     _write_ft2(ft2, spec)
     manager, exp_id, data_id = _manager_with_spectrum(tmp_path, ft2)
-    _write_metadata(manager, exp_id, data_id, "HSQC", confidence=0.3)  # Low confidence.
+    _write_metadata(manager, exp_id, data_id, "HSQC", confidence=0.3)  # low confidence
 
     result = pick_peaks(manager, exp_id, data_id, sigma_multiplier=25.0)
     rows = _read_rows(Path(result["peak_path"]))
     signs = {float(r["Intensity"]) > 0 for r in rows}
-    assert signs == {True, False}  # Choose both positive and negative.
-    assert any("spectrum evidence" in log for log in result["logs"])
+    assert signs == {True, False}  # both signs picked
+    assert any("谱面回补" in log for log in result["logs"])
 
 
 def test_pick_peaks_spectrum_evidence_keeps_dominant_when_mostly_one_sign(
     tmp_path: Path,
 ) -> None:
-    """0.2.199-patch29fc: low confidence but only sporadic negative peaks spurious peak -> still
-    dominant only the main symbol is left."""
+    """0.2.199-patch29fc: low confidence and only stray negative peaks -> stay dominant."""
     spec = _spectrum_with_peaks(
         (64, 128),
         [
@@ -353,7 +349,7 @@ def test_pick_peaks_spectrum_evidence_keeps_dominant_when_mostly_one_sign(
             ((25, 90), 500.0),
             ((40, 60), 400.0),
             ((10, 100), 300.0),
-            ((15, 50), -200.0),  # Single sporadic negative peak.
+            ((15, 50), -200.0),  # one stray negative peak
         ],
     )
     ft2 = tmp_path / "out.ft2"
@@ -369,8 +365,8 @@ def test_pick_peaks_spectrum_evidence_keeps_dominant_when_mostly_one_sign(
 def test_pick_peaks_spectrum_evidence_respects_confident_uniform(
     tmp_path: Path,
 ) -> None:
-    """0.2.199-patch29fc: High-confidence uniform template (HSQC 0.9+) respects template dominant
-    even if spectrum is balanced."""
+    """0.2.199-patch29fc: a high-confidence uniform template (HSQC 0.9+) keeps
+    its dominant sign even when the spectrum is balanced."""
     spec = _spectrum_with_peaks(
         (64, 128),
         [
@@ -391,14 +387,14 @@ def test_pick_peaks_spectrum_evidence_respects_confident_uniform(
     result = pick_peaks(manager, exp_id, data_id, sigma_multiplier=25.0)
     rows = _read_rows(Path(result["peak_path"]))
     assert all(float(r["Intensity"]) > 0 for r in rows)
-    assert not any("Chart replenishment" in log for log in result["logs"])
+    assert not any("谱面回补" in log for log in result["logs"])
 
 
 def test_pick_peaks_spectrum_evidence_rejects_contamination(
     tmp_path: Path,
 ) -> None:
-    """0.2.199-patch29fc-Fixed: A few symbols dominated by a single extremely strong peak
-    (suspected to be contaminated) do not trigger mixed."""
+    """0.2.199-patch29fc-fix: a minor sign dominated by a single very strong
+    peak (suspected contamination) does not trigger mixed."""
     spec = _spectrum_with_peaks(
         (64, 128),
         [
@@ -406,7 +402,7 @@ def test_pick_peaks_spectrum_evidence_rejects_contamination(
             ((25, 90), 450.0),
             ((40, 60), 400.0),
             ((10, 100), 350.0),
-            ((15, 50), -1800.0),  # Single extremely strong negative peak (contamination).
+            ((15, 50), -1800.0),  # one very strong negative peak (contamination)
             ((30, 70), -260.0),
             ((45, 20), -240.0),
         ],
@@ -419,13 +415,13 @@ def test_pick_peaks_spectrum_evidence_rejects_contamination(
     result = pick_peaks(manager, exp_id, data_id, sigma_multiplier=25.0)
     rows = _read_rows(Path(result["peak_path"]))
     assert all(float(r["Intensity"]) > 0 for r in rows)
-    assert not any("Chart replenishment" in log for log in result["logs"])
+    assert not any("谱面回补" in log for log in result["logs"])
 
 
 
 def test_gui_user_type_updates_metadata(tmp_path: Path) -> None:
-    """0.2.199-patch29fd:GUI user selects the type authoritatively and writes back metadata, and
-    selects the peak according to the new type (mixed)."""
+    """0.2.199-patch29fd: a GUI user-selected type is written back to metadata
+    authoritatively, and picking follows the new type (mixed)."""
     import json
 
     from workflow.import_workflow import apply_user_experiment_type
@@ -455,12 +451,11 @@ def test_gui_user_type_updates_metadata(tmp_path: Path) -> None:
     result = pick_peaks(manager, exp_id, data_id, sigma_multiplier=25.0)
     rows = _read_rows(Path(result["peak_path"]))
     signs = {float(r["Intensity"]) > 0 for r in rows}
-    assert signs == {True, False}  # HNCACB mixed → Choose both positive and negative.
+    assert signs == {True, False}  # HNCACB mixed → both signs picked
 
 
 def test_pick_peaks_mixed_type_picks_both_signs(tmp_path: Path) -> None:
-    """Mixed experiment (such as HNCACB 13Cα/13Cβ reverse phase): select both positive and negative
-    peaks."""
+    """mixed experiment (e.g. HNCACB 13Cα/13Cβ anti-phase): both signs are picked."""
     spec = _spectrum_with_peaks(
         (64, 128),
         [
@@ -480,15 +475,14 @@ def test_pick_peaks_mixed_type_picks_both_signs(tmp_path: Path) -> None:
     assert len(rows) == 4
     signs = {float(r["Intensity"]) > 0 for r in rows}
     assert signs == {True, False}
-    assert "Select both positive and negative peaks" in result["logs"][0]
+    assert "正负峰都选" in result["logs"][0]
 
 
 def test_pick_peaks_ft3_shifts_follow_logical_axes(tmp_path: Path) -> None:
-    """3D ORDER 2 3 1:F1/F2/F3_shift Get the corresponding data axis ppm(0.2.199-patch29ap
-    modified) according to the logical dimension."""
+    """3D ORDER 2 3 1: F1/F2/F3_shift take ppm from the data axis of the
+    logical dimension (0.2.199-patch29ap fix)."""
     data = np.zeros((16, 16, 16))  # (FDF3SIZE=15N, FDSPECNUM=13C, FDSIZE=1H)
-    # Avoid upper and lower edges (patch29bf axis peak exclusion 5 points).
-    data[8, 5, 8] = 500.0
+    data[8, 5, 8] = 500.0  # F1=8 avoids the top/bottom edges (patch29bf excludes 5 points)
     data = gaussian_filter(data, sigma=1.0)
     ft3 = tmp_path / "out.ft3"
     _write_ft3_ordered(ft3, data, [2.0, 3.0, 1.0])
@@ -498,7 +492,7 @@ def test_pick_peaks_ft3_shifts_follow_logical_axes(tmp_path: Path) -> None:
     rows = _read_rows(Path(result["peak_path"]), nuclei=["15N", "1H", "13C"])
     assert len(rows) >= 1
     row = rows[0]
-    # Logical dimension: F1=15N(FDF1), F2=1H(FDF2), F3=13C(FDF3).
+    # logical dims: F1=15N (FDF1), F2=1H (FDF2), F3=13C (FDF3)
     f1 = 100.0 + (16 - 1 - 8) * 2189.0 / (16 * 60.8)
     f2 = 6.0 + (16 - 1 - 8) * 3000.0 / (16 * 600.0)
     f3 = 40.0 + (16 - 1 - 5) * 11300.0 / (16 * 150.9)
@@ -508,8 +502,8 @@ def test_pick_peaks_ft3_shifts_follow_logical_axes(tmp_path: Path) -> None:
 
 
 def test_pick_peaks_flat_plateau_not_picked(tmp_path: Path) -> None:
-    """Flat baseline is not used as a peak (strict local maximum + peak selection 6σ,
-    0.2.199-patch29aq/ar modification)."""
+    """A flat baseline yields no peaks (strict local maximum + 6σ picking,
+    0.2.199-patch29aq/ar fix)."""
     spec = np.full((64, 128), 100.0)
     spec[20, 40] = 500.0
     spec[25, 90] = 500.0
@@ -524,7 +518,7 @@ def test_pick_peaks_flat_plateau_not_picked(tmp_path: Path) -> None:
 
 
 def test_pick_peaks_sigma_multiplier_param(tmp_path: Path) -> None:
-    """Sigma_multiplier parameter adjustable threshold: higher threshold selects fewer peaks
+    """sigma_multiplier sets the threshold: a higher value picks fewer peaks
     (0.2.199-patch29ar)."""
     rng = np.random.default_rng(3)
     spec = rng.normal(0, 1.0, (64, 128))
@@ -545,13 +539,14 @@ def test_pick_peaks_sigma_multiplier_param(tmp_path: Path) -> None:
 
 
 def test_pick_peaks_excludes_axial_edges(tmp_path: Path) -> None:
-    # 0.2.199-patch29at: The upper and lower edge axis peaks (horizontal bars) are not selected, and
-    # the peaks in the spectrum are retained (with σ≈1 noise floor, the test intention remains
-    # unchanged under the default threshold of 25σ, 0.2.199-patch29gc).
+    # 0.2.199-patch29at: axial peaks (bars) at the top/bottom edges are not
+    # picked, in-spectrum peaks are kept
+    # (with a σ≈1 noise floor the intent is unchanged at the 25σ default,
+    # 0.2.199-patch29gc)
     rng = np.random.default_rng(20260829)
     spec = rng.normal(0, 1.0, (64, 128))
-    spec[0, 60] += 800.0  # Top axis peak (horizontal bar).
-    spec[63, 60] += 700.0  # Bottom axis peak (horizontal bar).
+    spec[0, 60] += 800.0  # top axial peak (bar)
+    spec[63, 60] += 700.0  # bottom axial peak (bar)
     spec[20, 40] += 500.0
     spec[40, 90] += 450.0
     spec = gaussian_filter(spec, sigma=1.0)
@@ -561,12 +556,12 @@ def test_pick_peaks_excludes_axial_edges(tmp_path: Path) -> None:
 
     result = pick_peaks(manager, exp_id, data_id, sigma_multiplier=25.0)
     rows = _read_rows(Path(result['peak_path']))
-    assert len(rows) == 2  # Two peaks in the spectrum, the axial peak is excluded.
+    assert len(rows) == 2  # two in-spectrum peaks, axial peaks excluded
 
 
 def test_infer_nucleus_obs_covers_common_spectrometers() -> None:
-    """0.2.199-patch29dh:OBS Inference supports each field strength and 15N/13C (the old
-    implementation only recognizes 600 MHz except inversion +)."""
+    """0.2.199-patch29dh: OBS inference covers all field strengths and 15N/13C
+    (the old implementation inverted and only knew 600 MHz)."""
     from workflow.pick_peaks import _infer_nucleus_obs as infer
 
     assert infer(500.13) == "1H"
@@ -582,7 +577,8 @@ def test_infer_nucleus_obs_covers_common_spectrometers() -> None:
 
 
 def test_parse_nmrpipe_label_hn_alias() -> None:
-    """0.2.199-patch29dh:True NMRPipe LABEL 'HN' resolves to 1H(30.ft3/d_011.ft3 measured)."""
+    """0.2.199-patch29dh: the real NMRPipe LABEL 'HN' parses as 1H (measured on
+    30.ft3/d_011.ft3)."""
     from workflow.pick_peaks import _parse_nmrpipe_label as parse
 
     assert parse("HN") == "1H"
@@ -598,7 +594,7 @@ def test_parse_nmrpipe_label_hn_alias() -> None:
 def _write_metadata_dims(
     manager: ProjectManager, exp_id: str, data_id: str, dims: list[dict]
 ) -> None:
-    """Write metadata with dataset.dimensions (drives the peak selection metadata core)."""
+    """Write metadata with dataset.dimensions (drives the picking metadata nuclei)."""
     import json
 
     path = manager.data_metadata_path(exp_id, data_id)
@@ -613,12 +609,15 @@ def _write_metadata_dims(
 def test_pick_peaks_ft3_header_order_wins_over_metadata(
     tmp_path: Path,
 ) -> None:
-    """0.2.199-patch29dh: When the file header (FDDIMORDER+LABEL) conflicts with metadata, the file
-    header takes precedence. Reproduce the real HNCA(Bruker acquisition sequence metadata
-    F1=13C/F2=15N/F3=1H=CNH vs NMRPipe.ft3 header F1=15N/F2=1H/F3=13C=NHC): The peak table must
-    write the value according to NHC."""
+    """0.2.199-patch29dh: when the file header (FDDIMORDER+LABEL) conflicts with
+    metadata, the header wins.
+
+    Reproduces a real HNCA (Bruker acquisition-order metadata
+    F1=13C/F2=15N/F3=1H=CNH vs the NMRPipe .ft3 header
+    F1=15N/F2=1H/F3=13C=NHC): the peak table must write values as NHC.
+    """
     data = np.zeros((16, 16, 16))
-    data[8, 5, 8] = 500.0  # Logic F1(N)=8, F2(H)=8, F3(C)=5.
+    data[8, 5, 8] = 500.0  # logical F1(N)=8, F2(H)=8, F3(C)=5
     data = gaussian_filter(data, sigma=1.0)
     ft3 = tmp_path / "out.ft3"
     _write_ft3_ordered(ft3, data, [2.0, 3.0, 1.0])
@@ -647,12 +646,11 @@ def test_pick_peaks_ft3_header_order_wins_over_metadata(
 def test_pick_peaks_2d_reversed_storage_maps_by_nucleus(
     tmp_path: Path,
 ) -> None:
-    """0.2.199-patch29dh: When the 2D storage order is (1H, 15N), the N/H columns are matched by
-    core and no longer written in reverse."""
+    """0.2.199-patch29dh: with 2D storage order (1H,15N), N/H columns match by nucleus."""
     from nmrglue.fileio import pipe
 
     spec = np.zeros((64, 32))
-    spec[20, 10] = 500.0  # Store axis0=1H idx20, axis1=15N idx10.
+    spec[20, 10] = 500.0  # storage axis0=1H idx20, axis1=15N idx10
     spec = gaussian_filter(spec, sigma=1.2)
     ft2 = tmp_path / "hn.ft2"
     dic = {k: "0" for k in pipe.fdata_dic}
@@ -678,8 +676,7 @@ def test_pick_peaks_2d_reversed_storage_maps_by_nucleus(
     pipe.write(str(ft2), dic, spec.astype(np.float32), overwrite=True)
     manager, exp_id, data_id = _manager_with_spectrum(tmp_path, ft2)
 
-    # Axis mapping test: explicit 15σ (the default is 25σ, weak peak use cases do not rely on the
-    # default).
+    # axis-mapping test: explicit 15σ (default is 25σ; this weak-peak case does not rely on it)
     result = pick_peaks(
         manager, exp_id, data_id, sigma_multiplier=15.0
     )
@@ -690,8 +687,7 @@ def test_pick_peaks_2d_reversed_storage_maps_by_nucleus(
     assert abs(float(row["H_shift"]) - h_ppm) < 0.05
 
 def _write_ft2_nh(path: Path, data: np.ndarray) -> None:
-    """Real N-H two-dimensional spectrum fixture (0.2.199-patch29dl for reference constraint
-    testing)."""
+    """Real N-H 2D spectrum fixture (used by the 0.2.199-patch29dl reference tests)."""
     from nmrglue.fileio import pipe
 
     dic = {k: "0" for k in pipe.fdata_dic}
@@ -718,15 +714,15 @@ def _write_ft2_nh(path: Path, data: np.ndarray) -> None:
 
 
 def _nh_ppm(n_idx: int, h_idx: int) -> tuple[float, float]:
-    """Synthesizes the N-H spectrum of (N,H) ppm (consistent with the _write_ft2_nh head)."""
+    """(N,H) ppm of the synthetic N-H spectrum (matches the _write_ft2_nh header)."""
     n_ppm = 100.0 + (64 - 1 - n_idx) * 2189.0 / (64 * 60.8)
     h_ppm = 6.0 + (128 - 1 - h_idx) * 3000.0 / (128 * 600.0)
     return n_ppm, h_ppm
 
 
 def test_pick_peaks_reference_constraint_2d(tmp_path: Path) -> None:
-    """0.2.199-patch29dl: Reference peak table constraints -- 2D only retains peaks that match the
-    reference (N, H)."""
+    """0.2.199-patch29dl: reference-table constraint -- a 2D run keeps only
+    peaks matching the reference (N,H)."""
     rng = np.random.default_rng(20260831)
     spec = rng.normal(0, 0.3, (64, 128))
     spec[20, 40] += 1500.0
@@ -754,18 +750,18 @@ def test_pick_peaks_reference_constraint_2d(tmp_path: Path) -> None:
     )
     rows = _read_rows(Path(result["peak_path"]))
     assert len(rows) == 2
-    assert "Reference peak table constraints" in "".join(result["logs"])
+    assert "参考峰表约束" in "".join(result["logs"])
 
 
 def test_pick_peaks_reference_constraint_3d_with_2d_ref(
     tmp_path: Path,
 ) -> None:
-    """0.2.199-patch29dl: 3D peak selection is constrained by 2D reference (N, H) -- the third
-    dimension is free, and one reference peak can retain multiple peaks (such as HNCA and
-    CA/CB)."""
+    """0.2.199-patch29dl: 3D picking is constrained by the 2D reference (N,H) --
+    the third dimension is free, so one reference peak may keep several peaks
+    (e.g. CA/CB of HNCA)."""
     rng = np.random.default_rng(20260831)
     data = rng.normal(0, 0.3, (16, 16, 16))
-    # Logic F1(N)=8, F2(H)=8, F3(C)=5 and F3(C)=10; another (N,H)=(10,10).
+    # logical F1(N)=8, F2(H)=8, F3(C)=5 and F3(C)=10; another (N,H)=(10,10)
     data[8, 5, 8] += 1500.0
     data[8, 10, 8] += 1200.0
     data[10, 5, 10] += 1000.0
@@ -788,17 +784,16 @@ def test_pick_peaks_reference_constraint_3d_with_2d_ref(
         tolerance_ppm={"15N": 2.0, "1H": 0.5, "13C": 20.0},
     )
     rows = _read_rows(Path(result["peak_path"]), nuclei=["15N", "1H", "13C"])
-    # Two of the C values are retained and the other (N,H) is eliminated.
-    assert len(rows) == 2
-    assert "Reference peak table constraints" in "".join(result["logs"])
+    assert len(rows) == 2  # both C values for (N=8,H=8) kept, the other (N,H) dropped
+    assert "参考峰表约束" in "".join(result["logs"])
 
 
 def test_pick_peaks_reference_whole_shift(tmp_path: Path) -> None:
-    """0.2.199-patch29fw: Reference overall translation (3 ppm 15N). When there are enough
-    reference peaks (>=5), the overall translation is first aligned and then matched; when there
-    are few reference peaks (such as a single peak), the overall translation is unreliable and
-    degrades to direct matching. This use case uses 5 reference peaks (overall +3 ppm) to verify
-    that the alignment path retains the current peak."""
+    """0.2.199-patch29fw: whole-reference shift (3 ppm in 15N). With enough
+    reference peaks (>=5) the reference is aligned first and then matched; with
+    few peaks (e.g. a single one) the shift is unreliable, so matching is direct.
+    This case uses 5 reference peaks (shifted +3 ppm) to verify that the aligned
+    path keeps the current peaks."""
     rng = np.random.default_rng(20260831)
     spec = rng.normal(0, 0.3, (64, 128))
     for row, col in ((20, 40), (25, 90), (30, 60), (40, 100), (50, 70)):
@@ -821,24 +816,24 @@ def test_pick_peaks_reference_whole_shift(tmp_path: Path) -> None:
         tolerance_ppm={"15N": 1.0, "1H": 0.2},
     )
     rows = _read_rows(Path(result["peak_path"]))
-    # 5 true peaks overall +3 ppm All retained after alignment (15N search range covers 3 ppm).
+    # all 5 real peaks survive the +3 ppm alignment (the 15N search range covers 3 ppm)
     assert len(rows) == 5
     logs = "".join(result["logs"])
-    assert "overall offset" in logs
+    assert "整体偏移" in logs
 
 
 
 def test_safe_figure_token() -> None:
-    """0.2.199-patch29fx: Refer to the display name (exp/data including '/') to convert a single-
-    segment safe file name."""
+    """0.2.199-patch29fx: a reference display name (exp/data with '/') becomes a
+    single-segment safe file name."""
     from workflow.pick_peaks import _safe_figure_token
 
     assert _safe_figure_token("exp_009/d_002") == "exp_009_d_002"
     assert "/" not in _safe_figure_token("exp_009/d_002 (HSQC)")
 
 def test_pick_peaks_run_records_data_id_per_data(tmp_path: Path) -> None:
-    """Patch29hi:pick_peaks WorkflowRun records each data_id to avoid reporting across data
-    strings."""
+    """patch29hi: each pick_peaks WorkflowRun records its own data_id, avoiding
+    reports bleeding across data sets."""
     spec = np.zeros((64, 128))
     spec[20, 40] = 500.0
     spec[25, 90] = 350.0

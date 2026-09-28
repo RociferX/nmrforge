@@ -1,4 +1,4 @@
-"""Dialog component test: import experiment type /project form/information/confirm(offscreen)."""
+"""Dialog widget tests: import experiment type / project form / info / confirm (offscreen)."""
 
 from __future__ import annotations
 
@@ -41,8 +41,8 @@ def test_import_dialog_validation_empty(
     )
     dialog = ImportExperimentDialog(None)
     dialog._validate_and_accept()
-    assert messages and "directory" in messages[0]
-    assert dialog.result() != 1  # Not accepted.
+    assert messages and "目录" in messages[0]
+    assert dialog.result() != 1  # not accepted
     dialog.close()
 
 
@@ -79,8 +79,7 @@ def test_import_dialog_validation_requires_acqus(
 def test_import_dialog_segmented_container(
     qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """0.2.108: The container directory import verification passed and segmented collection was
-    automatically checked."""
+    """0.2.108: the container-directory import validates and auto-checks segmented acquisition."""
     container = tmp_path / "container"
     container.mkdir()
     for seg in ("seg1", "seg2"):
@@ -109,8 +108,8 @@ def test_confirm_dialog_returns_exec(
 
 
 def test_info_dialog_constructs(qapp: QApplication) -> None:
-    dialog = InfoDialog(None, "title", "content")
-    assert dialog.windowTitle() == "title"
+    dialog = InfoDialog(None, "标题", "内容")
+    assert dialog.windowTitle() == "标题"
     dialog.accept()
     assert dialog.result() == 1
 
@@ -118,8 +117,7 @@ def test_info_dialog_constructs(qapp: QApplication) -> None:
 def test_settings_dialog_trimmed_and_linewidth_saved(
     qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """0.2.112: Settings dialog box removes SMILE thread/zero filling, retains line width and
-    saves."""
+    """0.2.112: the settings dialog drops SMILE threads/zero-fill, keeps line width and saves."""
     from gui.dialogs import SettingsDialog
 
     monkeypatch.setattr(
@@ -131,7 +129,7 @@ def test_settings_dialog_trimmed_and_linewidth_saved(
     assert set(dialog.tolerance_spins) == {"1H", "15N", "13C"}
     assert not hasattr(dialog, "ppl_spin")
     assert not hasattr(dialog, "smile_spin")
-    # 2026-09-21 (user): the interface language can be pinned in the settings (auto/zh/en)
+    # 2026-09-21 (user): the UI language can be pinned in settings (auto/zh/en)
     assert [dialog.language_combo.itemData(i) for i in range(dialog.language_combo.count())] == [
         "auto",
         "zh",
@@ -149,7 +147,7 @@ def test_settings_dialog_trimmed_and_linewidth_saved(
     assert "linewidth_hz" in saved
     assert "alignment_tolerance_ppm" in saved
     assert saved["alignment_tolerance_ppm"]["1H"] == 0.02
-    assert "data_root" in saved  # 0.2.199-Patch29gg.
+    assert "data_root" in saved  # 0.2.199-patch29gg
     assert "points_per_line" not in saved
     assert "smile_thread_cap" not in saved
     dialog.close()
@@ -158,7 +156,7 @@ def test_settings_dialog_trimmed_and_linewidth_saved(
 def test_settings_dialog_preselects_the_saved_language(
     qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """When the config says zh/en, the settings combo must preselect that entry."""
+    """When the config says zh/en, the settings dialog preselects that entry."""
     from gui.dialogs import SettingsDialog
 
     monkeypatch.setattr(
@@ -173,11 +171,12 @@ def test_settings_dialog_preselects_the_saved_language(
 def test_settings_dialog_persists_the_chosen_language(
     qapp: QApplication, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """The settings dialog writes the interface language into the configuration file.
+    """The settings dialog writes the UI language into the config file (user-verified path:
+    switch language → restart → takes effect).
 
-    Regression: ``gui.settings._merged_view`` missed the scalar ``language`` key, so saving wrote
-    the old value back -- the dialog looked successful and the language was unchanged after a
-    restart.
+    Regression: ``gui.settings._merged_view`` used to drop the scalar key language, so
+    saving wrote the old value back: the dialog looked successful but the language never
+    changed after a restart.
     """
     import yaml
 
@@ -187,7 +186,7 @@ def test_settings_dialog_persists_the_chosen_language(
     local = tmp_path / "nmrforge.local.yaml"
     local.write_text("language: zh\n", encoding="utf-8")
     monkeypatch.setattr(gui_settings, "_settings_path", lambda: local)
-    # save_settings refreshes the language cache afterwards; keep it away from the real user file
+    # save_settings refreshes the language-layer cache; keep it away from the user's real config
     monkeypatch.setattr("ui_support.i18n.read_user_preference", lambda path=None: None)
 
     dialog = SettingsDialog(None)
@@ -203,7 +202,7 @@ def test_settings_dialog_persists_the_chosen_language(
 def test_settings_dialog_preselects_locale_style_language(
     qapp: QApplication, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """A config saying zh_CN (which the language layer honours) preselects "Chinese"."""
+    """When the config says zh_CN, the combo preselects the Chinese entry, not "follow system"."""
     from gui import settings as gui_settings
     from gui.dialogs import SettingsDialog
 
@@ -216,7 +215,7 @@ def test_settings_dialog_preselects_locale_style_language(
 
 
 def test_dialog_centered_on_screen(qapp: QApplication) -> None:
-    """0.2.112: Application-level filter moves the pop-up window to the centre of the screen."""
+    """0.2.112: an application-level filter moves popups to the centre of their screen."""
     from qtcompat.QtCore import QEventLoop, QTimer
     from qtcompat.QtWidgets import QDialog
 
@@ -247,7 +246,7 @@ def test_dialog_centered_on_screen(qapp: QApplication) -> None:
 def test_import_dialog_browse_starts_at_data_root(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """0.2.199-patch29gg: Import "Browse..." default starting point = data directory."""
+    """0.2.199-patch29gg: the import "Browse..." dialog starts in the data root directory."""
     from qtcompat.QtWidgets import QFileDialog
 
     from gui import settings as settings_module

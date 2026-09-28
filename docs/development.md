@@ -12,6 +12,14 @@
 - Routine: change locally -> `pytest` (add `--basetemp=<dir>` if your temporary directory is
   restricted) -> `ruff check .` -> run the suite on a machine that has NMRPipe (the suite does not call the engine) ->
   commit.
+- **Threshold for outward-facing actions (user, 2026-09-23)**: mirroring and pushing the public
+  tree, pushing to GitHub and rebuilding the AppImage all wait until the user asks for them by
+  name; small changes are verified on the private trunk + the VM first. A small round runs only
+  the relevant tests - the local **full** regression includes the two-tree sync guard (private
+  trunk only: the two trees must agree in structure and wording), so it goes red when the public
+  tree lags;
+  sync the public tree before running the full suite, and do not treat "the public tree lags" as a
+  defect.
 
 ## Test
 
@@ -107,6 +115,48 @@ Reference implementation: `core/user_errors.py::describe_exception` (GUI/CLI sha
 `nmrforge_api/cli.py::_report_unexpected`(CLI exit). Guard test `tests/test_user_errors.py`.
 Will scan `gui/`, `viewer/`, and fail once the visible text of user in the form of `type(exc).__name__` appears.
 
+## Behaviour fingerprint and change levels (mandatory, 2026-09-20)
+
+After changing `core/`, `backend/`, `workflow/`, `nmrforge_api/` or the shipped data
+(`nmrforge_data/config/nmrforge.yaml`, `nmrforge_data/presets/`): **decide the level first, then update the declaration**,
+or `tests/test_compat.py` fails (it guards against silent behaviour changes):
+
+```bash
+python scripts/update_compat_declaration.py --level additive          # new entry points/fields
+python scripts/update_compat_declaration.py --level behavior_changed \
+    --affected localization,sweep_detection --note "what changed"     # numbers change
+python scripts/update_compat_declaration.py --level same              # comments/wording only
+```
+
+- levels: `same` (code tokens unchanged) / `additive` (downstream need not re-run) /
+  `behavior_changed` (**numbers change**, `affected` required) / `contract_changed` (columns,
+  fields or error codes changed -- update the contract mirror and the guard);
+- the declaration lives in `nmrforge_api/compat_declaration.py` (a pure data module,
+  deliberately outside the fingerprint; never put logic in it);
+- fingerprint scope: `behavior_digest` covers the four code trees plus the shipped data (the
+  user's local `nmrforge_data/config/nmrforge.local.yaml` is not counted); `token_digest` strips
+  comments/docstrings, so the two language editions agree whenever the code is identical;
+- the artefact stamp in `run.json` / `records/reference.json` / `records/manifest.json` is
+  written by `nmrforge_api.compat.record_stamp()` -- never assemble it by hand;
+- the golden vector `python -m nmrforge_api compat --golden` must match the declaration (sync
+  the declared `golden` hashes when behaviour changes).
+
+## Record/state writes: always atomic (mandatory, 2026-09-20)
+
+- Every JSON document written and read back **as a whole** (study state, `run.json`,
+  `workflow.json`, reference/record JSON, localisation attachments, the
+  compatibility-manifest export, the per-step phase and NUS parameter caches,
+  `*.quality.json`, the SMILE ranking/report) goes through
+  `core.project.manager.atomic_write_text` (a temporary file in the same directory
+  plus `os.replace`) instead of `Path.write_text` directly: if a write is interrupted
+  (crash / power loss / a concurrent reader) the reader sees either the complete old
+  version or the complete new one.
+- Append-only logs (`run.log`, `qc_audit.jsonl`, CSV streams) are not covered.
+- When converting such a site **change only the write mechanism** and keep the
+  serialisation expression as it is -- the file bytes must not change, and neither
+  should downstream fingerprints, cache fingerprints or the golden vector (guards:
+  `tests/test_compat.py`, the golden vector).
+
 ## Processing process change coverage principle (mandatory, 0.2.163-patch15)
 
 Changes proposed by user to the processing flow (generating FID/generate spectrum /Artificial/Batch etc.) must be made by default.
@@ -184,8 +234,22 @@ Change/When adding a new function, old implementations that it supersedes or dup
   Judgment + signal-to-noise ratio/phase/baseline/artifact sub-level score + baseline indicator + inspection instructions).
   ◆ Data quality diagnosis (detect N item/Processed automatically M conclusions + details), ◆ Process parameter.
   With optimisation; the single-line condensed "spectrum quality:..." may no longer be returned;
-- The log of data quality diagnosis (before processing) must be arranged at the beginning of the process (uniform is consistent with NUS)
-  It must not be deferred until after optimisation;
+- The FID data quality diagnosis log goes at the **end of the Generate FID step** (user request,
+  2026-09-23: the diagnosis runs where the FID is produced, and its conclusions are reported
+  together with how they were handled; uniform matches NUS). It is **not** announced at the start
+  of Generate spectrum any more - the spectrum step reads it back and reuses it;
+- The data quality diagnosis belongs to the **Generate FID** step only (user request, 2026-09-23,
+  second round): that step's log and the GUI report for that step share
+  `workflow.direct_diagnostics.format_fid_step_report`; the spectrum report (automatic + manual)
+  does not contain this section and it must not be added back there. When this step removed no new
+  source bad points it must check the historical record
+  (`read_source_cleanup_history`: `removed_from_source_ser_and_nuslist` in qc_audit.jsonl plus the
+  `.bak` files under raw) and state plainly "N points were already deleted in an earlier run"; when
+  field drift could not be checked at all, or not a single segment could be measured, say so just
+  as plainly and do not give ✓. Counts use only the "detected items" (`auto_handled` / `notes`
+  kept separate); annotations such as the audit summary do not count.
+  `process/diagnostics.json` is reused (fall back to rerunning only when the record is missing or
+  does not match the current fid, and announce it as before when falling back);
 - Log is isolated by selected context (0.2.186): a single data log is independent, and the data group is shared within the group
   Experiment type experimental level, the rest is global; selected changes are switched to display by the main window set_scope, group batch.
   Progress is explicitly routed to group scope -- logs of different data must not be mixed into the same buffer.
@@ -251,9 +315,15 @@ Change/When adding a new function, old implementations that it supersedes or dup
   (baseline / zero filling / window function), and reduce SMILE memory; when turned off, optimisation uses the default 6.5-10.5 large range.
   This range is only used for final runs. SMILE The low memory prompt must also give "narrow the direct dimension range + turn on this option".
   Suggestions.
-- The pipeline step row button area must be able to automatically wrap (0.2.199-patch4): generate a row after the spectrum is completed
-  Up to 5 buttons (direct dimension scope/again optimisation/rerun final script/display spectrum/manual), width.
-  When it is insufficient, a new line will be automatically added and no single line will be allowed. Hidden buttons do not occupy space.
+- The pipeline step row button area must be able to wrap automatically (0.2.199-patch4): after
+  Generate spectrum completes, a row holds at most 5 buttons (direct dimension range / re-optimise /
+  rerun final script / display spectrum / manual); when the width is insufficient it starts a new
+  line and must not be squeezed onto one line; hidden buttons take no space. On 2026-09-25 (round
+  30) an **indirect-dimension flip + rerun final script** group box was added between "re-optimise"
+  and "display spectrum" (`PipelineStepRow.rerun_group`; inside the box: the title
+  "indirect-dimension flip" -> a 2D checkbox / a 3D three-entry dropdown -> the rerun button; the
+  whole box counts as **one** flow item, so the row still holds "5 visible items"), shown/hidden
+  under the same condition as "rerun final script"; D009 records this convention.
 - Left tree data running status (0.2.199-patch5): any processing (automatic steps/Rerun the final
   When script/manual script/data group batch) starts, the corresponding data in the tree on the left displays "Running". After.
   Restore the product inference state; the mark must be maintained in the main thread (the background thread queues the signal) and must not be directly.
@@ -318,14 +388,60 @@ Change/When adding a new function, old implementations that it supersedes or dup
   (When TD=1, bruker also outputs single file full mesh fid); 3D NUS slice only in SMILE script.
   Step1 direct dimension is processed and generated (nus3d_1/test%04d.ft1); multiple segments are merged using addNMR to merge.
   Single file (merged/{dataset_id}.fid), segment frequency migration PS -rs (a manual value
-  goes through params["segment_shift_hz"]). Since 2026-09-23 a multi-part conversion also
-  checks the inter-part field drift automatically (reference = part 1, criterion |d| > 1.5 Hz,
-  Hz only - ppm is measured and recorded but does not gate): over the threshold,
-  `PS -rs <d>Hz` is inserted before `MULT -c` in that
-  part's fid.com (MULT kept) and the part is re-converted; the residual is re-checked before
-  merging, and an unmeasurable peak or a residual still over the threshold is only reported
-  (see workflow/field_drift.py). The conversion period slice is a historical product.
+  goes through params["segment_shift_hz"]). Since 2026-09-23 a multi-segment conversion also
+  measures the inter-segment field drift automatically (reference = segment 1); **since 2026-09-24
+  the criterion is "drift vs the direct-dimension linewidth"**: `|Δ|` must exceed
+  `max(DRIFT_HZ_MIN = 1.5 Hz, IMPACT_FRACTION = 0.2 × linewidth)` - linewidth = the full width at
+  half maximum after subtracting a baseline taken as the point-by-point median of the magnitude
+  spectrum of the top trace; 0.2 × linewidth ⇔ the variance of a rigid offset across segments
+  broadens the line by ≤ 2% relative. Only when the linewidth cannot be measured does it fall back
+  to judging by FFT points (`DRIFT_POINTS_MIN = 1` point; point width = direct-dimension SW /
+  number of complex points; `1.5 Hz` stays the absolute floor; from then on the FFT point is only a
+  reference quantity in the report). When no offset can be measured it writes neither a correction
+  value nor "within the criterion", but states exactly "trace-by-trace signal-to-noise too low to
+  measure a trustworthy drift (the correlation peak is only X times the baseline, and the offsets
+  given by the traces differ from each other by Y Hz); no correction applied"; over the criterion it
+  inserts `PS -rs <Δ>Hz` before that segment's `MULT -c` in fid.com (keeping MULT), re-converts the
+  segment, and merges only after re-checking the residual. Before merging it runs a **segment
+  consistency check**: a difference in TD/SW/O1/SFO1/GRPDLY/FnMODE/PULPROG etc. = refuse to merge;
+  a different NS = warn, but it is **not a weighting problem** (per segment S∝NS and σ∝√NS, so the
+  matched weight w∝S/σ² is a constant → adding directly is already the optimal merge; a different NS
+  only means the segments were not acquired for equal lengths); segments over the criterion are
+  **either all corrected or none of them** (a mid-way failure rolls back the segments already
+  changed). See workflow/field_drift.py.
+  The conversion period slice is a historical product.
   New code must not be generated; the slicing fallback for _zero_bad_point_fid is only compatible with the old working directory.
+- **Sweep-width convention (2026-09-24, mandatory)**: `-xSW/-ySW/-zSW` in fid.com always take the
+  value adopted by `core.data.bruker_reader.resolve_sweep_width` - when `SW_h` and `SW(ppm)×SFO1`
+  agree (relative difference ≤ `SW_CONSISTENCY_TOL = 1%`) use `SW_h`; **when they contradict, use
+  the ppm form** (`SW×SFO1`) and leave a note; when `SW_h` is missing or 0 use `SW×SFO1` as well
+  (**never** treat ppm as Hz). Basis: TopSpin's `SW_h` is a derived quantity of `SW×SFO1` (the
+  measured ratio on three real segments is 1.000000000000), NMRPipe's official `com/nih.tcl` uses
+  ppm×SFO1 for its indirect-dimension candidate and nmrglue uses it for the indirect dimension too,
+  and the depositor's script (AGNuS `Convert_HSQC.csh`) uses it as well. The adopted value / raw
+  value / source are written into `sweep_width` in `*.fid.conversion.json` and appear in the
+  Generate FID step report and in the import warning (the same text in log / report / import).
+- **Acquisition-mode strategy (the user's convention, 2026-09-24, mandatory)**: `-yMODE/-zMODE` in
+  fid.com are **always written as the `Complex` mode number** (the bruk2pipe table:
+  `0 = Complex, States, Complex-N, States-N / States-TPPI, States-TPPI-N`), and **no sign
+  adjustment is made at conversion time**; whether `-alt`/`-neg`/`-real`/`-bruk` is needed is
+  decided by the FT flag table of `acquisition_mode_detector` **at the processing stage** (doing it
+  once at conversion time and once at processing time = applying it twice). Other family-0 keywords
+  in the depositor's script (such as `States-TPPI`) are normalised to `Complex`, and the reason is
+  explained in the Generate FID correction list (comparison against the public deposited script,
+  2026-09-24).
+- **CAR reference convention (the user's final wording, 2026-09-24, mandatory)**: `-xCAR/-yCAR/-zCAR`
+  in fid.com always take that dimension's acqus `O1/BF1` (the computed spectrum centre the operator
+  set; this way spectra from the same experiment acquired at different times share one reference
+  convention), from the single source `backend.bruker_workflow.carrier_values`. The "water peak
+  (TE) + γ ratio" of `bruker -AUTO` is only corroborating evidence
+  (`water_value`/`configured_source`) and does not take part in choosing the value; **an override
+  must be reported to the user dimension by dimension**: the Generate FID log and report give the
+  four-line block `acquisition center / Configured target CAR / Δ(=configured−acquisition) /
+  status: REFERENCE_OVERRIDE` (`carrier_reference_block` is the single source; the other statuses
+  are `REFERENCE_KEPT/MANUAL/MISSING/UNKNOWN`), with the same wording on both sides; the record is
+  `*.fid.conversion.json.carrier`
+  (`acquisition_center`/`configured_target`/`delta_ppm`/`status`).
 - SMILE peak memory budget (0.2.199-patch15): a SMILE peak of <= 2.8GB (zero fill 1024) is
   safe; the 5.6GB magnitude (zero fill 2048, direct dimension doubled) exceeds the memory
   guard. Test data and re-runs must keep `estimate_smile_peak_mb <= 2.8GB`;
@@ -356,44 +472,3 @@ Change/When adding a new function, old implementations that it supersedes or dup
 - Message style: `feat:` / `fix:` / `refactor:` / `docs:` + Chinese brief description
 - Documentation and code are updated simultaneously (CHANGELOG / PROJECT_STATE / README)
 
-## Behaviour fingerprint and change levels (mandatory, 2026-09-20)
-
-After changing `core/`, `backend/`, `workflow/`, `nmrforge_api/` or the shipped data
-(`nmrforge_data/config/nmrforge.yaml`, `nmrforge_data/presets/`): **decide the level first, then update the declaration**,
-or `tests/test_compat.py` fails (it guards against silent behaviour changes):
-
-```bash
-python scripts/update_compat_declaration.py --level additive          # new entry points/fields
-python scripts/update_compat_declaration.py --level behavior_changed \
-    --affected localization,sweep_detection --note "what changed"     # numbers change
-python scripts/update_compat_declaration.py --level same              # comments/wording only
-```
-
-- levels: `same` (code tokens unchanged) / `additive` (downstream need not re-run) /
-  `behavior_changed` (**numbers change**, `affected` required) / `contract_changed` (columns,
-  fields or error codes changed -- update the contract mirror and the guard);
-- the declaration lives in `nmrforge_api/compat_declaration.py` (a pure data module,
-  deliberately outside the fingerprint; never put logic in it);
-- fingerprint scope: `behavior_digest` covers the four code trees plus the shipped data (the
-  user's local `nmrforge_data/config/nmrforge.local.yaml` is not counted); `token_digest` strips
-  comments/docstrings, so the two language editions agree whenever the code is identical;
-- the artefact stamp in `run.json` / `records/reference.json` / `records/manifest.json` is
-  written by `nmrforge_api.compat.record_stamp()` -- never assemble it by hand;
-- the golden vector `python -m nmrforge_api compat --golden` must match the declaration (sync
-  the declared `golden` hashes when behaviour changes).
-
-## Record/state writes: always atomic (mandatory, 2026-09-20)
-
-- Every JSON document written and read back **as a whole** (study state, `run.json`,
-  `workflow.json`, reference/record JSON, localisation attachments, the
-  compatibility-manifest export, the per-step phase and NUS parameter caches,
-  `*.quality.json`, the SMILE ranking/report) goes through
-  `core.project.manager.atomic_write_text` (a temporary file in the same directory
-  plus `os.replace`) instead of `Path.write_text` directly: if a write is interrupted
-  (crash / power loss / a concurrent reader) the reader sees either the complete old
-  version or the complete new one.
-- Append-only logs (`run.log`, `qc_audit.jsonl`, CSV streams) are not covered.
-- When converting such a site **change only the write mechanism** and keep the
-  serialisation expression as it is -- the file bytes must not change, and neither
-  should downstream fingerprints, cache fingerprints or the golden vector (guards:
-  `tests/test_compat.py`, the golden vector).

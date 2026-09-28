@@ -1,5 +1,5 @@
-"""Clipping consistency of peak positioning attachments: ``max_peaks`` The number of rows in the
-appendix must be consistent with the peak table."""
+"""Trim consistency of peak localization attachments: after ``max_peaks`` the attachment row
+count must match the peak table."""
 
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ def test_trim_localization_records_keeps_rows_aligned(tmp_path: Path) -> None:
     lz.write_localization_records(peak_path, _records(6), meta={"method": "gaussian"})
     assert len(lz.read_localization_records(peak_path)) == 6
 
-    # Same sequence as _keep_top_peaks: first cut the peak table (max_peaks), and then truncate the
+    # Same sequence as _keep_top_peaks: first cut the peak table (max_peaks), then truncate the
     # attachment synchronously.
     rows = import_peaks_poky(peak_path)
     export_peaks_poky(peak_path, rows[:4])
@@ -43,6 +43,6 @@ def test_trim_localization_records_keeps_rows_aligned(tmp_path: Path) -> None:
     records = lz.read_localization_records(peak_path)
     assert len(records) == 4 == len(import_peaks_poky(peak_path))
     assert [r["Peak_ID"] for r in records] == [1, 2, 3, 4]
-    # Idempotent + No accessories/No exception is thrown when cropping is not required.
+    # Idempotent + no exception when there is no attachment / no trimming needed.
     assert lz.trim_localization_records(peak_path, 4) is False
     assert lz.trim_localization_records(tmp_path / "missing.list", 3) is False

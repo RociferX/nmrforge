@@ -1,4 +1,4 @@
-"""Internal data model underlying behaviour."""
+"""Basic behaviour of the internal data model."""
 
 from __future__ import annotations
 

@@ -1,5 +1,5 @@
-"""Direct dimension window function optimisation test: synthesis FID memory score, explicit
-windowless support on the render side."""
+"""Direct-dimension window function optimisation tests: synthetic FID in-memory scoring and
+explicit no-window support on the rendering side."""
 
 from __future__ import annotations
 
@@ -20,8 +20,8 @@ from workflow.window_optimize import (
 
 
 def _synth_fid(n_traces: int = 16, n: int = 512) -> np.ndarray:
-    """Synthesize direct dimension FID: exponential decay single peak + slight noise (different
-    traces and different amplitudes)."""
+    """Synthetic direct-dimension FID: an exponentially decaying single peak plus slight noise
+    (different traces, different amplitudes)."""
     rng = np.random.default_rng(7)
     t = np.arange(n, dtype=float)
     sig = np.exp(-t / 120.0) * np.exp(2j * np.pi * 0.11 * t)
@@ -33,8 +33,8 @@ def _synth_fid(n_traces: int = 16, n: int = 512) -> np.ndarray:
 
 
 def test_optimize_direct_window_picks_best_candidate() -> None:
-    """All candidate scores, the best is the highest score; the returned structure is consistent
-    with the configuration."""
+    """Every candidate is scored, the best one is the highest score; the returned structure matches
+    the configuration."""
     res = optimize_direct_window(_synth_fid(), sw=20000.0)
     assert isinstance(res, WindowOptimizeResult)
     assert res.choice in DEFAULT_CANDIDATES
@@ -48,31 +48,31 @@ def test_optimize_direct_window_picks_best_candidate() -> None:
 
 
 def test_optimize_direct_window_changed_flag() -> None:
-    """It is best to set changed=False when it is consistent with the existing configuration to
-    avoid meaningless writeback."""
+    """changed=False when the optimum matches the current configuration, which avoids a pointless
+    write-back."""
     fid = _synth_fid()
     res = optimize_direct_window(fid)
     again = optimize_direct_window(fid, current=res.choice)
     assert again.changed is False
     assert again.choice == res.choice
-    # The default current=None should be considered inconsistent with the optimal (unless the
-    # optimal happens to be the first candidate).
+    # A default current=None counts as differing from the optimum, unless the optimum is the first
+    # candidate
     assert optimize_direct_window(fid, current={}).changed is True
 
 
 def test_optimize_direct_window_no_signal_skips_gracefully() -> None:
-    """No signal FID does not throw an exception and returns keep-current."""
+    """A signal-free FID raises nothing and returns keep-current."""
     res = optimize_direct_window(np.zeros((8, 256), dtype=complex))
     assert res.changed is False
-    assert any("skip" in log for log in res.logs)
+    assert any("跳过" in log for log in res.logs)
 
 
 def test_optimize_direct_window_noise_resolution_trend() -> None:
-    """Resolution trend: The windowless (rectangular) main lobe is the narrowest, FWHM should not
-    be larger than SP candidate's 1.5x."""
+    """Resolution trend: no window (rectangular) has the narrowest main lobe, so FWHM must not
+    exceed 1.5x that of the SP candidates."""
     res = optimize_direct_window(_synth_fid())
     fwhm_by_label = {s["label"]: s["fwhm"] for s in res.scores}
-    none_fwhm = fwhm_by_label["No window (linear)"]
+    none_fwhm = fwhm_by_label["无窗(线性)"]
     sp_fwhms = [
         v for k, v in fwhm_by_label.items() if k.startswith("SP ")
     ]
@@ -83,21 +83,21 @@ def test_optimize_direct_window_noise_resolution_trend() -> None:
 def test_optimize_direct_window_from_work_missing_fid(
     tmp_path: Path, bruker_dir: Path
 ) -> None:
-    """If the work directory does not have a converted.fid, it will be skipped and the automatic
-    path will not be blocked."""
+    """Skipped when the work directory has no converted .fid, without blocking the automatic
+    path."""
     from core.data.bruker_reader import read_dataset
 
     exp = read_dataset(bruker_dir / "nus_3d")
     res = optimize_direct_window_from_work(tmp_path, exp)
     assert res.changed is False
-    assert any("skip" in log for log in res.logs)
+    assert any("跳过" in log for log in res.logs)
 
 
 def test_window_line_explicit_none_and_render(
     bruker_dir: Path,
 ) -> None:
-    """Type=none direct dimension remains fixed SP (required by SMILE); explicit SP parameter takes
-    effect."""
+    """With type=none the direct dimension still gets a fixed SP (a SMILE requirement); an explicit
+    SP parameter takes effect."""
     from backend.script_generator import (
         _window_line,
         generate_3d_nus_script,
@@ -113,7 +113,8 @@ def test_window_line_explicit_none_and_render(
     none_script = generate_3d_nus_script(
         exp, window={"F3": {"type": "none"}}, **base
     )
-    # 0.2.199-patch11: direct dimension fixed SP, type=none no longer makes step1 windowless.
+    # 0.2.199-patch11: the direct dimension keeps a fixed SP, type=none no longer makes step1
+    # windowless
     assert "| nmrPipe -fn SP -off 0.45 -end 0.98 -pow 2 -c 0.5" in none_script
     custom = generate_3d_nus_script(
         exp,
@@ -125,11 +126,11 @@ def test_window_line_explicit_none_and_render(
 
 
 def test_window_candidates_include_none() -> None:
-    """Both direct/indirect dimension candidate pools must be windowless (windowless is the goal of
-    correct optimisation, 0.2.190)."""
+    """Both the direct and indirect candidate pools must contain no window (no window is a correctly
+    optimisable target, 0.2.190)."""
     assert {"type": "none"} in DEFAULT_CANDIDATES
     assert {"type": "none"} in INDIRECT_CANDIDATES
-    # Direct dimension candidate 0.5-0.98 combination that retains user preference (0.2.189).
+    # The direct candidates keep the user's preferred 0.5-0.98 combination (0.2.189)
     assert (
         {"type": "sine_bell", "off": 0.50, "end": 0.98, "pow": 2, "c": 0.5}
         in DEFAULT_CANDIDATES
@@ -137,10 +138,13 @@ def test_window_candidates_include_none() -> None:
 
 
 def test_indirect_windows_selects_none_for_decayed_fid() -> None:
-    """Indirect dimension natural attenuation FID: The optimiser should be able to correctly select
-    no window (0.2.190). resolution restricted indirect dimension score band resolution
-    retention factor -- apodisation No window wins when only broadening, mild window will still
-    be selected when truncation artifacts are obvious."""
+    """Indirect-dimension naturally decaying FID: the optimiser must correctly select no window
+    (0.2.190).
+
+    The resolution-limited indirect-dimension score carries a resolution-retention factor -- when
+    apodisation only broadens the peak, no window wins; when the truncation artefact is obvious, a
+    mild window is still chosen.
+    """
     rng = np.random.default_rng(3)
     n_f1, n_f2 = 64, 256
     k0 = np.arange(n_f2, dtype=float)
@@ -156,8 +160,8 @@ def test_indirect_windows_selects_none_for_decayed_fid() -> None:
 
 
 def test_indirect_windows_picks_window_for_truncated_fid() -> None:
-    """Indirect dimension truncation FID: The windowless main lobe is the narrowest but has
-    ringing. The mild window should be selected for scoring instead of windowless."""
+    """Indirect-dimension truncated FID: no window has the narrowest main lobe but rings, so the
+    score should pick a mild window instead of no window."""
     rng = np.random.default_rng(4)
     n_f1, n_f2 = 64, 256
     k0 = np.arange(n_f2, dtype=float)
@@ -174,35 +178,37 @@ def test_indirect_windows_picks_window_for_truncated_fid() -> None:
 def test_indirect_windows_missing_recon_skips(
     tmp_path: Path, bruker_dir: Path
 ) -> None:
-    """Work None SMILE reconstruction plane indirect dimension window optimisation skip, not
-    blocked."""
+    """Indirect-dimension window optimisation is skipped when the work directory has no SMILE
+    reconstructed plane, without blocking."""
     from core.data.bruker_reader import read_dataset
 
     exp = read_dataset(bruker_dir / "nus_3d")
     res = optimize_indirect_windows_from_recon(tmp_path, exp)
     assert res.changed is False
-    assert any("skip" in log for log in res.logs)
+    assert any("跳过" in log for log in res.logs)
 
 
 def test_indirect_windows_missing_fid_skips(
     tmp_path: Path, bruker_dir: Path
 ) -> None:
-    """When there is no converted fid in work, uniform indirect dimension window optimisation is
-    skipped and not blocked."""
+    """Uniform indirect-dimension window optimisation is skipped when the work directory has no
+    converted fid, without blocking."""
     from core.data.bruker_reader import read_dataset
 
     exp = read_dataset(bruker_dir / "hsqc_2d")
     res = optimize_indirect_windows_from_work(tmp_path, exp)
     assert res.changed is False
-    assert any("skip" in log for log in res.logs)
+    assert any("跳过" in log for log in res.logs)
 
 
 def test_gm_in_direct_pool_requires_sw() -> None:
-    """GM Add direct dimension default candidate (0.2.192); skip when there is no SW, participate
-    in scoring when there is SW. Indirect dimension candidate pool does not add GM: resolution
-    is limited indirect dimension apodisation, the artificially high signal-to-noise ratio will
-    overturn the windowless selection of the natural attenuation axis (0.2.190 is required to be
-    retained)."""
+    """GM joins the direct-dimension default candidates (0.2.192); it is skipped without SW and
+    scored with SW.
+
+    The indirect candidate pool gets no GM: the inflated SNR of an apodised resolution-limited
+    indirect dimension would overturn the no-window choice of a naturally decaying axis (0.2.190
+    requires keeping it).
+    """
     gm = {"type": "gaussian", "g1": 8.0, "g2": 15.0, "g3": 0.0, "c": 1.0}
     assert gm in DEFAULT_CANDIDATES
     assert not any(c.get("type") == "gaussian" for c in INDIRECT_CANDIDATES)
@@ -213,5 +219,4 @@ def test_gm_in_direct_pool_requires_sw() -> None:
     with_sw = optimize_direct_window(fid, sw=20000.0)
     gm_scores = [s for s in with_sw.scores if "GM" in s["label"]]
     assert len(gm_scores) == 1
-    # The value is normal (sw=1.0 is not pressed to generate garbage).
-    assert gm_scores[0]["fwhm"] < 200.0
+    assert gm_scores[0]["fwhm"] < 200.0  # plausible value (no garbage from sw=1.0)

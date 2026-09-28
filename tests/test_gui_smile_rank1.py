@@ -1,4 +1,4 @@
-"""SMILE Scan Rank1 entry (0.2.199-patch29hz-fix 3 step 3)."""
+"""SMILE scan Rank1 entry (0.2.199-patch29hz - fix 3, step 3)."""
 
 from __future__ import annotations
 
@@ -31,8 +31,8 @@ def _manager(tmp_path: Path):
 def test_rank1_button_visible_only_after_success(
     tmp_path: Path, qapp: QApplication
 ) -> None:
-    """SMILE Only after the step is successful can "Rerun according to Rank1" (Option B:
-    optimisation does not automatically generate scores)."""
+    """The "Rerun by Rank1" button appears only after the SMILE step succeeds (plan B:
+    optimisation does not emit a spectrum automatically)."""
     from qtcompat.QtWidgets import QWidget
 
     host = QWidget()
@@ -44,7 +44,7 @@ def test_rank1_button_visible_only_after_success(
     assert not row.rank1_button.isVisibleTo(row)
     row.set_status("SUCCESS")
     assert row.rank1_button.isVisibleTo(row)
-    # Do not leave this button for other steps.
+    # Other steps do not keep this button.
     assert not panel._rows["fid"].rank1_button.isVisibleTo(panel._rows["fid"])
     panel.close()
     host.deleteLater()
@@ -52,8 +52,8 @@ def test_rank1_button_visible_only_after_success(
 
 
 def test_rerun_rank1_requires_script(tmp_path: Path) -> None:
-    """When there is no Rank1 script, an error will be explicitly reported instead of silently
-    rerunning other scripts."""
+    """Without a Rank1 script, report a clear error instead of silently rerunning another
+    script."""
     manager, exp, data = _manager(tmp_path)
     controller = ProcessingController(manager)
     with pytest.raises(RuntimeError, match="Rank1"):
@@ -62,7 +62,7 @@ def test_rerun_rank1_requires_script(tmp_path: Path) -> None:
 def test_rerun_rank1_refreshes_companions_and_provenance(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """SMILE-005: Use Rank1 to synchronize FT2/UCSF/QC, and snapshot parameter and script."""
+    """SMILE-005: adopting Rank1 syncs FT2/UCSF/QC and snapshots the params and script."""
     import json
     from types import SimpleNamespace
 
@@ -92,13 +92,12 @@ def test_rerun_rank1_refreshes_companions_and_provenance(
 
     def _export(source, target):
         Path(target).write_bytes(b"rank1-ucsf")
-        return str(target), f"UCSF has generated: {target}"
+        return str(target), f"UCSF 已生成: {target}"
 
     monkeypatch.setattr("workflow.ucsf_export.export_ucsf", _export)
     monkeypatch.setattr(
         "workflow.optimization_report.spectrum_quality_report_lines",
-        lambda *args, **kwargs: [
-            "◆ The best final spectrum image quality", "Comprehensive judgment: test"],
+        lambda *args, **kwargs: ["◆ 最终谱图质量", "综合判定: 测试"],
     )
 
     target = Path(controller.rerun_smile_rank1(exp.id, data.id))
@@ -129,7 +128,7 @@ def test_rank1_run_ref_is_a_spectrum_run() -> None:
 def test_rerun_rank1_failure_keeps_failed_run_and_snapshot(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Execution failures also retain the Rank1 parameter / script snapshot and failure status."""
+    """Execution failure also keeps the Rank1 params/script snapshot and the failed status."""
     from types import SimpleNamespace
 
     manager, exp, data = _manager(tmp_path)
@@ -147,7 +146,7 @@ def test_rerun_rank1_failure_keeps_failed_run_and_snapshot(
             return SimpleNamespace(returncode=1, stdout="failed", stderr="boom")
 
     monkeypatch.setattr("backend.runtime.CshRuntime", _Runtime)
-    with pytest.raises(RuntimeError, match="Rank1 rerun failed"):
+    with pytest.raises(RuntimeError, match="Rank1 重跑失败"):
         controller.rerun_smile_rank1(exp.id, data.id)
 
     run = manager.project.workflow_runs[-1]

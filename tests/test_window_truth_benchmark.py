@@ -1,18 +1,18 @@
 """Ground-truth benchmark tests for the window-selection fix (2026-09-22).
 
-Why this file exists: the window criterion moved from "peak/noise of the candidate itself"
-(a self-referential metric that always prefers a more aggressive window) to three
-**detection-oriented** factors, so there has to be a criterion that is **independent of the score**
-to show the change is right. That criterion has exactly one source: ground truth (known peak
-positions). This file locks three things:
+Why this file exists: the window criterion moved from "peak/noise of the windowed candidate itself"
+(a self-referential metric that necessarily prefers a more aggressive window) to three
+**detection-oriented** factors, so there must be a criterion **independent of the score** to show
+the change is right. That criterion has exactly one source: ground truth (known peak positions).
+This file locks three things:
 
 1. the matching/statistics/control conventions of `workflow/truth_benchmark.py` (one-to-one greedy
    matching, naming discipline, decoy background, reference calibration and its null distribution);
-2. that the optimiser never picks a merging candidate on a **synthetic close pair known to be
+2. that the optimiser may not select a merging candidate on a **synthetic close pair known to be
    merged by some candidates** (merging = one real peak lost);
-3. that the detection threshold used for scoring matches the convention the documentation claims
-   (otherwise "the peaks the optimiser sees" and "the peaks in the user's peak table" are not the
-   same thing).
+3. that the detection threshold used for scoring matches the product's own default peak-picking
+   threshold (otherwise "the peaks the optimiser sees" and "the peaks in the user's peak table" are
+   not the same thing).
 """
 
 from __future__ import annotations
@@ -64,9 +64,8 @@ def test_detect_peaks_threshold_removes_noise_peaks() -> None:
 
 
 def test_match_one_to_one_steals_and_marks_not_detected() -> None:
-    """One detection fought over by two expected peaks: the first wins, the other is
-    not_detected (not matched).
-    """
+    """One detection fought over by two expected peaks: the first one wins, the other is marked
+    not_detected (not matched)."""
     detected = [{"peak_id": "D1", "H_ppm": 8.01, "N_ppm": 120.2}]
     expected = [
         {"peak_id": "E1", "H_ppm": 8.00, "N_ppm": 120.0},
@@ -84,9 +83,8 @@ def test_match_one_to_one_steals_and_marks_not_detected() -> None:
 
 
 def test_unmatched_detections_are_not_called_false_peaks() -> None:
-    """Naming discipline: an unmatched detection is unmatched_detection (it may be an unassigned
-    real peak, an impurity or an artefact).
-    """
+    """Naming discipline: an unmatched detection is recorded as unmatched_detection (it may be an
+    unassigned real peak, an impurity or an artefact)."""
     detected = [
         {"peak_id": "D1", "H_ppm": 8.00, "N_ppm": 120.0},
         {"peak_id": "D2", "H_ppm": 9.50, "N_ppm": 110.0},
@@ -138,8 +136,7 @@ def test_chance_match_stats_is_reproducible() -> None:
 
 def test_estimate_offset_recovers_a_global_reference_shift() -> None:
     """Deposited shifts differ from the spectrum by a constant: after calibration the recovery must
-    be far above the unshifted one, and the null distribution has to come with it.
-    """
+    be far above the unshifted one, and the null distribution is reported too."""
     rng = np.random.default_rng(20260922)
     expected = _truth_frame(60)
     detected = [
@@ -202,12 +199,11 @@ def _close_pair_fid(lw: float = 8.0, separation: float = 12.0, noise: float = 0.
 
 
 def test_window_optimizer_never_merges_a_resolvable_pair() -> None:
-    """Synthetic close pair (about 1.5 times the natural line width): some candidates do merge it,
-    but the optimiser may not pick one of them.
-    """
+    """Synthetic close pair (separation about 1.5 times the natural line width): some candidates do
+    merge it, but the optimiser may not pick one of them."""
     result = optimize_direct_window(_close_pair_fid(), sw=20000.0)
     merged = {row["label"]: row["merged"] for row in result.scores}
-    assert any(value > 0.0 for value in merged.values()), "the merging criterion never fired"
+    assert any(value > 0.0 for value in merged.values()), "并峰判据没有触发,测试失去意义"
     chosen = [row for row in result.scores if row["selected"]]
     assert len(chosen) == 1
     assert chosen[0]["merged"] == 0.0
@@ -215,7 +211,8 @@ def test_window_optimizer_never_merges_a_resolvable_pair() -> None:
 
 
 def test_window_scoring_uses_the_reference_detection_threshold() -> None:
-    """The peak set the window choice looks at is 12 sigma, **not** the pick-peaking default 35.
+    """The peak set the window choice looks at is 12 sigma, **not** the product pick-peaking default
+    35 sigma (2026-09-22, the user's convention).
 
     35 sigma is the default prepared for strong-signal liquid spectra; its value is that it stays
     applicable in more situations, not that it is the peak set the window choice should look at --

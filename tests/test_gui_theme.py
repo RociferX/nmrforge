@@ -1,9 +1,13 @@
-"""Dark theme readability guard (0.2.199-patch29hz review fix). Background: Software forces dark
-theme (window #1e1e1e), but historically many QSS still write dark text in light theme (#2c3e50
-≈1.5:1, #333 ≈1.6:1, #444 ≈2.1:1, #555 ≈2.4:1, #666 ≈2.9:1), which is actually invisible. This
-test solidifies "text colour must be readable" into a rule to prevent fallback writing from
-being mixed in again; semantic colors are concentrated in ui_support/colors.py, and style sheets
-are in ui_support/theme.py."""
+"""Dark theme readability guard (0.2.199-patch29hz review fix).
+
+Background: the software enforces the dark theme (window #1e1e1e), but
+historically many QSS still wrote the light theme's dark text (#2c3e50 ≈1.5:1,
+#333 ≈1.6:1, #444 ≈2.1:1, #555 ≈2.4:1, #666 ≈2.9:1), which is effectively
+invisible. This test solidifies "text colour must be readable" into a rule to
+keep fallback wording from being mixed in again; semantic colours are
+concentrated in ui_support/colors.py and the style sheets are in
+ui_support/theme.py.
+"""
 
 from __future__ import annotations
 
@@ -22,15 +26,15 @@ from ui_support.colors import (  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
-# Text colour (excluding background-colour and other attributes ending with "colour:").
+# Text colour (excluding background-color and other attributes ending with "color:")
 COLOR_RE = re.compile(r"(?<!background-)color:\s*(#[0-9a-fA-F]{3,6})")
 
-# Clearly draw text on a light background: white background run details box, white background inline
-# naming editor, light yellow prompt bubble.
+# Text clearly drawn on a light background: white run details box, white inline
+# naming editor, light yellow hint bubble.
 ALLOWED_ON_LIGHT = {
-    ("gui/pipeline_panel.py", "#222"),      # detail_frame White background.
-    ("gui/project_tree.py", "#222"),        # Inline rename editor white background.
-    ("gui/pipeline_panel.py", "#935116"),   # hint_bubble Light yellow bottom.
+    ("gui/pipeline_panel.py", "#222"),      # detail_frame white background
+    ("gui/project_tree.py", "#222"),        # inline rename editor white background
+    ("gui/pipeline_panel.py", "#935116"),   # hint_bubble light yellow background
 }
 
 
@@ -53,9 +57,9 @@ def _contrast(a: str, b: str) -> float:
     return (hi + 0.05) / (lo + 0.05)
 
 
-# : The theme definition itself contains intentionally low-contrast disabled colors, and no contrast
-# judgment is made;: Interface files (including QSS) are all within the scanning range -- Removing
-# the style sheet does not mean that it is no longer checked.
+#: The theme definition itself intentionally contains low-contrast disabled
+#: colours, so no contrast check is made; interface files (including QSS) are all
+#: in scope -- moving the style sheet away does not mean it is no longer checked.
 THEME_DEFINITION_FILES = {"ui_support/theme.py"}
 
 
@@ -73,7 +77,7 @@ def _iter_text_colors():
 
 
 def test_theme_constants_are_readable() -> None:
-    """Semantic colors must all be 4.5:1 on dark window backgrounds."""
+    """Semantic colours must all reach 4.5:1 on the dark window background."""
     for color in (TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED):
         assert _contrast(color, WINDOW_BACKGROUND) >= 4.5, color
     assert _contrast(TEXT_MUTED, WINDOW_BACKGROUND) > _contrast(
@@ -82,7 +86,7 @@ def test_theme_constants_are_readable() -> None:
 
 
 def test_no_dark_text_on_dark_theme() -> None:
-    """Gui/ and viewer/ must no longer have low-contrast text on dark windows."""
+    """gui/ and viewer/ must no longer contain low-contrast text on dark windows."""
     offenders = []
     for rel, lineno, color, line in _iter_text_colors():
         if (rel, color) in ALLOWED_ON_LIGHT:
@@ -90,23 +94,23 @@ def test_no_dark_text_on_dark_theme() -> None:
         ratio = _contrast(color, WINDOW_BACKGROUND)
         if ratio < 4.5:
             offenders.append(f"{rel}:{lineno} {color} ({ratio:.2f}:1) {line}")
-    assert not offenders, "Low contrast text in dark theme:\n" + "\n".join(offenders)
+    assert not offenders, "暗色主题下的低对比文字:\n" + "\n".join(offenders)
 
 
 def test_retired_light_theme_colors_are_gone() -> None:
-    """Dark text literals in historical light themes must not be rolled back."""
+    """Dark text literals from the historical light theme must not come back."""
     retired = {"#2c3e50", "#333333", "#444444", "#555555", "#666666"}
     found = [
         f"{rel}:{lineno} {color}"
         for rel, lineno, color, _line in _iter_text_colors()
         if color in retired
     ]
-    assert not found, "Dark text for fallback: " + ", ".join(found)
+    assert not found, "回退的深色文字: " + ", ".join(found)
 
 
 def test_tree_icon_uses_theme_color() -> None:
-    """The colour of the tree icon is taken from the theme (originally hardcoded #2c3e50, which is
-    not visible on dark trees)."""
+    """The tree icon colour comes from the theme (was hardcoded #2c3e50, which is
+    invisible on dark trees)."""
     source = (ROOT / "gui" / "project_tree.py").read_text(encoding="utf-8")
     assert 'painter.setPen(QColor(TEXT_SECONDARY))' in source
     assert 'QColor("#2c3e50")' not in source

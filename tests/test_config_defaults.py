@@ -1,4 +1,4 @@
-"""Configure default value test(0.2.46):read/Override priority/Fallback on invalid value."""
+"""Config default tests (0.2.46): reading / override precedence / invalid-value fallback."""
 
 from __future__ import annotations
 
@@ -51,7 +51,7 @@ def test_load_processing_defaults_invalid_fallback() -> None:
         "backend": {"nmrpipe": {"path": 123}},
     }
     defaults = load_processing_defaults(cfg)
-    assert defaults["linewidth_hz"]["1H"] == 8.0  # Invalid -> nuclide default.
+    assert defaults["linewidth_hz"]["1H"] == 8.0  # invalid → nucleus default
     assert defaults["linewidth_hz"]["13C"] == 20.0
     assert defaults["points_per_line"] == 2.0
     assert defaults["nthread"] == min(2, smile_thread_limit())
@@ -64,18 +64,19 @@ def test_resolve_helpers() -> None:
     assert resolve_points_per_line("abc") == 2.0
     limit = smile_thread_limit()
     assert resolve_nthread(None) == min(2, limit)
-    # Machine upper limit = number of cores - 2 (CI 4 cores -> 2).
-    assert resolve_nthread(4) == min(4, limit)
+    assert resolve_nthread(4) == min(4, limit)  # machine cap = cores-2 (CI 4 cores → 2)
     assert resolve_nthread(0) == min(2, limit)
 
 
 def test_smile_thread_limit_follows_core_count(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The upper limit of threads = number of cores - 2, <= 3 cores only allow 1 (2026-09-09 user);
-    if the core number cannot be read, use 4 cores. This clamp is a product behaviour, so the
-    expected value must be calculated according to the upper limit: CI The managed runner only
-    has 4 cores, and hardcoding 4 will fail on CI (measured on 2026-09-17)."""
+    """Thread cap = cores-2; ≤3 cores allow only 1 (user, 2026-09-09); an unreadable core
+    count falls back to 4 cores.
+
+    This clamp is product behaviour, so expectations must be computed from the cap: a hosted
+    CI runner has only 4 cores, and hard-coding 4 fails on CI (measured 2026-09-17).
+    """
     import os as os_mod
 
     monkeypatch.setattr(os_mod, "cpu_count", lambda: 8)
@@ -89,8 +90,7 @@ def test_smile_thread_limit_follows_core_count(
 def test_zero_fill_plan_uses_config_defaults(
     bruker_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Read the configuration (Line width/point distance) when parameters are not passed
-    explicitly; explicit params take precedence."""
+    """Read config (linewidth / points per line) when no args are given; explicit params win."""
     from backend import config as config_mod
 
     exp = read_dataset(bruker_dir / "nus_2d")
@@ -105,24 +105,23 @@ def test_zero_fill_plan_uses_config_defaults(
     )
     plan = zero_fill_plan(exp)
     td = effective_td(exp)
-    # 0.2.199-patch29dq(user):NUS direct dimension zero filling default 2 x TD (consistent with
-    # uniform); insufficient memory is reduced from memory guard to 1 x TD and prompts, if it is
-    # still insufficient, it will report insufficient memory.
+    # 0.2.199-patch29dq (user): NUS direct-dimension zero fill defaults to 2xTD (same as
+    # uniform); the memory guard drops it to 1xTD with a hint, and only reports low memory
+    # if that is still not enough
     assert plan["F2"]["size"] == 1 << max(0, int(2 * td[0]) - 1).bit_length()
-    # Uniform paths remain 2 x TD.
+    # the uniform path keeps 2xTD
     uniform = read_dataset(bruker_dir / "hsqc_2d")
     plan_uniform = zero_fill_plan(uniform)
     td_u = effective_td(uniform)
     assert plan_uniform["F2"]["size"] == 1 << max(0, int(2 * td_u[0]) - 1).bit_length()
-    # Point pitch is finer (ppl 4.0) -> target SI is larger or equal (monotone).
+    # finer point spacing (ppl 4.0) → larger or equal target SI (monotonic)
     cfg_defaults["points_per_line"] = 4.0
     plan_fine = zero_fill_plan(exp)
     assert plan_fine["F1"]["size"] >= plan["F1"]["size"]
-    # Explicit params take precedence: ppl=1.0 override configuration 4.0 -> SI smaller or equal.
+    # explicit params win: ppl=1.0 overrides config 4.0 → smaller or equal SI
     plan_explicit = zero_fill_plan(exp, points_per_line=1.0)
     assert plan_explicit["F1"]["size"] <= plan_fine["F1"]["size"]
-    # Line width configuration: 15N The wider the line width -> The thicker the target point
-    # distance -> SI is smaller or equal.
+    # linewidth config: wider 15N linewidth → coarser target spacing → smaller or equal SI
     cfg_defaults["linewidth_hz"] = {"15N": 60.0}
     wide = zero_fill_plan(exp)
     cfg_defaults["linewidth_hz"] = {"15N": 5.0}
@@ -133,7 +132,7 @@ def test_zero_fill_plan_uses_config_defaults(
 def test_gui_saved_settings_are_loaded_by_backend(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """CONF-004:GUI Save the specification schema and Backend reads from the same file."""
+    """CONF-004: the GUI saves the canonical schema; the backend reads the same file."""
     import yaml
 
     from backend import config as backend_config
@@ -160,9 +159,8 @@ def test_gui_saved_settings_are_loaded_by_backend(
     assert raw["backend"]["nmrpipe"]["path"] == "/opt/nmrpipe/bin"
     assert raw["processing"]["linewidth_hz"]["1H"] == 9.5
 
-    # resolve_nthread() clamps to "cores - 2" (1 on a <=3-core machine) and the CI runners
-    # are small, so pin the core count or this assertion depends on the machine (red CI
-    # 2026-09-22)
+    # SMILE thread count is clamped by smile_thread_limit() to cores-2 (≤3 cores give 1); CI
+    # runners have only 2-4 cores, so this assertion needs a pinned core count (CI red 2026-09-22)
     monkeypatch.setattr(backend_config.os, "cpu_count", lambda: 8)
     defaults = backend_config.load_processing_defaults(backend_config.load_config())
     assert defaults["nmrpipe_path"] == "/opt/nmrpipe/bin"
@@ -173,7 +171,7 @@ def test_gui_saved_settings_are_loaded_by_backend(
 def test_gui_settings_migrate_legacy_top_level_keys(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The old configuration is readable. The next save removes the old shared keys and writes the
+    """Legacy config stays readable; the next save drops the old shared keys and writes the
     canonical nested structure."""
     import yaml
 
@@ -214,11 +212,11 @@ def test_gui_settings_migrate_legacy_top_level_keys(
 def test_gui_saved_language_preference_round_trips(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The interface language is a scalar key: the value picked in the settings must hit disk.
+    """The UI language is a scalar key: the value chosen in settings must reach disk.
 
-    2026-09-21 (reported by the user): ``_merged_view`` used to merge dict-typed keys only, and
-    ``language`` is a string, so ``save_settings({"language": "en"})`` wrote the previous value
-    back to the file -- the symptom was "I changed the language, restarted, and it is unchanged".
+    2026-09-21 (user, measured): ``_merged_view`` used to merge only dict keys, while
+    ``language`` is a string, so ``save_settings({"language": "en"})`` wrote the old on-disk
+    value back -- changing the language in settings had no effect after a restart.
     """
     import yaml
 
@@ -234,13 +232,15 @@ def test_gui_saved_language_preference_round_trips(
     assert gui_settings.load_settings()["language"] == "en"
     assert i18n.read_user_preference(local) == "en"  # the language layer reads the same value
 
-    # Switching back works too; an unsupported value falls back to auto (follow the system)
+    # switching back to Chinese works too; an invalid value falls back to auto (follow the
+    # system) rather than being written through
     gui_settings.save_settings({"language": "zh"})
     assert gui_settings.load_settings()["language"] == "zh"
     gui_settings.save_settings({"language": "de"})
     assert gui_settings.load_settings()["language"] == "auto"
 
-    # A save without "language" (e.g. the first-import hint updating "guide") must not drop it
+    # a save without language (e.g. the first-import prompt updating the guide) must not wipe
+    # the chosen language
     gui_settings.save_settings({"language": "en"})
     gui_settings.save_settings({"nmrpipe_path": "/opt/bin2"})
     assert gui_settings.load_settings()["language"] == "en"
@@ -250,11 +250,13 @@ def test_gui_saved_language_preference_round_trips(
 def test_language_value_accepts_locale_style_spellings(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Locale-style spellings (zh_CN / zh-Hans / en_US.UTF-8) must show as the effective choice.
+    """Locale-style spellings (zh_CN / zh-Hans / en_US.UTF-8) must show the effective entry
+    in settings.
 
-    The language layer honours them through ``normalize_language``, but the dialog used a strict
-    allow-list match, so it displayed "follow the system"; saving any unrelated setting then
-    rewrote ``language: zh_CN`` to ``auto`` and silently changed the interface language.
+    2026-09-21 review: the language layer recognises these spellings via
+    ``normalize_language``, while the settings dialog only does strict whitelist matching, so
+    it displayed "follow the system language"; changing any other setting and saving then
+    rewrote ``language: zh_CN`` to ``auto``, silently changing the language.
     """
     from gui import settings as gui_settings
 
@@ -265,12 +267,12 @@ def test_language_value_accepts_locale_style_spellings(
         ("zh-Hans", "zh"),
         ("en_US.UTF-8", "en"),
         ("auto", "auto"),
-        ("de", "auto"),  # unsupported -> follow the system, but stored back as "auto"
+        ("de", "auto"),  # unsupported → follow the system, but write back auto not the raw value
     ):
         local.write_text(f"language: {raw}\n", encoding="utf-8")
         assert gui_settings.load_settings()["language"] == expected, raw
 
-    # Changing another setting must not rewrite an effective zh_CN into auto
+    # changing only other settings must not rewrite the effective zh_CN to auto
     local.write_text("language: zh_CN\n", encoding="utf-8")
     gui_settings.save_settings({"linewidth_hz": {"1H": 9.0}})
     assert gui_settings.load_settings()["language"] == "zh"
@@ -280,7 +282,8 @@ def test_language_value_accepts_locale_style_spellings(
 def test_settings_and_ui_state_writes_go_through_the_atomic_helper(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The user config and the per-data UI state use atomic replacement like every other record."""
+    """User config and per-data UI state use the atomic helper like other records (not a plain
+    overwrite)."""
     import core.project.manager as manager
     from gui import per_data_records
     from gui import settings as gui_settings
@@ -297,13 +300,11 @@ def test_settings_and_ui_state_writes_go_through_the_atomic_helper(
         return real_json(path, data)
 
     monkeypatch.setattr(manager, "atomic_write_json", _spy_json)
-    monkeypatch.setattr(
-        gui_settings, "_settings_path", lambda: tmp_path / "nmrforge.local.yaml"
-    )
+    monkeypatch.setattr(gui_settings, "_settings_path", lambda: tmp_path / "nmrforge.local.yaml")
 
     gui_settings.save_settings({"nmrpipe_path": "/opt/bin"})
     assert calls and calls[-1].name == "nmrforge.local.yaml"
-    assert not list(tmp_path.glob("*.tmp"))  # no temporary file left behind
+    assert not list(tmp_path.glob("*.tmp"))  # no temp files left behind in the directory
 
     state_path = tmp_path / "ui_state.json"
     monkeypatch.setattr(per_data_records, "ui_state_path", lambda *a, **k: state_path)
@@ -314,7 +315,7 @@ def test_settings_and_ui_state_writes_go_through_the_atomic_helper(
 
 
 def test_factory_passes_config_nmrpipe_path(tmp_path: Path) -> None:
-    """Factory passes nmrpipe.path of config to NMRPipeBackend(nmrpipe_bin)."""
+    """The factory passes config's nmrpipe.path to NMRPipeBackend (nmrpipe_bin)."""
     from backend.factory import create_backend
 
     backend = create_backend(
@@ -329,8 +330,8 @@ def test_factory_passes_config_nmrpipe_path(tmp_path: Path) -> None:
 
 
 def test_zero_fill_plan_per_axis(bruker_dir: Path) -> None:
-    """Axis-by-axis zero filling: naked scalar = k x TD (synonymous with global); explicit size /
-    turns off the axis-by-axis effect."""
+    """Per-axis zero fill: a bare scalar = kxTD (same as global); explicit size and disabling
+    work per axis."""
     exp = read_dataset(bruker_dir / "hsqc_2d")
     scalar_two = zero_fill_plan(exp, 2)
     per_axis_two = zero_fill_plan(exp, {"F1": 2})
@@ -342,22 +343,22 @@ def test_zero_fill_plan_per_axis(bruker_dir: Path) -> None:
 
     off = zero_fill_plan(exp, {"F1": {"mode": "none"}})
     assert off["F1"]["mode"] == "none" and off["F1"]["size"] is None
-    assert off["F2"]["size"] is not None  # Only turn off F1, direct dimension remains as default.
+    assert off["F2"]["size"] is not None  # only F1 is off; direct dimension keeps the default
 
     auto_f1 = zero_fill_plan(exp, {"F1": {"mode": "auto"}})
     assert auto_f1["F1"]["mode"] == "auto"
 
 
 def test_zero_fill_plan_per_axis_points_per_line(bruker_dir: Path) -> None:
-    """The target number resolution can be given axis by axis: points_per_line.F1 only affects this
-    dimension SI."""
+    """Target digital resolution can be given per axis: points_per_line.F1 affects only that
+    dimension's SI."""
     exp = read_dataset(bruker_dir / "hsqc_2d")
     base = zero_fill_plan(exp, points_per_line=2.0)
     fine = zero_fill_plan(exp, points_per_line={"F1": 4.0})
     assert fine["F1"]["size"] >= base["F1"]["size"]
-    assert fine["F2"]["size"] == base["F2"]["size"]  # Direct dimension does not change with ppl.
+    assert fine["F2"]["size"] == base["F2"]["size"]  # direct dimension does not follow ppl
     coarse = zero_fill_plan(exp, points_per_line={"F1": 1.0})
     assert coarse["F1"]["size"] <= base["F1"]["size"]
-    # If an illegal value returns to the default value, it will not crash.
+    # invalid values fall back to the default without crashing
     fallback = zero_fill_plan(exp, points_per_line={"F1": "abc"})
     assert fallback["F1"]["size"] == base["F1"]["size"]

@@ -1,4 +1,4 @@
-"""Direct dimension statistics phase search test."""
+"""Direct-dimension statistical phase-search tests."""
 
 from __future__ import annotations
 
@@ -16,19 +16,17 @@ def test_direct_ft_traces() -> None:
 
 
 def test_search_direct_spectrum_phase_recovers_p0_p1() -> None:
-    """0.2.88: direct dimension FT spectral frequency domain search while recovering (p0, p1) (t1
-    phase incrementally random)."""
+    """0.2.88: frequency-domain search on the direct FT spectrum recovers (p0, p1) together."""
     from core.optimization.phase_search import search_direct_spectrum_phase
 
     rng = np.random.default_rng(7)
     n = 512
     k = np.arange(n)
-    # Signal phase (+33°, p1 slope -42°); search returns PS correction value (reverse number).
+    # Signal phase (+33°, p1 ramp -42°); the search returns the PS correction (its negation)
     sig_p0, sig_p1 = 33.0, -42.0
     traces = []
     for _ in range(80):
-        # NUS t1=0 with increment 0: direct dimension phase clean (first trace anchor point
-        # semantics).
+        # At NUS increment 0 (t1=0) the direct phase is clean (first-trace anchor semantics)
         spec = np.zeros(n, dtype=complex)
         for peak in (140, 260, 380):
             spec += np.exp(-((k - peak) ** 2) / (2 * 6.0**2))
@@ -41,7 +39,7 @@ def test_search_direct_spectrum_phase_recovers_p0_p1() -> None:
     est = search_direct_spectrum_phase(np.array(traces))
     assert est is not None
     p0, p1, score, gain = est
-    # P0/p1 is the correction value (signal phase inverse); p0 anchors the first trace (t1=0).
+    # p0/p1 are corrections (negated signal phase); p0 is anchored to the first trace (t1=0)
     assert abs(((p0 + sig_p0 + 180.0) % 360.0) - 180.0) <= 12.0, p0
     assert abs(p1 + sig_p1) <= 10.0, p1
     assert score > 0.6
@@ -49,10 +47,12 @@ def test_search_direct_spectrum_phase_recovers_p0_p1() -> None:
 
 
 def test_nus_direct_phase_matches_existing_sign_convention() -> None:
-    """0.2.92:NU-DFT direct dimension p0 has the same semantics as the existing method (take the
-    positive peak solution and eliminate the +/-180 ambiguity). The existing method (verified)
-    asserts for θ_true=-120 that p0≈120(+/-7.5);NU-DFT should give the same answer on the
-    equivalent replica slice, not 300(+/-180 reverse)."""
+    """0.2.92: the NU-DFT direct-dimension p0 has the same semantics as the existing method
+    (positive-peak solution, removing the ±180 ambiguity).
+
+    The existing (verified) method asserts p0≈120 (±7.5) for θ_true=-120; NU-DFT should
+    give the same answer on the equivalent complex slice, not 300 (the ±180 inversion).
+    """
     from scipy.signal import hilbert
 
     from core.optimization.phase_search import nus_direct_phase
@@ -82,8 +82,10 @@ def test_nus_direct_phase_matches_existing_sign_convention() -> None:
 
 
 def test_search_direct_phase_on_spectrum_recovers() -> None:
-    """0.2.94: The final spectrum fixed trace net absorption score search recovery direct dimension
-    (p0, p1). Signal phase -120°(p0)/-42°(p1 slope) -> correction should be (120, 42)."""
+    """0.2.94: net-absorption scoring on a fixed trace of the final spectrum recovers (p0, p1).
+
+    Signal phase -120° (p0) / -42° (p1 ramp) → the correction should be (120, 42).
+    """
     from core.optimization.phase_search import search_direct_phase_on_spectrum
 
     n_f1, n = 64, 512
@@ -109,23 +111,23 @@ def test_search_direct_phase_on_spectrum_recovers() -> None:
     est = search_direct_phase_on_spectrum(spec2d, metric="net")
     assert est is not None
     p0, p1, score = est
-    # The net/|Re| indicator is plateau saturated within +/-90° for clean symmetric peaks (same
-    # characteristics as existing optimisation, real reliable overlap/Asymmetry provides
-    # distinction,VM measured sampleI recovery -52.5°). Verification here: 1) High score (>90) ⇒
-    # positive peak solution, +/-180 inverted solution (score≈0) has been excluded; 2) falls within
-    # the plateau (+/-90°) containing the true value (120).
+    # For clean symmetric peaks the net/|Re| metric saturates on a plateau within ±90° (the
+    # same trait as the existing optimizer; real spectra discriminate through overlap or
+    # asymmetry, and on the VM the sampleI case recovers -52.5°). Here we verify: 1) a high
+    # score (>90) means the positive-peak solution, the ±180 inversion (score≈0) being ruled
+    # out; 2) the result lies on the plateau that contains the true value (120) (±90°).
     assert score > 90.0, score
     assert abs(((p0 - 120.0 + 180.0) % 360.0) - 180.0) <= 90.0, p0
 
 def test_direct_phase_search_progress_and_result() -> None:
-    """NO QUERY SPECIFIED. EXAMPLE REQUEST: GET?Q=HELLO&LANGPAIR=EN|IT."""
+    '''Direct-dimension search: parallel candidates + progress messages (running/done).'''
     import numpy as np
 
     from core.optimization.phase_search import search_direct_phase_on_spectrum
 
     rng = np.random.default_rng(7)
     arr = rng.normal(size=(20, 16, 12)).astype(np.complex128)
-    # Inject a strong direct dimension peak.
+    # Inject one strong direct-dimension peak
     arr[10, 8, :] = np.exp(1j * np.deg2rad(30.0)) * 10.0
     messages: list[str] = []
     res = search_direct_phase_on_spectrum(
@@ -133,13 +135,12 @@ def test_direct_phase_search_progress_and_result() -> None:
     )
     assert res is None or len(res) == 3
     if messages:
-        assert "direct-dimension phase search" in messages[0]
-        assert "done in" in messages[-1]
+        assert "直接维相位搜索中" in messages[0]
+        assert "完成" in messages[-1]
 
 
 def test_direct_phase_search_cancelled_raises() -> None:
-    """0.2.199-patch6: When the cancellation flag is set, the phase search immediately throws an
-    exception and exits."""
+    """0.2.199-patch6: with the cancel flag set, the phase search raises and exits immediately."""
     import numpy as np
     import pytest
 
@@ -148,7 +149,7 @@ def test_direct_phase_search_cancelled_raises() -> None:
     rng = np.random.default_rng(11)
     arr = rng.normal(size=(24, 18, 14)).astype(np.complex128)
     arr[10, 8, :] = np.exp(1j * np.deg2rad(20.0)) * 10.0
-    with pytest.raises(RuntimeError, match="cancelled by the user"):
+    with pytest.raises(RuntimeError, match="任务已取消"):
         search_direct_phase_on_spectrum(
             arr, axis=0, metric="symmetry", cancel=lambda: True
         )

@@ -41,9 +41,13 @@ import numpy as np
 from backend.base import BackendCapabilities
 from backend.bruker_workflow import (
     apply_fid_com_overrides,
+    carrier_audit,
+    parse_fid_com,
     patch_fid_com,
     patch_nus_expand_count,
     physical_direct_points,
+    sweep_width_audit,
+    sweep_width_log_lines,
 )
 from backend.config import (
     resolve_ext_hi,
@@ -74,6 +78,7 @@ from core.audit.qc_audit import QcAction, QcAuditLog
 from core.data.internal_data_model import Experiment, SamplingMode
 from core.data.nus_reader import read_nuslist
 from core.data.raw_fingerprint import raw_dir_fingerprint
+from core.experiment.pulse_pathways import mode_symbol_audit
 from core.optimization.phase_search import (
     direct_ft_traces,
     dominant_absorption_ratio,
@@ -84,10 +89,24 @@ from core.optimization.phase_search import (
 from core.planning.processing_plan import ProcessingPlan
 from core.project.manager import atomic_write_text
 from ui_support.i18n import tr
+from workflow.direct_diagnostics import (
+    format_fid_step_report,
+    load_or_run_direct_diagnostics,
+    read_carrier_audit,
+    read_fid_com_corrections,
+    read_mode_symbol_audit,
+    read_source_cleanup_history,
+    read_sweep_width_audit,
+)
 from workflow.field_drift import (
     DRIFT_HZ_MIN,
+    DRIFT_POINTS_MIN,
     DRIFT_PPM_THRESHOLD,
     MAX_ROUNDS,
+    GroupDriftResult,
+    check_segment_consistency,
+    consistency_report_lines,
+    criterion_rule_text,
     detect_group_drift,
     direct_axis_hz,
     insert_ps_shift,
@@ -105,6 +124,77 @@ def _slice_candidates(directory: Path, dataset_id: str) -> list[Path]:
     legacy = sorted(directory.glob("test*.fid"))
     seen = {p.name for p in new_style}
     return new_style + [p for p in legacy if p.name not in seen]
+
+
+def _sidecar_paths(work: Path | str, suffix: str) -> list[Path]:
+    """Conversion sidecar (``*.<suffix>``): the main working directory plus each
+    segment directory (every part of a multi-part conversion writes its own)."""
+    root = Path(work)
+    paths = sorted(root.glob(f"*.{suffix}"))
+    for seg in sorted(root.glob("seg_*")):
+        if seg.is_dir():
+            paths += sorted(seg.glob(f"*.{suffix}"))
+    return paths
+
+
+def carrier_record_paths(work: Path | str) -> list[Path]:
+    """CAR archive files: the main working directory plus each segment directory
+    (every part of a multi-part conversion writes its own)."""
+    return _sidecar_paths(work, "carrier.json")
+
+
+def read_carrier_records(work: Path | str) -> list[dict[str, Any]]:
+    """Read the carrier (CAR) convention archive from the conversion directory
+    (``*.carrier.json``, 2026-09-24).
+
+    ``bruker_workflow.carrier_audit`` writes each part's CAR decision to
+    ``<dataset_id>.carrier.json`` during conversion; they are collected here and
+    merged into the ``carrier`` key of ``*.fid.conversion.json`` so that the
+    "generate FID" step report can show which convention was kept or switched.
+    """
+    root = Path(work)
+    records: list[dict[str, Any]] = []
+    for path in carrier_record_paths(root):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(payload, dict) and payload.get("dims"):
+            records.append(payload)
+    return records
+
+
+#: fid.com parameter corrections that get no dedicated archive of their own during
+#: conversion (sweep width and carrier each have their own fix_lines).
+_FIX_LINE_SKIP_PREFIX = ("xSW", "ySW", "zSW", "xCAR", "yCAR", "zCAR", "out:")
+
+
+def read_fid_com_correction_records(work: Path | str) -> list[str]:
+    """List of fid.com parameters changed during conversion
+    (``*.fid_com_corrections.json``, 2026-09-24).
+
+    ``_convert_dir`` writes the ``patch_fid_com`` corrections to a sidecar; they are
+    collected back into the "generate FID" report so that the **parameter corrections
+    printed line by line in the log** show up there too (user 2026-09-24: "the
+    generate-fid step's log report should be followed up in the report of the middle
+    interface"). Sweep width and carrier have dedicated archives
+    (``sweep_width``/``carrier``), skipped here so the same value is not stated twice;
+    ``out:`` is only an output rename.
+    """
+    lines: list[str] = []
+    for path in _sidecar_paths(work, "fid_com_corrections.json"):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        items = payload.get("lines") if isinstance(payload, dict) else payload
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            text = str(item)
+            if text and not text.startswith(_FIX_LINE_SKIP_PREFIX):
+                lines.append(text)
+    return lines
 
 
 def _slice_in_file(directory: Path, dataset_id: str) -> str | None:
@@ -524,9 +614,22 @@ def _segment_kind_info(segments: list[Path | str]) -> tuple[str | None, list[str
     return kind, [detail]
 
 
+def _first_dir(raw_dirs: Any) -> Path | None:
+    """``raw_dirs`` (a single path or a sequence of paths) -> the first directory;
+    ``None`` when empty or unavailable.
+
+    Used to point ``mode_symbol_audit`` on the conversion-archive side at the raw
+    directory that may hold the pulse program, the same source as the import warning
+    side (bruker_workflow passes ``data_dir``).
+    """
+    if isinstance(raw_dirs, (str, Path)):
+        return Path(raw_dirs)
+    for item in raw_dirs or []:
+        return Path(item)
+    return None
+
+
 @dataclass
-
-
 class NMRPipeBackend:
     """NMRPipe implementation (Linux: bruker -AUTO + fid.com + NMRPipe pipeline,
     SMILE, multi-segment merge)."""
@@ -771,6 +874,7 @@ class NMRPipeBackend:
                         experiment.dataset_id,
                         [Path(seg) for seg in experiment.segments],
                         logs,
+                        experiment=experiment,
                     )
         else:
             in_file = f"{experiment.dataset_id}.fid"
@@ -795,7 +899,9 @@ class NMRPipeBackend:
                             "processing)",
                             p0=slice_in,
                         ))
-                self._record_conversion(work, experiment.dataset_id, raw, logs)
+                self._record_conversion(
+                    work, experiment.dataset_id, raw, logs, experiment=experiment
+                )
         if not converted:
             return {"success": False, "message": (
                 tr(
@@ -981,6 +1087,11 @@ class NMRPipeBackend:
         work = self._work_path(experiment)
         work.mkdir(parents=True, exist_ok=True)
         logs: list[str] = []
+        # 2026-09-24: when the sweep-width convention (SW_h vs SW x SFO1) is
+        # overridden, say so first -- patch_fid_com below rewrites the -xSW/-ySW/-zSW
+        # of fid.com to the Hz values adopted here (the same sentence goes into the
+        # conversion record)
+        logs += sweep_width_log_lines(experiment)
 
         # 0.2.199-patch29dz (user): report missing key input files right away so
         # bruker cannot hang or stall
@@ -1018,6 +1129,10 @@ class NMRPipeBackend:
                     "logs": logs,
                 }
         segment_kind: str | None = None
+        # 2026-09-23: the source sampling bad-point cleanup result goes into the data quality
+        # report at the end of the Generate-FID step
+        source_bad_points: list[tuple[int, ...]] = []
+        source_removed = False
         if progress is not None:
             progress(tr("Start converting fid"))
         if experiment.segments:
@@ -1035,6 +1150,7 @@ class NMRPipeBackend:
             _record_source_clean(
                 audit, experiment, list(experiment.segments), _count, _bad, source_removed
             )
+            source_bad_points = list(_bad)
             if _bad and source_removed:
                 # 0.2.197/0.2.199: segmented data likewise adjusts the grid to the
                 # actual range of the cleaned, merged nuslist, so cross-validation
@@ -1063,13 +1179,15 @@ class NMRPipeBackend:
                 fid_path = work / "merged"
             if converted:
                 # 2026-09-23: the "generate FID" step records the conversion provenance
-                # (including the field drift check) right away - "generate spectrum" can then
-                # reuse it instead of converting a second time because a record is missing
+                # (including the field drift check) right away - "generate spectrum" can
+                # then reuse it instead of converting a second time because a record is
+                # missing
                 self._record_conversion(
                     work,
                     experiment.dataset_id,
                     [Path(s) for s in experiment.segments],
                     logs,
+                    experiment=experiment,
                 )
                 _count, bad_points = self._write_merged_nuslist(
                     work, experiment.segments, experiment, logs
@@ -1097,6 +1215,42 @@ class NMRPipeBackend:
                 "logs": logs,
             }
         logs.append(f"fid → {fid_path}")
+        # 2026-09-23 (user request): the FID-layer data quality diagnosis moved from the start of
+        # the Generate-Spectrum step to the **end of the Generate-FID step**, so the findings and
+        # the way they were handled land in this step log; the conclusion goes to
+        # process/diagnostics.json and Generate Spectrum reads it back instead of re-running it
+        diag_result = None
+        try:
+            diag_result = load_or_run_direct_diagnostics(work, experiment)
+        except Exception as exc:  # noqa: BLE001 - a failed diagnosis must not block the conversion
+            logs.append(tr("data quality diagnosis failed: {p0}", p0=exc))
+        # 2026-09-23 (user request): "no bad point in this step" is not "never had one" -
+        # report the bad points that earlier runs removed from the source (read
+        # qc_audit.jsonl, with the raw .bak files as a fallback)
+        _raw_dirs = (
+            [Path(seg) for seg in experiment.segments] if experiment.segments else [raw]
+        )
+        logs += format_fid_step_report(
+            diagnostics=diag_result,
+            source_bad_points=source_bad_points,
+            source_removed=source_removed,
+            source_history=read_source_cleanup_history(work, _raw_dirs),
+            field_drift=read_field_drift_record(work),
+            # 2026-09-24 (user: "the generate-fid step's log report should be followed
+            # up in the report"): the log and the GUI step report share one body of
+            # content -- the sweep-width convention, the CAR reference block
+            # (acquisition center / Configured target CAR / delta / status) and the
+            # fid.com parameter corrections all read the same sidecars.
+            sweep_width=read_sweep_width_audit(work),
+            carrier=read_carrier_audit(work),
+            corrections=read_fid_com_corrections(work),
+            # 2026-09-24: dimensions whose mode/sign is unconfirmed (no FT -neg applied)
+            # get the same reminder in the report
+            mode_symbol=read_mode_symbol_audit(work),
+            # a single dataset has no "merge" step: the report wording follows the
+            # part count (user 2026-09-24)
+            parts=len(experiment.segments) if experiment.segments else 1,
+        )
         return {
             "success": True,
             "fid_path": str(fid_path),
@@ -1209,7 +1363,7 @@ class NMRPipeBackend:
             )
             if not merged_ready:
                 # 0.2.199-patch29cv: this path converts/merges on its own and notes
-                # the multi-segment type as well
+                # the multi-part kind as well
                 _kind, kind_logs = _segment_kind_info(experiment.segments)
                 logs += kind_logs
                 shifts = [float(v) for v in params.get("segment_shift_hz", [])]
@@ -1241,6 +1395,7 @@ class NMRPipeBackend:
                     experiment.dataset_id,
                     [Path(s) for s in experiment.segments],
                     logs,
+                    experiment=experiment,
                 )
             else:
                 logs.append(tr("Reuse merged fid ({p0}; skipping conversion/merge)", p0=merged_in))
@@ -1313,7 +1468,9 @@ class NMRPipeBackend:
                         "message": tr("NUS Conversion failed (bruker native recognition failed)"),
                         "logs": logs,
                     }
-                self._record_conversion(work, experiment.dataset_id, raw, logs)
+                self._record_conversion(
+                    work, experiment.dataset_id, raw, logs, experiment=experiment
+                )
             if raw_nuslist.is_file():
                 shutil.copy2(raw_nuslist, work / "nuslist")
                 # Safety net: re-validate the working nuslist (0 bad points expected
@@ -2307,7 +2464,7 @@ class NMRPipeBackend:
                 if ok and evaluate is not None:
                     try:
                         metrics.update(dict(evaluate(str(spectrum)) or {}))
-                    except Exception as exc:  # noqa: BLE001 - one failed combo must not stop the sweep
+                    except Exception as exc:  # noqa: BLE001 - keep sweeping after a failed combo
                         metrics = {"error": str(exc)}
                 elif not ok:
                     metrics = {"error": tr("Refactoring failed (rc={p0})", p0=run2.returncode)}
@@ -2316,7 +2473,7 @@ class NMRPipeBackend:
                 if holdout_file and holdout_coords:
                     try:
                         metrics.update(_holdout_residual())
-                    except Exception as exc:  # noqa: BLE001 - a failed residual must not stop the sweep
+                    except Exception as exc:  # noqa: BLE001 - keep sweeping after a bad residual
                         logs.append(tr("Leave residual calculation failed: {p0}", p0=exc))
                 if delete_spectra:
                     spectrum.unlink(missing_ok=True)
@@ -2456,6 +2613,12 @@ class NMRPipeBackend:
             _render_dir.mkdir(parents=True, exist_ok=True)
             out_file = f"{INTERMEDIATE_SUBDIR}/{out_file}"
         zf_params = dict(params or {})
+        # 2026-09-25 (user): the sampling flags (sampling.flip_f1/flip_f2 etc.) are
+        # read from params with the same convention as process()/reconstruct_nus --
+        # callers (reference-build phase preview / joint evaluation) only pass params
+        # instead of writing their own kwarg; an explicit ``sampling=`` still wins.
+        if sampling is None:
+            sampling = zf_params.get("sampling") or None
         zf_plan = zero_fill_plan(
             experiment,
             zf_params.get("zero_fill"),
@@ -2716,18 +2879,103 @@ class NMRPipeBackend:
         """Path of the conversion record: next to the fid, holding the raw fingerprint."""
         return work / f"{dataset_id}.fid.conversion.json"
 
+    @staticmethod
+    def _fid_products(work: Path, dataset_id: str) -> dict[str, int]:
+        """**Real on-disk locations** of the converted products -> byte sizes
+        (2026-09-24 review B1).
+
+        A single dataset is ``{dataset_id}.fid`` (or the ``fid/{dataset_id}NNN.fid``
+        slice stream); a multi-part one is ``merged/{dataset_id}.fid`` or
+        ``merged/fid/*.fid``. The reuse test and the conversion record both check
+        against this list -- previously only ``work/{dataset_id}.fid`` was looked at,
+        so empty or truncated multi-part products were never noticed.
+        """
+        patterns = (
+            ("", f"{dataset_id}*.fid"),
+            ("", "test*.fid"),
+            ("fid", f"{dataset_id}*.fid"),
+            ("fid", "test*.fid"),
+            ("merged", f"{dataset_id}*.fid"),
+            ("merged", "*.fid"),
+            ("merged/fid", f"{dataset_id}*.fid"),
+            ("merged/fid", "*.fid"),
+        )
+        products: dict[str, int] = {}
+        for label, pattern in patterns:
+            directory = work / label if label else work
+            if not directory.is_dir():
+                continue
+            for path in sorted(directory.glob(pattern)):
+                rel = f"{label}/{path.name}" if label else path.name
+                if rel in products:
+                    continue
+                try:
+                    products[rel] = path.stat().st_size
+                except OSError:
+                    continue
+        return products
+
     def _record_conversion(
         self,
         work: Path,
         dataset_id: str,
         raw_dirs: Any,
         logs: list[str],
+        experiment: Experiment | None = None,
     ) -> None:
         """Record the raw fingerprint, the fid size and the inter-part drift check (for reuse)."""
         payload: dict[str, Any] = {
             "raw_fingerprint": raw_dir_fingerprint(raw_dirs),
             "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
         }
+        # 2026-09-24: sweep-width convention archive (which value was used when SW_h
+        # and SW x SFO1 disagree, and what the raw values were)
+        if experiment is not None:
+            sweep = sweep_width_audit(experiment)
+            if sweep:
+                payload["sweep_width"] = sweep
+        # 2026-09-24: carrier convention archive (written to
+        # <dataset_id>.carrier.json during conversion; the report uses it to show
+        # which CAR convention was kept or switched). For multiple parts they are
+        # collected per part, and a disagreement is written into the report.
+        carrier = read_carrier_records(work)
+        if carrier:
+            payload["carrier"] = carrier[0]
+            divergent = [
+                plan
+                for plan in carrier[1:]
+                if json.dumps(plan.get("dims"), sort_keys=True)
+                != json.dumps(carrier[0].get("dims"), sort_keys=True)
+            ]
+            if divergent:
+                merged = dict(carrier[0])
+                merged["fix_lines"] = list(merged.get("fix_lines") or []) + [
+                    tr(
+                        "CAR: the parts do not use the same carrier convention (see the "
+                        "per-part records); merging keeps the first part's reference",
+                    )
+                ]
+                payload["carrier"] = merged
+        # 2026-09-24: the fid.com parameter correction list (the one printed line by
+        # line in the log) is archived with the conversion provenance too; the
+        # "generate FID" report reads it and shows the same corrections (report and log
+        # in one voice).
+        corrections = read_fid_com_correction_records(work)
+        if corrections:
+            payload["fid_com_corrections"] = corrections
+        # 2026-09-24 second revision: the "mode/sign unconfirmed for this dimension =>
+        # no FT -neg applied, please review manually" reminder text and the
+        # per-dimension detail go into the conversion provenance too -- the log
+        # (conversion warning), the report (which reads this) and the import warning
+        # (pulse_pathways.review_lines) all say the same thing.
+        if experiment is not None:
+            # data_dir shares its source with the import warning side (bruker_workflow):
+            # the pulse program may exist only in the raw directory, and omitting it
+            # would make the AQSEQ/sign decisions in the report disagree with the script
+            # (the three places must agree)
+            symbol = mode_symbol_audit(experiment, data_dir=_first_dir(raw_dirs))
+            if symbol.get("lines") or symbol.get("dims"):
+                payload["mode_symbol"] = symbol
         # 2026-09-23: the inter-part field drift result is archived with the conversion
         # provenance (see _correct_group_drift)
         drift = read_field_drift_record(work)
@@ -2736,6 +2984,12 @@ class NMRPipeBackend:
         fid = work / f"{dataset_id}.fid"
         if fid.is_file():
             payload["fid_size"] = fid.stat().st_size
+        # 2026-09-24 review B1: a multi-part product is merged/{dataset_id}.fid or
+        # merged/fid/*.fid -- archiving the real location together with the byte size
+        # lets the reuse test notice empty or truncated merged products
+        products = self._fid_products(work, dataset_id)
+        if products:
+            payload["fid_products"] = products
         try:
             atomic_write_text(
                 self._conversion_record_path(work, dataset_id),
@@ -2764,12 +3018,30 @@ class NMRPipeBackend:
           -> convert again (since 2026-09-23 a multi-part conversion must leave a drift
           conclusion behind; older records are re-run once).
         """
-        fid = work / f"{dataset_id}.fid"
-        if fid.is_file() and fid.stat().st_size == 0:
-            logs.append(tr("Converted fid {p0} is empty; converting again", p0=fid.name))
+        products = self._fid_products(work, dataset_id)
+        empty = [rel for rel, size in products.items() if size == 0]
+        if empty:
+            # 2026-09-24 review B1: empty files among the multi-part products
+            # (merged/...) were never checked before
+            logs.append(
+                tr(
+                    "Converted fid {p0} is empty; converting again",
+                    p0=", ".join(sorted(empty)),
+                )
+            )
             return False
         record = self._conversion_record_path(work, dataset_id)
         if not record.is_file():
+            if require_field_drift:
+                # 2026-09-24 review B2: reusing a multi-part dataset requires the
+                # inter-part field drift conclusion to be in the record -- a wholly
+                # missing record must not bypass this gate (previously it returned True
+                # first, so old projects were neither validated nor re-run)
+                logs.append(tr(
+                    "No conversion record for a multi-part dataset; converting again so the "
+                    "inter-part field drift is checked",
+                ))
+                return False
             logs.append(
                 tr(
                     "Reuse converted fid (no conversion record; the raw data is not "
@@ -2793,6 +3065,21 @@ class NMRPipeBackend:
         if recorded and recorded != raw_dir_fingerprint(raw_dirs):
             logs.append(tr("Raw data changed since the conversion; converting again"))
             return False
+        recorded_products = data.get("fid_products")
+        if isinstance(recorded_products, dict) and recorded_products:
+            # 2026-09-24 review B1: check the byte size of every real location one by
+            # one (a missing file or a changed size means convert again)
+            for rel, expected in recorded_products.items():
+                path = work / rel
+                if not path.is_file() or path.stat().st_size != int(expected):
+                    logs.append(
+                        tr(
+                            "Converted fid {p0} is missing or incomplete; converting again",
+                            p0=rel,
+                        )
+                    )
+                    return False
+        fid = work / f"{dataset_id}.fid"
         size = data.get("fid_size")
         if isinstance(size, int) and fid.is_file() and fid.stat().st_size != size:
             logs.append(
@@ -2913,8 +3200,27 @@ class NMRPipeBackend:
                         shutil.move(str(raw_fid), str(fid_com))
                     text = fid_com.read_text(encoding="utf-8", errors="replace")
                     patched, corrections = patch_fid_com(
-                        text, experiment, data_dir=convert_dir
+                        text,
+                        experiment,
+                        data_dir=convert_dir,
+                        # keys changed by hand are applied afterwards by
+                        # apply_fid_com_overrides; do not rewrite them here from
+                        # acqus/derived values (otherwise the log contradicts the final
+                        # script).
+                        manual_keys=set(fid_com_overrides or ()),
                     )
+
+                    # 2026-09-24: keep the script after "bruker -AUTO + backend patching"
+                    # as the fid.com.auto baseline -- when the script is edited by hand,
+                    # diffing against it carries only the **changed** parameters to each
+                    # part (otherwise a second run would take the previous manual values
+                    # as the baseline and silently drop them).
+                    try:
+                        (dest_work / "fid.com.auto").write_text(
+                            patched, encoding="utf-8", newline="\n"
+                        )
+                    except OSError:
+                        pass
                     if fid_com_overrides:
                         # Manual tuning overrides parameters only; the output name
                         # and structure remain guaranteed by the backend
@@ -2922,6 +3228,26 @@ class NMRPipeBackend:
                             patched, fid_com_overrides
                         )
                         corrections += override_corrections
+                    # 2026-09-24: carrier (CAR) convention archive -- decide from the raw
+                    # bruker -AUTO text which convention to keep (water peak + gamma
+                    # ratio / acqus O1/BF1) and write a sidecar for the "generate FID"
+                    # step report to reuse; CAR keys changed by hand are labelled as
+                    # manual.
+                    audit = carrier_audit(
+                        experiment,
+                        parse_fid_com(text),
+                        manual_keys=set(fid_com_overrides or ()),
+                    )
+                    if audit:
+                        try:
+                            atomic_write_text(
+                                dest_work / f"{experiment.dataset_id}.carrier.json",
+                                json.dumps(audit, ensure_ascii=False, indent=2) + "\n",
+                            )
+                        except OSError:
+                            pass
+                        if audit.get("summary"):
+                            logs.append(str(audit["summary"]))
                     if is_nus:
                         nuslist_path = convert_dir / "nuslist"
                         if nuslist_path.is_file():
@@ -2930,6 +3256,21 @@ class NMRPipeBackend:
                                 patched, nuslist_count
                             )
                             corrections += nus_corrections
+                    # 2026-09-24: write the fid.com parameters changed this time to a
+                    # sidecar; the parameter corrections printed line by line in the log
+                    # must also appear in the "generate FID" report (user 2026-09-24).
+                    # Sweep width and carrier have dedicated archives, so the reader
+                    # skips those two keys to avoid duplicates.
+                    try:
+                        atomic_write_text(
+                            dest_work / f"{experiment.dataset_id}.fid_com_corrections.json",
+                            json.dumps(
+                                {"lines": list(corrections)}, ensure_ascii=False, indent=2
+                            )
+                            + "\n",
+                        )
+                    except OSError:
+                        pass
                     for correction in corrections:
                         logs.append(tr("parameter correction: {p0}", p0=correction))
                     # LF line endings are mandatory: CRLF breaks csh's \ line
@@ -2975,7 +3316,7 @@ class NMRPipeBackend:
                 ndim=experiment.ndim,
             ):
                 return False
-            # SMILE needs only nuslist; intermediate products such as
+            # SMILE only needs nuslist; intermediate products such as
             # ser_full/mask.fid/mask/ are deleted to save space (mask/ is the sampling
             # mask written by nusExpand.tcl -mask in fid.com and can be regenerated)
             for stale in ("ser_full", "mask.fid"):
@@ -3863,6 +4204,28 @@ class NMRPipeBackend:
         directly; the slice form streams PS -rs through xyz2pipe).
         """
         logs: list[str] = []
+        # 2026-09-23 late night (user, d_018): before touching the conversion, check
+        # whether "these parts can be merged" -- differing
+        # TD/SW/O1/SFO1/GRPDLY/FnMODE/PULPROG = refuse to merge (far cheaper than
+        # suspecting it from the spectrum afterwards). Differing NS is only a warning:
+        # per part S is proportional to NS and sigma to sqrt(NS), so the matching
+        # weight w proportional to S/sigma^2 is a constant and a plain sum is the
+        # optimal merge (user 2026-09-24: "adding the fids directly has no weighting
+        # problem either"). The conclusion is archived with the field drift record and
+        # goes into the FID step report.
+        consistency: dict[str, Any] | None = None
+        if len(experiment.segments) >= 2:
+            consistency = check_segment_consistency(experiment.segments)
+            logs += consistency_report_lines(consistency)
+            blocking_keys = [
+                str(entry.get("key", "")) for entry in consistency.get("blocking") or []
+            ]
+            if blocking_keys:
+                return False, logs + [tr(
+                    "The parts are not the same experiment ({p0} differs between parts); merging "
+                    "was refused - re-import them with matching acquisition parameters",
+                    p0=", ".join(blocking_keys),
+                )]
         is_nus = experiment.sampling.mode is SamplingMode.NUS
         if is_nus:
             # 0.2.124: bad points are deleted from the source ser/nuslist with a
@@ -3972,19 +4335,44 @@ class NMRPipeBackend:
                 ):
                     shutil.rmtree(fid_dir)
                     shifted_dir.replace(fid_dir)
-        # 2026-09-23 (user): for multiple parts (segmented acquisition / repeated-experiment
-        # averaging) the direct-dimension peaks are aligned before addNMR sums them -
-        # unaligned field drift broadens or splits the peaks. With a manual
-        # segment_shift_hz the manual values are used (each part already got its PS -rs
-        # above) and no automatic check runs.
+        # 2026-09-23 (user): multiple parts (segmented acquisition / repeated-experiment
+        # averaging) go through the **segment consistency check** first, then the
+        # direct-dimension peaks are aligned, and only then does addNMR sum them --
+        # unaligned field drift broadens or splits the peaks, and "the two parts were
+        # never the same experiment" (differing TD/SW/O1) must refuse the merge
+        # (late-night d_018). With a manual segment_shift_hz the manual values are used
+        # (each part already got its PS -rs above) and no automatic check runs.
         if len(experiment.segments) >= 2:
+            drift_record: dict[str, Any] | None
             if any(shifts):
                 logs.append(tr(
                     "Manual per-part frequency shift (segment_shift_hz) is set; the automatic "
                     "inter-part field drift check was skipped",
                 ))
+                # the manual path is archived too: otherwise the reuse test
+                # (require_field_drift) never sees a field drift conclusion and
+                # re-converts the same batch of data every time
+                drift_record = {
+                    "checked": False,
+                    "reason": "manual-segment-shift",
+                    "parts": len(experiment.segments),
+                    "manual_shifts_hz": {
+                        str(index + 1): round(float(value), 4)
+                        for index, value in enumerate(shifts)
+                        if value
+                    },
+                    "segment_consistency": consistency,
+                }
+                write_field_drift_record(work, drift_record)
             else:
-                self._correct_group_drift(runtime, experiment, work, logs)
+                drift_record = self._correct_group_drift(
+                    runtime, experiment, work, logs, consistency
+                )
+            if drift_record and drift_record.get("blocked"):
+                return False, logs + [tr(
+                    "Inter-part field drift corrections could not be rolled back consistently; "
+                    "merging was refused (a half-corrected merge would be worse than none)",
+                )]
         if not slice_mode:
             if not self._merge_single_fid(
                 runtime, work, len(experiment.segments),
@@ -4033,10 +4421,15 @@ class NMRPipeBackend:
         report: Any,
         logs: list[str],
         audit: QcAuditLog,
-    ) -> bool:
-        """Write one part's drift correction into its fid.com and re-convert it.
+    ) -> str | None:
+        """Write one part's drift correction into that part's fid.com and re-convert it.
 
-        Returns True when the part was patched and re-converted successfully.
+        Returns the **pre-edit fid.com text** on success (the all-or-nothing rollback
+        needs it); returns None when any step fails. ``shift_hz`` is the **cumulative**
+        correction: the second round writes "the value already written last round plus
+        this round's residual" into the script, not the residual alone -- a plain
+        replacement would shrink the correction in the second round (bug fixed
+        2026-09-23).
         """
         seg_work = work / f"seg_{index + 1:03d}"
         fid_com = seg_work / "fid.com"
@@ -4046,20 +4439,63 @@ class NMRPipeBackend:
                 "part {p0}: fid.com not found, field drift correction skipped",
                 p0=index + 1,
             ))
-            return False
-        patched, applied = insert_ps_shift(
-            fid_com.read_text(encoding="utf-8", errors="replace"), shift_hz
-        )
+            return None
+        try:
+            original = fid_com.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            logs.append(tr(
+                "part {p0}: fid.com could not be read ({p1}); field drift correction skipped",
+                p0=index + 1,
+                p1=exc,
+            ))
+            return None
+        patched, applied = insert_ps_shift(original, shift_hz)
         if not applied:
             logs.append(tr(
                 "part {p0}: no MULT line in fid.com, field drift correction skipped",
                 p0=index + 1,
             ))
-            return False
-        fid_com.write_text(patched, encoding="utf-8", newline="\n")
+            return None
+        try:
+            fid_com.write_text(patched, encoding="utf-8", newline="\n")
+        except OSError as exc:
+            logs.append(tr(
+                "part {p0}: fid.com could not be written ({p1}); field drift correction skipped",
+                p0=index + 1,
+                p1=exc,
+            ))
+            return None
         # Same convention as _convert_dir: fid.com lives in the part work directory and its
-        # relative paths (./ser) resolve against the original conversion directory
-        result = runtime.run(["csh", str(fid_com)], cwd=str(raw_dir), timeout=900)
+        # relative paths (./ser) resolve against the original conversion directory.
+        # 2026-09-24 review B6/B7: on failure (including an exception from the runtime,
+        # e.g. the TaskTerminatedError of a user "stop") fid.com is restored to its
+        # pre-edit text -- otherwise the script keeps PS -rs while the data is stale, and
+        # the record still says "not corrected".
+        def _restore(reason: str) -> None:
+            try:
+                fid_com.write_text(original, encoding="utf-8", newline="\n")
+                logs.append(tr(
+                    "part {p0}: the field drift correction was rolled back ({p1})",
+                    p0=index + 1,
+                    p1=reason,
+                ))
+            except OSError as exc:  # noqa: BLE001 - a failed restore must still be reported
+                logs.append(tr(
+                    "part {p0}: the field drift correction could not be rolled back ({p1})",
+                    p0=index + 1,
+                    p1=exc,
+                ))
+
+        try:
+            result = runtime.run(["csh", str(fid_com)], cwd=str(raw_dir), timeout=900)
+        except Exception as exc:  # noqa: BLE001 - an interrupt must not leave half-changed state
+            logs.append(tr(
+                "part {p0} field drift re-conversion failed: {p1}",
+                p0=index + 1,
+                p1=exc,
+            ))
+            _restore(f"{type(exc).__name__}: {exc}")
+            return None
         logs.append(tr(
             "part {p0} field drift re-conversion -rs {p1}Hz: rc={p2}",
             p0=index + 1,
@@ -4067,19 +4503,22 @@ class NMRPipeBackend:
             p2=result.returncode,
         ))
         if result.returncode != 0:
-            return False
+            _restore(f"rc={result.returncode}")
+            return None
         if not self._finalize_converted_fid(
             raw_dir, seg_work, experiment.dataset_id, logs, ndim=experiment.ndim
         ):
-            return False
+            _restore("the converted fid could not be moved into place")
+            return None
         audit.record(
             QcAction(
                 issue_detected=tr("inter-part direct-dimension field drift"),
                 location=f"seg_{index + 1:03d}/fid.com",
-                detection_rule=tr(
-                    "direct-dimension frequency offset of each part vs part 1 (over {p0} Hz)",
-                    p0=DRIFT_HZ_MIN,
-                ),
+                # 2026-09-24 re-check: the audit's detection_rule must state the
+                # criterion that **actually applied** -- it changed from "1 FFT point" to
+                # max(1.5 Hz, 0.2 x line width), and archiving the old convention would
+                # disconnect the record from the behaviour.
+                detection_rule=criterion_rule_text(report),
                 action_taken="fid_com_ps_rs_shift",
                 before_state={
                     "shift_hz": 0.0,
@@ -4090,7 +4529,59 @@ class NMRPipeBackend:
                 extra={"file": "fid.com", "part": index + 1},
             )
         )
-        return True
+        return original
+
+    def _rollback_segment_shifts(
+        self,
+        runtime: CshRuntime,
+        experiment: Experiment,
+        work: Path,
+        saved: dict[int, str],
+        logs: list[str],
+    ) -> bool:
+        """Restore the rewritten parts to their original fid.com and convert again
+        (guaranteeing "either all corrected or none corrected").
+
+        Returns False when any restore fails -- the caller then blocks the merge: a
+        half-corrected merge input (addNMR shifted some parts and not others) is worse
+        than no correction at all, which is exactly what made the d_018 spectrum "very
+        strange".
+        """
+        ok_all = True
+        for index in sorted(saved):
+            seg_work = work / f"seg_{index + 1:03d}"
+            fid_com = seg_work / "fid.com"
+            raw_dir = Path(experiment.segments[index])
+            try:
+                fid_com.write_text(saved[index], encoding="utf-8", newline="\n")
+            except OSError as exc:
+                logs.append(tr(
+                    "part {p0}: the field drift correction could not be rolled back ({p1})",
+                    p0=index + 1,
+                    p1=exc,
+                ))
+                ok_all = False
+                continue
+            try:
+                result = runtime.run(["csh", str(fid_com)], cwd=str(raw_dir), timeout=900)
+            except Exception as exc:  # noqa: BLE001 - report an interrupt as a failure too
+                logs.append(tr(
+                    "part {p0}: the field drift rollback failed: {p1}",
+                    p0=index + 1,
+                    p1=exc,
+                ))
+                ok_all = False
+                continue
+            logs.append(tr(
+                "part {p0} drift correction rolled back (fid.com restored): rc={p1}",
+                p0=index + 1,
+                p1=result.returncode,
+            ))
+            if result.returncode != 0 or not self._finalize_converted_fid(
+                raw_dir, seg_work, experiment.dataset_id, logs, ndim=experiment.ndim
+            ):
+                ok_all = False
+        return ok_all
 
     def _correct_group_drift(
         self,
@@ -4098,17 +4589,30 @@ class NMRPipeBackend:
         experiment: Experiment,
         work: Path,
         logs: list[str],
+        consistency: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
-        """Inter-part field drift: measure each part's direct peak, patch its fid.com, re-convert.
+        """Inter-part field drift: measure each part's offset from the reference part and,
+        when it is over the criterion, patch that part's fid.com (PS -rs) and re-convert,
+        then re-check.
 
-        Reference = part 1; the criterion (Hz: |d| > 1.5, ppm recorded only) and the sign
-        convention
-        live in ``workflow/field_drift``. The result is written to ``work/field_drift.json``
-        (the conversion provenance carries it into ``*.fid.conversion.json``) and every patched
-        part is recorded in the QC audit. When a peak cannot be measured, or a residual stays
-        over the threshold after re-checking, it is only reported - the conversion is never
-        blocked and the shift is never escalated.
+        Reference = part 1; the criterion is **linewidth-based** (see
+        ``workflow/field_drift``): the correction only happens when the offset exceeds
+        ``max(1.5 Hz, 0.2 x linewidth)`` (a relative broadening above 2% is what
+        measurably affects the peak shape); "measurable" must first pass a coherence
+        statistic against a shuffled per-trace phase control and then a random-half
+        resampling stability gate; a part that cannot be measured is only reported, never
+        corrected, and never recorded as "within the criterion". The result is written to
+        ``work/field_drift.json`` (the conversion provenance carries it into
+        ``*.fid.conversion.json``) and every patched part is recorded separately in the
+        QC audit.
+
+        **all-or-nothing** (user 2026-09-23, after d_018 "some were corrected and some
+        were not, and they were all merged anyway"): the parts over the criterion are
+        either all corrected or none is -- if one part fails mid-way, the parts already
+        changed are rolled back to uncorrected and reported honestly; only when the
+        rollback also fails is ``blocked`` set, and the caller then refuses the merge.
         """
+        parts = len(experiment.segments)
         axes = direct_axis_hz(experiment)
         if axes is None:
             logs.append(tr(
@@ -4123,14 +4627,28 @@ class NMRPipeBackend:
         record: dict[str, Any] = {
             "checked": True,
             "reference": 1,
+            "parts": parts,
             "sw_hz": round(sw_hz, 3),
             "hz_min": DRIFT_HZ_MIN,
+            "points_min": DRIFT_POINTS_MIN,
             "ppm_reference": DRIFT_PPM_THRESHOLD,
             "rounds": [],
             "corrected_parts": [],
+            "applied_shift_hz": {},
+            "segment_consistency": consistency,
+            "merge": {
+                "parts": parts,
+                "policy": "all-or-nothing",
+                "corrected_parts": [],
+                "uncorrected_parts": [],
+                "blocked": False,
+            },
         }
-        last = None
-        for _round_index in range(1, MAX_ROUNDS + 1):
+        applied: dict[int, float] = {}
+        saved: dict[int, str] = {}
+        needed: set[int] = set()
+        last: GroupDriftResult | None = None
+        for round_index in range(1, MAX_ROUNDS + 1):
             inputs = self._segment_fid_inputs(work, experiment)
             if any(not paths for paths in inputs):
                 logs.append(tr(
@@ -4138,6 +4656,7 @@ class NMRPipeBackend:
                 ))
                 record["checked"] = False
                 record["reason"] = "missing-part-fid"
+                last = None
                 break
             report = detect_group_drift(inputs, sw_hz=sw_hz, sf_mhz=sf_mhz)
             logs += report.reports
@@ -4145,14 +4664,113 @@ class NMRPipeBackend:
             last = report
             if not report.needs_shift:
                 break
-            for index, shift_hz in sorted(report.needs_shift.items()):
-                if self._apply_segment_shift(
-                    runtime, experiment, work, index, shift_hz, report, logs, audit
+            needed.update(report.needs_shift)
+            failed: list[int] = []
+            for index, residual_hz in sorted(report.needs_shift.items()):
+                target = float(residual_hz) + applied.get(index, 0.0)
+                original = self._apply_segment_shift(
+                    runtime, experiment, work, index, target, report, logs, audit
+                )
+                if original is None:
+                    failed.append(index)
+                    continue
+                saved.setdefault(index, original)
+                applied[index] = target
+            if failed and applied:
+                logs.append(tr(
+                    "Inter-part field drift: {p0} part(s) could not be corrected while {p1} "
+                    "part(s) were already shifted; rolling every correction back so the merged "
+                    "parts share the same (uncorrected) frequency axis",
+                    p0=len(failed),
+                    p1=len(applied),
+                ))
+                if not self._rollback_segment_shifts(
+                    runtime, experiment, work, saved, logs
                 ):
-                    record["corrected_parts"].append(index + 1)
+                    record["blocked"] = True
+                    record["merge"]["blocked"] = True
+                    break
+                applied.clear()
+                saved.clear()
+                record["rolled_back"] = True
+                break
+            if failed:
+                logs.append(tr(
+                    "Inter-part field drift: none of the {p0} part(s) above the criterion could "
+                    "be corrected; they are merged without a frequency shift",
+                    p0=len(failed),
+                ))
+                break
+            if round_index == MAX_ROUNDS:
+                # the last round changed things too -> measure once more for the
+                # **post-change** true residual (no further correction)
+                inputs = self._segment_fid_inputs(work, experiment)
+                if not any(not paths for paths in inputs):
+                    verify = detect_group_drift(inputs, sw_hz=sw_hz, sf_mhz=sf_mhz)
+                    record["rounds"].append(verify.as_dict())
+                    last = verify
+                break
         if last is not None:
-            record["max_abs_ppm_after"] = round(last.max_abs_ppm(), 5)
-            record["within_threshold_after"] = not last.needs_shift
+            criterion = float(last.criterion_hz or DRIFT_HZ_MIN)
+            largest = last.largest_offset()
+            record["point_hz"] = (
+                last.point_hz if last.point_hz is None else round(last.point_hz, 4)
+            )
+            record["criterion_hz_after"] = round(criterion, 4)
+            record["linewidth_hz"] = (
+                None if last.linewidth_hz is None else round(last.linewidth_hz, 3)
+            )
+            record["criterion_basis"] = last.criterion_basis
+            # only **trustworthy** measurements are counted: skipped parts leave
+            # noise-level numbers (see GroupDriftResult)
+            record["max_abs_hz_after"] = (
+                None if largest is None else round(abs(largest[1]), 4)
+            )
+            record["max_abs_ppm_after"] = (
+                None if largest is None else round(abs(largest[0]), 5)
+            )
+            # same convention as the **measured offset** (the old implementation wrote
+            # "whether this round needs another correction", so a measured 4.0 Hz already
+            # past the 1.5 Hz criterion still wrote within_threshold_after: true --
+            # self-contradictory)
+            record["within_threshold_after"] = last.within_criterion()
+        corrected_parts = sorted(index + 1 for index in applied)
+        uncorrected_parts = sorted(
+            index + 1 for index in needed if index not in applied
+        )
+        record["corrected_parts"] = corrected_parts
+        record["applied_shift_hz"] = {
+            str(index + 1): round(float(value), 4)
+            for index, value in sorted(applied.items())
+        }
+        record["merge"]["corrected_parts"] = corrected_parts
+        record["merge"]["uncorrected_parts"] = uncorrected_parts
+        if record.get("blocked"):
+            logs.append(tr(
+                "Inter-part field drift: the corrections could not be rolled back consistently; "
+                "merging was refused",
+            ))
+        elif uncorrected_parts:
+            logs.append(tr(
+                "Merging {p0} part(s): inter-part field drift was not corrected for {p1} part(s) "
+                "({p2}) - every part was merged without a frequency shift so the merged data "
+                "stays internally consistent",
+                p0=parts,
+                p1=len(uncorrected_parts),
+                p2=", ".join(str(part) for part in uncorrected_parts),
+            ))
+        elif corrected_parts:
+            logs.append(tr(
+                "Merging {p0} part(s): part(s) {p1} were corrected for inter-part field drift, "
+                "the rest were within the criterion",
+                p0=parts,
+                p1=", ".join(str(part) for part in corrected_parts),
+            ))
+        else:
+            logs.append(tr(
+                "Merging {p0} part(s): no inter-part field drift correction was applied",
+                p0=parts,
+            ))
         write_field_drift_record(work, record)
         return record
 
@@ -4443,12 +5061,21 @@ class NMRPipeBackend:
             )
         text = "".join(" ".join(str(v) for v in point) + "\n" for point in valid)
         (work / "nuslist").write_text(text, encoding="utf-8")
-        logs.append(tr(
-            "Merge nuslist:{p0} sampling point (bad point "
-            "{p1})",
-            p0=len(valid),
-            p1=len(bad),
-        ))
+        # 2026-09-23 (user: "bad point deleted" next to "bad point 0" read as a
+        # contradiction): this line reports how many were dropped **during this merge**, not how
+        # many were deleted in total
+        if bad:
+            logs.append(tr(
+                "Merge nuslist:{p0} sampling point (another {p1} bad point(s) dropped in "
+                "this merge)",
+                p0=len(valid),
+                p1=len(bad),
+            ))
+        else:
+            logs.append(tr(
+                "Merge nuslist:{p0} sampling point (no new bad point in this step)",
+                p0=len(valid),
+            ))
         return len(valid), bad
 
     def _zero_bad_point_fid(
@@ -4680,4 +5307,3 @@ class NMRPipeBackend:
             return False, logs + [tr("Not generated {p0}", p0=out_file)], spectrum
         logs.append(tr("spectrum -> {p0}", p0=spectrum))
         return True, logs, spectrum
-

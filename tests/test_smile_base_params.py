@@ -1,11 +1,14 @@
-"""SMILE The source of the base parameter of optimisation is consistent with the template
-(0.2.199-patch29hz-Revision 18). user 2026-09-11: "Didn't I say at the beginning that only the
-smile parameter should be changed based on the final script? How could I change it to this?" --
-The original implementation `_last_spectrum_params` only recognizes `process`/`reconstruct_nus`,
-while the normal unified route registration is `phase_optimize_unified` -> base parameter It is
-always empty, and SMILE template is rebuilt from scratch (default window/PS(0,0)/POLY auto),
-which is not equivalent to running the script at the end, and will report "insufficient memory"
-according to the default wide window."""
+"""Where SMILE optimization base parameters come from, and template consistency
+(0.2.199-patch29hz-fix18).
+
+The user, 2026-09-11: "didn't I say from the start that we only change the smile
+parameters against the final script, how did it end up changing this" -- the old
+`_last_spectrum_params` recognized only `process`/`reconstruct_nus`, while the normal
+unified route registers `phase_optimize_unified` -> the base parameters were always empty
+and the SMILE template was rebuilt from scratch (default window / PS(0,0) / POLY auto),
+which neither equals the final-run script nor avoids reporting "not enough memory" against
+the default wide window.
+"""
 
 from __future__ import annotations
 
@@ -38,8 +41,9 @@ def _manager_with_spectrum_run(tmp_path: Path, *, ref: str, data_id: str = "d_00
 
 
 def test_unified_run_is_used_as_base_params(tmp_path: Path) -> None:
-    """The running parameter of the unified route (phase_optimize_unified) should be used as the
-    base parameter of SMILE."""
+    """The run parameters of the unified route (phase_optimize_unified) must serve as the
+    SMILE base parameters.
+    """
     manager, exp_id, data_id = _manager_with_spectrum_run(
         tmp_path, ref="phase_optimize_unified"
     )
@@ -54,8 +58,9 @@ def test_unified_run_is_used_as_base_params(tmp_path: Path) -> None:
 
 
 def test_other_data_run_is_ignored(tmp_path: Path) -> None:
-    """Strict data_id ownership: Spectrum operations of other data cannot be used as the base
-    parameter of this data."""
+    """Strict data_id ownership: a spectrum run of another data entry must not become this
+    data entry's base parameters.
+    """
     manager, exp_id, _data_id = _manager_with_spectrum_run(
         tmp_path, ref="phase_optimize_unified", data_id="d_002"
     )
@@ -65,8 +70,9 @@ def test_other_data_run_is_ignored(tmp_path: Path) -> None:
 
 
 def test_non_spectrum_run_is_ignored(tmp_path: Path) -> None:
-    """Peak picking/Operation of non-spectral steps such as analysis parameter does not
-    participate."""
+    """Run parameters of non-spectrum steps (peak picking, analysis, ...) do not take
+    part.
+    """
     manager, exp_id, data_id = _manager_with_spectrum_run(tmp_path, ref="pick_peaks")
     ctrl = ProcessingController(manager)
 
@@ -74,8 +80,9 @@ def test_non_spectrum_run_is_ignored(tmp_path: Path) -> None:
 
 
 def test_direct_phase_override_accepts_run_key() -> None:
-    """Template direct dimension phase: Explicit direct_phase_override takes precedence, otherwise
-    the running record direct_phase will be used."""
+    """Template direct-dimension phase: an explicit direct_phase_override wins, otherwise
+    the run record's direct_phase is used.
+    """
     from backend.nmrpipe_backend import direct_phase_override
 
     assert direct_phase_override({"direct_phase_override": [10.0, 1.0]}) == (10.0, 1.0)

@@ -1,4 +1,4 @@
-"""Script runs the pre-detector test(0.2.199-patch29h)."""
+"""Pre-run script detector tests (0.2.199-patch29h)."""
 
 from __future__ import annotations
 
@@ -35,11 +35,11 @@ bruk2pipe -verb -in ./ser \\
 
 
 def test_bruk2pipe_fidcom_has_no_false_positives() -> None:
-    """The two false positives measured on d_015 (2026-09-23).
+    """Two false positives verified on real data (d_015, 2026-09-23): MULT is a legal
+    function, and -out sits on the line after a continuation.
 
-    MULT is a valid nmrPipe function, and -out sits on the continuation line: the old
-    check matched ``nmrPipe`` plus ``.*`` -out (which does not cross lines) and therefore
-    reported "no output sink" for every conversion script.
+    The old implementation matched -out with ``nmrPipe`` + ``.*`` (``.*`` does not cross
+    lines) to detect the output write, so conversion scripts always false-positived.
     """
     assert check_script(FID_COM) == []
 
@@ -49,24 +49,27 @@ def test_good_script_no_warnings() -> None:
 
 
 def test_continuation_typo_backslash_h() -> None:
-    """The line continuation character at the end of the line is incorrectly entered `\\h` (user
-    measured scenario) -> clear prompt."""
+    """A continuation character mistyped as `\\h` at end of line (a user-observed
+    scenario) -> an explicit prompt.
+    """
     bad = GOOD_SCRIPT.replace(
         "| nmrPipe -fn ZF -size 4096 \\\n",
         "| nmrPipe -fn ZF -size 4096 \\h\n",
     )
     warnings = check_script(bad)
-    assert any("line continuation character" in w and "h" in w for w in warnings), warnings
+    assert any("续行符" in w and "h" in w for w in warnings), warnings
 
 
 def test_missing_continuation_before_pipe() -> None:
-    """The previous line is missing `\\`, and the next line starts with | -> pipe break prompt."""
+    """The previous line is missing `\\` and the next starts with | -> a broken-pipeline
+    prompt.
+    """
     bad = GOOD_SCRIPT.replace(
         "| nmrPipe -fn ZF -size 4096 \\\n",
         "| nmrPipe -fn ZF -size 4096\n",
     )
     warnings = check_script(bad)
-    assert any("missing line continuation character" in w for w in warnings), warnings
+    assert any("缺续行符" in w for w in warnings), warnings
 
 
 def test_missing_output_write() -> None:
@@ -91,7 +94,7 @@ def test_unknown_function() -> None:
 def test_sp_params_out_of_range() -> None:
     bad = GOOD_SCRIPT.replace("-off 0.45 -end 0.98", "-off 0.9 -end 0.1")
     warnings = check_script(bad)
-    assert any("SP window parameter exception" in w for w in warnings), warnings
+    assert any("SP 窗参数异常" in w for w in warnings), warnings
 
 
 def test_empty_script() -> None:

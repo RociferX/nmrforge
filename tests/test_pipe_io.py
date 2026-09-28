@@ -1,5 +1,5 @@
-"""NMRPipe replica unpacking test (reconstruction plane phase search has been deleted with
-workflow.recon_phase_search, 0.2.164)."""
+"""NMRPipe complex unpacking tests (the reconstruction-plane phase search was removed
+together with workflow.recon_phase_search, 0.2.164)."""
 
 from __future__ import annotations
 

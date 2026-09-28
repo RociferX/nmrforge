@@ -1,5 +1,5 @@
-"""2D leaves residuals: the direct dimension segment is not skipped silently when it cannot be cut
-off (0.2.199-patch29hz - fix 24, question 7)."""
+"""2D hold-out residual: do not skip silently when the direct dimension segment cannot be
+cut off (0.2.199-patch29hz - fix 24, question 7)."""
 
 from __future__ import annotations
 
@@ -12,15 +12,15 @@ from backend.nmrpipe_backend import NMRPipeBackend
 
 
 class _FakeRuntime:
-    """False csh: Do not run, unify rc=0 (missing products are handled by the candidate loop with
-    ok=False)."""
+    """Fake csh: does not really run, always rc=0 (missing products are handled by the candidate
+    loop with ok=False)."""
 
     def run(self, args, cwd=None, timeout=None):
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
 
 def _experiment(root: Path) -> SimpleNamespace:
-    """2D NUS Experiment: Holdout sets require nuslist (single column complex point index)."""
+    """2D NUS experiment: the holdout set needs nuslist (single-column complex point indices)."""
     (root / "nuslist").write_text(
         "".join(str(i) + chr(10) for i in range(12)), encoding="utf-8"
     )
@@ -32,7 +32,7 @@ def _experiment(root: Path) -> SimpleNamespace:
 
 
 def _backend(monkeypatch) -> NMRPipeBackend:
-    """Backend: fake csh + fake script generation (do not run real NMRPipe)."""
+    """Backend: fake csh + fake script generation (never runs real NMRPipe)."""
     monkeypatch.setattr(npb, "CshRuntime", _FakeRuntime)
 
     def fake_reconstruct_nus(self, experiment, params=None, **kwargs):
@@ -43,8 +43,8 @@ def _backend(monkeypatch) -> NMRPipeBackend:
 
 
 def test_missing_direct_segment_logs_skip(tmp_path: Path, monkeypatch) -> None:
-    """The line before SMILE is not TP -> build_2d_direct_only_script returns empty -> log must be
-    left."""
+    """The line before SMILE is not TP -> build_2d_direct_only_script returns empty -> a log must
+    be left."""
     monkeypatch.setattr(
         script_generator, "build_2d_direct_only_script", lambda text: ""
     )
@@ -59,15 +59,14 @@ def test_missing_direct_segment_logs_skip(tmp_path: Path, monkeypatch) -> None:
     assert result["success"] is False  # 0 candidates succeeded: no ranking, no promotion
     assert result["n_ok"] == 0
     assert any(
-        log.startswith("2D hold-out residual: cannot extract")
+        log.startswith("2D 留出残差:无法从终跑脚本截出")
         for log in result["logs"]
     )
-    # The holdout set is still in effect, but there is no residual indicator.
-    assert result["holdout_file"]
+    assert result["holdout_file"]  # Holdout set still applies, only no residual metric.
 
 
 def test_direct_segment_present_logs_step1(tmp_path: Path, monkeypatch) -> None:
-    """The direct dimension segment is intercepted -> no skip prompt appears, but step1 rc log."""
+    """Direct-dim segment can be cut -> no skip prompt appears, but a step1 rc log."""
     monkeypatch.setattr(
         script_generator,
         "build_2d_direct_only_script",
@@ -82,9 +81,7 @@ def test_direct_segment_present_logs_step1(tmp_path: Path, monkeypatch) -> None:
         holdout_ratio=0.25,
     )
     assert not any(
-        log.startswith("2D hold-out residual: cannot extract")
+        log.startswith("2D 留出残差:无法从终跑脚本截出")
         for log in result["logs"]
     )
-    assert any(
-        log.startswith("step1 2D direct dimension:") for log in result["logs"]
-    )
+    assert any(log.startswith("step1 2D 直接维:") for log in result["logs"])

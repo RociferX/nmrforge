@@ -1,8 +1,15 @@
-"""Unified optimisation result report format (0.2.157): pipeline parameter report is shared with
-log end summary. Data source: Generate spectrum actual effective parameter (stepwise
-merged_params / unified process result, key: phase_route, direct_phase, phases, baseline,
-window, zero_fill, diagnostics, backend_runs). Data quality diagnosis details are displayed
-directly here, and the running log is no longer referenced."""
+"""Unified optimisation result report format (0.2.157): the pipeline parameter report is shared
+with the end-of-log summary.
+
+Data source: the effective parameters of "Generate spectrum" (stepwise merged_params / unified
+process result, keys: phase_route, direct_phase, phases, baseline, window, zero_fill,
+backend_runs). **The data quality diagnosis is not part of this module** -- it belongs to the
+"Generate FID" step (2026-09-23 user: "the Generate spectrum step should also drop the
+intermediate data quality diagnosis, because it is no longer this stage's business"), and is
+carried by that step's log and step report (``direct_diagnostics.format_fid_step_report``).
+Even when a caller passes the whole ``run.params["diagnostics"]`` in, this module does not
+render it.
+"""
 
 from __future__ import annotations
 
@@ -50,17 +57,39 @@ def format_opt_mode_map(cfg: Any) -> str:
     return " ".join(parts) or tr("default")
 
 
-REPORT_MARK = tr("== spectrum quality and data quality report ==")
+def spectrum_report_title() -> str:
+    """Title of the spectrum quality report (the single definition shared by producer and
+    extractor, 2026-09-23).
+
+    Real bug fixed on 2026-09-23: previously the producer (phase_routes._append_final_summary /
+    the manual path) and the extractor (report_text_from_logs) each wrote their own title
+    literal, so changing the title made the report unextractable for good -- the report in the
+    "Generate spectrum" log was still announced, but {spectrum}.quality.json stopped being
+    refreshed and the GUI step detail forever showed "no report record". Both sides now call
+    this function. The language is taken at call time (an import-time constant would mismatch
+    after a UI language switch).
+    """
+    return tr("== spectrum quality report ==")
 
 
 def report_text_from_logs(logs: list[str]) -> str | None:
-    """Extract the report text (0.2.199-patch29d) from the unified process log.
-    phase_routes._append_final_summary will append all the lines starting with "== spectrum
-    quality and data quality report ==" into logs; the working thread generates the spectrum and
-    writes {spectrum} accordingly. quality.json, GUI When the cache misses, the record is read
-    directly, and the entire ft3 is no longer reread in the main thread."""
+    """Extract the report text from the unified process log (0.2.199-patch29d).
+
+    phase_routes._append_final_summary / the manual path appends every line starting with
+    "== spectrum quality report ==" to logs; after generating a spectrum the worker thread
+    writes {spectrum}.quality.json from it, and the GUI reads that record directly on a cache
+    miss instead of re-reading the whole ft3 in the main thread. The title comes from
+    ``spectrum_report_title()`` -- the same source as the producer, no more separate copies.
+    """
+    marks = (
+        spectrum_report_title(),
+        # Old title (before 2026-09-23 the data quality section was part of this report):
+        # tolerated when extracting.
+        tr("== spectrum quality and data quality report =="),
+    )
     for i, line in enumerate(logs):
-        if line.strip().startswith(REPORT_MARK):
+        head = line.strip()
+        if any(head.startswith(mark) for mark in marks):
             return "\n".join(logs[i:])
     return None
 
@@ -70,11 +99,13 @@ def write_quality_record(
     params: dict,
     text: str,
 ) -> None:
-    """Write {spectrum}.quality.json to report the cache record (same fingerprint as GUI
-    _cached_spectrum_report). fp = mtime_ns|size,params_fp = sha256(params)[:16];GUI will be
-    reused only after verification when reading is consistent. Changes in the spectrum or
-    parameter will automatically become invalid. Silent failure when writing to disk (cache
-    only)."""
+    """Write the {spectrum}.quality.json report cache record (same fingerprint as GUI
+    _cached_spectrum_report).
+
+    fp = mtime_ns|size, params_fp = sha256(params)[:16]; the GUI reuses the record only when it
+    verifies identically on read, so a changed spectrum or parameter invalidates it
+    automatically. A failed write is silent (cache only).
+    """
     import hashlib
     import json
     from pathlib import Path
@@ -110,18 +141,17 @@ def spectrum_quality_report_lines(
     baseline_scores: dict[str, float] | None = None,
     progress: Callable[[str], None] | None = None,
 ) -> list[str]:
-    """◆ Final spectrum chart quality section (0.2.169-supplement): comprehensive judgment + sub-
-    item grade score + baseline indicator (worst storage axis) + inspection description +
-    baseline uneven reason. The summary at the end of the log is shared with the pipeline
-    parameter report; The spectrum is unreadable/If the evaluation fails, return a single line
-    description..
+    """◆ Final spectrum quality section (0.2.169-supplement): overall verdict + per-item grade
+    scores + baseline indicators (worst storage axis) + inspection notes + reason for an uneven
+    baseline. Shared by the end-of-log summary and the pipeline parameter report; an unreadable
+    spectrum or a failed evaluation returns a single explanatory line.
 
-    sign_mode defaults to ``"auto"`` (2026-09-20): a standalone evaluation entry point
-    does not know the experiment type, so QC judges "single-sign positive / single-sign
-    negative / both signs coexist" by itself and writes that judgement into the
-    inspection notes (a spectrum the user processed may be single-sign and all
-    negative); callers inside the pipeline still pass the experiment convention
-    explicitly (``"uniform"``/``"mixed"``).
+    sign_mode defaults to ``"auto"`` (2026-09-20): a standalone evaluation entry point cannot
+    know the experiment type, so QC decides by itself between "single-sign positive peaks /
+    single-sign negative peaks / both signs present" and writes that verdict into the
+    inspection notes (a user-supplied spectrum may be single-sign and all negative); calls
+    inside the pipeline still pass the experiment convention explicitly
+    (``"uniform"``/``"mixed"``).
     """
     import numpy as np
 
@@ -139,9 +169,9 @@ def spectrum_quality_report_lines(
 
         from core.qc import baseline_quality, spectrum_quality
 
-        # 0.2.199-patch29z: Output progress of each stage of quality assessment (after the final run
-        # is completed, the user can see what is currently being evaluated instead of no log for a
-        # long time).
+        # 0.2.199-patch29z: each stage of the quality evaluation reports progress (after the
+        # final run the user can see what is currently being evaluated instead of a long
+        # stretch without logs)
         if progress is not None:
             progress(tr("spectrum quality assessment: reading final spectrum"))
         _dic, data = ng.pipe.read(str(spectrum_path))
@@ -152,10 +182,10 @@ def spectrum_quality_report_lines(
         if progress is not None:
             progress(tr("spectrum quality assessment: baseline worst axis analysis in progress"))
         comps = q.score.components
-        # 0.2.199-patch29z: The baseline score is consistent with the optimisation---Directly use
-        # the optimisation grid to select the configured axis score (the worst axis representative),
-        # without separately evaluating the final spectrum (the difference between the two
-        # benchmarks will cause optimisation 66.8 to report 50 confusion).
+        # 0.2.199-patch29z: the baseline score matches the optimisation -- use the per-axis score
+        # of the configuration selected in the optimisation grid (the worst axis represents it)
+        # instead of re-evaluating the final spectrum (two different baselines caused the
+        # confusion of optimisation 66.8 versus report 50)
         if baseline_scores and baseline_scores.values():
             opt_worst = min(baseline_scores.values())
             if 0.0 < opt_worst <= 100.0:
@@ -171,8 +201,7 @@ def spectrum_quality_report_lines(
             "rollback": tr("✗ Unqualified"),
         }.get(str(q.decision.value), str(q.decision.value))
         lines = [tr("◆ Final spectrum image quality (evaluation after processing is completed)")]
-        lines.append(
-            tr(
+        lines.append(tr(
             " Comprehensive judgment: {p0}(Comprehensive score "
             "{p1:.1f})",
             p0=decision_label,
@@ -236,12 +265,12 @@ def spectrum_quality_report_lines(
                 )
             )
         return lines
-    except Exception as exc:  # noqa: BLE001 - Quality assessment failure does not block reporting.
+    except Exception as exc:  # noqa: BLE001 - a failed quality evaluation must not block the report
         return [tr("◆ Final spectrum image quality: evaluation skipped ({p0})", p0=exc)]
 
 
 def format_optimization_report(params: dict) -> list[str]:
-    """Unify optimisation result reporting lines (with two-space indentation, 0.2.157)."""
+    """Unified optimisation result report lines (with a two-space indent, 0.2.157)."""
     lines: list[str] = []
     route = params.get("phase_route")
     if route is not None:
@@ -251,8 +280,8 @@ def format_optimization_report(params: dict) -> list[str]:
     direct = params.get("direct_phase")
     if direct is not None:
         lines.append(tr(" direct dimension phase: {p0}", p0=format_phase_pair(direct)))
-    # 0.2.162-patch15: Displayed when the user specifies the final direct dimension range (the empty
-    # end is displayed by default).
+    # 0.2.162-patch15: shown when the user sets the direct-dimension range of the final run
+    # (an empty end shows the default)
     final_lo = params.get("final_ext_lo")
     final_hi = params.get("final_ext_hi")
     if final_lo is not None or final_hi is not None:
@@ -273,14 +302,10 @@ def format_optimization_report(params: dict) -> list[str]:
     zero_fill = params.get("zero_fill")
     if zero_fill:
         lines.append(tr(" zero filling: {p0}", p0=format_opt_mode_map(zero_fill)))
-    diagnostics = params.get("diagnostics") or {}
-    reports = diagnostics.get("reports") or []
-    if reports:
-        lines.append(tr(" Data quality diagnosis:"))
-        for i, report in enumerate(reports, 1):
-            lines.append(f"    {i}. {report}")
-    elif diagnostics:
-        lines.append(tr(" Data quality diagnostics: None"))
+    # 2026-09-24: the whole ``diagnostics`` block is **not rendered here** -- the FID-layer
+    # diagnosis belongs to the "Generate FID" step (``run.params`` really does carry
+    # diagnostics, but no caller should display that stage's conclusions in the spectrum
+    # report). The historical line "Data quality diagnosis: None" is gone with it.
     runs = params.get("backend_runs")
     if runs is not None:
         lines.append(tr(" Number of backend runs: {p0}", p0=runs))

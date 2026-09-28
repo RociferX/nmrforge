@@ -1,5 +1,4 @@
-"""Phase A test: global context bar + spectrum linkage (step/parameter summary, positioning, 3D
-memory)."""
+"""Phase A tests: context bar + spectrum linkage (step/parameter summary, locate, 3D memory)."""
 
 from __future__ import annotations
 
@@ -120,16 +119,15 @@ def test_context_bar_follows_selection(
     window.project_tree.select_data(exp_id, data_id)
     text = window.context_bar.text()
     assert "demo" in text and "HSQC" in text
-    assert data_id in text and "Already imported" in text
+    assert data_id in text and "已导入" in text
     window.close()
 
 
 def test_pipeline_buttons_gated_by_prerequisites(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """0.2.163-patch14: When the pre-step is not completed (LOCKED), the subsequent steps (spectrum
-    generation/peak selection) Not available for operation/artificial button and the
-    programmatic run entry are also rejected."""
+    """0.2.163-patch14: while a prerequisite step is incomplete (LOCKED), later steps (spectrum
+    generation / peak picking) expose no run or manual button, and programmatic runs are refused."""
     from gui.main_window import MainWindow
     from gui.pipeline_state import record_step_success
 
@@ -145,19 +143,19 @@ def test_pipeline_buttons_gated_by_prerequisites(
     pipeline = window.center_panel.pipeline
     pipeline.set_selection("data", exp_id, data_id)
     rows = pipeline._rows
-    # The window is not shown, use isHidden to reflect the visible and hidden status of setVisible.
-    # fid is not generated: spectrum/peaks All LOCKED -> No operation/artificial button.
+    # The window is not shown, so isHidden mirrors setVisible's state
+    # fid not generated: spectrum/peaks are all LOCKED → no run/manual buttons
     for sid in ("spectrum", "peaks"):
         assert rows[sid].manual_button.isHidden(), sid
         assert rows[sid].run_button.isHidden(), sid
-    # 0.2.199-patch29dm: Manual button is hidden when fid is not automatically processed (READY).
+    # 0.2.199-patch29dm: the manual button stays hidden until fid is auto-processed (READY)
     assert rows["fid"].manual_button.isHidden()
 
-    # Programmed run entry is also rejected by the front guard (does not enter RUNNING/rear end).
+    # The programmatic run entry is refused by the prerequisite guard too (never reaches RUNNING)
     messages: list[str] = []
     pipeline.log_message.connect(messages.append)
     pipeline._on_run_requested("peaks")
-    assert any("Prerequisite steps not completed" in m for m in messages)
+    assert any("前置步骤未完成" in m for m in messages)
     assert "RUNNING" not in rows["peaks"].status_label.text()
 
     def _ready(sid: str, product: Path) -> None:
@@ -165,15 +163,14 @@ def test_pipeline_buttons_gated_by_prerequisites(
         product.write_bytes(b"x")
         manager.save()
         pipeline.refresh()
-        # 0.2.199-patch29dl(user): No manual script for peak selection, the manual button is always
-        # hidden.
+        # 0.2.199-patch29dl (user): peak picking has no manual script, so its button stays hidden
         if sid == "peaks":
             assert rows[sid].manual_button.isHidden(), sid
         else:
             assert not rows[sid].manual_button.isHidden(), sid
         assert not rows[sid].run_button.isHidden(), sid
 
-    # Generate FID -> spectrum READY;peaks still LOCKED.
+    # FID generated → spectrum READY; peaks still LOCKED
     fid = manager.data_dir(exp_id, data_id, "process") / f"{data_id}.fid"
     fid.parent.mkdir(parents=True, exist_ok=True)
     fid.write_bytes(b"fid")
@@ -181,14 +178,13 @@ def test_pipeline_buttons_gated_by_prerequisites(
     record_step_success(manager, exp_id, data_id, "fid")
     manager.save()
     pipeline.refresh()
-    # 0.2.199-patch29dm: The manual button appears after successful automatic processing of fid
-    # (directly read fid.com).
+    # 0.2.199-patch29dm: after a successful auto fid run the manual button appears (reads fid.com)
     assert not rows["fid"].manual_button.isHidden()
     assert not rows["spectrum"].manual_button.isHidden()
     assert not rows["spectrum"].run_button.isHidden()
     assert rows["peaks"].manual_button.isHidden()
 
-    # Generate spectrum -> peaks READY.
+    # Spectrum generated → peaks READY
     spectra = manager.data_dir(exp_id, data_id, "spectra")
     spectra.mkdir(parents=True, exist_ok=True)
     spec = spectra / f"{data_id}.ft2"
@@ -197,21 +193,19 @@ def test_pipeline_buttons_gated_by_prerequisites(
     record_step_success(manager, exp_id, data_id, "spectrum")
     _ready("peaks", spec)
 
-    # Peak table -> peaks completed (the analysis step has been deleted and the process ends with
-    # peak selection).
+    # Peak table → peaks done (the analysis step was removed, the flow ends at peak picking)
     peaks = manager.data_dir(exp_id, data_id, "peaks")
     peaks.mkdir(parents=True, exist_ok=True)
     peaks_list = peaks / f"{exp_id}-{data_id}.list"
     peaks_list.write_text("", encoding="utf-8")
     record_step_success(manager, exp_id, data_id, "peaks")
     pipeline.refresh()
-    assert "All steps completed" in pipeline.next_label.text()
+    assert "全部步骤已完成" in pipeline.next_label.text()
     window.close()
 
 
 def test_spectrum_panel_no_locator_bar(tmp_path: Path, qapp: QApplication) -> None:
-    """The spectrum panel no longer displays the "Location in Pipeline/Data Summary" bar (user
-    feedback is useless)."""
+    """The spectrum panel no longer shows the "locate in Pipeline / data summary" bar (useless)."""
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     entry = manager.create_experiment("HSQC")
     data = manager.import_data(entry.id, "/fake/1")
@@ -240,7 +234,7 @@ def test_3d_viewer_state_memory(tmp_path: Path, qapp: QApplication) -> None:
     panel._spectrum3d_panel.plane_combo.setCurrentIndex(2)
     panel._render_3d_view()
     assert panel._viewer3d_state.get((entry.id, data1.id)) == 2
-    # Switch away and switch back -> plane memory recovery (0.2.133 only slice, no mode memory).
+    # Switch away and back → the plane memory is restored (0.2.133: slice only, no mode memory)
     panel.set_context(entry.id, data2.id)
     panel.set_context(entry.id, data1.id)
     assert panel._spectrum3d_panel.plane_combo.currentIndex() == 2

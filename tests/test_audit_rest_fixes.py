@@ -1,16 +1,23 @@
-"""2026-09-12 Full project review and rectification (second batch) return: REPORT-008 … QA-017.
-Coverage: - REPORT-008 Analysis (HSQC CSP) function deletion: step list/batch/module/All
-controllers no longer appear, delete records are kept in docs/tasks/archive/2026-09-12-analysis-
-removal.md; - PROV-009 Single version source + WorkflowRun writing software/Tool version,
-parameter source and life cycle history; - MIG-010 Open the old project migration and atomically
-drop it; - LOG-011 The source bad point shall not be remembered as "deleted" when the cleanup
-fails; - BATCH-012 Batch formal limit 2D (constant + skip reason); - STUB-013 Native backend
-skeleton and unimplemented template verification deletion, provider Verification during
-creation; - DEAD-014 Configuration section without consumers and old SMILE copywriting cleanup;
-- PACK-015 v1.0.0 source plus AppImage, spec datas covering runtime resources (language
-               catalogues included), one artefact with the language switched at run time;
-- QA-017 Two Ruff alarms (covered by ruff check full access control, only key
-points are locked here)."""
+"""2026-09-12 project-wide audit fixes (second batch) regression: REPORT-008 ... QA-017.
+
+Covers:
+
+- REPORT-008  the analysis (HSQC CSP) feature is removed: the step table / batch steps /
+              module / controller no longer expose it; the removal record is archived in
+              docs/tasks/archive/2026-09-12-analysis-removal.md;
+- PROV-009    single version source + WorkflowRun records the software/tool versions, the
+              parameter source and the lifecycle history;
+- MIG-010     opening a legacy project migrates and persists to disk atomically;
+- LOG-011     a failed source bad-point cleanup must not record "deleted" any more;
+- BATCH-012   batch is formally limited to 2D (constant + skip reason);
+- STUB-013    the native backend skeleton and the unimplemented template validation are
+              removed; the provider is validated at creation time;
+- DEAD-014    consumerless config sections and the old SMILE wording are cleaned up;
+- PACK-015    v1.0.0 source + AppImage release, spec datas cover the runtime resources
+              (including the language packs), single artifact (runtime language switch);
+- QA-017      two Ruff warnings (covered by the full ruff check gate; only the key points
+              are pinned here).
+"""
 
 from __future__ import annotations
 
@@ -42,8 +49,8 @@ def _manager(tmp_path: Path):
 
 # ---------------------------------------------------------------- REPORT-008
 def test_analysis_removed_from_product_surface() -> None:
-    """REPORT-008: Analysis no longer appears in step sheets, batch steps, controllers and
-    modules."""
+    """REPORT-008: analysis no longer appears in the step table, batch steps, controller
+    or modules."""
     from gui.pipeline_panel import PIPELINE_STEPS
     from gui.processing import ProcessingController
     from workflow.batch import BATCH_STEPS
@@ -63,31 +70,32 @@ def test_analysis_removed_from_product_surface() -> None:
 
 
 def test_analysis_removal_is_documented() -> None:
-    """REPORT-008 Archives: Delete range/reason/Recovery methods must be documented. The complete
-    record in the private warehouse is in `docs/tasks/archive/2026-09-12-analysis-removal.md`;
-    the public warehouse does not come with internal archives. In this case, the same record in
-    `CHANGELOG.md` shall prevail."""
+    """REPORT-008 archival: the removal scope / reason / recovery method must be documented.
+
+    The private repository keeps the full record in
+    `docs/tasks/archive/2026-09-12-analysis-removal.md`; the public repository does not ship
+    the internal archive, in which case the same record in `CHANGELOG.md` is authoritative.
+    """
     note = Path("docs/tasks/archive/2026-09-12-analysis-removal.md")
     if note.is_file():
         text = note.read_text(encoding="utf-8")
-        for key in ("workflow/analyze.py", "recover", "git log"):
+        for key in ("workflow/analyze.py", "恢复", "git log"):
             assert key in text, key
         return
     changelog_path = Path("CHANGELOG.md")
     if not changelog_path.is_file():
-    # The public tree does not publish CHANGELOG.md; with neither record present there is
-    # nothing left to assert.
+    # The public repo does not ship CHANGELOG.md: with neither record present there is
+    # no source to assert against, so skip
         return
     changelog = changelog_path.read_text(encoding="utf-8")
     assert "REPORT-008" in changelog
     assert "workflow/analyze.py" in changelog
-    # The changelog stays in Chinese by decision (docs/i18n), so assert its own wording.
     assert "恢复方法" in changelog
 
 
 def test_report_products_no_longer_drive_status(tmp_path: Path) -> None:
-    """The report/ product no longer pushes experiments to analyzed (this status is only reserved
-    for old projects)."""
+    """report/ products no longer push an experiment to analyzed (that status is left to
+    legacy projects)."""
     manager, entry, data = _manager(tmp_path)
     spectra = manager.data_dir(entry.id, data.id, "spectra")
     spectra.mkdir(parents=True, exist_ok=True)
@@ -104,7 +112,7 @@ def test_report_products_no_longer_drive_status(tmp_path: Path) -> None:
 
 # ------------------------------------------------------------------ PROV-009
 def test_version_single_source() -> None:
-    """PROV-009: pyproject does not hard-code the version, but dynamically obtains it from
+    """PROV-009: pyproject does not hardcode the version; it is taken dynamically from
     core.__version__."""
     data = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
     assert data["project"]["dynamic"] == ["version"]
@@ -117,8 +125,8 @@ def test_version_single_source() -> None:
 
 
 def test_run_records_software_and_tool_versions(tmp_path: Path) -> None:
-    """PROV-009:run starts writing the version/parameter source, ends writing the status history,
-    and can be read back after being dropped to disk."""
+    """PROV-009: a run writes versions / parameter sources at start and the status history
+    at the end, readable back from disk."""
     manager, entry, _data = _manager(tmp_path)
     run = manager.start_run(
         entry.id,
@@ -156,8 +164,8 @@ def test_run_records_default_param_source(tmp_path: Path) -> None:
 
 
 def test_finish_run_merges_probed_tool_versions(tmp_path: Path) -> None:
-    """PROV-009: The NMRPipe version detected by backend during processing is merged into the
-    running record."""
+    """PROV-009: the NMRPipe version probed by the backend during processing is merged
+    into the run record."""
     from core.version import register_tool_version, reset_tool_versions
 
     reset_tool_versions()
@@ -173,8 +181,8 @@ def test_finish_run_merges_probed_tool_versions(tmp_path: Path) -> None:
 
 
 def test_nmrpipe_version_probe_is_defensive(tmp_path: Path) -> None:
-    """If the detection fails, it will just not be registered and no error will be thrown (the non-
-    executable file / directory does not exist)."""
+    """A failed probe is only left unregistered, it never raises (non-executable file /
+    missing directory)."""
     from backend.nmrpipe_version import clear_cache, register_nmrpipe_versions
     from core.version import registered_tool_versions, reset_tool_versions
 
@@ -191,8 +199,8 @@ def test_nmrpipe_version_probe_is_defensive(tmp_path: Path) -> None:
 
 # ------------------------------------------------------------------- MIG-010
 def test_open_project_persists_migration(tmp_path: Path) -> None:
-    """MIG-010: No other write operations will occur after the old schema project is opened, and
-    the migration has been downloaded."""
+    """MIG-010: opening a legacy-schema project produces no other writes, and the
+    migration is already persisted."""
     root = tmp_path / "legacy"
     root.mkdir()
     legacy = {
@@ -222,8 +230,8 @@ def test_open_project_persists_migration(tmp_path: Path) -> None:
 
 
 def test_open_current_schema_project_is_not_rewritten(tmp_path: Path) -> None:
-    """Projects that are already in the current schema are not overwritten by opening (Avoid
-    unnecessary writes/timestamp drift)."""
+    """A project already on the current schema is not rewritten merely by opening it (no
+    needless writes / timestamp drift)."""
     manager, _entry, _data = _manager(tmp_path)
     manager.save()
     project_file = manager.root / "project.json"
@@ -234,14 +242,14 @@ def test_open_current_schema_project_is_not_rewritten(tmp_path: Path) -> None:
 
 # ------------------------------------------------------------------- LOG-011
 def test_bad_point_log_does_not_claim_false_deletion(tmp_path: Path) -> None:
-    """LOG-011: When ser is missing, it can only mean that it has been reset to zero, and it cannot
-    be claimed that it has been deleted from the source."""
+    """LOG-011: with ser missing it may only report a fallback zeroing, never claim a
+    source deletion."""
     from backend.nmrpipe_backend import NMRPipeBackend
 
     raw = tmp_path / "raw"
     raw.mkdir()
-    # Duplicate sampling point = bad point; deliberately not providing ser to make source deletion
-    # impossible.
+    # A duplicate sampling point = a bad point; ser is deliberately absent so the source
+    # deletion cannot run
     (raw / "nuslist").write_text("10\n10\n11\n", encoding="utf-8")
     experiment = Experiment(
         dataset_id="d_001",
@@ -257,13 +265,13 @@ def test_bad_point_log_does_not_claim_false_deletion(tmp_path: Path) -> None:
     _valid, bad, removed = NMRPipeBackend()._clean_source_nus(
         experiment, [raw], logs
     )
-    assert bad, "a duplicate sampling point must be flagged as bad"
+    assert bad, "重复采样点应被识别为坏点"
     assert removed is False
     assert (raw / "nuslist").read_text(encoding="utf-8") == "10\n10\n11\n"
     joined = "\n".join(logs)
-    assert "deleted from the source ser/nuslist" not in joined
-    assert "fell back to zeroing while the FID is generated" in joined
-    assert "the original ser/nuslist is untouched" in joined
+    assert "已从源头 ser/nuslist 删除" not in joined
+    assert "回退为生成 FID 时清零" in joined
+    assert "原始 ser/nuslist 未改动" in joined
 
 
 # ----------------------------------------------------------------- BATCH-012
@@ -276,8 +284,8 @@ def test_batch_boundary_constant_is_2d() -> None:
 def test_batch_skips_3d_with_documented_reason(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """BATCH-012: 3D data is skipped according to the formal boundary, no steps are performed and
-    the reason is readable."""
+    """BATCH-012: 3D data is skipped at the formal boundary; no step runs and the reason
+    is readable."""
     from workflow import batch as batch_mod
 
     manager, entry, data = _manager(tmp_path)
@@ -294,8 +302,8 @@ def test_batch_skips_3d_with_documented_reason(
     per = result["results"][data.id]
     assert per["status"] == "skipped"
     assert per["steps"] == {}
-    assert "only supports 2D" in per["error"]
-    assert "capability boundary" in per["error"]
+    assert "仅支持 2D" in per["error"]
+    assert "能力边界" in per["error"]
     assert result["skipped"] == [data.id]
 
 
@@ -334,9 +342,9 @@ def test_default_config_has_no_consumerless_sections() -> None:
     )
     for section in ("app", "optimization", "qc", "reporting", "logging"):
         assert section not in raw, section
-    # The consumer of peaks.localization(2026-09-13) is
-    # core/peaks/localize.py::load_localization_defaults(Peak location method/Gaussian ROI), which
-    # belongs to the "runtime consumer" configuration section like backend/processing/smile.
+    # peaks.localization (2026-09-13) is consumed by
+    # core/peaks/localize.py::load_localization_defaults (peak localization method / Gaussian
+    # ROI); like backend/processing/smile it is a config section with a runtime consumer.
     assert set(raw) == {"backend", "processing", "smile", "peaks"}
     assert "localization" in raw["peaks"]
 
@@ -348,32 +356,34 @@ def test_smile_wording_matches_scheme_b() -> None:
         text for step_id, _label, text, _deps in PIPELINE_STEPS
         if step_id == "smile"
     )
-    assert "Use optimal spectrum" not in description
-    assert "does not automatically replace" in description
+    assert "采用最优谱" not in description
+    assert "不自动替换" in description
 
 
 def test_appimage_build_guards_against_missing_runtime_pieces() -> None:
-    """Two accidents the build has to catch: a resource missing from the artefact, and an
-    artefact that cannot start (both happened on the build VM, 2026-09-21)."""
+    """The build blocks two classes of accident: resources missing from the artifact, and
+    the artifact not starting at all (each hit once on a real machine, 2026-09-21)."""
     spec = Path("packaging/linux/NMRForge.spec").read_text(encoding="utf-8")
     script = Path("packaging/linux/build_appimage.sh").read_text(encoding="utf-8")
-    # (1) the resource self-check must know PyInstaller 6's contents directory (_internal),
-    # otherwise a real build reports a missing resource
+    # 1. the resource self-check must recognize PyInstaller 6's content directory _internal
+    #    (otherwise a real-machine build falsely reports missing resources)
     assert "BUNDLE_DIR" in script and "_internal" in script
-    # (2) the frozen start-up smoke: the packaged executable has to survive 20 s offscreen
+    # 2. frozen-startup smoke test: the packaged executable must stay alive offscreen for
+    #    20 seconds
     assert 'timeout 20 "$APPDIR/usr/bin/NMRForge"' in script
     assert "SMOKE_STATUS" in script
-    # (3) qtcompat imports PySide6.QtTest unconditionally - excluding it breaks the GUI
+    # 3. qtcompat imports PySide6.QtTest unconditionally -- excluding it crashes the GUI at
+    #    startup
     assert '"PySide6.QtTest"' not in spec
 
 
 # ------------------------------------------------------------------ PACK-015
 def test_appimage_spec_covers_runtime_resources() -> None:
-    """PACK-015: the AppImage datas must keep covering the runtime resource directories (the
-    language catalogues included)."""
+    """PACK-015: the AppImage datas must keep covering the runtime resource directories
+    (including the language packs)."""
     spec = Path("packaging/linux/NMRForge.spec").read_text(encoding="utf-8")
-    # shipped data comes from the data package and keeps its shape inside the artefact
-    # (installed = frozen = source checkout)
+    # Shipped data is taken from the data package and keeps the same shape inside the
+    # artifact (installed = frozen = source tree)
     resources = {
         "nmrforge_data/config": "nmrforge_data/config",
         "nmrforge_data/presets": "nmrforge_data/presets",
@@ -386,20 +396,22 @@ def test_appimage_spec_covers_runtime_resources() -> None:
 
 
 def test_appimage_build_is_single_artifact_with_runtime_language() -> None:
-    """One artefact with a run-time language (2026-09-21): the two-edition switches are gone."""
+    """Once the interface text is selected at runtime only one artifact is built: no more
+    Chinese/English build switch (2026-09-21)."""
     script = Path("packaging/linux/build_appimage.sh").read_text(encoding="utf-8")
     assert "APPIMAGE_SUFFIX" not in script
     assert "APPIMAGE_EDITION" not in script
-    # the artefact name carries no language suffix any more
+    # The artifact name no longer carries a language suffix
     assert "${APP}-${VERSION}-${ARCH}.AppImage" in script
-    # the language is recorded in the build provenance, and the build checks the catalogues landed
+    # The language source is written into the build provenance, and the build checks that
+    # the language packs really made it into the artifact
     assert "default lang" in script
     assert "ui_support/locales" in script
 
 
 def test_machine_local_config_cannot_reach_the_wheel() -> None:
-    """Shipped data enters the wheel, but the machine-local override must be excluded (it
-    carries absolute paths from the developer machine)."""
+    """Shipped data goes into the wheel, but the machine-level override
+    `nmrforge.local.yaml` must be excluded (it carries absolute local paths)."""
     import tomllib
 
     data = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
@@ -408,13 +420,15 @@ def test_machine_local_config_cannot_reach_the_wheel() -> None:
     excluded = setuptools["exclude-package-data"]["nmrforge_data"]
     assert all("local" not in item for item in packaged), packaged
     assert any("local" in item for item in excluded), excluded
-    # the same rule on the AppImage side: the build script stashes it before PyInstaller runs
+    # The same concern on the AppImage side: the build script moves it out of the build
+    # tree first
     script = Path("packaging/linux/build_appimage.sh").read_text(encoding="utf-8")
     assert 'LOCAL_CFG="nmrforge_data/config/nmrforge.local.yaml"' in script
 
 
 def test_both_trees_declare_a_default_language_file() -> None:
-    """The default language is per-tree data (private zh / public en), not a branch in the code."""
+    """The default language is a data file per tree (private zh / public en), not a branch
+    scattered through the code."""
     import json
 
     data = json.loads(Path("ui_support/locales/default.json").read_text(encoding="utf-8"))
@@ -422,22 +436,25 @@ def test_both_trees_declare_a_default_language_file() -> None:
 
 
 def test_packaging_policy_declares_source_and_appimage_release() -> None:
-    """PACK-015: The boundary between the current release and its AppImage licences must be
-    clear."""
+    """PACK-015: the license / acceptance boundary of the current release artifact and the
+    AppImage must be explicit."""
     text = Path("docs/packaging.md").read_text(encoding="utf-8")
     from core import __version__
 
-    assert "released with v" + __version__ in text
+    released = "v" + __version__
+    assert f"{released} 已发布" in text or f"released with {released}" in text
     assert "AppImage" in text
     assert "wheel" in text
     assert "APPIMAGE_RELEASE_CHECKLIST.md" in text
 
 
 def test_appimage_build_keeps_the_machine_local_config_out() -> None:
-    """PACK-015: the machine-local config (git-ignored) must not enter the artefact."""
+    """PACK-015: the machine-level local config (git-ignored) must not enter the artifact
+    -- it carries the build machine's absolute paths."""
     script = Path("packaging/linux/build_appimage.sh").read_text(encoding="utf-8")
     assert 'LOCAL_CFG="nmrforge_data/config/nmrforge.local.yaml"' in script
-    # it must leave the tree before PyInstaller runs, or the spec datas copy it into the AppDir
+    # It must be moved out before PyInstaller, otherwise the datas of NMRForge.spec copy it
+    # into the AppDir
     assert script.index('LOCAL_CFG="nmrforge_data/config/nmrforge.local.yaml"') < script.index(
         "--distpath"
     )

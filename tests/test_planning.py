@@ -1,4 +1,4 @@
-"""DAG Skeleton test of structure and early stopping logic."""
+"""Skeleton tests for the DAG structure and the early-stop logic."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ def test_dag_add_and_invalidates() -> None:
 
 
 def test_select_method_includes_baseline_nodes(bruker_dir: Path) -> None:
-    """The default plan contains baseline nodes in each dimension (mode=auto,enabled=True)."""
+    """The default plan has a baseline node per dimension (mode=auto, enabled=True)."""
     from core.data.bruker_reader import read_dataset
     from core.planning.method_selector import select_method
 

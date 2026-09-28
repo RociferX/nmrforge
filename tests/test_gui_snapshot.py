@@ -1,5 +1,5 @@
-"""Script snapshot GUI Wiring test: add WorkflowRun snapshot + history display after the step is
-run."""
+"""Script snapshot GUI wiring test: add WorkflowRun snapshot + history display after the step
+is run."""
 
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ def _manager_with_data(tmp_path: Path) -> tuple[ProjectManager, str, str]:
 
 
 def test_snapshot_step_writes_scripts_and_params(tmp_path: Path) -> None:
-    """After the step is successful, write the script/parameter into the corresponding WorkflowRun
+    """After the step is successful, write the script/params into the corresponding WorkflowRun
     snapshot directory."""
     manager, exp_id, data_id = _manager_with_data(tmp_path)
     run = manager.start_run(
@@ -84,7 +84,7 @@ def test_snapshot_step_no_matching_run(tmp_path: Path) -> None:
 
 
 def test_snapshot_step_filters_by_data_id(tmp_path: Path) -> None:
-    """Multi-sample data experiment type: Snapshot only the most recent run matching data_id."""
+    """Multi-sample data experiment type: snapshot only the most recent run matching data_id."""
     manager, exp_id, _data_id = _manager_with_data(tmp_path)
     manager.import_data(exp_id, "/fake/2")  # d_002
     run2 = manager.start_run(
@@ -139,7 +139,7 @@ def test_run_history_dialog_shows_snapshot(
         project_root=manager.root,
     )
     dialog.table.selectRow(0)
-    assert "Snapshot:" in dialog.detail_label.text()
+    assert "快照:" in dialog.detail_label.text()
     assert "process.com" in dialog.detail_label.text()
     assert dialog.snapshot_button.isEnabled()
     dialog.close()
@@ -152,7 +152,7 @@ def test_run_history_dialog_shows_snapshot(
         project_root=manager.root,
     )
     dialog2.table.selectRow(1)
-    assert "(none)" in dialog2.detail_label.text()
+    assert "(无)" in dialog2.detail_label.text()
     assert not dialog2.snapshot_button.isEnabled()
     dialog2.close()
 
@@ -182,10 +182,12 @@ def test_run_history_dialog_opens_snapshot(
 
 
 def test_snapshot_matches_unified_route_run(tmp_path: Path) -> None:
-    """Fix 24 (Problem 1): The running records of the unified phase route must also be matched by
-    the snapshot. It turns out that generate_spectrum is passed in hard-coded (process,
-    reconstruct_nus), and the unified route is registered as phase_optimize_unified ->
-    snapshot_dir constant space."""
+    """Fix 24 (problem 1): the unified phase route's run record must also be matched by the
+    snapshot.
+
+    Previously generate_spectrum passed the hard-coded (process, reconstruct_nus), while the
+    unified route registers phase_optimize_unified -> snapshot_dir stayed empty.
+    """
     from core.project.run_refs import STEP_RUN_REFS
 
     manager, exp_id, data_id = _manager_with_data(tmp_path)
@@ -209,8 +211,8 @@ def test_snapshot_matches_unified_route_run(tmp_path: Path) -> None:
 
 
 def test_generate_spectrum_snapshot_uses_shared_ref_table() -> None:
-    """The snapshot call point must use a shared table (hard-coding ref is the bug that is fixed
-    and prevents rollback)."""
+    """The snapshot call site must use the shared table (hard-coding ref is exactly the bug that
+    was fixed; guards against regression)."""
     import inspect
 
     from gui import processing

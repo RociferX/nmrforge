@@ -162,15 +162,14 @@ def test_alignment_figure_writes_png(tmp_path: Path) -> None:
     assert written == out
     assert out.is_file()
     assert out.stat().st_size > 1000
-    # 0.2.199-patch29fy: The same path is output and editable at the same time SVG.
+    # 0.2.199-patch29fy: an editable SVG is written alongside the same path
     svg = out.with_suffix(".svg")
     assert svg.is_file()
     assert svg.stat().st_size > 100
     assert "<svg" in svg.read_text(encoding="utf-8", errors="ignore")[:2000]
 
 def test_constants() -> None:
-    """0.2.199-patch29fx: Alignment tolerance is based on Poky kr default (1H +/-0.02, other cores
-    +/-0.2)."""
+    """0.2.199-patch29fx: alignment tolerances use Poky kr defaults (1H ±0.02, others ±0.2)."""
     assert MIN_ACCEPTABLE_RATIO == 0.60
     assert TOLERANCE_PPM["1H"] == 0.02
     for nucleus in ("2H", "15N", "13C", "19F", "31P", "23Na", "29Si"):
@@ -178,14 +177,12 @@ def test_constants() -> None:
 
 
 def test_matched_pairs_uses_original_row_indices() -> None:
-    """0.2.199-patch29fx: When the missing common core row is skipped by the matrix, the pairing
-    must return to the original row index (otherwise the inspection graph will draw the
-    connection line to the wrong peak)."""
+    """0.2.199-patch29fx: when the matrix skips a row without a common nucleus, pairing must
+    return the original row index (otherwise the check plot connects the wrong peaks)."""
     from workflow.peak_align import matched_pairs
 
     cur = [
-        # Missing 15N, cannot participate in common core matching -> skipped by matrix.
-        {"1H": 7.2},
+        {"1H": 7.2},  # no 15N: cannot match on common nuclei, so the matrix skips it
         {"1H": 8.0, "15N": 118.0},
     ]
     ref = [{"1H": 8.0, "15N": 118.0}]

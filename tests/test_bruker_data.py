@@ -1,4 +1,4 @@
-"""Bruker binary data reading test (synthetic ser/fid)."""
+"""Bruker binary data reading tests (synthetic ser/fid)."""
 
 from __future__ import annotations
 
@@ -16,17 +16,39 @@ from core.data.bruker_reader import (
 )
 from core.data.internal_data_model import SamplingMode
 
+#: Bruker pads every ser row to 1024 bytes — int32/float32 use 8 bytes per complex point
+#: ⇒ 128 complex points (``core.data.ser_layout``; on real data d_015 ``TD=1612 → row
+#: 1664``, ``356 → 384``).
+ROW_POINTS = 128
 
-def _write_ser(path: Path, fids: np.ndarray, byterda: int = 0) -> None:
-    """Write the complex FID array as Bruker ser (int32 real-imaginary interleaved). fids shape
-    (n_fids, td)."""
-    interleaved = np.stack([fids.real, fids.imag], axis=-1).astype(np.int32).reshape(-1)
+
+def _pad_rows(fids: np.ndarray, row_points: int = ROW_POINTS) -> np.ndarray:
+    """Pad a (n_fids, td) complex FID to whole row_points rows like real data (zeros at the end)."""
+    if fids.shape[1] >= row_points:
+        return fids
+    padded = np.zeros((fids.shape[0], row_points), dtype=complex)
+    padded[:, : fids.shape[1]] = fids
+    return padded
+
+
+def _write_ser(
+    path: Path, fids: np.ndarray, byterda: int = 0, *, pad: bool = True
+) -> None:
+    """Write a complex FID array as Bruker ser (int32 real/imaginary interleaved); fids is
+    (n_fids, td).
+
+    ``pad=True`` (the default) pads every row to 1024 bytes like real data; ``pad=False``
+    writes the raw unpadded rows, used only for negative cases where the layout cannot be
+    resolved.
+    """
+    data = _pad_rows(fids) if pad else fids
+    interleaved = np.stack([data.real, data.imag], axis=-1).astype(np.int32).reshape(-1)
     dtype = ">i4" if byterda else "<i4"
     interleaved.astype(dtype).tofile(path)
 
 
 def _make_states_fids(td1: int, td2: int):
-    """States 2D: The order FID in S(k,t), ser is R(k), I(k) interleaved."""
+    """States 2D: S(k,t); the FID order in ser is R(k), I(k) interleaved."""
     k = np.arange(td1)[:, None]
     t = np.arange(td2)[None, :]
     s = (k * 10 + t) + 1j * (k * 10 + t + 50)
@@ -48,7 +70,9 @@ def test_read_data_2d_states(tmp_path: Path, bruker_dir: Path) -> None:
     _write_ser(dst / "ser", fids, byterda=0)
     exp = read_dataset(dst)
     data = read_data(exp)
-    assert data.matrix.shape == (32, 64)
+    # The row count comes from the file (32 rows); row length is the padded 128 points (TD=64)
+    assert data.matrix.shape == (32, ROW_POINTS)
+    assert np.array_equal(data.matrix[:, :64], fids)
     assert data.layout["F1"].mult == 2
     assert data.layout["F1"].n_fids == 32
 
@@ -81,13 +105,17 @@ def test_read_data_3d(tmp_path: Path, bruker_dir: Path) -> None:
     _write_ser(dst / "ser", fids, byterda=0)
     exp = read_dataset(dst)
     data = read_data(exp)
-    assert data.matrix.shape == (8, 6, 8)
-    assert np.array_equal(data.matrix, expected)
+    # The row count matches the declared grid (48 = (4×2)×(3×2)) ⇒ restore as
+    # (n_f1, n_f2, row length); the row length includes padding
+    assert data.matrix.shape == (8, 6, ROW_POINTS)
+    assert np.array_equal(data.matrix[:, :, :td3], expected)
 
 
 def test_read_data_size_mismatch(tmp_path: Path, bruker_dir: Path) -> None:
+    """Raise when the layout cannot be resolved (row length not a multiple of 1024 bytes),
+    never guess."""
     dst = _copy_fixture(bruker_dir, "hsqc_small", tmp_path)
-    _write_ser(dst / "ser", np.zeros((2, 8), dtype=complex), byterda=0)
+    _write_ser(dst / "ser", np.zeros((2, 8), dtype=complex), byterda=0, pad=False)
     exp = read_dataset(dst)
     with pytest.raises(BrukerDataError):
         read_data(exp)
@@ -106,6 +134,29 @@ def test_read_data_1d(tmp_path: Path, bruker_dir: Path) -> None:
     data = read_data(exp)
     assert data.matrix.shape == (8,)
     assert np.allclose(data.matrix, fid)
+
+
+def test_read_data_reads_a_real_shaped_uniform_2d(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """Real-data shape (2026-09-24 review A3): 2D FnMODE=6, direct TD=2048, **1024 rows**.
+
+    The old implementation expected 2048 rows from "rows = indirect TD × hypercomplex
+    components" ⇒ ``ser size mismatch`` (exactly 2×, hit by 7/7 real datasets here), and
+    ``gui.raw_quality._estimate_snr`` swallowed the exception, so the raw-data SNR stayed
+    silently missing.
+    """
+    dst = _copy_fixture(bruker_dir, "hsqc_2d", tmp_path)
+    rows, values = 1024, 2048  # 2048 sample values per row = 1024 complex points (TD count)
+    (dst / "ser").write_bytes(b"\x00" * (rows * values * 8))
+    exp = read_dataset(dst)
+    exp.dimensions[0].td = values  # F2 (direct dim: acqus TD counts "real + imaginary")
+    exp.dimensions[1].td = rows  # F1 (indirect dim) = the number of physical rows
+    exp.acquisition_parameters["acqus"]["DTYPA"] = 2  # 8 bytes per value (real d_015 shape)
+    data = read_data(exp)
+    assert data.matrix.shape == (rows, values // 2)
+    assert data.layout["F1"].n_fids == rows
+    assert data.layout["F2"].td == values
 
 
 def test_read_segments_ok(tmp_path: Path, bruker_dir: Path) -> None:
@@ -138,9 +189,9 @@ def test_read_segments_mismatch(tmp_path: Path, bruker_dir: Path) -> None:
 def test_read_segments_sw_precision_tolerance(
     tmp_path: Path, bruker_dir: Path
 ) -> None:
-    """0.2.199-patch29cs: Segmentation SW_h with different writing precision (11904.762 vs
-    11904.7619047619) is regarded as the same experiment (spectrum width relative tolerance);
-    strict comparison of the old round(sw,6) will cause false rejections."""
+    """0.2.199-patch29cs: segmented SW_h written with a different precision (11904.762 vs
+    11904.7619047619) counts as the same experiment (relative spectral-width tolerance);
+    the old strict round(sw, 6) comparison produced false rejections."""
     import re as _re
     import shutil
 
@@ -163,8 +214,8 @@ def test_read_segments_sw_precision_tolerance(
 
 
 def test_classify_segment_kind(tmp_path: Path, bruker_dir: Path) -> None:
-    """0.2.199-patch29cu:uniform -> repeated superposition; NUS same point -> repeated
-    superposition; NUS different points -> segmentation."""
+    """0.2.199-patch29cu: uniform → repeat superposition; NUS same points → repeat
+    superposition; NUS different points → segmentation."""
     import shutil
 
     from core.data.bruker_reader import classify_segment_kind
@@ -183,9 +234,8 @@ def test_classify_segment_kind(tmp_path: Path, bruker_dir: Path) -> None:
     )
     c_nus = _container("c_nus", "nus_2d")
     segs = [c_nus / "s01", c_nus / "s02"]
-    assert classify_segment_kind(segs) == "repeat_nus"  # nuslist Same.
-    # Change the second paragraph of nuslist to remove the first line -> different sampling points
-    # -> segmentation.
+    assert classify_segment_kind(segs) == "repeat_nus"  # same nuslist
+    # Drop the first line of the second nuslist → different sampling points → segmentation
     nus2 = c_nus / "s02" / "nuslist"
     points = read_nuslist(nus2)
     nus2.write_text(

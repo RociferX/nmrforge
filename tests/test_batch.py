@@ -1,4 +1,4 @@
-"""Batch processing engine test: multiple data batch execution, single data failure continuation,
+"""Batch processing engine tests: multiple data execution, continuing after a single failure,
 WorkflowRun registration, stepwise reuse."""
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from workflow.batch import BatchError, run_batch
 
 
 class _FakeBackend:
-    """Fake backend to log calls to; convert_to_fid Configurable Nth failure."""
+    """Fake backend that records calls; convert_to_fid can be set to fail on call N."""
 
     def __init__(self, work_dir: Path, *, fail_fid_on: int = -1) -> None:
         self.work_dir = str(work_dir)
@@ -29,7 +29,7 @@ class _FakeBackend:
         self.fid_calls += 1
         self.calls.append(("convert_to_fid", experiment.dataset_id))
         if self.fid_calls == self.fail_fid_on:
-            return {"success": False, "message": "Conversion failed", "logs": []}
+            return {"success": False, "message": "转换失败", "logs": []}
         fid_path = Path(self.work_dir) / f"{experiment.dataset_id}.fid"
         self._touch(fid_path)
         return {
@@ -82,8 +82,7 @@ def _manager_with_data(
 
 
 def _set_batch(manager, exp_id: str, data_ids: list[str], batch: str) -> None:
-    """Write the GUI side of the batch key of.pipeline_state.json (emulates the GUI batch group
-    tag)."""
+    """Write the batch key in the GUI-side .pipeline_state.json (emulates a batch group tag)."""
     for data_id in data_ids:
         path = manager.data_base(exp_id, data_id) / ".pipeline_state.json"
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -100,8 +99,7 @@ def _runs_for(manager, data_id: str, refs: set[str]) -> list:
 
 
 def test_run_batch_multiple_data(tmp_path: Path, bruker_dir: Path) -> None:
-    """Multi-data batch: Execute fid -> spectrum one data at a time, all are successful and
-    WorkflowRun is registered."""
+    """Multi-data batch: fid→spectrum per data, all succeed and WorkflowRun is registered."""
     manager, exp_id, data_ids = _manager_with_data(
         tmp_path, bruker_dir / "hsqc_2d", n=2
     )
@@ -118,12 +116,12 @@ def test_run_batch_multiple_data(tmp_path: Path, bruker_dir: Path) -> None:
     )
     assert result["summary"] == {"total": 2, "success": 2, "failed": 0}
     assert result["failed"] == []
-    # Progress callback sequence: output x/y before each data, and then message step by step.
-    assert events[0].startswith(f"[1/2] Start processing data {data_ids[0]}")
-    assert events[1].startswith(f"{data_ids[0]}: start fid")
-    assert events[2].startswith(f"{data_ids[0]}: start spectrum")
-    assert events[-1] == f"{data_ids[1]}: success"
-    # Execute data by data: convert -> process -> convert -> process.
+    # Progress callback order: x/y before each data, then one message per step
+    assert events[0].startswith(f"[1/2] 开始处理数据 {data_ids[0]}")
+    assert events[1].startswith(f"{data_ids[0]}: 开始 fid")
+    assert events[2].startswith(f"{data_ids[0]}: 开始 spectrum")
+    assert events[-1] == f"{data_ids[1]}: 成功"
+    # Data by data: convert → process → convert → process
     assert [m for m, _ in backend.calls] == [
         "convert_to_fid",
         "process",
@@ -137,7 +135,7 @@ def test_run_batch_multiple_data(tmp_path: Path, bruker_dir: Path) -> None:
         spectrum = per["steps"]["spectrum"]
         assert fid.endswith(".fid")
         assert spectrum.endswith(".ft2")
-        # Contract §9.2: final spectrum placement data_dir(..., "spectra").
+        # Contract §9.2: the final spectrum lands in data_dir(..., "spectra")
         assert Path(spectrum).parent == manager.data_dir(
             exp_id, data_id, "spectra"
         )
@@ -153,8 +151,7 @@ def test_run_batch_multiple_data(tmp_path: Path, bruker_dir: Path) -> None:
 def test_run_batch_single_failure_continues(
     tmp_path: Path, bruker_dir: Path
 ) -> None:
-    """The failure of a single data does not interrupt the entire group: the second data conversion
-    fails, but the first one still succeeds completely."""
+    """One failure does not stop the group: the second data fails to convert, the first succeeds."""
     manager, exp_id, data_ids = _manager_with_data(
         tmp_path, bruker_dir / "hsqc_2d", n=2
     )
@@ -173,15 +170,14 @@ def test_run_batch_single_failure_continues(
     failed = result["results"][data_ids[1]]
     assert failed["status"] == "failed"
     assert failed["failed_step"] == "fid"
-    assert "Conversion failed" in failed["error"]
-    # The first data goes through fid+spectrum, and the second one stops at fid.
+    assert "转换失败" in failed["error"]
+    # The first data completes fid+spectrum, the second stops at fid
     assert [m for m, _ in backend.calls] == [
         "convert_to_fid",
         "process",
         "convert_to_fid",
     ]
-    # Failed data is not registered in spectrum run, and successful data is registered in both
-    # steps.
+    # Failed data registers no spectrum run; successful data registers both steps
     assert _runs_for(manager, data_ids[1], {"process"}) == []
     assert (
         len(
@@ -194,8 +190,7 @@ def test_run_batch_single_failure_continues(
 
 
 def test_run_batch_resolves_batch_id(tmp_path: Path, bruker_dir: Path) -> None:
-    """Batch_id Analysis: Press the batch key of.pipeline_state.json to get the data in the
-    group."""
+    """batch_id resolution: the group's data comes from the batch key of .pipeline_state.json."""
     manager, exp_id, data_ids = _manager_with_data(
         tmp_path, bruker_dir / "hsqc_2d", n=3
     )
@@ -211,8 +206,7 @@ def test_run_batch_resolves_batch_id(tmp_path: Path, bruker_dir: Path) -> None:
 def test_run_batch_reuses_stepwise(
     tmp_path: Path, bruker_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Fid/spectrum Reuse workflow.stepwise (monkeypatch verification call transparent
-    transmission)."""
+    """fid/spectrum reuse workflow.stepwise (monkeypatch verifies pass-through of the call)."""
     import workflow.stepwise as stepwise_mod
 
     manager, exp_id, data_ids = _manager_with_data(
@@ -251,8 +245,7 @@ def test_run_batch_reuses_stepwise(
 def test_run_batch_import_step_idempotent(
     tmp_path: Path, bruker_dir: Path
 ) -> None:
-    """The import step is idempotent: no data entries are created repeatedly and the imported
-    status is returned."""
+    """The import step is idempotent: no duplicate data entries, the imported state is returned."""
     manager, exp_id, data_ids = _manager_with_data(
         tmp_path, bruker_dir / "hsqc_2d", n=1
     )
@@ -265,7 +258,7 @@ def test_run_batch_import_step_idempotent(
 
 
 def _write_ft2(path: Path) -> None:
-    """Writes a minimum readable 2D ft2 (single peak, for pick_peaks to detect)."""
+    """Write a minimal readable 2D ft2 (one peak, for pick_peaks to detect)."""
     import numpy as np
     from nmrglue.fileio import pipe
 
@@ -288,7 +281,7 @@ def _write_ft2(path: Path) -> None:
 
 
 class _Ft2Backend(_FakeBackend):
-    """Process outputs readable ft2 (for actual detection by the peaks step)."""
+    """process produces a readable ft2 (for real detection by the peaks step)."""
 
     def process(
         self,
@@ -310,8 +303,7 @@ class _Ft2Backend(_FakeBackend):
 
 
 def test_run_batch_full_pipeline(tmp_path: Path, bruker_dir: Path) -> None:
-    """GUI The whole process (analysis has been hidden): import -> fid -> spectrum -> peaks, data
-    by data is successful."""
+    """Full GUI flow (analysis hidden): import→fid→spectrum→peaks, succeeding per data."""
     manager, exp_id, data_ids = _manager_with_data(
         tmp_path, bruker_dir / "hsqc_2d", n=1
     )
@@ -341,7 +333,7 @@ def test_run_batch_unknown_step_raises(
     manager, exp_id, data_ids = _manager_with_data(
         tmp_path, bruker_dir / "hsqc_2d", n=1
     )
-    with pytest.raises(BatchError, match="Unsupported batch step"):
+    with pytest.raises(BatchError, match="不支持的批处理步骤"):
         run_batch(
             manager,
             exp_id,
@@ -357,7 +349,7 @@ def test_run_batch_empty_batch_raises(
     manager, exp_id, _data_ids = _manager_with_data(
         tmp_path, bruker_dir / "hsqc_2d", n=1
     )
-    with pytest.raises(BatchError, match="no data"):
+    with pytest.raises(BatchError, match="没有数据"):
         run_batch(
             manager, exp_id, "B9", ["fid"], _FakeBackend(tmp_path / "work")
         )

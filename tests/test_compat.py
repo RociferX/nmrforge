@@ -1,12 +1,17 @@
-"""Guard for the behaviour compatibility fingerprint and change levels (2026-09-19).
+"""Guard for behaviour-compatibility fingerprints and change levels (downstream need,
+2026-09-19).
 
-- a fingerprint that disagrees with the declaration -> failure (a changed behaviour tree
-  means an updated declaration; silent behaviour changes are not allowed);
-  - an inconsistent level (``behavior_changed``/``contract_changed`` without ``affected``, or
-  ``same``/``additive`` with one) -> failure;
-- ``level=same`` with changed code tokens -> failure (``same`` allows comments/wording only);
-- a golden vector that cannot reproduce the declared hashes -> failure;
-- the declaration module stays **pure data** and the contract snapshot matches the code.
+- fingerprint disagrees with the declaration → failure (changing the behaviour tree requires
+  updating the declaration; silent behaviour changes are not allowed);
+- inconsistent level (``behavior_changed``/``contract_changed`` without ``affected``, or
+  ``same``/``additive`` with it) → failure;
+- ``level=same`` but the code tokens changed → failure (``same`` only allows comments/copy
+  changes);
+- the golden vector does not reproduce the declared hashes → failure;
+- the declaration module must still be **pure data** (only ``__future__``/``typing`` imports
+  and constant assignments);
+- the contract snapshot (peak-table column order / record schema / error codes / warning
+  codes) must match the code.
 """
 
 from __future__ import annotations
@@ -39,42 +44,43 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def test_behavior_digest_matches_the_declaration() -> None:
-    """A changed behaviour tree means an updated declaration, or the level cannot be trusted."""
+    """Changing the behaviour tree requires updating the declaration, otherwise the
+    ``compat_level`` downstream sees is untrustworthy."""
     status = compat_status()
     assert status["verified"], (
-        "the behaviour fingerprint disagrees with the declaration -- update it as described in "
-        "nmrforge_api/compat_declaration.py:\n"
-        f"  measured behavior_digest = {status['behavior_digest']}\n"
-        f"  declared digest          = {status['declared_digest']}\n"
-        "hint: python scripts/update_compat_declaration.py --level <level>"
+        "行为指纹与声明不一致 —— 按 nmrforge_api/compat_declaration.py 的说明更新:\n"
+        f"  实测 behavior_digest = {status['behavior_digest']}\n"
+        f"  声明里的 digest      = {status['declared_digest']}\n"
+        "提示:python scripts/update_compat_declaration.py --level <分级>"
     )
     assert status["compat_level"] in COMPAT_LEVELS
     assert status["compat_level"] != UNVERIFIED_LEVEL
 
 
 def test_declared_level_is_consistent() -> None:
-    """The level and ``affected`` must be consistent (downstream re-runs by affected)."""
+    """The level and ``affected`` must agree (downstream uses affected to decide what to rerun)."""
     status = compat_status()
     level = status["compat_level"]
     affected = list(status["affected"])
     unknown = [item for item in affected if item not in AFFECTED_STEPS]
-    assert not unknown, f"unknown steps in affected: {unknown} (allowed: {AFFECTED_STEPS})"
+    assert not unknown, f"affected 里有未知步骤: {unknown}(可用 {AFFECTED_STEPS})"
     if level in ("behavior_changed", "contract_changed"):
-        assert affected, f"level={level} must name affected (which downstream steps change)"
+        assert affected, f"level={level} 必须写 affected(哪些下游步骤会变)"
     else:
-        assert not affected, f"level={level} must not name affected (downstream need not re-run)"
+        assert not affected, f"level={level} 不该写 affected(下游不需要重跑)"
 
 
 def test_same_level_requires_unchanged_code_tokens() -> None:
-    """``same`` = comments/docstrings only: the code tokens must match the declaration."""
+    """``same`` = only comments/docstrings changed: the code tokens must match the declaration."""
     status = compat_status()
     if status["compat_level"] != "same":
-        pytest.skip(f"the current level is {status['compat_level']}, not applicable")
+        pytest.skip(f"当前分级是 {status['compat_level']},不适用")
     assert status["declared_token_digest"] == status["token_digest"]
 
 
 def test_declaration_module_is_data_only() -> None:
-    """The declaration module allows only ``__future__``/``typing`` imports and constants."""
+    """The declaration module allows only ``__future__``/``typing`` imports and constant
+    assignments (no behaviour)."""
     path = ROOT / DECLARATION_MODULE
     tree = ast.parse(path.read_text(encoding="utf-8"))
     for node in tree.body:
@@ -82,23 +88,25 @@ def test_declaration_module_is_data_only() -> None:
             assert node.module in ("__future__", "typing"), node.module
             continue
         if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant):
-            continue  # the module docstring
+            continue  # module docstring
         assert isinstance(node, (ast.Assign, ast.AnnAssign)), ast.dump(node)[:80]
 
 
 def test_golden_vector_matches_the_declaration(tmp_path: Path) -> None:
-    """Golden vector: a tiny synthetic spectrum + fixed parameters -> declared hashes."""
+    """Golden vector: a tiny synthetic spectrum + fixed parameters → the spectrum/peak-table
+    hashes must match the declaration."""
     result = check_conformance(workdir=tmp_path / "golden")
     assert result["name"] == GOLDEN_NAME
-    assert result["items"]["spectrum_sha256"], "golden spectrum hash differs (behaviour changed)"
+    assert result["items"]["spectrum_sha256"], "黄金谱哈希不一致(行为或配方变了)"
     assert result["items"]["peak_table_sha256"], (
-        "golden peak-table hash differs (behaviour, column order or formatting changed)"
+        "黄金峰表哈希不一致(行为、峰表列序或格式化变了)"
     )
-    assert result["items"]["n_peaks"], "the golden vector detected a different number of peaks"
+    assert result["items"]["n_peaks"], "黄金向量检出峰数变了"
 
 
 def test_manifest_contracts_match_the_code() -> None:
-    """The manifest contract snapshot must match the code (columns/schema/codes)."""
+    """The manifest's contract snapshot must match the code (column order / record schema /
+    error codes / warning codes)."""
     from nmrforge_api import errors as errors_module
 
     manifest = compat_manifest()
@@ -109,7 +117,7 @@ def test_manifest_contracts_match_the_code() -> None:
     assert contracts["error_codes"] == list(errors_module.__all__)
     assert "gaussian_fallback" in contracts["warning_codes"]
     assert "no_spectrum_change" in contracts["warning_codes"]
-    # fingerprint coverage: the four code trees plus the shipped data
+    # fingerprint scope: the four code trees + data shipped with the package
     sources = behavior_sources()
     for name in BEHAVIOR_ROOTS:
         assert name in sources
@@ -118,13 +126,13 @@ def test_manifest_contracts_match_the_code() -> None:
 
 
 def test_resume_fingerprint_schema_matches_the_code() -> None:
-    """The fingerprint schema id in the manifest must match the literal in sweep."""
+    """The manifest's fingerprint schema id must match the literal in sweep."""
     text = (ROOT / "nmrforge_api" / "sweep.py").read_text(encoding="utf-8")
     assert f'"{RECORD_SCHEMAS["resume_fingerprint"]}"' in text
 
 
 def test_record_stamp_has_the_expected_keys() -> None:
-    """The behaviour stamp written into artefacts: digest + level + affected + verified."""
+    """Behaviour stamp written into artefacts: digest + level + affected + verified."""
     stamp = record_stamp()
     assert set(stamp) == {
         "behavior_digest",
@@ -139,7 +147,7 @@ def test_record_stamp_has_the_expected_keys() -> None:
 
 
 def test_cli_compat_prints_the_manifest(tmp_path: Path, capsys) -> None:
-    """CLI ``compat [--out FILE]``: prints the manifest and can write it out."""
+    """CLI ``compat [--out FILE]``: print the manifest and optionally write it to disk."""
     assert cli_main(["compat"]) == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["schema"] == "nmrforge_api.compat.v1"
@@ -156,7 +164,7 @@ def test_cli_compat_prints_the_manifest(tmp_path: Path, capsys) -> None:
 
 
 def test_cli_compat_golden_flag_runs_the_vector(tmp_path: Path, capsys) -> None:
-    """CLI ``compat --golden``: also runs the golden vector and reports the comparison."""
+    """CLI ``compat --golden``: also run the golden vector and report the comparison."""
     assert cli_main(["compat", "--golden", "--workdir", str(tmp_path / "g")]) == 0
     payload = json.loads(capsys.readouterr().out)
     check = payload["golden_check"]

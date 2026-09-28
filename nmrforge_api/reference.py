@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from core.experiment.acquisition_mode_detector import sign_sampling_flags
 from core.project.manager import atomic_write_text, sha256_file
 from core.project.run_refs import STEP_RUN_REFS
 from core.version import software_commit, software_version, tool_versions
@@ -142,6 +143,19 @@ class ReferenceSpectrum:
         return True
 
     @property
+    def sampling_flags(self) -> dict[str, Any]:
+        """Sampling flags that steer the FT sign and direction, fixed when the reference is built.
+
+        User 2026-09-25 (building a reference through the API): a manual flip such as ``-neg``,
+        written as ``build_reference(params={"sampling": {"flip_f1": True}})``, must really reach
+        **every** reference step (phase preview, joint evaluation, final script) and freeze with
+        the reference. This reads that choice back out of the resolved parameters so combinations
+        inherit it and records keep it; a combination must **not** treat it as a sweep axis (see
+        the locked keys of :func:`nmrforge_api.sweep.validate_axes`).
+        """
+        return sign_sampling_flags(self.params)
+
+    @property
     def peak_table_parabolic_path(self) -> str:
         return str((self.peak_tables.get("parabolic") or {}).get("path", ""))
 
@@ -161,6 +175,10 @@ class ReferenceSpectrum:
             "sampling": self.sampling,
             "sampling_schedule": self.sampling_schedule,
             "sampling_evidence": self.sampling_evidence,
+            # 2026-09-25 (user): the FT sign/direction fixed when the reference was built (manual
+            # flips such as -neg). A **derived** field read from params, single source in core
+            # acquisition_mode_detector.sign_sampling_flags; not a dataclass field.
+            "sampling_flags": self.sampling_flags,
             "spectrum_path": self.spectrum_path,
             "frozen_spectrum": self.frozen_spectrum,
             "script_path": self.script_path,
@@ -756,13 +774,11 @@ def load_reference(
         reference.condition = target_ref.condition
     for path in (reference.frozen_spectrum, reference.script_path):
         if not path or not Path(path).is_file():
-            raise ReferenceError(
-                tr(
+            raise ReferenceError(tr(
                 "reference artefacts are missing; rebuild with force=True: "
                 "{p0}",
                 p0=path,
-            )
-            )
+            ))
     return reference
 
 
@@ -988,13 +1004,11 @@ def rebuild_reference_peak_tables(
     if updated.spectrum_sha256 and updated.spectrum_sha256 != spectrum_before:
         raise ReferenceError(tr("the recorded reference spectrum sha256 no longer matches"))
     if sha256_file(peaks) != peaks_before:
-        raise ReferenceError(
-            tr(
+        raise ReferenceError(tr(
             "recomputing the tables changed the reference peak identity table ({p0}), "
             "aborted",
             p0=peaks.name,
-        )
-        )
+        ))
     # Fixed 2026-09-19: refresh the study-level aggregate records/reference.json. The CLI
     # `--rebuild-peak-tables` branch returns right here, so without this the downstream
     # reader keeps seeing the old SHA, the old version and no exclusive_windows.

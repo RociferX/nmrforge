@@ -1,10 +1,14 @@
-"""2026-09-10 Full project review and repair regression (0.2.199-patch29hz). Coverage: 1. Direct
-dimension range verification is divided into direct dimension nuclide bins (originally hard-
-coded 0-20 ppm, 13C direct detection is rejected); 2. Product scanning excludes 3D projection
-(original *.ft2 fallback will treat the projection as the main spectrum); 3. Deleted/Recycle bin
-data is no longer written back by the interface "resurrection"; 4. spectrum file Double-click:
-1D (.ft1) should also be displayed on the right side instead of opening the directory where it
-is located."""
+"""Regression for the 2026-09-10 full-project review fixes (0.2.199-patch29hz).
+
+Coverage:
+1. Direct-dimension range validation is graded by direct-dimension nuclide (was
+   hardcoded to 0-20 ppm, so 13C direct detection was rejected);
+2. Artifact scanning excludes 3D projections (the old *.ft2 fallback treated a
+   projection as the main spectrum);
+3. Deleted/recycle-bin data is no longer written back "resurrected" by the GUI;
+4. Spectrum file double-click: 1D (.ft1) must also be shown on the right, instead
+   of opening the containing directory.
+"""
 
 from __future__ import annotations
 
@@ -38,8 +42,8 @@ def qapp() -> QApplication:
 
 @pytest.fixture
 def host(qapp: QApplication):
-    """Control host: The entire test is destroyed to avoid remaining top-level controls (Qt crashes
-    at the end)."""
+    """Widget host: destroyed with the test to avoid leftover top-level widgets
+    (Qt teardown crash)."""
     from qtcompat.QtWidgets import QWidget
 
     widget = QWidget()
@@ -55,20 +59,20 @@ def _project(tmp_path: Path, title: str = "demo"):
     return manager, exp, data
 
 
-# -------------------------------------------------------------------------- direct dimension range.
+# ---------------------------------------------------------------- direct-dimension range
 
 
 def test_ext_range_1h_stays_strict() -> None:
     assert validate_ext_range("10.5", "6.5", "1H") == ""
     assert validate_ext_range("", "", "1H") == ""
-    assert validate_ext_range("60", "20", "1H") != ""       # 1H Excludes 60 ppm.
-    # The high field end must be larger than the low field end.
+    assert validate_ext_range("60", "20", "1H") != ""       # 1H excludes 60 ppm
+    # The high-field end must be larger than the low-field end.
     assert validate_ext_range("6.5", "10.5", "1H") != ""
     assert validate_ext_range("abc", "", "1H") != ""
 
 
 def test_ext_range_13c_direct_is_accepted() -> None:
-    """13C direct detection (solid CANCO/NCACX, etc.) direct dimension in 0-200 ppm."""
+    """13C direct detection (solid CANCO/NCACX, etc.): direct dimension in 0-200 ppm."""
     assert validate_ext_range("70", "20", "13C") == ""
     assert validate_ext_range("", "20", "13C") == ""
     assert validate_ext_range("250", "20", "13C") != ""
@@ -79,19 +83,19 @@ def test_ext_range_unknown_nucleus_uses_wide_fallback() -> None:
     assert validate_ext_range("200", "20", "13C") == ""
 
 
-# --------------------------------------------------------------------- Product Scan.
+# ---------------------------------------------------------------- artifact scanning
 
 
 def test_projection_names_are_recognised() -> None:
     assert is_projection_spectrum_file("d_001_15N-1H.ft2", "d_001") is True
     assert is_projection_spectrum_file("d_001_proj_F1.ft2", "d_001") is True
     assert is_projection_spectrum_file("d_001.ft3", "d_001") is False
-    # Old naming <exp>-<data> is not a projection.
+    # Old <exp>-<data> naming is not a projection
     assert is_projection_spectrum_file("exp_001-d_001.ft2", "d_001") is False
 
 
 def test_node_artifacts_ignores_projection_only(tmp_path: Path) -> None:
-    """"Generate spectrum" cannot be considered completed when only the file is projected."""
+    """With only a projection file, "generate spectrum" must not count as done."""
     manager, exp, data = _project(tmp_path, "proj_art")
     spectra = manager.data_dir(exp.id, data.id, "spectra")
     spectra.mkdir(parents=True, exist_ok=True)
@@ -106,7 +110,7 @@ def test_node_artifacts_ignores_projection_only(tmp_path: Path) -> None:
     assert artifacts["spectrum"] == main
 
 
-# ------------------------------------------------------------------ Recycle Bin Guard.
+# ---------------------------------------------------------------- recycle-bin guard
 
 
 def test_ui_state_not_written_for_trashed_data(tmp_path: Path) -> None:
@@ -119,8 +123,8 @@ def test_ui_state_not_written_for_trashed_data(tmp_path: Path) -> None:
         manager, exp.id, data.id, "peaks", {"threshold": 40.0}
     )
     assert written is False
-    # Key: Deleted data directory must not be rebuilt (otherwise recover_trashed will misjudge
-    # resurrection).
+    # Critical: the deleted data directory must not be rebuilt (otherwise
+    # recover_trashed would wrongly judge it as resurrected)
     assert manager.data_base(exp.id, data.id).exists() is False
 
 
@@ -134,7 +138,8 @@ def test_ui_state_still_written_for_active_data(tmp_path: Path) -> None:
 
 
 def test_recover_trashed_ignores_ui_records_only(tmp_path: Path) -> None:
-    """Only interface records (report/log.txt, ui_state.json) are not considered "real products"."""
+    """GUI records only (report/log.txt, ui_state.json) do not count as real
+    artifacts."""
     manager, exp, data = _project(tmp_path, "trash_recover")
     base = manager.data_base(exp.id, data.id)
     (base / "report").mkdir(parents=True, exist_ok=True)
@@ -151,7 +156,7 @@ def test_recover_trashed_ignores_ui_records_only(tmp_path: Path) -> None:
     assert data.trashed is False
 
 
-# --------------------------------------------------------------------- tree double-click spectrum.
+# ---------------------------------------------------------------- tree double-click on spectrum
 
 
 def test_double_click_ft1_opens_spectrum(

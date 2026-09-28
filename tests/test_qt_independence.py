@@ -39,7 +39,7 @@ IGNORED_DIR_NAMES = {
     "build",
     "dist",
     "nmrforge.egg-info",
-    "Chinese_version",  # Chinese edition of the documentation (markdown only)
+    "Chinese_version",  # full Chinese-edition mirror of the same code; not scanned twice
 }
 
 

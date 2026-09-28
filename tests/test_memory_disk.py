@@ -1,5 +1,4 @@
-"""Process/_intermediate Intermediate product subdirectory + memory disk takeover test
-(0.2.199-patch29ez)."""
+"""process/_intermediate subdirectory + memory-disk takeover tests (0.2.199-patch29ez)."""
 
 from __future__ import annotations
 
@@ -53,9 +52,9 @@ def _big_memory_cfg(tmp_path: Path) -> dict:
 
 
 def test_estimate_intermediate_peak(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Patch29fk: The direct dimension is estimated according to the default EXT window (10.5-6.5)
-    and the number of points (fixture without sw/sf, according to the default 8ppm spectral
-    width is halved), no longer according to the full direct dimension SI virtual height."""
+    """patch29fk: estimate from the point count after the default EXT window (10.5-6.5); the
+    fixture has no sw/sf so the default 8 ppm width is halved. No longer inflated by the full
+    direct-dimension SI."""
     _patch_plan(monkeypatch, {"F1": 512, "F2": 4096})
     assert memory_disk.estimate_intermediate_peak(_experiment(nus=True)) == 256 * 4096 * 8 * 2
     assert memory_disk.estimate_intermediate_peak(_experiment(nus=False)) == 256 * 4096 * 8 * 2
@@ -64,16 +63,15 @@ def test_estimate_intermediate_peak(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_estimate_intermediate_peak_ext_window_params(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Patch29fk: user final_ext (applied by default) and ext override change direct dimension
-    estimation; disable application and return to default."""
+    """patch29fk: the user final_ext (applied by default) and ext overrides change the direct
+    dimension estimate; disabling the application restores the default."""
     _patch_plan(monkeypatch, {"F1": 512, "F2": 4096})
     exp = _experiment(nus=True)
-    # Narrow window 8.5-7.5(1ppm/8ppm -> 1/8):512 -> 64.
+    # Narrow window 8.5-7.5 (1 ppm of 8 ppm → 1/8): 512→64
     assert memory_disk.estimate_intermediate_peak(
         exp, {"final_ext_lo": "8.5", "final_ext_hi": "7.5"}
     ) == 64 * 4096 * 8 * 2
-    # Turn off "Apply this range to optimisation process": intermediates are still estimated
-    # according to the default wide window (conservative).
+    # "Apply range to optimization" off: intermediates keep the wide default (conservative)
     assert memory_disk.estimate_intermediate_peak(
         exp,
         {
@@ -82,7 +80,7 @@ def test_estimate_intermediate_peak_ext_window_params(
             "apply_ext_to_opt": "0",
         },
     ) == 256 * 4096 * 8 * 2
-    # Explicit ext_lo/ext_hi takes precedence.
+    # Explicit ext_lo/ext_hi take precedence
     assert memory_disk.estimate_intermediate_peak(
         exp, {"ext_lo": "8.5", "ext_hi": "7.5"}
     ) == 64 * 4096 * 8 * 2
@@ -99,7 +97,7 @@ def test_select_memory_dir_policy_and_conditions(
     }
     assert memory_disk.select_memory_dir(_experiment(), cfg_off) is None
 
-    _patch_plan(monkeypatch, {"F1": 1024, "F2": 8192})  # Peak 128MB(x 2).
+    _patch_plan(monkeypatch, {"F1": 1024, "F2": 8192})  # peak 128MB (×2)
     monkeypatch.setattr(
         memory_disk, "system_available_bytes", lambda: 1024 * 1024 * 1024
     )
@@ -107,11 +105,11 @@ def test_select_memory_dir_policy_and_conditions(
     assert mem is not None and mem.is_dir()
     assert mem.parent == tmp_path
 
-    # Insufficient system memory -> rollback.
+    # Not enough system memory → fall back
     monkeypatch.setattr(memory_disk, "system_available_bytes", lambda: 1)
     assert memory_disk.select_memory_dir(_experiment(), _big_memory_cfg(tmp_path)) is None
 
-    # Insufficient memory disk remaining -> rollback.
+    # Not enough free space on the memory disk → fall back
     monkeypatch.setattr(
         memory_disk, "system_available_bytes", lambda: 1024 * 1024 * 1024
     )
@@ -122,8 +120,7 @@ def test_select_memory_dir_policy_and_conditions(
 
 
 def test_selection_reason_text(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Patch29fk-fix: selection_reason gives the reason for the rollback; it is empty when the
-    conditions are met."""
+    """patch29fk-fix: selection_reason explains a fallback; empty when the conditions are met."""
     cfg_off = {"processing": {"intermediate_memory": "off"}}
     assert "off" in memory_disk.selection_reason(_experiment(), cfg_off)
     _patch_plan(monkeypatch, {"F1": 1024, "F2": 8192})
@@ -141,8 +138,7 @@ def test_selection_reason_text(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
 
 
 def test_prepare_teardown_disk_mode(tmp_path: Path) -> None:
-    """Strategy off: work/_intermediate is the real directory, teardown deletes the entire
-    directory."""
+    """Policy off: work/_intermediate is a real directory and teardown removes the whole tree."""
     work = tmp_path / "process"
     cfg_off = {"processing": {"intermediate_memory": "off"}}
     root, mem = memory_disk.prepare_intermediate(work, _experiment(), cfg_off)
@@ -157,9 +153,12 @@ def test_prepare_teardown_disk_mode(tmp_path: Path) -> None:
 def test_prepare_teardown_memory_mode(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Sufficient memory: work/_intermediate symbolic link to the memory directory and teardown are
-    both removed. Windows will automatically fall back to the real directory when there is no
-    ordinary user symbolic link permission (still safe)."""
+    """Enough memory: work/_intermediate is symlinked to the memory directory and teardown
+    removes both.
+
+    On Windows without symlink permission for regular users it falls back to a real directory
+    (still safe).
+    """
     work = tmp_path / "process"
     work.mkdir(parents=True, exist_ok=True)
     _patch_plan(monkeypatch, {"F1": 1024, "F2": 8192})
@@ -170,8 +169,7 @@ def test_prepare_teardown_memory_mode(
         work, _experiment(), _big_memory_cfg(tmp_path)
     )
     if os.name == "nt" and not root.is_symlink():
-        # Windows unsymbolic link permissions -> roll back to real directory (memory directory has
-        # been recycled).
+        # No Windows symlink permission → real-directory fallback (memory dir already reclaimed)
         assert mem is None
         assert root.is_dir()
         memory_disk.teardown_intermediate(work, None)
@@ -189,8 +187,8 @@ def test_prepare_teardown_memory_mode(
 def test_generate_spectrum_intermediate_subdir_disk(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Disk mode: work_dir Keep process directory, intermediate products in _intermediate, end
-    cleanup."""
+    """Disk mode: work_dir stays the process directory, intermediates live in _intermediate,
+    and both are cleaned up at the end."""
     import workflow.stepwise as stepwise
 
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
@@ -208,7 +206,7 @@ def test_generate_spectrum_intermediate_subdir_disk(
 
     def fake_impl(manager, exp_id, data_id, backend, *, work, params=None, progress=None):
         calls["work"] = work
-        assert backend.work_dir == str(work)  # Original logic: work_dir is still process directory.
+        assert backend.work_dir == str(work)  # unchanged: work_dir is still the process dir
         inter = work / memory_disk.INTERMEDIATE_SUBDIR
         assert inter.is_dir()
         (inter / "preview.ft2").write_bytes(b"x")
@@ -224,13 +222,12 @@ def test_generate_spectrum_intermediate_subdir_disk(
     assert not (expected / memory_disk.INTERMEDIATE_SUBDIR).exists()
 
 
-@pytest.mark.skipif(os.name == "nt", reason=
-    "Symbolic links require POSIX (ramdisk is a Linux feature)")
+@pytest.mark.skipif(os.name == "nt", reason="符号链接需 POSIX(内存盘为 Linux 特性)")
 def test_generate_spectrum_intermediate_memory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Memory mode: work/_intermediate points to the memory directory and ends the entire tree
-    deletion."""
+    """Memory mode: work/_intermediate points at the memory directory; teardown removes the
+    whole tree."""
     import workflow.stepwise as stepwise
 
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")

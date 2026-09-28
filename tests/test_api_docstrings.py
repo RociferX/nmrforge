@@ -1,8 +1,11 @@
-"""Phase 19: Disclose the docstring integrity guard of API. The mission statement requires that API
-be made public API and at least clearly write parameters / types / returns / raises / side
-effects / examples, and name processing API, batch API, ``localize_peak``, QC API, sampling API.
-The integrity of these **public entries** is locked here; internal private functions are not
-included in this list (clearly not required by the mission statement)."""
+"""Phase 19: docstring completeness guard for the public API.
+
+The task specification requires a public API to spell out at least parameters / types /
+returns / raises / side effects / examples, and names the processing API, the batch API,
+``localize_peak``, the QC API and the sampling API. This locks down the completeness of
+those **public entry points**; internal private functions are out of scope (the task
+specification explicitly does not require them).
+"""
 
 from __future__ import annotations
 
@@ -15,7 +18,7 @@ import pytest
 REQUIRED_SECTIONS = ("Parameters", "Returns", "Raises", "Side effects", "Examples")
 
 PUBLIC_API: list[tuple[str, str]] = [
-    # Processing API(External processing/Research entrance).
+    # processing API (external processing / research entry points)
     ("nmrforge_api.session", "open_study"),
     ("nmrforge_api.session", "add_dataset"),
     ("nmrforge_api.reference", "build_reference"),
@@ -31,7 +34,7 @@ PUBLIC_API: list[tuple[str, str]] = [
     ("nmrforge_api.sweep", "run_sweep"),
     # batch API
     ("workflow.batch", "run_batch"),
-    # Peak location.
+    # peak localization
     ("core.peaks.localize", "localize_peak"),
     # QC API
     ("core.qc.spectrum_quality", "evaluate"),
@@ -56,35 +59,42 @@ def _resolve(module: str, name: str):
 def test_public_api_docstring_has_the_required_sections(module: str, name: str) -> None:
     doc = inspect.getdoc(_resolve(module, name)) or ""
     missing = [section for section in REQUIRED_SECTIONS if section not in doc]
-    assert not missing, f"{module}.{name} The docstring is missing: {', '.join(missing)}"
+    assert not missing, f"{module}.{name} 的 docstring 缺少: {', '.join(missing)}"
 
 
 @pytest.mark.parametrize(("module", "name"), PUBLIC_API, ids=IDS)
 def test_public_api_docstring_names_real_parameters(module: str, name: str) -> None:
-    """Parameters cannot be an empty shell: at least one real parameter name must be mentioned."""
+    """The Parameters section must not be an empty shell: it must name at least one real
+    parameter."""
     obj = _resolve(module, name)
     doc = inspect.getdoc(obj) or ""
     parameters = list(inspect.signature(obj).parameters)
-    assert parameters, f"{module}.{name} No parameter, no need to check"
+    assert parameters, f"{module}.{name} 没有参数,无需检查"
     assert any(param in doc for param in parameters), (
-        f"{module}.{name} The docstring does not mention any real parameter name"
+        f"{module}.{name} 的 docstring 没有提到任何真实参数名"
     )
 
 
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def _column_block(text: str, marker: str) -> list[str]:
-    """Remove the comma-separated column names in the first ```text code block after ``marker``."""
+def _column_block(text: str, *markers: str) -> list[str]:
+    """Return the comma-separated column names from the first ```text block after the
+    **present** heading among ``markers``.
+
+    The two trees document in different languages (private Chinese / public English), so
+    each heading is accepted in either spelling.
+    """
+    marker = next((m for m in markers if m in text), None)
+    assert marker, f"文档里找不到任何标题: {markers}"
     block = text.split(marker, 1)[1]
     block = block.split("```text", 1)[1].split("```", 1)[0]
     return [name.strip() for name in block.replace("\n", " ").split(",") if name.strip()]
 
 
 def test_peak_table_columns_match_the_docs() -> None:
-    """The number and sequence of columns in the unified peak table are based on codes as the only
-    source, and the documents must be aligned column by column (to prevent "19/20 column"
-    drift)."""
+    """The code is the single source for the column count and column order of the unified peak
+    table; the docs must align column by column (to prevent "19/20 columns" drift)."""
     from nmrforge_api.peak_tables import PEAK_TABLE_COLUMNS
 
     expected = list(PEAK_TABLE_COLUMNS)
@@ -93,8 +103,13 @@ def test_peak_table_columns_match_the_docs() -> None:
     )
     contract = (ROOT / "docs" / "API_CONTRACT.md").read_text(encoding="utf-8")
 
-    assert _column_block(guide, "## 6.2 Unified peak table fields") == expected
-    assert _column_block(contract, "### 11.4 Peak table field") == expected
-    assert f"currently **{len(expected)} columns**" in guide, (
-        "the API guide must state the current column count"
+    assert _column_block(
+        guide, "## 6.2 统一峰表字段", "## 6.2 Unified peak table fields"
+    ) == expected
+    assert (
+        _column_block(contract, "### 11.4 峰表字段", "### 11.4 Peak table field") == expected
     )
+    assert (
+        f"当前 **{len(expected)} 列**" in guide
+        or f"currently **{len(expected)} columns**" in guide
+    ), "API 使用指南必须写明当前列数"

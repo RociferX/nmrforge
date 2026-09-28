@@ -1,29 +1,34 @@
-"""Window function optimisation: direct dimension + indirect dimension, unified memory scoring
-engine (no re-running SMILE/process). User rules (0.2.139) apply to each dimension: 1.
-Evaluation only does Fourier in this dimension (window in front of FT), candidates are all
-scored in memory on the original FID/reconstruction plane trace; 2. Resolution priority: filter
-by FWHM (points) first, and only keep line width <= The candidate of the optimal 1.25x; 3.
-Signal-to-noise ratio and linear balance in the standard pool: score = 0.5*snr_norm +
-0.5*shape_norm. 4. No window (none) is the first-class candidate: natural decay/FID The fully
-sampled axis at the tail should be able to correctly select no window; Need to suppress
-truncated ringing/The axis of noise improvement is automatically selected by scoring to select
-the appropriate window.. 0.2.190 (restore the true window selection): 0.2.189 The indirect
-dimension was hard-coded to be windowless -- that was a misunderstanding of the requirements in
-the previous window. The correct behaviour is that the optimizer treats windowless as a
-candidate to participate in the scoring, and can correctly select the windowless when the window
-is indeed optimal (natural attenuation, apodisation only widens); the direct dimension also
-restores 0.5-0.98 and other candidates to participate in the scoring (resolution filtering is
-relaxed to 1.25x to avoid excluding the moderate window of user preference in advance). 0.2.192
-(added) GM):GM(Lorentz-to-Gauss) formula has been aligned point by point with NMRPipe measured
-(0.2.191,k=1/(2*sqrt(ln2))), rejoining the direct dimension default candidate pool (GM g1=8
-g2=15). GM/EM Dependence spectrum width SW, score not provided Skip these candidates when SW (to
-avoid sw=1.0 values that are garbage and artificially high); the indirect dimension candidate
-pool does not add GM -- resolution The limited indirect dimension apodisation signal-to-noise
-ratio artificially high will overturn the windowless selection of the natural attenuation axis
-(0.2.190 requires retention). The selected configuration is written back to
-window[axis](type=none/sine_bell/gaussian/exp etc.), the complete script application is run from
-the terminal; any failure downgrade returns to the current configuration and does not block
-automatic processing.
+"""Window function optimisation: direct dimension + indirect dimension, one in-memory scoring
+engine (no re-running SMILE/process).
+
+The user rules (0.2.139) apply to every dimension:
+1. the evaluation only Fourier-transforms that dimension (the window goes in front of the FT), and
+   every candidate is scored in memory on the original FID / reconstructed plane traces;
+2. resolution first: filter by FWHM (points) and keep only candidates whose line width is
+   <= 1.25x the best one;
+3. inside the qualifying pool, balance signal-to-noise against line shape:
+   score = 0.5*snr_norm + 0.5*shape_norm;
+4. no window (none) is a first-class candidate: an axis with natural decay / a fully sampled FID
+   tail must be able to select no window correctly, while an axis that needs truncation ringing
+   suppressed or noise reduced gets the suitable window from the score.
+
+0.2.190 (restore real window selection): 0.2.189 hard-coded the indirect dimension to no window --
+a misreading of the requirement in the previous window. The correct behaviour is that no window
+takes part in the scoring and is picked when it really is optimal (natural decay, where apodisation
+only broadens); the direct dimension likewise restores the 0.5-0.98 candidates into the scoring
+(the resolution filter is relaxed to 1.25x so a user's preferred mild window is not excluded up
+front).
+
+0.2.192 (GM returns): the GM (Lorentz-to-Gauss) formula is now aligned point by point with measured
+NMRPipe (0.2.191, k=1/(2*sqrt(ln2))), so it rejoins the direct-dimension default candidate pool
+(GM g1=8 g2=15). GM/EM depend on the spectral width SW, so they are skipped when the scoring gets
+no SW (that avoids the garbage inflation at sw=1.0); the indirect-dimension pool gets no GM -- the
+inflated signal-to-noise of an apodised resolution-limited indirect dimension would overturn the
+no-window choice of a naturally decaying axis (0.2.190 requires keeping it).
+
+The selected configuration is written back to window[axis] (type=none/sine_bell/gaussian/exp, ...)
+and applied by the final-run full script; any failure degrades to returning the current
+configuration and never blocks automatic processing.
 
 2026-09-22 (user: "fix the window selection"): the scoring moved from "peak/noise of the strongest
 peak only" to three **detection-oriented** factors, anchored on the ground-truth benchmark (see
@@ -91,7 +96,7 @@ class WindowChoice:
 
 @dataclass
 class WindowOptimizeResult:
-    """Uniaxial window optimisation results."""
+    """Single-axis window optimisation result."""
 
     choice: dict[str, Any]
     changed: bool
@@ -195,14 +200,20 @@ def _label(cfg: dict[str, Any]) -> str:
 def _window_vector(
     cfg: dict[str, Any], n: int, sw: float = 0.0
 ) -> np.ndarray:
-    """NMRPipe semantic window vector (0.2.191 is consistent with nmrPipe measured/source code
-    point by point). Formula source: VM nmrPipe all 1 FID measured + nmrglue pipe_proc/proc_base
-    (same semantics as NMRPipe); first point equal multiplication -c(SP script explicit -c 0.5
-    Default, GM/EM script is not written -c Press NMRPipe Default 1.0): - SP/sine_bell: w[i] =
-    sin(pi*off + pi*(end-off)*i/(n-1))^pow; - GM(Lorentz-to-Gauss): w[i] = exp(pi*g1p*i -
-    (k*pi*g2p*(g3*(n-1)-i))^2), k=1/(2*sqrt(ln2))=0.6005612...(VM measured, non-nmrglue's 0.6
-    approximation), g1p=g1/SW, g2p=g2/SW(SW As the axis spectrum width Hz, take the fid head
-    FDFxSW); - EM: w[i] = exp(-pi*(lb/SW)*i); none/off=all 1."""
+    """NMRPipe-semantic window vector (0.2.191, aligned point by point with measured nmrPipe and
+    its source).
+
+    Formula source: measured on a VM nmrPipe all-ones FID + nmrglue pipe_proc/proc_base (same
+    semantics as NMRPipe); the first point is multiplied by -c everywhere (SP scripts pass
+    -c 0.5 explicitly, GM/EM scripts omit -c and take the NMRPipe default 1.0):
+    - SP/sine_bell: w[i] = sin(pi*off + pi*(end-off)*i/(n-1))^pow;
+    - GM (Lorentz-to-Gauss): w[i] = exp(pi*g1p*i - (k*pi*g2p*(g3*(n-1)-i))^2),
+      k=1/(2*sqrt(ln2))=0.6005612... (measured on the VM, not nmrglue's 0.6 approximation),
+      g1p=g1/SW, g2p=g2/SW (SW is that axis's spectral width in Hz, taken from FDFxSW in the fid
+      header);
+    - EM: w[i] = exp(-pi*(lb/SW)*i);
+    none/off = all ones.
+    """
     wtype = str(cfg.get("type", "sine_bell"))
     if wtype in ("none", "off"):
         return np.ones(n, dtype=float)
@@ -481,11 +492,13 @@ def _score_axis(
     sw: float = 0.0,
     res_tol: float = _RES_TOL,
 ) -> tuple[list[WindowChoice], WindowChoice | None, str]:
-    """Score the candidate window along the specified time axis, returning (choices, optimal, log
-    rows). When resolution_penalty>0, an exponential penalty is applied to the broadening of the
-    relative optimal FWHM in the standard pool (score *= exp(-k*max(fwhm/min_fwhm-1,0))):
-    resolution-limited indirect dimension Use this Let the natural attenuation axis fall
-    correctly to no window, and the truncated axis still retains the mild window (0.2.190)."""
+    """Score the candidate windows along the given time axis; returns (choices, best, log rows).
+
+    With resolution_penalty>0 an exponential penalty is applied to FWHM broadening relative to
+    the best in the qualifying pool (score *= exp(-k*max(fwhm/min_fwhm-1,0))): the
+    resolution-limited indirect dimension uses it to make a naturally decaying axis land on no
+    window while a truncated axis still keeps a mild window (0.2.190).
+    """
     n = arr.shape[axis]
     moved = np.moveaxis(arr, axis, -1)
     flat = moved.reshape(-1, n)
@@ -597,8 +610,8 @@ def optimize_axis_window(
     sw: float = 0.0,
     res_tol: float = _RES_TOL,
 ) -> WindowOptimizeResult:
-    """Score candidate windows along arr's axis timeline (shared engine, direct/indirect dimension
-    common)."""
+    """Score candidate windows along arr's axis timeline (shared engine, used by the direct and
+    indirect dimensions)."""
     data = np.asarray(arr)
     if data.ndim < 1 or data.shape[axis] < 16:
         return WindowOptimizeResult(
@@ -626,8 +639,7 @@ def optimize_axis_window(
     changed = best.cfg != (current or {})
     logs = [tr("{p0}: window(memory score): {p1}", p0=axis_label, p1=message)]
     if not changed:
-        logs.append(
-            tr(
+        logs.append(tr(
             "{p0}: Window: The optimal configuration is consistent with the existing configuration "
             "and remains",
             p0=axis_label,
@@ -683,11 +695,13 @@ def optimize_indirect_windows(
     zf_mult: float = 2.0,
     sw_map: dict[str, float] | None = None,
 ) -> MultiWindowOptimizeResult:
-    """Score the candidate window for each indirect dimension timeline (including no window), and
-    write back the optimal value for each axis. axis_map: Logical axis -> Time axis index in
-    array (the remaining axes in array can be time or frequency, which does not affect the axis-
-    by-axis scoring). zf_mult: Use zero-filled multipliers for scoring (the number of indirect
-    dimension points is small, and 2x improves FWHM resolution)."""
+    """Score the candidate windows of every indirect-dimension timeline (no window included) and
+    write the best one back per axis.
+
+    axis_map: logical axis -> time axis index in the array (the other axes of the array may be
+    time or frequency, which does not affect the per-axis scoring). zf_mult: zero-fill factor used
+    for scoring (indirect dimensions have few points, and 2x improves the FWHM resolution).
+    """
     data = np.asarray(arr)
     cands = candidates if candidates is not None else INDIRECT_CANDIDATES
     current = dict(current or {})
@@ -697,8 +711,7 @@ def optimize_indirect_windows(
     changed = False
     for axis_name, axis in axis_map.items():
         if axis >= data.ndim or data.shape[axis] < 16:
-            logs.append(
-                tr(
+            logs.append(tr(
                 "{p0}: indirect dimension window optimisation skip: insufficient "
                 "points",
                 p0=axis_name,
@@ -729,25 +742,17 @@ def optimize_indirect_windows(
     )
 
 def _fid_paths(work: Path, experiment: Experiment) -> list[Path]:
-    """The converted fid path: slice stream (fid/test*.fid) or single file (dataset.fid), has the
-    same semantics as workflow.direct_diagnostics._collect_fid_paths (0.2.163-patch6: 3D
-    uniform/NUS is a slice stream)."""
-    if experiment.segments:
-        for base in (work / "merged", work):
-            d = base / "fid"
-            if d.is_dir():
-                fs = sorted(d.glob("test*.fid"))
-                if fs:
-                    return fs
-    d2 = work / "fid"
-    if d2.is_dir():
-        fs = sorted(d2.glob("test*.fid"))
-        if fs:
-            return fs
-    single = work / f"{experiment.dataset_id}.fid"
-    if single.is_file():
-        return [single]
-    return sorted(work.glob("test*.fid"))
+    """Converted fid path: slice stream (fid/test*.fid), single file (dataset.fid) or the merged
+    single file of multi-part data (merged/dataset.fid).
+
+    2026-09-23: no second copy is kept any more -- this follows
+    ``workflow.direct_diagnostics.collect_fid_paths`` directly. Both implementations used to
+    miss ``merged/{dataset_id}.fid`` together, which silently skipped the FID-layer window
+    optimisation of multi-part datasets.
+    """
+    from workflow.direct_diagnostics import collect_fid_paths
+
+    return collect_fid_paths(work, experiment)
 
 
 def _load_fid(work: Path, experiment: Experiment) -> tuple[np.ndarray, dict] | None:
@@ -773,18 +778,21 @@ def _load_fid(work: Path, experiment: Experiment) -> tuple[np.ndarray, dict] | N
 def _load_recon_planes(
     work: Path, experiment: Experiment
 ) -> tuple[np.ndarray, dict] | None:
-    """Load SMILE reconstruction plane (indirect dimension time domain) + head.
-    0.2.199-patch29(measured sampleB + sampleJ manual slicing): 3D nus3d_rc/test%04d.ft1 Each
-    file = one direct dimension (F3 frequency) point, the plane array is (F1 time, F2 time): 13C
-    axis is hypercomplex 4 x TD (300 real), 15N axis is States real data (TD). Window function
-    scoring must act on the original real axis consistently with the backend (SP acts directly
-    on this axis), so simple axis 0 interleaved unpacking is not possible (will unpack the
-    hypercomplex data incorrectly); after stacking (F1, F2, F3). Read only the first plane
-    header FDFILECOUNT planes to avoid stale test*.ft1 mixing in (patch29). 2D nus2d/recon.ft1
-    Single file (F2 frequency, F1 time), F1 complex is in the last axis -- nmrglue has been
-    directly read as the complex data (F2, F1) complex, and cannot be used to split axis 0 with
-    read_pipe_complex (it will cut the direct dimension in half; 0.2.199-patch29b demonstrates
-    the 2D recon made by sampleF)."""
+    """Load the SMILE reconstruction planes (indirect-dimension time domain) + header.
+
+    0.2.199-patch29 (measured with manually sliced sampleB + sampleJ):
+    for 3D, nus3d_rc/test%04d.ft1 has one file per direct-dimension (F3 frequency) point and the
+    plane array is (F1 time, F2 time): the 13C axis is hypercomplex 4xTD (300 real) and the 15N
+    axis is States real (TD). The window scoring has to act on the original real axis exactly as
+    the backend does (SP acts directly on that axis), so it must **not** naively unpack axis 0
+    interleaved (that would unpack hypercomplex data incorrectly); after stacking the layout is
+    (F1 time, F2 time, F3). Only the first FDFILECOUNT planes of the first header are read, so
+    stale test*.ft1 files cannot mix in (patch29).
+    For 2D, nus2d/recon.ft1 is a single file (F2 frequency, F1 time) with the F1 complex part on
+    the last axis -- nmrglue already reads it as complex (F2, F1), so read_pipe_complex must not
+    be used to split axis 0 (it would halve the direct dimension; evidenced by the 2D recon
+    produced by sampleF in 0.2.199-patch29b).
+    """
     import nmrglue as ng
 
     from core.data.pipe_io import read_pipe_complex
@@ -838,8 +846,9 @@ def _uniform_axis_map(experiment: Experiment) -> dict[str, int]:
 
 
 def _nus_axis_map(experiment: Experiment) -> dict[str, int]:
-    """NUS reconstruction plane layout (0.2.199-patch29 correction): 2D (F2 frequency, F1) -> F1=1;
-    3D stack (F1, F2, F3) -> F1=0, F2=1. Old code F1=2 pointed to the direct dimension axis."""
+    """NUS reconstruction plane layout (0.2.199-patch29 correction): 2D (F2 frequency, F1 time)
+    -> F1=1; 3D stack (F1 time, F2 time, F3) -> F1=0, F2=1. The old code used F1=2, which
+    pointed at the direct-dimension axis."""
     if experiment.ndim >= 3:
         return {"F1": 0, "F2": 1}
     return {"F1": 1}
@@ -848,11 +857,14 @@ def _nus_axis_map(experiment: Experiment) -> dict[str, int]:
 def _axis_sw(
     dic: dict[str, Any], axis: str, experiment: Experiment | None = None
 ) -> float:
-    """From fid/Take the logical axis spectrum width of the plane head(SW Hz). 0.2.199-patch29:
-    Prioritize the head core label (FDF{n}LABEL) to match the logical axis core (3D head
-    FDF1=15N/FDF2=1H/FDF3=13C, which is different from the logical F2/F3/F1. If you choose by
-    numerical suffix, you will get the wrong axis SW); when the experiment is unknown, fall back
-    to the numerical suffix (2D) uniform header has the same number as the logic)."""
+    """Spectral width (SW in Hz) of a logical axis, taken from the fid / plane header.
+
+    0.2.199-patch29: match the logical nucleus against the header nucleus label (FDF{n}LABEL)
+    first (in a 3D header FDF1=15N/FDF2=1H/FDF3=13C, which does not agree with the logical
+    F2/F3/F1, so taking the numeric suffix would read the wrong axis's SW); when the experiment
+    is unknown, fall back to the numeric suffix (a 2D uniform header agrees with the logical
+    axis).
+    """
     if experiment is not None:
         dim = next(
             (d for d in experiment.dimensions if d.logical_axis == axis), None
@@ -883,9 +895,9 @@ def optimize_direct_window_from_work(
     zf_size: int | None = None,
     candidates: list[dict[str, Any]] | None = None,
 ) -> WindowOptimizeResult:
-    """Load and optimise the direct dimension window from the converted fid (work directory,
-    support slice stream), without re-running SMILE/process. SW (spectrum width) is read from
-    the fid header for GM/EM accurate modeling."""
+    """Load the converted fid (work directory, slice streams supported) and optimise the direct
+    dimension window without re-running SMILE/process. SW (spectral width) is read from the fid
+    header so GM/EM can be modelled exactly."""
     work = Path(work_dir)
     try:
         loaded = _load_fid(work, experiment)
@@ -920,8 +932,9 @@ def optimize_indirect_windows_from_work(
     current: dict[str, dict[str, Any]] | None = None,
     candidates: list[dict[str, Any]] | None = None,
 ) -> MultiWindowOptimizeResult:
-    """After conversion, fid optimizes uniform each indirect dimension window (memory scoring, no
-    rerun process). Each axis SW is read from the fid header for GM/EM to accurately model."""
+    """Optimise every uniform indirect-dimension window from the converted fid (in-memory scoring,
+    process is not re-run). Each axis's SW is read from the fid header so GM/EM can be modelled
+    exactly."""
     work = Path(work_dir)
     try:
         loaded = _load_fid(work, experiment)
@@ -953,9 +966,9 @@ def optimize_indirect_windows_from_recon(
     current: dict[str, dict[str, Any]] | None = None,
     candidates: list[dict[str, Any]] | None = None,
 ) -> MultiWindowOptimizeResult:
-    """Reconstruct planes from SMILE to optimise NUS for each indirect dimension window (memory
-    scoring, without rerunning SMILE). Each axis SW is read from the plane head for GM/EM
-    accurate modeling."""
+    """Optimise every NUS indirect-dimension window from the SMILE reconstruction planes (in-memory
+    scoring, SMILE is not re-run). Each axis's SW is read from the plane header so GM/EM can be
+    modelled exactly."""
     work = Path(work_dir)
     try:
         loaded = _load_recon_planes(work, experiment)
@@ -963,23 +976,19 @@ def optimize_indirect_windows_from_recon(
         return MultiWindowOptimizeResult(
             choice=dict(current or {}),
             changed=False,
-            logs=[(
-                tr(
+            logs=[tr(
                 "Indirect dimension window optimisation failed (reading reconstruction plane): "
                 "{p0}",
                 p0=exc,
-            )
             )],
         )
     if loaded is None:
         return MultiWindowOptimizeResult(
             choice=dict(current or {}),
             changed=False,
-            logs=[(
-                tr(
+            logs=[tr(
                 "indirect dimension window optimisation skip: not found SMILE reconstruction "
                 "plane",
-            )
             )],
         )
     planes, dic = loaded

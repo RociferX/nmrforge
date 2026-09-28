@@ -1,5 +1,5 @@
-"""Spectrum viewer module tests: ppm axis, ft2 loading, contours, viewer and separate window
-(offscreen)."""
+"""Spectrum viewer module tests: ppm axes, ft2 loading, contours, the viewer and the
+standalone window (offscreen)."""
 
 from __future__ import annotations
 
@@ -78,22 +78,22 @@ def test_spectrum_axis_ppm_roundtrip() -> None:
     axis = _axis("F2", size=256)
     ppm = axis.ppm
     assert ppm.shape == (256,)
-    assert ppm[0] > ppm[-1]  # ppm Decrement with index.
+    assert ppm[0] > ppm[-1]  # ppm decreases with the index
     for index in (0, 1, 100, 255):
         assert axis.index_at(axis.ppm_at(index)) == index
-    # ORIG defines the end point of the time axis ppm = ORIG/OBS.
+    # with ORIG defined, the axis end point ppm = ORIG/OBS
     assert abs(axis.ppm_at(255) - 4.7) < 1e-9
 
 
 def test_spectrum_axis_index_at_f() -> None:
-    """Sub-pixel deinterpolation: index_at_f(ppm_at_f(x)) ≈ x(0.2.199-patch29eo)."""
+    """Subpixel inverse interpolation: index_at_f(ppm_at_f(x)) ≈ x (0.2.199-patch29eo)."""
     axis = _axis("F2", size=256)
     for index in (0, 10, 128, 255):
         assert abs(axis.index_at_f(axis.ppm_at(index)) - index) < 1e-9
     f = 100.3
     ppm = axis.ppm_at_f(f)
     assert abs(axis.index_at_f(ppm) - f) < 1e-6
-    # Out of bounds clamp to endpoint.
+    # out of range clamps to the end point
     assert axis.index_at_f(axis.ppm[0] + 1.0) == 0.0
     assert axis.index_at_f(axis.ppm[-1] - 1.0) == float(axis.size - 1)
 
@@ -137,7 +137,7 @@ def test_load_from_ft2_rejects_1d(tmp_path: Path) -> None:
     dic["FDF1OBS"] = 1.0
     dic["FDF1CAR"] = 1.0
     pipe.write(str(path), dic, np.zeros(16, dtype=np.float32), overwrite=True)
-    with pytest.raises(ValueError, match="supports 2D spectrum"):
+    with pytest.raises(ValueError, match="二维"):
         Spectrum.load_from_ft2(path)
 
 
@@ -156,8 +156,8 @@ def test_contour_layer_small_data_uses_paths() -> None:
         neg_pen="#e74c3c",
         zoom=2.0,
     )
-    # Small spectrum walking matplotlib contour (size diversion, VM full stable path, see CHANGELOG
-    # 0.2.73).
+    # small spectra go through matplotlib contours (size shunt; the stable path for the full
+    # VM run, see CHANGELOG 0.2.73)
     assert layer._use_contourpy is False
     assert layer._path.isEmpty() is False
     assert layer._path_neg.isEmpty() is False
@@ -182,7 +182,8 @@ def test_contour_layer_large_data_uses_contourpy() -> None:
         neg_pen="#e74c3c",
         zoom=2.0,
     )
-    # Dapu walks contourpy real contours (POKY/nmrDraw thin line frame, see CHANGELOG 0.2.75).
+    # large spectra go through contourpy real contours (POKY/nmrDraw-style thin line frame,
+    # see CHANGELOG 0.2.75)
     assert layer._use_contourpy is True
     assert layer._path.isEmpty() is False
     assert layer._path_neg.isEmpty() is False
@@ -199,18 +200,18 @@ def test_viewer_add_spectrum_and_levels(qapp: QApplication) -> None:
     assert name == "HSQC"
     assert viewer.layer_list.count() == 1
     assert viewer.layers[0]._path.isEmpty() is False
-    # After changing the series slider, the path is rebuilt and the series is updated.
+    # changing the level slider rebuilds the paths and updates the level count
     old_count = viewer._level_count
     viewer.count_slider.setValue(old_count + 8)
     assert viewer._level_count == old_count + 8
-    assert len(viewer.layers[0]._levels) == 2 * (old_count + 8)  # Positive and negative symmetry.
+    assert len(viewer.layers[0]._levels) == 2 * (old_count + 8)  # symmetric positive/negative
     viewer.reset_view()
     viewer.close()
 
 
 def test_viewer_update_spectrum_data_in_place(qapp: QApplication) -> None:
-    """0.2.199-patch10: 3D slice switching updates main spectrum data in situ (no layer
-    reconstruction to avoid flickering)."""
+    """0.2.199-patch10: 3D slice switching updates the main spectrum data in situ (no layer
+    rebuild, avoids flicker)."""
     viewer = SpectrumViewer()
     first = _synthetic_spectrum()
     viewer.add_spectrum(first, name="slice 0")
@@ -218,7 +219,7 @@ def test_viewer_update_spectrum_data_in_place(qapp: QApplication) -> None:
     second.data = second.data + 1.0
     ok = viewer.update_spectrum_data(second, name="slice 1")
     assert ok is True
-    assert len(viewer.layers) == 1  # In-place update,Not added/reconstruction layer.
+    assert len(viewer.layers) == 1  # updated in situ: no layer added or rebuilt
     assert viewer._primary is second
     assert viewer.layer_names == ["slice 1"]
     assert viewer.layer_list.count() == 1
@@ -228,28 +229,26 @@ def test_viewer_update_spectrum_data_in_place(qapp: QApplication) -> None:
 
 
 def test_viewer_update_spectrum_data_falls_back(qapp: QApplication) -> None:
-    """0.2.199-patch10: In-situ update fallback clear+add when using multi-layer views."""
+    """0.2.199-patch10: in a multi-layer view the in-situ update falls back to clear+add."""
     viewer = SpectrumViewer()
     viewer.add_spectrum(_synthetic_spectrum())
-    viewer.add_spectrum(_synthetic_spectrum())  # Second floor.
+    viewer.add_spectrum(_synthetic_spectrum())  # second layer
     ok = viewer.update_spectrum_data(_synthetic_spectrum())
     assert ok is False
-    assert len(viewer.layers) == 1  # After clearing, there is only one left.
+    assert len(viewer.layers) == 1  # only one remains after clear
     viewer.close()
 
 
 def test_viewer_contour_defaults_and_english_labels(
     qapp: QApplication,
 ) -> None:
-    """0.2.77: The default starting point of the contour is 3%, the default level is 8, and
-    commonly used terms are displayed in English."""
+    """0.2.77: contour start defaults to 3% and levels to 8; common terms shown in English."""
     viewer = SpectrumViewer()
     assert viewer.level_slider.value() == 31
     assert viewer._level_count == 8
     assert viewer.count_slider.value() == 8
     assert viewer.level_label.text().startswith("Contour start 2.98%")
-    # Cubic mapping: the first 10% of the thresholds account for most of the drag strip (steeper
-    # than square).
+    # cubic mapping: the first 10% threshold takes up most of the slider (steeper than squared)
     viewer.level_slider.setValue(50)
     assert viewer._level_fraction() < 0.15
     viewer.level_slider.setValue(31)
@@ -273,12 +272,12 @@ def test_viewer_peaks_poky_style(qapp: QApplication) -> None:
     )
     data = viewer.peak_item.data
     assert data["size"].shape == (2,)
-    assert viewer.peak_item.opts["symbol"] == "x"  # Poky Style x.
-    assert viewer.peak_item.opts["pxMode"] is False  # Scale with spectrum.
-    assert viewer._label_overlay.visible_label_count() == 2  # Labeled peak + selected peak.
+    assert viewer.peak_item.opts["symbol"] == "x"  # Poky style x
+    assert viewer.peak_item.opts["pxMode"] is False  # scales with the spectrum
+    assert viewer._label_overlay.visible_label_count() == 2  # labelled peaks + selected peak
     viewer.highlight_peak(0)
     assert float(viewer.peak_item.data["size"][0]) == pytest.approx(1.5 * 3.0)
-    assert viewer._flash_item is not None  # 0.2.199-Patch29bk: single-click flashing positioning.
+    assert viewer._flash_item is not None  # 0.2.199-patch29bk: single-point flash localization
     assert viewer._flash_item.flags() & QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations
     viewer._clear_flash()
     assert viewer._flash_item is None
@@ -305,8 +304,8 @@ def test_viewer_nearest_peak(qapp: QApplication) -> None:
 
 
 def test_viewer_axis_direction_nmrdraw(qapp: QApplication) -> None:
-    """Display convention (user 0.2.59 feedback): 1H height ppm is on the left (x column 0 is to
-    the left), 15N height ppm is below (y row 0 is below)."""
+    """Display convention (user 0.2.59 feedback): 1H high ppm on the left (x column 0 on the
+left), 15N high ppm at the bottom (y row 0 at the bottom)."""
     import pyqtgraph as pg
 
     viewer = SpectrumViewer()
@@ -316,13 +315,12 @@ def test_viewer_axis_direction_nmrdraw(qapp: QApplication) -> None:
     nx, ny = spectrum.data.shape[1], spectrum.data.shape[0]
     p0 = vb.mapViewToScene(pg.QtCore.QPointF(0, 0))
     p1 = vb.mapViewToScene(pg.QtCore.QPointF(nx - 1, 0))
-    assert p0.x() < p1.x()  # Column 0 (height ppm) is on the left.
-    # View y is the data row: row 0 (high ppm) = view y=0 at the bottom, row ny-1 (low ppm) at the
-    # top.
+    assert p0.x() < p1.x()  # column 0 (high ppm) on the left
+    # view y is the data row: row 0 (high ppm) = view y=0 at the bottom, row ny-1 (low ppm)
+    # at the top
     q0 = vb.mapViewToScene(pg.QtCore.QPointF(0, 0))
     q1 = vb.mapViewToScene(pg.QtCore.QPointF(0, ny - 1))
-    # Row 0 (high ppm) is shown at the bottom and row ny-1 (low ppm) is at the top.
-    assert q0.y() > q1.y()
+    assert q0.y() > q1.y()  # row 0 (high ppm) at the bottom, row ny-1 (low ppm) at the top
     viewer.close()
 
 
@@ -362,15 +360,16 @@ def test_viewer_zoom_min_limit(qapp: QApplication) -> None:
 
 
 def test_viewer_zoom_out_bounded(qapp: QApplication) -> None:
-    """0.2.133:roller/scaleBy Zoom cannot go beyond the full range, and panning cannot move outside
-    the spectrum."""
+    """0.2.133: wheel/scaleBy zoom-out cannot go beyond the full range, and panning cannot
+    move the spectrum out of view."""
 
     viewer = SpectrumViewer()
     viewer.add_spectrum(_synthetic_spectrum((64, 128)))
     vb = viewer.plot.getViewBox()
     full = vb.viewRange()
     full_x_span = full[0][1] - full[0][0]
-    # Zoom out (wheel path scaleBy) 20 times: span and position must stay within full range.
+    # zoom out 20 times through the wheel path (scaleBy): the span and the position must stay
+    # inside the full range
     vb.setRange(xRange=(10, 20), yRange=(10, 20), padding=0)
     for _ in range(20):
         vb.scaleBy((0.9, 0.9), center=QPointF(16.0, 16.0))
@@ -378,8 +377,7 @@ def test_viewer_zoom_out_bounded(qapp: QApplication) -> None:
     assert vr[0][1] - vr[0][0] <= full_x_span + 1e-6
     assert vr[0][0] >= full[0][0] - 1e-6
     assert vr[0][1] <= full[0][1] + 1e-6
-    # Panning out of bounds: The view is pulled back and the spectrum cannot be moved out of the
-    # field of view.
+    # panning out of bounds: the view is pulled back, the spectrum cannot leave the viewport
     vb.translateBy(x=-500.0, y=0.0)
     vr = vb.viewRange()
     assert vr[0][0] >= full[0][0] - 1e-6
@@ -438,14 +436,14 @@ def test_viewer_drag_hold_follow_crosshair(qapp: QApplication) -> None:
     viewer.set_1d_mode(True)
     assert viewer._strips_active
     scene = viewer.plot.scene()
-    # ???? scene wrapper(PyQt ???? plot.scene() ???????)
+    # the scene wrapper (PyQt returns a wrapper object from plot.scene())
 
     viewer._mouse_left_pressed = True
     calls: list[str] = []
     viewer._move_crosshair = lambda x, y: calls.append(f"move {x} {y}") or None
     viewer._update_strips = lambda y, x: calls.append(f"strips {y} {x}") or None
 
-    # ?????? 1:1,????? (40, 60) ????????
+    # view and scene are 1:1: build the drag position from the view point (40, 60)
     drag_pos = viewer.plot.getViewBox().mapViewToScene(QPointF(40.0, 60.0))
     drag = QMouseEvent(
         QEvent.Type.MouseMove,
@@ -490,8 +488,7 @@ def test_viewer_drag_1d_updates_readout(qapp: QApplication) -> None:
     viewer.close()
 
 def test_scene_mouse_event_kind_maps_graphics_types(qapp: QApplication) -> None:
-    """0.2.148:pyqtgraph scene focus event type GraphicsSceneMouse* must be considered to hold
-    down/move."""
+    """0.2.148: pyqtgraph scene drag event types GraphicsSceneMouse* must count as press/move."""
     from qtcompat.QtCore import QEvent
 
     from viewer.spectrum_viewer import SpectrumViewer
@@ -504,18 +501,18 @@ def test_scene_mouse_event_kind_maps_graphics_types(qapp: QApplication) -> None:
     viewer.close()
 
 def test_value_spinboxes_roundtrip(qapp: QApplication) -> None:
-    """0.2.148: Values can be input and synchronized in both directions with the slider; the
-    series is automatically rounded."""
+    """0.2.148: values can be typed and sync both ways with the sliders; the level count is
+    rounded automatically."""
     viewer = SpectrumViewer()
-    # Input -> Slider.
+    # input -> slider
     viewer.count_label.setValue(12)
     assert viewer.count_slider.value() == 12
     assert viewer._level_count == 12
     viewer.aspect_label.setValue(2.0)
     assert viewer.aspect_slider.value() == 200
-    viewer.level_label.setValue(12.5)  # Percent inverse cubic mapping about 50.
+    viewer.level_label.setValue(12.5)  # inverting the cubic mapping gives about 50
     assert 45 <= viewer.level_slider.value() <= 55
-    # Slider -> Input.
+    # slider -> input
     viewer.count_slider.setValue(20)
     assert viewer.count_label.value() == 20
     viewer.aspect_slider.setValue(150)
@@ -523,7 +520,7 @@ def test_value_spinboxes_roundtrip(qapp: QApplication) -> None:
     viewer.level_slider.setValue(50)
     percent = viewer.level_label.value()
     assert 12.0 <= percent <= 13.0  # (0.5)^3 = 12.5%
-    # Display the value directly after the title.
+    # the value is displayed directly after the title
     assert viewer.level_label.text().startswith("Contour start ")
     assert viewer.level_label.text().endswith("%")
     assert viewer.count_label.text().startswith("Levels ")
@@ -531,7 +528,7 @@ def test_value_spinboxes_roundtrip(qapp: QApplication) -> None:
 
 
 def test_phase_panel_spinboxes_roundtrip(qapp: QApplication) -> None:
-    """0.2.148:P0/P1 can be input and synchronized with the slider."""
+    """0.2.148: P0/P1 can be typed and stay in sync with the sliders."""
     from viewer.spectrum_viewer import SpectrumViewer
 
     viewer = SpectrumViewer()
@@ -547,8 +544,8 @@ def test_phase_panel_spinboxes_roundtrip(qapp: QApplication) -> None:
 
 
 def test_2d_readout_refreshes_on_mouse_move(qapp: QApplication) -> None:
-    """0.2.148: Ordinary 2D (including 3D slices) mouse movement refreshes ppm readings in real
-    time."""
+    """0.2.148: in ordinary 2D (including 3D slices) mouse movement refreshes the ppm readout
+    in real time."""
 
     viewer = SpectrumViewer()
     viewer.add_spectrum(_synthetic_spectrum())
@@ -562,10 +559,10 @@ def test_2d_readout_refreshes_on_mouse_move(qapp: QApplication) -> None:
 
 
 def test_data_bounds_item_tracks_spectrum(qapp: QApplication) -> None:
-    """0.2.150: The bounding box is created with the spectrum, the same coordinate system is
-    scaled, and does not participate in automatic scaling."""
+    """0.2.150: the bounding box is created together with the spectrum, shares its coordinate
+    system so it follows zoom/pan, and does not take part in auto-scaling."""
     viewer = SpectrumViewer()
-    # Does not exist when the spectrum is not loaded (does not interfere with the startup view).
+    # absent while no spectrum is loaded (does not disturb the startup view)
     assert viewer._data_bounds_item is None
     viewer.add_spectrum(_synthetic_spectrum())
     item = viewer._data_bounds_item
@@ -574,27 +571,24 @@ def test_data_bounds_item_tracks_spectrum(qapp: QApplication) -> None:
     assert rect.left() == -0.5 and rect.top() == -0.5
     assert rect.width() == float(_synthetic_spectrum().x_axis.size)
     assert rect.height() == float(_synthetic_spectrum().y_axis.size)
-    # Zoom/Data coordinates remain unchanged after translation(The frame is the data boundary).
+    # data coordinates are unchanged after zoom/pan (what is boxed is the data bounds)
     vb = viewer.plot.getViewBox()
     vb.setRange(xRange=(10.0, 60.0), yRange=(5.0, 90.0), padding=0)
     assert item.rect() == rect
-    # The bounding box is in the same coordinate system as spectrum: parent is ViewBox childGroup,
-    # Zoom with view/Translation synchronization transformation (leaving the field of view after
-    # zooming in).
+    # the bounding box shares the spectrum's coordinate system: its parent is the ViewBox
+    # childGroup, so it transforms with zoom/pan (it leaves the viewport after zooming in)
     assert item.parentItem() is vb.childGroup
-    # IgnoreBounds=True: Do not enter addedItems and do not participate in automatic scaling
-    # calculations.
+    # ignoreBounds=True: not in addedItems, so it does not take part in auto-scaling
     assert item in vb.addedItems
         # 0.2.150: removed ignoreBounds (box now in addedItems)
-    # Removed after clearing (no longer exists).
+    # removed together with the spectrum on clear (it no longer exists)
     viewer.clear()
     assert viewer._data_bounds_item is None
     viewer.close()
 
 
 def test_slice_point_and_ppm_editable(qapp: QApplication) -> None:
-    """0.2.149: Slice point / ppm can be input and synchronized with the slider in three
-    directions."""
+    """0.2.149: the slice point / ppm can be typed and sync three ways with the slider."""
     import numpy as np
 
     from viewer.spectrum import Spectrum3D, SpectrumAxis
@@ -613,27 +607,27 @@ def test_slice_point_and_ppm_editable(qapp: QApplication) -> None:
     fired: list[int] = []
     panel.slice_changed.connect(lambda: fired.append(1))
     panel.set_spectrum3d(spec)
-    # 0.2.199-patch29bh:CH plane priority (H/N/C label -> fixed N), fallback assertion using
-    # axes[2].
+    # 0.2.199-patch29bh: the CH plane comes first (H/N/C labels -> N pinned); the fallback
+    # assertion uses axes[2]
     assert panel._slice_axis == 1
-    axis = axes[1]  # Default CH plane, fixed N.
+    axis = axes[1]  # default CH plane, N pinned
     mid = axis.size // 2
     assert panel.slice_slider.value() == mid
     assert panel.point_spin.value() == mid
     assert abs(panel.ppm_spin.value() - axis.ppm_at(mid)) < 1e-2
-    # Enter point.
+    # enter a point
     panel.point_spin.setValue(3)
     assert panel.slice_slider.value() == 3
     assert abs(panel.ppm_spin.value() - axis.ppm_at(3)) < 1e-2
-    # Enter ppm.
+    # enter a ppm
     panel.ppm_spin.setValue(axis.ppm_at(7))
     assert panel.slice_slider.value() == 7
     assert panel.point_spin.value() == 7
-    # Slider drag reverse sync.
+    # dragging the slider syncs back
     panel.slice_slider.setValue(9)
     assert panel.point_spin.value() == 9
     assert abs(panel.ppm_spin.value() - axis.ppm_at(9)) < 1e-2
-    assert fired  # set_spectrum3d/All input triggers redraw.
+    assert fired  # both set_spectrum3d and input trigger a redraw
     panel.clear()
     assert not panel.point_spin.isEnabled()
     assert not panel.ppm_spin.isEnabled()
@@ -643,8 +637,8 @@ def test_slice_point_and_ppm_editable(qapp: QApplication) -> None:
 
 
 def test_highlight_pans_view_to_peak(qapp: QApplication) -> None:
-    # 0.2.199-patch29bl: When the selected peak is out of view, pan the view to the centre (clamp
-    # the edge of the spectrum to move in).
+    # 0.2.199-patch29bl: when the selected peak is out of view, pan the view to the centre
+    # (the spectrum edge is clamped into the view)
     spectrum = _synthetic_spectrum()
     viewer = SpectrumViewer()
     viewer.add_spectrum(spectrum)
@@ -665,8 +659,8 @@ def test_highlight_pans_view_to_peak(qapp: QApplication) -> None:
 
 
 def test_peak_label_leader_line(qapp: QApplication) -> None:
-    # 0.2.199-patch29bm: label-peak mark horizontal connecting line, leave a gap; hide the label
-    # line and hide it together.
+    # 0.2.199-patch29bm: a horizontal leader line from the label to the peak marker, with a
+    # gap; hiding the label hides the line too
     spectrum = _synthetic_spectrum()
     viewer = SpectrumViewer()
     viewer.add_spectrum(spectrum)
@@ -680,16 +674,16 @@ def test_peak_label_leader_line(qapp: QApplication) -> None:
         ]
     )
     assert viewer._label_overlay.visible_label_count() == 1
-    viewer.set_peak_labels_visible(False)  # Hide Assignment: Labels are hidden together with lines.
+    viewer.set_peak_labels_visible(False)  # hide Assignment: label and line hide together
     assert viewer._label_overlay.visible_label_count() == 0
     viewer.set_peak_labels_visible(True)
     assert viewer._label_overlay.visible_label_count() == 1
     viewer.close()
 
 def test_label_positions_magnified_about_center(qapp: QApplication) -> None:
-    """0.2.199-patch29cl/patch29cm:assignment = The peak layer is enlarged by 1.25 x from the
-    centre of the view (the sphere is scattered), and the 1.25 x ratio is maintained during
-    scaling; the spectrum itself is still a 2D plane."""
+    """0.2.199-patch29cl/patch29cm: assignment = the peak layer magnified 1.25 x about the
+    view centre (spherical, spread out), keeping the 1.25 x ratio while zooming; the spectrum
+    itself is still a 2D plane."""
     spectrum = _synthetic_spectrum()
     viewer = SpectrumViewer()
     viewer.resize(640, 480)
@@ -721,7 +715,7 @@ def test_label_positions_magnified_about_center(qapp: QApplication) -> None:
         assert lp is not None
         assert abs((lp.x() - cx) - 1.25 * (pp.x() - cx)) < 2.0
         assert abs((lp.y() - cy) - 1.25 * (pp.y() - cy)) < 2.0
-    # After scaling, the proportion remains 1.25.
+    # the ratio is still 1.25 after zooming
     vb.setRange(xRange=(80.0, 176.0), yRange=(25.0, 70.0), padding=0)
     qapp.processEvents()
     for row, (xi, yi) in enumerate(viewer._peak_data_xy):
@@ -736,8 +730,8 @@ def test_label_positions_magnified_about_center(qapp: QApplication) -> None:
 
 
 def test_label_drag_updates_position(qapp: QApplication) -> None:
-    """0.2.199-patch29cl: Select mode to drag assignment to save custom screen position, hit
-    detection is available."""
+    """0.2.199-patch29cl: dragging an assignment in selection mode stores a custom screen
+    position, and hit detection works."""
     spectrum = _synthetic_spectrum()
     viewer = SpectrumViewer()
     viewer.resize(640, 480)
@@ -752,19 +746,19 @@ def test_label_drag_updates_position(qapp: QApplication) -> None:
         ]
     )
     qapp.processEvents()
-    assert viewer._label_positions[0] is None  # Default dynamic 1.25 x, no storage.
+    assert viewer._label_positions[0] is None  # dynamic 1.25 x by default, nothing stored
     lp = viewer._label_widget_pos(0)
     assert lp is not None
     assert viewer._label_at_widget(lp) == 0
     viewer._move_label(0, QPointF(lp.x() + 40.0, lp.y() + 30.0))
-    assert viewer._label_positions[0] is not None  # Save screen ratio after dragging.
+    assert viewer._label_positions[0] is not None  # the screen ratio is stored after dragging
     assert viewer._label_widget_pos(0) != lp
     viewer.close()
 
 
 def test_highlight_flash_only_when_requested(qapp: QApplication) -> None:
-    """0.2.199-patch29bo: Flashing is triggered only by clicking on the peak table; spectrum
-    Click/Frame selection only highlights without flashing."""
+    """0.2.199-patch29bo: the flash is triggered only by a peak-table click; clicking or
+    box-selecting on the spectrum only highlights, it does not flash."""
     spectrum = _synthetic_spectrum()
     viewer = SpectrumViewer()
     viewer.add_spectrum(spectrum)
