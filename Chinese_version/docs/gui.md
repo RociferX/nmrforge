@@ -13,11 +13,15 @@
 ## 启动
 
 ```bash
-python main.py    # 1.0.1 源码入口(AppImage 里是内置入口)
+python main.py
 ```
 
-公开发布的 Linux AppImage 为 v1.0.1。本指南按当前源码更新;该 AppImage 尚未重建,不包含下面新增的界面细节。
-首次正常运行会装桌面菜单项(`--remove-desktop` 移除),构建与验收记录见 [packaging.md](packaging.md)。
+Linux 是目标运行平台。已发布的 AppImage 对应其 Release 标明的确切源码 tag；可用产物见
+[Releases](https://github.com/RociferX/nmrforge/releases)。首次正常运行会装桌面菜单项
+(`--remove-desktop` 移除),构建与验收记录见 [packaging.md](packaging.md)。
+
+GUI 启动时会探测 NMRPipe 和 SMILE 并报告可用状态。这不表示所有操作都需要这些工具：已有处理谱
+可用纯 Python 做谱图 QC 和选峰；生成新的处理谱需要 NMRPipe，NUS 重构还需要 SMILE。
 
 ## 窗口布局
 
@@ -71,6 +75,7 @@ python main.py    # 1.0.1 源码入口(AppImage 里是内置入口)
 3. **生成 FID** → **确定直接维范围**(可选,步骤行上的「直接维范围」,默认 6.5–10.5 ppm)→
    **生成谱图**(步骤会自动解锁)。数据质量检测先跑,结论在任何优化步骤之前写进日志。
    生成 FID 需要机器上有 **NMRPipe**;NUS 数据的 SMILE 重构在生成谱图这一步自动包含。
+   对已有处理谱做 QC 和选峰不需要 NMRPipe。
 4. **读运行结束时的报告**:最终谱图质量(信噪比、相位、基线与伪影分项)、数据质量检测一节,
    以及解析后的处理参数(包括优化器自己选的),还有直接维范围与 CAR 载频口径。先看报告再看谱。
 5. **看谱**:点步骤行上的**「展示谱图」**在第 4 列打开终谱 —— 滚轮缩放、中键平移、强度滑块、

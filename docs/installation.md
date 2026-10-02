@@ -2,7 +2,8 @@
 
 ## Source and binary releases
 
-The GitHub repository contains source. The [releases page](https://github.com/RociferX/nmrforge/releases)
+The GitHub repository contains source. Linux is the target runtime; Windows may be used to edit
+source but is not a supported runtime environment. The [releases page](https://github.com/RociferX/nmrforge/releases)
 may also provide a versioned Linux AppImage. An AppImage contains the source revision named in its
 release; later source changes do not update that binary automatically. For the current source tree,
 use an editable install:
@@ -11,7 +12,7 @@ use an editable install:
 git clone https://github.com/RociferX/nmrforge.git
 cd nmrforge
 python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
+source .venv/bin/activate
 python -m pip install -e ".[test]"
 python main.py
 ```
@@ -42,7 +43,7 @@ release assets and [THIRD_PARTY.md](../THIRD_PARTY.md) for distribution informat
 git clone <this repository>
 cd nmrForge
 python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
+source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
@@ -83,7 +84,7 @@ python examples/quickstart.py example_data/hsqc_2d
 GUI tests need a display or an offscreen Qt platform:
 
 ```bash
-QT_QPA_PLATFORM=offscreen python -m pytest -q      # Windows: set QT_QPA_PLATFORM=offscreen
+QT_QPA_PLATFORM=offscreen python -m pytest -q
 ```
 
 ## Upgrading and uninstalling

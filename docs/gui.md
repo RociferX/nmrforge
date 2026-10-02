@@ -16,13 +16,18 @@ what the interface does; the underlying engine behaviour is in
 ## Starting it
 
 ```bash
-python main.py    # 1.0.1 source entry point (the AppImage starts it internally)
+python main.py
 ```
 
-The published Linux AppImage is v1.0.1. This guide follows the current source tree; the AppImage
-has not been rebuilt to include the newer interface details below. The first normal run installs
-the desktop entry (`--remove-desktop` removes it). Build and acceptance records are in
-[packaging.md](packaging.md).
+Linux is the target runtime. A released AppImage corresponds to the exact source tag named by its
+release; see the [releases page](https://github.com/RociferX/nmrforge/releases) for available
+artifacts. The first normal run installs the desktop entry (`--remove-desktop` removes it). Build
+and acceptance records are in [packaging.md](packaging.md).
+
+The GUI probes for NMRPipe and SMILE at startup and reports their availability. This does not mean
+every operation requires them: existing processed spectra can be QC-checked and peak-picked with
+pure Python. Generating a new processed spectrum requires NMRPipe; NUS reconstruction also requires
+SMILE.
 
 ## Window layout
 
@@ -87,7 +92,8 @@ positions and the branches of every step are in the tutorial.
    step row, 6.5-10.5 ppm by default) -> **Generate spectrum** (the next step unlocks
    automatically). The data-quality inspection runs first and its conclusion goes into the log
    before any optimisation step. Generate FID needs **NMRPipe** on the machine; the SMILE
-   reconstruction of NUS data is included automatically in the Generate spectrum step.
+   reconstruction of NUS data is included automatically in the Generate spectrum step. QC and
+   peak picking on an existing processed spectrum do not need NMRPipe.
 4. **Read the report** at the end of the run: final spectrum quality (with signal-to-noise, phase,
    baseline and artefact sub-scores), the data-quality inspection section, and the resolved
    processing parameters, including anything the optimiser chose, plus the direct dimension range

@@ -6,7 +6,8 @@ nmrForge 的错误信息应该说明「缺什么、该怎么办」。如果在 G
 
 ## 提示「NMRPipe NOT FOUND」/ 处理无法启动
 
-原因:后端定位不到 NMRPipe 可执行文件。
+原因:后端定位不到 NMRPipe 可执行文件。Linux 是目标运行平台；GUI 启动时会探测外部工具,
+处理步骤也会在需要时检查其能力。
 
 1. 确认 NMRPipe 已安装,且它的 `bin` 目录里有 `nmrPipe`;
 2. 在 `nmrforge_data/config/nmrforge.yaml`(或 `nmrforge_data/config/nmrforge.local.yaml`)里
@@ -18,12 +19,15 @@ nmrForge 的错误信息应该说明「缺什么、该怎么办」。如果在 G
        path: /opt/NMRPipe/nmrbin.linux212_64   # 目录或可执行文件
    ```
 
-   定位顺序:显式路径 → `nmrpipe_bin` → `PATH` → `csh` 环境 → 常见安装位置
-   (`backend/nmrpipe_finder.py`);
+   查找顺序:`backend.nmrpipe.path` → 别名 `backend.nmrpipe.nmrpipe_bin` → (未配置显式路径时)
+   `source ~/.cshrc` 后的 `csh`/`tcsh` `which` → `PATH`。配置值按显式路径处理；无效路径会报错,
+   不会静默回退,也不会扫描常见安装目录。其它 companion 工具优先使用有效的单工具配置,
+   再查 `csh` 环境和已发现安装目录及其父目录中的 `com/` 子目录;
 3. `python examples/quickstart.py <数据集>` 会先把「有没有找到 NMRPipe 与 SMILE」打出来,
    这是确认检测结果最快的办法。
 
-数据理解与 QC 不需要 NMRPipe;转换、FT、相位、基线与 SMILE 需要。
+数据理解不需要 NMRPipe。已存在的处理谱可用纯 Python 执行谱图 QC 和选峰；生成新的处理谱
+需要 NMRPipe，NUS 重构还需要 SMILE。
 
 ## 提示「本机未找到 tcsh/csh (NMRPipe scripts need a C-shell)」
 
@@ -94,24 +98,20 @@ nmrForge 在开始前先估算峰值,并把显式的 `-maxMem` 传下去;估算�
 2. 处理前先修正实验模板。`presets/*.yaml` 是实验模板的唯一来源;模板错了会一路传到相位处理、
    符号约定与窗函数缺省值,而且没有任何质量指标能可靠地发现它。
 
-## 测试报 `PermissionError ... pytest-of-<user>`
+## Linux 测试报 `PermissionError ... pytest-of-<user>`
 
-Windows 上测试套件把临时目录建在系统临时目录下。如果那个路径被锁(受限或只读的临时目录,
-或上次中断留下的 `pytest-of-<user>` 目录),pytest 就建不了它的 base temp 目录。
-
-按优先级:
+确认系统临时目录可写；若不可用，为 pytest 指定一个可写的 Linux 临时目录:
 
 ```bash
-python -m pytest --basetemp=/tmp/nf_pytest -q              # Linux
-python -m pytest --basetemp=$env:TEMP\nf_pytest -q          # PowerShell
+python -m pytest --basetemp=/tmp/nf_pytest -q
 ```
 
-如果原因是残留的 `pytest-of-<user>` 目录,删掉即可 —— 它本来就是一次性的。
+若是上次中断留下的临时目录导致冲突，请按需清理对应的一次性测试目录。
 
 ## GUI 测试报显示相关错误
 
 ```bash
-QT_QPA_PLATFORM=offscreen python -m pytest -q      # Windows: 设 QT_QPA_PLATFORM=offscreen
+QT_QPA_PLATFORM=offscreen python -m pytest -q
 ```
 
 ## 日志在哪?

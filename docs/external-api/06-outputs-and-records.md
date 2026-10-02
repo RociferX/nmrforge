@@ -35,6 +35,8 @@
 
 ## 6.2 Unified peak table fields (**27 columns**)
 
+The unified table contains currently **27 columns**, in the order below.
+
 The reference and combination modes use three-point parabolic localisation and write one peak table.
 Rerunning without resume replaces the corresponding run products. The table schema is declared by
 `nmrforge_api.peak_tables.PEAK_TABLE_COLUMNS`.

@@ -6,7 +6,8 @@ report it (see [CONTRIBUTING.md](../CONTRIBUTING.md)).
 
 ## "NMRPipe NOT FOUND" / processing cannot start
 
-Cause: the backend could not locate the NMRPipe executables.
+Cause: the backend could not locate the NMRPipe executable. Linux is the target runtime. The GUI
+probes external tools at startup, and processing steps check their capabilities when needed.
 
 1. Check that NMRPipe is installed and that its `bin` directory contains `nmrPipe`.
 2. Point nmrForge at it explicitly in `nmrforge_data/config/nmrforge.yaml` (or
@@ -18,12 +19,18 @@ Cause: the backend could not locate the NMRPipe executables.
        path: /opt/NMRPipe/nmrbin.linux212_64   # directory or executable
    ```
 
-   The locator searches, in order: the explicit path, `nmrpipe_bin`, `PATH`, the `csh`
-   environment, then common installation locations (`backend/nmrpipe_finder.py`).
+   Lookup order: `backend.nmrpipe.path` -> the `backend.nmrpipe.nmrpipe_bin` alias -> (when no
+   explicit path is configured) `csh`/`tcsh` `which` after `source ~/.cshrc` -> `PATH`. Configured
+   values are explicit paths; an invalid path is an error, not a silent fallback, and the locator
+   does not scan common installation directories. Other companion tools prefer a valid per-tool
+   path, then check the `csh` environment and `com/` directories under the discovered installation
+   directory and its parents.
 3. `python examples/quickstart.py <dataset>` prints whether NMRPipe and SMILE were found before
    anything else, which is the fastest way to confirm detection.
 
-Data understanding and QC work without NMRPipe; conversion, FT, phase, baseline and SMILE do not.
+Data understanding does not need NMRPipe. Existing processed spectra can be QC-checked and peak
+picked with pure Python; generating a new processed spectrum requires NMRPipe, and NUS
+reconstruction also requires SMILE.
 
 ## "tcsh/csh not found on this machine (NMRPipe scripts need a C-shell)"
 
@@ -95,27 +102,22 @@ and acquisition parameters - not file names. Two things to check:
    experiment templates; a wrong template propagates into phase handling, sign conventions and
    window defaults, and no quality metric reliably detects that.
 
-## The suite fails with `PermissionError ... pytest-of-<user>`
+## Linux tests fail with `PermissionError ... pytest-of-<user>`
 
-On Windows, the test suite writes its scratch directories under the system temp directory. If that
-path is locked down (a restricted or read-only temporary directory, or a stale
-`pytest-of-<user>` directory left by an earlier interrupted run), pytest cannot create its base
-temp directory.
-
-Workarounds, in order of preference:
+Check that the system temporary directory is writable. If not, point pytest to a writable Linux
+temporary directory:
 
 ```bash
-python -m pytest --basetemp=/tmp/nf_pytest -q              # Linux
-python -m pytest --basetemp=$env:TEMP\nf_pytest -q          # PowerShell
+python -m pytest --basetemp=/tmp/nf_pytest -q
 ```
 
-If a stale `pytest-of-<user>` directory is the cause, deleting it resolves it - it is disposable
-by definition.
+If a leftover temporary directory from an interrupted run causes a conflict, clean up that
+disposable test directory as needed.
 
 ## GUI tests fail with a display error
 
 ```bash
-QT_QPA_PLATFORM=offscreen python -m pytest -q      # Windows: set QT_QPA_PLATFORM=offscreen
+QT_QPA_PLATFORM=offscreen python -m pytest -q
 ```
 
 ## Where are the logs?

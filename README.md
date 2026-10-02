@@ -393,7 +393,7 @@ environment. Real-engine behaviour still requires NMRPipe/SMILE and separate val
 
 ```bash
 python -m pip install -e ".[test]"
-python -m pytest -q                  # full suite (~1.3k tests)
+python -m pytest -q                  # full suite
 python -m pytest -m unit             # fast subset (pure logic; ~45 s, mostly collection)
 python -m ruff check .               # static checks
 ```

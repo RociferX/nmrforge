@@ -343,7 +343,7 @@ python examples/quickstart.py ./example_data/hsqc_2d
 
 ```bash
 python -m pip install -e ".[test]"
-python -m pytest -q                  # 全量(约 1.3k 条)
+python -m pytest -q                  # 全量
 python -m pytest -m unit             # 快速子集(纯逻辑;约 45 秒,主要是收集开销)
 python -m ruff check .               # 静态检查
 ```

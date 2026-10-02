@@ -17,13 +17,18 @@ nmrForge 自动化 NMRPipe。它不包含、不下载、也不安装 NMRPipe。�
 
 ## nmrForge 如何找到它们
 
-`backend/nmrpipe_finder.py` 按这个顺序查找:
+NMRPipe 主程序由 `find_nmrpipe_bin` 查找,顺序如下:
 
-1. 配置里显式给出的路径(`backend.nmrpipe.path`)—— 一个目录或一个可执行文件;
-2. `backend.nmrpipe.nmrpipe_bin`;
-3. `PATH`;
-4. `csh` 环境,也就是终端 source 过 NMRPipe 环境文件之后得到的环境;
-5. 常见安装位置。
+1. 显式配置 `backend.nmrpipe.path`;
+2. 兼容别名 `backend.nmrpipe.nmrpipe_bin`;
+3. 未设置显式路径时,启动用户的 `csh`/`tcsh`,执行 `source ~/.cshrc` 后用 `which` 查询;
+4. `PATH`。
+
+两个配置项都按显式路径处理,可以指向安装目录或可执行文件。若已设置的路径无效,会报告错误,
+不会静默忽略并尝试后续来源。自动发现不扫描固定的常见安装目录。
+
+其它 NMRPipe companion 工具优先使用已配置且有效的单工具路径；否则先在 `csh` 环境中查找，
+再从已发现的安装目录及其父目录下的 `com/` 子目录查找。
 
 默认配置在 `nmrforge_data/config/nmrforge.yaml`。要做机器本地覆盖,就把它复制成
 `nmrforge_data/config/nmrforge.local.yaml`;该文件被 git 忽略,正是为了让机器路径永远不会进仓库。
@@ -32,14 +37,14 @@ nmrForge 自动化 NMRPipe。它不包含、不下载、也不安装 NMRPipe。�
 backend:
   provider: nmrpipe
   nmrpipe:
-    nmrpipe_bin: ""      # 留空表示通过 PATH / csh / 常见位置自动探测
-    path: ""             # 显式的 bin 目录或可执行文件;设置后优先
+    nmrpipe_bin: ""      # 兼容的显式路径别名
+    path: ""             # 主显式路径；优先于 nmrpipe_bin
 ```
 
 ## 缺少工具时如何报告
 
-- 只有在某个步骤真正需要时才去定位 NMRPipe。如果找不到,报出的是面向用户的提示
-  (例如「NMRPipe executable was not found」),而不是一个导入错误。
+- GUI 启动时会探测外部工具；处理步骤也会在需要时检查能力。缺少 NMRPipe 时给出面向用户的
+  提示(例如「NMRPipe executable was not found」),而不是导入错误。
 - 版本探测尽力而为:后端只有在真正定位到 NMRPipe/SMILE 之后,才把版本写进运行记录;
   否则该字段留空,而不是写一个编造的值。见 `core/version.py`。
 - `examples/quickstart.py` 在做任何事情之前,先打印是否找到了 NMRPipe 与 SMILE。
@@ -53,10 +58,9 @@ backend:
 | 实验类型判定 | 可用 |
 | 采样判定(uniform / NUS / uncertain) | 可用 |
 | 读取时域数据 | 可用 |
-| 处理(转换、FT、相位、基线、窗函数、填零) | 不可用 |
+| 生成新的处理谱(转换、FT、相位、基线、窗函数、填零) | 不可用 |
 | SMILE 重构 | 不可用 |
-| 谱图质量指标 | 不可用(它们需要一张处理过的谱) |
-| 在谱图上选峰 | 不可用 |
+| 已有处理谱的纯 Python QC 与选峰 | 可用(无需 NMRPipe) |
 | 峰表解析/导出 | 可用(文件级操作) |
 
 这条边界是有意为之:结果永远不会由某个替代引擎悄悄产出。
@@ -66,8 +70,7 @@ backend:
 - NUS 重构的内存主要由直接维尺寸乘以迭代间接 FT 网格决定,因此填零会让它迅速膨胀。
   nmrForge 在运行 SMILE 之前先估算峰值,并传入显式的 `-maxMem`,
   对预计会超过可用内存的重构直接拒绝启动。
-- 中间谱图可以放到 RAM 盘(`processing.memory_disk_path`、`processing.intermediate_memory: auto`)
-  以减少 I/O;在 Windows 上这需要你自己创建 RAM 盘,否则该设置会退回磁盘。
+- Linux 是目标运行平台；不要将 RAM 盘或其它 Windows 专用资源配置当作受支持的运行建议。
 - SMILE 的线程数是 `smile.nthread`(默认 2,并夹在「CPU 数减二」以内)。
 
 ## 版本兼容性

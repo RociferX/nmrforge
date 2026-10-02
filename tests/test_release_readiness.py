@@ -624,3 +624,34 @@ def test_release_documents_the_appimage_and_its_language_switch() -> None:
     )
     for stale in stale_claims:
         assert stale not in claims
+
+
+def test_frozen_python_build_config_keeps_abi_without_machine_paths(tmp_path: Path) -> None:
+    """Cached config code must be replaced as well as the collected source path."""
+    import runpy
+    import sys
+
+    helper = runpy.run_path(str(ROOT / "packaging/linux/sanitize_sysconfig.py"))
+    text = helper["render_config"](
+        {"prefix": "/home/builder/sdk", "SIZEOF_VOID_P": 8, "SOABI": "test-abi"},
+        "/home/builder/sdk", "/home/builder",
+    )
+    assert "/home/builder" not in text
+    result = {}
+    exec(compile(text, "portable-sysconfig.py", "exec"), result)
+    assert result["build_time_vars"]["prefix"] == sys.base_prefix
+    assert result["build_time_vars"]["SIZEOF_VOID_P"] == 8
+    assert result["build_time_vars"]["SOABI"] == "test-abi"
+
+    name = "_sysconfigdata_fixture"
+    source = tmp_path / (name + ".py")
+    source.write_text("build_time_vars = {'SIZEOF_VOID_P': 8}\n", encoding="utf-8")
+    cache = {name: compile("build_time_vars = {}", "old-config.py", "exec")}
+    pure = [(name, str(source), "PYMODULE")]
+    assert helper["sanitize_python_config"](pure, cache, tmp_path / "portable") == 1
+    assert pure[0][1] != str(source)
+    assert cache[name].co_filename == name + ".py"
+    result = {}
+    exec(cache[name], result)
+    assert result["build_time_vars"]["SIZEOF_VOID_P"] == 8
+

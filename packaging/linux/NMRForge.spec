@@ -2,6 +2,10 @@
 # Paths are relative to this file's directory (packaging/linux/); usage in docs/packaging.md
 
 import os
+import runpy
+from pathlib import Path
+
+from PyInstaller.config import CONF
 
 # 2026-09-21: the UI strings go through a runtime language layer, so only **one** AppImage is
 # built; this also drops the Qt modules the application does not use (it needs QtCore/QtGui/
@@ -80,6 +84,12 @@ a = Analysis(
     noarchive=False,
 )
 
+# Sanitize build-host paths before PYZ, including Analysis's cached code objects.
+sanitize = runpy.run_path(os.path.join(SPECPATH, "sanitize_sysconfig.py"))[
+    "sanitize_python_config"
+]
+sanitize(a.pure, CONF["code_cache"].setdefault(id(a.pure), {}),
+         Path(CONF["workpath"]) / "portable-sysconfig")
 pyz = PYZ(a.pure)
 
 exe = EXE(
