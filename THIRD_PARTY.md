@@ -4,8 +4,11 @@ This file records every third-party component that nmrForge depends on, whether 
 bundled with this repository, and under which terms it is used.
 
 Status note: this inventory was produced during public-release preparation and updated when the
-GUI moved from PyQt6 to PySide6. Items marked **BLOCKER** must be resolved by the repository owner
-before the repository is made public. Nothing here is legal advice.
+GUI moved from PyQt6 to PySide6. Dated preparation findings below are historical, not a claim
+that the repository is still unpublished. Runtime dependencies are externally installed for source
+use and bundled when required by the AppImage; NMRPipe/SMILE are never bundled. Installed dependency
+licences are explicitly collected into the AppImage, alongside Qt/LGPL notices and the Python
+licence. Items requiring owner review remain owner decisions. Nothing here is legal advice.
 
 ## 1. Summary table
 

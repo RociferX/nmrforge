@@ -177,3 +177,55 @@ def test_licence_texts_are_not_line_ending_converted() -> None:
     """
     attributes = (ROOT / ".gitattributes").read_text(encoding="utf-8")
     assert "packaging/linux/THIRD_PARTY_LICENSES/*.txt -text" in attributes
+
+
+def test_packaging_collects_licences_without_machine_metadata(tmp_path: Path) -> None:
+    import json
+    import runpy
+    from types import SimpleNamespace
+
+    helper = runpy.run_path(str(ROOT / "packaging/linux/collect_licenses.py"))
+    relative = Path("example.dist-info/licenses/LICENSE.txt")
+    source = tmp_path / relative
+    source.parent.mkdir(parents=True)
+    source.write_text("Example licence", encoding="utf-8")
+    python_licence = (
+        tmp_path / f"lib/python{sys.version_info.major}.{sys.version_info.minor}/LICENSE.txt"
+    )
+    python_licence.parent.mkdir(parents=True)
+    python_licence.write_text("Python licence", encoding="utf-8")
+    dist = SimpleNamespace(
+        metadata={"Name": "Example"},
+        version="1.2",
+        files=[relative, Path("example.dist-info/direct_url.json"), Path("../outside/LICENSE")],
+        locate_file=lambda item: tmp_path / item,
+    )
+    output = tmp_path / "collected"
+    entries = helper["collect_license_data"](output, [dist], tmp_path)
+    assert len(entries) == 3
+    assert entries[0] == (
+        f"third_party_licenses/example/{relative.as_posix()}",
+        str(source),
+        "DATA",
+    )
+    index = (output / "manifest.json").read_text(encoding="utf-8")
+    assert str(tmp_path) not in index
+    assert "direct_url" not in index
+    assert json.loads(index)[0]["version"] == "1.2"
+    spec = (ROOT / "packaging/linux/NMRForge.spec").read_text(encoding="utf-8")
+    assert "a.datas.extend(collect_licenses(" in spec
+
+
+def test_packaging_rejects_missing_recorded_licence(tmp_path: Path) -> None:
+    import runpy
+    from types import SimpleNamespace
+
+    helper = runpy.run_path(str(ROOT / "packaging/linux/collect_licenses.py"))
+    dist = SimpleNamespace(
+        metadata={"Name": "Example"},
+        version="1.2",
+        files=[Path("LICENSE")],
+        locate_file=lambda item: tmp_path / item,
+    )
+    with pytest.raises(FileNotFoundError, match="Missing recorded licence"):
+        helper["collect_license_data"](tmp_path / "output", [dist], tmp_path)

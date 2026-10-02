@@ -35,8 +35,13 @@ shipped next to this file as `LGPL-3.0.txt` and `GPL-3.0.txt`.
 
 Full texts of the permissive licences (MIT / BSD-3-Clause / PSF) for the remaining bundled
 components are their own package licences; the authoritative list of components and their licences
-is `THIRD_PARTY.md` in the source repository, and every wheel's `dist-info/licenses/` directory is
-likewise present inside the AppImage under `_internal/`.
+is `THIRD_PARTY.md` in the source repository. The build explicitly collects installed dependency
+licence/notice files under `_internal/third_party_licenses/`, including the Python runtime licence
+and PyInstaller's bootloader exception. The manifest records names, versions and relative licence
+paths, not machine configuration. It can include build-only dependencies, not all of which are
+embedded in the executable. The application's own Apache licence and NOTICE are under
+`_internal/licenses/nmrforge/`. Qt/PySide6's LGPL/GPL texts are provided beside this notice because
+the installed wheels do not provide those texts.
 
 ## Corresponding source
 
@@ -49,7 +54,7 @@ directly from the distributors:
     # Qt itself: https://download.qt.io/archive/qt/6.11/6.11.2/single/
 
 NMRForge's own corresponding source is the public repository at the commit recorded in
-`CITATION.cff` / the AppImage's `--licenses` output.
+the AppImage's `BUILD_INFO.txt`, exposed by `--licenses`.
 
 ## Replacing or relinking the LGPL libraries
 

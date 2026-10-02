@@ -6,6 +6,13 @@ The supported binary distribution is a single Linux AppImage with runtime langua
 selection; its source commit is recorded in `usr/share/doc/NMRForge/BUILD_INFO.txt`.
 Previously released v1.0.1 binaries are historical snapshots, not this source tree.
 
+The spec sanitizes build-machine paths in frozen Python configuration, including cached code
+objects, while retaining ABI values. It explicitly collects dependency licence/notice files and
+the Python runtime licence under `_internal/third_party_licenses/`, with a manifest of names,
+versions and relative licence paths. The manifest can include build-only tools. The application's
+Apache licence and NOTICE are under `_internal/licenses/nmrforge/`; Qt's LGPL/GPL texts remain
+under `usr/share/doc/NMRForge/third-party/`. Machine metadata such as direct_url is not copied.
+
 This page records the Linux AppImage build plan. Before every release the root
 `APPIMAGE_RELEASE_CHECKLIST.md` must be completed, and the licences of the bundled PySide6/Qt and
 other components must be re-checked.

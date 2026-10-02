@@ -15,6 +15,10 @@ analysis that led to the decision; the Apache-2.0 option analysed there was chos
 Read this together with [THIRD_PARTY.md](THIRD_PARTY.md), which records the dependency facts
 that constrain the choice. This is not legal advice.
 
+The dated audit statements below are historical decision evidence, not current publication or
+packaging status. Current AppImage obligations and mechanisms are described in
+`packaging/linux/THIRD_PARTY_LICENSES/NOTICE.md` and `docs/packaging.md`.
+
 ## 1. What has already been checked
 
 | Check | Result |

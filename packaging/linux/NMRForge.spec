@@ -76,6 +76,8 @@ a = Analysis(
         # language catalogues: the UI-string lookup tables (zh.json etc.), located at run time by
         # ui_support/i18n.py
         ("../../ui_support/locales", "ui_support/locales"),
+        ("../../LICENSE", "licenses/nmrforge"),
+        ("../../NOTICE", "licenses/nmrforge"),
     ],
     hiddenimports=["PySide6.QtSvg"],
     hookspath=[os.path.abspath(os.path.join(SPECPATH, "hooks"))],
@@ -90,6 +92,10 @@ sanitize = runpy.run_path(os.path.join(SPECPATH, "sanitize_sysconfig.py"))[
 ]
 sanitize(a.pure, CONF["code_cache"].setdefault(id(a.pure), {}),
          Path(CONF["workpath"]) / "portable-sysconfig")
+collect_licenses = runpy.run_path(os.path.join(SPECPATH, "collect_licenses.py"))[
+    "collect_license_data"
+]
+a.datas.extend(collect_licenses(Path(CONF["workpath"]) / "dependency-licenses"))
 pyz = PYZ(a.pure)
 
 exe = EXE(

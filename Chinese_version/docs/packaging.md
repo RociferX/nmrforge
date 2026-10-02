@@ -24,8 +24,9 @@
 
 **不打包（运行时发现）：**
 
-- NMRPipe/SMILE 由用户单独安装，不随 AppImage 分发；依次检查显式配置、用户 csh 环境、
-  PATH 与常见安装位置。详见 [external-dependencies.md](external-dependencies.md)。
+- NMRPipe/SMILE 由用户单独安装，不随 AppImage 分发；优先采用显式配置；未配置时检查
+  用户 csh 环境与 PATH，相关工具还可检查已确认安装目录。不扫描固定的“常见位置”。
+  详见 [external-dependencies.md](external-dependencies.md)。
   AppImage 内应用通过 `core/app_paths.py` 定位自身资源，与外部后端无关。
 
 ## 构建流程（在 Linux 构建机/VM 上执行）
@@ -46,6 +47,10 @@ packaging/linux/build_appimage.sh
 1. `python3 -m venv` + `pip install -e .`（依赖与 pyproject.toml 一致）。
 2. PyInstaller 按 packaging/linux/NMRForge.spec 打包：入口 main.py，
    datas 包含 nmrforge_data/config 与 nmrforge_data/presets；`console=False`（Qt GUI）。
+   构建时清理 Python 配置模块及其缓存代码中的构建机路径，保留 ABI 值；另显式收集
+   依赖许可/声明、Python 许可与项目 LICENSE/NOTICE，不依赖自动 hook 恰好收集它们。
+   `_internal/third_party_licenses/manifest.json` 仅记录包名、版本、相对许可路径，可能
+   包含未嵌入可执行文件的构建工具许可；不复制 direct_url 或本地机器配置。
    打包后立即跑两道构建期检查：**运行资源自检**（在 `_internal` 内容目录里查
    `nmrforge_data/{config,presets}`、`gui/assets`、`ui_support/locales` 与语言包）与
    **冻结态启动冒烟**（独立 HOME + `QT_QPA_PLATFORM=offscreen` 启动打包好的可执行文件，
@@ -89,6 +94,8 @@ packaging/linux/build_appimage.sh
   抖动会报 "Failed to download runtime"；可从 appimagetool 自身提取
   （`--appimage-offset` + `dd`）后放入缓存目录，脚本自动复用。
 
+
+## 历史构建记录（不是当前版本验收）
 
 - 构建机：VM Ubuntu 22.04（glibc 2.35）、uv python 3.12.13、
   PyInstaller 6.22.2、appimagetool continuous 8c8c91f、mksquashfs 系统包。

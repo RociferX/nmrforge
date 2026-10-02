@@ -654,4 +654,3 @@ def test_frozen_python_build_config_keeps_abi_without_machine_paths(tmp_path: Pa
     result = {}
     exec(cache[name], result)
     assert result["build_time_vars"]["SIZEOF_VOID_P"] == 8
-
