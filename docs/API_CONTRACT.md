@@ -474,7 +474,7 @@ arguments, return structures, and errors. The command line is `python -m nmrforg
 - Reference alignment does not modify spectra. Low-quality or ambiguous alignment is reported;
   it must not silently discard candidate peaks.
 
-### 11.4 Stable records and peak-table schema
+### 11.4 Peak table fields and stable records
 
 The unified `PEAK_TABLE_COLUMNS` schema has 27 columns:
 

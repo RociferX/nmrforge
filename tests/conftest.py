@@ -157,6 +157,25 @@ def bruker_dir(tmp_path: Path) -> Path:
 
 
 @pytest.fixture(autouse=True)
+def _isolate_machine_settings(tmp_path: Path, monkeypatch) -> None:
+    """Keep probe and GUI configuration writes inside each case's temporary directory."""
+    from backend import config
+    from core import app_paths
+    from gui import settings
+
+    original = app_paths.local_config_path
+
+    def isolated(filename: str = "nmrforge.local.yaml", *, packaged=None) -> Path:
+        frozen = app_paths.is_frozen() if packaged is None else bool(packaged)
+        if frozen:
+            return original(filename, packaged=packaged)
+        return tmp_path / "machine-config" / filename
+
+    monkeypatch.setattr(settings, "local_config_path", isolated)
+    monkeypatch.setattr(config, "local_config_path", isolated)
+
+
+@pytest.fixture(autouse=True)
 def _clear_cancel_between_tests() -> None:
     """0.2.199-patch29hg: clear the backend cancel flag before each test, so the previous test
     (e.g. the GUI stop button) cannot leak _CANCEL into the next processing/phase-search test and

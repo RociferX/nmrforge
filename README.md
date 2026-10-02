@@ -25,6 +25,7 @@ warning and output it produced so that the result can be reproduced and audited.
 
 Source version: **1.0.2** · Release channel: **stable**
 Author: **Xuanfeng Li**, University of Science and Technology of China · Source licence: Apache-2.0 (see [LICENSE](LICENSE) and [NOTICE](NOTICE))
+Bundled-library licensing and redistribution: [LICENSE_OPTIONS.md](LICENSE_OPTIONS.md).
 Distribution: source plus a Linux AppImage (one artefact; the interface language is switched at run time)
 Releases: <https://github.com/RociferX/nmrforge/releases>
 Repository: <https://github.com/RociferX/nmrforge>

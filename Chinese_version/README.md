@@ -20,6 +20,7 @@ nmrForge 读取一个 Bruker 数据集,判定它是什么实验、用了哪种�
 
 源码版本:**1.0.2** · 发布通道:**稳定版（Stable）**
 作者:**李宣锋(Xuanfeng Li),中国科学技术大学** · 源码许可:Apache-2.0(见 [LICENSE](../LICENSE) 与 [NOTICE](../NOTICE))
+随包第三方库的许可与再分发说明：[LICENSE_OPTIONS.md](../LICENSE_OPTIONS.md)。
 分发方式:源码 + Linux AppImage(一份产物,界面语言运行时切换)
 发布页:<https://github.com/RociferX/nmrforge/releases>
 仓库:<https://github.com/RociferX/nmrforge>
