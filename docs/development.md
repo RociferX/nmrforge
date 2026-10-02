@@ -168,8 +168,7 @@ exception details for unknown failures without inventing a cause or showing only
 class name. Never silently convert a failed operation into a successful result.
 
 Records should distinguish requested values, values applied, resolved automatic values, warnings,
-and failures. A recommendation is not an executed correction. QC reports describe data quality;
-they are not biosafety certifications.
+and failures. A recommendation is not an executed correction. QC reports describe data quality.
 
 ## Documentation and review
 
@@ -188,10 +187,3 @@ public contract changes.
 Review links and code examples after edits. Do not add private project notes, unpublished sample
 names, machine-specific paths, or development-environment details to public documentation.
 
-## Biological safety
-
-NMRForge is for routine NMR processing, quality control, visualization, and analysis. Do not use
-it to support enhancement of pathogen pathogenicity, transmissibility, host range, immune escape,
-or other high-risk biological capabilities. Assess a task by its intended use and foreseeable
-impact; public biological data or a viral protein name alone is not sufficient to infer harmful use.
-Stop only the unsafe portion and continue benign software maintenance where appropriate.
